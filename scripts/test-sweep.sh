@@ -105,8 +105,18 @@ if [ "$rc" -eq 1 ] && grep -q "empty registry" <<<"$out"; then ok "empty registr
 
 # 6. A lane whose files are absent is NOT BUILT, in the report and the summary, never PASS.
 t="$(fresh_tree not-built)"
-run "$t" store-assets duplication
-if grep -q "store-assets (#1729) *NOT BUILT" <<<"$out" && grep -q "duplication (#1731) *NOT BUILT" <<<"$out" && ! grep -q "PASS" <<<"$out"; then ok "missing lane files report NOT BUILT"; else bad "missing lane files should report NOT BUILT"; echo "$out"; fi
+run "$t" store-assets i18n-surfaces
+if grep -q "store-assets (#1729) *NOT BUILT" <<<"$out" && grep -q "i18n-surfaces (#1724) *NOT BUILT" <<<"$out" && ! grep -q "PASS" <<<"$out"; then ok "missing lane files report NOT BUILT"; else bad "missing lane files should report NOT BUILT"; echo "$out"; fi
+# A landed lane (#1731) is built and wired once its files exist.
+t="$(fresh_tree built)"
+for f in .claude/skills/reuse-check/SKILL.md scripts/check-clones.mjs scripts/clones.json scripts/clones-baseline.json; do
+  mkdir -p "$t/$(dirname "$f")"
+  cp "$repo/$f" "$t/$f"
+done
+run "$t" --list
+if grep -q "^duplication .*#1731 *built" <<<"$out"; then ok "duplication is built once its files exist"; else bad "duplication should list as built"; echo "$out"; fi
+run "$t" duplication
+if ! grep -q "NOT BUILT\|UNWIRED" <<<"$out" && grep -q "node scripts/check-clones.mjs" <<<"$out"; then ok "duplication runs check-clones.mjs"; else bad "duplication should run check-clones.mjs"; echo "$out"; fi
 run "$t" --summary
 if [ "$rc" -eq 0 ] && grep -q "not yet built: .*store-assets (#1729)" <<<"$out"; then ok "summary names the unbuilt lanes"; else bad "summary should name the unbuilt lanes (rc=$rc)"; echo "$out"; fi
 

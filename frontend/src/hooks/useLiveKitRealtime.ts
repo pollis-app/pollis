@@ -658,41 +658,23 @@ export function useLiveKitRealtime() {
         return;
       }
 
-      // @all mention in a group. Arrives on the per-user inbox room (so it
-      // reaches members even when they're not in the group's LiveKit room),
-      // separate from the new_message event. Fires an OS ping that normal
-      // channel messages don't — notify() still suppresses it if the user has
-      // notifications off. Skip our own @all; the notifications-off pref and
-      // cooldown are enforced in notify().
-      if (event.type === 'all_mention') {
+      // @all and @username mentions in a group (#843). Both arrive on the per-user inbox room (so
+      // they reach members even when they're not in the group's LiveKit room), separate from the
+      // new_message event, and fire an OS ping that normal channel messages don't — notify() still
+      // suppresses it if the user has notifications off, and enforces the cooldown. The backend
+      // sends `user_mention` only to the members actually named, so it routes to the louder
+      // `user_mention` category. Skip our own.
+      if (event.type === 'all_mention' || event.type === 'user_mention') {
         if (event.sender_id === currentUserIdRef.current) {
           return;
         }
         const senderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
         const title = roomNameMapRef.current.get(event.channel_id) ?? i18n.t('chat:notify.mentionTitle');
-        notify('all_mention', {
+        const bodyKey = event.type === 'all_mention' ? 'chat:notify.allMentionBody' : 'chat:notify.userMentionBody';
+        notify(event.type, {
           roomId: event.channel_id,
           title,
-          body: i18n.t('chat:notify.allMentionBody', { name: senderUsername }),
-          senderUsername,
-        });
-        return;
-      }
-
-      // @username mention in a group (#843). Same inbox-room delivery as
-      // all_mention, but the backend only sends it to the members actually
-      // named — so receiving one means this message is addressed to us, and
-      // it routes to the louder `user_mention` category. Skip our own.
-      if (event.type === 'user_mention') {
-        if (event.sender_id === currentUserIdRef.current) {
-          return;
-        }
-        const senderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
-        const title = roomNameMapRef.current.get(event.channel_id) ?? i18n.t('chat:notify.mentionTitle');
-        notify('user_mention', {
-          roomId: event.channel_id,
-          title,
-          body: i18n.t('chat:notify.userMentionBody', { name: senderUsername }),
+          body: i18n.t(bodyKey, { name: senderUsername }),
           senderUsername,
         });
         return;

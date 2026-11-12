@@ -438,34 +438,11 @@ impl std::fmt::Debug for NextHopDirectory {
     }
 }
 
-/// How long a single directory fetch may take before it is abandoned.
-const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-
-/// Cap on the artifact size we will read (the directory is a few KB).
-const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
-
 /// Fetch the signed directory once and install it. Every failure mode leaves
 /// the store holding whatever it held before — which expires on its own.
 pub async fn refresh_once(store: &NextHopDirectory, url: &str) -> anyhow::Result<usize> {
-    let response = crate::http::http_client(None)
-        .get(url)
-        .timeout(FETCH_TIMEOUT)
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("fetch {url}: {e}"))?;
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!("fetch {url}: HTTP {}", response.status()));
-    }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| anyhow::anyhow!("read {url}: {e}"))?;
-    if bytes.len() > MAX_ARTIFACT_BYTES {
-        return Err(anyhow::anyhow!(
-            "directory from {url} is {} bytes, over the {MAX_ARTIFACT_BYTES} cap",
-            bytes.len()
-        ));
-    }
+    // Same timeout and 1 MiB cap as the revocation list (the directory is a few KB).
+    let bytes = crate::revocation_sync::fetch_signed_artifact(url, "directory").await?;
     let hops = store.install(&bytes, crate::proto::now_unix())?;
     Ok(hops)
 }
@@ -501,13 +478,8 @@ where
                     tracing::warn!("directory refresh failed ({failures} in a row): {e}");
                 }
             }
-            let delay = crate::backoff::jittered(crate::revocation_sync::backoff_after(failures));
-            tokio::select! {
-                biased;
-                _ = &mut shutdown => {
-                    break;
-                }
-                _ = tokio::time::sleep(delay) => {}
+            if crate::revocation_sync::backoff_or_shutdown(shutdown.as_mut(), failures).await {
+                break;
             }
         }
     }))

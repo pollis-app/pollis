@@ -290,7 +290,7 @@
       color: var(--c-accent);
     }
 
-    .art-copy--copied {
+    .art-copy[data-copied] {
       border-color: #7bd88f;
       color: #7bd88f;
     }
@@ -764,6 +764,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
   </footer>
 
   <script src="script.js"></script>
+  <script src="copy.js"></script>
   <script src="artifacts.js"></script>
   <script>
     document.getElementById("year-copyright").textContent =

@@ -1,9 +1,9 @@
 import { errorMessage } from "../utils/errorMessage";
+import { PinField } from "../components/Auth/PinField";
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
-import { InputOtp } from "../components/ui/InputOtp";
 import { Button } from "../components/ui/Button";
 import * as api from "../services/api";
 
@@ -124,25 +124,15 @@ export const ChangePinPage: React.FC = () => {
               </p>
             )}
 
-            <div>
-              <InputOtp
-                length={4}
-                value={currentValue}
-                onChange={(v) => {
-                  setCurrent(v.replace(/\D/g, "").slice(0, 4));
-                  setError(null);
-                }}
-                disabled={isLoading}
-                autoFocus
-                mask
-              />
-              <input
-                data-testid="change-pin-input"
-                type="hidden"
-                value={currentValue}
-                readOnly
-              />
-            </div>
+            <PinField
+              value={currentValue}
+              onChange={(next) => {
+                setCurrent(next);
+                setError(null);
+              }}
+              disabled={isLoading}
+              data-testid="change-pin-input"
+            />
 
             <Button
               data-testid="change-pin-cancel-button"

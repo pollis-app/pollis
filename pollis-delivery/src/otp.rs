@@ -19,6 +19,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use pollis_device_cert::constant_time_eq;
 use rand::rngs::OsRng;
 use rand::{Rng, RngCore};
 use sha2::{Digest, Sha256};
@@ -243,19 +244,6 @@ fn salted_hash(salt: &[u8; 16], code: &str) -> [u8; 32] {
     h.finalize().into()
 }
 
-/// Constant-time byte compare — replicated from pollis-core's
-/// `device_enrollment::constant_time_eq` to keep the dependency surface small.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
-}
-
 /// Outcome of preparing a code for an email.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PrepareOutcome {
@@ -458,15 +446,19 @@ pub async fn process_request_otp_for(
     }
 }
 
-/// Hand the code to Resend.
-///
-/// Awaited by the handler, so [`crate::util::Upstream::Resend`] bounds it (#913); still 200.
-async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Result<()> {
+/// Send one plain-text email from `noreply@mail.pollis.com` through Resend: the one
+/// place this crate talks to it.
+pub(crate) async fn send_email(
+    api_key: &str,
+    to: &str,
+    subject: &str,
+    text: &str,
+) -> anyhow::Result<()> {
     let body = serde_json::json!({
         "from": "Pollis <noreply@mail.pollis.com>",
-        "to": [email],
-        "subject": "Your Pollis sign-in code",
-        "text": format!("Your verification code is: {code}\n\nThis code expires in 10 minutes."),
+        "to": [to],
+        "subject": subject,
+        "text": text,
     });
     let resp = crate::util::http_post(crate::util::Upstream::Resend, "https://api.resend.com/emails")
         .header("Authorization", format!("Bearer {api_key}"))
@@ -480,6 +472,14 @@ async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Resul
     Ok(())
 }
 
+/// Hand the code to Resend.
+///
+/// Awaited by the handler, so [`crate::util::Upstream::Resend`] bounds it (#913); still 200.
+async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Result<()> {
+    let text = format!("Your verification code is: {code}\n\nThis code expires in 10 minutes.");
+    send_email(api_key, email, "Your Pollis sign-in code", &text).await
+}
+
 /// Ask the CURRENT address to authorize moving the account off it (#1161).
 ///
 /// Sent BEFORE the change commits, naming the destination, so an unrequested code reads as an attack.
@@ -488,30 +488,17 @@ async fn send_email_change_challenge(
     current_email: &str,
     code: &str,
 ) -> anyhow::Result<()> {
-    let body = serde_json::json!({
-        "from": "Pollis <noreply@mail.pollis.com>",
-        "to": [current_email],
-        "subject": "Confirm the email change on your Pollis account",
-        "text": format!(
-            "Someone asked to change the email address on your Pollis account away \
-             from this one.\n\n\
-             To approve it, enter this code in Pollis: {code}\n\n\
-             It expires in 10 minutes.\n\n\
-             If this was not you, do NOT enter the code. Someone has access to one \
-             of your devices — revoke that device from Settings on a device you \
-             still control, and contact support@pollis.com."
-        ),
-    });
-    let resp = crate::util::http_post(crate::util::Upstream::Resend, "https://api.resend.com/emails")
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&body)
-        .send()
-        .await?;
-    if !resp.status().is_success() {
-        let txt = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Resend non-success: {txt}");
-    }
-    Ok(())
+    let text = format!(
+        "Someone asked to change the email address on your Pollis account away \
+         from this one.\n\n\
+         To approve it, enter this code in Pollis: {code}\n\n\
+         It expires in 10 minutes.\n\n\
+         If this was not you, do NOT enter the code. Someone has access to one \
+         of your devices — revoke that device from Settings on a device you \
+         still control, and contact support@pollis.com."
+    );
+    let subject = "Confirm the email change on your Pollis account";
+    send_email(api_key, current_email, subject, &text).await
 }
 
 /// Tell the address an account has just MOVED OFF that it happened (L3).
@@ -524,28 +511,20 @@ pub(crate) async fn send_email_change_notice(
     old_email: &str,
     new_email: &str,
 ) -> anyhow::Result<()> {
-    let body = serde_json::json!({
-        "from": "Pollis <noreply@mail.pollis.com>",
-        "to": [old_email],
-        "subject": "Your Pollis email address was changed",
-        "text": format!(
-            "The email address on your Pollis account was changed to {new_email}.\n\n\
-             If this was you, nothing further is needed.\n\n\
-             If it was not, someone has access to one of your devices. Revoke that \
-             device from Settings on a device you still control, and contact \
-             support@pollis.com."
-        ),
-    });
-    let resp = crate::util::http_post(crate::util::Upstream::Resend, "https://api.resend.com/emails")
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&body)
-        .send()
-        .await?;
-    if !resp.status().is_success() {
-        let txt = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Resend non-success: {txt}");
-    }
-    Ok(())
+    let text = format!(
+        "The email address on your Pollis account was changed to {new_email}.\n\n\
+         If this was you, nothing further is needed.\n\n\
+         If it was not, someone has access to one of your devices. Revoke that \
+         device from Settings on a device you still control, and contact \
+         support@pollis.com."
+    );
+    send_email(
+        api_key,
+        old_email,
+        "Your Pollis email address was changed",
+        &text,
+    )
+    .await
 }
 
 /// POST /v1/auth/verify-otp — attempt-limited check, then create-or-load the account and a session.

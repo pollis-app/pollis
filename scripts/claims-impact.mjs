@@ -108,8 +108,12 @@ for (const c of ledger.claims ?? []) {
 
 const range = `${sinceSha.slice(0, 8)}..${headSha.slice(0, 8)}`;
 if (args.includes("--json")) {
-  console.log(JSON.stringify({ since: sinceSha, head: headSha, changed_files: files.length, claims: hits }, null, 2));
-  process.exit(0);
+  // Exit only once stdout has drained: an immediate process.exit() cut a piped
+  // report off at 64 KiB, and sweep.mjs then failed to parse it.
+  process.stdout.write(JSON.stringify({ since: sinceSha, head: headSha, changed_files: files.length, claims: hits }, null, 2) + "\n", () => {
+    process.exit(0);
+  });
+  await new Promise(() => {});
 }
 
 const docs = new Set(hits.map((h) => h.doc));

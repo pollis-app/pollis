@@ -42,14 +42,10 @@ export const InputOtp: React.FC<InputOtpProps> = ({
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
-    const raw = e.target.value.replace(/\D/g, "");
-    if (!raw) {
-      return;
-    }
-    const chars = raw.slice(0, length - index).split("");
+  // Write `chars` into the boxes from `index` on, then focus the box after the last one written.
+  const fillFrom = (index: number, chars: string) => {
     const next = [...digits];
-    chars.forEach((ch, i) => {
+    chars.split("").forEach((ch, i) => {
       if (index + i < length) {
         next[index + i] = ch;
       }
@@ -59,17 +55,19 @@ export const InputOtp: React.FC<InputOtpProps> = ({
     inputsRef.current[nextFocus]?.focus();
   };
 
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
+    const raw = e.target.value.replace(/\D/g, "");
+    if (!raw) {
+      return;
+    }
+    fillFrom(index, raw.slice(0, length - index));
+  };
+
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>, index: number) => {
     e.preventDefault();
     const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, length - index);
     if (!pasted) { return; }
-    const next = [...digits];
-    pasted.split("").forEach((ch, i) => {
-      if (index + i < length) { next[index + i] = ch; }
-    });
-    onChange(next.join(""));
-    const nextFocus = Math.min(index + pasted.length, length - 1);
-    inputsRef.current[nextFocus]?.focus();
+    fillFrom(index, pasted);
   };
 
   const handleFocus = (e: React.FocusEvent<HTMLInputElement>, index: number) => {

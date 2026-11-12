@@ -8,12 +8,12 @@ import { horizontalArrowStep } from "../../utils/direction";
 import { stepRoll } from "../../utils/mediaRoll";
 import {
   announceMediaLoaded,
-  getMediaUrl,
   peekMediaUrl,
   saveAttachmentAs,
   subscribeMediaResolved,
 } from "../../services/r2-upload";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
+import { useResolveMediaUrl } from "../../hooks/useResolveMediaUrl";
 import { Button } from "../ui/Button";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { PressButton } from "../ui/PressButton";
@@ -177,26 +177,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
   const [downloadStatus, setDownloadStatus] = useState<"idle" | "downloading" | "done">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (url || failed || !attachment.object_key) {
-      return;
-    }
-    let mounted = true;
-    getMediaUrl(attachment)
-      .then((resolved) => {
-        if (mounted) {
-          setUrl(resolved);
-        }
-      })
-      .catch(() => {
-        if (mounted) {
-          setFailed(true);
-        }
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [url, failed, attachment.object_key, attachment.content_hash, attachment.content_type]);
+  useResolveMediaUrl(attachment, !url && !failed && !!attachment.object_key, setUrl, () => setFailed(true));
 
   // #1826: "failed to load" is never sticky; the first resolve or draw of this file anywhere clears it.
   useEffect(() => {

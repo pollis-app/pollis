@@ -65,8 +65,20 @@ pub(crate) async fn gate(
     if !state.require_auth {
         return Ok(Ok(None));
     }
-    // Cached pubkey lookup (#658); a connection is checked out only on a miss (#1500).
-    match auth::verify_request_cached(
+    match verify_signed_user(state, req).await {
+        Ok(user_id) => Ok(Ok(Some(user_id))),
+        Err(rej) => Ok(Err(rej.into_response())),
+    }
+}
+
+/// Verify `req`'s device signature over its raw body, as the `(user_id, device_id)`
+/// that signed it. Cached pubkey lookup (#658); a connection is checked out only on a
+/// miss (#1500).
+pub(crate) async fn verify_signed_identity(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<(String, String), AuthRejection> {
+    auth::verify_request_identity_cached(
         &state.device_keys,
         &state.db,
         &req.headers,
@@ -76,10 +88,16 @@ pub(crate) async fn gate(
         crate::util::now_unix() as i64,
     )
     .await
-    {
-        Ok(user_id) => Ok(Ok(Some(user_id))),
-        Err(rej) => Ok(Err(rej.into_response())),
-    }
+}
+
+/// [`verify_signed_identity`], keeping only the signer's `user_id`.
+pub(crate) async fn verify_signed_user(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<String, AuthRejection> {
+    verify_signed_identity(state, req)
+        .await
+        .map(|(user_id, _)| user_id)
 }
 
 /// [`gate`], also accepting a verified OTP session (`X-Pollis-Session`) for pre-enrollment devices.
@@ -208,17 +226,7 @@ pub(crate) async fn gate_identity(
     if !state.require_auth {
         return Ok(Ok(None));
     }
-    match auth::verify_request_identity_cached(
-        &state.device_keys,
-        &state.db,
-        &req.headers,
-        req.method.as_str(),
-        req.uri.path(),
-        &req.body,
-        crate::util::now_unix() as i64,
-    )
-    .await
-    {
+    match verify_signed_identity(state, req).await {
         Ok(identity) => Ok(Ok(Some(identity))),
         Err(rej) => Ok(Err(rej.into_response())),
     }

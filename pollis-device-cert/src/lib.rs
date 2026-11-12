@@ -158,9 +158,33 @@ pub fn verify_device_cert(
         .map_err(|_| DeviceCertError::SignatureInvalid)
 }
 
+/// Shared by `pollis-core` (enrollment codes, device links, the media-server token) and
+/// `pollis-delivery` (OTP and link verifiers): the one leaf both already depend on.
+/// Compare two secrets without an early exit on the first differing byte, so
+/// the time taken does not reveal how much of a guess matched. Unequal lengths
+/// return `false` straight away (a length is not secret here).
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constant_time_eq_matches_regular_eq() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+        assert!(constant_time_eq(b"", b""));
+    }
     use ml_dsa::{Keypair, Signer, SigningKey};
 
     fn account_key(seed: u8) -> SigningKey<MlDsa44> {

@@ -5,16 +5,14 @@
 //! rebuild keeps the last-good cache.
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use verifiable_log::SigningKey;
 // `verifying_key()` on a signing key comes from this trait (pin seam).
 use ml_dsa::Keypair as _;
-use tiny_http::{Method, Request, Response, Server};
+use tiny_http::Request;
 use verifiable_log_builder::{build_bundle, source};
 
 use crate::bundle::{now_ms, Bundle};
@@ -22,8 +20,7 @@ use crate::error::{Result, ServeError};
 use crate::group::verify_group_in_bundle;
 use crate::layout;
 use crate::server::{
-    cache_control_for, cors_preflight, escape, header, percent_decode, respond_json,
-    respond_status, VERIFY_GROUP_PREFIX,
+    bind, escape, percent_decode, respond_artifact, respond_json, respond_status, route, WorkerPool,
 };
 
 /// Number of request worker threads. Unlike the static server, the live verify
@@ -129,9 +126,7 @@ impl Shared {
 /// background threads. Dropping it (or calling [`LiveServer::shutdown`]) stops
 /// the pool.
 pub struct LiveServer {
-    addr: SocketAddr,
-    stop: Arc<AtomicBool>,
-    handles: Vec<JoinHandle<()>>,
+    pool: WorkerPool,
     shared: Arc<Shared>,
 }
 
@@ -153,12 +148,7 @@ impl LiveServer {
 
         // Loopback by default; `VLOG_BIND_HOST=0.0.0.0` for a container behind a proxy.
         let host = std::env::var("VLOG_BIND_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let server = Server::http((host.as_str(), port))
-            .map_err(|e| ServeError::Http(format!("bind failed: {e}")))?;
-        let addr = server
-            .server_addr()
-            .to_ip()
-            .ok_or_else(|| ServeError::Http("server bound to a non-IP address".into()))?;
+        let (server, addr) = bind(&host, port)?;
 
         let shared = Arc::new(Shared {
             db,
@@ -171,34 +161,24 @@ impl LiveServer {
             rebuild_count: AtomicU64::new(0),
         });
 
-        let server = Arc::new(server);
-        let stop = Arc::new(AtomicBool::new(false));
-
-        let handles = (0..WORKERS)
-            .map(|_| {
-                let server = server.clone();
-                let shared = shared.clone();
-                let stop = stop.clone();
-                std::thread::spawn(move || serve_loop(&server, &shared, &stop))
+        let pool = {
+            let shared = shared.clone();
+            WorkerPool::spawn(server, addr, WORKERS, move |request| {
+                handle_request(request, &shared)
             })
-            .collect();
+        };
 
-        Ok(LiveServer {
-            addr,
-            stop,
-            handles,
-            shared,
-        })
+        Ok(LiveServer { pool, shared })
     }
 
     /// The bound port (resolved even when `0` was requested).
     pub fn port(&self) -> u16 {
-        self.addr.port()
+        self.pool.port()
     }
 
     /// Base URL a client should hit, e.g. `http://127.0.0.1:54321`.
     pub fn base_url(&self) -> String {
-        format!("http://{}", self.addr)
+        self.pool.base_url()
     }
 
     /// How many DB pulls (rebuilds) have happened so far.
@@ -209,66 +189,23 @@ impl LiveServer {
     /// Block the calling thread, keeping the server alive until the process is
     /// killed. Used by the CLI `serve live` command.
     pub fn block_forever(self) {
-        while self.handles.iter().any(|h| !h.is_finished()) {
-            std::thread::sleep(Duration::from_millis(200));
-        }
+        self.pool.block_forever();
     }
 
     /// Stop the background threads and wait for them to exit.
-    pub fn shutdown(mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        for handle in self.handles.drain(..) {
-            let _ = handle.join();
-        }
-    }
-}
-
-impl Drop for LiveServer {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        for handle in self.handles.drain(..) {
-            let _ = handle.join();
-        }
-    }
-}
-
-/// Accept requests until `stop` is set, polling so shutdown is prompt.
-fn serve_loop(server: &Server, shared: &Shared, stop: &AtomicBool) {
-    while !stop.load(Ordering::Relaxed) {
-        match server.recv_timeout(Duration::from_millis(100)) {
-            Ok(Some(request)) => handle_request(request, shared),
-            Ok(None) => continue,
-            Err(_) => break,
-        }
+    pub fn shutdown(self) {
+        self.pool.shutdown();
     }
 }
 
 /// Route one request: CORS preflight, the dynamic verify endpoint, or a static
 /// `/v1` artifact — each first ensuring the in-memory cache is fresh.
 fn handle_request(request: Request, shared: &Shared) {
-    let method = request.method().clone();
-
-    let url = request.url().to_string();
-    let path = url.split('?').next().unwrap_or("").to_string();
-
-    if method == Method::Options {
-        cors_preflight(request);
+    let Some((request, path)) = route(request, |request, encoded| {
+        handle_verify_group(request, shared, encoded)
+    }) else {
         return;
-    }
-
-    if let Some(encoded) = path.strip_prefix(VERIFY_GROUP_PREFIX) {
-        if method != Method::Get {
-            respond_status(request, 405, "method not allowed");
-            return;
-        }
-        handle_verify_group(request, shared, encoded);
-        return;
-    }
-
-    if method != Method::Get && method != Method::Head {
-        respond_status(request, 405, "method not allowed");
-        return;
-    }
+    };
 
     let rel = path.trim_start_matches('/');
     if rel.is_empty() {
@@ -292,11 +229,7 @@ fn handle_request(request: Request, shared: &Shared) {
         }
     };
 
-    let cache_control = cache_control_for(&path);
-    let response = Response::from_data(bytes)
-        .with_header(header("Content-Type", "application/json"))
-        .with_header(header("Cache-Control", cache_control));
-    let _ = request.respond(response);
+    respond_artifact(request, bytes, &path);
 }
 
 /// Ensure freshness, then verify the requested group against the in-memory

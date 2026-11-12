@@ -53,17 +53,19 @@ export const UserProfilePage: React.FC = observer(() => {
     profile?.preferred_name
     || (profile?.username ? `@${profile.username}` : t("profile.fallbackTitle"));
 
+  const backItem: TerminalMenuItem = {
+    id: "back",
+    label: t("common:actions.goBack"),
+    icon: <ArrowLeft size={14} className="rtl-mirror" />,
+    action: () => navigate({ to: "/dms" }),
+    type: "system",
+    testId: "user-profile-back",
+    activateOn: "press",
+  };
+
   const items: TerminalMenuItem[] = !profile || isSelf
     ? [
-        {
-          id: "back",
-          label: t("common:actions.goBack"),
-          icon: <ArrowLeft size={14} className="rtl-mirror" />,
-          action: () => navigate({ to: "/dms" }),
-          type: "system",
-          testId: "user-profile-back",
-          activateOn: "press",
-        },
+        backItem,
       ]
     : [
         {
@@ -92,15 +94,7 @@ export const UserProfilePage: React.FC = observer(() => {
           testId: "user-profile-report",
         },
         { id: "__sep__", label: "", type: "separator" },
-        {
-          id: "back",
-          label: t("common:actions.goBack"),
-          icon: <ArrowLeft size={14} className="rtl-mirror" />,
-          action: () => navigate({ to: "/dms" }),
-          type: "system",
-          testId: "user-profile-back",
-          activateOn: "press",
-        },
+        backItem,
       ];
 
   return (

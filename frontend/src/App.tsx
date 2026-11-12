@@ -16,7 +16,7 @@ import { EnrollmentGateScreen } from "./components/Auth/EnrollmentGateScreen";
 import { EnrollmentApprovalPrompt } from "./components/Auth/EnrollmentApprovalPrompt";
 import { TerminalApp } from "./components/TerminalApp";
 import { TitleBar } from "./components/Layout/TitleBar";
-import { DotMatrix } from "./components/ui/DotMatrix";
+import { BackdropScreen } from "./components/Auth/BackdropScreen";
 import { Card } from "./components/ui/Card";
 import { UpdateScreen } from "./components/UpdateScreen";
 import { HistoryOfferScreen } from "./components/HistoryTransfer/HistoryOfferScreen";
@@ -603,17 +603,7 @@ function MainApp() {
 
   if (appState === "logout-confirm") {
     return (
-      <div
-        data-testid="logout-confirm-screen"
-        className="flex flex-col h-full w-full bg-bg"
-        style={{ position: "relative" }}
-      >
-        <div style={{ position: "absolute", inset: 0, opacity: 0.2, pointerEvents: "none" }}>
-          <DotMatrix speed={0.2} />
-        </div>
-
-        <TitleBar />
-
+      <BackdropScreen data-testid="logout-confirm-screen" backdropOpacity={0.2} backdropSpeed={0.2}>
         <div className="flex-1 flex items-center justify-center" style={{ position: "relative", zIndex: 1 }}>
           <Card padding="lg" style={{ width: "100%", maxWidth: 360 }}>
             <div className="flex flex-col gap-5">
@@ -654,21 +644,13 @@ function MainApp() {
             </div>
           </Card>
         </div>
-      </div>
+      </BackdropScreen>
     );
   }
 
   if (appState === "identity-setup") {
     return (
-      <div
-        data-testid="identity-setup-screen"
-        className="flex flex-col h-full w-full bg-bg"
-        style={{ position: "relative" }}
-      >
-        <div style={{ position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none" }}>
-          <DotMatrix />
-        </div>
-        <TitleBar />
+      <BackdropScreen data-testid="identity-setup-screen" backdropOpacity={0.35}>
         <div className="flex-1 flex items-center justify-center" style={{ position: "relative", zIndex: 1 }}>
           <Card padding="lg" style={{ width: "clamp(280px, 100%, 400px)" }}>
             <div className="flex flex-col gap-3">
@@ -687,7 +669,7 @@ function MainApp() {
             </div>
           </Card>
         </div>
-      </div>
+      </BackdropScreen>
     );
   }
 

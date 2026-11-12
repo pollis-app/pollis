@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, FileIcon, Play, X } from "lucide-react";
 import { getMediaUrl, peekMediaUrl } from "../../services/r2-upload";
+import { useResolveMediaUrl } from "../../hooks/useResolveMediaUrl";
 import { AttachmentDisplay } from "../Message/AttachmentDisplay";
 import type { MessageAttachment } from "../../types";
 import { PressButton } from "../ui/PressButton";
@@ -144,26 +145,7 @@ const GalleryTile = observer(({
   const isVideo = attachment.content_type.startsWith("video/");
   const isPending = !attachment.object_key;
 
-  useEffect(() => {
-    if (isPending || url || failed) {
-      return;
-    }
-    let mounted = true;
-    getMediaUrl(attachment)
-      .then((resolved) => {
-        if (mounted) {
-          setUrl(resolved);
-        }
-      })
-      .catch(() => {
-        if (mounted) {
-          setFailed(true);
-        }
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [isPending, url, failed, attachment.object_key, attachment.content_hash, attachment.content_type]);
+  useResolveMediaUrl(attachment, !isPending && !url && !failed, setUrl, () => setFailed(true));
 
   // The chat card's shape (AttachmentDisplay: 0.5rem, no frame), in both skins.
   const shape = "relative aspect-square overflow-hidden rounded-lg bg-surface-raised";

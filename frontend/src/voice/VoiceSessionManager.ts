@@ -236,17 +236,7 @@ class VoiceSessionManager {
       // cancelled, which `executeJoin` drops because the intent moved on.
       invoke('leave_voice_channel').catch(logIgnored);
       this.preJoinGate = [];
-      this.localIdentity = null;
-      this.setState({
-        phase: 'idle',
-        channelId: null,
-        counterpartyUserId: null,
-        groupId: null,
-        participants: [],
-        isMuted: false,
-        gate: gateForNewSession(this.state.gate),
-        reconnecting: null,
-      });
+      this.resetToIdle();
     }
     void this.reconcile();
   }
@@ -567,18 +557,7 @@ class VoiceSessionManager {
       if (this.abandoned(target)) {
         return false;
       }
-      this.localIdentity = null;
-      this.setState({
-        phase: 'idle',
-        channelId: null,
-        counterpartyUserId: null,
-        groupId: null,
-        participants: [],
-        isMuted: false,
-        gate: gateForNewSession(this.state.gate),
-        reconnecting: null,
-        error: msg,
-      });
+      this.resetToIdle({ error: msg });
       return false;
     }
 
@@ -588,17 +567,7 @@ class VoiceSessionManager {
         await invoke('leave_voice_channel');
       } catch {
       }
-      this.localIdentity = null;
-      this.setState({
-        phase: 'idle',
-        channelId: null,
-        counterpartyUserId: null,
-        groupId: null,
-        participants: [],
-        isMuted: false,
-        gate: gateForNewSession(this.state.gate),
-        reconnecting: null,
-      });
+      this.resetToIdle();
       return true;
     }
 
@@ -657,17 +626,7 @@ class VoiceSessionManager {
     }
 
     this.current = null;
-    this.localIdentity = null;
-    this.setState({
-      phase: 'idle',
-      channelId: null,
-      counterpartyUserId: null,
-      groupId: null,
-      participants: [],
-      isMuted: false,
-      gate: gateForNewSession(this.state.gate),
-      reconnecting: null,
-    });
+    this.resetToIdle();
 
     if (left) {
       this.emit('left', {
@@ -854,6 +813,22 @@ class VoiceSessionManager {
         break;
       }
     }
+  }
+
+  /** Back to an idle, call-less state: no local tile, a fresh gate; `extra` adds e.g. the join error. */
+  private resetToIdle(extra: Partial<VoiceSessionState> = {}): void {
+    this.localIdentity = null;
+    this.setState({
+      phase: 'idle',
+      channelId: null,
+      counterpartyUserId: null,
+      groupId: null,
+      participants: [],
+      isMuted: false,
+      gate: gateForNewSession(this.state.gate),
+      reconnecting: null,
+      ...extra,
+    });
   }
 
   private setState(patch: Partial<VoiceSessionState>): void {

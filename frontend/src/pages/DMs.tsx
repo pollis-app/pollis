@@ -1,8 +1,9 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Inbox, Ban, Plus, ShieldCheck, ShieldAlert } from "lucide-react";
-import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
+import { Inbox, Ban, Plus, ShieldCheck, ShieldAlert } from "lucide-react";
+import type { TerminalMenuItem } from "../components/ui/TerminalMenu";
+import { BackMenu } from "../components/ui/BackMenu";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useDMConversations, useLastMessages } from "../hooks/queries/useMessages";
@@ -112,19 +113,5 @@ export const DMsPage: React.FC = observer(() => {
     );
   }
 
-  items.push({
-    id: "__back__",
-    activateOn: "press",
-    label: t("common:actions.goBack"),
-    icon: <ArrowLeft size={14} className="rtl-mirror" />,
-    action: () => navigate({ to: "/" }),
-    type: "system",
-  });
-
-  return (
-    <TerminalMenu
-      items={items}
-      onEsc={() => navigate({ to: "/" })}
-    />
-  );
+  return <BackMenu items={items} onBack={() => navigate({ to: "/" })} />;
 });

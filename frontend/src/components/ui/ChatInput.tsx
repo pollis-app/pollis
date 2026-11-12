@@ -504,16 +504,21 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     setCaret(pending);
   }, [message]);
 
-  const acceptMention = useCallback((candidate: MentionCandidate) => {
-    const next = applyMention(message, caret, candidate.username);
-    if (next.text === message) {
-      return;
-    }
+  // An accepted completion: new text and caret, saved as the draft, list reset to the top.
+  const commitCompletion = (next: { text: string; caret: number }) => {
     pendingCaretRef.current = next.caret;
     setMessage(next.text);
     setDraft(draftKey, next.text);
     onValueChange?.(next.text);
     setActiveIndex(0);
+  };
+
+  const acceptMention = useCallback((candidate: MentionCandidate) => {
+    const next = applyMention(message, caret, candidate.username);
+    if (next.text === message) {
+      return;
+    }
+    commitCompletion(next);
   }, [message, caret, draftKey, onValueChange]);
 
   // List/ghost accept adds a trailing space; typing the closing ':' does not.
@@ -523,11 +528,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       return;
     }
     const next = applyShortcode(message, query.start, query.end, entry.insertText, true);
-    pendingCaretRef.current = next.caret;
-    setMessage(next.text);
-    setDraft(draftKey, next.text);
-    onValueChange?.(next.text);
-    setActiveIndex(0);
+    commitCompletion(next);
   }, [message, caret, draftKey, onValueChange]);
 
   const handleSend = () => {

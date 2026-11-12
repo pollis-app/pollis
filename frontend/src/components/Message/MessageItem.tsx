@@ -149,6 +149,45 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     </>
   );
 
+  // After the text in both skins: the edited mark, then a failed send's actions.
+  const bodyTail = (
+    <>
+      {message.edited_at && !isDeleted && (
+        <span
+          className="ms-1 text-xs text-muted"
+          data-testid={message.edit_unsent ? "message-edit-unsent" : undefined}
+        >
+          {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
+        </span>
+      )}
+      {/* Only a failed send is labelled, with why and its way out. */}
+      {message.status === "failed" && isOwn && (
+        <UnsentMessageActions message={message} />
+      )}
+    </>
+  );
+
+  const actionsFor = (variant: "refined" | "terminal") =>
+    !isDeleted && !isUnsent && (
+      <MessageActions
+        messageId={message.id}
+        variant={variant}
+        isOwn={isOwn}
+        canModerate={canModerate}
+        isSaved={isSaved}
+        isPinned={isPinned}
+        copyLinkState={copyLinkState}
+        onReply={onReply}
+        onOpenThread={onOpenThread}
+        onToggleSave={onToggleSave}
+        onTogglePin={onTogglePin}
+        onCopyLink={onCopyLink}
+        onReport={onReport}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
+    );
+
   if (skin === "refined") {
     const nameClass = isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : "";
     const nameStyle: React.CSSProperties | undefined = isAuthorAdmin
@@ -239,18 +278,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             }}
           >
             <MessageBody text={content} ctx={ctx} />
-            {message.edited_at && !isDeleted && (
-              <span
-                className="ms-1 text-xs text-muted"
-                data-testid={message.edit_unsent ? "message-edit-unsent" : undefined}
-              >
-                {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
-              </span>
-            )}
-            {/* Only a failed send is labelled, with why and its way out. */}
-            {message.status === "failed" && isOwn && (
-              <UnsentMessageActions message={message} />
-            )}
+            {bodyTail}
             <ReceiptIndicator
               receipts={receipt}
               peerCount={peerCount}
@@ -271,25 +299,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-1" />}
         </div>
 
-        {!isDeleted && !isUnsent && (
-          <MessageActions
-            messageId={message.id}
-            variant="refined"
-            isOwn={isOwn}
-            canModerate={canModerate}
-            isSaved={isSaved}
-            isPinned={isPinned}
-            copyLinkState={copyLinkState}
-            onReply={onReply}
-            onOpenThread={onOpenThread}
-            onToggleSave={onToggleSave}
-            onTogglePin={onTogglePin}
-            onCopyLink={onCopyLink}
-            onReport={onReport}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        )}
+        {actionsFor("refined")}
       </div>
     );
   }
@@ -371,18 +381,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             }}
           >
             <MessageBody text={content} ctx={ctx} />
-            {message.edited_at && !isDeleted && (
-              <span
-                className="ms-1 text-xs text-muted"
-                data-testid={message.edit_unsent ? "message-edit-unsent" : undefined}
-              >
-                {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
-              </span>
-            )}
-            {/* Only a failed send is labelled, with why and its way out. */}
-            {message.status === "failed" && isOwn && (
-              <UnsentMessageActions message={message} />
-            )}
+            {bodyTail}
             {/* No receipts in the terminal skin (product call). */}
           </span>
 
@@ -393,25 +392,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-0.5" />}
         </div>
 
-        {!isDeleted && !isUnsent && (
-          <MessageActions
-            messageId={message.id}
-            variant="terminal"
-            isOwn={isOwn}
-            canModerate={canModerate}
-            isSaved={isSaved}
-            isPinned={isPinned}
-            copyLinkState={copyLinkState}
-            onReply={onReply}
-            onOpenThread={onOpenThread}
-            onToggleSave={onToggleSave}
-            onTogglePin={onTogglePin}
-            onCopyLink={onCopyLink}
-            onReport={onReport}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        )}
+        {actionsFor("terminal")}
       </div>
     </div>
   );

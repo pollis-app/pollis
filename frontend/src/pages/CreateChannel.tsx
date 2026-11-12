@@ -6,6 +6,7 @@ import { observer } from "mobx-react-lite";
 import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
 import { deriveSlug } from "../utils/urlRouting";
+import { useNameSlug } from "../hooks/useNameSlug";
 import { groupQueryKeys } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
@@ -22,9 +23,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
   const { t } = useTranslation("channels");
   const { selectedGroupId, currentUser, addChannel, channels, groups, setSelectedChannelId } = appStore;
   const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [slugEdited, setSlugEdited] = useState(false);
+  const { name, slug, onNameChange, onSlugChange, finalSlug: resolveFinalSlug } = useNameSlug();
   const [description, setDescription] = useState("");
   const [channelType, setChannelType] = useState<"text" | "voice">("text");
   const [isLoading, setIsLoading] = useState(false);
@@ -38,7 +37,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
       setError(t("errors.nameRequired"));
       return;
     }
-    const finalSlug = (slugEdited ? slug : deriveSlug(name)).trim();
+    const finalSlug = resolveFinalSlug();
     if (!finalSlug) {
       setError(t("createChannel.slugRequired"));
       return;
@@ -133,10 +132,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <TextInput
             label={t("createChannel.nameLabel")}
             value={name}
-            onChange={(val) => {
-              setName(val);
-              if (!slugEdited) { setSlug(deriveSlug(val)); }
-            }}
+            onChange={onNameChange}
             placeholder={t("createChannel.namePlaceholder")}
             disabled={isLoading}
             id="create-channel-name"
@@ -147,7 +143,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <TextInput
             label={t("createChannel.slugLabel")}
             value={slug}
-            onChange={(val) => { setSlug(val.toLowerCase()); setSlugEdited(true); }}
+            onChange={onSlugChange}
             placeholder={t("createChannel.slugPlaceholder")}
             disabled={isLoading}
             id="create-channel-slug"

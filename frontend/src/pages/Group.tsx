@@ -1,8 +1,9 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, BellOff, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
+import { BellOff, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
+import { BackMenu } from "../components/ui/BackMenu";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useUserGroupsWithChannels, useGroupJoinRequests, useMutedChannels } from "../hooks/queries/useGroups";
@@ -47,19 +48,9 @@ export const GroupPage: React.FC = observer(() => {
 
   if (!group) {
     return (
-      <TerminalMenu
-        items={[
-          { id: "__not-found__", label: t("group.notFound"), disabled: true },
-          {
-            id: "__back__",
-            activateOn: "press" as const,
-            label: t("common:actions.goBack"),
-            icon: <ArrowLeft size={14} className="rtl-mirror" />,
-            action: () => navigate({ to: "/groups" }),
-            type: "system",
-          },
-        ]}
-        onEsc={() => navigate({ to: "/groups" })}
+      <BackMenu
+        items={[{ id: "__not-found__", label: t("group.notFound"), disabled: true }]}
+        onBack={() => navigate({ to: "/groups" })}
       />
     );
   }
@@ -194,20 +185,7 @@ export const GroupPage: React.FC = observer(() => {
       type: "system" as const,
       testId: "menu-item-leave-group",
     },
-    {
-      id: "__back__",
-      activateOn: "press" as const,
-      label: t("common:actions.goBack"),
-      icon: <ArrowLeft size={14} className="rtl-mirror" />,
-      action: () => navigate({ to: "/groups" }),
-      type: "system",
-    },
   ];
 
-  return (
-    <TerminalMenu
-      items={items}
-      onEsc={() => navigate({ to: "/groups" })}
-    />
-  );
+  return <BackMenu items={items} onBack={() => navigate({ to: "/groups" })} />;
 });

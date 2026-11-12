@@ -579,6 +579,13 @@ a.download-card:hover {
   color: var(--c-accent);
 }
 
+/* copy.js marks the button `data-copied` for a moment after a copy: the copy
+   icon swaps for a check. */
+.install-copy[data-copied] .install-copy-icon,
+.install-copy:not([data-copied]) .install-copy-check {
+  display: none;
+}
+
 .install-note,
 .terminal-note {
   color: var(--c-text-muted);

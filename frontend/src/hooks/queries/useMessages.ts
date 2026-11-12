@@ -167,7 +167,8 @@ function keyScopeFor(a: AttachmentWire, origin: ContentOrigin): AttachmentKeySco
     : null;
 }
 
-function transformMessage(m: RawMessage): Message {
+/** The fields every received message shares; DM and channel rows add their own. */
+function baseMessage(m: RawMessage) {
   // Undefined content (decryption failure) stays undefined so MessageList shows [encrypted].
   const parsed = m.content !== undefined ? parseContent(m.content, { conversationId: m.conversation_id }) : null;
   return {
@@ -182,29 +183,22 @@ function transformMessage(m: RawMessage): Message {
     thread_id: m.thread_id,
     is_pinned: false,
     created_at: new Date(m.sent_at).getTime(),
+    attachments: parsed?.attachments ?? [],
+  };
+}
+
+function transformMessage(m: RawMessage): Message {
+  return {
+    ...baseMessage(m),
     delivered: true,
     status: 'sent' as const,
-    attachments: parsed?.attachments ?? [],
   };
 }
 
 export function transformChannelMessage(m: RawChannelMessage): Message {
-  // Undefined content (decryption failure) stays undefined so MessageList shows [encrypted].
-  const parsed = m.content !== undefined ? parseContent(m.content, { conversationId: m.conversation_id }) : null;
   return {
-    id: m.id,
-    channel_id: undefined,
-    conversation_id: m.conversation_id,
-    sender_id: m.sender_id,
+    ...baseMessage(m),
     sender_username: m.sender_username,
-    ciphertext: new Uint8Array(),
-    nonce: new Uint8Array(),
-    content_decrypted: parsed?.text,
-    reply_to_message_id: m.reply_to_id,
-    thread_id: m.thread_id,
-    is_pinned: false,
-    created_at: new Date(m.sent_at).getTime(),
-    attachments: parsed?.attachments ?? [],
     edited_at: m.edited_at,
     deleted_at: m.deleted_at,
     undecryptable: m.undecryptable,

@@ -557,7 +557,8 @@ const DIMENSIONS = [
   },
   {
     id: "duplication", ticket: "#1731", what: "no new copy-paste clones against the committed baseline",
-    files: [".claude/skills/reuse-check/SKILL.md"],
+    files: [".claude/skills/reuse-check/SKILL.md", "scripts/check-clones.mjs", "scripts/clones.json", "scripts/clones-baseline.json"],
+    checks: [["node", "scripts/check-clones.mjs"]], mechanical: true,
   },
   {
     id: "platform-matrix", ticket: "#1728", what: "which platform × skin cells have automated coverage (report only)",

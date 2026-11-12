@@ -1,8 +1,7 @@
 import { errorMessage } from "../../utils/errorMessage";
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { TitleBar } from "../Layout/TitleBar";
-import { DotMatrix } from "../ui/DotMatrix";
+import { BackdropScreen } from "./BackdropScreen";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
@@ -121,17 +120,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
 
   // Distinct tint from the OTP screen.
   return (
-    <div
-      data-testid="enrollment-gate-screen"
-      className="flex flex-col h-full w-full bg-bg"
-      style={{
-        position: "relative",
-      }}
-    >
-      <div style={{ position: "absolute", inset: 0, opacity: 0.45, pointerEvents: "none" }}>
-        <DotMatrix speed={1.4} />
-      </div>
-      <TitleBar />
+    <BackdropScreen data-testid="enrollment-gate-screen" backdropOpacity={0.45} backdropSpeed={1.4}>
 
       <div
         className="flex-1 flex justify-center overflow-y-auto"
@@ -239,7 +228,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
           </div>
         </Card>
       </div>
-    </div>
+    </BackdropScreen>
   );
 };
 

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
@@ -49,7 +49,14 @@ export function useAcceptDMRequest() {
   });
 }
 
-export function useBlockUser() {
+/** Lists a block or unblock changes: DM requests, DM conversations, the blocked list. */
+function invalidateBlockLists(queryClient: QueryClient, userId: string | null) {
+  queryClient.invalidateQueries({ queryKey: ["dmRequests"] });
+  queryClient.invalidateQueries({ queryKey: messageQueryKeys.dmConversations(userId) });
+  queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
+}
+
+function useBlockMutation(command: "block_user" | "unblock_user") {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
 
@@ -58,17 +65,19 @@ export function useBlockUser() {
       if (!currentUser) {
         throw new Error("No current user");
       }
-      await invoke("block_user", {
+      await invoke(command, {
         blockerId: currentUser.id,
         blockedId,
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["dmRequests"] });
-      queryClient.invalidateQueries({ queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null) });
-      queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
+      invalidateBlockLists(queryClient, currentUser?.id ?? null);
     },
   });
+}
+
+export function useBlockUser() {
+  return useBlockMutation("block_user");
 }
 
 export type ReportReason = "spam" | "harassment" | "illegal" | "other";
@@ -96,34 +105,14 @@ export function useReportUser() {
     },
     onSuccess: (_data, vars) => {
       if (vars.alsoBlock) {
-        queryClient.invalidateQueries({ queryKey: ["dmRequests"] });
-        queryClient.invalidateQueries({ queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null) });
-        queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
+        invalidateBlockLists(queryClient, currentUser?.id ?? null);
       }
     },
   });
 }
 
 export function useUnblockUser() {
-  const queryClient = useQueryClient();
-  const currentUser = useObserver(() => appStore.currentUser);
-
-  return useMutation({
-    mutationFn: async (blockedId: string): Promise<void> => {
-      if (!currentUser) {
-        throw new Error("No current user");
-      }
-      await invoke("unblock_user", {
-        blockerId: currentUser.id,
-        blockedId,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["dmRequests"] });
-      queryClient.invalidateQueries({ queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null) });
-      queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
-    },
-  });
+  return useBlockMutation("unblock_user");
 }
 
 export function useBlockedUsers() {

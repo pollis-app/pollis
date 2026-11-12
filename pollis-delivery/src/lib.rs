@@ -587,23 +587,9 @@ pub(crate) fn bearer_token_matches(headers: &HeaderMap, expected: &str) -> bool 
 /// Takes raw [`Bytes`]: the signature binds `sha256(body)`.
 async fn submit(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     // Verify the signature over the *raw* body before parsing.
-    let authed_user = if state.require_auth {
-        match auth::verify_request_cached(
-            &state.device_keys,
-            &state.db,
-            &req.headers,
-            req.method.as_str(),
-            req.uri.path(),
-            &req.body,
-            util::now_unix() as i64,
-        )
-        .await
-        {
-            Ok(user_id) => Some(user_id),
-            Err(rej) => return Ok(rej.into_response()),
-        }
-    } else {
-        None
+    let authed_user = match writes::gate(&state, &req).await? {
+        Ok(authed) => authed,
+        Err(rejection) => return Ok(rejection),
     };
 
     // Parse after the signature check so a forged body can't even reach the DB.
@@ -676,23 +662,9 @@ async fn report_commit_since(
     req: RawRequest,
 ) -> Result<Response, AppError> {
     // Authenticate first, over the RAW body; the identity comes from the signature.
-    let authed = if state.require_auth {
-        match auth::verify_request_identity_cached(
-            &state.device_keys,
-            &state.db,
-            &req.headers,
-            req.method.as_str(),
-            req.uri.path(),
-            &req.body,
-            util::now_unix() as i64,
-        )
-        .await
-        {
-            Ok(id) => Some(id),
-            Err(rej) => return Ok(rej.into_response()),
-        }
-    } else {
-        None
+    let authed = match writes::gate_identity(&state, &req).await? {
+        Ok(authed) => authed,
+        Err(rejection) => return Ok(rejection),
     };
 
     let parsed: CommitSinceReport = match serde_json::from_slice(&req.body) {

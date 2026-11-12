@@ -96,7 +96,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/mls/provider.rs:130",
-        "pollis-core/src/commands/messages/send.rs:271"
+        "pollis-core/src/commands/messages/send.rs:260"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -120,7 +120,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/mls/provider.rs:130",
-        "pollis-core/src/commands/messages/send.rs:271"
+        "pollis-core/src/commands/messages/send.rs:260"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -488,7 +488,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/device_enrollment.rs:3",
-        "pollis-core/src/commands/device_enrollment.rs:612"
+        "pollis-core/src/commands/device_enrollment.rs:613"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -959,7 +959,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/device_enrollment.rs:3",
-        "pollis-core/src/commands/device_enrollment.rs:612"
+        "pollis-core/src/commands/device_enrollment.rs:613"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -1108,7 +1108,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/mls/provider.rs:27",
-        "pollis-core/src/commands/mls/group_state.rs:1179"
+        "pollis-core/src/commands/mls/group_state.rs:1172"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -1131,7 +1131,7 @@
         "pollis-core/src/commands/mls/provider.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:1179",
+        "pollis-core/src/commands/mls/group_state.rs:1172",
         "pollis-core/src/commands/mls/provider.rs:20"
       ],
       "status": "verified",
@@ -1979,7 +1979,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/account_identity.rs:57",
-        "frontend/src/App.tsx:749"
+        "frontend/src/App.tsx:731"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -2024,8 +2024,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:41",
-        "pollis-core/src/commands/device_enrollment.rs:103"
+        "pollis-core/src/commands/device_enrollment.rs:42",
+        "pollis-core/src/commands/device_enrollment.rs:104"
       ],
       "fact": "enrollment-code-length",
       "status": "verified",
@@ -2074,7 +2074,7 @@
         "pollis-core/src/commands/account_identity.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:728",
+        "pollis-core/src/commands/device_enrollment.rs:729",
         "pollis-core/src/commands/account_identity.rs:446"
       ],
       "status": "verified",
@@ -2156,8 +2156,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:43",
-        "pollis-core/src/commands/device_enrollment.rs:103"
+        "pollis-core/src/commands/device_enrollment.rs:44",
+        "pollis-core/src/commands/device_enrollment.rs:104"
       ],
       "fact": "enrollment-code-length",
       "status": "verified",
@@ -2178,7 +2178,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/device_enrollment.rs:3",
-        "pollis-core/src/commands/device_enrollment.rs:575"
+        "pollis-core/src/commands/device_enrollment.rs:576"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -2219,7 +2219,7 @@
         "pollis-core/src/commands/account_identity.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:728",
+        "pollis-core/src/commands/device_enrollment.rs:729",
         "pollis-core/src/commands/account_identity.rs:446"
       ],
       "status": "verified",
@@ -3563,7 +3563,7 @@
         "verifiable-log-serve/src/release.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/release.rs:124"
+        "verifiable-log-serve/src/release.rs:123"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -3647,7 +3647,7 @@
       ],
       "evidence": [
         "verifiable-log-serve/src/layout.rs:120",
-        "verifiable-log-serve/src/layout.rs:355"
+        "verifiable-log-serve/src/layout.rs:328"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -3808,7 +3808,7 @@
         "verifiable-log-serve/src/release.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/release.rs:94"
+        "verifiable-log-serve/src/release.rs:93"
       ],
       "status": "unverifiable",
       "note": "Historical capture; dated, so fine as a snapshot.",
@@ -3916,8 +3916,8 @@
         "website/artifacts.js"
       ],
       "evidence": [
-        "website/artifacts.js:240",
-        "website/artifacts.js:263"
+        "website/artifacts.js:238",
+        "website/artifacts.js:261"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -3940,7 +3940,7 @@
         "verifiable-log-serve/src/release.rs"
       ],
       "evidence": [
-        "website/artifacts.js:300",
+        "website/artifacts.js:298",
         "website/artifacts.html:536"
       ],
       "status": "verified",
@@ -3988,7 +3988,7 @@
       ],
       "evidence": [
         "src-tauri/src/lib.rs:547",
-        "frontend/src/components/Security/BuildVerifyLine.tsx:25"
+        "frontend/src/components/Security/BuildVerifyLine.tsx:26"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -4076,8 +4076,8 @@
         "website/artifacts.js"
       ],
       "evidence": [
-        "website/artifacts.js:240",
-        "website/artifacts.js:263"
+        "website/artifacts.js:238",
+        "website/artifacts.js:261"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -4557,7 +4557,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/messages.rs:379",
-        "pollis-core/src/commands/messages/send.rs:271"
+        "pollis-core/src/commands/messages/send.rs:260"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -4702,8 +4702,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:418",
-        "pollis-delivery/src/otp.rs:471"
+        "pollis-delivery/src/otp.rs:406",
+        "pollis-delivery/src/otp.rs:458"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -4829,8 +4829,8 @@
         "pollis-core/src/commands/mls/provider.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/device.rs:29",
-        "pollis-core/src/commands/mls/device.rs:151",
+        "pollis-core/src/commands/mls/device.rs:53",
+        "pollis-core/src/commands/mls/device.rs:175",
         "pollis-core/src/commands/mls/provider.rs:137"
       ],
       "status": "verified",
@@ -5528,8 +5528,8 @@
         "pollis-core/src/commands/auth.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:418",
-        "pollis-delivery/src/otp.rs:471",
+        "pollis-delivery/src/otp.rs:406",
+        "pollis-delivery/src/otp.rs:458",
         "pollis-core/src/commands/auth.rs:116"
       ],
       "status": "verified",
@@ -5549,7 +5549,7 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:418"
+        "pollis-delivery/src/otp.rs:406"
       ],
       "fact": "otp-length-digits",
       "status": "verified",
@@ -5569,9 +5569,9 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:239",
-        "pollis-delivery/src/otp.rs:308",
-        "pollis-delivery/src/otp.rs:347"
+        "pollis-delivery/src/otp.rs:240",
+        "pollis-delivery/src/otp.rs:296",
+        "pollis-delivery/src/otp.rs:335"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5590,8 +5590,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:96",
-        "pollis-delivery/src/otp.rs:362"
+        "pollis-delivery/src/otp.rs:97",
+        "pollis-delivery/src/otp.rs:350"
       ],
       "fact": "otp-ttl-minutes",
       "status": "verified",
@@ -5611,8 +5611,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:98",
-        "pollis-delivery/src/otp.rs:300"
+        "pollis-delivery/src/otp.rs:99",
+        "pollis-delivery/src/otp.rs:288"
       ],
       "fact": "otp-resend-throttle-seconds",
       "status": "verified",
@@ -5632,8 +5632,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:101",
-        "pollis-delivery/src/otp.rs:304"
+        "pollis-delivery/src/otp.rs:102",
+        "pollis-delivery/src/otp.rs:292"
       ],
       "fact": "otp-codes-per-window",
       "status": "verified",
@@ -5653,8 +5653,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:49",
-        "pollis-delivery/src/otp.rs:354"
+        "pollis-delivery/src/otp.rs:50",
+        "pollis-delivery/src/otp.rs:342"
       ],
       "fact": "otp-wrong-codes-before-lockout",
       "status": "verified",
@@ -5674,8 +5674,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:151",
-        "pollis-delivery/src/otp.rs:55"
+        "pollis-delivery/src/otp.rs:152",
+        "pollis-delivery/src/otp.rs:56"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5738,7 +5738,7 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:746"
+        "pollis-core/src/commands/device_enrollment.rs:747"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5757,8 +5757,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:899",
-        "pollis-core/src/commands/device_enrollment.rs:945"
+        "pollis-core/src/commands/device_enrollment.rs:900",
+        "pollis-core/src/commands/device_enrollment.rs:946"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5777,8 +5777,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:324",
-        "pollis-core/src/commands/device_enrollment.rs:408"
+        "pollis-core/src/commands/device_enrollment.rs:325",
+        "pollis-core/src/commands/device_enrollment.rs:409"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5797,9 +5797,9 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:43",
-        "pollis-core/src/commands/device_enrollment.rs:147",
-        "pollis-core/src/commands/device_enrollment.rs:160"
+        "pollis-core/src/commands/device_enrollment.rs:44",
+        "pollis-core/src/commands/device_enrollment.rs:148",
+        "pollis-core/src/commands/device_enrollment.rs:161"
       ],
       "fact": "enrollment-code-length",
       "status": "verified",
@@ -5820,7 +5820,7 @@
         "pollis-delivery/src/bootstrap.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:27",
+        "pollis-core/src/commands/device_enrollment.rs:28",
         "pollis-delivery/src/bootstrap.rs:436",
         "pollis-delivery/src/bootstrap.rs:504"
       ],
@@ -5842,8 +5842,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:577",
-        "pollis-core/src/commands/device_enrollment.rs:585"
+        "pollis-core/src/commands/device_enrollment.rs:578",
+        "pollis-core/src/commands/device_enrollment.rs:586"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5862,9 +5862,9 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:74",
-        "pollis-core/src/commands/device_enrollment.rs:171",
-        "pollis-core/src/commands/device_enrollment.rs:203"
+        "pollis-core/src/commands/device_enrollment.rs:75",
+        "pollis-core/src/commands/device_enrollment.rs:173",
+        "pollis-core/src/commands/device_enrollment.rs:204"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5904,7 +5904,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/account_identity.rs:406",
-        "pollis-core/src/commands/device_enrollment.rs:419"
+        "pollis-core/src/commands/device_enrollment.rs:420"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5924,8 +5924,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/key_packages.rs:59",
-        "pollis-core/src/commands/mls/key_packages.rs:209"
+        "pollis-core/src/commands/mls/key_packages.rs:55",
+        "pollis-core/src/commands/mls/key_packages.rs:196"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -5944,7 +5944,7 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:139"
+        "pollis-core/src/commands/device_enrollment.rs:140"
       ],
       "fact": "enrollment-code-bits",
       "status": "verified",
@@ -5965,7 +5965,7 @@
         "pollis-core/src/commands/pin.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_link.rs:197",
+        "pollis-core/src/commands/device_link.rs:199",
         "pollis-core/src/commands/pin.rs:623"
       ],
       "status": "verified",
@@ -5986,9 +5986,9 @@
         "pollis-delivery/src/links.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_link.rs:26",
-        "pollis-core/src/commands/device_link.rs:203",
-        "pollis-delivery/src/links.rs:40"
+        "pollis-core/src/commands/device_link.rs:27",
+        "pollis-core/src/commands/device_link.rs:204",
+        "pollis-delivery/src/links.rs:41"
       ],
       "fact": "device-link-qr-ttl-seconds",
       "status": "verified",
@@ -6028,9 +6028,9 @@
         "pollis-core/src/commands/device_link.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_link.rs:128",
-        "pollis-core/src/commands/device_link.rs:318",
-        "pollis-core/src/commands/device_link.rs:360"
+        "pollis-core/src/commands/device_link.rs:129",
+        "pollis-core/src/commands/device_link.rs:319",
+        "pollis-core/src/commands/device_link.rs:361"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6050,9 +6050,9 @@
         "pollis-delivery/src/links.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_link.rs:322",
-        "pollis-core/src/commands/device_link.rs:495",
-        "pollis-delivery/src/links.rs:43"
+        "pollis-core/src/commands/device_link.rs:323",
+        "pollis-core/src/commands/device_link.rs:496",
+        "pollis-delivery/src/links.rs:44"
       ],
       "fact": "device-offer-ttl-seconds",
       "status": "verified",
@@ -6160,8 +6160,8 @@
         "pollis-core/src/commands/mls/device.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/device.rs:522",
-        "pollis-core/src/commands/mls/device.rs:596"
+        "pollis-core/src/commands/mls/device.rs:546",
+        "pollis-core/src/commands/mls/device.rs:620"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6180,8 +6180,8 @@
         "pollis-core/src/commands/mls/reconcile.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/reconcile.rs:723",
-        "pollis-core/src/commands/mls/reconcile.rs:789",
+        "pollis-core/src/commands/mls/reconcile.rs:712",
+        "pollis-core/src/commands/mls/reconcile.rs:778",
         "pollis-core/src/commands/mls/reconcile.rs:366"
       ],
       "status": "verified",
@@ -6201,8 +6201,8 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:2022",
-        "pollis-core/src/commands/mls/group_state.rs:2049"
+        "pollis-core/src/commands/mls/group_state.rs:2015",
+        "pollis-core/src/commands/mls/group_state.rs:2042"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6222,8 +6222,8 @@
         "pollis-core/src/commands/mls/reconcile.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:2074",
-        "pollis-core/src/commands/mls/group_state.rs:2110",
+        "pollis-core/src/commands/mls/group_state.rs:2067",
+        "pollis-core/src/commands/mls/group_state.rs:2103",
         "pollis-core/src/commands/mls/reconcile.rs:366"
       ],
       "status": "verified",
@@ -6510,8 +6510,8 @@
         "pollis-core/src/commands/mls/provider.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:905",
-        "pollis-core/src/commands/mls/group_state.rs:943"
+        "pollis-core/src/commands/mls/group_state.rs:886",
+        "pollis-core/src/commands/mls/group_state.rs:924"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6552,7 +6552,7 @@
         "pollis-device-cert/src/lib.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/device.rs:162",
+        "pollis-core/src/commands/mls/device.rs:186",
         "pollis-core/src/commands/mls/ds_client.rs:12",
         "verifiable-log/src/sth.rs:20"
       ],
@@ -6695,8 +6695,8 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:906",
-        "pollis-core/src/commands/mls/group_state.rs:919"
+        "pollis-core/src/commands/mls/group_state.rs:887",
+        "pollis-core/src/commands/mls/group_state.rs:900"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6756,7 +6756,7 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:503",
+        "pollis-core/src/commands/mls/group_state.rs:502",
         "pollis-core/src/commands/mls/migrate.rs:180"
       ],
       "status": "verified",
@@ -6818,8 +6818,8 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:825",
-        "pollis-core/src/commands/mls/group_state.rs:503"
+        "pollis-core/src/commands/mls/group_state.rs:815",
+        "pollis-core/src/commands/mls/group_state.rs:502"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6839,8 +6839,8 @@
         "pollis-core/src/commands/mls/device.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:2055",
-        "pollis-core/src/commands/mls/device.rs:438"
+        "pollis-core/src/commands/mls/group_state.rs:2048",
+        "pollis-core/src/commands/mls/device.rs:462"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6859,7 +6859,7 @@
         "pollis-core/src/commands/mls/key_packages.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/key_packages.rs:248"
+        "pollis-core/src/commands/mls/key_packages.rs:235"
       ],
       "fact": "mls-key-package-pool",
       "status": "verified",
@@ -6902,7 +6902,7 @@
         "pollis-core/src/commands/mls/reconcile.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/reconcile.rs:695"
+        "pollis-core/src/commands/mls/reconcile.rs:684"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6944,7 +6944,7 @@
       "evidence": [
         "pollis-core/src/commands/messages/send.rs:158",
         "pollis-core/src/commands/messages/send.rs:165",
-        "pollis-core/src/commands/mls/group_state.rs:1326"
+        "pollis-core/src/commands/mls/group_state.rs:1319"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6986,9 +6986,9 @@
         "pollis-delivery/src/messages.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/messages/send.rs:277",
+        "pollis-core/src/commands/messages/send.rs:266",
         "pollis-delivery/src/messages.rs:460",
-        "pollis-core/src/commands/messages/seal.rs:116"
+        "pollis-core/src/commands/messages/seal.rs:142"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -7028,8 +7028,8 @@
         "pollis-core/src/commands/livekit/publish.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/messages/send.rs:311",
-        "pollis-core/src/commands/livekit/publish.rs:45"
+        "pollis-core/src/commands/messages/send.rs:300",
+        "pollis-core/src/commands/livekit/publish.rs:80"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -7051,7 +7051,7 @@
       "evidence": [
         "pollis-core/src/commands/messages/read.rs:31",
         "pollis-core/src/commands/messages/ingest.rs:945",
-        "pollis-core/src/commands/mls/group_state.rs:1965"
+        "pollis-core/src/commands/mls/group_state.rs:1958"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -7174,7 +7174,7 @@
         "pollis-core/src/commands/mls/provider.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:1179"
+        "pollis-core/src/commands/mls/group_state.rs:1172"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -7668,7 +7668,7 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:943"
+        "pollis-core/src/commands/mls/group_state.rs:924"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -7979,8 +7979,8 @@
       ],
       "evidence": [
         "pollis-delivery/src/history_transfer.rs:9",
-        "pollis-delivery/src/account.rs:492",
-        "pollis-delivery/src/account.rs:557"
+        "pollis-delivery/src/account.rs:541",
+        "pollis-delivery/src/account.rs:595"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -8254,7 +8254,7 @@
         "pollis-core/src/db/local_schema.sql"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/device.rs:21",
+        "pollis-core/src/commands/mls/device.rs:45",
         "pollis-core/src/db/local_schema.sql:183"
       ],
       "status": "verified",
@@ -8298,9 +8298,9 @@
         "pollis-core/src/media_server.rs"
       ],
       "evidence": [
-        "pollis-core/src/media_server.rs:237",
-        "pollis-core/src/media_server.rs:243",
-        "pollis-core/src/media_server.rs:650"
+        "pollis-core/src/media_server.rs:238",
+        "pollis-core/src/media_server.rs:244",
+        "pollis-core/src/media_server.rs:640"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -8606,9 +8606,9 @@
         "pollis-delivery/src/reads.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/reads.rs:176",
-        "pollis-delivery/src/reads.rs:200",
-        "pollis-delivery/src/reads.rs:234"
+        "pollis-delivery/src/reads.rs:158",
+        "pollis-delivery/src/reads.rs:182",
+        "pollis-delivery/src/reads.rs:216"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -8734,8 +8734,8 @@
         "pollis-core/src/commands/file_keys.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:1625",
-        "pollis-core/src/commands/mls/reconcile.rs:1215",
+        "pollis-core/src/commands/mls/group_state.rs:1618",
+        "pollis-core/src/commands/mls/reconcile.rs:1204",
         "pollis-core/src/commands/mls/self_update.rs:179"
       ],
       "status": "verified",
@@ -9237,8 +9237,8 @@
         "pollis-core/src/commands/mls/migrate.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:1622",
-        "pollis-core/src/commands/mls/reconcile.rs:1212",
+        "pollis-core/src/commands/mls/group_state.rs:1615",
+        "pollis-core/src/commands/mls/reconcile.rs:1201",
         "pollis-core/src/commands/mls/self_update.rs:176"
       ],
       "status": "verified",
@@ -9487,8 +9487,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:585",
-        "pollis-core/src/commands/device_enrollment.rs:592"
+        "pollis-core/src/commands/device_enrollment.rs:586",
+        "pollis-core/src/commands/device_enrollment.rs:593"
       ],
       "fact": "enrollment-code-length",
       "status": "verified",
@@ -9571,8 +9571,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:741",
-        "pollis-core/src/commands/device_enrollment.rs:746"
+        "pollis-core/src/commands/device_enrollment.rs:742",
+        "pollis-core/src/commands/device_enrollment.rs:747"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -9614,8 +9614,8 @@
         "pollis-delivery/src/teardown.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/account.rs:833",
-        "pollis-delivery/src/account.rs:907",
+        "pollis-delivery/src/account.rs:815",
+        "pollis-delivery/src/account.rs:889",
         "pollis-delivery/src/teardown.rs:4"
       ],
       "status": "verified",
@@ -9635,9 +9635,9 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:798",
-        "pollis-core/src/commands/device_enrollment.rs:800",
-        "pollis-core/src/commands/device_enrollment.rs:801"
+        "pollis-core/src/commands/device_enrollment.rs:799",
+        "pollis-core/src/commands/device_enrollment.rs:802",
+        "pollis-core/src/commands/device_enrollment.rs:802"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -9678,9 +9678,9 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/account.rs:614",
-        "pollis-delivery/src/writes.rs:836",
-        "pollis-core/src/commands/device_enrollment.rs:773"
+        "pollis-delivery/src/account.rs:652",
+        "pollis-delivery/src/writes.rs:846",
+        "pollis-core/src/commands/device_enrollment.rs:774"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -9700,7 +9700,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/account.rs:193",
-        "pollis-delivery/src/account.rs:667"
+        "pollis-delivery/src/account.rs:694"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -9761,8 +9761,8 @@
         "pollis-core/src/commands/mls/device.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/device.rs:61",
-        "pollis-core/src/commands/mls/device.rs:162"
+        "pollis-core/src/commands/mls/device.rs:85",
+        "pollis-core/src/commands/mls/device.rs:186"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -9865,9 +9865,9 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:142",
-        "pollis-delivery/src/otp.rs:145",
-        "pollis-delivery/src/otp.rs:217"
+        "pollis-delivery/src/otp.rs:143",
+        "pollis-delivery/src/otp.rs:146",
+        "pollis-delivery/src/otp.rs:218"
       ],
       "fact": "otp-ttl-minutes",
       "status": "verified",
@@ -9947,7 +9947,7 @@
         "pollis-delivery/src/push.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:114",
+        "pollis-delivery/src/otp.rs:115",
         "pollis-delivery/src/push.rs:79"
       ],
       "status": "verified",
@@ -10047,7 +10047,7 @@
         "pollis-delivery/src/ratelimit.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:217",
+        "pollis-delivery/src/otp.rs:218",
         "pollis-delivery/src/ratelimit.rs:10"
       ],
       "status": "verified",
@@ -10151,7 +10151,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/otp.rs:1",
-        "pollis-delivery/src/otp.rs:142"
+        "pollis-delivery/src/otp.rs:143"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -10269,7 +10269,7 @@
         "pollis-core/src/commands/messages/delete_capability.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/messages/edit_delete.rs:394",
+        "pollis-core/src/commands/messages/edit_delete.rs:384",
         "pollis-core/src/commands/messages/delete_capability.rs:3"
       ],
       "status": "verified",
@@ -10475,7 +10475,7 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:418"
+        "pollis-delivery/src/otp.rs:406"
       ],
       "fact": "otp-length-digits",
       "status": "verified",
@@ -10619,7 +10619,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/device_enrollment.rs:3",
-        "pollis-core/src/commands/device_enrollment.rs:43"
+        "pollis-core/src/commands/device_enrollment.rs:44"
       ],
       "fact": "enrollment-code-length",
       "status": "verified",
@@ -10639,8 +10639,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_enrollment.rs:39",
-        "pollis-core/src/commands/device_enrollment.rs:43"
+        "pollis-core/src/commands/device_enrollment.rs:40",
+        "pollis-core/src/commands/device_enrollment.rs:44"
       ],
       "fact": "enrollment-code-bits",
       "status": "verified",
@@ -11040,7 +11040,7 @@
         "pollis-core/src/commands/messages/edit_delete.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/messages/edit_delete.rs:394"
+        "pollis-core/src/commands/messages/edit_delete.rs:384"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -11368,7 +11368,7 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:418"
+        "pollis-delivery/src/otp.rs:406"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -11533,7 +11533,7 @@
         "scripts/suspend-account.sh"
       ],
       "evidence": [
-        "pollis-delivery/src/reports.rs:203",
+        "pollis-delivery/src/reports.rs:201",
         "scripts/suspend-account.sh:3"
       ],
       "status": "unverifiable",
@@ -11906,8 +11906,8 @@
         "verifiable-log-serve/src/pinned.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/remote.rs:704",
-        "verifiable-log-serve/src/remote.rs:881",
+        "verifiable-log-serve/src/remote.rs:810",
+        "verifiable-log-serve/src/remote.rs:858",
         "verifiable-log-serve/src/remote.rs:172"
       ],
       "status": "verified",
@@ -12009,8 +12009,8 @@
         "verifiable-log-serve/src/remote.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/remote.rs:704",
-        "verifiable-log-serve/src/remote.rs:881",
+        "verifiable-log-serve/src/remote.rs:810",
+        "verifiable-log-serve/src/remote.rs:858",
         "verifiable-log-serve/src/remote.rs:256"
       ],
       "status": "verified",
@@ -12140,9 +12140,9 @@
         "verifiable-log-builder/src/commit_log.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/group.rs:227",
-        "verifiable-log-serve/src/group.rs:255",
-        "verifiable-log-serve/src/group.rs:330"
+        "verifiable-log-serve/src/group.rs:191",
+        "verifiable-log-serve/src/group.rs:211",
+        "verifiable-log-serve/src/group.rs:269"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -12161,8 +12161,8 @@
         "verifiable-log-serve/src/group.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/group.rs:255",
-        "verifiable-log-serve/src/group.rs:330"
+        "verifiable-log-serve/src/group.rs:211",
+        "verifiable-log-serve/src/group.rs:269"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -12204,8 +12204,8 @@
         "website/transparency.js"
       ],
       "evidence": [
-        "verifiable-log-serve/src/group.rs:52",
-        "verifiable-log-serve/src/server.rs:21"
+        "verifiable-log-serve/src/group.rs:51",
+        "verifiable-log-serve/src/server.rs:22"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -12224,8 +12224,8 @@
         "verifiable-log-serve/src/group.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/group.rs:41",
-        "verifiable-log-serve/src/group.rs:330"
+        "verifiable-log-serve/src/group.rs:40",
+        "verifiable-log-serve/src/group.rs:269"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -12245,7 +12245,7 @@
         "verifiable-log-builder/src/account_key.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/account.rs:183",
+        "verifiable-log-serve/src/account.rs:147",
         "verifiable-log-builder/src/account_key.rs:52"
       ],
       "status": "verified",
@@ -12309,7 +12309,7 @@
       ],
       "evidence": [
         "verifiable-log-serve/src/release.rs:6",
-        "verifiable-log-serve/src/release.rs:275"
+        "verifiable-log-serve/src/release.rs:213"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -12330,7 +12330,7 @@
       ],
       "evidence": [
         "verifiable-log-serve/src/layout.rs:72",
-        "verifiable-log-serve/src/layout.rs:439"
+        "verifiable-log-serve/src/layout.rs:360"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -12615,8 +12615,8 @@
       ],
       "evidence": [
         "website/transparency.js:336",
-        "verifiable-log-serve/src/group.rs:92",
-        "verifiable-log-serve/src/group.rs:181"
+        "verifiable-log-serve/src/group.rs:91",
+        "verifiable-log-serve/src/group.rs:148"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -12764,7 +12764,7 @@
         "verifiable-log-serve/src/remote.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/remote.rs:1054",
+        "verifiable-log-serve/src/remote.rs:902",
         "verifiable-log/src/sth.rs:189"
       ],
       "status": "verified",
@@ -12910,8 +12910,8 @@
         "verifiable-log-serve/src/live.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/server.rs:21",
-        "verifiable-log-serve/src/live.rs:35"
+        "verifiable-log-serve/src/server.rs:22",
+        "verifiable-log-serve/src/live.rs:33"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -12931,8 +12931,8 @@
         "verifiable-log-serve/src/server.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/group.rs:220",
-        "verifiable-log-serve/src/server.rs:21"
+        "verifiable-log-serve/src/group.rs:184",
+        "verifiable-log-serve/src/server.rs:22"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -13344,7 +13344,7 @@
       ],
       "evidence": [
         "verifiable-log-builder/src/commit_log.rs:24",
-        "verifiable-log-serve/src/group.rs:246"
+        "verifiable-log-serve/src/group.rs:202"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -13596,7 +13596,7 @@
       ],
       "evidence": [
         ".github/workflows/transparency-publish.yml:454",
-        "verifiable-log-serve/src/server.rs:21"
+        "verifiable-log-serve/src/server.rs:22"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -14899,8 +14899,8 @@
       ],
       "evidence": [
         "website/artifacts.js:14",
-        "website/artifacts.js:542",
-        "website/artifacts.js:555"
+        "website/artifacts.js:509",
+        "website/artifacts.js:522"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -14921,7 +14921,7 @@
       ],
       "evidence": [
         "website/artifacts.js:4",
-        "website/artifacts.js:486",
+        "website/artifacts.js:471",
         "pollis-core/src/commands/transparency.rs:45"
       ],
       "status": "verified",
@@ -15850,7 +15850,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/otp.rs:1",
-        "pollis-delivery/src/otp.rs:39"
+        "pollis-delivery/src/otp.rs:40"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -16809,7 +16809,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/messages.rs:1315",
-        "pollis-delivery/src/account.rs:487"
+        "pollis-delivery/src/account.rs:476"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -16973,7 +16973,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/bootstrap.rs:171",
-        "pollis-delivery/src/links.rs:410"
+        "pollis-delivery/src/links.rs:400"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -17013,8 +17013,8 @@
         "pollis-delivery/src/teardown.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/account.rs:779",
-        "pollis-delivery/src/account.rs:799"
+        "pollis-delivery/src/account.rs:789",
+        "pollis-delivery/src/account.rs:797"
       ],
       "status": "verified",
       "note": "Main-DB rows are one transaction; commit-log-DB rows are purged right after the commit (account.rs:753).",
@@ -17034,8 +17034,8 @@
         "pollis-delivery/src/account.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/account.rs:723",
-        "pollis-delivery/src/account.rs:798"
+        "pollis-delivery/src/account.rs:733",
+        "pollis-delivery/src/account.rs:797"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -17157,8 +17157,8 @@
         "pollis-core/src/commands/device_enrollment.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/device_link.rs:198",
-        "pollis-core/src/commands/device_enrollment.rs:674"
+        "pollis-core/src/commands/device_link.rs:199",
+        "pollis-core/src/commands/device_enrollment.rs:675"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -17217,8 +17217,8 @@
         "pollis-delivery/src/account.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/account.rs:480",
-        "pollis-delivery/src/account.rs:486"
+        "pollis-delivery/src/account.rs:540",
+        "pollis-delivery/src/account.rs:541"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -17680,10 +17680,10 @@
       ],
       "evidence": [
         "pollis-core/src/commands/account_identity.rs:118",
-        "frontend/src/components/Auth/PinEntryScreen.tsx:15"
+        "frontend/src/components/Auth/PinEntryScreen.tsx:14"
       ],
       "status": "verified",
-      "note": "Forgot-PIN leads to Secret-Key recovery (PinEntryScreen.tsx:15). Someone who still has another enrolled device can also approve a new one, which the Explained tier states; the simple tier's 'only way back in' slightly overstates the limit but misleads nobody toward weaker security.",
+      "note": "Forgot-PIN leads to Secret-Key recovery (PinEntryScreen.tsx:14). Someone who still has another enrolled device can also approve a new one, which the Explained tier states; the simple tier's 'only way back in' slightly overstates the limit but misleads nobody toward weaker security.",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
@@ -17908,7 +17908,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/mls/provider.rs:136",
-        "pollis-core/src/commands/mls/key_packages.rs:267",
+        "pollis-core/src/commands/mls/key_packages.rs:254",
         "docs/security-whitepaper.md:348"
       ],
       "status": "verified",
@@ -17973,7 +17973,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/mls/reconcile.rs:366",
-        "pollis-core/src/commands/mls/reconcile.rs:746"
+        "pollis-core/src/commands/mls/reconcile.rs:735"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -18144,8 +18144,8 @@
       ],
       "evidence": [
         "pollis-core/src/commands/device_enrollment.rs:3",
-        "pollis-core/src/commands/device_enrollment.rs:141",
-        "pollis-core/src/commands/device_enrollment.rs:172"
+        "pollis-core/src/commands/device_enrollment.rs:142",
+        "pollis-core/src/commands/device_enrollment.rs:173"
       ],
       "fact": "enrollment-code-length",
       "status": "verified",
@@ -18229,7 +18229,7 @@
         "pollis-core/src/media_server.rs"
       ],
       "evidence": [
-        "pollis-core/src/media_server.rs:243"
+        "pollis-core/src/media_server.rs:244"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -18441,7 +18441,7 @@
         "key-set.json"
       ],
       "evidence": [
-        "verifiable-log-serve/src/release.rs:106",
+        "verifiable-log-serve/src/release.rs:105",
         "docs/signing-key-compromise-runbook.md:15"
       ],
       "status": "verified",
@@ -18502,7 +18502,7 @@
         "pollis-core/src/commands/transparency.rs"
       ],
       "evidence": [
-        "frontend/src/components/Security/BuildVerifyLine.tsx:28",
+        "frontend/src/components/Security/BuildVerifyLine.tsx:29",
         "pollis-core/src/commands/transparency.rs:332"
       ],
       "status": "verified",
@@ -19298,7 +19298,7 @@
       "evidence": [
         "pollis-core/src/commands/transparency.rs:43",
         "key-set.json:17",
-        "verifiable-log-serve/src/release.rs:106"
+        "verifiable-log-serve/src/release.rs:105"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -19424,7 +19424,7 @@
         "website/index.html"
       ],
       "evidence": [
-        "website/index.html:254"
+        "website/index.html:252"
       ],
       "status": "unverifiable",
       "note": "Deployed service; needs the live status page.",
@@ -19951,7 +19951,7 @@
         "key-set.json"
       ],
       "evidence": [
-        "verifiable-log-serve/src/release.rs:106",
+        "verifiable-log-serve/src/release.rs:105",
         "docs/signing-key-compromise-runbook.md:15"
       ],
       "status": "verified",
@@ -20200,8 +20200,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:418",
-        "pollis-delivery/src/otp.rs:114"
+        "pollis-delivery/src/otp.rs:406",
+        "pollis-delivery/src/otp.rs:115"
       ],
       "fact": "otp-length-digits",
       "status": "verified",
@@ -20329,7 +20329,7 @@
         "livekit/DEPLOY.md"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:114",
+        "pollis-delivery/src/otp.rs:115",
         "pollis-delivery/src/push.rs:55",
         "livekit/DEPLOY.md:396"
       ],
@@ -20440,7 +20440,7 @@
       "evidence": [
         "pollis-core/src/commands/auth.rs:933",
         "pollis-delivery/src/teardown.rs:211",
-        "pollis-delivery/src/account.rs:799"
+        "pollis-delivery/src/account.rs:797"
       ],
       "status": "disputed",
       "note": "Page says deletion rotates every conversation's keys and purges pending envelopes. Code: the deleting client only sends a best-effort, non-fatal wake-up asking members to evict its leaf (pollis-core/src/commands/auth.rs:933-958); the rotation is the next remaining member's commit. The envelope purge is `DELETE FROM message_envelope WHERE sender_id = ?` (pollis-delivery/src/teardown.rs:211), which matches nothing for sealed-sender envelopes, so messages you sent that others have not fetched stay until delivered (they go with the conversation, or via GC).",
@@ -20691,8 +20691,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:114",
-        "pollis-delivery/src/otp.rs:418"
+        "pollis-delivery/src/otp.rs:115",
+        "pollis-delivery/src/otp.rs:406"
       ],
       "fact": "otp-length-digits",
       "status": "verified",
@@ -21012,7 +21012,7 @@
         "pollis-delivery/src/push.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:114",
+        "pollis-delivery/src/otp.rs:115",
         "pollis-delivery/src/push.rs:55"
       ],
       "status": "disputed",

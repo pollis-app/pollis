@@ -63,8 +63,10 @@ interface SearchPanelProps {
   onClose: () => void;
 }
 
+/** Text channels (`kind` "channel") or voice channels (`kind` "voice") across the user's groups. */
 function buildChannelResults(
-  groups: GroupWithChannels[] | undefined
+  groups: GroupWithChannels[] | undefined,
+  kind: "channel" | "voice",
 ): SearchResultItem[] {
   if (!groups) {
     return [];
@@ -73,42 +75,15 @@ function buildChannelResults(
   for (const group of groups) {
     const groupSlug = group.slug || group.name.toLowerCase().replace(/\s+/g, "-");
     for (const channel of group.channels) {
-      if (channel.channel_type === "voice") {
+      if ((channel.channel_type === "voice") !== (kind === "voice")) {
         continue;
       }
       const channelSlug = channel.slug || channel.name.toLowerCase().replace(/\s+/g, "-");
       results.push({
-        type: "channel",
-        id: `channel-${channel.id}`,
+        type: kind,
+        id: `${kind}-${channel.id}`,
         name: channel.name,
-        breadcrumb: `/g/${groupSlug}/${channelSlug}`,
-        groupId: group.id,
-        channelId: channel.id,
-      });
-    }
-  }
-  return results;
-}
-
-function buildVoiceResults(
-  groups: GroupWithChannels[] | undefined
-): SearchResultItem[] {
-  if (!groups) {
-    return [];
-  }
-  const results: SearchResultItem[] = [];
-  for (const group of groups) {
-    const groupSlug = group.slug || group.name.toLowerCase().replace(/\s+/g, "-");
-    for (const channel of group.channels) {
-      if (channel.channel_type !== "voice") {
-        continue;
-      }
-      const channelSlug = channel.slug || channel.name.toLowerCase().replace(/\s+/g, "-");
-      results.push({
-        type: "voice",
-        id: `voice-${channel.id}`,
-        name: channel.name,
-        breadcrumb: `/g/${groupSlug}/voice/${channelSlug}`,
+        breadcrumb: kind === "voice" ? `/g/${groupSlug}/voice/${channelSlug}` : `/g/${groupSlug}/${channelSlug}`,
         groupId: group.id,
         channelId: channel.id,
       });
@@ -267,8 +242,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
   );
 
   const allItems = useMemo(() => {
-    const channels = buildChannelResults(groupsWithChannels);
-    const voiceChannels = buildVoiceResults(groupsWithChannels);
+    const channels = buildChannelResults(groupsWithChannels, "channel");
+    const voiceChannels = buildChannelResults(groupsWithChannels, "voice");
     const people = buildPersonResults(allGroupMembers, dmConversations, currentUserId);
     const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...people, ...pageResults];
     if (activeVoiceChannelId) {

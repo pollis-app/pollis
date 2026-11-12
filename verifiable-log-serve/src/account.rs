@@ -16,18 +16,15 @@
 //! Prerequisite failures return `Err`; a tampered chain yields an [`AccountReport`] with
 //! `chain_valid == false`.
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
-use verifiable_log::{proof, Entry, InclusionProof, Sth, VerifiableLog};
-use verifiable_log_builder::account_key::{
-    self, AccountKeyInvariant, AccountKeyLeaf,
-};
+use verifiable_log::VerifiableLog;
+use verifiable_log_builder::account_key::{self, AccountKeyInvariant, AccountKeyLeaf};
 
-use crate::bundle::{now_ms, short, Bundle, InclusionCheck, PublicKeyDoc};
+use crate::bundle::{now_ms, short, Bundle};
 use crate::error::Result;
-use crate::remote::{build_agent, fetch_json};
+use crate::remote::build_agent;
+use crate::verdict::{fetch_subject_bundle, print_verdict, raise_key_set_alarm, Anchor};
 
 /// Tenant id the account-key entries carry in the shared log.
 pub const ACCOUNT_TENANT: &str = account_key::TENANT;
@@ -112,55 +109,20 @@ fn verify_account_with(
 ) -> Result<AccountReport> {
     let base = base_url.trim_end_matches('/');
 
-    let pk_doc: PublicKeyDoc =
-        fetch_json(agent, &format!("{base}/v1/account-keys/public_key.json"))?;
-    // H-1: pin at the fetch boundary; the `*_in_bundle` core is not gated. Only pinned keys pass.
-    let pk_doc = crate::pinned::require_pinned_with(&pk_doc, now_ms(), trust)
-        .map_err(crate::error::ServeError::BadBundle)?;
-    let sth: Sth = fetch_json(agent, &format!("{base}/v1/account-keys/sth/latest.json"))?;
-    let entries: Vec<Entry> = fetch_json(agent, &format!("{base}/v1/account-keys/entries.json"))?;
-
-    // Plan which proofs to fetch: only this user's entries (decode + match).
-    let user_indices: Vec<usize> = entries
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| e.tenant == ACCOUNT_TENANT)
-        .filter_map(|(i, e)| AccountKeyLeaf::decode(&e.data).ok().map(|leaf| (i, leaf)))
-        .filter(|(_, leaf)| leaf.user_id == user_id)
-        .map(|(i, _)| i)
-        .collect();
-
-    let mut inclusion: Vec<InclusionCheck> = Vec::with_capacity(user_indices.len());
-    for i in &user_indices {
-        let url = format!("{base}/v1/account-keys/proof/inclusion/{}/{}.json", sth.tree_size, i);
-        if let Ok(proof) = fetch_json::<InclusionProof>(agent, &url) {
-            if let Some(entry) = entries.get(*i) {
-                inclusion.push(InclusionCheck {
-                    entry: entry.clone(),
-                    proof,
-                    sth_index: 0,
-                });
-            }
-        }
-    }
-
-    let bundle = Bundle {
-        // Carry the overlap set so a head from a retiring key still verifies (#875).
-        retired_keys: pk_doc.overlap_keys(),
-        public_key: pk_doc.public_key,
-        sths: vec![sth],
-        entries,
-        enforce_unique: vec![ACCOUNT_TENANT.to_string()],
-        inclusion,
-        consistency: Vec::new(),
-    };
+    let bundle = fetch_subject_bundle(
+        agent,
+        &format!("{base}/v1/account-keys"),
+        trust,
+        ACCOUNT_TENANT,
+        // Only this user's entries (decode + match).
+        |e| {
+            e.tenant == ACCOUNT_TENANT
+                && AccountKeyLeaf::decode(&e.data).is_ok_and(|leaf| leaf.user_id == user_id)
+        },
+    )?;
 
     let mut report = verify_account_in_bundle(&bundle, user_id);
-    // An unattributable served key set is an alarm even when the pin verifies.
-    if let Some(v) = trust.alarm_violation() {
-        report.chain_valid = false;
-        report.violations.insert(0, v);
-    }
+    raise_key_set_alarm(trust, &mut report.chain_valid, &mut report.violations);
     Ok(report)
 }
 
@@ -184,17 +146,8 @@ pub fn verify_account_in_bundle_at(
     let mut violations: Vec<String> = Vec::new();
 
     // 1. Trust anchor: the newest head under the account context and any acceptable key.
-    let candidates = bundle.key_candidates(now_ms);
-    let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
-    let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
-        Some(sth) => (
-            sth.tree_size,
-            sth.root_hash.clone(),
-            sth.verify_any_with_context(&candidates, account_key::STH_CONTEXT)
-                .is_some(),
-        ),
-        None => (0, String::new(), false),
-    };
+    let anchor = Anchor::new(bundle, now_ms, account_key::STH_CONTEXT);
+    let sth_sig_ok = anchor.sth_sig_ok;
     if !sth_sig_ok {
         violations
             .push("account STH signature is invalid — published head is not trustworthy".to_string());
@@ -214,27 +167,10 @@ pub fn verify_account_in_bundle_at(
 
     let found = !selected.is_empty();
 
-    // Only proofs checked against the newest head.
-    let inclusion_by_index: BTreeMap<usize, &InclusionProof> = bundle
-        .inclusion
-        .iter()
-        .filter(|c| latest.is_some_and(|s| c.proof.tree_size == s.tree_size))
-        .map(|c| (c.proof.leaf_index as usize, &c.proof))
-        .collect();
-
     let mut keys: Vec<AccountKeyVersion> = Vec::with_capacity(selected.len());
     let mut all_included = true;
     for (leaf_index, leaf) in &selected {
-        let included = match (
-            inclusion_by_index.get(leaf_index),
-            latest,
-            bundle.entries.get(*leaf_index),
-        ) {
-            (Some(proof), Some(sth), Some(entry)) => {
-                proof::verify_inclusion_proof(entry, proof, sth)
-            }
-            _ => false,
-        };
+        let included = anchor.included(bundle, *leaf_index);
         if !included {
             all_included = false;
             violations.push(format!(
@@ -277,8 +213,8 @@ pub fn verify_account_in_bundle_at(
     AccountReport {
         user_id: user_id.to_string(),
         found,
-        sth_tree_size,
-        root_hex,
+        sth_tree_size: anchor.sth_tree_size,
+        root_hex: anchor.root_hex,
         keys,
         chain_valid,
         violations,
@@ -305,19 +241,11 @@ impl AccountReport {
                 );
             }
         }
-        if !self.violations.is_empty() {
-            println!("Violations:");
-            for v in &self.violations {
-                println!("  - {v}");
-            }
-        }
-        println!(
-            "\n{}",
-            if self.chain_valid {
-                "PASS: account key chain is valid"
-            } else {
-                "FAIL: account key chain is NOT valid"
-            }
+        print_verdict(
+            &self.violations,
+            self.chain_valid,
+            "PASS: account key chain is valid",
+            "FAIL: account key chain is NOT valid",
         );
     }
 }

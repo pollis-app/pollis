@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import React from "react";
+import { useTranslation } from "react-i18next";
+import { SuggestList } from "./SuggestList";
 import { Avatar } from "./Avatar";
 import type { MentionCandidate } from "../../utils/mentions";
 
@@ -39,65 +40,30 @@ export const MentionSuggestList: React.FC<MentionSuggestListProps> = ({
   onHover,
 }) => {
   const { t } = useTranslation("common");
-  const activeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex]);
-
-  if (candidates.length === 0) {
-    return null;
-  }
 
   return (
-    <div
-      data-testid="mention-suggest-list"
-      role="listbox"
-      aria-label={t("mentions.listLabel")}
-      className="absolute bottom-full left-0 right-0 z-20 mb-1 mx-2 overflow-hidden rounded-panel border border-line bg-surface-raised"
-    >
-      <div className="px-3 py-1.5 border-b border-line text-2xs text-muted select-none">
-        {/* `Trans`, so a translator can move the highlighted query. */}
-        <Trans
-          i18nKey="mentions.matching"
-          ns="common"
-          values={{ query }}
-          components={{ hl: <span className="text-fg" /> }}
-        />
-      </div>
-      <div className="max-h-60 overflow-y-auto py-1">
-        {candidates.map((c, i) => {
-          const isActive = i === activeIndex;
-          return (
-            <button
-              key={c.userId}
-              ref={isActive ? activeRef : undefined}
-              type="button"
-              role="option"
-              aria-selected={isActive}
-              data-testid={`mention-option-${c.username}`}
-              data-active={isActive ? "true" : undefined}
-              // Keep composer focus: a blur tears down the list first.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onSelect(c);
-              }}
-              onMouseEnter={() => onHover(i)}
-              className={`w-full flex items-center gap-2 px-3 py-1.5 text-start text-sm hover:bg-hover ${
-                isActive ? "bg-active" : ""
-              }`}
-            >
-              <Avatar avatarKey={c.avatarUrl ?? null} size={22} alt={c.username} />
-              <span className="truncate text-fg">
-                <MatchedName username={c.username} query={query} />
-              </span>
-              {c.displayName && c.displayName !== c.username && (
-                <span className="truncate text-xs text-muted">{c.displayName}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <SuggestList
+      items={candidates}
+      activeIndex={activeIndex}
+      query={query}
+      testId="mention-suggest-list"
+      label={t("mentions.listLabel")}
+      matchingKey="mentions.matching"
+      itemKey={(c) => c.userId}
+      optionTestId={(c) => `mention-option-${c.username}`}
+      onSelect={onSelect}
+      onHover={onHover}
+      renderItem={(c) => (
+        <>
+          <Avatar avatarKey={c.avatarUrl ?? null} size={22} alt={c.username} />
+          <span className="truncate text-fg">
+            <MatchedName username={c.username} query={query} />
+          </span>
+          {c.displayName && c.displayName !== c.username && (
+            <span className="truncate text-xs text-muted">{c.displayName}</span>
+          )}
+        </>
+      )}
+    />
   );
 };

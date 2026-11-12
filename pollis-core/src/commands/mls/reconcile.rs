@@ -663,18 +663,7 @@ where
         }
     };
 
-    let sig_pub_bytes = group
-        .own_leaf_node()
-        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
-        .signature_key()
-        .as_slice()
-        .to_vec();
-    let signer = SignatureKeyPair::read(
-        provider.storage(),
-        &sig_pub_bytes,
-        signature_scheme(group.ciphersuite()),
-    )
-    .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
+    let signer = super::group_state::own_signer(provider, &group)?;
 
     crate::commands::file_keys::keep_epoch_kek(provider, &group);
     group

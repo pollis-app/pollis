@@ -151,23 +151,51 @@ pub fn insert_reset_statement(
     insert_json(map, RESET_STATEMENT_PATH.to_string(), statement)
 }
 
-/// The commit-log artifact set under `prefix` (`v1` for the first tree,
-/// [`COMMIT_LOG_2_API_PREFIX`] for its successor).
-fn commit_tree_artifacts(
+/// Build a tree manifest (`Manifest`, `AccountManifest`, `BinaryManifest`)
+/// from `bundle` and the [`TreeCore`] [`insert_tree_core`] gathered, plus any
+/// tree-specific fields named after it (`users`, `tags`).
+macro_rules! tree_manifest {
+    ($manifest:ident, $bundle:expr, $core:expr $(, $extra:ident)*) => {
+        $manifest {
+            format_version: FORMAT_VERSION,
+            version: API_VERSION.to_string(),
+            public_key: $bundle.public_key.clone(),
+            entry_count: $bundle.entries.len() as u64,
+            latest_tree_size: $core.latest_tree_size,
+            sth_sizes: $core.sth_sizes,
+            inclusion: $core.inclusion_refs,
+            consistency: $core.consistency_refs,
+            enforce_unique: $bundle.enforce_unique.clone(),
+            $($extra,)*
+        }
+    };
+}
+
+/// The parts every tree's manifest advertises, gathered while
+/// [`insert_tree_core`] writes the matching artifacts.
+struct TreeCore {
+    sth_sizes: Vec<u64>,
+    latest_tree_size: Option<u64>,
+    inclusion_refs: Vec<InclusionRef>,
+    consistency_refs: Vec<ConsistencyRef>,
+}
+
+/// Insert the artifacts every tree shares under `prefix`: the public key, each
+/// STH plus `sth/latest.json`, the entries, and the inclusion and consistency proofs.
+fn insert_tree_core(
+    map: &mut BTreeMap<String, Vec<u8>>,
     bundle: &Bundle,
     prefix: &str,
-) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
-    let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-
+) -> Result<TreeCore> {
     insert_json(
-        &mut map,
+        map,
         format!("{prefix}/public_key.json"),
         &bundle.public_key_doc(),
     )?;
 
     let mut sth_sizes: Vec<u64> = Vec::with_capacity(bundle.sths.len());
     for sth in &bundle.sths {
-        insert_json(&mut map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
+        insert_json(map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
         sth_sizes.push(sth.tree_size);
     }
     sth_sizes.sort_unstable();
@@ -175,12 +203,12 @@ fn commit_tree_artifacts(
 
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
     if let Some(latest) = latest {
-        insert_json(&mut map, format!("{prefix}/sth/latest.json"), latest)?;
+        insert_json(map, format!("{prefix}/sth/latest.json"), latest)?;
     }
 
-    insert_json(&mut map, format!("{prefix}/entries.json"), &bundle.entries)?;
+    insert_json(map, format!("{prefix}/entries.json"), &bundle.entries)?;
     for (i, entry) in bundle.entries.iter().enumerate() {
-        insert_json(&mut map, format!("{prefix}/entries/{i}.json"), entry)?;
+        insert_json(map, format!("{prefix}/entries/{i}.json"), entry)?;
     }
 
     let mut inclusion_refs: Vec<InclusionRef> = Vec::with_capacity(bundle.inclusion.len());
@@ -188,7 +216,7 @@ fn commit_tree_artifacts(
         let ts = check.proof.tree_size;
         let li = check.proof.leaf_index;
         insert_json(
-            &mut map,
+            map,
             format!("{prefix}/proof/inclusion/{ts}/{li}.json"),
             &check.proof,
         )?;
@@ -203,7 +231,7 @@ fn commit_tree_artifacts(
         let f = check.proof.first_size;
         let s = check.proof.second_size;
         insert_json(
-            &mut map,
+            map,
             format!("{prefix}/proof/consistency/{f}-{s}.json"),
             &check.proof,
         )?;
@@ -213,18 +241,26 @@ fn commit_tree_artifacts(
         });
     }
 
-    // No precomputed `/verify/group/<id>` files and no conversation list (#701).
-    let manifest = Manifest {
-        format_version: FORMAT_VERSION,
-        version: API_VERSION.to_string(),
-        public_key: bundle.public_key.clone(),
-        entry_count: bundle.entries.len() as u64,
-        latest_tree_size: latest.map(|s| s.tree_size),
+    Ok(TreeCore {
         sth_sizes,
-        inclusion: inclusion_refs,
-        consistency: consistency_refs,
-        enforce_unique: bundle.enforce_unique.clone(),
-    };
+        latest_tree_size: latest.map(|s| s.tree_size),
+        inclusion_refs,
+        consistency_refs,
+    })
+}
+
+/// The commit-log artifact set under `prefix` (`v1` for the first tree,
+/// [`COMMIT_LOG_2_API_PREFIX`] for its successor).
+fn commit_tree_artifacts(
+    bundle: &Bundle,
+    prefix: &str,
+) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
+    let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+
+    let core = insert_tree_core(&mut map, bundle, prefix)?;
+
+    // No precomputed `/verify/group/<id>` files and no conversation list (#701).
+    let manifest = tree_manifest!(Manifest, bundle, core);
     insert_json(&mut map, format!("{prefix}/index.json"), &manifest)?;
 
     Ok((manifest, map))
@@ -250,59 +286,7 @@ pub fn generate_account_artifacts(
     let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let prefix = ACCOUNT_API_PREFIX;
 
-    insert_json(
-        &mut map,
-        format!("{prefix}/public_key.json"),
-        &bundle.public_key_doc(),
-    )?;
-
-    let mut sth_sizes: Vec<u64> = Vec::with_capacity(bundle.sths.len());
-    for sth in &bundle.sths {
-        insert_json(&mut map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
-        sth_sizes.push(sth.tree_size);
-    }
-    sth_sizes.sort_unstable();
-    sth_sizes.dedup();
-
-    let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
-    if let Some(latest) = latest {
-        insert_json(&mut map, format!("{prefix}/sth/latest.json"), latest)?;
-    }
-
-    insert_json(&mut map, format!("{prefix}/entries.json"), &bundle.entries)?;
-    for (i, entry) in bundle.entries.iter().enumerate() {
-        insert_json(&mut map, format!("{prefix}/entries/{i}.json"), entry)?;
-    }
-
-    let mut inclusion_refs: Vec<InclusionRef> = Vec::with_capacity(bundle.inclusion.len());
-    for check in &bundle.inclusion {
-        let ts = check.proof.tree_size;
-        let li = check.proof.leaf_index;
-        insert_json(
-            &mut map,
-            format!("{prefix}/proof/inclusion/{ts}/{li}.json"),
-            &check.proof,
-        )?;
-        inclusion_refs.push(InclusionRef {
-            tree_size: ts,
-            leaf_index: li,
-        });
-    }
-
-    let mut consistency_refs: Vec<ConsistencyRef> = Vec::with_capacity(bundle.consistency.len());
-    for check in &bundle.consistency {
-        let f = check.proof.first_size;
-        let s = check.proof.second_size;
-        insert_json(
-            &mut map,
-            format!("{prefix}/proof/consistency/{f}-{s}.json"),
-            &check.proof,
-        )?;
-        consistency_refs.push(ConsistencyRef {
-            first: f,
-            second: s,
-        });
-    }
+    let core = insert_tree_core(&mut map, bundle, prefix)?;
 
     // A precomputed compact-JSON report per user; the path is the endpoint URL verbatim.
     let users: Vec<String> = bundle
@@ -324,18 +308,7 @@ pub fn generate_account_artifacts(
     }
 
     // Built last so it only advertises artifacts already in the map.
-    let manifest = AccountManifest {
-        format_version: FORMAT_VERSION,
-        version: API_VERSION.to_string(),
-        public_key: bundle.public_key.clone(),
-        entry_count: bundle.entries.len() as u64,
-        latest_tree_size: latest.map(|s| s.tree_size),
-        sth_sizes,
-        inclusion: inclusion_refs,
-        consistency: consistency_refs,
-        enforce_unique: bundle.enforce_unique.clone(),
-        users,
-    };
+    let manifest = tree_manifest!(AccountManifest, bundle, core, users);
     insert_json(&mut map, format!("{prefix}/index.json"), &manifest)?;
 
     Ok((manifest, map))
@@ -366,59 +339,7 @@ pub fn generate_binaries_artifacts(
     let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let prefix = BINARIES_API_PREFIX;
 
-    insert_json(
-        &mut map,
-        format!("{prefix}/public_key.json"),
-        &bundle.public_key_doc(),
-    )?;
-
-    let mut sth_sizes: Vec<u64> = Vec::with_capacity(bundle.sths.len());
-    for sth in &bundle.sths {
-        insert_json(&mut map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
-        sth_sizes.push(sth.tree_size);
-    }
-    sth_sizes.sort_unstable();
-    sth_sizes.dedup();
-
-    let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
-    if let Some(latest) = latest {
-        insert_json(&mut map, format!("{prefix}/sth/latest.json"), latest)?;
-    }
-
-    insert_json(&mut map, format!("{prefix}/entries.json"), &bundle.entries)?;
-    for (i, entry) in bundle.entries.iter().enumerate() {
-        insert_json(&mut map, format!("{prefix}/entries/{i}.json"), entry)?;
-    }
-
-    let mut inclusion_refs: Vec<InclusionRef> = Vec::with_capacity(bundle.inclusion.len());
-    for check in &bundle.inclusion {
-        let ts = check.proof.tree_size;
-        let li = check.proof.leaf_index;
-        insert_json(
-            &mut map,
-            format!("{prefix}/proof/inclusion/{ts}/{li}.json"),
-            &check.proof,
-        )?;
-        inclusion_refs.push(InclusionRef {
-            tree_size: ts,
-            leaf_index: li,
-        });
-    }
-
-    let mut consistency_refs: Vec<ConsistencyRef> = Vec::with_capacity(bundle.consistency.len());
-    for check in &bundle.consistency {
-        let f = check.proof.first_size;
-        let s = check.proof.second_size;
-        insert_json(
-            &mut map,
-            format!("{prefix}/proof/consistency/{f}-{s}.json"),
-            &check.proof,
-        )?;
-        consistency_refs.push(ConsistencyRef {
-            first: f,
-            second: s,
-        });
-    }
+    let core = insert_tree_core(&mut map, bundle, prefix)?;
 
     // A precomputed compact-JSON report per release tag; the path is the endpoint URL verbatim.
     let tags: Vec<String> = bundle
@@ -440,18 +361,7 @@ pub fn generate_binaries_artifacts(
     }
 
     // Built last so it only advertises artifacts already in the map.
-    let manifest = BinaryManifest {
-        format_version: FORMAT_VERSION,
-        version: API_VERSION.to_string(),
-        public_key: bundle.public_key.clone(),
-        entry_count: bundle.entries.len() as u64,
-        latest_tree_size: latest.map(|s| s.tree_size),
-        sth_sizes,
-        inclusion: inclusion_refs,
-        consistency: consistency_refs,
-        enforce_unique: bundle.enforce_unique.clone(),
-        tags,
-    };
+    let manifest = tree_manifest!(BinaryManifest, bundle, core, tags);
     insert_json(&mut map, format!("{prefix}/index.json"), &manifest)?;
 
     Ok((manifest, map))

@@ -17,18 +17,16 @@ pub struct Reaction {
 /// The DS gates on this once envelope GC has collected the row (#1161); decryption proved membership.
 async fn local_conversation_of(state: &Arc<AppState>, message_id: &str) -> Result<Option<String>> {
     use rusqlite::OptionalExtension as _;
-    let guard = state.local_db.lock().await;
-    let db = guard
-        .as_ref()
-        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-    Ok(db
-        .conn()
-        .query_row(
-            "SELECT conversation_id FROM message WHERE id = ?1",
-            rusqlite::params![message_id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?)
+    super::with_local_conn(state, |conn| {
+        Ok(conn
+            .query_row(
+                "SELECT conversation_id FROM message WHERE id = ?1",
+                rusqlite::params![message_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    })
+    .await
 }
 
 /// Add an emoji reaction to a message.

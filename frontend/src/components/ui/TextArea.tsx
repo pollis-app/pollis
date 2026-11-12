@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { fieldControlClass, fieldControlStyle } from "./fieldStyles";
 
 interface TextAreaProps {
   label: string;
@@ -61,17 +62,8 @@ export const TextArea: React.FC<TextAreaProps> = ({
           autoCapitalize="off"
           spellCheck={false}
           aria-invalid={!!error}
-          className={`w-full py-2 font-mono text-sm resize-none focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2 ${
-            error ? "border-danger" : isFocused ? "border-line-strong" : "border-line"
-          }`}
-          style={{
-            paddingInlineStart: isFocused && !disabled ? "1.5rem" : "0.75rem",
-            paddingInlineEnd: "0.75rem",
-            outline: "none",
-            borderRadius: "0.5rem",
-            opacity: disabled ? 0.5 : 1,
-            cursor: disabled ? "not-allowed" : undefined,
-          }}
+          className={fieldControlClass("resize-none", error, isFocused)}
+          style={fieldControlStyle(isFocused, disabled)}
         />
       </div>
       {description && !error && (

@@ -198,22 +198,7 @@ fn report_email(n: &ReportNotice) -> (String, String) {
 
 async fn send_report_notice(api_key: &str, n: &ReportNotice) -> anyhow::Result<()> {
     let (subject, text) = report_email(n);
-    let body = serde_json::json!({
-        "from": "Pollis <noreply@mail.pollis.com>",
-        "to": ["support@pollis.com"],
-        "subject": subject,
-        "text": text,
-    });
-    let resp = crate::util::http_post(crate::util::Upstream::Resend, "https://api.resend.com/emails")
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&body)
-        .send()
-        .await?;
-    if !resp.status().is_success() {
-        let txt = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Resend non-success: {txt}");
-    }
-    Ok(())
+    crate::otp::send_email(api_key, "support@pollis.com", &subject, &text).await
 }
 
 #[cfg(test)]

@@ -297,14 +297,9 @@ pub async fn edit_message_as(
     }
 
     let plaintext = super::framing::pad(new_content.as_bytes());
-    let sealed = {
-        // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
-        let mls_guard = state.mls_group_lock(&mls_group_id).await?;
-        let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
-    };
+    // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
+    let sealed =
+        super::seal::seal_holding_lock(state, &mls_group_id, conversation_id, &plaintext).await?;
 
     // The target's deletion capability (#1086) — this write replaces any pending
     // edit of the target, which is a delete.
@@ -378,14 +373,9 @@ async fn send_redaction_message(
     }
 
     let plaintext = super::framing::pad_redaction(target_message_id);
-    let sealed = {
-        // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
-        let mls_guard = state.mls_group_lock(&mls_group_id).await?;
-        let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
-    };
+    // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
+    let sealed =
+        super::seal::seal_holding_lock(state, &mls_group_id, conversation_id, &plaintext).await?;
 
     // A deletion capability like every envelope (#1086).
     let delete_token_hash =
@@ -489,19 +479,7 @@ fn filter_orphaned_locally(
     )?;
     let rows = stmt.query_map(rusqlite::params![user_id], |row| row.get::<_, String>(0))?;
 
-    let mut still_referenced = std::collections::HashSet::<String>::new();
-    for row in rows {
-        let content = row?;
-        for att in parse_attachment_refs(&content) {
-            still_referenced.insert(att.content_hash);
-        }
-    }
-
-    Ok(candidates
-        .iter()
-        .filter(|a| !still_referenced.contains(&a.content_hash))
-        .cloned()
-        .collect())
+    not_referenced_by(rows, candidates)
 }
 
 /// As `filter_orphaned_locally`, but across every sender (admin-delete); the DS count still decides.
@@ -515,6 +493,14 @@ fn filter_orphaned_locally_all(
     )?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
 
+    not_referenced_by(rows, candidates)
+}
+
+/// The `candidates` no message `content` in `rows` references.
+fn not_referenced_by(
+    rows: impl Iterator<Item = rusqlite::Result<String>>,
+    candidates: &[AttachmentRef],
+) -> Result<Vec<AttachmentRef>> {
     let mut still_referenced = std::collections::HashSet::<String>::new();
     for row in rows {
         let content = row?;
@@ -797,14 +783,9 @@ pub(super) async fn post_edit(
         super::framing::pad(new_content.as_bytes())
     };
 
-    let sealed = {
-        // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
-        let mls_guard = state.mls_group_lock(&mls_group_id).await?;
-        let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        super::seal::seal_under_lock(db.conn(), &mls_group_id, conversation_id, &plaintext, &held)?
-    };
+    // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
+    let sealed =
+        super::seal::seal_holding_lock(state, &mls_group_id, conversation_id, &plaintext).await?;
 
     // Replacing the pending edit is a delete, so it needs the target's capability (#1086).
     let delete_token =

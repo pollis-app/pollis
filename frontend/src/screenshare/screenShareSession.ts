@@ -1,6 +1,6 @@
 // Screen-share glue: backend event + frame streams, store mirror, and per-track I420 frame pub/sub.
 
-import { reaction } from "mobx";
+import { detachChannel, onSignOut } from "../utils/sessionTeardown";
 
 import { Channel, invoke } from "../bridge";
 
@@ -172,24 +172,14 @@ class ScreenShareSession {
 
   constructor() {
     // Tear down on logout: the media token rotates, so a surviving socket would 403 and reconnect forever.
-    reaction(
-      () => appStore.currentUser,
-      (user) => {
-        if (!user) {
-          this.teardown();
-        }
-      },
-    );
+    onSignOut(() => this.teardown());
   }
 
   /** Close the frame transport and reset subscription state. Idempotent. */
   teardown(): void {
     this.subscribed = false;
     // The Channel has no close(); dropping the handler is the teardown.
-    if (this.eventsChannel) {
-      this.eventsChannel.onmessage = () => {};
-      this.eventsChannel = null;
-    }
+    this.eventsChannel = detachChannel(this.eventsChannel);
     if (this.frameSocketReconnect !== null) {
       clearTimeout(this.frameSocketReconnect);
       this.frameSocketReconnect = null;

@@ -39,6 +39,41 @@ pub async fn publish_to_room_server(
     Ok(())
 }
 
+/// The connected room for `room_id`, cloned out so the lock is not held across an await.
+async fn connected_room(
+    livekit: &tokio::sync::Mutex<crate::realtime::LiveKitState>,
+    room_id: &str,
+) -> Option<Arc<Room>> {
+    let lk = livekit.lock().await;
+    lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
+}
+
+/// Reliably publish `event` to the connected room for `room_id`; a no-op when not
+/// connected. `what` prefixes a publish failure.
+async fn publish_reliable_to_room(
+    livekit: &tokio::sync::Mutex<crate::realtime::LiveKitState>,
+    room_id: &str,
+    event: &impl Serialize,
+    what: &str,
+) -> Result<()> {
+    let Some(room) = connected_room(livekit, room_id).await else {
+        return Ok(());
+    };
+
+    let payload = serde_json::to_vec(event).map_err(Error::Serde)?;
+
+    room.local_participant()
+        .publish_data(DataPacket {
+            payload,
+            reliable: true,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("{what}: {e}")))?;
+
+    Ok(())
+}
+
 /// Publish a `new_message` wake-up to an already-connected room (no-op if not).
 ///
 /// §5: a bare wake-up, **no sender** (re-derived from the MLS credential).
@@ -48,32 +83,9 @@ pub async fn publish_new_message_to_room(
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
 ) -> Result<()> {
-    let room = {
-        let lk = state.livekit.lock().await;
-        lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
-    };
-
-    let room = match room {
-        None => return Ok(()),
-        Some(r) => r,
-    };
-
-    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::new_message_payload(
-        channel_id,
-        conversation_id,
-    ))
-    .map_err(Error::Serde)?;
-
-    room.local_participant()
-        .publish_data(DataPacket {
-            payload,
-            reliable: true,
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("publish_new_message: {e}")))?;
-
-    Ok(())
+    let event =
+        crate::commands::livekit_signalling::new_message_payload(channel_id, conversation_id);
+    publish_reliable_to_room(&state.livekit, room_id, &event, "publish_new_message").await
 }
 
 /// Broadcast `edited_message` so clients invalidate their cache.
@@ -86,33 +98,12 @@ pub async fn publish_edited_message_to_room(
     conversation_id: Option<&str>,
     message_id: &str,
 ) -> Result<()> {
-    let room = {
-        let lk = livekit.lock().await;
-        lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
-    };
-
-    let room = match room {
-        None => return Ok(()),
-        Some(r) => r,
-    };
-
-    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::edited_message_payload(
+    let event = crate::commands::livekit_signalling::edited_message_payload(
         channel_id,
         conversation_id,
         message_id,
-    ))
-    .map_err(Error::Serde)?;
-
-    room.local_participant()
-        .publish_data(DataPacket {
-            payload,
-            reliable: true,
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("publish_edited_message: {e}")))?;
-
-    Ok(())
+    );
+    publish_reliable_to_room(livekit, room_id, &event, "publish_edited_message").await
 }
 
 /// Broadcast `deleted_message`; the durable path is the `delete` envelope.
@@ -125,33 +116,12 @@ pub async fn publish_deleted_message_to_room(
     conversation_id: Option<&str>,
     message_id: &str,
 ) -> Result<()> {
-    let room = {
-        let lk = livekit.lock().await;
-        lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
-    };
-
-    let room = match room {
-        None => return Ok(()),
-        Some(r) => r,
-    };
-
-    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::deleted_message_payload(
+    let event = crate::commands::livekit_signalling::deleted_message_payload(
         channel_id,
         conversation_id,
         message_id,
-    ))
-    .map_err(Error::Serde)?;
-
-    room.local_participant()
-        .publish_data(DataPacket {
-            payload,
-            reliable: true,
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("publish_deleted_message: {e}")))?;
-
-    Ok(())
+    );
+    publish_reliable_to_room(livekit, room_id, &event, "publish_deleted_message").await
 }
 
 /// Broadcasts a `membership_changed` event to a group's LiveKit room so
@@ -160,31 +130,14 @@ pub async fn publish_membership_changed_to_room(
     state: &Arc<AppState>,
     group_id: &str,
 ) -> Result<()> {
-    let room = {
-        let lk = state.livekit.lock().await;
-        lk.rooms.get(group_id).map(|(r, _)| Arc::clone(r))
-    };
-
-    let room = match room {
-        None => return Ok(()),
-        Some(r) => r,
-    };
-
-    let payload = serde_json::to_vec(
-        &crate::commands::livekit_signalling::membership_changed_payload(group_id),
+    let event = crate::commands::livekit_signalling::membership_changed_payload(group_id);
+    publish_reliable_to_room(
+        &state.livekit,
+        group_id,
+        &event,
+        "publish_membership_changed",
     )
-    .map_err(Error::Serde)?;
-
-    room.local_participant()
-        .publish_data(DataPacket {
-            payload,
-            reliable: true,
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("publish_membership_changed: {e}")))?;
-
-    Ok(())
+    .await
 }
 
 /// Broadcast `join_requests_changed` to admins via DS SendData (requester isn't in the room).
@@ -208,31 +161,16 @@ pub async fn publish_member_role_changed_to_room(
     state: &Arc<AppState>,
     group_id: &str,
 ) -> Result<()> {
-    let room = {
-        let lk = state.livekit.lock().await;
-        lk.rooms.get(group_id).map(|(r, _)| Arc::clone(r))
-    };
-
-    let room = match room {
-        None => return Ok(()),
-        Some(r) => r,
-    };
-
-    let payload = serde_json::to_vec(&crate::realtime::RealtimeEvent::MemberRoleChanged {
+    let event = crate::realtime::RealtimeEvent::MemberRoleChanged {
         group_id: group_id.to_owned(),
-    })
-    .map_err(Error::Serde)?;
-
-    room.local_participant()
-        .publish_data(DataPacket {
-            payload,
-            reliable: true,
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("publish_member_role_changed: {e}")))?;
-
-    Ok(())
+    };
+    publish_reliable_to_room(
+        &state.livekit,
+        group_id,
+        &event,
+        "publish_member_role_changed",
+    )
+    .await
 }
 
 /// Voice join/leave nudge so members refetch participants (LiveKit is the truth).
@@ -245,10 +183,7 @@ pub async fn publish_voice_presence(
     joined: bool,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let room = {
-        let lk = state.livekit.lock().await;
-        lk.rooms.get(&group_id).map(|(r, _)| Arc::clone(r))
-    };
+    let room = connected_room(&state.livekit, &group_id).await;
 
     if let Some(room) = room {
         // #836/§5: identity-free; recipients see the publishing participant.
@@ -277,10 +212,7 @@ pub async fn publish_voice_roster_changed(
     realtime_room: &str,
     channel_id: &str,
 ) {
-    let room = {
-        let lk = state.livekit.lock().await;
-        lk.rooms.get(realtime_room).map(|(r, _)| Arc::clone(r))
-    };
+    let room = connected_room(&state.livekit, realtime_room).await;
     let Some(room) = room else { return };
     let Ok(payload) = serde_json::to_vec(
         &crate::commands::livekit_signalling::voice_roster_changed_payload(channel_id),
@@ -304,10 +236,7 @@ pub async fn publish_typing(
     is_typing: bool,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let room = {
-        let lk = state.livekit.lock().await;
-        lk.rooms.get(&room_id).map(|(r, _)| Arc::clone(r))
-    };
+    let room = connected_room(&state.livekit, &room_id).await;
 
     let room = match room {
         None => return Ok(()),

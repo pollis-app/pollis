@@ -1,9 +1,8 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EmailOTPAuth } from "./EmailOTPAuth";
-import { TitleBar } from "../Layout/TitleBar";
-import { DotMatrix } from "../ui/DotMatrix";
-import { Card } from "../ui/Card";
+import { BackdropScreen } from "./BackdropScreen";
+import { AuthCard } from "./AuthCard";
 import { Button } from "../ui/Button";
 import type { AccountInfo } from "../../types";
 import * as api from "../../services/api";
@@ -30,142 +29,130 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [isWiping, setIsWiping] = useState(false);
 
   return (
-    <div
-      data-testid="auth-screen"
-      className="flex flex-col h-full w-full bg-bg"
-      style={{ position: "relative" }}
-    >
-      <div style={{ position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none" }}>
-        <DotMatrix />
-      </div>
-
-      <TitleBar />
-
-      <div className="flex-1 flex justify-center overflow-y-auto" style={{ position: "relative", zIndex: 1 }}>
-        <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 360 }}>
-          {notice ? (
-            <p
-              data-testid="auth-session-notice"
-              role="status"
-              className="text-xs font-mono text-fg mb-4"
-              style={{ lineHeight: 1.5 }}
-            >
-              {notice}
-            </p>
-          ) : null}
-          {view === "wipe" ? (
-            <div data-testid="wipe-confirm-section" className="flex flex-col gap-5">
-              <div>
-                <h2 className="text-sm font-mono font-semibold text-fg">
-                  {t("wipe.title")}
-                </h2>
-                <p
-                  className="text-xs mt-2 font-mono text-danger"
-                  style={{ lineHeight: 1.5 }}
-                >
-                  {t("wipe.warning")}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  data-testid="wipe-confirm-button"
-                  variant="danger"
-                  className="flex-1"
-                  isLoading={isWiping}
-                  loadingText={t("wipe.wiping")}
-                  onClick={async () => {
-                    setIsWiping(true);
-                    try {
-                      await api.wipeLocalData();
-                      onWipeComplete();
-                      setView("login");
-                    } catch (err) {
-                      console.error("[wipe]", err);
-                    } finally {
-                      setIsWiping(false);
-                    }
-                  }}
-                >
-                  {t("wipe.confirm")}
-                </Button>
-                <Button
-                  data-testid="wipe-cancel-button"
-                  variant="ghost"
-                  className="flex-1"
-                  disabled={isWiping}
-                  onClick={() => setView("login")}
-                >
-                  {t("common:actions.cancel")}
-                </Button>
-              </div>
+    <BackdropScreen data-testid="auth-screen" backdropOpacity={0.35}>
+      <AuthCard>
+        {notice ? (
+          <p
+            data-testid="auth-session-notice"
+            role="status"
+            className="text-xs font-mono text-fg mb-4"
+            style={{ lineHeight: 1.5 }}
+          >
+            {notice}
+          </p>
+        ) : null}
+        {view === "wipe" ? (
+          <div data-testid="wipe-confirm-section" className="flex flex-col gap-5">
+            <div>
+              <h2 className="text-sm font-mono font-semibold text-fg">
+                {t("wipe.title")}
+              </h2>
+              <p
+                className="text-xs mt-2 font-mono text-danger"
+                style={{ lineHeight: 1.5 }}
+              >
+                {t("wipe.warning")}
+              </p>
             </div>
-          ) : (
-            <div className="flex flex-col gap-5">
-              <div>
+            <div className="flex gap-2">
+              <Button
+                data-testid="wipe-confirm-button"
+                variant="danger"
+                className="flex-1"
+                isLoading={isWiping}
+                loadingText={t("wipe.wiping")}
+                onClick={async () => {
+                  setIsWiping(true);
+                  try {
+                    await api.wipeLocalData();
+                    onWipeComplete();
+                    setView("login");
+                  } catch (err) {
+                    console.error("[wipe]", err);
+                  } finally {
+                    setIsWiping(false);
+                  }
+                }}
+              >
+                {t("wipe.confirm")}
+              </Button>
+              <Button
+                data-testid="wipe-cancel-button"
+                variant="ghost"
+                className="flex-1"
+                disabled={isWiping}
+                onClick={() => setView("login")}
+              >
+                {t("common:actions.cancel")}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-5">
+            <div>
 
-                <p className="text-xs mt-1 font-mono text-accent">
-                  {t("login.prompt")}
+              <p className="text-xs mt-1 font-mono text-accent">
+                {t("login.prompt")}
+              </p>
+            </div>
+
+            {knownAccounts.length > 0 && authStep === "email" && (
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-mono text-muted">
+                  {t("login.previousAccounts")}
                 </p>
-              </div>
-
-              {knownAccounts.length > 0 && authStep === "email" && (
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs font-mono text-muted">
-                    {t("login.previousAccounts")}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {[...knownAccounts]
-                      .sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))
-                      .slice(0, 3)
-                      .map((account) => (
-                        <button
-                          key={account.user_id}
-                          data-testid={`known-account-chip-${account.user_id}`}
-                          onClick={() => {
-                            if (account.email) {
-                              setPrefillEmail(account.email);
-                              setPrefillNonce((n) => n + 1);
-                            }
-                          }}
-                          disabled={!account.email}
-                          className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors border-2 border-line text-dim enabled:cursor-pointer enabled:hover:border-accent enabled:hover:text-fg bg-surface"
-                          style={{
-                            borderRadius: "0.5rem",
-                          }}
-                        >
-                          <span>{account.username}</span>
-                        </button>
-                      ))}
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  {[...knownAccounts]
+                    .sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))
+                    .slice(0, 3)
+                    .map((account) => (
+                      <button
+                        key={account.user_id}
+                        data-testid={`known-account-chip-${account.user_id}`}
+                        onClick={() => {
+                          if (account.email) {
+                            setPrefillEmail(account.email);
+                            setPrefillNonce((n) => n + 1);
+                          }
+                        }}
+                        disabled={!account.email}
+                        className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors border-2 border-line text-dim enabled:cursor-pointer enabled:hover:border-accent enabled:hover:text-fg bg-surface"
+                        style={{
+                          borderRadius: "0.5rem",
+                        }}
+                      >
+                        <span>{account.username}</span>
+                      </button>
+                    ))}
                 </div>
-              )}
+              </div>
+            )}
 
-              <EmailOTPAuth
-                onSuccess={onAuthSuccess}
-                prefillEmail={prefillEmail}
-                prefillNonce={prefillNonce}
-                onStepChange={setAuthStep}
-              />
+            <EmailOTPAuth
+              onSuccess={onAuthSuccess}
+              prefillEmail={prefillEmail}
+              prefillNonce={prefillNonce}
+              onStepChange={setAuthStep}
+            />
 
-              {authStep === "email" && (
-                <button
-                  data-testid="wipe-local-data-button"
-                  onClick={() => setView("wipe")}
-                  className="text-xs font-mono self-center transition-colors text-muted hover:text-danger border-0"
-                  style={{
-                    background: "none",
-                    cursor: "pointer",
-                    padding: "0.25rem 0",
-                    marginTop: "1rem",
-                  }}
-                >
-                  {t("wipe.open")}
-                </button>
-              )}
-            </div>
-          )}
-        </Card>
-      </div>
-    </div>
+            {authStep === "email" && (
+              <button
+                data-testid="wipe-local-data-button"
+                onClick={() => setView("wipe")}
+                className="text-xs font-mono self-center transition-colors text-muted hover:text-danger border-0"
+                style={{
+                  background: "none",
+                  cursor: "pointer",
+                  padding: "0.25rem 0",
+                  marginTop: "1rem",
+                }}
+              >
+                {t("wipe.open")}
+              </button>
+            )}
+          </div>
+        )}
+      </AuthCard>
+    </BackdropScreen>
   );
 };

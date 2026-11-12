@@ -2,7 +2,7 @@ import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { Download, Film, Check } from "lucide-react";
+import { Film } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize, formatDuration } from "../../utils/format";
@@ -15,6 +15,7 @@ import {
   subscribeMediaResolved,
 } from "../../services/r2-upload";
 import { MediaSpotlight } from "./MediaSpotlight";
+import { DownloadStatusIcon } from "./DownloadStatusIcon";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
@@ -346,13 +347,7 @@ export const AttachmentDisplay = observer(({
           className={`flex-shrink-0 p-1 ${downloadStatus === "done" ? "text-accent" : "text-dim"}`}
           style={{ lineHeight: 0 }}
         >
-          {downloadStatus === "downloading" ? (
-            <LoadingSpinner size="sm" />
-          ) : downloadStatus === "done" ? (
-            <Check size={14} aria-hidden="true" />
-          ) : (
-            <Download size={14} aria-hidden="true" />
-          )}
+          <DownloadStatusIcon status={downloadStatus} />
         </button>
       )}
     </div>
@@ -621,13 +616,7 @@ export const AttachmentDisplay = observer(({
             padding: 0,
           }}
         >
-          {downloadStatus === "downloading" ? (
-            <LoadingSpinner size="sm" />
-          ) : downloadStatus === "done" ? (
-            <Check size={14} aria-hidden="true" />
-          ) : (
-            <Download size={14} aria-hidden="true" />
-          )}
+          <DownloadStatusIcon status={downloadStatus} />
         </button>
       )}
     </div>

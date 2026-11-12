@@ -1,6 +1,6 @@
 ---
 name: pre-release-sweeps
-description: One-off drift sweeps for Pollis, run by hand before a release that affects every app (desktop, mobile, CLI, DS, website together). `node scripts/sweep.mjs` runs every tier-1 checker, works out what changed since each dimension was last swept (scripts/sweep-ledger.json) and lists what is due; this skill then follows each due dimension's procedure: public facts (#1722), published pollis-verify commands and installer env vars (#1721), public claims (#1723), feature parity, i18n, the surface registry and platform coverage matrix (#1728). Not CI; never gates a merge. Use before a full release, when /release-check says "sweeps due", or when asked to "run the sweeps".
+description: One-off drift sweeps for Pollis, run by hand before a release that affects every app (desktop, mobile, CLI, DS, website together). `node scripts/sweep.mjs` runs every tier-1 checker, works out what changed since each dimension was last swept (scripts/sweep-ledger.json) and lists what is due; this skill then follows each due dimension's procedure: public facts (#1722), published pollis-verify commands and installer env vars (#1721), public claims (#1723), feature parity, i18n, copy-paste clones (#1731), the surface registry and platform coverage matrix (#1728). Not CI; never gates a merge. Use before a full release, when /release-check says "sweeps due", or when asked to "run the sweeps".
 argument-hint: "[dimension ...] [--since <ref>] [--deployed-only]"
 ---
 
@@ -214,9 +214,20 @@ listing screenshots need retaking.
 
 ## duplication (#1731)
 
-Copy-paste clones against a committed baseline. Not built yet: report "not yet
-built (#1731)". When #1731 lands, its full-baseline run is wired into
-`DIMENSIONS` in `scripts/sweep.mjs` and its step goes here.
+```bash
+node scripts/check-clones.mjs          # every boundary vs scripts/clones-baseline.json
+./scripts/test-check-clones.sh         # only if check-clones.mjs or clones.json changed
+```
+
+Copy-paste clones, scanned once per code boundary (frontend, mobile, website,
+rust; `.codesight/wiki/code-boundaries.md`) and compared with the committed
+baseline. Mechanical: the checker is the whole sweep, so it keeps no ledger
+entry. A new clone is one a PR let through without `/reuse-check`: fix it as
+that skill says (reuse, or extract inside the boundary), or, if it is
+deliberate, accept it with `--update-baseline` and say why in the release PR.
+`~ changed shape` lines are known clones an edit moved, and `↓ gone` lines are
+removed duplication: check the listed pairs, then `--update-baseline` and
+commit the refreshed baseline.
 
 ## platform-matrix (#1728)
 

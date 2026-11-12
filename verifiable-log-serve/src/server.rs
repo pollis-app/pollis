@@ -3,6 +3,7 @@
 //! For local testing only; production serves the `/v1` directory statically. Also exposes the
 //! dynamic `GET /verify/group/<id>` endpoint.
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -27,21 +28,14 @@ const WORKERS: usize = 4;
 /// background threads. Dropping it (or calling [`DevServer::shutdown`]) stops
 /// the pool.
 pub struct DevServer {
-    addr: std::net::SocketAddr,
-    stop: Arc<AtomicBool>,
-    handles: Vec<JoinHandle<()>>,
+    pool: WorkerPool,
 }
 
 impl DevServer {
     /// Bind `127.0.0.1:<port>` (pass `0` for an ephemeral port) and start
     /// serving `root` from a pool of background threads.
     pub fn spawn(root: PathBuf, port: u16) -> Result<DevServer> {
-        let server = Server::http(("127.0.0.1", port))
-            .map_err(|e| ServeError::Http(format!("bind failed: {e}")))?;
-        let addr = server
-            .server_addr()
-            .to_ip()
-            .ok_or_else(|| ServeError::Http("server bound to a non-IP address".into()))?;
+        let (server, addr) = bind("127.0.0.1", port)?;
 
         // Trust the served log's key so local runs and tests verify without the production pin.
         for rel in [
@@ -59,43 +53,105 @@ impl DevServer {
             }
         }
 
-        let server = Arc::new(server);
-        let base_url = Arc::new(format!("http://{addr}"));
-        let stop = Arc::new(AtomicBool::new(false));
-
-        let handles = (0..WORKERS)
-            .map(|_| {
-                let server = server.clone();
-                let root = root.clone();
-                let base_url = base_url.clone();
-                let stop = stop.clone();
-                std::thread::spawn(move || serve_loop(&server, &root, &base_url, &stop))
-            })
-            .collect();
-
-        Ok(DevServer { addr, stop, handles })
+        let base_url = format!("http://{addr}");
+        let pool = WorkerPool::spawn(server, addr, WORKERS, move |request| {
+            handle_request(request, &root, &base_url)
+        });
+        Ok(DevServer { pool })
     }
 
     /// The bound port (resolved even when `0` was requested).
     pub fn port(&self) -> u16 {
-        self.addr.port()
+        self.pool.port()
     }
 
     /// Base URL a client should hit, e.g. `http://127.0.0.1:54321`.
     pub fn base_url(&self) -> String {
-        format!("http://{}", self.addr)
+        self.pool.base_url()
     }
 
     /// Block the calling thread, keeping the server alive until the process is
     /// killed. Used by the CLI `serve` command.
     pub fn block_forever(self) {
+        self.pool.block_forever();
+    }
+
+    /// Stop the background threads and wait for them to exit.
+    pub fn shutdown(self) {
+        self.pool.shutdown();
+    }
+}
+
+/// Bind `host:port` (`0` for an ephemeral port), resolving the address actually bound.
+pub(crate) fn bind(host: &str, port: u16) -> Result<(Server, SocketAddr)> {
+    let server =
+        Server::http((host, port)).map_err(|e| ServeError::Http(format!("bind failed: {e}")))?;
+    let addr = server
+        .server_addr()
+        .to_ip()
+        .ok_or_else(|| ServeError::Http("server bound to a non-IP address".into()))?;
+    Ok((server, addr))
+}
+
+/// A pool of threads answering one bound [`Server`]. Dropping it (or calling
+/// [`WorkerPool::shutdown`]) stops the threads and waits for them.
+pub(crate) struct WorkerPool {
+    addr: SocketAddr,
+    stop: Arc<AtomicBool>,
+    handles: Vec<JoinHandle<()>>,
+}
+
+impl WorkerPool {
+    /// Start `workers` threads, each passing the requests it accepts to `handle`.
+    pub(crate) fn spawn(
+        server: Server,
+        addr: SocketAddr,
+        workers: usize,
+        handle: impl Fn(Request) + Send + Sync + 'static,
+    ) -> WorkerPool {
+        let server = Arc::new(server);
+        let handle = Arc::new(handle);
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let handles = (0..workers)
+            .map(|_| {
+                let server = server.clone();
+                let handle = handle.clone();
+                let stop = stop.clone();
+                std::thread::spawn(move || serve_loop(&server, &*handle, &stop))
+            })
+            .collect();
+
+        WorkerPool {
+            addr,
+            stop,
+            handles,
+        }
+    }
+
+    /// The bound port (resolved even when `0` was requested).
+    pub(crate) fn port(&self) -> u16 {
+        self.addr.port()
+    }
+
+    /// Base URL a client should hit, e.g. `http://127.0.0.1:54321`.
+    pub(crate) fn base_url(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
+    /// Block the calling thread until every worker has exited.
+    pub(crate) fn block_forever(self) {
         while self.handles.iter().any(|h| !h.is_finished()) {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
 
     /// Stop the background threads and wait for them to exit.
-    pub fn shutdown(mut self) {
+    pub(crate) fn shutdown(mut self) {
+        self.stop_and_join();
+    }
+
+    fn stop_and_join(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         for handle in self.handles.drain(..) {
             let _ = handle.join();
@@ -103,30 +159,31 @@ impl DevServer {
     }
 }
 
-impl Drop for DevServer {
+impl Drop for WorkerPool {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        for handle in self.handles.drain(..) {
-            let _ = handle.join();
-        }
+        self.stop_and_join();
     }
 }
 
 /// Accept requests until `stop` is set, polling so shutdown is prompt.
-fn serve_loop(server: &Server, root: &Path, base_url: &str, stop: &AtomicBool) {
+fn serve_loop(server: &Server, handle: &dyn Fn(Request), stop: &AtomicBool) {
     while !stop.load(Ordering::Relaxed) {
         match server.recv_timeout(Duration::from_millis(100)) {
-            Ok(Some(request)) => handle_request(request, root, base_url),
+            Ok(Some(request)) => handle(request),
             Ok(None) => continue,
             Err(_) => break,
         }
     }
 }
 
-/// Route one request. `OPTIONS` is answered as a CORS preflight; the dynamic
-/// verify endpoint is handled specially; everything else is a read-only static
-/// file lookup under `root`.
-fn handle_request(request: Request, root: &Path, base_url: &str) {
+/// The routing both servers share: answer a CORS preflight, send
+/// `/verify/group/<id>` to `verify_group` with the still-encoded id, and refuse
+/// anything but `GET`/`HEAD`. Returns the request and its path when it is a
+/// static read the caller must serve; otherwise the request has been answered.
+pub(crate) fn route(
+    request: Request,
+    verify_group: impl FnOnce(Request, &str),
+) -> Option<(Request, String)> {
     let method = request.method().clone();
 
     let url = request.url().to_string();
@@ -134,22 +191,43 @@ fn handle_request(request: Request, root: &Path, base_url: &str) {
 
     if method == Method::Options {
         cors_preflight(request);
-        return;
+        return None;
     }
 
     if let Some(encoded) = path.strip_prefix(VERIFY_GROUP_PREFIX) {
         if method != Method::Get {
             respond_status(request, 405, "method not allowed");
-            return;
+            return None;
         }
-        handle_verify_group(request, base_url, encoded);
-        return;
+        verify_group(request, encoded);
+        return None;
     }
 
     if method != Method::Get && method != Method::Head {
         respond_status(request, 405, "method not allowed");
-        return;
+        return None;
     }
+
+    Some((request, path))
+}
+
+/// Answer a static read with an artifact's JSON bytes, cached per [`cache_control_for`].
+pub(crate) fn respond_artifact(request: Request, bytes: Vec<u8>, path: &str) {
+    let response = Response::from_data(bytes)
+        .with_header(header("Content-Type", "application/json"))
+        .with_header(header("Cache-Control", cache_control_for(path)));
+    let _ = request.respond(response);
+}
+
+/// Route one request. `OPTIONS` is answered as a CORS preflight; the dynamic
+/// verify endpoint is handled specially; everything else is a read-only static
+/// file lookup under `root`.
+fn handle_request(request: Request, root: &Path, base_url: &str) {
+    let Some((request, path)) = route(request, |request, encoded| {
+        handle_verify_group(request, base_url, encoded)
+    }) else {
+        return;
+    };
 
     let rel = path.trim_start_matches('/');
 
@@ -168,11 +246,7 @@ fn handle_request(request: Request, root: &Path, base_url: &str) {
         }
     };
 
-    let cache = cache_control_for(&path);
-    let response = Response::from_data(bytes)
-        .with_header(header("Content-Type", "application/json"))
-        .with_header(header("Cache-Control", cache));
-    let _ = request.respond(response);
+    respond_artifact(request, bytes, &path);
 }
 
 /// Run the shared per-group verifier against our own `/v1` base and return the

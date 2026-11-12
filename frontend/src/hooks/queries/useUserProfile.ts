@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import * as api from "../../services/api";
 import { appStore } from "../../stores/appStore";
@@ -21,6 +21,12 @@ export const userQueryKeys = {
   /** Another user's PUBLIC profile row. */
   otherProfile: (userId: string | null) => ["user", "public-profile", userId] as const,
 };
+
+/** Both cached views of the signed-in user: the own profile and, a separate entry (#874), the public one. */
+function invalidateOwnProfile(queryClient: QueryClient, userId: string | null) {
+  queryClient.invalidateQueries({ queryKey: userQueryKeys.profile(userId) });
+  queryClient.invalidateQueries({ queryKey: userQueryKeys.otherProfile(userId) });
+}
 
 export function useOtherUserProfile(userId: string | null | undefined) {
   return useQuery({
@@ -269,13 +275,7 @@ export function useUpdateProfile() {
     },
     onSuccess: (data) => {
       setUsername(data.username);
-      queryClient.invalidateQueries({
-        queryKey: userQueryKeys.profile(currentUser?.id ?? null),
-      });
-      // The public view is a separate entry (#874).
-      queryClient.invalidateQueries({
-        queryKey: userQueryKeys.otherProfile(currentUser?.id ?? null),
-      });
+      invalidateOwnProfile(queryClient, currentUser?.id ?? null);
       queryClient.invalidateQueries({
         queryKey: messageQueryKeys.all,
       });
@@ -328,12 +328,7 @@ export function useUpdateAvatar() {
     },
     onSuccess: (avatarUrl) => {
       setUserAvatarUrl(avatarUrl);
-      queryClient.invalidateQueries({
-        queryKey: userQueryKeys.profile(currentUser?.id ?? null),
-      });
-      queryClient.invalidateQueries({
-        queryKey: userQueryKeys.otherProfile(currentUser?.id ?? null),
-      });
+      invalidateOwnProfile(queryClient, currentUser?.id ?? null);
       // Avatar keys are content-addressed (#874); the profile refetch is enough.
       queryClient.invalidateQueries({
         queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
