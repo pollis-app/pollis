@@ -521,7 +521,7 @@ export function useDMConversations() {
 }
 
 /** Move DM `dmId` up to its activity at `at` (ms) at once (#1838); the next list read agrees. */
-export function bumpDMActivity(
+function bumpDMActivity(
   queryClient: ReturnType<typeof useQueryClient>,
   userId: string,
   dmId: string,

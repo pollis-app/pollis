@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { activityMs, bumpActivity, byActivity } from "../lib/dmActivity.ts";
+import { activityMs, bumpActivity } from "../lib/dmActivity.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -45,11 +45,13 @@ test("an unlisted DM or no list yet is left alone", () => {
 
 test("ties break by id descending, the core's order", () => {
   const rows = [
-    { id: "dm-a", updated_at: 1_000 },
-    { id: "dm-c", updated_at: 1_000 },
+    { id: "dm-c", updated_at: 2_000 },
     { id: "dm-b", updated_at: 1_000 },
+    { id: "dm-a", updated_at: 500 },
   ];
-  assert.deepEqual(ids(rows.slice().sort(byActivity)), ["dm-c", "dm-b", "dm-a"]);
+  // dm-a now ties dm-c; the higher id stays first.
+  assert.deepEqual(ids(bumpActivity(rows, "dm-a", 2_000)), ["dm-c", "dm-a", "dm-b"]);
+  assert.deepEqual(ids(bumpActivity(rows, "dm-b", 2_000)), ["dm-c", "dm-b", "dm-a"]);
 });
 
 test("stamps read as instants; an unreadable one sorts last", () => {

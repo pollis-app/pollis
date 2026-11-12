@@ -16,7 +16,7 @@ export function activityMs(stamp: string | null | undefined): number {
 }
 
 /** `list_dm_channels`'s order: newest activity first, ties by id descending. */
-export function byActivity(a: ActivityRow, b: ActivityRow): number {
+function byActivity(a: ActivityRow, b: ActivityRow): number {
   if (a.updated_at !== b.updated_at) {
     return b.updated_at - a.updated_at;
   }
