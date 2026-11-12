@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn the_budget_keeps_posters_in_order_until_spent() {
         let big = "A".repeat(POSTER_ENVELOPE_BUDGET / 2);
-        let mut posters = vec![
+        let mut posters = [
             Some(big.clone()),
             None,
             Some(big.clone()),
