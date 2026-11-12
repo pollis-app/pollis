@@ -12,7 +12,7 @@ import {
 import { ChevronRight, Plus, X, Film, Music, Eye, EyeOff } from "lucide-react";
 import { EmojiPickerButton } from "../Emoji/EmojiPickerButton";
 import { getFileIcon, mimeFromName } from "../../utils/fileIcon";
-import { blurhashFromUrl, captureVideoPoster } from "../../utils/imageProcessing";
+import { blurhashFromUrl, captureVideoPoster, type CapturedPoster } from "../../utils/imageProcessing";
 import { SensitiveCover } from "../Media/SensitiveCover";
 import { observer } from "mobx-react-lite";
 import { dropTargetStore } from "../../stores/dropTargetStore";
@@ -59,6 +59,8 @@ export interface Attachment {
   // Marked sensitive (#1568): sent with `sens`, so receivers see it blurred.
   sensitive?: boolean;
   blurhash?: string;
+  /** A video's captured frame (#1837), handed to the core as its poster. */
+  posterFrame?: Blob;
 }
 
 function stagedIdOf(attachment: Attachment): string | null {
@@ -306,16 +308,18 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       ...stubs
         .filter((s) => s.type === "video")
         .map(async (stub) => {
-          let preview: string | undefined;
+          let poster: CapturedPoster | null = null;
           try {
             const bytes = await readFile(stub.source.path);
             const blobSrc = URL.createObjectURL(new Blob([bytes], { type: stub.mimeType }));
-            preview = (await captureVideoPoster(blobSrc))?.url;
+            poster = await captureVideoPoster(blobSrc);
             URL.revokeObjectURL(blobSrc);
           } catch {
           }
           setAttachments((prev) =>
-            prev.map((a) => a.id === stub.id ? { ...a, preview, loading: false } : a)
+            prev.map((a) => a.id === stub.id
+              ? { ...a, preview: poster?.url, posterFrame: poster?.blob, loading: false }
+              : a)
           );
         }),
     ]);
@@ -364,10 +368,10 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       },
     ]);
 
-    let videoPoster: string | undefined;
+    let videoPoster: CapturedPoster | null = null;
     if (isVid) {
       const blobSrc = URL.createObjectURL(file);
-      videoPoster = (await captureVideoPoster(blobSrc).catch(() => null))?.url;
+      videoPoster = await captureVideoPoster(blobSrc).catch(() => null);
       URL.revokeObjectURL(blobSrc);
     }
 
@@ -380,7 +384,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
     if (!staged) {
       if (preview) { URL.revokeObjectURL(preview); }
-      if (videoPoster) { URL.revokeObjectURL(videoPoster); }
+      if (videoPoster) { URL.revokeObjectURL(videoPoster.url); }
       setAttachments((prev) => prev.filter((a) => a.id !== id));
       return;
     }
@@ -395,7 +399,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         ? {
             ...a,
             source: { kind: "staged", id: staged.id } as const,
-            preview: preview ?? videoPoster,
+            preview: preview ?? videoPoster?.url,
+            posterFrame: videoPoster?.blob,
             loading: false,
           }
         : a);

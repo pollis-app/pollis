@@ -1,5 +1,5 @@
 import { invoke, discardStagedAttachment } from "../bridge";
-import { blurhashFromUrl } from "./imageProcessing";
+import { blobToBase64 } from "./imageProcessing";
 import type { Attachment } from "../components/ui/ChatInput";
 
 type MediaUploadResult = {
@@ -17,6 +17,8 @@ type MediaUploadResult = {
   blurhash?: string;
   width?: number;
   height?: number;
+  /** A video's bounded poster JPEG, base64 (#1837): `pv`. */
+  poster?: string;
 };
 
 /** Mirrors `pollis_core::commands::messages::OutgoingAttachment` (#1335): exactly one of `path` / `stagedId`. */
@@ -30,9 +32,19 @@ export type OutgoingAttachment = {
   height?: number;
   /** Marked sensitive in the composer (#1568). */
   sensitive?: boolean;
+  /** A video's captured frame, base64 (#1837); the core makes the poster, blurhash and size from it. */
+  poster?: string;
 };
 
-/** Hand attachments to the durable outbox (#1335); only a video's poster blurhash is computed here. */
+/** A video's captured frame as base64, or undefined; a frame that will not read just sends without one. */
+async function posterOf(att: Attachment): Promise<string | undefined> {
+  if (!att.mimeType.startsWith("video/") || !att.posterFrame) {
+    return undefined;
+  }
+  return blobToBase64(att.posterFrame).catch(() => undefined);
+}
+
+/** Hand attachments to the durable outbox (#1335); a video's frame goes with it (#1837). */
 export async function outgoingAttachments(
   attachments: Attachment[],
 ): Promise<OutgoingAttachment[]> {
@@ -41,19 +53,15 @@ export async function outgoingAttachments(
     if (!att.source) {
       throw new Error(`attachment ${att.name} has no bytes to send yet`);
     }
-    const meta =
-      att.mimeType.startsWith("video/") && att.preview
-        ? await blurhashFromUrl(att.preview).catch(() => null)
-        : null;
+    const poster = await posterOf(att);
     out.push({
       ...(att.source.kind === "staged" ? { stagedId: att.source.id } : { path: att.source.path }),
       filename: att.name,
       contentType: att.mimeType,
-      // The composer's sensitive-cover blurhash (#1568) until the upload's own.
-      blurhash: meta?.hash ?? att.blurhash,
-      width: meta?.width,
-      height: meta?.height,
+      // The composer's sensitive-cover blurhash (#1568) until the upload's or poster's own.
+      blurhash: att.blurhash,
       ...(att.sensitive ? { sensitive: true } : {}),
+      ...(poster ? { poster } : {}),
     });
   }
   return out;
@@ -82,46 +90,31 @@ export async function buildMessageContent(
     return contentText;
   }
 
-  // Video blurhash from the local poster; images get theirs during upload.
-  const videoBlurhashes = new Map<string, { bh: string; w: number; h: number }>();
-  await Promise.all(
-    attachments
-      .filter((att) => att.mimeType.startsWith("video/") && att.preview)
-      .map(async (att) => {
-        const meta = await blurhashFromUrl(att.preview!).catch(() => null);
-        if (meta) {
-          videoBlurhashes.set(att.id, {
-            bh: meta.hash,
-            w: meta.width,
-            h: meta.height,
-          });
-        }
-      }),
-  );
-
   // A file path or staged bytes. The caller owns retries (#1497); all uploads settle before failing.
   const settled = await Promise.allSettled(
-    attachments.map((att) => {
+    attachments.map(async (att) => {
       const done = uploaded.get(att);
       if (done) {
-        return Promise.resolve(done);
+        return done;
       }
       if (!att.source) {
-        return Promise.reject(
-          new Error(`attachment ${att.name} has no bytes to upload yet`),
-        );
+        throw new Error(`attachment ${att.name} has no bytes to upload yet`);
       }
+      // Images get their blurhash during upload; a video's comes from its frame (#1837).
+      const poster = (await posterOf(att)) ?? null;
       const upload =
         att.source.kind === "staged"
           ? invoke<MediaUploadResult>("upload_media_staged", {
               stagedId: att.source.id,
               filename: att.name,
               contentType: att.mimeType,
+              poster,
             })
           : invoke<MediaUploadResult>("upload_media", {
               path: att.source.path,
               filename: att.name,
               contentType: att.mimeType,
+              poster,
             });
       return upload.then((result) => {
         uploaded.set(att, result);
@@ -136,23 +129,21 @@ export async function buildMessageContent(
   const results = settled.map((s) => (s as PromiseFulfilledResult<MediaUploadResult>).value);
 
   const envelope: Record<string, unknown> = {
-    _att: results.map((r, i) => {
-      const vMeta = videoBlurhashes.get(attachments[i]?.id ?? "");
-      return {
-        key: r.key,
-        url: r.url,
-        name: r.filename,
-        ct: r.content_type,
-        size: r.size_bytes,
-        hash: r.content_hash,
-        kv: r.key_version,
-        sha: r.sha256,
-        bh: r.blurhash ?? vMeta?.bh,
-        w: r.width ?? vMeta?.w,
-        h: r.height ?? vMeta?.h,
-        ...(attachments[i]?.sensitive ? { sens: true } : {}),
-      };
-    }),
+    _att: results.map((r, i) => ({
+      key: r.key,
+      url: r.url,
+      name: r.filename,
+      ct: r.content_type,
+      size: r.size_bytes,
+      hash: r.content_hash,
+      kv: r.key_version,
+      sha: r.sha256,
+      bh: r.blurhash ?? attachments[i]?.blurhash,
+      w: r.width,
+      h: r.height,
+      ...(attachments[i]?.sensitive ? { sens: true } : {}),
+      ...(r.poster ? { pv: r.poster } : {}),
+    })),
   };
   if (contentText) {
     envelope._txt = contentText;

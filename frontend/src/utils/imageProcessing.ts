@@ -112,23 +112,81 @@ export async function blurhashFromUrl(
   });
 }
 
-/** Poster frame (≤0.5s in) as a JPEG object URL the caller must revoke, plus duration; null on failure. */
-export function captureVideoPoster(
-  src: string,
-): Promise<{ url: string; duration: number } | null> {
+export type CapturedPoster = {
+  /** JPEG object URL the caller must revoke. */
+  url: string;
+  /** The same JPEG, for the send path (#1837). */
+  blob: Blob;
+  /** Seconds, or 0 when unknown. */
+  duration: number;
+};
+
+/** True when nothing was painted: every sampled pixel is fully transparent. */
+function drewNothing(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
+  const { data } = ctx.getImageData(0, 0, w, h);
+  // Every 64th pixel is plenty: a real frame is opaque everywhere.
+  for (let i = 3; i < data.length; i += 4 * 64) {
+    if (data[i] !== 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Poster frame (≤0.5s in) as a JPEG, plus duration; null on failure.
+ *
+ * Two WebKit traps (#1837, both reproduced in a WKWebView): a non-blob source (the
+ * loopback media server) taints the canvas unless the element asks for CORS, so
+ * `toBlob` throws; and on a blob source `seeked` fires before the frame can be
+ * drawn, so the canvas comes out transparent. Hence `crossOrigin`, waiting for
+ * the next presented frame where the webview can say, and refusing a blank draw.
+ */
+export function captureVideoPoster(src: string): Promise<CapturedPoster | null> {
   return new Promise((resolve) => {
     const vid = document.createElement('video');
     vid.muted = true;
     vid.playsInline = true;
     vid.preload = 'metadata';
+    if (!src.startsWith('blob:') && !src.startsWith('data:')) {
+      vid.crossOrigin = 'anonymous';
+    }
 
     let settled = false;
-    const finish = (result: { url: string; duration: number } | null) => {
+    const finish = (result: CapturedPoster | null) => {
       if (settled) { return; }
       settled = true;
-      vid.src = '';
+      vid.removeAttribute('src');
       vid.load();
       resolve(result);
+    };
+
+    let drawn = false;
+    const draw = () => {
+      if (settled || drawn) { return; }
+      drawn = true;
+      const canvas = document.createElement('canvas');
+      // Cap to 1280px to stay well within WebKit/GDK's native surface limits.
+      const MAX_DIM = 1280;
+      let cw = vid.videoWidth;
+      let ch = vid.videoHeight;
+      if (!cw || !ch) { finish(null); return; }
+      if (cw > MAX_DIM) { ch = Math.round(ch * MAX_DIM / cw); cw = MAX_DIM; }
+      if (ch > MAX_DIM) { cw = Math.round(cw * MAX_DIM / ch); ch = MAX_DIM; }
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) { finish(null); return; }
+      try {
+        ctx.drawImage(vid, 0, 0, cw, ch);
+        if (drewNothing(ctx, cw, ch)) { finish(null); return; }
+        canvas.toBlob((blob) => {
+          finish(blob ? { url: URL.createObjectURL(blob), blob, duration } : null);
+        }, 'image/jpeg', 0.8);
+      } catch {
+        // A tainted canvas (no CORS on the source) throws here.
+        finish(null);
+      }
     };
 
     let duration = 0;
@@ -138,28 +196,33 @@ export function captureVideoPoster(
     }, { once: true });
 
     vid.addEventListener('seeked', () => {
-      const canvas = document.createElement('canvas');
-      // Cap to 1280px to stay well within WebKit/GDK's native surface limits.
-      const MAX_DIM = 1280;
-      let cw = vid.videoWidth || 320;
-      let ch = vid.videoHeight || 180;
-      if (cw > MAX_DIM) { ch = Math.round(ch * MAX_DIM / cw); cw = MAX_DIM; }
-      if (ch > MAX_DIM) { cw = Math.round(cw * MAX_DIM / ch); ch = MAX_DIM; }
-      canvas.width = cw;
-      canvas.height = ch;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { finish(null); return; }
-      ctx.drawImage(vid, 0, 0, cw, ch);
-      canvas.toBlob((blob) => {
-        finish(blob ? { url: URL.createObjectURL(blob), duration } : null);
-      }, 'image/jpeg', 0.75);
+      if (typeof vid.requestVideoFrameCallback === 'function') {
+        vid.requestVideoFrameCallback(() => draw());
+        // A webview that never presents a paused frame still gets a try.
+        setTimeout(draw, 1500);
+      } else {
+        draw();
+      }
     }, { once: true });
 
     vid.addEventListener('error', () => { finish(null); }, { once: true });
 
-    setTimeout(() => { finish(null); }, 5000);
+    setTimeout(() => { finish(null); }, 8000);
 
     vid.src = src;
     vid.load();
+  });
+}
+
+/** A Blob as standard base64 (no `data:` prefix), for a poster frame handed to the core. */
+export function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? '');
+      resolve(result.slice(result.indexOf(',') + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+    reader.readAsDataURL(blob);
   });
 }

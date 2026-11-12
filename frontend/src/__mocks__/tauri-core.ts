@@ -1661,6 +1661,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         width?: number;
         height?: number;
         sensitive?: boolean;
+        poster?: string;
       }>;
       const body =
         attachments.length === 0
@@ -1679,6 +1680,8 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
                 ...(a.blurhash ? { bh: a.blurhash } : {}),
                 ...(a.width ? { w: a.width, h: a.height } : {}),
                 ...(a.sensitive ? { sens: true } : {}),
+                // The core bounds the frame into `pv` (#1837); the mock passes it through.
+                ...(a.poster ? { pv: a.poster } : {}),
               })),
               ...(content ? { _txt: content } : {}),
             });
