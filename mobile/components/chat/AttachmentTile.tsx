@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from "react";
 import { observer } from "mobx-react-lite";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { MediaImage } from "../Media";
@@ -22,8 +22,6 @@ import { peekMediaUri } from "../../lib/media/cache";
 import { videoPosterPlan } from "../../lib/media/videoPoster";
 import { posterUri } from "../../lib/messageContent";
 
-// Full-size: Android's hierarchy omits a tiny empty view, so Maestro could not see it.
-const PROBE = { position: "absolute", top: 0, bottom: 0, start: 0, end: 0 } as const;
 
 const IMAGE_MAX_W = 220;
 function imageSize(att: MessageAttachment): { width: number; height: number } {
@@ -171,14 +169,14 @@ export const AttachmentTile = observer(function AttachmentTile({
             contentFit="cover"
             // Decrypted content: memory only, never expo-image's disk cache.
             cachePolicy="memory"
-            style={PROBE}
+            style={StyleSheet.absoluteFill}
             accessible={false}
           />
         ) : placeholder ? (
           <Image
             placeholder={placeholder}
             placeholderContentFit="cover"
-            style={PROBE}
+            style={StyleSheet.absoluteFill}
           />
         ) : null}
         <PlayBadge size={44} overFrame={!!posterSource || !!placeholder} />
@@ -188,7 +186,7 @@ export const AttachmentTile = observer(function AttachmentTile({
         testID={`video-poster-${posterKind}`}
         collapsable={false}
         pointerEvents="none"
-        style={PROBE}
+        style={StyleSheet.absoluteFill}
       />
       </View>
     );
