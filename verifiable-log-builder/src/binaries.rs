@@ -32,6 +32,54 @@ pub enum Layer {
     Exe,
 }
 
+/// A release **document** logged beside the binaries (#1848): the CycloneDX SBOM
+/// and the OpenVEX statement each desktop release publishes next to its installers.
+///
+/// Carried in the frozen [`BinaryRecord`] with no new [`Layer`] variant, so every
+/// verifier already deployed (the `pollis-verify` binaries, the in-app build
+/// check, the website explorer) decodes and replays these leaves unchanged: a
+/// verifier that cannot decode a leaf fails the whole tree. Identified by
+/// `bundle`, with `platform` and `arch` both [`RELEASE_DOCUMENT_TARGET`] (one
+/// document covers every platform's build) and `layer: payload`, since nothing
+/// re-signs a document after it is logged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReleaseDocument {
+    /// The CycloneDX SBOM, `pollis-<tag>.cdx.json`.
+    Sbom,
+    /// The OpenVEX statement, `pollis-<tag>.vex.json`.
+    Vex,
+}
+
+/// The `platform` and `arch` of every release-document leaf.
+pub const RELEASE_DOCUMENT_TARGET: &str = "any";
+
+impl ReleaseDocument {
+    /// Every kind, in the order a release logs them.
+    pub const ALL: [ReleaseDocument; 2] = [ReleaseDocument::Sbom, ReleaseDocument::Vex];
+
+    /// The leaf's `bundle` value.
+    pub fn bundle(self) -> &'static str {
+        match self {
+            ReleaseDocument::Sbom => "sbom",
+            ReleaseDocument::Vex => "vex",
+        }
+    }
+
+    /// The file-name suffix the document is published under.
+    pub fn suffix(self) -> &'static str {
+        match self {
+            ReleaseDocument::Sbom => ".cdx.json",
+            ReleaseDocument::Vex => ".vex.json",
+        }
+    }
+
+    /// The kind a leaf's `bundle` names, if it names one.
+    pub fn from_bundle(bundle: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|d| d.bundle() == bundle)
+    }
+}
+
 /// The reproducibility recipe pinned into each leaf. A rebuilder installs these
 /// exact toolchain versions to reproduce `payload_sha256` byte-for-byte.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +144,31 @@ impl BinaryRecord {
         Ok(Entry::new(TENANT, self.encode()?))
     }
 
+    /// The release document this leaf logs, or `None` for a build artifact.
+    pub fn release_document(&self) -> Option<ReleaseDocument> {
+        ReleaseDocument::from_bundle(&self.bundle)
+    }
+
+    /// Why this leaf is not a well-formed release-document leaf, if it is one at all.
+    fn release_document_defect(&self) -> Option<String> {
+        let doc = self.release_document()?;
+        let defect = if self.layer != Layer::Payload {
+            format!("is layer {:?}, not payload", self.layer)
+        } else if self.artifact_sha256 != self.payload_sha256 {
+            "has artifact_sha256 != payload_sha256".to_string()
+        } else if self.platform != RELEASE_DOCUMENT_TARGET || self.arch != RELEASE_DOCUMENT_TARGET {
+            format!(
+                "names platform/arch {}/{}, not {RELEASE_DOCUMENT_TARGET}/{RELEASE_DOCUMENT_TARGET}",
+                self.platform, self.arch
+            )
+        } else if !self.artifact_name.ends_with(doc.suffix()) {
+            format!("artifact `{}` does not end in {}", self.artifact_name, doc.suffix())
+        } else {
+            return None;
+        };
+        Some(format!("{} leaf for {} {defect}", doc.bundle(), self.release_tag))
+    }
+
     /// The fork-identity tuple: two leaves sharing this tuple describe the *same*
     /// released unit, so they must agree on `artifact_sha256`.
     fn fork_key(&self) -> (&str, &str, &str, &str, Layer) {
@@ -119,6 +192,11 @@ impl BinaryRecord {
 ///   a newer tag has appeared, an earlier tag can never appear again.
 /// * **Derived-layer pairing** — every non-`payload` leaf (`signed`, `exe`) must
 ///   have an earlier `layer:"payload"` leaf with equal `payload_sha256`.
+/// * **Release-document shape** (#1848) — a leaf whose `bundle` names a
+///   [`ReleaseDocument`] is `layer: payload` with `artifact_sha256 ==
+///   payload_sha256`, `platform`/`arch` [`RELEASE_DOCUMENT_TARGET`], and an
+///   `artifact_name` with the document's suffix. No leaf before #1848 used these
+///   bundle names, so the rule holds over the whole published tree.
 pub struct BinaryInvariant;
 
 impl BinaryInvariant {
@@ -132,6 +210,11 @@ impl BinaryInvariant {
 impl TenantInvariant for BinaryInvariant {
     fn check(&self, existing: &[&Entry], candidate: &Entry) -> Result<(), InvariantViolation> {
         let cand = Self::parse(candidate)?;
+
+        // (d) Release-document shape: needs no history, so it is checked first.
+        if let Some(defect) = cand.release_document_defect() {
+            return Err(InvariantViolation::new(TENANT, defect));
+        }
 
         let mut cand_tag_seen = false;
         let mut last_tag: Option<String> = None;
@@ -323,6 +406,90 @@ mod tests {
         let back = record("v1.0.0", "darwin", "dmg", Layer::Payload, 0x33, 0x33).to_entry().unwrap();
         let err = inv.check(&[&v1, &v2], &back).unwrap_err();
         assert!(err.message.contains("out of publish order"), "got: {}", err.message);
+    }
+
+    fn document(tag: &str, doc: ReleaseDocument, digest: u8) -> BinaryRecord {
+        BinaryRecord {
+            release_tag: tag.to_string(),
+            commit: "f".repeat(40),
+            platform: RELEASE_DOCUMENT_TARGET.to_string(),
+            arch: RELEASE_DOCUMENT_TARGET.to_string(),
+            bundle: doc.bundle().to_string(),
+            artifact_name: format!("pollis-{tag}{}", doc.suffix()),
+            layer: Layer::Payload,
+            payload_sha256: hex::encode([digest; 32]),
+            artifact_sha256: hex::encode([digest; 32]),
+            toolchain: toolchain(),
+            provenance_uri: format!(
+                "cdn.pollis.com/releases/{tag}/pollis-{tag}{}.intoto.jsonl",
+                doc.suffix()
+            ),
+        }
+    }
+
+    #[test]
+    fn release_documents_append_after_a_releases_binaries() {
+        let inv = BinaryInvariant;
+        let payload = record("v1.0.0", "linux", "appimage", Layer::Payload, 0x11, 0x11).to_entry().unwrap();
+        let sbom = document("v1.0.0", ReleaseDocument::Sbom, 0x51).to_entry().unwrap();
+        let vex = document("v1.0.0", ReleaseDocument::Vex, 0x52).to_entry().unwrap();
+        assert!(inv.check(&[&payload], &sbom).is_ok());
+        assert!(inv.check(&[&payload, &sbom], &vex).is_ok());
+        // The next tag's binaries still follow.
+        let next = record("v1.1.0", "linux", "appimage", Layer::Payload, 0x22, 0x22).to_entry().unwrap();
+        assert!(inv.check(&[&payload, &sbom, &vex], &next).is_ok());
+    }
+
+    #[test]
+    fn release_document_leaves_use_the_frozen_encoding() {
+        // No new field and no new Layer variant: a pre-#1848 decoder reads these bytes.
+        let r = document("v1.0.0", ReleaseDocument::Vex, 0x52);
+        let s = String::from_utf8(r.encode().unwrap()).unwrap();
+        assert!(s.contains("\"bundle\":\"vex\""), "got: {s}");
+        assert!(s.contains("\"layer\":\"payload\""), "got: {s}");
+        assert!(s.contains("\"platform\":\"any\",\"arch\":\"any\""), "got: {s}");
+        assert_eq!(
+            BinaryRecord::decode(s.as_bytes()).unwrap().release_document(),
+            Some(ReleaseDocument::Vex)
+        );
+        assert_eq!(
+            record("v1.0.0", "linux", "appimage", Layer::Payload, 1, 1).release_document(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_reissued_release_document_is_a_fork() {
+        let inv = BinaryInvariant;
+        let sbom = document("v1.0.0", ReleaseDocument::Sbom, 0x51).to_entry().unwrap();
+        let quieter = document("v1.0.0", ReleaseDocument::Sbom, 0x59).to_entry().unwrap();
+        let err = inv.check(&[&sbom], &quieter).unwrap_err();
+        assert!(err.message.contains("fork"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn malformed_release_document_leaves_are_rejected() {
+        let inv = BinaryInvariant;
+        let mut signed = document("v1.0.0", ReleaseDocument::Sbom, 0x51);
+        signed.layer = Layer::Signed;
+        let mut split = document("v1.0.0", ReleaseDocument::Sbom, 0x51);
+        split.artifact_sha256 = hex::encode([0x52; 32]);
+        let mut platform = document("v1.0.0", ReleaseDocument::Vex, 0x51);
+        platform.platform = "linux".to_string();
+        let mut arch = document("v1.0.0", ReleaseDocument::Vex, 0x51);
+        arch.arch = "x86_64".to_string();
+        let mut name = document("v1.0.0", ReleaseDocument::Vex, 0x51);
+        name.artifact_name = "pollis-v1.0.0.cdx.json".to_string();
+        for (bad, want) in [
+            (signed, "not payload"),
+            (split, "artifact_sha256 != payload_sha256"),
+            (platform, "platform/arch"),
+            (arch, "platform/arch"),
+            (name, "does not end in .vex.json"),
+        ] {
+            let err = inv.check(&[], &bad.to_entry().unwrap()).unwrap_err();
+            assert!(err.message.contains(want), "want {want:?}, got: {}", err.message);
+        }
     }
 
     #[test]

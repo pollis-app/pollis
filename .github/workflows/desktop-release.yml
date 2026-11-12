@@ -939,6 +939,16 @@ jobs:
           jq -e '.bomFormat == "CycloneDX"' "$f" >/dev/null
           jq -e '."@context" == "https://openvex.dev/ns/v0.2.0"' "pollis-${GITHUB_REF_NAME}.vex.json" >/dev/null
 
+      # #1848: the SBOM and VEX each get a binaries-tree leaf, and a leaf carries
+      # the recipe of the job that produced its bytes — this one, which ran the
+      # generator. Same sidecar and same hard requirement as the build jobs (#877):
+      # scripts/attest-binaries.sh refuses to log the documents without it.
+      - name: Record the generator toolchain (#1848)
+        run: |
+          set -euo pipefail
+          . scripts/lib/attest-helpers.sh
+          write_toolchain_manifest "pollis-${GITHUB_REF_NAME}-sbom.toolchain.json"
+
       - name: Upload SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -947,6 +957,7 @@ jobs:
           path: |
             pollis-*.cdx.json
             pollis-*.vex.json
+            pollis-*-sbom.toolchain.json
             oss/
 
   apply-migrations:
@@ -1453,11 +1464,11 @@ jobs:
           # its digest goes into the SLSA attestation and is recorded in the
           # public Rekor log, an append-only anchor Pollis does not control. So a
           # later, quieter SBOM cannot replace this one without the substitution
-          # being provable. (Hashing it into a binary-transparency leaf as well
-          # would need a new `Layer::Sbom` in the frozen BinaryRecord contract and
-          # a `pollis-verify` release ahead of it — see the follow-up note in
-          # docs/verifiable-builds-design.md.)
+          # being provable. #1848: the VEX beside it is a subject for the same
+          # reason, and both are also binaries-tree leaves (attest-and-log), each
+          # naming the .intoto.jsonl published below as its provenance_uri.
           cp "artifacts/pollis-sbom/pollis-${VERSION}.cdx.json" "prov/pollis-${VERSION}.cdx.json"
+          cp "artifacts/pollis-sbom/pollis-${VERSION}.vex.json" "prov/pollis-${VERSION}.vex.json"
           echo "staged provenance subjects:"
           ls -1 prov
 
@@ -1596,7 +1607,8 @@ jobs:
 
       # Same all-artifacts download the release job uses — pollis-macos/,
       # pollis-windows/, pollis-linux/ under artifacts/; the script finds each
-      # installer recursively.
+      # installer recursively. pollis-sbom/ carries the SBOM, the VEX and the
+      # generator's recipe sidecar, logged after the binaries (#1848).
       - name: Download all artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

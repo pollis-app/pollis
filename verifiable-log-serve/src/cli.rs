@@ -73,8 +73,10 @@ pub enum Command {
     /// Verify a released version's binaries: that every published artifact for a
     /// tag is provably included in the signed binaries tree (under the binaries
     /// domain-separated STH), the tree satisfies the binary invariant (no forked
-    /// re-issue, payload/signed pairing), and the recorded hashes match. Prints
-    /// the artifacts + hashes. Exits non-zero if invalid.
+    /// re-issue, payload/signed pairing), and the recorded hashes match. A release
+    /// that logs its SBOM and VEX must log both; releases from before those were
+    /// logged verify as before. Prints the artifacts, release documents and
+    /// hashes. Exits non-zero if invalid.
     Release {
         /// Base URL of the transparency log, e.g. https://verify.pollis.com
         base_url: String,

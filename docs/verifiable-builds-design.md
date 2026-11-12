@@ -301,9 +301,9 @@ deterministic):
 {
   "release_tag": "v1.3.0",            // git tag that produced this
   "commit": "<40-hex git sha>",       // exact source revision
-  "platform": "darwin",              // darwin | windows | linux
-  "arch": "aarch64",                 // aarch64 | x86_64
-  "bundle": "dmg",                   // dmg | app | nsis | appimage | deb | rpm
+  "platform": "darwin",              // darwin | windows | linux (any for a release document)
+  "arch": "aarch64",                 // aarch64 | x86_64 (any for a release document)
+  "bundle": "dmg",                   // dmg | app | nsis | appimage | deb | rpm | sbom | vex
   "artifact_name": "pollis-v1.3.0-macos.dmg",
   "layer": "signed",                 // "payload" (reproducible) | "signed" (wrapped) | "exe" (main binary as installed)
   "payload_sha256": "<hex>",         // hash of the reproducible pre-signature payload
@@ -367,6 +367,14 @@ Design notes:
   hashes them directly via `$APPIMAGE`, a strictly stronger check. Adding a
   `Layer` variant is backward-compatible: existing leaves' canonical bytes, and
   therefore every published inclusion proof, are untouched.
+- **Plus one leaf each for the release's SBOM and VEX** (#1848), after the
+  binaries: `bundle` `sbom` / `vex`, `platform` and `arch` `any`, `layer:
+  "payload"` with `artifact_sha256 == payload_sha256`, the `sbom` job's own recipe.
+  Deliberately not a new `Layer` variant: a verifier decodes every leaf on replay,
+  so a variant it does not know fails the whole tree for every `pollis-verify` and
+  in-app check already shipped. `BinaryInvariant` enforces the shape
+  (`ReleaseDocument`), and `pollis-verify release` fails a tag that logs one
+  document without the other.
 - The leaf commits to a **content hash + full recipe**, never to binary bytes —
   same privacy/space property as the commit-log builder (hash, drop the blob).
 - `provenance_uri` links each leaf to its SLSA/in-toto attestation (§3), so the
