@@ -1,0 +1,39 @@
+{
+  "ciphersuite": 82,
+  "expected": [
+    {
+      "epoch": 1,
+      "epoch_authenticator": "9f8c5f616c2650a4cf48762fa6f0cfd79d5eba54eca4300ab95d02b7ba352fea829e837aa340ba2dcd11ebc3c16d6a4f",
+      "exporter_secret": "8cb95ef2b270aab797d4e38ed860566b6fd69fc614a03e1a9d4a079d96bbcf9c"
+    },
+    {
+      "epoch": 2,
+      "epoch_authenticator": "87d5e76e9785cf02a29edf8829df307fa5009767510fda0c3684817b58d7b558ff4cf7bb38725b600f0480727322b196",
+      "exporter_secret": "359b5c6f73428e113c69fbf3e3e9047d4c37c12ca7dfda7194e3126927d50943"
+    },
+    {
+      "epoch": 3,
+      "epoch_authenticator": "e94633644277cc097a50ef00fded19c5e596b409577b293b5370ca34677e41d99638442c3c452447b74ddb0fa8c223c9",
+      "exporter_secret": "28fa7fe53731e13412004f0f92d5f70d07549543fcc1e6e3a2e1c066dea7d359"
+    },
+    {
+      "epoch": 4,
+      "epoch_authenticator": "68946467dbc3e7e923460e5071e17eef8766ff5b99b0f20bb1a0eeb2b1d15fb336b7ec72d4e5edf47a08fba23da5c9b6",
+      "exporter_secret": "06536e2bd4cf01520bf15e884fd1f99f8a6f355cd03848036fd4c6d2c59996d7"
+    }
+  ],
+  "exporter": {
+    "context": "6578706f727465722d636f6e74657874",
+    "label": "pollis-hpke-golden",
+    "length": 32
+  },
+  "generator": "openmls_rust_crypto 0.5.1 (hpke-rs 0.7) at openmls 34222ef632c87df58baaa7614c8a72ac235c5f07",
+  "group_id": "706f6c6c69732d68706b652d676f6c64656e",
+  "joiner_storage": [
+    {
+      "key": "4b65795061636b6167657b2276616c7565223a7b22766563223a5b3137312c33342c36382c34362c3234372c3233302c3233362c34382c31352c3136392c3133302c3233322c3135372c3230322c31342c3233342c3230312c34312c3133342c37332c322c34342c31372c38302c3233362c38312c39322c3137372c3132382c3233302c33392c3231352c3134362c36332c3235332c3132392c3133302c3130392c3235332c3132332c3139332c39392c34332c3134362c332c3130312c32372c38375d7d7d0001",
+      "value_file": "joiner_storage_0.json"
+    }
+  ],
+  "plaintext": "golden fixture: sealed by hpke-rs 0.7"
+}

@@ -1036,7 +1036,9 @@ TreeKEM derives every node key pair that way, so a client on the new derivation 
 different keys from the same path secret and cannot process a commit from an old one. The copy
 keeps hpke-rs's `draft-connolly-cfrg-hpke-mlkem` feature, which restores the 0.7 derivation,
 and `hpke_derive_keypair_matches_hpke_rs_0_7` (`pollis-core/src/commands/mls/tests.rs`) pins
-the derived keys for `0x0052` and `0x0001` to what 0.7 produced. **Upstream `main` does not
+the derived keys for `0x0052` and `0x0001` to what 0.7 produced; `hpke_golden_group_from_hpke_rs_0_7_replays`
+replays a `0x0052` group recorded by 0.7 (`pollis-core/tests/fixtures/hpke_golden/`) to pin
+HPKE seal/open and export too. **Upstream `main` does not
 enable that feature**, so the eventual rev bump has a second wire break to plan for besides
 code-point churn: that test fails until it is handled as a migration.
 

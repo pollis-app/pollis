@@ -1654,6 +1654,108 @@ fn hpke_derive_keypair_matches_hpke_rs_0_7() {
     }
 }
 
+/// **A `0x0052` group recorded by hpke-rs 0.7 replays on today's provider.**
+///
+/// `hpke_derive_keypair_matches_hpke_rs_0_7` pins `DeriveKeyPair` alone. This pins the rest of
+/// what HPKE does in a group: the fixture (`pollis-core/tests/fixtures/hpke_golden/`, README
+/// there) was written by the provider every build before #1846 links. Bob's KeyPackage private
+/// state is loaded into `mls_kv`, then this provider opens the Welcome sealed to his init key,
+/// processes an external commit (HPKE export against the derived `external_pub`) and two path
+/// commits (HPKE open, once with his KeyPackage leaf key and once with a parent key he derived),
+/// decrypts an application message, and must reach the recorded exporter secret and epoch
+/// authenticator at every epoch.
+#[test]
+fn hpke_golden_group_from_hpke_rs_0_7_replays() {
+    use serde_json::Value;
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hpke_golden");
+    let read = |name: &str| {
+        std::fs::read(dir.join(name)).unwrap_or_else(|e| panic!("fixture {name}: {e}"))
+    };
+    let golden: Value = serde_json::from_slice(&read("golden.json")).unwrap();
+    assert_eq!(golden["ciphersuite"].as_u64(), Some(u16::from(CS_PQ) as u64), "fixture suite");
+
+    let conn = make_db();
+    let provider = PollisProvider::new(&conn);
+    for row in golden["joiner_storage"].as_array().unwrap() {
+        let key = hex::decode(row["key"].as_str().unwrap()).unwrap();
+        let value = read(row["value_file"].as_str().unwrap());
+        conn.execute(
+            "INSERT INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
+            rusqlite::params![b"" as &[u8], key, value],
+        )
+        .unwrap();
+    }
+
+    let exporter = &golden["exporter"];
+    let label = exporter["label"].as_str().unwrap();
+    let context = hex::decode(exporter["context"].as_str().unwrap()).unwrap();
+    let len = exporter["length"].as_u64().unwrap() as usize;
+    let expected = golden["expected"].as_array().unwrap();
+    let check = |group: &MlsGroup, step: usize, what: &str| {
+        let want = &expected[step];
+        assert_eq!(Some(group.epoch().as_u64()), want["epoch"].as_u64(), "{what}: epoch");
+        let secret = group.export_secret(provider.crypto(), label, &context, len).unwrap();
+        assert_eq!(
+            hex::encode(secret),
+            want["exporter_secret"].as_str().unwrap(),
+            "{what}: exporter secret differs from hpke-rs 0.7"
+        );
+        assert_eq!(
+            hex::encode(group.epoch_authenticator().as_slice()),
+            want["epoch_authenticator"].as_str().unwrap(),
+            "{what}: epoch authenticator differs from hpke-rs 0.7"
+        );
+    };
+    let process = |group: &mut MlsGroup, file: &str| -> Option<Vec<u8>> {
+        let bytes = read(file);
+        let message: ProtocolMessage = MlsMessageIn::tls_deserialize(&mut bytes.as_slice())
+            .unwrap()
+            .try_into_protocol_message()
+            .unwrap();
+        let processed = group
+            .process_message(&provider, message)
+            .unwrap_or_else(|e| panic!("{file}: {e:?}"));
+        match processed.into_content() {
+            ProcessedMessageContent::ApplicationMessage(m) => Some(m.into_bytes()),
+            ProcessedMessageContent::StagedCommitMessage(staged) => {
+                group.merge_staged_commit(&provider, *staged).unwrap();
+                None
+            }
+            other => panic!("{file}: unexpected {other:?}"),
+        }
+    };
+
+    let welcome = match MlsMessageIn::tls_deserialize(&mut read("welcome.bin").as_slice())
+        .unwrap()
+        .extract()
+    {
+        MlsMessageBodyIn::Welcome(w) => w,
+        other => panic!("welcome.bin: {other:?}"),
+    };
+    let mut group = StagedWelcome::new_from_welcome(&provider, &super::provider::join_config(), welcome, None)
+        .expect("open the hpke-rs 0.7 Welcome")
+        .into_group(&provider)
+        .unwrap();
+    assert_eq!(group.group_id().as_slice(), hex::decode(golden["group_id"].as_str().unwrap()).unwrap());
+    check(&group, 0, "Welcome");
+
+    for (step, file) in
+        ["commit_1_external.bin", "commit_2_alice_update.bin", "commit_3_carol_update.bin"]
+            .into_iter()
+            .enumerate()
+    {
+        assert_eq!(process(&mut group, file), None, "{file} is a commit");
+        check(&group, step + 1, file);
+    }
+
+    assert_eq!(
+        process(&mut group, "application.bin").as_deref(),
+        Some(golden["plaintext"].as_str().unwrap().as_bytes()),
+        "application message plaintext"
+    );
+}
+
 /// The signature scheme is derived from the suite, not a constant.
 ///
 /// It is read off a *stored group*, which stays on its old suite until migrated, so both answers are pinned.
