@@ -58,6 +58,11 @@ export function peekMediaUri(contentHash: string | null | undefined): string | n
   return contentHash ? store.peek(contentHash) : null;
 }
 
+/** Called whenever any consumer's resolve of `contentHash` succeeds (#1826); returns the unsubscribe. */
+export function subscribeMediaResolved(contentHash: string, listener: () => void): () => void {
+  return store.subscribe(contentHash, listener);
+}
+
 // Every successful resolve must be paired with a `releaseMediaUri()`.
 export async function resolveMediaUri(
   attachment: Pick<

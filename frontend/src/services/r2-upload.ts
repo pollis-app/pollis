@@ -1,6 +1,7 @@
 import { dialogSave, invoke } from '../bridge';
 import type { MessageAttachment, PresignedUploadResponse } from '../types';
 import { IMAGE_EXT_MIME } from '../utils/fileIcon';
+import { createMediaUrlCache } from './mediaUrlCache';
 
 export async function uploadAvatar(
   userId: string,
@@ -100,24 +101,28 @@ async function downloadAndDecryptMedia(attachment: MessageAttachment): Promise<s
   return URL.createObjectURL(blob);
 }
 
-// De-dup per object id; resolved URLs stay valid for the document.
-const inFlight = new Map<string, Promise<string>>();
-// The same URLs once resolved, read synchronously so a remount (Vault Chat ↔ Media) draws at once.
-const resolvedUrls = new Map<string, string>();
+// De-dup per content hash; resolved URLs stay valid for the document and are read synchronously
+// so a remount (Vault Chat ↔ Media) draws at once. Successes are announced (#1826).
+const mediaUrls = createMediaUrlCache();
 
 /** The URL already resolved for this attachment, or null; never starts a fetch. */
 export function peekMediaUrl(attachment: Pick<MessageAttachment, "content_hash">): string | null {
-  return resolvedUrls.get(attachment.content_hash) ?? null;
+  return mediaUrls.peek(attachment.content_hash);
+}
+
+/** Called with the URL whenever anyone resolves or draws `contentHash` (#1826); returns the unsubscribe. */
+export function subscribeMediaResolved(contentHash: string, listener: (url: string) => void): () => void {
+  return mediaUrls.subscribe(contentHash, listener);
+}
+
+/** An element drew from `url`: wake any tile still showing a failure for this file. */
+export function announceMediaLoaded(contentHash: string, url: string): void {
+  mediaUrls.announce(contentHash, url);
 }
 
 /// Attachment → loopback media-server URL; over the 100 MiB cap, a Blob URL via `downloadAndDecryptMedia`.
 export async function getMediaUrl(attachment: MessageAttachment): Promise<string> {
-  const contentHash = attachment.content_hash;
-  const cached = inFlight.get(contentHash);
-  if (cached) {
-    return cached;
-  }
-  const promise = (async () => {
+  return mediaUrls.get(attachment.content_hash, async () => {
     const url = await invoke<string>('get_media_url', {
       ...mediaArgs(attachment),
       contentType: attachment.content_type,
@@ -126,17 +131,5 @@ export async function getMediaUrl(attachment: MessageAttachment): Promise<string
       return downloadAndDecryptMedia(attachment);
     }
     return url;
-  })();
-  inFlight.set(contentHash, promise);
-  promise.then(
-    (url) => {
-      if (inFlight.get(contentHash) === promise) {
-        resolvedUrls.set(contentHash, url);
-      }
-    },
-    () => {
-      inFlight.delete(contentHash);
-    },
-  );
-  return promise;
+  });
 }

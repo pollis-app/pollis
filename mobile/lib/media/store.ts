@@ -6,6 +6,8 @@
 //   synchronously and draws on its first frame. The set is bounded; the oldest beyond the bound,
 //   and every entry on `trim()` (lock, background), is unlinked.
 // - `clear()` (sign-out) forgets everything; a resolve or release from the ended session is a no-op.
+// - A successful decrypt is announced to `subscribe`rs of that hash (#1826), so a tile that failed
+//   earlier recovers the moment any other consumer (the viewer, another row) gets the file.
 
 export interface MediaStoreDeps {
   /** Best-effort unlink of a decrypted file. */
@@ -26,8 +28,12 @@ export interface MediaStore {
   trim(): Promise<void>;
   /** Sign-out: forget everything (the caller deletes the directory). */
   clear(): void;
+  /** Called after each successful decrypt of `contentHash`; returns the unsubscribe. */
+  subscribe(contentHash: string, listener: () => void): () => void;
   /** Hashes kept with no consumer, oldest first. For tests. */
   retained(): string[];
+  /** Live `subscribe` listeners across every hash. For tests. */
+  listenerCount(): number;
 }
 
 export function createMediaStore(deps: MediaStoreDeps): MediaStore {
@@ -37,6 +43,18 @@ export function createMediaStore(deps: MediaStoreDeps): MediaStore {
   const resolved = new Map<string, string>();
   // Insertion order = release order: the first key is the oldest.
   const retained = new Set<string>();
+  const listeners = new Map<string, Set<() => void>>();
+
+  function announce(hash: string): void {
+    const set = listeners.get(hash);
+    if (!set) {
+      return;
+    }
+    // A copy: a listener unsubscribes (and may resubscribe) while we walk.
+    for (const listener of [...set]) {
+      listener();
+    }
+  }
 
   function forget(hash: string): string | undefined {
     const uri = resolved.get(hash);
@@ -95,6 +113,7 @@ export function createMediaStore(deps: MediaStoreDeps): MediaStore {
           // Every consumer left before the decrypt landed: keep it like any other release.
           await retain(hash);
         }
+        announce(hash);
         return uri;
       });
       inFlight.set(hash, promise);
@@ -139,6 +158,33 @@ export function createMediaStore(deps: MediaStoreDeps): MediaStore {
       retained.clear();
     },
 
+    subscribe(hash, listener) {
+      let set = listeners.get(hash);
+      if (!set) {
+        set = new Set();
+        listeners.set(hash, set);
+      }
+      set.add(listener);
+      return () => {
+        const current = listeners.get(hash);
+        if (!current) {
+          return;
+        }
+        current.delete(listener);
+        if (current.size === 0) {
+          listeners.delete(hash);
+        }
+      };
+    },
+
     retained: () => [...retained],
+
+    listenerCount() {
+      let n = 0;
+      for (const set of listeners.values()) {
+        n += set.size;
+      }
+      return n;
+    },
   };
 }

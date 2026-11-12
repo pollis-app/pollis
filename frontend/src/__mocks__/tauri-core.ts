@@ -476,6 +476,16 @@ const WORKS_WHEN_REVOKED = new Set([
   store.clientPolicy = { ...ALLOWED_POLICY, ...status };
 };
 
+/** #1826: `get_media_url` fails for these R2 keys (a dropped network) until `__tauriFailMedia(key, false)`. */
+const failingMediaKeys = new Set<string>((preload.failMediaKeys ?? []) as string[]);
+(window as any).__tauriFailMedia = (key: string, fail: boolean) => {
+  if (fail) {
+    failingMediaKeys.add(key);
+  } else {
+    failingMediaKeys.delete(key);
+  }
+};
+
 /** Reject every `cmd` call with `message` until cleared, without revoking (#1338). */
 const rejectWith = new Map<string, string>();
 (window as any).__tauriRejectWith = (cmd: string, message: string | null) => {
@@ -2265,6 +2275,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     // A preload's `mediaUrls` stands in for the media server; else null.
     case 'get_media_url': {
+      if (failingMediaKeys.has(args.r2Key as string)) {
+        throw 'download_media: error sending request: network unreachable';
+      }
       const urls = (preload.mediaUrls ?? {}) as Record<string, string>;
       return urls[args.r2Key as string] ?? null;
     }

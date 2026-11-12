@@ -1,0 +1,179 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# MEDIA RECOVERY (#1826) — an image that failed to load is never stuck on
+# "Image unavailable": the moment the same file is fetched anywhere else (here,
+# the full-screen viewer) the chat row draws it, with no timer and no reopen.
+#
+# Sends an image the same way as media-viewer.yaml (system photo picker seeded
+# by `addMedia`, cell picked by its label), waits for the R2 copy, then
+# cold-restarts so no local preview or decrypted file survives.
+#
+# The failure is forced with airplane mode, which Maestro can switch ONLY on
+# Android: the chat is opened offline so the row's `get_media_path` fails
+# (`media-unavailable`), the network comes back, and the row is left alone —
+# nothing re-asks on its own. Opening the viewer fetches the file; closing it
+# must show the row drawn (`media-image-rendered`) without leaving the chat.
+# On iOS the flow stops after the cold-restart render: there is no network
+# switch, so the recovery is pinned there by mobile/tests/media-recovery.test.ts,
+# which drives the same `lib/media/tile.ts` both platforms run.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+
+# A group with #General to post into.
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Recover Group"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Recover Group, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- takeScreenshot: media-recovery-01-empty-channel
+
+# Seed the device library with a known image, then pick it.
+- addMedia:
+    - "../fixtures/media-viewer.png"
+- tapOn:
+    id: "btn-attach"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: media-recovery-02-picker
+# iPad: the picker takes only point taps (subflows/ipad-pick-photos.yaml).
+- runFlow:
+    when:
+      true: ${IPAD == "1"}
+    file: ../subflows/ipad-pick-photos.yaml
+    env:
+      CELLS: "1"
+      CONFIRM: "1"
+- runFlow:
+    when:
+      true: ${IPAD != "1"}
+    commands:
+      - tapOn:
+          text: "Photo(,| taken on) .*"
+          index: 0
+      - tapOn:
+          text: "(?i)(add|done).*"
+- extendedWaitUntil:
+    visible:
+      id: "strip-attachments"
+    timeout: 10000
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+    timeout: 60000
+- takeScreenshot: media-recovery-03-sent
+# Wait for the stored row: the restart below must find the R2 copy.
+- extendedWaitUntil:
+    notVisible:
+      id: "row-message-pending-.*"
+    timeout: 120000
+
+# Cold restart: no local preview or decrypted file survives it.
+- stopApp
+- launchApp
+- runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 20000
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "E2E Recover Group.*"
+    index: 0
+
+# ── iOS / iPad: no network switch; prove the online render and stop ─────────
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          text: "General"
+          optional: true
+      - assertVisible:
+          id: "screen-chat"
+      - extendedWaitUntil:
+          visible:
+            id: "media-image-rendered"
+          timeout: 60000
+      - assertNotVisible:
+          id: "media-unavailable"
+
+# ── Android: fail offline, recover from the viewer ──────────────────────────
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      # The group's channels are on screen; only the chat opens offline.
+      - setAirplaneMode: enabled
+      - tapOn:
+          text: "General"
+          optional: true
+      - assertVisible:
+          id: "screen-chat"
+      - extendedWaitUntil:
+          visible:
+            id: "media-unavailable"
+          timeout: 60000
+      - takeScreenshot: media-recovery-04-unavailable-offline
+      - setAirplaneMode: disabled
+      # Give the radio time to come back (a wait on an id that never shows).
+      # The row must NOT recover on its own: nothing polls.
+      - extendedWaitUntil:
+          visible:
+            id: "never-shown-media-recovery-wait"
+          timeout: 15000
+          optional: true
+      - assertVisible:
+          id: "media-unavailable"
+      # The viewer over the same attachment fetches it.
+      - tapOn:
+          id: "btn-attachment-.*"
+          index: 0
+      - extendedWaitUntil:
+          visible:
+            id: "screen-media-viewer"
+          timeout: 10000
+      - extendedWaitUntil:
+          visible:
+            id: "media-image-rendered"
+          timeout: 60000
+      - assertNotVisible:
+          id: "text-media-unavailable"
+      - takeScreenshot: media-recovery-05-viewer
+      - tapOn:
+          id: "btn-media-close"
+      # Back in the same chat, never remounted: the row picked the file up.
+      - assertVisible:
+          id: "screen-chat"
+      - extendedWaitUntil:
+          visible:
+            id: "media-image-rendered"
+          timeout: 10000
+      - assertNotVisible:
+          id: "media-unavailable"
+      - takeScreenshot: media-recovery-06-row-recovered

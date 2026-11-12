@@ -296,5 +296,40 @@ resolved URL synchronously, so `AttachmentDisplay` and the Vault's
 render. The gallery tile has the chat card's shape (0.5rem, no frame, blurhash
 placeholder) in both skins; Playwright `e2e/vault-media-tiles.spec.ts`.
 
+## A failed tile is never sticky (#1826)
+
+A fetch that failed (network drop, a DS or R2 hiccup) used to leave its tile on
+"Image unavailable" (mobile) or "failed to load" (desktop row and spotlight)
+until it remounted, even after the same file loaded elsewhere. Recovery is
+event-driven, never a timer or a poll:
+
+- **The cache announces every success per content hash.** Mobile's store
+  (`mobile/lib/media/store.ts`) calls `subscribe(hash)` listeners after each
+  successful decrypt; desktop's `createMediaUrlCache`
+  (`frontend/src/services/mediaUrlCache.ts`, behind `getMediaUrl` /
+  `peekMediaUrl` / `subscribeMediaResolved` in `r2-upload.ts`) does the same
+  after each `get_media_url`, and `announceMediaLoaded` adds an `<img>` /
+  `<video>` that actually drew (the spotlight, a row), which also covers a URL
+  that was already resolved.
+- **Only a failed consumer listens, and only while failed.** Mobile's
+  `startMediaTile` (`mobile/lib/media/tile.ts`, run by `useMediaUri` and
+  `useNamedMediaUri`) subscribes on failure; the first announce releases the
+  failed attempt's reference and re-acquires, which the cache answers at once
+  from the file the other consumer holds. Every attempt is one acquire and one
+  release with the generation it started in, so a sign-out clear still makes a
+  stale release a no-op. Desktop's `AttachmentDisplay` and `MediaSpotlight`
+  subscribe in an effect keyed on their `error` / `failed` state and take the
+  announced URL. Unmount (and recovery) unsubscribes.
+- **A remount asks again.** A failed fetch is dropped from the in-flight map on
+  both platforms, so the next mount peeks (instant if the file is held or kept)
+  and otherwise fetches afresh; nothing remembers the failure.
+
+Tests: `mobile/tests/media-recovery.test.ts`, `frontend/tests/media-recovery.test.ts`
+(a failed resolve, then a resolve elsewhere, leaves the tile rendered; a remount
+re-asks). Device tier: Playwright `e2e/media-recovery.spec.ts` (the IPC mock's
+`failMediaKeys` / `__tauriFailMedia` fail `get_media_url` for one key) and Maestro
+`flows/media-recovery.yaml` (Android airplane mode; iOS has no network switch in
+Maestro, so it covers the online render only).
+
 ---
 _Back to [index.md](./index.md)_
