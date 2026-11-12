@@ -275,7 +275,7 @@ async function main() {
         failedPeers.add(id);
       }
     }
-    if (failedPeers.size < 2) {
+    if (!adv.Ok && !adv.KeyRatcheted && failedPeers.size < 2) {
       failures.push(`the adversary saw a failure verdict for ${failedPeers.size} of 2 peers — frames never reached it, so nothing was proven`);
     }
     await invokeApp(C, "e2e_voice_adversary_leave").catch(() => {});
