@@ -337,6 +337,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                 label={c.user2_identifier}
                 badge={unread > 0 ? unread : null}
                 trailing={trailing}
+                testId={`dm-${c.id}`}
               />
             );
           })}

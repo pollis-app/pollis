@@ -6,6 +6,8 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../lib/native";
 import { messageQueryKeys, refreshStoredConversations } from "./queries/useMessages";
+import { dmQueryKeys, refreshDMActivity } from "./queries/useDMChannels";
+import type { DMConversation } from "../types";
 
 // Each waiter keeps its own cursor in the core, so a loop left parked across a sign-out sees
 // the same notes as the new one and can never take them from it.
@@ -44,6 +46,16 @@ export function usePersistedFeed(userId: string | null) {
           void queryClient.invalidateQueries({ queryKey: messageQueryKeys.all, refetchType: "all" });
         }
         refreshStoredConversations(queryClient, got.conversationIds);
+        // A message stored in a DM, sent or received, by any path, moves it to the top (#1838).
+        const listed = (
+          queryClient.getQueryData<DMConversation[]>(dmQueryKeys.channels(userId)) ?? []
+        ).map((d) => d.id);
+        const stored = new Set(got.conversationIds);
+        void refreshDMActivity(
+          queryClient,
+          userId,
+          got.everything ? listed : listed.filter((id) => stored.has(id)),
+        );
       }
     })();
     return () => {

@@ -263,6 +263,13 @@ messages read by the peer show ONE tick, on the newest (the row's label ends
 ", Read by everyone"); the peer's reply carries none and does not move it; a
 third message read by the peer takes the tick from the second.
 
+**DM order (automated, #1838):** `mobile/scripts/maestro-dm-order.sh <device>`
+— one device plus two `live_message_peer`s. The device opens a DM with peer A,
+then with peer B (`two-client/dm-order/1-open-dms.yaml`); on the Direct list B,
+the newest, is above A; A replies and its row moves above B while the list is on
+screen (received); the device sends into B and, back on the list, B is on top
+again (sent) — `2-order.yaml`, a screenshot at each step.
+
 **Device outside the tree (automated, #1571):** `mobile/scripts/maestro-device-outside-tree.sh <device>`
 — one device plus two dev-DS peers (`pollis-tui`'s `outside_tree_peer`, roles
 `owner` and `creator`). The owner signs up as the account's first device; the

@@ -14,6 +14,8 @@ pub struct DmChannel {
     pub id: String,
     pub created_by: String,
     pub created_at: String,
+    /// The newest local message's `sent_at`, else `created_at` (#1838): the list's sort key.
+    pub last_activity_at: String,
     pub members: Vec<DmChannelMember>,
 }
 
@@ -31,6 +33,7 @@ fn dm_from_wire(d: pollis_api::directory::DmChannelWire) -> DmChannel {
     DmChannel {
         id: d.id,
         created_by: d.created_by,
+        last_activity_at: d.created_at.clone(),
         created_at: d.created_at,
         members: d
             .members
@@ -84,6 +87,7 @@ pub async fn create_dm_channel(
             DmChannel {
                 id,
                 created_by,
+                last_activity_at: created_at.clone(),
                 created_at,
                 members: members
                     .into_iter()
@@ -184,11 +188,86 @@ pub async fn list_dm_channels(
         .into_iter()
         .map(dm_from_wire)
         .collect();
+    let dms = order_by_local_activity(state, dms).await;
 
     // Cache DM names for search (#850); the peer's username is only knowable here.
     cache_dms(state, &user_id, &dms).await;
 
     Ok(dms)
+}
+
+/// Newest local `sent_at` per conversation in `ids` (#1838), sent or received, any row kind.
+/// Conversations with no local messages are absent.
+fn latest_sent_at_on(
+    conn: &rusqlite::Connection,
+    ids: &[String],
+) -> Result<std::collections::HashMap<String, String>> {
+    let mut out = std::collections::HashMap::with_capacity(ids.len());
+    for chunk in crate::db::chunk::bind_chunks(ids, 0) {
+        let sql = format!(
+            "SELECT conversation_id, MAX(sent_at) FROM message
+             WHERE conversation_id IN ({}) GROUP BY conversation_id",
+            crate::db::chunk::placeholders(chunk.len(), 1)
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (id, at) = row?;
+            out.insert(id, at);
+        }
+    }
+    Ok(out)
+}
+
+/// A stored timestamp as an instant: RFC 3339, or SQLite's `datetime()` form read as UTC.
+fn parse_instant(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    if let Ok(d) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(d.to_utc());
+    }
+    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
+        .ok()
+        .map(|d| d.and_utc())
+}
+
+/// Stamp each DM's `last_activity_at` from `latest` and sort newest first (#1838).
+///
+/// A DM with no messages sorts by its creation time; ties (and unparseable stamps, last)
+/// break by id descending, so the order is total and rows never swap between reads.
+fn sort_by_activity(
+    mut dms: Vec<DmChannel>,
+    latest: &std::collections::HashMap<String, String>,
+) -> Vec<DmChannel> {
+    for dm in &mut dms {
+        if let Some(at) = latest.get(&dm.id) {
+            dm.last_activity_at = at.clone();
+        }
+    }
+    dms.sort_by(|a, b| {
+        parse_instant(&b.last_activity_at)
+            .cmp(&parse_instant(&a.last_activity_at))
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    dms
+}
+
+/// [`sort_by_activity`] over this device's local messages. With no local DB open the
+/// DMs still list, ordered by creation time.
+async fn order_by_local_activity(state: &Arc<AppState>, dms: Vec<DmChannel>) -> Vec<DmChannel> {
+    let ids: Vec<String> = dms.iter().map(|d| d.id.clone()).collect();
+    let latest = {
+        let guard = state.local_db.lock().await;
+        match guard.as_ref().map(|db| latest_sent_at_on(db.conn(), &ids)) {
+            Some(Ok(latest)) => latest,
+            Some(Err(e)) => {
+                crate::diag!("[dm] activity order: local read failed: {e}");
+                Default::default()
+            }
+            None => Default::default(),
+        }
+    };
+    sort_by_activity(dms, &latest)
 }
 
 /// Mirror the DM list into `conversation_cache`, naming each one after the peer.
@@ -304,6 +383,133 @@ pub async fn leave_dm_channel(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod activity_order_tests {
+    // #1838: the DM list's order, against the local schema.
+    use super::{latest_sent_at_on, sort_by_activity, DmChannel};
+    use rusqlite::Connection;
+
+    fn local_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::local::apply_local_schema(&conn).unwrap();
+        conn
+    }
+
+    fn message(conn: &Connection, id: &str, conversation_id: &str, sender: &str, sent_at: &str) {
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at, received_at)
+             VALUES (?1, ?2, ?3, X'00', 'hi', ?4, ?4)",
+            rusqlite::params![id, conversation_id, sender, sent_at],
+        )
+        .unwrap();
+    }
+
+    fn dm(id: &str, created_at: &str) -> DmChannel {
+        DmChannel {
+            id: id.to_string(),
+            created_by: "me".to_string(),
+            created_at: created_at.to_string(),
+            last_activity_at: created_at.to_string(),
+            members: Vec::new(),
+        }
+    }
+
+    fn order(conn: &Connection, dms: Vec<DmChannel>) -> Vec<String> {
+        let ids: Vec<String> = dms.iter().map(|d| d.id.clone()).collect();
+        let latest = latest_sent_at_on(conn, &ids).unwrap();
+        sort_by_activity(dms, &latest).into_iter().map(|d| d.id).collect()
+    }
+
+    #[test]
+    fn newest_message_sent_or_received_sorts_first() {
+        let conn = local_db();
+        message(&conn, "m1", "dm-old", "peer", "2026-01-01T10:00:00+00:00");
+        // Our own reply is the newest activity anywhere.
+        message(&conn, "m2", "dm-old", "me", "2026-03-01T10:00:00+00:00");
+        message(&conn, "m3", "dm-mid", "peer", "2026-02-01T10:00:00+00:00");
+        message(&conn, "m4", "dm-new", "peer", "2026-01-15T10:00:00+00:00");
+
+        let got = order(
+            &conn,
+            vec![
+                dm("dm-new", "2025-12-03T00:00:00+00:00"),
+                dm("dm-mid", "2025-12-02T00:00:00+00:00"),
+                dm("dm-old", "2025-12-01T00:00:00+00:00"),
+            ],
+        );
+        assert_eq!(got, ["dm-old", "dm-mid", "dm-new"]);
+    }
+
+    #[test]
+    fn a_dm_with_no_messages_sorts_by_its_creation_time() {
+        let conn = local_db();
+        message(&conn, "m1", "dm-chatty", "peer", "2026-01-10T00:00:00+00:00");
+
+        let got = order(
+            &conn,
+            vec![
+                dm("dm-chatty", "2025-01-01T00:00:00+00:00"),
+                dm("dm-empty-new", "2026-02-01T00:00:00Z"),
+                dm("dm-empty-old", "2025-06-01T00:00:00Z"),
+            ],
+        );
+        assert_eq!(got, ["dm-empty-new", "dm-chatty", "dm-empty-old"]);
+    }
+
+    #[test]
+    fn the_stamp_carries_the_newest_message_time() {
+        let conn = local_db();
+        message(&conn, "m1", "dm-a", "peer", "2026-01-10T00:00:00+00:00");
+        message(&conn, "m2", "dm-a", "peer", "2026-01-11T00:00:00+00:00");
+        let ids = vec!["dm-a".to_string(), "dm-b".to_string()];
+        let latest = latest_sent_at_on(&conn, &ids).unwrap();
+        let out = sort_by_activity(
+            vec![dm("dm-a", "2025-01-01T00:00:00Z"), dm("dm-b", "2025-01-02T00:00:00Z")],
+            &latest,
+        );
+        assert_eq!(out[0].last_activity_at, "2026-01-11T00:00:00+00:00");
+        // No messages: the creation time stands.
+        assert_eq!(out[1].last_activity_at, "2025-01-02T00:00:00Z");
+    }
+
+    #[test]
+    fn ties_break_by_id_and_offsets_compare_as_instants() {
+        let conn = local_db();
+        // The same instant written two ways, and a later one in a non-UTC offset.
+        message(&conn, "m1", "dm-a", "peer", "2026-01-01T10:00:00Z");
+        message(&conn, "m2", "dm-b", "peer", "2026-01-01T10:00:00+00:00");
+        message(&conn, "m3", "dm-c", "peer", "2026-01-01T06:00:00-05:00");
+
+        let input = || {
+            vec![
+                dm("dm-a", "2025-01-01T00:00:00Z"),
+                dm("dm-b", "2025-01-01T00:00:00Z"),
+                dm("dm-c", "2025-01-01T00:00:00Z"),
+            ]
+        };
+        let got = order(&conn, input());
+        assert_eq!(got, ["dm-c", "dm-b", "dm-a"]);
+        // Stable across reads whatever order the DS returned.
+        let mut reversed = input();
+        reversed.reverse();
+        assert_eq!(order(&conn, reversed), got);
+    }
+
+    #[test]
+    fn sqlite_datetime_and_unparseable_stamps_still_order() {
+        let conn = local_db();
+        let got = order(
+            &conn,
+            vec![
+                dm("dm-garbage", "not a time"),
+                dm("dm-sqlite", "2026-01-02 00:00:00"),
+                dm("dm-rfc", "2026-01-01T00:00:00Z"),
+            ],
+        );
+        assert_eq!(got, ["dm-sqlite", "dm-rfc", "dm-garbage"]);
+    }
 }
 
 #[cfg(test)]

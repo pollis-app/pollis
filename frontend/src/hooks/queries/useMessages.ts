@@ -14,6 +14,7 @@ import {
   withoutOutboxRows,
   type SendState,
 } from "../../utils/pendingMessages";
+import { activityMs, bumpActivity } from "../../utils/dmActivity";
 
 // Last background ingest per conversation, to debounce channel switching (realtime writes it too).
 const lastIngestAt = new Map<string, number>();
@@ -114,6 +115,8 @@ type RawDmChannel = {
   id: string;
   created_by: string;
   created_at: string;
+  /** Newest local message's `sent_at`, else `created_at` (#1838); the list arrives sorted by it. */
+  last_activity_at: string;
   members: Array<{ user_id: string; username?: string; avatar_url?: string; added_by: string; added_at: string }>;
 };
 
@@ -337,6 +340,12 @@ export function useSendMessage() {
         attachments: attachments ?? [],
       });
     },
+    // A DM moves to the top as the send starts (#1838); the stored row is kept even if it fails.
+    onMutate: (variables) => {
+      if (!variables.channelId && variables.conversationId && currentUser) {
+        bumpDMActivity(queryClient, currentUser.id, variables.conversationId, Date.now());
+      }
+    },
     onSuccess: (newMessage, variables) => {
       const queryKey = variables.channelId
         ? messageQueryKeys.channel(variables.channelId)
@@ -501,13 +510,46 @@ export function useDMConversations() {
               avatar_url: m.avatar_url,
             })),
           created_at: new Date(c.created_at).getTime(),
-          updated_at: new Date(c.created_at).getTime(),
+          // Latest activity (#1838); the core already sorted the list by it.
+          updated_at: activityMs(c.last_activity_at ?? c.created_at),
         };
       });
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
   });
+}
+
+/** Move DM `dmId` up to its activity at `at` (ms) at once (#1838); the next list read agrees. */
+function bumpDMActivity(
+  queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
+  dmId: string,
+  at: number,
+): void {
+  queryClient.setQueryData<DMConversation[]>(
+    messageQueryKeys.dmConversations(userId),
+    (prev) => bumpActivity(prev, dmId, at),
+  );
+}
+
+/** After DM ingests: each one's newest local message, sent or received, sets its place (#1838). One read. */
+export async function refreshDMActivity(
+  queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
+  dmIds: string[],
+): Promise<void> {
+  if (dmIds.length === 0) {
+    return;
+  }
+  try {
+    const rows = await invoke<RawChannelMessage[]>('read_last_messages', { conversationIds: dmIds });
+    for (const row of rows ?? []) {
+      bumpDMActivity(queryClient, userId, row.conversation_id, activityMs(row.sent_at));
+    }
+  } catch (err) {
+    console.warn('[dm] read_last_messages for the DM order failed:', err);
+  }
 }
 
 /** Newest message per conversation, keyed by conversation id. */

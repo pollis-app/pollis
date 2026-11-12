@@ -1,0 +1,75 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DM ORDER (#1838), part 2 of 2. Both peers have accepted; the device is on the
+# Direct list. A row reads "<handle>, <preview>, <time>" (or "<handle>, N unread, …").
+#
+# 1. Newest activity first: B (the last send) sits above A.
+# 2. A replies while the list is on screen: A moves to the top, live, for the
+#    receiver.
+# 3. The device sends into B, now the older one: back on the list, B is on top
+#    again, for the sender.
+
+# Bring the app forward if the wait for the peers left it behind, unlocking if so.
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible: "${PEER_B_HANDLE}, .*"
+    timeout: 15000
+- assertVisible:
+    text: "${PEER_B_HANDLE}, .*"
+    above:
+      text: "${PEER_A_HANDLE}, .*"
+- takeScreenshot: dm-order-01-newest-send-first
+
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_A_PORT}
+      TEXT: "a answers"
+- extendedWaitUntil:
+    visible: ".*a answers.*"
+    timeout: 20000
+- assertVisible:
+    text: "${PEER_A_HANDLE}, .*"
+    above:
+      text: "${PEER_B_HANDLE}, .*"
+- takeScreenshot: dm-order-02-received-moves-to-top
+
+- tapOn:
+    text: "${PEER_B_HANDLE}, .*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 15000
+- tapOn:
+    id: "input-composer"
+- inputText: "b again"
+- hideKeyboard:
+    optional: true
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: b again, .*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible: ".*b again.*"
+    timeout: 10000
+- assertVisible:
+    text: "${PEER_B_HANDLE}, .*"
+    above:
+      text: "${PEER_A_HANDLE}, .*"
+- takeScreenshot: dm-order-03-sent-moves-to-top

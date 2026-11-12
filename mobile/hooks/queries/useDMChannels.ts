@@ -11,6 +11,7 @@ import { dismissConversationNotifications } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { DMConversation } from "../../types";
+import { activityMs, bumpActivity } from "../../lib/dmActivity";
 
 export interface RawDmMember {
   user_id: string;
@@ -23,6 +24,8 @@ export interface RawDmChannel {
   created_by?: string;
   members: RawDmMember[];
   created_at: string;
+  /** Newest local message's `sent_at`, else `created_at` (#1838); the list arrives sorted by it. */
+  last_activity_at?: string;
 }
 
 export const dmQueryKeys = {
@@ -37,16 +40,50 @@ function transform(
   selfId: string,
 ): DMConversation {
   const other = raw.members.find((m) => m.user_id !== selfId);
-  const ts = new Date(raw.created_at).getTime();
   return {
     id: raw.id,
     user1_id: selfId,
     user2_identifier: other?.username || other?.user_id || "Unknown",
     user2_id: other?.user_id,
     user2_avatar_url: other?.avatar_url,
-    created_at: ts,
-    updated_at: ts,
+    created_at: new Date(raw.created_at).getTime(),
+    // Latest activity (#1838); the core already sorted the list by it.
+    updated_at: activityMs(raw.last_activity_at ?? raw.created_at),
   };
+}
+
+/** Move DM `dmId` up to its activity at `at` (ms) at once (#1838); the next list read agrees. */
+export function bumpDMActivity(
+  queryClient: QueryClient,
+  userId: string,
+  dmId: string,
+  at: number,
+): void {
+  queryClient.setQueryData<DMConversation[]>(dmQueryKeys.channels(userId), (prev) =>
+    bumpActivity(prev, dmId, at),
+  );
+}
+
+/** After DM ingests: each one's newest local message, sent or received, sets its place (#1838). One read. */
+export async function refreshDMActivity(
+  queryClient: QueryClient,
+  userId: string,
+  dmIds: string[],
+): Promise<void> {
+  if (dmIds.length === 0) {
+    return;
+  }
+  try {
+    const rows = await invoke<{ conversation_id: string; sent_at: string }[]>(
+      "read_last_messages",
+      { conversationIds: dmIds },
+    );
+    for (const row of rows ?? []) {
+      bumpDMActivity(queryClient, userId, row.conversation_id, activityMs(row.sent_at));
+    }
+  } catch (e) {
+    console.warn("[dm] read_last_messages for the DM order failed:", e);
+  }
 }
 
 export function useDMChannels() {

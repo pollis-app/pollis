@@ -1594,8 +1594,30 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return out;
     }
 
-    case 'list_dm_channels':
-      return store.dmChannels;
+    // #1838: the core's order — newest local message, else creation time; ties by id.
+    case 'list_dm_channels': {
+      const stamped = store.dmChannels.map((dm) => {
+        const msgs = store.messages[dm.id] ?? [];
+        const stamp = (v: string | number) =>
+          typeof v === 'number' ? new Date(v * 1000).toISOString() : v;
+        const newest = msgs.reduce<string | null>((best, m) => {
+          const t = stamp(m.sent_at);
+          return best === null || Date.parse(t) > Date.parse(best) ? t : best;
+        }, null);
+        return { ...dm, last_activity_at: newest ?? dm.created_at };
+      });
+      const at = (s: string) => {
+        const ms = Date.parse(s);
+        return Number.isFinite(ms) ? ms : 0;
+      };
+      return stamped.sort((a, b) => {
+        const d = at(b.last_activity_at) - at(a.last_activity_at);
+        if (d !== 0) {
+          return d;
+        }
+        return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+      });
+    }
 
     case 'get_safety_number': {
       const { peerUserId } = args as { peerUserId: string };
