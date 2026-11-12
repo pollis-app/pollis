@@ -7,6 +7,11 @@ export const deriveSlug = (name: string): string => {
     .replace(/^-|-$/g, ""); // Remove leading/trailing hyphens
 };
 
+/** The slug a create form submits: the typed one once the user edited it, else derived from the name; trimmed. */
+export function resolveSlug(name: string, slug: string, slugEdited: boolean): string {
+  return (slugEdited ? slug : deriveSlug(name)).trim();
+}
+
 // Permalinks (#854) are pointers, not capabilities: `pollis://m/<conversation_id>/<message_id>`, resolved only against the local DB.
 
 const PERMALINK_PREFIX = "pollis://m/";

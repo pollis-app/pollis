@@ -1,4 +1,4 @@
-import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { invoke } from "../../bridge";
 import * as api from "../../services/api";
@@ -30,6 +30,18 @@ export const groupQueryKeys = {
   inviteLinks: (groupId: string) => ["group-invite-links", groupId] as const,
   mutedChannels: (userId: string | null) => ["groups", "muted-channels", userId] as const,
 };
+
+/** A group's own fields changed: the group list and the groups-with-channels tree. */
+function invalidateGroupLists(queryClient: QueryClient, userId: string | null) {
+  queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroups(userId) });
+  queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(userId) });
+}
+
+/** A group's channel set changed: its channel list and the groups-with-channels tree. */
+function invalidateChannelLists(queryClient: QueryClient, groupId: string, userId: string | null) {
+  queryClient.invalidateQueries({ queryKey: groupQueryKeys.channels(groupId) });
+  queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(userId) });
+}
 
 /** Channels this account muted (#1431), held on the DS for the whole account. */
 export function useMutedChannels() {
@@ -215,12 +227,7 @@ export function useUpdateGroup() {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
-      });
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
-      });
+      invalidateGroupLists(queryClient, currentUser?.id ?? null);
     },
   });
 }
@@ -295,12 +302,7 @@ export function useCreateChannel() {
         updated_at: 0,
       };
 
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.channels(variables.groupId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
-      });
+      invalidateChannelLists(queryClient, variables.groupId, currentUser?.id ?? null);
 
       queryClient.setQueryData<Channel[]>(
         groupQueryKeys.channels(variables.groupId),
@@ -340,12 +342,7 @@ export function useUpdateChannel() {
       });
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.channels(variables.groupId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
-      });
+      invalidateChannelLists(queryClient, variables.groupId, currentUser?.id ?? null);
     },
   });
 }
@@ -362,12 +359,7 @@ export function useDeleteChannel() {
       await invoke('delete_channel', { channelId, requesterId: currentUser.id });
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.channels(variables.groupId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
-      });
+      invalidateChannelLists(queryClient, variables.groupId, currentUser?.id ?? null);
     },
   });
 }
@@ -384,12 +376,7 @@ export function useLeaveGroup() {
       await invoke("leave_group", { groupId, userId: currentUser.id });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
-      });
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
-      });
+      invalidateGroupLists(queryClient, currentUser?.id ?? null);
     },
   });
 }
@@ -718,7 +705,7 @@ export function useGroupJoinRequests(groupId: string | null) {
   });
 }
 
-export function useApproveJoinRequest() {
+function useJoinRequestDecision(command: 'approve_join_request' | 'reject_join_request') {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
 
@@ -727,7 +714,7 @@ export function useApproveJoinRequest() {
       if (!currentUser) {
         throw new Error('No current user');
       }
-      await invoke('approve_join_request', { requestId, approverId: currentUser.id });
+      await invoke(command, { requestId, approverId: currentUser.id });
       return groupId;
     },
     onSuccess: (groupId) => {
@@ -737,23 +724,12 @@ export function useApproveJoinRequest() {
   });
 }
 
-export function useRejectJoinRequest() {
-  const queryClient = useQueryClient();
-  const currentUser = useObserver(() => appStore.currentUser);
+export function useApproveJoinRequest() {
+  return useJoinRequestDecision('approve_join_request');
+}
 
-  return useMutation({
-    mutationFn: async ({ requestId, groupId }: { requestId: string; groupId: string }) => {
-      if (!currentUser) {
-        throw new Error('No current user');
-      }
-      await invoke('reject_join_request', { requestId, approverId: currentUser.id });
-      return groupId;
-    },
-    onSuccess: (groupId) => {
-      // This key also feeds the cross-group aggregate (#874).
-      queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
-    },
-  });
+export function useRejectJoinRequest() {
+  return useJoinRequestDecision('reject_join_request');
 }
 
 /** Pending join requests across the groups the user admins, over the per-group keys (#874). */

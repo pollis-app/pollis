@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck, Clock, AlertTriangle, ShieldQuestion } from "lucide-react";
 import { shellOpen } from "../../bridge";
 import type { BuildVerifyStatus } from "../../types";
+import { SecurityStatusLine } from "./SecurityStatusLine";
 
 interface BuildVerifyLineProps {
   status: BuildVerifyStatus;
@@ -53,43 +54,28 @@ export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
   const showReason = status === "mismatch" || status === "unavailable";
 
   return (
-    <div
-      data-testid={testId}
-      data-status={status}
-      className="flex flex-col gap-1"
+    <SecurityStatusLine
+      testId={testId}
+      status={status}
+      icon={icon}
+      label={t(labelKey)}
+      color={color}
+      reason={showReason && detail}
     >
-      <span
-        className="inline-flex items-center gap-1 text-2xs font-mono"
-        style={{ color }}
-      >
-        {icon}
-        {t(labelKey)}
-      </span>
-      {/* Reason plus the verify-guide link. */}
+      {/* The verify-guide link, under the reason. */}
       {showReason && (
-        <>
-          {detail && (
-            <span
-              data-testid={`${testId}-reason`}
-              className="text-2xs font-mono"
-              style={{ color }}
-            >
-              {detail}
-            </span>
-          )}
-          <button
-            type="button"
-            data-testid={`${testId}-learn-more`}
-            className="text-2xs font-mono underline self-start"
-            style={{ color }}
-            onClick={() => {
-              void shellOpen(VERIFY_DOCS_URL);
-            }}
-          >
-            {t("security.buildVerifyGuideLink")}
-          </button>
-        </>
+        <button
+          type="button"
+          data-testid={`${testId}-learn-more`}
+          className="text-2xs font-mono underline self-start"
+          style={{ color }}
+          onClick={() => {
+            void shellOpen(VERIFY_DOCS_URL);
+          }}
+        >
+          {t("security.buildVerifyGuideLink")}
+        </button>
       )}
-    </div>
+    </SecurityStatusLine>
   );
 };

@@ -22,6 +22,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::error::{Error, Result};
 use crate::state::AppState;
+use pollis_device_cert::constant_time_eq;
 
 /// 10 minutes: long enough to walk to the other device, short enough to bound exposure.
 const ENROLLMENT_TTL_SECS: i64 = 10 * 60;
@@ -950,17 +951,6 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
     }
 
     Ok(())
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 #[cfg(test)]

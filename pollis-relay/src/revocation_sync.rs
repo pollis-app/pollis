@@ -15,6 +15,7 @@
 //! It fetches directly (never through the overlay) and stores nothing on disk.
 
 use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use crate::backoff::jittered;
@@ -50,10 +51,10 @@ pub fn backoff_after(failures: u32) -> Duration {
     Duration::from_millis(millis as u64)
 }
 
-/// Fetch the signed revocation list once and install it.
-///
-/// Returns the accepted sequence number; no failure mutates the held list.
-pub async fn refresh_once(store: &RevocationStore, url: &str) -> anyhow::Result<u64> {
+/// Fetch one signed artifact (`what` names it in errors) directly, within
+/// [`FETCH_TIMEOUT`] and at most [`MAX_ARTIFACT_BYTES`]. Shared with
+/// [`crate::nexthop::refresh_once`].
+pub(crate) async fn fetch_signed_artifact(url: &str, what: &str) -> anyhow::Result<Vec<u8>> {
     let client = crate::http::http_client(None);
     let response = client
         .get(url)
@@ -70,10 +71,32 @@ pub async fn refresh_once(store: &RevocationStore, url: &str) -> anyhow::Result<
         .map_err(|e| anyhow::anyhow!("read {url}: {e}"))?;
     if bytes.len() > MAX_ARTIFACT_BYTES {
         return Err(anyhow::anyhow!(
-            "revocation list from {url} is {} bytes, over the {MAX_ARTIFACT_BYTES} cap",
+            "{what} from {url} is {} bytes, over the {MAX_ARTIFACT_BYTES} cap",
             bytes.len()
         ));
     }
+    Ok(bytes.to_vec())
+}
+
+/// Sleep out the jittered backoff for `failures`; `true` when `shutdown`
+/// resolved first and the refresh loop should stop.
+pub(crate) async fn backoff_or_shutdown<F: Future<Output = ()>>(
+    shutdown: Pin<&mut F>,
+    failures: u32,
+) -> bool {
+    let delay = jittered(backoff_after(failures));
+    tokio::select! {
+        biased;
+        _ = shutdown => true,
+        _ = tokio::time::sleep(delay) => false,
+    }
+}
+
+/// Fetch the signed revocation list once and install it.
+///
+/// Returns the accepted sequence number; no failure mutates the held list.
+pub async fn refresh_once(store: &RevocationStore, url: &str) -> anyhow::Result<u64> {
+    let bytes = fetch_signed_artifact(url, "revocation list").await?;
     // Floor 0: relays do not consume the directory; the store's high-water mark still blocks rollback.
     let seq = store.install(&bytes, proto::now_unix(), 0)?;
     Ok(seq)
@@ -115,13 +138,8 @@ where
                     tracing::warn!("revocation refresh failed ({failures} in a row): {e}");
                 }
             }
-            let delay = jittered(backoff_after(failures));
-            tokio::select! {
-                biased;
-                _ = &mut shutdown => {
-                    break;
-                }
-                _ = tokio::time::sleep(delay) => {}
+            if backoff_or_shutdown(shutdown.as_mut(), failures).await {
+                break;
             }
         }
     }))

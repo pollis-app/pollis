@@ -60,7 +60,7 @@ Rules that follow from it:
 
 - **The client and the DS share only through `pollis-api` (wire types), `pollis-schema` (migrations) and `pollis-device-cert`.** `pollis-core` never depends on `pollis-delivery`, and the DS never on `pollis-core`. A helper both need moves to one of those shared leaves, or stays duplicated.
 - **`pollis-core` does not depend on `libsql`** (#987; the client holds no database credential). Only `pollis-delivery` and `verifiable-log-builder` reach libsql, both through `pollis-libsql-connector` (#1303).
-- **Never add a dependency edge just to reuse a helper.** Move the helper to a crate both sides already depend on, or leave the copy and say why in the PR.
+- **Never add a dependency edge just to reuse a helper.** Move the helper to a crate both sides already depend on, or leave the copy and say why in the PR. Example: `constant_time_eq`, once copied five times across `pollis-core` and `pollis-delivery`, lives in `pollis-device-cert`, a leaf both already depend on (#1731).
 - `src-tauri` is a thin shim layer: logic lives in `pollis-core` (CLAUDE.md "Command path"), so a helper in `src-tauri` that `pollis-core` also needs belongs in `pollis-core`.
 - The capture helpers are separate processes; they share only `pollis-capture-proto`.
 - `fuzz/` and `patches/openmls-sqlite-storage`, `patches/sqlcipher-src` are excluded from the workspace (`Cargo.toml` `exclude`).
@@ -68,7 +68,7 @@ Rules that follow from it:
 ## website/
 
 - Static HTML, CSS and JavaScript uploaded as-is (`.github/workflows/website-deploy.yml` runs `wrangler pages deploy website`, no build step). There is no bundler and no template engine.
-- **Reuse means a shared file each page includes:** `styles.css` and `doc-page.css` for styles, `script.js` (the site-wide script). Page-specific logic stays in the page's own file (`artifacts.js`, `transparency.js`, `assurance.js`, `learn.js`, `verify-downloads.js`).
+- **Reuse means a shared file each page includes:** `styles.css` and `doc-page.css` for styles, `script.js` (the site-wide script), `copy.js` (every copy-to-clipboard button: `data-copy` / `data-copy-from`, tested by `scripts/test-website-copy.mjs`). Page-specific logic stays in the page's own file (`artifacts.js`, `transparency.js`, `assurance.js`, `learn.js`, `verify-downloads.js`).
 - **Page chrome is repeated by design.** The `<head>`, nav and footer appear in every page because there is no include mechanism. That repetition is in the clone baseline; do not inject chrome with JavaScript to remove it (it would make the pages depend on scripts to render their own navigation).
 - `website/artifacts.js` also carries the pinned transparency-log key, one of the copies `scripts/check-pinned-log-key.py` holds equal to `pollis-core`'s constant. Those copies are deliberate (each audience reads its own), not duplication.
 

@@ -51,10 +51,7 @@ const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onCh
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={selectClass}
-        style={selectStyle}
-        onFocus={(e) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; }}
-        onBlur={(e) => { e.currentTarget.style.borderColor = "var(--c-border)"; }}
+        {...selectSkin}
       >
         {devices.length === 0 ? (
           <option value="default">{fallbackLabel}</option>
@@ -98,10 +95,7 @@ const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, 
         <select
           value={value}
           onChange={(e) => onChange(e.target.value as NoiseSuppressionLevel)}
-          className={selectClass}
-          style={selectStyle}
-          onFocus={(e) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = "var(--c-border)"; }}
+          {...selectSkin}
         >
           {NOISE_SUPPRESSION_LEVELS.map((level) => (
             <option key={level} value={level}>
@@ -209,6 +203,14 @@ const selectStyle: React.CSSProperties = {
   cursor: "pointer",
   borderRadius: "0.5rem",
   width: "100%",
+};
+
+// Both selects' skin, plus the border that marks focus.
+const selectSkin = {
+  className: selectClass,
+  style: selectStyle,
+  onFocus: (e: React.FocusEvent<HTMLSelectElement>) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; },
+  onBlur: (e: React.FocusEvent<HTMLSelectElement>) => { e.currentTarget.style.borderColor = "var(--c-border)"; },
 };
 
 /** Push the live APM config; a no-op outside a call. */

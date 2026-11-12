@@ -180,43 +180,32 @@ pub(super) async fn deliver_queued(
         None => super::framing::pad(content.as_bytes()),
     };
 
-    let (sealed, sent_at) = {
-        // #1079: serialize behind any committer on this device before sealing —
-        // see `seal::seal_under_lock`. Taken before `local_db` (reconcile's and
-        // self_update's order) and dropped with this block, before the post's
-        // own catch-up can want it.
-        let mls_guard = state.mls_group_lock(&mls_group_id).await?;
-        let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-
-        let sealed = super::seal::seal_under_lock(
-            db.conn(),
-            &mls_group_id,
-            &conversation_id,
-            &plaintext,
-            &held,
-        )?;
+    // #1079: serialize behind any committer on this device before sealing — see
+    // `seal::seal_under_lock`; released before the post's own catch-up can want it.
+    let (sealed, sent_at) = super::seal::with_sealing_lock(state, &mls_group_id, |conn, held| {
+        let sealed =
+            super::seal::seal_under_lock(conn, &mls_group_id, &conversation_id, &plaintext, held)?;
 
         // `sent_at` refreshes per attempt until the first seal, then stays fixed (the DS may hold it).
         // Never earlier than the stored stamp, and later rows stay behind it (#1636).
-        let never_sealed: bool = db.conn().query_row(
+        let never_sealed: bool = conn.query_row(
             "SELECT length(ciphertext) = 0 FROM message WHERE id = ?1",
             rusqlite::params![id],
             |row| row.get(0),
         )?;
         let sent_at = if never_sealed {
-            super::outbox::restamp_on(db.conn(), &id, &conversation_id, &sent_at, chrono::Utc::now())?
+            super::outbox::restamp_on(conn, &id, &conversation_id, &sent_at, chrono::Utc::now())?
         } else {
             sent_at
         };
-        db.conn().execute(
+        conn.execute(
             "UPDATE message SET ciphertext = ?1, sent_at = ?2 WHERE id = ?3",
             rusqlite::params![sealed.bytes, sent_at, id],
         )?;
 
-        (sealed, sent_at)
-    };
+        Ok((sealed, sent_at))
+    })
+    .await?;
 
     // Mentions (#843) resolve against this channel's roster only, before the post carries the push audience.
     let members: Vec<(String, String)> = if is_channel {

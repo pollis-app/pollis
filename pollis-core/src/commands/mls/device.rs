@@ -15,6 +15,31 @@ use crate::state::AppState;
 
 use super::provider::{MlsProvider, PollisProvider};
 
+/// The device's stable signer for `suite` and the credential (`user_id:device_id`)
+/// bound to its public key: what every leaf this device builds is signed with.
+pub(super) fn device_signer_with_credential<C>(
+    provider: &MlsProvider<'_, C>,
+    user_id: &str,
+    device_id: &str,
+    suite: openmls::prelude::Ciphersuite,
+) -> crate::error::Result<(SignatureKeyPair, openmls::prelude::CredentialWithKey)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let scheme = super::provider::signature_scheme(suite);
+    let (sig_keys, sig_pub_bytes) =
+        load_or_create_device_signer(provider, user_id, device_id, scheme)?;
+
+    let credential = super::provider::make_credential(user_id, device_id);
+    let sig_pub = openmls::prelude::OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), scheme)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+    let cred_with_key = openmls::prelude::CredentialWithKey {
+        credential,
+        signature_key: sig_pub.into(),
+    };
+    Ok((sig_keys, cred_with_key))
+}
+
 /// Custom scope in `mls_kv` that stores the stable per-device MLS
 /// signature public-key bytes. The private side is held by openmls under
 /// its own `SignatureKeyPair` scope, looked up by these same bytes.

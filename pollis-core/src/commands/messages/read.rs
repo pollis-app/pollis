@@ -37,15 +37,7 @@ pub async fn list_messages(
 
         let rows = stmt.query_map(
             rusqlite::params![conversation_id, before_time, limit],
-            |row| Ok(Message {
-                id: row.get(0)?,
-                conversation_id: row.get(1)?,
-                sender_id: row.get(2)?,
-                content: row.get(3)?,
-                reply_to_id: row.get(4)?,
-                thread_id: row.get(5)?,
-                sent_at: row.get(6)?,
-            }),
+            row_to_message,
         )?;
 
         rows.filter_map(|r| r.ok()).collect()
@@ -57,18 +49,7 @@ pub async fn list_messages(
              ORDER BY sent_at DESC LIMIT ?2"
         )?;
 
-        let rows = stmt.query_map(
-            rusqlite::params![conversation_id, limit],
-            |row| Ok(Message {
-                id: row.get(0)?,
-                conversation_id: row.get(1)?,
-                sender_id: row.get(2)?,
-                content: row.get(3)?,
-                reply_to_id: row.get(4)?,
-                thread_id: row.get(5)?,
-                sent_at: row.get(6)?,
-            }),
-        )?;
+        let rows = stmt.query_map(rusqlite::params![conversation_id, limit], row_to_message)?;
 
         rows.filter_map(|r| r.ok()).collect()
     };
@@ -90,7 +71,18 @@ pub async fn get_channel_messages(
 
     ingest_channel_envelopes_inner(state, &user_id, &channel_id).await?;
 
-    let mut messages = read_local_channel_page(state, &channel_id, &cursor, limit).await?;
+    read_local_page(state, &channel_id, &cursor, limit).await
+}
+
+/// A local page of `conversation_id` with sender names hydrated, plus the cursor to the
+/// next (older) page when this one came back full.
+async fn read_local_page(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    cursor: &Option<MessageCursor>,
+    limit: i64,
+) -> Result<MessagePage> {
+    let mut messages = read_local_channel_page(state, conversation_id, cursor, limit).await?;
     hydrate_rows(state, &mut messages).await?;
 
     let next_cursor = if messages.len() == limit as usize {
@@ -103,6 +95,20 @@ pub async fn get_channel_messages(
     };
 
     Ok(MessagePage { messages, next_cursor })
+}
+
+/// Map a `message` row selected as
+/// `id, conversation_id, sender_id, content, reply_to_id, thread_id, sent_at` to a [`Message`].
+fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<Message> {
+    Ok(Message {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        sender_id: row.get(2)?,
+        content: row.get(3)?,
+        reply_to_id: row.get(4)?,
+        thread_id: row.get(5)?,
+        sent_at: row.get(6)?,
+    })
 }
 
 /// Map a `message` row to a [`ChannelMessage`].
@@ -264,19 +270,7 @@ pub async fn read_channel_messages(
     state: &Arc<AppState>,
 ) -> Result<MessagePage> {
     let limit = limit.unwrap_or(50);
-    let mut messages = read_local_channel_page(state, &channel_id, &cursor, limit).await?;
-    hydrate_rows(state, &mut messages).await?;
-
-    let next_cursor = if messages.len() == limit as usize {
-        messages.last().map(|m| MessageCursor {
-            sent_at: m.sent_at.clone(),
-            id: m.id.clone(),
-        })
-    } else {
-        None
-    };
-
-    Ok(MessagePage { messages, next_cursor })
+    read_local_page(state, &channel_id, &cursor, limit).await
 }
 
 /// Local-only read of a DM page. Mirrors `read_channel_messages`.
@@ -287,19 +281,7 @@ pub async fn read_dm_messages(
     state: &Arc<AppState>,
 ) -> Result<MessagePage> {
     let limit = limit.unwrap_or(50);
-    let mut messages = read_local_channel_page(state, &dm_channel_id, &cursor, limit).await?;
-    hydrate_rows(state, &mut messages).await?;
-
-    let next_cursor = if messages.len() == limit as usize {
-        messages.last().map(|m| MessageCursor {
-            sent_at: m.sent_at.clone(),
-            id: m.id.clone(),
-        })
-    } else {
-        None
-    };
-
-    Ok(MessagePage { messages, next_cursor })
+    read_local_page(state, &dm_channel_id, &cursor, limit).await
 }
 
 /// Bound-parameter chunk size, well under older SQLite's 999-variable limit.
@@ -413,19 +395,7 @@ pub async fn get_dm_messages(
 
     ingest_dm_envelopes_inner(state, &user_id, &dm_channel_id).await?;
 
-    let mut messages = read_local_channel_page(state, &dm_channel_id, &cursor, limit).await?;
-    hydrate_rows(state, &mut messages).await?;
-
-    let next_cursor = if messages.len() == limit as usize {
-        messages.last().map(|m| MessageCursor {
-            sent_at: m.sent_at.clone(),
-            id: m.id.clone(),
-        })
-    } else {
-        None
-    };
-
-    Ok(MessagePage { messages, next_cursor })
+    read_local_page(state, &dm_channel_id, &cursor, limit).await
 }
 
 /// A page of a conversation centred on one message (#850).

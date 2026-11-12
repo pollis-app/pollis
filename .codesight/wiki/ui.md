@@ -804,7 +804,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**196 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**204 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -823,9 +823,11 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TypingIndicator** — props: channelId, conversationId — `frontend/src/components/TypingIndicator.tsx`
 - **UpdateScreen** — `frontend/src/components/UpdateScreen.tsx`
 
-### `components/Auth` (9)
+### `components/Auth` (12)
 
+- **AuthCard** — `frontend/src/components/Auth/AuthCard.tsx`. The narrow (360) centred card of the sign-in and PIN screens (#1731).
 - **AuthError** — props: message — `frontend/src/components/Auth/AuthError.tsx`
+- **BackdropScreen** — props: backdropOpacity, backdropSpeed, children — `frontend/src/components/Auth/BackdropScreen.tsx`. Full-window pre-app shell: dot-matrix backdrop + `TitleBar`; used by the sign-in, PIN, secret-key and enrollment screens and `App.tsx`'s logout / identity-setup states (#1731).
 - **EmailOTPAuth** — props: onSuccess, prefillEmail, prefillNonce, onStepChange — `frontend/src/components/Auth/EmailOTPAuth.tsx`
 - **EnrollmentApprovalPrompt** — props: requestId, newDeviceId, onResolved — `frontend/src/components/Auth/EnrollmentApprovalPrompt.tsx`
 - **EnrollmentGateScreen** — props: linked, userId, userEmail, onEnrolled, onCancel, onResetComplete — `frontend/src/components/Auth/EnrollmentGateScreen.tsx`
@@ -833,6 +835,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **OfferCode** — props: deviceName, onSignedIn — `frontend/src/components/Auth/OfferCode.tsx`
 - **PinCreateScreen** — props: oldPin, onCreated, onCancel, headline, subline — `frontend/src/components/Auth/PinCreateScreen.tsx`
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
+- **PinField** — props: value, onChange, disabled — `frontend/src/components/Auth/PinField.tsx`. Masked 4-digit `InputOtp` + hidden e2e mirror input; shared by `PinCreateScreen`, `PinEntryScreen`, `ChangePinPage` (#1731).
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`
 
 ### `components/Diagnostics` (2)
@@ -899,9 +902,10 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SensitiveCover** — `frontend/src/components/Media/SensitiveCover.tsx`
 - **SensitiveHideButton** — `frontend/src/components/Media/SensitiveHideButton.tsx`
 
-### `components/Message` (21)
+### `components/Message` (22)
 
 - **AttachmentDisplay** — props: attachment, tile, testId, roll — `frontend/src/components/Message/AttachmentDisplay.tsx`
+- **DownloadStatusIcon** — props: status — `frontend/src/components/Message/DownloadStatusIcon.tsx`. Download / spinner / check glyph of `AttachmentDisplay`'s download buttons (#1731).
 - **KeyChangeNoticeRow** — props: noticeId, peerUserId, peerLabel, at, skin, onVerify — `frontend/src/components/Message/KeyChangeNoticeRow.tsx`
 - **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`. Inline previews for image/video URLs found in message text. **Every host is click-to-load, with no allowlist.** Painting `<img src>` from message text makes merely opening a message fetch from a host the SENDER chose — a read receipt and an IP disclosure in one, from any message including an unaccepted DM request. There was an exception for `cdn.pollis.com`; it is gone, because the hostname comes out of the message (so the sender picks what the check is run against, and the path was never checked at all) and because a webview image request is the renderer's own, not `http_client`'s, so it cannot ride the relay overlay. The reveal is per-URL and deliberately not remembered.
@@ -923,8 +927,9 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **UndecryptableMessage** — props: message, skin — `frontend/src/components/Message/UndecryptableMessage.tsx`
 - **UnsentMessageActions** — props: message — `frontend/src/components/Message/UnsentMessageActions.tsx`. "[Not sent]", one line on why (`unsentReason`: the outbox will resend a `failed` row; a `rejected` or never-stored one "couldn't be delivered", #1668), then Retry / Discard beside an own message the durable outbox has not delivered (#1335), rendered by both skins' `MessageItem` and by the thread panel's `ThreadMessageRow`; Retry is absent when the send failed before the core stored it (an upload). Mobile's counterpart is `mobile/components/chat/UnsentActions.tsx`.
 
-### `components/Preferences` (2)
+### `components/Preferences` (3)
 
+- **HexColorField** — props: color, hexInput, onHexInputChange, onColor, title, swatchStyle — `frontend/src/components/Preferences/HexColorField.tsx`. Swatch + hex box of the accent and background rows in `PreferencesPage` (#1731).
 - **LanguageSection** — props: userId — `frontend/src/components/Preferences/LanguageSection.tsx`
 - **RelayServingSection** — props: config, status, applyError, onChange — `frontend/src/components/Preferences/RelayServingSection.tsx`
 
@@ -937,17 +942,19 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ResultThumbnails** — `frontend/src/components/Search/ResultThumbnails.tsx`
 - **SearchView** — props: onOpenResult, onOpenRetentionSettings, initialQuery — `frontend/src/components/Search/SearchView.tsx`
 
-### `components/Security` (4)
+### `components/Security` (5)
 
 - **AccountKeyAuditLine** — props: status, detail, testId — `frontend/src/components/Security/AccountKeyAuditLine.tsx`
 - **BuildVerifyLine** — props: status, detail, testId — `frontend/src/components/Security/BuildVerifyLine.tsx`
 - **ExportArchiveButton** — `frontend/src/components/Security/ExportArchiveButton.tsx`
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
+- **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
-### `components/ui` (33)
+### `components/ui` (35)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
+- **BackMenu** — props: items, onBack — `frontend/src/components/ui/BackMenu.tsx`. `TerminalMenu` ending in "Go back" (Esc too); `DMs`, `Groups`, `Group` (#1731).
 - **Button** — props: children, onClick, disabled, isLoading, loadingText, className, variant, size, type, onKeyDown, onPointerEnter, onFocus, autoFocus, activateOn — `frontend/src/components/ui/Button.tsx`. Mobile's `Button` (`mobile/components/ui.tsx`) takes `loading`: disabled, spinner in place of its icons (`<testID>-busy`), announced busy. Slow submits pair it with `mobile/hooks/useSubmitLock.ts`, which claims the action synchronously so a double tap cannot submit twice (pinned by `mobile/tests/busy-feedback.test.ts`).
 - **Card** — props: children, className, style, padding — `frontend/src/components/ui/Card.tsx`
 - **ChatInput** — props: onSend, placeholder, disabled, autoFocus, className, maxAttachments, onValueChange, draftKey, canNotifyAll, onHistoryUp — `frontend/src/components/ui/ChatInput.tsx`
@@ -974,6 +981,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
 - **RichTextInput** — props: value, onChange, onSelectionChange, onKeyDown, onPaste, onFocus, onBlur, placeholder, disabled, autoFocus, className, style, ariaLabel, testId, ghost, ghostTestId, ghostClassName — `frontend/src/components/ui/RichTextInput.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
+- **SuggestList** — props: items, activeIndex, query, testId, label, matchingKey, itemKey, optionTestId, renderItem, onSelect, onHover — `frontend/src/components/ui/SuggestList.tsx`. Generic composer autocomplete shell behind `EmojiSuggestList` and `MentionSuggestList` (#1731).
 - **Switch** — props: label, checked, onChange, disabled, className, id, description — `frontend/src/components/ui/Switch.tsx`
 - **TerminalMenu** — props: items, onEsc, className, autoFocus — `frontend/src/components/ui/TerminalMenu.tsx`
 - **TextArea** — props: label, value, onChange, placeholder, description, error, disabled, rows, className, id, onKeyDown — `frontend/src/components/ui/TextArea.tsx`

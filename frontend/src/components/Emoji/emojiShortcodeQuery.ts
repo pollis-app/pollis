@@ -31,17 +31,32 @@ function opensAt(text: string, index: number): boolean {
   return index === 0 || /\s/.test(text[index - 1]);
 }
 
-/** The unterminated shortcode right before the caret, or null. */
-export function shortcodeQueryAt(text: string, caret: number): ShortcodeQuery | null {
-  let i = caret;
+/** Where the run of shortcode-body characters ending at `end` starts. */
+function bodyStart(text: string, end: number): number {
+  let i = end;
   while (i > 0 && SHORTCODE_BODY.test(text[i - 1])) {
     i -= 1;
   }
+  return i;
+}
+
+/** The `:` just before a body starting at `i`, when it opens a shortcode; else null. */
+function openingColon(text: string, i: number): number | null {
   if (i === 0 || text[i - 1] !== ":") {
     return null;
   }
   const colon = i - 1;
   if (!opensAt(text, colon)) {
+    return null;
+  }
+  return colon;
+}
+
+/** The unterminated shortcode right before the caret, or null. */
+export function shortcodeQueryAt(text: string, caret: number): ShortcodeQuery | null {
+  const i = bodyStart(text, caret);
+  const colon = openingColon(text, i);
+  if (colon === null) {
     return null;
   }
   return { start: colon, end: caret, query: text.slice(i, caret).toLowerCase() };
@@ -58,18 +73,12 @@ export function completedShortcodeAt(text: string, caret: number): CompletedShor
   if (caret <= 0 || text[caret - 1] !== ":") {
     return null;
   }
-  let i = caret - 1;
-  while (i > 0 && SHORTCODE_BODY.test(text[i - 1])) {
-    i -= 1;
-  }
+  const i = bodyStart(text, caret - 1);
   if (i === caret - 1) {
     return null;
   }
-  if (i === 0 || text[i - 1] !== ":") {
-    return null;
-  }
-  const colon = i - 1;
-  if (!opensAt(text, colon)) {
+  const colon = openingColon(text, i);
+  if (colon === null) {
     return null;
   }
   return { start: colon, end: caret, name: text.slice(i, caret - 1).toLowerCase() };

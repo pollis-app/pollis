@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Play, Pause } from "lucide-react";
 import { formatDuration } from "../../utils/format";
+import { useAudioPlayback } from "../../hooks/useAudioPlayback";
 import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivation";
 
 interface InlineAudioPlayerProps {
@@ -23,62 +24,19 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
   activateOn,
 }) => {
   const { t } = useTranslation("common");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const press = usePressActivation<HTMLDivElement>(onClick, activateOn);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-
-    const updateTime = () => setCurrentTime(audio.currentTime);
-    const updateDuration = () => {
-      if (isFinite(audio.duration)) {
-        setDuration(audio.duration);
-      }
-    };
-    const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
-
-    audio.addEventListener("timeupdate", updateTime);
-    audio.addEventListener("loadedmetadata", updateDuration);
-    audio.addEventListener("durationchange", updateDuration);
-    audio.addEventListener("play", handlePlay);
-    audio.addEventListener("pause", handlePause);
-
-    return () => {
-      audio.removeEventListener("timeupdate", updateTime);
-      audio.removeEventListener("loadedmetadata", updateDuration);
-      audio.removeEventListener("durationchange", updateDuration);
-      audio.removeEventListener("play", handlePlay);
-      audio.removeEventListener("pause", handlePause);
-    };
-  }, []);
+  const playback = useAudioPlayback(audioRef);
+  const { isPlaying, currentTime, duration } = playback;
 
   const togglePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!audioRef.current) {
-      return;
-    }
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
+    playback.togglePlay();
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation();
-    if (!audioRef.current) {
-      return;
-    }
-    const newTime = parseFloat(e.target.value);
-    audioRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
+    playback.seek(parseFloat(e.target.value));
   };
 
   return (

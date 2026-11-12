@@ -13,12 +13,11 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 use crate::error::Result;
 use crate::state::AppState;
 
-use super::device::{load_or_create_device_signer, AddedLeaf, IdentityDirectory, LeafVerdict};
+use super::device::{AddedLeaf, IdentityDirectory, LeafVerdict};
 use super::generation::{local_generation, mls_group_id, set_local_generation};
 use super::provider::{
-    current_suite, load_stored_group, load_stored_group_at, make_credential,
-    parse_credential_device_id, parse_credential_user_id, signature_scheme, store_only,
-    MlsProvider, PollisProvider,
+    current_suite, load_stored_group, load_stored_group_at, parse_credential_device_id,
+    parse_credential_user_id, signature_scheme, store_only, MlsProvider, PollisProvider,
 };
 
 /// Test-harness rendezvous points inside the join and commit paths.
@@ -772,17 +771,8 @@ pub(super) fn build_external_commit<C>(
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    let scheme = signature_scheme(suite);
-    let (sig_keys, sig_pub_bytes) =
-        load_or_create_device_signer(provider, user_id, device_id, scheme)?;
-
-    let credential = make_credential(user_id, device_id);
-    let sig_pub = OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), scheme)
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
-    let cred_with_key = CredentialWithKey {
-        credential,
-        signature_key: sig_pub.into(),
-    };
+    let (sig_keys, cred_with_key) =
+        super::device::device_signer_with_credential(provider, user_id, device_id, suite)?;
 
     // The GroupInfo must describe the lineage we MEANT to join (#1161 M6), checked before the delete below.
     let group_id = mls_group_id(conversation_id, generation);
@@ -882,17 +872,8 @@ pub(super) fn create_mls_group_in_suite<C>(
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    let scheme = signature_scheme(suite);
-    let (sig_keys, sig_pub_bytes) =
-        load_or_create_device_signer(provider, creator_user_id, device_id, scheme)?;
-
-    let credential = make_credential(creator_user_id, device_id);
-    let sig_pub = OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), scheme)
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
-    let cred_with_key = CredentialWithKey {
-        credential,
-        signature_key: sig_pub.into(),
-    };
+    let (sig_keys, cred_with_key) =
+        super::device::device_signer_with_credential(provider, creator_user_id, device_id, suite)?;
 
     let group_id = mls_group_id(conversation_id, generation);
 
@@ -979,6 +960,20 @@ where
         )))?;
     super::provider::upgrade_sender_ratchet(&mut group, provider.storage());
 
+    let signer = own_signer(provider, &group)?;
+
+    Ok((group, signer))
+}
+
+/// This device's signer in `group`, read from storage by its own leaf's signature key
+/// under the group's suite scheme.
+pub(super) fn own_signer<C>(
+    provider: &MlsProvider<'_, C>,
+    group: &MlsGroup,
+) -> crate::error::Result<SignatureKeyPair>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     let sig_pub_bytes = group
         .own_leaf_node()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
@@ -986,14 +981,12 @@ where
         .as_slice()
         .to_vec();
 
-    let signer = SignatureKeyPair::read(
+    SignatureKeyPair::read(
         provider.storage(),
         &sig_pub_bytes,
         signature_scheme(group.ciphersuite()),
     )
-    .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
-
-    Ok((group, signer))
+    .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))
 }
 
 /// Wipe all local MLS state for a group without publishing a commit.

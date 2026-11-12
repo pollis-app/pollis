@@ -18,6 +18,7 @@ use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 use crate::state::AppState;
+use pollis_device_cert::constant_time_eq;
 
 /// Versioned so an old client refuses a future format instead of misparsing.
 pub const LINK_PAYLOAD_PREFIX: &str = "pollis-link:v1:";
@@ -585,17 +586,6 @@ pub async fn claim_device_link(
     // Signed in by the other direction: stop offering this device's own code.
     *state.device_offer.lock().await = None;
     crate::commands::auth::sign_in_with_link_session(state, v, candidate_device_id).await
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 #[cfg(test)]

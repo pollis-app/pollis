@@ -463,6 +463,66 @@ async fn live_device_name(
     }
 }
 
+/// Delete a device's unclaimed key packages, its conversation watermarks (#685: cursors
+/// that can never advance) and its history transfers (#1735: it is party to none, in
+/// either role), all scoped to `actor`.
+async fn purge_device_state(tx: &Connection, actor: &str, device_id: &str) -> anyhow::Result<()> {
+    tx.execute(
+        "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
+        libsql::params![actor, device_id],
+    )
+    .await?;
+    tx.execute(
+        "DELETE FROM conversation_watermark WHERE user_id = ?1 AND device_id = ?2",
+        libsql::params![actor, device_id],
+    )
+    .await?;
+    crate::history_transfer::purge_device(tx, actor, device_id).await?;
+    Ok(())
+}
+
+/// The DMs `actor` is a member of.
+async fn dm_ids_of(tx: &Connection, actor: &str) -> anyhow::Result<Vec<String>> {
+    let mut dm_ids: Vec<String> = Vec::new();
+    let mut rows = tx
+        .query(
+            "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
+            libsql::params![actor],
+        )
+        .await?;
+    while let Some(row) = rows.next().await? {
+        dm_ids.push(row.get(0)?);
+    }
+    Ok(dm_ids)
+}
+
+/// Tear down each of `dm_ids` left with no members at all, recording it in `dead`.
+async fn purge_emptied_dms(
+    tx: &Connection,
+    dm_ids: &[String],
+    dead: &mut Vec<String>,
+) -> anyhow::Result<()> {
+    for dm_id in dm_ids {
+        let remaining: i64 = {
+            let mut rows = tx
+                .query(
+                    "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
+                    libsql::params![dm_id.clone()],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => row.get(0)?,
+                None => 0,
+            }
+        };
+        if remaining == 0 {
+            crate::teardown::purge_dm_channel(tx, dm_id).await?;
+            dead.push(dm_id.clone());
+        }
+    }
+    Ok(())
+}
+
 /// DELETE the revoked device's unclaimed key packages and its conversation
 /// watermarks, then tombstone its row — one transaction, all `WHERE user_id =
 /// actor`.
@@ -478,18 +538,7 @@ pub async fn apply_revoke_device(
         Err(o) => return Ok(o),
     };
     let tx = conn.transaction().await?;
-    tx.execute(
-        "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
-        libsql::params![actor.clone(), body.device_id.clone()],
-    )
-    .await?;
-    tx.execute(
-        "DELETE FROM conversation_watermark WHERE user_id = ?1 AND device_id = ?2",
-        libsql::params![actor.clone(), body.device_id.clone()],
-    )
-    .await?;
-    // #1735: a revoked device is party to no history transfer, in either role.
-    crate::history_transfer::purge_device(&tx, &actor, &body.device_id).await?;
+    purge_device_state(&tx, &actor, &body.device_id).await?;
     tx.execute(
         "UPDATE user_device SET revoked_at = datetime('now') \
          WHERE device_id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
@@ -543,18 +592,7 @@ pub async fn apply_logout_device(
         Err(o) => return Ok(o),
     };
     let tx = conn.transaction().await?;
-    tx.execute(
-        "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
-        libsql::params![actor.clone(), body.device_id.clone()],
-    )
-    .await?;
-    tx.execute(
-        "DELETE FROM conversation_watermark WHERE user_id = ?1 AND device_id = ?2",
-        libsql::params![actor.clone(), body.device_id.clone()],
-    )
-    .await?;
-    // #1735: as for a revocation.
-    crate::history_transfer::purge_device(&tx, &actor, &body.device_id).await?;
+    purge_device_state(&tx, &actor, &body.device_id).await?;
     tx.execute(
         "DELETE FROM user_device WHERE device_id = ?1 AND user_id = ?2",
         libsql::params![body.device_id.clone(), actor],
@@ -620,18 +658,7 @@ async fn reset_recover_in_tx(
 
     // Note the actor's DMs before their membership rows go — see
     // `apply_delete_account` for why this has to happen first.
-    let mut dm_ids: Vec<String> = Vec::new();
-    {
-        let mut rows = tx
-            .query(
-                "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
-                libsql::params![actor.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            dm_ids.push(row.get(0)?);
-        }
-    }
+    let dm_ids = dm_ids_of(tx, &actor).await?;
 
     let mut dead_conversations = handoff_group_ownership(tx, &actor).await?;
 
@@ -698,24 +725,7 @@ async fn reset_recover_in_tx(
     }
 
     // A DM the actor has just left with nobody else in it is dead.
-    for dm_id in &dm_ids {
-        let remaining: i64 = {
-            let mut rows = tx
-                .query(
-                    "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
-                    libsql::params![dm_id.clone()],
-                )
-                .await?;
-            match rows.next().await? {
-                Some(row) => row.get(0)?,
-                None => 0,
-            }
-        };
-        if remaining == 0 {
-            crate::teardown::purge_dm_channel(tx, dm_id).await?;
-            dead_conversations.push(dm_id.clone());
-        }
-    }
+    purge_emptied_dms(tx, &dm_ids, &mut dead_conversations).await?;
 
     Ok(dead_conversations)
 }
@@ -782,42 +792,14 @@ pub async fn apply_delete_account(
     // Note the actor's DMs BEFORE their membership rows go — afterwards there is
     // nothing left to identify which channels they were in, and an emptied DM
     // would keep its ciphertext and metadata forever.
-    let mut dm_ids: Vec<String> = Vec::new();
-    {
-        let mut rows = tx
-            .query(
-                "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
-                libsql::params![actor.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            dm_ids.push(row.get(0)?);
-        }
-    }
+    let dm_ids = dm_ids_of(&tx, &actor).await?;
 
     let mut dead_conversations = handoff_group_ownership(&tx, &actor).await?;
     crate::teardown::purge_user_rows(&tx, &actor).await?;
 
     // Any DM the actor has just left that now has no members at all is dead:
     // tear it down rather than leaving an unreachable conversation behind.
-    for dm_id in &dm_ids {
-        let remaining: i64 = {
-            let mut rows = tx
-                .query(
-                    "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
-                    libsql::params![dm_id.clone()],
-                )
-                .await?;
-            match rows.next().await? {
-                Some(row) => row.get(0)?,
-                None => 0,
-            }
-        };
-        if remaining == 0 {
-            crate::teardown::purge_dm_channel(&tx, dm_id).await?;
-            dead_conversations.push(dm_id.clone());
-        }
-    }
+    purge_emptied_dms(&tx, &dm_ids, &mut dead_conversations).await?;
 
     // The anchor row last.
     tx.execute(

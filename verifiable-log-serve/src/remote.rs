@@ -13,8 +13,8 @@ use verifiable_log_builder::binaries::{self, BinaryInvariant};
 
 use crate::account::ACCOUNT_TENANT;
 use crate::bundle::{
-    now_ms, short, AccountManifest, BinaryManifest, Manifest, PublicKeyDoc, FORMAT_VERSION,
-    MIN_LEAF_FORMAT_VERSION,
+    now_ms, short, AccountManifest, BinaryManifest, ConsistencyRef, InclusionRef, Manifest,
+    PublicKeyDoc, FORMAT_VERSION, MIN_LEAF_FORMAT_VERSION,
 };
 use crate::error::{Result, ServeError};
 use crate::layout::{COMMIT_LOG_2_API_PREFIX, RESET_STATEMENT_PATH};
@@ -542,9 +542,93 @@ fn verify_commit_tree(
     candidates: &[(String, verifiable_log::VerifyingKey)],
     report: &mut Report,
 ) -> Vec<Entry> {
+    let spec = TreeSpec {
+        prefix,
+        label,
+        context,
+        signature_suffix: "",
+        invariant_check: "all entries satisfy tenant invariants",
+    };
+    let advert = TreeAdvert::new(
+        manifest.entry_count,
+        manifest.latest_tree_size,
+        &manifest.sth_sizes,
+        &manifest.inclusion,
+        &manifest.consistency,
+    );
+    let new_log = || {
+        let mut log = VerifiableLog::new();
+        for tenant in &manifest.enforce_unique {
+            log.register_invariant(tenant.clone(), Box::new(UniqueDataInvariant));
+        }
+        log
+    };
+    verify_tree(agent, &spec, &advert, candidates, new_log, report)
+}
+
+/// How one served tree is fetched and how its checks are labelled.
+struct TreeSpec<'a> {
+    /// URL prefix the tree is served under, e.g. `{base}/v1/account-keys`.
+    prefix: &'a str,
+    /// Prepended to every check, e.g. `"account-keys: "` (empty for the first commit log).
+    label: &'a str,
+    /// Domain context every STH signature is verified under.
+    context: &'a [u8],
+    /// Appended to the signature checks, e.g. `" (account context)"`.
+    signature_suffix: &'a str,
+    /// The replay check's wording after `label`.
+    invariant_check: &'a str,
+}
+
+/// The parts of a tree's manifest the checks walk, borrowed from whichever
+/// manifest type serves it.
+struct TreeAdvert<'a> {
+    entry_count: u64,
+    latest_tree_size: Option<u64>,
+    sth_sizes: &'a [u64],
+    inclusion: &'a [InclusionRef],
+    consistency: &'a [ConsistencyRef],
+}
+
+impl<'a> TreeAdvert<'a> {
+    fn new(
+        entry_count: u64,
+        latest_tree_size: Option<u64>,
+        sth_sizes: &'a [u64],
+        inclusion: &'a [InclusionRef],
+        consistency: &'a [ConsistencyRef],
+    ) -> Self {
+        Self {
+            entry_count,
+            latest_tree_size,
+            sth_sizes,
+            inclusion,
+            consistency,
+        }
+    }
+}
+
+/// The checks every tree shares: each advertised head, equivocation, entries and
+/// replay through the log `new_log` builds, inclusion and consistency. Returns the entries.
+fn verify_tree(
+    agent: &ureq::Agent,
+    spec: &TreeSpec<'_>,
+    advert: &TreeAdvert<'_>,
+    candidates: &[(String, verifiable_log::VerifyingKey)],
+    new_log: impl FnOnce() -> VerifiableLog,
+    report: &mut Report,
+) -> Vec<Entry> {
+    let TreeSpec {
+        prefix,
+        label,
+        context,
+        signature_suffix,
+        invariant_check,
+    } = *spec;
+
     // 1. Fetch every advertised STH and verify its signature, keyed by size.
     let mut sths: BTreeMap<u64, Sth> = BTreeMap::new();
-    for size in &manifest.sth_sizes {
+    for size in advert.sth_sizes {
         let url = format!("{prefix}/sth/{size}.json");
         match fetch_json::<Sth>(agent, &url) {
             Ok(sth) => {
@@ -554,7 +638,7 @@ fn verify_commit_tree(
                 );
                 report.check(
                     sth.verify_any_with_context(candidates, context).is_some(),
-                    format!("{label}STH[{size}] signature"),
+                    format!("{label}STH[{size}] signature{signature_suffix}"),
                 );
                 sths.insert(*size, sth);
             }
@@ -563,15 +647,17 @@ fn verify_commit_tree(
     }
 
     // latest.json must agree with the largest head; it is the pointer clients follow.
-    if let Some(max_size) = manifest.latest_tree_size {
+    if let Some(max_size) = advert.latest_tree_size {
         match fetch_json::<Sth>(agent, &format!("{prefix}/sth/latest.json")) {
             Ok(latest) => {
                 let agrees =
                     latest.tree_size == max_size && sths.get(&max_size) == Some(&latest);
                 report.check(agrees, format!("{label}latest.json matches the newest STH"));
                 report.check(
-                    latest.verify_any_with_context(candidates, context).is_some(),
-                    format!("{label}latest.json signature"),
+                    latest
+                        .verify_any_with_context(candidates, context)
+                        .is_some(),
+                    format!("{label}latest.json signature{signature_suffix}"),
                 );
             }
             Err(e) => report.check(false, format!("{label}fetch latest.json: {e}")),
@@ -601,7 +687,7 @@ fn verify_commit_tree(
         }
     };
     report.check(
-        entries.len() as u64 == manifest.entry_count,
+        entries.len() as u64 == advert.entry_count,
         format!("{label}entries.json count matches manifest"),
     );
 
@@ -609,8 +695,7 @@ fn verify_commit_tree(
     for (i, entry) in entries.iter().enumerate() {
         match fetch_json::<Entry>(agent, &format!("{prefix}/entries/{i}.json")) {
             Ok(per) if &per == entry => {}
-            Ok(_) => per_entry_ok = false,
-            Err(_) => per_entry_ok = false,
+            _ => per_entry_ok = false,
         }
     }
     if !entries.is_empty() {
@@ -618,17 +703,14 @@ fn verify_commit_tree(
     }
 
     if !entries.is_empty() {
-        let mut log = VerifiableLog::new();
-        for tenant in &manifest.enforce_unique {
-            log.register_invariant(tenant.clone(), Box::new(UniqueDataInvariant));
-        }
+        let mut log = new_log();
         let mut replay_ok = true;
         for entry in &entries {
             if log.append(entry.clone()).is_err() {
                 replay_ok = false;
             }
         }
-        report.check(replay_ok, format!("{label}all entries satisfy tenant invariants"));
+        report.check(replay_ok, format!("{label}{invariant_check}"));
 
         if replay_ok {
             for (size, sth) in &sths {
@@ -641,8 +723,11 @@ fn verify_commit_tree(
         }
     }
 
-    for r in &manifest.inclusion {
-        let url = format!("{prefix}/proof/inclusion/{}/{}.json", r.tree_size, r.leaf_index);
+    for r in advert.inclusion {
+        let url = format!(
+            "{prefix}/proof/inclusion/{}/{}.json",
+            r.tree_size, r.leaf_index
+        );
         let passed = match fetch_json::<InclusionProof>(agent, &url) {
             Ok(p) => {
                 let entry = entries.get(r.leaf_index as usize);
@@ -660,7 +745,7 @@ fn verify_commit_tree(
         );
     }
 
-    for r in &manifest.consistency {
+    for r in advert.consistency {
         let url = format!("{prefix}/proof/consistency/{}-{}.json", r.first, r.second);
         let passed = match fetch_json::<ConsistencyProof>(agent, &url) {
             Ok(p) => {
@@ -679,6 +764,32 @@ fn verify_commit_tree(
         );
     }
     entries
+}
+
+/// Fetch a subtree's own `public_key.json` and return its usable keys, or record
+/// the failure under `label` and return `None`.
+fn subtree_candidates(
+    agent: &ureq::Agent,
+    prefix: &str,
+    label: &str,
+    report: &mut Report,
+) -> Option<Vec<(String, verifiable_log::VerifyingKey)>> {
+    match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json")) {
+        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
+            Some(vk) => Some(vk),
+            None => {
+                report.check(
+                    false,
+                    format!("{label}public_key.json has no usable key (all expired or malformed)"),
+                );
+                None
+            }
+        },
+        Err(e) => {
+            report.check(false, format!("{label}fetch public_key.json: {e}"));
+            None
+        }
+    }
 }
 
 /// Verify the account-key subtree served under `{base}/v1/account-keys/...`,
@@ -701,160 +812,31 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     };
 
     // Same key, published for a self-contained subtree.
-    let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
-    {
-        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
-            Some(vk) => vk,
-            None => {
-                report.check(
-                    false,
-                    "account-keys: public_key.json has no usable key (all expired or malformed)"
-                        .to_string(),
-                );
-                return;
-            }
-        },
-        Err(e) => {
-            report.check(false, format!("account-keys: fetch public_key.json: {e}"));
-            return;
-        }
+    let Some(candidates) = subtree_candidates(agent, &prefix, "account-keys: ", report) else {
+        return;
     };
 
-    // 1. Verify each account STH under the account context.
-    let mut sths: BTreeMap<u64, Sth> = BTreeMap::new();
-    for size in &manifest.sth_sizes {
-        let url = format!("{prefix}/sth/{size}.json");
-        match fetch_json::<Sth>(agent, &url) {
-            Ok(sth) => {
-                report.check(
-                    sth.tree_size == *size,
-                    format!("account-keys: STH[{size}] tree_size matches its URL"),
-                );
-                report.check(
-                    sth.verify_any_with_context(&candidates, account_key::STH_CONTEXT).is_some(),
-                    format!("account-keys: STH[{size}] signature (account context)"),
-                );
-                sths.insert(*size, sth);
-            }
-            Err(e) => report.check(false, format!("account-keys: fetch STH[{size}]: {e}")),
-        }
-    }
-
-    if let Some(max_size) = manifest.latest_tree_size {
-        match fetch_json::<Sth>(agent, &format!("{prefix}/sth/latest.json")) {
-            Ok(latest) => {
-                let agrees =
-                    latest.tree_size == max_size && sths.get(&max_size) == Some(&latest);
-                report.check(agrees, "account-keys: latest.json matches the newest STH");
-                report.check(
-                    latest.verify_any_with_context(&candidates, account_key::STH_CONTEXT).is_some(),
-                    "account-keys: latest.json signature (account context)",
-                );
-            }
-            Err(e) => report.check(false, format!("account-keys: fetch latest.json: {e}")),
-        }
-    }
-
-    let collected: Vec<&Sth> = sths.values().collect();
-    for i in 0..collected.len() {
-        for j in (i + 1)..collected.len() {
-            report.check(
-                !is_equivocation(collected[i], collected[j]),
-                format!(
-                    "account-keys: no equivocation between size {} and size {}",
-                    collected[i].tree_size, collected[j].tree_size
-                ),
-            );
-        }
-    }
-
-    // 3. Entries: cross-check, replay through the AccountKeyInvariant, confirm roots.
-    let entries: Vec<Entry> = match fetch_json(agent, &format!("{prefix}/entries.json")) {
-        Ok(e) => e,
-        Err(e) => {
-            report.check(false, format!("account-keys: fetch entries.json: {e}"));
-            Vec::new()
-        }
+    let spec = TreeSpec {
+        prefix: &prefix,
+        label: "account-keys: ",
+        context: account_key::STH_CONTEXT,
+        signature_suffix: " (account context)",
+        invariant_check: "all entries satisfy the account invariant",
     };
-    report.check(
-        entries.len() as u64 == manifest.entry_count,
-        "account-keys: entries.json count matches manifest",
+    let advert = TreeAdvert::new(
+        manifest.entry_count,
+        manifest.latest_tree_size,
+        &manifest.sth_sizes,
+        &manifest.inclusion,
+        &manifest.consistency,
     );
-
-    let mut per_entry_ok = true;
-    for (i, entry) in entries.iter().enumerate() {
-        match fetch_json::<Entry>(agent, &format!("{prefix}/entries/{i}.json")) {
-            Ok(per) if &per == entry => {}
-            _ => per_entry_ok = false,
-        }
-    }
-    if !entries.is_empty() {
-        report.check(per_entry_ok, "account-keys: per-entry files match entries.json");
-    }
-
-    if !entries.is_empty() {
-        // Stronger than generic uniqueness, so registered explicitly.
+    // Stronger than generic uniqueness, so registered explicitly.
+    let new_log = || {
         let mut log = VerifiableLog::new();
         log.register_invariant(ACCOUNT_TENANT, Box::new(AccountKeyInvariant));
-        let mut replay_ok = true;
-        for entry in &entries {
-            if log.append(entry.clone()).is_err() {
-                replay_ok = false;
-            }
-        }
-        report.check(replay_ok, "account-keys: all entries satisfy the account invariant");
-
-        if replay_ok {
-            for (size, sth) in &sths {
-                let matches = match log.root_at(*size as usize) {
-                    Ok(root) => sth.root_bytes().map(|r| r == root).unwrap_or(false),
-                    Err(_) => false,
-                };
-                report.check(
-                    matches,
-                    format!("account-keys: STH[{size}] root matches replayed entries"),
-                );
-            }
-        }
-    }
-
-    for r in &manifest.inclusion {
-        let url = format!("{prefix}/proof/inclusion/{}/{}.json", r.tree_size, r.leaf_index);
-        let passed = match fetch_json::<InclusionProof>(agent, &url) {
-            Ok(p) => {
-                let entry = entries.get(r.leaf_index as usize);
-                let sth = sths.get(&r.tree_size);
-                match (entry, sth) {
-                    (Some(entry), Some(sth)) => proof::verify_inclusion_proof(entry, &p, sth),
-                    _ => false,
-                }
-            }
-            Err(_) => false,
-        };
-        report.check(
-            passed,
-            format!("account-keys: inclusion: leaf {} in size {}", r.leaf_index, r.tree_size),
-        );
-    }
-
-    for r in &manifest.consistency {
-        let url = format!("{prefix}/proof/consistency/{}-{}.json", r.first, r.second);
-        let passed = match fetch_json::<ConsistencyProof>(agent, &url) {
-            Ok(p) => {
-                let old = sths.get(&r.first);
-                let new = sths.get(&r.second);
-                match (old, new) {
-                    (Some(o), Some(n)) => proof::verify_consistency_proof(o, n, &p),
-                    _ => false,
-                }
-            }
-            Err(_) => false,
-        };
-        report.check(
-            passed,
-            format!("account-keys: consistency: size {} -> size {}", r.first, r.second),
-        );
-    }
+        log
+    };
+    verify_tree(agent, &spec, &advert, &candidates, new_log, report);
 }
 
 /// Verify the binaries subtree served under `{base}/v1/binaries/...`, mirroring
@@ -878,160 +860,31 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     };
 
     // Same key, published for a self-contained subtree.
-    let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
-    {
-        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
-            Some(vk) => vk,
-            None => {
-                report.check(
-                    false,
-                    "binaries: public_key.json has no usable key (all expired or malformed)"
-                        .to_string(),
-                );
-                return;
-            }
-        },
-        Err(e) => {
-            report.check(false, format!("binaries: fetch public_key.json: {e}"));
-            return;
-        }
+    let Some(candidates) = subtree_candidates(agent, &prefix, "binaries: ", report) else {
+        return;
     };
 
-    // 1. Verify each binaries STH under the binaries context.
-    let mut sths: BTreeMap<u64, Sth> = BTreeMap::new();
-    for size in &manifest.sth_sizes {
-        let url = format!("{prefix}/sth/{size}.json");
-        match fetch_json::<Sth>(agent, &url) {
-            Ok(sth) => {
-                report.check(
-                    sth.tree_size == *size,
-                    format!("binaries: STH[{size}] tree_size matches its URL"),
-                );
-                report.check(
-                    sth.verify_any_with_context(&candidates, binaries::STH_CONTEXT).is_some(),
-                    format!("binaries: STH[{size}] signature (binaries context)"),
-                );
-                sths.insert(*size, sth);
-            }
-            Err(e) => report.check(false, format!("binaries: fetch STH[{size}]: {e}")),
-        }
-    }
-
-    if let Some(max_size) = manifest.latest_tree_size {
-        match fetch_json::<Sth>(agent, &format!("{prefix}/sth/latest.json")) {
-            Ok(latest) => {
-                let agrees =
-                    latest.tree_size == max_size && sths.get(&max_size) == Some(&latest);
-                report.check(agrees, "binaries: latest.json matches the newest STH");
-                report.check(
-                    latest.verify_any_with_context(&candidates, binaries::STH_CONTEXT).is_some(),
-                    "binaries: latest.json signature (binaries context)",
-                );
-            }
-            Err(e) => report.check(false, format!("binaries: fetch latest.json: {e}")),
-        }
-    }
-
-    let collected: Vec<&Sth> = sths.values().collect();
-    for i in 0..collected.len() {
-        for j in (i + 1)..collected.len() {
-            report.check(
-                !is_equivocation(collected[i], collected[j]),
-                format!(
-                    "binaries: no equivocation between size {} and size {}",
-                    collected[i].tree_size, collected[j].tree_size
-                ),
-            );
-        }
-    }
-
-    // 3. Entries: cross-check, replay through the BinaryInvariant, confirm roots.
-    let entries: Vec<Entry> = match fetch_json(agent, &format!("{prefix}/entries.json")) {
-        Ok(e) => e,
-        Err(e) => {
-            report.check(false, format!("binaries: fetch entries.json: {e}"));
-            Vec::new()
-        }
+    let spec = TreeSpec {
+        prefix: &prefix,
+        label: "binaries: ",
+        context: binaries::STH_CONTEXT,
+        signature_suffix: " (binaries context)",
+        invariant_check: "all entries satisfy the binary invariant",
     };
-    report.check(
-        entries.len() as u64 == manifest.entry_count,
-        "binaries: entries.json count matches manifest",
+    let advert = TreeAdvert::new(
+        manifest.entry_count,
+        manifest.latest_tree_size,
+        &manifest.sth_sizes,
+        &manifest.inclusion,
+        &manifest.consistency,
     );
-
-    let mut per_entry_ok = true;
-    for (i, entry) in entries.iter().enumerate() {
-        match fetch_json::<Entry>(agent, &format!("{prefix}/entries/{i}.json")) {
-            Ok(per) if &per == entry => {}
-            _ => per_entry_ok = false,
-        }
-    }
-    if !entries.is_empty() {
-        report.check(per_entry_ok, "binaries: per-entry files match entries.json");
-    }
-
-    if !entries.is_empty() {
-        // Registered explicitly rather than the generic UniqueDataInvariant.
+    // Registered explicitly rather than the generic UniqueDataInvariant.
+    let new_log = || {
         let mut log = VerifiableLog::new();
         log.register_invariant(BINARIES_TENANT, Box::new(BinaryInvariant));
-        let mut replay_ok = true;
-        for entry in &entries {
-            if log.append(entry.clone()).is_err() {
-                replay_ok = false;
-            }
-        }
-        report.check(replay_ok, "binaries: all entries satisfy the binary invariant");
-
-        if replay_ok {
-            for (size, sth) in &sths {
-                let matches = match log.root_at(*size as usize) {
-                    Ok(root) => sth.root_bytes().map(|r| r == root).unwrap_or(false),
-                    Err(_) => false,
-                };
-                report.check(
-                    matches,
-                    format!("binaries: STH[{size}] root matches replayed entries"),
-                );
-            }
-        }
-    }
-
-    for r in &manifest.inclusion {
-        let url = format!("{prefix}/proof/inclusion/{}/{}.json", r.tree_size, r.leaf_index);
-        let passed = match fetch_json::<InclusionProof>(agent, &url) {
-            Ok(p) => {
-                let entry = entries.get(r.leaf_index as usize);
-                let sth = sths.get(&r.tree_size);
-                match (entry, sth) {
-                    (Some(entry), Some(sth)) => proof::verify_inclusion_proof(entry, &p, sth),
-                    _ => false,
-                }
-            }
-            Err(_) => false,
-        };
-        report.check(
-            passed,
-            format!("binaries: inclusion: leaf {} in size {}", r.leaf_index, r.tree_size),
-        );
-    }
-
-    for r in &manifest.consistency {
-        let url = format!("{prefix}/proof/consistency/{}-{}.json", r.first, r.second);
-        let passed = match fetch_json::<ConsistencyProof>(agent, &url) {
-            Ok(p) => {
-                let old = sths.get(&r.first);
-                let new = sths.get(&r.second);
-                match (old, new) {
-                    (Some(o), Some(n)) => proof::verify_consistency_proof(o, n, &p),
-                    _ => false,
-                }
-            }
-            Err(_) => false,
-        };
-        report.check(
-            passed,
-            format!("binaries: consistency: size {} -> size {}", r.first, r.second),
-        );
-    }
+        log
+    };
+    verify_tree(agent, &spec, &advert, &candidates, new_log, report);
 }
 
 /// A blocking HTTP agent with a sane timeout, shared by every fetch path.

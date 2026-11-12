@@ -1,6 +1,6 @@
 // Webcam session glue; frames ride `screenShareSession`'s loopback socket. Capture is Rust-side everywhere.
 
-import { reaction } from "mobx";
+import { detachChannel, onSignOut } from "../utils/sessionTeardown";
 
 import { Channel, invoke } from "../bridge";
 import i18n from "../i18n";
@@ -49,22 +49,12 @@ class CameraSession {
   private eventsChannel: Channel<CameraEvent> | null = null;
 
   constructor() {
-    reaction(
-      () => appStore.currentUser,
-      (user) => {
-        if (!user) {
-          this.teardown();
-        }
-      },
-    );
+    onSignOut(() => this.teardown());
   }
 
   teardown(): void {
     this.subscribed = false;
-    if (this.eventsChannel) {
-      this.eventsChannel.onmessage = () => {};
-      this.eventsChannel = null;
-    }
+    this.eventsChannel = detachChannel(this.eventsChannel);
   }
 
   /** Idempotent. Wire the backend camera-event Channel once after auth. */

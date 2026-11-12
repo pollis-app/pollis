@@ -23,6 +23,7 @@ use bytes::Bytes;
 
 use crate::commands::r2 as r2cmd;
 use crate::state::AppState;
+use pollis_device_cert::constant_time_eq;
 
 /// Screenshare fan-out counters (#480), read via [`frame_fanout_counters`].
 static FRAMES_SENT: AtomicU64 = AtomicU64::new(0);
@@ -443,17 +444,6 @@ async fn pump_frames(mut socket: WebSocket, fanout: Arc<FrameFanout>) {
         }
     }
     fanout.unsubscribe(&sub);
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 /// Fresh 32-byte hex token, rotated on unlock.

@@ -27,6 +27,11 @@ export const MessageQueue: React.FC = observer(() => {
     return t('queue.pendingPlaceholder');
   };
 
+  const snippetFor = (messageId: string): string => {
+    const content = getMessageContent(messageId);
+    return content.length > 60 ? content.substring(0, 60) + '...' : content;
+  };
+
   const handleCancel = (queueItemId: string, _messageId: string) => {
     updateMessageQueueItem(queueItemId, { status: 'cancelled' });
     removeFromMessageQueue(queueItemId);
@@ -50,8 +55,7 @@ export const MessageQueue: React.FC = observer(() => {
 
       <div className="flex flex-col gap-1">
         {pendingMessages.map((item) => {
-          const content = getMessageContent(item.message_id);
-          const snippet = content.length > 60 ? content.substring(0, 60) + '...' : content;
+          const snippet = snippetFor(item.message_id);
 
           return (
             <div
@@ -84,8 +88,7 @@ export const MessageQueue: React.FC = observer(() => {
         })}
 
         {failedMessages.map((item) => {
-          const content = getMessageContent(item.message_id);
-          const snippet = content.length > 60 ? content.substring(0, 60) + '...' : content;
+          const snippet = snippetFor(item.message_id);
 
           return (
             <div

@@ -75,8 +75,8 @@ function shortHash(s) {
 }
 
 // A copy-to-clipboard chip that shows a shortened value and copies the full one.
-// The full value lives in a data attribute (escaped) and is read back — decoded
-// — by the delegated click handler below.
+// The full value lives in a data attribute (escaped); copy.js, the site's one
+// copy button, reads it back decoded and marks the chip `data-copied`.
 function copyChip(fullValue, displayText) {
   return (
     '<button type="button" class="art-copy" data-copy="' +
@@ -85,6 +85,18 @@ function copyChip(fullValue, displayText) {
     esc(displayText) +
     "</button>"
   );
+}
+
+// One download pill per row whose `key` the release pointer publishes, or a
+// note when it publishes none (the desktop and CLI cards).
+function downloadPills(data, rows) {
+  let links = "";
+  rows.forEach(function (r) {
+    if (data && data[r.key]) {
+      links += '<a class="art-link-pill" href="' + esc(data[r.key]) + '">' + esc(r.label) + "</a>";
+    }
+  });
+  return links || '<span class="art-note">No download links published.</span>';
 }
 
 // ── Time formatting (STH timestamps are ms since epoch) ─────────────────────
@@ -140,21 +152,7 @@ function renderDesktop(data) {
     { label: "Linux .rpm", key: "linux_rpm" },
     { label: "Linux .AppImage", key: "linux" },
   ];
-
-  let links = "";
-  rows.forEach(function (r) {
-    if (data && data[r.key]) {
-      links +=
-        '<a class="art-link-pill" href="' +
-        esc(data[r.key]) +
-        '">' +
-        esc(r.label) +
-        "</a>";
-    }
-  });
-  if (!links) {
-    links = '<span class="art-note">No download links published.</span>';
-  }
+  const links = downloadPills(data, rows);
 
   byId("art-desktop").innerHTML =
     '<div class="art-card-head">' +
@@ -314,20 +312,7 @@ function renderCLI(data) {
     { label: "macOS", key: "macos" },
     { label: "Windows", key: "windows" },
   ];
-  let links = "";
-  rows.forEach(function (r) {
-    if (data && data[r.key]) {
-      links +=
-        '<a class="art-link-pill" href="' +
-        esc(data[r.key]) +
-        '">' +
-        esc(r.label) +
-        "</a>";
-    }
-  });
-  if (!links) {
-    links = '<span class="art-note">No download links published.</span>';
-  }
+  const links = downloadPills(data, rows);
 
   byId("art-cli").innerHTML =
     '<div class="art-card-head">' +
@@ -518,24 +503,6 @@ function loadKey() {
       renderKeyUnavailable();
     });
 }
-
-// ── Copy delegation ─────────────────────────────────────────────────────────
-document.addEventListener("click", function (e) {
-  const btn = e.target.closest ? e.target.closest(".art-copy") : null;
-  if (!btn) {
-    return;
-  }
-  const value = btn.getAttribute("data-copy") || "";
-  if (!navigator.clipboard) {
-    return;
-  }
-  navigator.clipboard.writeText(value).then(function () {
-    btn.classList.add("art-copy--copied");
-    setTimeout(function () {
-      btn.classList.remove("art-copy--copied");
-    }, 1500);
-  });
-});
 
 // ── Boot — every section loads independently ────────────────────────────────
 fetchJSON(CDN_BASE + "/releases/latest.json")

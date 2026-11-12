@@ -82,7 +82,7 @@ function render(container, tag, byKey) {
         </div>
         <div class="verify-row-hash">
           <code class="verify-hash">${esc(hash)}</code>
-          <button type="button" class="verify-copy" data-hash="${esc(hash)}"
+          <button type="button" class="verify-copy" data-copy="${esc(hash)}" data-copied-label="Copied"
                   aria-label="Copy the SHA-256 for ${esc(r.label)}">Copy</button>
         </div>
       </li>`;
@@ -130,23 +130,6 @@ async function init() {
       `<li class="verify-note">Published hashes are temporarily unavailable. ` +
       `They can also be read from the <a href="/artifacts">artifacts page</a>.</li>`;
   }
-
-  list.addEventListener("click", async (ev) => {
-    const btn = ev.target.closest(".verify-copy");
-    if (!btn) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(btn.dataset.hash);
-      const was = btn.textContent;
-      btn.textContent = "Copied";
-      setTimeout(() => {
-        btn.textContent = was;
-      }, 1200);
-    } catch {
-      // Clipboard denied — the hash is selectable on the page regardless.
-    }
-  });
 }
 
 init();

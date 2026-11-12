@@ -33,6 +33,7 @@ import {
 } from "../hooks/queries/useRelayServing";
 import { RelayServingSection } from "../components/Preferences/RelayServingSection";
 import { LanguageSection } from "../components/Preferences/LanguageSection";
+import { HexColorField } from "../components/Preferences/HexColorField";
 import {
   hslToHex,
   hexToHsl,
@@ -58,10 +59,6 @@ import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function isValidHex(val: string): boolean {
-  return /^#[0-9a-fA-F]{6}$/.test(val);
 }
 
 // Absent `relay_serving*` fields fall back to RELAY_SERVING_DEFAULTS.
@@ -502,44 +499,14 @@ export const PreferencesPage: React.FC = observer(() => {
                 {t("accent.heading")}
               </h2>
 
-              <div className="flex items-center gap-2">
-                <label
-                  className="flex-shrink-0 cursor-pointer overflow-hidden focus-within:ring-4 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-black"
-                  style={{ width: 40, height: 40, borderRadius: 8, padding: 0 }}
-                  title={t("accent.pickTitle")}
-                >
-                  <input
-                    type="color"
-                    value={hslToHex(hue, saturation, 62)}
-                    onChange={(e) => handleAccentColor(e.target.value)}
-                    className="border-0"
-                    style={{ width: "150%", height: "150%", margin: "-25%", padding: 0, cursor: "pointer" }}
-                  />
-                </label>
-                <input
-                  type="text"
-                  value={accentHexInput}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setAccentHexInput(val);
-                    if (isValidHex(val)) {
-                      handleAccentColor(val);
-                    }
-                  }}
-                  onBlur={() => {
-                    if (!isValidHex(accentHexInput)) {
-                      setAccentHexInput(hslToHex(hue, saturation, 62));
-                    }
-                  }}
-                  maxLength={7}
-                  spellCheck={false}
-                  className={`text-xs font-mono font-machine px-2 py-1 bg-surface border border-line ${isValidHex(accentHexInput) ? "text-fg" : "text-danger"} focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black`}
-                  style={{
-                    width: 90,
-                    borderRadius: 6,
-                  }}
-                />
-              </div>
+              <HexColorField
+                color={hslToHex(hue, saturation, 62)}
+                hexInput={accentHexInput}
+                onHexInputChange={setAccentHexInput}
+                onColor={handleAccentColor}
+                title={t("accent.pickTitle")}
+                swatchStyle={{ width: 40, height: 40, borderRadius: 8, padding: 0 }}
+              />
 
               {/* Quick presets */}
               <div className="flex gap-2 flex-wrap">
@@ -583,44 +550,14 @@ export const PreferencesPage: React.FC = observer(() => {
                 {t("background.heading")}
               </h2>
 
-              <div className="flex items-center gap-2">
-                <label
-                  className="flex-shrink-0 cursor-pointer overflow-hidden focus-within:ring-4 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-black"
-                  style={{ width: 40, height: 40, padding: 0, borderRadius: "0.5rem", outline: "2px solid var(--c-accent)", outlineOffset: "-1px" }}
-                  title={t("background.pickTitle")}
-                >
-                  <input
-                    type="color"
-                    value={hslToHex(bgHue, bgSaturation, bgLightness)}
-                    onChange={(e) => handleBgColor(e.target.value)}
-                    className="border-0"
-                    style={{ width: "150%", height: "150%", margin: "-25%", padding: 0, cursor: "pointer" }}
-                  />
-                </label>
-                <input
-                  type="text"
-                  value={bgHexInput}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setBgHexInput(val);
-                    if (isValidHex(val)) {
-                      handleBgColor(val);
-                    }
-                  }}
-                  onBlur={() => {
-                    if (!isValidHex(bgHexInput)) {
-                      setBgHexInput(hslToHex(bgHue, bgSaturation, bgLightness));
-                    }
-                  }}
-                  maxLength={7}
-                  spellCheck={false}
-                  className={`text-xs font-mono font-machine px-2 py-1 bg-surface border border-line ${isValidHex(bgHexInput) ? "text-fg" : "text-danger"} focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black`}
-                  style={{
-                    width: 90,
-                    borderRadius: 6,
-                  }}
-                />
-              </div>
+              <HexColorField
+                color={hslToHex(bgHue, bgSaturation, bgLightness)}
+                hexInput={bgHexInput}
+                onHexInputChange={setBgHexInput}
+                onColor={handleBgColor}
+                title={t("background.pickTitle")}
+                swatchStyle={{ width: 40, height: 40, padding: 0, borderRadius: "0.5rem", outline: "2px solid var(--c-accent)", outlineOffset: "-1px" }}
+              />
 
               {/* Quick presets */}
               <div className="flex gap-2 flex-wrap">

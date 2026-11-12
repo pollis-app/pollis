@@ -1,11 +1,10 @@
 import { errorMessage } from "../../utils/errorMessage";
+import { PinField } from "./PinField";
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { TitleBar } from "../Layout/TitleBar";
-import { DotMatrix } from "../ui/DotMatrix";
-import { Card } from "../ui/Card";
+import { BackdropScreen } from "./BackdropScreen";
+import { AuthCard } from "./AuthCard";
 import { Button } from "../ui/Button";
-import { InputOtp } from "../ui/InputOtp";
 import * as api from "../../services/api";
 
 interface PinCreateScreenProps {
@@ -81,93 +80,70 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
   const setCurrent = step === "enter" ? setFirstPin : setConfirmPin;
 
   return (
-    <div
-      data-testid="pin-create-screen"
-      className="flex flex-col h-full w-full bg-bg"
-      style={{ position: "relative" }}
-    >
-      <div style={{ position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none" }}>
-        <DotMatrix />
-      </div>
-      <TitleBar />
-      <div
-        className="flex-1 flex justify-center overflow-y-auto"
-        style={{ position: "relative", zIndex: 1 }}
-      >
-        <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 360 }}>
-          <div className="flex flex-col gap-5">
-            <div>
-              <h2 className="text-sm font-mono font-semibold text-fg">
-                {step === "confirm" ? t("pinCreate.confirmHeadline") : headline}
-              </h2>
-              <p
-                className="text-xs mt-1 font-mono text-muted"
-                style={{ lineHeight: 1.5 }}
-              >
-                {step === "confirm" ? t("pinCreate.confirmSubline") : subline}
-              </p>
-            </div>
-
-            {error && (
-              <p
-                data-testid="pin-create-error"
-                className="text-xs font-mono text-danger"
-              >
-                {error}
-              </p>
-            )}
-
-            <div>
-              <InputOtp
-                /* remount per step to reset focus */
-                key={step}
-                length={4}
-                value={currentValue}
-                onChange={(v) => {
-                  setCurrent(v.replace(/\D/g, "").slice(0, 4));
-                  setError(null);
-                }}
-                disabled={isLoading}
-                autoFocus
-                mask
-              />
-              <input
-                data-testid="pin-create-input"
-                type="hidden"
-                value={currentValue}
-                readOnly
-              />
-            </div>
-
-            <Button
-              data-testid="pin-create-submit"
-              type="button"
-              onClick={handleSubmit}
-              isLoading={isLoading}
-              loadingText={t("pinCreate.saving")}
-              disabled={currentValue.length < 4}
-              className="w-full"
+    <BackdropScreen data-testid="pin-create-screen" backdropOpacity={0.35}>
+      <AuthCard>
+        <div className="flex flex-col gap-5">
+          <div>
+            <h2 className="text-sm font-mono font-semibold text-fg">
+              {step === "confirm" ? t("pinCreate.confirmHeadline") : headline}
+            </h2>
+            <p
+              className="text-xs mt-1 font-mono text-muted"
+              style={{ lineHeight: 1.5 }}
             >
-              {step === "confirm" ? t("pinCreate.save") : t("pinCreate.continue")}
-            </Button>
-
-            {onCancel && (
-              <button
-                data-testid="pin-create-cancel"
-                onClick={onCancel}
-                className="text-xs font-mono self-center text-muted border-0"
-                style={{
-                  background: "none",
-                  cursor: "pointer",
-                  padding: "0.25rem 0",
-                }}
-              >
-                {t("common:actions.cancel")}
-              </button>
-            )}
+              {step === "confirm" ? t("pinCreate.confirmSubline") : subline}
+            </p>
           </div>
-        </Card>
-      </div>
-    </div>
+
+          {error && (
+            <p
+              data-testid="pin-create-error"
+              className="text-xs font-mono text-danger"
+            >
+              {error}
+            </p>
+          )}
+
+          {/* remount per step to reset focus */}
+          <PinField
+            key={step}
+            value={currentValue}
+            onChange={(next) => {
+              setCurrent(next);
+              setError(null);
+            }}
+            disabled={isLoading}
+            data-testid="pin-create-input"
+          />
+
+          <Button
+            data-testid="pin-create-submit"
+            type="button"
+            onClick={handleSubmit}
+            isLoading={isLoading}
+            loadingText={t("pinCreate.saving")}
+            disabled={currentValue.length < 4}
+            className="w-full"
+          >
+            {step === "confirm" ? t("pinCreate.save") : t("pinCreate.continue")}
+          </Button>
+
+          {onCancel && (
+            <button
+              data-testid="pin-create-cancel"
+              onClick={onCancel}
+              className="text-xs font-mono self-center text-muted border-0"
+              style={{
+                background: "none",
+                cursor: "pointer",
+                padding: "0.25rem 0",
+              }}
+            >
+              {t("common:actions.cancel")}
+            </button>
+          )}
+        </div>
+      </AuthCard>
+    </BackdropScreen>
   );
 };

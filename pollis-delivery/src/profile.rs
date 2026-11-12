@@ -932,25 +932,8 @@ pub async fn apply_remove_dm_member(
             None => return Ok((WriteOutcome::Forbidden, false)),
         }
     }
-    let tx = conn.transaction().await?;
-    tx.execute(
-        "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
-    )
-    .await?;
-    // Existence, not a tally (see `groups::apply_leave_group`); same purge as `/v1/dm/leave`.
-    let mut survivors = tx
-        .query(
-            "SELECT 1 FROM dm_channel_member WHERE dm_channel_id = ?1 LIMIT 1",
-            libsql::params![body.dm_channel_id.clone()],
-        )
-        .await?;
-    let torn_down = survivors.next().await?.is_none();
-    drop(survivors);
-    if torn_down {
-        crate::teardown::purge_dm_channel(&tx, &body.dm_channel_id).await?;
-    }
-    tx.commit().await?;
+    // Same purge as `/v1/dm/leave`.
+    let torn_down = leave_dm_in_tx(conn, &body.dm_channel_id, &body.user_id).await?;
     Ok((WriteOutcome::Ok, torn_down))
 }
 
@@ -998,27 +981,37 @@ pub async fn apply_leave_dm(
         Ok(u) => u,
         Err(o) => return Ok((o, false)),
     };
+    let torn_down = leave_dm_in_tx(conn, &body.dm_channel_id, &user).await?;
+    Ok((WriteOutcome::Ok, torn_down))
+}
+
+/// Remove `user_id` from a DM in one transaction and, if no members remain, tear the
+/// channel down with all its data. Returns whether it was torn down.
+async fn leave_dm_in_tx(
+    conn: &Connection,
+    dm_channel_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![body.dm_channel_id.clone(), user.clone()],
+        libsql::params![dm_channel_id, user_id],
     )
     .await?;
-    // If no members remain, clean up the channel and all associated data.
     // Existence, not a tally — see `groups::apply_leave_group`.
     let mut survivors = tx
         .query(
             "SELECT 1 FROM dm_channel_member WHERE dm_channel_id = ?1 LIMIT 1",
-            libsql::params![body.dm_channel_id.clone()],
+            libsql::params![dm_channel_id],
         )
         .await?;
     let torn_down = survivors.next().await?.is_none();
     drop(survivors);
     if torn_down {
-        crate::teardown::purge_dm_channel(&tx, &body.dm_channel_id).await?;
+        crate::teardown::purge_dm_channel(&tx, dm_channel_id).await?;
     }
     tx.commit().await?;
-    Ok((WriteOutcome::Ok, torn_down))
+    Ok(torn_down)
 }
 
 #[cfg(test)]

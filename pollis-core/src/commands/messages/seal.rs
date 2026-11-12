@@ -56,6 +56,32 @@ fn try_seal_inner(
     }))
 }
 
+/// Run `f` on the local DB while holding the per-conversation MLS lock (#1079), taken
+/// BEFORE `local_db` (reconcile's and self_update's order). Both are released when this
+/// returns, before any post's catch-up can want them.
+pub(super) async fn with_sealing_lock<T>(
+    state: &std::sync::Arc<crate::state::AppState>,
+    mls_group_id: &str,
+    f: impl FnOnce(&rusqlite::Connection, &crate::state::MlsLockHeld<'_>) -> Result<T>,
+) -> Result<T> {
+    let mls_guard = state.mls_group_lock(mls_group_id).await?;
+    let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
+    super::with_local_conn(state, |conn| f(conn, &held)).await
+}
+
+/// [`seal_under_lock`] inside [`with_sealing_lock`].
+pub(super) async fn seal_holding_lock(
+    state: &std::sync::Arc<crate::state::AppState>,
+    mls_group_id: &str,
+    conversation_id: &str,
+    plaintext: &[u8],
+) -> Result<Sealed> {
+    with_sealing_lock(state, mls_group_id, |conn, held| {
+        seal_under_lock(conn, mls_group_id, conversation_id, plaintext, held)
+    })
+    .await
+}
+
 /// Seal for a caller that holds the per-conversation MLS lock — the shape every
 /// user-initiated post wants.
 ///
@@ -172,15 +198,13 @@ pub(super) async fn post_resealing<B: ClientRequest>(
                     );
                 }
                 // Re-take the MLS lock (#1079) only now the catch-up released it.
-                let mls_guard = state.mls_group_lock(mls_group_id).await?;
-                let held = crate::state::MlsLockHeld::from_guard(&mls_guard);
-                let guard = state.local_db.lock().await;
-                let db = guard.as_ref().ok_or_else(|| {
-                    crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
-                })?;
-                sealed =
-                    seal_under_lock(db.conn(), mls_group_id, conversation_id, plaintext, &held)?;
-                on_reseal(db.conn(), &sealed)?;
+                sealed = with_sealing_lock(state, mls_group_id, |conn, held| {
+                    let resealed =
+                        seal_under_lock(conn, mls_group_id, conversation_id, plaintext, held)?;
+                    on_reseal(conn, &resealed)?;
+                    Ok(resealed)
+                })
+                .await?;
             }
         }
     }

@@ -32,6 +32,18 @@ pub(crate) fn envelope_sent_at() -> String {
     stamp_envelope_sent_at(chrono::Utc::now())
 }
 
+/// Run `f` on the local DB; `Not signed in` when there is none.
+pub(super) async fn with_local_conn<T>(
+    state: &std::sync::Arc<crate::state::AppState>,
+    f: impl FnOnce(&rusqlite::Connection) -> crate::error::Result<T>,
+) -> crate::error::Result<T> {
+    let guard = state.local_db.lock().await;
+    let Some(db) = guard.as_ref() else {
+        return Err(crate::error::Error::Other(anyhow::anyhow!("Not signed in")));
+    };
+    f(db.conn())
+}
+
 /// [`envelope_sent_at`] with the clock lifted out, so tests can pick the instant.
 pub(super) fn stamp_envelope_sent_at(at: chrono::DateTime<chrono::Utc>) -> String {
     at.to_rfc3339()

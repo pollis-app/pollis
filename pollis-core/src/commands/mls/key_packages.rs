@@ -18,11 +18,7 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 use crate::error::Result;
 use crate::state::AppState;
 
-use super::device::load_or_create_device_signer;
-use super::provider::{
-    current_suite, make_credential, parse_credential_user_id, signature_scheme, MlsProvider,
-    PollisProvider,
-};
+use super::provider::{current_suite, parse_credential_user_id, MlsProvider, PollisProvider};
 
 /// Shape `(ref_hash, key_package_bytes)` pairs into the DS `packages` array (base64).
 ///
@@ -86,17 +82,8 @@ pub(super) fn build_key_package<C>(
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    let scheme = signature_scheme(suite);
-    let (sig_keys, sig_pub_bytes) =
-        load_or_create_device_signer(provider, user_id, device_id, scheme)?;
-
-    let credential = make_credential(user_id, device_id);
-    let sig_pub = OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), scheme)
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
-    let cred_with_key = CredentialWithKey {
-        credential,
-        signature_key: sig_pub.into(),
-    };
+    let (sig_keys, cred_with_key) =
+        super::device::device_signer_with_credential(provider, user_id, device_id, suite)?;
 
     let mut builder = KeyPackage::builder();
     if last_resort {
@@ -133,6 +120,8 @@ pub async fn forge_key_package_for(
     claimed_device_id: &str,
 ) -> Result<(String, Vec<u8>)> {
     use openmls_basic_credential::SignatureKeyPair;
+
+    use super::provider::{make_credential, signature_scheme};
 
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {

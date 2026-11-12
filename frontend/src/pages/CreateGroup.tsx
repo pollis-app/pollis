@@ -5,7 +5,7 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
-import { deriveSlug } from "../utils/urlRouting";
+import { useNameSlug } from "../hooks/useNameSlug";
 import { groupQueryKeys } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
@@ -22,9 +22,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
   const { t } = useTranslation("channels");
   const { currentUser, addGroup, setSelectedGroupId } = appStore;
   const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [slugEdited, setSlugEdited] = useState(false);
+  const { name, slug, onNameChange, onSlugChange, finalSlug: resolveFinalSlug } = useNameSlug();
   const [description, setDescription] = useState("");
   const [createTextChannel, setCreateTextChannel] = useState(false);
   const [createVoiceChannel, setCreateVoiceChannel] = useState(false);
@@ -37,7 +35,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
       setError(t("errors.nameRequired"));
       return;
     }
-    const finalSlug = (slugEdited ? slug : deriveSlug(name)).trim();
+    const finalSlug = resolveFinalSlug();
     if (!finalSlug) {
       setError(t("createGroup.slugInvalid"));
       return;
@@ -99,10 +97,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           <TextInput
             label={t("createGroup.nameLabel")}
             value={name}
-            onChange={(val) => {
-              setName(val);
-              if (!slugEdited) { setSlug(deriveSlug(val)); }
-            }}
+            onChange={onNameChange}
             placeholder={t("createGroup.namePlaceholder")}
             disabled={isLoading}
             id="create-group-name"
@@ -114,7 +109,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           <TextInput
             label={t("createGroup.slugLabel")}
             value={slug}
-            onChange={(val) => { setSlug(val.toLowerCase()); setSlugEdited(true); }}
+            onChange={onSlugChange}
             placeholder={t("createGroup.slugPlaceholder")}
             disabled={isLoading}
             id="create-group-slug"

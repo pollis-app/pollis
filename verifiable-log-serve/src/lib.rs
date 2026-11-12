@@ -16,6 +16,7 @@ pub mod live;
 pub mod release;
 pub mod remote;
 pub mod server;
+mod verdict;
 
 pub use account::{
     verify_account, verify_account_in_bundle, verify_account_in_bundle_at, AccountKeyVersion,

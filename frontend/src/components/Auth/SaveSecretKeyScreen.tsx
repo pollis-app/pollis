@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import i18n from "../../i18n";
-import { TitleBar } from "../Layout/TitleBar";
-import { DotMatrix } from "../ui/DotMatrix";
+import { BackdropScreen } from "./BackdropScreen";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
@@ -92,15 +91,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
 
   if (phase === "warn") {
     return (
-      <div
-        data-testid="save-secret-key-warning-screen"
-        className="flex flex-col h-full w-full bg-bg"
-        style={{ position: "relative" }}
-      >
-        <div style={{ position: "absolute", inset: 0, opacity: 0.2, pointerEvents: "none" }}>
-          <DotMatrix speed={0.2} />
-        </div>
-        <TitleBar />
+      <BackdropScreen data-testid="save-secret-key-warning-screen" backdropOpacity={0.2} backdropSpeed={0.2}>
         <div
           className="flex-1 flex justify-center overflow-y-auto"
           style={{ position: "relative", zIndex: 1, padding: "1rem" }}
@@ -148,21 +139,13 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
             </div>
           </Card>
         </div>
-      </div>
+      </BackdropScreen>
     );
   }
 
   if (phase === "show") {
     return (
-      <div
-        data-testid="save-secret-key-screen"
-        className="flex flex-col h-full w-full bg-bg"
-        style={{ position: "relative" }}
-      >
-        <div style={{ position: "absolute", inset: 0, opacity: 0.2, pointerEvents: "none" }}>
-          <DotMatrix speed={0.2} />
-        </div>
-        <TitleBar />
+      <BackdropScreen data-testid="save-secret-key-screen" backdropOpacity={0.2} backdropSpeed={0.2}>
         <div
           className="flex-1 flex justify-center overflow-y-auto"
           style={{ position: "relative", zIndex: 1, padding: "1rem", overflowY: "auto" }}
@@ -237,21 +220,13 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
             </div>
           </Card>
         </div>
-      </div>
+      </BackdropScreen>
     );
   }
 
   // Phase 3: confirm; the key is NOT visible.
   return (
-    <div
-      data-testid="save-secret-key-confirm-screen"
-      className="flex flex-col h-full w-full bg-bg"
-      style={{ position: "relative" }}
-    >
-      <div style={{ position: "absolute", inset: 0, opacity: 0.2, pointerEvents: "none" }}>
-        <DotMatrix speed={0.2} />
-      </div>
-      <TitleBar />
+    <BackdropScreen data-testid="save-secret-key-confirm-screen" backdropOpacity={0.2} backdropSpeed={0.2}>
       <div
         className="flex-1 flex justify-center overflow-y-auto"
         style={{ position: "relative", zIndex: 1, padding: "1rem" }}
@@ -303,6 +278,6 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
           </div>
         </Card>
       </div>
-    </div>
+    </BackdropScreen>
   );
 };

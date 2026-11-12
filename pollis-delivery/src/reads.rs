@@ -62,17 +62,7 @@ async fn reader(
             )),
         });
     }
-    match auth::verify_request_identity_cached(
-        &state.device_keys,
-        &state.db,
-        &req.headers,
-        req.method.as_str(),
-        req.uri.path(),
-        &req.body,
-        crate::util::now_unix() as i64,
-    )
-    .await
-    {
+    match crate::writes::verify_signed_identity(state, req).await {
         Ok((user_id, device_id)) => Ok(Ok(Reader { user_id, device_id })),
         Err(rej) => Ok(Err(rej.into_response())),
     }
@@ -94,17 +84,7 @@ pub(crate) async fn authed_user(
             _ => Err(bad_request("user_id required when auth is disabled")),
         });
     }
-    match auth::verify_request_cached(
-        &state.device_keys,
-        &state.db,
-        &req.headers,
-        req.method.as_str(),
-        req.uri.path(),
-        &req.body,
-        crate::util::now_unix() as i64,
-    )
-    .await
-    {
+    match crate::writes::verify_signed_user(state, req).await {
         Ok(user_id) => {
             if let Some(claimed) = body_user_id {
                 if !claimed.is_empty() && claimed != user_id {

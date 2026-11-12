@@ -2,8 +2,9 @@ import { errorMessage } from "../utils/errorMessage";
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Users, Plus, Search } from "lucide-react";
-import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
+import { Users, Plus, Search } from "lucide-react";
+import type { TerminalMenuItem } from "../components/ui/TerminalMenu";
+import { BackMenu } from "../components/ui/BackMenu";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useUserGroupsWithChannels, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
@@ -95,19 +96,5 @@ export const GroupsPage: React.FC = observer(() => {
     items = items.concat(groupItems);
   }
 
-  items.push({
-    id: "__back__",
-    activateOn: "press",
-    label: t("common:actions.goBack"),
-    icon: <ArrowLeft size={14} className="rtl-mirror" />,
-    action: () => navigate({ to: "/" }),
-    type: "system",
-  });
-
-  return (
-    <TerminalMenu
-      items={items}
-      onEsc={() => navigate({ to: "/" })}
-    />
-  );
+  return <BackMenu items={items} onBack={() => navigate({ to: "/" })} />;
 });

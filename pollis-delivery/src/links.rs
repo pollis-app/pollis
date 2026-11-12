@@ -28,6 +28,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use pollis_device_cert::constant_time_eq;
 use sha2::{Digest, Sha256};
 
 use crate::writes::{bad_request, gate_and_parse, ok_response, resolve_actor, RawRequest};
@@ -142,17 +143,6 @@ pub struct LinkStore {
 
 fn sweep(map: &mut HashMap<String, LinkRecord>, now: u64) {
     map.retain(|_, rec| now <= rec.expires_at);
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 fn id_is_live(map: &HashMap<String, LinkRecord>, link_id: &str, now: u64) -> bool {
@@ -466,28 +456,24 @@ pub async fn claim_link(State(state): State<AppState>, _headers: HeaderMap, body
         ClaimOutcome::Refused => return refused(),
     };
 
-    let conn = match state.db.conn().await {
-        Ok(c) => c,
-        Err(e) => return internal(e),
-    };
-    let account = match account_for(&conn, &user_id).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return refused(),
-        Err(e) => return internal(e),
+    let account = match linked_account(&state, &user_id).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
     };
     let ttl = state.otp_config.session_ttl_secs;
-    let session_token =
-        state
-            .sessions
-            .mint_device_link(&user_id, &account.email, &parsed.device_id, &parsed.link_id, ttl, now);
-    ok_response::<ClaimLinkBody>(ClaimLinkResponse {
+    let session_token = state.sessions.mint_device_link(
+        &user_id,
+        &account.email,
+        &parsed.device_id,
+        &parsed.link_id,
+        ttl,
+        now,
+    );
+    ok_response::<ClaimLinkBody>(account.into_session(
         user_id,
-        username: account.username,
-        email: account.email,
-        account_id_pub: account.account_id_pub,
         session_token,
-        session_expires_at: now.saturating_add(ttl) as i64,
-    })
+        now.saturating_add(ttl),
+    ))
 }
 
 pub async fn offer_link(State(state): State<AppState>, _headers: HeaderMap, body: Bytes) -> Response {
@@ -549,14 +535,9 @@ pub async fn poll_offer(State(state): State<AppState>, _headers: HeaderMap, body
         CollectOutcome::Refused => return refused(),
     };
 
-    let conn = match state.db.conn().await {
-        Ok(c) => c,
-        Err(e) => return internal(e),
-    };
-    let account = match account_for(&conn, &user_id).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return refused(),
-        Err(e) => return internal(e),
+    let account = match linked_account(&state, &user_id).await {
+        Ok(a) => a,
+        Err(resp) => return resp,
     };
     let ttl = state.otp_config.session_ttl_secs;
     let session_token =
@@ -564,14 +545,7 @@ pub async fn poll_offer(State(state): State<AppState>, _headers: HeaderMap, body
             .sessions
             .mint_device_offer(&user_id, &account.email, &device_id, &parsed.link_id, ttl, now);
     ok_response::<PollOfferBody>(PollOfferResponse {
-        session: Some(ClaimLinkResponse {
-            user_id,
-            username: account.username,
-            email: account.email,
-            account_id_pub: account.account_id_pub,
-            session_token,
-            session_expires_at: now.saturating_add(ttl) as i64,
-        }),
+        session: Some(account.into_session(user_id, session_token, now.saturating_add(ttl))),
     })
 }
 
@@ -579,6 +553,38 @@ struct Account {
     username: String,
     email: String,
     account_id_pub: Option<String>,
+}
+
+impl Account {
+    /// The signed-in session handed to the new device for `user_id`.
+    fn into_session(
+        self,
+        user_id: String,
+        session_token: String,
+        expires_at: u64,
+    ) -> ClaimLinkResponse {
+        ClaimLinkResponse {
+            user_id,
+            username: self.username,
+            email: self.email,
+            account_id_pub: self.account_id_pub,
+            session_token,
+            session_expires_at: expires_at as i64,
+        }
+    }
+}
+
+/// The account a link resolved to; an account gone since is [`refused`], a DB failure [`internal`].
+async fn linked_account(state: &AppState, user_id: &str) -> Result<Account, Response> {
+    let conn = match state.db.conn().await {
+        Ok(c) => c,
+        Err(e) => return Err(internal(e)),
+    };
+    match account_for(&conn, user_id).await {
+        Ok(Some(a)) => Ok(a),
+        Ok(None) => Err(refused()),
+        Err(e) => Err(internal(e)),
+    }
 }
 
 async fn account_for(conn: &libsql::Connection, user_id: &str) -> anyhow::Result<Option<Account>> {

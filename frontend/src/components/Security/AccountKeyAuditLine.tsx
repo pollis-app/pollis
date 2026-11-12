@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck, Clock, AlertTriangle, ShieldQuestion } from "lucide-react";
 import type { AuditStatus } from "../../types";
+import { SecurityStatusLine } from "./SecurityStatusLine";
 
 interface AccountKeyAuditLineProps {
   status: AuditStatus;
@@ -47,27 +48,13 @@ export const AccountKeyAuditLine: React.FC<AccountKeyAuditLineProps> = ({
   const { icon, labelKey, color } = statusConfig[status];
 
   return (
-    <div
-      data-testid={testId}
-      data-status={status}
-      className="flex flex-col gap-1"
-    >
-      <span
-        className="inline-flex items-center gap-1 text-2xs font-mono"
-        style={{ color }}
-      >
-        {icon}
-        {t(labelKey)}
-      </span>
-      {status === "alarm" && detail && (
-        <span
-          data-testid={`${testId}-reason`}
-          className="text-2xs font-mono"
-          style={{ color }}
-        >
-          {detail}
-        </span>
-      )}
-    </div>
+    <SecurityStatusLine
+      testId={testId}
+      status={status}
+      icon={icon}
+      label={t(labelKey)}
+      color={color}
+      reason={status === "alarm" && detail}
+    />
   );
 };
