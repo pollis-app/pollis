@@ -511,6 +511,9 @@ pub struct MediaUploadResult {
     pub blurhash: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// A video's poster JPEG, base64 (#1837): the `_att` `pv` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster: Option<String>,
 }
 
 /// Which key an existing attachment is sealed under.
@@ -623,6 +626,7 @@ pub async fn upload_media(
     path: String,
     filename: String,
     content_type: String,
+    poster: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
     // Refuse an over-cap file from metadata, before reading it (#1491).
@@ -641,7 +645,9 @@ pub async fn upload_media(
     let data = tokio::fs::read(&path).await
         .map_err(|e| Error::Other(anyhow::anyhow!("read file {path}: {e}")))?;
 
-    upload_plaintext(Plaintext::Owned(data), filename, content_type, UploadScope::Vault, state).await
+    let result =
+        upload_plaintext(Plaintext::Owned(data), filename, content_type, UploadScope::Vault, state).await?;
+    Ok(with_poster(result, poster).await)
 }
 
 /// Upload an attachment the renderer staged in memory (`commands::staging`) —
@@ -651,6 +657,7 @@ pub async fn upload_media_staged(
     staged_id: String,
     filename: String,
     content_type: String,
+    poster: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
     let _slot = upload_slot().await;
@@ -664,6 +671,40 @@ pub async fn upload_media_staged(
         upload_plaintext(Plaintext::Staged(bytes), filename, content_type, UploadScope::Vault, state).await;
     if result.is_ok() {
         crate::commands::staging::discard_staged(&staged_id);
+    }
+    Ok(with_poster(result?, poster).await)
+}
+
+/// A video's poster from the client's frame (#1837), off the async runtime.
+/// `None` when there is no frame or it does not decode: a send never fails on its poster.
+pub(crate) async fn video_poster(
+    content_type: &str,
+    frame: Option<String>,
+) -> Option<crate::commands::poster::VideoPoster> {
+    if !content_type.starts_with("video/") {
+        return None;
+    }
+    let frame = frame?;
+    match tokio::task::spawn_blocking(move || crate::commands::poster::from_frame_b64(&frame)).await {
+        Ok(Ok(poster)) => Some(poster),
+        Ok(Err(e)) => {
+            crate::diag!("[video_poster] no poster ({content_type}): {e}");
+            None
+        }
+        Err(e) => {
+            crate::diag!("[video_poster] poster task failed: {e}");
+            None
+        }
+    }
+}
+
+/// Fill a Vault video upload's blurhash, size and poster from its frame.
+async fn with_poster(mut result: MediaUploadResult, frame: Option<String>) -> MediaUploadResult {
+    if let Some(p) = video_poster(&result.content_type, frame).await {
+        result.blurhash = Some(p.blurhash);
+        result.width = Some(p.width);
+        result.height = Some(p.height);
+        result.poster = p.jpeg.map(crate::commands::poster::PosterJpeg::into_string);
     }
     result
 }
@@ -707,6 +748,7 @@ pub(crate) async fn upload_outbox_bytes(
             blurhash: None,
             width: None,
             height: None,
+            poster: None,
         });
     }
     let _slot = upload_slot().await;
@@ -827,6 +869,7 @@ async fn upload_plaintext(
         blurhash,
         width,
         height,
+        poster: None,
     })
 }
 
@@ -1135,11 +1178,15 @@ fn compute_image_meta(data: &[u8]) -> anyhow::Result<(String, u32, u32)> {
     let img = image::load_from_memory(data)
         .map_err(|e| anyhow::anyhow!("image decode: {e}"))?;
     let (width, height) = img.dimensions();
+    Ok((blurhash_of(&img)?, width, height))
+}
+
+/// The 4x3 blurhash of an image, an upload's or a video poster's (#1837).
+pub(crate) fn blurhash_of(img: &image::DynamicImage) -> anyhow::Result<String> {
     // A thumbnail yields the same blurhash at a fraction of the cost (#1497).
     let small = img.thumbnail(BLURHASH_SOURCE_MAX, BLURHASH_SOURCE_MAX).to_rgba8();
-    let hash = blurhash::encode(4, 3, small.width(), small.height(), small.as_raw())
-        .map_err(|e| anyhow::anyhow!("blurhash: {e:?}"))?;
-    Ok((hash, width, height))
+    blurhash::encode(4, 3, small.width(), small.height(), small.as_raw())
+        .map_err(|e| anyhow::anyhow!("blurhash: {e:?}"))
 }
 
 // R2 via the DS secrets broker: the client holds NO R2 credentials, only presigned URLs.

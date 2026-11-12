@@ -40,6 +40,7 @@ pub mod overlay;
 // NOT `pin` — that module is the device-unlock PIN.
 pub mod file_keys;
 pub mod pinned_messages;
+pub mod poster;
 pub mod push;
 pub mod r2;
 pub mod vault;

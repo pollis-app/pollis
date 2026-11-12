@@ -1493,8 +1493,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let path: String = arg(&args, "path")?;
             let filename: String = arg(&args, "filename")?;
             let content_type: String = arg(&args, "contentType")?;
+            // A video's poster frame, base64 (#1837).
+            let poster: Option<String> = arg_opt(&args, "poster")?;
             let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
-            ok(crate::commands::r2::upload_media(path, filename, content_type, &state()?)
+            ok(crate::commands::r2::upload_media(path, filename, content_type, poster, &state()?)
                 .await?)
         }
         // No loopback server on mobile: decrypt to a sandbox file; the JS side unlinks it on last release.
