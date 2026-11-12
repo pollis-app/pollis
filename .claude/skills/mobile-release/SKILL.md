@@ -106,7 +106,10 @@ to `mobile/store/runtime-versions.json`, using the values from step 4, and merge
   through this file.
 - **Android:** also tag `mobile-v<V>` on the release commit to publish the
   sideload APK (`.github/workflows/mobile-apk-release.yml`). When the run
-  succeeds, add its `sideload` entry the same way.
+  succeeds, add its `sideload` entry the same way. That run also publishes the
+  version's SBOM, VEX and licence summary to pollis.com/open-source (#1832).
+- **iOS only (no `mobile-v<V>` tag this time):** publish that evidence by hand:
+  `gh workflow run oss-evidence.yml -f product=mobile -f ref=<release commit> -f version=v<V>`.
 
 ## 7. Submit for review
 

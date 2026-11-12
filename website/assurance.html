@@ -309,9 +309,10 @@
             unchanged dependency can wait up to a week.
           </p>
           <p>
-            <strong>Neither gate covers JavaScript or vendored C/C++.</strong> The renderer's <code>pnpm</code>
-            tree is in the per-release SBOM but not vetted, and C and C++ compiled in build scripts (notably the
-            WebRTC crates) is in neither.
+            <strong>JavaScript is licence-checked only, and vendored C/C++ is in neither gate.</strong> The npm
+            packages each app ships must carry an allowed licence and are listed in the per-release SBOM, but
+            they are not vetted and no advisory check gates them. C and C++ compiled in build scripts (notably
+            the WebRTC crates) is in neither gate.
           </p>
         </div>
         <p style="margin-top: 1rem;">
@@ -513,6 +514,7 @@
           <li><a href="transparency.html">Key transparency</a></li>
           <li><a href="artifacts.html">Release artifacts</a></li>
           <li><a href="assurance.html" aria-current="page">Assurance</a></li>
+          <li><a href="open-source.html">Open source</a></li>
         </ul>
       </div>
       <div class="site-footer-col">

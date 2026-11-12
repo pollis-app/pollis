@@ -804,7 +804,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**204 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**206 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1009,7 +1009,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (56)
+### `pages` (58)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -1046,6 +1046,8 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **LinkDevicePage** — `frontend/src/pages/LinkDevicePage.tsx`
 - **Members** — props: groupId, isAdmin — `frontend/src/pages/Members.tsx`
 - **MembersPage** — `frontend/src/pages/MembersPage.tsx`
+- **OpenSourceLicensePage** — `frontend/src/pages/OpenSourceLicensePage.tsx`
+- **OpenSourcePage** — `frontend/src/pages/OpenSourcePage.tsx`
 - **PreferencesPage** — `frontend/src/pages/PreferencesPage.tsx`
 - **RenameChannelPage** — `frontend/src/pages/RenameChannelPage.tsx`
 - **RenameEntity** — props: kind — `frontend/src/pages/RenameEntity.tsx`. One form for both routes; `RenameGroup`/`RenameChannel` were eleven normalised lines apart and are gone (#874). A viewer who is not the group's admin (the page left open across a demotion — every entry point is admin-only) gets a read-only view instead of the form: name as text, the description as text only when there is one, no Save (#1281). The rule is `identityFieldMode` in `frontend/src/utils/identityFields.ts`, mirrored by `mobile/lib/identityFields.ts`, which mobile's `group/settings` uses the same way (`ReadOnlyField` for a non-admin, nothing for an empty description).

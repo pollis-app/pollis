@@ -216,6 +216,29 @@ full detail: `docs/metadata-retention-policy.md` §3.
   `GET /v1/ops/otp-requests` (operator token, 404 when off).
   `tests/otp_ops_log.rs` proves that every response is the same with the log on,
   that no IP or address is in the view, and that prod never sets the gate.
+- **Open-source inventory (#1832).** `scripts/oss-inventory.mjs` is the one
+  generator for what each product ships (`PRODUCTS`: desktop = src-tauri + the
+  capture helpers + the renderer's prod npm tree; mobile = pollis-core
+  `--no-default-features` + `mobile/`'s tree; cli = pollis-tui; ds =
+  pollis-delivery + its Worker). Rust is `cargo tree -e normal,no-proc-macro`
+  per release target triple, JS is Node resolution over the installed
+  `dependencies`, so build scripts, proc-macros and dev deps are out. It writes
+  (1) the apps' licence notices — desktop through the `virtual:oss-notices` Vite
+  plugin (`frontend/vite-plugin-oss-notices.ts`; a release build fails without
+  it, the Playwright build gets `src/__mocks__/oss-notices.json`), mobile through
+  `metro.config.js` into the gitignored `mobile/generated/` — shown on desktop
+  `/open-source` and mobile Self → Open source licenses; (2) per release, a
+  CycloneDX SBOM, an OpenVEX doc and `summary.json`, published to
+  `cdn.pollis.com/releases/oss/<product>/<version>/` (+ `latest.json`) by
+  `scripts/publish-oss-evidence.sh`, from desktop-release.yml directly and from
+  `oss-evidence.yml` for cli/mobile/ds; `website/open-source.html` renders the
+  four `latest.json`. The VEX comes from `supply-chain/vex.json`, one statement
+  per vulnerability `deny.toml` ignores; `supply-chain.yml` fails if the two
+  disagree (`check-vex`) and gates the shipped npm trees' licences against
+  deny.toml's allow-list plus `supply-chain/js-licenses.json`
+  (`check-licenses`). A package with no licence file gets the SPDX text from
+  `supply-chain/license-texts/`. Output is deterministic (timestamp = commit
+  time, `SOURCE_DATE_EPOCH` wins), so the rebuilt desktop bundle still matches.
 - **Diagnostics (#1305).** Two halves, matched by a random per-request id the
   client sends as `X-Pollis-Request-Id` (`pollis_api::redact::REQUEST_ID_HEADER`,
   minted per call in `ds_client.rs` `send_ds`, never derived from the user or
