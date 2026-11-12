@@ -518,6 +518,8 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
     // is published; the MLS derivation runs alongside connect and the mic.
     let e2ee_options = voice_e2ee::build_unarmed_e2ee_options();
     let key_provider = e2ee_options.key_provider.clone();
+    #[cfg(feature = "test-harness")]
+    super::e2e_hooks::remember_join(&token, &url, &key_provider);
     let mut room_options = RoomOptions::default();
     room_options.encryption = Some(e2ee_options);
     // Subscriber-driven video: tiles report their size, the SFU sends only the layer that fits
@@ -1436,6 +1438,10 @@ async fn drive_room_events(
                 crate::diag!(
                     "[voice-e2ee] frame state for {identity}: {state:?}"
                 );
+                #[cfg(feature = "test-harness")]
+                if matches!(participant, Participant::Remote(_)) {
+                    super::e2e_hooks::record_frame_state(super::e2e_hooks::SCOPE_SESSION, &identity, &state);
+                }
             }
             RoomEvent::LocalTrackPublished { .. } => {
                 // New cryptors start on slot 0; move to current epoch.

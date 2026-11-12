@@ -197,7 +197,7 @@ pub async fn get_voice_e2ee_key(
     })
 }
 
-async fn derive_voice_key_for_group(
+pub(crate) async fn derive_voice_key_for_group(
     state: &Arc<AppState>,
     mls_group_id: &str,
 ) -> Result<(Vec<u8>, i32, u64)> {

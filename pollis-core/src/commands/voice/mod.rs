@@ -2,6 +2,9 @@
 
 mod capture;
 mod devices;
+// #1850: test-only E2EE observation for the desktop e2e; never in a release app.
+#[cfg(feature = "test-harness")]
+pub mod e2e_hooks;
 mod gate;
 mod join;
 mod levels;

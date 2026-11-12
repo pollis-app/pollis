@@ -13,6 +13,10 @@ pub mod tray;
 #[cfg(feature = "test-harness")]
 pub mod test_harness;
 
+// #1850: the e2e-only voice E2EE hooks must never ship.
+#[cfg(all(feature = "e2e-hooks", not(debug_assertions)))]
+compile_error!("the `e2e-hooks` feature is test-only and must not be built without debug_assertions");
+
 // Gated so the headless lib builds warning-free.
 #[cfg(feature = "native-shell")]
 use std::sync::Arc;
@@ -690,6 +694,12 @@ pub fn run() {
             commands::voice::set_voice_output_device,
             commands::voice::set_voice_audio_processing,
             commands::voice::get_last_join_timings,
+            #[cfg(feature = "e2e-hooks")]
+            commands::voice::e2e_voice_e2ee_snapshot,
+            #[cfg(feature = "e2e-hooks")]
+            commands::voice::e2e_voice_adversary_reenter,
+            #[cfg(feature = "e2e-hooks")]
+            commands::voice::e2e_voice_adversary_leave,
             commands::voice_test::subscribe_voice_test_events,
             commands::voice_test::start_mic_test,
             commands::voice_test::set_mic_test_monitor,

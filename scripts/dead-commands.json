@@ -10,6 +10,9 @@
     "list_known_accounts": "Mobile bridge arm kept for parity debt: desktop's account picker uses it, mobile has none yet (scripts/feature-parity.json known_debt.desktop_only).",
     "read_messages_after": "Mobile bridge arm kept for parity debt: desktop's jump-to-message paging uses it, mobile has none yet (scripts/feature-parity.json known_debt.desktop_only).",
     "read_messages_around": "Mobile bridge arm kept for parity debt: desktop's jump-to-message uses it, mobile has none yet (scripts/feature-parity.json known_debt.desktop_only).",
-    "rebuild_search_index": "Mobile bridge arm kept for parity debt: desktop's Preferences offers the rebuild, mobile does not yet (scripts/feature-parity.json known_debt.desktop_only)."
+    "rebuild_search_index": "Mobile bridge arm kept for parity debt: desktop's Preferences offers the rebuild, mobile does not yet (scripts/feature-parity.json known_debt.desktop_only).",
+    "e2e_voice_e2ee_snapshot": "Test-only (#1850): registered only under the debug-only `e2e-hooks` feature; called over IPC by e2e/voice-removal-frame-keys.js, never by a client.",
+    "e2e_voice_adversary_reenter": "Test-only (#1850): registered only under the debug-only `e2e-hooks` feature; called over IPC by e2e/voice-removal-frame-keys.js, never by a client.",
+    "e2e_voice_adversary_leave": "Test-only (#1850): registered only under the debug-only `e2e-hooks` feature; called over IPC by e2e/voice-removal-frame-keys.js, never by a client."
   }
 }

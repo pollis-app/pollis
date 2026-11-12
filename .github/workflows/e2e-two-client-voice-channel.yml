@@ -7,9 +7,15 @@
 # PulseAudio null-sink + virtual-source) and an ephemeral LiveKit SFU on
 # loopback — same fixtures as e2e-two-client-call.yml.
 #
-# Pipeline: install deps -> build pollis + pollis-delivery -> start-audio ->
-# start-livekit -> start-backend -> run e2e/two-client-voice-channel.js through
-# the shared desktop-e2e action -> tear everything down (always).
+# A second step (#1850) runs e2e/voice-removal-frame-keys.js on the same stack:
+# three clients, one removed mid-call, then the removed member's frame keys are
+# checked (no current key held; re-entering the room with its join-time token
+# and keys decrypts nothing). It reads the frame-cryptor state through the
+# test-only `pollis/e2e-hooks` commands, which only a debug build can carry.
+#
+# Pipeline: install deps -> build pollis (+ e2e-hooks) + pollis-delivery ->
+# start-audio -> start-livekit -> start-backend -> run both scripts through the
+# shared desktop-e2e action -> tear everything down (always).
 # Manual trigger only (workflow_dispatch): heavy.
 name: E2E two-client voice channel (audio + LiveKit)
 
@@ -63,8 +69,10 @@ jobs:
       # Clean env (no TURSO_* / POLLIS_DELIVERY_URL / LIVEKIT_* yet — the fixtures
       # run LATER) so config.rs's option_env! bakes nothing in and both binaries
       # read the runtime env the fixtures inject.
+      # `pollis/e2e-hooks` adds the test-only voice E2EE commands the frame-key
+      # script reads; it refuses to compile without debug_assertions.
       - name: Build pollis + pollis-delivery (debug)
-        run: cargo build -p pollis -p pollis-delivery
+        run: cargo build -p pollis -p pollis-delivery --features pollis/e2e-hooks
 
       # Virtual audio FIRST — a voice-channel join opens cpal mic/playback and
       # fails the join if no device exists. Exports PULSE_* to $GITHUB_ENV.
@@ -86,6 +94,17 @@ jobs:
           command: pnpm e2e two-client-voice-channel
           working-directory: e2e
           artifact-name: e2e-two-client-voice-channel-failure
+          artifacts-path: |
+            e2e/artifacts/*.png
+            e2e/artifacts/*.html
+
+      - name: Run voice removal frame-key e2e (voice-removal-frame-keys.js)
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/desktop-e2e
+        with:
+          command: pnpm e2e voice-removal-frame-keys
+          working-directory: e2e
+          artifact-name: e2e-voice-removal-frame-keys-failure
           artifacts-path: |
             e2e/artifacts/*.png
             e2e/artifacts/*.html

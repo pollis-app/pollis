@@ -75,6 +75,7 @@ entry point (see below):
 | `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
 | `voice-ptt-deafen.js` | push-to-talk + self-deafen (#849): deafen implies mute and undeafen restores the *prior* mute state; PTT-idle renders distinctly from muted | yes | yes (writable) + LiveKit + audio |
 | `two-client-voice-channel.js` | A + B join a group voice channel, both see 2 participants, A leaves, B sees the drop | yes | yes (writable) + LiveKit + audio |
+| `voice-removal-frame-keys.js` | A, B, C in a group voice call; A removes C mid-call. A and B rotate to the removal epoch's key, C's ring holds no current key, and C re-entering the room with its join-time token and keys gets only `MissingKey`/`DecryptionFailed` verdicts (#1850). Needs the app built with `--features pollis/e2e-hooks` | yes | yes (writable) + LiveKit + audio |
 | `two-client-call.js` | two instances place + accept a real 1:1 call (B answers from the #1639 takeover); each sees the other in the call | yes | yes (writable) + LiveKit + audio |
 | `two-client-camera.js` | two instances in a call; A turns its webcam on, B sees A's remote camera tile | yes | yes (writable) + LiveKit + audio + virtual camera |
 | `two-client-screenshare.js` | two instances in a call; A shares its screen (X11/Xvfb capture), B sees A's remote screenshare tile | yes | yes (writable) + LiveKit + audio |
@@ -94,6 +95,7 @@ pnpm --filter @pollis/e2e e2e two-client-dm-reply       # bidirectional DM (need
 pnpm --filter @pollis/e2e e2e two-client-delete         # delete-for-everyone redaction (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-channel        # group text-channel convergence (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-voice-channel  # group voice join/leave (needs backend + LiveKit + audio)
+pnpm --filter @pollis/e2e e2e voice-removal-frame-keys  # removed member's frame keys (needs backend + LiveKit + audio; app built with --features pollis/e2e-hooks)
 pnpm --filter @pollis/e2e e2e voice-ptt-deafen          # push-to-talk + deafen states (needs backend + LiveKit + audio)
 pnpm --filter @pollis/e2e e2e two-client-call  # or: node e2e/two-client-call.js  (needs backend + LiveKit + audio up first)
 pnpm --filter @pollis/e2e e2e two-client-camera  # or: node e2e/two-client-camera.js  (needs backend + LiveKit + audio + virtual camera up first)
@@ -653,6 +655,7 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `two-client-delete.js` | `e2e-two-client-delete.yml` | — |
 | `two-client-channel.js` | `e2e-two-client-channel.yml` | — |
 | `two-client-voice-channel.js` | `e2e-two-client-voice-channel.yml` | LiveKit + audio |
+| `voice-removal-frame-keys.js` | `e2e-two-client-voice-channel.yml` (second step) | LiveKit + audio, `pollis/e2e-hooks` build |
 | `two-client-call.js` | `e2e-two-client-call.yml` | LiveKit + audio |
 | `two-client-camera.js` | `e2e-two-client-camera.yml` | LiveKit + audio + virtual camera |
 | `two-client-screenshare.js` | `e2e-two-client-screenshare.yml` | LiveKit + audio (X11 capture) |

@@ -60,6 +60,14 @@ The `test-harness` feature:
 
 It is **not** enabled in release builds.
 
+The shell's `e2e-hooks` feature (#1850) is its desktop-e2e sibling: it turns on
+`pollis-core/test-harness` in the REAL app and registers the `e2e_voice_*`
+commands (`pollis-core/src/commands/voice/e2e_hooks.rs`: ring fingerprints,
+frame-cryptor verdicts, an adversary re-entry with the last join's token and
+keys) that `e2e/voice-removal-frame-keys.js` drives over IPC. `src-tauri/src/lib.rs`
+has a `compile_error!` for `e2e-hooks` without `debug_assertions`, so it cannot
+reach a release build.
+
 Third-party crates (OpenMLS, the PQ crypto, libsql) build optimized under
 `cargo test` — `[profile.test.package."*"] opt-level = 2` in the workspace
 `Cargo.toml` — while our own crates stay at opt-level 0 with debug assertions.
@@ -1184,6 +1192,7 @@ build):
 | `two-client-camera.js` | camera on → the peer renders the remote tile | yes (+ LiveKit) |
 | `two-client-screenshare.js` | screenshare → the peer renders the remote tile | yes (+ LiveKit) |
 | `two-client-voice-channel.js` | voice channel join/leave, participant counts converge; then an immediate rejoin after leaving (the old room closes in the background) converges too | yes (+ LiveKit) |
+| `voice-removal-frame-keys.js` | three clients; A removes C mid-call. A and B send under the removal epoch's key, C's ring (its join's provider) holds no current key, and C re-entering with its join-time token and keys (eviction out of the picture, #1097) gets only `MissingKey`/`DecryptionFailed`, never `Ok`. Positive controls first: C decrypts both peers and holds A's live key before the removal. State comes from the test-only `e2e_voice_*` commands (`pollis-core/src/commands/voice/e2e_hooks.rs`, shell feature `e2e-hooks`, debug builds only) | yes (+ LiveKit) |
 | `voice-reconnect.js` | both in a voice channel, the SFU container is stopped for longer than the SDK's own retry window (75 s): neither client drops to the join CTA, and both see each other again after it restarts (in-session re-mint + reconnect) | yes (+ LiveKit, Docker) |
 | `voice-channel-no-mic.js` | joining a voice channel with no microphone degrades instead of failing | yes (+ LiveKit) |
 

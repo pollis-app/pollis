@@ -90,3 +90,22 @@ pub async fn set_voice_audio_processing(config: pollis_core::commands::voice_apm
 pub async fn get_last_join_timings(state: State<'_, Arc<AppState>>) -> Result<Option<JoinTimings>> {
     pollis_core::commands::voice::get_last_join_timings(&state).await
 }
+
+// #1850: test-only voice E2EE hooks for the desktop e2e; `e2e-hooks` refuses a release build.
+#[cfg(feature = "e2e-hooks")]
+#[tauri::command]
+pub async fn e2e_voice_e2ee_snapshot(state: State<'_, Arc<AppState>>) -> Result<pollis_core::commands::voice::e2e_hooks::VoiceE2eeSnapshot> {
+    pollis_core::commands::voice::e2e_hooks::voice_e2ee_snapshot(&state).await
+}
+
+#[cfg(feature = "e2e-hooks")]
+#[tauri::command]
+pub async fn e2e_voice_adversary_reenter(state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::voice::e2e_hooks::voice_e2ee_adversary_reenter(&state).await
+}
+
+#[cfg(feature = "e2e-hooks")]
+#[tauri::command]
+pub async fn e2e_voice_adversary_leave() -> Result<()> {
+    pollis_core::commands::voice::e2e_hooks::voice_e2ee_adversary_leave().await
+}
