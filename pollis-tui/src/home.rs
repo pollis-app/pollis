@@ -524,6 +524,7 @@ mod tests {
             id: id.to_string(),
             created_by: "me".to_string(),
             created_at: "t".to_string(),
+            last_activity_at: "t".to_string(),
             members: vec![
                 DmChannelMember {
                     user_id: "me".to_string(),
