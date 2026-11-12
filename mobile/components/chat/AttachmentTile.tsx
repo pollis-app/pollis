@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from "react";
 import { observer } from "mobx-react-lite";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { MediaImage } from "../Media";
@@ -16,6 +16,12 @@ import { useThemeRerender } from "../theme";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { tileTap } from "../../lib/sensitiveMedia";
 import { SensitiveCover, SensitiveHideButton } from "./SensitiveCover";
+import { useNamedMediaUri } from "../../hooks/useNamedMediaUri";
+import { useVideoPoster } from "../../hooks/useVideoPoster";
+import { peekMediaUri } from "../../lib/media/cache";
+import { videoPosterPlan } from "../../lib/media/videoPoster";
+import { posterUri } from "../../lib/messageContent";
+
 
 const IMAGE_MAX_W = 220;
 function imageSize(att: MessageAttachment): { width: number; height: number } {
@@ -69,7 +75,26 @@ export const AttachmentTile = observer(function AttachmentTile({
   };
 
   const visual = kind === "image" || kind === "video";
-  if (visual && tileTap(attachment, sensitivity.revealed) === "reveal") {
+  const covered = visual && tileTap(attachment, sensitivity.revealed) === "reveal";
+
+  // A video's still frame (#1837), in `videoPosterPlan`'s order.
+  const plan =
+    kind === "video" && !covered
+      ? videoPosterPlan(attachment, !!(attachment.object_key && peekMediaUri(attachment.content_hash)))
+      : "none";
+  // The named copy: AVFoundation, like AVPlayer, types a file by its extension.
+  const legacyFile = useNamedMediaUri(attachment, plan === "legacy");
+  const decodeUri =
+    plan === "pending" ? attachment.localPreviewUri ?? null : plan === "legacy" ? legacyFile.uri : null;
+  const decoded = useVideoPoster(decodeUri);
+  const posterSource =
+    plan === "pv" && attachment.poster
+      ? posterUri(attachment.poster)
+      : decoded
+        ? posterUri(decoded)
+        : null;
+
+  if (covered) {
     const box = visualBox;
     return (
       <Pressable
@@ -122,7 +147,9 @@ export const AttachmentTile = observer(function AttachmentTile({
 
   if (kind === "video") {
     const box = visualBox;
+    const posterKind = posterSource ? (plan === "pv" ? "pv" : "local") : placeholder ? "blurhash" : "placeholder";
     return withHide(
+      <View style={box}>
       <Pressable
         {...press}
         accessibilityLabel={t("attachment.openLabel", { filename: attachment.filename })}
@@ -135,15 +162,34 @@ export const AttachmentTile = observer(function AttachmentTile({
           justifyContent: "center",
         }}
       >
-        {placeholder ? (
+        {posterSource ? (
+          <Image
+            source={{ uri: posterSource }}
+            placeholder={placeholder}
+            placeholderContentFit="cover"
+            contentFit="cover"
+            // Decrypted content: memory only, never expo-image's disk cache.
+            cachePolicy="memory"
+            style={StyleSheet.absoluteFill}
+            accessible={false}
+          />
+        ) : placeholder ? (
           <Image
             placeholder={placeholder}
             placeholderContentFit="cover"
-            style={{ position: "absolute", top: 0, bottom: 0, start: 0, end: 0 }}
+            style={StyleSheet.absoluteFill}
           />
         ) : null}
-        <PlayBadge size={44} overFrame={!!placeholder} />
+        <PlayBadge size={44} overFrame={!!posterSource || !!placeholder} />
       </Pressable>
+      {/* What the tile drew, for Maestro (iOS hides ids inside the accessible button). */}
+      <View
+        testID={`video-poster-${posterKind}`}
+        collapsable={false}
+        pointerEvents="none"
+        style={StyleSheet.absoluteFill}
+      />
+      </View>
     );
   }
 

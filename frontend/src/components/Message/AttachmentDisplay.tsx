@@ -2,7 +2,7 @@ import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { Film } from "lucide-react";
+import { Play } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize, formatDuration } from "../../utils/format";
@@ -51,6 +51,18 @@ function mayNotDecode(contentType: string): boolean {
   return MAY_NOT_DECODE.has(contentType.toLowerCase().split(";")[0].trim());
 }
 
+// A video with no poster from its sender (an older build, #1837) is decoded here only up to this size.
+const LEGACY_POSTER_MAX_BYTES = 25 * 1024 * 1024;
+
+// A chat video thumb is 96px tall at its own aspect ratio, within these widths; unknown is square.
+function videoThumbBox(attachment: MessageAttachment): React.CSSProperties {
+  if (!attachment.width || !attachment.height) {
+    return { width: 96, height: 96 };
+  }
+  const width = Math.round((96 * attachment.width) / attachment.height);
+  return { width: Math.min(Math.max(width, 64), 172), height: 96 };
+}
+
 export const AttachmentDisplay = observer(({
   attachment,
   tile = false,
@@ -66,7 +78,9 @@ export const AttachmentDisplay = observer(({
   const cardTestId = testId ?? `attachment-${attachment.id}`;
   const thumbBox: React.CSSProperties = tile
     ? { width: "100%", aspectRatio: "1 / 1" }
-    : { width: 96, height: 96 };
+    : isVideo
+      ? videoThumbBox(attachment)
+      : { width: 96, height: 96 };
   const isPending = !attachment.object_key;
 
   // Own box so the hide button can be a sibling: a button cannot hold another.
@@ -159,9 +173,29 @@ export const AttachmentDisplay = observer(({
     prevViewerOpenRef.current = viewerOpen;
   }, [viewerOpen]);
 
+  // No `pv` from the sender (an older build, #1837): decode a frame here from the
+  // file once it is resolved, fetching it for that only while it is small.
+  const needsLocalPoster =
+    isVideo && !attachment.poster && !isPending && !sensitivity.hidden;
   useEffect(() => {
-    if (!isVideo) { return; }
-    const src = attachment.localPreviewUrl ?? downloadUrl;
+    if (!needsLocalPoster || downloadUrl) { return; }
+    const known = peekMediaUrl(attachment);
+    if (known) {
+      setDownloadUrl(known);
+      return;
+    }
+    if (attachment.file_size > LEGACY_POSTER_MAX_BYTES) { return; }
+    let mounted = true;
+    getMediaUrl(attachment)
+      .then((url) => { if (mounted) { setDownloadUrl(url); } })
+      // No frame: the filled placeholder stays, and a click still opens it.
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [needsLocalPoster, downloadUrl, attachment.object_key, attachment.content_hash]);
+
+  useEffect(() => {
+    if (!needsLocalPoster) { return; }
+    const src = downloadUrl;
     if (!src || posterAttemptedSrcRef.current === src) { return; }
     posterAttemptedSrcRef.current = src;
     let mounted = true;
@@ -174,7 +208,7 @@ export const AttachmentDisplay = observer(({
     });
 
     return () => { mounted = false; };
-  }, [isVideo, attachment.localPreviewUrl, downloadUrl]);
+  }, [needsLocalPoster, downloadUrl]);
 
   // Caps render-failure retries: onError nulls downloadUrl, which re-fetches.
   const renderFailuresRef = useRef(0);
@@ -486,24 +520,33 @@ export const AttachmentDisplay = observer(({
   }
 
   if (isVideo) {
+    // Poster sources in order (#1837): the sender's `pv`; a pending send's own frame
+    // (a video's `localPreviewUrl` is its captured poster); a frame decoded here; the blurhash.
+    const posterSrc = attachment.poster
+      ? `data:image/jpeg;base64,${attachment.poster}`
+      : (isPending ? attachment.localPreviewUrl : undefined) ?? poster;
+    const posterKind = posterSrc
+      ? attachment.poster ? "pv" : "local"
+      : attachment.blurhash ? "blurhash" : "placeholder";
     return (
       <>
         {withSensitiveChrome(sensitivity.hidden ? hiddenThumb() : (
         <PressButton
           data-testid={cardTestId}
           data-sensitive={sensitivity.sensitive ? "revealed" : undefined}
+          data-poster={posterKind}
           onClick={!isPending && !isLoading ? handleVideoOpen : undefined}
           disabled={isPending || isLoading}
           aria-label={t("attachment.openLabel", { filename: attachment.filename })}
           title={attachment.filename}
-          className="border-0"
+          // Filled, so a video with no frame is still a visible tile (#1837).
+          className="border-0 bg-surface-high"
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             ...cardBox,
             padding: 0,
-            background: "transparent",
             cursor: isPending || isLoading ? "default" : "pointer",
             position: "relative",
             overflow: "hidden",
@@ -511,14 +554,14 @@ export const AttachmentDisplay = observer(({
             flexShrink: 0,
           }}
         >
-          {(poster || attachment.blurhash) && (
+          {(posterSrc || attachment.blurhash) && (
             <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-              {poster ? (
+              {posterSrc ? (
                 <img
-                  src={poster}
+                  src={posterSrc}
                   alt=""
                   aria-hidden="true"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                 />
               ) : (
                 <BlurhashCanvas hash={attachment.blurhash!} />
@@ -539,7 +582,7 @@ export const AttachmentDisplay = observer(({
             {isLoading ? (
               <LoadingSpinner size="sm" />
             ) : (
-              <Film size={14} aria-hidden="true" style={{ color: "white" }} />
+              <Play size={14} aria-hidden="true" fill="white" style={{ color: "white", marginInlineStart: 2 }} />
             )}
           </div>
           {duration != null && (

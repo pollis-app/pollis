@@ -376,6 +376,16 @@ message" on it, pin its own message and unpin the peer's
 the device's pin and unpin in its own list. The one-device half (pin, list,
 jump, unpin) is `flows/pins.yaml`.
 
+**Video posters across clients (automated, #1837):** `mobile/scripts/maestro-video-posters.sh <device>`
+— the pins shape with `pollis-tui`'s `video_poster_peer` example (needs the dev
+R2 origins, read from Doppler `dev_personal`): the device opens a DM with a fresh
+peer (`two-client/pins/1-open-dm.yaml`); the peer uploads two real videos, one
+with a poster frame and one without (as a build from before #1837 sent them);
+the device must draw `video-poster-pv` for the first and `video-poster-local`
+(a frame decoded on the phone) for the second, never `video-poster-placeholder`,
+then send a video of its own (`two-client/video-posters/2-posters.yaml`). The
+script passes only when the peer finds a JPEG `pv` in the device's envelope.
+
 **Group membership without timeline lines (automated, #1506):** `mobile/scripts/maestro-membership.sh <device>`
 — `pollis-tui`'s `membership_peer` example plays the group's creator, and signs
 up a second account that stays a pending invitee. The creator invites the

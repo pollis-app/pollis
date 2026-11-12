@@ -89,6 +89,10 @@ pub struct OutgoingAttachment {
     /// Marked sensitive (#1568); travels only inside the encrypted envelope (`sens`).
     #[serde(default)]
     pub sensitive: bool,
+    /// A video's poster frame from the platform decoder, base64 (#1837). The
+    /// outbox bounds it into the envelope's `pv` and takes its blurhash and size.
+    #[serde(default)]
+    pub poster: Option<String>,
 }
 
 /// What the outbox knows about one stored attachment, without its bytes.
@@ -101,6 +105,8 @@ pub(super) struct AttMeta {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub sensitive: bool,
+    /// The bounded poster JPEG, base64 (#1837); `pv` on the wire.
+    pub poster: Option<String>,
 }
 
 /// The most one queued message may carry through the outbox, all attachments together.
@@ -143,7 +149,7 @@ async fn plan_attachments(attachments: &[OutgoingAttachment]) -> Result<Vec<AttM
                 "the attachments add up to more than {MAX_OUTBOX_BYTES_PER_MESSAGE} bytes"
             )));
         }
-        metas.push(AttMeta {
+        let mut meta = AttMeta {
             filename: att.filename.clone(),
             content_type: att.content_type.clone(),
             size: size as usize,
@@ -151,8 +157,20 @@ async fn plan_attachments(attachments: &[OutgoingAttachment]) -> Result<Vec<AttM
             width: att.width,
             height: att.height,
             sensitive: att.sensitive,
-        });
+            poster: None,
+        };
+        // The frame's blurhash and size win over the renderer's: they are the video's own.
+        if let Some(p) =
+            crate::commands::r2::video_poster(&att.content_type, att.poster.clone()).await
+        {
+            meta.blurhash = Some(p.blurhash);
+            meta.width = Some(p.width);
+            meta.height = Some(p.height);
+            meta.poster = p.jpeg.map(crate::commands::poster::PosterJpeg::into_string);
+        }
+        metas.push(meta);
     }
+    crate::commands::poster::within_budget(metas.iter_mut().map(|m| &mut m.poster));
     Ok(metas)
 }
 
@@ -163,8 +181,8 @@ fn no_staged(id: &str) -> Error {
 }
 
 const INSERT_ATTACHMENT_SQL: &str = "INSERT OR REPLACE INTO outbox_attachment
-       (message_id, position, filename, content_type, data, blurhash, width, height, sensitive)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+       (message_id, position, filename, content_type, data, blurhash, width, height, sensitive, poster)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
 pub(super) fn store_attachment_on(
     conn: &rusqlite::Connection,
@@ -185,6 +203,7 @@ pub(super) fn store_attachment_on(
             meta.width,
             meta.height,
             meta.sensitive,
+            meta.poster,
         ],
     )?;
     Ok(())
@@ -247,6 +266,9 @@ struct AttWire<'a> {
     /// Sensitive media (#1568); omitted unless set, so unmarked entries are unchanged.
     #[serde(skip_serializing_if = "is_false")]
     sens: bool,
+    /// A video's poster JPEG, base64 (#1837); omitted when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pv: Option<&'a str>,
 }
 
 /// An entry the outbox has not uploaded yet: what to draw while it waits. No
@@ -265,6 +287,9 @@ struct PendingAttWire<'a> {
     /// Sensitive media (#1568); omitted unless set, so unmarked entries are unchanged.
     #[serde(skip_serializing_if = "is_false")]
     sens: bool,
+    /// A video's poster JPEG, base64 (#1837); omitted when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pv: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -301,6 +326,7 @@ fn provisional_content(text: &str, metas: &[AttMeta]) -> String {
                 w: a.width,
                 h: a.height,
                 sens: a.sensitive,
+                pv: a.poster.as_deref(),
             })
             .collect(),
         txt: caption(text),
@@ -331,6 +357,7 @@ fn final_content(
                 w: r.width.or(a.width),
                 h: r.height.or(a.height),
                 sens: a.sensitive,
+                pv: a.poster.as_deref(),
             })
             .collect(),
         txt: caption(text),
@@ -349,7 +376,7 @@ fn caption_of(content: &str) -> String {
 /// The stored attachments of `id`, in order, without their bytes.
 pub(super) fn attachment_metas_on(conn: &rusqlite::Connection, id: &str) -> Result<Vec<AttMeta>> {
     let mut stmt = conn.prepare(
-        "SELECT filename, content_type, length(data), blurhash, width, height, sensitive
+        "SELECT filename, content_type, length(data), blurhash, width, height, sensitive, poster
          FROM outbox_attachment WHERE message_id = ?1 ORDER BY position",
     )?;
     let rows = stmt
@@ -362,6 +389,7 @@ pub(super) fn attachment_metas_on(conn: &rusqlite::Connection, id: &str) -> Resu
                 width: row.get(4)?,
                 height: row.get(5)?,
                 sensitive: row.get(6)?,
+                poster: row.get(7)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1564,6 +1592,7 @@ mod tests {
             width: Some(4),
             height: Some(3),
             sensitive: false,
+            poster: None,
         }
     }
 
@@ -1644,6 +1673,7 @@ mod tests {
             blurhash: None,
             width: Some(640),
             height: None,
+            poster: None,
         }];
         assert_eq!(
             final_content("", &atts, &uploaded),
@@ -1686,11 +1716,138 @@ mod tests {
             blurhash: None,
             width: None,
             height: None,
+            poster: None,
         };
         let done = final_content("", &stored, &[upload("a"), upload("b")]);
         let v: serde_json::Value = serde_json::from_str(&done).unwrap();
         assert_eq!(v["_att"][0]["sens"], serde_json::Value::Bool(true));
         assert!(v["_att"][1].get("sens").is_none());
+    }
+
+    /// #1837: a video's poster is stored with its bytes and travels as `pv` in
+    /// both the waiting and the finished envelope; nothing else gets one.
+    #[test]
+    fn a_video_poster_round_trips_through_the_outbox_as_pv() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let id = new_message_id();
+        let metas = [
+            AttMeta {
+                content_type: "video/mp4".to_string(),
+                poster: Some("/9j/AAAA".to_string()),
+                ..meta("clip.mp4", 5)
+            },
+            meta("b.png", 6),
+        ];
+        store_attachment_on(conn, &id, 0, &metas[0], b"first").unwrap();
+        store_attachment_on(conn, &id, 1, &metas[1], b"second").unwrap();
+        enqueue_on(conn, &queued(&id, ""), &metas).unwrap();
+
+        let stored = attachment_metas_on(conn, &id).unwrap();
+        assert_eq!(stored[0].poster.as_deref(), Some("/9j/AAAA"));
+        assert_eq!(stored[1].poster, None);
+        let (row, _) = load(conn, &id).unwrap().unwrap();
+        assert_eq!(
+            row.content.unwrap(),
+            r#"{"_att":[{"name":"clip.mp4","ct":"video/mp4","size":5,"bh":"LKO2","w":4,"h":3,"pv":"/9j/AAAA"},{"name":"b.png","ct":"image/png","size":6,"bh":"LKO2","w":4,"h":3}]}"#
+        );
+
+        let upload = |n: &str, ct: &str| crate::commands::r2::MediaUploadResult {
+            key: format!("media/{n}.enc"),
+            url: String::new(),
+            filename: n.to_string(),
+            content_type: ct.to_string(),
+            size_bytes: 1,
+            content_hash: n.to_string(),
+            key_version: 1,
+            sha256: "s".to_string(),
+            blurhash: None,
+            width: None,
+            height: None,
+            poster: None,
+        };
+        let done = final_content(
+            "",
+            &stored,
+            &[upload("clip.mp4", "video/mp4"), upload("b.png", "image/png")],
+        );
+        let v: serde_json::Value = serde_json::from_str(&done).unwrap();
+        assert_eq!(v["_att"][0]["pv"], "/9j/AAAA");
+        assert_eq!(v["_att"][0]["bh"], "LKO2");
+        assert!(v["_att"][1].get("pv").is_none());
+    }
+
+    /// #1837: the frame handed over becomes the poster, and its blurhash and
+    /// size replace the renderer's; a frame that does not decode sends without one.
+    #[tokio::test]
+    async fn planning_a_video_turns_its_frame_into_a_bounded_poster() {
+        use base64::Engine as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("clip.mp4");
+        std::fs::write(&path, b"not really a video").unwrap();
+        let img = image::RgbImage::from_fn(640, 360, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])
+        });
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let frame = base64::engine::general_purpose::STANDARD.encode(png);
+        let att = |ct: &str, poster: Option<String>| OutgoingAttachment {
+            path: Some(path.to_string_lossy().into_owned()),
+            staged_id: None,
+            filename: "clip.mp4".to_string(),
+            content_type: ct.to_string(),
+            blurhash: Some("renderer".to_string()),
+            width: Some(1),
+            height: Some(1),
+            sensitive: false,
+            poster,
+        };
+        let metas = plan_attachments(&[
+            att("video/mp4", Some(frame.clone())),
+            att("video/mp4", Some("garbage".to_string())),
+            att("image/png", Some(frame)),
+        ])
+        .await
+        .unwrap();
+
+        let poster = metas[0].poster.as_deref().expect("a poster");
+        let jpeg = base64::engine::general_purpose::STANDARD.decode(poster).unwrap();
+        assert!(jpeg.len() <= crate::commands::poster::POSTER_MAX_JPEG_BYTES);
+        assert_ne!(metas[0].blurhash.as_deref(), Some("renderer"));
+        assert_eq!((metas[0].width, metas[0].height), (Some(640), Some(360)));
+        // An undecodable frame keeps the renderer's values and sends without a poster.
+        assert_eq!(metas[1].poster, None);
+        assert_eq!(metas[1].blurhash.as_deref(), Some("renderer"));
+        // Only a video has a poster.
+        assert_eq!(metas[2].poster, None);
+    }
+
+    /// #1837, old clients: every pre-poster parser ignores `pv`, and an old
+    /// renderer's attachment (no `poster` field) still deserializes.
+    #[test]
+    fn pv_is_invisible_to_clients_that_predate_it() {
+        let with = r#"{"_att":[{"key":"media/a.enc","url":"","name":"a.mp4","ct":"video/mp4","size":1,"hash":"aa","kv":1,"sha":"s","bh":"LKO2","w":4,"h":3,"pv":"/9j/AAAA"}],"_txt":"look"}"#;
+        let without = r#"{"_att":[{"key":"media/a.enc","url":"","name":"a.mp4","ct":"video/mp4","size":1,"hash":"aa","kv":1,"sha":"s","bh":"LKO2","w":4,"h":3}],"_txt":"look"}"#;
+        let refs = |c: &str| {
+            super::super::edit_delete::parse_attachment_refs(c)
+                .into_iter()
+                .map(|r| (r.content_hash, r.r2_key))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(refs(with), refs(without));
+        assert_eq!(
+            crate::db::search_text::search_text(with),
+            crate::db::search_text::search_text(without)
+        );
+        assert_eq!(caption_of(with), "look");
+
+        let old: OutgoingAttachment = serde_json::from_str(
+            r#"{"path":"/x/a.mp4","filename":"a.mp4","contentType":"video/mp4","blurhash":"LKO2","width":4,"height":3}"#,
+        )
+        .unwrap();
+        assert_eq!(old.poster, None);
     }
 
     /// #1568, old clients: every pre-flag parser ignores `sens`.

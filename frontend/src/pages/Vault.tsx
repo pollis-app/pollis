@@ -150,6 +150,7 @@ export const VaultPage: React.FC = observer(() => {
               w: a.width,
               h: a.height,
               ...(a.sensitive ? { sens: true } : {}),
+              ...(a.poster ? { pv: a.poster } : {}),
             })),
             ...(editDraft.trim() ? { _txt: editDraft.trim() } : {}),
           })

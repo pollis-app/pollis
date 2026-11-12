@@ -118,6 +118,9 @@ CREATE TABLE IF NOT EXISTS outbox_attachment (
     -- Marked sensitive in the composer (#1568); written into the envelope as
     -- `sens`. Must stay identical to its `ADDITIVE_COLUMNS` entry in local.rs.
     sensitive    INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1)),
+    -- A video's bounded poster JPEG, base64 (#1837); written into the envelope
+    -- as `pv`. Must stay identical to its `ADDITIVE_COLUMNS` entry in local.rs.
+    poster       TEXT,
     PRIMARY KEY (message_id, position)
 );
 

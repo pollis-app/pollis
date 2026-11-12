@@ -64,6 +64,8 @@ interface AttachmentWire {
   h?: number;
   /** Sensitive media (#1568); omitted unless set. */
   sens?: boolean;
+  /** A video's poster JPEG, base64 (#1837); omitted unless the sender had one. */
+  pv?: unknown;
 }
 
 type RawMessage = {
@@ -150,11 +152,23 @@ export function parseContent(
         width: a.w,
         height: a.h,
         sensitive: a.sens === true,
+        poster: posterOf(a.pv),
       })),
     };
   } catch {
     return { text: raw, attachments: [] };
   }
+}
+
+/** Longest `pv` accepted; the core sends at most 16 KiB of it. */
+const POSTER_MAX_B64 = 64 * 1024;
+
+/** A sender's `pv` (#1837) only if it is plain base64 of a sane size; anything else is ignored. */
+function posterOf(pv: unknown): string | undefined {
+  if (typeof pv !== 'string' || pv.length === 0 || pv.length > POSTER_MAX_B64) {
+    return undefined;
+  }
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(pv) ? pv : undefined;
 }
 
 /** The attachment's key, or null if it can't be opened (uploading, or pre-#1382). */

@@ -13,6 +13,8 @@ export interface PickedAttachment {
   sensitive?: boolean;
   /** The cover's blurhash; covers a video (no core blurhash) in colour too. An image's own wins. */
   blurhash?: string;
+  /** A video's frame from the platform decoder, base64 JPEG (#1837); the core makes the poster from it. */
+  posterFrame?: string;
 }
 
 export interface MediaUploadResult {
@@ -29,6 +31,8 @@ export interface MediaUploadResult {
   blurhash?: string | null;
   width?: number | null;
   height?: number | null;
+  // A video's bounded poster JPEG, base64 (#1837): `pv`.
+  poster?: string | null;
 }
 
 /** Mirrors `pollis_core::commands::messages::OutgoingAttachment` (#1335). */
@@ -40,6 +44,12 @@ export interface OutgoingAttachment {
   width?: number;
   height?: number;
   sensitive?: boolean;
+  poster?: string;
+}
+
+/** A video's frame, if the composer got one; never for anything else. */
+function posterFrameOf(att: PickedAttachment): string | undefined {
+  return att.mimeType.startsWith("video/") ? att.posterFrame : undefined;
 }
 
 /** Hand picked attachments to the outbox (#1335), so the upload survives the app being killed. */
@@ -52,6 +62,7 @@ export function outgoingAttachments(attachments: PickedAttachment[]): OutgoingAt
     height: att.height,
     ...(att.blurhash ? { blurhash: att.blurhash } : {}),
     ...(att.sensitive ? { sensitive: true } : {}),
+    ...(posterFrameOf(att) ? { poster: posterFrameOf(att) } : {}),
   }));
 }
 
@@ -77,6 +88,7 @@ export async function buildMessageContent(
         path: att.uri,
         filename: att.name,
         contentType: att.mimeType,
+        poster: posterFrameOf(att) ?? null,
       }).then((result) => {
         uploaded.set(att, result);
         return result;
@@ -104,6 +116,7 @@ export async function buildMessageContent(
       h: r.height ?? undefined,
       // Only when set, as the core and desktop write it (#1568).
       ...(attachments[i]?.sensitive ? { sens: true } : {}),
+      ...(r.poster ? { pv: r.poster } : {}),
     })),
   };
   if (contentText) {

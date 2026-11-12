@@ -178,6 +178,8 @@ export interface MessageAttachment {
   height?: number;
   // Marked sensitive by the sender (#1568): blurred until revealed.
   sensitive?: boolean;
+  // A video's poster JPEG, base64 (#1837): the wire's `pv`.
+  poster?: string;
   localPreviewUrl?: string; // Blob URL for optimistic display — never persisted or sent to server
 }
 

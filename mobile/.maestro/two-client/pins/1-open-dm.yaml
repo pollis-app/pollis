@@ -30,7 +30,12 @@ tags:
     id: "input-composer"
 - inputText: "hello peer"
 # The keyboard can sit over the send button and take the tap (Gboard's mic).
-- hideKeyboard
+# iOS sits it below the composer, and its hideKeyboard fails on this field.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:

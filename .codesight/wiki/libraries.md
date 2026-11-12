@@ -19,7 +19,7 @@
 - `frontend/src/utils/errorMessage.ts` — errorMessage
 - `frontend/src/utils/fileIcon.ts` — EXT_MIME, IMAGE_EXT_MIME, mimeFromName, getFileIcon
 - `frontend/src/utils/format.ts` — formatFileSize, formatDuration, formatTimeOfDay, formatFullTimestamp, formatDayDivider, formatDateTime, …
-- `frontend/src/utils/imageProcessing.ts` — ResizeOptions, resizeImage, blurhashFromUrl, captureVideoPoster, validateImageFile, generateThumbnail
+- `frontend/src/utils/imageProcessing.ts` — ResizeOptions, resizeImage, blurhashFromUrl, captureVideoPoster (a video frame as a JPEG blob + URL; `crossOrigin` and a presented-frame wait for WebKit, #1837), blobToBase64, validateImageFile, generateThumbnail
 - `frontend/src/utils/log.ts` — logIgnored
 - `frontend/src/utils/mentions.ts` — mentionsAll
 - `frontend/src/utils/notify.ts` — Category, NotifyPayload, loadDeviceCallRingtone, saveDeviceCallRingtone, setNotifyPrefs, notify

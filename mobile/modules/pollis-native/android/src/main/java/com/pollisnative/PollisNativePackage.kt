@@ -16,6 +16,8 @@ class PollisNativePackage : BaseReactPackage() {
       PollisNativeModule.NAME -> PollisNativeModule(reactContext)
       // #1599: tells the rich-push handler which conversation is on screen.
       PollisPushStateModule.NAME -> PollisPushStateModule(reactContext)
+      // #1837: a video's still frame for its poster.
+      PollisVideoFrameModule.NAME -> PollisVideoFrameModule(reactContext)
       else -> null
     }
   }
@@ -35,6 +37,14 @@ class PollisNativePackage : BaseReactPackage() {
       moduleInfos[PollisPushStateModule.NAME] = ReactModuleInfo(
         PollisPushStateModule.NAME,
         PollisPushStateModule::class.java.name,
+        false,  // canOverrideExistingModule
+        false,  // needsEagerInit
+        false,  // isCxxModule
+        false // isTurboModule
+      )
+      moduleInfos[PollisVideoFrameModule.NAME] = ReactModuleInfo(
+        PollisVideoFrameModule.NAME,
+        PollisVideoFrameModule::class.java.name,
         false,  // canOverrideExistingModule
         false,  // needsEagerInit
         false,  // isCxxModule

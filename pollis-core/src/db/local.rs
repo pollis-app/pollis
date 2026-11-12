@@ -546,6 +546,12 @@ const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
         "sensitive",
         "ALTER TABLE outbox_attachment ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1))",
     ),
+    // Video posters (#1837). Must match `local_schema.sql`.
+    (
+        "outbox_attachment",
+        "poster",
+        "ALTER TABLE outbox_attachment ADD COLUMN poster TEXT",
+    ),
 ];
 
 /// Apply [`ADDITIVE_COLUMNS`] to a database that predates them.
@@ -1341,6 +1347,43 @@ mod tests {
         };
         insert(1, 1).expect("sensitive is writable on an upgraded DB");
         assert!(insert(2, 2).is_err(), "sensitive is a boolean");
+    }
+
+    /// #1837: a queued attachment from before posters upgrades with no poster and keeps its bytes.
+    #[test]
+    fn outbox_attachment_gains_poster_without_losing_queued_bytes() {
+        let conn = Connection::open_in_memory().expect("open");
+        conn.execute_batch(
+            "CREATE TABLE outbox_attachment (
+                 message_id   TEXT NOT NULL,
+                 position     INTEGER NOT NULL CHECK (position >= 0),
+                 filename     TEXT NOT NULL,
+                 content_type TEXT NOT NULL,
+                 data         BLOB NOT NULL,
+                 blurhash     TEXT,
+                 width        INTEGER,
+                 height       INTEGER,
+                 sensitive    INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1)),
+                 PRIMARY KEY (message_id, position)
+             );
+             INSERT INTO outbox_attachment (message_id, position, filename, content_type, data)
+             VALUES ('m1', 0, 'v.mp4', 'video/mp4', X'01');",
+        )
+        .expect("pre-poster schema");
+
+        add_missing_columns(&conn).expect("additive columns");
+        apply_local_schema(&conn).expect("schema batch");
+        add_missing_columns(&conn).expect("second run must be idempotent");
+
+        let (data, poster): (Vec<u8>, Option<String>) = conn
+            .query_row(
+                "SELECT data, poster FROM outbox_attachment WHERE message_id = 'm1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("the queued row survives");
+        assert_eq!(data, vec![1]);
+        assert_eq!(poster, None);
     }
 
     /// A fresh DB has no `message` table yet; that is not an error.

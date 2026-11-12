@@ -9,6 +9,7 @@ import { PlayBadge } from "../media/PlayBadge";
 import { AttachmentToolbar, TOOLBAR_GLYPH, type AttachmentToolbarAction } from "./AttachmentToolbar";
 import { SensitiveCover } from "./SensitiveCover";
 import { useVideoPoster } from "../../hooks/useVideoPoster";
+import { posterUri } from "../../lib/messageContent";
 import {
   COMPOSER_PREVIEW_SIZE,
   canMarkSensitive,
@@ -42,18 +43,26 @@ export function ComposerAttachmentPreview({
   const kind = previewKind(attachment.mimeType);
   const sensitive = attachment.sensitive === true;
   const openable = !!onOpen && cardOpens(attachment);
-  const poster = useVideoPoster(kind === "video" ? attachment.uri : null);
+  const frame = useVideoPoster(kind === "video" ? attachment.uri : null);
+  const poster = frame ? posterUri(frame) : null;
 
   // The cover's blurhash, once; the callback via a ref (screens pass a fresh arrow).
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+
+  // The frame rides with the send, so the core makes the video's poster from it (#1837).
+  useEffect(() => {
+    if (frame && attachment.posterFrame !== frame) {
+      onChangeRef.current?.(attachment.id, { posterFrame: frame });
+    }
+  }, [frame, attachment.posterFrame, attachment.id]);
   const hashSource = kind === "video" ? poster : kind === "image" ? attachment.uri : null;
   useEffect(() => {
     if (!sensitive || attachment.blurhash || !hashSource || !onChangeRef.current) {
       return;
     }
     let active = true;
-    Image.generateBlurhashAsync(hashSource as Parameters<typeof Image.generateBlurhashAsync>[0], [4, 3])
+    Image.generateBlurhashAsync(hashSource, [4, 3])
       .then((hash) => {
         if (active && hash) {
           onChangeRef.current?.(attachment.id, { blurhash: hash });
@@ -85,8 +94,9 @@ export function ComposerAttachmentPreview({
       <>
         {poster ? (
           <Image
-            source={poster}
+            source={{ uri: poster }}
             contentFit="cover"
+            cachePolicy="memory"
             style={{ position: "absolute", top: 0, bottom: 0, start: 0, end: 0 }}
             accessible={false}
           />

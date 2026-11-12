@@ -1411,7 +1411,11 @@ Current state:
   attachment opens the full-screen viewer `app/media.tsx`, #1248; the picker takes
   photos and videos, and a pending one shows in the composer as desktop's
   preview card — `components/chat/ComposerAttachmentPreview.tsx`, 120pt (desktop's
-  80px + #1568's half), a video's first frame via `hooks/useVideoPoster.ts`, the
+  80px + #1568's half), a video's first frame via `hooks/useVideoPoster.ts` (the
+  native `PollisVideoFrame` decoder, `lib/media/videoFrame.ts`; the same frame is
+  sent as the attachment's `poster`, which the core bounds into the envelope's
+  `pv`, and received tiles draw `pv`, a local frame or a filled placeholder —
+  `.codesight/wiki/media-server.md` → "Video posters", #1837), the
   shared top-end `AttachmentToolbar` — ONE capsule on the raised surface
   holding every glyph, never side-by-side discs; a toggle that is on shows it
   by an accent glyph alone — tap → the viewer on the picked file

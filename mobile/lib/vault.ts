@@ -69,6 +69,7 @@ export function editedVaultContent(original: string, draft: string): string | nu
     w: a.width,
     h: a.height,
     ...(a.sensitive ? { sens: true } : {}),
+    ...(a.poster ? { pv: a.poster } : {}),
   }));
   return JSON.stringify({ _att: att, ...(text ? { _txt: text } : {}) });
 }
