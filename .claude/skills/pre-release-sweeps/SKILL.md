@@ -162,6 +162,14 @@ copy, and bumps `verified_sha` and the `claims` ledger entry itself. "Audited
 docs changed" is its step 2.4: read those diffs for NEW claims. Disputed
 policy-page claims only warn; list them for Dan, never edit the policy pages.
 
+Findings are tickets, not copy. When a claim is true only because the product
+is weaker than it should be, fix the product or narrow the claim so it is true
+without a caveat; never add copy announcing a gap, a known vulnerability,
+incident history or a "not yet" item. File the weakness as a GitHub issue with a
+neutral title ("Dependency upgrade: …"). Public issues, comments and PR
+descriptions never spell out vulnerability or exploit details, and the PR's
+"Needs Dan's decision" items are worded neutrally.
+
 ## feature-parity (#1347)
 
 ```bash
