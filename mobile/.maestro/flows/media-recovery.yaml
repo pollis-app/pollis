@@ -91,6 +91,8 @@ tags:
     notVisible:
       id: "row-message-pending-.*"
     timeout: 120000
+# ...and delivered, so the offline launch below has no send of its own to fail.
+- runFlow: ../subflows/message-settled.yaml
 
 # Cold restart: no local preview or decrypted file survives it.
 - stopApp
