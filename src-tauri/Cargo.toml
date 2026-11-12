@@ -70,6 +70,10 @@ os-keystore = ["pollis-core/os-keystore"]
 # `cargo test --features test-harness --test flows` (default features), or
 # headless with `--no-default-features --features test-harness`.
 test-harness = ["tauri/test", "pollis-core/test-harness", "dep:libsql"]
+# Test-only voice E2EE hooks for the desktop e2e (#1850): registers the
+# `e2e_voice_*` commands in the real app. Debug builds only — `lib.rs` refuses
+# to compile it without `debug_assertions`, so it can never reach a release.
+e2e-hooks = ["media", "pollis-core/test-harness"]
 # Builds the ad-hoc vault soak test target (`tests/vault_soak.rs`, #1491).
 vault-soak = ["test-harness"]
 
