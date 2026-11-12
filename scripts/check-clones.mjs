@@ -29,7 +29,7 @@
  * /pre-release-sweeps (.claude/skills/).
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { join, resolve, relative, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -50,7 +50,8 @@ function option(name) {
   return args[i + 1] ?? null;
 }
 
-const root = resolve(option("--root") ?? join(here, ".."));
+// Real path: jscpd reports resolved paths (/private/var, not /var, on macOS).
+const root = realpathSync(resolve(option("--root") ?? join(here, "..")));
 const configPath = join(root, "scripts/clones.json");
 const baselinePath = join(root, "scripts/clones-baseline.json");
 const update = flag("--update-baseline");
@@ -125,6 +126,14 @@ function loc(f) {
   return `${relative(root, f.name)}:${f.start}-${f.end}`;
 }
 
+function pairKey(a, b) {
+  return [a, b].sort().join(" | ");
+}
+
+function pairOf(d) {
+  return pairKey(relative(root, d.firstFile.name), relative(root, d.secondFile.name));
+}
+
 function runBoundary(name) {
   const b = config.boundaries[name];
   const problems = [];
@@ -160,7 +169,7 @@ function runBoundary(name) {
     const reportPath = join(tmp, "jscpd-report.json");
     if (r.status !== 0 || !existsSync(reportPath)) {
       problems.push(`jscpd failed (exit ${r.status}):\n${r.stderr || r.stdout}`);
-      return { name, problems, fresh: [], dups: [], stale: 0, sources: 0, fingerprints: known };
+      return { name, problems, fresh: [], reshaped: [], dups: [], stale: 0, sources: 0, fingerprints: known };
     }
     const report = JSON.parse(readFileSync(reportPath, "utf8"));
     const after = JSON.parse(readFileSync(tmpBaseline, "utf8")).fingerprints ?? {};
@@ -171,9 +180,27 @@ function runBoundary(name) {
     const dups = (report.duplicates ?? []).filter(
       (d) => !(b.skipInlineTests && inTests(d.firstFile) && inTests(d.secondFile)),
     );
-    const fresh = dups.filter((d) => d.isNew);
+    // A fingerprint covers the exact cloned tokens, so an edit at the edge of a
+    // baselined clone (a line added to a shared footer) re-fingerprints it. A
+    // new fingerprint between two files that the baseline already pairs, no
+    // more often than the baseline does, is that reshaped clone, not new
+    // duplication; it is reported as such and refreshed by --update-baseline.
+    const basePairs = new Map();
+    for (const c of baseline.boundaries?.[name]?.clones ?? []) {
+      const [a, bb] = c.split(" ≡ ").map((s) => s.replace(/:\d+-\d+$/, ""));
+      const k = pairKey(a, bb);
+      basePairs.set(k, (basePairs.get(k) ?? 0) + 1);
+    }
+    const nowPairs = new Map();
+    for (const d of dups) {
+      const k = pairOf(d);
+      nowPairs.set(k, (nowPairs.get(k) ?? 0) + 1);
+    }
+    const unknown = dups.filter((d) => d.isNew);
+    const fresh = unknown.filter((d) => (nowPairs.get(pairOf(d)) ?? 0) > (basePairs.get(pairOf(d)) ?? 0));
+    const reshaped = unknown.filter((d) => !fresh.includes(d));
     const stale = Object.keys(known).filter((k) => !(k in after)).length;
-    return { name, problems, fresh, dups, stale, sources, fingerprints: after };
+    return { name, problems, fresh, reshaped, dups, stale, sources, fingerprints: after };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -201,8 +228,14 @@ for (const r of results) {
   } else if (!r.problems.length) {
     console.log(update ? `↻ ${head}, ${r.fresh.length} new accepted, ${r.stale} gone` : `✓ ${head}, none new`);
   }
+  if (r.reshaped.length && !update) {
+    console.log(`  ~ ${r.reshaped.length} baseline clone(s) changed shape (an edit moved their edges); not new. Check them, then --update-baseline:`);
+    for (const d of r.reshaped) {
+      console.log(`      ${loc(d.firstFile)}  ≡  ${loc(d.secondFile)}  (${d.lines} lines)`);
+    }
+  }
   if (r.stale && !update) {
-    console.log(`  ↓ ${r.stale} baseline clone(s) are gone: run with --update-baseline to ratchet down.`);
+    console.log(`  ↓ ${r.stale} baseline fingerprint(s) are gone: run with --update-baseline to ratchet down.`);
   }
   if (listAll) {
     for (const d of r.dups) {

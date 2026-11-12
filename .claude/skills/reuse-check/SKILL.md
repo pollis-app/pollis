@@ -83,9 +83,12 @@ the committed baseline (`scripts/clones-baseline.json`), printing both
 locations of each new one. Every new clone it reports is yours: fix it in
 step 4. Then:
 
-- `↓ N baseline clone(s) are gone` means your diff removed duplication: run
-  `node scripts/check-clones.mjs --update-baseline` and commit the smaller
+- `↓ N baseline fingerprint(s) are gone` means your diff removed duplication:
+  run `node scripts/check-clones.mjs --update-baseline` and commit the smaller
   baseline.
+- `~ N baseline clone(s) changed shape` means you edited the edge of a known
+  clone (e.g. added a line to page chrome every website page repeats). Not
+  new duplication; `--update-baseline` refreshes it.
 - A new clone you decide to keep (step 4's "leave it" cases): run
   `--update-baseline`, commit it, and give the reason in the Reuse section.
 - `scanned no files` or `configured path does not exist`: your diff moved a

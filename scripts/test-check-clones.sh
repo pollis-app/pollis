@@ -83,6 +83,34 @@ EOF
 run "$t" --boundary frontend
 if [ "$rc" -eq 0 ]; then ok "40 lines inserted above baselined clones still pass"; else bad "moved code reported as new:"; echo "$out"; fi
 
+echo "a reshaped baseline clone is not new, an extra clone in the same file pair is"
+t="$(fresh_tree reshaped)"
+# Edit the edge of a baselined website clone (page chrome shared by every page).
+python3 - "$t/website/artifacts.html" <<'EOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = '  <script src="artifacts.js"></script>'
+assert anchor in s, "anchor missing"
+open(p, "w").write(s.replace(anchor, '  <script src="reshaped.js"></script>\n' + anchor, 1))
+EOF
+run "$t" --boundary website
+if [ "$rc" -eq 0 ]; then ok "an edit at the edge of baselined page chrome passes"; else bad "reshaped clone reported as new:"; echo "$out"; fi
+t="$(fresh_tree same-pair)"
+pasted='export function pastedSamePair(items: readonly string[], limit: number): string[] {
+  const out: string[] = [];
+  for (const item of items) {
+    const trimmed = item.trim().toLowerCase();
+    if (trimmed.length === 0 || out.includes(trimmed)) { continue; }
+    out.push(trimmed.length > limit ? trimmed.slice(0, limit) + "…" : trimmed);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}'
+printf '\n%s\n' "$pasted" >> "$t/mobile/hooks/useEnrollmentApprovals.ts"
+printf '\n%s\n' "$pasted" >> "$t/mobile/hooks/useHistoryTransferService.ts"
+run "$t" --boundary mobile
+if [ "$rc" -ne 0 ] && [[ "$out" == *"useEnrollmentApprovals.ts"* ]]; then ok "a new clone between two already-paired files fails"; else bad "extra clone in a baselined pair passed (rc=$rc)"; echo "$out"; fi
+
 echo "a scan of nothing fails"
 t="$(fresh_tree empty)"
 node -e 'const f=process.argv[1];const fs=require("fs");const c=JSON.parse(fs.readFileSync(f));c.boundaries.website.format=["cobol"];fs.writeFileSync(f,JSON.stringify(c))' "$t/scripts/clones.json"
