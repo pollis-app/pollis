@@ -71,10 +71,30 @@ at the first convincing hit):
 
 ## 3. Check the diff for pasted blocks
 
-Look at each hunk over ~10 lines: is it a near-copy of code elsewhere (or of
-another hunk in the same diff)? Two components with the same JSX skeleton,
-two Rust functions with the same `match` and error mapping, the same fetch +
-parse + fallback twice in one file are the usual cases.
+Run the clone ratchet (a few seconds; jscpd is pinned and fetched by
+`pnpm dlx`):
+
+```bash
+node scripts/check-clones.mjs            # or --boundary frontend,rust for just the ones you touched
+```
+
+It scans each boundary separately and fails only on clones that are not in
+the committed baseline (`scripts/clones-baseline.json`), printing both
+locations of each new one. Every new clone it reports is yours: fix it in
+step 4. Then:
+
+- `↓ N baseline clone(s) are gone` means your diff removed duplication: run
+  `node scripts/check-clones.mjs --update-baseline` and commit the smaller
+  baseline.
+- A new clone you decide to keep (step 4's "leave it" cases): run
+  `--update-baseline`, commit it, and give the reason in the Reuse section.
+- `scanned no files` or `configured path does not exist`: your diff moved a
+  directory the config names; fix `scripts/clones.json`.
+
+The detector only sees token-level copies of 5+ lines. Also skim each hunk
+over ~10 lines yourself: two components with the same JSX skeleton but
+renamed props, two Rust functions with the same `match` and error mapping,
+the same fetch + parse + fallback written twice.
 
 ## 4. Fix it
 

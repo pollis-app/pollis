@@ -1,0 +1,105 @@
+{
+  "_comment": [
+    "Copy-paste detector configuration for scripts/check-clones.mjs (#1731). Run by /reuse-check before every PR and by /pre-release-sweeps; never in CI, never a merge gate.",
+    "One entry per code boundary (.codesight/wiki/code-boundaries.md). Each boundary is scanned on its own, so a clone between frontend/ and mobile/ is never reported: those are parity twins, not duplication.",
+    "jscpd: the pinned detector version, run with `pnpm dlx`. paths and ignore are relative to the repo root; format is jscpd's format names.",
+    "Ignored everywhere: generated files, the locale catalogues, migrations, tests and their fixtures. Tests repeat setup on purpose; a clone in a test is not drift in shipped code. skipInlineTests (Rust) also drops a clone whose two copies both sit inside an inline `#[cfg(test)] mod`, which no path glob can reach.",
+    "The accepted clones live in scripts/clones-baseline.json. A clone not in it fails the check; `--update-baseline` rewrites it after a clone is removed (ratchet down) or deliberately accepted."
+  ],
+  "jscpd": "5.4.2",
+  "minTokens": 50,
+  "minLines": 5,
+  "boundaries": {
+    "frontend": {
+      "paths": [
+        "frontend/src"
+      ],
+      "format": [
+        "typescript",
+        "tsx",
+        "javascript",
+        "css"
+      ],
+      "ignore": [
+        "frontend/src/i18n/locales/**",
+        "frontend/src/components/Emoji/annotations/**",
+        "frontend/src/components/Emoji/emojiData.ts",
+        "frontend/src/__mocks__/**",
+        "**/*.test.ts",
+        "**/*.test.tsx"
+      ]
+    },
+    "mobile": {
+      "paths": [
+        "mobile/app",
+        "mobile/components",
+        "mobile/hooks",
+        "mobile/lib",
+        "mobile/stores",
+        "mobile/i18n",
+        "mobile/theme",
+        "mobile/types",
+        "mobile/plugins",
+        "mobile/index.ts"
+      ],
+      "format": [
+        "typescript",
+        "tsx",
+        "javascript"
+      ],
+      "ignore": [
+        "mobile/i18n/resources.ts",
+        "mobile/components/emoji/annotations/**",
+        "mobile/components/emoji/emojiData.ts",
+        "**/*.test.ts",
+        "**/*.test.tsx"
+      ]
+    },
+    "website": {
+      "paths": [
+        "website"
+      ],
+      "format": [
+        "javascript",
+        "css",
+        "markup"
+      ],
+      "ignore": [
+        "website/learn/media/**",
+        "website/.well-known/**"
+      ]
+    },
+    "rust": {
+      "paths": [
+        "src-tauri/src",
+        "pollis-core/src",
+        "pollis-tui/src",
+        "pollis-capture-proto/src",
+        "pollis-capture-linux/src",
+        "pollis-capture-macos/src",
+        "verifiable-log/src",
+        "verifiable-log-builder/src",
+        "verifiable-log-serve/src",
+        "pollis-delivery/src",
+        "pollis-relay/src",
+        "pollis-device-cert/src",
+        "pollis-api/src",
+        "pollis-schema/src",
+        "pollis-sqlcipher/src",
+        "pollis-libsql-connector/src"
+      ],
+      "format": [
+        "rust"
+      ],
+      "ignore": [
+        "**/tests/**",
+        "**/tests.rs",
+        "**/*_tests.rs",
+        "**/*_test.rs",
+        "**/testing.rs",
+        "**/test_harness.rs"
+      ],
+      "skipInlineTests": true
+    }
+  }
+}
