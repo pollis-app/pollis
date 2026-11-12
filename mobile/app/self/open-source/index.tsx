@@ -9,7 +9,7 @@ import { Note } from "../../../components/self/SettingsField";
 import { Icon } from "../../../components/icons";
 import { ossNotices, ossPackageId } from "../../../lib/ossNotices";
 import type { OssNotices, OssNoticePackage } from "../../../types/ossNotices";
-import { semantic, type as ty, r, space } from "../../../theme/tokens";
+import { semantic, type as ty, space, groupedRowCorners } from "../../../theme/tokens";
 import { useThemeRerender } from "../../../components/theme";
 
 export default function OpenSource() {
@@ -61,10 +61,7 @@ export default function OpenSource() {
     <View
       style={{
         backgroundColor: semantic.raised,
-        borderTopLeftRadius: index === 0 ? r.lg : 0,
-        borderTopRightRadius: index === 0 ? r.lg : 0,
-        borderBottomLeftRadius: index === last ? r.lg : 0,
-        borderBottomRightRadius: index === last ? r.lg : 0,
+        ...groupedRowCorners(index, last),
         overflow: "hidden",
       }}
     >

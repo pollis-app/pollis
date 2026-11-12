@@ -12,7 +12,7 @@ import {
   type SecurityEvent,
   type SecurityEventFilter,
 } from "../../lib/securityEvents";
-import { semantic, type as ty, r, space } from "../../theme/tokens";
+import { semantic, type as ty, space, groupedRowCorners } from "../../theme/tokens";
 import { useThemeRerender } from "../../components/theme";
 
 const FILTER_LABEL_KEYS: Record<SecurityEventFilter, string> = {
@@ -81,10 +81,7 @@ export default function SecurityEvents() {
     <View
       style={{
         backgroundColor: semantic.raised,
-        borderTopLeftRadius: index === 0 ? r.lg : 0,
-        borderTopRightRadius: index === 0 ? r.lg : 0,
-        borderBottomLeftRadius: index === last ? r.lg : 0,
-        borderBottomRightRadius: index === last ? r.lg : 0,
+        ...groupedRowCorners(index, last),
         overflow: "hidden",
         // The previous filter's rows stay up, dimmed, until the new first page lands.
         opacity: isPlaceholderData ? 0.5 : 1,
