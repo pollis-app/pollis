@@ -178,6 +178,10 @@ done < <(printf '%s' "$runs" | jq -r '.[] | [
 #                      The accusation. No run currently carries this class, and
 #                      that fact should be checked, not assumed.
 CLASSIFIED='{
+  "43117782803": {
+    "class": "false_red",
+    "evidence": "No comparison was performed: the rebuild was never attempted. v1.19.9'"'"'s release run went red in attest-and-log during the 2026-11-11 ubuntu.com DNS outage, so its leaves were only written by the attest-release.yml backfill at 16:57 UTC, after that day'"'"'s 14:42 transparency-publish. This dispatch found v1.19.9 absent from the binaries tree and stopped at verify-log-inclusion, as designed. After a manual transparency-publish (43124687727) put it in the tree, run 43126114035 rebuilt the Linux AppImage and reproduced the logged payload."
+  },
   "33119829575": {
     "class": "environment_drift",
     "evidence": "The workflow'"'"'s own #944 verdict, confirmed by hand — and the strongest drift case yet: ZERO member files differ. v1.10.4'"'"'s release (33117720048 build-linux) built on ubuntu22@20260824.273.3; this rebuild landed on the older ubuntu22@20260817.266.1 (mixed pool during GitHub'"'"'s gradual image roll), same helper image ubuntu24@20260823.283.1 on both. Logged payload a3260af3…, rebuilt d43b090e… — but the unpacked AppImage diff by origin reports 0 differing vendored host libraries AND 0 differing files built from Pollis source: every byte of content is identical, and the only divergence is a handful of bytes in the squashfs container itself (offsets 932112, 107124192–95), i.e. the packaging tool between the two ubuntu22 images, not the code. The rebuild is internally deterministic: rerun 2026-08-27 22:26 reproduced d43b090e… byte-for-byte again on the same 20260817 image. Reruns cannot currently converge because the pool no longer hands out the release'"'"'s 20260824 image alongside; the moment one does, this row can be upgraded to byte-for-byte the way v1.10.0'"'"'s was."
