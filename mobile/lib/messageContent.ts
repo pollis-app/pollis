@@ -17,6 +17,24 @@ export interface AttachmentWire {
   w?: number;
   h?: number;
   sens?: boolean;
+  // A video's poster JPEG, base64 (#1837); validated by `posterOf`.
+  pv?: unknown;
+}
+
+/** Longest `pv` accepted; the core sends at most 16 KiB of it. */
+const POSTER_MAX_B64 = 64 * 1024;
+
+/** A sender's `pv` (#1837) only if it is plain base64 of a sane size; anything else is ignored. As desktop's. */
+export function posterOf(pv: unknown): string | undefined {
+  if (typeof pv !== "string" || pv.length === 0 || pv.length > POSTER_MAX_B64) {
+    return undefined;
+  }
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(pv) ? pv : undefined;
+}
+
+/** An image source for a base64 JPEG poster. */
+export function posterUri(poster: string): string {
+  return `data:image/jpeg;base64,${poster}`;
 }
 
 /** Null when it cannot be opened from here: uploading, pre-#1382, or preview-only. */
@@ -66,6 +84,7 @@ export function parseContent(raw: string | undefined, origin: ContentOrigin): {
         width: a.w,
         height: a.h,
         sensitive: a.sens === true,
+        poster: posterOf(a.pv),
       })),
     };
   } catch {

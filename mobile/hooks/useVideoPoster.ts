@@ -1,79 +1,27 @@
-// A picked local video's first frame (#1585) via a short-lived expo-video player, asked for only once loaded (iOS).
+// A local video's still frame (#1585, #1837) as base64 JPEG, from the platform decoder
+// (`lib/media/videoFrame.ts`). `null` while it decodes, for no uri, or when it cannot.
 
 import { useEffect, useState } from "react";
-import { createVideoPlayer, type VideoThumbnail } from "expo-video";
+import { videoFrame } from "../lib/media/videoFrame";
 
-const LOAD_TIMEOUT_MS = 8000;
-
-export function useVideoPoster(uri: string | null): VideoThumbnail | null {
-  const [poster, setPoster] = useState<VideoThumbnail | null>(null);
+export function useVideoPoster(uri: string | null): string | null {
+  const [frame, setFrame] = useState<{ uri: string; b64: string } | null>(null);
 
   useEffect(() => {
-    setPoster(null);
     if (!uri) {
       return;
     }
-    let player: ReturnType<typeof createVideoPlayer>;
-    try {
-      player = createVideoPlayer({ uri });
-      player.muted = true;
-    } catch {
-      return;
-    }
     let active = true;
-    let released = false;
-    let subscription: { remove: () => void } | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const release = () => {
-      if (released) {
-        return;
+    void videoFrame(uri).then((b64) => {
+      if (active && b64) {
+        setFrame({ uri, b64 });
       }
-      released = true;
-      subscription?.remove();
-      if (timer) {
-        clearTimeout(timer);
-      }
-      player.release();
-    };
-    const grab = () => {
-      subscription?.remove();
-      subscription = null;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      player
-        .generateThumbnailsAsync(0, { maxWidth: 360, maxHeight: 360 })
-        .then((thumbs) => {
-          if (active && thumbs[0]) {
-            setPoster(thumbs[0]);
-          }
-        })
-        .catch(() => {
-          // No poster: the card keeps its plain surface.
-        })
-        .finally(release);
-    };
-
-    if (player.status === "readyToPlay") {
-      grab();
-    } else {
-      subscription = player.addListener("statusChange", ({ status }) => {
-        if (status === "readyToPlay") {
-          grab();
-        } else if (status === "error") {
-          release();
-        }
-      });
-      timer = setTimeout(release, LOAD_TIMEOUT_MS);
-    }
+    });
     return () => {
       active = false;
-      if (subscription) {
-        release();
-      }
     };
   }, [uri]);
 
-  return poster;
+  // A frame decoded for an earlier uri never shows for this one.
+  return frame && frame.uri === uri ? frame.b64 : null;
 }

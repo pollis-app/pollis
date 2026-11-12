@@ -69,6 +69,8 @@ export interface MessageAttachment {
   height?: number;
   // Marked sensitive by the sender (#1568).
   sensitive?: boolean;
+  // A video's poster JPEG, base64 (#1837): the wire's `pv`.
+  poster?: string;
   // Never persisted or sent.
   localPreviewUri?: string;
 }
