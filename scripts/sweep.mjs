@@ -565,9 +565,221 @@ const DIMENSIONS = [
   },
 ];
 
-// Filled in by the platform-matrix phase; until then the dimension reports nothing due.
-function dueMatrix() {
-  return { lines: [], count: 0 };
+// ---------------------------------------------------------------------------
+// Platform matrix (report only): which platform × skin cells have automated coverage, generated from the
+// CI workflows and the e2e suites, and which features (surfaces.json → features) the gaps put at risk.
+// ---------------------------------------------------------------------------
+const LEVELS = ["none", "build/unit only", "e2e by hand", "e2e in CI (not per PR)", "e2e on every PR"];
+const COVERAGE_INPUTS = [".github/workflows", ".github/actions", "e2e", "mobile/.maestro", "mobile/scripts/maestro-run.sh", "pollis-tui/tests"];
+
+const stripComments = (t) => t.split("\n").filter((l) => !/^\s*#/.test(l)).map((l) => l.replace(/\s+#\s.*$/, "")).join("\n");
+
+function workflowTrigger(text) {
+  const on = /^on:\s*\n([\s\S]*?)(?=^\S)/m.exec(text)?.[1] ?? /^on:\s*(.+)$/m.exec(text)?.[1] ?? "";
+  if (/\bpull_request\b/.test(on)) {
+    return { rank: 4, label: "every PR" };
+  }
+  if (/\bpush:[\s\S]*?\bbranches:/.test(on) || /\bschedule:/.test(on)) {
+    return { rank: 3, label: /\bschedule:/.test(on) ? "nightly/main" : "main" };
+  }
+  if (/\bpush:[\s\S]*?\btags:/.test(on)) {
+    return { rank: 3, label: "release tag" };
+  }
+  return { rank: 3, label: "manual dispatch" };
+}
+
+function jobsOf(text) {
+  const body = text.slice(text.search(/^jobs:\s*$/m));
+  const parts = body.split(/^ {2}([\w-]+):\s*$/m);
+  const jobs = [];
+  for (let i = 1; i < parts.length; i += 2) {
+    jobs.push({ name: parts[i], text: parts[i + 1], runsOn: /runs-on:\s*([^\n]+)/.exec(parts[i + 1])?.[1].trim() ?? "" });
+  }
+  return jobs;
+}
+
+function platformMatrix() {
+  const axes = surfaces.axes;
+  const skinned = new Set(axes.skin_applies_to ?? []);
+  const cells = new Map();
+  for (const p of axes.platform) {
+    for (const s of skinned.has(p) ? axes.skin : ["-"]) {
+      cells.set(`${p}|${s}`, { platform: p, skin: s, best: 0, sources: [] });
+    }
+  }
+  const credit = (platform, skins, level, source) => {
+    for (const s of skinned.has(platform) ? skins ?? axes.skin : ["-"]) {
+      const c = cells.get(`${platform}|${s}`);
+      if (!c) {
+        continue;
+      }
+      c.best = Math.max(c.best, level);
+      c.sources.push({ level, source });
+    }
+  };
+
+  // The desktop renderer's default skin, and which native e2e scenarios switch to the other one.
+  const defaultSkin = /return v === "(\w+)" \? "\w+" : "(\w+)"/.exec(exists("frontend/src/utils/colorUtils.ts") ? read("frontend/src/utils/colorUtils.ts") : "")?.[2] ?? axes.skin[0];
+  const scenarioSkins = (name) => {
+    const f = `e2e/${name}.js`;
+    const text = exists(f) ? read(f) : "";
+    return [...new Set([defaultSkin, ...axes.skin.filter((s) => s !== defaultSkin && new RegExp(`["']${s}["']`).test(text))])];
+  };
+
+  const sources = [];
+  const wiredScenarios = new Set();
+  let maestroInCi = false;
+  const wfDir = ".github/workflows";
+  const workflows = exists(wfDir) ? readdirSync(join(ROOT, wfDir)).filter((f) => /\.ya?ml$/.test(f)).sort() : [];
+  let playwright = null;
+  for (const wf of workflows) {
+    const path = `${wfDir}/${wf}`;
+    const text = stripComments(read(path));
+    const trig = workflowTrigger(text);
+    for (const job of jobsOf(text)) {
+      const os = /windows/.test(job.runsOn) ? "windows" : /macos/.test(job.runsOn) ? "macos" : /ubuntu|linux/.test(job.runsOn) ? "linux" : "";
+      const where = `${path} → ${job.name}`;
+      // Native desktop e2e: the real Tauri binary under tauri-driver, in Xvfb (X11) unless the job brings up Wayland.
+      const scenarios = [...job.text.matchAll(/pnpm e2e ([\w-]+)/g)].map((m) => m[1]);
+      if (scenarios.length && /desktop-e2e|xvfb-run/.test(job.text) && os === "linux") {
+        const platform = /WAYLAND_DISPLAY|weston|\bcage\b|sway/.test(job.text) ? "linux-wayland" : "linux-x11";
+        for (const sc of scenarios) {
+          wiredScenarios.add(sc);
+          const skins = scenarioSkins(sc);
+          credit(platform, skins, trig.rank, `${sc} (${trig.label})`);
+          sources.push({ kind: "desktop e2e (WebDriver)", where, platform, skins, trigger: trig.label, what: `pnpm e2e ${sc}` });
+        }
+      }
+      if (/e2e:ui|playwright test/.test(job.text)) {
+        playwright = { where, trigger: trig.label };
+      }
+      if (/cargo test[^\n]*-p pollis-tui/.test(job.text)) {
+        const e2e = exists("pollis-tui/tests") && readdirSync(join(ROOT, "pollis-tui/tests")).some((f) => /e2e/.test(f));
+        credit("tui", null, e2e ? trig.rank : 1, `cargo test -p pollis-tui on ${os || job.runsOn} (${trig.label})`);
+        sources.push({ kind: e2e ? "TUI headless e2e" : "TUI unit", where, platform: "tui", trigger: trig.label, what: `cargo test -p pollis-tui on ${os || job.runsOn}` });
+      }
+      // A path filter naming mobile/.maestro is not a run: only an invocation counts.
+      if (/maestro-run\.sh|maestro test\b/.test(job.text)) {
+        maestroInCi = true;
+      }
+      const tauriBuild = /tauri-action|tauri build|build:tauri/.test(job.text);
+      // A job that builds only the terminal client (cli-release.yml) says nothing about the desktop app.
+      const tuiOnly = /-p pollis-tui\b/.test(job.text) && !tauriBuild && !/-p pollis-core\b|-p pollis(?![\w-])/.test(job.text);
+      if (tuiOnly && /cargo build/.test(job.text)) {
+        credit("tui", null, 1, `${wf} build on ${os} (${trig.label})`);
+      } else if (/cargo (test|build)/.test(job.text) || tauriBuild) {
+        if (os === "windows") {
+          credit("windows", null, 1, `${wf} (${trig.label})`);
+          sources.push({ kind: "build/unit", where, platform: "windows", trigger: trig.label });
+        }
+        if (os === "macos" && !/apple-ios/.test(job.text)) {
+          credit("macos", null, 1, `${wf} (${trig.label})`);
+          sources.push({ kind: "build/unit", where, platform: "macos", trigger: trig.label });
+        }
+        if (/apple-ios/.test(job.text)) {
+          credit("ios-iphone", null, 1, `${wf} (${trig.label})`);
+          credit("ios-ipad", null, 1, `${wf} (${trig.label})`);
+          sources.push({ kind: "build/unit", where, platform: "ios", trigger: trig.label });
+        }
+        if (os === "linux" && tauriBuild) {
+          credit("linux-x11", null, 1, `${wf} (${trig.label})`);
+          credit("linux-wayland", null, 1, `${wf} (${trig.label})`);
+          sources.push({ kind: "build/unit", where, platform: "linux", trigger: trig.label });
+        }
+      }
+      if (/assembleRelease|cargo ndk|linux-android/.test(job.text)) {
+        credit("android", null, 1, `${wf} (${trig.label})`);
+        sources.push({ kind: "build/unit", where, platform: "android", trigger: trig.label });
+      }
+    }
+  }
+
+  // Native scenarios no workflow runs: by hand only (e2e/Dockerfile, Xvfb).
+  const allScenarios = exists("e2e/run.js") ? readdirSync(join(ROOT, "e2e")).filter((f) => f.endsWith(".js") && !/\.spec\.js$|^run\.js$|config\.js$/.test(f)).map((f) => f.replace(/\.js$/, "")) : [];
+  const localScenarios = allScenarios.filter((s) => !wiredScenarios.has(s) && /tauri-driver|WebDriver|require\("\.\/lib|driver/.test(read(`e2e/${s}.js`)));
+  for (const sc of localScenarios) {
+    credit("linux-x11", scenarioSkins(sc), 2, `${sc} (by hand)`);
+  }
+  if (localScenarios.length) {
+    sources.push({ kind: "desktop e2e (WebDriver)", where: "e2e/*.js (no workflow)", platform: "linux-x11", trigger: "by hand", what: localScenarios.join(", ") });
+  }
+
+  // Maestro: mobile e2e. The runner's usage line names the platforms it drives.
+  const flowsDir = "mobile/.maestro/flows";
+  if (exists(flowsDir)) {
+    const flows = readdirSync(join(ROOT, flowsDir)).filter((f) => f.endsWith(".yaml"));
+    const runner = exists("mobile/scripts/maestro-run.sh") ? read("mobile/scripts/maestro-run.sh") : "";
+    const named = (/<flow\|all> <([\w|]+)>/.exec(runner)?.[1] ?? "").split("|").filter(Boolean);
+    const map = { ios: "ios-iphone", ipad: "ios-ipad", android: "android" };
+    const level = maestroInCi ? 3 : 2;
+    const ipadOnly = flows.filter((f) => /^\s*-\s*ipad\s*$/m.test(read(`${flowsDir}/${f}`)));
+    for (const n of named) {
+      if (map[n]) {
+        credit(map[n], null, level, `Maestro ${flows.length} flow(s) (${maestroInCi ? "CI" : "by hand"})`);
+      }
+    }
+    sources.push({ kind: "mobile e2e (Maestro)", where: `${flowsDir} (${flows.length} flows, ${ipadOnly.length} iPad-only) via mobile/scripts/maestro-run.sh`, platform: named.map((n) => map[n] ?? n).join(", "), trigger: maestroInCi ? "CI" : "by hand (no workflow runs Maestro)" });
+  }
+
+  // The Playwright tier drives the renderer in Chromium with Tauri mocked: skin coverage, not platform coverage.
+  let renderer = null;
+  const specs = exists("e2e") ? readdirSync(join(ROOT, "e2e")).filter((f) => /\.spec\.(js|ts)$/.test(f)) : [];
+  if (specs.length) {
+    const per = Object.fromEntries(axes.skin.map((s) => [s, specs.filter((f) => new RegExp(`["']${s}["']`).test(read(`e2e/${f}`))).length]));
+    renderer = { specs: specs.length, per_skin: per, where: playwright?.where ?? "e2e/playwright.config.js (no workflow)", trigger: playwright?.trigger ?? "by hand" };
+  }
+
+  const list = [...cells.values()];
+  const gaps = list.filter((c) => c.best <= 1);
+  const weak = list.filter((c) => c.best === 2 || c.best === 3);
+
+  // Features whose behaviour varies by platform/skin, on the cells with no e2e.
+  const platformsOf = (feat) => {
+    const all = feat.platforms ?? axes.platform;
+    const excluded = Object.keys(feat.excluded ?? {});
+    const groups = { mobile: ["ios-iphone", "ios-ipad", "android"], desktop: [...skinned] };
+    const out = all.filter((p) => !excluded.some((e) => e === p || (groups[e] ?? []).includes(p)));
+    return out;
+  };
+  const atRisk = [];
+  for (const [id, feat] of Object.entries(surfaces.features ?? {})) {
+    const ps = new Set(platformsOf(feat));
+    const hit = gaps.filter((c) => ps.has(c.platform) && (c.skin === "-" || (feat.varies_on ?? []).includes("skin") || c.skin === defaultSkin));
+    if (hit.length) {
+      atRisk.push({ feature: id, cells: hit.map((c) => (c.skin === "-" ? c.platform : `${c.platform}×${c.skin}`)) });
+    }
+  }
+  return { levels: LEVELS, default_skin: defaultSkin, cells: list.map(({ platform, skin, best, sources: s }) => ({ platform, skin, level: LEVELS[best], sources: [...new Set([...s].sort((a, b) => b.level - a.level).map((x) => x.source))] })), gaps: gaps.map((c) => (c.skin === "-" ? c.platform : `${c.platform}×${c.skin}`)), weak: weak.map((c) => `${c.skin === "-" ? c.platform : `${c.platform}×${c.skin}`} (${LEVELS[c.best]})`), renderer, sources, at_risk: atRisk };
+}
+
+function printMatrix(m) {
+  const pad = (s, n) => String(s).padEnd(n);
+  console.log(`    ${pad("platform", 15)}${pad("skin", 10)}coverage`);
+  for (const c of m.cells) {
+    const src = c.sources.slice(0, 3).join("; ") + (c.sources.length > 3 ? `; +${c.sources.length - 3}` : "");
+    console.log(`    ${pad(c.platform, 15)}${pad(c.skin, 10)}${pad(c.level, 24)}${src}`);
+  }
+  if (m.renderer) {
+    console.log(`    renderer: ${m.renderer.specs} Playwright spec(s) in Chromium with Tauri mocked (${m.renderer.trigger}); skin-specific: ${Object.entries(m.renderer.per_skin).map(([s, n]) => `${s} ${n}`).join(", ")}. Not counted as platform coverage.`);
+  }
+  console.log(`    gaps (no e2e at all): ${m.gaps.join(", ") || "none"}`);
+  console.log(`    weak (e2e not on every PR): ${m.weak.join(", ") || "none"}`);
+  for (const r of m.at_risk) {
+    console.log(`    at risk: ${r.feature} on ${r.cells.join(", ")}`);
+  }
+}
+
+function dueMatrix(base, diff) {
+  const lines = [];
+  const feats = Object.entries(surfaces?.features ?? {}).filter(([, f]) => diff.files.some((x) => matchesAny(f.paths ?? [], x))).map(([id]) => id);
+  if (feats.length) {
+    lines.push(`${feats.length} platform-varying feature(s) changed: ${listShort(feats)}; check each on the platforms the matrix leaves uncovered`);
+  }
+  const inputs = diff.files.filter((f) => matchesAny(COVERAGE_INPUTS, f));
+  if (inputs.length) {
+    lines.push(`${inputs.length} CI/e2e file(s) changed: re-read the matrix for new or lost coverage`);
+  }
+  return { lines, count: feats.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -776,5 +988,3 @@ for (const r of reports) {
 }
 console.log(`\n${summaryLine()}`);
 process.exit(reports.some((r) => r.status === "FAIL") ? 1 : 0);
-
-function printMatrix() {}
