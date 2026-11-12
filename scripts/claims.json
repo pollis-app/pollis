@@ -6406,7 +6406,7 @@
         "Cargo.lock"
       ],
       "evidence": [
-        "deny.toml:106",
+        "deny.toml:96",
         "Cargo.lock:4135"
       ],
       "status": "verified",
@@ -8981,7 +8981,7 @@
         "pollis-core/src/config.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:76",
+        "pollis-delivery/src/broker.rs:75",
         "pollis-core/src/config.rs:92",
         "pollis-core/src/config.rs:93"
       ],
@@ -9002,8 +9002,8 @@
         "pollis-delivery/src/broker.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:1352",
-        "pollis-delivery/src/broker.rs:1564"
+        "pollis-delivery/src/broker.rs:1364",
+        "pollis-delivery/src/broker.rs:1576"
       ],
       "status": "verified",
       "note": "True but narrow: every PUT, not just emoji, now must carry a signed content_length (broker.rs:1519-1530); presign lifetime 900 s (broker.rs:1308).",
@@ -9067,7 +9067,7 @@
       "evidence": [
         "pollis-core/src/commands/r2.rs:408",
         "pollis-core/src/commands/r2.rs:445",
-        "pollis-delivery/src/broker.rs:1522"
+        "pollis-delivery/src/broker.rs:1534"
       ],
       "status": "unverifiable",
       "note": "Depends on the R2 bucket's public-access config. In code, the stored URL is `{R2_S3_ENDPOINT}/{key}` (r2.rs:408), which needs SigV4; clients fetch via a DS presigned GET (r2.rs:445), and the DS presigns GETs for avatars/icons to any authenticated device (only writes are owner-gated, broker.rs:1478-1495). Settling it needs the bucket's public-access/custom-domain setting. Same claim repeated in §13 item 5.",
@@ -9087,8 +9087,8 @@
         "pollis-delivery/src/broker.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:847",
-        "pollis-delivery/src/broker.rs:332"
+        "pollis-delivery/src/broker.rs:859",
+        "pollis-delivery/src/broker.rs:336"
       ],
       "fact": "livekit-participant-token-minutes",
       "status": "verified",
@@ -9108,7 +9108,7 @@
         "pollis-delivery/src/broker.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:358"
+        "pollis-delivery/src/broker.rs:373"
       ],
       "fact": "livekit-admin-token-minutes",
       "status": "verified",
@@ -9129,8 +9129,8 @@
         "pollis-core/src/config.rs"
       ],
       "evidence": [
+        "pollis-delivery/src/broker.rs:67",
         "pollis-delivery/src/broker.rs:68",
-        "pollis-delivery/src/broker.rs:69",
         "pollis-core/src/config.rs:94"
       ],
       "status": "verified",
@@ -9150,9 +9150,9 @@
         "pollis-delivery/src/broker.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:185",
-        "pollis-delivery/src/broker.rs:190",
-        "pollis-delivery/src/broker.rs:195"
+        "pollis-delivery/src/broker.rs:184",
+        "pollis-delivery/src/broker.rs:189",
+        "pollis-delivery/src/broker.rs:194"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -9171,8 +9171,8 @@
         "pollis-delivery/src/broker.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:492",
-        "pollis-delivery/src/broker.rs:688"
+        "pollis-delivery/src/broker.rs:504",
+        "pollis-delivery/src/broker.rs:700"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -17966,8 +17966,8 @@
         "pollis-delivery/src/broker.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:512",
-        "pollis-delivery/src/broker.rs:590"
+        "pollis-delivery/src/broker.rs:524",
+        "pollis-delivery/src/broker.rs:602"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -19134,7 +19134,7 @@
         "deny.toml"
       ],
       "evidence": [
-        "deny.toml:178"
+        "deny.toml:168"
       ],
       "status": "unverifiable",
       "note": "deny.toml [licenses].allow lists 17 public SPDX identifiers plus LicenseRef-proprietary (Pollis's own crates), 18 entries in all (same at b5550ab0). 'Each one actually present' needs a cargo-deny run against the graph.",
@@ -19155,8 +19155,8 @@
         "Cargo.toml"
       ],
       "evidence": [
-        "deny.toml:468",
-        "deny.toml:485",
+        "deny.toml:458",
+        "deny.toml:475",
         "Cargo.toml:124"
       ],
       "status": "verified",
@@ -19235,9 +19235,9 @@
         "deny.toml"
       ],
       "evidence": [
-        "deny.toml:332",
-        "deny.toml:334",
-        "deny.toml:335"
+        "deny.toml:322",
+        "deny.toml:324",
+        "deny.toml:325"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -19763,7 +19763,7 @@
         "pollis-delivery/src/push.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:512",
+        "pollis-delivery/src/broker.rs:524",
         "pollis-delivery/src/push.rs:127"
       ],
       "status": "verified",
@@ -21720,7 +21720,7 @@
         "supply-chain/js-licenses.json"
       ],
       "evidence": [
-        "deny.toml:178",
+        "deny.toml:168",
         "supply-chain/js-licenses.json:3"
       ],
       "status": "verified",

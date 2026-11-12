@@ -16,7 +16,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use libsql::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -329,10 +328,26 @@ pub fn sign_livekit_token(
             can_publish_data,
         },
     };
-    let mut header = Header::new(Algorithm::HS256);
-    header.typ = Some("JWT".to_string());
-    let key = EncodingKey::from_secret(api_secret.as_bytes());
-    Ok(encode(&header, &claims, &key)?)
+    encode_hs256_jwt(&claims, api_secret)
+}
+
+/// The fixed JOSE header of every JWT the DS mints, byte for byte what
+/// `jsonwebtoken` emitted before #1845 (`typ` first), so tokens are unchanged.
+const JWT_HS256_HEADER: &[u8] = br#"{"typ":"JWT","alg":"HS256"}"#;
+
+/// Compact-serialise `claims` as an HS256 JWT (RFC 7519): base64url (no pad) of
+/// the header and the compact JSON claims, joined by `.`, then the base64url
+/// HMAC-SHA256 of that signing input. The DS only ever signs HS256 and never
+/// verifies, so this replaces `jsonwebtoken`, whose crypto backend links RSA
+/// and NIST-curve code the DS never calls (#1845).
+fn encode_hs256_jwt<T: Serialize>(claims: &T, secret: &str) -> anyhow::Result<String> {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    let header = URL_SAFE_NO_PAD.encode(JWT_HS256_HEADER);
+    let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims)?);
+    let signing_input = format!("{header}.{payload}");
+    let mac = hmac_sha256(secret.as_bytes(), signing_input.as_bytes());
+    Ok(format!("{signing_input}.{}", URL_SAFE_NO_PAD.encode(mac)))
 }
 
 // LiveKit RoomService (Twirp) calls need a short-lived admin JWT, signed here so the secret stays server-side.
@@ -375,10 +390,7 @@ pub fn sign_livekit_admin_token(
             room: room.to_string(),
         },
     };
-    let mut header = Header::new(Algorithm::HS256);
-    header.typ = Some("JWT".to_string());
-    let key = EncodingKey::from_secret(api_secret.as_bytes());
-    Ok(encode(&header, &claims, &key)?)
+    encode_hs256_jwt(&claims, api_secret)
 }
 
 /// Which env var the DS's server-side LiveKit base came from (#1751).

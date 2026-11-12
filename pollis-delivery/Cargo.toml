@@ -66,12 +66,13 @@ sha2 = "0.10"
 # on it rather than write the four-line loop.
 subtle = "2.6"
 hex = "0.4"
-# Authorized-secrets broker (#393): mint LiveKit JWTs server-side (pure HS256,
-# no native dep) and HMAC for the R2 SigV4 query-string presign. The DS is the
+# Authorized-secrets broker (#393): HMAC-SHA256 for both the LiveKit HS256 JWTs
+# (`broker::encode_hs256_jwt`, ~10 lines; #1845 dropped `jsonwebtoken`, whose
+# only crypto backends also link RSA and NIST-curve code) and the R2 SigV4
+# query-string presign. The DS is the
 # SOLE minter of both now — pollis-core's `livekit_jwt` module is gone and its
 # `r2` module asks `/v1/r2/presign` rather than signing locally — so these are
 # the only copies of either scheme in the workspace, not a mirror of one.
-jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 hmac = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # CSPRNG for OTP codes and 256-bit session tokens (OsRng).

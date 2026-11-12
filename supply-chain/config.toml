@@ -1149,10 +1149,6 @@ criteria = "safe-to-deploy"
 version = "0.7.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.jsonwebtoken]]
-version = "10.3.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.k256]]
 version = "0.13.4"
 criteria = "safe-to-deploy"
@@ -1279,10 +1275,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.libloading]]
 version = "0.8.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.libm]]
-version = "0.2.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.libredox]]
@@ -1509,10 +1501,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]
 version = "0.4.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-bigint-dig]]
-version = "0.8.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-complex]]
@@ -1823,10 +1811,6 @@ criteria = "safe-to-deploy"
 version = "0.9.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.pkcs1]]
-version = "0.7.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.pkcs8]]
 version = "0.10.2"
 criteria = "safe-to-deploy"
@@ -2049,10 +2033,6 @@ notes = "No independent review performed. The AEAD/hash/HMAC/RSA-verify primitiv
 
 [[exemptions.rodio]]
 version = "0.19.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.rsa]]
-version = "0.9.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.rsqlite-vfs]]
@@ -2303,10 +2283,6 @@ criteria = "safe-to-deploy"
 version = "0.3.9"
 criteria = "safe-to-deploy"
 
-[[exemptions.simple_asn1]]
-version = "0.6.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.siphasher]]
 version = "1.0.2"
 criteria = "safe-to-deploy"
@@ -2333,10 +2309,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.soup3-sys]]
 version = "0.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.spin]]
-version = "0.9.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.spki]]

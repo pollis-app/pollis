@@ -336,5 +336,8 @@ Tests: `pollis-delivery/tests/r2_presign_scope.rs`.
 `sign_livekit_token` and `presign_r2_url` are pure — the clock/timestamp is
 injected — so the signatures are deterministic and lockable. Known-answer tests
 live in `pollis-delivery/tests/broker.rs`: JWT header/claim shape + HS256
-re-verification, and a SigV4 golden URL (GET + PUT-with-slash/space) whose GET
+re-verification, golden tokens pinning byte-identical output since the DS
+dropped `jsonwebtoken` for its own `encode_hs256_jwt` (hmac + sha2, #1845), an
+ignored live round trip against a real LiveKit (`-- --ignored live_livekit`),
+and a SigV4 golden URL (GET + PUT-with-slash/space) whose GET
 signature is cross-checked against an independent SigV4 implementation.
