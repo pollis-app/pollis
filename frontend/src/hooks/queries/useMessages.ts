@@ -161,7 +161,7 @@ export function parseContent(
 const POSTER_MAX_B64 = 64 * 1024;
 
 /** A sender's `pv` (#1837) only if it is plain base64 of a sane size; anything else is ignored. */
-export function posterOf(pv: unknown): string | undefined {
+function posterOf(pv: unknown): string | undefined {
   if (typeof pv !== 'string' || pv.length === 0 || pv.length > POSTER_MAX_B64) {
     return undefined;
   }
