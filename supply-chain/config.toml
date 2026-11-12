@@ -59,12 +59,24 @@ audit-as-crates-io = true
 version = "0.5.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.aead]]
+version = "0.6.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.aes]]
 version = "0.8.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.aes]]
+version = "0.9.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.aes-gcm]]
 version = "0.10.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.aes-gcm]]
+version = "0.11.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.aho-corasick]]
@@ -211,6 +223,10 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.base16ct]]
+version = "1.0.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.base64]]
 version = "0.23.1"
 criteria = "safe-to-deploy"
@@ -343,8 +359,16 @@ criteria = "safe-to-deploy"
 version = "0.10.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.chacha20poly1305]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.chrono]]
 version = "0.4.44"
+criteria = "safe-to-deploy"
+
+[[exemptions.cipher]]
+version = "0.5.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.clang-sys]]
@@ -455,12 +479,20 @@ criteria = "safe-to-deploy"
 version = "0.15.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.cpubits]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.cpufeatures]]
 version = "0.2.17"
 criteria = "safe-to-deploy"
 
 [[exemptions.crabgrind]]
 version = "0.2.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.crabgrind]]
+version = "0.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.crc32fast]]
@@ -495,6 +527,10 @@ criteria = "safe-to-deploy"
 version = "0.5.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.crypto-bigint]]
+version = "0.7.11"
+criteria = "safe-to-deploy"
+
 [[exemptions.crypto-common]]
 version = "0.1.7"
 criteria = "safe-to-deploy"
@@ -511,8 +547,12 @@ criteria = "safe-to-deploy"
 version = "0.9.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.ctr]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.ctutils]]
-version = "0.4.5"
+version = "0.4.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.curve25519-dalek]]
@@ -659,6 +699,10 @@ criteria = "safe-to-deploy"
 version = "0.16.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.ecdsa]]
+version = "0.17.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.ed25519]]
 version = "2.2.3"
 criteria = "safe-to-deploy"
@@ -669,6 +713,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.elliptic-curve]]
 version = "0.13.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.elliptic-curve]]
+version = "0.14.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.embed-resource]]
@@ -725,6 +773,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ff]]
 version = "0.13.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.ff]]
+version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.field-offset]]
@@ -859,6 +911,10 @@ criteria = "safe-to-deploy"
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.ghash]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.gif]]
 version = "0.14.2"
 criteria = "safe-to-deploy"
@@ -895,6 +951,10 @@ criteria = "safe-to-deploy"
 version = "0.13.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.group]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.gtk]]
 version = "0.18.2"
 criteria = "safe-to-deploy"
@@ -925,12 +985,24 @@ notes = "Comes with rusqlite 0.41 (#1797, RUSTSEC-2026-0459). Statement-cache LR
 version = "0.3.7"
 criteria = "safe-to-deploy"
 
+[[exemptions.hax-lib]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.hax-lib-macros]]
 version = "0.3.7"
 criteria = "safe-to-deploy"
 
+[[exemptions.hax-lib-macros]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.hax-lib-macros-types]]
 version = "0.3.7"
+criteria = "safe-to-deploy"
+
+[[exemptions.hax-lib-macros-types]]
+version = "0.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.hermit-abi]]
@@ -961,16 +1033,32 @@ criteria = "safe-to-deploy"
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.hpke-rs]]
+version = "0.8.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.hpke-rs-crypto]]
 version = "0.7.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.hpke-rs-crypto]]
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.hpke-rs-libcrux]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.hpke-rs-libcrux]]
+version = "0.8.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.hpke-rs-rust-crypto]]
 version = "0.7.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.hpke-rs-rust-crypto]]
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.html5ever]]
@@ -1083,6 +1171,10 @@ criteria = "safe-to-deploy"
 version = "0.1.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.inout]]
+version = "0.2.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.instability]]
 version = "0.3.12"
 criteria = "safe-to-deploy"
@@ -1151,6 +1243,10 @@ criteria = "safe-to-deploy"
 version = "0.13.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.k256]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.keccak]]
 version = "0.2.0"
 criteria = "safe-to-deploy"
@@ -1187,20 +1283,40 @@ criteria = "safe-to-deploy"
 version = "0.0.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-aead]]
+version = "0.0.10"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-aes]]
 version = "0.0.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-aes]]
+version = "0.0.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-chacha20poly1305]]
 version = "0.0.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-chacha20poly1305]]
+version = "0.0.10"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-curve25519]]
 version = "0.0.8"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-curve25519]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-ecdh]]
 version = "0.0.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-ecdh]]
+version = "0.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-ed25519]]
@@ -1211,56 +1327,120 @@ criteria = "safe-to-deploy"
 version = "0.0.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-hacl-rs]]
+version = "0.0.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-hkdf]]
 version = "0.0.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-hkdf]]
+version = "0.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-hmac]]
 version = "0.0.8"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-hmac]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-hmac-drbg]]
 version = "0.0.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-hmac-drbg]]
+version = "0.0.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-intrinsics]]
 version = "0.0.8"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-intrinsics]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-kem]]
 version = "0.0.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-kem]]
+version = "0.0.10"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-macros]]
+version = "0.0.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-ml-kem]]
 version = "0.0.10"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-ml-kem]]
+version = "0.0.11"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-p256]]
 version = "0.0.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-p256]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-p384]]
+version = "0.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-platform]]
 version = "0.0.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-platform]]
+version = "0.0.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-poly1305]]
 version = "0.0.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-poly1305]]
+version = "0.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-secrets]]
 version = "0.0.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-secrets]]
+version = "0.0.7"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-sha2]]
 version = "0.0.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-sha2]]
+version = "0.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-sha3]]
 version = "0.0.10"
 criteria = "safe-to-deploy"
 
+[[exemptions.libcrux-sha3]]
+version = "0.0.11"
+criteria = "safe-to-deploy"
+
 [[exemptions.libcrux-traits]]
 version = "0.0.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-traits]]
+version = "0.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.libdbus-sys]]
@@ -1623,9 +1803,9 @@ criteria = "safe-to-deploy"
 notes = "No independent review performed — see the LOUD NOTICE above [policy.openmls]. This is the RFC 9420 MLS engine and this app's entire E2EE guarantee sits on it; pinned by exact rev in the workspace Cargo.toml's [patch.crates-io] because the PQ ciphersuite point 0x0052 this app negotiates ships in no released version. Trust rationale absent a line-by-line review: openmls is maintained by the IETF MLS working group's reference-implementation team (Phoenix R&D / former Wire team), used by Wire and other production MLS deployments, developed in the open with a public issue tracker, and this pin tracks upstream `main` deliberately (not a stale fork). None of that substitutes for a real audit — it is why the risk is accepted, not evidence the risk is absent."
 
 [[exemptions.openmls_basic_credential]]
-version = "0.5.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+version = "0.5.0"
 criteria = "safe-to-deploy"
-notes = "Same openmls-repo rev as [[exemptions.openmls]]; no independent review performed. Small crate (basic/X.509-less credential type used to bind MLS leaves to Pollis device identities) but still part of the trust boundary the MLS handshake authenticates against."
+notes = "patches/openmls-basic-credential: the crate at the same openmls-repo rev as [[exemptions.openmls]], copied in-tree with only p256/p384 moved 0.13 -> 0.14 (#1846; its Cargo.toml lists the diff). No independent review performed. Small crate (basic/X.509-less credential type used to bind MLS leaves to Pollis device identities) but still part of the trust boundary the MLS handshake authenticates against."
 
 [[exemptions.openmls_libcrux_crypto]]
 version = "0.3.1@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
@@ -1638,9 +1818,9 @@ criteria = "safe-to-deploy"
 notes = "Same openmls-repo rev; no independent review performed. In-memory MLS group-state storage provider — one of the two [patch.crates-io]-pinned storage backends."
 
 [[exemptions.openmls_rust_crypto]]
-version = "0.5.1@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
+version = "0.5.1"
 criteria = "safe-to-deploy"
-notes = "Same openmls-repo rev; no independent review performed. This is the RustCrypto-backed crypto provider openmls is actually configured to use (see the libcrux note above) — i.e. the crate that performs the real key-schedule/AEAD/signature operations behind the MLS API, making it as security-critical as openmls itself."
+notes = "patches/openmls-rust-crypto: the crate at the same openmls-repo rev, copied in-tree with only p256/p384 0.14 and hpke-rs 0.8 (draft-connolly-cfrg-hpke-mlkem kept, so DeriveKeyPair is unchanged) swapped in (#1846; its Cargo.toml lists the diff). No independent review performed. This is the RustCrypto-backed crypto provider openmls is actually configured to use (see the libcrux note above) — i.e. the crate that performs the real key-schedule/AEAD/signature operations behind the MLS API, making it as security-critical as openmls itself."
 
 [[exemptions.openmls_serialization_helpers]]
 version = "0.1.0@git:34222ef632c87df58baaa7614c8a72ac235c5f07"
@@ -1689,8 +1869,16 @@ criteria = "safe-to-deploy"
 version = "0.13.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.p256]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.p384]]
 version = "0.13.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.p384]]
+version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.pango]]
@@ -1743,6 +1931,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pem]]
 version = "3.0.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.pem-rfc7468]]
+version = "1.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.petgraph]]
@@ -1841,8 +2033,16 @@ criteria = "safe-to-deploy"
 version = "0.8.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.poly1305]]
+version = "0.9.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.polyval]]
 version = "0.6.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.polyval]]
+version = "0.7.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.potential_utf]]
@@ -1861,8 +2061,16 @@ criteria = "safe-to-deploy"
 version = "0.3.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.primefield]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.primeorder]]
 version = "0.13.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.primeorder]]
+version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro-crate]]
@@ -2020,6 +2228,10 @@ criteria = "safe-to-deploy"
 version = "0.4.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.rfc6979]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.rfd]]
 version = "0.16.0"
 criteria = "safe-to-deploy"
@@ -2157,6 +2369,10 @@ criteria = "safe-to-run"
 version = "0.7.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.sec1]]
+version = "0.8.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.secret-service]]
 version = "4.0.0"
 criteria = "safe-to-deploy"
@@ -2215,6 +2431,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.serde_with_macros]]
 version = "3.21.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.serdect]]
+version = "0.4.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.serial_test]]
@@ -2361,6 +2581,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
 version = "2.0.117"
+criteria = "safe-to-deploy"
+
+[[exemptions.syn]]
+version = "3.0.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.sys-locale]]
@@ -2649,6 +2873,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unicode-truncate]]
 version = "1.1.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.universal-hash]]
+version = "0.6.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.ureq]]
@@ -3079,6 +3307,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wl-clipboard-rs]]
 version = "0.9.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.wnaf]]
+version = "0.14.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.writeable]]

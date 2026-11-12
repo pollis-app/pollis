@@ -1026,6 +1026,22 @@ bump: the draft renumbers provisional code points between revisions and a code p
 is a wire-format break for every group already on `0x0052`. **The live risk is unchanged in
 kind and larger in degree: code-point churn (§7.4).**
 
+**Amended by #1846:** two of the five, `openmls_rust_crypto` and `openmls_basic_credential`,
+are now in-tree copies of the crates at that same rev (`patches/openmls-rust-crypto`,
+`patches/openmls-basic-credential`), patched in by path. They differ from upstream only in
+dependency versions — p256/p384 0.14 and hpke-rs 0.8 — which took elliptic-curve 0.13 and
+crypto-bigint 0.5 out of the graph without moving the rev. hpke-rs 0.8 changed the HPKE
+`DeriveKeyPair` for the X-Wing and ML-KEM KEMs (draft-ietf-hpke-pq labels the seed input);
+TreeKEM derives every node key pair that way, so a client on the new derivation computes
+different keys from the same path secret and cannot process a commit from an old one. The copy
+keeps hpke-rs's `draft-connolly-cfrg-hpke-mlkem` feature, which restores the 0.7 derivation,
+and `hpke_derive_keypair_matches_hpke_rs_0_7` (`pollis-core/src/commands/mls/tests.rs`) pins
+the derived keys for `0x0052` and `0x0001` to what 0.7 produced; `hpke_golden_group_from_hpke_rs_0_7_replays`
+replays a `0x0052` group recorded by 0.7 (`pollis-core/tests/fixtures/hpke_golden/`) to pin
+HPKE seal/open and export too. **Upstream `main` does not
+enable that feature**, so the eventual rev bump has a second wire break to plan for besides
+code-point churn: that test fails until it is handled as a migration.
+
 ### 7.1 What the pinned tree can already do (as of #454; see the amendment above)
 
 - The suite **exists in the pinned enum.** `openmls_traits 0.5.0` (already locked) defines

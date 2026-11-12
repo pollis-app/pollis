@@ -1,14 +1,4 @@
 {
   "_comment": "VEX source (#1832): one statement per RUSTSEC vulnerability deny.toml ignores, i.e. one we have triaged as not affecting Pollis. scripts/oss-inventory.mjs turns these into each product's OpenVEX document (only for packages that product ships); `oss-inventory.mjs check-vex` (supply-chain.yml) fails when this file and deny.toml's ignore list disagree. `affected` is the advisory's vulnerable version range; `aliases` must include every alias the advisory lists (CVE / GHSA ids are what customers' scanners report). `justification` is an OpenVEX justification. Write `impact_statement` for a customer: what the flaw needs, and why Pollis never gives it that.",
-  "statements": [
-    {
-      "id": "RUSTSEC-2026-0387",
-      "ecosystem": "cargo",
-      "package": "crypto-bigint",
-      "affected": ["<0.7.6"],
-      "aliases": [],
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The timing leaks are in arithmetic on secret NIST P-256/P-384 or secp256k1 keys. Pollis never creates or uses such a key: MLS runs on ML-KEM-768+X25519 with ML-DSA-44 (legacy groups X25519/Ed25519). crypto-bigint 0.5 is linked through elliptic-curve 0.13 but its secret-dependent paths are never called with a secret."
-    }
-  ]
+  "statements": []
 }

@@ -1,0 +1,83 @@
+# Pollis copy of `openmls_rust_crypto` 0.5.1 at the pinned openmls rev
+# (34222ef632c87df58baaa7614c8a72ac235c5f07), swapped in by the
+# `[patch.crates-io]` entry in the workspace Cargo.toml (#1846).
+#
+# The only changes from upstream are dependency moves that take
+# elliptic-curve 0.13 / crypto-bigint 0.5 out of the graph:
+#   - p256/p384 0.13 -> 0.14 (ECDSA; API port from upstream openmls#2249,
+#     055a2b4b). Encodings unchanged; Pollis never uses a NIST curve.
+#   - hpke-rs / hpke-rs-crypto / hpke-rs-rust-crypto 0.7 -> 0.8 (upstream
+#     openmls e0b21a70). The RustCrypto KEM/KDF/AEAD code paths are unchanged
+#     between the two; the one behavioural difference, the PQ DeriveKeyPair
+#     label, is switched back off below. pollis-core's
+#     `hpke_derive_keypair_matches_hpke_rs_0_7` test pins the outputs.
+#
+# Name, version and feature names must match the upstream crate, or the patch
+# stops applying. Delete this directory and its patch entry when the openmls
+# rev moves to a release on hpke-rs 0.8 (and audit the DeriveKeyPair label
+# then: upstream main does NOT enable draft-connolly-cfrg-hpke-mlkem).
+[package]
+name = "openmls_rust_crypto"
+authors = ["OpenMLS Authors"]
+version = "0.5.1"
+edition = "2021"
+rust-version = "1.91.0"
+publish = false
+description = "A crypto backend for OpenMLS implementing openmls_traits using RustCrypto primitives."
+license = "MIT"
+documentation = "https://docs.rs/openmls_rust_crypto"
+repository = "https://github.com/openmls/openmls/tree/main/openmls_rust_crypto"
+readme = "README.md"
+
+[dependencies]
+openmls_traits = { version = "0.5.0" }
+openmls_memory_storage = { version = "0.5.0" }
+
+# `draft-connolly-cfrg-hpke-mlkem` keeps hpke-rs 0.7's DeriveKeyPair for the
+# ML-KEM / X-Wing KEMs (seed = SHAKE256(ikm)). Without it hpke-rs 0.8 switches
+# to the draft-ietf-hpke-pq labeled derivation, which derives a DIFFERENT key
+# pair from the same TreeKEM path secret: a wire break with every Pollis build
+# on 0.7 for suite 0x0052. Do not drop this feature without a migration.
+hpke = { version = "0.8", package = "hpke-rs", default-features = false, features = [
+  "hazmat",
+  "serialization",
+  "experimental",
+  "draft-connolly-cfrg-hpke-mlkem",
+] }
+# Rust Crypto dependencies
+sha2 = { version = "0.11" }
+aes-gcm = { version = "0.10" }
+chacha20poly1305 = { version = "0.10" }
+hmac = { version = "0.13" }
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+rand_core_0_10 = { package = "rand_core", version = "0.10" }
+p256 = { version = "0.14" }
+p384 = { version = "0.14" }
+hkdf = { version = "0.13" }
+rand_chacha = { version = "0.3" }
+hpke-rs-crypto = { version = "0.8" }
+hpke-rs-rust-crypto = { version = "0.8", features = ["experimental"] }
+tls_codec = { version = "0.5", features = ["derive", "serde", "mls"] }
+ml-dsa = "0.1.0"
+thiserror = { version = "^2.0" }
+# FF1-AES128 backing for the virtual-clients-draft reuse-guard PRP.
+fpe = { version = "0.6", optional = true }
+aes = { version = "0.8", optional = true }
+
+[features]
+test-utils = ["openmls_memory_storage/test-utils"]
+extensions-draft = [
+  "openmls_traits/extensions-draft",
+  "openmls_memory_storage/extensions-draft",
+]
+targeted-messages-draft = ["openmls_traits/targeted-messages-draft"]
+draft-ietf-mls-pq-ciphersuites = [
+  "openmls_traits/draft-ietf-mls-pq-ciphersuites",
+]
+virtual-clients-draft = [
+  "openmls_traits/virtual-clients-draft",
+  "openmls_memory_storage/virtual-clients-draft",
+  "dep:fpe",
+  "dep:aes",
+]
