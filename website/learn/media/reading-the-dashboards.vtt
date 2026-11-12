@@ -35,7 +35,7 @@ Now inside the desktop app. "This build" tells you whether the exact binary you'
 And "not in public log" is the loud one: the release is published, there's something to compare against, and yours isn't it, or the log itself failed its checks.
 
 02:32.000 --> 02:45.000
-"Unavailable" versus "not in the log" is the difference between "I don't know" and "you've been tampered with". We shipped that wrong once, and the two results are labelled clearly.
+"Unavailable" versus "not in the log" is the difference between "I don't know" and "you've been tampered with", so the two results are labelled clearly.
 
 02:45.000 --> 02:55.000
 And here's the honest ending. Everything green means the things we published are consistent, permanent, and include the app you're running.

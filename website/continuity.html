@@ -138,18 +138,16 @@
 
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section">
-        <h2 class="doc-section-title">What is not solved yet</h2>
+        <h2 class="doc-section-title">What continuity depends on</h2>
         <ul>
-          <li><strong>No second key holder.</strong> The two pinned signing keys have one custodian. A second
-            holder is the most valuable continuity step, and needs a second person.</li>
-          <li><strong>A leaked log key still needs an app update.</strong> Since
+          <li><strong>No second key holder.</strong> The two pinned signing keys have one custodian.</li>
+          <li><strong>Retiring a leaked log key takes an app update.</strong> Since
             <a href="https://github.com/pollis-app/pollis/issues/754" target="_blank" rel="noopener noreferrer">#754</a>,
             an offline root key can name a new log key that installed apps accept without an update, so a lost key is
-            recoverable. Retiring the current key after a leak still takes a release, verified by the binaries tree that
+            recoverable. Retiring the current key after a leak takes a release, verified by the binaries tree that
             key signs, and the offline root has one custodian too.</li>
-          <li><strong>Nobody independent watches the log.</strong> Witness and gossip monitoring is designed but
-            unbuilt (<a href="https://github.com/pollis-app/pollis/issues/763" target="_blank" rel="noopener noreferrer">#763</a>).
-            Until it exists, "no alarm" means "nobody looked".</li>
+          <li><strong>No independent party monitors the log.</strong> It is checked by Pollis's own publishing job
+            and by anyone who runs the verifier, so "no alarm" means only that none of those checks failed.</li>
           <li><strong>No legal succession.</strong> Ownership, inheritance and escrow need a legal entity to
             hold them. A timer that publishes a key automatically would be worse than nothing, since it is an
             unattended path to the signing key.</li>

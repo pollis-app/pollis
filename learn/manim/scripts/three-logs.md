@@ -37,8 +37,7 @@ of its content.
 
 **[01:45–02:10] Scene 4 — binaries**
 The third holds the fingerprint of every desktop app we've released, and every
-update we push over the air to the mobile app. Mobile store builds aren't in it
-yet. Build a special
+update we push over the air to the mobile app. Build a special
 version for one person and that fingerprint is either in this public log, where
 anyone can see it, or missing from it, where that person's own app notices.
 There's no third option.

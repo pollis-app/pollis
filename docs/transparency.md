@@ -2,7 +2,7 @@
 
 Pollis publishes an append-only transparency log of every MLS commit, every account
 identity-key version, every desktop release and every mobile over-the-air update (the
-terminal client, the Android APK and the store builds are signed but not yet logged), so that anyone can check that the
+terminal client, the Android APK and the store builds are signed but not logged), so that anyone can check that the
 server has not rewritten a conversation's history or swapped someone's key. This
 document covers the threat, the trust model, the components and the design
 decisions. To run the verifier against the live log, see

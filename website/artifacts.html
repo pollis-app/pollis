@@ -664,7 +664,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
           </p>
           <p class="art-note">
             Next to it, <code>$BASE/pollis-&lt;tag&gt;.vex.json</code> is an OpenVEX document naming the known
-            advisories that do not affect this release, and why. It is not a provenance subject, so it has no signature. Pass both to a scanner and it applies them. The
+            advisories that do not affect this release, and why. Pass both to a scanner and it applies them. The
             <a href="open-source.html">open source page</a> has the commands, the same files for the mobile app,
             terminal client and Delivery Service, and each product's licences.
           </p>
@@ -699,7 +699,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
           <p style="margin-top: 0.6rem;">
             The SBOM lists what the lockfiles resolved to, not what the linker consumed. Vendored C and C++ compiled
             in build scripts (notably <code>webrtc-sys</code> and <code>webrtc-audio-processing-sys</code>) is not
-            listed. The SBOM is also not yet a leaf in the binaries transparency log.
+            listed.
           </p>
         </div>
       </section>
