@@ -7,7 +7,13 @@ import { getFileIcon } from "../../utils/fileIcon";
 import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize, formatDuration } from "../../utils/format";
 import { spotlightRoll } from "../../utils/mediaRoll";
-import { getMediaUrl, peekMediaUrl, saveAttachmentAs } from "../../services/r2-upload";
+import {
+  announceMediaLoaded,
+  getMediaUrl,
+  peekMediaUrl,
+  saveAttachmentAs,
+  subscribeMediaResolved,
+} from "../../services/r2-upload";
 import { MediaSpotlight } from "./MediaSpotlight";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
@@ -202,6 +208,21 @@ export const AttachmentDisplay = observer(({
     return () => { mounted = false; };
   }, [isImage, isAudio, isPending, downloadUrl, attachment.object_key, attachment.content_hash, attachment.content_type]);
 
+  // #1826: a failure is never sticky. While it shows, the first resolve or draw of this file
+  // anywhere (the spotlight, another row, the Vault grid) clears it. Event-driven, no retry timer.
+  useEffect(() => {
+    if (!error || !attachment.object_key) {
+      return;
+    }
+    return subscribeMediaResolved(attachment.content_hash, (url) => {
+      renderFailuresRef.current = 0;
+      setError(null);
+      if (isImage || isAudio || isVideo) {
+        setDownloadUrl(url);
+      }
+    });
+  }, [error, attachment.object_key, attachment.content_hash, isImage, isAudio, isVideo]);
+
   // Revoke blobs we created; localPreviewUrl is freed by the optimistic send.
   const ownedBlobRef = useRef<string | null>(null);
   useEffect(() => {
@@ -344,6 +365,7 @@ export const AttachmentDisplay = observer(({
         <PressButton
           data-testid={cardTestId}
           data-sensitive={sensitivity.sensitive ? "revealed" : undefined}
+          data-media-state={downloadUrl ? "ready" : error ? "failed" : "loading"}
           onClick={() => { if (downloadUrl) { setViewerOpen(true); } }}
           disabled={!downloadUrl}
           aria-label={t("attachment.viewLabel", { filename: attachment.filename })}
@@ -366,6 +388,12 @@ export const AttachmentDisplay = observer(({
             <img
               src={downloadUrl}
               alt={attachment.filename}
+              onLoad={() => {
+                // A drawn file wakes any other tile still failing on it (#1826).
+                if (attachment.object_key && downloadUrl !== attachment.localPreviewUrl) {
+                  announceMediaLoaded(attachment.content_hash, downloadUrl);
+                }
+              }}
               onError={() => {
                 renderFailuresRef.current += 1;
                 setDownloadUrl(null);

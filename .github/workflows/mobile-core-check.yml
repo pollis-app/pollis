@@ -424,7 +424,17 @@ jobs:
       - name: Metro bundle export (android)
         if: ${{ needs.changes.outputs.run_bundle == 'true' }}
         working-directory: mobile
-        run: pnpm expo export --platform android --output-dir "$RUNNER_TEMP/expo-export"
+        # pollis-native's `src/` is ubrn output (gitignored), made only by a
+        # native build, so its `main` does not resolve here. This bundle is
+        # checked and thrown away, never shipped: an empty stand-in lets Metro
+        # resolve and Hermes compile everything else. (The first JS-only PR
+        # after #1745, #1826, failed on exactly that.)
+        run: |
+          if [ ! -e modules/pollis-native/src/index.tsx ]; then
+            mkdir -p modules/pollis-native/src
+            printf 'export default {};\n' > modules/pollis-native/src/index.tsx
+          fi
+          pnpm expo export --platform android --output-dir "$RUNNER_TEMP/expo-export"
 
   # The first end-to-end mobile build in CI: uniffi bindings + a 3-ABI
   # cargo-ndk cross-compile of pollis-core, Expo prebuild, Gradle release

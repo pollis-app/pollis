@@ -6,7 +6,13 @@ import { errorMessage } from "../../utils/errorMessage";
 import { formatFileSize } from "../../utils/format";
 import { horizontalArrowStep } from "../../utils/direction";
 import { stepRoll } from "../../utils/mediaRoll";
-import { getMediaUrl, peekMediaUrl, saveAttachmentAs } from "../../services/r2-upload";
+import {
+  announceMediaLoaded,
+  getMediaUrl,
+  peekMediaUrl,
+  saveAttachmentAs,
+  subscribeMediaResolved,
+} from "../../services/r2-upload";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { Button } from "../ui/Button";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -192,6 +198,24 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
     };
   }, [url, failed, attachment.object_key, attachment.content_hash, attachment.content_type]);
 
+  // #1826: "failed to load" is never sticky; the first resolve or draw of this file anywhere clears it.
+  useEffect(() => {
+    if (!failed || !attachment.object_key) {
+      return;
+    }
+    return subscribeMediaResolved(attachment.content_hash, (resolved) => {
+      setUrl(resolved);
+      setFailed(false);
+    });
+  }, [failed, attachment.object_key, attachment.content_hash]);
+
+  // A drawn file wakes every row still failing on it.
+  const announceLoaded = () => {
+    if (url && attachment.object_key && url !== attachment.localPreviewUrl) {
+      announceMediaLoaded(attachment.content_hash, url);
+    }
+  };
+
   const handleDownload = async () => {
     if (downloadStatus !== "idle") {
       return;
@@ -238,6 +262,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         controls
         style={mediaBox}
         onClick={stopClick}
+        onLoadedData={announceLoaded}
       />
     );
   } else if (url && !failed) {
@@ -248,6 +273,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         alt={attachment.filename}
         style={{ ...mediaBox, objectFit: "contain" }}
         onClick={stopClick}
+        onLoad={announceLoaded}
         onError={() => setFailed(true)}
       />
     );

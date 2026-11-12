@@ -1550,7 +1550,10 @@ Current state:
   A released file is kept among the 32 most recently released (`lib/media/store.ts`)
   so a remount (Vault Chat ↔ Media, a row scrolled back) draws on its first frame;
   kept files are unlinked on lock and on going to the background, and `MediaImage`
-  caches decoded images in memory only. Rules: `.codesight/wiki/media-server.md`.
+  caches decoded images in memory only. A failed tile is never sticky (#1826):
+  `lib/media/tile.ts` listens for the store's per-hash resolve event while failed,
+  so the viewer (or any row) loading the file redraws it; never add a retry timer.
+  Rules: `.codesight/wiki/media-server.md`.
 - **Profile photos:** `components/UserAvatar.tsx` draws a user's photo everywhere a
   person is named (Direct rows, message and thread rows, mentions, members,
   requests, new DM, blocked, profile, info pages, search, Self), falling back to the
