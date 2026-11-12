@@ -364,6 +364,43 @@ in `pkg/service/roommanager.go`), which disclosed every client's IP to a third
 party on every join (`docs/metadata-retention-policy.md` §3) — keep the UDP
 listener configured, published and open.
 
+## DS server-API tunnel (#1751)
+
+Cloudflare Container egress to this box is dropped upstream of it, so the
+Delivery Service reaches LiveKit's server API (Twirp `RoomService` and `GET /`)
+through a Cloudflare Tunnel instead of `rtc.pollis.com`. Clients are unaffected
+and keep using `rtc.pollis.com`.
+
+- **Tunnel:** `pollis-livekit-api`, remotely managed (its ingress lives in the
+  Cloudflare dashboard, Zero Trust → Networks → Tunnels):
+  `livekit-api.pollis.com` → `http://livekit:7880`, everything else 404.
+- **DNS:** `livekit-api.pollis.com`, a proxied CNAME to the tunnel. One hostname
+  serves dev and prod, since both use this one LiveKit with separate key pairs.
+  Set `LIVEKIT_API_URL=https://livekit-api.pollis.com` in Doppler
+  (`dev_personal`, `prd_prod`), then deploy the DS with `force_restart: true`.
+- **Edge rule:** a WAF custom rule on the zone blocks every request to that
+  hostname except `GET`/`HEAD /` and `POST /twirp/livekit.RoomService/*`.
+  LiveKit's own API-key JWTs still authenticate every call.
+- **On the box:** a standalone container `cloudflared-livekit-api`
+  (`--restart always`, `--log-driver none`, read-only, no capabilities) on the
+  compose network, so it reaches `livekit:7880` without publishing that port.
+  It is outside `docker-compose.yml`, so a LiveKit deploy or restart leaves it
+  alone. Its run token is in `/root/cloudflared/livekit-api.env` (mode 600) and
+  nowhere else. On a rebuild, copy a fresh token from the tunnel's page in the
+  dashboard and re-run:
+  ```bash
+  NET=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$(docker compose ps -q livekit)")
+  docker run -d --name cloudflared-livekit-api --restart always --network "$NET" \
+    --log-driver none --env-file /root/cloudflared/livekit-api.env \
+    --read-only --cap-drop ALL --security-opt no-new-privileges --memory 256m \
+    cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39 \
+    tunnel --no-autoupdate --loglevel error run
+  ```
+- **Check:** `curl -s https://livekit-api.pollis.com/` answers `OK`; 530 means
+  the connector is down (`docker ps --filter name=cloudflared-livekit-api`).
+  From the DS: `/v1/ops/livekit?probe=1` reports
+  `api_base_source: LIVEKIT_API_URL`.
+
 ## Useful commands (on the box)
 
 ```bash

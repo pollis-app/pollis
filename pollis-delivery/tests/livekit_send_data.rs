@@ -209,6 +209,25 @@ fn livekit_broker(url: &str) -> BrokerConfig {
     }
 }
 
+/// #1751: with `LIVEKIT_API_URL` set, the DS's own `SendData` goes there, not to
+/// the client-facing `LIVEKIT_URL` (unreachable here, as it is from the container).
+#[tokio::test]
+async fn server_side_calls_use_livekit_api_url_when_set() {
+    let (api_url, seen) = fake_livekit().await;
+    let db = fresh_db().await;
+    let broker = BrokerConfig {
+        livekit_url: Some("wss://client-only.invalid".into()),
+        livekit_api_url: Some(api_url.replace("ws://", "http://")),
+        ..livekit_broker("unused")
+    };
+    let state = AppState::new(db.arc(), false).with_broker_config(broker);
+    let payload = serde_json::json!({ "type": "inbox_refresh" });
+
+    let sent = pollis_delivery::broker::room_send_data(&state, "inbox-alice", &payload).await;
+    assert_eq!(sent, Ok(pollis_delivery::broker::SendOutcome::Delivered));
+    assert_eq!(seen.lock().unwrap().len(), 1, "the call must reach the LIVEKIT_API_URL host");
+}
+
 fn broadcast_payload(recorded: &serde_json::Value) -> serde_json::Value {
     let raw = base64::engine::general_purpose::STANDARD
         .decode(recorded["data"].as_str().expect("data field"))

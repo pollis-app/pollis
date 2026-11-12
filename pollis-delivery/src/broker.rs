@@ -38,6 +38,11 @@ pub struct BrokerConfig {
     pub livekit_api_secret: Option<String>,
     /// LiveKit ws URL handed back to the client (env `LIVEKIT_URL`).
     pub livekit_url: Option<String>,
+    /// Optional base URL for the DS's own server-side LiveKit calls (Twirp
+    /// `RoomService`, the health check, the probe), e.g. a Cloudflare Tunnel
+    /// hostname (env `LIVEKIT_API_URL`). Unset → derived from `livekit_url`.
+    /// Never handed to clients. See [`BrokerConfig::livekit_api_base`] (#1751).
+    pub livekit_api_url: Option<String>,
     /// R2 S3 endpoint, e.g. `https://<acct>.r2.cloudflarestorage.com` (a trailing
     /// `/<bucket>` path segment is fine — the presigner uses only the host). Read
     /// from `R2_ENDPOINT`, falling back to the established `R2_S3_ENDPOINT`.
@@ -63,6 +68,7 @@ impl BrokerConfig {
             livekit_api_key: var("LIVEKIT_API_KEY"),
             livekit_api_secret: var("LIVEKIT_API_SECRET"),
             livekit_url: var("LIVEKIT_URL"),
+            livekit_api_url: var("LIVEKIT_API_URL"),
             // Also accept the established client env names, reusing the same Doppler secrets.
             r2_endpoint: var("R2_ENDPOINT").or_else(|| var("R2_S3_ENDPOINT")),
             r2_region: var("R2_REGION").unwrap_or_else(|| "auto".to_string()),
@@ -79,6 +85,14 @@ impl BrokerConfig {
             self.livekit_api_secret.as_deref()?,
             self.livekit_url.as_deref()?,
         ))
+    }
+
+    /// The base URL the DS's own server-side LiveKit calls go to, and which env
+    /// var it came from. `None` exactly when [`Self::livekit_ready`] is `None`:
+    /// `LIVEKIT_API_URL` alone never makes LiveKit "configured".
+    pub(crate) fn livekit_api_base(&self) -> Option<(String, ApiBaseSource)> {
+        let (_, _, url) = self.livekit_ready()?;
+        Some(select_api_base(url, self.livekit_api_url.as_deref()))
     }
 
     /// All R2 fields present → the presign endpoint can sign.
@@ -365,6 +379,36 @@ pub fn sign_livekit_admin_token(
     header.typ = Some("JWT".to_string());
     let key = EncodingKey::from_secret(api_secret.as_bytes());
     Ok(encode(&header, &claims, &key)?)
+}
+
+/// Which env var the DS's server-side LiveKit base came from (#1751).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApiBaseSource {
+    /// `LIVEKIT_API_URL`: a server-only route to the box (e.g. a tunnel),
+    /// because the container's egress to the client-facing host is dropped.
+    ApiUrl,
+    /// Derived from the client-facing `LIVEKIT_URL` (the default).
+    ClientUrl,
+}
+
+impl ApiBaseSource {
+    pub const fn name(self) -> &'static str {
+        match self {
+            ApiBaseSource::ApiUrl => "LIVEKIT_API_URL",
+            ApiBaseSource::ClientUrl => "LIVEKIT_URL",
+        }
+    }
+}
+
+/// `LIVEKIT_API_URL` when set (non-blank), else [`twirp_base`] of `LIVEKIT_URL`.
+/// Either way the scheme is normalised (`wss`→`https`) and a trailing `/` is
+/// dropped, so callers can append `/twirp/...` directly.
+pub(crate) fn select_api_base(livekit_url: &str, api_url: Option<&str>) -> (String, ApiBaseSource) {
+    let (raw, source) = match api_url.map(str::trim).filter(|u| !u.is_empty()) {
+        Some(u) => (u, ApiBaseSource::ApiUrl),
+        None => (livekit_url, ApiBaseSource::ClientUrl),
+    };
+    (twirp_base(raw).trim_end_matches('/').to_string(), source)
 }
 
 /// The Twirp server API is a separate HTTPS endpoint from the `wss://` SDK URL.
@@ -1716,4 +1760,63 @@ fn derive_signing_key(secret: &str, date: &str, region: &str, service: &str) -> 
     let k_region = hmac_sha256(&k_date, region.as_bytes());
     let k_service = hmac_sha256(&k_region, service.as_bytes());
     hmac_sha256(&k_service, b"aws4_request")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(url: Option<&str>, api: Option<&str>) -> BrokerConfig {
+        BrokerConfig {
+            livekit_api_key: Some("key".into()),
+            livekit_api_secret: Some("secret".into()),
+            livekit_url: url.map(str::to_string),
+            livekit_api_url: api.map(str::to_string),
+            ..BrokerConfig::default()
+        }
+    }
+
+    #[test]
+    fn unset_api_url_derives_from_the_client_url() {
+        let (base, src) = cfg(Some("wss://rtc.example.com"), None).livekit_api_base().unwrap();
+        assert_eq!(base, "https://rtc.example.com");
+        assert_eq!(src, ApiBaseSource::ClientUrl);
+        assert_eq!(src.name(), "LIVEKIT_URL");
+    }
+
+    #[test]
+    fn api_url_wins_when_set() {
+        let (base, src) = cfg(Some("wss://rtc.example.com"), Some("https://lk-api.example.com/"))
+            .livekit_api_base()
+            .unwrap();
+        assert_eq!(base, "https://lk-api.example.com");
+        assert_eq!(src, ApiBaseSource::ApiUrl);
+        assert_eq!(src.name(), "LIVEKIT_API_URL");
+    }
+
+    #[test]
+    fn a_ws_scheme_api_url_is_normalised_too() {
+        let (base, _) = select_api_base("wss://rtc.example.com", Some("ws://localhost:7880"));
+        assert_eq!(base, "http://localhost:7880");
+    }
+
+    #[test]
+    fn a_blank_api_url_falls_back() {
+        let (base, src) = select_api_base("ws://localhost:7880", Some("   "));
+        assert_eq!(base, "http://localhost:7880");
+        assert_eq!(src, ApiBaseSource::ClientUrl);
+    }
+
+    #[test]
+    fn api_url_alone_does_not_configure_livekit() {
+        let c = cfg(None, Some("https://lk-api.example.com"));
+        assert!(c.livekit_ready().is_none());
+        assert!(c.livekit_api_base().is_none());
+    }
+
+    #[test]
+    fn clients_still_get_livekit_url() {
+        let c = cfg(Some("wss://rtc.example.com"), Some("https://lk-api.example.com"));
+        assert_eq!(c.livekit_ready().unwrap().2, "wss://rtc.example.com");
+    }
 }

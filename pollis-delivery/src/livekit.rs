@@ -125,7 +125,7 @@ pub async fn twirp(
     token: &str,
     body: &serde_json::Value,
 ) -> Result<TwirpReply, TwirpFailure> {
-    let Some((_, _, url)) = state.broker.livekit_ready() else {
+    let Some((base, _)) = state.broker.livekit_api_base() else {
         return Err(TwirpFailure {
             method,
             phase: Phase::Status,
@@ -134,10 +134,7 @@ pub async fn twirp(
             detail: "livekit not configured".into(),
         });
     };
-    let endpoint = format!(
-        "{}/twirp/livekit.RoomService/{method}",
-        crate::broker::twirp_base(url)
-    );
+    let endpoint = format!("{base}/twirp/livekit.RoomService/{method}");
     let started = Instant::now();
     let mut first_phase = None;
     let mut attempt: u8 = 0;
@@ -503,8 +500,7 @@ pub async fn check(state: &AppState) -> Option<Check> {
     if let Some(c) = health.fresh_check(crate::util::now_unix()) {
         return Some(c);
     }
-    let (_, _, url) = state.broker.livekit_ready()?;
-    let base = crate::broker::twirp_base(url);
+    let (base, _) = state.broker.livekit_api_base()?;
     let started = Instant::now();
     let outcome = send_once(crate::util::livekit_probe_get(&format!("{base}/"))).await;
     let ms = started.elapsed().as_millis() as u64;
@@ -577,6 +573,12 @@ pub async fn ops(
         "now": now,
         "counts": counts,
     });
+    // Which env var the server-side base came from, and its hostname: never an
+    // address literal (#1751).
+    if let Some((base, source)) = state.broker.livekit_api_base() {
+        out["api_base_source"] = source.name().into();
+        out["api_host"] = api_hostname(&base).into();
+    }
     if q.probe.as_deref().is_some_and(|p| p == "1" || p == "true") {
         out["probe"] = probe(&state).await;
     }
@@ -589,10 +591,11 @@ pub async fn ops(
 /// outage lives. Reports address COUNTS only, never an address, and never a
 /// room name; nothing it does is recorded in [`LiveKitHealth`].
 pub async fn probe(state: &AppState) -> serde_json::Value {
-    let Some((api_key, api_secret, url)) = state.broker.livekit_ready() else {
+    let (Some((api_key, api_secret, _)), Some((base, _))) =
+        (state.broker.livekit_ready(), state.broker.livekit_api_base())
+    else {
         return serde_json::json!({ "error": "livekit not configured" });
     };
-    let base = crate::broker::twirp_base(url);
     let mut out = serde_json::Map::new();
 
     let parsed = reqwest::Url::parse(&base).ok();
@@ -699,6 +702,18 @@ pub async fn probe(state: &AppState) -> serde_json::Value {
     serde_json::Value::Object(out)
 }
 
+/// The base URL's DNS hostname; `None` for an IP literal (never reported) or
+/// an unparsable URL.
+fn api_hostname(base: &str) -> Option<String> {
+    let url = reqwest::Url::parse(base).ok()?;
+    let host = url.host_str()?;
+    // `host_str` brackets an IPv6 literal, so it never parses as an address.
+    if host.starts_with('[') || host.parse::<std::net::IpAddr>().is_ok() {
+        return None;
+    }
+    Some(host.to_string())
+}
+
 fn step(started: Instant, r: Result<TwirpReply, (Phase, String)>) -> serde_json::Value {
     let ms = started.elapsed().as_millis() as u64;
     match r {
@@ -732,6 +747,14 @@ pub fn worst_case() -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_api_host_is_reported_only_when_it_is_a_name() {
+        assert_eq!(api_hostname("https://lk-api.example.com").as_deref(), Some("lk-api.example.com"));
+        assert_eq!(api_hostname("http://localhost:7880").as_deref(), Some("localhost"));
+        assert_eq!(api_hostname("http://192.0.2.1:7880"), None);
+        assert_eq!(api_hostname("http://[2001:db8::1]:7880"), None);
+    }
 
     fn failure(phase: Phase) -> TwirpFailure {
         TwirpFailure { method: "SendData", phase, attempts: 2, elapsed_ms: 12_000, detail: String::new() }
