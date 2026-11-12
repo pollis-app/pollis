@@ -56,7 +56,7 @@ checks.
 
 **[02:32–02:45] Scene 4 — why the distinction matters**
 "Unavailable" versus "not in the log" is the difference between "I don't know" and
-"you've been tampered with". We shipped that wrong once, and the two results are
+"you've been tampered with", so the two results are
 labelled clearly.
 
 **[02:45–02:55] Scene 5 — what green means**

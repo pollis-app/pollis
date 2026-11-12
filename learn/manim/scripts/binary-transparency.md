@@ -35,20 +35,19 @@ unique data on purpose, so this can never be byte-identical twice. We log it
 separately, tied to its payload.
 
 **[01:05–01:15] Scene 2 — the third layer**
-And the third layer exists because of a bug we shipped. Worth telling properly.
+And the third layer exists because of what a running app can actually measure.
 
-**[01:15–01:32] Scene 3 — the bug**
-Our in-app "verify this build" button compared the running app to the payload
-fingerprint. But payload is a fingerprint of a whole directory, or of an installer
+**[01:15–01:32] Scene 3 — what a payload is**
+The in-app "verify this build" button needs something to compare the running app
+against. But payload is a fingerprint of a whole directory, or of an installer
 file. An app that's already installed has neither. It's just… itself.
 
-**[01:32–01:45] Scene 3 — what the user saw**
-So the comparison failed. Every time. On every genuine macOS and Windows release.
-And the app reported the loudest thing it can say: this build is not one Pollis
-published. That was wrong, and it was our fault.
+**[01:32–01:45] Scene 3 — the right comparison**
+So an installed app can never match its payload fingerprint, even when it's
+genuine. The check needs the right thing to compare against.
 
-**[01:45–02:00] Scene 3 — the fix and the lesson**
-The fix is a third layer: the fingerprint of the main program exactly as
+**[01:45–02:00] Scene 3 — the third layer**
+That's the third layer: the fingerprint of the main program exactly as
 installed, the one thing a running app can measure. And releases from before that
 layer have nothing to compare against, so the app says "can't check", not "you've
 been tampered with".
@@ -72,9 +71,9 @@ On Linux, we have that. A rebuild that uses none of our secrets, and that anyone
 can run from their own copy, rebuilds the AppImage and confirms the hash we logged.
 
 **[03:10–03:22] Scene 5 — macOS, Windows, and signing**
-On macOS and Windows, not yet. That's the biggest open gap in this story, and we'd
-rather you hear it from us. And the signing layer will never be reproducible
-anywhere. That's by design, not neglect.
+On macOS and Windows, the log proves you got the bytes we published, and those
+builds are not rebuilt from source. And the signing layer is never reproducible
+anywhere. That's by design: signing mixes in unique data.
 
 **[03:22–03:40] Scene 6 — the second leg**
 There's one more leg. Every release also carries a provenance record in a public

@@ -1741,7 +1741,7 @@ Time runs left to right: a one-way key chain, the caveat about an unlocked scree
           <p>Encryption does not, on its own, tell you who is on the other end. When you first message someone, your app fetches their public key from our servers. If the wrong key were handed over, a message could be read in the middle while both sides still saw a padlock, because the encryption works perfectly on the wrong key. Every encrypted messenger has this gap. Pollis addresses it two ways.</p>
           <p><strong>Safety numbers.</strong> Your app combines your key and your contact's key into a 60-digit code, shown as twelve 5-digit blocks. You both compute the same code from the same pair of keys; different keys give different codes. Compare them over a channel an eavesdropper cannot touch (side by side, read aloud on a call, or by scanning a QR code) and a mismatch shows up immediately.</p>
           <p>That only helps if you compare, and most people never do. The second safeguard works even when nobody checks.</p>
-          <p><strong>A public key log.</strong> Every identity key Pollis lists for an account goes into an append-only public log (<a href="#three-logs">Topic 9</a>). The desktop app's Security page checks that the key the log shows for you matches the key you hold, and warns you if they disagree; the mobile app does not run this check yet. A substituted key would sit in a permanent public record, where the real owner, or anyone auditing the log, can find it. The log is republished daily, so a swapped key surfaces within about a day, the same bound Certificate Transparency uses for web certificates.</p>
+          <p><strong>A public key log.</strong> Every identity key Pollis lists for an account goes into an append-only public log (<a href="#three-logs">Topic 9</a>). The desktop app's Security page checks that the key the log shows for you matches the key you hold, and warns you if they disagree. A substituted key would sit in a permanent public record, where the real owner, or anyone auditing the log, can find it. The log is republished daily, so a swapped key surfaces within about a day, the same bound Certificate Transparency uses for web certificates.</p>
           <p><strong>Trust on first use.</strong> The first time you talk to someone, your app remembers their key and flags any later change. Changes are usually innocent (a new phone, a reinstall), so a flag is a prompt to re-check before sharing anything sensitive, not an accusation. Pollis shows a shield next to verified contacts and a distinct warning when a remembered key has changed.</p>
           <p>Compare safety numbers once with the people who matter, and let the log cover the rest.</p>
         </div>
@@ -2137,7 +2137,7 @@ Climbing an audit path, watching a made-up entry miss the root, a rewrite that c
           <p><strong>Log 1, account keys: the wrong key being used for you.</strong> Every identity key we list for an account goes in here, in order, with a version number. A swapped key would have to be published here, in a record your own device audits. Versions only move forward, so an older key cannot be slipped back in and history cannot be renumbered.</p>
           <p><strong>Log 2, commits: a group's history being rewritten.</strong> Every device must apply a group's updates in the same order, and that order is what a bad server might try to reorder or split. So every commit is logged, under one rule: each epoch of a conversation appears once, and two different commits can never claim the same epoch. The log refuses a split, and if one were recorded anyway, both entries would stay in the signed public log for anyone to find.</p>
           <p>This log never contains message <em>content</em>: each entry stores only the hash of a sealed commit the server cannot open. The entry is public, though, and carries some structure: a conversation pseudonym, a sender pseudonym, the epoch number, a sequence number, and (once a conversation has moved to a new cipher suite) a generation number. The pseudonyms are hashes of the real ids that change every 1,024 log entries, and the sender's is different in every group, so an outsider reading <code>verify.pollis.com/v1/commit-log-2/entries.json</code> cannot follow a person across groups or a conversation across windows. Within a window they can still see that some conversation had a burst of membership or key changes.</p>
-          <p><strong>Log 3, binaries: a tampered app shipped to one person.</strong> The fingerprints of every desktop installer and every over-the-air mobile update go in here (mobile store builds are not logged yet), and the same release and platform can never come to mean different files later. A version built for a single person would either appear in the public log or be missing from it. Either way it is detectable.</p>
+          <p><strong>Log 3, binaries: a tampered app shipped to one person.</strong> The fingerprints of every desktop installer and every over-the-air mobile update go in here, and the same release and platform can never come to mean different files later. A version built for a single person would either appear in the public log or be missing from it. Either way it is detectable.</p>
           <p><strong>Why three logs.</strong> A signed statement about one log must never pass as a statement about another, so each log signs under its own label and a statement from one fails to verify against the others. They share one key and one site, so what you have to trust is still a single built-in key.</p>
         </div>
 
@@ -2183,10 +2183,9 @@ Each log and the problem it protects against, an attempted split being refused, 
               stored, it's sealed. The log publishes the order of a conversation, never a word
               of its content.</p>
             <p>The third holds the fingerprint of every desktop app we've released, and every
-              update we push over the air to the mobile app. Mobile store builds aren't in it
-              yet. Build a special version for one person and that fingerprint is either in this
-              public log, where anyone can see it, or missing from it, where that person's own
-              app notices. There's no third option.</p>
+              update we push over the air to the mobile app. Build a special version for one
+              person and that fingerprint is either in this public log, where anyone can see it,
+              or missing from it, where that person's own app notices. There's no third option.</p>
             <p>Why three logs instead of one? Because a signed head for one must never work as a
               head for another.</p>
             <p>Take a valid head from the commit log and try to pass it off as one for the
@@ -2219,17 +2218,17 @@ Each log and the problem it protects against, an attempted split being refused, 
         <div class="ln-prose">
           <p>Everything else on these pages assumes the app on your machine is the app whose source you can read. A tampered app defeats everything else.</p>
           <p>Code signing, the check your operating system runs before starting an app, proves less than people assume. An Apple or Windows signature proves the holder of the signing key produced these bytes, not what the bytes do. A tampered build signed with the right key passes every check your system makes.</p>
-          <p>So we publish the fingerprint of every desktop release, and of every over-the-air mobile update, into a public log. Mobile store builds are not logged yet. The question becomes "is this the same app Pollis published to everyone?" rather than "did Pollis sign this?"</p>
+          <p>So we publish the fingerprint of every desktop release, and of every over-the-air mobile update, into a public log. The question becomes "is this the same app Pollis published to everyone?" rather than "did Pollis sign this?"</p>
           <p>Each release is recorded at three levels, because "the app" is not one file. The <strong>payload</strong> is the program and its resources before any signature; an independent person can rebuild this from source and compare. The <strong>signed</strong> level is what you download after Apple or Windows wraps it; signing mixes in unique data, so two builds never produce an identical signed file. The <strong>installed program</strong> level is the fingerprint of the main program as it sits on your machine, which is what a running app can measure about itself. The app's "verify this build" check compares the running program against that fingerprint.</p>
           <p><strong>What this buys you.</strong> If a different build were made for one person, its fingerprint would either be missing from the log, which that person's app would notice, or appear in the public log next to the normal release.</p>
           <p><strong>Reproducible builds.</strong> A logged fingerprint proves we published these bytes, not that they came from the source you can read. That needs reproducible builds, where anyone compiling the source at a given version gets a byte-for-byte identical result. Ordinary builds bake in timestamps, file paths, and ordering that vary between machines, so this is hard.</p>
-          <p><strong>The Linux AppImage is reproducible.</strong> An independent rebuild from the public source and the published build recipe, with none of our secrets, produces the fingerprint we logged, and it runs automatically after every release. <strong>macOS and Windows are not there yet.</strong> The signing wrapper is never reproducible on any platform.</p>
+          <p><strong>The Linux AppImage is reproducible.</strong> An independent rebuild from the public source and the published build recipe, with none of our secrets, produces the fingerprint we logged, and it runs automatically after every release. macOS and Windows builds are logged with build provenance, and are not rebuilt from source. The signing wrapper is never reproducible on any platform.</p>
           <p>Every release also carries a build provenance record in a public log we do not run, showing which automated workflow produced the bytes; checking it involves no Pollis key. Provenance says who built it; reproducibility says whether it matches the source. Having both means one compromised key does not undo everything.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">Where the guarantee ends today</div>
-          <p>On macOS and Windows you currently get "these are the bytes Pollis published, and this workflow built them," but not "these bytes match the source you can read." Only the Linux AppImage closes that loop today; the Linux <code>.deb</code> and <code>.rpm</code> are not rebuilt either. Every rebuild's verdict is published per release on the <a href="assurance.html">assurance page</a>, failures included. The signed wrapper can never match on any platform, because signatures mix in unique data.</p>
+          <div class="ln-limit-label">Where the guarantee ends</div>
+          <p>On macOS and Windows you get "these are the bytes Pollis published, and this workflow built them," but not "these bytes match the source you can read." Only the Linux AppImage closes that loop; the Linux <code>.deb</code> and <code>.rpm</code> are not rebuilt either. Every rebuild's verdict is published per release on the <a href="assurance.html">assurance page</a>. The signed wrapper can never match on any platform, because signatures mix in unique data.</p>
         </div>
 
         <figure class="ln-figure">
@@ -2268,17 +2267,16 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             <p>The signed layer: what you actually download, after notarization. Signing embeds
               unique data on purpose, so this can never be byte-identical twice. We log it
               separately, tied to its payload.</p>
-            <p>And the third layer exists because of a bug we shipped. Worth telling properly.</p>
-            <p>Our in-app "verify this build" button compared the running app to the payload
-              fingerprint. But payload is a fingerprint of a whole directory, or of an installer
+            <p>And the third layer exists because of what a running app can actually measure.</p>
+            <p>The in-app "verify this build" button needs something to compare the running app
+              against. But payload is a fingerprint of a whole directory, or of an installer
               file. An app that's already installed has neither. It's just… itself.</p>
-            <p>So the comparison failed. Every time. On every genuine macOS and Windows release.
-              And the app reported the loudest thing it can say: this build is not one Pollis
-              published. That was wrong, and it was our fault.</p>
-            <p>The fix is a third layer: the fingerprint of the main program exactly as
-              installed, the one thing a running app can measure. And releases from before that
-              layer have nothing to compare against, so the app says "can't check", not "you've
-              been tampered with".</p>
+            <p>So an installed app can never match its payload fingerprint, even when it's
+              genuine. The check needs the right thing to compare against.</p>
+            <p>That's the third layer: the fingerprint of the main program exactly as installed,
+              the one thing a running app can measure. And releases from before that layer have
+              nothing to compare against, so the app says "can't check", not "you've been
+              tampered with".</p>
             <p>Here's what it buys you. Two people download the app. One gets the public build,
               its fingerprint's in the log. One gets a special build, just for them.</p>
             <p>Either its fingerprint isn't in the log, and their own app notices, or we put it
@@ -2290,9 +2288,9 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             <p>On Linux, we have that. A rebuild that uses none of our secrets, and that anyone
               can run from their own copy, rebuilds the AppImage and confirms the hash we
               logged.</p>
-            <p>On macOS and Windows, not yet. That's the biggest open gap in this story, and
-              we'd rather you hear it from us. And the signing layer will never be reproducible
-              anywhere. That's by design, not neglect.</p>
+            <p>On macOS and Windows, the log proves you got the bytes we published, and those
+              builds are not rebuilt from source. And the signing layer is never reproducible
+              anywhere. That's by design: signing mixes in unique data.</p>
             <p>There's one more leg. Every release also carries a provenance record in a public
               log that isn't ours, proving which workflow produced the bytes, with no key of
               ours involved in checking it. A different question from reproducibility.</p>
@@ -2586,8 +2584,7 @@ Both dashboards labelled, one release row taken apart, the same root in three pl
               something to compare against, and yours isn't it, or the log itself failed its
               checks.</p>
             <p>"Unavailable" versus "not in the log" is the difference between "I don't know"
-              and "you've been tampered with". We shipped that wrong once, and the two results
-              are labelled clearly.</p>
+              and "you've been tampered with", so the two results are labelled clearly.</p>
             <p>And here's the honest ending. Everything green means the things we published are
               consistent, permanent, and include the app you're running.</p>
             <p>It does not mean our code has no bugs, that your device is safe, or that the

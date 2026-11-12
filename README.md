@@ -182,7 +182,7 @@ pipeline logged. Beyond that:
   our filesystem layout.
 - **macOS and Windows** payload digests can be recomputed from the downloaded
   artifact (the shipped bundle with signing material normalized out), but are not
-  yet rebuilt from source, so the claim is weaker than for Linux.
+  rebuilt from source, so the claim is weaker than for Linux.
 - **Also shipped:** cosign/SLSA build provenance in public Rekor, and an in-app
   "verify this build" check.
 - Installs still also rely on platform code signing (Apple Developer ID +

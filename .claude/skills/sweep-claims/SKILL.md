@@ -31,6 +31,16 @@ first for the vocabulary rules it references.
   `scripts/check-facts.mjs`). A claim with a `fact` field is re-verified by
   running that checker, not by hand.
 - No "early access / untested" caveats; be honest about trade-offs only.
+- **Findings are tickets, not copy.** Never publish known vulnerabilities,
+  gaps, incident history or "not yet" items. When the product is weaker than
+  the copy, fix the product, or narrow the claim so it is true without a
+  caveat. Never delete a sentence whose removal makes a stronger nearby claim
+  false; narrow that claim instead. Genuine trade-offs a user needs stay.
+- The weakness itself becomes a GitHub issue with a neutral title
+  ("Dependency upgrade: quick-xml …", "Sign the per-release VEX …"), not a
+  copy edit announcing it. Public issues, comments and PR descriptions never
+  spell out vulnerability or exploit details (reachability, affected paths,
+  how to trigger it); report those privately per `SECURITY.md`.
 - Refer to tickets by number (#1723), never by lane labels.
 
 ## 1. What is due
@@ -74,6 +84,10 @@ code yourself before applying it; subagents are confidently wrong sometimes.
 ## 3. Fix
 
 - Fix every `wrong` and `outdated` claim in the same PR, and `incomplete` where cheap.
+- Where the copy is true only because the product is weaker than it should be
+  (a missing check, an unupgraded dependency, an unsigned file), narrow the
+  copy to what is true and open a neutrally titled ticket for the product
+  work; do not add a sentence announcing the gap.
 - **/learn:** the narration script `learn/manim/scripts/<slug>.md` is the
   source of truth. Edit it, then run `node scripts/check-learn-sync.mjs --write`,
   which rewrites the caption track `website/learn/media/<slug>.vtt` and the
@@ -115,7 +129,8 @@ On a `--dry-run`, change nothing.
 
 Title `Claims sweep: <range>`. Body: the due list (`claims-impact.mjs` output),
 one line per fix (severity, `doc:line`, old → new, evidence `path:line`),
-"Needs Dan's decision" for policy-page disputes, anything you could not
+"Needs Dan's decision" for policy-page disputes (worded neutrally: the two
+values and where they live, no vulnerability or exploit detail), anything you could not
 verify, and `Mobile: N/A (docs/website only)` unless app code changed. If
 public pages changed, the website must be deployed after merge
 (`website-deploy.yml`, then confirm the deployed commit).

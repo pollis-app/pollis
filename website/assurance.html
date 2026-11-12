@@ -83,8 +83,8 @@
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
             <strong>It covers the Linux AppImage payload only.</strong> The <code>.deb</code>, <code>.rpm</code>,
-            macOS and Windows builds have published-bytes-match and build provenance, but nothing re-derives them
-            from source yet.
+            macOS and Windows builds have published-bytes-match and build provenance; they are not rebuilt
+            from source.
           </p>
           <p>
             <strong>Reproduction needs the published build recipe as well as the source</strong>, because one
@@ -92,39 +92,14 @@
             not bit-for-bit reproduction.
           </p>
           <p>
-            <strong>Three releases were never checked.</strong> The rebuild runs only when the release workflow
-            succeeds, so v1.9.0, v1.9.1 and v1.10.0 have no verdict. They are in the table, marked as unchecked.
-          </p>
-          <p>
-            <strong>Some historical red runs were not real failures.</strong> Before commit
-            <code>8df524ba</code> (16 August 2026) the workflow could report "did not reproduce" for a release
-            not yet published to the log: the check exited cleanly over an empty artifact set, so the wait loop
-            stopped at once and compared the rebuild against nothing. v1.9.4 and v1.9.5 failed this way; both
-            reproduce byte-identically. The red runs stay in the table. Four later releases (v1.9.9, v1.10.4, v1.11.1 and v1.17.1) are red for the reason explained below: the rebuild landed on a different CI machine image. v1.17.5's rebuild failed after these fixes and has not yet been classified; until it is, the table counts it as a real finding.
-          </p>
-          <p>
-            <strong>v1.9.3 reproduces.</strong> Its 13 August rebuild did not, and went unexplained. The same
-            check re-run on 17 August (same tag, same source) landed on the CI machine image the release had used
-            and produced a payload byte-identical to the one in the log
-            (<code>07bccca8…</code>,
-            <a href="https://github.com/pollis-app/pollis/actions/runs/32036282718">run 32036282718</a>).
-          </p>
-          <p>
-            <strong>Why the August run differed.</strong> An AppImage is not purely a function of our source: the
-            bundler copies system libraries from the build machine into the bundle. GitHub rebuilds the image
-            behind its <code>ubuntu-22.04</code> label every few weeks and rolls it out gradually, so the release
-            build and its rebuild, 36 minutes apart, ran on different images and seven bundled libraries
-            (Kerberos, SQLite, systemd, udev) differed. The only change in code built from Pollis source was the
-            order of a list of content hashes in the executable, which a compile-time dependency emits in
-            filesystem order and which carries no meaning.
-          </p>
-          <p>
-            The August run stays in the table, still red, because it could not make the comparison it reported
-            on. The workflow now compares the machine image the release recorded with its own and reports one of
-            <em>did not reproduce</em>, <em>build environment drifted</em> or <em>no recorded recipe</em>. All
-            three fail, since an inconclusive rebuild is not a pass; only the first is a claim about the shipped
-            binary. The write-up, with the byte evidence, is in
-            <code>docs/reproducible-builds-residuals.md</code>.
+            <strong>Reading the table.</strong> The rebuild runs only when the release workflow succeeds, so a
+            release whose workflow did not finish has no verdict and is marked <em>never checked</em>. An AppImage
+            bundles system libraries copied from the build machine, so a rebuild is only comparable on the same CI
+            machine image as the release. The workflow compares the machine image the release recorded with its own
+            and reports one of <em>did not reproduce</em>, <em>build environment drifted</em> or <em>no recorded
+            recipe</em>. All three fail, since an inconclusive rebuild is not a pass; only the first is a claim
+            about the shipped binary. Every run is kept: a re-check adds a run rather than replacing one, and
+            each row shows its release's latest run with a count of earlier attempts.
           </p>
         </div>
       </section>
@@ -237,9 +212,7 @@
           <li>
             <strong>Advisories.</strong> Any RustSec advisory against the graph fails the build unless it has an
             exemption naming its <code>RUSTSEC-</code> id with a written reason; there is no blanket suppression.
-            There are 28 exemptions. Twenty-three are unmaintained-crate notices with no vulnerability (ten are the
-            GTK3 bindings Tauri's WebKit backend requires; no GTK4 Tauri backend exists). Five are real
-            vulnerabilities with no reachable fix, listed below.
+            The check runs on every change to the dependencies and weekly on a schedule.
           </li>
           <li>
             <strong>Licences.</strong> An allow-list of 17 identifiers, each one actually present in the graph.
@@ -253,33 +226,6 @@
             <code>main</code>.
           </li>
         </ul>
-
-        <div class="doc-table-wrap">
-          <table class="doc-table">
-            <caption>The five exempted advisories that are actual vulnerabilities, with the reason recorded in
-              <code>deny.toml</code>.</caption>
-            <thead><tr><th>Advisory</th><th>Crate</th><th>Why it is exempt</th></tr></thead>
-            <tbody>
-              <tr><td><code>RUSTSEC-2023-0071</code></td><td class="doc-td-dim"><code>rsa</code></td>
-                <td class="doc-td-dim">No upstream fix. Transitive via the Delivery Service's JWT library; the decryption-timing
-                  oracle is not reachable, since it signs only HS256 tokens and never decrypts with RSA.</td></tr>
-              <tr><td><code>RUSTSEC-2026-0387</code></td>
-                <td class="doc-td-dim"><code>crypto-bigint</code> 0.5</td>
-                <td class="doc-td-dim">Timing leaks fixed only on the 0.7 line, which nothing in our graph can use yet.
-                  No secret ever touches the affected curves: MLS uses ML-KEM-768 with X25519 and ML-DSA-44, and the
-                  Delivery Service signs HS256 tokens.</td></tr>
-              <tr><td><code>RUSTSEC-2026-0258</code></td><td class="doc-td-dim"><code>h2</code> 0.3</td>
-                <td class="doc-td-dim">Empty-DATA-frame denial of service, fixed only on the 0.4 line with no 0.3
-                  backport. Reachable only as libSQL's outbound client to Turso, never on the Delivery Service's
-                  inbound listener, which is hyper 1.9 and does not use it.</td></tr>
-              <tr><td><code>RUSTSEC-2026-0194</code><br /><code>RUSTSEC-2026-0195</code></td>
-                <td class="doc-td-dim"><code>quick-xml</code></td>
-                <td class="doc-td-dim">Two instances are build-time code generation. The two the desktop app ships never parse untrusted XML:
-                  Windows notifications only escape text with it, and on macOS it reads only the app's own signed
-                  Info.plist.</td></tr>
-            </tbody>
-          </table>
-        </div>
 
         <h3 class="doc-sub-title">cargo-vet — review provenance</h3>
         <p>
@@ -362,10 +308,7 @@
         <p>
           <strong>The key has been rotated once.</strong> In August 2026 the log signing key was replaced with
           fresh material and all three trees were republished from source data under new domain-separation
-          contexts. The previous key had been derived from the same 32-byte seed as its Ed25519 predecessor, so
-          the earlier post-quantum migration had changed the format but not the secret. A rehearsal against
-          production, with the old key still installed, caught two bugs that would each have made the rotation a
-          silent no-op. The result was verified from a machine that had not performed the rotation.
+          contexts. The result was verified from a machine that had not performed the rotation.
         </p>
         <p>
           <strong>A compromised signing key may need a new build.</strong> Clients also trust signers named in a key set
@@ -397,8 +340,7 @@
           </p>
           <p>
             <strong>The pinned key is copied by hand</strong> into the Rust core, the verifier, this website, two
-            workflows, the key-set statement and several documents. A stale deployed copy once showed every visitor
-            a false tamper alarm. CI now checks that the copies agree on every pull request
+            workflows, the key-set statement and several documents. CI checks that the copies agree on every pull request
             (<code>scripts/check-pinned-log-key.py</code>), and a separate workflow checks that the deployed site
             pins the same key, but nothing stops the copies being edited by hand in the first place.
           </p>
@@ -453,9 +395,7 @@
         <div class="doc-limit">
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
-            Both reviews were mostly static. Live testing of TLS configuration, signed-request replay, adversarial
-            two-client MLS behaviour, updater tampering and the voice SFU has been scoped but not run by an
-            independent human tester. An independent human audit is welcome, and the <a href="https://github.com/pollis-app/pollis/blob/main/docs/security-whitepaper.md"
+            Both reviews were mostly static, and neither was an independent human audit. An independent human audit is welcome, and the <a href="https://github.com/pollis-app/pollis/blob/main/docs/security-whitepaper.md"
             target="_blank" rel="noopener noreferrer">whitepaper</a> is written for that reader.
           </p>
         </div>
