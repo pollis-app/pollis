@@ -8,7 +8,7 @@ import { NativeModules } from "react-native";
 type FrameModule = { frame(uri: string, maxEdge: number): Promise<string> };
 
 /** Longest edge asked of the decoder; the core shrinks the sent poster further. */
-export const VIDEO_FRAME_EDGE = 640;
+const VIDEO_FRAME_EDGE = 640;
 
 /** A binary without the module (older than #1837) or a file it cannot decode gives null. */
 export async function videoFrame(uri: string, maxEdge = VIDEO_FRAME_EDGE): Promise<string | null> {
