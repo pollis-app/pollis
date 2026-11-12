@@ -16,6 +16,7 @@ import type { MessageAttachment } from "../../types";
 import { searchQueryKeys } from "./useSearch";
 import { refreshUnread } from "./useUnread";
 import { keyChangeNoticeKeys } from "./useSafety";
+import { bumpDMActivity } from "./useDMChannels";
 import { aliasAttachment } from "../../lib/media/viewer";
 import {
   outgoingAttachments,
@@ -388,6 +389,10 @@ export function useSendMessage(
       }
       const key = messageQueryKeys.conversation(conversationId, kind);
       await queryClient.cancelQueries({ queryKey: key });
+      // A DM moves to the top as the send starts (#1838); the stored row is kept even if it fails.
+      if (kind === "dm") {
+        bumpDMActivity(queryClient, currentUser.id, conversationId, Date.now());
+      }
       stubSeq += 1;
       const optimisticId = `pending-${Date.now()}-${stubSeq}`;
       stubIds.set(vars, optimisticId);

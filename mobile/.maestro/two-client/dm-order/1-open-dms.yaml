@@ -1,0 +1,75 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DM ORDER (#1838), part 1 of 2 — driven by scripts/maestro-dm-order.sh.
+# Sign up a fresh account and open a DM with each of the two peers the script
+# signed up: first ${PEER_A_HANDLE}, then ${PEER_B_HANDLE}, sending one message
+# into each. Ends on the Direct list.
+
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+
+- tapOn:
+    id: "btn-new-dm"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${PEER_A_HANDLE}"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
+- tapOn:
+    id: "row-user-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "input-composer"
+- inputText: "first hello"
+# The keyboard can sit over the send button and take the tap (Gboard's mic).
+- hideKeyboard:
+    optional: true
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: first hello, .*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+
+- tapOn:
+    id: "btn-new-dm"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${PEER_B_HANDLE}"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
+- tapOn:
+    id: "row-user-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "input-composer"
+- inputText: "second hello"
+- hideKeyboard:
+    optional: true
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: second hello, .*"
+    timeout: 15000
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
