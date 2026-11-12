@@ -1,0 +1,1002 @@
+{
+  "_comment": [
+    "THE registry of every public surface and content item (epic #1720, #1728). scripts/sweep.mjs reads it; it never owns another lane's data.",
+    "",
+    "axes        the dimensions a feature can vary on: platform, skin (desktop renderer only; mobile and the TUI have one look), store.",
+    "content     EVERY public content item: each website page, /learn topic, public doc, user-facing README, installer and store listing.",
+    "            source = the file a sweep edits; rendered = files (or globs) generated from it or shown with it; external = URLs of",
+    "            copies that are not in git (R2 video); checked_by = the sweep dimensions that check it (see sweep.mjs --list);",
+    "            policy: true = legal/policy page, flag-only (never edited by a sweep, #1720 'Policy vs code'); audience defaults to",
+    "            public, 'linked-design' = an internal design doc a public page links to. locales defaults to defaults.locales.",
+    "stores      every store a build or listing ships through, and what feeds it. Must match axes.store exactly.",
+    "registration  the globs every tracked file under which must be claimed by a content item, a store or `internal` (with a reason).",
+    "            sweep.mjs checks both directions: an unregistered file fails, and a registered path that matches nothing fails.",
+    "internal    files under the registration globs that are deliberately NOT public content, each with the reason.",
+    "features    only features whose behaviour varies by an axis (not the command inventory: that is feature-parity.json).",
+    "            paths = the code that implements it (a change there makes the platform-matrix dimension due); excluded = axis",
+    "            values it deliberately does not run on, with the reason.",
+    "data_files  the other lanes' data files sweep.mjs reads. A missing one is reported as 'not yet built (#lane)', never as passing.",
+    "",
+    "Adding a public page or doc: add it under content in the same PR (node scripts/sweep.mjs surfaces tells you if you forgot).",
+    "Not CI: like every drift sweep this runs by hand (/pre-release-sweeps) and never gates a merge."
+  ],
+  "axes": {
+    "platform": [
+      "ios-iphone",
+      "ios-ipad",
+      "android",
+      "macos",
+      "windows",
+      "linux-x11",
+      "linux-wayland",
+      "tui"
+    ],
+    "skin": [
+      "terminal",
+      "refined"
+    ],
+    "skin_applies_to": [
+      "macos",
+      "windows",
+      "linux-x11",
+      "linux-wayland"
+    ],
+    "store": [
+      "app-store",
+      "play",
+      "android-sideload",
+      "aur",
+      "github-release",
+      "website-install"
+    ]
+  },
+  "defaults": {
+    "audience": "public",
+    "locales": "en-only",
+    "locales_reason": "Public website and docs are English-only today; the app UI is localised through frontend/src/i18n/locales (the i18n dimension)."
+  },
+  "registration": {
+    "globs": [
+      "website/*.html",
+      "website/*.js",
+      "website/*.sh",
+      "website/*.json",
+      "website/.well-known/*",
+      "website/learn/media/*.vtt",
+      "learn/manim/scripts/*.md",
+      "learn/manim/scenes/*.py",
+      "docs/**/*.md",
+      "*.md",
+      "**/README.md",
+      "mobile/store/**"
+    ]
+  },
+  "stores": {
+    "app-store": {
+      "about": "iOS + iPadOS App Store",
+      "listing": [
+        "store/listing",
+        "store/release-notes-ios"
+      ],
+      "ships": "mobile store build (mobile/CLAUDE.md → Store builds), tag mobile-v*",
+      "assets": "screenshots: not generated yet (#1729)"
+    },
+    "play": {
+      "about": "Google Play",
+      "listing": [
+        "store/listing",
+        "store/release-notes-android"
+      ],
+      "ships": "mobile store build, tag mobile-v*",
+      "assets": "screenshots: not generated yet (#1729)"
+    },
+    "android-sideload": {
+      "about": "Signed APK from cdn.pollis.com, linked from website/android.html",
+      "listing": [
+        "website/android",
+        "store/android-sideload-cert"
+      ],
+      "ships": ".github/workflows/mobile-apk-release.yml"
+    },
+    "aur": {
+      "about": "Arch User Repository package",
+      "listing": [],
+      "ships": ".github/workflows/aur-republish.yml + scripts/publish-aur.sh"
+    },
+    "github-release": {
+      "about": "GitHub releases: desktop bundles, the pollis CLI, pollis-verify",
+      "listing": [
+        "readme/CHANGELOG"
+      ],
+      "ships": ".github/workflows/desktop-release.yml, cli-release.yml, verifier-release.yml"
+    },
+    "website-install": {
+      "about": "curl | sh installers on pollis.com",
+      "listing": [
+        "installer/install.sh",
+        "installer/cli-install.sh",
+        "website/index"
+      ],
+      "ships": ".github/workflows/website-deploy.yml"
+    }
+  },
+  "content": {
+    "docs/machine-checked-correctness-design": {
+      "kind": "doc",
+      "about": "Machine-checked correctness (linked from the website)",
+      "source": "docs/machine-checked-correctness-design.md",
+      "audience": "linked-design",
+      "checked_by": []
+    },
+    "docs/metadata-retention-policy": {
+      "kind": "doc",
+      "about": "Metadata retention policy (policy doc: flag-only)",
+      "source": "docs/metadata-retention-policy.md",
+      "policy": true,
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "docs/operational-continuity": {
+      "kind": "doc",
+      "about": "Operational continuity (source for website/continuity.html)",
+      "source": "docs/operational-continuity.md",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "docs/pq-hybrid-mls-design": {
+      "kind": "doc",
+      "about": "Post-quantum hybrid MLS design (linked from README)",
+      "source": "docs/pq-hybrid-mls-design.md",
+      "audience": "linked-design",
+      "checked_by": []
+    },
+    "docs/relay-operations": {
+      "kind": "doc",
+      "about": "Relay operations (linked from the website)",
+      "source": "docs/relay-operations.md",
+      "audience": "linked-design",
+      "checked_by": []
+    },
+    "docs/relay-overlay-design": {
+      "kind": "doc",
+      "about": "Relay overlay design (linked from the website and README)",
+      "source": "docs/relay-overlay-design.md",
+      "audience": "linked-design",
+      "checked_by": []
+    },
+    "docs/reproducible-builds-residuals": {
+      "kind": "doc",
+      "about": "What is not yet bit-for-bit reproducible, and why",
+      "source": "docs/reproducible-builds-residuals.md",
+      "checked_by": [
+        "claims",
+        "cli"
+      ]
+    },
+    "docs/run-it-yourself": {
+      "kind": "doc",
+      "about": "Run the whole stack yourself (linked from README and CONTRIBUTING)",
+      "source": "docs/run-it-yourself.md",
+      "checked_by": []
+    },
+    "docs/security-explained": {
+      "kind": "doc",
+      "about": "Security explained (long form, non-specialist)",
+      "source": "docs/security-explained.md",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "docs/security-simple": {
+      "kind": "doc",
+      "about": "Security in plain words (short form)",
+      "source": "docs/security-simple.md",
+      "checked_by": [
+        "claims",
+        "facts"
+      ]
+    },
+    "docs/security-whitepaper": {
+      "kind": "doc",
+      "about": "The security whitepaper",
+      "source": "docs/security-whitepaper.md",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "docs/signing-key-compromise-runbook": {
+      "kind": "doc",
+      "about": "Signing-key compromise runbook (linked from the website)",
+      "source": "docs/signing-key-compromise-runbook.md",
+      "audience": "linked-design",
+      "checked_by": [
+        "cli"
+      ]
+    },
+    "docs/sth-signing-key-custody": {
+      "kind": "doc",
+      "about": "Transparency-log signing-key custody (linked from the website)",
+      "source": "docs/sth-signing-key-custody.md",
+      "audience": "linked-design",
+      "checked_by": [
+        "facts",
+        "cli"
+      ]
+    },
+    "docs/transparency": {
+      "kind": "doc",
+      "about": "Transparency log: what it records and how to read it",
+      "source": "docs/transparency.md",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "docs/verifiable-builds-design": {
+      "kind": "doc",
+      "about": "Verifiable builds design (linked from website/artifacts and README)",
+      "source": "docs/verifiable-builds-design.md",
+      "audience": "linked-design",
+      "checked_by": [
+        "cli"
+      ]
+    },
+    "docs/verify-transparency-log": {
+      "kind": "doc",
+      "about": "How to verify the transparency log with pollis-verify",
+      "source": "docs/verify-transparency-log.md",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "installer/cli-install.sh": {
+      "kind": "installer",
+      "about": "Terminal-client (pollis CLI) one-line installer",
+      "source": "website/cli-install.sh",
+      "url": "https://pollis.com/cli-install.sh",
+      "checked_by": [
+        "installers"
+      ]
+    },
+    "installer/install.sh": {
+      "kind": "installer",
+      "about": "Desktop one-line installer (curl | sh), served from pollis.com",
+      "source": "website/install.sh",
+      "url": "https://pollis.com/install.sh",
+      "checked_by": [
+        "installers",
+        "cli"
+      ]
+    },
+    "learn/binary-transparency": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/binary-transparency.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/binary-transparency.vtt",
+        "learn/manim/scenes/binary_transparency.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/binary-transparency.mp4"
+      ],
+      "url": "https://pollis.com/learn#binary-transparency",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "learn/identity-keys": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/identity-keys.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/identity-keys.vtt",
+        "learn/manim/scenes/identity_keys.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/identity-keys.mp4"
+      ],
+      "url": "https://pollis.com/learn#identity-keys",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "learn/joining-leaving": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/joining-leaving.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/joining-leaving.vtt",
+        "learn/manim/scenes/joining_leaving.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/joining-leaving.mp4"
+      ],
+      "url": "https://pollis.com/learn#joining-leaving",
+      "checked_by": [
+        "claims",
+        "facts"
+      ]
+    },
+    "learn/merkle-trees": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/merkle-trees.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/merkle-trees.vtt",
+        "learn/manim/scenes/merkle_trees.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/merkle-trees.mp4"
+      ],
+      "url": "https://pollis.com/learn#merkle-trees",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "learn/mls-groups": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/mls-groups.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/mls-groups.vtt",
+        "learn/manim/scenes/mls_groups.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/mls-groups.mp4"
+      ],
+      "url": "https://pollis.com/learn#mls-groups",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "learn/proofs-and-equivocation": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/proofs-and-equivocation.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/proofs-and-equivocation.vtt",
+        "learn/manim/scenes/proofs_and_equivocation.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/proofs-and-equivocation.mp4"
+      ],
+      "url": "https://pollis.com/learn#proofs-and-equivocation",
+      "checked_by": [
+        "claims",
+        "cli"
+      ]
+    },
+    "learn/reading-the-dashboards": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/reading-the-dashboards.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/reading-the-dashboards.vtt",
+        "learn/manim/scenes/reading_the_dashboards.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/reading-the-dashboards.mp4"
+      ],
+      "url": "https://pollis.com/learn#reading-the-dashboards",
+      "checked_by": [
+        "claims",
+        "cli"
+      ]
+    },
+    "learn/recovery": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/recovery.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/recovery.vtt",
+        "learn/manim/scenes/recovery.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/recovery.mp4"
+      ],
+      "url": "https://pollis.com/learn#recovery",
+      "checked_by": [
+        "claims",
+        "facts"
+      ]
+    },
+    "learn/the-problem": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/the-problem.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/the-problem.vtt",
+        "learn/manim/scenes/the_problem.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/the-problem.mp4"
+      ],
+      "url": "https://pollis.com/learn#the-problem",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "learn/threat-model": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/threat-model.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/threat-model.vtt",
+        "learn/manim/scenes/threat_model.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/threat-model.mp4"
+      ],
+      "url": "https://pollis.com/learn#threat-model",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "learn/three-logs": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/three-logs.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/three-logs.vtt",
+        "learn/manim/scenes/three_logs.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/three-logs.mp4"
+      ],
+      "url": "https://pollis.com/learn#three-logs",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "learn/verify-it-yourself": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/verify-it-yourself.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/verify-it-yourself.vtt",
+        "learn/manim/scenes/verify_it_yourself.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/verify-it-yourself.mp4"
+      ],
+      "url": "https://pollis.com/learn#verify-it-yourself",
+      "checked_by": [
+        "claims",
+        "cli"
+      ]
+    },
+    "learn/vocabulary": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/vocabulary.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/vocabulary.vtt",
+        "learn/manim/scenes/vocabulary.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/vocabulary.mp4"
+      ],
+      "url": "https://pollis.com/learn#vocabulary",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "learn/window-not-door": {
+      "kind": "learn-topic",
+      "source": "learn/manim/scripts/window-not-door.md",
+      "rendered": [
+        "website/learn.html",
+        "website/learn/media/window-not-door.vtt",
+        "learn/manim/scenes/window_not_door.py"
+      ],
+      "external": [
+        "https://cdn.pollis.com/learn/media/window-not-door.mp4"
+      ],
+      "url": "https://pollis.com/learn#window-not-door",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "readme/CHANGELOG": {
+      "kind": "readme",
+      "about": "Release notes; desktop-release.yml links it from every GitHub release",
+      "source": "CHANGELOG.md",
+      "checked_by": []
+    },
+    "readme/CONTRIBUTING": {
+      "kind": "readme",
+      "about": "How to contribute",
+      "source": "CONTRIBUTING.md",
+      "checked_by": []
+    },
+    "readme/LICENSE": {
+      "kind": "readme",
+      "about": "Licence",
+      "source": "LICENSE.md",
+      "checked_by": []
+    },
+    "readme/pollis-verify": {
+      "kind": "readme",
+      "about": "pollis-verify (the transparency-log verifier CLI) README",
+      "source": "verifiable-log-serve/README.md",
+      "checked_by": [
+        "cli"
+      ]
+    },
+    "readme/README": {
+      "kind": "readme",
+      "about": "Repository README: what Pollis is, install, verify",
+      "source": "README.md",
+      "url": "https://github.com/pollis-app/pollis",
+      "checked_by": [
+        "facts",
+        "cli"
+      ]
+    },
+    "readme/SECURITY": {
+      "kind": "readme",
+      "about": "Security policy and disclosure contact",
+      "source": "SECURITY.md",
+      "checked_by": [
+        "cli"
+      ]
+    },
+    "readme/verifiable-log": {
+      "kind": "readme",
+      "about": "verifiable-log crate README (the log format third parties verify)",
+      "source": "verifiable-log/README.md",
+      "checked_by": []
+    },
+    "readme/verifiable-log-builder": {
+      "kind": "readme",
+      "about": "verifiable-log-builder crate README",
+      "source": "verifiable-log-builder/README.md",
+      "checked_by": []
+    },
+    "store/android-sideload-cert": {
+      "kind": "store-asset",
+      "about": "Sideload APK signing-cert fingerprint, shown on website/android.html",
+      "source": "mobile/store/android-sideload-cert.sha256",
+      "stores": [
+        "android-sideload"
+      ],
+      "checked_by": []
+    },
+    "store/listing": {
+      "kind": "store-listing",
+      "about": "App Store + Play listing copy, privacy labels, data-safety answers, screenshot shot list",
+      "source": "docs/store-listing.md",
+      "stores": [
+        "app-store",
+        "play"
+      ],
+      "checked_by": [
+        "claims",
+        "facts"
+      ]
+    },
+    "store/release-notes-android": {
+      "kind": "store-release-notes",
+      "about": "Play release notes per version",
+      "source": "mobile/store/release-notes/*.android.txt",
+      "stores": [
+        "play"
+      ],
+      "checked_by": []
+    },
+    "store/release-notes-ios": {
+      "kind": "store-release-notes",
+      "about": "App Store 'What's New' text per version",
+      "source": "mobile/store/release-notes/*.ios.txt",
+      "stores": [
+        "app-store"
+      ],
+      "checked_by": []
+    },
+    "website/android": {
+      "kind": "website-page",
+      "about": "Android sideload: APK download, signing-cert fingerprint, how to verify it",
+      "source": "website/android.html",
+      "url": "https://pollis.com/android.html",
+      "checked_by": [
+        "claims",
+        "facts"
+      ]
+    },
+    "website/artifacts": {
+      "kind": "website-page",
+      "about": "Release artifacts and how to check their hashes and attestations",
+      "source": "website/artifacts.html",
+      "rendered": [
+        "website/artifacts.js"
+      ],
+      "url": "https://pollis.com/artifacts.html",
+      "checked_by": [
+        "claims",
+        "cli"
+      ]
+    },
+    "website/assurance": {
+      "kind": "website-page",
+      "about": "Reproducible-build assurance: the rebuild ledger, rendered from website/rebuild-ledger.json",
+      "source": "website/assurance.html",
+      "rendered": [
+        "website/assurance.js",
+        "website/rebuild-ledger.json"
+      ],
+      "url": "https://pollis.com/assurance.html",
+      "checked_by": [
+        "claims",
+        "facts"
+      ]
+    },
+    "website/continuity": {
+      "kind": "website-page",
+      "about": "Operational continuity: what happens if the operator disappears",
+      "source": "website/continuity.html",
+      "url": "https://pollis.com/continuity.html",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "website/device-security": {
+      "kind": "website-page",
+      "about": "What a device holds and how it is protected",
+      "source": "website/device-security.html",
+      "url": "https://pollis.com/device-security.html",
+      "checked_by": [
+        "claims",
+        "facts"
+      ]
+    },
+    "website/faq": {
+      "kind": "website-page",
+      "about": "FAQ",
+      "source": "website/faq.html",
+      "url": "https://pollis.com/faq.html",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "website/index": {
+      "kind": "website-page",
+      "about": "Home page: product summary, downloads, install one-liners",
+      "source": "website/index.html",
+      "rendered": [
+        "website/verify-downloads.js"
+      ],
+      "url": "https://pollis.com/",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "website/learn": {
+      "kind": "website-page",
+      "about": "/learn: the explainer videos, their transcripts and caption tracks",
+      "source": "website/learn.html",
+      "rendered": [
+        "website/learn.js",
+        "website/learn/media/*.vtt"
+      ],
+      "url": "https://pollis.com/learn",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "website/legal-requests": {
+      "kind": "website-page",
+      "about": "Legal-requests policy (policy page: flag-only, never edited by a sweep)",
+      "source": "website/legal-requests.html",
+      "url": "https://pollis.com/legal-requests.html",
+      "checked_by": [
+        "claims"
+      ],
+      "policy": true
+    },
+    "website/privacy": {
+      "kind": "website-page",
+      "about": "Privacy policy (policy page: flag-only)",
+      "source": "website/privacy.html",
+      "url": "https://pollis.com/privacy.html",
+      "checked_by": [
+        "claims",
+        "facts"
+      ],
+      "policy": true
+    },
+    "website/retention": {
+      "kind": "website-page",
+      "about": "Message and metadata retention, the accepted losses",
+      "source": "website/retention.html",
+      "url": "https://pollis.com/retention.html",
+      "checked_by": [
+        "claims",
+        "facts"
+      ]
+    },
+    "website/script.js": {
+      "kind": "website-asset",
+      "about": "Shared page script on every website page (copy chips, nav)",
+      "source": "website/script.js",
+      "checked_by": []
+    },
+    "website/security": {
+      "kind": "website-page",
+      "about": "Security overview",
+      "source": "website/security.html",
+      "url": "https://pollis.com/security.html",
+      "checked_by": [
+        "claims",
+        "facts",
+        "cli"
+      ]
+    },
+    "website/security.txt": {
+      "kind": "website-asset",
+      "about": "RFC 9116 security contact",
+      "source": "website/.well-known/security.txt",
+      "url": "https://pollis.com/.well-known/security.txt",
+      "checked_by": []
+    },
+    "website/subprocessors": {
+      "kind": "website-page",
+      "about": "Subprocessors (policy page: flag-only)",
+      "source": "website/subprocessors.html",
+      "url": "https://pollis.com/subprocessors.html",
+      "checked_by": [
+        "claims",
+        "facts"
+      ],
+      "policy": true
+    },
+    "website/terms": {
+      "kind": "website-page",
+      "about": "Terms of service (policy page: flag-only)",
+      "source": "website/terms.html",
+      "url": "https://pollis.com/terms.html",
+      "checked_by": [
+        "claims"
+      ],
+      "policy": true
+    },
+    "website/transparency": {
+      "kind": "website-page",
+      "about": "Transparency log and dashboards",
+      "source": "website/transparency.html",
+      "rendered": [
+        "website/transparency.js"
+      ],
+      "url": "https://pollis.com/transparency.html",
+      "checked_by": [
+        "claims",
+        "cli"
+      ]
+    }
+  },
+  "internal": {
+    "CLAUDE.md": "agent instructions",
+    "ARCHITECTURE.md": "internal architecture notes",
+    "docs/backend-core-invariants.md": "internal design (failure taxonomy)",
+    "docs/ci-trust.md": "internal CI design",
+    "docs/dead-code.md": "internal tooling",
+    "docs/deployments.md": "internal runbook (the installer env vars it documents are checked by the installers dimension)",
+    "docs/ds-operator-endpoints.md": "operator runbook",
+    "docs/goal-a-deploy-runbook.md": "operator runbook",
+    "docs/history-transfer-design.md": "internal design",
+    "docs/metadata-minimization-design.md": "internal design",
+    "docs/mls-reconcile-hardening.md": "internal design",
+    "docs/mobile-compliance-answers.md": "owner's drafts for store questionnaires; the filed answers are store/listing",
+    "docs/otp-server-bootstrap-design.md": "internal design",
+    "docs/path-to-launch-epic.md": "internal planning",
+    "docs/pollis-tui-spec.md": "internal spec",
+    "docs/qr-device-link-design.md": "internal design",
+    "docs/secrets-broker.md": "internal design",
+    "docs/security/dependency-scan-2026-10.md": "dated internal audit record",
+    "docs/state-derivation-audit-baseline-2026-09-13.md": "dated internal audit record",
+    "docs/state-derivation-audit.md": "internal audit",
+    "e2e/README.md": "test-suite guide",
+    "frontend/src/i18n/README.md": "contributor guide (catalogues)",
+    "fuzz/README.md": "test-suite guide",
+    "infra/relay-hydra/README.md": "operator guide",
+    "learn/README.md": "render toolchain guide",
+    "mobile/.maestro/README.md": "test-suite guide",
+    "mobile/store/ExportOptions.plist": "iOS build export config",
+    "mobile/store/ota-code-signing.pem": "OTA public signing cert (build input)",
+    "mobile/store/runtime-versions.json": "OTA runtime ledger (build input)",
+    "patches/sqlcipher-src/README.md": "vendored-patch note",
+    "pollis-sqlcipher/tests/fixtures/README.md": "test fixture note",
+    "scripts/x11-clipboard-repro/README.md": "repro harness note",
+    "specs/tla/README.md": "formal-spec guide"
+  },
+  "features": {
+    "screen-capture": {
+      "varies_on": [
+        "platform"
+      ],
+      "platforms": [
+        "macos",
+        "windows",
+        "linux-x11",
+        "linux-wayland"
+      ],
+      "paths": [
+        "pollis-core/src/commands/screenshare",
+        "pollis-capture-linux",
+        "pollis-capture-macos",
+        "pollis-capture-proto"
+      ],
+      "note": "Linux has two backends: X11 (Xvfb-testable) and the Wayland portal (pollis-capture-linux/src/linux.rs probe_backend).",
+      "excluded": {
+        "mobile": "real-time media excluded by product decision (CLAUDE.md)",
+        "tui": "terminal client has no media"
+      }
+    },
+    "camera": {
+      "varies_on": [
+        "platform"
+      ],
+      "platforms": [
+        "macos",
+        "windows",
+        "linux-x11",
+        "linux-wayland"
+      ],
+      "paths": [
+        "pollis-core/src/commands/camera",
+        "pollis-capture-linux",
+        "pollis-capture-macos"
+      ],
+      "excluded": {
+        "mobile": "real-time media excluded by product decision",
+        "tui": "terminal client has no media"
+      }
+    },
+    "voice": {
+      "varies_on": [
+        "platform"
+      ],
+      "platforms": [
+        "macos",
+        "windows",
+        "linux-x11",
+        "linux-wayland"
+      ],
+      "paths": [
+        "pollis-core/src/commands/voice",
+        "pollis-core/src/commands/voice_apm.rs",
+        "pollis-core/src/commands/voice_denoiser.rs",
+        "pollis-core/src/commands/voice_e2ee.rs",
+        "frontend/src/components/Voice"
+      ],
+      "note": "audio devices are per OS (CoreAudio, WASAPI, PulseAudio/PipeWire).",
+      "excluded": {
+        "mobile": "real-time media excluded by product decision",
+        "tui": "terminal client has no media"
+      }
+    },
+    "clipboard": {
+      "varies_on": [
+        "platform"
+      ],
+      "paths": [
+        "src-tauri/src/clipboard.rs",
+        "frontend/src/bridge/clipboard.ts",
+        "frontend/src/utils/clipboardPaste.ts"
+      ],
+      "note": "X11 selections vs the Wayland data-device protocol vs NSPasteboard / Win32; mobile uses the OS share sheet."
+    },
+    "keystore": {
+      "varies_on": [
+        "platform"
+      ],
+      "paths": [
+        "pollis-core/src/keystore.rs"
+      ],
+      "note": "OS keychain where one exists, machine-bound encrypted file where none does (#882)."
+    },
+    "terminal-io": {
+      "varies_on": [
+        "platform"
+      ],
+      "platforms": [
+        "tui"
+      ],
+      "paths": [
+        "pollis-core/src/commands/terminal_unix.rs",
+        "pollis-core/src/commands/terminal_windows.rs",
+        "pollis-core/src/commands/terminal_gate.rs",
+        "pollis-tui/src"
+      ],
+      "note": "Unix pty vs Windows console."
+    },
+    "notifications": {
+      "varies_on": [
+        "platform"
+      ],
+      "paths": [
+        "pollis-core/src/notify",
+        "pollis-core/src/commands/push.rs",
+        "src-tauri/src/tray.rs"
+      ],
+      "note": "APNs / FCM push with on-device decrypt on mobile; OS notification centre + tray on desktop."
+    },
+    "updates": {
+      "varies_on": [
+        "platform",
+        "store"
+      ],
+      "paths": [
+        "pollis-core/src/commands/update.rs",
+        "frontend/src/components/UpdateScreen.tsx",
+        "mobile/store/runtime-versions.json",
+        "pollis-delivery/worker/updates.ts"
+      ],
+      "note": "Tauri updater per desktop OS; store review + signed OTA on mobile; AUR and the install scripts update differently."
+    },
+    "message-rendering": {
+      "varies_on": [
+        "platform",
+        "skin"
+      ],
+      "paths": [
+        "frontend/src/components/Message",
+        "mobile/components/chat/MessageRow.tsx",
+        "mobile/components/chat/MessageBody.tsx",
+        "pollis-tui/src/content.rs"
+      ],
+      "note": "two desktop skins with separate branches, a native mobile row, and the TUI."
+    },
+    "composer": {
+      "varies_on": [
+        "platform",
+        "skin"
+      ],
+      "paths": [
+        "frontend/src/components/Message",
+        "mobile/components/chat/Composer.tsx",
+        "pollis-tui/src/app.rs"
+      ],
+      "note": "keyboard handling differs per OS and per skin; the mobile soft keyboard."
+    },
+    "two-pane-layout": {
+      "varies_on": [
+        "platform"
+      ],
+      "platforms": [
+        "ios-ipad"
+      ],
+      "paths": [
+        "mobile/components/MasterDetail.tsx",
+        "mobile/components/pane"
+      ],
+      "note": "iPad only (mobile/.maestro/flows/ipad-two-pane.yaml)."
+    }
+  },
+  "data_files": {
+    "feature_parity": "scripts/feature-parity.json",
+    "facts": "scripts/facts.json",
+    "claims": "scripts/claims.json",
+    "sweep_ledger": "scripts/sweep-ledger.json",
+    "i18n_surfaces": "scripts/i18n-surfaces.json",
+    "store_screenshots": "mobile/store/screenshots"
+  }
+}

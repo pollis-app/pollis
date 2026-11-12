@@ -2,12 +2,40 @@
   "_comment": [
     "When each drift-sweep dimension was last swept (epic #1720). `sha` is the commit the sweep verified against;",
     "a sweep re-checks only what changed in `git diff <sha>..HEAD`. `by` names the procedure that ran it.",
+    "Read by scripts/sweep.mjs (#1728), the engine behind /pre-release-sweeps: `node scripts/sweep.mjs --list` names every",
+    "dimension, its lane and checkers; a dimension with no entry here is reported as 'never swept'. After a sweep, set entries",
+    "with `node scripts/sweep.mjs --bump <dim,...>` (HEAD, today) rather than by hand.",
     "claims: scripts/claims.json, swept with /sweep-claims (.claude/skills/sweep-claims/SKILL.md); `node scripts/claims-impact.mjs --ledger` lists what is due.",
-    "Other dimensions (#1728) add their own entry when their lane lands."
+    "facts, cli, installers, surfaces, platform-matrix: the baselines that landed with #1722, #1721 and #1728."
   ],
   "claims": {
+    "sha": "ea87926b9a8d08da46fec6bbcd76cbff46b56be6",
+    "date": "2026-11-12",
+    "by": "sweep-claims (#1723)"
+  },
+  "facts": {
     "sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
     "date": "2026-11-11",
-    "by": "manual"
+    "by": "baseline (#1722)"
+  },
+  "cli": {
+    "sha": "8b11507973c033d20ca02efdba13e2393a3180d7",
+    "date": "2026-11-07",
+    "by": "baseline (#1721)"
+  },
+  "installers": {
+    "sha": "8b11507973c033d20ca02efdba13e2393a3180d7",
+    "date": "2026-11-07",
+    "by": "baseline (#1721)"
+  },
+  "surfaces": {
+    "sha": "660f8cc956cd892b399a5f5cca80072c1b628849",
+    "date": "2026-11-12",
+    "by": "baseline (#1728)"
+  },
+  "platform-matrix": {
+    "sha": "660f8cc956cd892b399a5f5cca80072c1b628849",
+    "date": "2026-11-12",
+    "by": "baseline (#1728)"
   }
 }
