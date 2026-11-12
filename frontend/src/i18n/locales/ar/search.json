@@ -50,7 +50,9 @@
     "arcadeName": "الأركيد",
     "arcadeKeywords": "أركيد لعبة كويكبات مركبة إطلاق بيضة عيد الفصح لعب arcade game asteroids ship shoot easter egg play",
     "vaultName": "الخزنة",
-    "vaultKeywords": "الخزنة vault ملاحظات تخزين شخصي خاص مشفر ملفات"
+    "vaultKeywords": "الخزنة vault ملاحظات تخزين شخصي خاص مشفر ملفات",
+    "openSourceName": "تراخيص البرمجيات مفتوحة المصدر",
+    "openSourceKeywords": "مفتوح المصدر تراخيص ترخيص جهات خارجية إسناد إشعارات مكتبات حزم تبعيات قانوني حقوق النشر open source licenses"
   },
   "page": {
     "title": "بحث"

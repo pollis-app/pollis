@@ -299,6 +299,18 @@ const diagnosticsRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/DiagnosticsPage"), "DiagnosticsPage"),
 });
 
+const openSourceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/open-source",
+  component: lazyRouteComponent(() => import("./pages/OpenSourcePage"), "OpenSourcePage"),
+});
+
+const openSourceLicenseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/open-source/$packageId",
+  component: lazyRouteComponent(() => import("./pages/OpenSourceLicensePage"), "OpenSourceLicensePage"),
+});
+
 const keyboardShortcutsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/shortcuts",
@@ -392,6 +404,8 @@ const routeTree = rootRoute.addChildren([
   searchRoute,
   keyboardShortcutsRoute,
   diagnosticsRoute,
+  openSourceRoute,
+  openSourceLicenseRoute,
   updateRoute,
   callRoute,
   incomingCallRoute,

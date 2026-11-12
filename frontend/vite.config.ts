@@ -1,11 +1,12 @@
 import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { ossNotices } from './vite-plugin-oss-notices'
 
 const isPlaywright = process.env.VITE_PLAYWRIGHT === 'true'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), ossNotices({ playwright: isPlaywright })],
   // Relative asset URLs, so a `file://`-loaded index.html resolves them.
   base: './',
   // VITE_* env vars come from the monorepo root.

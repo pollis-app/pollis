@@ -93,6 +93,8 @@ on:
       - 'scripts/mobile-i18n-resources.mjs'
       - 'scripts/mobile-android-push-strings.mjs'
       - 'scripts/i18n-check.mjs'
+      - 'scripts/oss-inventory.mjs'
+      - 'supply-chain/license-texts/**'
       - 'pollis-delivery/worker/**'
       - 'pollis-delivery/worker-tests/**'
       - 'pollis-delivery/wrangler.*.jsonc'
@@ -169,9 +171,12 @@ jobs:
               - 'mobile/store/ota-code-signing.pem'
               - 'mobile/store/ExportOptions.plist'
             # Metro bundles these straight from frontend/ (metro.config.js
-            # watchFolders, #1074).
+            # watchFolders, #1074), and metro.config.js generates the Open
+            # source licenses data from these two (#1832).
             app_catalogues:
               - 'frontend/src/i18n/locales/**'
+              - 'scripts/oss-inventory.mjs'
+              - 'supply-chain/license-texts/**'
             tests:
               # mobile/ files that never reach a binary (see the `app` step below):
               # only the unit tests can see them.

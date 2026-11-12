@@ -270,6 +270,13 @@ function Self() {
               chevron
               onPress={() => router.push("/self/diagnostics")}
             />
+            <ListRow
+              testID="row-self-open-source"
+              glyph={<Icon.openSource size={GLYPH} color={semantic.text} />}
+              name={t("settings:openSource.title")}
+              chevron
+              onPress={() => router.push("/self/open-source")}
+            />
             <VersionRow />
             <UpdateRow />
           </Group>

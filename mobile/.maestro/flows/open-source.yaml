@@ -1,0 +1,58 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# OPEN SOURCE LICENSES (#1832) — desktop's /open-source page, on a real build.
+#
+# Self → Open source licenses lists every third-party package this build ships
+# (generated from the lockfiles by metro.config.js when the bundle was built),
+# the filter narrows it, and a package opens the licence text it ships. uniffi
+# is in every build (the Rust bridge) and is MPL-2.0, so it proves the Rust half
+# of the list reached the bundle, not only the npm half.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- scrollUntilVisible:
+    element:
+      id: "row-self-open-source"
+    direction: DOWN
+- tapOn:
+    id: "row-self-open-source"
+- assertVisible:
+    id: "screen-self-open-source"
+# The list loads after the push animation; the count line appears with it.
+- extendedWaitUntil:
+    visible:
+      id: "text-open-source-count"
+      text: ".*[0-9]{3,}.*"
+    timeout: 10000
+- takeScreenshot: open-source-01-list
+
+# --- the filter narrows to one crate ---
+- tapOn:
+    id: "input-open-source-filter"
+- inputText: "uniffi"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "row-open-source-uniffi"
+    timeout: 5000
+- assertNotVisible:
+    id: "row-open-source-react-native"
+- takeScreenshot: open-source-02-filtered
+
+# --- the package opens its licence text ---
+- tapOn:
+    id: "row-open-source-uniffi"
+- assertVisible:
+    id: "screen-self-open-source-license"
+- extendedWaitUntil:
+    visible:
+      id: "text-open-source-license"
+      text: "MPL-2.0"
+    timeout: 5000
+- assertVisible:
+    id: "text-open-source-text"
+    text: "(?s).*Mozilla Public License.*"
+- takeScreenshot: open-source-03-license

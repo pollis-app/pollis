@@ -172,6 +172,7 @@ const PAGE_RESULTS: PageResultSpec[] = [
   { id: "page-copy-history", nameKey: "pages.copyHistoryName", keywordsKey: "pages.copyHistoryKeywords", breadcrumb: "/security/copy-history", path: "/security/copy-history" },
   { id: "page-shortcuts", nameKey: "pages.shortcutsName", keywordsKey: "pages.shortcutsKeywords", breadcrumb: "/shortcuts", path: "/shortcuts" },
   { id: "page-diagnostics", nameKey: "pages.diagnosticsName", keywordsKey: "pages.diagnosticsKeywords", breadcrumb: "/diagnostics", path: "/diagnostics" },
+  { id: "page-open-source", nameKey: "pages.openSourceName", keywordsKey: "pages.openSourceKeywords", breadcrumb: "/open-source", path: "/open-source" },
   { id: "page-update", nameKey: "pages.updateName", keywordsKey: "pages.updateKeywords", breadcrumb: "/update", path: "/update" },
   { id: "page-invites", nameKey: "pages.invitesName", keywordsKey: "pages.invitesKeywords", breadcrumb: "/invites", path: "/invites" },
   { id: "page-join", nameKey: "pages.joinName", keywordsKey: "pages.joinKeywords", breadcrumb: "/join", path: "/join" },

@@ -336,6 +336,14 @@ export default function RootLayout() {
                 options={drillIn}
               />
               <Stack.Screen
+                name="self/open-source/index"
+                options={drillIn}
+              />
+              <Stack.Screen
+                name="self/open-source/[id]"
+                options={drillIn}
+              />
+              <Stack.Screen
                 name="self/change-pin"
                 options={drillIn}
               />

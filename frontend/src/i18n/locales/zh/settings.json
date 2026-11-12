@@ -17,7 +17,9 @@
     "securityLabel": "安全",
     "securityDescription": "设备注册、身份重置",
     "shortcutsLabel": "快捷键",
-    "shortcutsDescription": "全局键盘快捷键一览"
+    "shortcutsDescription": "全局键盘快捷键一览",
+    "openSourceLabel": "开源许可",
+    "openSourceDescription": "本应用中的第三方软件及其许可证"
   },
   "preferences": {
     "title": "偏好设置"
@@ -378,5 +380,20 @@
     "newCode": "获取新代码",
     "failed": "无法关联设备，请重试。",
     "done": "完成"
+  },
+  "openSource": {
+    "title": "开源许可",
+    "intro": "Pollis 基于开源软件构建。此版本中的每个第三方软件包都列出了其许可证；选择一个即可阅读许可证全文。",
+    "count": "此版本中的软件包：{{count}}",
+    "unavailable": "许可证列表在构建应用时生成，此开发版本中没有。",
+    "filterLabel": "筛选软件包",
+    "filterPlaceholder": "按名称或许可证筛选",
+    "empty": "没有匹配的软件包。",
+    "notFound": "此软件包不属于此版本。",
+    "versionLabel": "版本",
+    "licenseLabel": "许可证",
+    "sourceLabel": "来源",
+    "cargo": "Rust crate",
+    "npm": "npm 软件包"
   }
 }

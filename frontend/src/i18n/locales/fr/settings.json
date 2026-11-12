@@ -17,7 +17,9 @@
     "securityLabel": "Sécurité",
     "securityDescription": "Enrôlements d'appareils, réinitialisations d'identité",
     "shortcutsLabel": "Raccourcis clavier",
-    "shortcutsDescription": "Référence des raccourcis clavier globaux"
+    "shortcutsDescription": "Référence des raccourcis clavier globaux",
+    "openSourceLabel": "Licences open source",
+    "openSourceDescription": "Logiciels tiers de cette app et leurs licences"
   },
   "preferences": {
     "title": "Préférences"
@@ -390,5 +392,20 @@
     "newCode": "Obtenir un nouveau code",
     "failed": "Impossible d'associer l'appareil. Réessayez.",
     "done": "Terminé"
+  },
+  "openSource": {
+    "title": "Licences open source",
+    "intro": "Pollis repose sur des logiciels open source. Chaque paquet tiers de cette version est listé avec sa licence ; sélectionnez-en un pour lire le texte de la licence.",
+    "count": "Paquets dans cette version : {{count}}",
+    "unavailable": "La liste des licences est générée à la compilation de l’app, et cette version de développement n’en a pas.",
+    "filterLabel": "Filtrer les paquets",
+    "filterPlaceholder": "Filtrer par nom ou licence",
+    "empty": "Aucun paquet ne correspond.",
+    "notFound": "Ce paquet ne fait pas partie de cette version.",
+    "versionLabel": "Version",
+    "licenseLabel": "Licence",
+    "sourceLabel": "Source",
+    "cargo": "Crate Rust",
+    "npm": "Paquet npm"
   }
 }
