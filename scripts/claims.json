@@ -3117,7 +3117,7 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Pollis's three logs, and what each one protects",
-        "quote": "The fingerprints of every desktop installer and every over-the-air mobile update go in here (mobile store builds are not logged yet),"
+        "quote": "The fingerprints of every desktop installer and every over-the-air mobile update go in here,"
       },
       "claim": "The fingerprints of every desktop installer and every over-the-air mobile update go in here (mobile store builds are not logged yet),",
       "kind": "security",
@@ -3130,7 +3130,7 @@
         ".github/workflows/desktop-release.yml:1579"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -3264,28 +3264,6 @@
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
     },
     {
-      "id": "learn-binary-transparency-04",
-      "doc": "learn/manim/scripts/binary-transparency.md",
-      "locator": {
-        "heading": "Scene 3 — what the user saw",
-        "quote": "And the app reported the loudest thing it can say: this build is not one Pollis published."
-      },
-      "also_rendered_in": [
-        "website/learn.html",
-        "website/learn/media/binary-transparency.vtt"
-      ],
-      "claim": "And the app reported the loudest thing it can say: this build is not one Pollis published. That was wrong, and it was our fault.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/transparency.rs:832"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
-    },
-    {
       "id": "learn-binary-transparency-05",
       "doc": "learn/manim/scripts/binary-transparency.md",
       "locator": {
@@ -3360,13 +3338,13 @@
       "doc": "learn/manim/scripts/binary-transparency.md",
       "locator": {
         "heading": "Scene 5 — macOS, Windows, and signing",
-        "quote": "On macOS and Windows, not yet."
+        "quote": "On macOS and Windows, the log proves you got the bytes we published, and those builds are not rebuilt from source."
       },
       "also_rendered_in": [
         "website/learn.html",
         "website/learn/media/binary-transparency.vtt"
       ],
-      "claim": "macOS and Windows payloads are not reproduced.",
+      "claim": "macOS and Windows builds are logged (published-bytes match) but not rebuilt from source; only the Linux AppImage is.",
       "kind": "process",
       "anchors": [
         ".github/workflows/rebuild-verify.yml",
@@ -3376,7 +3354,7 @@
         "website/assurance.html:85"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62"
     },
     {
       "id": "learn-binary-transparency-09",
@@ -3470,7 +3448,7 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Where the guarantee ends today",
-        "quote": "Only the Linux AppImage closes that loop today; the Linux .deb and .rpm are not rebuilt either."
+        "quote": "Only the Linux AppImage closes that loop; the Linux .deb and .rpm are not rebuilt either."
       },
       "claim": "Only the AppImage payload is reproduced.",
       "kind": "process",
@@ -3482,7 +3460,7 @@
         "website/assurance.html:85"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -9080,7 +9058,7 @@
         "heading": "9.4 Avatars and group icons",
         "quote": "Anyone with the R2 URL can fetch them."
       },
-      "claim": "Anyone holding an avatar/icon URL can fetch the image without authentication (also Known Gaps item 5).",
+      "claim": "Anyone holding an avatar/icon URL can fetch the image without authentication (also Security Trade-offs item 3).",
       "kind": "security",
       "anchors": [
         "pollis-delivery/src/broker.rs",
@@ -10016,7 +9994,7 @@
         ".github/workflows/transparency-publish.yml:47"
       ],
       "status": "verified",
-      "note": "Section 13 item 10 numbers the limits (a)-(e); '§6.9 limit 5' refers to §6.9's own list, outside this scope.",
+      "note": "Section 13 item 6 numbers the limits (a)-(e); '§6.9 limit 5' refers to §6.9's own list, outside this scope.",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
@@ -10041,30 +10019,10 @@
       "also_rendered_in": []
     },
     {
-      "id": "wp-s13-01",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "13. Known Gaps and Audit Focus Recommendations",
-        "quote": "a manually triggered two-client e2e (`e2e-two-client-voice-channel.yml`) runs a real LiveKit SFU but asserts only the participant roster"
-      },
-      "claim": "Voice E2EE has no real two-client decryption test; the two-client e2e is manual and roster-only.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/e2e-two-client-voice-channel.yml"
-      ],
-      "evidence": [
-        ".github/workflows/e2e-two-client-voice-channel.yml:3",
-        ".github/workflows/e2e-two-client-voice-channel.yml:17"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
       "id": "wp-s13-02",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "13. Known Gaps and Audit Focus Recommendations",
+        "heading": "13. Security Trade-offs",
         "quote": "TOFU pins (`batch_check_and_pin_account_keys`, refs #277) run before adds"
       },
       "claim": "TOFU account-key pinning runs before adds.",
@@ -10083,7 +10041,7 @@
       "id": "wp-s13-03",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "13. Known Gaps and Audit Focus Recommendations",
+        "heading": "13. Security Trade-offs",
         "quote": "The DS throttles per mailbox and per IP (§11.1). The counters are in memory"
       },
       "claim": "OTP throttle counters are in DS memory.",
@@ -10104,7 +10062,7 @@
       "id": "wp-s13-04",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "13. Known Gaps and Audit Focus Recommendations",
+        "heading": "13. Security Trade-offs",
         "quote": "Self-updates fire on join and from the launch sweep (7 days + up to 2 days jitter, at most 3 groups per sweep)"
       },
       "claim": "PCS self-updates are launch-driven: 7 d + 2 d jitter, 3 groups per sweep.",
@@ -10125,7 +10083,7 @@
       "id": "wp-s13-05",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "13. Known Gaps and Audit Focus Recommendations",
+        "heading": "13. Security Trade-offs",
         "quote": "Pre-join history is not recoverable, and a new device starts empty unless the user copies history to it from another of their"
       },
       "claim": "Pre-join history is not recoverable, and a new device starts empty unless the user copies history to it from another of their enrolled devices (#1735: device to device, sealed end to end; no key moves and the server holds nothing it can decrypt).",
@@ -10147,7 +10105,7 @@
       "id": "wp-s13-06",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "13. Known Gaps and Audit Focus Recommendations",
+        "heading": "13. Security Trade-offs",
         "quote": "IP hiding exists only as the opt-in relay overlay, off by default."
       },
       "claim": "IP hiding is an opt-in relay overlay, off by default.",
@@ -10167,7 +10125,7 @@
       "id": "wp-s13-07",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "13. Known Gaps and Audit Focus Recommendations",
+        "heading": "13. Security Trade-offs",
         "quote": "removes the escrow and the exposure. Desktop never escrows."
       },
       "claim": "Rich notifications escrow the DB key on mobile; 'Nothing' removes it; desktop never escrows.",
@@ -10187,7 +10145,7 @@
       "id": "wp-s13-08",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "13. Known Gaps and Audit Focus Recommendations",
+        "heading": "13. Security Trade-offs",
         "quote": "The DS compares salted SHA-256 hashes in constant time"
       },
       "claim": "OTP comparison uses salted SHA-256 in constant time.",
@@ -15329,26 +15287,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "site-artifacts-18",
-      "doc": "website/artifacts.html",
-      "locator": {
-        "heading": "The second anchor: Sigstore, SLSA and the SBOM",
-        "quote": "The SBOM is also not yet a leaf in the binaries transparency log."
-      },
-      "claim": "The SBOM is not logged in the binaries tree.",
-      "kind": "process",
-      "anchors": [
-        "scripts/attest-binaries.sh"
-      ],
-      "evidence": [
-        "scripts/attest-binaries.sh:223",
-        "scripts/attest-binaries.sh:317"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
       "id": "site-artifacts-19",
       "doc": "website/artifacts.html",
       "locator": {
@@ -15393,9 +15331,9 @@
       "doc": "website/artifacts.html",
       "locator": {
         "heading": "The second anchor: Sigstore, SLSA and the SBOM",
-        "quote": "is an OpenVEX document naming the known advisories that do not affect this release, and why. It is not a provenance subject, so it has no signature."
+        "quote": "is an OpenVEX document naming the known advisories that do not affect this release, and why."
       },
-      "claim": "Each desktop release publishes an unsigned OpenVEX document next to the SBOM, listing not-affected advisories with a justification.",
+      "claim": "Each desktop release publishes an OpenVEX document next to the SBOM, listing not-affected advisories with a justification.",
       "kind": "process",
       "anchors": [
         ".github/workflows/desktop-release.yml",
@@ -15409,7 +15347,7 @@
         "scripts/oss-inventory.mjs:570"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -16757,7 +16695,7 @@
       "doc": "website/continuity.html",
       "locator": {
         "heading": "What is not solved yet",
-        "quote": "Retiring the current key after a leak still takes a release, verified by the binaries tree that key signs, and the offline"
+        "quote": "Retiring the current key after a leak takes a release, verified by the binaries tree that key signs, and the offline"
       },
       "claim": "A leaked log key still needs an app update. Since #754, an offline root key can name a new log key that installed apps accept without an update, so a lost key is recoverable. Retiring the current key after a leak still takes a release, verified by the binaries tree that key signs, and the offline root has one custodian too.",
       "kind": "security",
@@ -16772,7 +16710,7 @@
         "docs/signing-key-compromise-runbook.md:26"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -18680,9 +18618,9 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "including releases that were never checked, several whose rebuild ran on a different CI machine image from the release and so could"
+        "quote": "Each rebuild's verdict is recorded per release on the assurance page."
       },
-      "claim": "including releases that were never checked, several whose rebuild ran on a different CI machine image from the release and so could not be compared, and any that did not reproduce.",
+      "claim": "Every rebuild verdict is published per release in the rebuild ledger rendered on /assurance.",
       "kind": "process",
       "anchors": [
         "website/rebuild-ledger.json",
@@ -18693,7 +18631,7 @@
         "website/rebuild-ledger.json:720"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -18928,13 +18866,14 @@
       "doc": "website/assurance.html",
       "locator": {
         "heading": "Where this guarantee ends",
-        "quote": "The rebuild runs only when the release workflow succeeds, so v1.9.0, v1.9.1 and v1.10.0 have no verdict."
+        "quote": "The rebuild runs only when the release workflow succeeds, so a release whose workflow did not finish has no verdict and is marked never checked."
       },
-      "claim": "Three releases (v1.9.0, v1.9.1, v1.10.0) were never checked because the rebuild only runs after a successful release.",
+      "claim": "The rebuild runs only after a successful release workflow; releases without a run are shown as never checked.",
       "kind": "process",
       "anchors": [
         ".github/workflows/rebuild-verify.yml",
-        "website/rebuild-ledger.json"
+        "website/rebuild-ledger.json",
+        "website/assurance.js"
       ],
       "evidence": [
         ".github/workflows/rebuild-verify.yml:103",
@@ -18943,71 +18882,7 @@
         "website/rebuild-ledger.json:820"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-05",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "Where this guarantee ends",
-        "quote": "8df524ba (16 August 2026)"
-      },
-      "claim": "8df524ba (16 August 2026)",
-      "kind": "process",
-      "anchors": [
-        "scripts/rebuild-ledger.sh",
-        "website/rebuild-ledger.json"
-      ],
-      "evidence": [
-        "scripts/rebuild-ledger.sh:56",
-        "scripts/rebuild-ledger.sh:57",
-        "website/rebuild-ledger.json:5"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-06",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "Where this guarantee ends",
-        "quote": "The same check re-run on 17 August (same tag, same source) landed on the CI machine image the release had used"
-      },
-      "claim": "v1.9.3's 13 Aug rebuild was environment drift; its 17 Aug re-run (run 32036282718) reproduced 07bccca8.",
-      "kind": "process",
-      "anchors": [
-        "website/rebuild-ledger.json",
-        "docs/reproducible-builds-residuals.md"
-      ],
-      "evidence": [
-        "website/rebuild-ledger.json:744",
-        "docs/reproducible-builds-residuals.md:1"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-07",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "Where this guarantee ends",
-        "quote": "Four later releases (v1.9.9, v1.10.4, v1.11.1 and v1.17.1) are red for the reason explained below: the rebuild landed on a different CI machine image."
-      },
-      "claim": "reproduce byte-identically. The red runs stay in the table. Four later releases (v1.9.9, v1.10.4, v1.11.1 and v1.17.1) are red for the reason explained below: the rebuild landed on a different CI machine image. v1.17.5's rebuild failed after these fixes and has not yet been classified; until it is, the table counts it as a real finding.",
-      "kind": "process",
-      "anchors": [
-        "website/rebuild-ledger.json",
-        "scripts/rebuild-ledger.sh"
-      ],
-      "evidence": [
-        "website/rebuild-ledger.json:440",
-        "website/rebuild-ledger.json:720"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -19015,7 +18890,7 @@
       "doc": "website/assurance.html",
       "locator": {
         "heading": "Where this guarantee ends",
-        "quote": "The workflow now compares the machine image the release recorded with its own and reports one of did not reproduce, build environment drifted or no recorded recipe."
+        "quote": "The workflow compares the machine image the release recorded with its own and reports one of did not reproduce, build environment drifted or no recorded recipe."
       },
       "claim": "rebuild-verify distinguishes did_not_reproduce / environment_drift / recipe_unrecorded, all failing.",
       "kind": "process",
@@ -19028,7 +18903,7 @@
         ".github/workflows/rebuild-verify.yml:735"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -19229,20 +19104,21 @@
       "doc": "website/assurance.html",
       "locator": {
         "heading": "3 · Supply chain",
-        "quote": "Twenty-three are unmaintained-crate notices with no vulnerability (ten are the GTK3 bindings Tauri's WebKit backend requires; no GTK4 Tauri backend exists)."
+        "quote": "The check runs on every change to the dependencies and weekly on a schedule."
       },
-      "claim": "There are 28 exemptions. Twenty-three are unmaintained-crate notices with no vulnerability (ten are the GTK3 bindings Tauri's WebKit backend requires; no GTK4 Tauri backend exists). Five are real vulnerabilities with no reachable fix, listed below.",
-      "kind": "number",
+      "claim": "cargo-deny advisories run on PRs and pushes to main that touch a manifest, the lockfile or deny.toml, and on a weekly schedule; any advisory without a named ignore fails.",
+      "kind": "process",
       "anchors": [
+        ".github/workflows/supply-chain.yml",
         "deny.toml"
       ],
       "evidence": [
-        "deny.toml:31",
-        "deny.toml:41",
-        "deny.toml:53"
+        ".github/workflows/supply-chain.yml:16",
+        ".github/workflows/supply-chain.yml:33",
+        "deny.toml:25"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -19282,50 +19158,6 @@
         "deny.toml:483",
         "deny.toml:500",
         "Cargo.toml:124"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-21",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "3 · Supply chain",
-        "quote": "Transitive via the Delivery Service's JWT library; the decryption-timing oracle is not reachable, since it signs only HS256 tokens and never decrypts with RSA."
-      },
-      "claim": "rsa (RUSTSEC-2023-0071) is exempted because it is reached only through the Delivery Service's JWT library, which signs HS256 tokens and never decrypts with RSA.",
-      "kind": "security",
-      "anchors": [
-        "deny.toml"
-      ],
-      "evidence": [
-        "deny.toml:34",
-        "deny.toml:41"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-22",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "3 · Supply chain",
-        "quote": "The five exempted advisories that are actual vulnerabilities"
-      },
-      "claim": "The five exempted advisories that are actual vulnerabilities",
-      "kind": "number",
-      "anchors": [
-        "deny.toml"
-      ],
-      "evidence": [
-        "deny.toml:31",
-        "deny.toml:41",
-        "deny.toml:53",
-        "deny.toml:79",
-        "deny.toml:94",
-        "deny.toml:95"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -19527,7 +19359,7 @@
       "doc": "website/assurance.html",
       "locator": {
         "heading": "4 · Signing keys, custody and rotation",
-        "quote": "CI now checks that the copies agree on every pull request"
+        "quote": "CI checks that the copies agree on every pull request"
       },
       "claim": "check-pinned-log-key.py runs on PRs (scripts-check.yml) and website-verify.yml checks the deployed site's pin.",
       "kind": "process",
@@ -19543,7 +19375,7 @@
       ],
       "status": "verified",
       "note": "scripts-check.yml is path-filtered, but its filter includes every file that holds a copy of the key (website/**, docs/**, key-set.json, pollis-core/src/**, .github/workflows/**).",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -19624,29 +19456,6 @@
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-41",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "3 · Supply chain",
-        "quote": "The two the desktop app ships never parse untrusted XML: Windows notifications only escape text with it, and on macOS it reads only the app's own signed Info.plist."
-      },
-      "claim": "Of the quick-xml instances under RUSTSEC-2026-0194/0195, two are build-time and the two shipped in the desktop app never parse untrusted XML.",
-      "kind": "security",
-      "anchors": [
-        "deny.toml",
-        "supply-chain/vex.json"
-      ],
-      "evidence": [
-        "deny.toml:85",
-        "deny.toml:88",
-        "deny.toml:94",
-        "supply-chain/vex.json:38"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
     {
@@ -19963,6 +19772,25 @@
       "also_rendered_in": []
     },
     {
+      "id": "site-faq-34",
+      "doc": "website/faq.html",
+      "locator": {
+        "heading": "Does the server record who sent a message?",
+        "quote": "No. The stored message does not say who sent it; only people in the conversation can tell, from the sealed contents."
+      },
+      "claim": "Stored message envelopes carry a sealed sentinel, not the sender; recipients attribute from the MLS credential.",
+      "kind": "behaviour",
+      "anchors": [
+        "pollis-schema/migrations/000008_message_envelope_sealed_sender.sql"
+      ],
+      "evidence": [
+        "pollis-schema/migrations/000008_message_envelope_sealed_sender.sql:1"
+      ],
+      "status": "verified",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
+      "also_rendered_in": []
+    },
+    {
       "id": "site-faq-12",
       "doc": "website/faq.html",
       "locator": {
@@ -20099,7 +19927,7 @@
       "doc": "website/faq.html",
       "locator": {
         "heading": "Is there an iOS or Android app?",
-        "quote": "Its over-the-air JavaScript updates are logged in the binary transparency log before they go live; the store and sideload app binaries themselves"
+        "quote": "Its over-the-air JavaScript updates are logged in the binary transparency log before they go live; the store and sideload app binaries are signed but are not in the log."
       },
       "claim": "Its over-the-air JavaScript updates are logged in the binary transparency log before they go live; the store and sideload app binaries themselves are not logged yet.",
       "kind": "process",
@@ -20112,7 +19940,7 @@
         ".github/workflows/mobile-ota-release.yml:392"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
@@ -20346,6 +20174,26 @@
       "also_rendered_in": []
     },
     {
+      "id": "site-faq-33",
+      "doc": "website/faq.html",
+      "locator": {
+        "heading": "What happens if the server goes down?",
+        "quote": "Unlocking the app and on-device search work offline; the conversation list and message pages load from the server."
+      },
+      "claim": "Unlock and on-device search work offline; the group list and message pages need the Delivery Service.",
+      "kind": "behaviour",
+      "anchors": [
+        "pollis-core/src/commands/ds_reads.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/ds_reads.rs:47",
+        "pollis-core/src/commands/ds_reads.rs:105"
+      ],
+      "status": "verified",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
+      "also_rendered_in": []
+    },
+    {
       "id": "site-faq-30",
       "doc": "website/faq.html",
       "locator": {
@@ -20373,7 +20221,7 @@
       "doc": "website/faq.html",
       "locator": {
         "heading": "Should I trust Pollis with my life?",
-        "quote": "No independent human audit yet; there have been two full adversarial security reviews by teams of AI agents"
+        "quote": "Pollis has had two full adversarial security reviews by teams of AI agents, not an independent human audit"
       },
       "claim": "No independent human audit; two AI-agent reviews.",
       "kind": "process",
@@ -20385,7 +20233,7 @@
       ],
       "status": "unverifiable",
       "note": "Audit history is an external fact; consistent with website/assurance.html section 5.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
       "also_rendered_in": []
     },
     {
