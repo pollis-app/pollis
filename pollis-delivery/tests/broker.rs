@@ -133,6 +133,104 @@ fn livekit_admin_token_grants_room_admin_and_verifies() {
     assert_hs256_signature(&token, LK_SECRET);
 }
 
+// #1845: the DS signs JWTs itself (hmac + sha2) instead of via `jsonwebtoken`.
+// These are the exact tokens `jsonwebtoken` 10.3 minted for the same inputs, so
+// any drift in header bytes, claim order, JSON escaping or base64 shows up here.
+const GOLDEN_PARTICIPANT: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoiYWxpY2UiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAwOTAwLCJuYW1lIjoiIiwidmlkZW8iOnsicm9vbSI6InJvb20tMSIsInJvb21Kb2luIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOnRydWUsImNhblB1Ymxpc2hEYXRhIjp0cnVlfX0.tlPm2YKjgX_TI_Qa6tZu21xAtqI0fqX2YvZ_cNoUfPs";
+const GOLDEN_VIEW: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoiYWxpY2U6dmlldyIsImlhdCI6MTcwMDAwMDAwMCwibmJmIjoxNzAwMDAwMDAwLCJleHAiOjE3MDAwMDA5MDAsIm5hbWUiOiIiLCJ2aWRlbyI6eyJyb29tIjoicm9vbS0xIiwicm9vbUpvaW4iOnRydWUsImNhblB1Ymxpc2giOnRydWUsImNhblN1YnNjcmliZSI6dHJ1ZSwiY2FuUHVibGlzaERhdGEiOmZhbHNlfX0.LGSitJocmDnHiNCqjK_pfDoCRSUvnpZirIX8NnO0FPw";
+const GOLDEN_ESCAPED_ROOM: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoieCIsImlhdCI6MTcwMDAwMDAwMCwibmJmIjoxNzAwMDAwMDAwLCJleHAiOjE3MDAwMDA5MDAsIm5hbWUiOiIiLCJ2aWRlbyI6eyJyb29tIjoiZG0tXCJxXCJcXMOpLzw-JiIsInJvb21Kb2luIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOnRydWUsImNhblB1Ymxpc2hEYXRhIjp0cnVlfX0.gdhkCvoqvBSPSVke4At388QtAdBIqgRNR2JWDT_5-r0";
+const GOLDEN_ADMIN: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoicG9sbGlzLWRzIiwiaWF0IjoxNzAwMDAwMDAwLCJuYmYiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDMwMCwidmlkZW8iOnsicm9vbUFkbWluIjp0cnVlLCJyb29tTGlzdCI6dHJ1ZSwicm9vbSI6ImluYm94LXVfMTIzIn19.sdBn6YplkAJTvoeIfMV42gblkjjOHBToqgP4vNo2VkM";
+const GOLDEN_ADMIN_LIST: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoicG9sbGlzLWRzIiwiaWF0IjoxNzAwMDAwMDAwLCJuYmYiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDMwMCwidmlkZW8iOnsicm9vbUFkbWluIjp0cnVlLCJyb29tTGlzdCI6dHJ1ZSwicm9vbSI6IiJ9fQ.gUxDesquDbBScicD7YlnUzeRh5zlqVeFr6cgNe3sfgE";
+
+#[test]
+fn livekit_tokens_are_byte_identical_to_the_jsonwebtoken_output() {
+    let now = 1_700_000_000u64;
+    let mint = |room: &str, identity: &str, data: bool| {
+        sign_livekit_token(LK_KEY, LK_SECRET, room, identity, data, now).unwrap()
+    };
+    assert_eq!(mint("room-1", "alice", true), GOLDEN_PARTICIPANT);
+    assert_eq!(mint("room-1", "alice:view", false), GOLDEN_VIEW);
+    assert_eq!(mint("dm-\"q\"\\\u{e9}/<>&", "x", true), GOLDEN_ESCAPED_ROOM);
+    assert_eq!(
+        sign_livekit_admin_token(LK_KEY, LK_SECRET, "inbox-u_123", now).unwrap(),
+        GOLDEN_ADMIN
+    );
+    assert_eq!(
+        sign_livekit_admin_token(LK_KEY, LK_SECRET, "", now).unwrap(),
+        GOLDEN_ADMIN_LIST
+    );
+}
+
+/// Sign, then verify and decode the way a LiveKit server does: HS256 over the
+/// first two segments with the shared secret, and the claims read back intact.
+#[test]
+fn livekit_token_round_trips_through_an_hs256_verifier() {
+    let now = 1_700_000_000u64;
+    let room = "dm-\"q\"\\\u{e9}/<>&";
+    let token = sign_livekit_token(LK_KEY, LK_SECRET, room, "x", true, now).unwrap();
+    assert_hs256_signature(&token, LK_SECRET);
+    let (header, payload, signature) = split_jwt(&token);
+    assert_eq!(header, serde_json::json!({ "typ": "JWT", "alg": "HS256" }));
+    assert_eq!(payload["video"]["room"], room);
+    assert_eq!(payload["sub"], "x");
+
+    // A different secret must not verify.
+    let last_dot = token.rfind('.').unwrap();
+    let mut mac = Hmac::<Sha256>::new_from_slice(b"another-secret").unwrap();
+    mac.update(&token.as_bytes()[..last_dot]);
+    let wrong = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(mac.finalize().into_bytes());
+    assert_ne!(signature, wrong);
+}
+
+/// Live round trip against a real LiveKit server: the participant token passes
+/// `/rtc/validate` and the admin token is accepted by `RoomService/ListRooms`,
+/// while one signed under the wrong secret is refused. Needs `LIVEKIT_URL` /
+/// `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` (e.g. a `livekit-server --dev`), so
+/// it is ignored by default:
+/// `cargo test -p pollis-delivery --test broker -- --ignored live_livekit`.
+#[tokio::test]
+#[ignore = "needs a reachable LiveKit server and its key/secret in env"]
+async fn live_livekit_accepts_minted_tokens() {
+    let url = std::env::var("LIVEKIT_URL").expect("LIVEKIT_URL");
+    let key = std::env::var("LIVEKIT_API_KEY").expect("LIVEKIT_API_KEY");
+    let secret = std::env::var("LIVEKIT_API_SECRET").expect("LIVEKIT_API_SECRET");
+    let base = url
+        .trim_end_matches('/')
+        .replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let http = reqwest::Client::new();
+    let list_rooms = |token: String| {
+        http.post(format!("{base}/twirp/livekit.RoomService/ListRooms"))
+            .bearer_auth(token)
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+    };
+
+    let participant =
+        sign_livekit_token(&key, &secret, "pollis-roundtrip", "roundtrip", false, now).unwrap();
+    let resp = http
+        .get(format!("{base}/rtc/validate"))
+        .query(&[("access_token", participant.as_str())])
+        .send()
+        .await
+        .expect("validate request");
+    assert!(resp.status().is_success(), "participant token rejected: {}", resp.status());
+
+    let admin = sign_livekit_admin_token(&key, &secret, "", now).unwrap();
+    let resp = list_rooms(admin).await.expect("ListRooms request");
+    assert!(resp.status().is_success(), "admin token rejected: {}", resp.status());
+
+    let forged = sign_livekit_admin_token(&key, "not-the-secret", "", now).unwrap();
+    let resp = list_rooms(forged).await.expect("ListRooms request");
+    assert_eq!(resp.status().as_u16(), 401, "a token under the wrong secret must be refused");
+}
+
 // R2 SigV4 known-answer: path-style, so the signature is not AWS's documented one.
 
 const R2_ENDPOINT: &str = "https://accountid.r2.cloudflarestorage.com";

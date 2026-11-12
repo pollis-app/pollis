@@ -293,7 +293,11 @@ under the endpoint above.
 functions (both take an injected clock so output is deterministic):
 
 - `sign_livekit_token` — decode the JWT, assert HS256/`typ=JWT` header, claim
-  shape, and re-verify the HS256 signature against the secret.
+  shape, and re-verify the HS256 signature against the secret. Golden tokens pin
+  the exact bytes (the DS signs with its own `encode_hs256_jwt` on hmac + sha2
+  since #1845; the goldens are what `jsonwebtoken` produced). An ignored test,
+  `live_livekit_accepts_minted_tokens`, round-trips tokens through a real
+  LiveKit given `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`.
 - `presign_r2_url` — SigV4 golden test: every input pinned, the exact URL string
   asserted (GET + PUT-with-slash/space), plus a canonical-query ordering check.
   The GET signature is cross-checked against an independent SigV4 implementation.
