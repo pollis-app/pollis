@@ -32,6 +32,7 @@ Not scanned, each for a reason: `e2e/` (test code), `pollis-delivery/worker/` (o
   | `mobile/lib/username.ts` | `frontend/src/utils/username.ts` | `mobile/tests/username.test.ts` |
   | `mobile/lib/identityFields.ts` | `frontend/src/utils/identityFields.ts` | `mobile/tests/identity-fields.test.ts` |
   | `mobile/lib/securityEvents.ts` | `frontend/src/components/Security/securityEvents.ts` | `mobile/tests/security-events.test.ts` |
+  | `mobile/lib/dmActivity.ts` | `frontend/src/utils/dmActivity.ts` | `mobile/tests/dm-activity.test.ts` (byte-identical) |
   | `mobile/i18n/languages.ts`, `namespaces.ts` | `frontend/src/i18n/languages.ts`, `namespaces.ts` | `mobile/tests/i18n.test.ts` |
   | `mobile/types/index.ts` | `frontend/src/types/index.ts` (and the Rust structs) | by hand |
 
