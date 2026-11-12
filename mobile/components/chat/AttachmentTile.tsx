@@ -16,7 +16,7 @@ import { useThemeRerender } from "../theme";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { tileTap } from "../../lib/sensitiveMedia";
 import { SensitiveCover, SensitiveHideButton } from "./SensitiveCover";
-import { useMediaUri } from "../../hooks/useMediaUri";
+import { useNamedMediaUri } from "../../hooks/useNamedMediaUri";
 import { useVideoPoster } from "../../hooks/useVideoPoster";
 import { peekMediaUri } from "../../lib/media/cache";
 import { videoPosterPlan } from "../../lib/media/videoPoster";
@@ -82,7 +82,8 @@ export const AttachmentTile = observer(function AttachmentTile({
     kind === "video" && !covered
       ? videoPosterPlan(attachment, !!(attachment.object_key && peekMediaUri(attachment.content_hash)))
       : "none";
-  const legacyFile = useMediaUri(plan === "legacy" ? attachment : null);
+  // The named copy: AVFoundation, like AVPlayer, types a file by its extension.
+  const legacyFile = useNamedMediaUri(attachment, plan === "legacy");
   const decodeUri =
     plan === "pending" ? attachment.localPreviewUri ?? null : plan === "legacy" ? legacyFile.uri : null;
   const decoded = useVideoPoster(decodeUri);
