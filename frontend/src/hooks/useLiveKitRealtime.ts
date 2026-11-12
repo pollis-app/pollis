@@ -10,7 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useObserver } from 'mobx-react-lite';
 import { appStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
-import { flushOutbox, lastMessageQueryKeys, messageQueryKeys, useDMConversations, markIngested } from './queries/useMessages';
+import { flushOutbox, lastMessageQueryKeys, messageQueryKeys, useDMConversations, markIngested, refreshDMActivity } from './queries/useMessages';
 import { receiptQueryKeys } from './queries/useReceipts';
 import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipants';
 import { usePreferences } from './queries/usePreferences';
@@ -712,6 +712,10 @@ export function useLiveKitRealtime() {
           });
         },
       });
+      // A message sent or received moves its DM to the top (#1838), whether or not it alerted.
+      if (conversationId) {
+        await refreshDMActivity(queryClientRef.current, currentUser.id, [conversationId]);
+      }
     };
 
     invoke('subscribe_realtime', { onEvent: channel }).catch((err) => {
