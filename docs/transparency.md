@@ -70,7 +70,8 @@ history:
   `pollis-verify release <base-url> <tag>`, which runs the same `verify_release`
   function that produces the published `/verify/release/<tag>` report. Since #1250
   the same tree also holds every **mobile over-the-air update** and rollback (see
-  "Mobile OTA updates in the binaries tree" below).
+  "Mobile OTA updates in the binaries tree" below), and since #1848 each desktop
+  release's **SBOM and VEX** (see "Release documents in the binaries tree").
 
 One key signs all three, under different domain-separation contexts
 (`pollis-verifiable-log:sth:v2:commit-log-2`, `…:sth:v2:account-keys`,
@@ -447,7 +448,7 @@ identity, and pseudonymizing the id would break that.
 
 ### The binaries invariant
 
-On replay, the binaries tree enforces three rules over the whole tree:
+On replay, the binaries tree enforces four rules over the whole tree:
 
 - **No silent re-issue**: no two leaves share
   `(release_tag, platform, arch, bundle, layer)` with different `artifact_sha256`.
@@ -458,10 +459,40 @@ On replay, the binaries tree enforces three rules over the whole tree:
   non-reproducible wrapper) and every `layer:"exe"` leaf (the installed main executable) must have an earlier `layer:"payload"` leaf with the
   same `payload_sha256`, so the reproducible content of every signed artifact is
   itself logged.
+- **Release-document shape** (#1848): a leaf with `bundle` `sbom` or `vex` is a
+  `payload` leaf with `artifact_sha256 == payload_sha256`, platform and arch `any`,
+  and an `artifact_name` ending in `.cdx.json` or `.vex.json` respectively.
 
 A violation in the source records aborts the build, and `pollis-verify release`
 checks the invariant again, so a forked or unpaired tree is rejected even if it is
-correctly signed.
+correctly signed. `pollis-verify release` also fails a tag that logs one release
+document without the other.
+
+### Release documents in the binaries tree (#1848)
+
+Every desktop release publishes a CycloneDX SBOM and an OpenVEX statement next to
+its installers. Both are SLSA provenance subjects with a keyless cosign signature
+(the `provenance` job), and `attest-and-log` logs each as a leaf after the
+release's binaries, under the same tag. A later, quieter SBOM, or a VEX that
+claims more advisories do not apply, cannot replace the one a release shipped
+without the swap showing as a fork. The leaves use the same frozen `BinaryRecord`.
+Neither the leaf contract nor any `Layer` changed, so every verifier already
+deployed decodes and replays them:
+
+| field | value |
+|---|---|
+| `release_tag` | the desktop release's tag |
+| `platform`, `arch` | `any` (one document covers every platform's build) |
+| `bundle` | `sbom` or `vex` |
+| `artifact_name` | `pollis-<tag>.cdx.json` / `pollis-<tag>.vex.json`, as published at `cdn.pollis.com/releases/<tag>/` |
+| `layer` | `payload` (artifact = payload; nothing re-signs a document after it is logged) |
+| `toolchain` | the `sbom` job's own recipe (`pollis-<tag>-sbom.toolchain.json`), since that job ran the generator |
+| `provenance_uri` | `cdn.pollis.com/releases/<tag>/<artifact_name>.intoto.jsonl` |
+
+Releases cut before #1848 have no document leaves and verify exactly as before.
+The copies under `releases/oss/desktop/<tag>/` are the same bytes under their
+`pollis-desktop-<tag>` names, and `oss-evidence.yml` refuses to republish a
+desktop version whose documents are logged.
 
 ### Mobile OTA updates in the binaries tree (#1250)
 

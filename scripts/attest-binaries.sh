@@ -33,6 +33,8 @@
 #     inside an install. The AppImage needs no `exe` leaf — its shipped bytes ARE
 #     the payload and the running app hashes them directly via $APPIMAGE, which
 #     is a strictly stronger check (whole payload, not just the main binary).
+#   * the release's SBOM and VEX each get a `payload` leaf after the binaries
+#     (bundle `sbom` / `vex`, platform and arch `any`; #1848, see the end).
 #
 # Output: a JSON array of BinaryRecords (this tag only) at $OUT, in publish
 # order. The caller (desktop-release.yml) merges it into the accumulating
@@ -329,6 +331,52 @@ if [ -n "${rpm:-}" ]; then
   bsdtar -xf "$rpm" -C "$ex"
   emit_exe linux x86_64 rpm "$name" "$sha" "$(find_installed_bin "$ex")"
 fi
+
+# ── Release documents: the SBOM and VEX, after the binaries (#1848) ──
+#
+# The CycloneDX SBOM and OpenVEX statement published next to the installers get
+# a leaf each, so a later, quieter document cannot replace the one a release
+# shipped without the swap showing in the log. The frozen BinaryRecord carries
+# them unchanged — no new Layer variant, which every verifier already deployed
+# would fail to decode — told apart by `bundle` (`sbom` / `vex`), with platform
+# and arch `any` (one document covers every platform) and `layer: payload`
+# (nothing re-signs a document after it is logged, so artifact == payload).
+# verifiable-log-builder/src/binaries.rs :: ReleaseDocument enforces that shape.
+#
+# The recipe is the sbom job's own (it ran the generator), from its
+# `*-sbom.toolchain.json` sidecar — never borrowed from a build job.
+#
+# RELEASE_DOCUMENTS=required (the default) hard-fails when either document or the
+# sidecar is missing: a release must not lose its document leaves quietly.
+# `skip` attests the installers only, for backfilling a tag released before
+# #1848, which published no sbom recipe sidecar (attest-release.yml).
+case "${RELEASE_DOCUMENTS:-required}" in
+  required)
+    sbom="$(find_one "pollis-${RELEASE_TAG}.cdx.json" || true)"
+    vex="$(find_one "pollis-${RELEASE_TAG}.vex.json" || true)"
+    if [ -z "${sbom:-}" ] || [ -z "${vex:-}" ]; then
+      echo "::error::attest: release documents missing — want pollis-${RELEASE_TAG}.cdx.json"
+      echo "::error::  and pollis-${RELEASE_TAG}.vex.json under ${ARTIFACTS_DIR}, got"
+      echo "::error::  '${sbom:-<no match>}' and '${vex:-<no match>}'. The sbom job in"
+      echo "::error::  desktop-release.yml publishes both. To backfill a tag released"
+      echo "::error::  before #1848, set RELEASE_DOCUMENTS=skip."
+      exit 1
+    fi
+    load_toolchain "release documents" '*-sbom.toolchain.json'
+    for doc in "sbom:$sbom" "vex:$vex"; do
+      kind="${doc%%:*}"; file="${doc#*:}"
+      sha="$(sha_file "$file")"
+      emit any any "$kind" "$(basename "$file")" payload "$sha" "$sha"
+    done
+    ;;
+  skip)
+    echo "attest: RELEASE_DOCUMENTS=skip — no SBOM/VEX leaves for ${RELEASE_TAG}"
+    ;;
+  *)
+    echo "::error::attest: RELEASE_DOCUMENTS must be 'required' or 'skip', got '${RELEASE_DOCUMENTS}'"
+    exit 1
+    ;;
+esac
 
 count="$(jq 'length' <<<"$records")"
 [ "$count" -gt 0 ] || { echo "::error::attest: no artifacts found under ${ARTIFACTS_DIR}"; exit 1; }

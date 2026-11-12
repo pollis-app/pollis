@@ -10,7 +10,9 @@ use ml_dsa::Keypair;
 use verifiable_log::SigningKey;
 use verifiable_log::{Entry, Sth, VerifiableLog};
 use verifiable_log_builder::account_key::STH_CONTEXT as ACCOUNT_STH_CONTEXT;
-use verifiable_log_builder::binaries::{self, BinaryRecord, Layer, Toolchain};
+use verifiable_log_builder::binaries::{
+    self, BinaryRecord, Layer, ReleaseDocument, Toolchain, RELEASE_DOCUMENT_TARGET,
+};
 use verifiable_log_builder::{build_binaries_bundle, build_bundle, CommitRow};
 use verifiable_log_serve::bundle::{Bundle, InclusionCheck};
 use verifiable_log_serve::{layout, release, remote, DevServer};
@@ -217,18 +219,13 @@ fn unknown_tag_reports_not_found() {
     assert!(report.artifacts.is_empty());
 }
 
-#[test]
-fn forked_tree_fails_the_verifiers_independent_replay() {
-    // A forked tree the builder would refuse; the verifier must catch it on replay.
+/// A correctly signed bundle over `records` with NO invariant enforced on append:
+/// a tree the builder would refuse, so the verifier's own replay must catch it.
+fn unchecked_bundle(records: &[BinaryRecord]) -> Bundle {
     let key = signing_key();
-    let forked = vec![
-        record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x11, 0x11),
-        record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x99, 0x99),
-    ];
-
     let mut log = VerifiableLog::new();
     let mut entries: Vec<Entry> = Vec::new();
-    for r in &forked {
+    for r in records {
         let entry = r.to_entry().unwrap();
         log.append(entry.clone()).unwrap();
         entries.push(entry);
@@ -243,7 +240,7 @@ fn forked_tree_fails_the_verifiers_independent_replay() {
         })
         .collect();
 
-    let bundle = Bundle {
+    Bundle {
         public_key: hex::encode(key.verifying_key().encode()),
         retired_keys: Vec::new(),
         sths: vec![sth],
@@ -251,7 +248,15 @@ fn forked_tree_fails_the_verifiers_independent_replay() {
         enforce_unique: vec![binaries::TENANT.to_string()],
         inclusion,
         consistency: Vec::new(),
-    };
+    }
+}
+
+#[test]
+fn forked_tree_fails_the_verifiers_independent_replay() {
+    let bundle = unchecked_bundle(&[
+        record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x11, 0x11),
+        record("v1.3.0", "darwin", "aarch64", "dmg", Layer::Payload, 0x99, 0x99),
+    ]);
 
     let report = release::verify_release_in_bundle(&bundle, "v1.3.0");
     assert!(
@@ -426,4 +431,98 @@ fn ota_update_groups_verify_alongside_desktop_releases() {
     twice.push(ota_record(publish, "ios", rv_ios, "ota-manifest", 0x40));
     let err = build_binaries_bundle(&twice, &signing_key(), TS).unwrap_err();
     assert!(err.to_string().contains("out of publish order"), "got: {err}");
+}
+
+/// One release-document leaf (#1848), in the exact shape `scripts/attest-binaries.sh` emits.
+fn document_record(tag: &str, doc: ReleaseDocument, digest: u8) -> BinaryRecord {
+    let artifact_name = format!("pollis-{tag}{}", doc.suffix());
+    BinaryRecord {
+        release_tag: tag.to_string(),
+        commit: "f".repeat(40),
+        platform: RELEASE_DOCUMENT_TARGET.to_string(),
+        arch: RELEASE_DOCUMENT_TARGET.to_string(),
+        bundle: doc.bundle().to_string(),
+        artifact_name: artifact_name.clone(),
+        layer: Layer::Payload,
+        payload_sha256: hex::encode([digest; 32]),
+        artifact_sha256: hex::encode([digest; 32]),
+        toolchain: toolchain(),
+        provenance_uri: format!("cdn.pollis.com/releases/{tag}/{artifact_name}.intoto.jsonl"),
+    }
+}
+
+/// The SBOM and VEX are logged after a release's binaries, under the same tag, and
+/// a release from before they were logged still verifies in the same tree.
+#[test]
+fn release_documents_verify_and_older_releases_without_them_still_pass() {
+    let mut records = fixture_records();
+    records.push(record("v1.4.0", "linux", "x86_64", "appimage", Layer::Payload, 0x44, 0x44));
+    records.push(document_record("v1.4.0", ReleaseDocument::Sbom, 0x51));
+    records.push(document_record("v1.4.0", ReleaseDocument::Vex, 0x52));
+    let bundle = to_serve_bundle(&build_binaries_bundle(&records, &signing_key(), TS).unwrap());
+
+    let older = release::verify_release_in_bundle(&bundle, "v1.3.0");
+    assert!(older.chain_valid, "violations: {:?}", older.violations);
+    assert_eq!(older.artifacts.len(), 5);
+    assert!(older.artifacts.iter().all(|a| a.release_document().is_none()));
+
+    let report = release::verify_release_in_bundle(&bundle, "v1.4.0");
+    assert!(report.chain_valid, "violations: {:?}", report.violations);
+    assert_eq!(report.artifacts.len(), 3);
+    let docs: Vec<_> = report
+        .artifacts
+        .iter()
+        .filter_map(|a| a.release_document().map(|d| (d, a)))
+        .collect();
+    assert_eq!(docs.len(), 2);
+    for (doc, a) in docs {
+        assert!(a.included, "{} must be provably included", a.artifact_name);
+        assert_eq!(a.artifact_name, format!("pollis-v1.4.0{}", doc.suffix()));
+        assert_eq!(a.artifact_sha256, a.payload_sha256);
+    }
+
+    // The JSON shape is unchanged: documents are artifacts, told apart by `bundle`.
+    let json = serde_json::to_value(&report).unwrap();
+    let bundles: Vec<&str> = json["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["bundle"].as_str().unwrap())
+        .collect();
+    assert_eq!(bundles, ["appimage", "sbom", "vex"]);
+}
+
+/// A release that logs one document but not the other is incomplete.
+#[test]
+fn a_release_logging_only_its_sbom_fails() {
+    let mut records = fixture_records();
+    records.push(document_record("v1.3.0", ReleaseDocument::Sbom, 0x51));
+    let bundle = to_serve_bundle(&build_binaries_bundle(&records, &signing_key(), TS).unwrap());
+
+    let report = release::verify_release_in_bundle(&bundle, "v1.3.0");
+    assert!(!report.chain_valid);
+    assert!(
+        report.violations.iter().any(|v| v.contains("no vex leaf")),
+        "got: {:?}",
+        report.violations
+    );
+}
+
+/// A malformed document leaf the builder would refuse fails the verifier's replay.
+#[test]
+fn a_malformed_release_document_fails_the_replay() {
+    let mut records = fixture_records();
+    records.push(document_record("v1.3.0", ReleaseDocument::Sbom, 0x51));
+    let mut vex = document_record("v1.3.0", ReleaseDocument::Vex, 0x52);
+    vex.platform = "linux".to_string();
+    records.push(vex);
+    assert!(build_binaries_bundle(&records, &signing_key(), TS).is_err());
+
+    let report = release::verify_release_in_bundle(&unchecked_bundle(&records), "v1.3.0");
+    assert!(!report.chain_valid);
+    assert!(
+        report.violations.iter().any(|v| v.contains("platform/arch")),
+        "got: {:?}",
+        report.violations
+    );
 }

@@ -15,7 +15,7 @@ pub mod keys;
 pub mod source;
 
 pub use account_key::{AccountKeyInvariant, AccountKeyLeaf};
-pub use binaries::{BinaryInvariant, BinaryRecord, Layer, Toolchain};
+pub use binaries::{BinaryInvariant, BinaryRecord, Layer, ReleaseDocument, Toolchain};
 pub use builder::{
     build_account_bundle, build_binaries_bundle, build_bundle, build_bundle_from_leaves,
     build_commit_log_2_bundle, Bundle, RetiredKey,
