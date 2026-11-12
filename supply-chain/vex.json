@@ -27,24 +27,6 @@
       "aliases": ["GHSA-q83h-524g-xf6h"],
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The flaw lets an HTTP/2 peer flood a connection with empty DATA frames. h2 0.3 is linked only into libsql's outbound client to the database, and that client offers ALPN http/1.1 only, so no HTTP/2 connection is ever negotiated. The Delivery Service's inbound listener (hyper 1.x) is built without HTTP/2."
-    },
-    {
-      "id": "RUSTSEC-2026-0194",
-      "ecosystem": "cargo",
-      "package": "quick-xml",
-      "affected": ["<0.41.0"],
-      "aliases": [],
-      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The denial of service needs attacker-controlled XML to be parsed. In the desktop app quick-xml is reached two ways, and neither parses untrusted input: Windows notifications use only its escape function to build toast XML (no parsing), and the plist crate parses only the app's own signed Info.plist on macOS. No Pollis product parses XML from the network or from users."
-    },
-    {
-      "id": "RUSTSEC-2026-0195",
-      "ecosystem": "cargo",
-      "package": "quick-xml",
-      "affected": ["<0.41.0"],
-      "aliases": [],
-      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "The denial of service needs attacker-controlled XML to be parsed. In the desktop app quick-xml is reached two ways, and neither parses untrusted input: Windows notifications use only its escape function to build toast XML (no parsing), and the plist crate parses only the app's own signed Info.plist on macOS. No Pollis product parses XML from the network or from users."
     }
   ]
 }
