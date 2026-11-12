@@ -9,9 +9,9 @@
     "facts, cli, installers, surfaces, platform-matrix: the baselines that landed with #1722, #1721 and #1728."
   ],
   "claims": {
-    "sha": "ea87926b9a8d08da46fec6bbcd76cbff46b56be6",
+    "sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
     "date": "2026-11-12",
-    "by": "sweep-claims (#1723)"
+    "by": "sweep-claims"
   },
   "facts": {
     "sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
