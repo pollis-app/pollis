@@ -357,6 +357,7 @@ or media.
 | `e2e-two-client-delete.yml` | `two-client-delete.js` — delete-for-everyone flips B's delivered copy | backend |
 | `e2e-two-client-channel.yml` | `two-client-channel.js` — group + text channel, invite, accept, post, receive | backend |
 | `e2e-two-client-voice-channel.yml` | `two-client-voice-channel.js` — both join a voice channel, one leaves | backend + LiveKit + audio |
+| `e2e-two-client-voice-channel.yml` (second step) | `voice-removal-frame-keys.js` — a member removed mid-call holds no current frame key and decrypts nothing after re-entering (app built with `--features pollis/e2e-hooks`) | backend + LiveKit + audio |
 | `e2e-two-client-call.yml` | `two-client-call.js` — place + accept a real 1:1 call | backend + LiveKit + audio |
 | `e2e-two-client-camera.yml` | `two-client-camera.js` — B sees A's remote camera tile | backend + LiveKit + audio + virtual camera |
 | `e2e-two-client-screenshare.yml` | `two-client-screenshare.js` — B sees A's remote screenshare tile | backend + LiveKit + audio (X11/Xvfb capture) |

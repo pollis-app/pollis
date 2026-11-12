@@ -16,6 +16,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 |---|----------|---|---|--------|-------|
 | M-CH | Group + text-channel convergence: A creates group+channel, invites B, B accepts, A posts, B receives | 5 | 2 | ✅ | two-client-channel.js. Core Slack model. Invite path is MLS-synchronous (reliable). |
 | M-VC | Voice channel: A joins, B joins same channel, both see 2 participants, A leaves, B sees drop | 5 | 2 | ✅ | two-client-voice-channel.js. Explicitly requested. Needs LiveKit + audio + group membership (MLS voice key). |
+| M-VRK | Voice removal: A removes C mid-call; A and B rotate, C holds no current frame key and decrypts nothing after re-entering with its join-time token | 5 | 4 | ✅ | voice-removal-frame-keys.js (#1850). Reads frame-cryptor state through the debug-only `pollis/e2e-hooks` commands. |
 | M-OFF | Offline convergence: A sends while B's app closed, B relaunches → receives (bounded history) | 5 | 2 | ⬜ | "Messages must work" invariant. |
 | M-DM2 | DM bidirectional: B replies to A, A sees B's message | 4 | 3 | ✅ | two-client-dm-reply.js — asserts the B→A leg two-client.js does not. |
 | M-INV | Invite link (#847): A mints a link, copies it, B redeems and joins; A revokes, B's retry is refused. Run in BOTH skins | 5 | 2 | ✅ | invite-links.js. Asserts the clipboard really holds the token (it can never be shown again) and that the failure message does not disclose WHY. |
