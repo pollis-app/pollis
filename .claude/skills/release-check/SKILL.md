@@ -20,6 +20,7 @@ scripts/release-impact.sh            # every target: live version vs main
 scripts/release-impact.sh --pr <N>   # if a PR number was given: which targets it feeds
 node scripts/feature-parity.mjs --since <last release tag>   # parity gaps new since the last release
 node scripts/feature-parity.mjs      # gaps that are neither exempt nor known debt
+node scripts/sweep.mjs --summary     # drift sweeps due since each was last swept (#1728)
 ```
 
 For `--since`, use the newer of the latest `v*` tag and the latest `mobile-v*`
@@ -46,6 +47,11 @@ Output one table, every target, every time:
 
 | Target | Status | Decision | Why |
 |---|---|---|---|
+
+Under the table, print the `sweeps due: …` line from `sweep.mjs --summary`
+verbatim. It is informational: drift sweeps never block a deploy. If it names
+anything and the release ships every app together, the sweeps belong in it
+(`/pre-release-sweeps`); otherwise leave them for the next full release.
 
 Decision is one of **deploy**, **defer (reason)** or **N/A**. Deferring is
 fine; forgetting is the bug. Rules that change the decision:
