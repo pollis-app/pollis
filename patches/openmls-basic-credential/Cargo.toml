@@ -1,0 +1,52 @@
+# Pollis copy of `openmls_basic_credential` 0.5.0 at the pinned openmls rev
+# (34222ef632c87df58baaa7614c8a72ac235c5f07), swapped in by the
+# `[patch.crates-io]` entry in the workspace Cargo.toml (#1846).
+#
+# The ONLY change from upstream is the p256/p384 0.13 -> 0.14 move (and the
+# getrandom/rand_core 0.10 RNG that p256 0.14's key generation takes), ported
+# from upstream openmls#2249 (055a2b4b). It takes elliptic-curve 0.13 and
+# crypto-bigint 0.5 out of the graph. Key and signature encodings are
+# unchanged (SEC1 uncompressed public keys, DER signatures, raw scalars), and
+# Pollis signs with ML-DSA-44 anyway. Ed25519, ML-DSA and the serialized
+# `SignatureKeyPair` layout are untouched.
+#
+# Name and version must match the upstream crate, or the patch stops applying.
+# Delete this directory and its patch entry when the openmls rev moves to one
+# whose basic_credential is on p256 0.14 (upstream main after 055a2b4b).
+[package]
+name = "openmls_basic_credential"
+version = "0.5.0"
+authors = ["OpenMLS Authors"]
+edition = "2021"
+rust-version = "1.91.0"
+publish = false
+description = "A Basic Credential implementation for OpenMLS"
+license = "MIT"
+documentation = "https://docs.rs/openmls_basic_credential"
+repository = "https://github.com/openmls/openmls/tree/main/basic_credential"
+readme = "README.md"
+
+[dependencies]
+openmls_traits = { version = "0.5.0" }
+tls_codec = { version = "0.5", features = ["derive", "serde", "mls"] }
+serde = { version = "^1.0" }
+
+# Rust Crypto
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+p256 = { version = "0.14" }
+p384 = { version = "0.14" }
+ml-dsa = "0.1.0"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rand_core_0_10 = { package = "rand_core", version = "0.10" }
+getrandom = { version = "0.4", features = ["sys_rng"] }
+zeroize = "1.8.2"
+
+[features]
+clonable = [] # Make the keys clonable
+test-utils = [] # Only use for tests!
+draft-ietf-mls-pq-ciphersuites = [
+    "openmls_traits/draft-ietf-mls-pq-ciphersuites",
+]
+
+[dev-dependencies]
+serde_json = "1.0.149"
