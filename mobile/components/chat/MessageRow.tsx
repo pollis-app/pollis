@@ -8,6 +8,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useTranslation } from "react-i18next";
+import { KeyboardController } from "react-native-keyboard-controller";
 import { UserAvatar } from "../UserAvatar";
 import { Icon } from "../icons";
 import { fonts, r, semantic, type as ty } from "../../theme/tokens";
@@ -36,6 +37,10 @@ const AVATAR = 40;
 const AVATAR_GAP = 12;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+function dismissKeyboard() {
+  void KeyboardController.dismiss();
+}
 
 /** One timeline message, Discord-style; the whole row is ONE accessible element. */
 export function MessageRow({
@@ -158,10 +163,12 @@ export function MessageRow({
     press.value = withTiming(0, { duration: PRESS_FEEDBACK.fadeOutMs });
   };
 
-  // Touch long press plays a haptic (#1286); the a11y action does not.
+  // Touch long press plays a haptic (#1286); the a11y action does not. The sheet opens with
+  // the keyboard going down, as in Slack, Discord and Signal (#1859).
   const onLongPressTouch = onLongPress
     ? () => {
         haptic("longPress");
+        void KeyboardController.dismiss();
         onLongPress();
       }
     : undefined;
@@ -210,6 +217,8 @@ export function MessageRow({
   return (
     <SwipeToReply onReply={onReply} pressFeedback={press}>
       <AnimatedPressable
+        // The list persists "handled" taps (#1859), so a tap on a row dismisses the keyboard here.
+        onPress={dismissKeyboard}
         onLongPress={onLongPressTouch}
         delayLongPress={LONG_PRESS_MS}
         onPressIn={onPressIn}

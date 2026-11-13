@@ -1,0 +1,149 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# MESSAGE ACTIONS WITH THE KEYBOARD UP (#1859) — with the composer focused, ONE
+# long press on a message opens its action sheet, and the keyboard goes down as
+# the sheet opens (Slack, Discord and Signal do the same). Before the fix the
+# message list's scroll view took every touch while the keyboard was up (React
+# Native's default keyboardShouldPersistTaps="never"), so the first long press
+# only dismissed the keyboard. Every press here is a single attempt on purpose:
+# the retries in long-press-message.yaml / long-press-link.yaml would hide it.
+# Also: a long press on a link opens its sheet the same way, and a plain tap on
+# a row still dismisses the keyboard. Self-contained: a fresh self-owned group.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Keyboard Actions"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "E2E Keyboard Actions, .*"
+    timeout: 15000
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+- tapOn:
+    id: "input-composer"
+- inputText: "Long press me with the keyboard up"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*Long press me with the keyboard up.*"
+    timeout: 10000
+- runFlow: ../subflows/message-settled.yaml
+
+# 1. The composer is focused and the keyboard is up: one long press opens the sheet.
+- tapOn:
+    id: "input-composer"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-open"
+    timeout: 5000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: message-actions-keyboard-01-keyboard-up
+- longPressOn:
+    id: "row-message-.*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-edit"
+    timeout: 4000
+- takeScreenshot: message-actions-keyboard-02-sheet
+- tapOn:
+    id: "btn-action-cancel"
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-edit"
+    timeout: 5000
+# The keyboard went down with the sheet and stays down.
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 5000
+
+# 2. The same from the sheet's own action: Edit works straight from a press made
+# with the keyboard up (the sheet is live, not a dead overlay).
+- tapOn:
+    id: "input-composer"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-open"
+    timeout: 5000
+- longPressOn:
+    id: "row-message-.*"
+- extendedWaitUntil:
+    visible:
+      id: "btn-edit"
+    timeout: 4000
+- tapOn:
+    id: "btn-edit"
+- assertVisible:
+    id: "btn-edit-save"
+- tapOn:
+    id: "btn-edit-cancel"
+# No hideKeyboard here: with no keyboard up, Android's is a Back that leaves the chat.
+- assertVisible:
+    id: "input-composer"
+
+# 3. A plain tap on a row still dismisses the keyboard.
+- tapOn:
+    id: "input-composer"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-open"
+    timeout: 5000
+- tapOn:
+    id: "row-message-.*"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 5000
+- assertNotVisible:
+    id: "btn-edit"
+
+# 4. A link: one long press with the keyboard up opens the link sheet.
+- tapOn:
+    id: "input-composer"
+- inputText: "https://example.com/pollis-e2e/keyboard/one-long-link-that-wraps-across-several-lines-of-the-message-body?with=query&and=more"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*example.com/pollis-e2e/keyboard.*"
+    timeout: 10000
+- runFlow: ../subflows/message-settled.yaml
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-open"
+    timeout: 5000
+- waitForAnimationToEnd:
+    timeout: 3000
+- longPressOn: ".*example.com/pollis-e2e/keyboard.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-link"
+    timeout: 4000
+- takeScreenshot: message-actions-keyboard-03-link-sheet
+- tapOn:
+    id: "btn-link-close"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 5000

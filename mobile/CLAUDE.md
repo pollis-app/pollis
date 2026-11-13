@@ -1246,6 +1246,16 @@ frame alone is exact, since a `<Screen>` starts at the window's top; only
 keyboard already up (email → OTP) seeds from the current keyboard state.
 `tests/keyboard.test.ts` pins this.
 
+Touches with the keyboard up (#1859): a list that sits above a composer
+(the chat, a thread, the Vault) sets `keyboardShouldPersistTaps="handled"`.
+React Native's default, `"never"`, makes the scroll view claim every touch in
+the capture phase while a text field is focused, so the first touch only
+dismissed the keyboard and a long press on a message did nothing. With
+`"handled"` the row gets it; `MessageRow` dismisses the keyboard itself on a
+tap, and every long press that opens a sheet (message row, attachment tile,
+link, Vault entry) calls `KeyboardController.dismiss()` as the sheet opens,
+as Slack, Discord and Signal do. Maestro: `flows/message-actions-keyboard.yaml`.
+
 Stranded layout (#1641, #1642): every `KeyboardAvoidingView` pads from
 keyboard-controller's events, and on Android those come only from the
 window-insets *animation* callback. Android hides the keyboard with no

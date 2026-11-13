@@ -223,6 +223,8 @@ function ThreadScreen() {
       <FlatList
         ref={listRef}
         testID="list-thread"
+        // As the chat list (#1859): rows, links and tiles answer the first touch with the keyboard up.
+        keyboardShouldPersistTaps="handled"
         data={replies}
         keyExtractor={(m) => m.id}
         renderItem={renderRow}

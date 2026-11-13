@@ -934,6 +934,9 @@ function TextChat(props: ChatViewProps = {}) {
         ref={listRef}
         testID="list-messages"
         inverted
+        // Not the default "never", whose scroll view takes every touch while the keyboard is up,
+        // so a long press did nothing until it was dismissed (#1859). Rows dismiss it themselves.
+        keyboardShouldPersistTaps="handled"
         data={items}
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
