@@ -9575,13 +9575,13 @@
       ],
       "evidence": [
         "pollis-delivery/src/account.rs:79",
-        "pollis-delivery/src/account.rs:104",
-        "pollis-delivery/src/account.rs:646",
-        "pollis-delivery/tests/reset_session.rs:645",
-        "pollis-delivery/tests/reset_session.rs:661"
+        "pollis-delivery/src/account.rs:99",
+        "pollis-delivery/src/account.rs:649",
+        "pollis-delivery/tests/reset_session.rs:598",
+        "pollis-delivery/tests/reset_session.rs:614"
       ],
       "status": "verified",
-      "verified_sha": "6cb535eb8008da9ae6f06d6354f1d0da9e8d6f15",
+      "verified_sha": "3763120c3b735ab71c615cd0f8c94cbe572497b5",
       "also_rendered_in": []
     },
     {
@@ -9598,11 +9598,11 @@
         "pollis-delivery/tests/reset_session.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/account.rs:95",
-        "pollis-delivery/tests/reset_session.rs:708"
+        "pollis-delivery/src/account.rs:97",
+        "pollis-delivery/tests/reset_session.rs:661"
       ],
       "status": "verified",
-      "verified_sha": "6cb535eb8008da9ae6f06d6354f1d0da9e8d6f15",
+      "verified_sha": "3763120c3b735ab71c615cd0f8c94cbe572497b5",
       "also_rendered_in": []
     },
     {
