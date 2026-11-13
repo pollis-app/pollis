@@ -3,8 +3,7 @@ name: Supply Chain
 # Dependency-supply-chain gate for the machine-checked-correctness program
 # (#452, M0). cargo-deny enforces advisories / licenses / bans / sources;
 # cargo-vet enforces per-crate review provenance; since #1832 the npm trees the
-# products ship are licence-gated too, and supply-chain/vex.json must agree with
-# deny.toml's ignores. Both are metadata-only — no
+# products ship are licence-gated too. Both are metadata-only — no
 # crate compilation, so this job needs no native build deps and stays fast.
 # A new/bumped crate that trips an advisory, an unlisted license, an untrusted
 # source, or an unvetted review now fails the PR.
@@ -84,13 +83,6 @@ jobs:
       # --locked: verify against the committed lockfile + pinned import audits.
       - name: cargo vet
         run: cargo vet --locked
-
-      # #1832: every vulnerability deny.toml ignores has a VEX statement in
-      # supply-chain/vex.json (what customers' scanners read), and every
-      # statement is still ignored, against the advisory DB cargo deny just
-      # fetched.
-      - name: VEX agrees with deny.toml
-        run: node scripts/oss-inventory.mjs check-vex
 
   # #1832: cargo-deny gates Rust licences; this gates the npm packages each
   # product ships (desktop renderer, mobile app, DS Worker) against the same

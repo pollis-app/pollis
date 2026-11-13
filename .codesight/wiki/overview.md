@@ -228,13 +228,11 @@ full detail: `docs/metadata-retention-policy.md` §3.
   it, the Playwright build gets `src/__mocks__/oss-notices.json`), mobile through
   `metro.config.js` into the gitignored `mobile/generated/` — shown on desktop
   `/open-source` and mobile Self → Open source licenses; (2) per release, a
-  CycloneDX SBOM, an OpenVEX doc and `summary.json`, published to
+  CycloneDX SBOM and `summary.json`, published to
   `cdn.pollis.com/releases/oss/<product>/<version>/` (+ `latest.json`) by
   `scripts/publish-oss-evidence.sh`, from desktop-release.yml directly and from
   `oss-evidence.yml` for cli/mobile/ds; `website/open-source.html` renders the
-  four `latest.json`. The VEX comes from `supply-chain/vex.json`, one statement
-  per vulnerability `deny.toml` ignores; `supply-chain.yml` fails if the two
-  disagree (`check-vex`) and gates the shipped npm trees' licences against
+  four `latest.json`. `supply-chain.yml` gates the shipped npm trees' licences against
   deny.toml's allow-list plus `supply-chain/js-licenses.json`
   (`check-licenses`). A package with no licence file gets the SPDX text from
   `supply-chain/license-texts/`. Output is deterministic (timestamp = commit

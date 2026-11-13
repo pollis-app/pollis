@@ -146,8 +146,8 @@ jobs:
       - name: Action-pin check catches each mutable shape
         run: ./scripts/test-check-action-pins.sh
 
-      # #1832: the open-source generator's licence logic (the JS gate trusts it),
-      # its VEX version ranges and its npm walk. The runner's own Node runs it.
+      # #1832: the open-source generator's licence logic (the JS gate trusts it)
+      # and its npm walk. The runner's own Node runs it.
       - name: oss-inventory unit tests
         run: node --test scripts/test-oss-inventory.mjs
 

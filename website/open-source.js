@@ -42,18 +42,6 @@ function renderLicenses(licenses) {
     <tbody>${rows.join("")}</tbody></table></div>`;
 }
 
-function renderNotAffected(list) {
-  if (list.length === 0) {
-    return "<p>No known advisory affects a package in this release that needed a statement.</p>";
-  }
-  const items = list.map((s) => {
-    const ids = [s.id, ...s.aliases].map((x) => `<code>${esc(x)}</code>`).join(", ");
-    const pkgs = s.packages.map((p) => `<code>${esc(p)}</code>`).join(", ");
-    return `<li>${ids} in ${pkgs}: <strong>not affected</strong>. ${esc(s.impact_statement)}</li>`;
-  });
-  return `<ul>${items.join("")}</ul>`;
-}
-
 function renderProduct(product, s) {
   const generated = new Date(s.generated);
   const when = Number.isNaN(generated.getTime()) ? "" : ` · ${esc(generated.toISOString().slice(0, 10))}`;
@@ -61,10 +49,8 @@ function renderProduct(product, s) {
     <h3 class="doc-sub-title">${esc(product.name)} · <code>${esc(s.version)}</code>${when}</h3>
     <p>${esc(s.components.total)} third-party packages: ${esc(s.components.cargo)} Rust crates and
       ${esc(s.components.npm)} npm packages.
-      ${cdnLink(s.sbom, "SBOM (CycloneDX)")} · ${cdnLink(s.vex, "VEX (OpenVEX)")}</p>
+      ${cdnLink(s.sbom, "SBOM (CycloneDX)")}</p>
     ${renderLicenses(s.licenses)}
-    <p><strong>Known advisories checked and not affecting this release</strong></p>
-    ${renderNotAffected(s.not_affected)}
   </div>`;
 }
 

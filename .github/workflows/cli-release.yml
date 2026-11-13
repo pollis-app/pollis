@@ -497,7 +497,7 @@ jobs:
           AWS_DEFAULT_REGION: auto
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-  # #1832: the CLI's SBOM, VEX and summary at cdn.pollis.com/releases/oss/cli/,
+  # #1832: the CLI's SBOM and summary at cdn.pollis.com/releases/oss/cli/,
   # once the release is announced (pollis.com/open-source reads latest.json).
   oss-evidence:
     needs: [resolve-version, announce-cli]

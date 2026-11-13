@@ -540,7 +540,7 @@ jobs:
             - There is no auto-update. Check <https://pollis.com/android> for
               new versions.
 
-  # #1832: the mobile app's SBOM, VEX and summary at
+  # #1832: the mobile app's SBOM and summary at
   # cdn.pollis.com/releases/oss/mobile/. A `mobile-v*` tag marks the commit the
   # store builds of that version came from too (the mobile-release skill); an
   # iOS-only release dispatches oss-evidence.yml by hand instead.

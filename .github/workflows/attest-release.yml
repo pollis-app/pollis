@@ -17,11 +17,11 @@ on:
       tag:
         description: "Published release tag to attest, e.g. v1.3.4"
         required: true
-      # #1848: a release's SBOM and VEX are logged after its binaries. A tag
-      # released before #1848 published no recipe sidecar for them, so it can
-      # only be attested with its installers alone.
+      # #1848: a release's SBOM is logged after its binaries. A tag released
+      # before #1848 published no recipe sidecar for it, so it can only be
+      # attested with its installers alone.
       documents:
-        description: "Log the release's SBOM and VEX (untick only for a tag released before #1848)"
+        description: "Log the release's SBOM (untick only for a tag released before #1848)"
         type: boolean
         default: true
 
@@ -72,7 +72,7 @@ jobs:
           gh release download "${{ inputs.tag }}" --dir artifacts \
             --pattern '*.dmg' --pattern '*.exe' --pattern '*.AppImage' \
             --pattern '*.deb' --pattern '*.rpm' --pattern '*.payload-sha256' \
-            --pattern '*.toolchain.json' --pattern '*.cdx.json' --pattern '*.vex.json'
+            --pattern '*.toolchain.json' --pattern '*.cdx.json'
           ls -la artifacts
 
       # Must match desktop-release.yml's attest-and-log tooling: this workflow

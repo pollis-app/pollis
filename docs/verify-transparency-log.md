@@ -282,25 +282,23 @@ pollis-verify release https://verify.pollis.com v1.3.6 --json
 sha256sum pollis-v1.3.6-linux.AppImage
 ```
 
-### Release documents: the SBOM and VEX
+### Release documents: the SBOM
 
 Desktop releases cut after #1848 also log the CycloneDX SBOM
-(`pollis-<tag>.cdx.json`) and the OpenVEX statement (`pollis-<tag>.vex.json`)
-published next to the installers. Each is one `payload` leaf after the release's
-binaries, with `bundle` `sbom` or `vex` and platform and arch `any`. `release` lists
-them under `Release documents:` with their full SHA-256, checks their inclusion like
-any other leaf, and fails a release that logs one without the other. A release from
-before #1848 has no document leaves and verifies as it always did.
+(`pollis-<tag>.cdx.json`) published next to the installers. It is one `payload`
+leaf after the release's binaries, with `bundle` `sbom` and platform and arch `any`.
+`release` lists it under `Release documents:` with its full SHA-256 and checks its
+inclusion like any other leaf. A release from before #1848 has no SBOM leaf and
+verifies as it always did.
 
 ```bash
 pollis-verify release https://verify.pollis.com <tag>
-sha256sum pollis-<tag>.cdx.json pollis-<tag>.vex.json
+sha256sum pollis-<tag>.cdx.json
 ```
 
-Both documents are also SLSA provenance subjects with a keyless cosign signature,
-published next to them as `.intoto.jsonl`, `.sig` and `.pem`, so the cosign and SLSA
-checks in section 7 work on them unchanged with `ART=pollis-<tag>.vex.json` (or
-`.cdx.json`).
+The SBOM is also a SLSA provenance subject with a keyless cosign signature,
+published next to it as `.intoto.jsonl`, `.sig` and `.pem`, so the cosign and SLSA
+checks in section 7 work on it unchanged with `ART=pollis-<tag>.cdx.json`.
 
 ### Mobile over-the-air updates
 

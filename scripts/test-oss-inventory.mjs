@@ -1,5 +1,5 @@
 // Unit tests for scripts/oss-inventory.mjs (#1832): the licence gate's SPDX
-// logic, the VEX version ranges, and the npm walker on a pnpm-shaped tree.
+// logic and the npm walker on a pnpm-shaped tree.
 // Run: node --test scripts/test-oss-inventory.mjs
 
 import { test } from "node:test";
@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { jsGraph, normaliseLicense, parseSpdx, spdxAllowed, versionAffected } from "./oss-inventory.mjs";
+import { jsGraph, normaliseLicense, parseSpdx, spdxAllowed } from "./oss-inventory.mjs";
 
 const ALLOWED = new Set(["MIT", "Apache-2.0", "BSD-3-Clause", "Apache-2.0 WITH LLVM-exception"]);
 const allowed = (expr) => spdxAllowed(parseSpdx(normaliseLicense(expr)), ALLOWED);
@@ -34,14 +34,6 @@ test("strings that are not SPDX expressions do not parse, so the gate fails them
   for (const bad of ["SEE LICENSE IN LICENSE.md", "MIT OR", "(MIT", "Apache 2.0", ""]) {
     assert.equal(parseSpdx(bad), null, bad);
   }
-});
-
-test("VEX ranges match the advisory's vulnerable versions only", () => {
-  assert.equal(versionAffected("0.5.5", ["<0.7.6"]), true);
-  assert.equal(versionAffected("0.7.6", ["<0.7.6"]), false);
-  assert.equal(versionAffected("0.3.27", [">=0.3.0, <0.3.28"]), true);
-  assert.equal(versionAffected("0.4.0", [">=0.3.0, <0.3.28"]), false);
-  assert.equal(versionAffected("9.9.9", []), true);
 });
 
 // A pnpm layout: the project links its direct deps into .pnpm/<pkg>@<v>/node_modules/<pkg>,

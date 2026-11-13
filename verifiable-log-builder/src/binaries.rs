@@ -33,7 +33,7 @@ pub enum Layer {
 }
 
 /// A release **document** logged beside the binaries (#1848): the CycloneDX SBOM
-/// and the OpenVEX statement each desktop release publishes next to its installers.
+/// each desktop release publishes next to its installers.
 ///
 /// Carried in the frozen [`BinaryRecord`] with no new [`Layer`] variant, so every
 /// verifier already deployed (the `pollis-verify` binaries, the in-app build
@@ -47,8 +47,6 @@ pub enum Layer {
 pub enum ReleaseDocument {
     /// The CycloneDX SBOM, `pollis-<tag>.cdx.json`.
     Sbom,
-    /// The OpenVEX statement, `pollis-<tag>.vex.json`.
-    Vex,
 }
 
 /// The `platform` and `arch` of every release-document leaf.
@@ -56,13 +54,12 @@ pub const RELEASE_DOCUMENT_TARGET: &str = "any";
 
 impl ReleaseDocument {
     /// Every kind, in the order a release logs them.
-    pub const ALL: [ReleaseDocument; 2] = [ReleaseDocument::Sbom, ReleaseDocument::Vex];
+    pub const ALL: [ReleaseDocument; 1] = [ReleaseDocument::Sbom];
 
     /// The leaf's `bundle` value.
     pub fn bundle(self) -> &'static str {
         match self {
             ReleaseDocument::Sbom => "sbom",
-            ReleaseDocument::Vex => "vex",
         }
     }
 
@@ -70,7 +67,6 @@ impl ReleaseDocument {
     pub fn suffix(self) -> &'static str {
         match self {
             ReleaseDocument::Sbom => ".cdx.json",
-            ReleaseDocument::Vex => ".vex.json",
         }
     }
 
@@ -432,25 +428,23 @@ mod tests {
         let inv = BinaryInvariant;
         let payload = record("v1.0.0", "linux", "appimage", Layer::Payload, 0x11, 0x11).to_entry().unwrap();
         let sbom = document("v1.0.0", ReleaseDocument::Sbom, 0x51).to_entry().unwrap();
-        let vex = document("v1.0.0", ReleaseDocument::Vex, 0x52).to_entry().unwrap();
         assert!(inv.check(&[&payload], &sbom).is_ok());
-        assert!(inv.check(&[&payload, &sbom], &vex).is_ok());
         // The next tag's binaries still follow.
         let next = record("v1.1.0", "linux", "appimage", Layer::Payload, 0x22, 0x22).to_entry().unwrap();
-        assert!(inv.check(&[&payload, &sbom, &vex], &next).is_ok());
+        assert!(inv.check(&[&payload, &sbom], &next).is_ok());
     }
 
     #[test]
     fn release_document_leaves_use_the_frozen_encoding() {
         // No new field and no new Layer variant: a pre-#1848 decoder reads these bytes.
-        let r = document("v1.0.0", ReleaseDocument::Vex, 0x52);
+        let r = document("v1.0.0", ReleaseDocument::Sbom, 0x52);
         let s = String::from_utf8(r.encode().unwrap()).unwrap();
-        assert!(s.contains("\"bundle\":\"vex\""), "got: {s}");
+        assert!(s.contains("\"bundle\":\"sbom\""), "got: {s}");
         assert!(s.contains("\"layer\":\"payload\""), "got: {s}");
         assert!(s.contains("\"platform\":\"any\",\"arch\":\"any\""), "got: {s}");
         assert_eq!(
             BinaryRecord::decode(s.as_bytes()).unwrap().release_document(),
-            Some(ReleaseDocument::Vex)
+            Some(ReleaseDocument::Sbom)
         );
         assert_eq!(
             record("v1.0.0", "linux", "appimage", Layer::Payload, 1, 1).release_document(),
@@ -474,18 +468,18 @@ mod tests {
         signed.layer = Layer::Signed;
         let mut split = document("v1.0.0", ReleaseDocument::Sbom, 0x51);
         split.artifact_sha256 = hex::encode([0x52; 32]);
-        let mut platform = document("v1.0.0", ReleaseDocument::Vex, 0x51);
+        let mut platform = document("v1.0.0", ReleaseDocument::Sbom, 0x51);
         platform.platform = "linux".to_string();
-        let mut arch = document("v1.0.0", ReleaseDocument::Vex, 0x51);
+        let mut arch = document("v1.0.0", ReleaseDocument::Sbom, 0x51);
         arch.arch = "x86_64".to_string();
-        let mut name = document("v1.0.0", ReleaseDocument::Vex, 0x51);
-        name.artifact_name = "pollis-v1.0.0.cdx.json".to_string();
+        let mut name = document("v1.0.0", ReleaseDocument::Sbom, 0x51);
+        name.artifact_name = "pollis-v1.0.0.json".to_string();
         for (bad, want) in [
             (signed, "not payload"),
             (split, "artifact_sha256 != payload_sha256"),
             (platform, "platform/arch"),
             (arch, "platform/arch"),
-            (name, "does not end in .vex.json"),
+            (name, "does not end in .cdx.json"),
         ] {
             let err = inv.check(&[], &bad.to_entry().unwrap()).unwrap_err();
             assert!(err.message.contains(want), "want {want:?}, got: {}", err.message);

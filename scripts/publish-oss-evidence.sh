@@ -6,7 +6,6 @@
 # to the public release bucket, then confirms the CDN serves it:
 #
 #   releases/oss/<product>/<version>/pollis-<product>-<version>.cdx.json   SBOM
-#   releases/oss/<product>/<version>/pollis-<product>-<version>.vex.json   VEX
 #   releases/oss/<product>/<version>/summary.json                          index
 #   releases/oss/<product>/latest.json   = that summary (no-cache), what
 #                                          pollis.com/open-source reads
@@ -31,9 +30,8 @@ if ! [[ "$version" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 sbom="${dir}/pollis-${product}-${version}.cdx.json"
-vex="${dir}/pollis-${product}-${version}.vex.json"
 summary="${dir}/summary.json"
-for f in "$sbom" "$vex" "$summary"; do
+for f in "$sbom" "$summary"; do
   [ -s "$f" ] || { echo "::error::missing ${f}" >&2; exit 1; }
 done
 # Never publish an empty claim (desktop-release.yml's SBOM guard, for every product).
@@ -50,7 +48,6 @@ put() {
   aws s3 cp "$1" "$2" --endpoint-url "$ENDPOINT" --content-type application/json "${@:3}"
 }
 put "$sbom" "${prefix}/${version}/$(basename "$sbom")"
-put "$vex" "${prefix}/${version}/$(basename "$vex")"
 put "$summary" "${prefix}/${version}/summary.json"
 put "$summary" "${prefix}/latest.json" --cache-control no-cache
 
@@ -68,12 +65,10 @@ if [ "$served" != "$version" ]; then
   echo "::error::${cdn}/latest.json does not serve ${version}" >&2
   exit 1
 fi
-for f in "$sbom" "$vex"; do
-  want="$(sha256sum "$f" | cut -d' ' -f1)"
-  got="$(curl -fsSL "${cdn}/${version}/$(basename "$f")" | sha256sum | cut -d' ' -f1)"
-  if [ "$got" != "$want" ]; then
-    echo "::error::${cdn}/${version}/$(basename "$f") does not match what was uploaded" >&2
-    exit 1
-  fi
-done
+want="$(sha256sum "$sbom" | cut -d' ' -f1)"
+got="$(curl -fsSL "${cdn}/${version}/$(basename "$sbom")" | sha256sum | cut -d' ' -f1)"
+if [ "$got" != "$want" ]; then
+  echo "::error::${cdn}/${version}/$(basename "$sbom") does not match what was uploaded" >&2
+  exit 1
+fi
 echo "published ${product} ${version}: ${n} components, ${cdn}/latest.json live"
