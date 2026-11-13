@@ -43,6 +43,11 @@ async fn seed_conversation(db: &Db, conv: &str, recipient: &str, generation: i64
     }
 }
 
+/// A genuine Welcome for `recipient`'s `device`, which the #1851 check accepts.
+async fn welcome(db: &Db, recipient: &str, device: &str) -> Vec<u8> {
+    common::mls::welcome_for(&db.conn().await.unwrap(), recipient, device).await
+}
+
 fn resubmit_req_at(
     conv: &str,
     generation: i64,
@@ -102,16 +107,17 @@ async fn resubmit_re_drives_a_missing_welcome() {
     // Auth off skips the caller's membership gate; the recipient's is checked either way.
     seed_conversation(&db, "conv1", "alice", 0).await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
+    let welcome = welcome(&db, "alice", "dev1").await;
 
     let resp = router
-        .oneshot(resubmit_req("conv1", "alice", "dev1", b"welcome-blob"))
+        .oneshot(resubmit_req("conv1", "alice", "dev1", &welcome))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let (count, data, generation) = welcome_row(&db, "conv1", "alice", "dev1").await;
     assert_eq!(count, 1, "resubmit must insert exactly one Welcome");
-    assert_eq!(data, b"welcome-blob");
+    assert_eq!(data, welcome);
     assert_eq!(generation, 0, "a pre-P4 client's Welcome is generation 0");
 }
 
@@ -121,22 +127,24 @@ async fn resubmit_is_idempotent_and_refreshes_blob() {
     seed_conversation(&db, "conv1", "alice", 0).await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
 
+    let v1 = welcome(&db, "alice", "dev1").await;
     let r1 = router
         .clone()
-        .oneshot(resubmit_req("conv1", "alice", "dev1", b"welcome-v1"))
+        .oneshot(resubmit_req("conv1", "alice", "dev1", &v1))
         .await
         .unwrap();
     assert_eq!(r1.status(), StatusCode::OK);
 
+    let v2 = welcome(&db, "alice", "dev1").await;
     let r2 = router
-        .oneshot(resubmit_req("conv1", "alice", "dev1", b"welcome-v2"))
+        .oneshot(resubmit_req("conv1", "alice", "dev1", &v2))
         .await
         .unwrap();
     assert_eq!(r2.status(), StatusCode::OK);
 
     let (count, data, _) = welcome_row(&db, "conv1", "alice", "dev1").await;
     assert_eq!(count, 1, "resubmit must not duplicate the Welcome");
-    assert_eq!(data, b"welcome-v2", "resubmit must refresh to the latest blob");
+    assert_eq!(data, v2, "resubmit must refresh to the latest blob");
 }
 
 /// A migrated conversation must land the successor's Welcome, or the device is stranded.
@@ -146,22 +154,24 @@ async fn a_resubmit_refreshes_the_generation_too() {
     seed_conversation(&db, "conv1", "alice", 1).await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
 
+    let classic = welcome(&db, "alice", "dev1").await;
     let r1 = router
         .clone()
-        .oneshot(resubmit_req_at("conv1", 0, "alice", "dev1", b"classic"))
+        .oneshot(resubmit_req_at("conv1", 0, "alice", "dev1", &classic))
         .await
         .unwrap();
     assert_eq!(r1.status(), StatusCode::OK);
 
+    let hybrid = welcome(&db, "alice", "dev1").await;
     let r2 = router
-        .oneshot(resubmit_req_at("conv1", 1, "alice", "dev1", b"hybrid"))
+        .oneshot(resubmit_req_at("conv1", 1, "alice", "dev1", &hybrid))
         .await
         .unwrap();
     assert_eq!(r2.status(), StatusCode::OK);
 
     let (count, data, generation) = welcome_row(&db, "conv1", "alice", "dev1").await;
     assert_eq!(count, 1);
-    assert_eq!(data, b"hybrid");
+    assert_eq!(data, hybrid);
     assert_eq!(generation, 1, "the upsert must carry the successor's lineage");
 }
 

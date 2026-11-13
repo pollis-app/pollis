@@ -286,14 +286,15 @@ async fn a_member_cannot_overwrite_another_members_pending_welcome() {
     seed_lineage(&db, "g1", 0, 1, "alice").await;
     let conn = db.conn().await.unwrap();
 
+    let honest = common::mls::welcome_for(&conn, "bob", "b1").await;
     let out =
-        apply_welcomes_resubmit(&conn, &conn, Some("alice"), &resubmit(0, "bob", "b1", b"honest"))
+        apply_welcomes_resubmit(&conn, &conn, Some("alice"), &resubmit(0, "bob", "b1", &honest))
             .await
             .unwrap();
     assert!(matches!(out, ResubmitOutcome::Ok));
 
     let out =
-        apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", b"hijack"))
+        apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", &common::mls::welcome_for(&conn, "bob", "b1").await))
             .await
             .unwrap();
     assert!(
@@ -309,7 +310,7 @@ async fn a_member_cannot_overwrite_another_members_pending_welcome() {
         .await
         .unwrap();
     let row = rows.next().await.unwrap().unwrap();
-    assert_eq!(row.get::<Vec<u8>>(0).unwrap(), b"honest");
+    assert_eq!(row.get::<Vec<u8>>(0).unwrap(), honest);
     assert_eq!(row.get::<String>(1).unwrap(), "alice");
 }
 
@@ -319,10 +320,11 @@ async fn the_publisher_may_refresh_its_own_welcome() {
     seed_lineage(&db, "g1", 0, 1, "alice").await;
     let conn = db.conn().await.unwrap();
 
-    apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", b"v1"))
+    apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", &common::mls::welcome_for(&conn, "bob", "b1").await))
         .await
         .unwrap();
-    let out = apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", b"v2"))
+    let v2 = common::mls::welcome_for(&conn, "bob", "b1").await;
+    let out = apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", &v2))
         .await
         .unwrap();
     assert!(matches!(out, ResubmitOutcome::Ok));
@@ -335,7 +337,7 @@ async fn the_publisher_may_refresh_its_own_welcome() {
         .await
         .unwrap();
     let data: Vec<u8> = rows.next().await.unwrap().unwrap().get(0).unwrap();
-    assert_eq!(data, b"v2");
+    assert_eq!(data, v2);
 }
 
 /// The head commit's author and a group admin may both re-drive a pending Welcome.
@@ -346,16 +348,16 @@ async fn the_adder_and_an_admin_may_re_drive_a_pending_welcome() {
     seed_lineage(&db, "g1", 0, 1, "carol").await;
     let conn = db.conn().await.unwrap();
 
-    apply_welcomes_resubmit(&conn, &conn, Some("bob"), &resubmit(0, "bob", "b1", b"v1"))
+    apply_welcomes_resubmit(&conn, &conn, Some("bob"), &resubmit(0, "bob", "b1", &common::mls::welcome_for(&conn, "bob", "b1").await))
         .await
         .unwrap();
 
-    let out = apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", b"v2"))
+    let out = apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", &common::mls::welcome_for(&conn, "bob", "b1").await))
         .await
         .unwrap();
     assert!(matches!(out, ResubmitOutcome::Ok), "the adder may re-drive");
 
-    let out = apply_welcomes_resubmit(&conn, &conn, Some("alice"), &resubmit(0, "bob", "b1", b"v3"))
+    let out = apply_welcomes_resubmit(&conn, &conn, Some("alice"), &resubmit(0, "bob", "b1", &common::mls::welcome_for(&conn, "bob", "b1").await))
         .await
         .unwrap();
     assert!(matches!(out, ResubmitOutcome::Ok), "an admin may re-drive");
@@ -368,14 +370,14 @@ async fn a_delivered_welcome_may_be_refreshed_by_anyone() {
     seed_lineage(&db, "g1", 0, 1, "alice").await;
     let conn = db.conn().await.unwrap();
 
-    apply_welcomes_resubmit(&conn, &conn, Some("alice"), &resubmit(0, "bob", "b1", b"v1"))
+    apply_welcomes_resubmit(&conn, &conn, Some("alice"), &resubmit(0, "bob", "b1", &common::mls::welcome_for(&conn, "bob", "b1").await))
         .await
         .unwrap();
     conn.execute("UPDATE mls_welcome SET delivered = 1", ())
         .await
         .unwrap();
 
-    let out = apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", b"v2"))
+    let out = apply_welcomes_resubmit(&conn, &conn, Some("carol"), &resubmit(0, "bob", "b1", &common::mls::welcome_for(&conn, "bob", "b1").await))
         .await
         .unwrap();
     assert!(matches!(out, ResubmitOutcome::Ok));

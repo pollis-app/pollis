@@ -179,6 +179,92 @@ fn welcome_replaces_held_group(conn: &rusqlite::Connection, welcome_bytes: &[u8]
     target
 }
 
+/// One leaf of a Welcome's tree: `(user, device, signature key, scheme)`.
+type TreeLeaf = (String, String, Vec<u8>, SignatureScheme);
+
+/// Every leaf of the tree a Welcome would admit this device into, as
+/// `(user, device, signature key, scheme)`, read before anything is joined.
+///
+/// Opening a Welcome consumes its KeyPackage, so, like
+/// [`welcome_replaces_held_group`], the peek runs in a savepoint that is always
+/// rolled back. The tree is the GroupInfo's, unverified: staging the Welcome
+/// later verifies exactly this tree, so a tree that fails here never joins and
+/// one that passes joins with the same leaves.
+fn welcome_tree_leaves(
+    conn: &rusqlite::Connection,
+    welcome_bytes: &[u8],
+) -> Option<Vec<TreeLeaf>> {
+    let mut reader: &[u8] = welcome_bytes;
+    let MlsMessageBodyIn::Welcome(welcome) = MlsMessageIn::tls_deserialize(&mut reader).ok()?.extract()
+    else {
+        return None;
+    };
+    let scheme = welcome_ciphersuite(&welcome)?.signature_algorithm();
+    conn.execute_batch("SAVEPOINT welcome_tree_peek").ok()?;
+    let leaves = {
+        let provider = PollisProvider::new(conn);
+        ProcessedWelcome::new_from_welcome(&provider, &super::provider::join_config(), welcome)
+            .ok()
+            .and_then(|processed| {
+                let tree = processed.unverified_group_info().extensions().ratchet_tree()?;
+                Some(
+                    tree.ratchet_tree()
+                        .leaves()
+                        .map(|leaf| {
+                            (
+                                super::provider::parse_credential_user_id(leaf.credential()),
+                                super::provider::parse_credential_device_id(leaf.credential())
+                                    .unwrap_or_default(),
+                                leaf.signature_key().as_slice().to_vec(),
+                                scheme,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+    };
+    let _ = conn.execute_batch("ROLLBACK TO welcome_tree_peek; RELEASE welcome_tree_peek");
+    leaves
+}
+
+/// #1851: refuse a Welcome whose tree holds a leaf its claimed account never
+/// certified, BEFORE joining, so this device never enters an epoch shared with
+/// it. `Some((user, device, reason))` names the leaf and refuses.
+///
+/// Revoked devices and unverifiable leaves do not refuse
+/// ([`super::IdentityDirectory::never_certified`]). The cert material is the
+/// DS's, pinned to local trust like the replay's, so a DS that withholds it
+/// can only make a leaf unverifiable, never certify one.
+async fn welcome_admits_never_certified_leaf(
+    state: &Arc<AppState>,
+    welcome_bytes: &[u8],
+    user_id: &str,
+) -> Option<(String, String, String)> {
+    let leaves = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref()?;
+        welcome_tree_leaves(db.conn(), welcome_bytes)?
+    };
+    let mut users: Vec<String> = leaves.iter().map(|(u, _, _, _)| u.clone()).collect();
+    users.sort();
+    users.dedup();
+    let directory = match super::reconcile::load_pinned_identities(state, &users, user_id).await {
+        Ok(dir) => dir,
+        Err(e) => {
+            crate::diag!(
+                "[mls] poll_mls_welcomes: cross-signing material for a Welcome's tree could not \
+                 be loaded ({e}) — its leaves stay unverifiable"
+            );
+            return None;
+        }
+    };
+    leaves.iter().find_map(|(user, device, key, scheme)| {
+        directory
+            .never_certified(user, device, key, *scheme)
+            .map(|why| (user.clone(), device.clone(), why))
+    })
+}
+
 /// Poll the remote `mls_welcome` table for undelivered Welcome messages
 /// addressed to `user_id`.  Each one is applied locally and then marked
 /// `delivered = 1` so it is not processed again.
@@ -243,6 +329,35 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         conversation_id: filed_under,
     } in items
     {
+        // #1851: never join a tree holding a leaf its account never certified.
+        // Acked and re-joined like any failed Welcome; the external join
+        // applies the same refusal, so this device stays out until members
+        // have evicted the leaf.
+        if let Some((leaf_user, leaf_device, why)) =
+            welcome_admits_never_certified_leaf(state, &bytes, user_id).await
+        {
+            crate::diag!(
+                "[mls] poll_mls_welcomes: refusing welcome {id} (filed under {filed_under:?}): \
+                 its tree holds a leaf for {leaf_user}:{leaf_device} not certified by that \
+                 account ({why})"
+            );
+            super::group_state::record_uncertified_leaf_event(
+                state,
+                user_id,
+                filed_under.as_deref().unwrap_or_default(),
+                &leaf_user,
+                &leaf_device,
+                &why,
+            )
+            .await;
+            if let Some(conversation_id) = filed_under {
+                if !failed.contains(&conversation_id) {
+                    failed.push(conversation_id);
+                }
+            }
+            processed_ids.push(id);
+            continue;
+        }
         // `None`: the corroboration below stands in for the filed-under check.
         match apply_welcome(state, &bytes, None).await {
             Ok((conversation_id, generation)) => {

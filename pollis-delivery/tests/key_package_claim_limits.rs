@@ -30,16 +30,20 @@ async fn co_members(db: &common::TempDb, group_id: &str, users: &[&str]) {
     }
 }
 
+/// `count` unclaimed rows of one real, certified package (#1851: the DS serves
+/// nothing else); the claim never compares a row's bytes with its reference.
 async fn publish(db: &common::TempDb, user: &str, device: &str, count: usize) {
     let conn = db.conn().await.unwrap();
+    let key_package = common::mls::serveable_key_package(&conn, user, device).await;
     for i in 0..count {
         conn.execute(
             "INSERT INTO mls_key_package \
                  (ref_hash, user_id, key_package, device_id, ciphersuite, claimed) \
-             VALUES (?1, ?2, X'00', ?3, ?4, 0)",
+             VALUES (?1, ?2, ?3, ?4, ?5, 0)",
             libsql::params![
                 format!("{user}-{device}-{i}"),
                 user,
+                key_package.clone(),
                 device,
                 CIPHERSUITE_PQ
             ],

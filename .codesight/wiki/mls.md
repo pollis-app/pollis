@@ -1265,16 +1265,42 @@ leaf carrying the same `user:device` credential. It also keyed off the
 committer-written `added_user_id` / `added_device_ids` columns (NULL → skipped,
 multi-user add → first user only), which now serve only as the DS's prefetch
 hint. Pinned by `device::leaf_verdict_tests` (unit) and
-`src-tauri/tests/flows/cross_signing.rs` (the DS substitutes a forged
-KeyPackage: the committer refuses; a committer that adds it anyway is flagged
-and evicted by every honest member).
+`src-tauri/tests/flows/cross_signing.rs` (with the in-process DS's own checks
+switched off, the DS substitutes a forged KeyPackage: the committer refuses; a
+committer that adds it anyway is flagged and evicted by every honest member; a
+device Welcomed into that tree refuses to join until the leaf is gone).
 
-**Residual.** A rogue leaf that a malicious or pre-fix committer DID add holds
-the group's key schedule from that epoch until the eviction commit lands —
-bounded by one honest member's reconcile (kicked immediately on detection),
-not by anything the attacker controls. Refusing to merge instead would strand
-the refusing device behind the canonical log with no honest way back (the
-ELECTRON-epoch-11 incident); eviction is the append-only answer.
+**The DS enforces the same rule (#1851, `pollis-delivery/src/leaf_cert.rs`).**
+It refuses, over its own `users` / `user_device` rows, anything that would put
+a leaf in a group without a cert from the claimed account — and, holding the
+rows, it treats a device with no cert yet as uncertified too:
+
+| Object | Endpoint | Refused when |
+|---|---|---|
+| KeyPackage | `/v1/key-packages`, `/v1/key-packages/replenish` | it does not validate; `ref_hash` is not its KeyPackageRef; its suite or `last_resort` flag is not what it is filed as; its `user:device` credential is not the publishing device; or that device is not certified. One bad package refuses the request |
+| KeyPackage | `/v1/key-packages/claim` | its leaf is not the claimed target's certified device right now (checked lazily, so rows stored before #1851 are judged by the same rule). The row is skipped, neither deleted nor spent, and the next one tried, up to 16; it is served again once the device's cert verifies |
+| Welcome | `/v1/commits`, `/v1/welcomes/resubmit` | a new member's KeyPackageRef is not a stored package of a certified device, or no new member is the recipient device |
+| GroupInfo | `/v1/commits`, `/v1/group-info` | it does not parse, has no ratchet tree, or has a leaf the stored GroupInfo lacks that is not certified |
+
+Commits themselves are `PrivateMessage`s the DS cannot open, so the Welcome and
+the GroupInfo are where it sees an add. Diffing against the *stored* GroupInfo
+(not the previous epoch's) means a commit sent without a GroupInfo is caught
+by the next one. `LeafCheck::Skip` (`submit_commit_with`,
+`apply_claim_key_package_with`) exists only for tests: the flows harness models
+a DS that does not check (`harness::set_ds_skips_leaf_checks`), and the
+serialization tests use placeholder bytes. DS tests mint real material with
+`pollis-delivery/tests/common/mls.rs`.
+
+**Why replay still merges.** A commit the DS accepted is the canonical epoch,
+the DS takes envelopes only at the head epoch (#1041), and the eviction commit
+can only be built from the head, so a member that declined it could neither
+send nor evict. Members merge and evict; a joining device, which holds no
+group yet, refuses instead (`IdentityDirectory::never_certified`: a bad cert
+chain or a key the cert does not cover; revocation does not count, since
+members are already removing that leaf): `welcomes.rs::welcome_admits_never_certified_leaf`
+before a Welcome is applied (the Welcome is acked and an `uncertified_mls_leaf`
+event recorded), and `check_lineage_provenance` over every leaf of an external
+join's GroupInfo.
 
 `MlsStore` (`signal/mls_storage.rs`) counts its own statements under
 `test-harness` (`mls_storage::counters`, thread-local so concurrent tests do not

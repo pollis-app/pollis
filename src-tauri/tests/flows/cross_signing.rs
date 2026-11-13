@@ -2,8 +2,13 @@
 //! leaf key the claimed user's own `account_id_pub` certified.
 //!
 //! The untrusted DS can hand a committer a self-consistent forged KeyPackage (whitepaper §5.3).
+//!
+//! The DS refuses to store or serve one (#1851, `pollis_delivery::leaf_cert`), so the
+//! client-side tests run the in-process DS with its leaf checks OFF
+//! ([`set_ds_skips_leaf_checks`]): they model a DS that does not check, which is
+//! exactly what the client checks exist for.
 
-use crate::harness::{welcome_blobs, wipe, writable_remote, TestClient};
+use crate::harness::{set_ds_skips_leaf_checks, welcome_blobs, wipe, writable_remote, TestClient};
 use serial_test::serial;
 
 const CS_PQ_CODE_POINT: i64 = 0x0052;
@@ -82,6 +87,8 @@ async fn committer_refuses_a_key_package_not_cross_signed_by_the_claimed_account
     // Two: each refused attempt burns one.
     substitute_forged_key_packages(&attacker, &bob, 2).await;
 
+    // A DS that serves the forgeries.
+    set_ds_skips_leaf_checks(true);
     // Its outcome is logged, not returned.
     alice.invite(&group_id, &bob_profile.username).await;
 
@@ -92,6 +99,7 @@ async fn committer_refuses_a_key_package_not_cross_signed_by_the_claimed_account
     )
     .await
     .expect("reconcile runs");
+    set_ds_skips_leaf_checks(false);
     assert!(
         outcome.added.is_empty(),
         "a forged KeyPackage must never become an Add: {:?}",
@@ -189,9 +197,12 @@ async fn inbound_replay_flags_and_evicts_a_leaf_not_cross_signed_by_its_account(
 
     // Reset before any assertion, so the eviction is the production reconcile.
     substitute_forged_key_packages(&attacker, &bob, 1).await;
+    // A DS that serves the forgery and stores the commit, and a committer that adds it.
+    set_ds_skips_leaf_checks(true);
     pollis_lib::commands::mls::set_skip_committer_leaf_check(true);
     alice.invite(&group_id, &bob_profile.username).await;
     pollis_lib::commands::mls::set_skip_committer_leaf_check(false);
+    set_ds_skips_leaf_checks(false);
     let members = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
     assert!(
         members.iter().any(|(u, d)| u == &bob_profile.id && d == &bob_device),
@@ -247,5 +258,209 @@ async fn inbound_replay_flags_and_evicts_a_leaf_not_cross_signed_by_its_account(
     drop(alice);
     drop(carol);
     drop(bob);
+    drop(attacker);
+}
+
+/// #1851: the DS never serves a forged KeyPackage, and refuses a commit that
+/// adds one even from a committer that skips its own check.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_ds_refuses_to_serve_or_commit_an_uncertified_leaf() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut attacker = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    attacker.sign_up("attacker@test.local").await;
+    let bob_device = device_of(&bob).await;
+
+    let group_id = alice.create_group("Refused at the DS").await;
+    let epoch_before = crate::harness::ds_head_epoch(&group_id).await;
+    let bob_in_alices_tree = || async {
+        pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id)
+            .await
+            .iter()
+            .any(|(u, _)| u == &bob_profile.id)
+    };
+
+    // 1. A committer that skips its own check gets nothing to add: the DS
+    //    skips the forgeries instead of serving them.
+    substitute_forged_key_packages(&attacker, &bob, 2).await;
+    pollis_lib::commands::mls::set_skip_committer_leaf_check(true);
+    alice.invite(&group_id, &bob_profile.username).await;
+    let _ = pollis_lib::commands::mls::reconcile_group_mls_impl(
+        &alice.state,
+        &group_id,
+        &alice_profile.id,
+    )
+    .await;
+    pollis_lib::commands::mls::set_skip_committer_leaf_check(false);
+    assert_eq!(crate::harness::ds_head_epoch(&group_id).await, epoch_before, "no commit lands");
+    assert!(!bob_in_alices_tree().await, "no forged leaf for bob in alice's tree");
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM mls_key_package WHERE user_id = ?1 AND claimed = 1",
+            libsql::params![bob_profile.id.clone()],
+        )
+        .await
+        .expect("count");
+    let left: i64 = rows.next().await.expect("row").expect("row").get(0).expect("count");
+    drop(rows);
+    assert_eq!(left, 0, "the DS serves none of the forged packages");
+
+    // 2. Served a forgery anyway, the same committer's commit is refused: its
+    //    Welcome and GroupInfo give the uncertified leaf away.
+    substitute_forged_key_packages(&attacker, &bob, 1).await;
+    crate::harness::set_ds_skips_claim_check(true);
+    pollis_lib::commands::mls::set_skip_committer_leaf_check(true);
+    let _ = pollis_lib::commands::mls::reconcile_group_mls_impl(
+        &alice.state,
+        &group_id,
+        &alice_profile.id,
+    )
+    .await;
+    pollis_lib::commands::mls::set_skip_committer_leaf_check(false);
+    crate::harness::set_ds_skips_claim_check(false);
+    assert_eq!(crate::harness::ds_head_epoch(&group_id).await, epoch_before, "no commit lands");
+    assert!(!bob_in_alices_tree().await, "the refused commit is not merged");
+    assert!(
+        welcome_blobs(&group_id).await.is_empty(),
+        "no Welcome is stored for the refused add"
+    );
+
+    // bob's genuine pool goes through the same DS untouched.
+    crate::harness::republish_key_packages(&bob).await;
+    let outcome = pollis_lib::commands::mls::reconcile_group_mls_impl(
+        &alice.state,
+        &group_id,
+        &alice_profile.id,
+    )
+    .await
+    .expect("reconcile runs");
+    assert!(
+        outcome
+            .added
+            .iter()
+            .any(|(u, d)| u == &bob_profile.id && d == &bob_device),
+        "bob's genuine KeyPackage must be admitted: {:?}",
+        outcome.added
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(attacker);
+}
+
+/// #1851: a device never joins a tree holding a leaf its claimed account did
+/// not certify. Its Welcome comes from the commit that added that leaf (a
+/// non-conforming committer, a DS that does not check); it refuses the
+/// Welcome before joining, refuses the external join on the same tree, and
+/// joins once members have evicted the leaf.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_joiner_refuses_a_tree_holding_an_uncertified_leaf_until_it_is_evicted() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+    let mut attacker = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let dave_profile = dave.sign_up("dave@test.local").await;
+    attacker.sign_up("attacker@test.local").await;
+    let bob_device = device_of(&bob).await;
+    let dave_device = device_of(&dave).await;
+
+    let group_id = alice.create_group("Refused at join").await;
+
+    // dave is invited with no package to claim, so the next reconcile adds
+    // him in the same commit as the rogue leaf.
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+    conn.execute(
+        "DELETE FROM mls_key_package WHERE user_id = ?1",
+        libsql::params![dave_profile.id.clone()],
+    )
+    .await
+    .expect("empty dave's pool");
+    alice.invite(&group_id, &dave_profile.username).await;
+    crate::harness::republish_key_packages(&dave).await;
+
+    substitute_forged_key_packages(&attacker, &bob, 1).await;
+    set_ds_skips_leaf_checks(true);
+    pollis_lib::commands::mls::set_skip_committer_leaf_check(true);
+    alice.invite(&group_id, &bob_profile.username).await;
+    pollis_lib::commands::mls::set_skip_committer_leaf_check(false);
+    set_ds_skips_leaf_checks(false);
+    let members = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
+    assert!(
+        members.iter().any(|(u, d)| u == &bob_profile.id && d == &bob_device)
+            && members.iter().any(|(u, d)| u == &dave_profile.id && d == &dave_device),
+        "precondition: one commit added the rogue leaf and dave: {members:?}"
+    );
+
+    let invite = dave.first_pending_invite().await.expect("dave's invite");
+    dave.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    dave.poll().await;
+    dave.process_commits_for(&group_id).await;
+    assert!(
+        pollis_lib::commands::mls::local_tree_members(&dave.state, &group_id)
+            .await
+            .is_empty(),
+        "dave must not hold a group whose tree has the rogue leaf"
+    );
+    let events = dave
+        .invoke_json(
+            "list_security_events",
+            serde_json::json!({ "userId": dave_profile.id, "limit": 50 }),
+        )
+        .await;
+    let events = events["events"].as_array().cloned().unwrap_or_default();
+    assert!(
+        events.iter().any(|e| {
+            e["kind"] == "uncertified_mls_leaf" && e["device_id"] == bob_device.as_str()
+        }),
+        "dave records why he refused: {events:?}"
+    );
+
+    // alice's own reconcile evicts the leaf; then dave joins the clean tree.
+    let _ = pollis_lib::commands::mls::reconcile_group_mls_impl(
+        &alice.state,
+        &group_id,
+        &alice_profile.id,
+    )
+    .await
+    .expect("alice's reconcile runs");
+    let members = pollis_lib::commands::mls::local_tree_members(&alice.state, &group_id).await;
+    assert!(
+        !members.iter().any(|(u, d)| u == &bob_profile.id && d == &bob_device),
+        "alice evicts the rogue leaf: {members:?}"
+    );
+
+    dave.process_commits_for(&group_id).await;
+    let members = pollis_lib::commands::mls::local_tree_members(&dave.state, &group_id).await;
+    assert!(
+        members.iter().any(|(u, d)| u == &dave_profile.id && d == &dave_device)
+            && !members.iter().any(|(u, d)| u == &bob_profile.id && d == &bob_device),
+        "dave joins once the leaf is gone: {members:?}"
+    );
+    let channel = alice.general_channel_id(&group_id).await;
+    alice.send_channel_message(&channel, "after").await;
+    assert!(
+        dave.fetch_channel_messages(&channel)
+            .await
+            .iter()
+            .any(|m| m["content"] == "after"),
+        "dave reads the group once in"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(dave);
     drop(attacker);
 }

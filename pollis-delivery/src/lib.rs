@@ -1,6 +1,9 @@
 //! Pollis MLS Delivery Service.
 //!
-//! The sole writer to the MLS control-plane tables; it sees only opaque blobs (RFC 9420 DS role).
+//! The sole writer to the MLS control-plane tables (RFC 9420 DS role). Message
+//! content and commits are opaque to it; of the MLS objects it stores, it reads
+//! only the public leaves of KeyPackages, Welcomes and GroupInfos, to refuse
+//! uncertified devices ([`leaf_cert`], #1851).
 //!
 //! ## Write authentication ([`auth`])
 //!
@@ -30,6 +33,7 @@ pub mod livekit;
 pub mod headers;
 pub mod invite_token;
 pub mod last_seen;
+pub mod leaf_cert;
 pub mod messages;
 pub mod ops_log;
 pub mod otp;

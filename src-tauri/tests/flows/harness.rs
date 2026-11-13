@@ -167,7 +167,67 @@ pub(crate) fn ds_fault_armed() -> bool {
     peek_ds_fault().is_some()
 }
 
-/// State for the one harness-served endpoint, the fault-injecting `/v1/commits` override.
+/// #1851: while set, the in-process DS models one that does NOT run the leaf
+/// checks (`pollis_delivery::leaf_cert`): `/v1/commits` stores uncertified
+/// leaves and `/v1/key-packages/claim` serves whatever is in the table. Lets
+/// the cross-signing flows prove the CLIENT's checks hold on their own, since
+/// the DS is outside the trust boundary.
+static DS_SKIPS_CLAIM_CHECK: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static DS_SKIPS_COMMIT_CHECK: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Make the in-process DS skip (`true`) or run (`false`) all its leaf checks.
+pub(crate) fn set_ds_skips_leaf_checks(skip: bool) {
+    set_ds_skips_claim_check(skip);
+    DS_SKIPS_COMMIT_CHECK.store(skip, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Only the claim-time check: the DS serves forgeries but still checks commits.
+pub(crate) fn set_ds_skips_claim_check(skip: bool) {
+    DS_SKIPS_CLAIM_CHECK.store(skip, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn leaf_check(skip: &std::sync::atomic::AtomicBool) -> pollis_delivery::leaf_cert::LeafCheck {
+    if skip.load(std::sync::atomic::Ordering::SeqCst) {
+        pollis_delivery::leaf_cert::LeafCheck::Skip
+    } else {
+        pollis_delivery::leaf_cert::LeafCheck::Enforce
+    }
+}
+
+/// `/v1/key-packages/claim`, mirroring the real handler with the leaf check
+/// selectable ([`set_ds_skips_leaf_checks`]).
+async fn delivery_claim(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use pollis_delivery::devices::{
+        apply_claim_key_package_with, claim_outcome_response, ClaimKeyPackageBody,
+    };
+    let claimer = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: ClaimKeyPackageBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match apply_claim_key_package_with(&conn, Some(&claimer), &parsed, leaf_check(&DS_SKIPS_CLAIM_CHECK)).await {
+        Ok(outcome) => claim_outcome_response::<ClaimKeyPackageBody>(outcome),
+        Err(e) => ds_internal_error(format!("claim: {e}")),
+    }
+}
+
+/// State for the harness-served endpoints: the fault-injecting `/v1/commits`
+/// override and the `/v1/key-packages/claim` override.
 #[derive(Clone)]
 struct DsState {
     main: Arc<Db>,
@@ -264,7 +324,7 @@ async fn delivery_submit(
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("conn: {e}")),
     };
-    match pollis_delivery::commit::submit_commit(&main_conn, &conn, &parsed).await {
+    match pollis_delivery::commit::submit_commit_with(&main_conn, &conn, &parsed, leaf_check(&DS_SKIPS_COMMIT_CHECK)).await {
         Ok(pollis_delivery::commit::SubmitVerdict::Forbidden) => {
             pollis_delivery::error::AuthRejection::Forbidden.into_response()
         }
@@ -376,6 +436,10 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
                     .route(
                         <pollis_delivery::commit::SubmitBody as pollis_api::DsRequest>::PATH,
                         axum::routing::post(delivery_submit),
+                    )
+                    .route(
+                        <pollis_delivery::devices::ClaimKeyPackageBody as pollis_api::DsRequest>::PATH,
+                        axum::routing::post(delivery_claim),
                     )
                     .with_state(fault_state)
                     .fallback_service(pollis_delivery::build_router_with_state(real_state))

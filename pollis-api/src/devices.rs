@@ -89,8 +89,8 @@ pub const PUSH_KIND_DM_REQUEST: &str = "dm_request";
 /// — the post-quantum suite, and since #669 the only suite Pollis uses. It is
 /// also the default for any request that does not name one.
 ///
-/// The DS only ever uses this as a routing/label value; it never parses the
-/// opaque `key_package` blob to confirm the suite.
+/// The DS routes claims by this value and, since #1851, refuses a published
+/// package whose own suite differs from the one it is filed under.
 ///
 /// Provisional draft code point (#668); must move together with `CS_PQ` in `pollis-core`.
 pub const CIPHERSUITE_PQ: i64 = 0x0052;
@@ -105,7 +105,7 @@ pub struct KeyPackageEntry {
     /// MLS ciphersuite code point this package was built with. Optional: absent
     /// means [`CIPHERSUITE_PQ`], the only suite in use.
     ///
-    /// Client-supplied routing hint only; MLS rejects a mismatch at validation.
+    /// Must be the package's own suite: the DS refuses a mismatch (#1851).
     #[serde(default)]
     pub ciphersuite: Option<i64>,
     /// This is the device's LAST-RESORT package in its suite (#1571, RFC 9420

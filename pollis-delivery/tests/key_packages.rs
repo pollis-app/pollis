@@ -6,7 +6,7 @@ use std::sync::Arc;
 use pollis_delivery::db::Db;
 use pollis_delivery::devices::{
     apply_claim_key_package, apply_publish_key_packages, apply_replenish_key_packages,
-    ClaimKeyPackageBody, ClaimOutcome, KeyPackageEntry, PublishKeyPackagesBody,
+    ClaimKeyPackageBody, ClaimOutcome, PublishKeyPackagesBody,
     ReplenishKeyPackagesBody, CIPHERSUITE_PQ,
 };
 use pollis_delivery::writes::WriteOutcome;
@@ -33,38 +33,35 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-/// One unclaimed current-suite package; explicit `created_at` makes claim order deterministic.
+/// One unclaimed current-suite package; explicit `created_at` makes claim order
+/// deterministic. Returns the stored bytes: a real package of a certified device,
+/// since the DS serves nothing else (#1851).
 async fn insert_kp(
     db: &Db,
     ref_hash: &str,
     user_id: &str,
     device_id: &str,
-    key_package: &[u8],
     created_at: &str,
-) {
-    insert_kp_in_suite(
-        db,
-        ref_hash,
-        user_id,
-        device_id,
-        key_package,
-        created_at,
-        Some(CIPHERSUITE_PQ),
-    )
-    .await;
+) -> Vec<u8> {
+    insert_kp_in_suite(db, ref_hash, user_id, device_id, created_at, Some(CIPHERSUITE_PQ)).await
 }
 
-/// `None` omits the column: the pre-#454 INSERT, taking the `000010` default.
+/// `None` omits the column: the pre-#454 INSERT, taking the `000010` default
+/// (the retired classic suite, whose package it then is).
 async fn insert_kp_in_suite(
     db: &Db,
     ref_hash: &str,
     user_id: &str,
     device_id: &str,
-    key_package: &[u8],
     created_at: &str,
     ciphersuite: Option<i64>,
-) {
+) -> Vec<u8> {
     let conn = db.conn().await.unwrap();
+    let suite = suite_of(ciphersuite.unwrap_or(CIPHERSUITE_LEGACY));
+    let key_package = common::mls::shared_device(&conn, user_id, device_id)
+        .await
+        .key_package_in(suite, false)
+        .bytes;
     match ciphersuite {
         Some(suite) => conn
             .execute(
@@ -97,6 +94,11 @@ async fn insert_kp_in_suite(
             .await
             .unwrap(),
     };
+    key_package
+}
+
+fn suite_of(code: i64) -> openmls::prelude::Ciphersuite {
+    openmls::prelude::Ciphersuite::try_from(code as u16).expect("known suite")
 }
 
 fn device_body(user_id: &str, device_id: &str) -> ClaimKeyPackageBody {
@@ -118,13 +120,13 @@ fn device_body_in_suite(user_id: &str, device_id: &str, suite: i64) -> ClaimKeyP
 #[tokio::test(flavor = "multi_thread")]
 async fn claim_returns_the_right_bytes_then_exhausts() {
     let db = fresh_db().await;
-    insert_kp(&db, "ref-a", "bob", "dev1", b"kp-bytes-a", "2024-01-01 00:00:00").await;
+    let kp_bytes_a = insert_kp(&db, "ref-a", "bob", "dev1", "2024-01-01 00:00:00").await;
     let conn = db.conn().await.unwrap();
 
     match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, key_package } => {
             assert_eq!(ref_hash, "ref-a");
-            assert_eq!(key_package, b"kp-bytes-a");
+            assert_eq!(key_package, kp_bytes_a);
         }
         ClaimOutcome::NoKeyPackage => panic!("expected a claimed package"),
         other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
@@ -144,15 +146,15 @@ async fn claim_returns_the_right_bytes_then_exhausts() {
 #[tokio::test(flavor = "multi_thread")]
 async fn claim_is_oldest_first_and_device_scoped() {
     let db = fresh_db().await;
-    insert_kp(&db, "ref-old", "bob", "dev1", b"old", "2024-01-01 00:00:00").await;
-    insert_kp(&db, "ref-new", "bob", "dev1", b"new", "2024-02-01 00:00:00").await;
-    insert_kp(&db, "ref-d2", "bob", "dev2", b"d2", "2024-01-01 00:00:00").await;
+    let old = insert_kp(&db, "ref-old", "bob", "dev1", "2024-01-01 00:00:00").await;
+    let _new = insert_kp(&db, "ref-new", "bob", "dev1", "2024-02-01 00:00:00").await;
+    let _d2 = insert_kp(&db, "ref-d2", "bob", "dev2", "2024-01-01 00:00:00").await;
     let conn = db.conn().await.unwrap();
 
     match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, key_package } => {
             assert_eq!(ref_hash, "ref-old");
-            assert_eq!(key_package, b"old");
+            assert_eq!(key_package, old);
         }
         ClaimOutcome::NoKeyPackage => panic!("expected the oldest dev1 package"),
         other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
@@ -180,16 +182,20 @@ async fn claim_is_oldest_first_and_device_scoped() {
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     let db = fresh_db().await;
-    insert_kp(&db, "ref-solo", "bob", "dev1", b"the-only-kp", "2024-01-01 00:00:00").await;
+    let the_only_kp = insert_kp(&db, "ref-solo", "bob", "dev1", "2024-01-01 00:00:00").await;
 
     let mut handles = Vec::new();
     for _ in 0..8 {
         let db = Arc::clone(&db);
+        let the_only_kp = the_only_kp.clone();
         handles.push(tokio::spawn(async move {
             let conn = db.conn().await.unwrap();
             // busy_timeout is per-connection: a local-file artifact; Turso serializes server-side.
             conn.execute_batch("PRAGMA busy_timeout=10000;").await.unwrap();
-            apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap()
+            (
+                apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap(),
+                the_only_kp,
+            )
         }));
     }
 
@@ -197,13 +203,13 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     let mut none = 0;
     for h in handles {
         match h.await.unwrap() {
-            ClaimOutcome::Claimed { ref_hash, key_package } => {
+            (ClaimOutcome::Claimed { ref_hash, key_package }, the_only_kp) => {
                 assert_eq!(ref_hash, "ref-solo");
-                assert_eq!(key_package, b"the-only-kp");
+                assert_eq!(key_package, the_only_kp);
                 claimed += 1;
             }
-            ClaimOutcome::NoKeyPackage => none += 1,
-            other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            (ClaimOutcome::NoKeyPackage, _) => none += 1,
+            (other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited), _) => {
                 panic!("the claim gate refused an unrelated test claim: {other:?}")
             }
         }
@@ -224,24 +230,24 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     assert_eq!(row.get::<i64>(0).unwrap(), 1);
 }
 
-/// `None` reproduces what every deployed client sends.
-async fn publish_one(db: &Db, user: &str, device: &str, ref_hash: &str, suite: Option<i64>) {
+/// `None` reproduces what every deployed client sends. Returns the package's reference.
+async fn publish_one(db: &Db, user: &str, device: &str, suite: Option<i64>) -> String {
     let conn = db.conn().await.unwrap();
-    use base64::Engine as _;
+    let kp = common::mls::shared_device(&conn, user, device)
+        .await
+        .key_package_in(suite_of(suite.unwrap_or(CIPHERSUITE_PQ)), false);
+    let mut entry = kp.entry();
+    entry.ciphersuite = suite;
     let body = PublishKeyPackagesBody {
         device_id: device.to_string(),
-        packages: vec![KeyPackageEntry {
-            ref_hash: ref_hash.to_string(),
-            key_package: base64::engine::general_purpose::STANDARD.encode(ref_hash.as_bytes()),
-            ciphersuite: suite,
-            last_resort: false,
-        }],
+        packages: vec![entry],
         user_id: Some(user.to_string()),
     };
     match apply_publish_key_packages(&conn, Some(user), &body).await.unwrap() {
         WriteOutcome::Ok => {}
-        _ => panic!("publish must succeed"),
+        other => panic!("publish must succeed, got {other:?}"),
     }
+    kp.ref_hash
 }
 
 async fn insert_device(db: &Db, user: &str, device: &str) {
@@ -280,21 +286,23 @@ async fn unclaimed_in_suite(db: &Db, user: &str, device: &str, suite: i64) -> i6
     rows.next().await.unwrap().expect("count row").get::<i64>(0).unwrap()
 }
 
-fn replenish_body(user: &str, device: &str, suite: i64, refs: &[&str]) -> ReplenishKeyPackagesBody {
-    use base64::Engine as _;
-    ReplenishKeyPackagesBody {
+/// A replenish of `n` real packages in `suite`, and their references.
+async fn replenish_body(
+    db: &Db,
+    user: &str,
+    device: &str,
+    suite: i64,
+    n: usize,
+) -> (ReplenishKeyPackagesBody, Vec<String>) {
+    let conn = db.conn().await.unwrap();
+    let dev = common::mls::shared_device(&conn, user, device).await;
+    let kps: Vec<_> = (0..n).map(|_| dev.key_package_in(suite_of(suite), false)).collect();
+    let body = ReplenishKeyPackagesBody {
         device_id: device.to_string(),
-        packages: refs
-            .iter()
-            .map(|r| KeyPackageEntry {
-                ref_hash: r.to_string(),
-                key_package: base64::engine::general_purpose::STANDARD.encode(r.as_bytes()),
-                ciphersuite: Some(suite),
-                last_resort: false,
-            })
-            .collect(),
+        packages: kps.iter().map(|k| k.entry()).collect(),
         user_id: Some(user.to_string()),
-    }
+    };
+    (body, kps.into_iter().map(|k| k.ref_hash).collect())
 }
 
 async fn stored_suite(db: &Db, ref_hash: &str) -> i64 {
@@ -313,12 +321,12 @@ async fn stored_suite(db: &Db, ref_hash: &str) -> i64 {
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_and_claim_without_a_suite_land_on_the_current_suite() {
     let db = fresh_db().await;
-    publish_one(&db, "bob", "dev1", "ref-untagged", None).await;
-    assert_eq!(stored_suite(&db, "ref-untagged").await, CIPHERSUITE_PQ);
+    let ref_untagged = publish_one(&db, "bob", "dev1", None).await;
+    assert_eq!(stored_suite(&db, &ref_untagged).await, CIPHERSUITE_PQ);
 
     let conn = db.conn().await.unwrap();
     match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
-        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-untagged"),
+        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, ref_untagged),
         ClaimOutcome::NoKeyPackage => panic!("an untagged package must stay claimable"),
         other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
             panic!("the claim gate refused an unrelated test claim: {other:?}")
@@ -330,7 +338,7 @@ async fn publish_and_claim_without_a_suite_land_on_the_current_suite() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rows_written_without_the_column_take_the_schema_default_not_the_current_suite() {
     let db = fresh_db().await;
-    insert_kp_in_suite(&db, "ref-old", "bob", "dev1", b"old", "2024-01-01 00:00:00", None).await;
+    insert_kp_in_suite(&db, "ref-old", "bob", "dev1", "2024-01-01 00:00:00", None).await;
     assert_eq!(stored_suite(&db, "ref-old").await, CIPHERSUITE_LEGACY);
 
     let conn = db.conn().await.unwrap();
@@ -357,7 +365,7 @@ async fn rows_written_without_the_column_take_the_schema_default_not_the_current
 #[tokio::test(flavor = "multi_thread")]
 async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
     let db = fresh_db().await;
-    publish_one(&db, "bob", "dev1", "ref-legacy", Some(CIPHERSUITE_LEGACY)).await;
+    let ref_legacy = publish_one(&db, "bob", "dev1", Some(CIPHERSUITE_LEGACY)).await;
     let conn = db.conn().await.unwrap();
 
     match apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_PQ))
@@ -377,7 +385,7 @@ async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
         .await
         .unwrap()
     {
-        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-legacy"),
+        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, ref_legacy),
         ClaimOutcome::NoKeyPackage => panic!("the legacy package must still be claimable"),
         other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
             panic!("the claim gate refused an unrelated test claim: {other:?}")
@@ -389,13 +397,13 @@ async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_two_suite_pools_do_not_contaminate_each_other() {
     let db = fresh_db().await;
-    publish_one(&db, "bob", "dev1", "ref-legacy", Some(CIPHERSUITE_LEGACY)).await;
-    publish_one(&db, "bob", "dev1", "ref-pq", Some(CIPHERSUITE_PQ)).await;
-    assert_eq!(stored_suite(&db, "ref-pq").await, CIPHERSUITE_PQ);
+    let ref_legacy = publish_one(&db, "bob", "dev1", Some(CIPHERSUITE_LEGACY)).await;
+    let ref_pq = publish_one(&db, "bob", "dev1", Some(CIPHERSUITE_PQ)).await;
+    assert_eq!(stored_suite(&db, &ref_pq).await, CIPHERSUITE_PQ);
     let conn = db.conn().await.unwrap();
 
     match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
-        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-pq"),
+        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, ref_pq),
         ClaimOutcome::NoKeyPackage => panic!("the PQ pool must serve a suite-less claim"),
         other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
             panic!("the claim gate refused an unrelated test claim: {other:?}")
@@ -406,7 +414,7 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
         .await
         .unwrap()
     {
-        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-legacy"),
+        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, ref_legacy),
         ClaimOutcome::NoKeyPackage => panic!("the legacy pool must be unaffected"),
         other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
             panic!("the claim gate refused an unrelated test claim: {other:?}")
@@ -433,7 +441,7 @@ async fn publishing_no_longer_derives_the_retired_pq_capable_flag() {
     insert_device(&db, "bob", "dev1").await;
     assert_eq!(pq_capable(&db, "bob", "dev1").await, 0, "a fresh device row defaults to 0");
 
-    publish_one(&db, "bob", "dev1", "ref-pq", Some(CIPHERSUITE_PQ)).await;
+    let _ref_pq = publish_one(&db, "bob", "dev1", Some(CIPHERSUITE_PQ)).await;
     assert_eq!(
         pq_capable(&db, "bob", "dev1").await,
         0,
@@ -441,13 +449,8 @@ async fn publishing_no_longer_derives_the_retired_pq_capable_flag() {
     );
 
     let conn = db.conn().await.unwrap();
-    apply_replenish_key_packages(
-        &conn,
-        Some("bob"),
-        &replenish_body("bob", "dev1", CIPHERSUITE_PQ, &["r1", "r2"]),
-    )
-    .await
-    .unwrap();
+    let (body, _) = replenish_body(&db, "bob", "dev1", CIPHERSUITE_PQ, 2).await;
+    apply_replenish_key_packages(&conn, Some("bob"), &body).await.unwrap();
     assert_eq!(
         pq_capable(&db, "bob", "dev1").await,
         0,
@@ -462,30 +465,21 @@ async fn rotating_one_suite_leaves_the_other_pool_intact() {
     insert_device(&db, "bob", "dev1").await;
 
     let conn = db.conn().await.unwrap();
-    apply_replenish_key_packages(
-        &conn,
-        Some("bob"),
-        &replenish_body("bob", "dev1", CIPHERSUITE_LEGACY, &["c1", "c2"]),
-    )
-    .await
-    .unwrap();
-    apply_replenish_key_packages(
-        &conn,
-        Some("bob"),
-        &replenish_body("bob", "dev1", CIPHERSUITE_PQ, &["h1", "h2"]),
-    )
-    .await
-    .unwrap();
+    let (body, c_refs) = replenish_body(&db, "bob", "dev1", CIPHERSUITE_LEGACY, 2).await;
+    assert!(matches!(
+        apply_replenish_key_packages(&conn, Some("bob"), &body).await.unwrap(),
+        WriteOutcome::Ok
+    ));
+    let (body, h_refs) = replenish_body(&db, "bob", "dev1", CIPHERSUITE_PQ, 2).await;
+    assert!(matches!(
+        apply_replenish_key_packages(&conn, Some("bob"), &body).await.unwrap(),
+        WriteOutcome::Ok
+    ));
     assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_LEGACY).await, 2);
     assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_PQ).await, 2);
 
-    apply_replenish_key_packages(
-        &conn,
-        Some("bob"),
-        &replenish_body("bob", "dev1", CIPHERSUITE_LEGACY, &["c3", "c4", "c5"]),
-    )
-    .await
-    .unwrap();
+    let (body, _) = replenish_body(&db, "bob", "dev1", CIPHERSUITE_LEGACY, 3).await;
+    apply_replenish_key_packages(&conn, Some("bob"), &body).await.unwrap();
     assert_eq!(
         unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_LEGACY).await,
         3,
@@ -497,12 +491,12 @@ async fn rotating_one_suite_leaves_the_other_pool_intact() {
         "a legacy rotation must NOT drain the PQ pool"
     );
 
-    assert_eq!(stored_suite(&db, "h1").await, CIPHERSUITE_PQ);
+    assert_eq!(stored_suite(&db, &h_refs[0]).await, CIPHERSUITE_PQ);
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
-            "SELECT COUNT(*) FROM mls_key_package WHERE ref_hash IN ('c1','c2')",
-            (),
+            "SELECT COUNT(*) FROM mls_key_package WHERE ref_hash IN (?1, ?2)",
+            libsql::params![c_refs[0].clone(), c_refs[1].clone()],
         )
         .await
         .unwrap();

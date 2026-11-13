@@ -17,10 +17,10 @@ use tower::ServiceExt as _;
 
 mod common;
 
-fn gen_signing_key() -> SigningKey<MlDsa44> {
+fn gen_seed() -> [u8; 32] {
     let mut seed = [0u8; 32];
     OsRng.fill_bytes(&mut seed);
-    SigningKey::<MlDsa44>::from_seed(&seed.into())
+    seed
 }
 
 fn b64(b: &[u8]) -> String {
@@ -43,10 +43,13 @@ struct Account {
     user_id: String,
     device_id: String,
     key: SigningKey<MlDsa44>,
+    /// The seed of `key`, so a Welcome can be minted for this very device (#1851).
+    seed: [u8; 32],
 }
 
 async fn seed_account(db: &Db, user_id: &str) -> Account {
-    let key = gen_signing_key();
+    let seed = gen_seed();
+    let key = SigningKey::<MlDsa44>::from_seed(&seed.into());
     let conn = db.conn().await.unwrap();
     conn.execute(
         "INSERT OR IGNORE INTO users (id, email, username) VALUES (?1, ?1 || '@x', ?1)",
@@ -65,7 +68,14 @@ async fn seed_account(db: &Db, user_id: &str) -> Account {
         user_id: user_id.to_string(),
         device_id,
         key,
+        seed,
     }
+}
+
+/// A genuine Welcome for `who`'s device, which the DS's #1851 check accepts.
+async fn welcome_to(db: &Db, who: &Account) -> Vec<u8> {
+    let conn = db.conn().await.unwrap();
+    common::mls::welcome_for_device_key(&conn, &who.user_id, &who.device_id, who.seed).await
 }
 
 /// Put `user` in `group_id`'s roster; a group id is a valid MLS conversation id.
@@ -152,7 +162,6 @@ fn bundle(conv: &str, epoch: i64, sender: &str, recipient: &str, welcome: &[u8])
         "based_on_epoch": epoch,
         "sender_id": sender,
         "commit": b64(format!("commit-{conv}-{epoch}-{sender}").as_bytes()),
-        "group_info": b64(b"group-info"),
         "welcomes": [{
             "recipient_id": recipient,
             "recipient_device_id": format!("{recipient}-dev"),
@@ -173,7 +182,11 @@ async fn a_commit_bundle_cannot_park_a_welcome_on_a_non_member() {
         &db,
         &mallory,
         "/v1/commits",
-        bundle("mallory-grp", 0, "mallory", "victim", b"forged-welcome"),
+        {
+            let mut b = bundle("mallory-grp", 0, "mallory", "victim", b"forged-welcome");
+            b["group_info"] = serde_json::json!(b64(b"group-info"));
+            b
+        },
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "a Welcome to a non-member must be refused");
@@ -210,11 +223,11 @@ async fn a_commit_bundle_cannot_park_a_welcome_on_a_non_member() {
 async fn a_welcome_to_a_current_member_still_lands() {
     let db = fresh_db().await;
     let alice = seed_account(&db, "alice").await;
-    let _dave = seed_account(&db, "dave").await;
+    let dave = seed_account(&db, "dave").await;
     seed_member(&db, "grp", "alice", "member").await;
     seed_member(&db, "grp", "dave", "member").await;
 
-    let status = post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", b"real-welcome")).await;
+    let status = post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", &welcome_to(&db, &dave).await)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         count(&db, "SELECT COUNT(*) FROM mls_welcome WHERE recipient_id = 'dave'", ()).await,
@@ -227,7 +240,7 @@ async fn a_welcome_to_a_current_member_still_lands() {
 async fn a_welcome_to_a_pending_invitee_is_admitted() {
     let db = fresh_db().await;
     let alice = seed_account(&db, "alice").await;
-    let _dave = seed_account(&db, "dave").await;
+    let dave = seed_account(&db, "dave").await;
     seed_member(&db, "grp", "alice", "admin").await;
     db.conn()
         .await
@@ -241,7 +254,7 @@ async fn a_welcome_to_a_pending_invitee_is_admitted() {
         .unwrap();
 
     assert_eq!(
-        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", b"staged")).await,
+        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", &welcome_to(&db, &dave).await)).await,
         StatusCode::OK,
         "a Welcome staged for a pending invitee must be admitted"
     );
@@ -274,17 +287,18 @@ async fn a_member_cannot_steal_another_members_pending_welcome() {
     let db = fresh_db().await;
     let alice = seed_account(&db, "alice").await;
     let bob = seed_account(&db, "bob").await;
-    let _dave = seed_account(&db, "dave").await;
+    let dave = seed_account(&db, "dave").await;
     for u in ["alice", "bob", "dave"] {
         seed_member(&db, "grp", u, "member").await;
     }
 
+    let alice_welcome = welcome_to(&db, &dave).await;
     assert_eq!(
-        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", b"alice-welcome")).await,
+        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", &alice_welcome)).await,
         StatusCode::OK
     );
     assert_eq!(
-        post(&db, &bob, "/v1/commits", bundle("grp", 1, "bob", "dave", b"bob-welcome")).await,
+        post(&db, &bob, "/v1/commits", bundle("grp", 1, "bob", "dave", &welcome_to(&db, &dave).await)).await,
         StatusCode::FORBIDDEN
     );
 
@@ -299,7 +313,7 @@ async fn a_member_cannot_steal_another_members_pending_welcome() {
             .unwrap();
         rows.next().await.unwrap().unwrap().get::<Vec<u8>>(0).unwrap()
     };
-    assert_eq!(blob, b"alice-welcome", "Alice's pending Welcome must survive");
+    assert_eq!(blob, alice_welcome, "Alice's pending Welcome must survive");
     assert_eq!(
         count(&db, "SELECT COUNT(*) FROM mls_commit_log WHERE conversation_id = 'grp'", ()).await,
         1,
@@ -313,17 +327,17 @@ async fn an_admin_may_re_drive_another_members_pending_welcome() {
     let db = fresh_db().await;
     let alice = seed_account(&db, "alice").await;
     let boss = seed_account(&db, "boss").await;
-    let _dave = seed_account(&db, "dave").await;
+    let dave = seed_account(&db, "dave").await;
     seed_member(&db, "grp", "alice", "member").await;
     seed_member(&db, "grp", "boss", "admin").await;
     seed_member(&db, "grp", "dave", "member").await;
 
     assert_eq!(
-        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", b"alice-welcome")).await,
+        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", &welcome_to(&db, &dave).await)).await,
         StatusCode::OK
     );
     assert_eq!(
-        post(&db, &boss, "/v1/commits", bundle("grp", 1, "boss", "dave", b"boss-welcome")).await,
+        post(&db, &boss, "/v1/commits", bundle("grp", 1, "boss", "dave", &welcome_to(&db, &dave).await)).await,
         StatusCode::OK
     );
 }
@@ -338,7 +352,7 @@ async fn a_fetched_welcome_names_the_conversation_it_was_filed_under() {
     seed_member(&db, "grp", "dave", "member").await;
 
     assert_eq!(
-        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", b"real-welcome")).await,
+        post(&db, &alice, "/v1/commits", bundle("grp", 0, "alice", "dave", &welcome_to(&db, &dave).await)).await,
         StatusCode::OK
     );
 

@@ -1114,7 +1114,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/mls/provider.rs:27",
-        "pollis-core/src/commands/mls/group_state.rs:1165"
+        "pollis-core/src/commands/mls/group_state.rs:1195"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
@@ -1137,7 +1137,7 @@
         "pollis-core/src/commands/mls/provider.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:1165",
+        "pollis-core/src/commands/mls/group_state.rs:1195",
         "pollis-core/src/commands/mls/provider.rs:20"
       ],
       "status": "verified",
@@ -1321,7 +1321,7 @@
       "evidence": [
         "pollis-core/src/commands/mls/self_update.rs:19",
         "pollis-core/src/commands/mls/sweep.rs:19",
-        "pollis-core/src/commands/mls/welcomes.rs:495"
+        "pollis-core/src/commands/mls/welcomes.rs:607"
       ],
       "status": "verified",
       "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
@@ -6156,8 +6156,8 @@
         "pollis-core/src/commands/mls/device.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/device.rs:571",
-        "pollis-core/src/commands/mls/device.rs:645"
+        "pollis-core/src/commands/mls/device.rs:603",
+        "pollis-core/src/commands/mls/device.rs:679"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -6197,8 +6197,8 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:2008",
-        "pollis-core/src/commands/mls/group_state.rs:2035"
+        "pollis-core/src/commands/mls/group_state.rs:2038",
+        "pollis-core/src/commands/mls/group_state.rs:2065"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -6218,8 +6218,8 @@
         "pollis-core/src/commands/mls/reconcile.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:2060",
-        "pollis-core/src/commands/mls/group_state.rs:2096",
+        "pollis-core/src/commands/mls/group_state.rs:2090",
+        "pollis-core/src/commands/mls/group_state.rs:2126",
         "pollis-core/src/commands/mls/reconcile.rs:366"
       ],
       "status": "verified",
@@ -6231,18 +6231,112 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "5.3 Device cross-signing",
-        "quote": "Both halves are tested in `src-tauri/tests/flows/cross_signing.rs`"
+        "quote": "The client checks are tested in `src-tauri/tests/flows/cross_signing.rs`"
       },
-      "claim": "Both committer and replay halves are tested in the flows suite.",
+      "claim": "The committer, replay and join-time checks are tested in the flows suite, with the in-process DS's own checks switched off; the DS checks have their own suite.",
       "kind": "process",
       "anchors": [
-        "src-tauri/tests/flows/cross_signing.rs"
+        "src-tauri/tests/flows/cross_signing.rs",
+        "pollis-delivery/tests/leaf_certification.rs"
       ],
       "evidence": [
-        "src-tauri/tests/flows/cross_signing.rs:1"
+        "src-tauri/tests/flows/cross_signing.rs:1",
+        "pollis-delivery/tests/leaf_certification.rs:1"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "0f0f9916aeda2ff2ddad5a3697c7ab680b641e2d",
+      "also_rendered_in": []
+    },
+    {
+      "id": "wp-s5-27",
+      "doc": "docs/security-whitepaper.md",
+      "locator": {
+        "heading": "5.3 Device cross-signing",
+        "quote": "A KeyPackage is stored only if it validates, is filed under its own KeyPackageRef and suite by the device its credential names, and that device is certified"
+      },
+      "claim": "The DS validates every published KeyPackage, checks its reference, suite and credential against the request, and refuses it unless the leaf is the certified key of a live device whose cert verifies under the account key.",
+      "kind": "security",
+      "anchors": [
+        "pollis-delivery/src/leaf_cert.rs",
+        "pollis-delivery/src/devices.rs"
+      ],
+      "evidence": [
+        "pollis-delivery/src/leaf_cert.rs:203",
+        "pollis-delivery/src/leaf_cert.rs:261",
+        "pollis-delivery/src/devices.rs:68"
+      ],
+      "status": "verified",
+      "verified_sha": "0f0f9916aeda2ff2ddad5a3697c7ab680b641e2d",
+      "also_rendered_in": []
+    },
+    {
+      "id": "wp-s5-28",
+      "doc": "docs/security-whitepaper.md",
+      "locator": {
+        "heading": "5.3 Device cross-signing",
+        "quote": "A KeyPackage is served only while its device is certified"
+      },
+      "claim": "A claim checks each candidate package's leaf and skips, without deleting or spending, any whose device is not certified at that moment.",
+      "kind": "security",
+      "anchors": [
+        "pollis-delivery/src/devices.rs",
+        "pollis-delivery/src/leaf_cert.rs"
+      ],
+      "evidence": [
+        "pollis-delivery/src/devices.rs:508",
+        "pollis-delivery/src/leaf_cert.rs:203"
+      ],
+      "status": "verified",
+      "verified_sha": "41a3399ddd5acd2ce9bd37f05f5ce68c9cf4d7a7",
+      "also_rendered_in": []
+    },
+    {
+      "id": "wp-s5-29",
+      "doc": "docs/security-whitepaper.md",
+      "locator": {
+        "heading": "5.3 Device cross-signing",
+        "quote": "A commit is refused, with nothing written, if one of its Welcomes admits a KeyPackage that is not a stored package of a certified device or does not admit its recipient"
+      },
+      "claim": "submit_commit checks every Welcome's KeyPackageRefs and the GroupInfo's new leaves before its transaction; resubmit and group-info apply the same checks.",
+      "kind": "security",
+      "anchors": [
+        "pollis-delivery/src/commit.rs",
+        "pollis-delivery/src/leaf_cert.rs",
+        "pollis-delivery/src/writes.rs"
+      ],
+      "evidence": [
+        "pollis-delivery/src/commit.rs:245",
+        "pollis-delivery/src/leaf_cert.rs:283",
+        "pollis-delivery/src/leaf_cert.rs:336",
+        "pollis-delivery/src/writes.rs:636",
+        "pollis-delivery/src/writes.rs:1022"
+      ],
+      "status": "verified",
+      "verified_sha": "0f0f9916aeda2ff2ddad5a3697c7ab680b641e2d",
+      "also_rendered_in": []
+    },
+    {
+      "id": "wp-s5-30",
+      "doc": "docs/security-whitepaper.md",
+      "locator": {
+        "heading": "5.3 Device cross-signing",
+        "quote": "A device does not enter a tree that holds a leaf its claimed account never certified"
+      },
+      "claim": "Before applying a Welcome, and before an external join, the device verdicts every leaf of the tree and refuses one that is positively not certified (revocation excepted).",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/mls/welcomes.rs",
+        "pollis-core/src/commands/mls/group_state.rs",
+        "pollis-core/src/commands/mls/device.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/mls/welcomes.rs:235",
+        "pollis-core/src/commands/mls/welcomes.rs:334",
+        "pollis-core/src/commands/mls/group_state.rs:723",
+        "pollis-core/src/commands/mls/device.rs:565"
+      ],
+      "status": "verified",
+      "verified_sha": "0f0f9916aeda2ff2ddad5a3697c7ab680b641e2d",
       "also_rendered_in": []
     },
     {
@@ -6485,8 +6579,8 @@
         "pollis-core/src/commands/mls/provider.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:886",
-        "pollis-core/src/commands/mls/group_state.rs:905"
+        "pollis-core/src/commands/mls/group_state.rs:916",
+        "pollis-core/src/commands/mls/group_state.rs:935"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -6671,8 +6765,8 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:887",
-        "pollis-core/src/commands/mls/group_state.rs:881"
+        "pollis-core/src/commands/mls/group_state.rs:917",
+        "pollis-core/src/commands/mls/group_state.rs:911"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -6732,7 +6826,7 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:501",
+        "pollis-core/src/commands/mls/group_state.rs:512",
         "pollis-core/src/commands/mls/migrate.rs:180"
       ],
       "status": "verified",
@@ -6752,8 +6846,8 @@
         "pollis-delivery/src/commit.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/commit.rs:239",
-        "pollis-delivery/src/commit.rs:289"
+        "pollis-delivery/src/commit.rs:279",
+        "pollis-delivery/src/commit.rs:329"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -6794,8 +6888,8 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:805",
-        "pollis-core/src/commands/mls/group_state.rs:501"
+        "pollis-core/src/commands/mls/group_state.rs:835",
+        "pollis-core/src/commands/mls/group_state.rs:512"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -6815,7 +6909,7 @@
         "pollis-core/src/commands/mls/device.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:2041",
+        "pollis-core/src/commands/mls/group_state.rs:2071",
         "pollis-core/src/commands/mls/device.rs:487"
       ],
       "status": "verified",
@@ -6858,8 +6952,8 @@
       ],
       "evidence": [
         "pollis-core/src/commands/mls/key_packages.rs:7",
-        "pollis-delivery/src/devices.rs:474",
-        "pollis-core/src/commands/mls/welcomes.rs:294"
+        "pollis-delivery/src/devices.rs:570",
+        "pollis-core/src/commands/mls/welcomes.rs:406"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -6920,7 +7014,7 @@
       "evidence": [
         "pollis-core/src/commands/messages/send.rs:158",
         "pollis-core/src/commands/messages/send.rs:165",
-        "pollis-core/src/commands/mls/group_state.rs:1312"
+        "pollis-core/src/commands/mls/group_state.rs:1342"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -7027,7 +7121,7 @@
       "evidence": [
         "pollis-core/src/commands/messages/read.rs:31",
         "pollis-core/src/commands/messages/ingest.rs:945",
-        "pollis-core/src/commands/mls/group_state.rs:1951"
+        "pollis-core/src/commands/mls/group_state.rs:1981"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -7150,7 +7244,7 @@
         "pollis-core/src/commands/mls/provider.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:1165"
+        "pollis-core/src/commands/mls/group_state.rs:1195"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -7233,7 +7327,7 @@
       "evidence": [
         "pollis-core/src/commands/mls/sweep.rs:19",
         "pollis-core/src/commands/mls/sweep.rs:206",
-        "pollis-core/src/commands/mls/welcomes.rs:504"
+        "pollis-core/src/commands/mls/welcomes.rs:616"
       ],
       "status": "verified",
       "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
@@ -7566,7 +7660,7 @@
         "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:905"
+        "pollis-core/src/commands/mls/group_state.rs:935"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -7607,8 +7701,8 @@
       ],
       "evidence": [
         "pollis-delivery/src/commit.rs:69",
-        "pollis-delivery/src/commit.rs:243",
-        "pollis-delivery/src/commit.rs:720"
+        "pollis-delivery/src/commit.rs:283",
+        "pollis-delivery/src/commit.rs:760"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -7881,7 +7975,7 @@
       "evidence": [
         "pollis-core/Cargo.toml:424",
         "patches/sqlcipher-src/Cargo.toml:1",
-        "Cargo.lock:7227"
+        "Cargo.lock:7231"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -8503,7 +8597,7 @@
         "pollis-core/src/commands/file_keys.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:1611",
+        "pollis-core/src/commands/mls/group_state.rs:1641",
         "pollis-core/src/commands/mls/reconcile.rs:1193",
         "pollis-core/src/commands/mls/self_update.rs:179"
       ],
@@ -9006,7 +9100,7 @@
         "pollis-core/src/commands/mls/migrate.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/group_state.rs:1608",
+        "pollis-core/src/commands/mls/group_state.rs:1638",
         "pollis-core/src/commands/mls/reconcile.rs:1190",
         "pollis-core/src/commands/mls/self_update.rs:176"
       ],
@@ -9452,7 +9546,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/account.rs:679",
-        "pollis-delivery/src/writes.rs:854",
+        "pollis-delivery/src/writes.rs:867",
         "pollis-core/src/commands/device_enrollment.rs:775"
       ],
       "status": "verified",
@@ -12719,8 +12813,8 @@
         "pollis-delivery/src/commit.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/commit.rs:412",
-        "pollis-delivery/src/commit.rs:605"
+        "pollis-delivery/src/commit.rs:452",
+        "pollis-delivery/src/commit.rs:645"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -14672,8 +14766,8 @@
         "pollis-delivery/src/lib.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/lib.rs:282",
-        "pollis-delivery/src/lib.rs:487"
+        "pollis-delivery/src/lib.rs:286",
+        "pollis-delivery/src/lib.rs:491"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -15928,8 +16022,8 @@
         "pollis-delivery/src/commit.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/commit.rs:386",
-        "pollis-delivery/src/commit.rs:389"
+        "pollis-delivery/src/commit.rs:426",
+        "pollis-delivery/src/commit.rs:429"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -16155,7 +16249,7 @@
         "pollis-delivery/src/teardown.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/commit.rs:389",
+        "pollis-delivery/src/commit.rs:429",
         "pollis-delivery/src/teardown.rs:105"
       ],
       "status": "verified",
@@ -16989,7 +17083,7 @@
       "evidence": [
         "pollis-core/src/commands/mls/provider.rs:136",
         "pollis-core/src/commands/mls/key_packages.rs:243",
-        "docs/security-whitepaper.md:348"
+        "docs/security-whitepaper.md:355"
       ],
       "status": "verified",
       "note": "No build mints classic-suite groups or KeyPackages (#669). Groups stored on an older suite stay readable until migrated (provider.rs:164-167); whether any such group remains live is runtime state.",
@@ -17669,7 +17763,7 @@
       ],
       "evidence": [
         "docs/security-whitepaper.md:9",
-        "docs/security-whitepaper.md:753"
+        "docs/security-whitepaper.md:760"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -17949,7 +18043,7 @@
         "pollis-delivery/src/commit.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/commit.rs:1075",
+        "pollis-delivery/src/commit.rs:1115",
         "scripts/kani-inventory.sh:46"
       ],
       "status": "verified",
@@ -18246,7 +18340,7 @@
         "docs/security-whitepaper.md"
       ],
       "evidence": [
-        "docs/security-whitepaper.md:753"
+        "docs/security-whitepaper.md:760"
       ],
       "status": "unverifiable",
       "note": "A process record (#1091/#1102/#1113, #1161); not checkable against code.",
@@ -19041,7 +19135,7 @@
         "docs/security-whitepaper.md"
       ],
       "evidence": [
-        "docs/security-whitepaper.md:753"
+        "docs/security-whitepaper.md:760"
       ],
       "status": "unverifiable",
       "note": "A process record (#1091/#1102/#1113, #1161); not checkable against code.",
@@ -19787,7 +19881,7 @@
       ],
       "evidence": [
         "pollis-schema/migrations/000008_message_envelope_sealed_sender.sql:9",
-        "pollis-delivery/src/commit.rs:247"
+        "pollis-delivery/src/commit.rs:287"
       ],
       "status": "verified",
       "note": "True for message envelopes. MLS commits (group changes) do record the committer's real id in mls_commit_log until pruned, and the DS sees the sender live on each authenticated write (subprocessors page says so).",
@@ -19977,7 +20071,7 @@
       "evidence": [
         "pollis-delivery/tests/teardown.rs:734",
         "pollis-delivery/src/teardown.rs:281",
-        "pollis-delivery/src/devices.rs:368"
+        "pollis-delivery/src/devices.rs:407"
       ],
       "status": "verified",
       "verified_sha": "adb534c44adb06a712a868ef1eb5f2afe2c34172",

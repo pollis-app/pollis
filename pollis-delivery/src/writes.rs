@@ -626,6 +626,18 @@ pub async fn group_info(
     };
 
     let conn = state.log_db.conn().await?;
+    // #1851: a GroupInfo is the tree an external joiner builds on, and the
+    // baseline the next commit's GroupInfo is diffed against, so it may add no
+    // uncertified leaf either (`leaf_cert::check_group_info`).
+    {
+        let main_conn = state.db.conn().await?;
+        let stored = crate::leaf_cert::stored_group_info(&conn, &parsed.conversation_id).await?;
+        if let Err(why) =
+            crate::leaf_cert::check_group_info(&main_conn, stored.as_deref(), &gi).await?
+        {
+            return Ok(bad_request(why));
+        }
+    }
     let outcome = upsert_group_info(
         &conn,
         &parsed.conversation_id,
@@ -639,7 +651,8 @@ pub async fn group_info(
     Ok(head_bounded_response::<GroupInfoBody>(outcome))
 }
 
-/// Decode the base64 GroupInfo and UPSERT it (W4 minus auth/authz), for handler and harness.
+/// Decode the base64 GroupInfo and UPSERT it (W4 minus auth/authz and minus
+/// the #1851 leaf check, which the handler runs against the main DB).
 pub async fn apply_group_info(
     log_conn: &Connection,
     body: &GroupInfoBody,
@@ -945,13 +958,14 @@ pub async fn welcomes_resubmit(
     })
 }
 
-/// The resubmit decision and the write, behind four gates:
+/// The resubmit decision and the write, behind five gates:
 ///
 ///   1. **The actor is a current member** of the conversation (unchanged; skipped
 ///      on the no-auth path, mirroring submit / group_info).
 ///   2. **The RECIPIENT is a current member** too, else any member could Welcome any device.
 ///   3. **The lineage exists** ([`refuse_above_head`]).
 ///   4. **One member may not overwrite another's undelivered Welcome** (the head-commit author or an admin may).
+///   5. **No uncertified leaf** (#1851): [`crate::leaf_cert::check_welcome`].
 pub async fn apply_welcomes_resubmit(
     main_conn: &Connection,
     log_conn: &Connection,
@@ -1003,6 +1017,18 @@ pub async fn apply_welcomes_resubmit(
                 || is_conversation_admin(main_conn, &body.conversation_id, actor).await?
         }
     };
+
+    // 5. #1851: the same leaf check a Welcome in a commit bundle gets.
+    if let Err(why) = crate::leaf_cert::check_welcome(
+        main_conn,
+        &body.recipient_id,
+        &body.recipient_device_id,
+        &welcome,
+    )
+    .await?
+    {
+        return Ok(ResubmitOutcome::Invalid(why));
+    }
 
     match upsert_welcome(
         log_conn,

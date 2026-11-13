@@ -93,7 +93,6 @@ fn submit_body_json(conv: &str, epoch: i64, sender: &str) -> Vec<u8> {
         "based_on_epoch": epoch,
         "sender_id": sender,
         "commit": b64(format!("commit-{conv}-{epoch}-{sender}").as_bytes()),
-        "group_info": b64(b"group-info"),
     }))
     .unwrap()
 }

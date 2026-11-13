@@ -37,7 +37,47 @@ fn entry(ref_hash: &str, last_resort: bool) -> KeyPackageEntry {
     }
 }
 
+type Labels = std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>>;
+
+/// Real packages and the labels the tests name them by (#1851: the DS stores
+/// only real, certified packages, filed under their real references).
+fn labels() -> &'static Labels {
+    static LABELS: std::sync::OnceLock<Labels> = std::sync::OnceLock::new();
+    LABELS.get_or_init(Default::default)
+}
+
+/// The test's label for a stored reference; an unknown one is returned as is.
+fn label_of(ref_hash: &str) -> String {
+    labels()
+        .lock()
+        .unwrap()
+        .get(ref_hash)
+        .map(|(label, _)| label.clone())
+        .unwrap_or_else(|| ref_hash.to_string())
+}
+
+/// Swap each labelled placeholder [`entry`] for a real package of the same
+/// kind from `user`'s certified `device`.
+async fn realize(db: &Db, user: &str, device: &str, packages: Vec<KeyPackageEntry>) -> Vec<KeyPackageEntry> {
+    let conn = db.conn().await.unwrap();
+    let dev = common::mls::shared_device(&conn, user, device).await;
+    packages
+        .into_iter()
+        .map(|placeholder| {
+            let kp = dev.key_package_in(common::mls::SUITE, placeholder.last_resort);
+            labels()
+                .lock()
+                .unwrap()
+                .insert(kp.ref_hash.clone(), (placeholder.ref_hash.clone(), kp.bytes.clone()));
+            let mut real = kp.entry();
+            real.ciphersuite = placeholder.ciphersuite;
+            real
+        })
+        .collect()
+}
+
 async fn publish(db: &Db, user: &str, device: &str, packages: Vec<KeyPackageEntry>) -> WriteOutcome {
+    let packages = realize(db, user, device, packages).await;
     let body = PublishKeyPackagesBody {
         device_id: device.to_string(),
         packages,
@@ -49,6 +89,7 @@ async fn publish(db: &Db, user: &str, device: &str, packages: Vec<KeyPackageEntr
 }
 
 async fn rotate(db: &Db, user: &str, device: &str, packages: Vec<KeyPackageEntry>) -> WriteOutcome {
+    let packages = realize(db, user, device, packages).await;
     let body = ReplenishKeyPackagesBody {
         device_id: device.to_string(),
         packages,
@@ -70,8 +111,9 @@ async fn claim(db: &Db, claimer: &str, user: &str, device: &str) -> Option<Strin
         .unwrap()
     {
         ClaimOutcome::Claimed { ref_hash, key_package } => {
-            assert_eq!(key_package, ref_hash.as_bytes(), "the claimed row's own bytes");
-            Some(ref_hash)
+            let (label, bytes) = labels().lock().unwrap().get(&ref_hash).cloned().expect("a known package");
+            assert_eq!(key_package, bytes, "the claimed row's own bytes");
+            Some(label)
         }
         ClaimOutcome::NoKeyPackage => None,
         other => panic!("the claim gate refused a test claim: {other:?}"),
@@ -89,8 +131,9 @@ async fn refs(db: &Db, sql_where: &str) -> Vec<String> {
         .unwrap();
     let mut out = Vec::new();
     while let Some(row) = rows.next().await.unwrap() {
-        out.push(row.get::<String>(0).unwrap());
+        out.push(label_of(&row.get::<String>(0).unwrap()));
     }
+    out.sort();
     out
 }
 
@@ -130,12 +173,12 @@ async fn no_update_can_mark_a_last_resort_package_claimed() {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
-            "UPDATE mls_key_package SET claimed = 1 WHERE ref_hash = 'lr' RETURNING ref_hash",
+            "UPDATE mls_key_package SET claimed = 1 WHERE last_resort = 1 RETURNING ref_hash",
             (),
         )
         .await
         .unwrap();
-    assert_eq!(rows.next().await.unwrap().unwrap().get::<String>(0).unwrap(), "lr");
+    assert_eq!(label_of(&rows.next().await.unwrap().unwrap().get::<String>(0).unwrap()), "lr");
     drop(rows);
     conn.execute("UPDATE mls_key_package SET claimed = 1", ()).await.unwrap();
     assert_eq!(refs(&db, "claimed = 0").await, vec!["lr"], "only the regular row was spent");
@@ -219,8 +262,7 @@ async fn a_client_that_predates_the_field_is_unchanged() {
     assert!(!wire.contains("last_resort"), "got {wire}");
 
     let db = fresh_db().await;
-    let conn = db.conn().await.unwrap();
-    apply_publish_key_packages(&conn, Some("bob"), &body).await.unwrap();
+    assert!(matches!(publish(&db, "bob", "d1", body.packages).await, WriteOutcome::Ok));
     assert_eq!(refs(&db, "last_resort = 0").await, vec!["r1"]);
     assert_eq!(claim(&db, "alice", "bob", "d1").await.as_deref(), Some("r1"));
     assert_eq!(claim(&db, "alice", "bob", "d1").await, None, "and an empty pool is empty");

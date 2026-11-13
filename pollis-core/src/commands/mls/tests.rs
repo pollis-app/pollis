@@ -3155,8 +3155,11 @@ fn an_external_join_refuses_a_lineage_built_by_a_forged_signer() {
         },
     )
     .expect_err("a lineage whose GroupInfo is signed by an uncertified leaf must be refused");
+    // #1851's tree-wide leaf check runs first and refuses the same forged leaf; either gate
+    // must name the provenance failure.
+    let msg = err.to_string();
     assert!(
-        err.to_string().contains("not a certified device of a current member"),
+        msg.contains("not a certified device of a current member") || msg.contains("never certified"),
         "the refusal must name the provenance failure, got {err}"
     );
 
