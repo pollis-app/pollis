@@ -12,7 +12,7 @@ pub async fn start_screen_share(
     _max_height: Option<u32>,
 ) -> Result<()> {
     Err(crate::error::Error::Other(anyhow::anyhow!(
-        "screen share is not implemented on this OS yet"
+        "screen share is not supported on this platform"
     )))
 }
 

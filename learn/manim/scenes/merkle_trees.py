@@ -96,7 +96,7 @@ class MerkleTrees(Scene):
         self.beat_build()
         self.beat_ripple()
         self.beat_leverage()
-        self.beat_honest()
+        self.beat_proves()
 
     def hold_until(self, target):
         """Pad the scene so cumulative time reaches `target` seconds, keeps each
@@ -327,12 +327,12 @@ class MerkleTrees(Scene):
         self.hold_until(103)
         self.play(FadeOut(VGroup(left, right, divider)))
 
-    # ── Scene 5 (1:44–2:30), what it does, and does not, do ──────────────────────────────
-    def beat_honest(self):
-        head = Text("What it does, and does not, do", color=AMBER).scale(0.6).move_to([0, 2.6, 0])
+    # ── Scene 5 (1:44–2:30), what it proves ─────────────────────────────────────────────
+    def beat_proves(self):
+        head = Text("What it proves", color=AMBER).scale(0.6).move_to([0, 2.6, 0])
         body = VGroup(
-            Text("A Merkle tree does not judge whether an entry is truthful.", color=FG).scale(0.46),
-            Text("A wrong entry could still be added; the tree just records it.", color=MUTED).scale(0.42),
+            Text("A Merkle tree records entries; it does not judge them.", color=FG).scale(0.46),
+            Text("Its job is to make every change to the list visible.", color=MUTED).scale(0.42),
         ).arrange(DOWN, buff=0.25).shift([0, 1.1, 0])
 
         self.play(AddTextLetterByLetter(head, run_time=0.7))
@@ -340,7 +340,7 @@ class MerkleTrees(Scene):
         self.wait(1.2)
 
         turn = VGroup(
-            Text("What it removes is the ability to change the list quietly.", color=OK).scale(0.5),
+            Text("No one can change the list quietly.", color=OK).scale(0.5),
             Text("Showing one list to you and another to someone else: caught on compare.",
                  color=MUTED).scale(0.4),
             Text("Or changing it later: caught the same way.", color=MUTED).scale(0.4),

@@ -1,7 +1,7 @@
 //! Explicit teardown — the deletes that `ON DELETE CASCADE` was supposed to do
 //! and never did on any deployment.
 //!
-//! **Production Turso runs with `foreign_keys=OFF`**, so no cascade has ever fired ([`crate::db::LOCAL_PRAGMAS`]).
+//! Deletes never rely on foreign-key cascades ([`crate::db::LOCAL_PRAGMAS`]).
 //!
 //! So: no implicit deletes anywhere. Every row that should go is named here.
 //!

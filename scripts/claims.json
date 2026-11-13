@@ -6497,18 +6497,19 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "6.1 Standard and library",
-        "quote": "#669 retired the classic suite (`CS_CLASSIC` deleted, `CS_HYBRID` renamed `CS_PQ`)."
+        "quote": "Groups created on the classic RFC 9420 suite `0x0001` move to `0x0052` by the lineage migration in §6.10"
       },
-      "claim": "The classic suite and CS_CLASSIC are gone; CS_HYBRID is now CS_PQ.",
+      "claim": "Groups on the classic suite 0x0001 move to the PQ suite 0x0052 by lineage migration.",
       "kind": "behaviour",
       "anchors": [
-        "pollis-core/src/commands/mls/provider.rs"
+        "pollis-core/src/commands/mls/provider.rs",
+        "pollis-core/src/commands/mls/migrate.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/provider.rs:130"
+        "pollis-core/src/commands/mls/migrate.rs:40"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -7569,26 +7570,6 @@
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s6-68",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "6.10 Which suite a group runs, and how a group changes suite",
-        "quote": "`user_device.pq_capable` remains as a dead column because migrations must stay additive."
-      },
-      "claim": "#669 deleted the hybrid-birth gates; pq_capable remains as a dead column.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-schema/migrations/**",
-        "pollis-delivery/src/devices.rs"
-      ],
-      "evidence": [
-        "pollis-schema/migrations/000010_key_package_ciphersuite.sql:34"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
@@ -10748,20 +10729,19 @@
       "doc": "docs/security-simple.md",
       "locator": {
         "heading": "(single body, no headings)",
-        "quote": "This covers messages sent since your groups switched over; anything older stays under the old lock"
+        "quote": "Every new group starts with both locks."
       },
-      "claim": "Hybrid PQ key agreement covers messages since migration; older ones keep the classical suite.",
+      "claim": "New groups are created on the hybrid PQ suite.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/mls/provider.rs",
-        "pollis-core/src/commands/mls/migrate.rs"
+        "pollis-core/src/commands/mls/group_state.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/mls/provider.rs:122",
-        "pollis-core/src/commands/mls/provider.rs:128"
+        "pollis-core/src/commands/mls/group_state.rs:900"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -18846,21 +18826,19 @@
       "doc": "website/faq.html",
       "locator": {
         "heading": "How do I know the app I downloaded hasn't been tampered with?",
-        "quote": "so all 258 leaves through v1.9.7 carry \"rustc\": \"unknown\"."
+        "quote": "Leaves for current releases record the build recipe in a toolchain field; the release workflow fails rather than record an unknown recipe."
       },
-      "claim": "258 early leaves carry an unknown toolchain; releases now hard-require a recorded recipe; each release ships a CycloneDX SBOM.",
+      "claim": "Release attestation fails rather than log a leaf without a recorded build recipe.",
       "kind": "number",
       "anchors": [
         ".github/workflows/desktop-release.yml",
         "scripts/attest-binaries.sh"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:234",
-        ".github/workflows/desktop-release.yml:912",
-        ".github/workflows/desktop-release.yml:1053"
+        "scripts/attest-binaries.sh:186"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
