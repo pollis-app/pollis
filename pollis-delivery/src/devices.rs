@@ -427,11 +427,11 @@ pub async fn sweep_key_package_claims(conn: &Connection) -> anyhow::Result<u64> 
 ///
 /// `claimer` is `None` only on the no-auth path, which skips the budget.
 ///
-/// #1851: a package is handed out only while its leaf is still certified
-/// ([`leaf_cert::leaf_verdict`]): the device may have been revoked, or the
-/// account key reset, since it was published, and packages stored before the
-/// publish-time check never had one. A package that fails is burnt (deleted)
-/// and the next one tried; it never reaches the claimer.
+/// #1851: a package is handed out only while its leaf is certified right now
+/// ([`leaf_cert::leaf_verdict`]), checked lazily at claim time, so rows stored
+/// before the publish-time check are judged by the same rule. One that fails
+/// is skipped, not deleted or spent: if its device's cert is put right (a
+/// re-sign after an identity reset), the package is served again.
 pub async fn apply_claim_key_package(
     conn: &Connection,
     claimer: Option<&str>,
@@ -440,8 +440,8 @@ pub async fn apply_claim_key_package(
     apply_claim_key_package_with(conn, claimer, body, leaf_cert::LeafCheck::Enforce).await
 }
 
-/// Most uncertified packages one claim burns before answering `NoKeyPackage`.
-const CLAIM_MAX_BURNT: usize = 16;
+/// Most packages one claim skips as uncertified before answering `NoKeyPackage`.
+const CLAIM_MAX_SKIPPED: usize = 16;
 
 /// [`apply_claim_key_package`] with the leaf check selectable. Production
 /// always enforces; [`leaf_cert::LeafCheck::Skip`] is for the integration
@@ -464,15 +464,20 @@ pub async fn apply_claim_key_package_with(
 
     let suite = body.ciphersuite.unwrap_or(CIPHERSUITE_PQ);
     let mut claimed = None;
-    for _ in 0..CLAIM_MAX_BURNT {
-        let Some(hit) = claim_regular(conn, body, suite).await? else {
+    let mut skipped: Vec<String> = Vec::new();
+    while skipped.len() < CLAIM_MAX_SKIPPED {
+        let Some((ref_hash, key_package)) = oldest_regular(conn, body, suite, &skipped).await? else {
             break;
         };
-        if serveable(conn, body, &hit.1, check).await? {
-            claimed = Some(hit);
+        if !serveable(conn, body, &key_package, check).await? {
+            skipped.push(ref_hash);
+            continue;
+        }
+        // The one-way flip; a concurrent claimer may have taken it since the read.
+        if flip_claimed(conn, &ref_hash).await? {
+            claimed = Some((ref_hash, key_package));
             break;
         }
-        burn(conn, &hit.0).await?;
     }
     // Empty pool: fall back to the last-resort package (#1571), read, never flipped. Device-scoped only.
     if claimed.is_none() {
@@ -482,8 +487,6 @@ pub async fn apply_claim_key_package_with(
             {
                 if serveable(conn, body, &hit.1, check).await? {
                     claimed = Some(hit);
-                } else {
-                    burn(conn, &hit.0).await?;
                 }
             }
         }
@@ -539,60 +542,43 @@ async fn serveable(
     Ok(leaf_cert::leaf_verdict(conn, &leaf).await?.is_ok())
 }
 
-/// Delete a package that may never be served (#1851).
-async fn burn(conn: &Connection, ref_hash: &str) -> anyhow::Result<()> {
-    conn.execute(
-        "DELETE FROM mls_key_package WHERE ref_hash = ?1",
-        libsql::params![ref_hash.to_string()],
-    )
-    .await?;
-    Ok(())
-}
-
-/// Atomically claim the OLDEST unclaimed REGULAR package for the target: the
-/// pre-#1571 claim, narrowed to `last_resort = 0` so the pool is spent before the
-/// package that never may be.
-async fn claim_regular(
+/// The OLDEST unclaimed REGULAR package for the target, outside `skip`: the
+/// pre-#1571 claim order, narrowed to `last_resort = 0` so the pool is spent
+/// before the package that never may be. A read; [`flip_claimed`] claims it.
+async fn oldest_regular(
     conn: &Connection,
     body: &ClaimKeyPackageBody,
     suite: i64,
+    skip: &[String],
 ) -> anyhow::Result<Option<(String, Vec<u8>)>> {
-    let mut rows = match &body.target_device_id {
-        Some(device_id) => {
-            conn.query(
-                "UPDATE mls_key_package \
-                 SET claimed = 1 \
-                 WHERE ref_hash = ( \
-                     SELECT ref_hash FROM mls_key_package \
-                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
-                       AND ciphersuite = ?3 AND last_resort = 0 \
-                     ORDER BY created_at ASC LIMIT 1 \
-                 ) \
-                 RETURNING ref_hash, key_package",
-                libsql::params![body.target_user_id.clone(), device_id.clone(), suite],
-            )
-            .await?
-        }
-        None => {
-            conn.query(
-                "UPDATE mls_key_package \
-                 SET claimed = 1 \
-                 WHERE ref_hash = ( \
-                     SELECT ref_hash FROM mls_key_package \
-                     WHERE user_id = ?1 AND claimed = 0 AND ciphersuite = ?2 \
-                       AND last_resort = 0 \
-                     ORDER BY created_at ASC LIMIT 1 \
-                 ) \
-                 RETURNING ref_hash, key_package",
-                libsql::params![body.target_user_id.clone(), suite],
-            )
-            .await?
-        }
-    };
+    let skip = serde_json::to_string(skip)?;
+    let mut rows = conn
+        .query(
+            "SELECT ref_hash, key_package FROM mls_key_package \
+             WHERE user_id = ?1 AND (?2 IS NULL OR device_id = ?2) AND claimed = 0 \
+               AND ciphersuite = ?3 AND last_resort = 0 \
+               AND ref_hash NOT IN (SELECT value FROM json_each(?4)) \
+             ORDER BY created_at ASC LIMIT 1",
+            libsql::params![body.target_user_id.clone(), body.target_device_id.clone(), suite, skip],
+        )
+        .await?;
     Ok(match rows.next().await? {
         Some(row) => Some((row.get::<String>(0)?, row.get::<Vec<u8>>(1)?)),
         None => None,
     })
+}
+
+/// Atomically claim one package: exactly one claimer flips a row, since the
+/// `claimed = 0` guard runs under the single writer. `false`: someone else won.
+async fn flip_claimed(conn: &Connection, ref_hash: &str) -> anyhow::Result<bool> {
+    let flipped = conn
+        .execute(
+            "UPDATE mls_key_package SET claimed = 1 \
+             WHERE ref_hash = ?1 AND claimed = 0 AND last_resort = 0",
+            libsql::params![ref_hash.to_string()],
+        )
+        .await?;
+    Ok(flipped == 1)
 }
 
 /// The device's last-resort package in `suite` (#1571); a plain SELECT, so it serves repeatedly.

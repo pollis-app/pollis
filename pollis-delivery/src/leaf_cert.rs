@@ -174,8 +174,10 @@ fn parse_group_info(bytes: &[u8]) -> Option<VerifiableGroupInfo> {
 }
 
 /// Every leaf in a GroupInfo's ratchet tree. `Err` when the GroupInfo does not
-/// parse, carries no ratchet tree, or has a leaf whose credential names no
-/// device: none of those can be checked, so none is stored.
+/// parse or carries no ratchet tree: neither can be checked, so neither is
+/// stored. A leaf whose credential names no device (an old user-only
+/// credential) is kept with an empty `device_id`: tolerated if the stored
+/// GroupInfo already had it, refused as new (no such device is registered).
 pub fn group_info_leaves(bytes: &[u8]) -> Result<HashSet<Leaf>, Refusal> {
     let gi = parse_group_info(bytes).ok_or("group info does not parse")?;
     let suite = gi.group_context().ciphersuite();
@@ -183,13 +185,18 @@ pub fn group_info_leaves(bytes: &[u8]) -> Result<HashSet<Leaf>, Refusal> {
         .extensions()
         .ratchet_tree()
         .ok_or("group info carries no ratchet tree")?;
-    tree.ratchet_tree()
+    Ok(tree
+        .ratchet_tree()
         .leaves()
         .map(|leaf| {
-            leaf_of(leaf.credential(), leaf.signature_key().as_slice(), suite)
-                .ok_or("group info has a leaf whose credential names no device")
+            leaf_of(leaf.credential(), leaf.signature_key().as_slice(), suite).unwrap_or_else(|| Leaf {
+                user_id: String::from_utf8_lossy(leaf.credential().serialized_content()).into_owned(),
+                device_id: String::new(),
+                signature_key: leaf.signature_key().as_slice().to_vec(),
+                scheme: suite.signature_algorithm(),
+            })
         })
-        .collect()
+        .collect())
 }
 
 /// Is `leaf` a device its account certified, per the main DB right now?
@@ -322,8 +329,10 @@ pub async fn check_welcome(
 ///
 /// Diffed against the stored GroupInfo rather than the previous epoch's, so a
 /// leaf that arrived in a commit published without a GroupInfo is still
-/// checked at the next one. A stored GroupInfo the DS cannot read counts as
-/// empty: every leaf is then checked.
+/// checked at the next one. With no stored GroupInfo (a new group) every leaf
+/// is checked. A stored one the DS cannot read gives no baseline, so the diff
+/// is skipped rather than holding an existing group's honest commits against
+/// leaves it already had; the Welcome check and members' checks still apply.
 pub async fn check_group_info(
     main_conn: &Connection,
     stored: Option<&[u8]>,
@@ -333,9 +342,13 @@ pub async fn check_group_info(
         Ok(leaves) => leaves,
         Err(why) => return Ok(Err(why)),
     };
-    let before: HashSet<Leaf> = stored
-        .and_then(|b| group_info_leaves(b).ok())
-        .unwrap_or_default();
+    let before: HashSet<Leaf> = match stored {
+        None => HashSet::new(),
+        Some(b) => match group_info_leaves(b) {
+            Ok(before) => before,
+            Err(_) => return Ok(Ok(())),
+        },
+    };
     all_certified(main_conn, leaves.difference(&before)).await
 }
 

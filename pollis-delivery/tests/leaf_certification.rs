@@ -186,7 +186,9 @@ async fn a_key_package_for_someone_elses_device_is_refused_at_publish() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_uncertified_package_already_in_the_table_is_burnt_not_served() {
+/// Skipped, not deleted: a package is judged lazily at claim time, so one
+/// whose device's cert is later put right is served again.
+async fn an_uncertified_package_already_in_the_table_is_skipped_not_served() {
     let db = fresh_db().await;
     let conn = db.conn().await.unwrap();
     let (_, _, _, bob_dev) = alice_and_bob(&conn).await;
@@ -206,7 +208,16 @@ async fn an_uncertified_package_already_in_the_table_is_burnt_not_served() {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, good.ref_hash),
         other => panic!("the certified package must be served, got {other:?}"),
     }
-    assert_eq!(stored_packages(&conn, "bob").await, 1, "the forged row is deleted");
+    assert_eq!(stored_packages(&conn, "bob").await, 2, "the forged row is kept");
+    let mut rows = conn
+        .query(
+            "SELECT claimed FROM mls_key_package WHERE ref_hash = ?1",
+            libsql::params![forged.ref_hash.clone()],
+        )
+        .await
+        .unwrap();
+    let claimed: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(claimed, 0, "and not spent");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -234,7 +245,6 @@ async fn a_revoked_devices_packages_are_never_served() {
 
     let out = apply_claim_key_package(&conn, Some("alice"), &claim_body(&bob_dev)).await.unwrap();
     assert!(matches!(out, ClaimOutcome::NoKeyPackage), "{out:?}");
-    assert_eq!(stored_packages(&conn, "bob").await, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

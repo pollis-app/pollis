@@ -286,7 +286,7 @@ async fn the_ds_refuses_to_serve_or_commit_an_uncertified_leaf() {
     };
 
     // 1. A committer that skips its own check gets nothing to add: the DS
-    //    burns the forgeries instead of serving them.
+    //    skips the forgeries instead of serving them.
     substitute_forged_key_packages(&attacker, &bob, 2).await;
     pollis_lib::commands::mls::set_skip_committer_leaf_check(true);
     alice.invite(&group_id, &bob_profile.username).await;
@@ -303,14 +303,14 @@ async fn the_ds_refuses_to_serve_or_commit_an_uncertified_leaf() {
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
         .query(
-            "SELECT COUNT(*) FROM mls_key_package WHERE user_id = ?1",
+            "SELECT COUNT(*) FROM mls_key_package WHERE user_id = ?1 AND claimed = 1",
             libsql::params![bob_profile.id.clone()],
         )
         .await
         .expect("count");
     let left: i64 = rows.next().await.expect("row").expect("row").get(0).expect("count");
     drop(rows);
-    assert_eq!(left, 0, "the DS burns forged packages instead of serving them");
+    assert_eq!(left, 0, "the DS serves none of the forged packages");
 
     // 2. Served a forgery anyway, the same committer's commit is refused: its
     //    Welcome and GroupInfo give the uncertified leaf away.

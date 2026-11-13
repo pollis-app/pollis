@@ -6261,8 +6261,8 @@
         "pollis-delivery/src/devices.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/leaf_cert.rs:196",
-        "pollis-delivery/src/leaf_cert.rs:254",
+        "pollis-delivery/src/leaf_cert.rs:203",
+        "pollis-delivery/src/leaf_cert.rs:261",
         "pollis-delivery/src/devices.rs:68"
       ],
       "status": "verified",
@@ -6276,15 +6276,15 @@
         "heading": "5.3 Device cross-signing",
         "quote": "A KeyPackage is served only while its device is still certified"
       },
-      "claim": "A claim re-checks the drawn package's leaf and deletes it instead of serving it when the device is no longer certified.",
+      "claim": "A claim checks each candidate package's leaf and skips, without deleting or spending, any whose device is not certified at that moment.",
       "kind": "security",
       "anchors": [
         "pollis-delivery/src/devices.rs",
         "pollis-delivery/src/leaf_cert.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/devices.rs:505",
-        "pollis-delivery/src/leaf_cert.rs:196"
+        "pollis-delivery/src/devices.rs:508",
+        "pollis-delivery/src/leaf_cert.rs:203"
       ],
       "status": "verified",
       "verified_sha": "0f0f9916aeda2ff2ddad5a3697c7ab680b641e2d",
@@ -6306,8 +6306,8 @@
       ],
       "evidence": [
         "pollis-delivery/src/commit.rs:245",
-        "pollis-delivery/src/leaf_cert.rs:276",
-        "pollis-delivery/src/leaf_cert.rs:327",
+        "pollis-delivery/src/leaf_cert.rs:283",
+        "pollis-delivery/src/leaf_cert.rs:336",
         "pollis-delivery/src/writes.rs:636",
         "pollis-delivery/src/writes.rs:1022"
       ],
@@ -6952,7 +6952,7 @@
       ],
       "evidence": [
         "pollis-core/src/commands/mls/key_packages.rs:7",
-        "pollis-delivery/src/devices.rs:584",
+        "pollis-delivery/src/devices.rs:570",
         "pollis-core/src/commands/mls/welcomes.rs:406"
       ],
       "status": "verified",

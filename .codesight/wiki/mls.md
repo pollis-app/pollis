@@ -1278,7 +1278,7 @@ rows, it treats a device with no cert yet as uncertified too:
 | Object | Endpoint | Refused when |
 |---|---|---|
 | KeyPackage | `/v1/key-packages`, `/v1/key-packages/replenish` | it does not validate; `ref_hash` is not its KeyPackageRef; its suite or `last_resort` flag is not what it is filed as; its `user:device` credential is not the publishing device; or that device is not certified. One bad package refuses the request |
-| KeyPackage | `/v1/key-packages/claim` | its leaf is no longer the claimed target's certified device (revoked, account key reset, or a row stored before the check). The row is deleted and the next one tried, up to 16 |
+| KeyPackage | `/v1/key-packages/claim` | its leaf is not the claimed target's certified device right now (checked lazily, so rows stored before #1851 are judged by the same rule). The row is skipped, neither deleted nor spent, and the next one tried, up to 16; it is served again once the device's cert verifies |
 | Welcome | `/v1/commits`, `/v1/welcomes/resubmit` | a new member's KeyPackageRef is not a stored package of a certified device, or no new member is the recipient device |
 | GroupInfo | `/v1/commits`, `/v1/group-info` | it does not parse, has no ratchet tree, or has a leaf the stored GroupInfo lacks that is not certified |
 
