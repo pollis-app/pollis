@@ -37,12 +37,12 @@ fn entry(ref_hash: &str, last_resort: bool) -> KeyPackageEntry {
     }
 }
 
+type Labels = std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>>;
+
 /// Real packages and the labels the tests name them by (#1851: the DS stores
 /// only real, certified packages, filed under their real references).
-fn labels() -> &'static std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>> {
-    static LABELS: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>>,
-    > = std::sync::OnceLock::new();
+fn labels() -> &'static Labels {
+    static LABELS: std::sync::OnceLock<Labels> = std::sync::OnceLock::new();
     LABELS.get_or_init(Default::default)
 }
 
