@@ -76,7 +76,8 @@ deploy with the page.
   per `[data-merkle-widget]` element, so topics share it rather than forking it:
   Topic 7 mounts it plain, Topic 8 adds `data-proof` for the inclusion-proof walk
   (pick an entry, get only its sibling hashes, climb, tamper, watch it fail).
-- Every section states its mechanism's **honest limit** in the `.ln-limit`
-  callout. Non-negotiable (epic "honesty constraint").
+- Every section states what the mechanism does and its design boundaries
+  plainly, in the `.ln-limit` callout. Topics describe current behaviour; they
+  do not list gaps.
 - Every claim traces to a repo anchor, listed at the top of the scene file and in
   the topic's issue.

@@ -219,7 +219,7 @@
     "portal": "Screen share is unavailable — the desktop screen-sharing portal did not respond."
   },
   "cameraError": {
-    "unsupported": "Webcam capture isn't available on this platform yet.",
+    "unsupported": "Webcam capture isn't available on this platform.",
     "permission": "Camera access is blocked. Grant Pollis camera permission, then try again.",
     "busy": "The camera is in use by another app. Close it and try again.",
     "helperMissing": "Camera helper is missing. Reinstall Pollis to restore it.",

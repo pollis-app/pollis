@@ -1,6 +1,6 @@
 # Verifiable / Reproducible Builds + Binary Transparency
 
-**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release https://verify.pollis.com <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned log key (ML-DSA-44; rotated to fresh material in #732). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P4 (in-app "verify this build") is now SHIPPED** — the optional Security-page affordance (`verify_own_build` in `pollis-core`, `BuildVerifyLine` + "This build" section on `SecurityPage`) reusing the account-key self-audit path. **P5 (full reproducibility + independent rebuilder) is SHIPPED for Linux (#484)** — see §1.5 / §6 Phase 5. **P3 (cosign/SLSA keyless provenance) is now SHIPPED (#484)** — every released installer + updater bundle carries a keyless SLSA build-provenance attestation *and* a cosign signature anchored in the **public Rekor** log via the GitHub Actions OIDC identity (no Pollis key on that verification path), a second independent anchor; see §3 / §6 Phase 3. The full design of record follows.
+**Status:** Shipped. The `binaries` tenant tree, `BinaryRecord` schema and `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`); `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`); the `pollis-verify release https://verify.pollis.com <tag>` auditor subcommand; the release-pipeline append job that logs each artifact's payload and signed hashes to **verify.pollis.com/v1/binaries**, trusting only the pinned log key (ML-DSA-44); keyless SLSA build provenance and cosign signatures anchored in the public Rekor log via the GitHub Actions OIDC identity (§3); the in-app "Verify this build" line on the Security page (`verify_own_build` in `pollis-core`); and bit-for-bit reproducibility of the Linux payload with an independent rebuilder (§1.5). The design of record follows.
 **Author lens:** performance, security, and *zero user burden* are first-class
 constraints, called out explicitly at each decision.
 **Audience:** maintainers deciding whether/how to build this, plus the security
@@ -8,19 +8,9 @@ auditors who read `docs/security-whitepaper.md`.
 
 ---
 
-## 0. The gap this closes (ground truth)
+## 0. What this establishes
 
-`docs/security-whitepaper.md` §1.1 (line 22) states, verbatim:
-
-> "The trust delegation is the same as Signal Desktop or WhatsApp Desktop: the
-> binary is trusted at install time… **Reproducible builds are not currently a
-> goal; binary integrity rests on platform code-signing** (Apple Developer ID +
-> notarization on macOS, Azure Trusted Signing on Windows…). The auto-update path
-> verifies the same OS-native signature on every downloaded installer before
-> launch…"
-
-That paragraph is an honest admission of the single largest hole in Pollis's
-threat story. Everything else in the whitepaper — MLS, PIN-wrapped keys, the
+Every property in `docs/security-whitepaper.md` — MLS, PIN-wrapped keys, the
 account-key directory, the MLS commit log — assumes **the binary running on the
 user's device is the one whose source you can read**. Code-signing does *not*
 establish that. A Developer ID / Azure Trusted Signing signature proves only
@@ -30,16 +20,15 @@ single targeted build handed to one user — is validly signed and passes
 Gatekeeper / Authenticode / the minisign updater check. MLS/E2EE has the same
 limitation from the other side: it proves the *server* can't read plaintext,
 but a backdoored *client* trivially can. (The relay overlay,
-`docs/relay-overlay-design.md`, is orthogonal here — an optional, currently
-deferred IP-metadata defense-in-depth that forwards already-encrypted bytes;
+`docs/relay-overlay-design.md`, is orthogonal here — an optional
+IP-metadata defense-in-depth that forwards already-encrypted bytes;
 it is explicitly not part of the E2EE proof.) **Neither the protocol nor the
 signing proves the E2EE claim end to end unless you can also prove the client
 binary is honest.** This document is the piece that closes that loop.
 
-The thesis Pollis already sells — *don't trust the operator, verify* — is, today,
-only half-true: you can verify the **server's** behaviour (transparency log,
-`pollis-verify`), but you cannot verify the **operator's own binary**. This
-feature makes the second half true too, and it does so by **reusing the exact
+The thesis — *don't trust the operator, verify* — covers two things: the
+**server's** behaviour (transparency log, `pollis-verify`) and the **operator's own
+binary**. This feature covers the binary, and it does so by **reusing the exact
 key-transparency machinery already shipped**, extended from keys to binaries.
 
 ### What already exists (and that we extend, not replace)
@@ -100,7 +89,7 @@ content-addressed toolchain:
   as a separately-reproduced sub-artifact. The doc already isolates this helper
   in its own job — we lean into that isolation.
 - **meson/ninja for `webrtc-audio-processing-sys`:** pin exact versions
-  (`meson>=1.3` today is a floor, not a pin). This C++ dep is the single biggest
+  (`meson>=1.3` is a floor, not a pin). This C++ dep is the single biggest
   practical reproducibility risk after signing — see §1.5.
 
 > **Performance lens:** pinning does not slow builds; `Swatinem/rust-cache@v2` is
@@ -118,7 +107,7 @@ content-addressed toolchain:
   optional for reproducibility (the lock hashes suffice) but valuable for
   **supply-chain durability** and offline rebuild by an auditor.
 - Frontend: `pnpm-lock.yaml` present (162 KB); enforce `pnpm install
-  --frozen-lockfile` in release CI (today it's plain `pnpm install`).
+  --frozen-lockfile` in every release CI job.
 
 ### 1.3 Cargo / Rust build determinism
 
@@ -169,10 +158,10 @@ The known non-determinism sources and their fixes:
   bundler; we hash the **final bundle**, not Vite output in isolation, so Vite
   determinism is necessary but the acceptance test is at the Tauri-bundle layer.
 
-### 1.5 The hard parts — an honest accounting
+### 1.5 The hard parts
 
 This is where a rigorous spec earns its keep. Not everything is cheaply
-reproducible, and pretending otherwise would be dishonest to auditors.
+reproducible, and the residual list says exactly what is not.
 
 > **Shipped status (P5, #484).** The Linux AppImage payload is now hardened to
 > be reproducible *modulo a documented residual list*: the toolchain is pinned
@@ -184,15 +173,10 @@ reproducible, and pretending otherwise would be dishonest to auditors.
 > **`docs/reproducible-builds-residuals.md`** and an independent, fork-runnable
 > reproducer lives in **`.github/workflows/rebuild-verify.yml`**. The items below
 > remain best-effort exactly as this section describes; the residual doc is their
-> canonical, per-release-auditable form. **Biggest residual (call it out):**
-> since the #506 secrets-broker cutover the client bakes **no** R2 or LiveKit
-> credentials — those moved behind the Delivery Service — so the two secrets this
-> paragraph used to name are gone from the binary. What remains is the
-> publishable **read-only** Turso token and an **optional** observability log-DB
-> token; it is the latter that still stops a *fully secretless* third party
-> bit-reproducing even the Linux payload, while a party holding the published
-> recipe can. Dropping that last optional token is the next reproducibility
-> milestone.
+> canonical, per-release-auditable form. The client bakes **no** credentials:
+> only public endpoint URLs and the relay-directory verification key, all recorded
+> in the published build recipe, so a party holding that recipe can bit-reproduce
+> the Linux payload.
 
 1. **Code-signing is non-reproducible *by construction*.** A notarized `.dmg`
    embeds an Apple timestamp + a CMS signature; an Authenticode `.exe` embeds an
@@ -553,7 +537,7 @@ because the threat model includes *compelled Pollis keys*.
   artifact was signed by the Pollis GitHub Actions identity, checked against
   Rekor, with **no Pollis-held key on the verification path.**
 
-**Honest limits (P3).** This proves *build provenance* (these bytes came from
+**Scope (P3).** This proves *build provenance* (these bytes came from
 this workflow at this commit) and adds a *non-Pollis* transparency anchor
 (Rekor). It does **not**, by itself, prove reproducibility — that the logged
 payload rebuilds byte-for-byte from public source is the separate P5 story
@@ -668,12 +652,12 @@ The running app knows its **own** binary. A new `pollis-core` command,
      before `exe` shipped). Quiet, not alarming, and its copy points at the
      independent-verification guide.
 
-> **Honesty caveat (must be in the UI copy, not buried):** the in-app check
+> **Scope of the in-app check (stated in the UI copy):** the in-app check
 > proves *inclusion in the log* and *hash match to the logged payload*. It does
 > **not**, by itself, prove the logged payload reproduces from source — that step
 > requires an *independent rebuilder* (a compromised app could lie about its own
-> hash). So the in-app line is worded as "published in the public log; verified
-> by independent rebuilders" and links out to the third-party verification story.
+> hash). So the in-app line says the build is published in the public log and that
+> Linux releases are rebuilt from source independently, and links out to the third-party verification story.
 > The real proof is the ecosystem (monitors + rebuilders), and the app is one
 > convenient, honest window onto it. This mirrors how the website explorer is
 > framed as "convenience, not the trust anchor" in `verify-transparency-log.md`.
@@ -704,7 +688,7 @@ what makes a targeted build detectable.
 
 **This is what actually *proves* the E2EE claim.** MLS proves the *math* — it
 is the E2EE itself that makes the *server unable to read plaintext* (the relay
-overlay is only optional, currently deferred IP-metadata defense-in-depth); but
+overlay is only optional IP-metadata defense-in-depth); but
 only verifiable builds
 prove **the client you're running is the one that implements that math and
 doesn't exfiltrate keys.** Without it, "E2EE" rests on trusting an unverifiable
@@ -723,10 +707,9 @@ Honesty is the point. This feature does not defend against:
 - **A compromised OS / device.** If the endpoint is owned, the attacker reads
   plaintext regardless of which binary Pollis shipped. Out of scope (device is
   "trusted" in §1.1 of the whitepaper).
-- **The reproducibility gaps in §1.5** (native C++ deps, notarization). Until
-  those are fully closed, the honest claim is "reproducible payload modulo a
-  documented, hash-pinned set of vendored native blobs" — auditors are told
-  exactly what they're *not* getting bit-for-bit.
+- **Signed and native components (§1.5).** The claim is "reproducible payload
+  modulo a documented, hash-pinned set of vendored native blobs"; the residual
+  list tells auditors exactly what is not bit-for-bit.
 - **Mobile.** This spec is desktop (Tauri) only. The `pollis-core` reuse via
   uniffi means the *log format* extends to mobile later, but iOS/Android store
   signing + reproducibility is a separate effort.
@@ -813,8 +796,8 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
   verified/pending/mismatch/tree-invalid with fixture `ReleaseReport`s (no network,
   no DB) — a deliberately-wrong local hash yields **Mismatch**; the Security page
   renders the states via `BuildVerifyLine`. End-to-end against a *real* release
-  still needs a signed build (the per-platform payload hashing is best-effort:
-  exact for the Linux AppImage, deferred for `.app`/NSIS/deb/rpm — §4.2).
+  needs a signed build: a Linux AppImage is checked against its `payload` leaf, an
+  installed app on every other platform against its `exe` leaf (§4.2).
 
 ### Phase 5 — Full reproducibility hardening + independent rebuilder (mixed) — **shipped for Linux (#484)**
 - **Shipped:** exact toolchain pin (`rust-toolchain.toml` 1.96.0 +
@@ -828,14 +811,11 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
   (`docs/reproducible-builds-residuals.md`), and the third-party-runnable
   reproducer (`.github/workflows/rebuild-verify.yml`, separate trust domain, no
   Pollis secrets, trusts only the pinned key).
-- **Still best-effort (in the residual list, not yet closed):** vendoring the
-  capture-helper bindgen output; pinning native `meson`/`clang` and runner
-  images by *digest* (labels only today). The former top item — stripping the
-  still-baked *secret* `option_env!` inputs — is closed: since #987 every baked
-  value is public, and the release build jobs' environment is checker-bounded to
-  exactly that recipe (`scripts/check-build-recipe.py`), so a fully secretless
-  third party can bit-reproduce the Linux payload. macOS/Windows payload
-  reproduction is best-effort pending a matching-runner reproducer.
+- **Recorded in the residual list:** the capture-helper bindgen output, and native
+  `meson`/`clang` and runner images pinned by label. Every baked value is public,
+  and the release build jobs' environment is checker-bounded to exactly that recipe
+  (`scripts/check-build-recipe.py`), so a secretless third party can bit-reproduce
+  the Linux payload, which is the payload the reproducer rebuilds.
 - **Acceptance:** an *independent* party reproduces the Linux payload bit-for-bit
   (or modulo the documented list) and confirms its hash is logged; the reproduced
   set is published. Reproducibility of **macOS/Windows payloads** is
@@ -870,7 +850,7 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
   story by letting users verify the binary actually implements the minimizing
   behaviour the spec claims.
 - **Relay-overlay spec (the sharp contrast).** `docs/relay-overlay-design.md`
-  is optional IP-metadata defense-in-depth (currently deferred): the relay
+  is optional IP-metadata defense-in-depth: the relay
   forwards already-encrypted bytes and hides who-talks-to-whom, nothing more.
   It is MLS/E2EE that keeps the *server* from reading plaintext; this spec
   proves the *client* is honest. Stated plainly in the whitepaper edit: the
@@ -886,23 +866,19 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
 **Build it, in the phased order above, and start with Phase 0 + Phase 1 — both
 low-risk (Phase 1 fully in-box; Phase 0's builds run on CI, with the
 hash/diff analysis in-box), and together they produce the first real artifact:
-a public binaries transparency tree that `pollis-verify` can check.** That alone
-lets the whitepaper §1.1 admission be rewritten from "reproducible builds are not
-a goal" to "released binaries are content-hashed into a public, append-only
-transparency log; reproducibility of the Linux payload is verified, with a
-documented residual list for signed/native components." The high-leverage,
-lower-cost half (log + provenance) lands well before the expensive tail (full
-bit-for-bit macOS/Windows reproducibility), and each phase is independently
-valuable.
+a public binaries transparency tree that `pollis-verify` can check.** Together
+they let the whitepaper §1.1 state that released binaries are content-hashed into
+a public, append-only transparency log, with the Linux payload independently
+reproduced and a documented residual list for signed/native components.
 
 The single most important framing to preserve: **this is the feature that turns
 "E2EE" from a promise into a proof.** It is worth prioritising above further
 protocol polish, because every other security property is conditional on the
-binary being honest — and today nothing proves that.
+binary being honest, and this is what proves it.
 
 Do **not** over-scope v1 into full cross-platform bit-reproducibility; that is the
 part most likely to stall. Ship the log + provenance + in-app surface first
-(Phases 1–4), then grind reproducibility (Phase 5) with an honest residual list.
+(Phases 1–4), then reproducibility (Phase 5) with a published residual list.
 
 ---
 
@@ -910,15 +886,12 @@ part most likely to stall. Ship the log + provenance + in-app surface first
 
 **Title:** Verifiable builds + binary transparency — prove the shipped client is the honest source
 
-**Problem.** `docs/security-whitepaper.md` §1.1 admits reproducible builds are not
-a goal and binary integrity rests solely on OS code-signing. Code-signing proves
-"Pollis produced these bytes," never "these bytes match the public source." A
-compromised, compelled, or *per-user-targeted* build is validly signed and passes
-Gatekeeper/Authenticode and the minisign updater check — defeating E2EE entirely
-while looking legitimate. Every other Pollis security property (MLS, PIN-wrapped
-keys, the key-transparency log, the relay overlay) is conditional on the running
-binary being honest, and today nothing proves that. This is the flagship trust
-gap, and it's closable by extending the *existing* `#330` key-transparency Merkle
+**Problem.** Code-signing proves "Pollis produced these bytes," never "these
+bytes match the public source." A compromised, compelled, or *per-user-targeted*
+build is validly signed and passes Gatekeeper/Authenticode and the minisign updater
+check. Every other Pollis security property (MLS, PIN-wrapped keys, the
+key-transparency log, the relay overlay) is conditional on the running binary
+matching the source. The fix extends the *existing* `#330` key-transparency Merkle
 infrastructure (`verifiable-log*`, `pollis-verify`, `verify.pollis.com`) from keys
 to binaries — a third tenant tree, a provenance sidecar, and one advisory line on
 the Security page, with **zero added user burden**.
@@ -929,7 +902,7 @@ the Security page, with **zero added user burden**.
 - **P2 (runners):** `attest-and-log` job in `desktop-release.yml` logs payload+artifact hashes; `transparency-publish.yml` publishes/self-audits/tripwires the binaries tree.
 - **P3 (CI):** SLSA provenance via `actions/attest-build-provenance` + keyless `cosign` (Fulcio/Rekor) — a build-provenance anchor Pollis doesn't control.
 - **P4 (in-box logic):** optional in-app "Verify this build" on the Security page (`verify_own_build`, reusing the account-key verify path) — automatic-or-one-click, never mandatory.
-- **P5 (mixed):** full reproducibility hardening (path remapping, `SOURCE_DATE_EPOCH`, pinned native toolchains, vendored bindgen) + an independent third-party rebuilder; publish an honest residual-nondeterminism list.
+- **P5 (mixed):** full reproducibility hardening (path remapping, `SOURCE_DATE_EPOCH`, pinned native toolchains, vendored bindgen) + an independent third-party rebuilder; publish the residual-nondeterminism list.
 
 **Acceptance (top-line).** A released tag `vX.Y.Z` results in `/v1/binaries/...`
 on `verify.pollis.com` with per-artifact `payload`/`signed` leaves;

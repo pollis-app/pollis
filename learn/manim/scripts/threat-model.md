@@ -30,7 +30,7 @@ can't see what's inside. We can see the outside.
 **[01:00–01:15] Scene 3 — what metadata is**
 That your account sent something, when, roughly how big, and which conversation it
 belongs to. That's called metadata, and it can be sensitive all by itself. We're
-not going to tell you it doesn't exist.
+not going to pretend it doesn't exist.
 
 **[01:15–01:30] Scene 4 — the subtler attack**
 There's a subtler attack too. Encryption only helps if you're using the right key

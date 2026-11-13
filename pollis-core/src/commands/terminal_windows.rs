@@ -8,7 +8,7 @@ use crate::state::AppState;
 
 fn unsupported() -> Error {
     Error::Other(anyhow::anyhow!(
-        "in-app terminal pane is not yet supported on Windows (ConPTY backend not implemented)"
+        "in-app terminal pane is not supported on this platform"
     ))
 }
 

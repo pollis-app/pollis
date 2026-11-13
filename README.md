@@ -63,14 +63,9 @@ a key bound to that machine, never in plaintext.
   transparency log, so the server cannot fork, roll back or rewrite a conversation's
   history without detection.
 
-**Limits.** Pollis hides message content, not the fact that you are communicating.
-The server and network see connection metadata (IP address, timing, channel
-membership), and there is no sender anonymity. An optional single-hop relay (v0)
-that hides your IP from Pollis servers is built in but **off by default**; turn it on
-in Preferences → "Network privacy (relay)"
-([docs/relay-overlay-design.md](docs/relay-overlay-design.md) §13). It does not
-provide anonymity, does not hide the social graph, and is not part of the E2EE
-guarantee. Traffic is only as strong as the suite it was sealed under: moving a group
+**Scope.** Pollis protects message content, not the fact that you are
+communicating: the server and network see connection metadata (IP address,
+timing, channel membership). Traffic is only as strong as the suite it was sealed under: moving a group
 to a newer suite does not re-protect earlier traffic
 ([docs/pq-hybrid-mls-design.md](docs/pq-hybrid-mls-design.md)). The full threat
 model is [docs/security-whitepaper.md](docs/security-whitepaper.md); a
@@ -169,26 +164,25 @@ tree.
 own Turso database, LiveKit SFU and R2 bucket and running the real client against
 them, so you can watch what leaves your machine.
 
-### Verifiable builds: current status
+### Verifiable builds
 
 The binaries tree shows that the artifacts you downloaded are the ones the release
 pipeline logged. Beyond that:
 
-- **Linux is reproducible.** At `v1.8.4` an independent rebuild from public source
-  matched the logged payload hash (`1a4213a1…`), checked against the pinned log key
-  alone, and the rebuilder now runs after every release. This covers the **Linux
-  AppImage payload**. Rust and C/C++ build paths are remapped, and the release fails
+- **Linux is reproducible.** An independent rebuild from public source runs after
+  every release and is checked against the logged payload hash using the pinned log
+  key alone. This covers the **Linux AppImage payload**. Rust and C/C++ build paths are remapped, and the release fails
   if the binary embeds an absolute build path, so reproduction does not depend on
   our filesystem layout.
 - **macOS and Windows** payload digests can be recomputed from the downloaded
-  artifact (the shipped bundle with signing material normalized out), but are not
-  rebuilt from source, so the claim is weaker than for Linux.
+  artifact (the shipped bundle with signing material normalized out) and compared
+  with the logged hash.
 - **Also shipped:** cosign/SLSA build provenance in public Rekor, and an in-app
   "verify this build" check.
 - Installs still also rely on platform code signing (Apple Developer ID +
   notarization, Azure Trusted Signing). Transparency is in addition to signing.
 
-Details and the residual list:
+Details:
 [docs/reproducible-builds-residuals.md](docs/reproducible-builds-residuals.md),
 [docs/verifiable-builds-design.md](docs/verifiable-builds-design.md).
 
@@ -244,5 +238,3 @@ website/          # Static marketing site: plain HTML/CSS/JS on Cloudflare Pages
 
 - **Broader availability**: currently an open pre-alpha, working toward a stable
   public release.
-- **IP-hiding relay**: v0 (single-hop) is built and opt-in, off by default;
-  multi-hop (v1) is not built. See the security docs above.

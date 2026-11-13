@@ -32,7 +32,7 @@ Why three logs instead of one? Because a signed head for one must never work as 
 Take a valid head from the commit log and try to pass it off as one for the binaries log. It doesn't fit. Each tree signs under its own context, so the signature says which tree it belongs to.
 
 02:40.000 --> 02:52.000
-And the limits, plainly. These don't make us honest, they make lying undeniable rather than impossible. They also say nothing about bugs. A log proves what we published, not that it's correct.
+What the logs prove. These don't make us honest, they make lying undeniable rather than impossible. They also say nothing about bugs. A log proves what we published, not that it's correct.
 
 02:52.000 --> 03:00.000
 One practical note. The logs rebuild once a day, and again right after each release, so a key published an hour ago may genuinely not be in there yet. That's why your app says "pending" instead of raising an alarm.

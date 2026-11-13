@@ -2,16 +2,11 @@
 -- proof rather than a claim.
 --
 -- Sealed sender (#607) blinds `message_envelope.sender_id`, so the Delivery
--- Service cannot tell whose envelope a row is. The self-delete branch therefore
--- trusted the caller's own `msg_sender_id` hint: any member could delete any
--- envelope in a conversation, with no tombstone, before slower recipients
--- fetched it — and a member could clobber another author's pending edit the same
--- way. CLAUDE.md allows exactly three message losses; that is a fourth, and
--- unlike the other three it is attacker-controlled rather than a storage bound.
---
--- The fix does not try to re-identify the sender — that is what sealing exists
--- to prevent. It stores `SHA-256(token)` at send time and requires the preimage
--- to delete. The DS authorizes nobody; it compares a hash.
+-- Service cannot tell whose envelope a row is. Deleting (or editing) an
+-- envelope is authorized without re-identifying the sender — that is what
+-- sealing exists to prevent. The client stores `SHA-256(token)` at send time
+-- and presents the preimage to delete. The DS authorizes nobody; it compares a
+-- hash.
 --
 -- The token is DERIVED, never transmitted or stored by the client:
 --
@@ -23,9 +18,7 @@
 -- rest of the conversation.
 --
 -- Nullable, and it has to stay nullable: rows written by clients that predate
--- this have no hash, and the DS falls back to the old membership-only check for
--- them. Requiring the capability outright has to wait until clients that produce
--- one have reached the fleet.
+-- this column have no hash.
 --
 -- Not linkable: the value is a fresh-looking 32 bytes per message, so it groups
 -- nothing and identifies no one. It is also not a secret the DS can use — the

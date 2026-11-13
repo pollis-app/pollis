@@ -183,7 +183,7 @@ class ThreatModel(Scene):
 
         honest = Text("That is metadata. It can be sensitive all by itself,",
                       color=FG).scale(0.46).move_to([0, -2.5, 0])
-        honest2 = Text("Later sections show how Pollis shrinks even that.",
+        honest2 = Text("We won't pretend it doesn't exist.",
                        color=AMBER).scale(0.46).move_to([0, -3.1, 0])
         self.play(FadeIn(honest))
         self.play(FadeIn(honest2))

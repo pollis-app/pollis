@@ -217,7 +217,7 @@
     "buildStatusUnavailable": "无法验证",
     "buildVerifyGuideLink": "如何独立验证此构建 →",
     "thisBuildHeading": "此构建",
-    "thisBuildDescription": "Pollis 发布的每个版本都会把指纹记入同一个公开的、只可追加的日志。此项确认你正在运行的构建确实是 Pollis 在那里发布、并由第三方重建者独立验证过的版本 — 它本身并不能证明构建与源代码一致，因为被篡改的应用可能谎报自己的指纹。",
+    "thisBuildDescription": "Pollis 发布的每个版本都会把指纹记入同一个公开的、只可追加的日志。此项确认你正在运行的构建确实是 Pollis 在那里发布的版本；Linux 版本还会从源代码独立重建，并与该日志核对。它本身并不能证明构建与源代码一致，因为被篡改的应用可能谎报自己的指纹。",
     "verdictsLink": "这些结论意味着什么 →",
     "buildVersion": "版本 {{version}}",
     "buildCommit": "提交 {{commit}}",

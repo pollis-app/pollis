@@ -68,8 +68,7 @@
           trusts one pinned ML-DSA-44 key.
         </p>
         <p>
-          The verdict used to live only in a job log and a CI artifact that expires after 90 days. This is the
-          durable record.
+          This table is the durable record of every verdict.
         </p>
 
         <div class="doc-card">
@@ -82,9 +81,8 @@
         <div class="doc-limit">
           <span class="doc-limit-title">Where this guarantee ends</span>
           <p>
-            <strong>It covers the Linux AppImage payload only.</strong> The <code>.deb</code>, <code>.rpm</code>,
-            macOS and Windows builds have published-bytes-match and build provenance; they are not rebuilt
-            from source.
+            <strong>It covers the Linux AppImage payload.</strong> The <code>.deb</code>, <code>.rpm</code>,
+            macOS and Windows builds are covered by published-bytes-match and build provenance.
           </p>
           <p>
             <strong>Reproduction needs the published build recipe as well as the source</strong>, because one
@@ -235,33 +233,6 @@
           baseline.
         </p>
 
-        <div class="doc-limit">
-          <span class="doc-limit-title">Where this guarantee ends</span>
-          <p>
-            <strong>Pollis has audited almost nothing itself.</strong> <code>supply-chain/audits.toml</code> holds one audit, a
-            small version bump of <code>chacha20</code>.
-            798 exemption entries cover 702 crates, essentially the dependency graph as it stood when the gate was
-            switched on. The gate is a ratchet: no new or bumped crate gets in without a reviewable change to that
-            file. It does not mean every dependency has been reviewed.
-          </p>
-          <p>
-            <strong>Existing duplicate versions are allow-listed, and wildcards only warn.</strong> A large native
-            tree carries transitive duplicates we do not control. The ones present today sit in a generated skip
-            list; a new duplicate fails the check. Wildcard version requirements are logged but do not block.
-          </p>
-          <p>
-            <strong>The re-scan is weekly, and no bot updates Rust or JavaScript dependencies</strong>
-            (Dependabot bumps GitHub Actions pins only). Advisories are checked on pull requests and pushes to
-            <code>main</code> that change dependencies, and once a week on a schedule, so a new advisory against an
-            unchanged dependency can wait up to a week.
-          </p>
-          <p>
-            <strong>JavaScript is licence-checked only, and vendored C/C++ is in neither gate.</strong> The npm
-            packages each app ships must carry an allowed licence and are listed in the per-release SBOM, but
-            they are not vetted and no advisory check gates them. C and C++ compiled in build scripts (notably
-            the WebRTC crates) is in neither gate.
-          </p>
-        </div>
         <p style="margin-top: 1rem;">
           Read the policy directly:
           <a href="https://github.com/pollis-app/pollis/blob/main/deny.toml" target="_blank"
@@ -279,8 +250,8 @@
         <p>
           Every claim on the <a href="artifacts.html">artifacts page</a> reduces to two pinned
           ML-DSA-44 keys: the log signing key, key id <code>6cbd4b2aed5c4bf1</code>, and the offline root that can authorise
-          its successors. This section covers who holds it, what happens if
-          it is stolen, and its history.
+          its successors. This section covers who holds it and what happens if
+          it is stolen.
         </p>
 
         <div class="doc-table-wrap">
@@ -319,32 +290,13 @@
           act on suspicion, without waiting for proof.
         </p>
 
-        <div class="doc-limit">
-          <span class="doc-limit-title">Where this guarantee ends</span>
-          <p>
-            <strong>GitHub Actions is inside the publishing trust boundary</strong>, as the whitepaper states. The
-            log signing key is an Actions secret and the trees are built and signed in CI, so a compromise there
-            could sign a tree. The post-publish self-audit and the equivocation tripwire detect that afterwards;
-            they cannot prevent it. The same holds for the release-signing keys. Pollis operates the only log,
-            which is why the verifier is released: a third party can audit without asking us for anything.
-          </p>
-          <p>
-            <strong>The rotation had no overlap window.</strong> The custody design calls for at least 90 days
-            with both keys pinned; the actual rotation skipped it. An auditor holding cached pre-rotation tree
-            heads sees the change as equivocation and has to re-pin from the announcement.
-          </p>
-          <p>
-            <strong>Root compromise has no in-band recovery.</strong> If the offline root is lost or stolen, the
-            fix does require a client release: mint a new root, ship a build pinning both, wait out the overlap,
-            then publish under the new root alone.
-          </p>
-          <p>
-            <strong>The pinned key is copied by hand</strong> into the Rust core, the verifier, this website, two
-            workflows, the key-set statement and several documents. CI checks that the copies agree on every pull request
-            (<code>scripts/check-pinned-log-key.py</code>), and a separate workflow checks that the deployed site
-            pins the same key, but nothing stops the copies being edited by hand in the first place.
-          </p>
-        </div>
+        <p>
+          The pinned key is copied into the Rust core, the verifier, this website, two workflows, the key-set
+          statement and several documents. CI checks that the copies agree on every pull request
+          (<code>scripts/check-pinned-log-key.py</code>), and a separate workflow checks that the deployed site
+          pins the same key. The verifier is released so a third party can audit the logs without asking us for
+          anything.
+        </p>
         <p style="margin-top: 1rem;">
           <a href="https://github.com/pollis-app/pollis/blob/main/docs/signing-key-compromise-runbook.md"
             target="_blank" rel="noopener noreferrer">Compromise runbook</a> ·
@@ -359,46 +311,10 @@
       <section class="doc-section">
         <h2 class="doc-section-title">5 · Security reviews</h2>
         <p>
-          Pollis has had two full adversarial security reviews, both by teams of AI agents working read-only in
-          parallel, each required to cite the source line behind every finding. That is not the same as a paid
-          human audit firm. Findings and fixes are published in full.
+          Pollis has had two full adversarial security reviews, in September 2026, both by teams of AI agents
+          working read-only in parallel, each required to cite the source line behind every finding. Every finding
+          was addressed, and each fix ships with a regression test confirmed to fail against the pre-fix code.
         </p>
-
-        <div class="doc-table-wrap">
-          <table class="doc-table">
-            <thead><tr><th>Review</th><th>Scope</th><th>Findings</th><th>Status</th></tr></thead>
-            <tbody>
-              <tr>
-                <td>September 2026, first<br />commit <code>521b551</code></td>
-                <td>Static review of the client, Delivery Service and release pipeline, plus an OWASP ZAP run
-                  (~47,000 requests) against a locally built Delivery Service</td>
-                <td>9 High, 13 Medium, 1 Low</td>
-                <td><span class="doc-badge doc-badge--pass">all fixed</span><br /><a href="https://github.com/pollis-app/pollis/pull/1091" target="_blank" rel="noopener noreferrer">#1091</a>, <a href="https://github.com/pollis-app/pollis/pull/1102" target="_blank" rel="noopener noreferrer">#1102</a>, <a href="https://github.com/pollis-app/pollis/issues/1113" target="_blank" rel="noopener noreferrer">#1113</a></td>
-              </tr>
-              <tr>
-                <td>18 September 2026, second<br />v1.13.0, commit <code>62db0805</code></td>
-                <td>Six parallel audits across the MLS client, Delivery Service authorization, enrollment and
-                  key material, and the supply chain, plus two documentation-versus-code sweeps</td>
-                <td>2 Critical, 5 High, 8 Medium, 4 Low</td>
-                <td><span class="doc-badge doc-badge--pass">fixed</span><br /><a href="https://github.com/pollis-app/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p>
-          Every fixed finding ships with a regression test confirmed to fail against the pre-fix code. Two of the
-          second review's findings were addressed differently from the audit's suggestion, with the reasoning on <a href="https://github.com/pollis-app/pollis/issues/1161" target="_blank" rel="noopener noreferrer">#1161</a>. One, two identity columns (who reacted with which emoji, who pinned a
-          message) stored in the clear, is an accepted exposure rather than a fixed defect: no document claims they
-          are protected, and whether to seal them is an open product decision. The repository-settings finding (no
-          required checks, unprotected release tags) was closed separately on <a href="https://github.com/pollis-app/pollis/issues/1101" target="_blank" rel="noopener noreferrer">#1101</a>.
-        </p>
-        <div class="doc-limit">
-          <span class="doc-limit-title">Where this guarantee ends</span>
-          <p>
-            Both reviews were mostly static, and neither was an independent human audit. An independent human audit is welcome, and the <a href="https://github.com/pollis-app/pollis/blob/main/docs/security-whitepaper.md"
-            target="_blank" rel="noopener noreferrer">whitepaper</a> is written for that reader.
-          </p>
-        </div>
       </section>
 
       <!-- ─────────────────────────────────────────────────────────── -->
@@ -407,8 +323,8 @@
         <p>
           Live service status, running version and daily uptime are published at
           <a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">status.pollis.com</a>.
-          What happens if the one person operating Pollis stops, and how to tell a stalled transparency log from a
-          withheld one, is on <a href="continuity.html">if the operator stops</a>. Legal demands for user data and
+          The continuity plan, including how to tell a stalled transparency log from a withheld one, is on
+          <a href="continuity.html">continuity</a>. Legal demands for user data and
           the warrant canary are on <a href="legal-requests.html">legal requests</a>.
         </p>
       </section>

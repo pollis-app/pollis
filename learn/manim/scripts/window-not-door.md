@@ -23,11 +23,11 @@ before it, through a process that can't be reversed. Like mixing paint: easy
 forwards, impossible backwards. And once a key is used, it's deleted, not on your
 device, not on our servers, not anywhere.
 
-**[00:55–01:20] Scene 3 — the caveat**
-One honest caveat, because this gets overstated. If your old messages are still on
+**[00:55–01:20] Scene 3 — your device**
+One thing to be precise about. If your old messages are still on
 your screen, someone holding your unlocked device just reads them. Forward secrecy
 protects encrypted traffic, someone who recorded your data months ago and steals a
-key today still can't open what they recorded. Shared files are the exception: their keys last as long as the conversation does.
+key today still can't open what they recorded. Shared files are sealed with a file key that members' devices keep for the life of the conversation.
 
 **[01:20–01:40] Scene 4 — a real break**
 Now the future. Normally a stolen key means you're compromised forever. Here, the

@@ -6,7 +6,7 @@ use crate::{error::Result, state::AppState};
 
 fn unsupported() -> crate::error::Error {
     crate::error::Error::Other(anyhow::anyhow!(
-        "webcam capture is not yet supported on this platform"
+        "webcam capture is not supported on this platform"
     ))
 }
 

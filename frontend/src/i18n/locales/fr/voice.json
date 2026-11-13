@@ -190,7 +190,7 @@
     "portal": "Le partage d'écran est indisponible — le portail de partage d'écran du bureau n'a pas répondu."
   },
   "cameraError": {
-    "unsupported": "La capture webcam n'est pas encore disponible sur cette plateforme.",
+    "unsupported": "La capture webcam n'est pas disponible sur cette plateforme.",
     "permission": "L'accès à la caméra est bloqué. Accordez l'autorisation caméra à Pollis, puis réessayez.",
     "busy": "La caméra est utilisée par une autre application. Fermez-la et réessayez.",
     "helperMissing": "L'assistant caméra est absent. Réinstallez Pollis pour le restaurer.",

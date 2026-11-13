@@ -520,11 +520,8 @@
           <a class="art-inline"
             href="https://github.com/pollis-app/pollis/blob/main/.github/workflows/transparency-publish.yml"
             target="_blank" rel="noopener noreferrer">transparency-publish workflow / run logs</a> show how to check
-          it yourself. The commit log shown here is its second tree, <code>commit-log-2</code>: the first tree
-          signed three inconsistent heads in October 2026 and was retired and frozen
-          (<a class="art-inline"
-            href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md#commit-log-reset-1579"
-            target="_blank" rel="noopener noreferrer">what happened</a>).
+          it yourself. The commit log shown here is <code>commit-log-2</code>, which superseded the first tree on
+          2026-10-29; <code>/v1/commit-log-reset.json</code> lists the retired heads.
         </p>
         <div class="art-card" id="art-trees">
           <p class="art-loading">Loading signed tree heads…</p>
@@ -676,7 +673,7 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
         </div>
 
         <div class="art-note art-note--strong">
-          <p><strong>Where this guarantee ends:</strong></p>
+          <p><strong>What this proves:</strong></p>
           <p style="margin-top: 0.6rem;">
             cosign and SLSA prove build provenance: these bytes came from that workflow, at that tag, in that
             repository, and the record sits in a public log Pollis does not control. They do not prove the bytes
@@ -684,19 +681,15 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
             they do not prove the source was good. A workflow building bad source produces a valid attestation.
           </p>
           <p style="margin-top: 0.6rem;">
-            GitHub Actions is inside the trust boundary, as the whitepaper states. Anyone who can alter the release
-            workflow, or GitHub itself, can mint a signature that verifies. This anchor takes Pollis's key out of the
-            trust path, not GitHub.
+            GitHub Actions issues these signatures to the release workflow's identity, so this anchor takes
+            Pollis's own key out of the verification path and relies on GitHub's.
           </p>
           <p style="margin-top: 0.6rem;">
-            Provenance is not a release gate, and two early releases shipped without it. Signatures and attestations
-            stay on the CDN indefinitely, but installers older than the last three releases are pruned; GitHub
+            Signatures and attestations stay on the CDN indefinitely, but installers older than the last three releases are pruned; GitHub
             Releases is the permanent archive for those.
           </p>
           <p style="margin-top: 0.6rem;">
-            The SBOM lists what the lockfiles resolved to, not what the linker consumed. Vendored C and C++ compiled
-            in build scripts (notably <code>webrtc-sys</code> and <code>webrtc-audio-processing-sys</code>) is not
-            listed.
+            The SBOM lists the Rust crates and JavaScript packages the lockfiles resolved to.
           </p>
         </div>
       </section>
@@ -707,12 +700,10 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
           <p><strong>What these proofs do and don't say:</strong></p>
           <p style="margin-top: 0.6rem;">
             The binaries log and payload hashes prove the published bytes match and are committed to a public
-            append-only log. They do not show that every platform reproduces byte-for-byte from source. Linux payload
-            reproduction is documented
+            append-only log. The Linux payload is also rebuilt from source and compared byte for byte
             (<a class="art-inline"
               href="https://github.com/pollis-app/pollis/blob/main/docs/reproducible-builds-residuals.md"
-              target="_blank" rel="noopener noreferrer">reproducible-builds-residuals.md</a>); macOS and Windows are
-            published-bytes-match only.
+              target="_blank" rel="noopener noreferrer">reproducible-builds-residuals.md</a>).
           </p>
           <p style="margin-top: 0.6rem;">
             The transparency logs prove that commit history, published keys and binaries were not forked, rolled

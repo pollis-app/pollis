@@ -211,7 +211,7 @@
         <div class="faq-answer">
           <div class="plain">
             <p>Yes, for what you say. Messages and calls are encrypted on your device, and your private keys never leave your devices unencrypted.</p>
-            <p>What the server can still see: your email and username, which groups and DMs you're in and what they're called, and when each message was sent and to which conversation. Stored messages don't record who sent them, but at the moment you hit send the server does know it's you (see the next question). Emoji reactions, avatars and group icons are not encrypted.</p>
+            <p>What the server can still see: your email and username, which groups and DMs you're in and what they're called, when each message was sent and to which conversation, and emoji reactions, avatars and group icons. Stored messages don't record who sent them, but at the moment you hit send the server does know it's you (see the next question).</p>
           </div>
           <div class="dev">
             <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. On desktop, private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) via the <code>keyring</code> crate. On mobile they sit in an encrypted file whose key is held by the iOS Keychain (this-device-only) or a non-exportable Android Keystore key. Where no keystore is available, they go in an encrypted file bound to the machine, never in plaintext. They are never sent anywhere.</p>
@@ -228,7 +228,7 @@
             <p>No. The stored message does not say who sent it; only people in the conversation can tell, from the sealed contents. A database breach or a legal demand for stored data can't reveal who said what.</p>
           </div>
           <div class="dev">
-            <p>Sealed sender (shipped). MLS already authenticates the sender inside the ciphertext via the message's <code>BasicCredential</code> (<code>{user_id}:{device_id}</code>), so the plaintext <code>sender_id</code> the server used to store was redundant. The stored envelope is now sealed (migration <code>000008_message_envelope_sealed_sender.sql</code>), and the recipient attributes the message from the MLS credential on decrypt.</p>
+            <p>Sealed sender (shipped). MLS already authenticates the sender inside the ciphertext via the message's <code>BasicCredential</code> (<code>{user_id}:{device_id}</code>), so the server needs no plaintext <code>sender_id</code>. The stored envelope is sealed (migration <code>000008_message_envelope_sealed_sender.sql</code>), and the recipient attributes the message from the MLS credential on decrypt.</p>
             <p>This covers data at rest only. The Delivery Service authenticates the send with an <code>X-Pollis-User</code> header, so it sees the sender at send time.</p>
           </div>
         </div>
@@ -238,10 +238,10 @@
         <div class="faq-question">Does the length of my messages give anything away?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Very little. Every text message is padded before it's sealed: short messages all come out the same size, and longer ones are rounded up, so the server only learns a rough size range. Attachments are not padded.</p>
+            <p>Very little. Every text message is padded before it's sealed: short messages all come out the same size, and longer ones are rounded up, so the server only learns a rough size range.</p>
           </div>
           <div class="dev">
-            <p>Text plaintext is padded before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>): everything up to 256 bytes collapses to one size, and above that lengths are rounded up with PADMÉ (worst-case overhead about 12%). Redactions, read receipts and thread replies are padded the same way. Attachments are not padded: their ciphertext is the file size plus a 16-byte tag per 4 MiB chunk.</p>
+            <p>Text plaintext is padded before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>): everything up to 256 bytes collapses to one size, and above that lengths are rounded up with PADMÉ (worst-case overhead about 12%). Redactions, read receipts and thread replies are padded the same way.</p>
           </div>
         </div>
       </div>
@@ -328,19 +328,19 @@
         <div class="faq-answer">
           <div class="plain">
             <p>Pollis publishes a fingerprint of every release to a public, tamper-evident log. A small tool, <code>pollis-verify</code>, lets anyone confirm that the app they're running is one Pollis published. A tampered build given to one person would either appear in the public log permanently or be missing from it, and either is detectable.</p>
-            <p>On Linux, an automated rebuild from the public source after every release also confirms the released app matches byte for byte. On macOS and Windows, the log proves the app matches what Pollis published; those builds are not rebuilt from source.</p>
+            <p>On Linux, an automated rebuild from the public source after every release also confirms the released app matches byte for byte. On macOS and Windows, the log proves the app matches what Pollis published.</p>
           </div>
           <div class="dev">
             <p>Binary transparency (shipped). Each released artifact's hashes are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a single pinned log key (post-quantum ML-DSA-44, published on the <a href="artifacts.html">artifacts page</a>). <code>pollis-verify release https://verify.pollis.com &lt;tag&gt;</code> checks a build against the log, trusting only that key and any successor signed by the pinned offline root key (<code>/v1/key-set.json</code>).</p>
-            <p>Each leaf also has a <code>toolchain</code> field meant to record the build recipe. No workflow ever set it, so all 258 leaves through v1.9.7 carry <code>"rustc": "unknown"</code>. The log is append-only, so they cannot be corrected: their hashes are right, their recipe field is not. The release workflow now fails rather than record <code>unknown</code>, so leaves from later releases carry a real recipe.</p>
+            <p>Leaves for current releases record the build recipe in a <code>toolchain</code> field; the release workflow fails rather than record an unknown recipe.</p>
             <p>Each release from then on also publishes a CycloneDX SBOM (<code>pollis-&lt;tag&gt;.cdx.json</code>) listing the Rust crates and JavaScript packages that ship in the app, taken from the release's lockfiles (build-time-only tools such as build scripts, proc-macros and dev dependencies are left out), with a build-recipe sidecar per platform. The SBOM is itself a provenance subject, so its digest is anchored in Sigstore's public log and a swapped SBOM would be detectable.</p>
             <p>Also shipped:</p>
             <ul>
               <li>a post-release workflow that rebuilds the Linux AppImage from public source and fails on any hash mismatch with the log;</li>
-              <li>SLSA build provenance and keyless <code>cosign</code> signatures on every desktop artifact for all three platforms, anchored in Sigstore's Rekor log, so verification needs no Pollis-held key;</li>
+              <li>SLSA build provenance and keyless <code>cosign</code> signatures on desktop artifacts for all three platforms, anchored in Sigstore's Rekor log, so verification needs no Pollis-held key;</li>
               <li>an in-app "verify this build" button on the security screen, which hashes the running binary and runs the same release check as the CLI.</li>
             </ul>
-            <p>Limits: the rebuild covers the Linux AppImage only (not <code>.deb</code>/<code>.rpm</code>, macOS, or Windows), and it needs the published build recipe as well as the source, because a build-time value is baked in. Every release's verdict is recorded on the <a href="assurance.html">assurance page</a>, misses included: red runs from a since-fixed reporting bug, releases left inconclusive because the rebuild ran on a different CI machine image than the release, and a few early releases that were never checked. Provenance is not a release gate, and two earlier releases shipped without it. The in-app check is advisory: it proves log inclusion, not reproduction from source, and reports <code>pending</code> for the few minutes after a release until the log is republished with it.</p>
+            <p>The rebuild covers the Linux AppImage, and it needs the published build recipe as well as the source, because a build-time value is baked in. Every release's verdict is recorded on the <a href="assurance.html">assurance page</a>. The in-app check proves log inclusion, and reports <code>pending</code> for the few minutes after a release until the log is republished with it.</p>
           </div>
         </div>
       </div>
@@ -421,10 +421,10 @@
         <div class="faq-question">Should I trust Pollis with my life?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Pollis is in open preview and has not been independently audited. If your physical safety depends on unbreakable communication, use a mature, audited tool built for that threat model.</p>
+            <p>Pollis is in open preview. It has had two full adversarial security reviews, described on the <a href="assurance.html">assurance page</a>. If your physical safety depends on unbreakable communication, use a mature tool built for that threat model.</p>
           </div>
           <div class="dev">
-            <p>Open preview status. Pollis has had two full adversarial security reviews by teams of AI agents, not an independent human audit, with findings and fixes published on the <a href="assurance.html">assurance page</a>. Protocol choices (MLS, keystore-backed identity, client-side encryption) target a Slack-style workspace threat model, not a nation-state adversary. For high-risk use, pick a tool with a documented audit history.</p>
+            <p>Open preview status. Pollis has had two full adversarial security reviews by teams of AI agents, summarised on the <a href="assurance.html">assurance page</a>. Protocol choices (MLS, keystore-backed identity, client-side encryption) target a Slack-style workspace threat model, not a nation-state adversary. For high-risk use, pick a tool built for that threat model.</p>
           </div>
         </div>
       </div>

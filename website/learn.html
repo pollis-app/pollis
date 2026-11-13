@@ -1111,9 +1111,9 @@
 
         <figure class="ln-figure">
           <video crossorigin="anonymous" class="ln-video" controls playsinline preload="none"
-            poster="https://cdn.pollis.com/learn/media/threat-model-r1723.jpg" aria-describedby="threat-model-transcript-body">
-            <source src="https://cdn.pollis.com/learn/media/threat-model-r1723.webm" type="video/webm" />
-            <source src="https://cdn.pollis.com/learn/media/threat-model-r1723.mp4" type="video/mp4" />
+            poster="https://cdn.pollis.com/learn/media/threat-model-r1864.jpg" aria-describedby="threat-model-transcript-body">
+            <source src="https://cdn.pollis.com/learn/media/threat-model-r1864.webm" type="video/webm" />
+            <source src="https://cdn.pollis.com/learn/media/threat-model-r1864.mp4" type="video/mp4" />
             <track kind="captions" srclang="en" label="English"
               src="/learn/media/threat-model.vtt" />
           </video>
@@ -1143,7 +1143,7 @@ A readable message, then a sealed one, then the delivery details on the outside 
               We can't see what's inside. We can see the outside.</p>
             <p>That your account sent something, when, roughly how big, and which conversation
               it belongs to. That's called metadata, and it can be sensitive all by itself.
-              We're not going to tell you it doesn't exist.</p>
+              We're not going to pretend it doesn't exist.</p>
             <p>There's a subtler attack too. Encryption only helps if you're using the right key
               for the right person. A dishonest server could hand you the wrong key, its own,
               and read everything without ever breaking the math.</p>
@@ -1505,12 +1505,11 @@ Lockboxes left in advance, a welcome that carries only today's keys, earlier mes
               separate members of the group, each with their own keys. Their group keys are
               never copied between them. The one key that does travel is your account key, once,
               sealed end to end, when you link the new device.</p>
-            <p>Which brings us to the trade-off we want you to hear from us, not discover later.
-              A new device starts empty, unless you copy your history over from another of your
-              devices, directly, sealed end to end. There's no history backup on our servers. We
-              could encrypt your history and store it on our servers behind a PIN, but watch
-              what that builds: a copy of every conversation, on our infrastructure, behind a
-              six-digit number.</p>
+            <p>Which brings us to how history works on a new device. A new device starts empty,
+              unless you copy your history over from another of your devices, directly, sealed
+              end to end. There's no history backup on our servers. We could encrypt your
+              history and store it on our servers behind a PIN, but watch what that builds: a
+              copy of every conversation, on our infrastructure, behind a six-digit number.</p>
             <p>That's the exact thing this app exists to not have. So we don't do it. Three
               kinds of loss are acceptable: messages from before you joined, a new device
               starting empty, and — if one of your devices goes quiet for over a year — mail
@@ -1538,26 +1537,26 @@ Lockboxes left in advance, a welcome that carries only today's keys, earlier mes
         <div class="ln-prose">
           <p>Suppose someone copies a key off your device today. What do they get, looking backward in time and forward?</p>
           <p><strong>The past: forward secrecy.</strong> Nothing. Each new key is derived from the previous one by a one-way step that cannot be reversed, and used keys are deleted. A key stolen today opens today's messages; the material for yesterday's no longer exists. (To handle messages that arrive out of order, the protocol briefly keeps a small, bounded set of recent message keys, so the boundary is that window rather than a hard line.)</p>
-          <p>Forward secrecy protects <em>recorded network traffic</em>, not your device. Your messages are stored decrypted in a local database so the app can show them instantly, and that database is protected by a key in your operating system's keystore. Someone inside your unlocked device can read your history directly. What forward secrecy guarantees is that traffic recorded months ago stays sealed, even with a key stolen today. Shared files are the exception: a conversation's file keys last as long as the conversation, so someone who copied them off your device could open file blobs they had already captured from storage.</p>
+          <p>Forward secrecy protects <em>recorded network traffic</em>, not your device. Your messages are stored decrypted in a local database so the app can show them instantly, and that database is protected by a key in your operating system's keystore. Someone inside your unlocked device can read your history directly. What forward secrecy guarantees is that traffic recorded months ago stays sealed, even with a key stolen today. Shared files are sealed with a per-conversation file key that members' devices keep for the life of the conversation (<a href="#attachments">see Topic 6</a>).</p>
           <p><strong>The future: post-compromise security.</strong> Normally a stolen key keeps working until you notice and start over. In MLS the group heals on its own. Ordinary updates, such as adding a member or a routine key refresh, replace keys along part of the tree. Once a member the attacker does not control makes an update, the stolen key stops working, without anyone having to notice the theft.</p>
           <p>This is the payoff of the tree from <a href="#mls-groups">Topic 3</a>: rekeying is cheap, so it happens often, and the window in which a stolen key is useful stays short. It does not open backward, and it closes on its own.</p>
         </div>
 
         <div class="ln-limit">
           <div class="ln-limit-label">The limits</div>
-          <p>Someone with continuous access to your device receives every update you do and stays in; this recovers from a break that has ended, not one in progress. Messages already decrypted on your device can be read by whoever holds it. Neither property hides metadata. Healing needs a key change: the desktop app refreshes its own keys in each group about once a week, but the phone apps only do so when someone joins or leaves, so a quiet group used only on phones heals slowly. And none of this deletes messages; it limits how much time a stolen key covers.</p>
+          <p>Someone with continuous access to your device receives every update you do and stays in; this recovers from a break that has ended, not one in progress. Messages already decrypted on your device can be read by whoever holds it. Neither property hides metadata. Healing comes with a key change: the group's next update, such as a member joining or leaving or a routine key refresh, closes the window. And none of this deletes messages; it limits how much time a stolen key covers.</p>
         </div>
 
         <figure class="ln-figure">
           <video crossorigin="anonymous" class="ln-video" controls playsinline preload="none"
-            poster="https://cdn.pollis.com/learn/media/window-not-door.jpg" aria-describedby="window-not-door-transcript-body">
-            <source src="https://cdn.pollis.com/learn/media/window-not-door.webm" type="video/webm" />
-            <source src="https://cdn.pollis.com/learn/media/window-not-door.mp4" type="video/mp4" />
+            poster="https://cdn.pollis.com/learn/media/window-not-door-r1864.jpg" aria-describedby="window-not-door-transcript-body">
+            <source src="https://cdn.pollis.com/learn/media/window-not-door-r1864.webm" type="video/webm" />
+            <source src="https://cdn.pollis.com/learn/media/window-not-door-r1864.mp4" type="video/mp4" />
             <track kind="captions" srclang="en" label="English"
               src="/learn/media/window-not-door.vtt" />
           </video>
           <figcaption class="ln-figcaption">
-Time runs left to right: a one-way key chain, the caveat about an unlocked screen, a break that heals on an ordinary update, and the window narrowing as the group stays active.
+Time runs left to right: a one-way key chain, what an unlocked screen shows, a break that heals on an ordinary update, and the window narrowing as the group stays active.
           </figcaption>
         </figure>
 
@@ -1578,11 +1577,11 @@ Time runs left to right: a one-way key chain, the caveat about an unlocked scree
               before it, through a process that can't be reversed. Like mixing paint: easy
               forwards, impossible backwards. And once a key is used, it's deleted, not on your
               device, not on our servers, not anywhere.</p>
-            <p>One honest caveat, because this gets overstated. If your old messages are still
-              on your screen, someone holding your unlocked device just reads them. Forward
-              secrecy protects encrypted traffic, someone who recorded your data months ago and
-              steals a key today still can't open what they recorded. Shared files are the
-              exception: their keys last as long as the conversation does.</p>
+            <p>One thing to be precise about. If your old messages are still on your screen,
+              someone holding your unlocked device just reads them. Forward secrecy protects
+              encrypted traffic, someone who recorded your data months ago and steals a key
+              today still can't open what they recorded. Shared files are sealed with a file key
+              that members' devices keep for the life of the conversation.</p>
             <p>Now the future. Normally a stolen key means you're compromised forever. Here, the
               attacker is reading. Epoch seven. Epoch eight. This is a real break.</p>
             <p>Then someone else in the group, someone the attacker doesn't control, does
@@ -1653,7 +1652,7 @@ Time runs left to right: a one-way key chain, the caveat about an unlocked scree
         </dl>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The trade this makes</div>
+          <div class="ln-limit-label">How file keys work</div>
           <p>The key ring belongs to the conversation, not to the moment a file was sent. Someone who
             joins later can open files posted before they joined, as long as they can see a message that
             points at them. When someone is removed, a new key is added and used for everything uploaded
@@ -1929,9 +1928,9 @@ A message read in the middle while both screens show a padlock, safety numbers m
 
         <figure class="ln-figure">
           <video crossorigin="anonymous" class="ln-video" controls playsinline preload="none"
-            poster="https://cdn.pollis.com/learn/media/merkle-trees-r1723.jpg" aria-describedby="merkle-trees-transcript-body">
-            <source src="https://cdn.pollis.com/learn/media/merkle-trees-r1723.webm" type="video/webm" />
-            <source src="https://cdn.pollis.com/learn/media/merkle-trees-r1723.mp4" type="video/mp4" />
+            poster="https://cdn.pollis.com/learn/media/merkle-trees-r1864.jpg" aria-describedby="merkle-trees-transcript-body">
+            <source src="https://cdn.pollis.com/learn/media/merkle-trees-r1864.webm" type="video/webm" />
+            <source src="https://cdn.pollis.com/learn/media/merkle-trees-r1864.mp4" type="video/mp4" />
             <track kind="captions" srclang="en" label="English"
               src="/learn/media/merkle-trees.vtt" />
           </video>
@@ -1968,8 +1967,9 @@ Building the tree from the bottom up, then changing one entry and watching the r
             <p>So the root is a fingerprint of the entire list, in sixty-four characters. You
               don't download fifty thousand entries to check we've been honest, you compare
               sixty-four characters.</p>
-            <p>Now the honest limit. A Merkle tree doesn't stop us writing something false. Add
-              a dishonest entry, and the tree would include it quite happily.</p>
+            <p>Now what it proves, and what it doesn't. A Merkle tree doesn't stop us writing
+              something false. Add a dishonest entry, and the tree would include it quite
+              happily.</p>
             <p>What it takes away is our ability to lie quietly. We can't show you one list and
               someone else a different one, or change our story later, without it showing the
               moment anyone compares roots.</p>
@@ -2026,8 +2026,8 @@ Building the tree from the bottom up, then changing one entry and watching the r
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">Where the guarantee ends</div>
-          <p>None of this makes serving two different lists impossible; it makes it provable once anyone compares. If nobody compares signed heads, two versions could coexist unnoticed. Today the routine check is our own publishing job plus anyone running the verifier; more independent checkers would help.</p>
+          <div class="ln-limit-label">What it proves</div>
+          <p>None of this makes serving two different lists impossible; it makes it provable once anyone compares. Our publishing job compares what is actually being served, and anyone can run the verifier to compare the heads they were shown.</p>
         </div>
 
         <figure class="ln-figure">
@@ -2191,7 +2191,7 @@ Each log and the problem it protects against, an attempted split being refused, 
             <p>Take a valid head from the commit log and try to pass it off as one for the
               binaries log. It doesn't fit. Each tree signs under its own context, so the
               signature says which tree it belongs to.</p>
-            <p>And the limits, plainly. These don't make us honest, they make lying undeniable
+            <p>What the logs prove. These don't make us honest, they make lying undeniable
               rather than impossible. They also say nothing about bugs. A log proves what we
               published, not that it's correct.</p>
             <p>One practical note. The logs rebuild once a day, and again right after each
@@ -2222,20 +2222,20 @@ Each log and the problem it protects against, an attempted split being refused, 
           <p>Each release is recorded at three levels, because "the app" is not one file. The <strong>payload</strong> is the program and its resources before any signature; an independent person can rebuild this from source and compare. The <strong>signed</strong> level is what you download after Apple or Windows wraps it; signing mixes in unique data, so two builds never produce an identical signed file. The <strong>installed program</strong> level is the fingerprint of the main program as it sits on your machine, which is what a running app can measure about itself. The app's "verify this build" check compares the running program against that fingerprint.</p>
           <p><strong>What this buys you.</strong> If a different build were made for one person, its fingerprint would either be missing from the log, which that person's app would notice, or appear in the public log next to the normal release.</p>
           <p><strong>Reproducible builds.</strong> A logged fingerprint proves we published these bytes, not that they came from the source you can read. That needs reproducible builds, where anyone compiling the source at a given version gets a byte-for-byte identical result. Ordinary builds bake in timestamps, file paths, and ordering that vary between machines, so this is hard.</p>
-          <p><strong>The Linux AppImage is reproducible.</strong> An independent rebuild from the public source and the published build recipe, with none of our secrets, produces the fingerprint we logged, and it runs automatically after every release. macOS and Windows builds are logged with build provenance, and are not rebuilt from source. The signing wrapper is never reproducible on any platform.</p>
+          <p><strong>The Linux AppImage is reproducible.</strong> An independent rebuild from the public source and the published build recipe, with none of our secrets, produces the fingerprint we logged, and it runs automatically after every release. macOS and Windows builds are logged with build provenance. The signing wrapper is never reproducible on any platform.</p>
           <p>Every release also carries a build provenance record in a public log we do not run, showing which automated workflow produced the bytes; checking it involves no Pollis key. Provenance says who built it; reproducibility says whether it matches the source. Having both means one compromised key does not undo everything.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">Where the guarantee ends</div>
-          <p>On macOS and Windows you get "these are the bytes Pollis published, and this workflow built them," but not "these bytes match the source you can read." Only the Linux AppImage closes that loop; the Linux <code>.deb</code> and <code>.rpm</code> are not rebuilt either. Every rebuild's verdict is published per release on the <a href="assurance.html">assurance page</a>. The signed wrapper can never match on any platform, because signatures mix in unique data.</p>
+          <div class="ln-limit-label">What each platform proves</div>
+          <p>On every platform the log proves "these are the bytes Pollis published." On macOS and Windows, provenance adds "this workflow built them." The Linux AppImage adds "these bytes match the source you can read." Every rebuild's verdict is published per release on the <a href="assurance.html">assurance page</a>. The signed wrapper can never match on any platform, because signatures mix in unique data.</p>
         </div>
 
         <figure class="ln-figure">
           <video crossorigin="anonymous" class="ln-video" controls playsinline preload="none"
-            poster="https://cdn.pollis.com/learn/media/binary-transparency-r1723.jpg" aria-describedby="binary-transparency-transcript-body">
-            <source src="https://cdn.pollis.com/learn/media/binary-transparency-r1723.webm" type="video/webm" />
-            <source src="https://cdn.pollis.com/learn/media/binary-transparency-r1723.mp4" type="video/mp4" />
+            poster="https://cdn.pollis.com/learn/media/binary-transparency-r1864.jpg" aria-describedby="binary-transparency-transcript-body">
+            <source src="https://cdn.pollis.com/learn/media/binary-transparency-r1864.webm" type="video/webm" />
+            <source src="https://cdn.pollis.com/learn/media/binary-transparency-r1864.mp4" type="video/mp4" />
             <track kind="captions" srclang="en" label="English"
               src="/learn/media/binary-transparency.vtt" />
           </video>
@@ -2288,9 +2288,9 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             <p>On Linux, we have that. A rebuild that uses none of our secrets, and that anyone
               can run from their own copy, rebuilds the AppImage and confirms the hash we
               logged.</p>
-            <p>On macOS and Windows, the log proves you got the bytes we published, and those
-              builds are not rebuilt from source. And the signing layer is never reproducible
-              anywhere. That's by design: signing mixes in unique data.</p>
+            <p>On macOS and Windows, the log proves you got exactly the bytes we published. The
+              signing layer is never reproducible on any platform. That's by design: signing
+              mixes in unique data.</p>
             <p>There's one more leg. Every release also carries a provenance record in a public
               log that isn't ours, proving which workflow produced the bytes, with no key of
               ours involved in checking it. A different question from reproducibility.</p>
@@ -2333,12 +2333,9 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             <code>/v1/&lt;log&gt;/sth/latest.json</code> is the current signed
             statement and <code>/v1/&lt;log&gt;/entries.json</code> the log's
             entries, where <code>&lt;log&gt;</code> is <code>commit-log-2</code>,
-            <code>binaries</code> or <code>account-keys</code>. The first commit log,
-            served directly under <code>/v1/</code>, was retired in October 2026 after
-            it signed three inconsistent heads; its files stay frozen in place and a
-            signed statement at <code>/v1/commit-log-reset.json</code> describes them
-            (<a href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md#commit-log-reset-1579"
-            target="_blank" rel="noopener noreferrer">details</a>).
+            <code>binaries</code> or <code>account-keys</code>. <code>commit-log-2</code>
+            superseded the first tree on 2026-10-29;
+            <code>/v1/commit-log-reset.json</code> lists the retired heads.
             <code>/verify/release/&lt;tag&gt;</code> is a
             ready-made report for one release. <code>/v1/&lt;log&gt;/public_key.json</code>
             is the signing key, served for convenience only: real verification

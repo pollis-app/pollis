@@ -68,17 +68,17 @@ That is worth having. IP is a strong deidentifier: it pins a user to a network, 
 
 ### 2.2 What it does NOT defend: the application-layer social graph
 
-This is the critical honesty point. **Hiding the IP does not hide who you are inside Turso's data model.** Pollis's metadata lives in *rows*, not in *packet headers*:
+This is the key point. **Hiding the IP does not hide who you are inside Turso's data model.** Pollis's metadata lives in *rows*, not in *packet headers*:
 
 - `users` (id, email, username), `group_member`, `dm_channel_member`, `user_block` — the social graph.
-- `message_envelope` — sender id, timestamp, ciphertext size (`docs/security-whitepaper.md` §1.2, `ARCHITECTURE.md` §Data storage model).
+- `message_envelope` — recipient conversation, timestamp, ciphertext size (`docs/security-whitepaper.md` §1.2, `ARCHITECTURE.md` §Data storage model).
 - `mls_commit_log` / `mls_welcome` timing.
 
-A request to Turso is **authenticated as a specific user at the application layer** — the actor's `user_id` is supplied and trusted because it came from the unlocked `account_id_key` (`docs/security-whitepaper.md` §8.1). So even if that request arrives from a relay's IP, the *content* of the request says "user `u_123` is reading channel `c_abc`." The relay changes *from where* the connection appears to originate; it does nothing about *whose account* the request is for. Turso still sees the full social graph and message metadata keyed by stable user ids.
+A request to the Delivery Service is **authenticated as a specific device at the application layer**: every request is signed by the device's key and names its user and device (`X-Pollis-User` / `X-Pollis-Device`, `docs/security-whitepaper.md` §8). So even if that request arrives from a relay's IP, the *content* of the request says "user `u_123` is reading channel `c_abc`." The relay changes *from where* the connection appears to originate; it does nothing about *whose account* the request is for. The DS and Turso still see the social graph and message metadata keyed by stable user ids.
 
 > **The relay defends the packet-header identity. It does not defend the payload identity.** Hiding "which household connected" is a different problem from hiding "which user did what," and only the first is a network-layer problem.
 
-Defending the application-layer graph is a **separate, harder project**: sealed-sender / metadata-minimization (unlinking the *sender* from the envelope so the service can route a message without learning who sent it), private contact discovery, oblivious/PIR reads, VRF-backed private key-directory lookups (the whitepaper already notes the last as an upgrade path for the transparency log, §6.9 limit (3)). Those change the *data model and access patterns*, not the transport.
+Defending the application-layer graph is a **separate problem**, addressed in the data model and access patterns rather than the transport: sealed sender, for example, unlinks the *sender* from the stored envelope (`docs/security-whitepaper.md` §1.2).
 
 **The relay and sealed-sender compose; neither substitutes for the other.**
 - Relay **without** sealed-sender: the operator can't see your IP but still sees your entire keyed-by-`user_id` social graph. IP-anonymous, not graph-anonymous.

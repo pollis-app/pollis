@@ -66,7 +66,7 @@
       "unit": "days",
       "asserted_in": [
         { "file": "website/retention.html", "pattern": "identity reset {value} days\\. Long enough to investigate" },
-        { "file": "docs/metadata-retention-policy.md", "pattern": "\\| {value} days since #762 \\(`POLLIS_DS_SECURITY_EVENT_RETENTION" },
+        { "file": "docs/metadata-retention-policy.md", "pattern": "\\| {value} days \\(#762, `POLLIS_DS_SECURITY_EVENT_RETENTION" },
         { "file": "docs/metadata-retention-policy.md", "pattern": "`security_event` retention: {value} days" }
       ]
     },
@@ -393,20 +393,8 @@
       "words": false,
       "asserted_in": [
         { "file": "website/security.html", "pattern": "AES-256-GCM in {value} MiB chunks" },
-        { "file": "website/faq.html", "pattern": "tag per {value} MiB chunk" },
         { "file": "website/faq.html", "pattern": "sealed in {value} MiB chunks" },
-        { "file": "docs/security-whitepaper.md", "pattern": "tag per {value} MiB chunk" },
         { "file": "docs/security-whitepaper.md", "pattern": "AES-256-GCM over {value} MiB chunks" }
-      ]
-    },
-
-    "attachment-tag-bytes": {
-      "value_from": { "file": "pollis-core/src/commands/r2.rs", "pattern": "^const TAG_SIZE: usize = (\\d+);" },
-      "unit": "bytes",
-      "words": false,
-      "asserted_in": [
-        { "file": "website/faq.html", "pattern": "plus a {value}-byte tag per" },
-        { "file": "docs/security-whitepaper.md", "pattern": "plus one {value}-byte tag per" }
       ]
     },
 
@@ -446,8 +434,7 @@
       "value_from": { "file": "pollis-core/src/commands/mls/self_update.rs", "pattern": "SELF_UPDATE_INTERVAL: chrono::Duration = chrono::Duration::days\\((\\d+)\\);" },
       "unit": "days",
       "asserted_in": [
-        { "file": "docs/security-whitepaper.md", "pattern": "has not committed for {value} days plus" },
-        { "file": "docs/security-whitepaper.md", "pattern": "launch sweep \\({value} days \\+ up to" }
+        { "file": "docs/security-whitepaper.md", "pattern": "has not committed for {value} days plus" }
       ]
     },
 
@@ -455,8 +442,7 @@
       "value_from": { "file": "pollis-core/src/commands/mls/self_update.rs", "pattern": "SELF_UPDATE_JITTER: chrono::Duration = chrono::Duration::days\\((\\d+)\\);" },
       "unit": "days",
       "asserted_in": [
-        { "file": "docs/security-whitepaper.md", "pattern": "jitter of up to {value} days" },
-        { "file": "docs/security-whitepaper.md", "pattern": "up to {value} days jitter" }
+        { "file": "docs/security-whitepaper.md", "pattern": "jitter of up to {value} days" }
       ]
     },
 
@@ -611,28 +597,11 @@
       ]
     },
 
-    "relay-pool-floor": {
-      "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"node_floor\" \\{[\\s\\S]*?default\\s*=\\s*(\\d+)" },
-      "unit": "nodes",
-      "asserted_in": [
-        { "file": "website/subprocessors.html", "pattern": "Floor of {value} nodes" }
-      ]
-    },
-
     "relay-pool-cap": {
       "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"node_max\" \\{[\\s\\S]*?default\\s*=\\s*(\\d+)" },
       "unit": "nodes",
       "asserted_in": [
-        { "file": "website/subprocessors.html", "pattern": "hard cap of {value}, bounded by" }
-      ]
-    },
-
-    "relay-pool-budget-usd": {
-      "value_from": { "file": "infra/relay-hydra/variables.tf", "pattern": "variable \"monthly_budget_usd\" \\{[\\s\\S]*?default\\s*=\\s*(\\d+)" },
-      "unit": "USD per month",
-      "words": false,
-      "asserted_in": [
-        { "file": "website/subprocessors.html", "pattern": "bounded by a \\${value}/month budget" }
+        { "file": "website/subprocessors.html", "pattern": "At most {value} nodes" }
       ]
     },
 
@@ -664,7 +633,6 @@
       "value_from": { "file": "docs/sth-signing-key-custody.md", "pattern": "Wait out the overlap window so the fleet updates\\. \\*\\*Minimum (\\d+) days\\*\\*" },
       "unit": "days",
       "asserted_in": [
-        { "file": "website/assurance.html", "pattern": "The custody design calls for at least {value} days with both keys pinned" },
         { "file": "docs/sth-signing-key-custody.md", "pattern": "≥ {value} days; the number is unset until the next rotation" }
       ]
     },
@@ -708,7 +676,7 @@
       "unit": "US regions",
       "asserted_in": [
         { "file": "website/subprocessors.html", "pattern": "{value} US regions \\(Virginia, Ohio, California, Oregon\\)" },
-        { "file": "website/subprocessors.html", "pattern": "Nodes across {value} US regions" }
+        { "file": "website/subprocessors.html", "pattern": "Relay nodes across {value} US regions" }
       ]
     },
 

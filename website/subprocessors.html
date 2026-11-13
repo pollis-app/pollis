@@ -6,12 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pollis — Subprocessors</title>
   <meta name="description"
-    content="Every third party in the Pollis path: what each one sees, in what form, and where it runs — including the relay pool roster and who operates it." />
+    content="Every third party in the Pollis path: what each one sees, in what form, and where it runs — including the relay pool and who operates it." />
   <meta name="theme-color" content="#0f1117" />
 
   <meta property="og:title" content="Pollis — Subprocessors" />
   <meta property="og:description"
-    content="Who sees what, in what form, and in which jurisdiction — with the gaps named." />
+    content="Who sees what, in what form, and in which jurisdiction." />
   <meta property="og:type" content="website" />
 
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
@@ -93,10 +93,9 @@
                 <td>Cloudflare R2</td>
                 <td class="doc-td-dim">Attachments, download CDN, transparency-log hosting</td>
                 <td class="doc-td-dim">
-                  Encrypted attachment blobs, their size and upload time, and an object key derived from the
-                  content hash; no filename, user or conversation id.
-                  <strong>Avatars and group icons are not encrypted</strong> and are public to anyone with the
-                  URL.
+                  Encrypted attachment blobs, their size and upload time, and an object key that is a random
+                  file id; no filename, user or conversation id. Also avatars and group icons, which are public
+                  to anyone with the URL.
                 </td>
                 <td class="doc-td-dim">Cloudflare global</td>
               </tr>
@@ -104,9 +103,8 @@
                 <td>Resend</td>
                 <td class="doc-td-dim">Sends the login email</td>
                 <td class="doc-td-dim">
-                  <strong>Your email address and six-digit one-time code, in plain text</strong>, for the
-                  duration of the send. This is the largest plaintext exposure in the system. The Delivery Service
-                  sends the email; the app never holds a Resend credential.
+                  <strong>Your email address and six-digit one-time code</strong>, which it sees while sending
+                  the email. The Delivery Service sends the email; the app never holds a Resend credential.
                 </td>
                 <td class="doc-td-dim">Provider-determined</td>
               </tr>
@@ -129,28 +127,28 @@
                 <td class="doc-td-dim">
                   A relay sees the ciphertext it forwards and the two ends of its hop. The first hop sees your IP,
                   and every hop learns which account built the circuit, because each verifies your device
-                  certificate. Never content. See the roster below.
+                  certificate. Never content. See the relay pool below.
                 </td>
-                <td class="doc-td-dim">Nodes across four US regions; control plane <code>us-west-2</code></td>
+                <td class="doc-td-dim">Relay nodes across four US regions; control plane <code>us-west-2</code></td>
               </tr>
               <tr>
-                <td>A single leased virtual server</td>
+                <td>Hostinger<br /><span class="doc-td-dim">one virtual server</span></td>
                 <td class="doc-td-dim">Runs the self-hosted LiveKit media server and TURN relay</td>
                 <td class="doc-td-dim">
-                  Who is in a call, which room, when, and your IP, which it needs to route media. Call audio and
-                  video are end-to-end encrypted and forwarded as ciphertext; the realtime signalling JSON is not
-                  encrypted at the application layer. No call record is written to any database, and the server
-                  keeps no access, error or container logs.
+                  A pseudonym for each call's room and a per-room pseudonym for each participant, never an
+                  account id or conversation name; when a call happens; the call's signalling messages; and your
+                  IP, which it needs to route media. Call audio and video are end-to-end encrypted and forwarded
+                  as ciphertext. No call record is written to any database, and the server keeps no access, error
+                  or container logs.
                 </td>
-                <td class="doc-td-dim">One host, one location</td>
+                <td class="doc-td-dim">Boston, United States</td>
               </tr>
               <tr>
                 <td>GitHub</td>
                 <td class="doc-td-dim">Source, CI, releases, container registry</td>
                 <td class="doc-td-dim">
-                  No user data, but it is <strong>inside the publishing trust boundary</strong>: the transparency
-                  log is built and signed in GitHub Actions, which also holds the release-signing keys.
-                  <a href="assurance.html">Assurance</a> covers what that means.
+                  No user data. The transparency log is built and signed in GitHub Actions, which also holds the
+                  release-signing keys.
                 </td>
                 <td class="doc-td-dim">Global</td>
               </tr>
@@ -201,108 +199,54 @@
       <section class="doc-section">
         <h2 class="doc-section-title">The relay pool, and who operates it</h2>
         <p>
-          Pollis has an optional relay overlay that hides your IP address from the first-party services. The
-          design documents describe a stronger arrangement than what actually runs, so here is the current
-          state.
+          Pollis has an optional relay overlay. When the app connects through a relay, the first-party
+          services do not see your IP address.
         </p>
 
         <p>
           <strong>It is opt-in and off by default.</strong> Unless you have turned on network privacy in
           preferences, none of your traffic goes through a relay and this section does not apply to you.
-        </p>
-
-        <p>
-          <strong>The pool is currently switched off.</strong> No relay nodes are running; the pool was small,
-          barely used and cost money to keep up. With network privacy set to <em>off</em> or <em>prefer</em>,
-          nothing changes: <em>prefer</em> connects directly, as it always did when the pool was unreachable. With
-          <em>strict</em>, sending pauses rather than connecting directly; switch to <em>prefer</em> to keep
-          sending. The table describes the pool as configured, and as it will run if switched back on.
+          With network privacy set to <em>prefer</em>, the app goes through a relay when the signed directory
+          lists a reachable one and connects directly otherwise. With <em>strict</em>, sending pauses rather than
+          connecting directly; switch to <em>prefer</em> to keep sending.
         </p>
 
         <div class="doc-table-wrap">
           <table class="doc-table">
-            <thead><tr><th></th><th>What the design allows for</th><th>What runs when the pool is on</th></tr></thead>
+            <thead><tr><th></th><th>How the pool is configured</th></tr></thead>
             <tbody>
               <tr>
                 <td>Operators</td>
-                <td class="doc-td-dim">Guidance for self-hosters is to run nodes across at least two unrelated
-                  providers, so one provider's outage or subpoena cannot take the pool.</td>
-                <td class="doc-td-dim"><strong>Every node is first-party, in one AWS account.</strong> The
-                  two-provider guidance is for third parties running their own nodes; it does not describe the
-                  Pollis pool.</td>
+                <td class="doc-td-dim"><strong>Every node is first-party, in one AWS account.</strong></td>
               </tr>
               <tr>
                 <td>Jurisdiction</td>
-                <td class="doc-td-dim">Placement is drawn from an allowed region set with a jurisdiction
-                  denylist available.</td>
-                <td class="doc-td-dim">Four US regions (Virginia, Ohio, California, Oregon), with the denylist
-                  empty. All nodes are in the United States.</td>
+                <td class="doc-td-dim">Four US regions (Virginia, Ohio, California, Oregon). All nodes are in the
+                  United States.</td>
               </tr>
               <tr>
                 <td>Placement</td>
-                <td class="doc-td-dim">A pool-wide node count, not a per-region map.</td>
                 <td class="doc-td-dim">Each node's region is redrawn at random every 24 hours, with
                   replacement, so two nodes can share a region. There is no stable per-region roster.</td>
               </tr>
               <tr>
                 <td>Size</td>
-                <td class="doc-td-dim">Floor of 2 nodes, hard cap of 3, bounded by a $20/month budget.</td>
-                <td class="doc-td-dim">The cheapest ARM instances AWS sells, on spot pricing.</td>
+                <td class="doc-td-dim">At most 3 nodes, on the cheapest ARM instances AWS sells.</td>
               </tr>
               <tr>
                 <td>Control plane</td>
-                <td class="doc-td-dim">Subject to the same jurisdiction policy as the nodes.</td>
                 <td class="doc-td-dim">In <code>us-west-2</code>. It sees every relay's IP.</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        <h3 class="doc-sub-title">Check the roster yourself</h3>
         <p>
-          The directory is public and signed:
+          <strong>The overlay hides your network address, not your account.</strong> With multiple hops no single
+          node holds both your IP and your destination, and every hop verifies your device certificate, so it
+          learns which account built the circuit. Push notifications reach your device through APNs and FCM
+          directly; see the Expo row above.
         </p>
-        <code class="doc-cmd">curl -fsSL https://relays.pollis.com/directory.json \
-  | jq -r .payload_b64 | base64 -d \
-  | jq '{issued_at, expires_at, relays: [.relays[] | {addr, region}]}'</code>
-        <span class="doc-cmd-note">
-          Returns each node's address and region. While the pool is off, this returns the last signed directory,
-          with an <code>expires_at</code> in the past; clients refuse an expired directory, so a stale roster
-          cannot stay in use. When the pool is on, placement rotates daily, so the output changes from day to
-          day.
-        </span>
-
-        <div class="doc-limit">
-          <span class="doc-limit-title">Where this guarantee ends</span>
-          <p>
-            <strong>A first-party pool means one operator at both ends.</strong> With multiple hops no single node
-            holds both your IP and your destination, but we run the first and last hop, so those two logs could be
-            joined. A middle hop in a different trust domain prevents that, which is why the design has volunteer
-            relays and never gives a volunteer the first or last position. There are no volunteer relays today.
-          </p>
-          <p>
-            <strong>This hides your network address, not your identity.</strong> Every hop verifies your device
-            certificate and so learns which account built the circuit. Hiding the account needs anonymous
-            credentials, which are not built.
-          </p>
-          <p>
-            <strong>An observer who can watch both ends of a circuit can correlate it</strong> by timing and
-            volume, however many hops it has. No overlay of this kind fixes that.
-          </p>
-          <p>
-            <strong>The whole pool currently shares one QUIC identity certificate</strong>, so the client pins the
-            certificate rather than any address.
-          </p>
-          <p>
-            <strong>The directory-signing key is Ed25519, not post-quantum</strong>, because the signer runs in an
-            environment with no ML-DSA implementation. One key signs both the directory and the revocation list, so
-            a signature proves who signed but not which document.
-          </p>
-          <p>
-            <strong>Push notifications do not use the overlay.</strong> APNs and FCM reach your device directly.
-            See the Expo row above.
-          </p>
-        </div>
         <p style="margin-top: 1rem;">
           <a href="https://github.com/pollis-app/pollis/blob/main/docs/relay-overlay-design.md" target="_blank"
             rel="noopener noreferrer">Overlay design</a> ·

@@ -189,7 +189,7 @@
     "portal": "屏幕共享不可用 — 桌面屏幕共享门户没有响应。"
   },
   "cameraError": {
-    "unsupported": "此平台暂不支持摄像头采集。",
+    "unsupported": "此平台不支持摄像头采集。",
     "permission": "摄像头访问被阻止。请授予 Pollis 摄像头权限后重试。",
     "busy": "摄像头正被其他应用占用。请关闭该应用后重试。",
     "helperMissing": "摄像头辅助程序缺失。请重新安装 Pollis 以恢复。",

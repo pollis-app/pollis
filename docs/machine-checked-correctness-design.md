@@ -509,17 +509,16 @@ reproducible build of a tree full of unvetted crates proves you reproduced
 Three tools, wired into CI as a distinct fast job (no native deps → cheap):
 
 - **`cargo-deny`** (advisories + licenses + bans + sources): fail CI on any
-  RUSTSEC advisory in the tree, on a disallowed/again-unknown license, on
-  duplicate/yanked crates, and on any crate sourced outside crates.io/our vendor.
+  RUSTSEC advisory without a specific, reviewed ignore entry, on a
+  disallowed/unknown license, on a new duplicate crate version, and on any crate
+  sourced outside crates.io/our vendor.
   A `deny.toml` at the workspace root; `cargo deny check` in CI. **Start here —
   highest value per hour, near-zero maintenance.**
-- **`cargo-vet`** (human review provenance): record that each dependency (and
-  version) has been reviewed — either by us or via an imported trusted registry
-  (the Mozilla/Google shared audit set). `supply-chain/` audits committed;
-  `cargo vet` in CI fails on any unvetted/updated crate, forcing a review or an
-  explicit exemption. This is the "verify, don't trust" story applied to deps: an
-  auditor can read `supply-chain/audits.toml` and see exactly what was reviewed by
-  whom.
+- **`cargo-vet`** (review provenance): every dependency (and version) is
+  covered by an audit — ours or one imported from a trusted registry (the
+  Mozilla/Google shared audit set) — or by an explicit exemption. `supply-chain/`
+  is committed; `cargo vet` in CI fails on any new or bumped crate that has
+  neither, so every dependency change is a reviewable change to that directory.
 - **`cargo-crev`** (optional, community web-of-trust): complements vet with
   external reviews. Lower priority; vet's imported audit sets cover most of the
   value with less ceremony.
@@ -634,9 +633,8 @@ be written (model it first).
 Spend the budget where the state machine is *pure and load-bearing*, not where it
 is *async and glue*. Concretely: **do M0 → M1 → M2 → M3 now** (~2 weeks:
 supply-chain gating + Kani on watermark/gate/canonicalization + a continuous
-soak). These are all in-box, cheap in CI, and each retires a *named* production
-incident class (#442 message-loss false-alarm, #411 phantom-epoch, fuzzer-finding-#2
-leak, F1 gaps). Defer the TLA+ specs (M4/M5) until the pure-fn proofs prove the ROI
+soak). These are all in-box, cheap in CI, and each covers a *named* failure
+class (message loss, phantom epoch, removed-device rejoin, commit-log gaps). Defer the TLA+ specs (M4/M5) until the pure-fn proofs prove the ROI
 and the retention-floor code (I4) is imminent — then model it before writing it.
 Do **not** attempt to formally verify openmls, libsql, or the async command layer;
 keep them behind the trust boundary and let the (already strong) proptest +

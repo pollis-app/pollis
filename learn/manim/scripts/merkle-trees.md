@@ -45,8 +45,8 @@ So the root is a fingerprint of the entire list, in sixty-four characters. You
 don't download fifty thousand entries to check we've been honest, you compare
 sixty-four characters.
 
-**[01:44–02:04] Scene 5 — the honest limit**
-Now the honest limit. A Merkle tree doesn't stop us writing something false. Add a
+**[01:44–02:04] Scene 5 — what it proves**
+Now what it proves, and what it doesn't. A Merkle tree doesn't stop us writing something false. Add a
 dishonest entry, and the tree would include it quite happily.
 
 **[02:04–02:22] Scene 5 — what it *does* prevent**

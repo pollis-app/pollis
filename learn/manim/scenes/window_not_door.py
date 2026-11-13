@@ -156,9 +156,9 @@ class WindowNotDoor(Scene):
         self.hold_until(55)
         self.play(FadeOut(VGroup(head, chain, arrows, back, refused, oneway, deleted)))
 
-    # ── Scene 3 (0:55–1:20), the caveat that gets skipped ──────────────────
+    # ── Scene 3 (0:55–1:20), your unlocked device ──────────────────────────
     def beat_caveat(self):
-        head = Text("One important caveat",
+        head = Text("Your device is a different question",
                     color=DANGER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         spine = VGroup(self.axis, self.marks, self.stolen, self.stolen_arrow)
         self.play(AddTextLetterByLetter(head, run_time=0.7), spine.animate.set_opacity(0.0))
@@ -263,7 +263,7 @@ class WindowNotDoor(Scene):
                  DANGER, w=11.4, h=0.8, scale=0.34),
             chip("metadata → untouched by either property (topic 1)",
                  AMBER, w=11.4, h=0.8, scale=0.34),
-            chip("healing is driven by activity → a silent group rekeys rarely",
+            chip("healing comes with a key change → the group's next update closes the window",
                  AMBER, w=11.4, h=0.8, scale=0.34),
         ).arrange(DOWN, buff=0.35).move_to([0, 0.7, 0])
         for r in rows:

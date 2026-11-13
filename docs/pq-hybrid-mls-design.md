@@ -90,9 +90,7 @@ the code as it is today.
   Never a flag day. Two things landed differently from the sketch here and are worth
   reading in §8: migration is *not* a ciphersuite-transition commit at an epoch boundary
   (RFC 9420 has no such commit) but a **successor group** under a generation counter; and
-  the crypto-provider change landed as a **route**, not a swap, because putting classic
-  traffic on libcrux would have been a security regression (§7.3) — a route that #668
-  then dissolved by moving to a suite RustCrypto implements.
+  #668 moved to a suite RustCrypto implements, so one crypto backend serves it (§7.3).
   The live risk is no longer availability but **code-point churn** — `0x0052` is a
   provisional `draft-ietf-mls-pq-ciphersuites` point, and its predecessor `0x004D` was
   dropped by the same draft one revision earlier; pin the openmls rev and budget
@@ -527,11 +525,9 @@ local `message` table inside the SQLCipher-encrypted database, whitepaper §7.1)
 > `user_device.pq_capable` — is deleted rather than left dormant.
 >
 > **Why a hard cutover was allowed.** #669's own issue text assumed retirement would have
-> to wait out the 90-day fleet turnover this section describes. It does not, because the
-> deployment has zero active users: there is no old app in the field to strand, so the
-> gradual path had nothing left to protect. That is a property of *this* deployment at
-> *this* moment, not a correction to the argument — a fleet with real users would still
-> need every word below.
+> to wait out the 90-day fleet turnover this section describes. At #669 there was no old
+> app in the field to strand, so the gradual path had nothing left to protect. A fleet
+> with old apps still in use needs every word below.
 >
 > **What the no-stranding guarantee rests on now.** The acceptance criterion is unchanged:
 > a migrated group can never contain a member who could not follow it across. It is now
@@ -1086,90 +1082,15 @@ The 1216-byte `hpke_init_key` is exactly ML-KEM-768 public key (1184) + X25519 (
 confirming real hybrid encapsulation — not a stubbed or classical-only path. That
 `hpke_init_key` is unchanged under `0x0052`: the KEM did not move (§2.1).
 
-### 7.3 Provider integration: suite-routed under #454, single-backend since #668
+### 7.3 Provider integration: one backend
 
-> **Superseded.** Everything in this subsection describes the #454 state and is kept
-> because the *reasoning* — a supply-chain advisory can veto a crypto backend regardless of
-> its feature set — is the part worth remembering. As shipped today, one backend
-> (`openmls_rust_crypto::RustCrypto`) serves **both** suites, `openmls_libcrux_crypto` is
-> out of the dependency tree entirely, and there is no suite→provider dispatch:
-> `PollisProvider` is the only provider any path constructs
-> (`pollis-core/src/commands/mls/provider.rs`). The `with_suite_provider!` /
-> `with_group_provider!` / `with_lineage_provider!` macros that performed the dispatch are
-> deleted; two of the three had to deserialise the whole stored group just to read a suite
-> before they could dispatch, work every call site then repeated inside the body. The
-> routing invariant test `classic_provider_never_routes_to_libcrux` is now
-> `mls_backend_is_rustcrypto`, and **nine** libcrux `deny.toml` ignores were retired — not
-> by re-arguing reachability, but because the crates left the graph (see §7.3.1).
-
-- The provider is generic over its crypto half (`pollis-core/src/commands/mls/provider.rs`):
-  `MlsProvider<C>` composes any backend `C` with the custom `MlsStore`.
-  `openmls_libcrux_crypto` `pub use`s its `CryptoProvider` (`src/lib.rs:6`), so adding a
-  hybrid-capable provider means adding one type alias and leaves `MlsStore` untouched —
-  storage is ciphersuite- and backend-agnostic, storing opaque blobs in `mls_kv`
-  (`pollis-core/src/signal/mls_storage.rs:223`).
-- **The libcrux provider *can* serve both suites — and we deliberately do not let it.**
-  The full two-party flow ran under it on classic-AES, classic-ChaCha *and* X-Wing, all
-  green, so a single-provider design is technically available. It was rejected on a
-  security ground discovered when the supply-chain gate was run against the change:
-  `openmls_libcrux_crypto 0.3.1` pulls `libcrux-aead 0.0.6` with default features, and
-  **`libcrux-aesgcm <= 0.0.8` checks the AES-GCM authentication tag in non-constant time
-  (RUSTSEC-2026-0211, `patched = []`)**. Pollis's *current* suite is AES-128-GCM, so a
-  wholesale swap would move every message decrypt in the shipping app onto a timing side
-  channel — a real regression today, bought with a post-quantum capability nothing yet
-  uses. The fix exists only in the renamed `libcrux-aes 0.0.9`, which no released
-  `openmls_libcrux_crypto` depends on.
-- **Therefore: the crypto provider is routed by ciphersuite.** `PollisProvider`
-  (RustCrypto, constant-time `subtle` tag compare) serves the classic suite and is the
-  only provider any production path constructs; `PollisPqProvider` (libcrux) serves the
-  ChaCha20-Poly1305 hybrid suite and is constructed nowhere in production yet. Both
-  compose the same untouched `MlsStore`. The mixed-provider hazard this creates is
-  *bounded and already measured*: RustCrypto-backed and libcrux-backed clients interoperate
-  in one classic group in all four direction combinations (KeyPackage, Welcome/join,
-  application messages both ways, a cross-provider self-update commit, and byte-identical
-  `export_secret`), pinned by the cross-provider interop test. The routing itself is pinned
-  by `classic_provider_never_routes_to_libcrux`, which is also the stated basis of the
-  `deny.toml` entry for RUSTSEC-2026-0211 — if the providers are ever merged, that ignore
-  becomes a lie and the test fails first.
-- **Budget the other five libcrux advisories too.** Adding the provider pulls
-  RUSTSEC-2026-0209/0210 (`libcrux-aesgcm`), -0124 (`libcrux-chacha20poly1305`), -0075
-  (`libcrux-ed25519`) and -0073 (`libcrux-poly1305`) into the graph. Under the routing
-  above none are reachable from live traffic; -0124 and -0073 *do* sit on the hybrid path
-  and must be re-argued (not merely re-ignored) before P2 puts a real group on that suite.
-  Reasons are recorded per-ID in `deny.toml`.
-- **WARNING — do not use the crate's bundled `Provider` type.** It hardcodes
-  `openmls_memory_storage::MemoryStorage` (`src/lib.rs:13`) and would silently lose all
-  MLS group state on restart. Pollis composes `openmls_libcrux_crypto::CryptoProvider`
-  with its own `MlsStore`, exactly as `PollisProvider` does with `RustCrypto`.
-- **SHARP EDGE — the libcrux provider's `supports()` self-contradicts.** Its `supports()`
-  returns `Err(UnsupportedCiphersuite)` for Pollis's *current* AES-GCM suite — it demands
-  `hpke_aead == ChaCha20Poly1305` (`src/crypto.rs:48-51`) — while its own
-  `supported_ciphersuites()` lists that same AES-GCM suite. No path in the full flow
-  consults `supports()`, so classic groups work today; but anything that *starts* calling
-  `supports()` would break every classic group. P1a pins this with a regression test (§8).
-
-#### 7.3.1 How #668 closed the advisory ledger
-
-Worth recording because the outcome is the *good* one and it was not the plan. #454 carried
-nine libcrux ignores in `deny.toml`, in two clusters, each resting on a reachability
-argument:
-
-- **RUSTSEC-2026-0207 / -0208 / -0212** (`libcrux-sha3 0.0.8`, `libcrux-secrets 0.0.5`) came
-  in transitively through `hpke-rs 0.6.1` ← `openmls_rust_crypto`. The fixes shipped in
-  `hpke-rs 0.7.0`, which **no released openmls depends on** — but the #668 pin to openmls
-  `main` does, so the tree now builds `libcrux-sha3 0.0.10` and `libcrux-secrets 0.0.6`,
-  the patched versions. The git pin taken for the *signature* change happened to close
-  three advisories the released stack could not.
-- **RUSTSEC-2026-0211 / -0209 / -0210 / -0124 / -0075 / -0073** entered via
-  `openmls_libcrux_crypto 0.3.1`. Moving the PQ suite to `0x0052` removed that crate from
-  the graph, so all six went with it.
-
-That also retires the *code invariant* the first cluster's argument rested on: the only
-reason `PollisPqProvider` existed was to keep classic AES-GCM traffic away from libcrux's
-non-constant-time tag check. With one backend there is nothing to route. **If a
-libcrux-backed provider is ever reintroduced, every one of the six must be re-argued from
-scratch** — the `deny.toml` note says so explicitly, and the entries must not simply be
-resurrected.
+One backend (`openmls_rust_crypto::RustCrypto`) serves the MLS suite, and `PollisProvider`
+is the only provider any path constructs (`pollis-core/src/commands/mls/provider.rs`).
+`MlsProvider<C>` composes the crypto half with the custom `MlsStore`; storage is ciphersuite-
+and backend-agnostic, storing opaque blobs in `mls_kv`
+(`pollis-core/src/signal/mls_storage.rs`). The invariant is pinned by the
+`mls_backend_is_rustcrypto` test. `openmls_libcrux_crypto` is not in the dependency tree;
+reintroducing any second crypto backend needs its own supply-chain review (`deny.toml`).
 
 ### 7.4 The live risk: code-point churn, not availability
 
@@ -1286,16 +1207,10 @@ versions, and treat a future OpenMLS bump as a tracked migration.
 the swap this phase originally proposed. `PollisProvider` (RustCrypto) served `CS_CLASSIC`
 and `PollisPqProvider` (`openmls_libcrux_crypto`) served `CS_HYBRID`, both over the custom
 `MlsStore`; the crate's bundled `Provider` type was not used (it hardcodes in-memory
-storage — §7.3). The swap was rejected because libcrux's AES-GCM decryption has an
-unpatched non-constant-time tag check (RUSTSEC-2026-0211), which would have put *classic*
-traffic on vulnerable code; the hybrid suite's AEAD is ChaCha20-Poly1305, which the
-advisory does not touch. The routing was therefore security-load-bearing and was pinned by
-`classic_provider_never_routes_to_libcrux` alongside the `supports()` self-contradiction
-regression test (§7.3).
-**#668 dissolved rather than routed around the problem:** `0x0052` is implemented by
-RustCrypto and by no libcrux provider, so the second backend, the dispatch macros, the
-cross-provider interop test and nine `deny.toml` ignores all left the tree together
-(§7.3.1). The routing invariant is now the simpler `mls_backend_is_rustcrypto`.
+storage — §7.3).
+**#668 replaced the routing with a single backend:** `0x0052` is implemented by RustCrypto,
+so the second backend, the dispatch macros and the cross-provider interop test left the
+tree together (§7.3). The invariant is now `mls_backend_is_rustcrypto`.
 
 **Phase 1b — Suite parametrisation: DONE.** ✅ `CS_CLASSIC` / `CS_HYBRID` introduced, every
 `CS` call site made suite-aware (the 31 references in §7.5), the additive migrations landed
@@ -1378,9 +1293,8 @@ group classic.
 publication was *not* retired — pre-migration lineages and any client that had not yet
 updated still needed it, and the retirement was expected to require a multi-release
 additive→drop dance (CLAUDE.md) that could not begin until an app that stopped *needing*
-classic had full uptake. **#669 did it as a hard cutover instead**, because the deployment
-has zero active users: there is no un-updated app in the field, so there was no uptake to
-wait for. `CS_CLASSIC` and `PUBLISHED_SUITES` are deleted, one pool publishes, the gate
+classic had full uptake. **#669 did it as a hard cutover instead**, with no uptake to wait
+for. `CS_CLASSIC` and `PUBLISHED_SUITES` are deleted, one pool publishes, the gate
 this phase built is deleted with the suite it gated, and *no* migration was needed — the
 `pq_capable` column is retired in place rather than dropped, keeping migrations additive.
 The one thing #669 did **not** do is remove the last Ed25519 MLS leaf key: the device still
