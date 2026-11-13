@@ -1304,7 +1304,7 @@ Rules that matter:
   ever switched on). Those commit rows stay but stop naming the account:
   `scrub_commit_log` blanks `sender_id`, drops the account and its devices from
   `added_user_id` / `added_device_ids`, and blanks `mls_group_info.updated_by_device_id`.
-  It runs on the log DB, after the main transaction. `mls_welcome.submitted_by` naming the account is nulled. `conversation` is append-only by its own design (#880).
+  It runs on the log DB after the main transaction, and `purge_legacy_log_copies` does the same to the main DB's pre-#420 copies of those tables where they still exist. `mls_welcome.submitted_by` naming the account is nulled. `conversation` is append-only by its own design (#880).
 - **Adding a table with a `user_id` means adding it to the teardown.**
   `pollis-delivery/tests/teardown.rs` reads the live schema and fails if a table
   naming a user or a conversation is in neither the purge list nor an exemption

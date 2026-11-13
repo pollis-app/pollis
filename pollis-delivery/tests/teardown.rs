@@ -852,3 +852,58 @@ async fn purging_twice_is_a_no_op() {
         assert_eq!(count(&c, table).await, after_first[i], "{table} changed on the second purge");
     }
 }
+
+/// A main DB as an older deployment has it: the baseline's control-plane tables
+/// still hold rows from before the commit log moved out (#420).
+async fn main_only_conn() -> Connection {
+    let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+    let c = db.connect().unwrap();
+    c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+    pollis_schema::apply::main_db(&c).await.unwrap();
+    c
+}
+
+/// The main DB's pre-split copies are scrubbed of the deleted account.
+#[tokio::test]
+async fn the_main_dbs_legacy_log_copies_stop_naming_the_account() {
+    let c = main_only_conn().await;
+    exec(&c, "INSERT INTO mls_commit_log \
+              (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+              VALUES ('conv', 0, 'victim', X'01', 'victim,carol', 'victim_dev,carol_dev')").await;
+    exec(&c, "INSERT INTO mls_commit_log \
+              (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+              VALUES ('conv', 1, 'carol', X'02', 'victim', 'victim_dev')").await;
+    exec(&c, "INSERT INTO mls_welcome (id, conversation_id, recipient_id, welcome_data) \
+              VALUES ('w1', 'conv', 'victim', X'01')").await;
+    exec(&c, "INSERT INTO mls_group_info (conversation_id, epoch, group_info, updated_by_device_id) \
+              VALUES ('conv', 1, X'01', 'victim_dev')").await;
+
+    let devices = vec!["victim_dev".to_string()];
+    pollis_delivery::teardown::purge_legacy_log_copies(&c, "victim", &devices).await.unwrap();
+
+    assert_eq!(count_where(&c, "mls_commit_log", "sender_id", "victim").await, 0);
+    assert_eq!(count(&c, "mls_commit_log").await, 2, "the rows themselves stay");
+    let mut rows = c
+        .query("SELECT COUNT(*) FROM mls_commit_log \
+                WHERE added_user_id LIKE '%victim%' OR added_device_ids LIKE '%victim%'", ())
+        .await
+        .unwrap();
+    assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 0);
+    assert_eq!(count_where(&c, "mls_welcome", "recipient_id", "victim").await, 0);
+    assert_eq!(count_where(&c, "mls_group_info", "updated_by_device_id", "victim_dev").await, 0);
+    // Idempotent.
+    pollis_delivery::teardown::purge_legacy_log_copies(&c, "victim", &devices).await.unwrap();
+}
+
+/// A main DB without those tables (created after the split, or a test DB that
+/// drops them) is a no-op, not an error.
+#[tokio::test]
+async fn the_legacy_scrub_is_a_no_op_where_the_tables_are_gone() {
+    let c = main_only_conn().await;
+    for t in ["mls_commit_log", "mls_welcome", "mls_group_info"] {
+        exec(&c, &format!("DROP TABLE {t}")).await;
+    }
+    pollis_delivery::teardown::purge_legacy_log_copies(&c, "victim", &["d".to_string()])
+        .await
+        .unwrap();
+}

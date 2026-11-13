@@ -775,6 +775,8 @@ pub async fn delete_account(
             crate::writes::purge_welcomes(&log_conn, &owner).await?;
             crate::teardown::purge_user_log_rows(&log_conn, &owner, &device_ids).await?;
             crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
+            // The main DB's pre-#420 copies of those tables, where they exist.
+            crate::teardown::purge_legacy_log_copies(&conn, &owner, &device_ids).await?;
         }
     }
     outcome_response::<DeleteAccountBody>(outcome)

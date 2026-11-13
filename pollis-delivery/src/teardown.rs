@@ -540,6 +540,16 @@ pub async fn scrub_commit_log(
     user_id: &str,
     device_ids: &[String],
 ) -> anyhow::Result<()> {
+    scrub_commit_rows(conn, user_id, device_ids).await?;
+    scrub_group_info(conn, user_id, device_ids).await
+}
+
+/// The `mls_commit_log` half of [`scrub_commit_log`].
+async fn scrub_commit_rows(
+    conn: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+) -> anyhow::Result<()> {
     conn.execute(
         "UPDATE mls_commit_log SET sender_id = '' WHERE sender_id = ?1",
         libsql::params![user_id.to_string()],
@@ -572,7 +582,15 @@ pub async fn scrub_commit_log(
         )
         .await?;
     }
+    Ok(())
+}
 
+/// The `mls_group_info` half of [`scrub_commit_log`].
+async fn scrub_group_info(
+    conn: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+) -> anyhow::Result<()> {
     let mut named: Vec<String> = Vec::with_capacity(device_ids.len() + 1);
     named.push(user_id.to_string());
     named.extend(device_ids.iter().cloned());
@@ -584,6 +602,54 @@ pub async fn scrub_commit_log(
         .await?;
     }
     Ok(())
+}
+
+/// The main DB's copies of the control-plane tables, from before the commit log
+/// moved to its own DB (#420). That move started the log DB empty and never
+/// dropped these, so a deployment that predates it still holds rows in them
+/// that name accounts. Each statement runs only where its table and column
+/// exist: a main DB created after the split, or a test DB that drops them, has
+/// none. Where the log shares the main DB this repeats
+/// [`purge_user_log_rows`], which is idempotent.
+///
+/// Callers run this AFTER the main transaction commits, like the log purge.
+pub async fn purge_legacy_log_copies(
+    conn: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+) -> anyhow::Result<()> {
+    let uid = || libsql::params![user_id.to_string()];
+    if has_column(conn, "mls_welcome", "recipient_id").await? {
+        conn.execute("DELETE FROM mls_welcome WHERE recipient_id = ?1", uid()).await?;
+    }
+    if has_column(conn, "mls_welcome", "submitted_by").await? {
+        conn.execute(
+            "UPDATE mls_welcome SET submitted_by = NULL WHERE submitted_by = ?1",
+            uid(),
+        )
+        .await?;
+    }
+    if has_column(conn, "mls_commit_since", "user_id").await? {
+        conn.execute("DELETE FROM mls_commit_since WHERE user_id = ?1", uid()).await?;
+    }
+    if has_column(conn, "mls_commit_log", "added_device_ids").await? {
+        scrub_commit_rows(conn, user_id, device_ids).await?;
+    }
+    if has_column(conn, "mls_group_info", "updated_by_device_id").await? {
+        scrub_group_info(conn, user_id, device_ids).await?;
+    }
+    Ok(())
+}
+
+/// Does `table` exist with a column named `column`?
+async fn has_column(conn: &Connection, table: &str, column: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2",
+            libsql::params![table.to_string(), column.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// `csv` with every element in `drop` removed; `None` when nothing is left.
