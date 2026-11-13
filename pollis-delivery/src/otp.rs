@@ -243,7 +243,7 @@ const SWEEP_AT: usize = 1024;
 /// Per-mailbox OTP state. Two halves:
 ///
 /// - **Limits** (resend throttle, send budget, wrong-guess count, lockout) live
-///   in `otp_mailbox` (migration `000047`), keyed by [`MailboxKey`]. Every
+///   in `otp_mailbox` (migration `000048`), keyed by [`MailboxKey`]. Every
 ///   decision about them is one SQL statement, so they hold across restarts
 ///   and concurrent requests are serialized by the database.
 /// - **Codes** (salted hashes) live in this process only. A code that dies

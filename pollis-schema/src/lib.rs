@@ -290,9 +290,9 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         include_str!("../migrations/000046_conversation_membership_version.sql"),
     ),
     (
-        47,
+        48,
         "otp_mailbox",
-        include_str!("../migrations/000047_otp_mailbox.sql"),
+        include_str!("../migrations/000048_otp_mailbox.sql"),
     ),
 ];
 

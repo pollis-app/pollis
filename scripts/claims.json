@@ -5707,14 +5707,14 @@
       "kind": "security",
       "anchors": [
         "pollis-delivery/src/otp.rs",
-        "pollis-schema/migrations/000047_otp_mailbox.sql",
+        "pollis-schema/migrations/000048_otp_mailbox.sql",
         "pollis-delivery/tests/otp_state_durability.rs"
       ],
       "evidence": [
         "pollis-delivery/src/otp.rs:170",
         "pollis-delivery/src/otp.rs:132",
         "pollis-delivery/src/otp.rs:332",
-        "pollis-schema/migrations/000047_otp_mailbox.sql:22",
+        "pollis-schema/migrations/000048_otp_mailbox.sql:22",
         "pollis-delivery/tests/otp_state_durability.rs:81"
       ],
       "status": "verified",
@@ -20412,13 +20412,13 @@
       "claim": "otp_mailbox holds a keyed hash per mailbox, never the address, and its rows are deleted by trigger once past their last code expiry or lockout end.",
       "kind": "behaviour",
       "anchors": [
-        "pollis-schema/migrations/000047_otp_mailbox.sql",
+        "pollis-schema/migrations/000048_otp_mailbox.sql",
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-schema/migrations/000047_otp_mailbox.sql:22",
-        "pollis-schema/migrations/000047_otp_mailbox.sql:35",
-        "pollis-schema/migrations/000047_otp_mailbox.sql:40"
+        "pollis-schema/migrations/000048_otp_mailbox.sql:22",
+        "pollis-schema/migrations/000048_otp_mailbox.sql:35",
+        "pollis-schema/migrations/000048_otp_mailbox.sql:40"
       ],
       "status": "verified",
       "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
