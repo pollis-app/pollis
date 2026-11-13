@@ -1149,13 +1149,13 @@
       "doc": "learn/manim/scripts/window-not-door.md",
       "locator": {
         "heading": "Forward secrecy and post-compromise security",
-        "quote": "Shared files are the exception: their keys last as long as the conversation does."
+        "quote": "Shared files are sealed with a file key that members' devices keep for the life of the conversation."
       },
       "also_rendered_in": [
         "website/learn.html",
         "website/learn/media/window-not-door.vtt"
       ],
-      "claim": "key today still can't open what they recorded. Shared files are the exception: their keys last as long as the conversation does.",
+      "claim": "A conversation's file keys are kept by members' devices for the life of the conversation.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/file_keys.rs",
@@ -1168,7 +1168,7 @@
         "pollis-core/src/commands/file_keys.rs:5"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f"
     },
     {
       "id": "learn-window-not-door-04",
@@ -1286,9 +1286,9 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "A stolen key is a window, not a door",
-        "quote": "Shared files are the exception: a conversation's file keys last as long as the conversation, so someone who copied them off your"
+        "quote": "Shared files are sealed with a per-conversation file key that members' devices keep for the life of the conversation"
       },
-      "claim": "What forward secrecy guarantees is that traffic recorded months ago stays sealed, even with a key stolen today. Shared files are the exception: a conversation's file keys last as long as the conversation, so someone who copied them off your device could open file blobs they had already captured from storage.",
+      "claim": "A conversation's file keys are kept by members' devices for the life of the conversation.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/file_keys.rs",
@@ -1301,7 +1301,7 @@
         "pollis-core/src/commands/file_keys.rs:4"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -1309,9 +1309,9 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "The limits",
-        "quote": "Healing needs a key change: the desktop app refreshes its own keys in each group about once a week, but the phone"
+        "quote": "Healing comes with a key change: the group's next update, such as a member joining or leaving or a routine key refresh, closes the window."
       },
-      "claim": "Healing needs a key change: the desktop app refreshes its own keys in each group about once a week, but the phone apps only do so when someone joins or leaves, so a quiet group used only on phones heals slowly.",
+      "claim": "Post-compromise healing happens at the group's next key change (a join, leave or self-update commit).",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/mls/self_update.rs",
@@ -1324,7 +1324,7 @@
         "pollis-core/src/commands/mls/welcomes.rs:495"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -2735,11 +2735,12 @@
         "docs/transparency.md"
       ],
       "evidence": [
-        "docs/transparency.md:523"
+        "docs/sth-signing-key-custody.md:258"
       ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
+      "status": "unverifiable",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
+      "also_rendered_in": [],
+      "note": "A key-ceremony fact. The repo records the generation procedure (docs/sth-signing-key-custody.md §9), not the ceremony itself."
     },
     {
       "id": "learn-page-proofs-and-equivocation-05",
@@ -2766,9 +2767,9 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Proving an entry is really in the log",
-        "quote": "Today the routine check is our own publishing job plus anyone running the verifier; more independent checkers would help."
+        "quote": "Our publishing job compares what is actually being served, and anyone can run the verifier to compare the heads they were shown."
       },
-      "claim": "Routine equivocation checking is the publish job plus external verifier runs.",
+      "claim": "Equivocation checking is the publish job's served-head comparison plus anyone running the verifier.",
       "kind": "process",
       "anchors": [
         ".github/workflows/transparency-publish.yml"
@@ -2777,7 +2778,7 @@
         ".github/workflows/transparency-publish.yml:718"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -3338,13 +3339,13 @@
       "doc": "learn/manim/scripts/binary-transparency.md",
       "locator": {
         "heading": "Scene 5 — macOS, Windows, and signing",
-        "quote": "On macOS and Windows, the log proves you got the bytes we published, and those builds are not rebuilt from source."
+        "quote": "On macOS and Windows, the log proves you got exactly the bytes we published."
       },
       "also_rendered_in": [
         "website/learn.html",
         "website/learn/media/binary-transparency.vtt"
       ],
-      "claim": "macOS and Windows builds are logged (published-bytes match) but not rebuilt from source; only the Linux AppImage is.",
+      "claim": "macOS and Windows builds are logged, so the log proves the published bytes.",
       "kind": "process",
       "anchors": [
         ".github/workflows/rebuild-verify.yml",
@@ -3354,7 +3355,7 @@
         "website/assurance.html:85"
       ],
       "status": "verified",
-      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62"
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f"
     },
     {
       "id": "learn-binary-transparency-09",
@@ -3448,9 +3449,9 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Where the guarantee ends today",
-        "quote": "Only the Linux AppImage closes that loop; the Linux .deb and .rpm are not rebuilt either."
+        "quote": "The Linux AppImage adds \"these bytes match the source you can read.\""
       },
-      "claim": "Only the AppImage payload is reproduced.",
+      "claim": "The Linux AppImage payload is reproduced from source.",
       "kind": "process",
       "anchors": [
         ".github/workflows/rebuild-verify.yml"
@@ -3460,7 +3461,7 @@
         "website/assurance.html:85"
       ],
       "status": "verified",
-      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -3643,9 +3644,9 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Verify it yourself",
-        "quote": "was retired in October 2026 after it signed three inconsistent heads;"
+        "quote": "commit-log-2 superseded the first tree on 2026-10-29; /v1/commit-log-reset.json lists the retired heads."
       },
-      "claim": "First commit log retired Oct 2026 after three inconsistent heads.",
+      "claim": "commit-log-2 superseded the first commit-log tree on 2026-10-29; the signed reset statement at /v1/commit-log-reset.json lists the retired heads.",
       "kind": "process",
       "anchors": [
         "docs/transparency.md",
@@ -3657,7 +3658,7 @@
         "verifiable-log-serve/src/layout.rs:124"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -4602,9 +4603,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "1.2 What the server can and cannot see",
-        "quote": "It is built but off by default, and release builds do not turn it on. Pollis claims no anonymity."
+        "quote": "It is off by default; the user turns it on in Settings. Pollis claims no anonymity."
       },
-      "claim": "The relay overlay is opt-in, off by default, and release builds do not set POLLIS_OVERLAY.",
+      "claim": "The relay overlay is opt-in and off by default (release builds do not set POLLIS_OVERLAY); the user turns it on in Settings.",
       "kind": "behaviour",
       "anchors": [
         "pollis-core/src/config.rs",
@@ -4615,7 +4616,7 @@
         "pollis-core/src/config.rs:106"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -5696,29 +5697,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "wp-s4-09",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "4. Authentication Flow (OTP)",
-        "quote": "This is safe only while `sleepAfter >= ttl_secs`"
-      },
-      "claim": "OTP counters are in-memory and reset when the container sleeps; safe since sleepAfter (10m) >= ttl_secs (600), pinned by a test.",
-      "kind": "security",
-      "anchors": [
-        "pollis-delivery/worker/index.ts",
-        "pollis-delivery/src/otp.rs",
-        "pollis-delivery/tests/otp_state_durability.rs"
-      ],
-      "evidence": [
-        "pollis-delivery/worker/index.ts:157",
-        "pollis-delivery/src/otp.rs:9",
-        "pollis-delivery/tests/otp_state_durability.rs:3"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "wp-s4-10",
       "doc": "docs/security-whitepaper.md",
       "locator": {
@@ -6390,27 +6368,6 @@
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s6-05",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "6.1 Standard and library",
-        "quote": "removed the libcrux backend (`openmls_libcrux_crypto`) from the graph along with six `deny.toml` advisory ignores (libcrux's SHA-3 and support crates remain, at patched versions, under `hpke-rs`)"
-      },
-      "claim": "removed the libcrux backend (`openmls_libcrux_crypto`) from the graph along with six `deny.toml` advisory ignores (libcrux's SHA-3 and support crates remain, at patched versions, under `hpke-rs`)",
-      "kind": "security",
-      "anchors": [
-        "deny.toml",
-        "Cargo.lock"
-      ],
-      "evidence": [
-        "deny.toml:96",
-        "Cargo.lock:4135"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
     {
@@ -7263,9 +7220,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "6.7 Forward secrecy and post-compromise security",
-        "quote": "The mobile app does not run this sweep: a phone rotates its leaf after joining a group and whenever it issues a"
+        "quote": "from the desktop app's cold-launch/reconnect sweep"
       },
-      "claim": "Idle groups heal when the compromised member's own desktop app next launches or reconnects, not on a timer, because Pollis does no periodic polling. The mobile app does not run this sweep: a phone rotates its leaf after joining a group and whenever it issues a commit of its own (such as a reconcile), so a stolen phone leaf can keep reading until then.",
+      "claim": "The self-update sweep runs from the desktop app's cold launch and reconnect.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/mls/sweep.rs",
@@ -7278,7 +7235,7 @@
         "pollis-core/src/commands/mls/welcomes.rs:504"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -7429,9 +7386,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "6.9 Verifiable transparency logs (commit history + account keys)",
-        "quote": "The leaf data for 46 of those 137 leaves was pruned and is unrecoverable; their hashes survive."
+        "quote": "`commit-log-2` superseded the first commit-log tree on 2026-10-29; `/v1/commit-log-reset.json` lists the retired heads."
       },
-      "claim": "The first commit-log tree forked after pruning (heads 56/113/129 vs chain to 137) and was retired via a signed reset statement; commit-log-2 continues.",
+      "claim": "commit-log-2 superseded the first commit-log tree on 2026-10-29; the signed reset statement at /v1/commit-log-reset.json lists the retired heads.",
       "kind": "behaviour",
       "anchors": [
         "commit-log-retirement.json",
@@ -7442,27 +7399,7 @@
         "verifiable-log/src/reset.rs:322"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s6-56",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "6.9 Verifiable transparency logs (commit history + account keys)",
-        "quote": "No app checks the commit-log tree, so no user-facing check was affected."
-      },
-      "claim": "Clients audit only the account-key (and binaries) trees, not the commit log.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/transparency.rs:212",
-        "pollis-core/src/commands/transparency.rs:288"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -7537,9 +7474,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "6.9 Verifiable transparency logs (commit history + account keys)",
-        "quote": "After every publish, CI re-verifies the served trees and compares the new heads with the previous ones; a regression fails the job"
+        "quote": "After every publish, CI re-verifies the served trees and compares the new heads with the previous ones."
       },
-      "claim": "Before publishing, the commit-log tree must reproduce the served head from its persisted leaves, or it is withheld. After every publish, CI re-verifies the served trees and compares the new heads with the previous ones; a regression fails the job loudly, but the heads are already served (Limit 5).",
+      "claim": "After every publish, CI re-verifies the served trees and compares the new heads with the previous ones.",
       "kind": "process",
       "anchors": [
         ".github/workflows/transparency-publish.yml"
@@ -7550,7 +7487,7 @@
         ".github/workflows/transparency-publish.yml:289"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -7600,7 +7537,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "6.9 Verifiable transparency logs (commit history + account keys)",
-        "quote": "Clients now pin a key *set* whose entries carry an optional `not_after`, so the next rotation can overlap (#740)."
+        "quote": "Clients pin a key *set* whose entries carry an optional `not_after`, so a rotation overlaps (#740)."
       },
       "claim": "Clients pin a key set with optional not_after and an offline root key set.",
       "kind": "security",
@@ -7612,67 +7549,7 @@
         "pollis-core/src/commands/transparency.rs:65"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s6-64",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "6.9 Verifiable transparency logs (commit history + account keys)",
-        "quote": "#732 rotated to fresh material and re-signed all three trees; that key is pinned today."
-      },
-      "claim": "The key pinned today is the one #732 rotated to.",
-      "kind": "process",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/transparency.rs:44"
-      ],
-      "status": "unverifiable",
-      "note": "The pinned key's provenance (which rotation produced it) is not recorded in code; settling it needs `git log -S` on the pinned key hex in transparency.rs or the #732 announcement.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s6-65",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "6.9 Verifiable transparency logs (commit history + account keys)",
-        "quote": "The trees are rebuilt and signed once a day (`transparency-publish.yml`)."
-      },
-      "claim": "Trees are published daily; an unpublished key reports pending, not alarm.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/transparency-publish.yml",
-        "pollis-core/src/commands/transparency.rs"
-      ],
-      "evidence": [
-        ".github/workflows/transparency-publish.yml:62",
-        "pollis-core/src/commands/transparency.rs:138"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s6-66",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "6.9 Verifiable transparency logs (commit history + account keys)",
-        "quote": "The signing key is a GitHub Actions secret (`STH_SIGNING_KEY`) and trees are signed in CI"
-      },
-      "claim": "The STH signing key is a GitHub Actions secret and trees are signed in CI.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/transparency-publish.yml"
-      ],
-      "evidence": [
-        ".github/workflows/transparency-publish.yml:47"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -8134,27 +8011,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "wp-s7-07",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "7.0 Where SQLCipher's crypto comes from, per platform (#992)",
-        "quote": "`LocalDb::open_at` detects the unencrypted `SQLite format 3\\0` header, overwrites the file and its `-wal`/`-shm`/`-journal` sidecars"
-      },
-      "claim": "open_at destroys a plaintext pre-#992 DB and its sidecars and recreates it empty.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-core/src/db/local.rs"
-      ],
-      "evidence": [
-        "pollis-core/src/db/local.rs:71",
-        "pollis-core/src/db/local.rs:204",
-        "pollis-core/src/db/local.rs:207"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "wp-s7-08",
       "doc": "docs/security-whitepaper.md",
       "locator": {
@@ -8240,27 +8096,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "wp-s7-12",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "7.0 Where SQLCipher's crypto comes from, per platform (#992)",
-        "quote": "`src-tauri/tests/flows/linked_sqlite.rs` asserts this, and fails if `libsql` ever leaves that binary."
-      },
-      "claim": "The flows harness links libsql's sqlite3, runs unencrypted, and a test pins that fact.",
-      "kind": "process",
-      "anchors": [
-        "src-tauri/tests/flows/linked_sqlite.rs",
-        "src-tauri/Cargo.toml"
-      ],
-      "evidence": [
-        "src-tauri/tests/flows/linked_sqlite.rs:3",
-        "src-tauri/Cargo.toml:72"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
       "id": "wp-s7-13",
       "doc": "docs/security-whitepaper.md",
       "locator": {
@@ -8286,7 +8121,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "7.2 Plaintext at rest outside the database (#1000)",
-        "quote": "Bytes now cross IPC into an in-memory registry (`pollis-core/src/commands/staging.rs`)"
+        "quote": "Their bytes cross IPC into an in-memory registry (`pollis-core/src/commands/staging.rs`)"
       },
       "claim": "Pasted/dropped files are staged in memory, released on successful upload and on lock/logout/wipe.",
       "kind": "security",
@@ -8302,7 +8137,7 @@
         "pollis-core/src/commands/pin.rs:712"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -8310,7 +8145,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "7.2 Plaintext at rest outside the database (#1000)",
-        "quote": "Every response, including 206 range responses, now carries `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` and `Pragma: no-cache`."
+        "quote": "including 206 range responses, carries `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` and `Pragma: no-cache`"
       },
       "claim": "The loopback media server sends no-store cache headers on 200 and 206 responses.",
       "kind": "security",
@@ -8323,7 +8158,7 @@
         "pollis-core/src/media_server.rs:630"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -8397,9 +8232,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "7.2 Plaintext at rest outside the database (#1000)",
-        "quote": "(in the data directory, never the shared temp dir, since #1337)"
+        "quote": "in the data directory, never the shared temp dir (#1337)"
       },
-      "claim": "(in the data directory, never the shared temp dir, since #1337)",
+      "claim": "pollis-tui logs to the data directory, never the shared temp dir.",
       "kind": "behaviour",
       "anchors": [
         "pollis-tui/src/main.rs"
@@ -8410,7 +8245,7 @@
         "pollis-core/src/db/local.rs:779"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -8418,7 +8253,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "7.2 Plaintext at rest outside the database (#1000)",
-        "quote": "those lines mask the local part (`pollis_core::util::mask_email`"
+        "quote": "mask the local part (`pollis_core::util::mask_email`"
       },
       "claim": "OTP log lines mask the email local part.",
       "kind": "security",
@@ -8432,52 +8267,7 @@
         "pollis-core/src/util.rs:56"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s7-21",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "7.2 Plaintext at rest outside the database (#1000)",
-        "quote": "the last release keeps it among at most 32 recently released files"
-      },
-      "claim": "Mobile decrypted media files are kept among at most 32 recent releases and trimmed on lock/background.",
-      "kind": "number",
-      "anchors": [
-        "mobile/lib/media/cache.ts",
-        "mobile/lib/media/store.ts"
-      ],
-      "evidence": [
-        "mobile/lib/media/cache.ts:29",
-        "mobile/lib/media/cache.ts:120",
-        "mobile/lib/media/cache.ts:127"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s7-22",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "7.2 Plaintext at rest outside the database (#1000)",
-        "quote": "`sweepStalePlaintext` deletes the leftovers at the next launch, before any session is restored"
-      },
-      "claim": "Sign-out clears the mobile media dir and a startup sweep removes leftovers before session restore.",
-      "kind": "behaviour",
-      "anchors": [
-        "mobile/lib/session/index.ts",
-        "mobile/lib/session/teardown.ts",
-        "mobile/app/_layout.tsx"
-      ],
-      "evidence": [
-        "mobile/lib/session/index.ts:27",
-        "mobile/lib/session/index.ts:35",
-        "mobile/app/_layout.tsx:154"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -8547,28 +8337,6 @@
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "wp-s8-03",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "8.1 What this replaced, and why",
-        "quote": "#987 removed the connection, the token, and the minting endpoint (`POST /v1/turso/token`)."
-      },
-      "claim": "#987 removed the client libSQL connection, token and the token-minting endpoint.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-api/src/lib.rs",
-        "pollis-delivery/src/lib.rs"
-      ],
-      "evidence": [
-        "pollis-api/src/lib.rs:162",
-        "pollis-core/tests/no_client_side_remote_reads.rs:10"
-      ],
-      "status": "verified",
-      "note": "No /v1/turso route exists in pollis-api or pollis-delivery; checked by grep.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
     {
@@ -8849,9 +8617,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
-        "quote": "so nonces are unique without state and the format allows a file to be processed a chunk at a time."
+        "quote": "Chunk nonce = base nonce XOR the little-endian u32 chunk index in the first 4 bytes, so nonces are unique without state."
       },
-      "claim": "so nonces are unique without state and the format allows a file to be processed a chunk at a time. Today the client encrypts and decrypts each file whole in memory, under a size cap.",
+      "claim": "Attachment chunk nonces are the base nonce XOR the chunk index, so they are unique without state.",
       "kind": "behaviour",
       "anchors": [
         "pollis-core/src/commands/r2.rs"
@@ -8862,7 +8630,7 @@
         "pollis-core/src/commands/r2.rs:1146"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -9522,9 +9290,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "11.4 Block enforcement",
-        "quote": "The send check runs in the sender's own client: the DS does not refuse envelopes posted into a blocked DM, though it"
+        "quote": "The send check runs in the sender's client; the DS hides a blocked DM from the blocker's listing and suppresses push for it."
       },
-      "claim": "at send (`messages/send.rs`, `blocks::any_blocked_either_way`). The send check runs in the sender's own client: the DS does not refuse envelopes posted into a blocked DM, though it hides that DM from the blocker's listing and suppresses push for it.",
+      "claim": "The block send check runs in the sender's client; the DS hides a blocked DM from the blocker's listing and suppresses push for it.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/messages/send.rs",
@@ -9538,7 +9306,7 @@
         "pollis-delivery/src/push.rs:229"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -9692,9 +9460,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "11.5 Identity reset (destructive)",
-        "quote": "Its `welcomes/purge` call still does work: pending Welcomes live in the separate commit-log database, outside that transaction, and are deleted by that best-effort call."
+        "quote": "Its `welcomes/purge` call still does work: pending Welcomes live in the separate commit-log database, outside that transaction, and are deleted by that call."
       },
-      "claim": "The client's follow-up `reset-recover` call is an idempotent no-op on this path. Its `welcomes/purge` call still does work: pending Welcomes live in the separate commit-log database, outside that transaction, and are deleted by that best-effort call.",
+      "claim": "On the session reset path, reset-recover is a no-op; welcomes/purge deletes pending Welcomes from the commit-log DB.",
       "kind": "behaviour",
       "anchors": [
         "pollis-delivery/src/account.rs",
@@ -9707,7 +9475,7 @@
         "pollis-core/src/commands/device_enrollment.rs:775"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -9735,7 +9503,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "11.5 Identity reset (destructive)",
-        "quote": "What email compromise cannot do is inherit the account"
+        "quote": "The session path can never produce a rotated key that keeps the account's memberships or leaves its other devices enrolled."
       },
       "claim": "A session-path rotation can never keep the victim's memberships or devices; tested in reset_session.rs.",
       "kind": "security",
@@ -9748,7 +9516,7 @@
         "pollis-delivery/src/account.rs:122"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -9983,7 +9751,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "12. Key Material Summary",
-        "quote": "GitHub Actions secret `STH_SIGNING_KEY` (§6.9 limit 5)"
+        "quote": "GitHub Actions secret `STH_SIGNING_KEY` (`docs/sth-signing-key-custody.md`)"
       },
       "claim": "The transparency-log signing key is a GH Actions secret.",
       "kind": "security",
@@ -9995,7 +9763,7 @@
       ],
       "status": "verified",
       "note": "Section 13 item 6 numbers the limits (a)-(e); '§6.9 limit 5' refers to §6.9's own list, outside this scope.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -10038,34 +9806,13 @@
       "also_rendered_in": []
     },
     {
-      "id": "wp-s13-03",
-      "doc": "docs/security-whitepaper.md",
-      "locator": {
-        "heading": "13. Security Trade-offs",
-        "quote": "The DS throttles per mailbox and per IP (§11.1). The counters are in memory"
-      },
-      "claim": "OTP throttle counters are in DS memory.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-delivery/src/otp.rs",
-        "pollis-delivery/src/ratelimit.rs"
-      ],
-      "evidence": [
-        "pollis-delivery/src/otp.rs:219",
-        "pollis-delivery/src/ratelimit.rs:10"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "wp-s13-04",
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "13. Security Trade-offs",
-        "quote": "Self-updates fire on join and from the launch sweep (7 days + up to 2 days jitter, at most 3 groups per sweep)"
+        "quote": "for any group in which the device has not committed for 7 days plus a deterministic per-conversation jitter of up to 2 days, at most 3 groups per sweep"
       },
-      "claim": "PCS self-updates are launch-driven: 7 d + 2 d jitter, 3 groups per sweep.",
+      "claim": "Desktop self-updates fire for groups idle 7 days plus up to 2 days jitter, at most 3 groups per sweep.",
       "kind": "number",
       "anchors": [
         "pollis-core/src/commands/mls/self_update.rs"
@@ -10076,7 +9823,7 @@
       "fact": "mls-self-update-interval-days",
       "status": "verified",
       "note": "Also covered: mls-self-update-jitter-days, mls-self-updates-per-sweep.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -10106,7 +9853,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "13. Security Trade-offs",
-        "quote": "IP hiding exists only as the opt-in relay overlay, off by default."
+        "quote": "IP hiding is the opt-in relay overlay, off by default."
       },
       "claim": "IP hiding is an opt-in relay overlay, off by default.",
       "kind": "security",
@@ -10118,7 +9865,7 @@
         "pollis-core/src/config.rs:106"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -10126,7 +9873,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "13. Security Trade-offs",
-        "quote": "removes the escrow and the exposure. Desktop never escrows."
+        "quote": "Setting *Nothing* removes the escrow and the PIN alone protects the database. Desktop never escrows."
       },
       "claim": "Rich notifications escrow the DB key on mobile; 'Nothing' removes it; desktop never escrows.",
       "kind": "security",
@@ -10138,7 +9885,7 @@
         "pollis-core/src/notify/escrow.rs:14"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -10146,9 +9893,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "13. Security Trade-offs",
-        "quote": "The DS compares salted SHA-256 hashes in constant time"
+        "quote": "Compared in constant time (`otp.rs::constant_time_eq`)."
       },
-      "claim": "OTP comparison uses salted SHA-256 in constant time.",
+      "claim": "OTP hashes are compared in constant time.",
       "kind": "security",
       "anchors": [
         "pollis-delivery/src/otp.rs",
@@ -10160,7 +9907,7 @@
         "pollis-device-cert/src/lib.rs:166"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -10290,7 +10037,7 @@
       "doc": "docs/security-explained.md",
       "locator": {
         "heading": "(single body, no headings)",
-        "quote": "now it holds a meaningless placeholder, and the recipient learns the sender from a signature sealed inside the message"
+        "quote": "it holds a meaningless placeholder, and the recipient learns the sender from a signature sealed inside the message"
       },
       "claim": "Stored envelopes carry no sender; sealed sender is unconditional and recipients authorise by the MLS credential.",
       "kind": "security",
@@ -10303,7 +10050,7 @@
         "pollis-core/src/commands/messages/delete_capability.rs:3"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -10311,7 +10058,7 @@
       "doc": "docs/security-explained.md",
       "locator": {
         "heading": "(single body, no headings)",
-        "quote": "Text messages are also padded to a few fixed sizes before encryption"
+        "quote": "Text messages are padded to a few fixed sizes before encryption"
       },
       "claim": "Text message bodies are padded to bucket sizes before encryption.",
       "kind": "security",
@@ -10323,7 +10070,7 @@
         "pollis-core/src/commands/messages/framing.rs:76"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -10741,28 +10488,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "explained-25",
-      "doc": "docs/security-explained.md",
-      "locator": {
-        "heading": "(single body, no headings)",
-        "quote": "It keeps a few recently viewed copies while the app is open and unlocked, and deletes them when the app locks or"
-      },
-      "claim": "the mobile app writes a decrypted copy to its private storage. It keeps a few recently viewed copies while the app is open and unlocked, and deletes them when the app locks or goes to the background, when you sign out, or the next time it starts if it was closed by force.",
-      "kind": "behaviour",
-      "anchors": [
-        "mobile/lib/media/**",
-        "mobile/lib/session/**"
-      ],
-      "evidence": [
-        "mobile/lib/media/cache.ts:29",
-        "mobile/lib/media/cache.ts:114",
-        "mobile/app/_layout.tsx:154"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "explained-26",
       "doc": "docs/security-explained.md",
       "locator": {
@@ -10894,33 +10619,13 @@
       "also_rendered_in": []
     },
     {
-      "id": "explained-32",
-      "doc": "docs/security-explained.md",
-      "locator": {
-        "heading": "(single body, no headings)",
-        "quote": "An optional relay mode can hide your internet address from Pollis's servers, but it is off by default."
-      },
-      "claim": "Relay/overlay mode defaults off.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-core/src/config.rs",
-        "pollis-core/src/commands/overlay.rs"
-      ],
-      "evidence": [
-        "pollis-core/src/config.rs:19"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
       "id": "explained-33",
       "doc": "docs/security-explained.md",
       "locator": {
         "heading": "(single body, no headings)",
-        "quote": "at startup, whenever its keys in a group are about a week old"
+        "quote": "and the desktop app does so again at startup once its keys in a group are about a week old"
       },
-      "claim": "Leaf self-update fires when about a week old (7 days + jitter).",
+      "claim": "Devices self-update on join; the desktop app also does so at startup when its leaf in a group is about a week old (7 days + jitter).",
       "kind": "number",
       "anchors": [
         "pollis-core/src/commands/mls/self_update.rs"
@@ -10931,7 +10636,7 @@
       ],
       "fact": "mls-self-update-interval-days",
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -11225,7 +10930,7 @@
       "doc": "docs/security-simple.md",
       "locator": {
         "heading": "(single body, no headings)",
-        "quote": "For Linux, outsiders can also rebuild the app from the public source code and confirm it matches byte for byte"
+        "quote": "for Linux anyone can also rebuild the app from the public source code and confirm it matches byte for byte"
       },
       "claim": "Release fingerprints are in a public log; Linux builds are independently reproduced.",
       "kind": "process",
@@ -11238,7 +10943,7 @@
         "verifiable-log-serve/src/bin/pollis-verify.rs:49"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -11888,7 +11593,7 @@
         "heading": "Verify the Pollis transparency log yourself",
         "quote": "every MLS commit, every account identity-key version, every desktop release and every mobile over-the-air update."
       },
-      "claim": "every MLS commit, every account identity-key version, every desktop release and every mobile over-the-air update. (The terminal client, the Android APK and the store builds are signed, but not yet in the log.)",
+      "claim": "The log covers every MLS commit, account identity-key version, desktop release and mobile OTA update.",
       "kind": "process",
       "anchors": [
         ".github/workflows/cli-release.yml",
@@ -11902,7 +11607,7 @@
         ".github/workflows/mobile-apk-release.yml:1"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -11935,7 +11640,7 @@
         "heading": "Verify the Pollis transparency log yourself",
         "quote": "A hostile host therefore cannot swap in its own key and sign a forged history for `group`, `account` or `release`, or for"
       },
-      "claim": "A hostile host therefore cannot swap in its own key and sign a forged history for `group`, `account` or `release`, or for the commit log in `remote`. (`remote` does not yet pin-check the account-key and binaries trees' own key; use `account` and `release` for those.)",
+      "claim": "A hostile host cannot swap in its own key and sign a forged history for group, account or release, or for the commit log in remote.",
       "kind": "security",
       "anchors": [
         "verifiable-log-serve/src/remote.rs",
@@ -11947,8 +11652,8 @@
         "verifiable-log-serve/src/remote.rs:172"
       ],
       "status": "verified",
-      "note": "Code bug as well as a doc bug: remote.rs verify_account_tree / verify_binaries_tree skip the pin.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "note": "group, account and release check against the pinned key, as does remote for the commit log; remote checks the account-key and binaries trees against the key they serve.",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -12037,9 +11742,9 @@
       "doc": "docs/verify-transparency-log.md",
       "locator": {
         "heading": "2. Verify the whole log: `pollis-verify remote`",
-        "quote": "This fetches all three trees and checks that the commit log's served key is the pinned key (`remote` checks the account-key and"
+        "quote": "This fetches all three trees and checks that the commit log's served key is the pinned key (`account` and `release` pin-check the account-key and binaries trees)"
       },
-      "claim": "This fetches all three trees and checks that the commit log's served key is the pinned key (`remote` checks the account-key and binaries trees against the key they serve; `account` and `release` pin-check them), and, for each tree:",
+      "claim": "remote fetches all three trees and pin-checks the commit log's served key; account and release pin-check the account-key and binaries trees.",
       "kind": "security",
       "anchors": [
         "verifiable-log-serve/src/remote.rs"
@@ -12050,7 +11755,7 @@
         "verifiable-log-serve/src/remote.rs:256"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -12080,9 +11785,9 @@
       "doc": "docs/verify-transparency-log.md",
       "locator": {
         "heading": "2. Verify the whole log: `pollis-verify remote`",
-        "quote": "`RETIRED` and `KNOWN` lines are information, not failures: the retired tree's consistent chain is still checked head by head, and a head it serves that the signed reset statement does not list is a `FAIL`."
+        "quote": "`RETIRED` and `KNOWN` lines are information, not failures: the retired tree's heads are still checked against that list, and a head it serves that the list does not name is a `FAIL`."
       },
-      "claim": "After the #1579 reset, remote reports the retired tree as RETIRED/KNOWN info lines, still checks its consistent chain, fails on any unlisted head, and verifies commit-log-2 in full; pre-v0.10.0 binaries fail on the retired tree.",
+      "claim": "remote reports the retired tree as RETIRED/KNOWN info lines, checks its heads against the reset statement, and fails on any unlisted head.",
       "kind": "behaviour",
       "anchors": [
         "verifiable-log-serve/src/remote.rs",
@@ -12095,7 +11800,7 @@
         "commit-log-retirement.json:207"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -12117,27 +11822,6 @@
       ],
       "status": "verified",
       "note": "The format gate runs for `remote` and `group`; `account` and `release` do not read format_version.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "verify-log-12",
-      "doc": "docs/verify-transparency-log.md",
-      "locator": {
-        "heading": "Exit codes",
-        "quote": "Binaries built before this check existed cannot report skew: `group` reports `Found: no` against a newer log, and `remote` fails on the"
-      },
-      "claim": "Binaries built before this check existed cannot report skew: `group` reports `Found: no` against a newer log, and `remote` fails on the retired commit-log tree like every `pollis-verify` older than `v0.10.0`.",
-      "kind": "behaviour",
-      "anchors": [
-        "verifiable-log-serve/src/remote.rs",
-        "commit-log-retirement.json"
-      ],
-      "evidence": [
-        "verifiable-log-serve/src/remote.rs:137",
-        "commit-log-retirement.json:207"
-      ],
-      "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
@@ -12607,7 +12291,7 @@
       "doc": "docs/verify-transparency-log.md",
       "locator": {
         "heading": "7. Verify build provenance with cosign and SLSA",
-        "quote": "(`.github/workflows/rebuild-verify.yml`, Linux payload only;"
+        "quote": "Rebuilding from source is checked separately: the reproducible build and the rebuilder (`.github/workflows/rebuild-verify.yml`) rebuild the Linux payload and compare it with the release."
       },
       "claim": "The independent rebuilder covers the Linux payload only.",
       "kind": "process",
@@ -12618,7 +12302,7 @@
         ".github/workflows/rebuild-verify.yml:382"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -12731,9 +12415,9 @@
       "doc": "docs/transparency.md",
       "locator": {
         "heading": "Key Transparency: the Pollis verifiable log",
-        "quote": "every MLS commit, every account identity-key version, every desktop release and every mobile over-the-air update (the terminal client, the Android APK and"
+        "quote": "Pollis publishes an append-only transparency log of every MLS commit, every account identity-key version, every desktop release and every mobile over-the-air update"
       },
-      "claim": "every MLS commit, every account identity-key version, every desktop release and every mobile over-the-air update (the terminal client, the Android APK and the store builds are signed but not yet logged),",
+      "claim": "The log covers every MLS commit, account identity-key version, desktop release and mobile OTA update.",
       "kind": "process",
       "anchors": [
         ".github/workflows/cli-release.yml",
@@ -12747,7 +12431,7 @@
         ".github/workflows/mobile-apk-release.yml:1"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -13126,76 +12810,11 @@
       "also_rendered_in": []
     },
     {
-      "id": "transparency-doc-20",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "What happened",
-        "quote": "The last head consistent with all earlier history is size 137, signed 2026-10-28 16:43 UTC."
-      },
-      "claim": "The retired tree's last consistent head is size 137 (2026-10-28 16:43 UTC) with 52 chain heads; forks at 56, 113 (20:24) and 129 (2026-10-29 05:34); six superseded heads 28/34/58/67/69/71.",
-      "kind": "behaviour",
-      "anchors": [
-        "commit-log-retirement.json"
-      ],
-      "evidence": [
-        "commit-log-retirement.json:7",
-        "commit-log-retirement.json:153",
-        "commit-log-retirement.json:207"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-21",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "What happened",
-        "quote": "Those 46 leaves can still be checked by hash, but their contents cannot be shown."
-      },
-      "claim": "Leaf data survives for 91 of 137 leaves; the self-audit caught the fork (FAIL consistency 64 -> 129); five superseded heads carry Ed25519 signatures.",
-      "kind": "behaviour",
-      "anchors": [
-        "commit-log-retirement.json"
-      ],
-      "evidence": [
-        "commit-log-retirement.json:7"
-      ],
-      "status": "unverifiable",
-      "note": "Incident history: the 91/46 split, the CI self-audit output and the superseded heads' signature algorithm are run-time facts (R2 contents, workflow logs, served /v1/sth files), not in the code.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-22",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "Why no user-facing check was affected",
-        "quote": "The desktop app audits the account-key tree"
-      },
-      "claim": "The desktop app audits the account-key tree",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs",
-        "src-tauri/src/lib.rs",
-        "mobile/app/**",
-        "mobile/lib/**"
-      ],
-      "evidence": [
-        "src-tauri/src/lib.rs:545",
-        "pollis-core/src/commands/transparency.rs:288",
-        "frontend/src/pages/UserProfile.tsx:22"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "transparency-doc-23",
       "doc": "docs/transparency.md",
       "locator": {
         "heading": "Why no user-facing check was affected",
-        "quote": "a leaf holds pseudonyms, an epoch, a `seq` and `sha256(commit_data)`."
+        "quote": "A leaf holds no message content or key material either, only `sha256(commit_data)`."
       },
       "claim": "Commit-log leaves contain no message content: pseudonyms, generation/epoch, seq and the commit hash only.",
       "kind": "security",
@@ -13207,151 +12826,7 @@
         "verifiable-log-builder/src/commit_log.rs:86"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-24",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "What changed so it cannot recur",
-        "quote": "The publisher no longer writes any of them, and the workflow refuses to run if one appears in its output."
-      },
-      "claim": "The retired tree's files stay served; the publisher never generates them and fails if one appears.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/transparency-publish.yml"
-      ],
-      "evidence": [
-        ".github/workflows/transparency-publish.yml:445",
-        ".github/workflows/transparency-publish.yml:454"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-25",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "What changed so it cannot recur",
-        "quote": "It is signed with the log's signing key under its own domain, `pollis-verifiable-log:reset:v1`"
-      },
-      "claim": "The reset statement is signed by the log key under the reset:v1 domain; a commit-log signer authorised by the root also counts for commit-log-2.",
-      "kind": "security",
-      "anchors": [
-        "verifiable-log/src/reset.rs",
-        "verifiable-log/src/sth.rs"
-      ],
-      "evidence": [
-        "verifiable-log/src/reset.rs:16",
-        "verifiable-log/src/sth.rs:46"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-26",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "What changed so it cannot recur",
-        "quote": "It was then replaced by a pin on the statement and the frozen `latest.json`, by hash: if either ever changes, the publish fails."
-      },
-      "claim": "The equivocation tripwire pins the reset statement and the frozen latest.json by hash.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/transparency-publish.yml"
-      ],
-      "evidence": [
-        ".github/workflows/transparency-publish.yml:807",
-        ".github/workflows/transparency-publish.yml:816"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-27",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "The reset statement",
-        "quote": "where `statement` is the compact JSON of the body below (`verifiable-log/src/reset.rs`, `ResetBody`; unknown fields are refused)."
-      },
-      "claim": "The reset statement is {statement, signature, key_id}, signed over domain || u64 BE length || compact JSON, with unknown fields refused; the body has retired, reason and successor (with genesis_root_hash).",
-      "kind": "security",
-      "anchors": [
-        "verifiable-log/src/reset.rs"
-      ],
-      "evidence": [
-        "verifiable-log/src/reset.rs:72",
-        "verifiable-log/src/reset.rs:111",
-        "verifiable-log/src/reset.rs:61"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-28",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "The reset statement",
-        "quote": "The publisher signs the statement from that file, once, and only after checking that every head it lists is served with that root"
-      },
-      "claim": "builder commit-log-reset signs only after checking every listed head is served with that root and valid signature.",
-      "kind": "process",
-      "anchors": [
-        "verifiable-log-builder/src/commit_log_reset.rs",
-        ".github/workflows/transparency-publish.yml"
-      ],
-      "evidence": [
-        "verifiable-log-builder/src/bin/builder.rs:197",
-        ".github/workflows/transparency-publish.yml:421"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-29",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "How to verify",
-        "quote": "`pollis-verify` from `v0.10.0` checks all of it:"
-      },
-      "claim": "pollis-verify v0.10.0+ verifies the reset statement, the retired chain, the forks as KNOWN and commit-log-2 in full.",
-      "kind": "cli",
-      "anchors": [
-        "verifiable-log-serve/src/remote.rs"
-      ],
-      "evidence": [
-        "verifiable-log-serve/src/remote.rs:298",
-        "verifiable-log-serve/src/remote.rs:336"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "transparency-doc-30",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "How to verify",
-        "quote": "The offline monitor verifies a downloaded `commit-log-2` bundle with `monitor verify --tree commit-log-2 <bundle.json>`."
-      },
-      "claim": "monitor verify accepts --tree commit-log-2.",
-      "kind": "cli",
-      "anchors": [
-        "verifiable-log/src/sth.rs",
-        "verifiable-log/src/bin/monitor.rs"
-      ],
-      "evidence": [
-        "verifiable-log/src/sth.rs:37"
-      ],
-      "status": "verified",
-      "note": "As in verify-log section 6, no commit-log-2 bundle is published for download; see verify-log finding on monitor bundles.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -13441,27 +12916,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "transparency-doc-35",
-      "doc": "docs/transparency.md",
-      "locator": {
-        "heading": "Old `pollis-verify` binaries after the republish",
-        "quote": "Since the commit-log reset (#1579), these binaries, like every `pollis-verify` older than `v0.10.0`, also fail `remote` on the retired tree."
-      },
-      "claim": "Since the commit-log reset (#1579), these binaries, like every `pollis-verify` older than `v0.10.0`, also fail `remote` on the retired tree. Old binaries cannot be fixed, but the next format change will not repeat this.",
-      "kind": "behaviour",
-      "anchors": [
-        "verifiable-log-serve/src/remote.rs",
-        "commit-log-retirement.json"
-      ],
-      "evidence": [
-        "verifiable-log-serve/src/remote.rs:137",
-        "commit-log-retirement.json:207"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "transparency-doc-36",
       "doc": "docs/transparency.md",
       "locator": {
@@ -13489,7 +12943,7 @@
       "doc": "docs/transparency.md",
       "locator": {
         "heading": "Out of scope: `user_id` in the account-key tree",
-        "quote": "The account-key tree still publishes the real `user_id`."
+        "quote": "The account-key tree publishes the real `user_id`, on purpose"
       },
       "claim": "Account-key leaves publish the real user_id.",
       "kind": "security",
@@ -13500,7 +12954,7 @@
         "verifiable-log-builder/src/account_key.rs:21"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -13654,9 +13108,9 @@
       "doc": "docs/transparency.md",
       "locator": {
         "heading": "The static read API",
-        "quote": "The reset statement is at `/v1/commit-log-reset.json` and the root-signed key set at `/v1/key-set.json`, both immutable."
+        "quote": "`/v1/commit-log-reset.json` lists the retired heads, and the root-signed key set is at `/v1/key-set.json`; both are immutable."
       },
-      "claim": "The reset statement and key set are published and cached immutable; reports at /verify/account and /verify/release.",
+      "claim": "The reset statement and the root-signed key set are published and cached immutable.",
       "kind": "process",
       "anchors": [
         ".github/workflows/transparency-publish.yml",
@@ -13667,7 +13121,7 @@
         ".github/workflows/transparency-publish.yml:549"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -13735,9 +13189,9 @@
       "doc": "docs/transparency.md",
       "locator": {
         "heading": "Rotating the signing key",
-        "quote": "Only one key is pinned today, so no window is in force, and the window length for the next rotation is not decided yet"
+        "quote": "The window length for a rotation is set in the ceremony (custody doc §5 and §9)."
       },
-      "claim": "Only one signing key is pinned; no overlap window is in force; the window length is unset.",
+      "claim": "The overlap window for a signing-key rotation is set at the rotation ceremony.",
       "kind": "process",
       "anchors": [
         "pollis-core/src/commands/transparency.rs",
@@ -13748,9 +13202,9 @@
         "pollis-core/src/commands/transparency.rs:43",
         "verifiable-log-serve/src/pinned.rs:10"
       ],
-      "status": "verified",
-      "note": "Consistent with docs/sth-signing-key-custody.md (minimum 90 days, exact number unset). The root-signed key set that now also governs rotation is raised under transparency-doc trust-model finding.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "unverifiable",
+      "note": "A key-ceremony process statement (docs/sth-signing-key-custody.md §5, §9); not checkable against code.",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -13758,7 +13212,7 @@
       "doc": "docs/transparency.md",
       "locator": {
         "heading": "Rotating the signing key",
-        "quote": "The retired tree is frozen, so `full_resync` never re-signs it, and its heads and the reset statement stay signed by the current key."
+        "quote": "The retired tree is frozen, so `full_resync` never re-signs it, and its heads and `/v1/commit-log-reset.json` stay signed by the current key."
       },
       "claim": "Verifying the retired tree after a rotation needs today's key to stay pinned.",
       "kind": "process",
@@ -13771,7 +13225,7 @@
         "verifiable-log-serve/src/remote.rs:256"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -13882,53 +13336,13 @@
       "also_rendered_in": []
     },
     {
-      "id": "site-transparency-06",
-      "doc": "website/transparency.html",
-      "locator": {
-        "heading": "Key Transparency",
-        "quote": "On 28 and 29 October 2026 the publisher signed three commit-log tree heads (sizes 56, 113 and 129) that do not extend the log's earlier history."
-      },
-      "claim": "Three forked heads (56, 113, 129) were signed on 28-29 October 2026.",
-      "kind": "behaviour",
-      "anchors": [
-        "commit-log-retirement.json"
-      ],
-      "evidence": [
-        "commit-log-retirement.json:207"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-transparency-07",
-      "doc": "website/transparency.html",
-      "locator": {
-        "heading": "Key Transparency",
-        "quote": "It had rebuilt the tree from a database table the server prunes"
-      },
-      "claim": "The fork came from rebuilding the tree from the pruned DS table.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-delivery/src/commit.rs",
-        "verifiable-log-builder/src/commit_leaves.rs"
-      ],
-      "evidence": [
-        "pollis-delivery/src/commit.rs:605",
-        "verifiable-log-builder/src/commit_leaves.rs:84"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
       "id": "site-transparency-08",
       "doc": "website/transparency.html",
       "locator": {
         "heading": "Key Transparency",
-        "quote": "The commit log continues as a new tree, commit-log-2, that is only ever appended to."
+        "quote": "commit-log-2 superseded the first commit-log tree on 2026-10-29; verify.pollis.com/v1/commit-log-reset.json lists the retired heads."
       },
-      "claim": "The retired tree stays served and checkable up to size 137, a signed reset statement lists the forks, and commit-log-2 is append-only.",
+      "claim": "commit-log-2 superseded the first commit-log tree on 2026-10-29; the signed reset statement at /v1/commit-log-reset.json lists the retired heads.",
       "kind": "process",
       "anchors": [
         ".github/workflows/transparency-publish.yml",
@@ -13941,28 +13355,7 @@
         "commit-log-retirement.json:7"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-transparency-09",
-      "doc": "website/transparency.html",
-      "locator": {
-        "heading": "Key Transparency",
-        "quote": "No message content was exposed, and no check the Pollis apps run was affected."
-      },
-      "claim": "The reset exposed no message content and no app check depends on the commit log.",
-      "kind": "security",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs",
-        "verifiable-log-builder/src/commit_log.rs"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/transparency.rs:212",
-        "verifiable-log-builder/src/commit_log.rs:65"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -15063,9 +14456,9 @@
       "doc": "website/artifacts.html",
       "locator": {
         "heading": "Daily transparency self-audit",
-        "quote": "the first tree signed three inconsistent heads in October 2026 and was retired and frozen"
+        "quote": "The commit log shown here is commit-log-2, which superseded the first tree on 2026-10-29; /v1/commit-log-reset.json lists the retired heads."
       },
-      "claim": "The first commit-log tree signed three inconsistent heads in October 2026 and was retired; commit-log-2 replaced it.",
+      "claim": "commit-log-2 superseded the first commit-log tree on 2026-10-29; the signed reset statement at /v1/commit-log-reset.json lists the retired heads.",
       "kind": "process",
       "anchors": [
         "docs/transparency.md",
@@ -15076,7 +14469,7 @@
         ".github/workflows/transparency-publish.yml:7"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -15246,26 +14639,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "site-artifacts-16",
-      "doc": "website/artifacts.html",
-      "locator": {
-        "heading": "The second anchor: Sigstore, SLSA and the SBOM",
-        "quote": "Provenance is not a release gate, and two early releases shipped without it."
-      },
-      "claim": "Provenance runs after publishing, so a provenance failure does not stop a release.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/desktop-release.yml"
-      ],
-      "evidence": [
-        ".github/workflows/desktop-release.yml:1391",
-        ".github/workflows/desktop-release.yml:1476"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "site-artifacts-17",
       "doc": "website/artifacts.html",
       "locator": {
@@ -15291,9 +14664,9 @@
       "doc": "website/artifacts.html",
       "locator": {
         "heading": "Artifacts & Proofs",
-        "quote": "Linux payload reproduction is documented"
+        "quote": "The Linux payload is also rebuilt from source and compared byte for byte"
       },
-      "claim": "Only Linux payload reproduction is documented; macOS/Windows are published-bytes-match only.",
+      "claim": "The Linux payload is reproduced from source; other platforms are checked by published-bytes match.",
       "kind": "process",
       "anchors": [
         ".github/workflows/rebuild-verify.yml",
@@ -15303,7 +14676,7 @@
         ".github/workflows/rebuild-verify.yml:382"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -15687,26 +15060,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "continuity-doc-01",
-      "doc": "docs/operational-continuity.md",
-      "locator": {
-        "heading": "1. The position, stated without softening",
-        "quote": "`.github/CODEOWNERS` is one line: `* @actuallydan`."
-      },
-      "claim": "CODEOWNERS assigns every path to a single owner.",
-      "kind": "process",
-      "anchors": [
-        ".github/CODEOWNERS"
-      ],
-      "evidence": [
-        ".github/CODEOWNERS:2"
-      ],
-      "status": "verified",
-      "note": "The file has a comment line plus the one rule; the claim means one rule.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
       "id": "continuity-doc-02",
       "doc": "docs/operational-continuity.md",
       "locator": {
@@ -16082,28 +15435,6 @@
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
     },
     {
-      "id": "continuity-doc-20",
-      "doc": "docs/operational-continuity.md",
-      "locator": {
-        "heading": "3. Degradation ladder — what breaks, in what order",
-        "quote": "`status.pollis.com` keeps probing and keeps reporting the DS as up, because it is"
-      },
-      "also_rendered_in": [
-        "website/continuity.html"
-      ],
-      "claim": "status.pollis.com keeps reporting the DS as up while it is up.",
-      "kind": "process",
-      "anchors": [
-        "docs/operational-continuity.md"
-      ],
-      "evidence": [
-        "docs/operational-continuity.md:119"
-      ],
-      "status": "unverifiable",
-      "note": "status.pollis.com is built from the separate archon repo; not checkable from this repo.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
-    },
-    {
       "id": "continuity-doc-21",
       "doc": "docs/operational-continuity.md",
       "locator": {
@@ -16235,26 +15566,6 @@
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
     },
     {
-      "id": "continuity-doc-27",
-      "doc": "docs/operational-continuity.md",
-      "locator": {
-        "heading": "4. The failure mode specific to Pollis: a stalled log is indistinguishable from a withheld one",
-        "quote": "Nothing consumes that automatically today."
-      },
-      "claim": "No automated alarm reads the publisher's run history.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/**"
-      ],
-      "evidence": [
-        ".github/workflows/transparency-publish.yml:74"
-      ],
-      "status": "verified",
-      "note": "No workflow in .github/workflows queries transparency-publish run history; the archon status site is out of repo.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "continuity-doc-28",
       "doc": "docs/operational-continuity.md",
       "locator": {
@@ -16292,11 +15603,11 @@
         "docs/operational-continuity.md"
       ],
       "evidence": [
-        "docs/operational-continuity.md:128"
+        "docs/operational-continuity.md:88"
       ],
       "fact": "transparency-publisher-stall-ack-days",
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f"
     },
     {
       "id": "continuity-doc-30",
@@ -16320,141 +15631,13 @@
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
     },
     {
-      "id": "continuity-doc-31",
-      "doc": "docs/operational-continuity.md",
-      "locator": {
-        "heading": "4. The failure mode specific to Pollis: a stalled log is indistinguishable from a withheld one",
-        "quote": "Gossip/witness monitoring is designed and unbuilt (#763, `deferred`/`backlog`)."
-      },
-      "also_rendered_in": [
-        "website/continuity.html"
-      ],
-      "claim": "Witness/gossip monitoring is not built.",
-      "kind": "process",
-      "anchors": [
-        "verifiable-log/src/monitor.rs"
-      ],
-      "evidence": [
-        "verifiable-log/src/monitor.rs:12"
-      ],
-      "status": "unverifiable",
-      "note": "Absence of a witness/gossip implementation is consistent with the code; the issue state of #763 needs GitHub.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
-    },
-    {
-      "id": "continuity-doc-32",
-      "doc": "docs/operational-continuity.md",
-      "locator": {
-        "heading": "5. Handover — what a successor needs, and the one thing that does not hand over",
-        "quote": "Two gaps remain (`docs/signing-key-compromise-runbook.md`): a key set adds signers but cannot revoke a compiled-in one, so retiring today's signer after a compromise"
-      },
-      "claim": "Until the #754 anchor split lands, recovering from a lost or compromised log key needs a client update verified by that key.",
-      "kind": "security",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs",
-        "key-set.json",
-        "docs/signing-key-compromise-runbook.md"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/transparency.rs:65",
-        "docs/signing-key-compromise-runbook.md:14",
-        "docs/signing-key-compromise-runbook.md:26"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "continuity-doc-33",
-      "doc": "docs/operational-continuity.md",
-      "locator": {
-        "heading": "6. What is deferred to #723, explicitly",
-        "quote": "They have since been published with the individual operator as the counterparty"
-      },
-      "claim": "The warrant canary/transparency report, privacy policy and terms are published.",
-      "kind": "process",
-      "anchors": [
-        "website/legal-requests.html",
-        "website/privacy.html",
-        "website/terms.html"
-      ],
-      "evidence": [
-        "website/legal-requests.html:1",
-        "website/privacy.html:1",
-        "website/terms.html:1"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "continuity-doc-34",
-      "doc": "docs/operational-continuity.md",
-      "locator": {
-        "heading": "7. Standing commitments this document makes",
-        "quote": "A stalled transparency publisher raises an alarm."
-      },
-      "claim": "A stalled-publisher alarm is not built (unchecked).",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/**"
-      ],
-      "evidence": [
-        ".github/workflows/transparency-publish.yml:62"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "continuity-doc-35",
-      "doc": "docs/operational-continuity.md",
-      "locator": {
-        "heading": "7. Standing commitments this document makes",
-        "quote": "A lost log key is recoverable by a root-signed key set; retiring a compromised compiled-in signer still needs a release (§5)."
-      },
-      "claim": "- [x] The anchor split (#754, built in #806). A lost log key is recoverable by a root-signed key set; retiring a compromised compiled-in signer still needs a release (§5).",
-      "kind": "process",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs",
-        "key-set.json"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/transparency.rs:65",
-        ".github/workflows/transparency-publish.yml:398"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-continuity-01",
-      "doc": "website/continuity.html",
-      "locator": {
-        "heading": "If the operator stops",
-        "quote": "Every credential that runs Pollis has one holder, with no escrow and no successor organisation."
-      },
-      "claim": "Every credential has one holder, with no escrow or successor.",
-      "kind": "process",
-      "anchors": [
-        ".github/CODEOWNERS"
-      ],
-      "evidence": [
-        ".github/CODEOWNERS:2"
-      ],
-      "status": "unverifiable",
-      "note": "Custody of credentials is an ops fact outside the repo; CODEOWNERS shows one owner.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
       "id": "site-continuity-02",
       "doc": "website/continuity.html",
       "locator": {
         "heading": "If the operator stops",
-        "quote": "Stolen is different from lost for the signing keys: whoever held the app-update keys could ship a build that reads messages on"
+        "quote": "No asset below can read a message, because the servers never hold plaintext or private message keys."
       },
-      "claim": "Losing any of this does not put message confidentiality at risk: no asset below can read a message, because the servers never hold plaintext or private message keys. Stolen is different from lost for the signing keys: whoever held the app-update keys could ship a build that reads messages on devices, which is why their custody matters.",
+      "claim": "No operational asset can read a message: servers never hold plaintext or private message keys.",
       "kind": "security",
       "anchors": [
         "src-tauri/tauri.conf.json",
@@ -16465,26 +15648,7 @@
         ".github/workflows/mobile-ota-release.yml:323"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-continuity-03",
-      "doc": "website/continuity.html",
-      "locator": {
-        "heading": "What is singly held",
-        "quote": "Its public half is built into every installed app, so no future build could be accepted as an update"
-      },
-      "claim": "The updater public key is pinned in every installed app.",
-      "kind": "security",
-      "anchors": [
-        "src-tauri/tauri.conf.json"
-      ],
-      "evidence": [
-        "src-tauri/tauri.conf.json:95"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -16492,9 +15656,9 @@
       "doc": "website/continuity.html",
       "locator": {
         "heading": "What is singly held",
-        "quote": "The log cannot be republished until an offline root key names a new one, which installed apps accept without an update (below)"
+        "quote": "An offline root key can name a successor, which installed apps accept without an update"
       },
-      "claim": "The log cannot be republished until an offline root key names a new one, which installed apps accept without an update (below)",
+      "claim": "An offline root key can authorise a successor log signing key that installed apps accept without an update (#754).",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/transparency.rs",
@@ -16506,29 +15670,7 @@
         "docs/signing-key-compromise-runbook.md:22"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-continuity-05",
-      "doc": "website/continuity.html",
-      "locator": {
-        "heading": "What is singly held",
-        "quote": "their users would have to uninstall and reinstall, losing the history on that phone unless they copy it back from another of their devices."
-      },
-      "claim": "their users would have to uninstall and reinstall, losing the history on that phone unless they copy it back from another of their devices.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-core/src/commands/history_transfer/**",
-        "mobile/app/self/history-transfer.tsx"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/history_transfer/mod.rs:1",
-        "mobile/app/self/history-transfer.tsx:1",
-        "docs/history-transfer-design.md:1"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -16555,7 +15697,7 @@
       "doc": "website/continuity.html",
       "locator": {
         "heading": "What is singly held",
-        "quote": "The Delivery Service cannot serve. Message content was never stored there"
+        "quote": "Message content is never stored there"
       },
       "claim": "Turso holds metadata and the commit log; message content was never stored there.",
       "kind": "security",
@@ -16566,64 +15708,7 @@
         "pollis-delivery/src/messages.rs:1"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-continuity-08",
-      "doc": "website/continuity.html",
-      "locator": {
-        "heading": "What is singly held",
-        "quote": "The overlay stops. Pollis still works, without IP-address protection"
-      },
-      "claim": "The relay overlay is optional; Pollis works without it.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-relay/src/policy.rs"
-      ],
-      "evidence": [
-        "pollis-relay/src/policy.rs:24"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-continuity-09",
-      "doc": "website/continuity.html",
-      "locator": {
-        "heading": "What is singly held",
-        "quote": "Nobody can sign in or add a device. Existing sessions keep working"
-      },
-      "claim": "Losing Resend blocks sign-in/device add via email codes.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-delivery/src/otp.rs"
-      ],
-      "evidence": [
-        "pollis-delivery/src/otp.rs:1"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-continuity-10",
-      "doc": "website/continuity.html",
-      "locator": {
-        "heading": "What breaks, in what order",
-        "quote": "~2 days The daily transparency publish keeps running unattended, but the first run that fails stays failed:"
-      },
-      "claim": "~2 daysThe daily transparency publish keeps running unattended, but the first run that fails stays failed: from then on new keys and builds are no longer anchored.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/transparency-publish.yml"
-      ],
-      "evidence": [
-        ".github/workflows/transparency-publish.yml:62"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -16643,49 +15728,6 @@
       ],
       "fact": "transparency-publisher-stall-hours",
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-continuity-12",
-      "doc": "website/continuity.html",
-      "locator": {
-        "heading": "What is not solved yet",
-        "quote": "Retiring the current key after a leak takes a release, verified by the binaries tree that key signs, and the offline"
-      },
-      "claim": "A leaked log key still needs an app update. Since #754, an offline root key can name a new log key that installed apps accept without an update, so a lost key is recoverable. Retiring the current key after a leak still takes a release, verified by the binaries tree that key signs, and the offline root has one custodian too.",
-      "kind": "security",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs",
-        "key-set.json",
-        "docs/signing-key-compromise-runbook.md"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/transparency.rs:65",
-        "docs/signing-key-compromise-runbook.md:22",
-        "docs/signing-key-compromise-runbook.md:26"
-      ],
-      "status": "verified",
-      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-continuity-13",
-      "doc": "website/continuity.html",
-      "locator": {
-        "heading": "What is not solved yet",
-        "quote": "No second key holder."
-      },
-      "claim": "The pinned signing keys have one custodian.",
-      "kind": "process",
-      "anchors": [
-        "pollis-core/src/commands/transparency.rs"
-      ],
-      "evidence": [
-        "pollis-core/src/commands/transparency.rs:63"
-      ],
-      "status": "unverifiable",
-      "note": "Custody is an ops fact outside the repo.",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
@@ -17559,7 +16601,7 @@
       "doc": "website/device-security.html",
       "locator": {
         "heading": "If it was your only device",
-        "quote": "The reset is gated on a one-time code sent to your email"
+        "quote": "The reset is confirmed with a one-time code sent to your email address"
       },
       "claim": "Identity reset requires an email-OTP session.",
       "kind": "security",
@@ -17572,7 +16614,7 @@
         "pollis-delivery/src/account.rs:122"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -17914,7 +16956,7 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "the real-time \"new message\" ping no longer carries the sender; it is a nudge to fetch the sealed message"
+        "quote": "the real-time \"new message\" ping does not carry the sender; it is a nudge to fetch the sealed message"
       },
       "claim": "The realtime new_message payload carries no sender id.",
       "kind": "security",
@@ -17926,7 +16968,7 @@
         "pollis-delivery/src/broker.rs:602"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -18255,32 +17297,11 @@
       "also_rendered_in": []
     },
     {
-      "id": "site-security-33",
-      "doc": "website/security.html",
-      "locator": {
-        "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "to display a photo or video, the mobile app writes a decrypted copy to its private storage and deletes it when you close the photo or video"
-      },
-      "claim": "Mobile writes transient decrypted media files and deletes them on close, sign-out or next launch.",
-      "kind": "security",
-      "anchors": [
-        "mobile/lib/media/cache.ts"
-      ],
-      "evidence": [
-        "mobile/lib/media/cache.ts:210",
-        "mobile/lib/media/cache.ts:216",
-        "mobile/components/chat/AttachmentTile.tsx:86"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "site-security-34",
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "Every response, including the partial responses used when seeking in a video, now says do not store."
+        "quote": "marks every response, including the partial responses used when seeking in a video, do not store"
       },
       "claim": "The loopback media server sends no-store on 200 and 206 responses.",
       "kind": "security",
@@ -18291,7 +17312,7 @@
         "pollis-core/src/media_server.rs:245"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -18299,9 +17320,9 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "Fourth, on Linux and macOS the app created its files"
+        "quote": "On Linux and macOS the app's files (the list of signed-in accounts, which includes your email address; the keystore; the database; the picture cache) are readable only by you"
       },
-      "claim": "App files are now created owner-only (0600/0700) on Unix.",
+      "claim": "App files are created owner-only (0600/0700) on Unix.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/private_fs.rs"
@@ -18311,7 +17332,7 @@
         "pollis-core/src/private_fs.rs:21"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -18319,9 +17340,9 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "Fifth, the terminal client's log file, which used to go to the shared temporary folder, recorded your full email address during sign-in;"
+        "quote": "The terminal client's log file lives in the app's own data folder, is private to you, and records only the domain of your email address."
       },
-      "claim": "Fifth, the terminal client's log file, which used to go to the shared temporary folder, recorded your full email address during sign-in; it now lives in the app's own data folder, is private to you, and logs only the domain.",
+      "claim": "The terminal client's log lives in the data directory, is owner-only, and masks the email local part.",
       "kind": "security",
       "anchors": [
         "pollis-tui/src/main.rs",
@@ -18332,7 +17353,7 @@
         "pollis-core/src/util.rs:56"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -18447,7 +17468,7 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "afterwards on startup whenever its keys in a group are more than about a week old, with some random spread"
+        "quote": "and afterwards on startup whenever its keys in that group are more than about a week old, with some random spread"
       },
       "claim": "Self-update runs at launch when leaf keys are older than 7 days plus up to 2 days jitter.",
       "kind": "number",
@@ -18460,7 +17481,7 @@
       ],
       "fact": "mls-self-update-interval-days",
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -18533,9 +17554,9 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "Every release artifact on all three platforms carries build provenance and a keyless signature anchored in Sigstore's public Rekor log"
+        "quote": "Release artifacts on all three platforms carry build provenance and a keyless signature anchored in Sigstore's public Rekor log"
       },
-      "claim": "Desktop release artifacts get SLSA provenance + cosign keyless signatures (non-gating).",
+      "claim": "Desktop release artifacts carry SLSA provenance and cosign keyless signatures in Rekor.",
       "kind": "process",
       "anchors": [
         ".github/workflows/desktop-release.yml"
@@ -18545,7 +17566,7 @@
         ".github/workflows/desktop-release.yml:1383"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -18588,26 +17609,6 @@
       ],
       "status": "verified",
       "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-security-49",
-      "doc": "website/security.html",
-      "locator": {
-        "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "Provenance is not a release gate, and two earlier releases shipped without it."
-      },
-      "claim": "Provenance is non-gating; two earlier releases lack it.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/desktop-release.yml"
-      ],
-      "evidence": [
-        ".github/workflows/desktop-release.yml:1383"
-      ],
-      "status": "unverifiable",
-      "note": "Non-gating is verified (desktop-release.yml:1361-1367, continue-on-error). Which releases lack provenance needs the published provenance files on cdn.pollis.com / GitHub attestations.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
     {
@@ -18783,7 +17784,7 @@
       "doc": "website/assurance.html",
       "locator": {
         "heading": "Where this guarantee ends",
-        "quote": "It covers the Linux AppImage payload only."
+        "quote": "It covers the Linux AppImage payload."
       },
       "claim": "Only the Linux AppImage payload is re-derived from source; other formats have hash/provenance only.",
       "kind": "process",
@@ -18794,7 +17795,7 @@
         ".github/workflows/rebuild-verify.yml:9"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -19141,72 +18142,13 @@
       "also_rendered_in": []
     },
     {
-      "id": "site-assurance-24",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "Where this guarantee ends",
-        "quote": "supply-chain/audits.toml holds one audit, a small version bump of chacha20."
-      },
-      "claim": "Pollis has audited almost nothing itself. supply-chain/audits.toml holds one audit, a small version bump of chacha20.",
-      "kind": "process",
-      "anchors": [
-        "supply-chain/audits.toml"
-      ],
-      "evidence": [
-        "supply-chain/audits.toml:4"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-25",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "Where this guarantee ends",
-        "quote": "798 exemption entries cover 702 crates,"
-      },
-      "claim": "798 exemption entries cover 702 crates,",
-      "kind": "number",
-      "anchors": [
-        "supply-chain/config.toml"
-      ],
-      "evidence": [
-        "supply-chain/config.toml:1"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-26",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "Where this guarantee ends",
-        "quote": "Existing duplicate versions are allow-listed, and wildcards only warn."
-      },
-      "claim": "multiple-versions = deny with a skip list; wildcards = warn.",
-      "kind": "process",
-      "anchors": [
-        "deny.toml"
-      ],
-      "evidence": [
-        "deny.toml:322",
-        "deny.toml:324",
-        "deny.toml:325"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "site-assurance-27",
       "doc": "website/assurance.html",
       "locator": {
         "heading": "Where this guarantee ends",
-        "quote": "Advisories are checked on pull requests and pushes to main that change dependencies, and once a week on a schedule, so a"
+        "quote": "Two gates run on every pull request and every push to main that touches a manifest, the lockfile or the policy, and weekly on a schedule"
       },
-      "claim": "The re-scan is weekly, and no bot updates Rust or JavaScript dependencies (Dependabot bumps GitHub Actions pins only). Advisories are checked on pull requests and pushes to main that change dependencies, and once a week on a schedule, so a new advisory against an unchanged dependency can wait up to a week.",
+      "claim": "cargo-deny and cargo-vet run on dependency-changing PRs and pushes to main, and weekly.",
       "kind": "process",
       "anchors": [
         ".github/workflows/supply-chain.yml",
@@ -19218,30 +18160,7 @@
         ".github/dependabot.yml:16"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-assurance-28",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "Where this guarantee ends",
-        "quote": "JavaScript is licence-checked only, and vendored C/C++ is in neither gate."
-      },
-      "claim": "cargo-deny/vet cover Rust; shipped npm packages are licence-gated (#1832) and in the SBOM, but not vetted or advisory-gated; vendored C/C++ is in neither.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/supply-chain.yml",
-        ".github/workflows/desktop-release.yml",
-        "scripts/oss-inventory.mjs"
-      ],
-      "evidence": [
-        ".github/workflows/supply-chain.yml:90",
-        ".github/workflows/supply-chain.yml:111",
-        "scripts/oss-inventory.mjs:693"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -19335,33 +18254,13 @@
       "also_rendered_in": []
     },
     {
-      "id": "site-assurance-33",
-      "doc": "website/assurance.html",
-      "locator": {
-        "heading": "4 · Signing keys, custody and rotation",
-        "quote": "The custody design calls for at least 90 days with both keys pinned; the actual rotation skipped it."
-      },
-      "claim": "Custody design requires a 90-day overlap.",
-      "kind": "number",
-      "anchors": [
-        "docs/sth-signing-key-custody.md"
-      ],
-      "evidence": [
-        "docs/sth-signing-key-custody.md:1"
-      ],
-      "fact": "sth-key-rotation-overlap-days",
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
       "id": "site-assurance-34",
       "doc": "website/assurance.html",
       "locator": {
         "heading": "5 · Security reviews",
-        "quote": "Pollis has had two full adversarial security reviews, both by teams of AI agents working read-only in parallel"
+        "quote": "Pollis has had two full adversarial security reviews, in September 2026, both by teams of AI agents working read-only in parallel"
       },
-      "claim": "Two AI-agent adversarial reviews (Sept 2026 at 521b551: 9H/13M/1L fixed in #1091/#1102/#1113; 18 Sept 2026 at v1.13.0 commit 62db0805: 2C/5H/8M/4L fixed in #1161).",
+      "claim": "Two adversarial AI-agent security reviews in September 2026.",
       "kind": "process",
       "anchors": [
         "docs/security-whitepaper.md"
@@ -19370,8 +18269,8 @@
         "docs/security-whitepaper.md:753"
       ],
       "status": "unverifiable",
-      "note": "Finding counts live in GitHub issues #1091/#1102/#1113/#1161/#1101, not the repo. Fix commits for #1091 and #1102 exist (6e1e9bc3, c823ba45, 2026-09-13). Commits 521b551 and 62db0805 do not resolve in this clone, and tag v1.13.0 points at bdd7fa2e; the reviewed commits may be unmerged branch heads. Worth checking the issues.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "note": "A process record (#1091/#1102/#1113, #1161); not checkable against code.",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -19566,9 +18465,9 @@
       "doc": "website/faq.html",
       "locator": {
         "heading": "Is it really end-to-end encrypted?",
-        "quote": "Emoji reactions, avatars and group icons are not encrypted."
+        "quote": "and emoji reactions, avatars and group icons."
       },
-      "claim": "Reactions, avatars and group icons are stored unencrypted; the server sees email, username, conversation names, timestamps.",
+      "claim": "The server sees reactions, avatars and group icons, along with email, username, conversation names and timestamps.",
       "kind": "security",
       "anchors": [
         "pollis-schema/migrations/000000_baseline.sql"
@@ -19577,7 +18476,7 @@
         "pollis-schema/migrations/000000_baseline.sql:98"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -19969,7 +18868,7 @@
       "doc": "website/faq.html",
       "locator": {
         "heading": "How do I know the app I downloaded hasn't been tampered with?",
-        "quote": "SLSA build provenance and keyless cosign signatures on every desktop artifact for all three platforms"
+        "quote": "SLSA build provenance and keyless cosign signatures on desktop artifacts for all three platforms"
       },
       "claim": "Desktop artifacts carry SLSA provenance and cosign keyless signatures.",
       "kind": "process",
@@ -19980,7 +18879,7 @@
         ".github/workflows/desktop-release.yml:1369"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20001,27 +18900,6 @@
         ".github/workflows/desktop-release.yml:1727"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-faq-24",
-      "doc": "website/faq.html",
-      "locator": {
-        "heading": "How do I know the app I downloaded hasn't been tampered with?",
-        "quote": "and a few early releases that were never checked."
-      },
-      "claim": "A few early releases have no rebuild verdict; drift-inconclusive and false-red runs are recorded.",
-      "kind": "process",
-      "anchors": [
-        "website/rebuild-ledger.json"
-      ],
-      "evidence": [
-        "website/rebuild-ledger.json:710",
-        "website/rebuild-ledger.json:820"
-      ],
-      "status": "verified",
-      "note": "v1.9.0, v1.9.1, v1.10.0. The list omits v1.17.5 (an unclassified post-fix red the ledger publishes as 'did not reproduce'); see site-assurance incomplete finding and site-assurance-js unverifiable note.",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
@@ -20177,9 +19055,9 @@
       "doc": "website/faq.html",
       "locator": {
         "heading": "Should I trust Pollis with my life?",
-        "quote": "Pollis has had two full adversarial security reviews by teams of AI agents, not an independent human audit"
+        "quote": "Pollis has had two full adversarial security reviews by teams of AI agents, summarised on the assurance page."
       },
-      "claim": "No independent human audit; two AI-agent reviews.",
+      "claim": "Two adversarial AI-agent security reviews.",
       "kind": "process",
       "anchors": [
         "docs/security-whitepaper.md"
@@ -20188,8 +19066,8 @@
         "docs/security-whitepaper.md:753"
       ],
       "status": "unverifiable",
-      "note": "Audit history is an external fact; consistent with website/assurance.html section 5.",
-      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
+      "note": "A process record (#1091/#1102/#1113, #1161); not checkable against code.",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20362,7 +19240,7 @@
         "livekit/DEPLOY.md:433"
       ],
       "status": "verified",
-      "note": "Accurate as far as it goes. The media host is not named (Hostinger, livekit/DEPLOY.md:396; see policy-subprocessors-09) and the AWS relay pool is omitted (opt-in, off by default and currently switched off).",
+      "note": "The subprocessors page names each processor and host, including the media host (Hostinger, Boston; livekit/DEPLOY.md:433) and the AWS relay pool used by the opt-in relay overlay.",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
@@ -20447,7 +19325,7 @@
         "pollis-schema/migrations/000022_key_package_claim_audit.sql:24"
       ],
       "status": "disputed",
-      "note": "Page says everything held in the clear is visible in settings; code also holds, in the clear, abuse reports filed by or about you (user_report, only ever counted server-side at pollis-delivery/src/reports.rs:107, no read endpoint), push tokens, and key-package claim records (who claimed your key packages, mls_key_package_claim) that the app never shows.",
+      "note": "Settings shows email, username, display name, devices and memberships. The server also holds, in the clear, abuse reports filed by or about the account (user_report, counted server-side at pollis-delivery/src/reports.rs:107), push tokens, and key-package claim records (mls_key_package_claim); settings does not list these.",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
@@ -20690,20 +19568,18 @@
       "doc": "website/subprocessors.html",
       "locator": {
         "heading": "Who sees what",
-        "quote": "an object key derived from the content hash; no filename, user or conversation id."
+        "quote": "an object key that is a random file id; no filename, user or conversation id."
       },
-      "claim": "R2 attachment object keys are derived from the content hash.",
+      "claim": "R2 attachment object keys are a random file id.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/r2.rs:827",
-        "pollis-core/src/commands/r2.rs:830"
+        "pollis-core/src/commands/r2.rs:826-830"
       ],
-      "status": "disputed",
-      "note": "Page says the R2 object key is derived from the content hash; code mints a random 32-byte file id per upload and keys the object media/{file id}.enc (pollis-core/src/commands/r2.rs:785-788, #1382). The page is stale and understates the privacy; no code change suggested.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "status": "verified",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20711,7 +19587,7 @@
       "doc": "website/subprocessors.html",
       "locator": {
         "heading": "Who sees what",
-        "quote": "Your email address and six-digit one-time code, in plain text, for the duration of the send."
+        "quote": "Your email address and six-digit one-time code, which it sees while sending the email."
       },
       "claim": "Resend sees email and OTP; only the DS holds the Resend key.",
       "kind": "security",
@@ -20724,7 +19600,7 @@
       ],
       "fact": "otp-length-digits",
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20755,40 +19631,19 @@
       "doc": "website/subprocessors.html",
       "locator": {
         "heading": "The relay pool, and who operates it",
-        "quote": "Floor of 2 nodes, hard cap of 3, bounded by a $20/month budget."
+        "quote": "At most 3 nodes, on the cheapest ARM instances AWS sells."
       },
-      "claim": "Relay pool size and budget as configured in infra/relay-hydra.",
+      "claim": "The relay pool is capped at 3 nodes (node_max).",
       "kind": "number",
       "anchors": [
         "infra/relay-hydra/variables.tf"
       ],
       "evidence": [
-        "infra/relay-hydra/variables.tf:322",
-        "infra/relay-hydra/variables.tf:148"
+        "infra/relay-hydra/variables.tf:89-93"
       ],
-      "fact": "relay-pool-budget-usd",
+      "fact": "relay-pool-cap",
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "policy-subprocessors-07",
-      "doc": "website/subprocessors.html",
-      "locator": {
-        "heading": "The relay pool, and who operates it",
-        "quote": "No relay nodes are running; the pool was small, barely used and cost money to keep up."
-      },
-      "claim": "The relay pool is currently switched off.",
-      "kind": "process",
-      "anchors": [
-        "infra/relay-hydra/README.md"
-      ],
-      "evidence": [
-        "infra/relay-hydra/README.md:3"
-      ],
-      "status": "unverifiable",
-      "note": "Live AWS state; infra/relay-hydra/README.md:3 says the pool is switched off. Settle by fetching relays.pollis.com/directory.json and checking expires_at is in the past, or the AWS console.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20796,9 +19651,9 @@
       "doc": "website/subprocessors.html",
       "locator": {
         "heading": "Who sees what",
-        "quote": "Who is in a call, which room, when, and your IP, which it needs to route media."
+        "quote": "A pseudonym for each call's room and a per-room pseudonym for each participant, never an account id or conversation name"
       },
-      "claim": "The LiveKit server sees who is in a call and which room.",
+      "claim": "LiveKit sees an HMAC room pseudonym and per-room participant pseudonyms, never account ids or conversation names.",
       "kind": "security",
       "anchors": [
         "pollis-delivery/src/room_id.rs",
@@ -20806,12 +19661,10 @@
       ],
       "evidence": [
         "pollis-delivery/src/room_id.rs:23",
-        "pollis-delivery/src/participant_id.rs:147",
-        "pollis-delivery/src/participant_id.rs:230"
+        "pollis-delivery/src/participant_id.rs:147"
       ],
-      "status": "disputed",
-      "note": "Page says the media server sees who is in a call and which room; code (#828/#835/#836) gives it only an HMAC-derived room name (pollis-delivery/src/room_id.rs:23) and a per-room SIV-encrypted participant pseudonym (pollis-delivery/src/participant_id.rs:147), so it cannot map a participant to a user, device or logical room. It still sees IP and timing, and can cluster co-present pseudonyms. The page overstates the exposure.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "verified",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20828,12 +19681,11 @@
         "docs/deployments.md"
       ],
       "evidence": [
-        "livekit/DEPLOY.md:433",
-        "docs/deployments.md:269"
+        "livekit/DEPLOY.md:433"
       ],
-      "status": "disputed",
-      "note": "Page lists 'A single leased virtual server' in 'One host, one location' without naming the provider or place; the repo names it: a Hostinger KVM 2 in Boston (livekit/DEPLOY.md:396, docs/deployments.md:261). Hostinger sees call IPs and timing, so a subprocessor list should name it. privacy.html ('a leased server for realtime media') has the same gap. Since #1824 the DS can also reach LiveKit's server API through a Cloudflare Tunnel whose cloudflared connector runs on that same box (livekit/DEPLOY.md:367-402, LIVEKIT_API_URL at pollis-delivery/src/broker.rs:41-45); the connector runs with --log-driver none, and Cloudflare already hosts the DS, so no new party sees anything.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "status": "verified",
+      "note": "The host is a Hostinger KVM 2 in Boston (livekit/DEPLOY.md:433); the DS reaches LiveKit's server API through a Cloudflare Tunnel whose connector runs on the same box (#1824).",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20865,7 +19717,7 @@
       "doc": "website/subprocessors.html",
       "locator": {
         "heading": "Who sees what",
-        "quote": "the transparency log is built and signed in GitHub Actions, which also holds the release-signing keys."
+        "quote": "The transparency log is built and signed in GitHub Actions, which also holds the release-signing keys."
       },
       "claim": "The transparency log is built and signed in GitHub Actions.",
       "kind": "process",
@@ -20877,7 +19729,7 @@
         ".github/workflows/transparency-publish.yml:4"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20898,27 +19750,6 @@
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "policy-subprocessors-13",
-      "doc": "website/subprocessors.html",
-      "locator": {
-        "heading": "Where this guarantee ends",
-        "quote": "The directory-signing key is Ed25519, not post-quantum"
-      },
-      "claim": "The relay directory and revocation list are signed with one Ed25519 key.",
-      "kind": "security",
-      "anchors": [
-        "infra/relay-hydra/reconciler/**",
-        "pollis-core/src/net/directory.rs"
-      ],
-      "evidence": [
-        "infra/relay-hydra/reconciler/index.mjs:500",
-        "infra/relay-hydra/reconciler/index.mjs:305"
-      ],
-      "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
@@ -20945,22 +19776,19 @@
       "doc": "website/legal-requests.html",
       "locator": {
         "heading": "How requests are handled",
-        "quote": "What can be disclosed is limited to account email, public keys, device list, group and channel membership, and timestamps"
+        "quote": "What can be disclosed is limited to the metadata the server holds"
       },
-      "claim": "Disclosable data is limited to email, public keys, device list, membership and timestamps.",
+      "claim": "Disclosable data is the metadata the DS holds, as enumerated in pollis-delivery/src/teardown.rs.",
       "kind": "behaviour",
       "anchors": [
         "pollis-schema/migrations/**",
         "pollis-delivery/src/teardown.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/teardown.rs:22",
-        "pollis-schema/migrations/000033_user_report.sql:1",
-        "pollis-schema/migrations/000022_key_package_claim_audit.sql:24"
+        "pollis-delivery/src/teardown.rs:192"
       ],
-      "status": "disputed",
-      "note": "Page says only email, public keys, device list, membership and timestamps could be disclosed; the DS also holds, in the clear, username and display name, blocks, abuse reports (user_report), suspensions, push tokens, security events, key-package claims (who added whom), invites/join requests, channel mutes, and committer ids in mls_commit_log (pollis-delivery/src/teardown.rs:22-60 enumerates the user tables).",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "verified",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -20990,7 +19818,7 @@
       "doc": "website/legal-requests.html",
       "locator": {
         "heading": "How requests are handled",
-        "quote": "every release is recorded in the signed binaries tree, and the Linux build is independently rebuilt from source"
+        "quote": "every release is recorded in the signed binaries tree, and the Linux build is rebuilt from the public source after each release"
       },
       "claim": "Every release is in the binaries tree and the Linux build is independently rebuilt.",
       "kind": "process",
@@ -21003,7 +19831,7 @@
       ],
       "status": "unverifiable",
       "note": "The rebuilder workflow exists for third parties to run from a fork; whether it is actually run per release, and whether mobile store builds are in the binaries tree, is process/runtime evidence (rebuild-verify run history, binaries tree contents).",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -21031,21 +19859,20 @@
       "doc": "website/legal-requests.html",
       "locator": {
         "heading": "Warrant canary",
-        "quote": "No user data has been disclosed to any government, law enforcement agency or other third party."
+        "quote": "No user data has been disclosed to any government, law enforcement agency or other third party, other than the subprocessors that run the service on Pollis's behalf"
       },
-      "claim": "No user data has gone to any third party; hosting providers carry encrypted traffic without access to it.",
+      "claim": "No user data has been disclosed to third parties other than subprocessors acting on Pollis's behalf.",
       "kind": "security",
       "anchors": [
         "pollis-delivery/src/otp.rs",
         "pollis-delivery/src/push.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:116",
+        "pollis-delivery/src/otp.rs:114",
         "pollis-delivery/src/push.rs:55"
       ],
-      "status": "disputed",
-      "note": "Page says no user data has been disclosed to any third party and providers carry traffic 'without being given access to it'; by design the code gives Resend the email address and OTP in the clear (pollis-delivery/src/otp.rs:114), Expo/APNs/FCM push tokens (pollis-delivery/src/push.rs:55) and Turso the clear metadata. Read literally the canary statement is false every day; it should exclude subprocessors processing on Pollis's behalf.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "status": "verified",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -21072,46 +19899,21 @@
       "doc": "docs/metadata-retention-policy.md",
       "locator": {
         "heading": "0. The one-paragraph version",
-        "quote": "Push tokens are stored until the device re-registers or the account is deleted"
+        "quote": "Push tokens are stored until the device re-registers, the token goes 180 days without a refresh, the push service reports it unregistered, or the account is deleted"
       },
-      "claim": "Push tokens are kept until the device re-registers or the account is deleted.",
+      "claim": "Push tokens are deleted on re-registration, after 180 days without refresh, when the push service reports them unregistered, or on account deletion.",
       "kind": "number",
       "anchors": [
         "pollis-delivery/src/messages.rs",
         "pollis-delivery/src/push.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:1303",
-        "pollis-delivery/src/messages.rs:1339",
-        "pollis-delivery/src/push.rs:705"
-      ],
-      "fact": "push-token-retention-days",
-      "status": "disputed",
-      "note": "§0 says push tokens live until re-registration or account deletion; code also deletes them after 180 days without refresh (pollis-delivery/src/messages.rs:1303,1339, #762) and when Expo reports DeviceNotRegistered (pollis-delivery/src/push.rs:705, #1423). §2's table already says so; §0 contradicts it.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "policy-retention-03",
-      "doc": "docs/metadata-retention-policy.md",
-      "locator": {
-        "heading": "4. Push notifications",
-        "quote": "There is no expiry sweep for tokens belonging to uninstalled apps."
-      },
-      "claim": "Push tokens of uninstalled apps are never swept.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-delivery/src/messages.rs",
-        "pollis-delivery/src/push.rs"
-      ],
-      "evidence": [
-        "pollis-delivery/src/messages.rs:1339",
+        "pollis-delivery/src/messages.rs:1302-1306",
         "pollis-delivery/src/push.rs:716"
       ],
       "fact": "push-token-retention-days",
-      "status": "disputed",
-      "note": "§4 says there is no expiry sweep; code reaps tokens unrefreshed for 180 days (pollis-delivery/src/messages.rs:1339) and prunes a token Expo reports DeviceNotRegistered (pollis-delivery/src/push.rs:716).",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "verified",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -21119,9 +19921,9 @@
       "doc": "docs/metadata-retention-policy.md",
       "locator": {
         "heading": "0. The one-paragraph version",
-        "quote": "change takes effect at the next full republish (the #672 / #699 key-rotation ceremony)"
+        "quote": "its commit-log leaves carry windowed pseudonyms rather than conversation and sender identifiers"
       },
-      "claim": "The #701 ledger pseudonyms are not live until a future republish.",
+      "claim": "Public commit-log leaves carry windowed pseudonyms (#701), live in commit-log-2.",
       "kind": "behaviour",
       "anchors": [
         "verifiable-log-builder/src/commit_log.rs",
@@ -21129,34 +19931,10 @@
       ],
       "evidence": [
         "verifiable-log-builder/src/commit_log.rs:3",
-        "verifiable-log/src/sth.rs:34",
-        "docs/transparency.md:387"
-      ],
-      "status": "disputed",
-      "note": "Doc says #701 pseudonyms take effect at the next republish; that republish ran in August 2026 (docs/transparency.md:387-392, sth:v2 contexts in verifiable-log/src/sth.rs:24-34), and the live commit-log-2 tree is built from pseudonymous leaves (verifiable-log-builder/src/commit_log.rs:3). The doc contradicts its own §6 (line 404) on this.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-      "also_rendered_in": []
-    },
-    {
-      "id": "policy-retention-05",
-      "doc": "docs/metadata-retention-policy.md",
-      "locator": {
-        "heading": "6. The public transparency ledger",
-        "quote": "Until the ceremony runs, the *code* is complete and tested but the *live* ledger still carries the pre-#701 (raw-id) leaves under the current roots."
-      },
-      "claim": "The live ledger still carries raw-id commit-log leaves.",
-      "kind": "behaviour",
-      "anchors": [
-        "verifiable-log-builder/src/commit_log.rs",
-        "verifiable-log/src/sth.rs"
-      ],
-      "evidence": [
-        "docs/transparency.md:387",
         "verifiable-log/src/sth.rs:34"
       ],
-      "status": "disputed",
-      "note": "Doc says the live ledger still carries raw-id leaves; the ceremony ran (docs/transparency.md:387) and the live tree is commit-log-2 with pseudonymous leaves (verifiable-log/src/sth.rs:34-39). The §9 bullet ('it takes effect on the *live* ledger at the next full republish', line 551-553) is stale the same way.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "verified",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -21164,21 +19942,19 @@
       "doc": "docs/metadata-retention-policy.md",
       "locator": {
         "heading": "1. Retention model: watermark-bounded, not time-bounded",
-        "quote": "beyond \"messages sent before you joined\" and \"a new device starts empty\""
+        "quote": "a new device starts empty unless you copy history to it from another of your enrolled devices"
       },
-      "claim": "The other two accepted losses include 'a new device starts empty'.",
+      "claim": "Accepted loss (2): a new device starts empty unless history is copied from another enrolled device (#1735).",
       "kind": "behaviour",
       "anchors": [
         "pollis-delivery/src/history_transfer.rs",
         "pollis-schema/migrations/000045_history_transfer.sql"
       ],
       "evidence": [
-        "pollis-schema/migrations/000045_history_transfer.sql:1",
-        "pollis-delivery/src/history_transfer.rs:17"
+        "pollis-delivery/src/history_transfer.rs:1"
       ],
-      "status": "disputed",
-      "note": "Doc names the second accepted loss as 'a new device starts empty'; since #1735 a new device can copy history from another enrolled device (pollis-schema/migrations/000045_history_transfer.sql:1, pollis-delivery/src/history_transfer.rs), and CLAUDE.md now words loss (2) as 'starts empty unless the user copies history from another of their enrolled devices'.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "verified",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -21186,22 +19962,20 @@
       "doc": "docs/metadata-retention-policy.md",
       "locator": {
         "heading": "9. Gaps this policy exposes (each needs a ticket or a decision)",
-        "quote": "configured explicitly in both `wrangler.{dev,prod}.jsonc` rather than left on the code default of 6"
+        "quote": "N = 12 months (2026-08-04), the code default and also set explicitly in both `wrangler.{dev,prod}.jsonc`"
       },
-      "claim": "The code default for the staleness window is 6 months.",
+      "claim": "The watermark staleness window is 12 months, the code default, and set explicitly in both wrangler configs.",
       "kind": "number",
       "anchors": [
         "pollis-delivery/src/messages.rs",
         "pollis-delivery/wrangler.prod.jsonc"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:136",
-        "pollis-delivery/wrangler.prod.jsonc:43"
+        "pollis-delivery/src/messages.rs:136"
       ],
       "fact": "watermark-stale-months",
-      "status": "disputed",
-      "note": "§9 says the code default is 6; the code default is 12 since #1486 (pollis-delivery/src/messages.rs:136). §1 of the same doc already says so.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "status": "verified",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -21456,28 +20230,6 @@
         "pollis-core/src/commands/r2.rs:830"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "policy-retention-20",
-      "doc": "docs/metadata-retention-policy.md",
-      "locator": {
-        "heading": "5. Media (Cloudflare R2)",
-        "quote": "is a separable server-side sweep and is NOT built here"
-      },
-      "claim": "No server sweep reclaims unreferenced R2 blobs yet.",
-      "kind": "behaviour",
-      "anchors": [
-        "pollis-delivery/src/messages.rs",
-        "pollis-delivery/src/broker.rs"
-      ],
-      "evidence": [
-        "pollis-delivery/src/messages.rs:1401",
-        "pollis-delivery/src/messages.rs:1446"
-      ],
-      "status": "verified",
-      "note": "The GC sweep only reaps orphaned reference rows; attachment_object rows are collected on an explicit client delete; the DS never deletes R2 objects.",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
