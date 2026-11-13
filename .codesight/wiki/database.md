@@ -874,6 +874,13 @@ One row = "group `group_id` calls this object `:shortcode:`". The PK makes a sho
 
 **Bounds.** There is deliberately **no per-group cap** (#848 is explicit). The bound is per-person: `EMOJI_MAX_PER_USER` (1000) rows per creator across all groups, which with the 48 KiB object ceiling caps one account's worst-case storage at 48 MiB — and usually far less, since their second copy of a popular emoji costs a row and no bytes.
 
+### conversation_membership_version _(post-baseline 000046, #1874)_
+- `conversation_id` TEXT PK: the MLS group id (a group id, or a DM id)
+- `version` INTEGER NOT NULL DEFAULT 0
+- `updated_at` TEXT NOT NULL DEFAULT now
+
+A counter bumped (`directory::bump_membership_version`) whenever an account or device leaves the group's roster: account deletion, identity reset, group leave/removal, DM leave, device revocation, and logout with data deletion. A missing row reads as 0. `catch-up` returns it when asked, and a sender that sees it change re-runs the pre-seal reconcile before sealing (`.codesight/wiki/mls.md`). It holds no user or device id, and goes with its group or DM (`purge_group` / `purge_dm_channel`).
+
 ### conversation_watermark _(migration 5, re-keyed in migration 16)_
 - PK: (`conversation_id`, `user_id`, `device_id`)
 - `conversation_id` TEXT NOT NULL

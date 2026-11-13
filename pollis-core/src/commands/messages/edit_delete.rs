@@ -213,7 +213,7 @@ pub async fn delete_message(
     }
 
     // Broadcast so connected members apply the redaction now; the envelope is the durable path.
-    let (mls_group_id, is_channel) = resolve_mls_group(state, &conversation_id).await?;
+    let (mls_group_id, is_channel, _) = resolve_mls_group(state, &conversation_id).await?;
     let (channel_arg, dm_arg) = if is_channel {
         (Some(conversation_id.as_str()), None)
     } else {
@@ -234,15 +234,18 @@ pub async fn delete_message(
 
 /// Resolve the MLS group backing a conversation: a channel maps to its
 /// `group_id` (all channels in a group share one MLS group); a DM's MLS group is
-/// keyed by the conversation id itself. Returns `(mls_group_id, is_channel)`.
+/// keyed by the conversation id itself. Returns `(mls_group_id, is_channel,
+/// membership_version)`; the version is for [`backstop_on_membership_change`](crate::commands::mls::backstop_on_membership_change).
 async fn resolve_mls_group(
     state: &Arc<AppState>,
     conversation_id: &str,
-) -> Result<(String, bool)> {
-    let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
+) -> Result<(String, bool, Option<i64>)> {
+    let resolved =
+        crate::commands::ds_reads::catch_up_with_membership(state, conversation_id, false).await?;
     Ok((
         resolved.mls_group_id,
         resolved.kind == pollis_api::directory::ConversationKind::Channel,
+        resolved.membership_version,
     ))
 }
 
@@ -267,7 +270,7 @@ pub async fn edit_message_as(
     new_content: &str,
 ) -> Result<()> {
     let envelope_id = Ulid::new().to_string();
-    let (mls_group_id, _is_channel) = resolve_mls_group(state, conversation_id).await?;
+    let (mls_group_id, _is_channel, _) = resolve_mls_group(state, conversation_id).await?;
 
     // Catch up so the edit is sealed at the current epoch.
     {
@@ -343,7 +346,8 @@ async fn send_redaction_message(
     user_id: &str,
 ) -> Result<()> {
     let envelope_id = Ulid::new().to_string();
-    let (mls_group_id, _is_channel) = resolve_mls_group(state, conversation_id).await?;
+    let (mls_group_id, _is_channel, membership_version) =
+        resolve_mls_group(state, conversation_id).await?;
 
     // Catch up before encrypting (#440), as send and edit do.
     {
@@ -371,6 +375,15 @@ async fn send_redaction_message(
     if needs_repair {
         crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
     }
+
+    // #1874: a departed account's leaves go before anything more is sealed to them.
+    Box::pin(crate::commands::mls::backstop_on_membership_change(
+        state,
+        &mls_group_id,
+        user_id,
+        membership_version,
+    ))
+    .await;
 
     let plaintext = super::framing::pad_redaction(target_message_id);
     // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
@@ -741,11 +754,13 @@ pub(super) async fn post_edit(
     } = edit;
 
     // Not (or no longer) a member: the outbox records `rejected`.
-    let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
+    let resolved =
+        crate::commands::ds_reads::catch_up_with_membership(state, conversation_id, false).await?;
     if !resolved.authorized {
         return Err(super::outbox::not_a_member());
     }
     let mls_group_id = resolved.mls_group_id;
+    let membership_version = resolved.membership_version;
 
     // Catch up before encrypting, or the edit seals at a stale epoch (#371).
     {
@@ -774,6 +789,15 @@ pub(super) async fn post_edit(
         // Rejoin via external join; never nuke the shared commit log (docs/mls-reconcile-hardening.md).
         crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
     }
+
+    // #1874: a departed account's leaves go before anything more is sealed to them.
+    Box::pin(crate::commands::mls::backstop_on_membership_change(
+        state,
+        &mls_group_id,
+        user_id,
+        membership_version,
+    ))
+    .await;
 
     // Size padding (issue #331 v2, §4.1) — same scheme as the send path:
     // pad TEXT edits to a size bucket; leave attachment edits unpadded.

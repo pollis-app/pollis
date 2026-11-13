@@ -284,6 +284,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "history_transfer",
         include_str!("../migrations/000045_history_transfer.sql"),
     ),
+    (
+        46,
+        "conversation_membership_version",
+        include_str!("../migrations/000046_conversation_membership_version.sql"),
+    ),
 ];
 
 /// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.

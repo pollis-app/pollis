@@ -61,11 +61,33 @@ pub(crate) async fn catch_up_full(
     want_dm: bool,
     want_roster: bool,
 ) -> Result<dir::CatchUpResponse> {
+    post_catch_up(state, conversation_id, want_envelopes, want_dm, want_roster, false).await
+}
+
+/// [`catch_up`] before a seal: with the membership version the pre-seal check
+/// compares (#1874).
+pub(crate) async fn catch_up_with_membership(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    want_dm: bool,
+) -> Result<dir::CatchUpResponse> {
+    post_catch_up(state, conversation_id, false, want_dm, false, true).await
+}
+
+async fn post_catch_up(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    want_envelopes: bool,
+    want_dm: bool,
+    want_roster: bool,
+    want_membership_version: bool,
+) -> Result<dir::CatchUpResponse> {
     let body = dir::CatchUpBody {
         conversation_id: conversation_id.to_string(),
         want_envelopes,
         want_dm,
         want_roster,
+        want_membership_version,
         user_id: Some(current_user_id(state).await?),
         device_id: state.device_id.lock().await.clone(),
     };

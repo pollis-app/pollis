@@ -76,7 +76,7 @@ pub use group_state::{
 pub use group_state::rendezvous;
 
 pub use sweep::catch_up_all_mls_groups;
-pub use sweep::{backstop_before_seal, reconcile_backstop_all, reconcile_backstop_one, BackstopReport};
+pub use sweep::{backstop_before_seal, backstop_on_membership_change, reconcile_backstop_all, reconcile_backstop_one, BackstopReport};
 pub use sweep::apply_membership_wake;
 
 pub use self_update::{self_update_group, self_update_if_due};

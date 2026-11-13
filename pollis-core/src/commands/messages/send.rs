@@ -108,8 +108,8 @@ pub(super) async fn deliver_queued(
     state.check_not_outdated()?;
 
     // Group channels share the group's MLS group; a DM's is keyed by conversation_id.
-    let resolved =
-        crate::commands::ds_reads::catch_up(state, &conversation_id, false, true).await?;
+    // With the membership version the pre-seal check compares (#1874).
+    let resolved = crate::commands::ds_reads::catch_up_with_membership(state, &conversation_id, true).await?;
     // Not (or no longer) a member: no attempt will ever get further, so say so
     // in a way the outbox records as `rejected` rather than retrying (#1335).
     if !resolved.authorized {
@@ -169,7 +169,15 @@ pub(super) async fn deliver_queued(
     // #1571: re-add a leafless device before sealing so it can read this. Best-effort.
     // Boxed: a reconcile is a large future, and inlining it into every send's
     // state machine overflowed a default (2 MiB) test-thread stack.
-    Box::pin(crate::commands::mls::backstop_before_seal(state, &mls_group_id, &sender_id)).await;
+    // #1874: at once, whatever the interval, when an account or device has left
+    // the roster since the last check.
+    Box::pin(crate::commands::mls::backstop_before_seal(
+        state,
+        &mls_group_id,
+        &sender_id,
+        resolved.membership_version,
+    ))
+    .await;
 
     // Pad text to a size bucket (#331); attachments stay unpadded unless threaded (#825), whose id rides the frame.
     let plaintext: Vec<u8> = match thread_id.as_deref() {

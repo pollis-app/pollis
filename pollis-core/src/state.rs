@@ -117,8 +117,9 @@ pub struct AppState {
     pub outbox_awaiting_key: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Held during a KeyPackage top-up (#1412); `try_lock` so a drain never publishes a second batch.
     pub key_package_refill: Arc<Mutex<()>>,
-    /// Last pre-seal missing-device check per conversation (#1571), so a burst of sends checks once.
-    pub pre_seal_checked: Arc<Mutex<HashMap<String, std::time::Instant>>>,
+    /// Last pre-seal missing-device check per conversation (#1571), so a burst of sends checks once,
+    /// with the membership version it saw (#1874): a different version re-checks at once.
+    pub pre_seal_checked: Arc<Mutex<HashMap<String, (std::time::Instant, Option<i64>)>>>,
     /// Single-flight outbox drain (#1335); a waiting caller answers with the last report.
     pub outbox_drain: Arc<Mutex<Option<crate::commands::messages::OutboxReport>>>,
     /// A `flush_outbox` that found a drain running asks it to go round again (#1335).

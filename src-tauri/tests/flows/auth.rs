@@ -1504,3 +1504,69 @@ async fn delete_account_leaves_no_commit_log_or_claim_row_naming_it() {
     drop(alice);
     drop(bob);
 }
+
+/// #1874: once an account is deleted, a remaining member's next send removes its
+/// leaves before sealing, even right after a pre-seal check and with no live
+/// wake-up (the harness has no LiveKit). Group and DM alike.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn delete_account_moves_every_conversation_past_its_devices_before_the_next_seal() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_id = alice.sign_up("alice@test.local").await.id;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Rotates").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    alice.process_commits_for(&channel_id).await;
+
+    let dm_id = alice.create_dm(&[alice_id.as_str(), bob_profile.id.as_str()]).await;
+    bob.accept_dm_request(&dm_id).await;
+    bob.poll().await;
+
+    // Bob sends in both, so each conversation's pre-seal check is fresh.
+    bob.send_channel_message_id(&channel_id, "before, group").await;
+    bob.send_channel_message_id(&dm_id, "before, dm").await;
+
+    let has_alice = |tree: &[(String, String)]| tree.iter().any(|(u, _)| u == &alice_id);
+    for mls_group in [&group_id, &dm_id] {
+        let tree = pollis_lib::commands::mls::local_tree_members(&bob.state, mls_group).await;
+        assert!(has_alice(&tree), "precondition: alice has a leaf in {mls_group}: {tree:?}");
+    }
+    let epochs_before = (
+        crate::harness::ds_head_epoch(&group_id).await,
+        crate::harness::ds_head_epoch(&dm_id).await,
+    );
+
+    alice
+        .invoke_json("delete_account", json!({ "userId": alice_id }))
+        .await;
+
+    bob.send_channel_message_id(&channel_id, "after, group").await;
+    bob.send_channel_message_id(&dm_id, "after, dm").await;
+
+    for mls_group in [&group_id, &dm_id] {
+        let tree = pollis_lib::commands::mls::local_tree_members(&bob.state, mls_group).await;
+        assert!(
+            !has_alice(&tree),
+            "the deleted account's leaves must be gone before bob's next seal in {mls_group}: {tree:?}"
+        );
+    }
+    assert!(crate::harness::ds_head_epoch(&group_id).await > epochs_before.0, "group epoch advanced");
+    assert!(crate::harness::ds_head_epoch(&dm_id).await > epochs_before.1, "dm epoch advanced");
+
+    drop(alice);
+    drop(bob);
+}

@@ -58,6 +58,7 @@ pub async fn catch_up(
             dm: None,
             roster: Vec::new(),
             head: None,
+            membership_version: None,
         }));
     };
 
@@ -71,6 +72,7 @@ pub async fn catch_up(
             dm: None,
             roster: Vec::new(),
             head: None,
+            membership_version: None,
         }));
     }
 
@@ -103,6 +105,12 @@ pub async fn catch_up(
         Vec::new()
     };
 
+    let membership_version = if parsed.want_membership_version {
+        Some(membership_version(&conn, &mls_group_id).await?)
+    } else {
+        None
+    };
+
     Ok(ok_response::<CatchUpBody>(CatchUpResponse {
         authorized: true,
         mls_group_id,
@@ -112,6 +120,7 @@ pub async fn catch_up(
         dm,
         roster,
         head,
+        membership_version,
     }))
 }
 
@@ -155,6 +164,80 @@ pub async fn desired_roster(conn: &Connection, conversation_id: &str) -> anyhow:
         }
     }
     Ok(out)
+}
+
+/// The roster-departure counter for an MLS group (#1874); 0 when never bumped.
+pub async fn membership_version(conn: &Connection, mls_group_id: &str) -> anyhow::Result<i64> {
+    let mut rows = conn
+        .query(
+            "SELECT version FROM conversation_membership_version WHERE conversation_id = ?1",
+            libsql::params![mls_group_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => 0,
+    })
+}
+
+/// Record that an account or device left `mls_group_id`'s roster (#1874), so
+/// every sender re-checks its tree before it next seals there.
+pub async fn bump_membership_version(conn: &Connection, mls_group_id: &str) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO conversation_membership_version (conversation_id, version) VALUES (?1, 1) \
+         ON CONFLICT(conversation_id) DO UPDATE SET \
+             version = version + 1, updated_at = datetime('now')",
+        libsql::params![mls_group_id.to_string()],
+    )
+    .await?;
+    Ok(())
+}
+
+/// The MLS groups `user_id` is in: every group and DM. Read BEFORE the
+/// membership rows go, for [`bump_membership_version`].
+pub async fn mls_groups_of(conn: &Connection, user_id: &str) -> anyhow::Result<MlsGroupsOf> {
+    let mut out = MlsGroupsOf::default();
+    let mut rows = conn
+        .query(
+            "SELECT group_id FROM group_member WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    while let Some(row) = rows.next().await? {
+        out.groups.push(row.get::<String>(0)?);
+    }
+    drop(rows);
+    let mut rows = conn
+        .query(
+            "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    while let Some(row) = rows.next().await? {
+        out.dms.push(row.get::<String>(0)?);
+    }
+    Ok(out)
+}
+
+/// What [`mls_groups_of`] found, split by kind: the wake-up payload differs.
+#[derive(Debug, Default, Clone)]
+pub struct MlsGroupsOf {
+    pub groups: Vec<String>,
+    pub dms: Vec<String>,
+}
+
+impl MlsGroupsOf {
+    pub fn all(&self) -> impl Iterator<Item = &String> {
+        self.groups.iter().chain(self.dms.iter())
+    }
+}
+
+/// [`bump_membership_version`] for every MLS group `user_id` is in.
+pub async fn bump_membership_versions_of(conn: &Connection, user_id: &str) -> anyhow::Result<()> {
+    for id in mls_groups_of(conn, user_id).await?.all() {
+        bump_membership_version(conn, id).await?;
+    }
+    Ok(())
 }
 
 /// Resolve an id in the shared conversation namespace to `(mls_group_id, kind)`.
