@@ -450,7 +450,18 @@ async fn external_join_attempt(
                 None
             }
         };
-    let roster_ids: Vec<String> = roster.iter().flatten().cloned().collect();
+    // Plus every user with a leaf in the tree, so the #1851 check judges leaves
+    // claiming a non-member too.
+    let mut roster_ids: Vec<String> = roster.iter().flatten().cloned().collect();
+    if let Some(tree) = verifiable_group_info.extensions().ratchet_tree() {
+        roster_ids.extend(
+            tree.ratchet_tree()
+                .leaves()
+                .map(|leaf| parse_credential_user_id(leaf.credential())),
+        );
+    }
+    roster_ids.sort();
+    roster_ids.dedup();
     let identities = match super::reconcile::load_pinned_identities(state, &roster_ids, user_id)
         .await
     {
@@ -708,6 +719,25 @@ where
         .map_err(|e| refuse(format!("the GroupInfo's ratchet tree does not verify: {e}")))?;
 
     let scheme = signature_scheme(suite);
+
+    // #1851: never join a tree holding a leaf its account never certified;
+    // this device would share every epoch with it until members evict it.
+    for leaf in tree.leaves() {
+        let user = parse_credential_user_id(leaf.credential());
+        let device = parse_credential_device_id(leaf.credential()).unwrap_or_default();
+        if let Some(why) = provenance.identities.never_certified(
+            &user,
+            &device,
+            leaf.signature_key().as_slice(),
+            scheme,
+        ) {
+            return Err(refuse(format!(
+                "the GroupInfo's tree holds a leaf for {user}:{device} that account never \
+                 certified ({why})"
+            )));
+        }
+    }
+
     let Some(leaf) = group_info_signer(provider, scheme, &tree, vgi) else {
         return Err(refuse(
             "the published GroupInfo's signature does not verify under any leaf of its own tree"
@@ -2107,21 +2137,16 @@ async fn report_uncertified_leaves(
         if !kind.alarms() {
             continue;
         }
-        let ev = pollis_api::account::SecurityEventBody {
-            kind: "uncertified_mls_leaf".to_string(),
-            device_id: Some(leaf.device_id.clone()),
-            metadata: Some(format!(
+        post_uncertified_leaf_event(
+            state,
+            user_id,
+            Some(&leaf.device_id),
+            format!(
                 "conversation={mls_group_id} user={} epoch={epoch} reason={reason}",
                 leaf.user_id
-            )),
-            // No-auth fallback for the acting user.
-            user_id: Some(user_id.to_string()),
-        };
-        if let Err(e) = super::ds_client::ds_post_ok(state, &ev).await {
-            crate::diag!(
-                "[mls] process_pending_commits: DS security-event for uncertified leaf failed (non-fatal): {e}"
-            );
-        }
+            ),
+        )
+        .await;
     }
 
     // Detached: reconcile re-acquires the MLS lock we hold.
@@ -2130,6 +2155,46 @@ async fn report_uncertified_leaves(
         mls_group_id.to_string(),
         user_id.to_string(),
     ));
+}
+
+/// One `uncertified_mls_leaf` `security_event` (shown on the Security page); best-effort.
+async fn post_uncertified_leaf_event(
+    state: &Arc<AppState>,
+    user_id: &str,
+    leaf_device_id: Option<&str>,
+    metadata: String,
+) {
+    let ev = pollis_api::account::SecurityEventBody {
+        kind: "uncertified_mls_leaf".to_string(),
+        device_id: leaf_device_id.map(str::to_string),
+        metadata: Some(metadata),
+        // No-auth fallback for the acting user.
+        user_id: Some(user_id.to_string()),
+    };
+    if let Err(e) = super::ds_client::ds_post_ok(state, &ev).await {
+        crate::diag!("[mls] DS security-event for uncertified leaf failed (non-fatal): {e}");
+    }
+}
+
+/// #1851: a Welcome this device refused because its tree holds a leaf the
+/// claimed account never certified; recorded like a replayed one.
+pub(super) async fn record_uncertified_leaf_event(
+    state: &Arc<AppState>,
+    user_id: &str,
+    conversation_id: &str,
+    leaf_user_id: &str,
+    leaf_device_id: &str,
+    reason: &str,
+) {
+    post_uncertified_leaf_event(
+        state,
+        user_id,
+        Some(leaf_device_id),
+        format!(
+            "conversation={conversation_id} user={leaf_user_id} refused_welcome reason={reason}"
+        ),
+    )
+    .await;
 }
 
 /// The detached eviction reconcile [`report_uncertified_leaves`] spawns.

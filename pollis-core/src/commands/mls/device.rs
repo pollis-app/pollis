@@ -551,6 +551,38 @@ impl IdentityDirectory {
         signature_key: &[u8],
         scheme: SignatureScheme,
     ) -> LeafVerdict {
+        self.verdict(user_id, device_id, signature_key, scheme, true)
+    }
+
+    /// Is the leaf positively NOT a device its account ever certified — a bad
+    /// cert chain, or a key the cert does not cover? `Some(reason)` if so.
+    ///
+    /// The question a JOINING device asks of every leaf in the tree it is
+    /// about to enter (#1851). Revocation is not part of it: a revoked device
+    /// was certified when it was added and its leaf is on its way out
+    /// (members evict it), so it does not make a group unsafe to join. An
+    /// unverifiable leaf is not evidence either.
+    pub fn never_certified(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        signature_key: &[u8],
+        scheme: SignatureScheme,
+    ) -> Option<String> {
+        match self.verdict(user_id, device_id, signature_key, scheme, false) {
+            LeafVerdict::Uncertified(why) => Some(why),
+            LeafVerdict::Certified | LeafVerdict::Unverifiable(_) => None,
+        }
+    }
+
+    fn verdict(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        signature_key: &[u8],
+        scheme: SignatureScheme,
+        honor_revocation: bool,
+    ) -> LeafVerdict {
         if !self.pinned {
             return LeafVerdict::Unverifiable("identity directory not pinned to local trust");
         }
@@ -571,7 +603,9 @@ impl IdentityDirectory {
         // Tombstone wins — a revoked device is unambiguously not allowed into a
         // tree, regardless of cert column state.
         if let Some(revoked_at) = &row.revoked_at {
-            return LeafVerdict::Uncertified(format!("device revoked at {revoked_at}"));
+            if honor_revocation {
+                return LeafVerdict::Uncertified(format!("device revoked at {revoked_at}"));
+            }
         }
 
         let (cert, issued_at_str, cert_identity_version, ed_pub, pq_pub) = match (
@@ -755,5 +789,32 @@ mod leaf_verdict_tests {
             dir.leaf_verdict(UID, DID, &pq_pub, SignatureScheme::MLDSA44),
             LeafVerdict::Unverifiable(_)
         ));
+    }
+
+    /// #1851: what a joining device refuses a tree over. A revoked device's
+    /// genuine leaf is on its way out; a key its account never certified is not.
+    #[test]
+    fn never_certified_ignores_revocation_but_not_a_foreign_key() {
+        let (mut dir, _, pq_pub) = certified_identity();
+        let attacker_key = vec![0xAAu8; 1312];
+        assert_eq!(dir.never_certified(UID, DID, &pq_pub, SignatureScheme::MLDSA44), None);
+        assert!(dir
+            .never_certified(UID, DID, &attacker_key, SignatureScheme::MLDSA44)
+            .is_some());
+        assert_eq!(
+            dir.never_certified("nobody", DID, &attacker_key, SignatureScheme::MLDSA44),
+            None,
+            "unverifiable is not evidence"
+        );
+
+        dir.by_user.get_mut(UID).unwrap().devices[0].revoked_at = Some("2026-01-01".to_string());
+        assert!(matches!(
+            dir.leaf_verdict(UID, DID, &pq_pub, SignatureScheme::MLDSA44),
+            LeafVerdict::Uncertified(_)
+        ));
+        assert_eq!(dir.never_certified(UID, DID, &pq_pub, SignatureScheme::MLDSA44), None);
+        assert!(dir
+            .never_certified(UID, DID, &attacker_key, SignatureScheme::MLDSA44)
+            .is_some());
     }
 }
