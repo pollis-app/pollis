@@ -748,7 +748,7 @@ pub async fn delete_account(
     };
     // An empty body is valid when signed (actor from auth).
     let parsed: DeleteAccountBody = if req.body.is_empty() {
-        DeleteAccountBody { user_id: None }
+        DeleteAccountBody { user_id: None, withdraw: Vec::new() }
     } else {
         match serde_json::from_slice(&req.body) {
             Ok(b) => b,
@@ -795,7 +795,14 @@ pub async fn apply_delete_account(
         Ok(a) => a,
         Err(o) => return Ok((o, Vec::new())),
     };
+    if body.withdraw.len() > pollis_api::account::WITHDRAW_MAX {
+        return Ok((WriteOutcome::Invalid("too many envelopes to withdraw"), Vec::new()));
+    }
     let tx = conn.transaction().await?;
+
+    // The actor's undelivered envelopes, by capability: sealed ones carry no
+    // sender id for `purge_user_rows` to match.
+    crate::messages::withdraw_envelopes(&tx, &body.withdraw).await?;
 
     // Note the actor's DMs BEFORE their membership rows go — afterwards there is
     // nothing left to identify which channels they were in, and an emptied DM

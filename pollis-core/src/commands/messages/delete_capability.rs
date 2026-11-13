@@ -87,9 +87,112 @@ pub(super) async fn envelope_delete_token(
     Some(delete_token(&seed, message_id))
 }
 
+/// The envelopes this account may still have waiting on the DS, newest first,
+/// at most `limit`: every envelope this device posted (`known_envelope` 'own':
+/// messages, edits, receipts, redactions) and every message row the account
+/// authored, which covers ones sent from its other devices. Both stop at the
+/// DS's longest envelope retention (the `known_envelope` prune window).
+///
+/// Ids the DS has already collected are harmless: a withdrawal that matches no
+/// row is skipped.
+pub(crate) fn own_envelope_ids(
+    conn: &rusqlite::Connection,
+    user_id: &str,
+    limit: usize,
+) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT id FROM ( \
+             SELECT id, julianday(recorded_at) AS t FROM known_envelope WHERE kind = 'own' \
+             UNION ALL \
+             SELECT id, julianday(sent_at) AS t FROM message \
+              WHERE sender_id = ?1 AND undecryptable IS NULL \
+                AND julianday(sent_at) >= julianday('now', '-400 days') \
+         ) GROUP BY id ORDER BY MAX(t) DESC LIMIT ?2",
+    )?;
+    let ids = stmt
+        .query_map(rusqlite::params![user_id, limit as i64], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(ids)
+}
+
+/// The withdrawal list account deletion sends (#1866): each of
+/// [`own_envelope_ids`] with its deletion capability. Empty when the account
+/// key or the local DB is unavailable, in which case only the DS-side purge runs.
+pub(crate) async fn withdrawable_envelopes(
+    state: &std::sync::Arc<crate::state::AppState>,
+    user_id: &str,
+) -> Vec<pollis_api::account::WithdrawEnvelope> {
+    let Some(seed) = unlocked_account_seed(state).await else {
+        crate::diag!("[account] no account key; sent envelopes are not withdrawn");
+        return Vec::new();
+    };
+    let ids = {
+        let guard = state.local_db.lock().await;
+        match guard.as_ref() {
+            Some(db) => own_envelope_ids(db.conn(), user_id, pollis_api::account::WITHDRAW_MAX),
+            None => Ok(Vec::new()),
+        }
+    };
+    match ids {
+        Ok(ids) => ids
+            .into_iter()
+            .map(|id| pollis_api::account::WithdrawEnvelope {
+                delete_token: delete_token(&seed, &id),
+                message_id: id,
+            })
+            .collect(),
+        Err(e) => {
+            crate::diag!("[account] could not list sent envelopes (non-fatal): {e}");
+            Vec::new()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::local::apply_local_schema(&conn).unwrap();
+        conn
+    }
+
+    fn insert_message(conn: &rusqlite::Connection, id: &str, sender: &str, sent_at: &str) {
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at) \
+             VALUES (?1, 'c', ?2, X'', 'hi', ?3)",
+            rusqlite::params![id, sender, sent_at],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn own_envelopes_cover_posted_and_authored_newest_first() {
+        let conn = db();
+        let now = chrono::Utc::now();
+        let ago = |days: i64| (now - chrono::Duration::days(days)).to_rfc3339();
+        // Posted from this device: a control frame with no message row, and a message.
+        crate::commands::messages::loss::record_own_envelope(&conn, "receipt-1");
+        crate::commands::messages::loss::record_own_envelope(&conn, "mine-here");
+        insert_message(&conn, "mine-here", "me", &ago(1));
+        // Sent from another of the account's devices.
+        insert_message(&conn, "mine-elsewhere", "me", &ago(3));
+        // Older than any envelope the DS still holds.
+        insert_message(&conn, "mine-ancient", "me", &ago(500));
+        // Someone else's.
+        insert_message(&conn, "theirs", "them", &ago(1));
+
+        let ids = own_envelope_ids(&conn, "me", 100).unwrap();
+        assert_eq!(ids.len(), 3, "{ids:?}");
+        assert!(ids.contains(&"receipt-1".to_string()));
+        assert!(ids.contains(&"mine-here".to_string()), "listed once");
+        assert_eq!(ids.last().map(String::as_str), Some("mine-elsewhere"), "newest first");
+        assert!(!ids.contains(&"theirs".to_string()));
+        assert!(!ids.contains(&"mine-ancient".to_string()));
+
+        assert_eq!(own_envelope_ids(&conn, "me", 1).unwrap().len(), 1, "the limit holds");
+    }
 
     const SEED_A: &[u8] = &[7u8; 32];
     const SEED_B: &[u8] = &[9u8; 32];

@@ -210,7 +210,8 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     )
     .await?;
 
-    // Sealed-sender envelopes (#607) carry no sender id, so they go with their conversation.
+    // Unsealed (legacy) envelopes. Sealed ones (#607) carry no sender id; account
+    // deletion withdraws them by capability first (`messages::withdraw_envelopes`).
     conn.execute("DELETE FROM message_envelope WHERE sender_id = ?1", uid()).await?;
 
     conn.execute("DELETE FROM message_reaction WHERE user_id = ?1", uid()).await?;

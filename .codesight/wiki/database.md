@@ -359,6 +359,18 @@ through `send` would leave no row at all, and a *missing* row also reads
 `NotRequired`, so the test would pass while asserting nothing
 (`delete_capability_tests_support::insert_pre_1135_envelope`).
 
+**Account deletion withdraws by capability (#1866).** `purge_user_rows` can only
+match `sender_id`, which a sealed envelope does not carry. So `delete_account`
+in pollis-core sends `DeleteAccountBody.withdraw`: up to `WITHDRAW_MAX` (10,000)
+`(message_id, delete_token)` pairs, newest first. They come from the device's
+`known_envelope` 'own' rows (every envelope it posted) plus the `message` rows the
+account authored inside the 400-day window
+(`delete_capability::own_envelope_ids`). `messages::withdraw_envelopes` runs first in
+the deletion transaction. It removes each envelope whose stored hash matches, any
+pending edit of it (an edit carries its target's hash), and their
+`attachment_ref` / `message_reaction` rows. A pair that matches nothing is skipped.
+Older clients omit the field, and only the DS-side purge runs for them.
+
 Client side, a device that cannot compute a capability is one that is **locked**
 (the account seed is gone). `receipts.rs` skips emitting the receipt rather than
 posting a frame the DS will refuse — already the documented best-effort case: the

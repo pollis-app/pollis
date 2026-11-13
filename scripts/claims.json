@@ -19318,16 +19318,19 @@
       "kind": "behaviour",
       "anchors": [
         "pollis-core/src/commands/auth.rs",
+        "pollis-core/src/commands/messages/delete_capability.rs",
         "pollis-delivery/src/teardown.rs",
-        "pollis-delivery/src/account.rs"
+        "pollis-delivery/src/account.rs",
+        "pollis-delivery/src/messages.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/auth.rs:933",
-        "pollis-delivery/src/teardown.rs:211",
-        "pollis-delivery/src/account.rs:796"
+        "pollis-core/src/commands/auth.rs:934",
+        "pollis-core/src/commands/auth.rs:967",
+        "pollis-delivery/src/account.rs:805",
+        "pollis-delivery/src/messages.rs:1523"
       ],
       "status": "disputed",
-      "note": "Page says deletion rotates every conversation's keys and purges pending envelopes. Code: the deleting client only sends a best-effort, non-fatal wake-up asking members to evict its leaf (pollis-core/src/commands/auth.rs:933-958); the rotation is the next remaining member's commit. The envelope purge is `DELETE FROM message_envelope WHERE sender_id = ?` (pollis-delivery/src/teardown.rs:211), which matches nothing for sealed-sender envelopes, so messages you sent that others have not fetched stay until delivered (they go with the conversation, or via GC).",
+      "note": "Page says deletion rotates every conversation's keys. Code: the deleting client only sends a best-effort, non-fatal wake-up asking members to evict its leaf (pollis-core/src/commands/auth.rs:933-958); the rotation is the next remaining member's commit. The purge of pending envelopes matches: the client lists its sent envelopes with their deletion capability (pollis-core/src/commands/auth.rs:967) and the DS removes them in the deletion transaction (pollis-delivery/src/account.rs:805, pollis-delivery/src/messages.rs:1523).",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
     },
