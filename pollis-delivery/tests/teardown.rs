@@ -14,6 +14,7 @@ use pollis_api::groups::DeleteGroupBody;
 
 /// Every user-naming (table, column), written out for review; the coverage test proves it complete.
 const USER_COLUMNS: &[(&str, &str)] = &[
+    ("account_log_purge", "user_id"),
     ("account_recovery", "user_id"),
     ("channel_mute", "user_id"),
     ("conversation_watermark", "user_id"),
@@ -261,17 +262,17 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
 /// Every step `POST /v1/account/delete` runs, in its order. One DB stands in for
 /// both the main and the log DB here, so the log purge runs on it too.
 async fn delete_account(c: &Connection, user: &str) -> WriteOutcome {
-    let device_ids = pollis_delivery::broker::user_device_ids(c, user).await.unwrap();
-    let (outcome, dead) = apply_delete_account(
+    let (outcome, _) = apply_delete_account(
         c,
         Some(user),
         &DeleteAccountBody { user_id: Some(user.into()), withdraw: Vec::new() },
     )
     .await
     .unwrap();
-    pollis_delivery::writes::purge_welcomes(c, user).await.unwrap();
-    pollis_delivery::teardown::purge_user_log_rows(c, user, &device_ids).await.unwrap();
-    pollis_delivery::teardown::purge_conversation_log(c, &dead).await.unwrap();
+    assert!(
+        pollis_delivery::teardown::finish_account_log_purge(c, c, user).await.unwrap(),
+        "the deletion transaction records its commit-log half"
+    );
     outcome
 }
 

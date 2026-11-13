@@ -86,6 +86,9 @@ async fn main() -> Result<()> {
     // Envelope-GC sweep (#689); started before the router so it also runs on a scale-to-zero wake.
     spawn_envelope_gc_sweep(Arc::clone(&db), state.retention_metrics.clone());
 
+    // Commit-log halves an earlier account deletion still owes (#1883).
+    pollis_delivery::account::spawn_account_log_purge_drain(&state);
+
     let app = build_router_with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))

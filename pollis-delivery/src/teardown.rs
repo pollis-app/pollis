@@ -138,6 +138,12 @@ pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
         "Migration bookkeeping. No user data.",
     ),
     (
+        "account_log_purge",
+        "Account deletion's own record of the commit-log half it still owes \
+         (#1883), written in the deletion transaction and deleted by \
+         `finish_account_log_purge` once that half has run.",
+    ),
+    (
         "pin_keystate",
         "Conversation-owned, not user-owned (#99): the one wrapped pin key the \
          REMAINING members unwrap to read the conversation's pins. Deleting it on \
@@ -713,4 +719,99 @@ pub async fn purge_conversation_log(
             .await?;
     }
     Ok(())
+}
+
+/// Record account deletion's commit-log half in the deletion's own main-DB
+/// transaction (migration 000049), so the half that cannot share that
+/// transaction is owed durably rather than by the request alone. `device_ids`
+/// must be read before [`purge_user_rows`] deletes `user_device`.
+pub async fn record_account_log_purge(
+    tx: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+    dead_conversations: &[String],
+) -> anyhow::Result<()> {
+    tx.execute(
+        "INSERT INTO account_log_purge (user_id, device_ids, dead_conversations) \
+         VALUES (?1, ?2, ?3) \
+         ON CONFLICT(user_id) DO UPDATE SET \
+             device_ids = excluded.device_ids, \
+             dead_conversations = excluded.dead_conversations",
+        libsql::params![
+            user_id.to_string(),
+            serde_json::to_string(device_ids)?,
+            serde_json::to_string(dead_conversations)?
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
+/// Run the commit-log half recorded for `user_id` by [`record_account_log_purge`],
+/// then drop the record. Runs only after the deletion transaction has committed
+/// (the record exists only then), as [`purge_conversation_log`] requires.
+/// Idempotent; `false` when nothing was owed.
+///
+/// `conn` is the main DB (the record and the pre-#420 log copies), `log_conn`
+/// the commit-log DB; they are the same database in a single-DB deploy.
+pub async fn finish_account_log_purge(
+    conn: &Connection,
+    log_conn: &Connection,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let owed: Option<(String, String)> = {
+        let mut rows = conn
+            .query(
+                "SELECT device_ids, dead_conversations FROM account_log_purge WHERE user_id = ?1",
+                libsql::params![user_id.to_string()],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => Some((row.get(0)?, row.get(1)?)),
+            None => None,
+        }
+    };
+    let Some((device_ids, dead_conversations)) = owed else {
+        return Ok(false);
+    };
+    let device_ids: Vec<String> = serde_json::from_str(&device_ids)?;
+    let dead_conversations: Vec<String> = serde_json::from_str(&dead_conversations)?;
+
+    crate::writes::purge_welcomes(log_conn, user_id).await?;
+    purge_user_log_rows(log_conn, user_id, &device_ids).await?;
+    purge_conversation_log(log_conn, &dead_conversations).await?;
+    purge_legacy_log_copies(conn, user_id, &device_ids).await?;
+
+    conn.execute(
+        "DELETE FROM account_log_purge WHERE user_id = ?1",
+        libsql::params![user_id.to_string()],
+    )
+    .await?;
+    Ok(true)
+}
+
+/// Run every commit-log half still owed, oldest first. One that fails stays
+/// recorded for the next run and does not stop the rest. Returns how many ran.
+pub async fn drain_account_log_purges(
+    conn: &Connection,
+    log_conn: &Connection,
+) -> anyhow::Result<usize> {
+    let mut owed: Vec<String> = Vec::new();
+    {
+        let mut rows = conn
+            .query("SELECT user_id FROM account_log_purge ORDER BY created_at, user_id", ())
+            .await?;
+        while let Some(row) = rows.next().await? {
+            owed.push(row.get(0)?);
+        }
+    }
+    let mut finished = 0;
+    for user_id in owed {
+        match finish_account_log_purge(conn, log_conn, &user_id).await {
+            Ok(true) => finished += 1,
+            Ok(false) => {}
+            Err(e) => tracing::warn!("account deletion: commit-log purge still owed: {e:#}"),
+        }
+    }
+    Ok(finished)
 }

@@ -761,7 +761,8 @@ async fn reset_recover_in_tx(
 ///
 /// Nothing relies on `ON DELETE CASCADE` (FKs are off in production); see [`crate::teardown`].
 ///
-/// Commit-log rows are purged after the commit.
+/// Commit-log rows are purged after the commit, from a record the transaction
+/// writes ([`crate::teardown::record_account_log_purge`]).
 pub async fn delete_account(
     State(state): State<AppState>,
     req: RawRequest,
@@ -780,36 +781,49 @@ pub async fn delete_account(
         }
     };
     let conn = state.db.conn().await?;
-    // The device ids, while `user_device` still has them: the commit-log scrub
-    // below runs after the main transaction has deleted those rows.
-    let device_ids = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
-        Ok(owner) => crate::broker::user_device_ids(&conn, &owner).await?,
-        Err(_) => Vec::new(),
-    };
-    // And its conversations, for the leave wake-up sent after the commit (#1874).
+    // Its conversations, for the leave wake-up sent after the commit (#1874).
     let left = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         Ok(owner) => crate::directory::mls_groups_of(&conn, &owner).await?,
         Err(_) => crate::directory::MlsGroupsOf::default(),
     };
-    let (outcome, dead_conversations) =
+    let (outcome, _dead_conversations) =
         apply_delete_account(&conn, authed.as_deref(), &parsed).await?;
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         // `user_device` is now empty for this user, so every one of their cached
         // keys is stale (#658).
         state.device_keys.invalidate_user(&owner);
-        // Commit-log DB, only once the main transaction has committed — see
-        // `teardown::purge_conversation_log` for why the order is load-bearing.
         if matches!(outcome, WriteOutcome::Ok) {
-            let log_conn = state.log_db.conn().await?;
-            crate::writes::purge_welcomes(&log_conn, &owner).await?;
-            crate::teardown::purge_user_log_rows(&log_conn, &owner, &device_ids).await?;
-            crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
-            // The main DB's pre-#420 copies of those tables, where they exist.
-            crate::teardown::purge_legacy_log_copies(&conn, &owner, &device_ids).await?;
             spawn_leave_wakes(&state, left);
+            // The commit-log half the deletion transaction recorded. A failure
+            // fails the request; the record stays, and the next deletion or DS
+            // start runs it (`spawn_account_log_purge_drain`).
+            let log_conn = state.log_db.conn().await?;
+            crate::teardown::finish_account_log_purge(&conn, &log_conn, &owner).await?;
+            spawn_account_log_purge_drain(&state);
         }
     }
     outcome_response::<DeleteAccountBody>(outcome)
+}
+
+/// In the background, run any commit-log half an earlier account deletion
+/// still owes ([`crate::teardown::drain_account_log_purges`]). Called at DS start
+/// and after each account deletion; there is no timer.
+pub fn spawn_account_log_purge_drain(state: &AppState) {
+    let db = std::sync::Arc::clone(&state.db);
+    let log_db = std::sync::Arc::clone(&state.log_db);
+    tokio::spawn(async move {
+        let result = async {
+            let conn = db.conn().await?;
+            let log_conn = log_db.conn().await?;
+            crate::teardown::drain_account_log_purges(&conn, &log_conn).await
+        }
+        .await;
+        match result {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("account deletion: ran {n} owed commit-log purge(s)"),
+            Err(e) => tracing::warn!("account deletion: owed commit-log purges not run: {e:#}"),
+        }
+    });
 }
 
 /// Tell every conversation the deleted account was in that a member left, so
@@ -841,7 +855,7 @@ fn spawn_leave_wakes(state: &AppState, left: crate::directory::MlsGroupsOf) {
 /// Every remote-data delete of account deletion, in one transaction. Self-scoped
 /// to the signer.
 ///
-/// Returns the destroyed conversation ids, for the post-commit log purge.
+/// Returns the destroyed conversation ids (also recorded for the post-commit log purge).
 pub async fn apply_delete_account(
     conn: &Connection,
     authed: Option<&str>,
@@ -867,12 +881,19 @@ pub async fn apply_delete_account(
     // #1874: every conversation it was in re-checks its tree before the next seal.
     crate::directory::bump_membership_versions_of(&tx, &actor).await?;
 
+    // Read while `user_device` still has them, for the commit-log scrub.
+    let device_ids = crate::broker::user_device_ids(&tx, &actor).await?;
+
     let mut dead_conversations = handoff_group_ownership(&tx, &actor).await?;
     crate::teardown::purge_user_rows(&tx, &actor).await?;
 
     // Any DM the actor has just left that now has no members at all is dead:
     // tear it down rather than leaving an unreachable conversation behind.
     purge_emptied_dms(&tx, &dm_ids, &mut dead_conversations).await?;
+
+    // The commit-log half cannot join this transaction; it is owed from here on.
+    crate::teardown::record_account_log_purge(&tx, &actor, &device_ids, &dead_conversations)
+        .await?;
 
     // The anchor row last.
     tx.execute(

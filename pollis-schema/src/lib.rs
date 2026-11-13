@@ -294,6 +294,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "otp_mailbox",
         include_str!("../migrations/000048_otp_mailbox.sql"),
     ),
+    (
+        49,
+        "account_log_purge",
+        include_str!("../migrations/000049_account_log_purge.sql"),
+    ),
 ];
 
 /// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.

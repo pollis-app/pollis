@@ -874,6 +874,14 @@ One row = "group `group_id` calls this object `:shortcode:`". The PK makes a sho
 
 **Bounds.** There is deliberately **no per-group cap** (#848 is explicit). The bound is per-person: `EMOJI_MAX_PER_USER` (1000) rows per creator across all groups, which with the 48 KiB object ceiling caps one account's worst-case storage at 48 MiB — and usually far less, since their second copy of a popular emoji costs a row and no bytes.
 
+### account_log_purge _(post-baseline 000049, #1883)_
+- `user_id` TEXT PK: the deleted account
+- `device_ids` TEXT NOT NULL: its former device ids (JSON array)
+- `dead_conversations` TEXT NOT NULL: conversations the deletion tore down (JSON array)
+- `created_at` TEXT NOT NULL DEFAULT now
+
+Account deletion's commit-log half, written in the deletion transaction and deleted once that half has run (see "Teardown" below). Exempt from the user purge for that reason (`EXEMPT_FROM_USER_PURGE`).
+
 ### conversation_membership_version _(post-baseline 000046, #1874)_
 - `conversation_id` TEXT PK: the MLS group id (a group id, or a DM id)
 - `version` INTEGER NOT NULL DEFAULT 0
@@ -1314,6 +1322,7 @@ Teardown is now enumerated in one module:
 | `purge_group(conn, group_id)` | each channel's history, then the group's own rows; returns the dead conversation ids |
 | `purge_dm_channel(conn, dm_id)` | a DM with no members left |
 | `purge_user_log_rows` / `purge_device_log_rows` / `purge_conversation_log` | the commit-log DB (`mls_commit_since`, `mls_group_info`, `mls_welcome`, `mls_commit_log`) |
+| `record_account_log_purge` / `finish_account_log_purge` / `drain_account_log_purges` | account deletion's commit-log half, owed in `account_log_purge` (migration 000049) |
 
 Rules that matter:
 
@@ -1322,6 +1331,13 @@ Rules that matter:
   in that order, so a rolled-back teardown can never have already destroyed a
   still-live conversation's MLS state. Leftover rows for a dead conversation are
   recoverable; deleted state for a living one is not.
+- **Account deletion records its commit-log half in its own transaction**
+  (`account_log_purge`, #1883): the account's devices are gone after the commit,
+  so no retry of the request could authenticate to redo that half. The handler
+  runs it right after the commit (a failure fails the request) and deletes the
+  record; a record left by a failure is run by the next account deletion or the
+  next DS start (`spawn_account_log_purge_drain`). No timer. Identity reset needs
+  no record: its device survives, so a retried request reruns its log half.
 - **Two tables are exempt, with reasons carried in code**
   (`EXEMPT_FROM_USER_PURGE`): `account_key_log` (published, client-verified,
   append-only) and `mls_commit_log` for a *surviving* conversation (deleting a
