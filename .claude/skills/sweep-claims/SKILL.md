@@ -30,7 +30,7 @@ first for the vocabulary rules it references.
 - Numbers belong to the facts registry (`scripts/facts.json`, checked by
   `scripts/check-facts.mjs`). A claim with a `fact` field is re-verified by
   running that checker, not by hand.
-- No "early access / untested" caveats; be honest about trade-offs only.
+- No "early access / untested" caveats. A finding is fixed in the product, not disclosed in copy; only genuine by-design properties are stated, plainly (see "Findings are tickets, not copy" in CLAUDE.md).
 - **Findings are tickets, not copy.** Never publish known vulnerabilities,
   gaps, incident history or "not yet" items. When the product is weaker than
   the copy, fix the product, or narrow the claim so it is true without a
