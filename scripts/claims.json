@@ -9564,22 +9564,45 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "11.5 Identity reset (destructive)",
-        "quote": "Its `welcomes/purge` call still does work: pending Welcomes live in the separate commit-log database, outside that transaction, and are deleted by that call."
+        "quote": "Once that transaction commits, the same request (the session `rotate-identity`, or `reset-recover`) deletes every pending Welcome addressed to the account, along with the commit-log state of conversations the wipe tore down."
       },
-      "claim": "On the session reset path, reset-recover is a no-op; welcomes/purge deletes pending Welcomes from the commit-log DB.",
+      "claim": "The session rotate-identity and reset-recover delete the account's pending Welcomes from the commit-log DB after the main commit; no client purge call is needed.",
       "kind": "behaviour",
       "anchors": [
         "pollis-delivery/src/account.rs",
         "pollis-delivery/src/writes.rs",
-        "pollis-core/src/commands/device_enrollment.rs"
+        "pollis-delivery/tests/reset_session.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/account.rs:679",
-        "pollis-delivery/src/writes.rs:867",
-        "pollis-core/src/commands/device_enrollment.rs:775"
+        "pollis-delivery/src/account.rs:79",
+        "pollis-delivery/src/account.rs:104",
+        "pollis-delivery/src/account.rs:646",
+        "pollis-delivery/tests/reset_session.rs:645",
+        "pollis-delivery/tests/reset_session.rs:661"
       ],
       "status": "verified",
-      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
+      "verified_sha": "f2b5ba682eda7167e0c1246b9813a50899420eab",
+      "also_rendered_in": []
+    },
+    {
+      "id": "wp-s11-16",
+      "doc": "docs/security-whitepaper.md",
+      "locator": {
+        "heading": "11.5 Identity reset (destructive)",
+        "quote": "If that delete fails, the request fails, so a reset is never reported complete while Welcomes remain; rerunning the reset repeats both halves."
+      },
+      "claim": "A failed commit-log Welcome delete fails the reset request (5xx); both halves are idempotent and a rerun completes them.",
+      "kind": "behaviour",
+      "anchors": [
+        "pollis-delivery/src/account.rs",
+        "pollis-delivery/tests/reset_session.rs"
+      ],
+      "evidence": [
+        "pollis-delivery/src/account.rs:95",
+        "pollis-delivery/tests/reset_session.rs:708"
+      ],
+      "status": "verified",
+      "verified_sha": "f2b5ba682eda7167e0c1246b9813a50899420eab",
       "also_rendered_in": []
     },
     {
