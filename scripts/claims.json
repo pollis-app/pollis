@@ -19914,47 +19914,6 @@
       "also_rendered_in": []
     },
     {
-      "id": "policy-legal-05",
-      "doc": "website/legal-requests.html",
-      "locator": {
-        "heading": "Warrant canary",
-        "quote": "No warrant, subpoena or court order for user data has been received."
-      },
-      "claim": "No legal process for user data has been received.",
-      "kind": "process",
-      "anchors": [
-        "website/legal-requests.html"
-      ],
-      "evidence": [
-        "website/legal-requests.html:125"
-      ],
-      "status": "unverifiable",
-      "note": "Operator statement; not checkable from code.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
-      "id": "policy-legal-06",
-      "doc": "website/legal-requests.html",
-      "locator": {
-        "heading": "Warrant canary",
-        "quote": "No user data has been disclosed to any government, law enforcement agency or other third party, other than the subprocessors that run the service on Pollis's behalf"
-      },
-      "claim": "No user data has been disclosed to third parties other than subprocessors acting on Pollis's behalf.",
-      "kind": "security",
-      "anchors": [
-        "pollis-delivery/src/otp.rs",
-        "pollis-delivery/src/push.rs"
-      ],
-      "evidence": [
-        "pollis-delivery/src/otp.rs:114",
-        "pollis-delivery/src/push.rs:55"
-      ],
-      "status": "verified",
-      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
-      "also_rendered_in": []
-    },
-    {
       "id": "policy-retention-01",
       "doc": "docs/metadata-retention-policy.md",
       "locator": {
