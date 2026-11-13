@@ -2282,6 +2282,25 @@ mod tests {
         }
     }
 
+    /// Binds a UDP socket and a TCP listener on the SAME loopback port, as an SFU serves both.
+    ///
+    /// An ephemeral UDP port says nothing about whether TCP holds that number too, so a lone
+    /// attempt fails with `AddrInUse` whenever something else owns it (#1860). Retry with fresh
+    /// ports, bounded so a broken environment still fails loudly.
+    async fn bind_udp_and_tcp_on_one_port() -> (tokio::net::UdpSocket, TcpListener) {
+        const ATTEMPTS: usize = 64;
+        let mut last_err = None;
+        for _ in 0..ATTEMPTS {
+            let udp = tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
+            match TcpListener::bind(udp.local_addr().unwrap()).await {
+                Ok(tcp) => return (udp, tcp),
+                Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => last_err = Some(e),
+                Err(e) => panic!("TCP bind on the UDP port failed: {e}"),
+            }
+        }
+        panic!("no loopback port free for both UDP and TCP after {ATTEMPTS} tries: {last_err:?}");
+    }
+
     /// For ONE host and port, TCP signaling rides a circuit while UDP media goes straight to the origin.
     ///
     /// The SOCKS5 CONNECT transport enforces the §6.4 media rule, which no host list could.
@@ -2289,9 +2308,8 @@ mod tests {
     async fn a_socks_shim_cannot_carry_media_even_for_an_overlaid_host() {
         use tokio::net::UdpSocket;
 
-        let media = UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
+        let (media, signaling) = bind_udp_and_tcp_on_one_port().await;
         let sfu_addr = media.local_addr().unwrap();
-        let signaling = TcpListener::bind(sfu_addr).await.expect("same port, TCP side");
         tokio::spawn(async move {
             while let Ok((mut sock, _)) = signaling.accept().await {
                 tokio::spawn(async move {
