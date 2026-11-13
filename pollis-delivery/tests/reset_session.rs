@@ -6,12 +6,11 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::Engine as _;
 use http_body_util::BodyExt as _;
-use ml_dsa::{Keypair, MlDsa44, Signer, SigningKey};
-use pollis_delivery::auth::canonical_message;
+use ml_dsa::Keypair;
+use common::{gen_signing_key, send_signed};
 use pollis_delivery::db::Db;
 use pollis_delivery::otp::OtpConfig;
 use pollis_delivery::{build_router_with_state, AppState};
-use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
 
 mod common;
@@ -359,48 +358,6 @@ async fn session_rotation_is_the_reset_and_is_audited_by_the_ds() {
         1,
         "the follow-up reset-recover keeps the same device and nothing else"
     );
-}
-
-fn gen_signing_key() -> SigningKey<MlDsa44> {
-    let mut seed = [0u8; 32];
-    OsRng.fill_bytes(&mut seed);
-    SigningKey::<MlDsa44>::from_seed(&seed.into())
-}
-
-async fn send_signed(
-    state: &AppState,
-    path: &str,
-    body: serde_json::Value,
-    user_id: &str,
-    device_id: &str,
-    sk: &SigningKey<MlDsa44>,
-) -> (StatusCode, serde_json::Value) {
-    let bytes = serde_json::to_vec(&body).unwrap();
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let msg = canonical_message("POST", path, ts, &bytes);
-    let sig = base64::engine::general_purpose::STANDARD.encode(sk.sign(&msg).encode());
-    let req = Request::builder()
-        .method("POST")
-        .uri(path)
-        .header("content-type", "application/json")
-        .header("X-Pollis-User", user_id)
-        .header("X-Pollis-Device", device_id)
-        .header("X-Pollis-Timestamp", ts.to_string())
-        .header("X-Pollis-Signature", sig)
-        .body(Body::from(bytes))
-        .unwrap();
-    let resp = build_router_with_state(state.clone()).oneshot(req).await.unwrap();
-    let status = resp.status();
-    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let val = if bytes.is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
-    };
-    (status, val)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -761,4 +718,71 @@ async fn welcomes_purge_still_answers_after_a_session_reset() {
         send(&dbs.state, "/v1/welcomes/purge", serde_json::json!({}), Some(&token), false).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["deleted"], serde_json::json!(0), "nothing is left for it to delete");
+}
+
+/// A conversation the reset tears down (the account is its only member), with
+/// MLS state on the log DB.
+async fn seed_solo_conversation(dbs: &SplitDbs, user_id: &str) {
+    let conn = dbs.main.conn().await.unwrap();
+    for sql in [
+        "INSERT INTO conversation (id, kind) VALUES ('solo', 'group')".to_string(),
+        format!("INSERT INTO groups (id, name, owner_id) VALUES ('solo', 'S', '{user_id}')"),
+        format!("INSERT INTO group_member (group_id, user_id, role) VALUES ('solo', '{user_id}', 'admin')"),
+    ] {
+        conn.execute(&sql, ()).await.expect("seed main");
+    }
+    dbs.log
+        .conn()
+        .await
+        .unwrap()
+        .execute(
+            "INSERT INTO mls_group_info (conversation_id, epoch, group_info, updated_by_device_id) \
+             VALUES ('solo', 1, x'00', 'dev-old')",
+            (),
+        )
+        .await
+        .expect("seed log");
+}
+
+/// The torn-down conversations are recorded in the reset transaction: when
+/// dropping their log state fails, a rerun reset (which tears nothing down
+/// itself, they are already gone) still drops it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rerun_reset_drops_the_log_state_of_conversations_the_failed_one_tore_down() {
+    let dbs = split_dbs().await;
+    let (user_id, token) = login_established(&dbs.state, "alice@example.com", "dev-new").await;
+    seed_split(&dbs, &user_id, "dev-new").await;
+    seed_solo_conversation(&dbs, &user_id).await;
+    let group_info = "SELECT COUNT(*) FROM mls_group_info WHERE conversation_id = ?1";
+    let owed = "SELECT COUNT(*) FROM account_log_purge WHERE user_id = ?1";
+
+    dbs.log
+        .conn()
+        .await
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER block_group_info_delete BEFORE DELETE ON mls_group_info \
+             BEGIN SELECT RAISE(ABORT, 'log db unavailable'); END;",
+        )
+        .await
+        .unwrap();
+    let (s, body) =
+        send(&dbs.state, "/v1/account/rotate-identity", rotate_body(1), Some(&token), false).await;
+    assert!(s.is_server_error(), "got {s}: {body}");
+    assert_eq!(count(&dbs.log, group_info, "solo").await, 1);
+    assert_eq!(count(&dbs.main, "SELECT COUNT(*) FROM groups WHERE id = ?1", "solo").await, 0);
+    assert_eq!(count(&dbs.main, owed, &user_id).await, 1, "the torn-down conversation stays owed");
+
+    dbs.log
+        .conn()
+        .await
+        .unwrap()
+        .execute("DROP TRIGGER block_group_info_delete", ())
+        .await
+        .unwrap();
+    let (s, body) =
+        send(&dbs.state, "/v1/account/rotate-identity", rotate_body(2), Some(&token), false).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(count(&dbs.log, group_info, "solo").await, 0, "the rerun drops it");
+    assert_eq!(count(&dbs.main, owed, &user_id).await, 0);
 }

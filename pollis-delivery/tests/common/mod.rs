@@ -37,6 +37,59 @@ impl TempDb {
     }
 }
 
+/// A fresh ML-DSA-44 device signing key.
+pub fn gen_signing_key() -> ml_dsa::SigningKey<ml_dsa::MlDsa44> {
+    use rand_core::RngCore as _;
+    let mut seed = [0u8; 32];
+    rand_core::OsRng.fill_bytes(&mut seed);
+    ml_dsa::SigningKey::<ml_dsa::MlDsa44>::from_seed(&seed.into())
+}
+
+/// POST `body` to `path` through the router, device-signed as `user_id`/`device_id`.
+pub async fn send_signed(
+    state: &pollis_delivery::AppState,
+    path: &str,
+    body: serde_json::Value,
+    user_id: &str,
+    device_id: &str,
+    sk: &ml_dsa::SigningKey<ml_dsa::MlDsa44>,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    use base64::Engine as _;
+    use http_body_util::BodyExt as _;
+    use ml_dsa::Signer as _;
+    use tower::ServiceExt as _;
+
+    let bytes = serde_json::to_vec(&body).unwrap();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let msg = pollis_delivery::auth::canonical_message("POST", path, ts, &bytes);
+    let sig = base64::engine::general_purpose::STANDARD.encode(sk.sign(&msg).encode());
+    let req = axum::http::Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("content-type", "application/json")
+        .header("X-Pollis-User", user_id)
+        .header("X-Pollis-Device", device_id)
+        .header("X-Pollis-Timestamp", ts.to_string())
+        .header("X-Pollis-Signature", sig)
+        .body(axum::body::Body::from(bytes))
+        .unwrap();
+    let resp = pollis_delivery::build_router_with_state(state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let val = if bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+    };
+    (status, val)
+}
+
 impl Deref for TempDb {
     type Target = Arc<Db>;
 

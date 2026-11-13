@@ -65,7 +65,7 @@ pub async fn rotate_identity(
             Err(resp) => return Ok(resp),
         };
     let conn = state.db.conn().await?;
-    let (outcome, dead_conversations) =
+    let (outcome, _dead_conversations) =
         apply_rotate_identity(&conn, authed.as_deref(), &parsed, &credential).await?;
     // Evict the user (#658): every device cert chains to the rotated key.
     let owner = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()).ok();
@@ -76,32 +76,28 @@ pub async fn rotate_identity(
     if let (RotateOutcome::Applied { .. }, GateCredential::Session { .. }, Some(owner)) =
         (&outcome, &credential, owner.as_deref())
     {
-        reset_log_half(&state, owner, &dead_conversations).await?;
+        reset_log_half(&state, &conn, owner).await?;
     }
     rotate_outcome_response::<RotateIdentityBody>(outcome)
 }
 
 /// The commit-log-DB half of an identity reset, run once the main transaction
-/// has committed: drop the MLS state of the conversations the wipe destroyed
-/// and delete every pending Welcome addressed to the account. Those Welcomes
-/// were made for key packages and devices the wipe just removed.
+/// has committed: delete every pending Welcome addressed to the account (they
+/// were made for key packages and devices the wipe just removed), and drop the
+/// MLS state of the conversations the wipe destroyed, which the transaction
+/// recorded ([`crate::teardown::record_account_log_purge`]).
 ///
 /// The two databases share no transaction. An error here fails the request
 /// (5xx) even though the main-DB half has applied, so the reset is never
-/// reported complete with Welcomes left behind. Both halves are idempotent: a
-/// retried `reset-recover` reruns them, and a retried reset rotates again from
-/// the account's new head and reruns them. `POST /v1/welcomes/purge` stays for
-/// clients that still send it; after this it deletes nothing.
-async fn reset_log_half(
-    state: &AppState,
-    owner: &str,
-    dead_conversations: &[String],
-) -> anyhow::Result<()> {
+/// reported complete with Welcomes left behind. A retried `reset-recover`, or a
+/// reset rerun from the account's new head, deletes the Welcomes again; the
+/// recorded conversations stay owed until they are dropped, by that rerun, the
+/// next account deletion or the next DS start. `POST /v1/welcomes/purge` stays
+/// for clients that still send it; after this it deletes nothing.
+async fn reset_log_half(state: &AppState, conn: &Connection, owner: &str) -> anyhow::Result<()> {
     let log_conn = state.log_db.conn().await?;
-    if !dead_conversations.is_empty() {
-        crate::teardown::purge_conversation_log(&log_conn, dead_conversations).await?;
-    }
     crate::writes::purge_welcomes(&log_conn, owner).await?;
+    crate::teardown::finish_account_log_purge(conn, &log_conn, owner).await?;
     Ok(())
 }
 
@@ -212,6 +208,13 @@ pub async fn apply_rotate_identity(
     let (credential_label, device_id, dead_conversations) = match credential {
         GateCredential::Session { device_id } => {
             let dead = reset_recover_in_tx(&tx, &actor, Some(device_id.as_str())).await?;
+            crate::teardown::record_account_log_purge(
+                &tx,
+                &actor,
+                crate::teardown::OwedLogPurge::Reset,
+                &dead,
+            )
+            .await?;
             ("session", Some(device_id.clone()), dead)
         }
         GateCredential::Signature { device_id } => {
@@ -637,13 +640,13 @@ pub async fn reset_recover(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    let (outcome, dead_conversations) =
+    let (outcome, _dead_conversations) =
         apply_reset_recover(&conn, authed.as_deref(), &parsed).await?;
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         // Account-wide device wipe → evict the whole user (#658).
         state.device_keys.invalidate_user(&owner);
         if matches!(outcome, WriteOutcome::Ok) {
-            reset_log_half(&state, &owner, &dead_conversations).await?;
+            reset_log_half(&state, &conn, &owner).await?;
         }
     }
     outcome_response::<ResetRecoverBody>(outcome)
@@ -664,6 +667,13 @@ pub async fn apply_reset_recover(
     let tx = conn.transaction().await?;
     let dead_conversations =
         reset_recover_in_tx(&tx, &actor, body.current_device_id.as_deref()).await?;
+    crate::teardown::record_account_log_purge(
+        &tx,
+        &actor,
+        crate::teardown::OwedLogPurge::Reset,
+        &dead_conversations,
+    )
+    .await?;
     tx.commit().await?;
     Ok((WriteOutcome::Ok, dead_conversations))
 }
@@ -794,34 +804,48 @@ pub async fn delete_account(
         state.device_keys.invalidate_user(&owner);
         if matches!(outcome, WriteOutcome::Ok) {
             spawn_leave_wakes(&state, left);
-            // The commit-log half the deletion transaction recorded. A failure
-            // fails the request; the record stays, and the next deletion or DS
-            // start runs it (`spawn_account_log_purge_drain`).
-            let log_conn = state.log_db.conn().await?;
-            crate::teardown::finish_account_log_purge(&conn, &log_conn, &owner).await?;
+            // The commit-log half the deletion transaction recorded. The
+            // account is gone and the half is owed durably, so a failure here
+            // is logged, not returned: the record stays for the next drain
+            // (`spawn_account_log_purge_drain`), and the client finishes its
+            // own cleanup instead of retrying a request that can no longer sign.
+            if let Err(e) = finish_owed_log_purge(&state, &conn, &owner).await {
+                tracing::warn!("account deletion: commit-log purge left owed: {e:#}");
+            }
             spawn_account_log_purge_drain(&state);
         }
     }
     outcome_response::<DeleteAccountBody>(outcome)
 }
 
-/// In the background, run any commit-log half an earlier account deletion
-/// still owes ([`crate::teardown::drain_account_log_purges`]). Called at DS start
-/// and after each account deletion; there is no timer.
+async fn finish_owed_log_purge(state: &AppState, conn: &Connection, owner: &str) -> anyhow::Result<()> {
+    let log_conn = state.log_db.conn().await?;
+    crate::teardown::finish_account_log_purge(conn, &log_conn, owner).await?;
+    Ok(())
+}
+
+/// In the background, run every commit-log half still owed
+/// ([`crate::teardown::drain_account_log_purges`]), one drain at a time
+/// (`AppState::log_purge_drain`). Called at DS start and after each account
+/// deletion; there is no timer.
 pub fn spawn_account_log_purge_drain(state: &AppState) {
     let db = std::sync::Arc::clone(&state.db);
     let log_db = std::sync::Arc::clone(&state.log_db);
-    tokio::spawn(async move {
-        let result = async {
-            let conn = db.conn().await?;
-            let log_conn = log_db.conn().await?;
-            crate::teardown::drain_account_log_purges(&conn, &log_conn).await
-        }
-        .await;
-        match result {
-            Ok(0) => {}
-            Ok(n) => tracing::info!("account deletion: ran {n} owed commit-log purge(s)"),
-            Err(e) => tracing::warn!("account deletion: owed commit-log purges not run: {e:#}"),
+    state.log_purge_drain.kick(move || {
+        let db = std::sync::Arc::clone(&db);
+        let log_db = std::sync::Arc::clone(&log_db);
+        async move {
+            let result = async {
+                let conn = db.conn().await?;
+                let log_conn = log_db.conn().await?;
+                crate::teardown::drain_account_log_purges(&conn, &log_conn).await
+            }
+            .await;
+            match result {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("ran {n} owed commit-log purge(s)"),
+                Err(e) => tracing::warn!("owed commit-log purges not run: {e:#}"),
+            }
         }
     });
 }
@@ -892,8 +916,13 @@ pub async fn apply_delete_account(
     purge_emptied_dms(&tx, &dm_ids, &mut dead_conversations).await?;
 
     // The commit-log half cannot join this transaction; it is owed from here on.
-    crate::teardown::record_account_log_purge(&tx, &actor, &device_ids, &dead_conversations)
-        .await?;
+    crate::teardown::record_account_log_purge(
+        &tx,
+        &actor,
+        crate::teardown::OwedLogPurge::Deletion { device_ids: &device_ids },
+        &dead_conversations,
+    )
+    .await?;
 
     // The anchor row last.
     tx.execute(

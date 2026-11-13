@@ -2,11 +2,21 @@
 //! transaction, so a failure after the main commit leaves a record the next
 //! run finishes rather than rows no request can reach.
 
+use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::http::StatusCode;
 use libsql::Connection;
+use ml_dsa::Keypair as _;
 use pollis_api::account::DeleteAccountBody;
 use pollis_delivery::account::apply_delete_account;
 use pollis_delivery::teardown::{drain_account_log_purges, finish_account_log_purge};
+use pollis_delivery::util::SingleFlight;
 use pollis_delivery::writes::WriteOutcome;
+use pollis_delivery::AppState;
+
+mod common;
 
 async fn open(log: bool) -> Connection {
     let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
@@ -132,4 +142,140 @@ async fn a_failed_commit_log_half_stays_owed_and_the_next_drain_finishes_it() {
     assert_eq!(drain_account_log_purges(&main, &log).await.unwrap(), 1);
     assert_eq!(log_rows_naming_victim(&log).await, 0, "nothing naming the account is left");
     assert_eq!(owed(&main).await, 0);
+}
+
+/// A record whose id lists cannot be read still runs the account-scoped part
+/// and is deleted, rather than failing every drain.
+#[tokio::test]
+async fn an_unreadable_record_still_runs_and_goes() {
+    let (main, log) = seeded().await;
+    exec(
+        &main,
+        "INSERT INTO account_log_purge (user_id, scrub_account, device_ids, dead_conversations) \
+         VALUES ('victim', 1, 'not json', '[1')",
+    )
+    .await;
+    assert!(finish_account_log_purge(&main, &log, "victim").await.unwrap());
+    assert_eq!(owed(&main).await, 0);
+    assert_eq!(
+        count(&log, "SELECT COUNT(*) FROM mls_welcome WHERE recipient_id = 'victim'").await
+            + count(&log, "SELECT COUNT(*) FROM mls_commit_since WHERE user_id = 'victim'").await,
+        0,
+        "the account-scoped rows still go"
+    );
+}
+
+/// `POST /v1/account/delete` with a failing commit-log DB: the account is gone
+/// and the half is recorded, so the request succeeds (a retry could no longer
+/// sign) and the record waits for the next drain.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_deletion_request_succeeds_when_the_commit_log_half_fails() {
+    let main = common::TempDb::open("main.db").await;
+    pollis_schema::apply::main_db(&main.conn().await.unwrap()).await.unwrap();
+    let log = common::TempDb::open("log.db").await;
+    pollis_schema::apply::log_db(&log.conn().await.unwrap()).await.unwrap();
+    let state = AppState::new_with_log_db(main.arc(), log.arc(), true);
+
+    let sk = common::gen_signing_key();
+    let main_conn = main.conn().await.unwrap();
+    exec(&main_conn, "INSERT INTO users (id, email, username) VALUES ('victim', 'v@x.com', 'victim')").await;
+    main_conn
+        .execute(
+            "INSERT INTO user_device (device_id, user_id, mls_signature_pub_pq) VALUES ('victim_dev', 'victim', ?1)",
+            libsql::params![sk.verifying_key().encode().to_vec()],
+        )
+        .await
+        .unwrap();
+    let log_conn = log.conn().await.unwrap();
+    exec(
+        &log_conn,
+        "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
+         VALUES ('w1', 'other_g', 'victim', 'victim_dev', x'00')",
+    )
+    .await;
+    exec(
+        &log_conn,
+        "CREATE TRIGGER block_welcome_delete BEFORE DELETE ON mls_welcome \
+         BEGIN SELECT RAISE(ABORT, 'log db unavailable'); END",
+    )
+    .await;
+
+    let (s, body) = common::send_signed(
+        &state,
+        "/v1/account/delete",
+        serde_json::json!({}),
+        "victim",
+        "victim_dev",
+        &sk,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "the deletion committed, so the request succeeds: {body}");
+    assert_eq!(count(&main_conn, "SELECT COUNT(*) FROM users WHERE id = 'victim'").await, 0);
+    assert_eq!(owed(&main_conn).await, 1, "the commit-log half stays owed");
+
+    exec(&log_conn, "DROP TRIGGER block_welcome_delete").await;
+    // The request also kicked a background drain; either may be the one that runs it.
+    drain_account_log_purges(&main_conn, &log_conn).await.unwrap();
+    assert_eq!(count(&log_conn, "SELECT COUNT(*) FROM mls_welcome WHERE recipient_id = 'victim'").await, 0);
+    assert_eq!(owed(&main_conn).await, 0);
+}
+
+/// Overlapping kicks never run the drain twice at once, and the last kick is
+/// always served by a run that starts after it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn drains_run_one_at_a_time_and_never_miss_a_kick() {
+    let gate = SingleFlight::default();
+    let kicks = Arc::new(AtomicUsize::new(0));
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+    let runs = Arc::new(AtomicUsize::new(0));
+    let last_seen = Arc::new(AtomicUsize::new(0));
+
+    let mut kickers = Vec::new();
+    for _ in 0..8 {
+        let gate = gate.clone();
+        let (kicks, active, max_active, runs, last_seen) =
+            (kicks.clone(), active.clone(), max_active.clone(), runs.clone(), last_seen.clone());
+        kickers.push(tokio::spawn(async move {
+            for _ in 0..10 {
+                kicks.fetch_add(1, SeqCst);
+                let (kicks, active, max_active, runs, last_seen) =
+                    (kicks.clone(), active.clone(), max_active.clone(), runs.clone(), last_seen.clone());
+                gate.kick(move || {
+                    let (kicks, active, max_active, runs, last_seen) =
+                        (kicks.clone(), active.clone(), max_active.clone(), runs.clone(), last_seen.clone());
+                    async move {
+                        let now = active.fetch_add(1, SeqCst) + 1;
+                        max_active.fetch_max(now, SeqCst);
+                        last_seen.store(kicks.load(SeqCst), SeqCst);
+                        tokio::time::sleep(Duration::from_millis(2)).await;
+                        active.fetch_sub(1, SeqCst);
+                        runs.fetch_add(1, SeqCst);
+                    }
+                });
+                tokio::time::sleep(Duration::from_micros(300)).await;
+            }
+        }));
+    }
+    for k in kickers {
+        k.await.unwrap();
+    }
+    // Let the last run finish.
+    let mut stable = 0;
+    let mut prev = usize::MAX;
+    while stable < 20 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let now = runs.load(SeqCst);
+        if now == prev && active.load(SeqCst) == 0 {
+            stable += 1;
+        } else {
+            stable = 0;
+        }
+        prev = now;
+    }
+
+    assert_eq!(max_active.load(SeqCst), 1, "two drains ran at once");
+    assert!(runs.load(SeqCst) >= 1);
+    assert!(runs.load(SeqCst) < 80, "overlapping kicks share a run");
+    assert_eq!(last_seen.load(SeqCst), 80, "a run started after the last kick");
 }

@@ -139,9 +139,9 @@ pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
     ),
     (
         "account_log_purge",
-        "Account deletion's own record of the commit-log half it still owes \
-         (#1883), written in the deletion transaction and deleted by \
-         `finish_account_log_purge` once that half has run.",
+        "The record of a commit-log half an identity reset or account deletion \
+         still owes (#1883), written in that operation's transaction and deleted \
+         by `finish_account_log_purge` once the half has run.",
     ),
     (
         "pin_keystate",
@@ -721,36 +721,100 @@ pub async fn purge_conversation_log(
     Ok(())
 }
 
-/// Record account deletion's commit-log half in the deletion's own main-DB
-/// transaction (migration 000049), so the half that cannot share that
-/// transaction is owed durably rather than by the request alone. `device_ids`
-/// must be read before [`purge_user_rows`] deletes `user_device`.
+/// What an operation leaves owed to the commit-log DB (migration 000049).
+pub enum OwedLogPurge<'a> {
+    /// Identity reset: only the conversations it tore down. Its request
+    /// deletes the account's Welcomes itself each time it runs.
+    Reset,
+    /// Account deletion: the account's own commit-log rows too. `device_ids`
+    /// must be read before [`purge_user_rows`] deletes `user_device`.
+    Deletion { device_ids: &'a [String] },
+}
+
+/// Record, in the operation's own main-DB transaction, the commit-log half that
+/// cannot share it, merged with anything still owed for `user_id`. Nothing is
+/// written for a reset that tore nothing down and has nothing owed.
 pub async fn record_account_log_purge(
     tx: &Connection,
     user_id: &str,
-    device_ids: &[String],
+    owed: OwedLogPurge<'_>,
     dead_conversations: &[String],
 ) -> anyhow::Result<()> {
+    let prior = owed_row(tx, user_id).await?;
+    let had_prior = prior.is_some();
+    let (mut scrub, mut devices, mut dead) = prior.unwrap_or_default();
+    if let OwedLogPurge::Deletion { device_ids } = owed {
+        scrub = true;
+        devices.extend(device_ids.iter().cloned());
+    }
+    dead.extend(dead_conversations.iter().cloned());
+    if !had_prior && !scrub && dead.is_empty() {
+        return Ok(());
+    }
+    devices.sort();
+    devices.dedup();
+    dead.sort();
+    dead.dedup();
     tx.execute(
-        "INSERT INTO account_log_purge (user_id, device_ids, dead_conversations) \
-         VALUES (?1, ?2, ?3) \
+        "INSERT INTO account_log_purge (user_id, scrub_account, device_ids, dead_conversations) \
+         VALUES (?1, ?2, ?3, ?4) \
          ON CONFLICT(user_id) DO UPDATE SET \
+             scrub_account = excluded.scrub_account, \
              device_ids = excluded.device_ids, \
              dead_conversations = excluded.dead_conversations",
         libsql::params![
             user_id.to_string(),
-            serde_json::to_string(device_ids)?,
-            serde_json::to_string(dead_conversations)?
+            i64::from(scrub),
+            serde_json::to_string(&devices)?,
+            serde_json::to_string(&dead)?
         ],
     )
     .await?;
     Ok(())
 }
 
-/// Run the commit-log half recorded for `user_id` by [`record_account_log_purge`],
-/// then drop the record. Runs only after the deletion transaction has committed
-/// (the record exists only then), as [`purge_conversation_log`] requires.
-/// Idempotent; `false` when nothing was owed.
+/// The owed row for `user_id`: (scrub_account, device ids, dead conversations).
+async fn owed_row(
+    conn: &Connection,
+    user_id: &str,
+) -> anyhow::Result<Option<(bool, Vec<String>, Vec<String>)>> {
+    let mut rows = conn
+        .query(
+            "SELECT scrub_account, device_ids, dead_conversations \
+             FROM account_log_purge WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let scrub: i64 = row.get(0)?;
+    let devices: String = row.get(1)?;
+    let dead: String = row.get(2)?;
+    Ok(Some((
+        scrub != 0,
+        ids_from_json(&devices, "device_ids"),
+        ids_from_json(&dead, "dead_conversations"),
+    )))
+}
+
+/// A stored id list. Only [`record_account_log_purge`] writes these; an
+/// unreadable one is logged and read as empty, so the row still runs its
+/// account-scoped part and is deleted instead of failing every drain.
+fn ids_from_json(text: &str, column: &str) -> Vec<String> {
+    match serde_json::from_str(text) {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::error!("account_log_purge.{column} unreadable, read as empty: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// Run the commit-log half owed for `user_id`, then drop the record. Runs only
+/// after the recording transaction has committed (the record exists only
+/// then), as [`purge_conversation_log`] requires. Idempotent; `false` when
+/// nothing was owed.
 ///
 /// `conn` is the main DB (the record and the pre-#420 log copies), `log_conn`
 /// the commit-log DB; they are the same database in a single-DB deploy.
@@ -759,28 +823,16 @@ pub async fn finish_account_log_purge(
     log_conn: &Connection,
     user_id: &str,
 ) -> anyhow::Result<bool> {
-    let owed: Option<(String, String)> = {
-        let mut rows = conn
-            .query(
-                "SELECT device_ids, dead_conversations FROM account_log_purge WHERE user_id = ?1",
-                libsql::params![user_id.to_string()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => Some((row.get(0)?, row.get(1)?)),
-            None => None,
-        }
-    };
-    let Some((device_ids, dead_conversations)) = owed else {
+    let Some((scrub, device_ids, dead_conversations)) = owed_row(conn, user_id).await? else {
         return Ok(false);
     };
-    let device_ids: Vec<String> = serde_json::from_str(&device_ids)?;
-    let dead_conversations: Vec<String> = serde_json::from_str(&dead_conversations)?;
 
-    crate::writes::purge_welcomes(log_conn, user_id).await?;
-    purge_user_log_rows(log_conn, user_id, &device_ids).await?;
     purge_conversation_log(log_conn, &dead_conversations).await?;
-    purge_legacy_log_copies(conn, user_id, &device_ids).await?;
+    if scrub {
+        crate::writes::purge_welcomes(log_conn, user_id).await?;
+        purge_user_log_rows(log_conn, user_id, &device_ids).await?;
+        purge_legacy_log_copies(conn, user_id, &device_ids).await?;
+    }
 
     conn.execute(
         "DELETE FROM account_log_purge WHERE user_id = ?1",
@@ -810,7 +862,7 @@ pub async fn drain_account_log_purges(
         match finish_account_log_purge(conn, log_conn, &user_id).await {
             Ok(true) => finished += 1,
             Ok(false) => {}
-            Err(e) => tracing::warn!("account deletion: commit-log purge still owed: {e:#}"),
+            Err(e) => tracing::warn!("commit-log purge still owed: {e:#}"),
         }
     }
     Ok(finished)

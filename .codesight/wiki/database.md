@@ -875,12 +875,13 @@ One row = "group `group_id` calls this object `:shortcode:`". The PK makes a sho
 **Bounds.** There is deliberately **no per-group cap** (#848 is explicit). The bound is per-person: `EMOJI_MAX_PER_USER` (1000) rows per creator across all groups, which with the 48 KiB object ceiling caps one account's worst-case storage at 48 MiB — and usually far less, since their second copy of a popular emoji costs a row and no bytes.
 
 ### account_log_purge _(post-baseline 000049, #1883)_
-- `user_id` TEXT PK: the deleted account
-- `device_ids` TEXT NOT NULL: its former device ids (JSON array)
-- `dead_conversations` TEXT NOT NULL: conversations the deletion tore down (JSON array)
+- `user_id` TEXT PK: the account
+- `scrub_account` INTEGER NOT NULL CHECK IN (0, 1): 1 for an account deletion (the account's own commit-log rows go too), 0 for an identity reset (only its torn-down conversations)
+- `device_ids` TEXT NOT NULL: the deleted account's former device ids (JSON array; empty for a reset)
+- `dead_conversations` TEXT NOT NULL: conversations the operation tore down (JSON array)
 - `created_at` TEXT NOT NULL DEFAULT now
 
-Account deletion's commit-log half, written in the deletion transaction and deleted once that half has run (see "Teardown" below). Exempt from the user purge for that reason (`EXEMPT_FROM_USER_PURGE`).
+The commit-log half an identity reset or account deletion still owes, written in that operation's transaction (merged with anything already owed for the account) and deleted once the half has run (see "Teardown" below). An unreadable id list is logged and read as empty, so the row still runs and goes. Exempt from the user purge for that reason (`EXEMPT_FROM_USER_PURGE`).
 
 ### conversation_membership_version _(post-baseline 000046, #1874)_
 - `conversation_id` TEXT PK: the MLS group id (a group id, or a DM id)
@@ -1322,7 +1323,7 @@ Teardown is now enumerated in one module:
 | `purge_group(conn, group_id)` | each channel's history, then the group's own rows; returns the dead conversation ids |
 | `purge_dm_channel(conn, dm_id)` | a DM with no members left |
 | `purge_user_log_rows` / `purge_device_log_rows` / `purge_conversation_log` | the commit-log DB (`mls_commit_since`, `mls_group_info`, `mls_welcome`, `mls_commit_log`) |
-| `record_account_log_purge` / `finish_account_log_purge` / `drain_account_log_purges` | account deletion's commit-log half, owed in `account_log_purge` (migration 000049) |
+| `record_account_log_purge` / `finish_account_log_purge` / `drain_account_log_purges` | the commit-log half an identity reset or account deletion still owes, in `account_log_purge` (migration 000049) |
 
 Rules that matter:
 
@@ -1331,13 +1332,17 @@ Rules that matter:
   in that order, so a rolled-back teardown can never have already destroyed a
   still-live conversation's MLS state. Leftover rows for a dead conversation are
   recoverable; deleted state for a living one is not.
-- **Account deletion records its commit-log half in its own transaction**
-  (`account_log_purge`, #1883): the account's devices are gone after the commit,
-  so no retry of the request could authenticate to redo that half. The handler
-  runs it right after the commit (a failure fails the request) and deletes the
-  record; a record left by a failure is run by the next account deletion or the
-  next DS start (`spawn_account_log_purge_drain`). No timer. Identity reset needs
-  no record: its device survives, so a retried request reruns its log half.
+- **Identity reset and account deletion record their commit-log half in their
+  own transaction** (`account_log_purge`, #1883). A retry cannot redo it: a
+  deleted account's devices can no longer sign, and a rerun reset finds the
+  conversations the first one tore down already gone. The handler runs the
+  half right after the commit and deletes the record. If that fails, a reset
+  request fails (its rerun runs the record again); a deletion request still
+  succeeds, since the account is gone and the work is owed durably. Any record
+  left is run by the next account deletion or the next DS start
+  (`spawn_account_log_purge_drain`, one drain at a time per process via
+  `util::SingleFlight`). No timer. The reset's own Welcome delete is not
+  recorded: its request deletes the account's Welcomes each time it runs.
 - **Two tables are exempt, with reasons carried in code**
   (`EXEMPT_FROM_USER_PURGE`): `account_key_log` (published, client-verified,
   append-only) and `mls_commit_log` for a *surviving* conversation (deleting a
