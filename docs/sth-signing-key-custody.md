@@ -2,8 +2,8 @@
 
 **Status:** every §9 decision is now made. §5 (the key set + overlap window) is **BUILT** (#740).
 §4 custody is **DECIDED — Option A, the CI secret** (2026-08-03), knowingly against §4's own
-recommendation. §6 (the anchor split) is **DECIDED — adopt** (2026-08-04), implementation tracked in
-**#754**; that choice follows directly from the custody one. Two items remain open but need no
+recommendation. §6 (the anchor split) is **BUILT** (#754, #806): an offline root signs the key set
+(`/v1/key-set.json`); that choice follows directly from the custody one. Two items remain open but need no
 decision: the overlap-window length (unset until a rotation needs it) and whether gossip/witness
 monitoring (§8) gets its own ticket. See §9 for the ledger. Resolves the design half of #700; part
 of #662. The runbook in §7 was executed by #732/#740.
@@ -64,11 +64,8 @@ amount of KMS hardening fixes this; it is a structural property of using one key
 
 This is the strongest argument for §6, and it should have been decided before, not after, #699 minted
 the v2 key — the key hierarchy is baked in the moment we publish and pin. It was not: #732 minted and
-pinned first. §6 is now decided (adopt, 2026-08-04, tracked in **#754**), which costs a second
-rotation rather than riding along with the first.
-
-**Until #754 lands, this gap is open**, and anything describing our recovery posture should say so
-rather than imply a compromise is cleanly recoverable.
+pinned first. §6 is built (#754, #806): an offline root key signs the key set, so a signer can be
+retired without trusting the key being retired (§8).
 
 ## 4. Custody options
 
@@ -213,7 +210,7 @@ fix.
 Cost: one more document type, one more verification step, and a ceremony we would want for the root
 anyway. Compared to "a leak is unrecoverable", this is cheap.
 
-### DECIDED 2026-08-04: adopt the split. Tracked in #754.
+### DECIDED 2026-08-04: adopt the split. Built in #806 (#754).
 
 **The custody decision made this one, and not in the direction that lets us skip it.** §4 was settled
 as Option A — the raw seed stays a CI secret. That is the *highest*-likelihood custody option on
@@ -242,10 +239,8 @@ than in the abstract.
 pinned first — so adopting it now costs a second rotation rather than riding along with the first.
 That cost is real and was avoidable. It is materially smaller than it would have been before #740,
 because the overlap window means the next rotation is no longer a flag day: ship a release pinning
-both the current key and the new root, wait out the window, then cut over. The work is tracked in
-**#754** with no deadline attached; until it lands, `docs/backend-core-invariants.md` and the honest-
-limits section of the whitepaper should keep saying that a signing-key compromise is not cleanly
-recoverable.
+both the current key and the new root, wait out the window, then cut over. The work landed in
+**#754** (#806) (§8, "As built").
 
 ## 7. Rotation runbook (what #699 executes)
 
@@ -301,12 +296,7 @@ Written to be followed literally. Every step is checkable; none of it is "and th
 
 ## 8. Compromise recovery
 
-Until §6 lands, be honest about this: **there is no clean recovery.** The steps are:
-revoke by shipping a client update that re-pins → but the update's provenance rests on the binaries tree
-signed by the compromised key → so recovery depends on out-of-band trust (the website, the repository,
-whatever channel users already trust) and a plainly-worded public statement.
-
-Once §6 lands, recovery is: the offline root signs a key-set statement retiring the compromised key id;
+Recovery is: the offline root signs a key-set statement retiring the compromised key id;
 clients pick it up on their next fetch; no client update is required.
 
 **As built (#1454):** clients and `pollis-verify` fetch and verify the key set at runtime and trust
@@ -330,27 +320,23 @@ vs. ship the key set with an overlap window first — and that one is the last c
 The two are different axes that happened to share letters.
 
 - [x] **Custody (§4): Option A — the raw seed stays a CI secret.** Decided 2026-08-03.
-      Diverges from §4's recommendation (C for the anchor key, revisit B once ML-DSA-44 KMS
-      support is confirmed) and from §4's own caveat that A is *"acceptable only while the pin is
-      `None` and nothing trusts the key"* — the pin is now set (#740), so this is a knowingly
-      accepted risk, not an oversight. Current state: `transparency-publish.yml` reads
-      `VLOG_SIGNING_KEY` from `secrets.STH_SIGNING_KEY`; no KMS key exists in the account.
-      A backup of the seed lives in Doppler `pollis/prd`. **Revisiting this is real follow-up
-      work, not a formality** — see the unresolved item directly below, which it interacts with.
+      `transparency-publish.yml` reads `VLOG_SIGNING_KEY` from `secrets.STH_SIGNING_KEY`, and a
+      backup of the seed lives in Doppler `pollis/prd`. See the item directly below, which it
+      interacts with.
 
 - [x] **Key-set shape lands with the rotation — yes.** Shipped in #740: `PinnedKey`
       (`key_id` + `not_after`), `PINNED_LOG_PUBLIC_KEYS`, `Sth::verify_any_with_context`,
       `PublicKeyEntry`/`retired_keys` in the served `public_key.json`, and `builder --retired-key`.
       §5 documents the mechanism.
 
-- [x] **Anchor split (§6): ADOPT. Decided 2026-08-04, tracked in #754.** Not because the gap is
+- [x] **Anchor split (§6): ADOPT. Decided 2026-08-04, built in #754 (#806).** Not because the gap is
       urgent — it is a recovery path, not a live hole — but because the §4 custody choice made it
       mandatory: "CI secret" plus "no split" is the one combination with no answer to a leak. §3's
       circular dependency is the mechanism: one key signs all three trees including `binaries`, the
       pin is a `const` in the client, so recovering from a compromise means shipping a client update
       that users verify *through the tree the compromised key signs*. Having taken the cheap custody
-      option, the split is what pays for it. #740 already shipped the client-side key *set*; #754
-      adds the root-signed key-set statement so retiring a key no longer needs a client release.
+      option, the split is what pays for it. #740 shipped the client-side key *set*; #754 (#806)
+      added the root-signed key-set statement so retiring a key no longer needs a client release.
       Costs a second rotation because #732 minted first — real, avoidable, and much cheaper
       post-#740, since the overlap window means it is no longer a flag day.
 

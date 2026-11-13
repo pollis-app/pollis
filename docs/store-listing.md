@@ -231,9 +231,9 @@ The owner is the exporter of record.
 
 ## 6. Google Play — new personal developer account requirements
 
-**Account status (2026-10-02):** the earlier Play account was closed by Google. A new personal
-developer account was opened under **`dan@pollis.com`** and is in identity verification. The upload keystore (`~/.pollis/pollis-upload.jks`) is unaffected
-— it is not tied to any account; Play App Signing enrolls it at the first upload.
+**Account (2026-10-02):** the Play developer account is a personal developer account under
+**`dan@pollis.com`**. The upload keystore (`~/.pollis/pollis-upload.jks`) is not tied to any
+account; Play App Signing enrolls it at the first upload.
 
 Personal (non-organization) Play developer accounts created after 13 Nov 2023 must, before
 production access is granted:

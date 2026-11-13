@@ -29,15 +29,13 @@ which conversations exist, which users and devices belong to them, when envelope
 how the MLS group state evolved. Encrypted envelopes are retained **only until every current member
 device has collected them** — bounded by the slowest device, never by a clock. Client IP addresses are
 used for rate limiting only, held in memory as a keyed per-process hash, and never written to a database. Push tokens are stored until the device
-re-registers or the account is deleted, and the notification they carry is content-free. Account
+re-registers, the token goes 180 days without a refresh, the push service reports it unregistered, or the
+account is deleted, and the notification they carry is content-free. Account
 records and membership rows are retained for the life of the account and removed when the account is
-deleted — as of 2026-08 by an enumerated, table-by-table teardown rather than by foreign-key cascades
-that never fired in production (§2.1). The account-key history is the deliberate exception: it is
+deleted, by an enumerated, table-by-table teardown (§2.1). The account-key history is the deliberate exception: it is
 append-only and survives deletion (§8). The public transparency ledger is, by design, permanent and
-append-only; #701 replaces the commit log's formerly-stable conversation and sender identifiers with
-windowed pseudonyms, so a third party can no longer build a longitudinal activity map from it (§6). That
-change takes effect at the next full republish (the #672 / #699 key-rotation ceremony), because the leaf
-encoding is a frozen contract.
+append-only; its commit-log leaves carry windowed pseudonyms rather than conversation and sender
+identifiers, so a third party cannot build a longitudinal activity map from it (§6).
 
 ---
 
@@ -47,11 +45,9 @@ The single most important thing to understand about Pollis retention is that **t
 a delivery watermark, not a TTL.**
 
 An encrypted envelope is deleted when *every current, LIVE member device of its conversation has reported
-a fetch watermark past it* (`pollis-delivery/src/messages.rs`, the `CLEANUP_*` fragments). A 30-day TTL
-used to be OR-ed with that gate; it was removed in #688 / PR #716 because either arm alone could delete,
-so a device offline for a month silently lost mail. That contradicted invariant I3 in
-`docs/backend-core-invariants.md`, which requires retention bounded by the slowest member device and
-specifies **no TTL**.
+a fetch watermark past it* (`pollis-delivery/src/messages.rs`, the `CLEANUP_*` fragments). There is
+**no TTL**: invariant I3 in `docs/backend-core-invariants.md` requires retention bounded by the slowest
+member device, so message age never deletes (#688).
 
 **Removed members do not pin (#1778).** "Current" is literal: a device whose user has been removed from
 the conversation stops counting toward the floor the moment the membership row goes. Mail sealed to it
@@ -62,17 +58,16 @@ first joined: rejoining does not bring it back, and no placeholder is shown for 
 removed devices would keep ciphertext around for people who are no longer in the conversation, which this
 policy exists to avoid.
 
-**Device-staleness bound (#720).** Since #720 the floor is bounded by member watermarks **and** by device
+**Device-staleness bound (#720).** The floor is bounded by member watermarks **and** by device
 *liveness*: a member device that has not **reported** a watermark within a configured window
 (`POLLIS_DS_WATERMARK_STALE_MONTHS`, **12 months** — the code default since #1486, and set explicitly in
 both deployed environments) stops pinning retention and is excluded from
-the floor, mirroring how a revoked device is excluded (#685). This is **not** a TTL and does not reopen
-the #688 bug: the bound is on the device's own last **report** (`conversation_watermark.reported_at`, a
+the floor, mirroring how a revoked device is excluded (#685). This is **not** a TTL: the bound is on the device's own last **report** (`conversation_watermark.reported_at`, a
 server-stamped wall-clock time), never on the message's age. A device that reported yesterday still pins
 every envelope below its cursor, however old. Coming back and reporting makes the device live again
 immediately (reversible; the device is not revoked or removed from any roster).
 
-**Why 12 and not the original 6** (decided 2026-08-04; the code default followed in #1486). This window is the *only* thing
+**Why 12 months** (decided 2026-08-04; the code default since #1486). This window is the *only* thing
 standing between a returning user and missing mail, so its length is the blast radius of the third
 accepted loss below. The product principle in `CLAUDE.md` — *"given 'simpler but drops messages' vs
 'more complex but delivers,' pick the one that delivers"* — points at the longer window, and three
@@ -98,15 +93,15 @@ retention period for an undelivered envelope, but there is now a bound tied to r
 liveness.** A member who joins a busy conversation and keeps at least one device reporting pins that
 conversation's envelopes indefinitely; a member whose every device goes silent past the window stops
 pinning. The cost is a **third accepted message loss** — beyond "messages sent before you joined" and "a
-new device starts empty" — a device dormant past the window that later returns may find gaps. This is a
+new device starts empty unless you copy history to it from another of your enrolled devices" — a device dormant past the window that later returns may find gaps. This is a
 deliberate storage/correctness trade. **N is decided: 12 months** (2026-08-04, rationale above), the code
 default (#1486) and also set explicitly in both deployed environments, and disclosed to users on
 the Learn page rather than only in this document.
 
 **Growth visibility (#720 checkbox 1).** The GC sweep computes an identity-free `message_envelope` growth
 snapshot on the same walk — total envelope count, how many conversations hold envelopes, the oldest
-retained `sent_at`, and the *shape* of the worst offender (largest conversation's count + oldest `sent_at`,
-no id). It is logged and served on `GET /v1/retention/metrics`. That endpoint is **gated by an operator
+retained `sent_at`, and the *shape* of the largest (its count + oldest `sent_at`, no id). It is logged
+and served on `GET /v1/retention/metrics`. That endpoint is **gated by an operator
 bearer token**, NOT open like `/health`/`/version`: those return a service name and a git sha, whereas this
 is a pollable aggregate activity meter — scraped on a schedule it reveals how many conversations exist, how
 fast the network is growing, and when it is busy. Identity-free (§3) is necessary but not sufficient; the
@@ -129,12 +124,12 @@ DB, split out in #420 Goal A).
 
 | Data | Table | Retention | Enforced by |
 |---|---|---|---|
-| Encrypted message envelopes | `message_envelope` | Until every current **live** member device has reported a watermark past the row. **No TTL** (age never deletes); since #720 a device silent past `POLLIS_DS_WATERMARK_STALE_MONTHS` (set to 12) stops pinning, bounded on the device's last **report**, not the message's age. Also removed immediately on user-initiated delete. | `messages.rs` `CLEANUP_*`; #688/#716, #720 |
+| Encrypted message envelopes | `message_envelope` | Until every current **live** member device has reported a watermark past the row. **No TTL** (age never deletes); a device silent past `POLLIS_DS_WATERMARK_STALE_MONTHS` (set to 12) stops pinning, bounded on the device's last **report**, not the message's age. Also removed immediately on user-initiated delete. | `messages.rs` `CLEANUP_*`; #688/#716, #720 |
 | Reactions | `message_reaction` | Life of the account; **explicitly deleted** on account deletion (both the user's own reactions and any reaction to a message that goes with them) | `teardown.rs` `purge_user_rows` / `purge_conversation_rows` |
 | Per-device fetch cursors | `conversation_watermark` | **Indefinite** — advanced, never aged out. Deleted with the device (revoke, logout), with the conversation, and on account deletion. Carries `reported_at` (server-stamped last-report wall-clock, #720), the liveness signal the envelope floor reads. Written only by a current **member**, for its own **signing device**, and only with a canonical UTC RFC 3339 cursor no further ahead of the DS clock than the signature window (`check_cursor_stamp`) — the same bound every client-chosen `message_envelope.sent_at` must meet, since a far-future cursor never rewinds and would black out delivery and then trigger GC | `apply_advance_watermark`; #720; `teardown.rs` |
 | MLS commit history | `mls_commit_log` (log DB) | Pruned to the tier-1 floor (min applied epoch across current member devices, and across removed-but-unrevoked devices that reported within `POLLIS_DS_WATERMARK_STALE_MONTHS`, so a re-added device can replay to its own removal, #1772) with a tier-2 per-conversation hard cap | commit-log retention code + `retention_tests` |
 | Latest MLS group state | `mls_group_info` | Latest epoch only; overwritten, no history | `000001_commit_log_db.sql` |
-| Per-device commit catch-up | `mls_commit_since` | Upserted monotonically; deleted with the device, with the conversation, and on account deletion. Until 2026-08 nothing ever deleted from it, so it retained a `(conversation, user, device)` triple indefinitely | `000003_mls_commit_since.sql`; `teardown.rs` `purge_user_log_rows` / `purge_device_log_rows` |
+| Per-device commit catch-up | `mls_commit_since` | Upserted monotonically; deleted with the device, with the conversation, and on account deletion | `000003_mls_commit_since.sql`; `teardown.rs` `purge_user_log_rows` / `purge_device_log_rows` |
 | Welcome messages | `mls_welcome` | Deduplicated per `(conversation_id, recipient_id, recipient_device_id)`; a resend for that tuple replaces the blob and re-arms delivery rather than stacking a row; **explicitly deleted** on account deletion and with the conversation | `migrations-log/000002_mls_welcome_unique_recipient.sql`; `writes.rs` `purge_welcomes`, `teardown.rs` |
 | Key packages | `mls_key_package` | Claimed packages are marked `claimed=1`, not hard-deleted; **explicitly deleted** on account deletion, device revocation and logout | `000000_baseline.sql`, `000010`; `teardown.rs`, `account.rs` |
 | Accounts | `users` | Life of the account; deleted on account deletion, last in the teardown transaction | `account.rs` `apply_delete_account` |
@@ -142,29 +137,18 @@ DB, split out in #420 Goal A).
 | Account identity-key history | `account_key_log` | **Append-only, never deleted.** This is deliberate: it is the client-verifiable record that an account's key did not change behind your back | `000005_account_key_log.sql` |
 | Abuse reports and suspensions (#1213) | `user_report` (reporter, reported account, reason, optional conversation/message ids — never content), `account_suspension` | Until the reporter or reported account is deleted (reports, both directions) / until the operator lifts it or the account is deleted (suspension) | `teardown.rs` `purge_user_rows`; operator: `scripts/suspend-account.sh` |
 | Membership and social graph | `group_member`, `dm_channel_member`, `groups`, `channels`, `dm_channel`, `user_block`, `group_invite`, `group_join_request`, `group_invite_link`, `group_invite_link_redemption`, `group_emoji`, `account_recovery`, `user_preferences`, `device_enrollment_request` | Life of the account / conversation; **explicitly deleted** on account deletion and on group/DM teardown, table by table | `teardown.rs` `purge_user_rows` / `purge_group` / `purge_dm_channel`, enumerated in `USER_PURGED_TABLES` |
-| Security events | `security_event` (`id`, `user_id`, `kind`, `device_id`, `created_at`, `metadata`) | **90 days** since #762 (`POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, §9); also **explicitly deleted** on account deletion | `messages.rs` `sweep_aged_records`; `teardown.rs` `purge_user_rows` |
-| Attachment object index | `attachment_object` (`content_hash` → `r2_key`; since #1382 `content_hash` holds the object's **random per-upload file id**, not a hash of the content) | **Reference-counted (#690):** collected only when no still-existing message references the file id — the same predicate for every caller, with no uploader identity in it. Migration `000031` briefly recorded `uploaded_by` (and `attachment_ref.registered_by`) to grant the uploader an exemption; both columns are dead and their values cleared since `000032`, so the DS holds no "which account stored this object" linkage. | `messages.rs` `apply_delete_attachment` (conditional `NOT EXISTS (attachment_ref ⋈ message_envelope)`), `000032_attachment_ownership_retired.sql` |
+| Security events | `security_event` (`id`, `user_id`, `kind`, `device_id`, `created_at`, `metadata`) | **90 days** (#762, `POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, §9); also **explicitly deleted** on account deletion | `messages.rs` `sweep_aged_records`; `teardown.rs` `purge_user_rows` |
+| Attachment object index | `attachment_object` (`content_hash` → `r2_key`; `content_hash` holds the object's **random per-upload file id**, not a hash of the content) | **Reference-counted (#690):** collected only when no still-existing message references the file id — the same predicate for every caller, with no uploader identity in it. The DS holds no "which account stored this object" linkage (the `uploaded_by` / `registered_by` columns are unused and empty). | `messages.rs` `apply_delete_attachment` (conditional `NOT EXISTS (attachment_ref ⋈ message_envelope)`), `000032_attachment_ownership_retired.sql` |
 | Wrapped file key rings (#1382) | `file_keystate` (`conversation_id`, wrapped ring, `key_version`, `(generation, epoch)`, `updated_by_device_id`) | One mutable row per MLS conversation, overwritten on every re-wrap/rotation; the ring is ciphertext under an MLS exporter key the DS never holds. **Explicitly deleted** on group/DM teardown | `000036_file_keystate.sql`; `teardown.rs` `purge_group` / `purge_dm_channel` |
 | Attachment references | `attachment_ref` (`content_hash` = file id, `message_id`) | One declaration per (message that carries a file). The count is **derived** — a declaration counts only while its `message_envelope` exists — so a reference is released by deleting the message envelope (self/admin delete, envelope GC #689, retention #720, teardown), never by a dedicated call, and cannot outlive its message. Orphaned/forged declarations are reaped by `sweep_envelope_gc`. **New at-rest linkage — see the note below.** | `messages.rs` (`object_is_referenced`, `sweep_envelope_gc`), `000012_attachment_ref.sql` |
 | Failed DS requests (#1305) | `ds_error_log` (time, method, matched route pattern, status, the response's `error` text, the `warn!`/`error!` lines the request raised, and a random per-request id the client generated) — **no user, device, email or IP column**; text is scrubbed (`pollis_api::redact::scrub`) before the insert | **72 hours and at most 500 rows**, whichever is smaller; written at most 30 rows a minute | The table's own `AFTER INSERT` trigger (`000035_ds_error_log.sql`) on every insert — no sweep and no code path can skip it; `pollis-delivery/tests/error_log.rs` |
-| Push tokens | `push_token` | Until the device re-registers (upsert on `token`), **180 days** since last refresh (#762, `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, §9), account deletion — the last of which is now an explicit delete rather than a cascade that never fired — or Expo reporting the token `DeviceNotRegistered` in a ticket or receipt (#1423) | `000006_push_token.sql`; `sweep_aged_records`; `teardown.rs`; `push.rs` `prune_token` |
+| Push tokens | `push_token` | Until the device re-registers (upsert on `token`), **180 days** since last refresh (#762, `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, §9), account deletion, or Expo reporting the token `DeviceNotRegistered` in a ticket or receipt (#1423) | `000006_push_token.sql`; `sweep_aged_records`; `teardown.rs`; `push.rs` `prune_token` |
 | Per-channel mutes (#1431) | `channel_mute` (user id, channel id, when muted) — read by the DS's push fan-out to skip a muted member | Until the user unmutes, leaves or is removed from the group, the channel or group is deleted, or the account is deleted | `000038_channel_mute.sql`; `profile.rs` `apply_set_channel_mute`; `teardown.rs` `purge_user_rows` / `purge_conversation_rows` / `purge_member_channel_mutes` |
 | Push tickets awaiting a receipt (#1423) | `push_ticket` (Expo ticket id, the push token it was sent to, a unix time) — **no user, conversation, device or IP column** | Until the GC sweep has fetched the ticket's receipt from Expo, and **24 hours at most** (Expo keeps receipts no longer); also deleted with the token and on account deletion | `000037_push_ticket.sql` (an `AFTER INSERT` trigger drops day-old rows); `push.rs` `check_push_receipts`; `teardown.rs` `purge_user_rows` |
 
-### 2.1 Deletion is explicit, because the cascades never fired
+### 2.1 Deletion is explicit
 
-Until 2026-08 this section's deletion claims were **wrong**, and the reason is worth recording so it is
-not reintroduced.
-
-The remote schema decorates nearly every child table with `REFERENCES users(id) ON DELETE CASCADE` (and
-the same for `groups`, `channels`, `dm_channel`). **Production Turso does not enable foreign-key
-enforcement**, so none of those clauses has ever fired on any deployment. `delete_account` ran
-`DELETE FROM users` and trusted the cascade; `delete_group` ran `DELETE FROM groups` and did the same.
-In reality the device roster, DM membership, invites, join requests, blocks, preferences, the recovery
-blob, the security-event log, the push tokens, the directory-index rows and the group's entire channel
-and message history all survived the delete. The rows a user asked us to remove stayed in the database.
-
-Deletion is now **enumerated**, in `pollis-delivery/src/teardown.rs`:
+Deletion is **enumerated**, in `pollis-delivery/src/teardown.rs`:
 
 - `purge_user_rows` names every main-DB table that carries a user identifier;
 - `purge_group`, `purge_dm_channel` and `purge_conversation_rows` do the same per conversation;
@@ -178,44 +162,37 @@ tests rather than by review (`pollis-delivery/tests/teardown.rs`):
 1. **Completeness.** `every_user_scoped_table_is_accounted_for` reads the *live* schema and fails if any
    table naming a user is neither purged nor listed in `EXEMPT_FROM_USER_PURGE` with a stated reason. A
    new migration that adds a table with a `user_id` and forgets the teardown fails CI at the point it
-   lands. (It found one on the first run: `mls_commit_since`, which nothing had ever deleted from.)
+   lands.
 2. **Scoping.** `account_deletion_cannot_reach_another_account` and
    `group_deletion_cannot_reach_another_group` seed two fully-populated subjects and assert that
    deleting one changes not a single row of the other — the #878 defect class ("authorised on one field,
    deleted by another") pinned down for the destructive paths.
 
-The tests run with `PRAGMA foreign_keys=OFF`, matching production. So does the `flows` integration
-harness as of this change; it previously ran with foreign keys ON, which made it *stricter* than any
-real deploy and is why the suite never caught this.
-
 Three columns cannot be deleted or blanked, because they are `NOT NULL` pointers on rows that belong to
 a conversation other people are still using: `groups.owner_id`, `dm_channel.created_by` and
 `dm_channel_member.added_by`. Teardown **hands them over** to a remaining participant rather than
-leaving a deleted user's id in a live row. For `dm_channel.created_by` that is also a correctness fix
-rather than tidiness — it is an authorization input (the DM creator may remove a member), so left naming
+leaving a deleted user's id in a live row. For `dm_channel.created_by` that is also a correctness
+property — it is an authorization input (the DM creator may remove a member), so left naming
 a deleted account the capability belonged to somebody who can never authenticate again.
 
 **What deletion does not remove** is listed in §8, and each exemption is also carried as a machine-read
 reason string next to the code.
 
-**Sealed sender.** Since #607 / migration `000008`, `message_envelope.sender_id` holds a sentinel rather
+**Sealed sender.** `message_envelope.sender_id` (#607, migration `000008`) holds a sentinel rather
 than the real sender; the true sender is authenticated inside the MLS ciphertext and recoverable only by
-members. The stored row therefore no longer shows who sent what. The DS still observes the sender *live*
+members. The stored row therefore does not show who sent what. The DS still observes the sender *live*
 on the authenticated write, via the `X-Pollis-User` header — that is an at-rest guarantee, not an
 in-flight one, and `docs/metadata-minimization-design.md` says so.
 
 **Attachment references, stated plainly (#690).** Making attachment deletion correct required the client
 to declare each reference to the DS, because the server cannot read message content and so cannot count
-references itself. The chosen mechanism — `attachment_ref (content_hash, message_id)` — introduces a new
-piece of *at-rest* linkage the operator did not previously hold: joining `attachment_ref` to
-`message_envelope.conversation_id` tells the operator which messages carry which stored object. Until #1382
-`content_hash` was convergent (SHA-256 of plaintext) — which also let anyone holding the bucket and this
-table decrypt every attachment; that scheme was broken and replaced — so the join revealed which messages,
-and therefore which conversations, **shared the same file**. Since #1382 it is a random file id minted per
-upload, so identical content uploaded twice is two unrelated ids and the cross-conversation "same file"
-linkage is gone; what remains is "this message carries this object", and two messages share an id only when
+references itself. The chosen mechanism — `attachment_ref (content_hash, message_id)` — adds a
+piece of *at-rest* linkage: joining `attachment_ref` to
+`message_envelope.conversation_id` tells the operator which messages carry which stored object.
+`content_hash` is a random file id minted per upload, so identical content uploaded twice is two
+unrelated ids: the linkage is "this message carries this object", and two messages share an id only when
 they reference the same upload. It does **not** reveal the file itself (plaintext is never seen, and nothing the DS holds is key material), the
-filename (#762 removed it from the R2 key, §5), or the sender (sealed, above). The `message_id` is now **load-bearing**, not incidental: the
+filename (not in the R2 key, §5), or the sender (sealed, above). The `message_id` is **load-bearing**, not incidental: the
 reference count is derived by joining `attachment_ref` to `message_envelope` on it (#690), which is what
 makes a reference self-releasing when its message is deleted/GC'd and unforgeable by an unauthorized
 caller. The considered alternative — an opaque, client-minted `ref_token` per reference — would expose
@@ -223,11 +200,7 @@ only a per-file *count*, never a linkage, but it cannot join to the envelope, so
 derived-release property: a device that loses local state can never release its tokens (references leak,
 the object is never collected) and an admin deleting another member's message cannot release a token it
 never held. That alternative fails deletion, which is the exact guarantee this ticket exists to establish,
-so we **accept the co-reference linkage as-is** as the price of a robust, honestly-collectable store.
-Note this is **not** picked up by #701/#662 — those minimize the *public transparency ledger*, not DS
-tables — so reducing this specific DS-side linkage (e.g. pseudonymising the `message_id`, if it can be
-done without breaking the envelope join) would be its own follow-up, deliberately not planned as part of
-#690.
+so the design keeps the co-reference linkage as the price of a robust, collectable store.
 
 ---
 
@@ -288,12 +261,11 @@ either, operators included.** IPs are used for rate limiting only, and only as k
   clients are its own (`turn.udp_port` + `turn.domain` in `livekit/livekit.yml`): with no TURN/UDP
   listener configured LiveKit falls back to Google's public STUN servers, which would have every client
   send its address to a third party on every join.
-- **Device names.** Clients used to register a device as `"{hostname} ({os})"`, and hostnames can embed
-  an address (`ip-10-0-0-12`). Clients now register an OS label ("macOS desktop"); the DS redacts any
-  IP-shaped token in a device name or security-log note on write (`pollis-delivery/src/util.rs`
-  `redact_ip_literals`), and migration `000034` scrubbed the rows written before.
+- **Device names.** Clients register a device with an OS label ("macOS desktop"), never a hostname, which
+  can embed an address; the DS also redacts any IP-shaped token in a device name or security-log note on
+  write (`pollis-delivery/src/util.rs` `redact_ip_literals`).
 
-Caveat to state honestly rather than hide: **Cloudflare, as our edge, necessarily sees the client IP**,
+**Cloudflare, as our edge, necessarily sees the client IP**,
 as does any transit provider. An account member running `wrangler tail` against the DS Worker sees
 live request metadata for the duration of the tail; that is a Cloudflare account permission, not a
 config setting, and nothing is retained by it. Likewise **the edge provider's account administrators
@@ -308,9 +280,10 @@ client IPs from the first-party services, and is opt-in and off by default. This
 
 - **Stored:** the Expo push token, the owning `user_id`, the platform string (`ios`/`android`), and an
   `updated_at` timestamp (`000006_push_token.sql`).
-- **Retention:** until the same device re-registers (which upserts by token) or the account is deleted.
-  There is no expiry sweep for tokens belonging to uninstalled apps.
-- **Payload:** deliberately content-free, and since #1157 conversation-free. The notification
+- **Retention:** until the same device re-registers (which upserts by token), 180 days without a refresh
+  (`POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, the GC sweep's `sweep_aged_records`), Expo reporting the token
+  `DeviceNotRegistered` (`push.rs` `prune_token`), or account deletion.
+- **Payload:** deliberately content-free and conversation-free (#1157). The notification
   carries a fixed title and body ("New message" / "You have a new message") plus
   `data: { h }` and nothing else — a random 128-bit handle, minted per notification per recipient.
   Never plaintext, never a sender, never a preview, never the conversation id
@@ -347,11 +320,9 @@ client IPs from the first-party services, and is opt-in and off by default. This
 
 ## 5. Media (Cloudflare R2)
 
-- Object keys are `media/{random file id}.enc` (`pollis-core/src/commands/r2.rs`; #1382 — previously
-  `media/{sha256-of-plaintext}.enc`, a convergent scheme the bucket and DS could decrypt, now replaced). The key contains
-  no user, device, group, or conversation identifier, and **no filename** — #762 removed the filename
-  segment precisely because a distinctive name was itself metadata visible to the storage operator. See
-  §9, which has described the current shape since that change.
+- Object keys are `media/{random file id}.enc` (`pollis-core/src/commands/r2.rs`). The key contains
+  no user, device, group, or conversation identifier, and **no filename**, because a distinctive name
+  would itself be metadata visible to the storage operator (#762).
 - Objects are client-side encrypted (AES-256-GCM) before upload under a key derived from the conversation's
   MLS-wrapped file key ring (or, for Vault files, the account key); R2 and the DS hold ciphertext and no key
   material.
@@ -364,11 +335,8 @@ client IPs from the first-party services, and is opt-in and off by default. This
   reference (`broker.rs`, `object_is_referenced`), so a client that deleted its own message cannot blow
   away a blob another conversation still needs — not even the account that uploaded the bytes, since a
   blob can back several messages and the gate asks only whether anything still references it.
-  There is no lifecycle rule and no automatic expiry.
-  **Reclaiming the R2 blob + Turso row for a file id that no live message references (e.g. after envelope GC
-  aged the last message out) is a separable server-side sweep and is NOT built here — #690 makes such an
-  object *collectable* (the reference no longer pins it); a follow-up gives the DS the R2-delete capability
-  to actually reclaim it.** See the `attachment_object` / `attachment_ref` rows and the linkage note in §2.
+  There is no lifecycle rule and no automatic expiry. See the `attachment_object` / `attachment_ref` rows
+  and the linkage note in §2.
 - The on-device decrypted cache lives under the app sandbox, is itself encrypted with a key derived from
   the local database key, is capped at 500 MiB, and is LRU-evicted.
 
@@ -385,7 +353,7 @@ Three trees are published, all signed under one key with distinct context string
 
 | Tree | Tenant | Leaf contents |
 |---|---|---|
-| MLS commit log | `mls-commit-log` | `conversation_pseudonym`, `generation`, `epoch`, `sender_pseudonym`, `seq`, `sha256(commit_data)` — **windowed pseudonyms, not raw ids** since #701 (`verifiable-log-builder/src/commit_log.rs`) |
+| MLS commit log | `mls-commit-log` | `conversation_pseudonym`, `generation`, `epoch`, `sender_pseudonym`, `seq`, `sha256(commit_data)` — **windowed pseudonyms, not raw ids** (#701, `verifiable-log-builder/src/commit_log.rs`) |
 | Account-key directory | account-keys | user id + key version + key material commitment |
 | Released binaries | binaries | release tag, platform, artifact name, digest, provenance URI |
 
@@ -405,26 +373,12 @@ The persisted file holds exactly the pseudonymous leaves `/v1/commit-log-2/entri
 real `conversation_id` or `sender_id`, so keeping it adds no retention beyond what the public ledger
 already holds.
 
-**The commit-log reset (#1579).** Before #1580 the tree was rebuilt from the live table on every publish.
-Once the DS began pruning on 28 October 2026, that put different leaves at already-signed positions, and
-three heads were signed and served that do not extend the log's consistent chain, which ends at size 137
-(signed 2026-10-28 16:43 UTC): sizes 56 and 113 (2026-10-28 20:24 UTC) and 129 (2026-10-29 05:34 UTC).
-The leaf hashes of all 137 leaves on that chain survive, so every head on it can still be checked, but
-the leaf data for 46 of them was pruned before any copy was kept and cannot be recovered. That is a loss
-of public ledger content, not of anything a user holds: the leaves carry only pseudonyms, epochs, `seq`
-and commit hashes, and no app checks the commit-log tree, so no user-facing check was affected. The first
-tree was therefore retired rather than repaired: every file of it stays served, frozen, under `/v1/`, a
-reset statement signed by the log key at `/v1/commit-log-reset.json` lists its consistent chain, the three
-forked heads and six older superseded heads, and the commit log continues as a new tree,
-`commit-log-2`, under `/v1/commit-log-2/` with its own signing context, append-only from its first leaf.
-The ledger's permanence holds for both trees: nothing of the retired tree was deleted, and the new tree
-is only ever appended to. Full account and how to verify both: `docs/transparency.md` → "Commit-log reset
-(#1579)".
+`commit-log-2` superseded the first tree on 2026-10-29; `/v1/commit-log-reset.json` lists the retired heads.
+Every file of the retired tree stays served under `/v1/`.
 
-**Former exposure and the #701 mitigation, stated plainly:** the commit-log leaf *used to* publish a
-**stable `conversation_id` and a real `sender_id` in the clear**, so anyone could build a longitudinal
-activity map — which groups exist, how often each changes, and who commits to them — with no access to
-Pollis. #701 replaces both with **windowed pseudonyms**: `conversation_pseudonym =
+**Windowed pseudonyms (#701).** The commit-log leaf carries no stable `conversation_id` and no real
+`sender_id`, so nobody outside can build a longitudinal activity map (which groups exist, how often each
+changes, who commits to them) from it. It carries **windowed pseudonyms** instead: `conversation_pseudonym =
 H(dom || conversation_id || window)` and `sender_pseudonym = H(dom || conversation_id || sender_id ||
 window)`, where `window = seq / PSEUDONYM_WINDOW_SIZE`. The pseudonym is stable *within* a window (so
 the fork/monotonicity invariant stays publicly checkable inside one) and rotates at each boundary (so an
@@ -433,36 +387,22 @@ pseudonym is keyless — it needs only `conversation_id`, which members and the 
 third-party scraper does not — so **no new signing key or custody problem is introduced** (contrast
 `docs/sth-signing-key-custody.md`). The raw commit bytes were never published (the leaf commits to
 `sha256(commit_data)` only). The account-key tree's `user_id` is deliberately **not** pseudonymised —
-key transparency looks a user up by identity, so it is load-bearing (out of #701's scope). Full design:
+key transparency looks a user up by identity, so it is load-bearing. Full design:
 `docs/transparency.md` → "Windowed pseudonyms in the commit log".
 
-**Residual, named honestly:** windowing weakens the *public* invariant at window boundaries — a fork or
+**Forks across a window boundary.** Windowing narrows the *public* invariant at window boundaries — a fork or
 regression whose two branches straddle a boundary carries two different pseudonyms, so an outside-only
 replay grouping by pseudonym cannot see it. This is inherent: a public commitment that let an outsider
 re-link two windows would also defeat the unlinkability, so the two are mutually exclusive for a
-third-party observer. It is **not** a gap for members or the builder: a member (who knows
+third-party observer. Members and the builder still see it: a member (who knows
 `conversation_id`) regroups every window and catches it, and `build_bundle` runs the invariant at full
 strength over the real ids before pseudonymising, so the honest builder never emits a
 boundary-straddling fork. Only a substituted/compromised publisher could, and a member catches that on
 replay.
 
-**Coupling, stated because it is not written down elsewhere:** the leaf encoding is a **frozen
-contract** — re-encoding history invalidates every signed root ever published and every cached inclusion
-proof — so #701's code cannot pseudonymise *existing* history in place. It takes effect only at a **full
-republish of the tree from scratch**, which is exactly what the #672 / PL-11 ML-DSA-44 key rotation
-(executed by #699, `docs/sth-signing-key-custody.md` §7) already performs under the `sth:v2` contexts.
-**#701 ships with that ceremony:** its builder is what makes the republished commit-log tree carry
-pseudonyms. Until the ceremony runs, the *code* is complete and tested but the *live* ledger still
-carries the pre-#701 (raw-id) leaves under the current roots.
-
-**Stale auditors after the republish:** the republish is a breaking change to the served wire shape, so
-the served manifests now carry a `format_version` an auditor's `pollis-verify` reads *before* it
-verifies anything. A binary older than the republished log reports version skew (exit code 2, "upgrade
-your verifier") — never a verification failure — because a tool whose whole job is answering "was this
-tampered with?" must not raise a false alarm the day the key rotates (the same principle as the absent
-log pin, #668). Upgrade any `pollis-verify` older than `v0.6.0` after the republish; the website
-explorer is unaffected (it calls the live server's dynamic endpoint, not a static manifest). Details:
-`docs/transparency.md` → "A stale `pollis-verify` after the republish".
+**Format version.** Served manifests carry a `format_version` that `pollis-verify` reads *before* it
+verifies anything, so a binary older than the log reports version skew (exit code 2, "upgrade your
+verifier"), never a verification failure.
 
 ---
 
@@ -473,20 +413,16 @@ Call and realtime-signalling state is held in memory for the life of the connect
 written to any first-party database. Media frames are E2EE under a key derived from the MLS group
 exporter secret; the SFU forwards ciphertext.
 
-LiveKit sees connection metadata inherent to routing — a participant, a room, and a time — but since
-#828/#835/#836 it sees **pseudonyms, not identities**. Room names are HMAC-derived
+LiveKit sees connection metadata inherent to routing — a participant, a room, and a time — and
+(#828/#835/#836) it sees **pseudonyms, not identities**. Room names are HMAC-derived
 (`pollis-delivery/src/room_id.rs::room_pseudonym`) and participant identities are SIV-encrypted per room
 (`pollis-delivery/src/participant_id.rs::participant_pseudonym`), both applied at token-mint and roster
 time, so the SFU cannot map a participant back to a user, a device, or a logical room. Tests pin both
 directions (`never_leaks_the_user_or_device_id`, `never_leaks_the_logical_name`). Realtime signalling JSON
-no longer carries the sender (`docs/metadata-minimization-design.md` v2).
+does not carry the sender (`docs/metadata-minimization-design.md` v2).
 
-**Residual:** a pseudonym is stable within a room for the lifetime of the signing secret, so the SFU can
-still cluster co-present participants across a call — it just cannot name them.
-
-*(This paragraph previously stated LiveKit sees `{user_id}:{device_id}`. That was written before #828/#835/#836
-and was still here at the 2026-08-31 sign-off, which means the sign-off did not re-diff §7 against code that
-had already landed — worth knowing about this document's review process, not just this line.)*
+A pseudonym is stable within a room for the lifetime of the signing secret, so the SFU sees which
+pseudonyms share a call, without being able to name them.
 
 ---
 
@@ -512,59 +448,35 @@ Being specific here is what makes the rest of the document credible:
 
 ---
 
-## 9. Gaps this policy exposes (each needs a ticket or a decision)
+## 9. Retention decisions
 
-Writing this document surfaced retention behaviour we have not decided on, only inherited:
-
-- [x] **`security_event` retention: 90 days** (2026-08-04, #762). It is a per-user, timestamped,
-      device-attributed audit trail — precisely the record a privacy-first product should age out. 90 days
-      is long enough to investigate an incident someone noticed late, short enough that it is not a
-      standing longitudinal profile of when each user changed devices. Enforced on the GC sweep
-      (`sweep_aged_records`); `POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, `0` retains forever.
-- [x] **`conversation_watermark`: deliberately NOT reaped** (2026-08-04, #762). This is a decision to
-      leave it alone, not an omission. Since #720 these rows are load-bearing for envelope retention: the
-      GC floor is computed from `reported_at`, so deleting a live member's watermark makes their device
-      look like it never reported and can *advance* the floor past mail they have not collected. That is a
-      message-loss risk, taken on to reclaim rows the doc itself calls "harmless in size". The trade is
-      not worth it. Revisit only alongside a reap keyed on membership (the device is no longer in the
-      conversation), which is a genuinely different and safe predicate.
-- [x] **`push_token` reap: 180 days since last refresh** (2026-08-04, #762). Clients re-register on
-      launch, so `updated_at` is a direct liveness signal and a live device refreshes long before this.
-      Six months is deliberately generous: a reaped token costs a missed notification until the next
-      launch re-registers it — a nuisance, not data loss. Enforced on the same sweep;
-      `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, `0` disables.
-- [x] **No maximum retention for undelivered envelopes** (§1) — #720 landed a device-staleness bound
-      (`POLLIS_DS_WATERMARK_STALE_MONTHS`). Retention is bounded by member watermarks **and** by
-      recipient-device liveness. **Owner decision CLOSED 2026-08-04: N = 12 months**, configured
-      explicitly in both `wrangler.{dev,prod}.jsonc` rather than left on the code default of 6, and
-      the resulting third accepted-loss **is** surfaced publicly (`website/learn.html`) and in
-      `CLAUDE.md` / `docs/backend-core-invariants.md`. Rationale in §1.
-- [x] **Attachment deletion is not reference-counted** (#690). **Done** — the reference count is derived
-      by joining `attachment_ref` to `message_envelope`, so a reference is released by deleting its message
-      (self/admin delete, envelope GC #689, retention #720, teardown) and cannot outlive it; the Turso row
-      and the R2 delete gate both consult that derived count. The trade-off is a new co-reference linkage
-      the operator can read at rest (§2 note), accepted as-is (not covered by #701/#662, which are
-      ledger-side). **Remaining:** an object whose last message aged out is now *collectable* but not yet
-      auto-*reclaimed* — a server-side R2+row sweep (giving the DS R2-delete capability) is the identified
-      follow-up, unblocked by this ticket.
-- [x] **The commit-log ledger publishes stable identifiers** (#701). Closed by windowed pseudonyms (§6):
-      `conversation_id` / `sender_id` are replaced with per-window `H(...)` pseudonyms. The *code* is
-      complete and tested; it takes effect on the *live* ledger at the next full republish (the #672 /
-      #699 ML-DSA-44 key-rotation ceremony), since the leaf is a frozen contract. Residual (a
-      boundary-straddling fork is invisible to an outside-only replay, but not to members or the honest
-      builder) is named in §6. The republish is a breaking wire change, so the served bundle now carries
-      a `format_version` and `pollis-verify` (bumped to `v0.6.0`) reports a too-old binary as version
-      skew, not a verification failure — see §6.
-- [x] **Original filenames removed from R2 object keys** (2026-08-04, #762). Keys are now
-      `media/<content_hash>.enc` (since #1382 `media/<random file id>.enc`); the filename was decorative (the content hash was the uniqueness anchor)
-      but readable by the operator from an object listing alone, without decrypting anything.
-      `budget-2026.pdf` is content. No migration needed: the key is stored per object in
-      `attachment_object.r2_key` and download paths take it explicitly, so objects written under the old
-      format keep resolving. Only new uploads take the new shape.
-
-All four are now decided (#762). The honest answer is no longer "indefinite" for any of them — three
-carry a bound enforced on the GC sweep, and the fourth (`conversation_watermark`) is an explicit
-decision to retain, with the reason written down, because reaping it risks deleting undelivered mail.
+- **`security_event` retention: 90 days** (2026-08-04, #762). It is a per-user, timestamped,
+  device-attributed audit trail — precisely the record a privacy-first product should age out. 90 days
+  is long enough to investigate an incident someone noticed late, short enough that it is not a
+  standing longitudinal profile of when each user changed devices. Enforced on the GC sweep
+  (`sweep_aged_records`); `POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, `0` retains forever.
+- **`conversation_watermark`: deliberately not reaped** (2026-08-04, #762). These rows are load-bearing
+  for envelope retention: the GC floor is computed from `reported_at`, so deleting a live member's
+  watermark would make their device look like it never reported and could *advance* the floor past mail
+  they have not collected. The rows go with the device, the conversation and the account.
+- **`push_token` reap: 180 days since last refresh** (2026-08-04, #762). Clients re-register on
+  launch, so `updated_at` is a direct liveness signal and a live device refreshes long before this.
+  A reaped token costs a missed notification until the next launch re-registers it — a nuisance, not
+  data loss. Enforced on the same sweep; `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, `0` disables.
+- **Undelivered envelopes: bounded by member watermarks and device liveness** (§1, #720,
+  `POLLIS_DS_WATERMARK_STALE_MONTHS`). **N = 12 months** (2026-08-04), the code default and also set
+  explicitly in both `wrangler.{dev,prod}.jsonc`; the resulting third accepted loss is stated publicly
+  (`website/learn.html`) and in `CLAUDE.md` / `docs/backend-core-invariants.md`. Rationale in §1.
+- **Attachments are reference-counted** (#690). The count is derived by joining `attachment_ref` to
+  `message_envelope`, so a reference is released by deleting its message (self/admin delete, envelope
+  GC #689, retention #720, teardown) and cannot outlive it; the Turso row and the R2 delete gate both
+  consult that derived count. The co-reference linkage this leaves at rest is described in §2.
+- **The commit-log ledger publishes windowed pseudonyms** (#701, §6), not `conversation_id` /
+  `sender_id`. The served bundle carries a `format_version`, and `pollis-verify` reports a too-old
+  binary as version skew, not a verification failure.
+- **No filenames in R2 object keys** (2026-08-04, #762). Keys are `media/<random file id>.enc`; a
+  filename would be readable by the operator from an object listing alone, without decrypting anything.
+  The key is stored per object in `attachment_object.r2_key` and download paths take it explicitly.
 
 ---
 
@@ -573,16 +485,11 @@ decision to retain, with the reason written down, because reaping it risks delet
 This document describes what the code does today, with citations, and it deliberately does not soften
 anything. All three items reserved to the owner are now decided:
 
-1. **The retention periods described are the intended policy.** §9's gaps were closed by #762 before
-   publication, so nothing published here is a period we do not actually enforce.
+1. **The retention periods described are the intended policy** (§9), and each is enforced in code.
 2. **The public wording derived from this document is signed off** and is now live as
    `website/retention.html` — including §6's answer to "what happens to the permanent ledger when I
    delete my account", which is the tension a reader spots first.
 3. **The App Store / Play privacy-form answers** are unblocked and answered from §2, §3 and §4 (#708).
 
-What that sign-off does *not* cover: anything that depends on the legal entity (#723) — a privacy policy
-naming a controller, a data-processing agreement, or a statement about legal process received. Those are
-not retention questions and are not answered here.
-
-Related: #662 (parent), #702 (this ticket), #708 (mobile compliance paperwork, blocked on this),
+Related: #662 (parent), #702 (this ticket), #708 (mobile compliance paperwork),
 #690, #699, #701, #720.

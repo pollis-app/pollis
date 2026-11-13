@@ -2,9 +2,7 @@
 
 Pollis publishes an append-only [transparency log](./transparency.md) of every MLS
 commit, every account identity-key version, every desktop release and every mobile
-over-the-air update. (The terminal client, the Android APK and the store builds are
-signed, but not yet in the log.) This guide
-shows how to check it yourself: that the server has not forked, rolled back or
+over-the-air update. This guide shows how to check it yourself: that the server has not forked, rolled back or
 rewritten any of it.
 
 The verifier trusts two keys compiled into it and nothing else: the log's ML-DSA-44
@@ -21,8 +19,7 @@ production, or a dev server you run yourself.
 `pollis-verify` checks the served key against a key compiled into the binary and
 refuses to continue if they differ. A hostile host therefore cannot swap in its own
 key and sign a forged history for `group`, `account` or `release`, or for the commit
-log in `remote`. (`remote` does not yet pin-check the account-key and binaries
-trees' own key; use `account` and `release` for those.) To verify a log you run yourself, signed with your
+log in `remote`. To verify a log you run yourself, signed with your
 own key, set `POLLIS_VERIFY_PINNED_KEYS_HEX` to that key (hex, 1312 bytes;
 comma-separate several). It adds to the compiled key rather than replacing it, and
 only you can set it. Leave it unset for production.
@@ -61,8 +58,8 @@ pollis-verify remote <base-url>
 ```
 
 This fetches all three trees and checks that the commit log's served key is the
-pinned key (`remote` checks the account-key and binaries trees against the key
-they serve; `account` and `release` pin-check them), and, for each tree: every STH signature, that `latest.json` matches the newest STH, that no
+pinned key (`account` and `release` pin-check the account-key and binaries trees),
+and, for each tree: every STH signature, that `latest.json` matches the newest STH, that no
 two heads equivocate, that the entries replay to each signed root, and every
 inclusion and consistency proof. A passing run prints one `PASS` line per check and
 exits `0` (output shortened; numbers are illustrative):
@@ -98,13 +95,10 @@ KNOWN  commit-log (retired): 6 superseded heads from an earlier generation of th
 OK: all checks passed
 ```
 
-The commit log's first tree, under `/v1/...`, was retired in October 2026 after it
-signed heads that do not extend its own history (#1579). `RETIRED` and `KNOWN` lines
-are information, not failures: the retired tree's consistent chain is still checked
-head by head, and a head it serves that the signed reset statement does not list is
-a `FAIL`. The live commit log is `commit-log-2`. See `docs/transparency.md` →
-"Commit-log reset (#1579)". `pollis-verify` older than `v0.10.0` does not know about
-the reset and fails on the retired tree.
+`commit-log-2` superseded the first tree on 2026-10-29; `/v1/commit-log-reset.json`
+lists the retired heads. `RETIRED` and `KNOWN` lines are information, not failures:
+the retired tree's heads are still checked against that list, and a head it serves
+that the list does not name is a `FAIL`. Use `pollis-verify` `v0.10.0` or later.
 
 Any failure prints `FAIL` on the offending line, ends with
 `FAILED: one or more checks did not pass`, and exits non-zero. If the served key is
@@ -125,10 +119,7 @@ pollis-verify remote <base-url> && echo "log is intact" || echo "VERIFICATION FA
 `pollis-verify` reads the log's `format_version` before checking anything else. If
 the log is newer than the binary, it says *"your pollis-verify is too old for this
 log — upgrade it"* and exits `2`. That is not evidence of tampering; install a newer
-`pollis-verify-v*` release. Binaries built before this check existed cannot report
-skew: `group` reports `Found: no` against a newer log, and `remote` fails on the
-retired commit-log tree like every `pollis-verify` older than `v0.10.0`.
-If in doubt, upgrade.
+`pollis-verify-v*` release.
 
 ## 3. Verify one conversation: `pollis-verify group`
 
@@ -428,11 +419,10 @@ from `actuallydan/pollis` to `pollis-app/pollis`: their certificates and
 provenance name `actuallydan/pollis`, so substitute that in the three commands
 above.
 
-**What this does not prove.** cosign and SLSA show that the Pollis release workflow
-built these bytes at a specific commit. They do not show that the bytes rebuild
-from source. That is the job of the reproducible build and the independent
-rebuilder (`.github/workflows/rebuild-verify.yml`, Linux payload only; see
-[`reproducible-builds-residuals.md`](./reproducible-builds-residuals.md)).
+**What this proves.** cosign and SLSA show that the Pollis release workflow built
+these bytes at a specific commit. Rebuilding from source is checked separately: the
+reproducible build and the rebuilder (`.github/workflows/rebuild-verify.yml`) rebuild
+the Linux payload and compare it with the release.
 
 ## The website explorer
 
