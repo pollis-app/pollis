@@ -534,8 +534,7 @@ pub async fn purge_user_log_rows(
 ///   left to use either.
 /// * `mls_group_info.updated_by_device_id` → `''`; diagnostic only.
 ///
-/// Idempotent. Also run on the main DB, which keeps pre-#420 copies of these
-/// two tables.
+/// Idempotent. Runs on the commit-log DB, via [`purge_user_log_rows`].
 pub async fn scrub_commit_log(
     conn: &Connection,
     user_id: &str,

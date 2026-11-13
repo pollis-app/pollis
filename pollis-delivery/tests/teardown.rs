@@ -272,7 +272,6 @@ async fn delete_account(c: &Connection, user: &str) -> WriteOutcome {
     pollis_delivery::writes::purge_welcomes(c, user).await.unwrap();
     pollis_delivery::teardown::purge_user_log_rows(c, user, &device_ids).await.unwrap();
     pollis_delivery::teardown::purge_conversation_log(c, &dead).await.unwrap();
-    pollis_delivery::teardown::scrub_commit_log(c, user, &device_ids).await.unwrap();
     outcome
 }
 

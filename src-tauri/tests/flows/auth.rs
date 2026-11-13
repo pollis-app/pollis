@@ -1433,3 +1433,74 @@ async fn reset_identity_and_recover_from_a_fresh_device() {
     drop(fresh);
     drop(old);
 }
+
+/// #1865: after an account is deleted, the surviving conversation's commit log
+/// and the key-package claim records no longer name it, on the real handler path
+/// (main DB and separate commit-log DB).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn delete_account_leaves_no_commit_log_or_claim_row_naming_it() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_id = alice.sign_up("alice@test.local").await.id;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // Alice's Add of bob is a commit she sent, after a key-package claim she made.
+    let group_id = alice.create_group("Survives").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    alice.process_commits_for(&channel_id).await;
+
+    async fn count(db: &std::sync::Arc<pollis_delivery::db::Db>, sql: &str, id: &str) -> i64 {
+        let conn = db.conn().await.expect("conn");
+        let mut rows = conn
+            .query(sql, libsql::params![id.to_string()])
+            .await
+            .unwrap_or_else(|e| panic!("{sql}: {e}"));
+        rows.next().await.expect("row").expect("row").get(0).expect("count")
+    }
+    const SENT: &str = "SELECT COUNT(*) FROM mls_commit_log WHERE sender_id = ?1";
+    const CLAIMED: &str = "SELECT COUNT(*) FROM mls_key_package_claim \
+                           WHERE claimer_id = ?1 OR target_user_id = ?1";
+
+    let main = writable_remote().await;
+    let log = crate::harness::writable_log().await;
+    assert!(count(&log, SENT, &alice_id).await > 0, "setup: alice sent a commit");
+    assert!(count(&main, CLAIMED, &alice_id).await > 0, "setup: alice claimed a key package");
+    let chain_before: i64 = {
+        let conn = log.conn().await.expect("log conn");
+        let mut rows = conn
+            .query("SELECT COUNT(*) FROM mls_commit_log", ())
+            .await
+            .expect("chain query");
+        rows.next().await.expect("row").expect("row").get(0).expect("count")
+    };
+
+    alice
+        .invoke_json("delete_account", json!({ "userId": alice_id }))
+        .await;
+
+    assert_eq!(count(&log, SENT, &alice_id).await, 0, "a commit still names alice as sender");
+    assert_eq!(count(&main, CLAIMED, &alice_id).await, 0, "a claim record still names alice");
+    let conn = log.conn().await.expect("log conn");
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM mls_commit_log", ())
+        .await
+        .expect("chain query");
+    let chain_after: i64 = rows.next().await.expect("row").expect("row").get(0).expect("count");
+    assert_eq!(chain_after, chain_before, "the surviving conversation keeps its commit chain");
+
+    drop(alice);
+    drop(bob);
+}

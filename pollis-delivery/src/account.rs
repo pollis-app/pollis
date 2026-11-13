@@ -775,10 +775,6 @@ pub async fn delete_account(
             crate::writes::purge_welcomes(&log_conn, &owner).await?;
             crate::teardown::purge_user_log_rows(&log_conn, &owner, &device_ids).await?;
             crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
-            // The main DB keeps pre-#420 copies of the control-plane tables. A
-            // no-op repeat when the commit log shares the main DB.
-            crate::writes::purge_welcomes(&conn, &owner).await?;
-            crate::teardown::scrub_commit_log(&conn, &owner, &device_ids).await?;
         }
     }
     outcome_response::<DeleteAccountBody>(outcome)
