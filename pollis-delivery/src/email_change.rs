@@ -24,7 +24,7 @@ use axum::{
 
 use crate::error::{AppError, AuthRejection};
 use crate::otp::{
-    normalize_email, process_request_otp, process_request_otp_for, OtpConfig, OtpStore,
+    normalize_email, process_request_otp, process_request_otp_for, OtpConfig, OtpScope, OtpStore,
     VerifyOutcome,
 };
 use crate::writes::{bad_request, gate, RawRequest};
@@ -36,7 +36,7 @@ pub use pollis_api::email_change::*;
 /// The email-change machinery: a dedicated OTP store plus the requester binding.
 ///
 /// A SEPARATE OTP store from signup's, so a change to X can't collide with a signup for X.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct EmailChangeStore {
     /// The signup OTP machinery, privately, keyed by `new_email`.
     otp: OtpStore,
@@ -46,17 +46,28 @@ pub struct EmailChangeStore {
     requesters: Arc<Mutex<HashMap<String, String>>>,
 }
 
+impl Default for EmailChangeStore {
+    fn default() -> Self {
+        Self {
+            otp: OtpStore::new(OtpScope::EmailChangeNew),
+            current_otp: OtpStore::new(OtpScope::EmailChangeCurrent),
+            requesters: Arc::default(),
+        }
+    }
+}
+
 impl EmailChangeStore {
     /// Record `requester` for `new_email` (latest wins), then send BOTH codes via [`process_request_otp`].
     ///
     /// `current_email` comes from the database, never the body; `None` sends only the new code.
     pub async fn request(
         &self,
+        conn: &libsql::Connection,
         cfg: &OtpConfig,
         requester: &str,
         new_email: &str,
         current_email: Option<&str>,
-    ) {
+    ) -> anyhow::Result<()> {
         {
             let mut g = self
                 .requesters
@@ -64,16 +75,18 @@ impl EmailChangeStore {
                 .expect("email-change requesters mutex poisoned");
             g.insert(normalize_email(new_email), requester.to_string());
         }
-        process_request_otp(&self.otp, cfg, new_email).await;
+        process_request_otp(conn, &self.otp, cfg, new_email).await?;
         if let Some(current) = current_email {
             process_request_otp_for(
+                conn,
                 &self.current_otp,
                 cfg,
                 current,
                 crate::otp::OtpPurpose::EmailChangeChallenge,
             )
-            .await;
+            .await?;
         }
+        Ok(())
     }
 
     /// The recorded requester for `new_email`, if any.
@@ -138,15 +151,19 @@ pub async fn request_email_change_otp(
             Ok(e) => e,
             Err(e) => return Ok(internal(e)),
         };
-        state
+        if let Err(e) = state
             .email_change
             .request(
+                &conn,
                 &state.otp_config,
                 &requester,
                 &new_email,
                 current_email.as_deref(),
             )
-            .await;
+            .await
+        {
+            return Ok(internal(e));
+        }
     }
     Ok(ok_status::<RequestEmailChangeBody>())
 }
@@ -234,7 +251,8 @@ pub async fn apply_verify_email_change(
         };
         match store
             .current_otp
-            .check(&current_key, current_code.trim(), cfg, crate::util::now_unix())
+            .check(conn, &current_key, current_code.trim(), cfg, crate::util::now_unix())
+            .await?
         {
             VerifyOutcome::Ok => {}
             VerifyOutcome::LockedOut => {
@@ -248,7 +266,11 @@ pub async fn apply_verify_email_change(
     }
 
     // Validate WITHOUT consuming, so a DB failure below leaves the code valid for a retry (#518).
-    match store.otp.check(trimmed, code, cfg, crate::util::now_unix()) {
+    match store
+        .otp
+        .check(conn, trimmed, code, cfg, crate::util::now_unix())
+        .await?
+    {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => {
             // check() already deleted the code on lockout; drop the binding too.
@@ -270,7 +292,7 @@ pub async fn apply_verify_email_change(
         .await?;
     if rows.next().await?.is_some() {
         // Correct code, but the email is taken: consume it and report the conflict.
-        store.otp.consume(trimmed);
+        store.otp.consume(trimmed, cfg);
         store.clear(trimmed);
         return Ok(EmailChangeOutcome::EmailTaken);
     }
@@ -281,9 +303,9 @@ pub async fn apply_verify_email_change(
     )
     .await?;
     // Applied: consume BOTH codes (single-use) now that the write has succeeded.
-    store.otp.consume(trimmed);
+    store.otp.consume(trimmed, cfg);
     if let Some(current) = old_email.as_deref() {
-        store.current_otp.consume(&normalize_email(current));
+        store.current_otp.consume(current, cfg);
     }
     store.clear(trimmed);
 

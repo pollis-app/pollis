@@ -16,8 +16,13 @@ const TOKEN: &str = "ops-token";
 const IP_A: &str = "203.0.113.41";
 const IP_B: &str = "198.51.100.42";
 
+/// With the schema: `request-otp` writes the mailbox's limits.
 async fn fresh_db() -> common::TempDb {
-    common::TempDb::open("ops.db").await
+    let db = common::TempDb::open("ops.db").await;
+    pollis_schema::apply::single_db(&db.conn().await.unwrap())
+        .await
+        .expect("schema");
+    db
 }
 
 /// Only the per-client limit is in play: `DEV_OTP`, no per-email throttle.

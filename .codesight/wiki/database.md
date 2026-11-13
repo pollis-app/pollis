@@ -159,7 +159,7 @@ hyper 1.x.
 this table** — `NOT NULL UNIQUE` cannot merge `" a@x.com "` with `"a@x.com"`, it just
 lets both exist as two accounts for one person. Canonical form is **`trim` +
 `lower`** — one function, `pollis_delivery::otp::normalize_email`, which is also
-the OTP store's key.
+what the OTP store hashes into its `otp_mailbox` key.
 
 It used to be trim only, with the lowercasing applied to the store key alone. That
 split was the bug (#1088): `Alice@x.com` and `alice@x.com` were *one* mailbox to
@@ -172,7 +172,7 @@ directly by in-process harnesses:
 
 | site | function | statement |
 |---|---|---|
-| sign-in (resolve-or-create) | `pollis_delivery::otp::apply_verify_otp` | the `SELECT` + `INSERT INTO users` |
+| sign-in (resolve-or-create) | `pollis_delivery::otp::apply_verify_otp` | the `users` lookup folded into the code's accept statement + `INSERT INTO users` |
 | email change | `pollis_delivery::email_change::apply_verify_email_change` | the conflict `SELECT` + `UPDATE users SET email` |
 | identifier lookup | `pollis_delivery::directory::user_by_identifier` | the email-branch `SELECT` (usernames are already `a-z0-9_.-`, so there is no case to fold) |
 
@@ -1277,6 +1277,13 @@ The payload is now `data: { h }` and nothing else, and `mobile/lib/push/routing.
 
 ### history_transfer / history_transfer_chunk / history_transfer_budget _(migration 000045, #1735)_
 The DS's relay for copying message history between two of one account's devices (`docs/history-transfer-design.md`). `history_transfer`: one row per transfer — `user_id`, `src_device_id`, `dst_device_id` (CHECK different), `via` (`link`/`sibling`), `state` (`requested` → `accepted` → `completed`; or `declined`/`cancelled`), the opaque signed `req`/`req_sig` and `acc`/`acc_sig` (CHECK: an acceptance exists exactly from `accepted` on), `acked_through` (trigger: only moves forward), unix-second `created_at`/`updated_at`/`expires_at`. A partial UNIQUE index allows one OPEN transfer per receiving device. `history_transfer_chunk(transfer_id, idx, sealed ≤ 1 MiB)`: triggers refuse a chunk for a transfer that is not accepted, outside the 8-chunk window above the ack, or not contiguous, and refuse any UPDATE (a stored chunk is immutable). Ended rows are kept an hour (chunks deleted at once); the GC tick (`history_transfer::sweep_expired`) deletes everything past `expires_at` (requests 15 min, accepted 24 h after last activity). `history_transfer_budget(user_id, window_start, used)`: the durable per-account request budget (12/hour). All three are purged by account deletion; revocation and logout purge the device's transfers; identity reset purges the account's.
+
+### otp_mailbox _(migration 000048, #1879)_
+The per-mailbox sign-in code limits (`pollis-delivery/src/otp.rs`), one row per mailbox that asked for or guessed a code recently. `mailbox` TEXT PK: HMAC-SHA256 (hex) of `scope ‖ 0 ‖ normalize_email(address)` under `MailboxKey`, derived from `LIVEKIT_API_SECRET` with a domain label, so every process of a deployment computes the same row and the table never holds an address (a CHECK admits exactly 64 lowercase hex characters). `scope` keeps sign-in, email-change-new and email-change-current apart. Columns: `failed`, `locked_until`, `last_sent_at`, `sends`, `window_start`, `updated_at`, `expires_at` (unix seconds). The codes are not here: their salted hashes stay in DS memory, so a restart only means the user asks for a new code.
+
+**One statement per decision.** `PREPARE_SQL` (may a code go out), `WRONG_GUESS_SQL` (count it, lock at the limit) and `accept_sql!` (a correct code: refused while locked, else the row resets) are each a single `INSERT … ON CONFLICT DO UPDATE … WHERE … RETURNING`, so concurrent requests are serialized by the database. Every statement treats a row past `expires_at` as absent. Sign-in folds its `users` lookup into the accept statement's RETURNING, so a successful `verify-otp` costs the same round trips as a plain account lookup; `request-otp` costs one.
+
+**Bounded.** `expires_at` is when the row stops mattering (last code's expiry, or lockout end); `AFTER INSERT` / `AFTER UPDATE` triggers delete every row past it on each write. No sweep, no timer. Proofs: `otp.rs` unit tests, `tests/otp_state_durability.rs` (limits hold across a fresh `AppState` over the same DB).
 
 ### user_groups / user_dms _(migration 000009 — created, then retired #1085)_
 **Empty and unreferenced.** Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned) and the maintenance + reads were reverted, leaving a frozen backfill of the roster as of the moment the migration ran — never inserted into, never read, only deleted from. That is the worst shape a table can have: it could only drift further from `group_member` / `dm_channel_member`, so anything that started reading it would have served a confidently wrong sidebar while looking authoritative.

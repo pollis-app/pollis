@@ -1,76 +1,200 @@
-//! #1142: the OTP guess budget lives in memory, and the container sleeps.
+//! #1879: a mailbox's sign-in code limits hold across a DS restart.
 //!
-//! Safe only while `sleepAfter >= ttl_secs`: the silence that resets the counter also expires the code.
+//! A "restart" here is what the container gives a new process: a fresh
+//! `AppState` (empty memory) over the same database, with the mailbox key
+//! derived again from the same secret.
 
-use pollis_delivery::otp::OtpConfig;
+use std::sync::Arc;
 
-/// Parse `sleepAfter` from source: a constant copied into Rust would drift.
-fn sleep_after_secs() -> u64 {
-    let src = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worker/index.ts"),
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use http_body_util::BodyExt as _;
+use pollis_delivery::db::Db;
+use pollis_delivery::otp::{MailboxKey, OtpConfig, OtpScope, OtpStore, PrepareOutcome};
+use pollis_delivery::ratelimit::RateLimitConfig;
+use pollis_delivery::{build_router_with_state, AppState};
+use tower::ServiceExt as _;
+
+mod common;
+
+const DEV_CODE: &str = "123456";
+const SECRET: &str = "test-deployment-secret";
+const EMAIL: &str = "alice@example.com";
+
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("otp.db").await;
+    pollis_schema::apply::single_db(&db.conn().await.unwrap())
+        .await
+        .expect("schema");
+    db
+}
+
+/// The config one process builds at boot: the key is derived, not shared.
+fn boot_config() -> OtpConfig {
+    OtpConfig {
+        dev_otp: Some(DEV_CODE.to_string()),
+        resend_throttle_secs: 0,
+        mailbox_key: MailboxKey::derive(SECRET),
+        ..OtpConfig::default()
+    }
+}
+
+/// One DS process: fresh memory over `db`.
+fn boot(db: Arc<Db>) -> AppState {
+    AppState::new(db, true)
+        .with_otp_config(boot_config())
+        // Every request comes from one test client; this file is about the
+        // per-mailbox limits, not the per-IP ones.
+        .with_ratelimit_config(RateLimitConfig {
+            request_otp_max: 1_000,
+            verify_otp_max: 1_000,
+            ..RateLimitConfig::default()
+        })
+}
+
+async fn post(state: &AppState, path: &str, body: serde_json::Value) -> StatusCode {
+    let req = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = build_router_with_state(state.clone()).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let _ = resp.into_body().collect().await.unwrap();
+    status
+}
+
+async fn request_code(state: &AppState) -> StatusCode {
+    post(state, "/v1/auth/request-otp", serde_json::json!({ "email": EMAIL })).await
+}
+
+async fn verify(state: &AppState, code: &str) -> StatusCode {
+    post(
+        state,
+        "/v1/auth/verify-otp",
+        serde_json::json!({ "email": EMAIL, "code": code, "device_id": "dev-1" }),
     )
-    .expect("read worker/index.ts");
-
-    let line = src
-        .lines()
-        .map(str::trim)
-        .find(|l| l.starts_with("sleepAfter"))
-        .expect(
-            "worker/index.ts no longer declares `sleepAfter` — if the container \
-             lifetime moved, this invariant needs re-deriving, not deleting",
-        );
-
-    let raw = line
-        .split('"')
-        .nth(1)
-        .expect("sleepAfter must be a quoted time expression");
-
-    parse_time_expression(raw)
-        .unwrap_or_else(|| panic!("could not parse sleepAfter value {raw:?}"))
+    .await
 }
 
-/// The `parseTimeExpression` subset the config may use: `<n>[smh]` or bare seconds.
-fn parse_time_expression(raw: &str) -> Option<u64> {
-    let raw = raw.trim();
-    let (digits, mult) = match raw.chars().last()? {
-        's' => (&raw[..raw.len() - 1], 1),
-        'm' => (&raw[..raw.len() - 1], 60),
-        'h' => (&raw[..raw.len() - 1], 3600),
-        '0'..='9' => (raw, 1),
-        _ => return None,
-    };
-    digits.parse::<u64>().ok().map(|n| n * mult)
+#[tokio::test]
+async fn a_lockout_holds_across_a_restart() {
+    let db = fresh_db().await;
+    let before = boot(db.arc());
+    assert_eq!(request_code(&before).await, StatusCode::OK);
+    for _ in 0..5 {
+        assert_eq!(verify(&before, "000000").await, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(verify(&before, "000000").await, StatusCode::TOO_MANY_REQUESTS);
+
+    let after = boot(db.arc());
+    // A new request is answered as always but issues no code.
+    assert_eq!(request_code(&after).await, StatusCode::OK);
+    assert_eq!(verify(&after, DEV_CODE).await, StatusCode::TOO_MANY_REQUESTS);
 }
 
-/// `OTP_TTL_SECS` can raise `ttl_secs` at runtime, which this test cannot see.
-#[test]
-fn the_container_sleeps_no_sooner_than_an_otp_expires() {
-    let sleep_after = sleep_after_secs();
-    let ttl = OtpConfig::default().ttl_secs;
+#[tokio::test]
+async fn the_guess_count_holds_across_a_restart() {
+    let db = fresh_db().await;
+    let before = boot(db.arc());
+    assert_eq!(request_code(&before).await, StatusCode::OK);
+    for _ in 0..5 {
+        assert_eq!(verify(&before, "000000").await, StatusCode::UNAUTHORIZED);
+    }
 
-    assert!(
-        sleep_after >= ttl,
-        "sleepAfter is {sleep_after}s but an OTP lives {ttl}s. The failed-guess \
-         counter and mailbox lockout are in-memory (#1142), so the container \
-         going to sleep clears them. That is only safe while the silence needed \
-         to trigger it also expires the code being attacked. With sleepAfter \
-         BELOW the code lifetime, an attacker gets a fresh {}-guess budget \
-         against one live code every {sleep_after}s just by pausing. Raise \
-         sleepAfter back to at least {ttl}s, or make the lockout durable.",
-        OtpConfig::default().max_attempts
+    let after = boot(db.arc());
+    assert_eq!(request_code(&after).await, StatusCode::OK);
+    assert_eq!(
+        verify(&after, "000000").await,
+        StatusCode::TOO_MANY_REQUESTS,
+        "the sixth wrong guess locks the mailbox, whichever process saw the first five"
     );
+    assert_eq!(verify(&after, DEV_CODE).await, StatusCode::TOO_MANY_REQUESTS);
 }
 
-#[test]
-fn the_sleep_after_parser_handles_the_forms_the_config_may_use() {
-    assert_eq!(parse_time_expression("10m"), Some(600));
-    assert_eq!(parse_time_expression("24h"), Some(86_400));
-    assert_eq!(parse_time_expression("90s"), Some(90));
-    assert_eq!(parse_time_expression("600"), Some(600));
-    assert_eq!(parse_time_expression("soon"), None);
+/// Codes are per process: after a restart the user asks again, and nothing
+/// else about the mailbox has changed.
+#[tokio::test]
+async fn after_a_restart_a_new_code_signs_in() {
+    let db = fresh_db().await;
+    let before = boot(db.arc());
+    assert_eq!(request_code(&before).await, StatusCode::OK);
 
-    assert!(
-        sleep_after_secs() > 0,
-        "sleepAfter parsed as 0 — the source read is not finding the declaration"
+    let after = boot(db.arc());
+    assert_eq!(verify(&after, DEV_CODE).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(request_code(&after).await, StatusCode::OK);
+    assert_eq!(verify(&after, DEV_CODE).await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_resend_throttle_holds_across_a_restart() {
+    let db = fresh_db().await;
+    let conn = db.conn().await.unwrap();
+    let cfg = OtpConfig { resend_throttle_secs: 30, ..boot_config() };
+
+    let before = OtpStore::new(OtpScope::SignIn);
+    assert!(matches!(
+        before.prepare(&conn, EMAIL, DEV_CODE, &cfg, 1_000).await.unwrap(),
+        PrepareOutcome::Send(_)
+    ));
+
+    let after = OtpStore::new(OtpScope::SignIn);
+    let cfg = OtpConfig { mailbox_key: MailboxKey::derive(SECRET), ..cfg };
+    assert_eq!(
+        after.prepare(&conn, EMAIL, DEV_CODE, &cfg, 1_010).await.unwrap(),
+        PrepareOutcome::Refused
     );
+    assert!(matches!(
+        after.prepare(&conn, EMAIL, DEV_CODE, &cfg, 1_030).await.unwrap(),
+        PrepareOutcome::Send(_)
+    ));
+}
+
+#[tokio::test]
+async fn the_send_budget_holds_across_a_restart() {
+    let db = fresh_db().await;
+    let conn = db.conn().await.unwrap();
+    let cfg = boot_config();
+
+    let before = OtpStore::new(OtpScope::SignIn);
+    for i in 0..cfg.max_sends_per_window {
+        assert!(matches!(
+            before.prepare(&conn, EMAIL, DEV_CODE, &cfg, 1_000 + u64::from(i)).await.unwrap(),
+            PrepareOutcome::Send(_)
+        ));
+    }
+
+    let after = OtpStore::new(OtpScope::SignIn);
+    let cfg = boot_config();
+    assert_eq!(
+        after.prepare(&conn, EMAIL, DEV_CODE, &cfg, 1_100).await.unwrap(),
+        PrepareOutcome::Refused
+    );
+    // The window still rolls over.
+    assert!(matches!(
+        after.prepare(&conn, EMAIL, DEV_CODE, &cfg, 1_000 + cfg.ttl_secs).await.unwrap(),
+        PrepareOutcome::Send(_)
+    ));
+}
+
+/// After the sign-in flows above, the table holds hashes only.
+#[tokio::test]
+async fn the_table_never_holds_an_address() {
+    let db = fresh_db().await;
+    let state = boot(db.arc());
+    request_code(&state).await;
+    verify(&state, "000000").await;
+
+    let conn = db.conn().await.unwrap();
+    let mut rows = conn.query("SELECT * FROM otp_mailbox", ()).await.unwrap();
+    let mut n = 0;
+    while let Some(row) = rows.next().await.unwrap() {
+        n += 1;
+        for i in 0..row.column_count() {
+            let v = format!("{:?}", row.get_value(i).unwrap());
+            assert!(!v.contains('@') && !v.contains("alice"), "column {i} holds {v}");
+        }
+    }
+    assert_eq!(n, 1);
 }
