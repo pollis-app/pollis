@@ -282,17 +282,12 @@ pub async fn resolve_conversation(
 }
 
 async fn channel_ids_of(conn: &Connection, group_id: &str) -> anyhow::Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT id FROM channels WHERE group_id = ?1",
-            libsql::params![group_id.to_string()],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
+    crate::util::query_strings(
+        conn,
+        "SELECT id FROM channels WHERE group_id = ?1",
+        libsql::params![group_id.to_string()],
+    )
+    .await
 }
 
 /// This device's watermark for each of `conversation_ids`, by conversation.
@@ -1372,33 +1367,23 @@ async fn one_to_one_dm(
 }
 
 pub async fn user_group_ids(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT g.id FROM groups g \
-             JOIN group_member gm ON gm.group_id = g.id \
-             WHERE gm.user_id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
+    crate::util::query_strings(
+        conn,
+        "SELECT g.id FROM groups g \
+         JOIN group_member gm ON gm.group_id = g.id \
+         WHERE gm.user_id = ?1",
+        libsql::params![user_id.to_string()],
+    )
+    .await
 }
 
 pub async fn user_dm_ids(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
+    crate::util::query_strings(
+        conn,
+        "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
+        libsql::params![user_id.to_string()],
+    )
+    .await
 }
 
 /// Every emoji the caller may USE: the picker and the send rule in one query.

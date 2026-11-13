@@ -755,7 +755,12 @@ pub async fn delete_message(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<DeleteMessageBody>(apply_delete_message(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_delete_message(&conn, authed.as_deref(), &parsed).await?;
+    // The delete may have released the last reference to a file (#1881).
+    if matches!(outcome, WriteOutcome::Ok) {
+        spawn_attachment_reclaim(&state);
+    }
+    outcome_response::<DeleteMessageBody>(outcome)
 }
 
 /// A capability hash whose PREIMAGE is known, so a fixture can both write an
@@ -824,6 +829,45 @@ pub(crate) async fn check_delete_capability(
     } else {
         Ok(DeleteCapability::Refused)
     }
+}
+
+/// Remove envelope `message_id` and its pending edit, both scoped to
+/// `conversation_id`. Returns how many rows the envelope itself lost (0 or 1).
+async fn remove_envelope_and_edit(
+    tx: &Connection,
+    conversation_id: &str,
+    message_id: &str,
+) -> anyhow::Result<u64> {
+    let params = || libsql::params![message_id.to_string(), conversation_id.to_string()];
+    let removed = tx
+        .execute(
+            "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
+            params(),
+        )
+        .await?;
+    tx.execute(
+        "DELETE FROM message_envelope \
+         WHERE target_message_id = ?1 AND type = 'edit' AND conversation_id = ?2",
+        params(),
+    )
+    .await?;
+    Ok(removed)
+}
+
+/// The stored `sender_id` of envelope `message_id` in `conversation_id`: the
+/// author for a legacy unsealed envelope, the sealed sentinel otherwise.
+async fn envelope_sender(
+    conn: &Connection,
+    conversation_id: &str,
+    message_id: &str,
+) -> anyhow::Result<Option<String>> {
+    Ok(crate::util::query_strings(
+        conn,
+        "SELECT sender_id FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
+        libsql::params![message_id.to_string(), conversation_id.to_string()],
+    )
+    .await?
+    .pop())
 }
 
 /// The capability hash carried by the PENDING EDIT of `message_id`, if there is
@@ -954,28 +998,30 @@ pub async fn apply_delete_message(
             return Ok(WriteOutcome::Forbidden);
         }
         // ...and, since #1086, capability PROOF; legacy rows keep the membership-only path.
-        if check_delete_capability(
+        let capability = check_delete_capability(
             conn,
             &body.conversation_id,
             &body.message_id,
             body.delete_token.as_deref(),
         )
-        .await?
-            == DeleteCapability::Refused
-        {
+        .await?;
+        if capability == DeleteCapability::Refused {
             return Ok(WriteOutcome::Forbidden);
         }
+        // Authorship proven, not hinted: the capability, or a legacy unsealed
+        // envelope naming the actor. Only then does removing the envelope
+        // release the message's attachments (#1881).
+        let proven_author = capability == DeleteCapability::Proved
+            || envelope_sender(conn, &body.conversation_id, &body.message_id).await?.as_deref()
+                == Some(actor.as_str());
         // SCOPED to the authorized conversation, or membership anywhere would authorize deleting any envelope.
         let tx = conn.transaction().await?;
-        tx.execute(
-            "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
-            libsql::params![body.message_id.clone(), body.conversation_id.clone()],
-        )
-        .await?;
-        tx.execute(
-            "DELETE FROM message_envelope \
-             WHERE target_message_id = ?1 AND type = 'edit' AND conversation_id = ?2",
-            libsql::params![body.message_id.clone(), body.conversation_id.clone()],
+        let removed = remove_envelope_and_edit(&tx, &body.conversation_id, &body.message_id).await?;
+        release_message_references(
+            &tx,
+            &body.message_id,
+            body.delete_token.as_deref(),
+            removed > 0 && proven_author,
         )
         .await?;
         tx.commit().await?;
@@ -996,17 +1042,11 @@ pub async fn apply_delete_message(
     let now = now_rfc3339();
     // Scoped like the self-branch, or one group's admin could delete anywhere.
     let tx = conn.transaction().await?;
-    tx.execute(
-        "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
-        libsql::params![body.message_id.clone(), body.conversation_id.clone()],
-    )
-    .await?;
-    tx.execute(
-        "DELETE FROM message_envelope \
-         WHERE target_message_id = ?1 AND type = 'edit' AND conversation_id = ?2",
-        libsql::params![body.message_id.clone(), body.conversation_id.clone()],
-    )
-    .await?;
+    let removed = remove_envelope_and_edit(&tx, &body.conversation_id, &body.message_id).await?;
+    // The tombstone removes the message for every member, so its attachments
+    // are released (#1881). The admin's authority is over this conversation,
+    // which only the envelope still names, so a collected one releases nothing.
+    release_message_references(&tx, &body.message_id, None, removed > 0).await?;
     insert_envelope_with_seq(
         &tx,
         &body.conversation_id,
@@ -1398,8 +1438,12 @@ pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result
             }
         }
     }
-    // Reap orphaned `attachment_ref` rows (#690): hygiene only, as the count is derived.
-    conn.execute(REAP_ORPHANED_ATTACHMENT_REFS_SQL, ()).await?;
+    // Envelope GC removes delivered mail, never history (#1881), so it releases
+    // no message reference. Orphaned VAULT references are another matter: the
+    // entry they named is gone, so what they held is released. Marked first, as
+    // the references are the only record of which objects those were.
+    let orphaned_vault = crate::util::query_strings(conn, ORPHANED_VAULT_HASHES_SQL, ()).await?;
+    mark_released_objects(conn, &orphaned_vault).await?;
     conn.execute(REAP_ORPHANED_VAULT_REFS_SQL, ()).await?;
     Ok(SweepReport {
         visited: conversations.len(),
@@ -1418,18 +1462,22 @@ fn min_opt(a: Option<String>, b: Option<String>) -> Option<String> {
     }
 }
 
-// The attachment reference count is DERIVED (#690): a declaration counts only while its envelope exists,
+// The attachment reference count (#690, #1881).
 //
-// so every envelope delete releases it, and releasing needs no authz of its own.
+// A message reference is the `attachment_ref` row itself. It lasts as long as
+// the message does in its recipients' history, which outlives the envelope:
+// envelope GC, the #720 window, account deletion and conversation teardown all
+// leave every member's history in place, and members fetch the file from R2
+// lazily. Only an explicit delete of the message releases it
+// ([`release_message_references`]).
 //
-// Forged/orphaned declarations are inert, and reaped by [`sweep_envelope_gc`].
+// Registration binds every row to its message's author (#1165), so the
+// authenticated path writes no forged row.
 //
-// The vault leg (#107): a `vault_attachment_ref` on a live `vault_message` counts the same way.
+// The vault leg (#107): a `vault_attachment_ref` on a live `vault_message`.
 macro_rules! live_ref_exists {
     () => {
-        "(EXISTS (SELECT 1 FROM attachment_ref ar \
-                  JOIN message_envelope me ON me.id = ar.message_id \
-                  WHERE ar.content_hash = ?1) \
+        "(EXISTS (SELECT 1 FROM attachment_ref ar WHERE ar.content_hash = ?1) \
           OR EXISTS (SELECT 1 FROM vault_attachment_ref var \
                      JOIN vault_message vm ON vm.id = var.vault_message_id \
                      WHERE var.content_hash = ?1))"
@@ -1440,24 +1488,272 @@ macro_rules! live_ref_exists {
 /// [`object_is_referenced`].
 const OBJECT_IS_REFERENCED_SQL: &str = concat!("SELECT ", live_ref_exists!());
 
-/// Collect the shared dedup row iff NO live reference remains. One predicate, no
-/// Rust-side count, so it holds under concurrent deletes.
+/// Collect the shared row iff NO reference remains. One predicate, no Rust-side
+/// count, so it holds under concurrent deletes.
+///
+/// A row already released is left to [`reclaim_released_attachments`], which
+/// still needs its `r2_key` to delete the blob.
 const COLLECT_UNREFERENCED_OBJECT_SQL: &str = concat!(
-    "DELETE FROM attachment_object WHERE content_hash = ?1 AND NOT ",
+    "DELETE FROM attachment_object WHERE content_hash = ?1 AND reclaim_state IS NULL AND NOT ",
     live_ref_exists!()
 );
 
-/// Reap declaration rows whose message envelope is gone (GC'd, deleted, aged out,
-/// or a forged id). Hygiene only: the count is already correct (see [`live_ref_exists`]).
-const REAP_ORPHANED_ATTACHMENT_REFS_SQL: &str = "\
-DELETE FROM attachment_ref \
- WHERE NOT EXISTS (SELECT 1 FROM message_envelope me WHERE me.id = attachment_ref.message_id)";
+/// Mark the object released iff NO reference remains (#1881): the same
+/// predicate as [`COLLECT_UNREFERENCED_OBJECT_SQL`] and the presign gate.
+const MARK_RELEASED_OBJECT_SQL: &str = concat!(
+    "UPDATE attachment_object SET reclaim_state = 'released' \
+     WHERE content_hash = ?1 AND reclaim_state IS NULL AND NOT ",
+    live_ref_exists!()
+);
 
-/// The vault leg of the same hygiene: reap reference rows whose vault entry is
-/// gone (teardown or a crash); `/v1/vault/delete` already removes them inline.
+/// A new reference wins over a release that has not started deleting.
+const REVIVE_RELEASED_OBJECT_SQL: &str = "\
+UPDATE attachment_object SET reclaim_state = NULL \
+ WHERE content_hash = ?1 AND reclaim_state = 'released'";
+
+/// Clear a release whose object is referenced again (a reference written by
+/// any path that did not revive it).
+const UNMARK_REFERENCED_OBJECT_SQL: &str = concat!(
+    "UPDATE attachment_object SET reclaim_state = NULL \
+     WHERE content_hash = ?1 AND reclaim_state = 'released' AND ",
+    live_ref_exists!()
+);
+
+/// Claim a released, still-unreferenced object for deletion, just before its
+/// blob is deleted. From here the reclaim finishes even if a reference lands.
+const CLAIM_RELEASED_OBJECT_SQL: &str = concat!(
+    "UPDATE attachment_object SET reclaim_state = 'deleting' \
+     WHERE content_hash = ?1 AND reclaim_state = 'released' AND NOT ",
+    live_ref_exists!()
+);
+
+/// Orphaned vault references: their vault entry is gone (teardown or a crash);
+/// `/v1/vault/delete` already removes them inline.
 const REAP_ORPHANED_VAULT_REFS_SQL: &str = "\
 DELETE FROM vault_attachment_ref \
  WHERE NOT EXISTS (SELECT 1 FROM vault_message vm WHERE vm.id = vault_attachment_ref.vault_message_id)";
+
+/// The hashes [`REAP_ORPHANED_VAULT_REFS_SQL`] is about to drop.
+const ORPHANED_VAULT_HASHES_SQL: &str = "\
+SELECT DISTINCT content_hash FROM vault_attachment_ref \
+ WHERE NOT EXISTS (SELECT 1 FROM vault_message vm WHERE vm.id = vault_attachment_ref.vault_message_id)";
+
+/// The hashes the vault entries `vault_scope` selects reference, read before
+/// those entries' references go. `vault_scope` is a `SELECT id FROM
+/// vault_message …` bound by `params`.
+pub(crate) async fn vault_hashes_of(
+    conn: &Connection,
+    vault_scope: &str,
+    params: impl libsql::params::IntoParams,
+) -> anyhow::Result<Vec<String>> {
+    crate::util::query_strings(
+        conn,
+        &format!(
+            "SELECT DISTINCT content_hash FROM vault_attachment_ref WHERE vault_message_id IN ({vault_scope})"
+        ),
+        params,
+    )
+    .await
+}
+
+/// Drop every reference vault entry `vault_message_id` holds, returning the
+/// hashes it held, for [`mark_released_objects`] once the caller has written
+/// whatever replaces them.
+pub(crate) async fn drop_vault_references(
+    conn: &Connection,
+    vault_message_id: &str,
+) -> anyhow::Result<Vec<String>> {
+    let held = vault_hashes_of(conn, "?1", libsql::params![vault_message_id.to_string()]).await?;
+    conn.execute(
+        "DELETE FROM vault_attachment_ref WHERE vault_message_id = ?1",
+        libsql::params![vault_message_id.to_string()],
+    )
+    .await?;
+    Ok(held)
+}
+
+/// Release the references of message `message_id`, which an explicit delete
+/// has just removed for everyone (#1881), and mark what that left
+/// unreferenced. Returns the hashes released.
+///
+/// A reference goes when `envelope_deleted` (this request removed the envelope
+/// under the delete's own authorization), or when `token` is the message's
+/// deletion capability (#1086) and matches the hash copied onto the reference
+/// at registration: the author's delete of a message whose envelope GC already
+/// collected. Anything else releases nothing.
+pub(crate) async fn release_message_references(
+    conn: &Connection,
+    message_id: &str,
+    token: Option<&str>,
+    envelope_deleted: bool,
+) -> anyhow::Result<Vec<String>> {
+    let digest: Option<String> = token.map(capability_digest);
+    let scope = "message_id = ?1 AND (?2 OR (delete_token_hash IS NOT NULL AND delete_token_hash = ?3))";
+    let params = || {
+        libsql::params![
+            message_id.to_string(),
+            i64::from(envelope_deleted),
+            digest.clone()
+        ]
+    };
+    let released = crate::util::query_strings(
+        conn,
+        &format!("SELECT DISTINCT content_hash FROM attachment_ref WHERE {scope}"),
+        params(),
+    )
+    .await?;
+    if released.is_empty() {
+        return Ok(released);
+    }
+    conn.execute(&format!("DELETE FROM attachment_ref WHERE {scope}"), params())
+        .await?;
+    mark_released_objects(conn, &released).await?;
+    Ok(released)
+}
+
+/// Clear a release that has not started deleting, because a new reference to
+/// `hash` just landed (#1881). A file is never lost to a declaration that
+/// arrived late.
+pub(crate) async fn revive_released_object(conn: &Connection, hash: &str) -> anyhow::Result<()> {
+    conn.execute(REVIVE_RELEASED_OBJECT_SQL, libsql::params![hash.to_string()])
+        .await?;
+    Ok(())
+}
+
+/// Mark released each of `hashes` that nothing still references (#1881). Called
+/// in the same transaction as the explicit delete that released them.
+/// Returns how many objects were marked.
+pub async fn mark_released_objects(conn: &Connection, hashes: &[String]) -> anyhow::Result<u64> {
+    let mut marked = 0u64;
+    for hash in hashes {
+        marked += conn
+            .execute(MARK_RELEASED_OBJECT_SQL, libsql::params![hash.clone()])
+            .await?;
+    }
+    Ok(marked)
+}
+
+/// What one [`reclaim_released_attachments`] pass did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReclaimReport {
+    /// Objects whose blob and row are both gone.
+    pub reclaimed: u64,
+    /// Objects whose blob delete failed; their rows stay for the next pass.
+    pub failed: u64,
+}
+
+/// Reclaim every released object (#1881): delete the R2 blob, then the row and
+/// any leftover references.
+///
+/// Safe to stop anywhere. A released object that is referenced again is
+/// revived instead. One still unreferenced is claimed (`deleting`) before its
+/// blob is deleted; from then on a reference cannot save bytes that may
+/// already be gone, so the row and every reference go with them and no row
+/// ever names a missing blob. The row is the only record of the key, so it
+/// goes only after the blob delete succeeds; a failed delete leaves it for the
+/// next pass (the next explicit delete, or the envelope-GC tick).
+///
+/// The DS deletes only the attachment key its own presign would name for the
+/// row's file id; a row whose `r2_key` is anything else loses the row but
+/// deletes no blob.
+pub async fn reclaim_released_attachments(
+    conn: &Connection,
+    store: &impl crate::broker::ObjectStore,
+) -> anyhow::Result<ReclaimReport> {
+    reclaim_pending(conn, store, None).await
+}
+
+/// [`reclaim_released_attachments`] for the one object `content_hash`, if a
+/// delete released it.
+pub async fn reclaim_released_attachment(
+    conn: &Connection,
+    store: &impl crate::broker::ObjectStore,
+    content_hash: &str,
+) -> anyhow::Result<ReclaimReport> {
+    reclaim_pending(conn, store, Some(content_hash)).await
+}
+
+async fn reclaim_pending(
+    conn: &Connection,
+    store: &impl crate::broker::ObjectStore,
+    only: Option<&str>,
+) -> anyhow::Result<ReclaimReport> {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    {
+        let mut rows = conn
+            .query(
+                "SELECT content_hash, r2_key FROM attachment_object \
+                 WHERE reclaim_state IS NOT NULL AND (?1 IS NULL OR content_hash = ?1)",
+                libsql::params![only.map(str::to_string)],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            pending.push((row.get(0)?, row.get(1)?));
+        }
+    }
+    let mut report = ReclaimReport::default();
+    for (hash, r2_key) in pending {
+        conn.execute(UNMARK_REFERENCED_OBJECT_SQL, libsql::params![hash.clone()])
+            .await?;
+        conn.execute(CLAIM_RELEASED_OBJECT_SQL, libsql::params![hash.clone()])
+            .await?;
+        let claimed = {
+            let mut rows = conn
+                .query(
+                    "SELECT 1 FROM attachment_object WHERE content_hash = ?1 AND reclaim_state = 'deleting'",
+                    libsql::params![hash.clone()],
+                )
+                .await?;
+            rows.next().await?.is_some()
+        };
+        if !claimed {
+            continue;
+        }
+        let names_this_object = crate::broker::parse_r2_key(&r2_key).is_some_and(|k| {
+            k.family == crate::broker::R2Family::Media && k.content_hash == Some(hash.as_str())
+        });
+        if names_this_object {
+            if let Err(e) = store.delete_object(&r2_key).await {
+                tracing::warn!("attachment reclaim: object delete failed, retried next pass: {e}");
+                report.failed += 1;
+                continue;
+            }
+        }
+        let gone = conn
+            .execute(
+                "DELETE FROM attachment_object WHERE content_hash = ?1 AND reclaim_state = 'deleting'",
+                libsql::params![hash.clone()],
+            )
+            .await?;
+        if gone > 0 {
+            clear_declarations(conn, &hash).await?;
+            report.reclaimed += 1;
+        }
+    }
+    Ok(report)
+}
+
+/// Run [`reclaim_released_attachments`] in the background after an explicit
+/// delete commits, so the request does not wait on R2. Best-effort: whatever
+/// it leaves, the envelope-GC tick retries.
+pub fn spawn_attachment_reclaim(state: &crate::AppState) {
+    if state.broker.r2_ready().is_none() {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        let conn = match state.db.conn().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("attachment reclaim: DB connection failed: {e}");
+                return;
+            }
+        };
+        if let Err(e) = reclaim_released_attachments(&conn, &state.broker).await {
+            tracing::warn!("attachment reclaim failed: {e}");
+        }
+    });
+}
 
 /// True when `message_id` names a STILL-EXISTING envelope the caller provably
 /// wrote.
@@ -1512,8 +1808,8 @@ fn capability_digest(token: &str) -> String {
 const WITHDRAW_CHUNK: usize = 200;
 
 /// Remove the envelopes an account is withdrawing on deletion, each proven by
-/// its deletion capability (#1086), with the attachment references and
-/// reactions hanging off them. Returns how many envelopes went.
+/// its deletion capability (#1086), with the reactions hanging off them.
+/// Returns how many envelopes went. Attachment references stay (#1881).
 ///
 /// A pair matches the envelope with that id and stored hash, and any pending
 /// edit of it (an edit envelope carries its target's hash). A pair that matches
@@ -1562,12 +1858,8 @@ pub async fn withdraw_envelopes(
 
         let marks = (1..=ids.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
         let id_params = || ids.iter().cloned().map(libsql::Value::from).collect::<Vec<_>>();
-        // Children first, while the envelopes still exist (#690).
-        conn.execute(
-            &format!("DELETE FROM attachment_ref WHERE message_id IN ({marks})"),
-            id_params(),
-        )
-        .await?;
+        // Attachment references stay: members who fetched these keep them in
+        // their history, so withdrawing is not a delete of the message (#1881).
         conn.execute(
             &format!("DELETE FROM message_reaction WHERE message_id IN ({marks})"),
             id_params(),
@@ -1606,7 +1898,16 @@ pub async fn delete_attachment(
     let conn = state.db.conn().await?;
     // The verified actor is passed and deliberately unused: the collect asks
     // only whether anything still references the object, never who is asking.
-    outcome_response::<AttachmentDeleteBody>(apply_delete_attachment(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_delete_attachment(&conn, authed.as_deref(), &parsed).await?;
+    // The client asks for the collect right after its delete released the
+    // file, so finish that file now: blob, then row (#1881). A failure leaves
+    // it for the envelope-GC tick, and the request still succeeds.
+    if state.broker.r2_ready().is_some() {
+        if let Err(e) = reclaim_released_attachment(&conn, &state.broker, &parsed.content_hash).await {
+            tracing::warn!("attachment reclaim failed: {e}");
+        }
+    }
+    outcome_response::<AttachmentDeleteBody>(outcome)
 }
 
 /// Register an attachment object row (`content_hash → r2_key`) and, when a
@@ -1644,12 +1945,20 @@ pub async fn apply_register_attachment(
     .await?;
     // The reference exists only on the send variant (#925).
     if let Some(message_id) = body.message_id() {
-        // No registrar recorded either (000032).
+        // No registrar recorded either (000032). The envelope's deletion
+        // capability hash rides along, so the author's delete can release this
+        // reference after envelope GC has collected the envelope (#1881).
         tx.execute(
-            "INSERT OR IGNORE INTO attachment_ref (content_hash, message_id) VALUES (?1, ?2)",
+            "INSERT INTO attachment_ref (content_hash, message_id, delete_token_hash) \
+             VALUES (?1, ?2, (SELECT delete_token_hash FROM message_envelope WHERE id = ?2 LIMIT 1)) \
+             ON CONFLICT(content_hash, message_id) DO UPDATE SET \
+                 delete_token_hash = COALESCE(attachment_ref.delete_token_hash, excluded.delete_token_hash)",
             libsql::params![body.content_hash().to_string(), message_id.to_string()],
         )
         .await?;
+        // A send whose declaration lands after another message's delete
+        // released the object revives it, rather than losing the file (#1881).
+        revive_released_object(&tx, body.content_hash()).await?;
     }
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
@@ -2425,13 +2734,11 @@ mod gc_sql_tests {
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
     }
 
-    /// The DS-internal GC sweep releases a swept message's attachment reference:
-    /// once the envelope is gone the object is no longer referenced (collectable),
-    /// and the orphaned declaration row is reaped so `attachment_ref` stays
-    /// bounded. Without this the reference outlived its message forever and pinned
-    /// the object + R2 blob — the #690 Blocking 2 storage leak.
+    /// Envelope GC collects DELIVERED mail; the message stays in every member's
+    /// history and its file is fetched from R2 lazily, so the sweep must keep
+    /// the reference and the object (#1881).
     #[tokio::test]
-    async fn gc_releases_a_swept_messages_attachment_reference() {
+    async fn gc_keeps_a_swept_messages_attachment_reference() {
         let conn = conn().await;
         channel_fixture(&conn).await;
         add_device(&conn, "alice", "a1", false).await;
@@ -2440,46 +2747,37 @@ mod gc_sql_tests {
         add_envelope(&conn, "m1", "c1", 7).await;
         add_attachment(&conn, "h", "m1").await;
 
-        assert!(
-            object_is_referenced(&conn, "h").await.unwrap(),
-            "referenced while the message is live"
-        );
-
         let report = sweep_envelope_gc(&conn, TEST_STALE).await.unwrap();
         assert_eq!(report.visited, 1, "the sweep visits the one conversation with envelopes");
         assert_eq!(envelope_count(&conn, "c1").await, 0, "the message was swept");
         assert!(
-            !object_is_referenced(&conn, "h").await.unwrap(),
-            "with the message gone the reference must not survive — the object is \
-             now collectable (#690 Blocking 2)"
+            object_is_referenced(&conn, "h").await.unwrap(),
+            "a delivered message still shows its file; GC must not release it"
         );
-        assert_eq!(
-            raw_ref_count(&conn, "h").await,
-            0,
-            "the orphaned declaration row is reaped so attachment_ref stays bounded"
-        );
+        assert_eq!(raw_ref_count(&conn, "h").await, 1);
+        let mut rows = conn
+            .query("SELECT reclaim_state FROM attachment_object WHERE content_hash = 'h'", ())
+            .await
+            .unwrap();
+        let state: Option<String> = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(state, None, "GC marked a file still in history");
     }
 
-    /// A forged-add reference — a `register` for a `message_id` that never had an
-    /// envelope, the residue of the Blocking 1 attack — is never counted, and is
-    /// reclaimed by the sweep rather than pinning the object forever.
+    /// References count without an envelope, so a forged one would pin a file:
+    /// registration refuses a declaration naming a message the caller did not
+    /// write, including one that never existed (#1165).
     #[tokio::test]
-    async fn a_reference_to_a_nonexistent_message_is_never_counted_and_is_reaped() {
+    async fn a_declaration_for_a_message_that_does_not_exist_is_refused() {
         let conn = conn().await;
-        // No `message_envelope` row 'ghost' is ever created.
-        add_attachment(&conn, "h", "ghost").await;
-
-        assert!(
-            !object_is_referenced(&conn, "h").await.unwrap(),
-            "a declaration whose message never existed must never count (#690)"
-        );
-
-        sweep_envelope_gc(&conn, TEST_STALE).await.unwrap();
-        assert_eq!(
-            raw_ref_count(&conn, "h").await,
-            0,
-            "the forged/orphaned declaration is reaped, not immortal"
-        );
+        let body = AttachmentRegisterBody::ForMessage {
+            content_hash: "h".into(),
+            r2_key: "media/h.enc".into(),
+            message_id: "ghost".into(),
+            delete_token: None,
+        };
+        let out = apply_register_attachment(&conn, Some("mallory"), &body).await.unwrap();
+        assert!(matches!(out, WriteOutcome::Forbidden));
+        assert_eq!(raw_ref_count(&conn, "h").await, 0);
     }
 }
 

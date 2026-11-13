@@ -25,7 +25,6 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "history_transfer_budget",
     "account_recovery",
     "directory_lookup_budget",
-    "attachment_ref",
     "channel_mute",
     "conversation_watermark",
     "device_enrollment_request",
@@ -65,7 +64,6 @@ pub const USER_PURGED_TABLES: &[&str] = &[
 /// [`purge_group`], [`purge_dm_channel`] and [`purge_conversation_log`] between
 /// them.
 pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
-    "attachment_ref",
     "channel_mute",
     "channels",
     "conversation_membership_version",
@@ -123,9 +121,17 @@ pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
     ),
     (
         "attachment_object",
-        "Content-addressed and shared across users; reference-counted (#690). \
-         Collected when the last referencing message goes, which account teardown \
-         causes by deleting the envelopes and `attachment_ref` rows.",
+        "Shared and reference-counted (#690). The account's messages stay in \
+         their recipients' history, so their files stay; an object goes when \
+         every message referencing it is deleted, or with the account's vault \
+         when only that vault held it (#1881).",
+    ),
+    (
+        "attachment_ref",
+        "One row per message carrying a file; it names neither the account nor \
+         the conversation. The messages stay in their recipients' history after \
+         the account goes, so their references do too; an explicit delete of a \
+         message releases its own (#1881).",
     ),
     (
         "custom_emoji_object",
@@ -169,7 +175,14 @@ pub const EXEMPT_FROM_CONVERSATION_PURGE: &[(&str, &str)] = &[
     ),
     (
         "attachment_object",
-        "Shared and reference-counted; released, not deleted, by teardown.",
+        "Shared and reference-counted; released only when every message \
+         referencing it is deleted (#1881).",
+    ),
+    (
+        "attachment_ref",
+        "Members keep a deleted conversation's history on their devices and \
+         fetch its files lazily, so its references stay until each message is \
+         deleted (#1881). Names neither a user nor the conversation.",
     ),
     (
         "custom_emoji_object",
@@ -204,12 +217,8 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     let uid2 = || libsql::params![user_id.to_string(), user_id.to_string()];
 
     // Rows hanging off this user's envelopes go BEFORE those envelopes, or they're orphaned (#690).
-    conn.execute(
-        "DELETE FROM attachment_ref WHERE message_id IN \
-         (SELECT id FROM message_envelope WHERE sender_id = ?1)",
-        uid(),
-    )
-    .await?;
+    // Attachment references stay: the messages stay in their recipients'
+    // history, and their files with them (#1881).
     conn.execute(
         "DELETE FROM message_reaction WHERE message_id IN \
          (SELECT id FROM message_envelope WHERE sender_id = ?1)",
@@ -310,7 +319,15 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     conn.execute("DELETE FROM read_cursor_sync WHERE user_id = ?1", uid()).await?;
     // Channel mutes (#1431).
     conn.execute("DELETE FROM channel_mute WHERE user_id = ?1", uid()).await?;
-    // The vault (#107): references first, while the subquery can still see the entries.
+    // The vault (#107): references first, while the subquery can still see the
+    // entries. The vault is this account's alone, so deleting it deletes that
+    // history, and the files only it held are released (#1881).
+    let released = crate::messages::vault_hashes_of(
+        conn,
+        "SELECT id FROM vault_message WHERE user_id = ?1",
+        uid(),
+    )
+    .await?;
     conn.execute(
         "DELETE FROM vault_attachment_ref WHERE vault_message_id IN \
          (SELECT id FROM vault_message WHERE user_id = ?1)",
@@ -318,6 +335,7 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     )
     .await?;
     conn.execute("DELETE FROM vault_message WHERE user_id = ?1", uid()).await?;
+    crate::messages::mark_released_objects(conn, &released).await?;
     // Pins this user placed (#99); the row names the pinner in the clear.
     conn.execute("DELETE FROM pinned_message WHERE pinned_by = ?1", uid()).await?;
     conn.execute("DELETE FROM security_event WHERE user_id = ?1", uid()).await?;
@@ -379,7 +397,7 @@ async fn hand_over_dangling_pointers(conn: &Connection, user_id: &str) -> anyhow
 }
 
 /// Delete every main-DB row belonging to one conversation's message history:
-/// envelopes, the reactions and attachment references hanging off them, and the
+/// envelopes, the reactions hanging off them, and the
 /// per-device cursors.
 ///
 /// `conversation_id` is a channel or DM id (one namespace, migration 000016).
@@ -391,12 +409,8 @@ pub async fn purge_conversation_rows(
 ) -> anyhow::Result<()> {
     let cid = || libsql::params![conversation_id.to_string()];
 
-    conn.execute(
-        "DELETE FROM attachment_ref WHERE message_id IN \
-         (SELECT id FROM message_envelope WHERE conversation_id = ?1)",
-        cid(),
-    )
-    .await?;
+    // Attachment references stay: every member keeps this history on their
+    // devices after the teardown, and fetches its files lazily (#1881).
     // By the envelope while it survives, and by the conversation the reaction
     // was gated against (#1433) once GC has collected it.
     conn.execute(

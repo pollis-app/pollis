@@ -230,11 +230,13 @@ async fn deleting_the_last_entry_that_holds_a_file_collects_it() {
         )
         .await
         .expect("seed attachment_object");
+    // Live rows only: a released file waits for the DS to delete its R2
+    // object, and this harness has no R2 (#1881).
     let object_rows = || async {
         let conn = remote.conn().await.expect("conn");
         let mut rows = conn
             .query(
-                "SELECT 1 FROM attachment_object WHERE content_hash = ?1",
+                "SELECT 1 FROM attachment_object WHERE content_hash = ?1 AND reclaim_state IS NULL",
                 libsql::params![file_id.clone()],
             )
             .await

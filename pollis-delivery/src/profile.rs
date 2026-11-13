@@ -59,19 +59,14 @@ async fn shared_dm_channels(
     user_a: &str,
     user_b: &str,
 ) -> anyhow::Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT a.dm_channel_id FROM dm_channel_member a \
-             JOIN dm_channel_member b ON b.dm_channel_id = a.dm_channel_id \
-             WHERE a.user_id = ?1 AND b.user_id = ?2",
-            libsql::params![user_a.to_string(), user_b.to_string()],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
+    crate::util::query_strings(
+        conn,
+        "SELECT a.dm_channel_id FROM dm_channel_member a \
+         JOIN dm_channel_member b ON b.dm_channel_id = a.dm_channel_id \
+         WHERE a.user_id = ?1 AND b.user_id = ?2",
+        libsql::params![user_a.to_string(), user_b.to_string()],
+    )
+    .await
 }
 
 pub async fn update_profile(

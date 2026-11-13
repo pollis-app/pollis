@@ -649,6 +649,11 @@ pub async fn reset_recover(
             reset_log_half(&state, &conn, &owner).await?;
         }
     }
+    // The reset deleted the account's vault, which may have held the last
+    // reference to a file (#1881).
+    if matches!(outcome, WriteOutcome::Ok) {
+        crate::messages::spawn_attachment_reclaim(&state);
+    }
     outcome_response::<ResetRecoverBody>(outcome)
 }
 
@@ -813,6 +818,9 @@ pub async fn delete_account(
                 tracing::warn!("account deletion: commit-log purge left owed: {e:#}");
             }
             spawn_account_log_purge_drain(&state);
+            // The account's vault went with it, and may have held the last
+            // reference to a file (#1881).
+            crate::messages::spawn_attachment_reclaim(&state);
         }
     }
     outcome_response::<DeleteAccountBody>(outcome)

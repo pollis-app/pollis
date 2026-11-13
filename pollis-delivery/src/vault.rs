@@ -65,9 +65,12 @@ pub async fn save_vault_message(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    vault_outcome_response::<SaveVaultMessageBody>(
-        apply_save_vault_message(&conn, authed.as_deref(), &parsed).await?,
-    )
+    let outcome = apply_save_vault_message(&conn, authed.as_deref(), &parsed).await?;
+    // An edit that drops a file may release it (#1881).
+    if matches!(outcome, VaultOutcome::Ok) {
+        crate::messages::spawn_attachment_reclaim(&state);
+    }
+    vault_outcome_response::<SaveVaultMessageBody>(outcome)
 }
 
 /// UPSERT one vault entry, owner-bound on BOTH arms, and REPLACE its
@@ -113,7 +116,10 @@ pub async fn apply_save_vault_message(
         }
     }
 
-    let affected = conn
+    // One transaction: the entry and its reference set change together, so a
+    // failure part-way never leaves the entry without the files it holds.
+    let tx = conn.transaction().await?;
+    let affected = tx
         .execute(
             // `updated_at` = `created_at` on insert; it changes only on a real edit (#1316, #1497).
             "INSERT INTO vault_message (id, user_id, nonce, blob, created_at, updated_at) \
@@ -138,23 +144,26 @@ pub async fn apply_save_vault_message(
         .await?;
     // Zero rows: the id is someone else's entry.
     if affected == 0 {
+        tx.rollback().await?;
         return Ok(VaultOutcome::Forbidden);
     }
 
-    // Replace the entry's reference set; GC collects an object only once nothing references it.
-    conn.execute(
-        "DELETE FROM vault_attachment_ref WHERE vault_message_id = ?1",
-        libsql::params![body.id.clone()],
-    )
-    .await?;
+    // Replace the entry's reference set; an object goes only once nothing references it.
+    let before = crate::messages::drop_vault_references(&tx, &body.id).await?;
     for h in &body.attachment_hashes {
-        conn.execute(
+        let h = h.to_ascii_lowercase();
+        tx.execute(
             "INSERT OR IGNORE INTO vault_attachment_ref (content_hash, vault_message_id) \
              VALUES (?1, ?2)",
-            libsql::params![h.to_ascii_lowercase(), body.id.clone()],
+            libsql::params![h.clone(), body.id.clone()],
         )
         .await?;
+        // A file another delete just released is held again (#1881).
+        crate::messages::revive_released_object(&tx, &h).await?;
     }
+    // A file this edit dropped is released, if nothing else holds it.
+    crate::messages::mark_released_objects(&tx, &before).await?;
+    tx.commit().await?;
     Ok(VaultOutcome::Ok)
 }
 
@@ -167,9 +176,11 @@ pub async fn delete_vault_message(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<DeleteVaultMessageBody>(
-        apply_delete_vault_message(&conn, authed.as_deref(), &parsed).await?,
-    )
+    let outcome = apply_delete_vault_message(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) {
+        crate::messages::spawn_attachment_reclaim(&state);
+    }
+    outcome_response::<DeleteVaultMessageBody>(outcome)
 }
 
 /// Hard-DELETE one entry and its refs, owner-bound; an already-gone entry is a no-op.
@@ -184,19 +195,19 @@ pub async fn apply_delete_vault_message(
         Ok(u) => u,
         Err(o) => return Ok(o),
     };
-    let removed = conn
+    let tx = conn.transaction().await?;
+    let removed = tx
         .execute(
             "DELETE FROM vault_message WHERE id = ?1 AND user_id = ?2",
             libsql::params![body.id.clone(), user],
         )
         .await?;
     if removed > 0 {
-        conn.execute(
-            "DELETE FROM vault_attachment_ref WHERE vault_message_id = ?1",
-            libsql::params![body.id.clone()],
-        )
-        .await?;
+        let held = crate::messages::drop_vault_references(&tx, &body.id).await?;
+        // Deleting the entry deletes it from the only history it is in (#1881).
+        crate::messages::mark_released_objects(&tx, &held).await?;
     }
+    tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
 

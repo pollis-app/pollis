@@ -36,8 +36,38 @@ async fn add_envelope(db: &Db, msg: &str) {
         .unwrap();
 }
 
-/// The only way a reference is released.
+/// The author deletes the message for everyone: the only way a reference is
+/// released (#1881). Collecting the envelope (GC, retention, teardown) is not.
 async fn delete_envelope(db: &Db, msg: &str) {
+    let conn = db.conn().await.unwrap();
+    let sender: String = {
+        let mut rows = conn
+            .query(
+                "SELECT sender_id FROM message_envelope WHERE id = ?1",
+                libsql::params![msg.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().expect("envelope").get(0).unwrap()
+    };
+    let out = pollis_delivery::messages::apply_delete_message(
+        &conn,
+        None,
+        &pollis_delivery::messages::DeleteMessageBody {
+            message_id: msg.into(),
+            conversation_id: "conv".into(),
+            msg_sender_id: Some(sender.clone()),
+            actor_id: Some(sender),
+            delete_token: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+}
+
+/// Envelope GC's effect: the envelope goes, the message stays in history.
+async fn collect_envelope(db: &Db, msg: &str) {
     db.conn().await
         .unwrap()
         .execute(
@@ -74,11 +104,13 @@ async fn release_ref(db: &Db, hash: &str, msg: &str) {
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
+/// The object is live: its row exists and no delete has released it. A
+/// released row stays only until the DS has deleted its R2 object (#1881).
 async fn object_exists(db: &Db, hash: &str) -> bool {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
-            "SELECT 1 FROM attachment_object WHERE content_hash = ?1",
+            "SELECT 1 FROM attachment_object WHERE content_hash = ?1 AND reclaim_state IS NULL",
             libsql::params![hash.to_string()],
         )
         .await
@@ -177,21 +209,18 @@ async fn a_forged_attachment_delete_cannot_release_a_live_reference() {
     );
 }
 
-/// Deleting the envelope alone releases the reference (GC path is tested in `messages.rs`).
+/// Collecting the envelope (envelope GC) leaves the message in its recipients'
+/// history, so the reference stays; the author's delete releases it (#1881).
 #[tokio::test]
-async fn a_reference_cannot_outlive_its_message() {
+async fn a_reference_outlives_its_envelope_until_the_message_is_deleted() {
     let db = fresh().await;
     let hash = "gone";
     register_ref(&db, hash, "media/gone/f.enc", "m1").await;
-    assert!(referenced(&db, hash).await, "referenced while m1 lives");
-
-    delete_envelope(&db, "m1").await;
+    collect_envelope(&db, "m1").await;
     assert!(
-        !referenced(&db, hash).await,
-        "with m1's envelope gone the reference no longer counts — a reference must \
-         not outlive its message (#690 Blocking 2)"
+        referenced(&db, hash).await,
+        "a delivered message still shows its file after GC collects the envelope"
     );
-
     apply_delete_attachment(
         &db.conn().await.unwrap(),
         Some("u1"),
@@ -199,7 +228,7 @@ async fn a_reference_cannot_outlive_its_message() {
     )
     .await
     .unwrap();
-    assert!(!object_exists(&db, hash).await, "the orphaned object is collectable");
+    assert!(object_exists(&db, hash).await, "the collect must not take it either");
 }
 
 /// A pre-#690 delete with no `message_id` releases nothing and stays conditional.

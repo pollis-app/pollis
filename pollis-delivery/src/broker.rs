@@ -95,7 +95,7 @@ impl BrokerConfig {
     }
 
     /// All R2 fields present → the presign endpoint can sign.
-    fn r2_ready(&self) -> Option<(&str, &str, &str, &str)> {
+    pub fn r2_ready(&self) -> Option<(&str, &str, &str, &str)> {
         Some((
             self.r2_endpoint.as_deref()?,
             self.r2_bucket.as_deref()?,
@@ -1608,6 +1608,49 @@ pub async fn r2_presign(
         method: http_method.to_string(),
         expires_in: PRESIGN_EXPIRES_SECS,
     }))
+}
+
+/// Where the DS deletes the R2 objects it reclaims (#1881). [`BrokerConfig`]
+/// is the real bucket; tests substitute an in-memory store.
+pub trait ObjectStore: Sync {
+    /// Delete `key`. An object that is already gone is a success, so a retried
+    /// reclaim converges.
+    fn delete_object(
+        &self,
+        key: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+}
+
+impl ObjectStore for BrokerConfig {
+    /// A DELETE through the same SigV4 presign the client's own deletes use,
+    /// sent by the DS. Unconfigured R2 is an error, so the row stays marked.
+    async fn delete_object(&self, key: &str) -> anyhow::Result<()> {
+        let (endpoint, bucket, access_key, secret_key) = self
+            .r2_ready()
+            .ok_or_else(|| anyhow::anyhow!("r2 not configured"))?;
+        let url = presign_r2_url(
+            endpoint,
+            bucket,
+            &self.r2_region,
+            access_key,
+            secret_key,
+            "DELETE",
+            key,
+            PRESIGN_EXPIRES_SECS,
+            &amz_datetime(),
+        );
+        let status = crate::util::http_delete(crate::util::Upstream::R2, &url)
+            .send()
+            .await
+            // The URL carries a signature; keep it out of the error and the logs.
+            .map_err(|e| anyhow::anyhow!(e.without_url()))?
+            .status();
+        if status.is_success() || status == reqwest::StatusCode::NOT_FOUND {
+            Ok(())
+        } else {
+            anyhow::bail!("r2 delete answered {status}")
+        }
+    }
 }
 
 // SigV4 query-string presign: single-chunk, `UNSIGNED-PAYLOAD`; the signature is appended last, unsigned.
