@@ -4,4 +4,6 @@ New
 • Self now lists the open source licenses the app uses.
 
 Fixes
+• Long-pressing a message while the keyboard is open now opens its actions straight away.
 • An image or video that failed to load now appears as soon as the same file loads elsewhere in the app.
+• Reliability and security improvements.
