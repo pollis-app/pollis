@@ -1,6 +1,8 @@
 //! `POST /v1/key-packages/claim` limits: a claim spends a package, so unlimited claims drain a pool.
 
-use pollis_delivery::devices::{apply_claim_key_package, ClaimKeyPackageBody, ClaimOutcome};
+use pollis_delivery::devices::{
+    apply_claim_key_package, sweep_key_package_claims, ClaimKeyPackageBody, ClaimOutcome,
+};
 
 mod common;
 
@@ -336,4 +338,49 @@ async fn the_budget_survives_a_restart() {
         ),
         "a bound a rolling restart clears is not a bound"
     );
+}
+
+/// The retention sweep drops claim records past the budget window and keeps
+/// the ones the budget still counts.
+#[tokio::test]
+async fn sweep_drops_claims_older_than_the_window() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    for (id, age) in [("old", "-2 hours"), ("edge", "-61 minutes"), ("fresh", "-5 minutes")] {
+        conn.execute(
+            "INSERT INTO mls_key_package_claim \
+                 (id, claimer_id, target_user_id, target_device_id, claimed_at) \
+             VALUES (?1, 'mallory', 'bob', 'b1', datetime('now', ?2))",
+            libsql::params![id, age],
+        )
+        .await
+        .unwrap();
+    }
+
+    let n = sweep_key_package_claims(&conn).await.unwrap();
+    assert_eq!(n, 2, "both rows past the window go");
+    assert_eq!(recorded(&db, "mallory", "bob").await, 1, "the in-window claim stays");
+    assert_eq!(sweep_key_package_claims(&conn).await.unwrap(), 0, "a second sweep finds nothing");
+}
+
+/// Pruning never loosens the budget: a pair at its limit stays limited after a sweep.
+#[tokio::test]
+async fn sweep_keeps_an_exhausted_budget_exhausted() {
+    let db = fresh().await;
+    publish(&db, "bob", "b1", 200).await;
+    let conn = db.conn().await.unwrap();
+    while !matches!(
+        apply_claim_key_package(&conn, Some("mallory"), &claim("bob", "b1"))
+            .await
+            .unwrap(),
+        ClaimOutcome::RateLimited
+    ) {}
+
+    assert_eq!(sweep_key_package_claims(&conn).await.unwrap(), 0);
+    assert!(matches!(
+        apply_claim_key_package(&conn, Some("mallory"), &claim("bob", "b1"))
+            .await
+            .unwrap(),
+        ClaimOutcome::RateLimited
+    ));
 }

@@ -362,6 +362,20 @@ async fn recent_claims(
     })
 }
 
+/// Delete claim records older than [`CLAIM_WINDOW_SECS`]: the budget counts
+/// only that window, so nothing reads an older row. Run by the retention sweep.
+/// Returns the number of rows deleted.
+pub async fn sweep_key_package_claims(conn: &Connection) -> anyhow::Result<u64> {
+    let cutoff = format!("-{CLAIM_WINDOW_SECS} seconds");
+    Ok(conn
+        .execute(
+            "DELETE FROM mls_key_package_claim \
+             WHERE datetime(claimed_at) <= datetime('now', ?1)",
+            libsql::params![cutoff],
+        )
+        .await?)
+}
+
 /// Atomically claim one unclaimed package for the target: oldest first, requested suite (default PQ).
 ///
 /// Exactly one winner per row: the `WHERE claimed = 0` subquery runs under the single writer.
