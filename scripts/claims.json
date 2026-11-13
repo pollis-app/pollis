@@ -4715,8 +4715,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:394",
-        "pollis-delivery/src/otp.rs:446"
+        "pollis-delivery/src/otp.rs:647",
+        "pollis-delivery/src/otp.rs:706"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -5541,8 +5541,8 @@
         "pollis-core/src/commands/auth.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:394",
-        "pollis-delivery/src/otp.rs:446",
+        "pollis-delivery/src/otp.rs:647",
+        "pollis-delivery/src/otp.rs:706",
         "pollis-core/src/commands/auth.rs:116"
       ],
       "status": "verified",
@@ -5562,7 +5562,7 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:394"
+        "pollis-delivery/src/otp.rs:647"
       ],
       "fact": "otp-length-digits",
       "status": "verified",
@@ -5583,13 +5583,13 @@
         "pollis-device-cert/src/lib.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:241",
-        "pollis-delivery/src/otp.rs:284",
-        "pollis-delivery/src/otp.rs:323",
+        "pollis-delivery/src/otp.rs:273",
+        "pollis-delivery/src/otp.rs:436",
+        "pollis-delivery/src/otp.rs:561",
         "pollis-device-cert/src/lib.rs:166"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
@@ -5605,12 +5605,12 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:98",
-        "pollis-delivery/src/otp.rs:338"
+        "pollis-delivery/src/otp.rs:96",
+        "pollis-delivery/src/otp.rs:580"
       ],
       "fact": "otp-ttl-minutes",
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
@@ -5618,7 +5618,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "4. Authentication Flow (OTP)",
-        "quote": "30 s between sends to one address (`PrepareOutcome::Throttled`);"
+        "quote": "30 s between sends to one address;"
       },
       "claim": "30 s resend throttle per address.",
       "kind": "number",
@@ -5626,12 +5626,12 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:100",
-        "pollis-delivery/src/otp.rs:276"
+        "pollis-delivery/src/otp.rs:98",
+        "pollis-delivery/src/otp.rs:332"
       ],
       "fact": "otp-resend-throttle-seconds",
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
@@ -5647,12 +5647,12 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:103",
-        "pollis-delivery/src/otp.rs:280"
+        "pollis-delivery/src/otp.rs:101",
+        "pollis-delivery/src/otp.rs:332"
       ],
       "fact": "otp-codes-per-window",
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
@@ -5668,12 +5668,12 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:51",
-        "pollis-delivery/src/otp.rs:330"
+        "pollis-delivery/src/otp.rs:49",
+        "pollis-delivery/src/otp.rs:354"
       ],
       "fact": "otp-wrong-codes-before-lockout",
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
@@ -5689,11 +5689,36 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:153",
-        "pollis-delivery/src/otp.rs:57"
+        "pollis-delivery/src/otp.rs:256",
+        "pollis-delivery/src/otp.rs:449"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
+      "also_rendered_in": []
+    },
+    {
+      "id": "wp-s4-09",
+      "doc": "docs/security-whitepaper.md",
+      "locator": {
+        "heading": "4. Authentication Flow (OTP)",
+        "quote": "The limits are held in the DS database (`otp_mailbox`) under an HMAC-SHA256 of the address keyed by a DS-held secret, never the address itself, so neither a fresh `request-otp` nor a DS restart resets them."
+      },
+      "claim": "Per-mailbox OTP limits are stored in Turso under a keyed hash of the address and hold across a DS restart.",
+      "kind": "security",
+      "anchors": [
+        "pollis-delivery/src/otp.rs",
+        "pollis-schema/migrations/000047_otp_mailbox.sql",
+        "pollis-delivery/tests/otp_state_durability.rs"
+      ],
+      "evidence": [
+        "pollis-delivery/src/otp.rs:170",
+        "pollis-delivery/src/otp.rs:132",
+        "pollis-delivery/src/otp.rs:332",
+        "pollis-schema/migrations/000047_otp_mailbox.sql:22",
+        "pollis-delivery/tests/otp_state_durability.rs:81"
+      ],
+      "status": "verified",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
@@ -9286,12 +9311,14 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:1"
+        "pollis-delivery/src/otp.rs:1",
+        "pollis-delivery/src/otp.rs:332",
+        "pollis-delivery/src/otp.rs:354"
       ],
       "fact": "otp-lockout-minutes",
       "status": "verified",
       "note": "All four numbers are fact-covered: otp-resend-throttle-seconds, otp-codes-per-window, otp-lockout-minutes, otp-wrong-codes-before-lockout.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
@@ -9732,13 +9759,13 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:144",
-        "pollis-delivery/src/otp.rs:147",
-        "pollis-delivery/src/otp.rs:219"
+        "pollis-delivery/src/otp.rs:234",
+        "pollis-delivery/src/otp.rs:256",
+        "pollis-delivery/src/otp.rs:449"
       ],
       "fact": "otp-ttl-minutes",
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
@@ -9814,7 +9841,7 @@
         "pollis-delivery/src/push.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:116",
+        "pollis-delivery/src/otp.rs:114",
         "pollis-delivery/src/push.rs:79"
       ],
       "status": "verified",
@@ -9978,7 +10005,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/otp.rs:1",
-        "pollis-delivery/src/otp.rs:144",
+        "pollis-delivery/src/otp.rs:234",
         "pollis-device-cert/src/lib.rs:166"
       ],
       "status": "verified",
@@ -10327,7 +10354,7 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:394"
+        "pollis-delivery/src/otp.rs:647"
       ],
       "fact": "otp-length-digits",
       "status": "verified",
@@ -11180,7 +11207,7 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:394"
+        "pollis-delivery/src/otp.rs:647"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -15335,7 +15362,7 @@
       ],
       "evidence": [
         "pollis-delivery/src/otp.rs:1",
-        "pollis-delivery/src/otp.rs:41"
+        "pollis-delivery/src/otp.rs:38"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -19178,8 +19205,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:394",
-        "pollis-delivery/src/otp.rs:116"
+        "pollis-delivery/src/otp.rs:647",
+        "pollis-delivery/src/otp.rs:114"
       ],
       "fact": "otp-length-digits",
       "status": "verified",
@@ -19307,7 +19334,7 @@
         "livekit/DEPLOY.md"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:116",
+        "pollis-delivery/src/otp.rs:114",
         "pollis-delivery/src/push.rs:55",
         "livekit/DEPLOY.md:433"
       ],
@@ -19674,8 +19701,8 @@
         "pollis-delivery/src/otp.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/otp.rs:116",
-        "pollis-delivery/src/otp.rs:394"
+        "pollis-delivery/src/otp.rs:114",
+        "pollis-delivery/src/otp.rs:647"
       ],
       "fact": "otp-length-digits",
       "status": "verified",
@@ -20373,6 +20400,28 @@
       "fact": "watermark-stale-months",
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "also_rendered_in": []
+    },
+    {
+      "id": "policy-retention-24",
+      "doc": "docs/metadata-retention-policy.md",
+      "locator": {
+        "heading": "2. What the Delivery Service database retains",
+        "quote": "until the mailbox's last code expires (10 minutes) or its lockout ends (15 minutes), whichever is later. Every insert or update deletes the rows past that"
+      },
+      "claim": "otp_mailbox holds a keyed hash per mailbox, never the address, and its rows are deleted by trigger once past their last code expiry or lockout end.",
+      "kind": "behaviour",
+      "anchors": [
+        "pollis-schema/migrations/000047_otp_mailbox.sql",
+        "pollis-delivery/src/otp.rs"
+      ],
+      "evidence": [
+        "pollis-schema/migrations/000047_otp_mailbox.sql:22",
+        "pollis-schema/migrations/000047_otp_mailbox.sql:35",
+        "pollis-schema/migrations/000047_otp_mailbox.sql:40"
+      ],
+      "status": "verified",
+      "verified_sha": "21128de074b928d24ae3b451d570df24c78bf6a4",
       "also_rendered_in": []
     },
     {
