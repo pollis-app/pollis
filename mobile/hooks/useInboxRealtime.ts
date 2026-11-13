@@ -220,7 +220,7 @@ export function useInboxRealtime() {
           }
         }
       }
-      // Then the re-add backstop (#1571).
+      // Then the re-add and self-update backstops (#1571, #1880).
       const resumedUser = userId;
       void catchUpThenBackstop(
         catchUpTargets(groupsRef.current, dmsRef.current),

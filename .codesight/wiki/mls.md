@@ -822,7 +822,9 @@ is stranded on a retired lineage.
 `self_update_if_due` (`mls/self_update.rs`) rotates this device's own leaf: once on
 join, then whenever its leaf in a conversation is older than `SELF_UPDATE_INTERVAL`
 (7 days) plus a deterministic per-conversation jitter of up to `SELF_UPDATE_JITTER`
-(2 days), capped at `MAX_SELF_UPDATES_PER_SWEEP` (3) per sweep. Launch-driven, not a
+(2 days), capped at `MAX_SELF_UPDATES_PER_SWEEP` (3) per sweep. Desktop runs it from
+`catch_up_all_mls_groups`; mobile from `reconcile_backstop_all` after its landing and
+resume ingest pass (#1880), single-flight in `mobile/lib/mlsBackstop.ts`. Launch-driven, not a
 timer — consistent with the no-periodic-polling rule; a group whose members are all
 offline does not heal until one of them opens the app.
 

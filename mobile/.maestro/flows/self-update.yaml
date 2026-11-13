@@ -1,0 +1,93 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# SELF-UPDATE (#1880) — returning to the foreground runs the MLS backstops,
+# and they rotate this device's own leaf in a group where it is due, as the
+# desktop sweep does.
+#
+# A group this device just created has never been rotated here, so it is due.
+# Home + relaunch is a return to the foreground (useInboxRealtime's resume
+# pass); the backstop's summary line in the on-device log then counts the
+# rotation. A second return finds nothing due: the rotation was recorded.
+# The Diagnostics screen reads the log once as it opens, so each check
+# re-opens it until the pass has written its line. Self-contained (no peer).
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "input-group-name"
+- inputText: "Rotation"
+- tapOn:
+    id: "btn-submit-group"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "Rotation, .*"
+    timeout: 15000
+
+# --- 1. Back to the foreground: the overdue leaf rotates ---
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "panel-group"
+- tapOn:
+    id: "tab-self"
+- scrollUntilVisible:
+    element:
+      id: "row-self-diagnostics"
+    direction: DOWN
+- tapOn:
+    id: "row-self-diagnostics"
+- repeat:
+    times: 15
+    while:
+      notVisible:
+        id: "text-diagnostics-preview"
+        text: "(?s).*\\[mls-backstop\\] [^\\n]*, 1 self-updated.*"
+    commands:
+      - tapOn:
+          id: "btn-back"
+      - scrollUntilVisible:
+          element:
+            id: "row-self-diagnostics"
+          direction: DOWN
+      - tapOn:
+          id: "row-self-diagnostics"
+- assertVisible:
+    id: "text-diagnostics-preview"
+    text: "(?s).*\\[mls-backstop\\] [^\\n]*, 1 self-updated.*"
+- takeScreenshot: self-update-01-rotated
+
+# --- 2. Again: nothing is due, so the newest backstop line rotates nothing ---
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "screen-self-diagnostics"
+- repeat:
+    times: 15
+    while:
+      notVisible:
+        id: "text-diagnostics-preview"
+        text: "(?s).*\\[mls-backstop\\] [^\\n]*, 0 self-updated(?:(?!\\[mls-backstop\\]).)*"
+    commands:
+      - tapOn:
+          id: "btn-back"
+      - scrollUntilVisible:
+          element:
+            id: "row-self-diagnostics"
+          direction: DOWN
+      - tapOn:
+          id: "row-self-diagnostics"
+- assertVisible:
+    id: "text-diagnostics-preview"
+    text: "(?s).*\\[mls-backstop\\] [^\\n]*, 0 self-updated(?:(?!\\[mls-backstop\\]).)*"
+- takeScreenshot: self-update-02-not-due

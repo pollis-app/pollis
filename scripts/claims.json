@@ -7315,14 +7315,16 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "6.7 Forward secrecy and post-compromise security",
-        "quote": "from the desktop app's cold-launch/reconnect sweep"
+        "quote": "the desktop app on cold launch and reconnect, the mobile app on open and on each return to the foreground"
       },
-      "claim": "The self-update sweep runs from the desktop app's cold launch and reconnect.",
+      "claim": "The self-update sweep runs from the desktop app's cold launch and reconnect, and from the mobile app's open and each return to the foreground.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/mls/sweep.rs",
         "pollis-core/src/commands/mls/self_update.rs",
-        "pollis-core/src/bridge.rs"
+        "pollis-core/src/bridge.rs",
+        "mobile/hooks/useInboxRealtime.ts",
+        "mobile/lib/mlsBackstop.ts"
       ],
       "evidence": [
         "pollis-core/src/commands/mls/sweep.rs:19",
@@ -9887,7 +9889,7 @@
         "heading": "13. Security Trade-offs",
         "quote": "for any group in which the device has not committed for 7 days plus a deterministic per-conversation jitter of up to 2 days, at most 3 groups per sweep"
       },
-      "claim": "Desktop self-updates fire for groups idle 7 days plus up to 2 days jitter, at most 3 groups per sweep.",
+      "claim": "Self-updates fire for groups idle 7 days plus up to 2 days jitter, at most 3 groups per sweep.",
       "kind": "number",
       "anchors": [
         "pollis-core/src/commands/mls/self_update.rs"
@@ -10698,9 +10700,9 @@
       "doc": "docs/security-explained.md",
       "locator": {
         "heading": "(single body, no headings)",
-        "quote": "and the desktop app does so again at startup once its keys in a group are about a week old"
+        "quote": "and the app does so again when it opens once its keys in a group are about a week old"
       },
-      "claim": "Devices self-update on join; the desktop app also does so at startup when its leaf in a group is about a week old (7 days + jitter).",
+      "claim": "Devices self-update on join; the app also does so when it opens and its leaf in a group is about a week old (7 days + jitter).",
       "kind": "number",
       "anchors": [
         "pollis-core/src/commands/mls/self_update.rs"
@@ -17542,9 +17544,9 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "and afterwards on startup whenever its keys in that group are more than about a week old, with some random spread"
+        "quote": "and afterwards whenever the app opens and its keys in that group are more than about a week old, with some random spread"
       },
-      "claim": "Self-update runs at launch when leaf keys are older than 7 days plus up to 2 days jitter.",
+      "claim": "Self-update runs when the app opens and leaf keys are older than 7 days plus up to 2 days jitter.",
       "kind": "number",
       "anchors": [
         "pollis-core/src/commands/mls/self_update.rs"
