@@ -1466,11 +1466,11 @@
       ],
       "evidence": [
         "pollis-schema/migrations/000012_attachment_ref.sql:47",
-        "pollis-delivery/src/messages.rs:1584",
-        "pollis-delivery/src/messages.rs:1659"
+        "pollis-delivery/src/messages.rs:1568",
+        "pollis-delivery/src/messages.rs:1657"
       ],
       "status": "verified",
-      "verified_sha": "332c7ed9d73a7532ae17035d9671320fe7ac66cb",
+      "verified_sha": "74110308b27b4246b4f183f2df63d0034425eec2",
       "also_rendered_in": []
     },
     {
@@ -8854,12 +8854,12 @@
         "pollis-schema/migrations/000050_attachment_reclaim.sql"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:1584",
-        "pollis-delivery/src/messages.rs:1659",
+        "pollis-delivery/src/messages.rs:1568",
+        "pollis-delivery/src/messages.rs:1657",
         "pollis-schema/migrations/000050_attachment_reclaim.sql:1"
       ],
       "status": "verified",
-      "verified_sha": "332c7ed9d73a7532ae17035d9671320fe7ac66cb",
+      "verified_sha": "74110308b27b4246b4f183f2df63d0034425eec2",
       "also_rendered_in": []
     },
     {
@@ -16079,11 +16079,11 @@
         "pollis-delivery/src/messages.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:1503",
-        "pollis-delivery/src/messages.rs:1584"
+        "pollis-delivery/src/messages.rs:1486",
+        "pollis-delivery/src/messages.rs:1568"
       ],
       "status": "verified",
-      "verified_sha": "332c7ed9d73a7532ae17035d9671320fe7ac66cb",
+      "verified_sha": "74110308b27b4246b4f183f2df63d0034425eec2",
       "also_rendered_in": []
     },
     {
