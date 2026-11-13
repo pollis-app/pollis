@@ -18,6 +18,15 @@ mod common;
 
 const FLOOR: &str = r#"{"v":1,"minimum":{"macos":"1.17.0","android-play":"1.0.21"},"message":"Version 1.16 loses drafts."}"#;
 
+/// A database with the schema: `request-otp` writes the mailbox's limits.
+async fn schema_db(file: &str) -> common::TempDb {
+    let db = common::TempDb::open(file).await;
+    pollis_schema::apply::single_db(&db.conn().await.unwrap())
+        .await
+        .expect("schema");
+    db
+}
+
 fn state(db: Arc<pollis_delivery::db::Db>, mirror: PolicyMirror) -> AppState {
     AppState::new(db, false)
         .with_otp_config(OtpConfig {
@@ -63,7 +72,7 @@ fn floor() -> PolicyMirror {
 
 #[tokio::test]
 async fn a_build_below_its_minimum_gets_a_typed_426() {
-    let db = common::TempDb::open("policy-426.db").await;
+    let db = schema_db("policy-426.db").await;
     let st = state(db.arc(), floor());
     let (status, body) = call(&st, otp(Some(("macos", "1.16.2")))).await;
     assert_eq!(status, StatusCode::UPGRADE_REQUIRED);
@@ -82,7 +91,7 @@ async fn a_build_below_its_minimum_gets_a_typed_426() {
 
 #[tokio::test]
 async fn everything_else_passes() {
-    let db = common::TempDb::open("policy-pass.db").await;
+    let db = schema_db("policy-pass.db").await;
     let st = state(db.arc(), floor());
     for client in [
         // Up to date, and exactly at the minimum.
@@ -114,7 +123,7 @@ async fn everything_else_passes() {
 /// Ops and health GETs are exempt, even from a blocked build; the mirror shows what is enforced.
 #[tokio::test]
 async fn gets_are_exempt_and_the_mirror_is_served() {
-    let db = common::TempDb::open("policy-get.db").await;
+    let db = schema_db("policy-get.db").await;
     let st = state(db.arc(), floor());
     let old = Some(("macos", "1.0.0"));
     for path in ["/health", "/version"] {
@@ -131,7 +140,7 @@ async fn gets_are_exempt_and_the_mirror_is_served() {
 
 #[tokio::test]
 async fn unconfigured_it_enforces_nothing() {
-    let db = common::TempDb::open("policy-off.db").await;
+    let db = schema_db("policy-off.db").await;
     let st = state(db.arc(), PolicyMirror::new(None));
     assert_eq!(call(&st, otp(Some(("macos", "0.0.1")))).await.0, StatusCode::OK);
     assert_eq!(call(&st, get("/v1/client-policy", None)).await.0, StatusCode::NOT_FOUND);
@@ -195,7 +204,7 @@ async fn a_publish_reaches_enforcement() {
     let (url, served) = cdn((200, FLOOR)).await;
     let mirror = PolicyMirror::new(Some(url));
     mirror.refresh().await;
-    let db = common::TempDb::open("policy-e2e.db").await;
+    let db = schema_db("policy-e2e.db").await;
     let st = state(db.arc(), mirror.clone());
     assert_eq!(call(&st, otp(Some(("macos", "1.16.0")))).await.0, StatusCode::UPGRADE_REQUIRED);
     *served.lock().unwrap() = (200, r#"{"v":1,"minimum":{}}"#.into());
@@ -206,7 +215,7 @@ async fn a_publish_reaches_enforcement() {
 /// `GET /v1/config` reports the mirrored URL, so a deploy can prove the var reached the container.
 #[tokio::test]
 async fn the_effective_config_names_the_mirrored_url() {
-    let db = common::TempDb::open("policy-config.db").await;
+    let db = schema_db("policy-config.db").await;
     let url = "https://cdn.pollis.com/dev/client-policy.json";
     for (mirror, expected) in [
         (PolicyMirror::new(Some(url.to_string())), serde_json::json!(url)),

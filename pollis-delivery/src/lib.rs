@@ -79,7 +79,7 @@ pub struct AppState {
     pub log_db: Arc<Db>,
     /// When true, `POST /v1/commits` requires a valid device signature.
     pub require_auth: bool,
-    /// In-memory OTP store (request-otp / verify-otp).
+    /// OTP store (request-otp / verify-otp): limits in `otp_mailbox`, codes in memory.
     pub otp: otp::OtpStore,
     /// In-memory OTP-session store gating the bootstrap writes.
     pub sessions: session::SessionStore,

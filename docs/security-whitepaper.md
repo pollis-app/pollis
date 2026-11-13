@@ -226,8 +226,8 @@ The OTP proves control of an email address and nothing else. It is not the unloc
 - 6 digits from `OsRng` (`gen_range(0..1_000_000u32)`), zero-padded.
 - Stored in DS memory as `SHA-256(salt ‖ code)` with a fresh 16-byte salt. TTL 10 minutes; deleted on first successful verification. Compared in constant time (`otp.rs::constant_time_eq`).
 - Sent by the DS to `api.resend.com` using `RESEND_API_KEY` from the DS environment. The client holds no Resend key.
-- **Throttling** (`OtpConfig`, all keyed on the mailbox, and surviving a fresh `request-otp` since #1088):
-  - 30 s between sends to one address (`PrepareOutcome::Throttled`);
+- **Throttling** (`OtpConfig`), per mailbox. The limits are held in the DS database (`otp_mailbox`) under an HMAC-SHA256 of the address keyed by a DS-held secret, never the address itself, so neither a fresh `request-otp` nor a DS restart resets them. Each decision is one SQL statement:
+  - 30 s between sends to one address;
   - at most 3 codes per TTL window;
   - after 5 wrong codes the mailbox gets one more guess: a 6th wrong code means the mailbox, not just the code, is locked for 15 minutes, and every outstanding code is dropped.
   - Codes accumulate rather than replace, so requesting a new code does not invalidate one the user is about to type.
@@ -655,7 +655,7 @@ LiveKit data packets carry application events: `new_message` (a wake-up; the cip
 
 The DS throttles at two scopes:
 
-- **Per mailbox** (`pollis-delivery/src/otp.rs`): 30 s resend throttle, 3 codes per window, and a 15-minute mailbox lockout on the next wrong code once 5 have failed (§4).
+- **Per mailbox** (`pollis-delivery/src/otp.rs`): 30 s resend throttle, 3 codes per window, and a 15-minute mailbox lockout on the next wrong code once 5 have failed, held in the DS database (§4).
 - **Per client IP** (`pollis-delivery/src/ratelimit.rs`): fixed windows over the unauthenticated OTP endpoints, keyed on a hash of the client IP: the edge Worker strips every IP header and forwards only `X-Pollis-Client-Bucket` (an HMAC of the IP), which the DS hashes again under a per-process key. No plain IP reaches the DS (`docs/metadata-retention-policy.md`). This covers a client spraying requests across many addresses to email-bomb mailboxes or burn Resend quota, which the per-mailbox limit cannot.
 - Resend's own reputation and per-key limits sit underneath both.
 
