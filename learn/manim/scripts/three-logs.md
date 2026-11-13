@@ -51,8 +51,8 @@ Take a valid head from the commit log and try to pass it off as one for the
 binaries log. It doesn't fit. Each tree signs under its own context, so the
 signature says which tree it belongs to.
 
-**[02:40–02:52] Scene 6 — the honest limit**
-And the limits, plainly. These don't make us honest, they make lying undeniable
+**[02:40–02:52] Scene 6 — what the logs prove**
+What the logs prove. These don't make us honest, they make lying undeniable
 rather than impossible. They also say nothing about bugs. A log proves what we
 published, not that it's correct.
 

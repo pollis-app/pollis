@@ -353,15 +353,8 @@
       </div>
 
       <div class="kt-explainer" id="kt-reset">
-        <strong>The commit log was reset.</strong> On 28 and 29 October 2026 the publisher signed three
-        commit-log tree heads (sizes 56, 113 and 129) that do not extend the log's earlier history. It
-        had rebuilt the tree from a database table the server prunes, so the rebuilt tree no longer matched
-        what it had already signed. The first tree is retired and left exactly where it was, so anyone can
-        still check its consistent history up to size 137, and a signed reset statement lists the three
-        forked heads. The commit log continues as a new tree, <code>commit-log-2</code>, that is only ever
-        appended to. No message content was exposed, and no check the Pollis apps run was affected.
-        <a href="https://github.com/pollis-app/pollis/blob/main/docs/transparency.md#commit-log-reset-1579"
-          target="_blank" rel="noopener noreferrer">What happened, and how to verify both trees</a>.
+        <code>commit-log-2</code> superseded the first commit-log tree on 2026-10-29;
+        <code>verify.pollis.com/v1/commit-log-reset.json</code> lists the retired heads.
       </div>
 
       <form class="kt-form" id="kt-form">

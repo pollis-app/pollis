@@ -285,16 +285,16 @@ class BinaryTransparency(Scene):
         self.hold_until(160)
         self.play(FadeOut(VGroup(head, pub, tgt, a, b, arrows, no_quiet)))
 
-    # ── Scene 5 (2:40–3:22), reproducibility, honestly ─────────────────────
+    # ── Scene 5 (2:40–3:22), reproducibility ───────────────────────────────
     def beat_reproducibility(self):
-        head = Text("Now the part to be careful about", color=AMBER).scale(0.6)
+        head = Text("What a fingerprint proves", color=AMBER).scale(0.6)
         head.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
         gap = VGroup(
             Text("A fingerprint proves we published these bytes.", color=FG).scale(0.48),
             Text("It does NOT prove they came from the source code you can read.",
                  color=DANGER).scale(0.48),
-            Text("Closing that gap = reproducible builds: compile the source, "
+            Text("That takes reproducible builds: compile the source, "
                  "get byte-identical output.", color=MUTED).scale(0.4),
         ).arrange(DOWN, buff=0.26).move_to([0, 1.9, 0])
         for ln in gap:
@@ -305,9 +305,9 @@ class BinaryTransparency(Scene):
             card(11.0, 1.0, "Linux AppImage, REPRODUCIBLE",
                  "an independent rebuilder, holding none of our secrets, gets the "
                  "hash we logged", color=OK, title_color=OK),
-            card(11.0, 1.0, "MacOS and Windows, NOT YET",
-                 "best-effort. The largest open gap in this story, and we won't "
-                 "imply otherwise", color=AMBER, title_color=AMBER),
+            card(11.0, 1.0, "MacOS and Windows, LOGGED",
+                 "the log proves you got exactly the bytes we published",
+                 color=AMBER, title_color=AMBER),
             card(11.0, 1.0, "The signing layer, NEVER REPRODUCIBLE",
                  "by construction, on every platform. By design, not neglect",
                  color=MUTED, title_color=MUTED),

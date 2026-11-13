@@ -40,7 +40,7 @@ between them. The one key that does travel is your account key, once, sealed end
 to end, when you link the new device.
 
 **[02:20–02:40] Scene 6 — the trade**
-Which brings us to the trade-off we want you to hear from us, not discover later.
+Which brings us to how history works on a new device.
 A new device starts empty, unless you copy your history over from another of
 your devices, directly, sealed end to end. There's no history backup on our
 servers. We could encrypt your

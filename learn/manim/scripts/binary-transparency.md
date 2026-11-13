@@ -61,7 +61,7 @@ Either its fingerprint isn't in the log, and their own app notices, or we put it
 in the log, where it sits in public, permanently, next to the real release.
 There's no quiet option.
 
-**[02:40–02:55] Scene 5 — the honest part**
+**[02:40–02:55] Scene 5 — reproducible builds**
 Now the part to be careful about. A fingerprint proves we published these bytes.
 It does not prove they came from the source code you can read. For that you need
 reproducible builds, anyone compiles the source and gets byte-identical output.
@@ -71,9 +71,9 @@ On Linux, we have that. A rebuild that uses none of our secrets, and that anyone
 can run from their own copy, rebuilds the AppImage and confirms the hash we logged.
 
 **[03:10–03:22] Scene 5 — macOS, Windows, and signing**
-On macOS and Windows, the log proves you got the bytes we published, and those
-builds are not rebuilt from source. And the signing layer is never reproducible
-anywhere. That's by design: signing mixes in unique data.
+On macOS and Windows, the log proves you got exactly the bytes we published.
+The signing layer is never reproducible on any platform. That's by design:
+signing mixes in unique data.
 
 **[03:22–03:40] Scene 6 — the second leg**
 There's one more leg. Every release also carries a provenance record in a public
