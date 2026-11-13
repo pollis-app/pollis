@@ -9,7 +9,7 @@ use pollis_delivery::teardown::{
     USER_PURGED_TABLES,
 };
 use pollis_delivery::writes::WriteOutcome;
-use pollis_api::account::DeleteAccountBody;
+use pollis_api::account::{DeleteAccountBody, WithdrawEnvelope};
 use pollis_api::groups::DeleteGroupBody;
 
 /// Every user-naming (table, column), written out for review; the coverage test proves it complete.
@@ -265,7 +265,7 @@ async fn delete_account(c: &Connection, user: &str) -> WriteOutcome {
     let (outcome, dead) = apply_delete_account(
         c,
         Some(user),
-        &DeleteAccountBody { user_id: Some(user.into()) },
+        &DeleteAccountBody { user_id: Some(user.into()), withdraw: Vec::new() },
     )
     .await
     .unwrap();
@@ -323,7 +323,7 @@ async fn account_deletion_keeps_the_append_only_transparency_log() {
     apply_delete_account(
         &c,
         Some("victim"),
-        &DeleteAccountBody { user_id: Some("victim".into()) },
+        &DeleteAccountBody { user_id: Some("victim".into()), withdraw: Vec::new() },
     )
     .await
     .unwrap();
@@ -347,7 +347,7 @@ async fn account_deletion_does_not_gap_a_surviving_conversations_commit_chain() 
     apply_delete_account(
         &c,
         Some("victim"),
-        &DeleteAccountBody { user_id: Some("victim".into()) },
+        &DeleteAccountBody { user_id: Some("victim".into()), withdraw: Vec::new() },
     )
     .await
     .unwrap();
@@ -496,7 +496,7 @@ async fn account_deletion_hands_over_a_shared_group_instead_of_destroying_it() {
     apply_delete_account(
         &c,
         Some("victim"),
-        &DeleteAccountBody { user_id: Some("victim".into()) },
+        &DeleteAccountBody { user_id: Some("victim".into()), withdraw: Vec::new() },
     )
     .await
     .unwrap();
@@ -525,7 +525,7 @@ async fn account_deletion_tears_down_a_dm_it_empties() {
     apply_delete_account(
         &c,
         Some("victim"),
-        &DeleteAccountBody { user_id: Some("victim".into()) },
+        &DeleteAccountBody { user_id: Some("victim".into()), withdraw: Vec::new() },
     )
     .await
     .unwrap();
@@ -906,4 +906,155 @@ async fn the_legacy_scrub_is_a_no_op_where_the_tables_are_gone() {
     pollis_delivery::teardown::purge_legacy_log_copies(&c, "victim", &["d".to_string()])
         .await
         .unwrap();
+}
+
+/// `SHA-256(token)`, base64: the stored form of a deletion capability (#1086).
+fn capability_hash(token: &str) -> String {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+    base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()))
+}
+
+/// A sealed envelope as the DS stores it: no sender id, only the capability hash.
+async fn seed_sealed(c: &Connection, id: &str, conversation: &str, token: &str) {
+    exec(c, &format!(
+        "INSERT INTO message_envelope \
+             (id, conversation_id, sender_id, ciphertext, sent_at, sealed, delete_token_hash) \
+         VALUES ('{id}', '{conversation}', 'sealed', 'ct', '2026-01-01', 1, '{}')",
+        capability_hash(token)
+    )).await;
+}
+
+fn withdraw(pairs: &[(&str, &str)]) -> Vec<WithdrawEnvelope> {
+    pairs
+        .iter()
+        .map(|(id, token)| WithdrawEnvelope {
+            message_id: id.to_string(),
+            delete_token: token.to_string(),
+        })
+        .collect()
+}
+
+/// Account deletion removes the sealed envelopes the account proves it sent,
+/// with their pending edits, attachment references and reactions, and nothing
+/// it cannot prove.
+#[tokio::test]
+async fn account_deletion_withdraws_its_unfetched_sealed_envelopes() {
+    let c = conn().await;
+    seed_user(&c, "bystander", "victim", false).await;
+    seed_user(&c, "victim", "bystander", false).await;
+
+    seed_sealed(&c, "v_msg", "bystander_c", "tok-v-msg").await;
+    seed_sealed(&c, "v_receipt", "bystander_c", "tok-v-receipt").await;
+    // An edit envelope carries its target's hash.
+    exec(&c, &format!(
+        "INSERT INTO message_envelope \
+             (id, conversation_id, sender_id, ciphertext, sent_at, sealed, type, \
+              target_message_id, delete_token_hash) \
+         VALUES ('v_edit', 'bystander_c', 'sealed', 'ct', '2026-01-02', 1, 'edit', 'v_msg', '{}')",
+        capability_hash("tok-v-msg")
+    )).await;
+    exec(&c, "INSERT INTO attachment_ref (content_hash, message_id) VALUES ('v_file', 'v_msg')").await;
+    exec(&c, "INSERT INTO message_reaction (id, message_id, user_id, emoji) \
+              VALUES ('b_rx_on_v', 'v_msg', 'bystander', ':+1:')").await;
+    // The victim presents a wrong token for this one.
+    seed_sealed(&c, "v_wrong", "bystander_c", "tok-v-wrong").await;
+    // Someone else's envelope, named in the list with a guessed token.
+    seed_sealed(&c, "b_msg", "bystander_c", "tok-b-msg").await;
+
+    let (outcome, _)= apply_delete_account(
+        &c,
+        Some("victim"),
+        &DeleteAccountBody {
+            user_id: Some("victim".into()),
+            withdraw: withdraw(&[
+                ("v_msg", "tok-v-msg"),
+                ("v_receipt", "tok-v-receipt"),
+                ("v_wrong", "not-the-token"),
+                ("b_msg", "tok-v-msg"),
+                ("long_gone", "tok-long-gone"),
+            ]),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, WriteOutcome::Ok));
+
+    for id in ["v_msg", "v_receipt", "v_edit"] {
+        assert_eq!(count_where(&c, "message_envelope", "id", id).await, 0, "{id} survived");
+    }
+    assert_eq!(count_where(&c, "attachment_ref", "message_id", "v_msg").await, 0);
+    assert_eq!(count_where(&c, "message_reaction", "message_id", "v_msg").await, 0);
+    assert_eq!(
+        count_where(&c, "message_envelope", "id", "v_wrong").await,
+        1,
+        "an unproven envelope stays"
+    );
+    assert_eq!(
+        count_where(&c, "message_envelope", "id", "b_msg").await,
+        1,
+        "another account's envelope stays"
+    );
+}
+
+/// The same proof works beyond one statement's worth of pairs.
+#[tokio::test]
+async fn account_deletion_withdraws_across_chunks() {
+    let c = conn().await;
+    seed_user(&c, "victim", "bystander", false).await;
+    let n = 450;
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for i in 0..n {
+        let (id, token) = (format!("v_{i:04}"), format!("tok-{i}"));
+        seed_sealed(&c, &id, "victim_c", &token).await;
+        pairs.push((id, token));
+    }
+
+    let body = DeleteAccountBody {
+        user_id: Some("victim".into()),
+        withdraw: pairs
+            .iter()
+            .map(|(id, token)| WithdrawEnvelope {
+                message_id: id.clone(),
+                delete_token: token.clone(),
+            })
+            .collect(),
+    };
+    let (outcome, _) = apply_delete_account(&c, Some("victim"), &body).await.unwrap();
+    assert!(matches!(outcome, WriteOutcome::Ok));
+    let mut rows = c
+        .query("SELECT COUNT(*) FROM message_envelope WHERE id LIKE 'v\\_%' ESCAPE '\\'", ())
+        .await
+        .unwrap();
+    let left: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(left, 0);
+}
+
+/// An oversized list is refused before anything is deleted.
+#[tokio::test]
+async fn account_deletion_refuses_an_oversized_withdraw_list() {
+    let c = conn().await;
+    seed_user(&c, "victim", "bystander", true).await;
+    let body = DeleteAccountBody {
+        user_id: Some("victim".into()),
+        withdraw: (0..=pollis_api::account::WITHDRAW_MAX)
+            .map(|i| WithdrawEnvelope {
+                message_id: format!("m{i}"),
+                delete_token: "t".into(),
+            })
+            .collect(),
+    };
+    let (outcome, _) = apply_delete_account(&c, Some("victim"), &body).await.unwrap();
+    assert!(matches!(outcome, WriteOutcome::Invalid(_)));
+    assert_eq!(count_where(&c, "users", "id", "victim").await, 1);
+}
+
+/// A client that predates the field still deletes its account.
+#[test]
+fn a_delete_body_without_withdraw_still_parses() {
+    let body: DeleteAccountBody = serde_json::from_str(r#"{"user_id":"victim"}"#).unwrap();
+    assert!(body.withdraw.is_empty());
+    let wire = serde_json::to_string(&DeleteAccountBody { user_id: None, withdraw: Vec::new() })
+        .unwrap();
+    assert!(!wire.contains("withdraw"), "an empty list is left off the wire");
 }

@@ -100,7 +100,25 @@ pub struct ResetRecoverBody {
 pub struct DeleteAccountBody {
     #[serde(default)]
     pub user_id: Option<String>,
+    /// Envelopes the account sent that the DS removes in the deletion
+    /// transaction, each proven by its deletion capability (#1086). Sealed
+    /// envelopes carry no sender, so this is the only way the DS can find them.
+    /// At most [`WITHDRAW_MAX`]; omitted by older clients.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub withdraw: Vec<WithdrawEnvelope>,
 }
+
+/// One envelope to remove on account deletion: its id and the preimage of its
+/// stored `delete_token_hash`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct WithdrawEnvelope {
+    pub message_id: String,
+    pub delete_token: String,
+}
+
+/// Most envelopes one account deletion may withdraw. Keeps the signed body
+/// well under the DS's request-size limit (~100 bytes an entry).
+pub const WITHDRAW_MAX: usize = 10_000;
 
 /// `POST /v1/account/rotate-identity` — the `identity_version` the rotation
 /// landed on.
