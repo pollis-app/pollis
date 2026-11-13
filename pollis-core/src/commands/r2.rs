@@ -1101,6 +1101,8 @@ pub fn cache_decrypt(file_bytes: &[u8], db_key: &[u8], info: &[u8]) -> Result<Ve
 }
 
 /// Delete an R2 object via a DS-minted presigned DELETE. A 404 counts as success.
+///
+/// Custom emoji only: the DS refuses it for an attachment, which only the DS deletes (#1881).
 pub(crate) async fn delete_r2_object(
     state: &Arc<AppState>,
     r2_key: &str,

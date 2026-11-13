@@ -122,7 +122,7 @@ pub async fn delete_message(
         let now = chrono::Utc::now().to_rfc3339();
 
         // Soft-delete locally; the admin may hold no row, and the tombstone propagates anyway.
-        let attachments: Vec<(AttachmentRef, bool)> = {
+        let attachments: Vec<AttachmentRef> = {
             let guard = state.local_db.lock().await;
             let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
@@ -136,21 +136,13 @@ pub async fn delete_message(
 
             db.conn().execute(super::outbox::SOFT_DELETE_SQL, rusqlite::params![now, message_id])?;
 
-            let raw = content.unwrap_or_default();
-            let attachments = parse_attachment_refs(&raw);
-            if attachments.is_empty() {
-                Vec::new()
-            } else {
-                // Ref-count against every local message, not just the admin's; a cheap first pass only.
-                let orphaned = filter_orphaned_locally_all(db.conn(), &attachments)?;
-                mark_locally_orphaned(attachments, &orphaned)
-            }
+            parse_attachment_refs(&content.unwrap_or_default())
         };
 
-        // Release EVERY attachment's reference for the deleted message; the DS
-        // collects the shared object only when no reference remains.
-        for (att, locally_orphaned) in attachments {
-            cleanup_attachment(state, &message_id, &att, locally_orphaned).await;
+        // The delete released the message's references; the DS removes each
+        // file once nothing references it (#1881).
+        for att in attachments {
+            cleanup_attachment(state, &message_id, &att).await;
         }
 
         // Broadcast for cache invalidation; the tombstone is the durable path.
@@ -170,8 +162,8 @@ pub async fn delete_message(
     // Self-delete: redaction first, then envelope removal (see `retract_for_everyone`).
     retract_for_everyone(state, &conversation_id, &message_id, &user_id).await?;
 
-    // Soft-delete the local row (the `[deleted]` placeholder recipients see) and find orphans, under one lock.
-    let attachments: Vec<(AttachmentRef, bool)> = {
+    // Soft-delete the local row (the `[deleted]` placeholder recipients see) under one lock.
+    let attachments: Vec<AttachmentRef> = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
@@ -197,19 +189,13 @@ pub async fn delete_message(
             )));
         }
 
-        let raw = content.unwrap_or_default();
-        let attachments = parse_attachment_refs(&raw);
-        if attachments.is_empty() {
-            Vec::new()
-        } else {
-            let orphaned = filter_orphaned_locally(db.conn(), &user_id, &attachments)?;
-            mark_locally_orphaned(attachments, &orphaned)
-        }
+        parse_attachment_refs(&content.unwrap_or_default())
     };
 
-    // Release every attachment's reference; the DS collects only unreferenced objects.
-    for (att, locally_orphaned) in attachments {
-        cleanup_attachment(state, &message_id, &att, locally_orphaned).await;
+    // The delete released the message's references; the DS removes each file
+    // once nothing references it (#1881).
+    for att in attachments {
+        cleanup_attachment(state, &message_id, &att).await;
     }
 
     // Broadcast so connected members apply the redaction now; the envelope is the durable path.
@@ -465,70 +451,6 @@ pub(crate) fn is_attachment_content(content: &str) -> bool {
     !parse_attachment_refs(content).is_empty()
 }
 
-/// Pair each attachment with its local orphaned flag, which only gates the R2 delete attempt (#690).
-fn mark_locally_orphaned(
-    all: Vec<AttachmentRef>,
-    orphaned: &[AttachmentRef],
-) -> Vec<(AttachmentRef, bool)> {
-    let orphaned_hashes: std::collections::HashSet<&str> =
-        orphaned.iter().map(|a| a.content_hash.as_str()).collect();
-    all.into_iter()
-        .map(|att| {
-            let is_orphaned = orphaned_hashes.contains(att.content_hash.as_str());
-            (att, is_orphaned)
-        })
-        .collect()
-}
-
-/// The attachments none of the user's other non-deleted local messages reference.
-fn filter_orphaned_locally(
-    conn: &rusqlite::Connection,
-    user_id: &str,
-    candidates: &[AttachmentRef],
-) -> Result<Vec<AttachmentRef>> {
-    let mut stmt = conn.prepare(
-        "SELECT content FROM message
-         WHERE sender_id = ?1 AND deleted_at IS NULL AND content IS NOT NULL",
-    )?;
-    let rows = stmt.query_map(rusqlite::params![user_id], |row| row.get::<_, String>(0))?;
-
-    not_referenced_by(rows, candidates)
-}
-
-/// As `filter_orphaned_locally`, but across every sender (admin-delete); the DS count still decides.
-fn filter_orphaned_locally_all(
-    conn: &rusqlite::Connection,
-    candidates: &[AttachmentRef],
-) -> Result<Vec<AttachmentRef>> {
-    let mut stmt = conn.prepare(
-        "SELECT content FROM message
-         WHERE deleted_at IS NULL AND content IS NOT NULL",
-    )?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-
-    not_referenced_by(rows, candidates)
-}
-
-/// The `candidates` no message `content` in `rows` references.
-fn not_referenced_by(
-    rows: impl Iterator<Item = rusqlite::Result<String>>,
-    candidates: &[AttachmentRef],
-) -> Result<Vec<AttachmentRef>> {
-    let mut still_referenced = std::collections::HashSet::<String>::new();
-    for row in rows {
-        let content = row?;
-        for att in parse_attachment_refs(&content) {
-            still_referenced.insert(att.content_hash);
-        }
-    }
-
-    Ok(candidates
-        .iter()
-        .filter(|a| !still_referenced.contains(&a.content_hash))
-        .cloned()
-        .collect())
-}
-
 /// Register a DS reference for each attachment in `content`, keyed by message id (#690).
 ///
 /// Best-effort: never fails the send.
@@ -658,20 +580,13 @@ pub(crate) fn spawn_attachment_ref_backfill(state: &Arc<AppState>, user_id: &str
     });
 }
 
-/// Trigger server-side collection of a deleted message's attachment, and — when
-/// the client's local view suggests it may now be orphaned — try to collect the
-/// R2 object. Best-effort on both: failures are logged, never bubbled.
+/// Ask the DS to finish a deleted message's attachment now (#1881).
+/// Best-effort: a failure is logged, never bubbled.
 ///
-/// The reference is already released; this asks the DS to collect the row if nothing references the hash.
-///
-/// `locally_orphaned` only saves a round trip; the DS presign gate is the authority.
-async fn cleanup_attachment(
-    state: &Arc<AppState>,
-    message_id: &str,
-    att: &AttachmentRef,
-    locally_orphaned: bool,
-) {
-    // Ask the DS to conditionally collect the shared row. Best-effort.
+/// The delete already released the reference. Only the DS removes a file, once
+/// nothing references it; this call has it remove this one at once rather than
+/// on its next pass. The client never deletes the R2 object itself.
+async fn cleanup_attachment(state: &Arc<AppState>, message_id: &str, att: &AttachmentRef) {
     let remote_result = async {
         let body = pollis_api::messages::AttachmentDeleteBody {
             content_hash: att.content_hash.clone(),
@@ -683,21 +598,8 @@ async fn cleanup_attachment(
 
     if let Err(e) = remote_result {
         crate::diag!(
-            "[delete_message] failed to release attachment ref for {} (msg {message_id}): {e}",
+            "[delete_message] failed to ask the DS to collect attachment {} (msg {message_id}): {e}",
             att.content_hash
-        );
-    }
-
-    if !locally_orphaned {
-        // Still referenced by another local message — the DS gate would refuse
-        // the R2 delete anyway, so skip the round trip.
-        return;
-    }
-
-    if let Err(e) = crate::commands::r2::delete_r2_object(state, &att.r2_key).await {
-        crate::diag!(
-            "[delete_message] failed to delete R2 object {} (hash {}): {e}",
-            att.r2_key, att.content_hash
         );
     }
 }
