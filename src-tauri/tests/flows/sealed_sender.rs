@@ -269,3 +269,46 @@ async fn an_unlock_declares_the_references_older_sends_missed() {
 
     drop(alice);
 }
+
+/// #1866: deleting an account withdraws the sealed envelopes it sent that are
+/// still on the DS, in a conversation that outlives it; others' envelopes stay.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn account_deletion_withdraws_unfetched_sealed_envelopes() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let (_group_id, channel_id) = two_member_channel(&alice, &bob, &bob_profile.username).await;
+    let from_bob = bob.send_channel_message_id(&channel_id, "from bob").await;
+    let first = alice.send_channel_message_id(&channel_id, "unread one").await;
+    let second = alice.send_channel_message_id(&channel_id, "unread two").await;
+
+    let remote = writable_remote().await;
+    for id in [&first, &second, &from_bob] {
+        assert_eq!(envelope_sealed_and_sender(&remote, id).await.1, "sealed");
+    }
+
+    alice
+        .invoke_json("delete_account", serde_json::json!({ "userId": alice_profile.id }))
+        .await;
+
+    let conn = remote.conn().await.expect("remote conn");
+    for (id, want) in [(&first, 0i64), (&second, 0), (&from_bob, 1)] {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM message_envelope WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .expect("count query");
+        let n: i64 = rows.next().await.expect("row").expect("row").get(0).expect("count");
+        assert_eq!(n, want, "envelope {id}: expected {want} row(s) after alice's deletion");
+    }
+
+    drop(alice);
+    drop(bob);
+}

@@ -961,9 +961,14 @@ pub async fn delete_account(
     }
 
     // Phase 2: one DS transaction; a half-deleted account is a corrupt state.
+    // It also withdraws the envelopes this account sent that may still be
+    // waiting for someone (#1866): sealed, they name no sender for the DS to
+    // match, so each is listed with its deletion capability.
+    let withdraw = crate::commands::messages::withdrawable_envelopes(state, &user_id).await;
     let body = pollis_api::account::DeleteAccountBody {
         // The DS's no-auth fallback actor (`resolve_actor`); never widens access.
         user_id: Some(user_id.clone()),
+        withdraw,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 

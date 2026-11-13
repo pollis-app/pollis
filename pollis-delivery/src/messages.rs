@@ -1496,11 +1496,91 @@ async fn envelope_is_authored_by(
 /// constant time: both are fixed-length encodings of a 32-byte digest, so a
 /// length difference is itself a mismatch rather than something to branch on.
 fn capability_matches(stored: &str, token: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    capability_digest(token).as_bytes().ct_eq(stored.as_bytes()).into()
+}
+
+/// The stored form of a deletion capability: `SHA-256(token)`, base64.
+fn capability_digest(token: &str) -> String {
     use base64::Engine as _;
     use sha2::{Digest, Sha256};
-    use subtle::ConstantTimeEq;
-    let digest = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()));
-    digest.as_bytes().ct_eq(stored.as_bytes()).into()
+    base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token.as_bytes()))
+}
+
+/// Envelope pairs per statement in [`withdraw_envelopes`]: two bound
+/// parameters each, far under SQLite's variable limit.
+const WITHDRAW_CHUNK: usize = 200;
+
+/// Remove the envelopes an account is withdrawing on deletion, each proven by
+/// its deletion capability (#1086), with the attachment references and
+/// reactions hanging off them. Returns how many envelopes went.
+///
+/// A pair matches the envelope with that id and stored hash, and any pending
+/// edit of it (an edit envelope carries its target's hash). A pair that matches
+/// nothing (already fetched and collected, legacy row with no hash, wrong token)
+/// is skipped. Sealed envelopes name no sender, so this is the only way the DS
+/// can find an account's undelivered mail. Runs inside the caller's transaction.
+pub async fn withdraw_envelopes(
+    conn: &Connection,
+    items: &[pollis_api::account::WithdrawEnvelope],
+) -> anyhow::Result<u64> {
+    let mut gone = 0u64;
+    for chunk in items.chunks(WITHDRAW_CHUNK) {
+        let values = (0..chunk.len())
+            .map(|i| format!("(?{}, ?{})", 2 * i + 1, 2 * i + 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() * 2);
+        for item in chunk {
+            params.push(item.message_id.clone().into());
+            params.push(capability_digest(&item.delete_token).into());
+        }
+
+        let mut ids: Vec<String> = Vec::new();
+        {
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "WITH v(id, h) AS (VALUES {values}) \
+                         SELECT me.id FROM v JOIN message_envelope me \
+                             ON me.id = v.id AND me.delete_token_hash = v.h \
+                         UNION \
+                         SELECT me.id FROM v JOIN message_envelope me \
+                             ON me.target_message_id = v.id AND me.type = 'edit' \
+                            AND me.delete_token_hash = v.h"
+                    ),
+                    params,
+                )
+                .await?;
+            while let Some(row) = rows.next().await? {
+                ids.push(row.get::<String>(0)?);
+            }
+        }
+        if ids.is_empty() {
+            continue;
+        }
+
+        let marks = (1..=ids.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let id_params = || ids.iter().cloned().map(libsql::Value::from).collect::<Vec<_>>();
+        // Children first, while the envelopes still exist (#690).
+        conn.execute(
+            &format!("DELETE FROM attachment_ref WHERE message_id IN ({marks})"),
+            id_params(),
+        )
+        .await?;
+        conn.execute(
+            &format!("DELETE FROM message_reaction WHERE message_id IN ({marks})"),
+            id_params(),
+        )
+        .await?;
+        gone += conn
+            .execute(
+                &format!("DELETE FROM message_envelope WHERE id IN ({marks})"),
+                id_params(),
+            )
+            .await?;
+    }
+    Ok(gone)
 }
 
 pub async fn register_attachment(

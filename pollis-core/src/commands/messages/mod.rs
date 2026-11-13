@@ -25,6 +25,9 @@ mod types;
 // `pub` so the out-of-workspace `fuzz/` crate can fuzz `next_watermark` (#481).
 pub mod watermark;
 
+// Account deletion (#1866) withdraws the account's undelivered envelopes.
+pub(crate) use delete_capability::withdrawable_envelopes;
+
 /// The `sent_at` stamp for a `message_envelope` row this device writes — the ONE
 /// place the client's envelope timestamp format is decided.
 /// `sent_at` is compared lexically, so this must never truncate a real fraction.
