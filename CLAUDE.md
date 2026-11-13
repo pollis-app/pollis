@@ -58,6 +58,14 @@ Secrets: Doppler → GH Actions; locally `.env.development` (scripts source it a
 - **Findings are tickets, not copy.** When the product is weaker than public copy (website, `/learn`, docs, READMEs, store), fix the product or narrow the claim until it is true without a caveat; never publish known vulnerabilities, gaps, incident history or "not yet" items (genuine trade-offs a user needs stay). The finding becomes a GitHub issue with a neutral title ("Dependency upgrade: …"); public issues, comments and PR descriptions never spell out vulnerability or exploit details, and "Needs Dan's decision" items are worded neutrally.
   The model is Signal's: the code is public and anyone may review it, but we don't signpost gaps for attackers (human or AI). This is not about hiding vulnerabilities or being less transparent; it's that a finding gets fixed and patched immediately, so there's nothing to publish. Don't publish vulnerability lists (VEX, advisory tables, scan reports) either; internal CI gates like `cargo deny` stay.
 
+## Settled decisions
+
+Decided by Dan; don't re-propose these or raise them as findings in sweeps.
+
+- **Blocking is client-side.** The blocked person's app shows a message as sent and never posts it, so a block reveals nothing to them (the Signal/WhatsApp model). The DS takes no part in refusing or discarding messages in a blocked DM.
+- **No separate provenance gate at publish time.** Releases carry build provenance; a second check that refuses to publish without it was judged redundant.
+- **No warrant canary.** It asks readers to take our word for it, which isn't auditable, and signing it ourselves doesn't change that.
+
 ## Style
 
 - `if` statements always use braces, even for single-line bodies.
