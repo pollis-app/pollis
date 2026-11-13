@@ -25,6 +25,7 @@ use crate::writes::{
     WriteOutcome,
 };
 use crate::AppState;
+use crate::leaf_cert;
 use crate::util::b64_decode;
 
 // Request bodies live in `pollis-api`, shared with pollis-core; re-exported here.
@@ -61,6 +62,14 @@ pub async fn apply_publish_key_packages(
     for pkg in &body.packages {
         decoded.push((pkg, b64_decode(&pkg.key_package)?));
     }
+    // #1851: every package must be the actor's own certified device, or none is stored.
+    for (pkg, kp) in &decoded {
+        if let Err(why) =
+            refuse_uncertified_package(conn, &actor, &body.device_id, pkg, kp).await?
+        {
+            return Ok(WriteOutcome::Invalid(why));
+        }
+    }
     let tx = conn.transaction().await?;
     for (pkg, kp) in decoded {
         if pkg.last_resort {
@@ -90,6 +99,34 @@ pub async fn apply_publish_key_packages(
     }
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
+}
+
+/// #1851: a package is stored only if it is the publishing device's own,
+/// filed under its real KeyPackageRef and suite, flagged last-resort exactly
+/// when it carries the extension, and certified ([`leaf_cert`]).
+async fn refuse_uncertified_package(
+    conn: &Connection,
+    actor: &str,
+    device_id: &str,
+    entry: &KeyPackageEntry,
+    bytes: &[u8],
+) -> anyhow::Result<Result<(), leaf_cert::Refusal>> {
+    let kp = match leaf_cert::inspect_key_package(bytes) {
+        Ok(kp) => kp,
+        Err(why) => return Ok(Err(why)),
+    };
+    if kp.last_resort != entry.last_resort {
+        return Ok(Err("last_resort does not match the key package"));
+    }
+    leaf_cert::check_published_key_package(
+        conn,
+        actor,
+        device_id,
+        &entry.ref_hash,
+        entry.suite(),
+        &kp,
+    )
+    .await
 }
 
 /// At most ONE last-resort package per suite per request (#1571): a clean 400, not a 500.
@@ -139,12 +176,14 @@ pub async fn apply_replenish_key_packages(
     // Decode every package up front so a bad blob aborts before we touch the DB.
     let mut decoded: Vec<(String, Vec<u8>, i64, bool)> = Vec::with_capacity(body.packages.len());
     for pkg in &body.packages {
-        decoded.push((
-            pkg.ref_hash.clone(),
-            b64_decode(&pkg.key_package)?,
-            pkg.suite(),
-            pkg.last_resort,
-        ));
+        let kp = b64_decode(&pkg.key_package)?;
+        // #1851: refused before the stale pool is cleared, so a refusal leaves it as it was.
+        if let Err(why) =
+            refuse_uncertified_package(conn, &actor, &body.device_id, pkg, &kp).await?
+        {
+            return Ok(WriteOutcome::Invalid(why));
+        }
+        decoded.push((pkg.ref_hash.clone(), kp, pkg.suite(), pkg.last_resort));
     }
     // A rotation replaces only the SUITES it publishes; an empty request clears the whole device.
     let mut suites: Vec<i64> = decoded.iter().map(|(_, _, s, _)| *s).collect();
@@ -387,10 +426,31 @@ pub async fn sweep_key_package_claims(conn: &Connection) -> anyhow::Result<u64> 
 ///   * only SUCCESSFUL claims count, so an empty pool doesn't lock out honest adders.
 ///
 /// `claimer` is `None` only on the no-auth path, which skips the budget.
+///
+/// #1851: a package is handed out only while its leaf is still certified
+/// ([`leaf_cert::leaf_verdict`]): the device may have been revoked, or the
+/// account key reset, since it was published, and packages stored before the
+/// publish-time check never had one. A package that fails is burnt (deleted)
+/// and the next one tried; it never reaches the claimer.
 pub async fn apply_claim_key_package(
     conn: &Connection,
     claimer: Option<&str>,
     body: &ClaimKeyPackageBody,
+) -> anyhow::Result<ClaimOutcome> {
+    apply_claim_key_package_with(conn, claimer, body, leaf_cert::LeafCheck::Enforce).await
+}
+
+/// Most uncertified packages one claim burns before answering `NoKeyPackage`.
+const CLAIM_MAX_BURNT: usize = 16;
+
+/// [`apply_claim_key_package`] with the leaf check selectable. Production
+/// always enforces; [`leaf_cert::LeafCheck::Skip`] is for the integration
+/// harness, to model a DS that serves whatever is in the table.
+pub async fn apply_claim_key_package_with(
+    conn: &Connection,
+    claimer: Option<&str>,
+    body: &ClaimKeyPackageBody,
+    check: leaf_cert::LeafCheck,
 ) -> anyhow::Result<ClaimOutcome> {
     if let Some(claimer) = claimer {
         if !may_claim_from(conn, claimer, &body.target_user_id).await? {
@@ -403,16 +463,31 @@ pub async fn apply_claim_key_package(
     }
 
     let suite = body.ciphersuite.unwrap_or(CIPHERSUITE_PQ);
-    let claimed = match claim_regular(conn, body, suite).await? {
-        Some(hit) => Some(hit),
-        // Empty pool: fall back to the last-resort package (#1571), read, never flipped. Device-scoped only.
-        None => match &body.target_device_id {
-            Some(device_id) => {
+    let mut claimed = None;
+    for _ in 0..CLAIM_MAX_BURNT {
+        let Some(hit) = claim_regular(conn, body, suite).await? else {
+            break;
+        };
+        if serveable(conn, body, &hit.1, check).await? {
+            claimed = Some(hit);
+            break;
+        }
+        burn(conn, &hit.0).await?;
+    }
+    // Empty pool: fall back to the last-resort package (#1571), read, never flipped. Device-scoped only.
+    if claimed.is_none() {
+        if let Some(device_id) = &body.target_device_id {
+            if let Some(hit) =
                 last_resort_package(conn, &body.target_user_id, device_id, suite).await?
+            {
+                if serveable(conn, body, &hit.1, check).await? {
+                    claimed = Some(hit);
+                } else {
+                    burn(conn, &hit.0).await?;
+                }
             }
-            None => None,
-        },
-    };
+        }
+    }
 
     let Some((ref_hash, key_package)) = claimed else {
         return Ok(ClaimOutcome::NoKeyPackage);
@@ -437,6 +512,41 @@ pub async fn apply_claim_key_package(
         ref_hash,
         key_package,
     })
+}
+
+/// May this claimed package go to the claimer (#1851)? Its leaf must be the
+/// target the claim named, and still certified.
+async fn serveable(
+    conn: &Connection,
+    body: &ClaimKeyPackageBody,
+    key_package: &[u8],
+    check: leaf_cert::LeafCheck,
+) -> anyhow::Result<bool> {
+    if check == leaf_cert::LeafCheck::Skip {
+        return Ok(true);
+    }
+    let Some(leaf) = leaf_cert::stored_key_package_leaf(key_package) else {
+        return Ok(false);
+    };
+    if leaf.user_id != body.target_user_id {
+        return Ok(false);
+    }
+    if let Some(device_id) = &body.target_device_id {
+        if &leaf.device_id != device_id {
+            return Ok(false);
+        }
+    }
+    Ok(leaf_cert::leaf_verdict(conn, &leaf).await?.is_ok())
+}
+
+/// Delete a package that may never be served (#1851).
+async fn burn(conn: &Connection, ref_hash: &str) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM mls_key_package WHERE ref_hash = ?1",
+        libsql::params![ref_hash.to_string()],
+    )
+    .await?;
+    Ok(())
 }
 
 /// Atomically claim the OLDEST unclaimed REGULAR package for the target: the

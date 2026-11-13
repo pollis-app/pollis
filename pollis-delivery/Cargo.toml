@@ -3,7 +3,7 @@ name = "pollis-delivery"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Pollis MLS Delivery Service: the sole writer to the MLS control-plane tables. Serializes commits per conversation (race-free, append-only by construction) and serves the contiguous commit log. Sees only opaque blobs — never plaintext or keys (RFC 9420 Delivery Service role)."
+description = "Pollis MLS Delivery Service: the sole writer to the MLS control-plane tables. Serializes commits per conversation (race-free, append-only by construction) and serves the contiguous commit log. Never sees plaintext or keys; reads only the public leaves of the MLS objects it stores, to refuse uncertified devices (RFC 9420 Delivery Service role)."
 
 [lib]
 name = "pollis_delivery"
@@ -59,6 +59,18 @@ pollis-schema = { path = "../pollis-schema" }
 # canonical message that binds sha256(body). The DS request credential is
 # `user_device.mls_signature_pub_pq`. Also the device-cert signature scheme.
 ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
+# #1851: the DS reads the PUBLIC parts of the MLS objects it stores — a
+# KeyPackage's leaf (credential + signature key), a Welcome's KeyPackageRefs and
+# a GroupInfo's ratchet tree — to refuse any that would put a leaf in a group
+# that the claimed account's device cert does not cover. Parsing only: the DS
+# holds no MLS group state and no MLS keys. The same pinned openmls rev as
+# pollis-core (workspace `[patch.crates-io]`), so the two cannot disagree on the
+# wire format; `draft-ietf-mls-pq-ciphersuites` makes the 0x0052 code point
+# parse. `openmls_rust_crypto` verifies a KeyPackage's own signature and
+# computes its KeyPackageRef.
+openmls = { version = "0.8", features = ["draft-ietf-mls-pq-ciphersuites"] }
+openmls_traits = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites"] }
+openmls_rust_crypto = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites"] }
 sha2 = "0.10"
 # Constant-time equality for the #847 invite-link secret hash. Hand-rolling a
 # byte fold is not equivalent — LLVM is free to turn `diff == 0` back into an
@@ -103,6 +115,9 @@ pollis-schema = { path = "../pollis-schema", features = ["libsql"] }
 # The endpoint table, so the route-coverage test walks the same list the client
 # posts to rather than a copy of it.
 pollis-api = { path = "../pollis-api" }
+# #1851: mint real KeyPackages, GroupInfos and Welcomes (certified and not) so
+# the leaf-certification tests feed the DS what a client would.
+openmls_basic_credential = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites", "clonable"] }
 
 # Picks up `[workspace.lints]` from the root Cargo.toml, which declares the
 # `kani` cfg the proof harnesses in this crate are gated on.

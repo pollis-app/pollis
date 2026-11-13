@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 pub mod fake_livekit;
+pub mod mls;
 
 use pollis_delivery::db::Db;
 use std::ops::Deref;

@@ -186,10 +186,26 @@ pub enum SubmitVerdict {
 ///      [`crate::writes::WELCOME_MAX_BYTES`], the same ceiling a resubmit obeys.
 ///   2. **The RECIPIENT is in the DESIRED ROSTER** ([`crate::writes::in_desired_roster`]).
 ///   3. **One member may not steal another's pending Welcome**, unless admin; a NEWER generation always wins.
+///   4. **No uncertified leaf** (#1851, [`crate::leaf_cert`]): every Welcome
+///      admits only stored KeyPackages of certified devices, its recipient's
+///      among them, and every leaf the resulting GroupInfo adds to the stored
+///      one is certified. The commit itself is a `PrivateMessage` the DS cannot
+///      open; these are the parts of the bundle where an add is visible.
 pub async fn submit_commit(
     main_conn: &Connection,
     log_conn: &Connection,
     body: &SubmitBody,
+) -> Result<SubmitVerdict> {
+    submit_commit_with(main_conn, log_conn, body, crate::leaf_cert::LeafCheck::Enforce).await
+}
+
+/// [`submit_commit`] with gate 4 selectable. Production always enforces;
+/// [`crate::leaf_cert::LeafCheck::Skip`] is for tests (see its docs).
+pub async fn submit_commit_with(
+    main_conn: &Connection,
+    log_conn: &Connection,
+    body: &SubmitBody,
+    check: crate::leaf_cert::LeafCheck,
 ) -> Result<SubmitVerdict> {
     let conn = log_conn;
     let commit = b64_decode(&body.commit)?;
@@ -223,6 +239,30 @@ pub async fn submit_commit(
         };
         if !admissible {
             return Ok(SubmitVerdict::Forbidden);
+        }
+    }
+
+    // Gate 4, before any write (#1851).
+    if check == crate::leaf_cert::LeafCheck::Enforce {
+        for (w, welcome) in &welcomes {
+            if let Err(why) = crate::leaf_cert::check_welcome(
+                main_conn,
+                &w.recipient_id,
+                &w.recipient_device_id,
+                welcome,
+            )
+            .await?
+            {
+                return Ok(SubmitVerdict::Invalid(why));
+            }
+        }
+        if let Some(gi) = &group_info {
+            let stored = crate::leaf_cert::stored_group_info(conn, &body.conversation_id).await?;
+            if let Err(why) =
+                crate::leaf_cert::check_group_info(main_conn, stored.as_deref(), gi).await?
+            {
+                return Ok(SubmitVerdict::Invalid(why));
+            }
         }
     }
 

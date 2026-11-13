@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use pollis_delivery::commit::{
-    fetch_commits, head_epoch, head_epoch_in, head_generation, submit_commit, SubmitBody,
+    fetch_commits, head_epoch, head_epoch_in, head_generation, submit_commit_with, SubmitBody,
     SubmitResponse, SubmitVerdict, WelcomeBody,
 };
 use pollis_delivery::db::Db;
@@ -14,11 +14,14 @@ use pollis_delivery::db::Db;
 mod common;
 
 /// Drive the real `submit_commit` on a single-DB fixture; a Welcome-authz refusal panics.
+///
+/// The #1851 leaf gate is skipped: these bodies carry placeholder MLS bytes, and
+/// that gate has its own suite (`leaf_certification.rs`).
 async fn submit(
     conn: &libsql::Connection,
     body: &SubmitBody,
 ) -> anyhow::Result<SubmitResponse> {
-    match submit_commit(conn, conn, body).await? {
+    match submit_commit_with(conn, conn, body, pollis_delivery::leaf_cert::LeafCheck::Skip).await? {
         SubmitVerdict::Response(r) => Ok(r),
         other => panic!("expected a CAS response, got {other:?}"),
     }
