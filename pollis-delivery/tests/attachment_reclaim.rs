@@ -715,3 +715,146 @@ async fn an_upload_awaiting_its_message_is_left_alone() {
         1
     );
 }
+
+// ---- message ids are client-chosen --------------------------------------------
+
+/// After delivery GC frees id `a_msg`, someone else posts their own envelope
+/// under that id and deletes it, by their own capability or as admin of their
+/// own group. Only references registered against the envelope actually removed
+/// go, so the original's file stays until its author deletes it.
+#[tokio::test]
+async fn an_id_reused_after_gc_cannot_release_the_originals_file() {
+    let c = conn().await;
+    two_messages(&c).await;
+    user(&c, "mallory").await;
+    group(&c, "gm", "cm", &["mallory"]).await;
+    let r2 = FakeR2::with(&key());
+    deliver_both(&c).await;
+    author_deletes(&c, "bob", "b_msg", "cb").await;
+
+    // Self path: mallory's own envelope `a_msg`, her own capability.
+    exec(&c, &format!(
+        "INSERT INTO message_envelope \
+             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
+         VALUES ('a_msg', 'cm', 'sealed', 'ct', '2026-01-02', 1, 1, '{}')",
+        capability_hash("mallory-token")
+    )).await;
+    let _ = apply_register_attachment(
+        &c,
+        Some("mallory"),
+        &AttachmentRegisterBody::ForMessage {
+            content_hash: FILE.into(),
+            r2_key: key(),
+            message_id: "a_msg".into(),
+            delete_token: Some("mallory-token".into()),
+        },
+    )
+    .await
+    .unwrap();
+    author_deletes_with(&c, "mallory", "a_msg", "cm", Some("mallory-token".into())).await;
+    assert_eq!(scalar(&c, "SELECT COUNT(*) FROM message_envelope WHERE id = 'a_msg'").await, 0);
+    assert_kept(&c, &r2, "a self-delete of a reused id").await;
+
+    // Admin path: the same id again, tombstoned by mallory as admin of her group.
+    exec(&c, &format!(
+        "INSERT INTO message_envelope \
+             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
+         VALUES ('a_msg', 'cm', 'sealed', 'ct', '2026-01-03', 2, 1, '{}')",
+        capability_hash("mallory-token-2")
+    )).await;
+    let out = apply_delete_message(
+        &c,
+        Some("mallory"),
+        &DeleteMessageBody {
+            message_id: "a_msg".into(),
+            conversation_id: "cm".into(),
+            msg_sender_id: Some("someone".into()),
+            actor_id: None,
+            delete_token: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    assert_kept(&c, &r2, "an admin delete of a reused id").await;
+
+    // The real author's delete still works.
+    author_deletes(&c, "alice", "a_msg", "ca").await;
+    assert_removed(&c, &r2, "after the original's author deleted it").await;
+}
+
+/// A legacy reference carries no capability hash; no delete can prove it, so
+/// it pins its file.
+#[tokio::test]
+async fn a_legacy_reference_without_a_capability_is_never_released() {
+    let c = conn().await;
+    user(&c, "alice").await;
+    group(&c, "ga", "ca", &["alice"]).await;
+    exec(&c, "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at, seq) \
+              VALUES ('old', 'ca', 'alice', 'ct', '2026-01-01', 1)").await;
+    let out = apply_register_attachment(
+        &c,
+        Some("alice"),
+        &AttachmentRegisterBody::ForMessage {
+            content_hash: FILE.into(),
+            r2_key: key(),
+            message_id: "old".into(),
+            delete_token: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+    let r2 = FakeR2::with(&key());
+    author_deletes_with(&c, "alice", "old", "ca", None).await;
+    assert_kept(&c, &r2, "a legacy message's delete").await;
+}
+
+// ---- registration while the bytes are going --------------------------------
+
+/// Once the DS has started deleting a file's bytes, a new reference could not
+/// keep them: registration and the Vault save say so instead of accepting a
+/// reference that would be dropped.
+#[tokio::test]
+async fn a_reference_to_a_file_being_deleted_is_refused_explicitly() {
+    let c = conn().await;
+    user(&c, "alice").await;
+    user(&c, "bob").await;
+    group(&c, "ga", "ca", &["alice", "bob"]).await;
+    send_with_file(&c, "a_msg", "ca", 1).await;
+    author_deletes(&c, "alice", "a_msg", "ca").await;
+    exec(&c, &format!("UPDATE attachment_object SET reclaim_state = 'deleting' WHERE content_hash = '{FILE}'")).await;
+
+    exec(&c, &format!(
+        "INSERT INTO message_envelope \
+             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
+         VALUES ('b_msg', 'ca', 'sealed', 'ct', '2026-01-01', 2, 1, '{}')",
+        capability_hash(&token_of("b_msg"))
+    )).await;
+    assert!(matches!(declare(&c, "b_msg", FILE).await, WriteOutcome::Invalid(_)));
+    let out = pollis_delivery::vault::apply_save_vault_message(&c, Some("bob"), &vault_entry("v1", &[FILE]))
+        .await
+        .unwrap();
+    assert!(matches!(out, pollis_delivery::vault::VaultOutcome::Invalid(_)));
+    assert_eq!(scalar(&c, "SELECT COUNT(*) FROM vault_message").await, 0, "the save is all or nothing");
+    assert_eq!(declarations(&c).await, 0);
+}
+
+// ---- bounded passes -------------------------------------------------------------
+
+/// One pass takes on at most a bounded number of objects; the rest wait.
+#[tokio::test]
+async fn a_reclaim_pass_is_bounded() {
+    let c = conn().await;
+    let r2 = FakeR2::default();
+    for i in 0..150 {
+        let id = format!("{i:064x}");
+        exec(&c, &format!(
+            "INSERT INTO attachment_object (content_hash, r2_key, reclaim_state) \
+             VALUES ('{id}', 'media/{id}.enc', 'released')"
+        )).await;
+    }
+    assert_eq!(reclaim(&c, &r2).await.reclaimed, 100);
+    assert_eq!(reclaim(&c, &r2).await.reclaimed, 50);
+    assert_eq!(scalar(&c, "SELECT COUNT(*) FROM attachment_object").await, 0);
+}

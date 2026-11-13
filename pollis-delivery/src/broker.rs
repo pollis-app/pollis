@@ -8,7 +8,10 @@
 //!
 //! Media is sealed under keys the DS never holds (#1382), so a presign only exposes ciphertext.
 //!
-//! `delete` is refused while a live message still references the object (#690, [`crate::messages::object_is_referenced`]).
+//! Writes to shared objects are gated: an attachment (`media/`) is never deleted
+//! or overwritten through a presign, since the DS deletes attachments itself once
+//! every message referring to them is deleted (#1881); an emoji only while no
+//! group references it (#848).
 
 use axum::{
     extract::State,
@@ -1500,7 +1503,9 @@ fn put_max_bytes(family: R2Family) -> u64 {
 ///   * **A PUT or DELETE of an owned object needs the owner.** Only a user may
 ///     write or delete under their own `avatars/` prefix, and only an admin of
 ///     the group under its `group-icons/` prefix.
-///   * **A PUT or DELETE of a shared object needs it unreferenced** (#690, #848).
+///   * **Attachments (`media/`) are written once and deleted only by the DS**
+///     (#1881): no DELETE, and no PUT onto a file id the DS already knows.
+///   * **An emoji PUT or DELETE needs it unreferenced** (#848).
 pub async fn r2_presign(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1553,13 +1558,20 @@ pub async fn r2_presign(
 
     // Shared families: overwriting substitutes bytes for everyone; deleting 404s them for everyone.
     //
-    // No identity in the answer: `object_is_referenced` is the one predicate, shared with `apply_delete_attachment`.
+    // No identity in the answer.
     if writing {
         if let Some(content_hash) = object.content_hash {
-            let referenced = match object.family {
+            let refused = match object.family {
+                // The DS alone deletes attachments, once every message
+                // referring to them is deleted (#1881). A client never deletes
+                // one, and never writes over a file id the DS already holds,
+                // referenced or not: a file with no surviving reference may
+                // still be in someone's history.
                 R2Family::Media => {
-                    let conn = state.db.conn().await?;
-                    crate::messages::object_is_referenced(&conn, content_hash).await?
+                    http_method == "DELETE" || {
+                        let conn = state.db.conn().await?;
+                        crate::messages::object_is_known(&conn, content_hash).await?
+                    }
                 }
                 R2Family::Emoji => {
                     let conn = state.db.conn().await?;
@@ -1567,7 +1579,7 @@ pub async fn r2_presign(
                 }
                 R2Family::Avatar | R2Family::GroupIcon => false,
             };
-            if referenced {
+            if refused {
                 return Ok(AuthRejection::Forbidden.into_response());
             }
         }

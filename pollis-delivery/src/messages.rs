@@ -832,19 +832,32 @@ pub(crate) async fn check_delete_capability(
 }
 
 /// Remove envelope `message_id` and its pending edit, both scoped to
-/// `conversation_id`. Returns how many rows the envelope itself lost (0 or 1).
+/// `conversation_id`. Returns the deletion-capability hash of the envelope
+/// this call actually removed, if it removed one that carried a hash: the only
+/// envelope whose attachment references the delete may release (#1881).
 async fn remove_envelope_and_edit(
     tx: &Connection,
     conversation_id: &str,
     message_id: &str,
-) -> anyhow::Result<u64> {
+) -> anyhow::Result<Option<String>> {
     let params = || libsql::params![message_id.to_string(), conversation_id.to_string()];
-    let removed = tx
-        .execute(
-            "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
-            params(),
-        )
-        .await?;
+    // One statement, so the hash is the one on the row this delete removed, and
+    // the transaction's first act is a write (a read first would make the later
+    // write's lock upgrade fail at once under contention instead of waiting).
+    let removed: Option<String> = {
+        let mut rows = tx
+            .query(
+                "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2 \
+                 RETURNING delete_token_hash",
+                params(),
+            )
+            .await?;
+        let mut hash = None;
+        while let Some(row) = rows.next().await? {
+            hash = row.get::<Option<String>>(0).ok().flatten();
+        }
+        hash
+    };
     tx.execute(
         "DELETE FROM message_envelope \
          WHERE target_message_id = ?1 AND type = 'edit' AND conversation_id = ?2",
@@ -852,22 +865,6 @@ async fn remove_envelope_and_edit(
     )
     .await?;
     Ok(removed)
-}
-
-/// The stored `sender_id` of envelope `message_id` in `conversation_id`: the
-/// author for a legacy unsealed envelope, the sealed sentinel otherwise.
-async fn envelope_sender(
-    conn: &Connection,
-    conversation_id: &str,
-    message_id: &str,
-) -> anyhow::Result<Option<String>> {
-    Ok(crate::util::query_strings(
-        conn,
-        "SELECT sender_id FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
-        libsql::params![message_id.to_string(), conversation_id.to_string()],
-    )
-    .await?
-    .pop())
 }
 
 /// The capability hash carried by the PENDING EDIT of `message_id`, if there is
@@ -998,32 +995,26 @@ pub async fn apply_delete_message(
             return Ok(WriteOutcome::Forbidden);
         }
         // ...and, since #1086, capability PROOF; legacy rows keep the membership-only path.
-        let capability = check_delete_capability(
+        if check_delete_capability(
             conn,
             &body.conversation_id,
             &body.message_id,
             body.delete_token.as_deref(),
         )
-        .await?;
-        if capability == DeleteCapability::Refused {
+        .await?
+            == DeleteCapability::Refused
+        {
             return Ok(WriteOutcome::Forbidden);
         }
-        // Authorship proven, not hinted: the capability, or a legacy unsealed
-        // envelope naming the actor. Only then does removing the envelope
-        // release the message's attachments (#1881).
-        let proven_author = capability == DeleteCapability::Proved
-            || envelope_sender(conn, &body.conversation_id, &body.message_id).await?.as_deref()
-                == Some(actor.as_str());
         // SCOPED to the authorized conversation, or membership anywhere would authorize deleting any envelope.
         let tx = conn.transaction().await?;
         let removed = remove_envelope_and_edit(&tx, &body.conversation_id, &body.message_id).await?;
-        release_message_references(
-            &tx,
-            &body.message_id,
-            body.delete_token.as_deref(),
-            removed > 0 && proven_author,
-        )
-        .await?;
+        // The message's attachments go with it (#1881): those registered
+        // against the envelope just removed, or, once envelope GC has
+        // collected it, against the capability the author presents.
+        let mut proofs: Vec<String> = removed.into_iter().collect();
+        proofs.extend(body.delete_token.as_deref().map(capability_digest));
+        release_message_references(&tx, &body.message_id, &proofs).await?;
         tx.commit().await?;
         return Ok(WriteOutcome::Ok);
     }
@@ -1044,9 +1035,11 @@ pub async fn apply_delete_message(
     let tx = conn.transaction().await?;
     let removed = remove_envelope_and_edit(&tx, &body.conversation_id, &body.message_id).await?;
     // The tombstone removes the message for every member, so its attachments
-    // are released (#1881). The admin's authority is over this conversation,
-    // which only the envelope still names, so a collected one releases nothing.
-    release_message_references(&tx, &body.message_id, None, removed > 0).await?;
+    // are released (#1881): only those registered against the envelope this
+    // tombstone removed from its own conversation. A collected one releases
+    // nothing; the admin holds no other proof of which message it was.
+    let proofs: Vec<String> = removed.into_iter().collect();
+    release_message_references(&tx, &body.message_id, &proofs).await?;
     insert_envelope_with_seq(
         &tx,
         &body.conversation_id,
@@ -1488,18 +1481,8 @@ macro_rules! live_ref_exists {
 /// [`object_is_referenced`].
 const OBJECT_IS_REFERENCED_SQL: &str = concat!("SELECT ", live_ref_exists!());
 
-/// Collect the shared row iff NO reference remains. One predicate, no Rust-side
-/// count, so it holds under concurrent deletes.
-///
-/// A row already released is left to [`reclaim_released_attachments`], which
-/// still needs its `r2_key` to delete the blob.
-const COLLECT_UNREFERENCED_OBJECT_SQL: &str = concat!(
-    "DELETE FROM attachment_object WHERE content_hash = ?1 AND reclaim_state IS NULL AND NOT ",
-    live_ref_exists!()
-);
-
 /// Mark the object released iff NO reference remains (#1881): the same
-/// predicate as [`COLLECT_UNREFERENCED_OBJECT_SQL`] and the presign gate.
+/// predicate as the presign gate.
 const MARK_RELEASED_OBJECT_SQL: &str = concat!(
     "UPDATE attachment_object SET reclaim_state = 'released' \
      WHERE content_hash = ?1 AND reclaim_state IS NULL AND NOT ",
@@ -1576,25 +1559,26 @@ pub(crate) async fn drop_vault_references(
 /// has just removed for everyone (#1881), and mark what that left
 /// unreferenced. Returns the hashes released.
 ///
-/// A reference goes when `envelope_deleted` (this request removed the envelope
-/// under the delete's own authorization), or when `token` is the message's
-/// deletion capability (#1086) and matches the hash copied onto the reference
-/// at registration: the author's delete of a message whose envelope GC already
-/// collected. Anything else releases nothing.
+/// Message ids are chosen by clients, so an id alone does not say which
+/// message a reference belongs to. A reference goes only when the deletion
+/// capability hash copied onto it at registration is one of `proofs`: the
+/// hash of the envelope this delete removed, or of the capability the author
+/// presented. A reference with no hash (a pre-#1086 message) is never
+/// released; it pins its file.
 pub(crate) async fn release_message_references(
     conn: &Connection,
     message_id: &str,
-    token: Option<&str>,
-    envelope_deleted: bool,
+    proofs: &[String],
 ) -> anyhow::Result<Vec<String>> {
-    let digest: Option<String> = token.map(capability_digest);
-    let scope = "message_id = ?1 AND (?2 OR (delete_token_hash IS NOT NULL AND delete_token_hash = ?3))";
+    if proofs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let marks = (2..proofs.len() + 2).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+    let scope = format!("message_id = ?1 AND delete_token_hash IN ({marks})");
     let params = || {
-        libsql::params![
-            message_id.to_string(),
-            i64::from(envelope_deleted),
-            digest.clone()
-        ]
+        let mut v: Vec<libsql::Value> = vec![message_id.to_string().into()];
+        v.extend(proofs.iter().cloned().map(libsql::Value::from));
+        v
     };
     let released = crate::util::query_strings(
         conn,
@@ -1609,6 +1593,20 @@ pub(crate) async fn release_message_references(
         .await?;
     mark_released_objects(conn, &released).await?;
     Ok(released)
+}
+
+/// The `reclaim_state` of the object `hash`, if its row exists and has one.
+pub(crate) async fn object_state(conn: &Connection, hash: &str) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT reclaim_state FROM attachment_object WHERE content_hash = ?1",
+            libsql::params![hash.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0).ok().flatten(),
+        None => None,
+    })
 }
 
 /// Clear a release that has not started deleting, because a new reference to
@@ -1673,6 +1671,11 @@ pub async fn reclaim_released_attachment(
     reclaim_pending(conn, store, Some(content_hash)).await
 }
 
+/// The most objects one reclaim pass takes on, so a degraded R2 bounds the
+/// pass. Picked at random, so rows whose delete keeps failing cannot starve
+/// the rest; anything left waits for the next pass.
+const RECLAIM_PASS_LIMIT: i64 = 100;
+
 async fn reclaim_pending(
     conn: &Connection,
     store: &impl crate::broker::ObjectStore,
@@ -1683,8 +1686,9 @@ async fn reclaim_pending(
         let mut rows = conn
             .query(
                 "SELECT content_hash, r2_key FROM attachment_object \
-                 WHERE reclaim_state IS NOT NULL AND (?1 IS NULL OR content_hash = ?1)",
-                libsql::params![only.map(str::to_string)],
+                 WHERE reclaim_state IS NOT NULL AND (?1 IS NULL OR content_hash = ?1) \
+                 ORDER BY RANDOM() LIMIT ?2",
+                libsql::params![only.map(str::to_string), RECLAIM_PASS_LIMIT],
             )
             .await?;
         while let Some(row) = rows.next().await? {
@@ -1733,24 +1737,34 @@ async fn reclaim_pending(
     Ok(report)
 }
 
-/// Run [`reclaim_released_attachments`] in the background after an explicit
-/// delete commits, so the request does not wait on R2. Best-effort: whatever
-/// it leaves, the envelope-GC tick retries.
+/// Run [`reclaim_released_attachments`] in the background, one pass at a time
+/// (`AppState::attachment_reclaim`): a kick while a pass runs makes it go
+/// round once more instead of starting a second. Kicked after an explicit
+/// delete commits and on every envelope-GC tick, which is the retry.
 pub fn spawn_attachment_reclaim(state: &crate::AppState) {
     if state.broker.r2_ready().is_none() {
         return;
     }
-    let state = state.clone();
-    tokio::spawn(async move {
-        let conn = match state.db.conn().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!("attachment reclaim: DB connection failed: {e}");
-                return;
+    let db = std::sync::Arc::clone(&state.db);
+    let broker = state.broker.clone();
+    state.attachment_reclaim.kick(move || {
+        let db = std::sync::Arc::clone(&db);
+        let broker = broker.clone();
+        async move {
+            let result = async {
+                let conn = db.conn().await?;
+                reclaim_released_attachments(&conn, &broker).await
             }
-        };
-        if let Err(e) = reclaim_released_attachments(&conn, &state.broker).await {
-            tracing::warn!("attachment reclaim failed: {e}");
+            .await;
+            match result {
+                Ok(r) if r.reclaimed > 0 || r.failed > 0 => tracing::info!(
+                    "attachment reclaim: {} reclaimed, {} retried next pass",
+                    r.reclaimed,
+                    r.failed
+                ),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("attachment reclaim failed: {e:#}"),
+            }
         }
     });
 }
@@ -1945,6 +1959,12 @@ pub async fn apply_register_attachment(
     .await?;
     // The reference exists only on the send variant (#925).
     if let Some(message_id) = body.message_id() {
+        // The DS is deleting this file's bytes: a reference now could not keep
+        // them, so say so rather than accept one that would be dropped (#1881).
+        if object_state(&tx, body.content_hash()).await?.as_deref() == Some("deleting") {
+            tx.rollback().await?;
+            return Ok(WriteOutcome::Invalid("this attachment is being deleted"));
+        }
         // No registrar recorded either (000032). The envelope's deletion
         // capability hash rides along, so the author's delete can release this
         // reference after envelope GC has collected the envelope (#1881).
@@ -1964,34 +1984,17 @@ pub async fn apply_register_attachment(
     Ok(WriteOutcome::Ok)
 }
 
-/// COLLECT the shared `attachment_object` row once NO live reference remains
-/// (#690, resolving the second `TODO(#419)`). Authz: any authenticated user —
-/// deliberately, because this endpoint performs no destructive act that the
-/// reference count did not already permit, for any caller.
-///
-/// It does NOT release a reference (Blocking 1); `message_id` is kept for wire-compat but UNUSED.
-///
-/// One identity-free conditional `DELETE`; collecting also runs [`clear_declarations`].
-///
-/// The R2 object is gated separately and by the SAME evidence: `/v1/r2/presign`
-/// refuses to mint a `delete` while [`object_is_referenced`] holds
-/// (`broker.rs`). Turso row and R2 blob are collected by one predicate, so
-/// neither can outlive the other and the two cannot disagree.
+/// The collect shipped clients send after a delete (#690). It changes nothing
+/// (#1881): the delete itself released the file's references and marked it,
+/// and only the DS removes a file, through [`reclaim_released_attachments`],
+/// which the handler runs for this file next. A row no delete released stays,
+/// whatever the caller believes about it; an unreferenced file is kept, not
+/// lost. Answers `Ok`, so a shipped client's call still succeeds.
 pub async fn apply_delete_attachment(
-    conn: &Connection,
+    _conn: &Connection,
     _authed: Option<&str>,
-    body: &AttachmentDeleteBody,
+    _body: &AttachmentDeleteBody,
 ) -> anyhow::Result<WriteOutcome> {
-    // Collect only; the identity-free conditional DELETE is atomic against a concurrent reference.
-    let collected = conn
-        .execute(
-            COLLECT_UNREFERENCED_OBJECT_SQL,
-            libsql::params![body.content_hash.clone()],
-        )
-        .await?;
-    if collected > 0 {
-        clear_declarations(conn, &body.content_hash).await?;
-    }
     Ok(WriteOutcome::Ok)
 }
 
@@ -2012,10 +2015,20 @@ async fn clear_declarations(conn: &Connection, content_hash: &str) -> anyhow::Re
     Ok(())
 }
 
-/// True when at least one STILL-EXISTING message references the attachment
-/// object `content_hash` (#690) — the count derived by joining
-/// `attachment_ref` to `message_envelope` (see [`live_ref_exists`]), never the
-/// raw declaration rows. Gates both the Turso collect and the R2 `delete` presign.
+/// True when the DS holds a row for attachment `content_hash`, in any state:
+/// its file id is taken, so no client may write to its key (#1881).
+pub async fn object_is_known(conn: &Connection, content_hash: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM attachment_object WHERE content_hash = ?1",
+            libsql::params![content_hash.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
+/// True when a message or live Vault entry still references the attachment
+/// object `content_hash` ([`live_ref_exists`], #690, #1881).
 pub async fn object_is_referenced(conn: &Connection, content_hash: &str) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(

@@ -523,10 +523,11 @@ the remote is the source of truth (sync replaces the cache).
 - `set_vault_message_pinned(id, pinned, user_id)` → `VaultMessage`
 - `delete_vault_message(id, user_id)` — hard delete, remote first; releases the
   entry's attachment references, then collects every file no other local entry
-  holds (#1491): `/v1/attachments/delete` for the `attachment_object` row, a
-  presigned DELETE for the object, and this device's media-cache entry. Both
-  server steps are conditional on the server (no live message or vault reference,
-  any user), so a file something else still holds survives. Until #1491 nothing
+  holds (#1491) and drops this device's media-cache entry. The DS deletes the
+  object and its row itself once no message or vault entry references it
+  (#1881); the client's `/v1/attachments/delete` call has it do that now, and the
+  presigned DELETE the client still asks for is refused. A file something else
+  still holds survives. Until #1491 nothing
   ever collected a deleted Vault file: the object and its row stayed for the life
   of the account.
 
@@ -686,7 +687,7 @@ Capture, publish and the remote drain are described in [capture-split.md](./capt
 - `save_media_to_path(r2_key, content_hash, sha256, key_scope, target_path)` → `"marked"` | `"unsupported"` | `"failed: …"` — "save attachment as…". Downloads, decrypts, verifies `sha256` and writes the file in Rust, then applies this platform's download marker (macOS `com.apple.quarantine`, Windows `Zone.Identifier`). The renderer used to `fetch` the loopback URL and `writeFile` the bytes, which left the file with no provenance marker at all — Gatekeeper and SmartScreen both treat an unmarked file as locally authored. A marker that cannot be written (FAT32, a network share) does NOT fail the save; the return value says what happened. `target_path` is gated by `PathScope`. See `.codesight/wiki/media-server.md`.
 - `poster?` on both upload commands (and `OutgoingAttachment.poster` on `send_message`): a video's frame from the client's platform decoder, base64; the result then carries the video's `blurhash`, `width`, `height` and `poster` (the bounded JPEG for `pv`). See [media-server.md → Video posters](media-server.md#video-posters-1837).
 - `upload_media_staged(staged_id, filename, content_type, poster?)` — the same upload for bytes with no path: a paste, or a drop the webview surfaced as a `File`. Reads them from the in-memory staging registry (`commands/staging.rs`) and releases them **only on success**, so a failed upload is a retry rather than a lost paste.
-- Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) used by `delete_message` to purge orphaned attachments. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
+- Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) that `delete_message` and the Vault paths still request for an attachment; the DS refuses it since #1881 (it deletes attachments itself), and the client logs the refusal. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 
 ### Path-taking commands are scoped to what the user picked
 

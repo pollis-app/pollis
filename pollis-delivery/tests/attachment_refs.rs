@@ -28,12 +28,23 @@ async fn add_envelope(db: &Db, msg: &str) {
         .execute(
             // Every NOT NULL column is supplied, or `OR IGNORE` silently inserts nothing.
             "INSERT OR IGNORE INTO message_envelope \
-               (id, conversation_id, sender_id, ciphertext, sent_at) \
-             VALUES (?1, 'conv', 'sender', 'ct', '2026-01-01T00:00:00Z')",
-            libsql::params![msg.to_string()],
+               (id, conversation_id, sender_id, ciphertext, sent_at, delete_token_hash) \
+             VALUES (?1, 'conv', 'sender', 'ct', '2026-01-01T00:00:00Z', ?2)",
+            libsql::params![msg.to_string(), capability_hash(msg)],
         )
         .await
         .unwrap();
+}
+
+/// `SHA-256(token)`, base64: the stored form of message `msg`'s capability (#1086).
+fn capability_hash(msg: &str) -> String {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+    base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token_of(msg).as_bytes()))
+}
+
+fn token_of(msg: &str) -> String {
+    format!("tok-{msg}")
 }
 
 /// The author deletes the message for everyone: the only way a reference is
@@ -58,7 +69,7 @@ async fn delete_envelope(db: &Db, msg: &str) {
             conversation_id: "conv".into(),
             msg_sender_id: Some(sender.clone()),
             actor_id: Some(sender),
-            delete_token: None,
+            delete_token: Some(token_of(msg)),
         },
     )
     .await
@@ -267,8 +278,9 @@ async fn old_client_delete_cannot_strand_a_referenced_object() {
     .await
     .unwrap();
     assert!(
-        !object_exists(&db, "legacy").await,
-        "a zero-reference legacy row stays collectable — no worse than today"
+        object_exists(&db, "legacy").await,
+        "only a delete releases a file (#1881): an unreferenced row no delete \
+         released may still be in someone's history, so the collect keeps it"
     );
 }
 
@@ -322,9 +334,10 @@ async fn r2_presign_delete_is_refused_while_referenced() {
     release_ref(&db, "hhhh", "m_q").await;
     assert_eq!(
         presign_delete(&router, key).await,
-        StatusCode::OK,
-        "with no reference left the delete presign must be minted"
+        StatusCode::FORBIDDEN,
+        "the DS deletes attachments itself (#1881); a client never gets a delete"
     );
+    assert!(!object_exists(&db, "hhhh").await, "released for the DS to reclaim");
 }
 
 /// Non-media keys pass the gate so avatar/icon cleanup keeps working.
@@ -534,9 +547,9 @@ async fn add_envelope_from(db: &Db, msg: &str, sender: &str) {
         .unwrap()
         .execute(
             "INSERT OR IGNORE INTO message_envelope \
-               (id, conversation_id, sender_id, ciphertext, sent_at) \
-             VALUES (?1, 'conv', ?2, 'ct', '2026-01-01T00:00:00Z')",
-            libsql::params![msg.to_string(), sender.to_string()],
+               (id, conversation_id, sender_id, ciphertext, sent_at, delete_token_hash) \
+             VALUES (?1, 'conv', ?2, 'ct', '2026-01-01T00:00:00Z', ?3)",
+            libsql::params![msg.to_string(), sender.to_string(), capability_hash(msg)],
         )
         .await
         .unwrap();
@@ -615,11 +628,11 @@ async fn a_second_senders_attachment_survives_the_first_senders_delete() {
     delete_envelope(&db, "m-bob").await;
     assert_eq!(
         presign_delete_as(&router, &key, "alice").await,
-        StatusCode::OK,
-        "with the last reference gone the delete presign must be minted"
+        StatusCode::FORBIDDEN,
+        "the DS deletes attachments itself (#1881); a client never gets a delete"
     );
     collect_as(&db, &hash, "alice").await;
-    assert!(!object_exists(&db, &hash).await, "the unreferenced object is collected");
+    assert!(!object_exists(&db, &hash).await, "released for the DS to reclaim");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -669,7 +682,7 @@ async fn a_senders_own_second_message_still_blocks_their_delete() {
 
     delete_envelope(&db, "m-two").await;
     collect_as(&db, &hash, "alice").await;
-    assert!(!object_exists(&db, &hash).await, "with her last reference gone it collects");
+    assert!(!object_exists(&db, &hash).await, "with her last reference gone it is released");
 }
 
 /// Migration 000031's attribution columns are dead (000032): never written.

@@ -339,12 +339,13 @@ client IPs from the first-party services, and is opt-in and off by default. This
   messages and fetch their files lazily, so none of them releases a file. Once the last reference is
   released, the DS deletes the R2 object and then the row; the row is the only record of the object's key,
   so it is kept until the R2 delete succeeds, and a failed delete is retried on the next envelope-GC pass
-  (`POLLIS_DS_GC_SWEEP_SECS`). A new reference to a released file keeps it. The DS deletes only the
-  `media/` key named by the object's own file id. The DS is
-  the chokepoint — `/v1/r2/presign` **refuses to mint a `delete`** for an object that still has a live
-  reference (`broker.rs`, `object_is_referenced`), so a client that deleted its own message cannot blow
-  away a blob another conversation still needs — not even the account that uploaded the bytes, since a
-  blob can back several messages and the gate asks only whether anything still references it.
+  (`POLLIS_DS_GC_SWEEP_SECS`). A new reference to a released file keeps it. A delete releases only the
+  references registered against the message it removed (matched by that message's deletion-capability
+  hash), so a message id alone cannot release anything; a reference from before #1086, which carries no
+  hash, is never released and keeps its file. The DS deletes only the `media/` key named by the object's
+  own file id. The DS is the only deleter: `/v1/r2/presign` mints no `delete` for an attachment and no
+  `put` onto a file id it already holds (`broker.rs`), and the client's collect request changes nothing,
+  so an unreferenced file that no delete released is kept rather than lost.
   There is no R2 lifecycle rule and no age-based expiry. See the `attachment_object` / `attachment_ref` rows
   and the linkage note in §2.
 - The on-device decrypted cache lives under the app sandbox, is itself encrypted with a key derived from

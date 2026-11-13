@@ -152,6 +152,11 @@ pub async fn apply_save_vault_message(
     let before = crate::messages::drop_vault_references(&tx, &body.id).await?;
     for h in &body.attachment_hashes {
         let h = h.to_ascii_lowercase();
+        // A file whose bytes the DS is deleting cannot be kept by this entry (#1881).
+        if crate::messages::object_state(&tx, &h).await?.as_deref() == Some("deleting") {
+            tx.rollback().await?;
+            return Ok(VaultOutcome::Invalid("an attachment is being deleted"));
+        }
         tx.execute(
             "INSERT OR IGNORE INTO vault_attachment_ref (content_hash, vault_message_id) \
              VALUES (?1, ?2)",

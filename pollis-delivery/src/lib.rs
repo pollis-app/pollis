@@ -111,6 +111,8 @@ pub struct AppState {
     pub livekit_health: livekit::LiveKitHealth,
     /// One drain of owed commit-log purges at a time (#1883); see [`account::spawn_account_log_purge_drain`].
     pub log_purge_drain: util::SingleFlight,
+    /// One attachment reclaim pass at a time (#1881); see [`messages::spawn_attachment_reclaim`].
+    pub attachment_reclaim: util::SingleFlight,
 }
 
 impl AppState {
@@ -144,6 +146,7 @@ impl AppState {
             client_policy: client_policy::PolicyMirror::default(),
             livekit_health: livekit::LiveKitHealth::default(),
             log_purge_drain: util::SingleFlight::default(),
+            attachment_reclaim: util::SingleFlight::default(),
         }
     }
 

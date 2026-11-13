@@ -24,8 +24,7 @@ use anyhow::{Context, Result};
 use pollis_delivery::messages::{
     gc_sweep_secs, watermark_stale_modifier, RetentionMetricsHandle, RetentionSnapshot,
 };
-use pollis_delivery::broker::BrokerConfig;
-use pollis_delivery::{build_app_state, build_router_with_state, db::Db};
+use pollis_delivery::{build_app_state, build_router_with_state, db::Db, AppState};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -85,11 +84,7 @@ async fn main() -> Result<()> {
     }
 
     // Envelope-GC sweep (#689); started before the router so it also runs on a scale-to-zero wake.
-    spawn_envelope_gc_sweep(
-        Arc::clone(&db),
-        state.retention_metrics.clone(),
-        state.broker.clone(),
-    );
+    spawn_envelope_gc_sweep(Arc::clone(&db), state.retention_metrics.clone(), state.clone());
 
     // Commit-log halves an earlier account deletion still owes (#1883).
     pollis_delivery::account::spawn_account_log_purge_drain(&state);
@@ -115,7 +110,7 @@ async fn main() -> Result<()> {
 /// A timer: collectible state can settle with no request to hook. `POLLIS_DS_GC_SWEEP_SECS`.
 ///
 /// Also carries the #720 liveness window and gathers the growth snapshot.
-fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle, broker: BrokerConfig) {
+fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle, state: AppState) {
     let secs = gc_sweep_secs();
     if secs == 0 {
         tracing::info!("pollis-delivery: envelope-GC sweep disabled (POLLIS_DS_GC_SWEEP_SECS=0)");
@@ -133,23 +128,10 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle, broker:
                     Ok(report) => {
                         emit_retention_metrics(report.visited, &report.metrics);
                         *metrics.lock().unwrap() = Some(report.metrics);
-                        // #1881: finish any file an explicit delete released whose
-                        // R2 delete has not succeeded yet (the retry for that path).
-                        if broker.r2_ready().is_some() {
-                            match pollis_delivery::messages::reclaim_released_attachments(
-                                &conn, &broker,
-                            )
-                            .await
-                            {
-                                Ok(r) if r.reclaimed > 0 || r.failed > 0 => tracing::info!(
-                                    "attachment reclaim: {} reclaimed, {} retried next pass",
-                                    r.reclaimed,
-                                    r.failed
-                                ),
-                                Ok(_) => {}
-                                Err(e) => tracing::warn!("attachment reclaim failed: {e}"),
-                            }
-                        }
+                        // #1881: retry any file an explicit delete released whose R2
+                        // delete has not succeeded yet. Kicked, not awaited, so a slow
+                        // R2 never holds up the sweeps below.
+                        pollis_delivery::messages::spawn_attachment_reclaim(&state);
                         // #762: aged-out audit rows and dead push tokens; logged so the GC result isn't lost.
                         match pollis_delivery::messages::sweep_aged_records(
                             &conn,
