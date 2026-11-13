@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
+import { KeyboardController } from "react-native-keyboard-controller";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { MessageBodyInline } from "../chat/MessageBody";
@@ -38,8 +39,10 @@ export function VaultEntryRow({
 }) {
   const { t } = useTranslation("vault");
 
+  // The entry sheet opens with the keyboard going down, as the chat's message sheet (#1859).
   const onLongPressTouch = () => {
     haptic("longPress");
+    void KeyboardController.dismiss();
     onOpenActions();
   };
 

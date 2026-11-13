@@ -1,6 +1,7 @@
 // Opening a link from message text (attacker-controlled). Rules live in lib/links.ts, shared with desktop.
 
 import { Linking } from "react-native";
+import { KeyboardController } from "react-native-keyboard-controller";
 import { haptic } from "./haptics";
 import { findUrls, parseLink } from "./links";
 import { linkSheetStore } from "../stores/linkSheetStore";
@@ -38,6 +39,7 @@ export function longPressLink(raw: string): void {
     return;
   }
   haptic("longPress");
+  void KeyboardController.dismiss();
   linkSheetStore.show(target, target.needsConfirm ? "confirm" : "menu");
 }
 
