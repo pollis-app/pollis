@@ -63,9 +63,16 @@ async fn park_share(state: &Arc<AppState>) -> (u64, u32) {
 
 fn pid_alive(pid: u32) -> bool {
     // A killed child stays a zombie until reaped; `kill -0` on a zombie still succeeds,
-    // so read the state letter from /proc instead.
-    std::fs::read_to_string(format!("/proc/{pid}/stat"))
-        .map(|s| !s.contains(") Z "))
+    // so read the process state letter instead: `ps` prints it on Linux and macOS
+    // alike (`/proc` exists only on Linux), and prints nothing once the pid is gone.
+    std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .map(|out| {
+            let stat = String::from_utf8_lossy(&out.stdout);
+            let stat = stat.trim();
+            !stat.is_empty() && !stat.starts_with('Z')
+        })
         .unwrap_or(false)
 }
 
