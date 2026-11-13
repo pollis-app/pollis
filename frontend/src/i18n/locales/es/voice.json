@@ -190,7 +190,7 @@
     "portal": "Compartir pantalla no está disponible: el portal de compartición de pantalla del escritorio no ha respondido."
   },
   "cameraError": {
-    "unsupported": "La captura de webcam todavía no está disponible en esta plataforma.",
+    "unsupported": "La captura de webcam no está disponible en esta plataforma.",
     "permission": "El acceso a la cámara está bloqueado. Concede a Pollis permiso de cámara e inténtalo de nuevo.",
     "busy": "Otra aplicación está usando la cámara. Ciérrala e inténtalo de nuevo.",
     "helperMissing": "Falta el ayudante de cámara. Reinstala Pollis para restaurarlo.",

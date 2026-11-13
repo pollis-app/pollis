@@ -14,7 +14,7 @@ export const LOCAL_CAMERA_PREVIEW_KEY = "__local_camera_preview__";
 export function friendlyCameraError(raw: string): string {
   const r = raw.toLowerCase();
   if (
-    r.includes("not yet supported") ||
+    r.includes("not supported") ||
     r.includes("unsupported")
   ) {
     return i18n.t("voice:cameraError.unsupported");

@@ -220,7 +220,7 @@
     "buildStatusUnavailable": "Verificación no disponible",
     "buildVerifyGuideLink": "Cómo verificar esta compilación por tu cuenta →",
     "thisBuildHeading": "Esta compilación",
-    "thisBuildDescription": "Cada versión que publica Pollis deja su huella en el mismo registro público de solo adición. Esto confirma que la compilación que estás ejecutando es una que Pollis publicó ahí y que han verificado de forma independiente terceros que la recompilan; por sí solo no prueba que la compilación coincida con el código fuente, ya que una app manipulada podría mentir sobre su propia huella.",
+    "thisBuildDescription": "Cada versión que publica Pollis deja su huella en el mismo registro público de solo adición. Esto confirma que la compilación que estás ejecutando es una que Pollis publicó ahí; las versiones de Linux, además, se recompilan de forma independiente desde el código fuente y se cotejan con él. Por sí solo no prueba que la compilación coincida con el código fuente, ya que una app manipulada podría mentir sobre su propia huella.",
     "verdictsLink": "Qué significan estos veredictos →",
     "buildVersion": "Versión {{version}}",
     "buildCommit": "Commit {{commit}}",

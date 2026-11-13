@@ -220,7 +220,7 @@
     "buildStatusUnavailable": "Vérification indisponible",
     "buildVerifyGuideLink": "Comment vérifier ce build de façon indépendante →",
     "thisBuildHeading": "Ce build",
-    "thisBuildDescription": "Chaque version publiée par Pollis reçoit une empreinte inscrite dans ce même journal public en ajout seul. Ceci confirme que le build que vous exécutez est bien un build publié par Pollis et vérifié de façon indépendante par des reconstructeurs tiers — cela ne prouve pas à soi seul que le build correspond au code source, puisqu'une application altérée pourrait mentir sur sa propre empreinte.",
+    "thisBuildDescription": "Chaque version publiée par Pollis reçoit une empreinte inscrite dans ce même journal public en ajout seul. Ceci confirme que le build que vous exécutez est bien un build publié par Pollis ; les versions Linux sont en outre reconstruites de façon indépendante à partir du code source et comparées à ce journal. Cela ne prouve pas à soi seul que le build correspond au code source, puisqu'une application altérée pourrait mentir sur sa propre empreinte.",
     "verdictsLink": "Ce que signifient ces verdicts →",
     "buildVersion": "Version {{version}}",
     "buildCommit": "Commit {{commit}}",
