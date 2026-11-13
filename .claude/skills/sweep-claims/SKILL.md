@@ -37,7 +37,7 @@ first for the vocabulary rules it references.
   caveat. Never delete a sentence whose removal makes a stronger nearby claim
   false; narrow that claim instead. Genuine trade-offs a user needs stay.
 - The weakness itself becomes a GitHub issue with a neutral title
-  ("Dependency upgrade: quick-xml …", "Sign the per-release VEX …"), not a
+  ("Dependency upgrade: quick-xml …", "Sign the per-release SBOM …"), not a
   copy edit announcing it. Public issues, comments and PR descriptions never
   spell out vulnerability or exploit details (reachability, affected paths,
   how to trigger it); report those privately per `SECURITY.md`.

@@ -765,7 +765,7 @@
     },
     "website/open-source": {
       "kind": "website-page",
-      "about": "Open-source inventory: each product's SBOM, VEX and licence summary (#1832)",
+      "about": "Open-source inventory: each product's SBOM and licence summary (#1832)",
       "source": "website/open-source.html",
       "rendered": [
         "website/open-source.js"

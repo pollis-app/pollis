@@ -801,9 +801,9 @@ STUB
 fi
 
 echo
-echo "attest-binaries.sh — the SBOM and VEX leaves (#1848)"
+echo "attest-binaries.sh — the SBOM leaf (#1848)"
 
-# The whole script against an AppImage-only release plus its documents: needs
+# The whole script against an AppImage-only release plus its SBOM: needs
 # only jq and sha256sum, so the document path is exercised without a release.
 docs="$work/docs"
 stage_docs() {
@@ -813,8 +813,7 @@ stage_docs() {
   echo "$recipe" > "$docs/a/pollis-linux/pollis-v9.9.9-linux.toolchain.json"
   echo "$recipe" > "$docs/a/pollis-sbom/pollis-v9.9.9-sbom.toolchain.json"
   echo '{"bomFormat":"CycloneDX"}' > "$docs/a/pollis-sbom/pollis-v9.9.9.cdx.json"
-  echo '{"@context":"https://openvex.dev/ns/v0.2.0"}' > "$docs/a/pollis-sbom/pollis-v9.9.9.vex.json"
-  # The oss/ copies under their product names must not be mistaken for them.
+  # The oss/ copy under its product name must not be mistaken for it.
   echo decoy > "$docs/a/pollis-sbom/oss/pollis-desktop-v9.9.9.cdx.json"
 }
 run_attest() {
@@ -823,28 +822,28 @@ run_attest() {
 }
 if command -v jq >/dev/null 2>&1 && command -v sha256sum >/dev/null 2>&1; then
   stage_docs
-  run_attest; check "attests a release with its SBOM and VEX" "$?" "0"
-  check "logs the documents after the binaries" \
-    "$(jq -r '[.[].bundle] | join(",")' "$docs/out.json" 2>/dev/null)" "appimage,sbom,vex"
+  run_attest; check "attests a release with its SBOM" "$?" "0"
+  check "logs the SBOM after the binaries" \
+    "$(jq -r '[.[].bundle] | join(",")' "$docs/out.json" 2>/dev/null)" "appimage,sbom"
   sbom_sha="$(sha_file "$docs/a/pollis-sbom/pollis-v9.9.9.cdx.json")"
   check "the sbom leaf is a payload leaf over the published bytes, platform any" \
     "$(jq -r '.[1] | [.platform, .arch, .layer, .artifact_name, .payload_sha256 == .artifact_sha256, .artifact_sha256] | join(" ")' "$docs/out.json")" \
     "any any payload pollis-v9.9.9.cdx.json true ${sbom_sha}"
   check "its provenance_uri is the one the provenance job publishes" \
-    "$(jq -r '.[2].provenance_uri' "$docs/out.json")" \
-    "cdn.pollis.com/releases/v9.9.9/pollis-v9.9.9.vex.json.intoto.jsonl"
+    "$(jq -r '.[1].provenance_uri' "$docs/out.json")" \
+    "cdn.pollis.com/releases/v9.9.9/pollis-v9.9.9.cdx.json.intoto.jsonl"
 
-  stage_docs; rm "$docs/a/pollis-sbom/pollis-v9.9.9.vex.json"
-  run_attest; check "refuses a release whose VEX is missing" "$?" "1"
-  grep -q "release documents missing" "$docs/log" && ok "the missing-document error says so" \
-    || bad "missing-document error is unclear: $(cat "$docs/log")"
+  stage_docs; rm "$docs/a/pollis-sbom/pollis-v9.9.9.cdx.json"
+  run_attest; check "refuses a release whose SBOM is missing" "$?" "1"
+  grep -q "SBOM missing" "$docs/log" && ok "the missing-SBOM error says so" \
+    || bad "missing-SBOM error is unclear: $(cat "$docs/log")"
 
   stage_docs; rm "$docs/a/pollis-sbom/pollis-v9.9.9-sbom.toolchain.json"
-  run_attest; check "refuses the documents without the sbom job's recipe" "$?" "1"
+  run_attest; check "refuses the SBOM without the sbom job's recipe" "$?" "1"
 
   stage_docs; rm "$docs/a/pollis-sbom/"*.json
   RELEASE_DOCUMENTS=skip run_attest; check "RELEASE_DOCUMENTS=skip attests the installers alone" "$?" "0"
-  check "skip logs no document leaves" "$(jq -r '[.[].bundle] | join(",")' "$docs/out.json")" "appimage"
+  check "skip logs no SBOM leaf" "$(jq -r '[.[].bundle] | join(",")' "$docs/out.json")" "appimage"
 else
   echo "  skip — jq/sha256sum not installed"
 fi

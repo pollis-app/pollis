@@ -451,14 +451,13 @@ fn document_record(tag: &str, doc: ReleaseDocument, digest: u8) -> BinaryRecord 
     }
 }
 
-/// The SBOM and VEX are logged after a release's binaries, under the same tag, and
-/// a release from before they were logged still verifies in the same tree.
+/// The SBOM is logged after a release's binaries, under the same tag, and a
+/// release from before it was logged still verifies in the same tree.
 #[test]
 fn release_documents_verify_and_older_releases_without_them_still_pass() {
     let mut records = fixture_records();
     records.push(record("v1.4.0", "linux", "x86_64", "appimage", Layer::Payload, 0x44, 0x44));
     records.push(document_record("v1.4.0", ReleaseDocument::Sbom, 0x51));
-    records.push(document_record("v1.4.0", ReleaseDocument::Vex, 0x52));
     let bundle = to_serve_bundle(&build_binaries_bundle(&records, &signing_key(), TS).unwrap());
 
     let older = release::verify_release_in_bundle(&bundle, "v1.3.0");
@@ -468,13 +467,13 @@ fn release_documents_verify_and_older_releases_without_them_still_pass() {
 
     let report = release::verify_release_in_bundle(&bundle, "v1.4.0");
     assert!(report.chain_valid, "violations: {:?}", report.violations);
-    assert_eq!(report.artifacts.len(), 3);
+    assert_eq!(report.artifacts.len(), 2);
     let docs: Vec<_> = report
         .artifacts
         .iter()
         .filter_map(|a| a.release_document().map(|d| (d, a)))
         .collect();
-    assert_eq!(docs.len(), 2);
+    assert_eq!(docs.len(), 1);
     for (doc, a) in docs {
         assert!(a.included, "{} must be provably included", a.artifact_name);
         assert_eq!(a.artifact_name, format!("pollis-v1.4.0{}", doc.suffix()));
@@ -489,33 +488,16 @@ fn release_documents_verify_and_older_releases_without_them_still_pass() {
         .iter()
         .map(|a| a["bundle"].as_str().unwrap())
         .collect();
-    assert_eq!(bundles, ["appimage", "sbom", "vex"]);
-}
-
-/// A release that logs one document but not the other is incomplete.
-#[test]
-fn a_release_logging_only_its_sbom_fails() {
-    let mut records = fixture_records();
-    records.push(document_record("v1.3.0", ReleaseDocument::Sbom, 0x51));
-    let bundle = to_serve_bundle(&build_binaries_bundle(&records, &signing_key(), TS).unwrap());
-
-    let report = release::verify_release_in_bundle(&bundle, "v1.3.0");
-    assert!(!report.chain_valid);
-    assert!(
-        report.violations.iter().any(|v| v.contains("no vex leaf")),
-        "got: {:?}",
-        report.violations
-    );
+    assert_eq!(bundles, ["appimage", "sbom"]);
 }
 
 /// A malformed document leaf the builder would refuse fails the verifier's replay.
 #[test]
 fn a_malformed_release_document_fails_the_replay() {
     let mut records = fixture_records();
-    records.push(document_record("v1.3.0", ReleaseDocument::Sbom, 0x51));
-    let mut vex = document_record("v1.3.0", ReleaseDocument::Vex, 0x52);
-    vex.platform = "linux".to_string();
-    records.push(vex);
+    let mut sbom = document_record("v1.3.0", ReleaseDocument::Sbom, 0x51);
+    sbom.platform = "linux".to_string();
+    records.push(sbom);
     assert!(build_binaries_bundle(&records, &signing_key(), TS).is_err());
 
     let report = release::verify_release_in_bundle(&unchecked_bundle(&records), "v1.3.0");

@@ -2274,8 +2274,8 @@
         "learn/manim/scenes/merkle_trees.py"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1579",
-        ".github/workflows/desktop-release.yml:1739",
+        ".github/workflows/desktop-release.yml:1568",
+        ".github/workflows/desktop-release.yml:1728",
         "learn/manim/scenes/merkle_trees.py:53"
       ],
       "status": "verified",
@@ -2735,7 +2735,7 @@
         "docs/transparency.md"
       ],
       "evidence": [
-        "docs/transparency.md:525"
+        "docs/transparency.md:523"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -2915,7 +2915,7 @@
         ".github/workflows/mobile-apk-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1579",
+        ".github/workflows/desktop-release.yml:1568",
         ".github/workflows/mobile-ota-release.yml:20"
       ],
       "status": "verified",
@@ -2987,7 +2987,7 @@
       ],
       "evidence": [
         ".github/workflows/transparency-publish.yml:62",
-        ".github/workflows/desktop-release.yml:1739"
+        ".github/workflows/desktop-release.yml:1728"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
@@ -3126,8 +3126,8 @@
         ".github/workflows/mobile-apk-release.yml"
       ],
       "evidence": [
-        "verifiable-log-builder/src/binaries.rs:143",
-        ".github/workflows/desktop-release.yml:1579"
+        "verifiable-log-builder/src/binaries.rs:139",
+        ".github/workflows/desktop-release.yml:1568"
       ],
       "status": "verified",
       "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
@@ -3187,7 +3187,7 @@
       ],
       "evidence": [
         ".github/workflows/transparency-publish.yml:62",
-        ".github/workflows/desktop-release.yml:1739"
+        ".github/workflows/desktop-release.yml:1728"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -3212,7 +3212,7 @@
         ".github/workflows/mobile-apk-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1579",
+        ".github/workflows/desktop-release.yml:1568",
         ".github/workflows/mobile-ota-release.yml:20"
       ],
       "status": "verified",
@@ -3235,7 +3235,7 @@
         "verifiable-log-builder/src/binaries.rs"
       ],
       "evidence": [
-        "verifiable-log-builder/src/binaries.rs:58"
+        "verifiable-log-builder/src/binaries.rs:56"
       ],
       "status": "verified",
       "note": "Linux bundles have no signed layer (the July v1.5.3 run shows payload+exe only).",
@@ -3258,7 +3258,7 @@
         "verifiable-log-builder/src/binaries.rs"
       ],
       "evidence": [
-        "verifiable-log-builder/src/binaries.rs:118"
+        "verifiable-log-builder/src/binaries.rs:114"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9"
@@ -3374,7 +3374,7 @@
         ".github/workflows/mobile-ota-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1388",
+        ".github/workflows/desktop-release.yml:1378",
         ".github/workflows/mobile-ota-release.yml:407"
       ],
       "status": "verified",
@@ -3395,7 +3395,7 @@
         ".github/workflows/mobile-apk-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1579",
+        ".github/workflows/desktop-release.yml:1568",
         ".github/workflows/mobile-ota-release.yml:20"
       ],
       "status": "verified",
@@ -3476,7 +3476,7 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1388"
+        ".github/workflows/desktop-release.yml:1378"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -3548,7 +3548,7 @@
         "verifiable-log-serve/src/verdict.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/release.rs:122"
+        "verifiable-log-serve/src/release.rs:119"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
@@ -3794,7 +3794,7 @@
         "verifiable-log-serve/src/verdict.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/release.rs:92"
+        "verifiable-log-serve/src/release.rs:89"
       ],
       "status": "unverifiable",
       "note": "Historical capture; dated, so fine as a snapshot.",
@@ -11834,8 +11834,8 @@
         "verifiable-log-serve/src/bin/pollis-verify.rs"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1342",
-        ".github/workflows/desktop-release.yml:1255"
+        ".github/workflows/desktop-release.yml:1332",
+        ".github/workflows/desktop-release.yml:1246"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -11897,7 +11897,7 @@
         "scripts/attest-binaries.sh"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1623",
+        ".github/workflows/desktop-release.yml:1612",
         ".github/workflows/cli-release.yml:425",
         ".github/workflows/mobile-apk-release.yml:1"
       ],
@@ -12328,7 +12328,7 @@
         "scripts/attest-binaries.sh"
       ],
       "evidence": [
-        "verifiable-log-builder/src/binaries.rs:120",
+        "verifiable-log-builder/src/binaries.rs:116",
         "scripts/attest-binaries.sh:28"
       ],
       "status": "verified",
@@ -12515,9 +12515,9 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1471",
-        ".github/workflows/desktop-release.yml:1507",
-        ".github/workflows/desktop-release.yml:1538"
+        ".github/workflows/desktop-release.yml:1461",
+        ".github/workflows/desktop-release.yml:1496",
+        ".github/workflows/desktop-release.yml:1527"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -12537,7 +12537,7 @@
       ],
       "evidence": [
         ".github/workflows/desktop-release.yml:28",
-        ".github/workflows/desktop-release.yml:1507"
+        ".github/workflows/desktop-release.yml:1496"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -12556,7 +12556,7 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1471"
+        ".github/workflows/desktop-release.yml:1461"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -12575,7 +12575,7 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1471"
+        ".github/workflows/desktop-release.yml:1461"
       ],
       "status": "unverifiable",
       "note": "Whether slsa-verifier accepts an actions/attest-build-provenance (GitHub-hosted runner builder id) bundle depends on the slsa-verifier version; settle by running it against a real release's .intoto.jsonl.",
@@ -12595,7 +12595,7 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1471"
+        ".github/workflows/desktop-release.yml:1461"
       ],
       "status": "unverifiable",
       "note": "Repository-move date vs tag history is not in the code; settle by inspecting the v1.17.2 and v1.18.x .pem certificate SANs on the CDN.",
@@ -12742,7 +12742,7 @@
         "scripts/attest-binaries.sh"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1623",
+        ".github/workflows/desktop-release.yml:1612",
         ".github/workflows/cli-release.yml:425",
         ".github/workflows/mobile-apk-release.yml:1"
       ],
@@ -12893,7 +12893,7 @@
         "verifiable-log-builder/src/binaries.rs"
       ],
       "evidence": [
-        "verifiable-log-builder/src/binaries.rs:71"
+        "verifiable-log-builder/src/binaries.rs:68"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -13516,8 +13516,8 @@
         "verifiable-log-builder/src/binaries.rs"
       ],
       "evidence": [
-        "verifiable-log-builder/src/binaries.rs:120",
-        "verifiable-log-builder/src/binaries.rs:184"
+        "verifiable-log-builder/src/binaries.rs:116",
+        "verifiable-log-builder/src/binaries.rs:180"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -14203,8 +14203,8 @@
       ],
       "evidence": [
         "scripts/attest-binaries.sh:301",
-        ".github/workflows/desktop-release.yml:1316",
-        ".github/workflows/desktop-release.yml:1317"
+        ".github/workflows/desktop-release.yml:1307",
+        ".github/workflows/desktop-release.yml:1308"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -14472,9 +14472,9 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1030",
-        ".github/workflows/desktop-release.yml:1079",
-        ".github/workflows/desktop-release.yml:1548"
+        ".github/workflows/desktop-release.yml:1023",
+        ".github/workflows/desktop-release.yml:1070",
+        ".github/workflows/desktop-release.yml:1537"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -14600,7 +14600,7 @@
       ],
       "evidence": [
         ".github/workflows/desktop-release.yml:107",
-        ".github/workflows/desktop-release.yml:1030",
+        ".github/workflows/desktop-release.yml:1023",
         "scripts/check-build-recipe.py:41"
       ],
       "status": "verified",
@@ -15155,8 +15155,8 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1471",
-        ".github/workflows/desktop-release.yml:1512"
+        ".github/workflows/desktop-release.yml:1461",
+        ".github/workflows/desktop-release.yml:1501"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -15175,8 +15175,8 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1052",
-        ".github/workflows/desktop-release.yml:1056"
+        ".github/workflows/desktop-release.yml:1045",
+        ".github/workflows/desktop-release.yml:1049"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -15196,11 +15196,11 @@
         "scripts/oss-inventory.mjs"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:894",
-        ".github/workflows/desktop-release.yml:919",
-        ".github/workflows/desktop-release.yml:1060",
-        ".github/workflows/desktop-release.yml:1319",
-        ".github/workflows/desktop-release.yml:1460"
+        ".github/workflows/desktop-release.yml:890",
+        ".github/workflows/desktop-release.yml:915",
+        ".github/workflows/desktop-release.yml:1053",
+        ".github/workflows/desktop-release.yml:1310",
+        ".github/workflows/desktop-release.yml:1450"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -15219,7 +15219,7 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:894"
+        ".github/workflows/desktop-release.yml:890"
       ],
       "status": "unverifiable",
       "note": "Date of the first SBOM-carrying release is CDN/release history, not code; settled by listing releases/<tag>/*.cdx.json on the CDN.",
@@ -15258,8 +15258,8 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1401",
-        ".github/workflows/desktop-release.yml:1487"
+        ".github/workflows/desktop-release.yml:1391",
+        ".github/workflows/desktop-release.yml:1476"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -15278,9 +15278,9 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1220",
-        ".github/workflows/desktop-release.yml:1250",
-        ".github/workflows/desktop-release.yml:1269"
+        ".github/workflows/desktop-release.yml:1211",
+        ".github/workflows/desktop-release.yml:1241",
+        ".github/workflows/desktop-release.yml:1260"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -15327,70 +15327,26 @@
       "also_rendered_in": []
     },
     {
-      "id": "site-artifacts-24",
-      "doc": "website/artifacts.html",
-      "locator": {
-        "heading": "The second anchor: Sigstore, SLSA and the SBOM",
-        "quote": "is an OpenVEX document naming the known advisories that do not affect this release, and why."
-      },
-      "claim": "Each desktop release publishes an OpenVEX document next to the SBOM, listing not-affected advisories with a justification.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/desktop-release.yml",
-        "scripts/oss-inventory.mjs",
-        "supply-chain/vex.json"
-      ],
-      "evidence": [
-        ".github/workflows/desktop-release.yml:923",
-        ".github/workflows/desktop-release.yml:1062",
-        ".github/workflows/desktop-release.yml:1460",
-        "scripts/oss-inventory.mjs:570"
-      ],
-      "status": "verified",
-      "verified_sha": "7f81cfe28409ebac2d2e21cef8c215f05c2b7c62",
-      "also_rendered_in": []
-    },
-    {
-      "id": "site-artifacts-25",
-      "doc": "website/artifacts.html",
-      "locator": {
-        "heading": "The second anchor: Sigstore, SLSA and the SBOM",
-        "quote": "VEX files begin with the first release after"
-      },
-      "claim": "Desktop VEX files exist only for releases after 12 November 2026.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/desktop-release.yml"
-      ],
-      "evidence": [
-        ".github/workflows/desktop-release.yml:923"
-      ],
-      "status": "unverifiable",
-      "note": "No tag contains #1833 yet (newest v1.19.9); settle after the next desktop release by fetching releases/<tag>/pollis-<tag>.vex.json on the CDN.",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-      "also_rendered_in": []
-    },
-    {
       "id": "site-artifacts-26",
       "doc": "website/artifacts.html",
       "locator": {
         "heading": "The second anchor: Sigstore, SLSA and the SBOM",
-        "quote": "has the commands, the same files for the mobile app, terminal client and Delivery Service, and each product's licences."
+        "quote": "has the same file for the mobile app, terminal client and Delivery Service, and each product's licences."
       },
-      "claim": "The open source page gives scanner commands and SBOM/VEX/licences for mobile, CLI and DS too.",
+      "claim": "The open source page links the SBOM and licences for mobile, CLI and DS too.",
       "kind": "process",
       "anchors": [
         "website/open-source.html",
         ".github/workflows/oss-evidence.yml"
       ],
       "evidence": [
-        "website/open-source.html:77",
-        "website/open-source.html:88",
+        "website/open-source.html:76",
+        "website/open-source.html:80",
         ".github/workflows/cli-release.yml:500",
         ".github/workflows/mobile-apk-release.yml:547"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -15446,7 +15402,7 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1579"
+        ".github/workflows/desktop-release.yml:1568"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -18545,7 +18501,7 @@
         "verifiable-log-serve/src/verdict.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/release.rs:104",
+        "verifiable-log-serve/src/release.rs:101",
         "docs/signing-key-compromise-runbook.md:15"
       ],
       "status": "verified",
@@ -18585,8 +18541,8 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1379",
-        ".github/workflows/desktop-release.yml:1393"
+        ".github/workflows/desktop-release.yml:1369",
+        ".github/workflows/desktop-release.yml:1383"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -18647,7 +18603,7 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1393"
+        ".github/workflows/desktop-release.yml:1383"
       ],
       "status": "unverifiable",
       "note": "Non-gating is verified (desktop-release.yml:1361-1367, continue-on-error). Which releases lack provenance needs the published provenance files on cdn.pollis.com / GitHub attestations.",
@@ -18668,8 +18624,8 @@
         ".github/workflows/transparency-publish.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1725",
-        ".github/workflows/desktop-release.yml:1738"
+        ".github/workflows/desktop-release.yml:1714",
+        ".github/workflows/desktop-release.yml:1727"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -19090,10 +19046,10 @@
         ".github/workflows/supply-chain.yml"
       ],
       "evidence": [
-        ".github/workflows/supply-chain.yml:15",
+        ".github/workflows/supply-chain.yml:14",
+        ".github/workflows/supply-chain.yml:50",
         ".github/workflows/supply-chain.yml:51",
-        ".github/workflows/supply-chain.yml:52",
-        ".github/workflows/supply-chain.yml:78"
+        ".github/workflows/supply-chain.yml:77"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -19113,8 +19069,8 @@
         "deny.toml"
       ],
       "evidence": [
-        ".github/workflows/supply-chain.yml:16",
-        ".github/workflows/supply-chain.yml:33",
+        ".github/workflows/supply-chain.yml:15",
+        ".github/workflows/supply-chain.yml:32",
         "deny.toml:25"
       ],
       "status": "verified",
@@ -19257,8 +19213,8 @@
         ".github/dependabot.yml"
       ],
       "evidence": [
+        ".github/workflows/supply-chain.yml:50",
         ".github/workflows/supply-chain.yml:51",
-        ".github/workflows/supply-chain.yml:52",
         ".github/dependabot.yml:16"
       ],
       "status": "verified",
@@ -19280,9 +19236,9 @@
         "scripts/oss-inventory.mjs"
       ],
       "evidence": [
-        ".github/workflows/supply-chain.yml:98",
-        ".github/workflows/supply-chain.yml:119",
-        "scripts/oss-inventory.mjs:788"
+        ".github/workflows/supply-chain.yml:90",
+        ".github/workflows/supply-chain.yml:111",
+        "scripts/oss-inventory.mjs:693"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -19305,7 +19261,7 @@
       "evidence": [
         "pollis-core/src/commands/transparency.rs:43",
         "key-set.json:17",
-        "verifiable-log-serve/src/release.rs:105"
+        "verifiable-log-serve/src/release.rs:102"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
@@ -19979,7 +19935,7 @@
         "verifiable-log-serve/src/verdict.rs"
       ],
       "evidence": [
-        "verifiable-log-serve/src/release.rs:104",
+        "verifiable-log-serve/src/release.rs:101",
         "docs/signing-key-compromise-runbook.md:15"
       ],
       "status": "verified",
@@ -20001,8 +19957,8 @@
       ],
       "evidence": [
         ".github/workflows/desktop-release.yml:234",
-        ".github/workflows/desktop-release.yml:916",
-        ".github/workflows/desktop-release.yml:1060"
+        ".github/workflows/desktop-release.yml:912",
+        ".github/workflows/desktop-release.yml:1053"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -20021,7 +19977,7 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1379"
+        ".github/workflows/desktop-release.yml:1369"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -20041,8 +19997,8 @@
         ".github/workflows/transparency-publish.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1725",
-        ".github/workflows/desktop-release.yml:1738"
+        ".github/workflows/desktop-release.yml:1714",
+        ".github/workflows/desktop-release.yml:1727"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -20241,22 +20197,22 @@
       "doc": "website/faq.html",
       "locator": {
         "heading": "How do I know the app I downloaded hasn't been tampered with?",
-        "quote": "listing the Rust crates and JavaScript packages that ship in the app, taken from the release's lockfiles (build-time-only tools such as build scripts, proc-macros and dev dependencies are left out), with an OpenVEX file beside it and a build-recipe sidecar per platform."
+        "quote": "listing the Rust crates and JavaScript packages that ship in the app, taken from the release's lockfiles (build-time-only tools such as build scripts, proc-macros and dev dependencies are left out), with a build-recipe sidecar per platform."
       },
-      "claim": "The desktop SBOM covers the shipped crates and production npm packages from the release lockfiles, excluding build-time-only dependencies, with a VEX beside it.",
+      "claim": "The desktop SBOM covers the shipped crates and production npm packages from the release lockfiles, excluding build-time-only dependencies.",
       "kind": "process",
       "anchors": [
         ".github/workflows/desktop-release.yml",
         "scripts/oss-inventory.mjs"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:916",
-        "scripts/oss-inventory.mjs:20",
-        "scripts/oss-inventory.mjs:25",
-        ".github/workflows/desktop-release.yml:1062"
+        ".github/workflows/desktop-release.yml:912",
+        "scripts/oss-inventory.mjs:16",
+        "scripts/oss-inventory.mjs:21",
+        ".github/workflows/desktop-release.yml:1055"
       ],
       "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f",
       "also_rendered_in": []
     },
     {
@@ -21594,12 +21550,12 @@
       "doc": "website/open-source.html",
       "locator": {
         "heading": "Open source",
-        "quote": "Every release of every product publishes three files, produced by the release pipeline from the lockfiles the release was built with:"
+        "quote": "Every release of every product publishes two files, produced by the release pipeline from the lockfiles the release was built with:"
       },
       "also_rendered_in": [
         "website/open-source.js"
       ],
-      "claim": "Each product's release pipeline generates and publishes its SBOM, VEX and summary from the release's lockfiles.",
+      "claim": "Each product's release pipeline generates and publishes its SBOM and summary from the release's lockfiles.",
       "kind": "process",
       "anchors": [
         ".github/workflows/oss-evidence.yml",
@@ -21611,14 +21567,14 @@
         "scripts/publish-oss-evidence.sh"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1076",
+        ".github/workflows/desktop-release.yml:1067",
         ".github/workflows/cli-release.yml:506",
         ".github/workflows/mobile-apk-release.yml:551",
         ".github/workflows/delivery-deploy-prod.yml:267"
       ],
       "status": "verified",
       "note": "An iOS-only App Store release has no mobile-v tag and is published by dispatching oss-evidence.yml (mobile-release skill step 6).",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
+      "verified_sha": "fbaae5847f318425a2e87a1ed5030fb58e4e8b9f"
     },
     {
       "id": "website-open-source-02",
@@ -21636,30 +21592,8 @@
         "scripts/oss-inventory.mjs"
       ],
       "evidence": [
-        ".github/workflows/supply-chain.yml:119",
-        "scripts/oss-inventory.mjs:788"
-      ],
-      "status": "verified",
-      "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
-    },
-    {
-      "id": "website-open-source-03",
-      "doc": "website/open-source.html",
-      "locator": {
-        "heading": "How it is kept current",
-        "quote": "That reasoning becomes a VEX statement, and CI fails if the VEX and the triage list ever disagree."
-      },
-      "claim": "Every vulnerability deny.toml ignores has a statement in supply-chain/vex.json, enforced in CI.",
-      "kind": "process",
-      "anchors": [
-        ".github/workflows/supply-chain.yml",
-        "supply-chain/vex.json",
-        "deny.toml",
-        "scripts/oss-inventory.mjs"
-      ],
-      "evidence": [
-        ".github/workflows/supply-chain.yml:93",
-        "scripts/oss-inventory.mjs:894"
+        ".github/workflows/supply-chain.yml:111",
+        "scripts/oss-inventory.mjs:693"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
@@ -21677,8 +21611,8 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        ".github/workflows/desktop-release.yml:1460",
-        ".github/workflows/desktop-release.yml:1473"
+        ".github/workflows/desktop-release.yml:1450",
+        ".github/workflows/desktop-release.yml:1462"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73"
@@ -21741,7 +21675,7 @@
         "pollis-delivery/Dockerfile"
       ],
       "evidence": [
-        "scripts/oss-inventory.mjs:103",
+        "scripts/oss-inventory.mjs:94",
         "pollis-delivery/Dockerfile:57"
       ],
       "status": "verified",
@@ -21762,9 +21696,9 @@
         ".github/workflows/desktop-release.yml"
       ],
       "evidence": [
-        "scripts/publish-oss-evidence.sh:14",
-        "scripts/publish-oss-evidence.sh:52",
-        ".github/workflows/desktop-release.yml:1217"
+        "scripts/publish-oss-evidence.sh:13",
+        "scripts/publish-oss-evidence.sh:50",
+        ".github/workflows/desktop-release.yml:1208"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
@@ -21783,9 +21717,9 @@
         "scripts/oss-inventory.mjs"
       ],
       "evidence": [
-        "scripts/oss-inventory.mjs:310",
-        "scripts/oss-inventory.mjs:512",
-        "scripts/oss-inventory.mjs:519"
+        "scripts/oss-inventory.mjs:301",
+        "scripts/oss-inventory.mjs:503",
+        "scripts/oss-inventory.mjs:510"
       ],
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",

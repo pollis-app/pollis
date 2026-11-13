@@ -9,9 +9,6 @@
 //!    verifies against that binaries STH.
 //! 3. **Invariant.** Replay the **whole tree** through the [`BinaryInvariant`] —
 //!    replayed over every entry, since tag order and pairing are global.
-//! 4. **Release documents** (#1848). A tag that logs its SBOM or its VEX must log
-//!    both. A tag that logs neither predates #1848 and still passes: older
-//!    releases are verified exactly as before.
 //!
 //! Prerequisite failures return `Err`; a tampered tree yields a [`ReleaseReport`] with
 //! `chain_valid == false`.
@@ -22,7 +19,7 @@ use verifiable_log::VerifiableLog;
 use verifiable_log_builder::binaries::{self, BinaryInvariant, BinaryRecord};
 
 /// Re-exported for the same reason as [`Layer`]: it is how a consumer tells a
-/// logged SBOM/VEX ([`ReleaseArtifact::release_document`]) from a build artifact.
+/// logged SBOM ([`ReleaseArtifact::release_document`]) from a build artifact.
 pub use binaries::ReleaseDocument;
 
 use crate::bundle::{now_ms, short, Bundle};
@@ -49,7 +46,7 @@ pub struct ReleaseArtifact {
     pub platform: String,
     /// `aarch64` | `x86_64`.
     pub arch: String,
-    /// `dmg` | `app` | `nsis` | `appimage` | `deb` | `rpm`, or `sbom` | `vex` for
+    /// `dmg` | `app` | `nsis` | `appimage` | `deb` | `rpm`, or `sbom` for
     /// a logged release document (#1848, platform and arch `any`).
     pub bundle: String,
     /// The reproducible payload vs the signed wrapper.
@@ -225,27 +222,7 @@ pub fn verify_release_in_bundle_at(
         });
     }
 
-    // 3. Release documents: a tag logs its SBOM and VEX together or not at all.
-    //    Neither is a release from before they were logged, verified as before.
-    let logged: Vec<ReleaseDocument> = selected
-        .iter()
-        .filter_map(|(_, r)| r.release_document())
-        .collect();
-    if !logged.is_empty() {
-        for doc in ReleaseDocument::ALL {
-            if !logged.contains(&doc) {
-                violations.push(format!(
-                    "release {release_tag} logs {} but no {} leaf: its release documents are \
-                     logged together or not at all",
-                    logged.iter().map(|d| d.bundle()).collect::<Vec<_>>().join("+"),
-                    doc.bundle(),
-                ));
-            }
-        }
-    }
-    let documents_ok = logged.is_empty() || ReleaseDocument::ALL.iter().all(|d| logged.contains(d));
-
-    // 4. Invariant: replay the WHOLE tree; the binary invariant is partly global.
+    // 3. Invariant: replay the WHOLE tree; the binary invariant is partly global.
     let mut log = VerifiableLog::new();
     log.register_invariant(BINARIES_TENANT, Box::new(BinaryInvariant));
     let mut invariant_ok = true;
@@ -259,7 +236,7 @@ pub fn verify_release_in_bundle_at(
         }
     }
 
-    let chain_valid = sth_sig_ok && all_included && invariant_ok && documents_ok;
+    let chain_valid = sth_sig_ok && all_included && invariant_ok;
 
     ReleaseReport {
         release_tag: release_tag.to_string(),
@@ -312,7 +289,7 @@ impl ReleaseReport {
                 );
             }
         } else if self.found {
-            println!("Release documents: none logged (this release predates logged SBOM/VEX leaves)");
+            println!("Release documents: none logged (this release predates logged SBOM leaves)");
         }
         print_verdict(
             &self.violations,

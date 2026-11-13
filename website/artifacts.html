@@ -663,17 +663,14 @@ curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</cod
             any other artifact, then read it:
           </p>
           <p class="art-note">
-            Next to it, <code>$BASE/pollis-&lt;tag&gt;.vex.json</code> is an OpenVEX document naming the known
-            advisories that do not affect this release, and why. Pass both to a scanner and it applies them. The
-            <a href="open-source.html">open source page</a> has the commands, the same files for the mobile app,
-            terminal client and Delivery Service, and each product's licences.
+            The <a href="open-source.html">open source page</a> has the same file for the mobile app, terminal
+            client and Delivery Service, and each product's licences.
           </p>
           <ul class="art-cmds">
             <li>
               <code class="art-cmd">curl -sSL "$BASE/pollis-v1.17.4.cdx.json" | jq '.components | length'</code>
               <span class="art-cmd-note">SBOMs begin at the first release after 16 August 2026; earlier tags have
-                no <code>.cdx.json</code> and the URL returns 404. VEX files begin with the first release after
-                12 November 2026. See the limits below.</span>
+                no <code>.cdx.json</code> and the URL returns 404. See the limits below.</span>
             </li>
           </ul>
         </div>

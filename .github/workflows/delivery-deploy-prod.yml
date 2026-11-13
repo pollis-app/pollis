@@ -257,7 +257,7 @@ jobs:
         if: steps.guard.outputs.ok == 'true'
         run: ./scripts/verify-client-policy.sh https://api.pollis.com
 
-  # #1832: the Delivery Service's SBOM, VEX and summary at
+  # #1832: the Delivery Service's SBOM and summary at
   # cdn.pollis.com/releases/oss/ds/<sha>/, versioned by the SHA /version reports.
   oss-evidence:
     needs: deploy

@@ -1,18 +1,14 @@
 #!/usr/bin/env node
 /**
- * oss-inventory.mjs — what open source each Pollis product ships, under which
- * licences, and which known advisories do not affect it (#1832).
+ * oss-inventory.mjs — what open source each Pollis product ships, and under
+ * which licences (#1832).
  *
- * One generator for all four products, so a customer gets the same three
+ * One generator for all four products, so a customer gets the same two
  * documents for each, built the same way:
  *
  *   SBOM     CycloneDX 1.6 JSON: every third-party Rust crate and npm package
  *            in the product, with licence, purl, hash (crates) and the
  *            dependency edges between them.
- *   VEX      OpenVEX 0.2.0: for each advisory we have triaged as not affecting
- *            us (supply-chain/vex.json), a machine-readable "not_affected"
- *            statement scanners such as Grype and Trivy apply on top of the
- *            SBOM, so a customer's scan agrees with our triage.
  *   notices  The attribution data the apps render on their "Open source
  *            licenses" page: name, version, licence and the licence text each
  *            package ships.
@@ -30,10 +26,10 @@
  * those are covered by the licence of the crate or package that vendors them.
  *
  * Modes:
- *   node scripts/oss-inventory.mjs <product> [--version V] [--sbom F] [--vex F] [--notices F]
+ *   node scripts/oss-inventory.mjs <product> [--version V] [--sbom F] [--notices F]
  *                                             [--summary F] [--out-dir D]
- *        product: desktop | mobile | cli | ds. --out-dir writes the SBOM and VEX
- *        under their published names plus summary.json, the index
+ *        product: desktop | mobile | cli | ds. --out-dir writes the SBOM
+ *        under its published name plus summary.json, the index
  *        pollis.com/open-source reads (scripts/publish-oss-evidence.sh uploads
  *        them to cdn.pollis.com/releases/oss/<product>/<version>/). --root DIR
  *        describes the checkout at DIR instead of this one.
@@ -41,23 +37,18 @@
  *        JS licence gate: every npm package any product ships carries a licence
  *        on the allow-list (deny.toml's, plus supply-chain/js-licenses.json).
  *        Rust is gated by `cargo deny check licenses`.
- *   node scripts/oss-inventory.mjs check-vex [--advisory-db DIR]
- *        supply-chain/vex.json and deny.toml's ignore list agree: every ignored
- *        advisory that is a vulnerability has a VEX statement, every statement
- *        is still ignored, and each names the right package and aliases.
  */
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// TOOL: this checkout's triage and licence data (supply-chain/, deny.toml).
+// TOOL: this checkout's licence data (supply-chain/, deny.toml).
 // ROOT: the source tree being described (lockfiles, node_modules, git), which
 // `--root` points at another checkout to describe an older release with
-// today's triage (.github/workflows/oss-evidence.yml).
+// today's licence data (.github/workflows/oss-evidence.yml).
 const TOOL = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ROOT = resolve(process.argv.includes("--root") ? process.argv[process.argv.indexOf("--root") + 1] : TOOL);
 const SCRIPT_VERSION = "1";
@@ -560,84 +551,6 @@ export function cyclonedx(inv, version) {
 }
 
 // ---------------------------------------------------------------------------
-// VEX
-// ---------------------------------------------------------------------------
-
-function loadVex() {
-  return JSON.parse(readFileSync(join(TOOL, "supply-chain/vex.json"), "utf8"));
-}
-
-export function openvex(inv, version) {
-  const vex = loadVex();
-  const statements = [];
-  for (const s of vex.statements) {
-    const hits = inv.components.filter(
-      (c) => c.ecosystem === s.ecosystem && c.name === s.package && versionAffected(c.version, s.affected),
-    );
-    if (hits.length === 0) {
-      continue;
-    }
-    statements.push({
-      vulnerability: { name: s.id, ...(s.aliases?.length ? { aliases: s.aliases } : {}) },
-      products: hits.map((c) => ({ "@id": c.purl })),
-      status: "not_affected",
-      justification: s.justification,
-      impact_statement: s.impact_statement,
-    });
-  }
-  return {
-    "@context": "https://openvex.dev/ns/v0.2.0",
-    "@id": `https://pollis.com/oss/vex/${inv.productId}/${version}`,
-    author: "Pollis",
-    timestamp: sourceDateIso(),
-    version: 1,
-    tooling: `pollis oss-inventory ${SCRIPT_VERSION}`,
-    statements,
-  };
-}
-
-// `affected` is a list of semver ranges like "<0.7.6" or ">=0.3.0, <0.3.28".
-export function versionAffected(version, ranges) {
-  if (!ranges || ranges.length === 0) {
-    return true;
-  }
-  return ranges.some((range) =>
-    range.split(",").every((part) => {
-      const m = /^\s*(<=|>=|<|>|=)?\s*([0-9][^\s]*)\s*$/.exec(part);
-      if (!m) {
-        die(`bad version range "${range}" in supply-chain/vex.json`);
-      }
-      const c = cmpVersion(version, m[2]);
-      switch (m[1] ?? "=") {
-        case "<":
-          return c < 0;
-        case "<=":
-          return c <= 0;
-        case ">":
-          return c > 0;
-        case ">=":
-          return c >= 0;
-        default:
-          return c === 0;
-      }
-    }),
-  );
-}
-
-function cmpVersion(a, b) {
-  const pa = a.split(/[.+-]/).map((x) => (/^\d+$/.test(x) ? Number(x) : x));
-  const pb = b.split(/[.+-]/).map((x) => (/^\d+$/.test(x) ? Number(x) : x));
-  for (let i = 0; i < 3; i += 1) {
-    const x = pa[i] ?? 0;
-    const y = pb[i] ?? 0;
-    if (x !== y) {
-      return x < y ? -1 : 1;
-    }
-  }
-  return 0;
-}
-
-// ---------------------------------------------------------------------------
 // Summary: the small index pollis.com/open-source reads for each product
 // ---------------------------------------------------------------------------
 
@@ -645,10 +558,10 @@ export const CDN_BASE = "https://cdn.pollis.com/releases/oss";
 
 export function evidenceNames(productId, version) {
   const stem = `pollis-${productId}-${version}`;
-  return { sbom: `${stem}.cdx.json`, vex: `${stem}.vex.json` };
+  return { sbom: `${stem}.cdx.json` };
 }
 
-export function summary(inv, version, vexDoc) {
+export function summary(inv, version) {
   const names = evidenceNames(inv.productId, version);
   const base = `${CDN_BASE}/${inv.productId}/${version}`;
   const licenses = new Map();
@@ -663,20 +576,12 @@ export function summary(inv, version, vexDoc) {
     version,
     generated: sourceDateIso(),
     sbom: `${base}/${names.sbom}`,
-    vex: `${base}/${names.vex}`,
     components: {
       total: inv.components.length,
       cargo: inv.components.filter((c) => c.ecosystem === "cargo").length,
       npm: inv.components.filter((c) => c.ecosystem === "npm").length,
     },
     licenses: sortedBy([...licenses].map(([license, count]) => ({ license, count })), (x) => `${String(1e6 - x.count).padStart(7, "0")}${x.license}`),
-    not_affected: vexDoc.statements.map((s) => ({
-      id: s.vulnerability.name,
-      aliases: s.vulnerability.aliases ?? [],
-      packages: s.products.map((p) => p["@id"]),
-      justification: s.justification,
-      impact_statement: s.impact_statement,
-    })),
   };
 }
 
@@ -835,120 +740,6 @@ function checkLicenses() {
 }
 
 // ---------------------------------------------------------------------------
-// VEX ↔ deny.toml agreement
-// ---------------------------------------------------------------------------
-
-function denyIgnoredIds() {
-  const deny = readFileSync(join(TOOL, "deny.toml"), "utf8");
-  const section = /^\[advisories\]\s*$([\s\S]*?)^\[/m.exec(deny)?.[1] ?? "";
-  const ids = [];
-  for (const line of section.split("\n")) {
-    if (/^\s*#/.test(line)) {
-      continue;
-    }
-    for (const m of line.matchAll(/id\s*=\s*"(RUSTSEC-\d{4}-\d{4})"/g)) {
-      ids.push(m[1]);
-    }
-  }
-  return ids;
-}
-
-function findAdvisoryDb() {
-  const explicit = arg("--advisory-db");
-  if (explicit) {
-    return explicit;
-  }
-  const base = join(process.env.CARGO_HOME ?? join(homedir(), ".cargo"), "advisory-dbs");
-  if (!existsSync(base)) {
-    return null;
-  }
-  const dbs = readdirSync(base).filter((d) => existsSync(join(base, d, "crates")));
-  return dbs.length > 0 ? join(base, dbs[0]) : null;
-}
-
-function readAdvisory(db, id) {
-  const crates = join(db, "crates");
-  for (const pkg of readdirSync(crates)) {
-    const f = join(crates, pkg, `${id}.md`);
-    if (existsSync(f)) {
-      const front = /```toml\n([\s\S]*?)\n```/.exec(readFileSync(f, "utf8"))?.[1] ?? "";
-      const str = (k) => new RegExp(`^${k}\\s*=\\s*"([^"]*)"`, "m").exec(front)?.[1] ?? null;
-      const list = (k) => {
-        const m = new RegExp(`^${k}\\s*=\\s*\\[([^\\]]*)\\]`, "m").exec(front);
-        return m ? [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : [];
-      };
-      return { package: str("package"), informational: str("informational"), aliases: list("aliases") };
-    }
-  }
-  return null;
-}
-
-const OPENVEX_JUSTIFICATIONS = new Set([
-  "component_not_present",
-  "vulnerable_code_not_present",
-  "vulnerable_code_not_in_execute_path",
-  "vulnerable_code_cannot_be_controlled_by_adversary",
-  "inline_mitigations_already_exist",
-]);
-
-function checkVex() {
-  const vex = loadVex();
-  const ignored = new Set(denyIgnoredIds());
-  const failures = [];
-  const byId = new Map(vex.statements.map((s) => [s.id, s]));
-  for (const s of vex.statements) {
-    if (!ignored.has(s.id)) {
-      failures.push(`${s.id}: has a VEX statement but is no longer ignored in deny.toml — remove the statement (or it was fixed: good)`);
-    }
-    if (!OPENVEX_JUSTIFICATIONS.has(s.justification)) {
-      failures.push(`${s.id}: justification "${s.justification}" is not an OpenVEX justification`);
-    }
-    if (!s.impact_statement || s.impact_statement.length < 40) {
-      failures.push(`${s.id}: impact_statement must say why, in a sentence a customer can check`);
-    }
-  }
-  const db = findAdvisoryDb();
-  if (!db) {
-    die("no RustSec advisory DB found; run `cargo deny fetch` first or pass --advisory-db");
-  }
-  for (const id of ignored) {
-    const adv = readAdvisory(db, id);
-    if (!adv) {
-      failures.push(`${id}: ignored in deny.toml but not in the advisory DB at ${db} (withdrawn? update the DB)`);
-      continue;
-    }
-    // Unmaintained / unsound notices are not vulnerabilities; scanners do not
-    // report them, so a VEX statement would say nothing.
-    if (adv.informational) {
-      if (byId.has(id)) {
-        failures.push(`${id}: is informational (${adv.informational}); VEX covers vulnerabilities only — drop the statement`);
-      }
-      continue;
-    }
-    const s = byId.get(id);
-    if (!s) {
-      failures.push(`${id}: a vulnerability ignored in deny.toml with no statement in supply-chain/vex.json — customers' scanners will report it as affecting us`);
-      continue;
-    }
-    if (s.package !== adv.package) {
-      failures.push(`${id}: supply-chain/vex.json says package "${s.package}", the advisory says "${adv.package}"`);
-    }
-    for (const a of adv.aliases) {
-      if (!(s.aliases ?? []).includes(a)) {
-        failures.push(`${id}: alias ${a} is missing from supply-chain/vex.json, so scanners keyed on it will not match the statement`);
-      }
-    }
-  }
-  if (failures.length > 0) {
-    for (const f of failures) {
-      console.error(`::error::${f}`);
-    }
-    die(`${failures.length} VEX problem(s)`);
-  }
-  console.log(`VEX OK: ${vex.statements.length} statements agree with deny.toml and the advisory DB`);
-}
-
-// ---------------------------------------------------------------------------
 
 function writeJson(path, value) {
   mkdirSync(dirname(resolve(path)), { recursive: true });
@@ -961,34 +752,24 @@ function main() {
     checkLicenses();
     return;
   }
-  if (mode === "check-vex") {
-    checkVex();
-    return;
-  }
   if (!mode || !PRODUCTS[mode]) {
-    die(`usage: oss-inventory.mjs <${Object.keys(PRODUCTS).join("|")}> [--version V] [--sbom F] [--vex F] [--notices F] [--summary F] [--out-dir D] | check-licenses | check-vex`);
+    die(`usage: oss-inventory.mjs <${Object.keys(PRODUCTS).join("|")}> [--version V] [--sbom F] [--notices F] [--summary F] [--out-dir D] | check-licenses`);
   }
   const version = arg("--version") ?? "0.0.0-dev";
   const inv = inventory(mode);
   const sbomPath = arg("--sbom");
-  const vexPath = arg("--vex");
   const noticesPath = arg("--notices");
   const summaryPath = arg("--summary");
-  // --out-dir writes all three published files under their published names.
+  // --out-dir writes both published files under their published names.
   const outDir = arg("--out-dir");
   const names = evidenceNames(mode, version);
-  const vexDoc = openvex(inv, version);
   const sbomOut = sbomPath ?? (outDir && join(outDir, names.sbom));
-  const vexOut = vexPath ?? (outDir && join(outDir, names.vex));
   const summaryOut = summaryPath ?? (outDir && join(outDir, "summary.json"));
   if (sbomOut) {
     writeJson(sbomOut, cyclonedx(inv, version));
   }
-  if (vexOut) {
-    writeJson(vexOut, vexDoc);
-  }
   if (summaryOut) {
-    writeJson(summaryOut, summary(inv, version, vexDoc));
+    writeJson(summaryOut, summary(inv, version));
   }
   if (noticesPath) {
     writeJson(noticesPath, notices(inv));
