@@ -179,6 +179,9 @@ fn welcome_replaces_held_group(conn: &rusqlite::Connection, welcome_bytes: &[u8]
     target
 }
 
+/// One leaf of a Welcome's tree: `(user, device, signature key, scheme)`.
+type TreeLeaf = (String, String, Vec<u8>, SignatureScheme);
+
 /// Every leaf of the tree a Welcome would admit this device into, as
 /// `(user, device, signature key, scheme)`, read before anything is joined.
 ///
@@ -190,7 +193,7 @@ fn welcome_replaces_held_group(conn: &rusqlite::Connection, welcome_bytes: &[u8]
 fn welcome_tree_leaves(
     conn: &rusqlite::Connection,
     welcome_bytes: &[u8],
-) -> Option<Vec<(String, String, Vec<u8>, SignatureScheme)>> {
+) -> Option<Vec<TreeLeaf>> {
     let mut reader: &[u8] = welcome_bytes;
     let MlsMessageBodyIn::Welcome(welcome) = MlsMessageIn::tls_deserialize(&mut reader).ok()?.extract()
     else {
