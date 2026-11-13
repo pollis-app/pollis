@@ -485,25 +485,9 @@ pub async fn purge_dm_channel(conn: &Connection, dm_channel_id: &str) -> anyhow:
     Ok(())
 }
 
-/// Every device id `user_id` has enrolled. Read BEFORE [`purge_user_rows`]
-/// deletes `user_device`, for [`purge_user_log_rows`], which runs afterwards on
-/// the commit-log DB.
-pub async fn user_device_ids(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT device_id FROM user_device WHERE user_id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
-}
-
 /// Purge or blank every commit-log-DB field that names `user_id` or one of
-/// `device_ids` (from [`user_device_ids`]).
+/// `device_ids` (from [`crate::broker::user_device_ids`], read BEFORE
+/// [`purge_user_rows`] deletes `user_device`).
 ///
 /// * `mls_commit_since` rows go.
 /// * `mls_welcome.submitted_by` is nulled on Welcomes addressed to others. NULL

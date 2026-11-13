@@ -261,7 +261,7 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
 /// Every step `POST /v1/account/delete` runs, in its order. One DB stands in for
 /// both the main and the log DB here, so the log purge runs on it too.
 async fn delete_account(c: &Connection, user: &str) -> WriteOutcome {
-    let device_ids = pollis_delivery::teardown::user_device_ids(c, user).await.unwrap();
+    let device_ids = pollis_delivery::broker::user_device_ids(c, user).await.unwrap();
     let (outcome, dead) = apply_delete_account(
         c,
         Some(user),

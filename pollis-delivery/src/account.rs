@@ -759,7 +759,7 @@ pub async fn delete_account(
     // The device ids, while `user_device` still has them: the commit-log scrub
     // below runs after the main transaction has deleted those rows.
     let device_ids = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
-        Ok(owner) => crate::teardown::user_device_ids(&conn, &owner).await?,
+        Ok(owner) => crate::broker::user_device_ids(&conn, &owner).await?,
         Err(_) => Vec::new(),
     };
     let (outcome, dead_conversations) =
