@@ -68,6 +68,7 @@ pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "attachment_ref",
     "channel_mute",
     "channels",
+    "conversation_membership_version",
     "conversation_seq",
     "conversation_watermark",
     "dm_channel",
@@ -469,6 +470,9 @@ pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Ve
     conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", gid()).await?;
     conn.execute("DELETE FROM file_keystate WHERE conversation_id = ?1", gid()).await?;
 
+    // The roster-departure counter (#1874), keyed by the group id.
+    conn.execute("DELETE FROM conversation_membership_version WHERE conversation_id = ?1", gid()).await?;
+
     // The anchor row last.
     conn.execute("DELETE FROM groups WHERE id = ?1", gid()).await?;
 
@@ -482,6 +486,7 @@ pub async fn purge_dm_channel(conn: &Connection, dm_channel_id: &str) -> anyhow:
 
     purge_conversation_rows(conn, dm_channel_id).await?;
     conn.execute("DELETE FROM dm_channel_member WHERE dm_channel_id = ?1", did()).await?;
+    conn.execute("DELETE FROM conversation_membership_version WHERE conversation_id = ?1", did()).await?;
     conn.execute("DELETE FROM dm_channel WHERE id = ?1", did()).await?;
     Ok(())
 }

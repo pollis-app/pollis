@@ -998,6 +998,8 @@ async fn leave_dm_in_tx(
         libsql::params![dm_channel_id, user_id],
     )
     .await?;
+    // #1874: senders re-check their tree before they next seal here.
+    crate::directory::bump_membership_version(&tx, dm_channel_id).await?;
     // Existence, not a tally — see `groups::apply_leave_group`.
     let mut survivors = tx
         .query(

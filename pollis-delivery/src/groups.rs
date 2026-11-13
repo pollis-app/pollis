@@ -392,6 +392,8 @@ pub async fn apply_leave_group(
         libsql::params![body.group_id.clone(), user.clone()],
     )
     .await?;
+    // #1874: senders re-check their tree before they next seal here.
+    crate::directory::bump_membership_version(&tx, &body.group_id).await?;
     // The leaver's channel mutes (#1431) go with the membership they hung on.
     crate::teardown::purge_member_channel_mutes(&tx, &body.group_id, &user).await?;
     let mut survivors = tx
@@ -635,6 +637,8 @@ pub async fn apply_remove_member(
         libsql::params![body.group_id.clone(), body.user_id.clone()],
     )
     .await?;
+    // #1874: senders re-check their tree before they next seal here.
+    crate::directory::bump_membership_version(&tx, &body.group_id).await?;
     // The removed member's channel mutes (#1431) go with the membership.
     crate::teardown::purge_member_channel_mutes(&tx, &body.group_id, &body.user_id).await?;
     tx.commit().await?;

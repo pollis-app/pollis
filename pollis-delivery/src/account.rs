@@ -538,6 +538,8 @@ pub async fn apply_revoke_device(
         Err(o) => return Ok(o),
     };
     let tx = conn.transaction().await?;
+    // #1874: the device's leaves must go before anyone seals to them again.
+    crate::directory::bump_membership_versions_of(&tx, &actor).await?;
     purge_device_state(&tx, &actor, &body.device_id).await?;
     tx.execute(
         "UPDATE user_device SET revoked_at = datetime('now') \
@@ -592,6 +594,8 @@ pub async fn apply_logout_device(
         Err(o) => return Ok(o),
     };
     let tx = conn.transaction().await?;
+    // #1874: the device's leaves must go before anyone seals to them again.
+    crate::directory::bump_membership_versions_of(&tx, &actor).await?;
     purge_device_state(&tx, &actor, &body.device_id).await?;
     tx.execute(
         "DELETE FROM user_device WHERE device_id = ?1 AND user_id = ?2",
@@ -659,6 +663,8 @@ async fn reset_recover_in_tx(
     // Note the actor's DMs before their membership rows go — see
     // `apply_delete_account` for why this has to happen first.
     let dm_ids = dm_ids_of(tx, &actor).await?;
+    // #1874: every conversation it was in re-checks its tree before the next seal.
+    crate::directory::bump_membership_versions_of(tx, &actor).await?;
 
     let mut dead_conversations = handoff_group_ownership(tx, &actor).await?;
 
@@ -762,6 +768,11 @@ pub async fn delete_account(
         Ok(owner) => crate::broker::user_device_ids(&conn, &owner).await?,
         Err(_) => Vec::new(),
     };
+    // And its conversations, for the leave wake-up sent after the commit (#1874).
+    let left = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        Ok(owner) => crate::directory::mls_groups_of(&conn, &owner).await?,
+        Err(_) => crate::directory::MlsGroupsOf::default(),
+    };
     let (outcome, dead_conversations) =
         apply_delete_account(&conn, authed.as_deref(), &parsed).await?;
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
@@ -777,9 +788,36 @@ pub async fn delete_account(
             crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
             // The main DB's pre-#420 copies of those tables, where they exist.
             crate::teardown::purge_legacy_log_copies(&conn, &owner, &device_ids).await?;
+            spawn_leave_wakes(&state, left);
         }
     }
     outcome_response::<DeleteAccountBody>(outcome)
+}
+
+/// Tell every conversation the deleted account was in that a member left, so
+/// members online remove its devices' leaves now (#1874), whether or not the
+/// deleting client's own wake-up got through. The same `membership_changed`
+/// leave the clients publish; best-effort, like theirs. The membership version
+/// bumped in the deletion is what makes the next seal wait for the removal.
+fn spawn_leave_wakes(state: &AppState, left: crate::directory::MlsGroupsOf) {
+    if state.broker.livekit_ready().is_none() {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        let wakes = left
+            .groups
+            .iter()
+            .map(|gid| (gid, serde_json::json!({ "type": "membership_changed", "group_id": gid, "kind": "leave" })))
+            .chain(left.dms.iter().map(|dm| {
+                (dm, serde_json::json!({ "type": "membership_changed", "conversation_id": dm, "kind": "leave" }))
+            }));
+        for (room, payload) in wakes {
+            if let Err(e) = crate::broker::room_send_data(&state, room, &payload).await {
+                tracing::warn!("account deletion: leave wake-up failed: {e}");
+            }
+        }
+    });
 }
 
 /// Every remote-data delete of account deletion, in one transaction. Self-scoped
@@ -808,6 +846,8 @@ pub async fn apply_delete_account(
     // nothing left to identify which channels they were in, and an emptied DM
     // would keep its ciphertext and metadata forever.
     let dm_ids = dm_ids_of(&tx, &actor).await?;
+    // #1874: every conversation it was in re-checks its tree before the next seal.
+    crate::directory::bump_membership_versions_of(&tx, &actor).await?;
 
     let mut dead_conversations = handoff_group_ownership(&tx, &actor).await?;
     crate::teardown::purge_user_rows(&tx, &actor).await?;

@@ -35,6 +35,10 @@ pub struct CatchUpBody {
     /// Members plus pending invitees (so they get a Welcome at invite time); the ONE definition `reconcile` and `migrate` share.
     #[serde(default)]
     pub want_roster: bool,
+    /// Include [`CatchUpResponse::membership_version`] (#1874). Ignored by a DS
+    /// that predates it.
+    #[serde(default)]
+    pub want_membership_version: bool,
     /// No-auth (dev/test) path only; ignored when the DS enforces auth, though
     /// still signature-bound.
     #[serde(default)]
@@ -82,6 +86,12 @@ pub struct CatchUpResponse {
     /// The receiver's half of the epoch gate: replaying only commits before this head never skips unfetched envelopes.
     #[serde(default)]
     pub head: Option<LogHead>,
+    /// A counter the DS bumps whenever an account or device leaves this MLS
+    /// group's roster (#1874). `None` unless `want_membership_version` (or from
+    /// a DS that predates the field). A sender that sees it change re-checks its
+    /// tree before sealing.
+    #[serde(default)]
+    pub membership_version: Option<i64>,
 }
 
 /// A position in the commit log: the next epoch a commit in `generation` would

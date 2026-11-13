@@ -1058,3 +1058,56 @@ fn a_delete_body_without_withdraw_still_parses() {
         .unwrap();
     assert!(!wire.contains("withdraw"), "an empty list is left off the wire");
 }
+
+/// #1874: deleting an account bumps the membership version of every
+/// conversation that outlives it, so senders re-check before their next seal;
+/// a conversation torn down with it leaves no counter behind.
+#[tokio::test]
+async fn account_deletion_bumps_the_membership_version_of_surviving_conversations() {
+    use pollis_delivery::directory::membership_version;
+    let c = conn().await;
+    seed_user(&c, "bystander", "victim", true).await;
+    seed_user(&c, "victim", "bystander", false).await;
+    // Victim's solo DM with nobody else: torn down with the account.
+    exec(&c, "INSERT INTO conversation (id, kind) VALUES ('solo_dm', 'dm')").await;
+    exec(&c, "INSERT INTO dm_channel (id, created_by) VALUES ('solo_dm', 'victim')").await;
+    exec(&c, "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) \
+              VALUES ('solo_dm', 'victim', 'victim')").await;
+
+    assert_eq!(membership_version(&c, "victim_g").await.unwrap(), 0);
+    assert_eq!(membership_version(&c, "victim_dm").await.unwrap(), 0);
+
+    assert!(matches!(delete_account(&c, "victim").await, WriteOutcome::Ok));
+
+    assert_eq!(membership_version(&c, "victim_g").await.unwrap(), 1, "shared group");
+    assert_eq!(membership_version(&c, "victim_dm").await.unwrap(), 1, "shared DM");
+    assert_eq!(membership_version(&c, "bystander_g").await.unwrap(), 0, "not the victim's");
+    assert_eq!(
+        count_where(&c, "conversation_membership_version", "conversation_id", "solo_dm").await,
+        0,
+        "a torn-down DM keeps no counter"
+    );
+}
+
+/// Group deletion drops the counter with the group.
+#[tokio::test]
+async fn group_deletion_drops_the_membership_version() {
+    let c = conn().await;
+    seed_user(&c, "owner", "peer", true).await;
+    pollis_delivery::directory::bump_membership_version(&c, "owner_g").await.unwrap();
+    let (_, dead) = apply_delete_group(
+        &c,
+        Some("owner"),
+        &DeleteGroupBody {
+            group_id: "owner_g".into(),
+            requester_id: Some("owner".into()),
+        },
+    )
+    .await
+    .unwrap();
+    pollis_delivery::teardown::purge_conversation_log(&c, &dead).await.unwrap();
+    assert_eq!(
+        count_where(&c, "conversation_membership_version", "conversation_id", "owner_g").await,
+        0
+    );
+}

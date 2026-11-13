@@ -121,24 +121,98 @@ pub(crate) const PRE_SEAL_CHECK_INTERVAL: std::time::Duration =
 
 /// Before sealing into `conversation_id`, re-add any device that belongs in its
 /// tree and is missing — or evict a stale leaf — so the message is sealed to the
-/// tree reconcile wants (#1571). At most once per conversation per
-/// [`PRE_SEAL_CHECK_INTERVAL`] on this device; best-effort, never fails a send.
+/// tree reconcile wants (#1571). Best-effort, never fails a send.
+///
+/// At most once per conversation per [`PRE_SEAL_CHECK_INTERVAL`] on this device,
+/// unless `membership_version` (from the send's catch-up read) differs from the
+/// one the last check saw: an account or device has left the roster since, and
+/// its leaves must go before anything else is sealed (#1874). `None` (a DS that
+/// predates the field) keeps the interval alone.
 ///
 /// The caller has caught up and holds no MLS lock.
-pub async fn backstop_before_seal(state: &Arc<AppState>, conversation_id: &str, user_id: &str) {
-    {
-        let mut checked = state.pre_seal_checked.lock().await;
-        let now = std::time::Instant::now();
-        if let Some(at) = checked.get(conversation_id) {
-            if now.duration_since(*at) < PRE_SEAL_CHECK_INTERVAL {
-                return;
-            }
-        }
-        checked.insert(conversation_id.to_string(), now);
+pub async fn backstop_before_seal(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    membership_version: Option<i64>,
+) {
+    let due = pre_seal_check_due(
+        &mut *state.pre_seal_checked.lock().await,
+        conversation_id,
+        membership_version,
+        std::time::Instant::now(),
+        CheckWhen::IntervalOrChange,
+    );
+    if due {
+        run_pre_seal_check(state, conversation_id, user_id).await;
     }
+}
+
+/// The pre-seal check for the seals that never ran one (edits, redactions):
+/// only when `membership_version` shows an account or device has left the
+/// roster since this device last checked (#1874), so they add no reads in
+/// steady state.
+pub async fn backstop_on_membership_change(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    membership_version: Option<i64>,
+) {
+    let due = pre_seal_check_due(
+        &mut *state.pre_seal_checked.lock().await,
+        conversation_id,
+        membership_version,
+        std::time::Instant::now(),
+        CheckWhen::ChangeOnly,
+    );
+    if due {
+        run_pre_seal_check(state, conversation_id, user_id).await;
+    }
+}
+
+async fn run_pre_seal_check(state: &Arc<AppState>, conversation_id: &str, user_id: &str) {
     if let Err(e) = reconcile_if_tree_drifted(state, conversation_id, user_id).await {
         crate::diag!("[mls-backstop] pre-seal check for {conversation_id}: {e}");
+        // Forget the version, so the next send that carries one checks again.
+        if let Some(entry) = state.pre_seal_checked.lock().await.get_mut(conversation_id) {
+            entry.1 = None;
+        }
     }
+}
+
+/// Which pre-seal checks are due.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckWhen {
+    /// A send: the first in a while, or the roster changed.
+    IntervalOrChange,
+    /// An edit or redaction: only when the roster changed.
+    ChangeOnly,
+}
+
+/// Whether a pre-seal check is due, recording it as done when it is. Pure.
+///
+/// "Changed" is a known version other than the one last seen; with no record
+/// yet, any departure ever (`> 0`) counts, as nothing says it was handled.
+fn pre_seal_check_due(
+    checked: &mut std::collections::HashMap<String, (std::time::Instant, Option<i64>)>,
+    conversation_id: &str,
+    membership_version: Option<i64>,
+    now: std::time::Instant,
+    when: CheckWhen,
+) -> bool {
+    let due = match (checked.get(conversation_id), when) {
+        (None, CheckWhen::IntervalOrChange) => true,
+        (None, CheckWhen::ChangeOnly) => membership_version.is_some_and(|v| v > 0),
+        (Some((at, seen)), _) => {
+            let changed = membership_version.is_some() && membership_version != *seen;
+            let stale = now.duration_since(*at) >= PRE_SEAL_CHECK_INTERVAL;
+            changed || (when == CheckWhen::IntervalOrChange && stale)
+        }
+    };
+    if due {
+        checked.insert(conversation_id.to_string(), (now, membership_version));
+    }
+    due
 }
 
 /// One conversation's full sweep pass. Ordering is load-bearing:
@@ -586,5 +660,42 @@ mod tests {
             &valid,
             &[key("alice", "a1"), key("bob", "b1")],
         ));
+    }
+
+    /// #1874: within the interval a burst checks once, but a changed membership
+    /// version checks at once; an unknown version (older DS) keeps the interval.
+    #[test]
+    fn a_changed_membership_version_overrides_the_interval() {
+        use super::{pre_seal_check_due, CheckWhen, PRE_SEAL_CHECK_INTERVAL};
+        let send = CheckWhen::IntervalOrChange;
+        let mut checked = std::collections::HashMap::new();
+        let t0 = std::time::Instant::now();
+        let soon = t0 + std::time::Duration::from_secs(5);
+        let mut due = |c: &str, v: Option<i64>, at, when| pre_seal_check_due(&mut checked, c, v, at, when);
+
+        assert!(due("c", Some(0), t0, send), "first check");
+        assert!(!due("c", Some(0), soon, send), "same version, within interval");
+        assert!(!due("c", None, soon, send), "no version, within interval");
+        assert!(due("c", Some(1), soon, send), "version changed");
+        assert!(!due("c", Some(1), soon, send), "recorded");
+        assert!(due("c", Some(1), t0 + PRE_SEAL_CHECK_INTERVAL * 2, send), "interval elapsed");
+        assert!(due("other", None, soon, send), "per conversation");
+    }
+
+    /// Edits and redactions check only on a change, never on the interval.
+    #[test]
+    fn an_edit_checks_only_when_the_roster_changed() {
+        use super::{pre_seal_check_due, CheckWhen, PRE_SEAL_CHECK_INTERVAL};
+        let edit = CheckWhen::ChangeOnly;
+        let mut checked = std::collections::HashMap::new();
+        let t0 = std::time::Instant::now();
+        let late = t0 + PRE_SEAL_CHECK_INTERVAL * 2;
+        let mut due = |c: &str, v: Option<i64>, at, when| pre_seal_check_due(&mut checked, c, v, at, when);
+
+        assert!(!due("c", None, t0, edit), "older DS: nothing to go on");
+        assert!(!due("c", Some(0), t0, edit), "nobody ever left");
+        assert!(due("c", Some(2), t0, edit), "someone left, never checked");
+        assert!(!due("c", Some(2), late, edit), "no interval for edits");
+        assert!(due("c", Some(3), late, edit), "left again");
     }
 }
