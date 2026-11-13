@@ -1133,6 +1133,72 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
     drop(bob);
 }
 
+/// Set (or clear, with `None`) this device's last own-leaf rotation in `conversation_id`.
+async fn set_last_self_update(client: &TestClient, conversation_id: &str, days_ago: Option<i64>) {
+    let guard = client.state.local_db.lock().await;
+    let conn = guard.as_ref().expect("local db open").conn();
+    match days_ago {
+        Some(days) => {
+            let at = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+            conn.execute(
+                "INSERT INTO mls_self_update (conversation_id, last_epoch, last_at) VALUES (?1, 0, ?2) \
+                 ON CONFLICT(conversation_id) DO UPDATE SET last_at = excluded.last_at",
+                rusqlite::params![conversation_id, at],
+            )
+            .expect("set last self-update");
+        }
+        None => {
+            conn.execute(
+                "DELETE FROM mls_self_update WHERE conversation_id = ?1",
+                rusqlite::params![conversation_id],
+            )
+            .expect("clear last self-update");
+        }
+    }
+}
+
+/// #1880: mobile's backstop rotates overdue leaves like the desktop sweep, at most three per pass,
+/// and leaves a recently rotated one alone.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_mobile_backstop_rotates_overdue_leaves_three_per_pass() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let mut groups = Vec::new();
+    for name in ["One", "Two", "Three", "Four"] {
+        groups.push(alice.create_group(name).await);
+    }
+    let mut heads_before = Vec::new();
+    for gid in &groups {
+        set_last_self_update(&alice, gid, None).await;
+        heads_before.push(ds_head_epoch(gid).await);
+    }
+
+    let first = backstop(&alice, &alice_p.id).await;
+    assert_eq!(first.self_updated, 3, "capped at three per pass, got {first:?}");
+    let second = backstop(&alice, &alice_p.id).await;
+    assert_eq!(second.self_updated, 1, "the fourth on the next pass, got {second:?}");
+    let third = backstop(&alice, &alice_p.id).await;
+    assert_eq!(third.self_updated, 0, "nothing left due, got {third:?}");
+    for (gid, before) in groups.iter().zip(heads_before) {
+        assert_eq!(ds_head_epoch(gid).await, before + 1, "one rotation landed in {gid}");
+    }
+
+    // Six days is inside the interval; thirty is past interval plus jitter.
+    set_last_self_update(&alice, &groups[0], Some(6)).await;
+    set_last_self_update(&alice, &groups[1], Some(30)).await;
+    let fourth = backstop(&alice, &alice_p.id).await;
+    assert_eq!(fourth.self_updated, 1, "only the overdue group, got {fourth:?}");
+}
+
+async fn backstop(client: &TestClient, user_id: &str) -> pollis_core::commands::mls::BackstopReport {
+    pollis_core::commands::mls::reconcile_backstop_all(&client.state, user_id)
+        .await
+        .expect("backstop")
+}
+
 /// #679: revoking one device, with no roster change, must prune its leaf on its own.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]

@@ -14,11 +14,13 @@
 //!
 //! It also re-adds a leafless device whose KeyPackage pool was empty at add time.
 //!
-//! ## On mobile, and before every seal (#1571)
+//! ## On mobile, and before every seal (#1571, #1880)
 //!
-//! Mobile never runs the sweep, so two more callers reach the backstop:
+//! Mobile runs its own catch-up, so two more callers reach the backstops:
 //!
-//! * [`reconcile_backstop_all`]: every conversation, after mobile's ingest pass;
+//! * [`reconcile_backstop_all`]: every conversation, after mobile's ingest pass on landing and on
+//!   each return to the foreground — the reconcile backstop and the self-update backstop, under the
+//!   same per-pass cap as the sweep;
 //! * [`backstop_before_seal`]: one conversation, before a seal, at most once per [`PRE_SEAL_CHECK_INTERVAL`].
 
 use std::collections::HashSet;
@@ -75,12 +77,17 @@ pub struct BackstopReport {
     pub checked: usize,
     /// Conversations whose tree had drifted and were reconciled.
     pub reconciled: usize,
+    /// Conversations where this device rotated its own leaf (#1880).
+    pub self_updated: usize,
 }
 
-/// The reconcile backstop for every conversation the user is in, without the
-/// catch-up, migration and self-update the full sweep adds (#1571).
+/// The reconcile and self-update backstops for every conversation the user is
+/// in, without the catch-up and migration the full sweep adds (#1571, #1880).
 ///
-/// Mobile's entry, run after its own ingest pass; cheap in steady state (see [`local_tree_drift`]).
+/// Mobile's entry, run after its own ingest pass; cheap in steady state (see
+/// [`local_tree_drift`]; the self-update due check is a local read). Per
+/// conversation in the sweep's order: reconcile, then self-update, capped at
+/// `MAX_SELF_UPDATES_PER_SWEEP` landed rotations per pass.
 pub async fn reconcile_backstop_all(
     state: &Arc<AppState>,
     user_id: &str,
@@ -96,11 +103,13 @@ pub async fn reconcile_backstop_all(
                 crate::diag!("[mls-backstop] {conversation_id}: {e}");
             }
         }
+        self_update_backstop(state, conversation_id, user_id, &mut report.self_updated).await;
     }
     crate::diag!(
-        "[mls-backstop] {user_id}: {} conversation(s) checked, {} reconciled",
+        "[mls-backstop] {user_id}: {} conversation(s) checked, {} reconciled, {} self-updated",
         report.checked,
-        report.reconciled
+        report.reconciled,
+        report.self_updated
     );
     Ok(report)
 }

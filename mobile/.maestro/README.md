@@ -92,6 +92,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | --- | --- | --- |
 | `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch: a wrong PIN puts the pad back with `pin-error`, and the right one's fourth digit must, within a second, show `pin-busy` (the launch loader, with no keypad key left on screen) or have already left the pad (a fast unlock; never a frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
+| `self-update` | #1880 a return to the foreground rotates this device's own leaf in a group where it is due (a group it just created): the newest `[mls-backstop]` line in Diagnostics counts `1 self-updated`; a second return counts `0`, so the rotation was recorded. Needs a binary with the core change | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `composer-draft` | unsent composer text survives backing out to another tab and returning (desktop's in-memory draft store, `mobile/lib/drafts.ts`); sending clears it | no |
 | `outbox` | #1335 a message whose send is killed mid-flight (`stopApp` right after Send in a fresh group) is still there after relaunch + unlock and is delivered by the outbox drain (no `btn-retry-message-*` left); Android only: a send made in airplane mode is kept as failed with `btn-retry-message-<id>` / `btn-discard-message-<id>`, and back online Retry settles it | no |

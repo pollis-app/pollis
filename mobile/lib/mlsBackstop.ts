@@ -1,4 +1,5 @@
-// The MLS re-add backstop (#1571), run after each catch-up pass's ingests settle; single flight. Pure.
+// The MLS backstops — re-add (#1571) and own-leaf rotation (#1880) — run after each catch-up
+// pass's ingests settle. Single flight: a foreground during a pass joins it. Pure.
 
 import type { CatchUpTarget } from "./messageWake";
 
