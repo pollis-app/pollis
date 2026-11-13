@@ -6274,7 +6274,7 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "5.3 Device cross-signing",
-        "quote": "A KeyPackage is served only while its device is still certified"
+        "quote": "A KeyPackage is served only while its device is certified"
       },
       "claim": "A claim checks each candidate package's leaf and skips, without deleting or spending, any whose device is not certified at that moment.",
       "kind": "security",
@@ -6287,7 +6287,7 @@
         "pollis-delivery/src/leaf_cert.rs:203"
       ],
       "status": "verified",
-      "verified_sha": "0f0f9916aeda2ff2ddad5a3697c7ab680b641e2d",
+      "verified_sha": "41a3399ddd5acd2ce9bd37f05f5ce68c9cf4d7a7",
       "also_rendered_in": []
     },
     {
