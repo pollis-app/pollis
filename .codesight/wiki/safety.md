@@ -547,7 +547,10 @@ credential the gate accepted (`gate_or_session_kind` → `GateCredential`) and, 
 is a bare OTP session, runs the whole `reset-recover` wipe — group/DM membership,
 key packages, every `user_device` except the session's own — inside the rotation's
 transaction (`apply_rotate_identity` → `reset_recover_in_tx`), then purges the
-actor's Welcomes and any emptied conversations' commit-log state post-commit. An
+actor's Welcomes and any emptied conversations' commit-log state post-commit
+(`reset_log_half`, shared with `reset-recover`; a failure there fails the request,
+and both halves are idempotent, so rerunning the reset finishes it — the client's
+`welcomes/purge` is kept for older builds and no longer needed). An
 email OTP alone can therefore only ever produce a fresh identity that owns nothing;
 it cannot mint a key that inherits the account or leaves the victim's devices
 enrolled beside it. A device-signed rotation (an enrolled device holding the

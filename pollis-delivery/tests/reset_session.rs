@@ -23,16 +23,20 @@ async fn fresh_db() -> common::TempDb {
     db
 }
 
-fn authed_state(db: Arc<Db>) -> AppState {
-    AppState::new(db, true).with_otp_config(OtpConfig {
+fn otp_config() -> OtpConfig {
+    OtpConfig {
         resend_api_key: None,
-        dev_otp: Some("123456".to_string()),
+        dev_otp: Some(DEV_CODE.to_string()),
         ttl_secs: 600,
         session_ttl_secs: 600,
         resend_throttle_secs: 0,
         max_attempts: 5,
         ..OtpConfig::default()
-    })
+    }
+}
+
+fn authed_state(db: Arc<Db>) -> AppState {
+    AppState::new(db, true).with_otp_config(otp_config())
 }
 
 const DEV_CODE: &str = "123456";
@@ -551,4 +555,210 @@ async fn account_status_still_answers_a_device_signature() {
     .await;
     assert_eq!(s, StatusCode::OK, "a device-signed read still 200s: {body}");
     assert_eq!(body["account"]["email"], "alice@example.com");
+}
+
+/// The production shape: Welcomes live in a commit-log DB separate from the main DB.
+struct SplitDbs {
+    main: common::TempDb,
+    log: common::TempDb,
+    state: AppState,
+}
+
+async fn split_dbs() -> SplitDbs {
+    let main = common::TempDb::open("main.db").await;
+    pollis_schema::apply::main_db(&main.conn().await.unwrap()).await.expect("main schema");
+    let log = common::TempDb::open("log.db").await;
+    pollis_schema::apply::log_db(&log.conn().await.unwrap()).await.expect("log schema");
+    let state = AppState::new_with_log_db(main.arc(), log.arc(), true).with_otp_config(otp_config());
+    SplitDbs { main, log, state }
+}
+
+/// Main-DB account state for a reset, plus pending Welcomes on the log DB: two
+/// for `user_id` (one per device) and one for another account, which must survive.
+async fn seed_split(dbs: &SplitDbs, user_id: &str, current: &str) {
+    let conn = dbs.main.conn().await.unwrap();
+    for sql in [
+        "INSERT INTO conversation (id, kind) VALUES ('g1', 'group')".to_string(),
+        format!("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', '{user_id}')"),
+        format!("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', '{user_id}', 'admin')"),
+        "INSERT INTO users (id, email, username) VALUES ('other', 'o@x.com', 'other')".to_string(),
+        "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'other', 'admin')".to_string(),
+        format!("INSERT INTO mls_key_package (ref_hash, user_id, key_package) VALUES ('kp1', '{user_id}', x'00')"),
+        format!("INSERT INTO user_device (device_id, user_id) VALUES ('dev-old', '{user_id}')"),
+        format!("INSERT OR IGNORE INTO user_device (device_id, user_id) VALUES ('{current}', '{user_id}')"),
+    ] {
+        conn.execute(&sql, ()).await.expect("seed main");
+    }
+    let log = dbs.log.conn().await.unwrap();
+    for sql in [
+        format!(
+            "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
+             VALUES ('w1', 'g1', '{user_id}', 'dev-old', x'00')"
+        ),
+        format!(
+            "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
+             VALUES ('w2', 'g1', '{user_id}', '{current}', x'00')"
+        ),
+        "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
+         VALUES ('w3', 'g1', 'other', 'dev-other', x'00')"
+            .to_string(),
+    ] {
+        log.execute(&sql, ()).await.expect("seed log");
+    }
+}
+
+async fn log_welcomes(dbs: &SplitDbs, recipient: &str) -> i64 {
+    count(&dbs.log, "SELECT COUNT(*) FROM mls_welcome WHERE recipient_id = ?1", recipient).await
+}
+
+/// Make every Welcome delete on the log DB fail, as an unreachable log DB would.
+async fn break_welcome_deletes(dbs: &SplitDbs) {
+    dbs.log
+        .conn()
+        .await
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER block_welcome_delete BEFORE DELETE ON mls_welcome \
+             BEGIN SELECT RAISE(ABORT, 'log db unavailable'); END;",
+        )
+        .await
+        .expect("trigger");
+}
+
+async fn mend_welcome_deletes(dbs: &SplitDbs) {
+    dbs.log
+        .conn()
+        .await
+        .unwrap()
+        .execute("DROP TRIGGER block_welcome_delete", ())
+        .await
+        .expect("drop trigger");
+}
+
+/// #1883: the session reset request alone removes the account's pending
+/// Welcomes from the commit-log DB; no `welcomes/purge` call follows.
+#[tokio::test(flavor = "multi_thread")]
+async fn session_reset_purges_log_db_welcomes_without_a_client_purge() {
+    let dbs = split_dbs().await;
+    let (user_id, token) = login_established(&dbs.state, "alice@example.com", "dev-new").await;
+    seed_split(&dbs, &user_id, "dev-new").await;
+    assert_eq!(log_welcomes(&dbs, &user_id).await, 2);
+
+    let (s, body) =
+        send(&dbs.state, "/v1/account/rotate-identity", rotate_body(1), Some(&token), false).await;
+    assert_eq!(s, StatusCode::OK, "session reset should 200: {body}");
+
+    assert_eq!(log_welcomes(&dbs, &user_id).await, 0, "the reset request itself deletes the Welcomes");
+    assert_eq!(log_welcomes(&dbs, "other").await, 1, "another account's Welcome is untouched");
+}
+
+/// The device-signed path: `reset-recover` deletes the Welcomes itself too.
+#[tokio::test(flavor = "multi_thread")]
+async fn signed_reset_recover_purges_log_db_welcomes_without_a_client_purge() {
+    let dbs = split_dbs().await;
+    let (user_id, _token) = login_established(&dbs.state, "alice@example.com", "dev-enrolled").await;
+    seed_split(&dbs, &user_id, "dev-enrolled").await;
+    let sk = gen_signing_key();
+    dbs.main
+        .conn()
+        .await
+        .unwrap()
+        .execute(
+            "UPDATE user_device SET mls_signature_pub_pq = ?1 \
+             WHERE device_id = 'dev-enrolled' AND user_id = ?2",
+            libsql::params![sk.verifying_key().encode().to_vec(), user_id.clone()],
+        )
+        .await
+        .unwrap();
+
+    let (s, body) = send_signed(
+        &dbs.state,
+        "/v1/account/rotate-identity",
+        rotate_body(1),
+        &user_id,
+        "dev-enrolled",
+        &sk,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(log_welcomes(&dbs, &user_id).await, 2, "a plain signed rotation wipes nothing");
+
+    let (s, body) = send_signed(
+        &dbs.state,
+        "/v1/account/reset-recover",
+        serde_json::json!({ "current_device_id": "dev-enrolled" }),
+        &user_id,
+        "dev-enrolled",
+        &sk,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(log_welcomes(&dbs, &user_id).await, 0, "reset-recover itself deletes the Welcomes");
+    assert_eq!(log_welcomes(&dbs, "other").await, 1, "another account's Welcome is untouched");
+}
+
+/// The databases share no transaction. When the Welcome delete fails after the
+/// main commit, the request fails rather than reporting a finished reset, and
+/// rerunning the reset (from the new head, as the client does) removes them.
+#[tokio::test(flavor = "multi_thread")]
+async fn session_reset_fails_when_the_welcome_delete_fails_and_a_rerun_finishes_it() {
+    let dbs = split_dbs().await;
+    let (user_id, token) = login_established(&dbs.state, "alice@example.com", "dev-new").await;
+    seed_split(&dbs, &user_id, "dev-new").await;
+
+    break_welcome_deletes(&dbs).await;
+    let (s, body) =
+        send(&dbs.state, "/v1/account/rotate-identity", rotate_body(1), Some(&token), false).await;
+    assert!(s.is_server_error(), "a failed Welcome delete must fail the reset, got {s}: {body}");
+    assert_eq!(log_welcomes(&dbs, &user_id).await, 2);
+    assert_eq!(identity_version(&dbs.main, &user_id).await, 2, "the main-DB half had committed");
+
+    mend_welcome_deletes(&dbs).await;
+    let (s, body) =
+        send(&dbs.state, "/v1/account/rotate-identity", rotate_body(2), Some(&token), false).await;
+    assert_eq!(s, StatusCode::OK, "the rerun reset should 200: {body}");
+    assert_eq!(identity_version(&dbs.main, &user_id).await, 3);
+    assert_eq!(log_welcomes(&dbs, &user_id).await, 0, "the rerun deletes the Welcomes");
+    assert_eq!(log_welcomes(&dbs, "other").await, 1);
+}
+
+/// The same for `reset-recover`, whose retry is the identical request.
+#[tokio::test(flavor = "multi_thread")]
+async fn reset_recover_fails_when_the_welcome_delete_fails_and_a_retry_finishes_it() {
+    let dbs = split_dbs().await;
+    let (user_id, token) = login(&dbs.state, "alice@example.com", "dev-new").await;
+    seed_split(&dbs, &user_id, "dev-new").await;
+    let body = serde_json::json!({ "current_device_id": "dev-new" });
+
+    break_welcome_deletes(&dbs).await;
+    let (s, resp) =
+        send(&dbs.state, "/v1/account/reset-recover", body.clone(), Some(&token), false).await;
+    assert!(s.is_server_error(), "a failed Welcome delete must fail reset-recover, got {s}: {resp}");
+    assert_eq!(log_welcomes(&dbs, &user_id).await, 2);
+
+    mend_welcome_deletes(&dbs).await;
+    let (s, resp) = send(&dbs.state, "/v1/account/reset-recover", body, Some(&token), false).await;
+    assert_eq!(s, StatusCode::OK, "the retry should 200: {resp}");
+    assert_eq!(log_welcomes(&dbs, &user_id).await, 0);
+    assert_eq!(
+        count(&dbs.main, "SELECT COUNT(*) FROM user_device WHERE user_id = ?1", &user_id).await,
+        1,
+        "only the resetting device remains"
+    );
+}
+
+/// Older clients still send `welcomes/purge` after the reset; it keeps answering 200.
+#[tokio::test(flavor = "multi_thread")]
+async fn welcomes_purge_still_answers_after_a_session_reset() {
+    let dbs = split_dbs().await;
+    let (user_id, token) = login_established(&dbs.state, "alice@example.com", "dev-new").await;
+    seed_split(&dbs, &user_id, "dev-new").await;
+
+    let (s, _) =
+        send(&dbs.state, "/v1/account/rotate-identity", rotate_body(1), Some(&token), false).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, body) =
+        send(&dbs.state, "/v1/welcomes/purge", serde_json::json!({}), Some(&token), false).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["deleted"], serde_json::json!(0), "nothing is left for it to delete");
 }

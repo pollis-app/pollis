@@ -72,17 +72,37 @@ pub async fn rotate_identity(
     if let Some(owner) = owner.as_deref() {
         state.device_keys.invalidate_user(owner);
     }
-    // The log-DB half of a session reset, after the main commit (mirrors `reset_recover`).
+    // A session rotation is the reset, so its commit-log half runs here too.
     if let (RotateOutcome::Applied { .. }, GateCredential::Session { .. }, Some(owner)) =
         (&outcome, &credential, owner.as_deref())
     {
-        let log_conn = state.log_db.conn().await?;
-        if !dead_conversations.is_empty() {
-            crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
-        }
-        crate::writes::purge_welcomes(&log_conn, owner).await?;
+        reset_log_half(&state, owner, &dead_conversations).await?;
     }
     rotate_outcome_response::<RotateIdentityBody>(outcome)
+}
+
+/// The commit-log-DB half of an identity reset, run once the main transaction
+/// has committed: drop the MLS state of the conversations the wipe destroyed
+/// and delete every pending Welcome addressed to the account. Those Welcomes
+/// were made for key packages and devices the wipe just removed.
+///
+/// The two databases share no transaction. An error here fails the request
+/// (5xx) even though the main-DB half has applied, so the reset is never
+/// reported complete with Welcomes left behind. Both halves are idempotent: a
+/// retried `reset-recover` reruns them, and a retried reset rotates again from
+/// the account's new head and reruns them. `POST /v1/welcomes/purge` stays for
+/// clients that still send it; after this it deletes nothing.
+async fn reset_log_half(
+    state: &AppState,
+    owner: &str,
+    dead_conversations: &[String],
+) -> anyhow::Result<()> {
+    let log_conn = state.log_db.conn().await?;
+    if !dead_conversations.is_empty() {
+        crate::teardown::purge_conversation_log(&log_conn, dead_conversations).await?;
+    }
+    crate::writes::purge_welcomes(&log_conn, owner).await?;
+    Ok(())
 }
 
 /// Map a [`RotateOutcome`] to its HTTP response (200 / 403 / 409).
@@ -606,7 +626,8 @@ pub async fn apply_logout_device(
     Ok(WriteOutcome::Ok)
 }
 
-/// POST /v1/account/reset-recover — the post-reset membership/device wipe, as ONE transaction.
+/// POST /v1/account/reset-recover — the post-reset membership/device wipe, as ONE
+/// transaction, then the account's pending Welcomes ([`reset_log_half`]).
 pub async fn reset_recover(
     State(state): State<AppState>,
     req: RawRequest,
@@ -618,15 +639,12 @@ pub async fn reset_recover(
     let conn = state.db.conn().await?;
     let (outcome, dead_conversations) =
         apply_reset_recover(&conn, authed.as_deref(), &parsed).await?;
-    // Account-wide device wipe → evict the whole user (#658).
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        // Account-wide device wipe → evict the whole user (#658).
         state.device_keys.invalidate_user(&owner);
-    }
-    // Conversations this reset emptied no longer exist; drop their MLS state
-    // from the commit-log DB, after the main transaction has committed.
-    if matches!(outcome, WriteOutcome::Ok) && !dead_conversations.is_empty() {
-        let log_conn = state.log_db.conn().await?;
-        crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
+        if matches!(outcome, WriteOutcome::Ok) {
+            reset_log_half(&state, &owner, &dead_conversations).await?;
+        }
     }
     outcome_response::<ResetRecoverBody>(outcome)
 }
