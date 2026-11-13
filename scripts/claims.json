@@ -9581,7 +9581,7 @@
         "pollis-delivery/tests/reset_session.rs:661"
       ],
       "status": "verified",
-      "verified_sha": "f2b5ba682eda7167e0c1246b9813a50899420eab",
+      "verified_sha": "6cb535eb8008da9ae6f06d6354f1d0da9e8d6f15",
       "also_rendered_in": []
     },
     {
@@ -9602,7 +9602,7 @@
         "pollis-delivery/tests/reset_session.rs:708"
       ],
       "status": "verified",
-      "verified_sha": "f2b5ba682eda7167e0c1246b9813a50899420eab",
+      "verified_sha": "6cb535eb8008da9ae6f06d6354f1d0da9e8d6f15",
       "also_rendered_in": []
     },
     {
