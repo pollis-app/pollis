@@ -756,6 +756,12 @@ pub async fn delete_account(
         }
     };
     let conn = state.db.conn().await?;
+    // The device ids, while `user_device` still has them: the commit-log scrub
+    // below runs after the main transaction has deleted those rows.
+    let device_ids = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        Ok(owner) => crate::broker::user_device_ids(&conn, &owner).await?,
+        Err(_) => Vec::new(),
+    };
     let (outcome, dead_conversations) =
         apply_delete_account(&conn, authed.as_deref(), &parsed).await?;
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
@@ -767,8 +773,10 @@ pub async fn delete_account(
         if matches!(outcome, WriteOutcome::Ok) {
             let log_conn = state.log_db.conn().await?;
             crate::writes::purge_welcomes(&log_conn, &owner).await?;
-            crate::teardown::purge_user_log_rows(&log_conn, &owner).await?;
+            crate::teardown::purge_user_log_rows(&log_conn, &owner, &device_ids).await?;
             crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
+            // The main DB's pre-#420 copies of those tables, where they exist.
+            crate::teardown::purge_legacy_log_copies(&conn, &owner, &device_ids).await?;
         }
     }
     outcome_response::<DeleteAccountBody>(outcome)

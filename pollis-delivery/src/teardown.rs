@@ -41,6 +41,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "message_envelope",
     "message_reaction",
     "mls_key_package",
+    "mls_key_package_claim",
     // Commit-log-DB tables, purged by the delete handler after the main transaction.
     "mls_commit_since",
     "mls_welcome",
@@ -107,8 +108,10 @@ pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
          users(id) ON DELETE CASCADE` is actively dangerous and inert only because \
          Turso has foreign keys off: firing it would erase a departed member's \
          commits from the middle of the chain, leaving permanent epoch gaps that \
-         stop every REMAINING member from advancing. Commit rows do go when the \
-         whole conversation goes (`purge_conversation_log`), and are pruned by \
+         stop every REMAINING member from advancing. The rows stay, but every \
+         field naming the account (`sender_id`, `added_user_id`, \
+         `added_device_ids`) is blanked by `scrub_commit_log`. Commit rows go when \
+         the whole conversation goes (`purge_conversation_log`), and are pruned by \
          generation in `commit.rs`.",
     ),
     (
@@ -257,10 +260,28 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     // Custom emoji this user contributed (migration 000015); releases the objects for gc.
     conn.execute("DELETE FROM group_emoji WHERE created_by = ?1", uid()).await?;
 
-    // Devices and per-device state.
+    // Devices and per-device state. The conversation-owned key rows (#99, #1382)
+    // survive, so their diagnostic device pointer is blanked while `user_device`
+    // can still say which devices were this user's.
+    for table in ["pin_keystate", "file_keystate"] {
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET updated_by_device_id = '' WHERE updated_by_device_id IN \
+                 (SELECT device_id FROM user_device WHERE user_id = ?1)"
+            ),
+            uid(),
+        )
+        .await?;
+    }
     conn.execute("DELETE FROM user_device WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM device_enrollment_request WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM mls_key_package WHERE user_id = ?1", uid()).await?;
+    // The claim budget (#847), as claimer and as the account claimed from.
+    conn.execute(
+        "DELETE FROM mls_key_package_claim WHERE claimer_id = ?1 OR target_user_id = ?2",
+        uid2(),
+    )
+    .await?;
     conn.execute("DELETE FROM conversation_watermark WHERE user_id = ?1", uid()).await?;
     // #1423: tickets awaiting a receipt name only a token, so they go via the
     // user's tokens, before those are deleted.
@@ -464,23 +485,186 @@ pub async fn purge_dm_channel(conn: &Connection, dm_channel_id: &str) -> anyhow:
     Ok(())
 }
 
-/// Purge the commit-log DB's rows that name `user_id` and are not part of an
-/// append-only guarantee.
+/// Purge or blank every commit-log-DB field that names `user_id` or one of
+/// `device_ids` (from [`crate::broker::user_device_ids`], read BEFORE
+/// [`purge_user_rows`] deletes `user_device`).
 ///
-/// Today that is `mls_commit_since`, which kept a triple per conversation a deleted user was in.
-///
-/// `mls_welcome` goes via [`crate::writes::purge_welcomes`]; `mls_commit_log` is exempt.
+/// * `mls_commit_since` rows go.
+/// * `mls_welcome.submitted_by` is nulled on Welcomes addressed to others. NULL
+///   is "unattributed", which only drops a resubmit defence the deleted account
+///   can no longer exercise. The account's own Welcomes go via
+///   [`crate::writes::purge_welcomes`].
+/// * `mls_commit_log` and `mls_group_info` rows stay; see [`scrub_commit_log`].
 ///
 /// Callers run this AFTER the main transaction commits, for the same reason as
 /// [`purge_conversation_log`].
-pub async fn purge_user_log_rows(log_conn: &Connection, user_id: &str) -> anyhow::Result<()> {
+pub async fn purge_user_log_rows(
+    log_conn: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+) -> anyhow::Result<()> {
+    let uid = || libsql::params![user_id.to_string()];
+    log_conn
+        .execute("DELETE FROM mls_commit_since WHERE user_id = ?1", uid())
+        .await?;
     log_conn
         .execute(
-            "DELETE FROM mls_commit_since WHERE user_id = ?1",
-            libsql::params![user_id.to_string()],
+            "UPDATE mls_welcome SET submitted_by = NULL WHERE submitted_by = ?1",
+            uid(),
         )
         .await?;
+    scrub_commit_log(log_conn, user_id, device_ids).await
+}
+
+/// Blank `user_id` and `device_ids` out of the commit chain and the GroupInfo
+/// rows of conversations that outlive the account.
+///
+/// The rows stay: the chain is shared by every member and a commit removed from
+/// its middle is an epoch gap for all of them (see `EXEMPT_FROM_USER_PURGE`).
+///
+/// What is blanked, and why nothing breaks:
+/// * `sender_id` → `''`. Read back only by `writes::head_commit_sender`, which
+///   compares it to an authenticated (never empty) actor, and echoed in
+///   `CommitWire`, which clients do not consult. The immutability trigger
+///   (log migration 000005) guards the chain identity and payload, not this.
+/// * `added_user_id` / `added_device_ids` → the account and its devices are
+///   dropped from the lists (both NULL once no other user is named). They are a
+///   prefetch hint (`reads::added_identities`) and a re-add hint for the named
+///   device (`readded_epoch` in pollis-core); a deleted account has no device
+///   left to use either.
+/// * `mls_group_info.updated_by_device_id` → `''`; diagnostic only.
+///
+/// Idempotent. Runs on the commit-log DB, via [`purge_user_log_rows`].
+pub async fn scrub_commit_log(
+    conn: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+) -> anyhow::Result<()> {
+    scrub_commit_rows(conn, user_id, device_ids).await?;
+    scrub_group_info(conn, user_id, device_ids).await
+}
+
+/// The `mls_commit_log` half of [`scrub_commit_log`].
+async fn scrub_commit_rows(
+    conn: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE mls_commit_log SET sender_id = '' WHERE sender_id = ?1",
+        libsql::params![user_id.to_string()],
+    )
+    .await?;
+
+    // `added_user_id` is a CSV: match a whole element, never a substring.
+    let mut hits: Vec<(i64, Option<String>, Option<String>)> = Vec::new();
+    {
+        let mut rows = conn
+            .query(
+                "SELECT seq, added_user_id, added_device_ids FROM mls_commit_log \
+                 WHERE instr(',' || replace(added_user_id, ' ', '') || ',', ',' || ?1 || ',') > 0",
+                libsql::params![user_id.to_string()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            hits.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        }
+    }
+    for (seq, users, devices) in hits {
+        let users = csv_without(users.as_deref(), &[user_id.to_string()]);
+        let devices = match users {
+            Some(_) => csv_without(devices.as_deref(), device_ids),
+            None => None,
+        };
+        conn.execute(
+            "UPDATE mls_commit_log SET added_user_id = ?2, added_device_ids = ?3 WHERE seq = ?1",
+            libsql::params![seq, users, devices],
+        )
+        .await?;
+    }
     Ok(())
+}
+
+/// The `mls_group_info` half of [`scrub_commit_log`].
+async fn scrub_group_info(
+    conn: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+) -> anyhow::Result<()> {
+    let mut named: Vec<String> = Vec::with_capacity(device_ids.len() + 1);
+    named.push(user_id.to_string());
+    named.extend(device_ids.iter().cloned());
+    for id in named {
+        conn.execute(
+            "UPDATE mls_group_info SET updated_by_device_id = '' WHERE updated_by_device_id = ?1",
+            libsql::params![id],
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// The main DB's copies of the control-plane tables, from before the commit log
+/// moved to its own DB (#420). That move started the log DB empty and never
+/// dropped these, so a deployment that predates it still holds rows in them
+/// that name accounts. Each statement runs only where its table and column
+/// exist: a main DB created after the split, or a test DB that drops them, has
+/// none. Where the log shares the main DB this repeats
+/// [`purge_user_log_rows`], which is idempotent.
+///
+/// Callers run this AFTER the main transaction commits, like the log purge.
+pub async fn purge_legacy_log_copies(
+    conn: &Connection,
+    user_id: &str,
+    device_ids: &[String],
+) -> anyhow::Result<()> {
+    let uid = || libsql::params![user_id.to_string()];
+    if has_column(conn, "mls_welcome", "recipient_id").await? {
+        conn.execute("DELETE FROM mls_welcome WHERE recipient_id = ?1", uid()).await?;
+    }
+    if has_column(conn, "mls_welcome", "submitted_by").await? {
+        conn.execute(
+            "UPDATE mls_welcome SET submitted_by = NULL WHERE submitted_by = ?1",
+            uid(),
+        )
+        .await?;
+    }
+    if has_column(conn, "mls_commit_since", "user_id").await? {
+        conn.execute("DELETE FROM mls_commit_since WHERE user_id = ?1", uid()).await?;
+    }
+    if has_column(conn, "mls_commit_log", "added_device_ids").await? {
+        scrub_commit_rows(conn, user_id, device_ids).await?;
+    }
+    if has_column(conn, "mls_group_info", "updated_by_device_id").await? {
+        scrub_group_info(conn, user_id, device_ids).await?;
+    }
+    Ok(())
+}
+
+/// Does `table` exist with a column named `column`?
+async fn has_column(conn: &Connection, table: &str, column: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2",
+            libsql::params![table.to_string(), column.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
+/// `csv` with every element in `drop` removed; `None` when nothing is left.
+fn csv_without(csv: Option<&str>, drop: &[String]) -> Option<String> {
+    let kept: Vec<&str> = csv
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty() && !drop.iter().any(|d| d == e))
+        .collect();
+    if kept.is_empty() {
+        None
+    } else {
+        Some(kept.join(","))
+    }
 }
 
 /// Purge one device's commit-log-DB state (revocation, logout).

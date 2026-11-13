@@ -132,11 +132,12 @@ DB, split out in #420 Goal A).
 | Encrypted message envelopes | `message_envelope` | Until every current **live** member device has reported a watermark past the row. **No TTL** (age never deletes); since #720 a device silent past `POLLIS_DS_WATERMARK_STALE_MONTHS` (set to 12) stops pinning, bounded on the device's last **report**, not the message's age. Also removed immediately on user-initiated delete. | `messages.rs` `CLEANUP_*`; #688/#716, #720 |
 | Reactions | `message_reaction` | Life of the account; **explicitly deleted** on account deletion (both the user's own reactions and any reaction to a message that goes with them) | `teardown.rs` `purge_user_rows` / `purge_conversation_rows` |
 | Per-device fetch cursors | `conversation_watermark` | **Indefinite** — advanced, never aged out. Deleted with the device (revoke, logout), with the conversation, and on account deletion. Carries `reported_at` (server-stamped last-report wall-clock, #720), the liveness signal the envelope floor reads. Written only by a current **member**, for its own **signing device**, and only with a canonical UTC RFC 3339 cursor no further ahead of the DS clock than the signature window (`check_cursor_stamp`) — the same bound every client-chosen `message_envelope.sent_at` must meet, since a far-future cursor never rewinds and would black out delivery and then trigger GC | `apply_advance_watermark`; #720; `teardown.rs` |
-| MLS commit history | `mls_commit_log` (log DB) | Pruned to the tier-1 floor (min applied epoch across current member devices, and across removed-but-unrevoked devices that reported within `POLLIS_DS_WATERMARK_STALE_MONTHS`, so a re-added device can replay to its own removal, #1772) with a tier-2 per-conversation hard cap | commit-log retention code + `retention_tests` |
+| MLS commit history | `mls_commit_log` (log DB) | Pruned to the tier-1 floor (min applied epoch across current member devices, and across removed-but-unrevoked devices that reported within `POLLIS_DS_WATERMARK_STALE_MONTHS`, so a re-added device can replay to its own removal, #1772) with a tier-2 per-conversation hard cap. On account deletion the rows of surviving conversations stay, with the account's `sender_id`, `added_user_id` and `added_device_ids` blanked | commit-log retention code + `retention_tests`; `teardown.rs` `scrub_commit_log` |
 | Latest MLS group state | `mls_group_info` | Latest epoch only; overwritten, no history | `000001_commit_log_db.sql` |
 | Per-device commit catch-up | `mls_commit_since` | Upserted monotonically; deleted with the device, with the conversation, and on account deletion. Until 2026-08 nothing ever deleted from it, so it retained a `(conversation, user, device)` triple indefinitely | `000003_mls_commit_since.sql`; `teardown.rs` `purge_user_log_rows` / `purge_device_log_rows` |
 | Welcome messages | `mls_welcome` | Deduplicated per `(conversation_id, recipient_id, recipient_device_id)`; a resend for that tuple replaces the blob and re-arms delivery rather than stacking a row; **explicitly deleted** on account deletion and with the conversation | `migrations-log/000002_mls_welcome_unique_recipient.sql`; `writes.rs` `purge_welcomes`, `teardown.rs` |
 | Key packages | `mls_key_package` | Claimed packages are marked `claimed=1`, not hard-deleted; **explicitly deleted** on account deletion, device revocation and logout | `000000_baseline.sql`, `000010`; `teardown.rs`, `account.rs` |
+| Key-package claim budget | `mls_key_package_claim` (claimer, target account, optional target device, time) | **One hour**, the window the claim budget counts; older rows are deleted by the GC sweep. Also **explicitly deleted** on account deletion, as claimer or as target | `000022_key_package_claim_audit.sql`; `devices.rs` `sweep_key_package_claims`; `teardown.rs` `purge_user_rows` |
 | Accounts | `users` | Life of the account; deleted on account deletion, last in the teardown transaction | `account.rs` `apply_delete_account` |
 | Devices | `user_device` | Revocation writes a `revoked_at` tombstone (the row is retained so revoked devices stop pinning retention and cannot re-authenticate); rows are hard-deleted on logout and on account deletion, together with that device's key packages and fetch cursors | `000004_user_device_revoked_at.sql`; `account.rs` `apply_logout_device` / `apply_revoke_device`, `teardown.rs` |
 | Account identity-key history | `account_key_log` | **Append-only, never deleted.** This is deliberate: it is the client-verifiable record that an account's key did not change behind your back | `000005_account_key_log.sql` |
@@ -176,7 +177,9 @@ Everything a single teardown does on the main DB is one transaction. Two propert
 tests rather than by review (`pollis-delivery/tests/teardown.rs`):
 
 1. **Completeness.** `every_user_scoped_table_is_accounted_for` reads the *live* schema and fails if any
-   table naming a user is neither purged nor listed in `EXEMPT_FROM_USER_PURGE` with a stated reason. A
+   table with a user-id column (by the column names the test lists, such as `user_id`, `sender_id`,
+   `claimer_id`, `target_user_id`, `added_user_id`, `submitted_by`) is neither purged nor listed in
+   `EXEMPT_FROM_USER_PURGE` with a stated reason. A
    new migration that adds a table with a `user_id` and forgets the teardown fails CI at the point it
    lands. (It found one on the first run: `mls_commit_since`, which nothing had ever deleted from.)
 2. **Scoping.** `account_deletion_cannot_reach_another_account` and
@@ -499,8 +502,9 @@ Being specific here is what makes the rest of the document credible:
 2. **Your commits in a conversation that outlives you.** `mls_commit_log` is an append-only MLS epoch
    chain shared by every member. Deleting a departed member's commits from the middle of it would leave
    permanent epoch gaps that stop the *remaining* members from advancing, so those rows stay for as long
-   as the conversation does — and go the moment it is deleted. They carry a commit blob and, since #701,
-   a windowed pseudonym rather than a stable sender id. The baseline schema's
+   as the conversation does — and go the moment it is deleted. Once your account is deleted they carry
+   the commit blob and nothing that names you: the sender, added-account and added-device fields that
+   referred to your account are blanked. The baseline schema's
    `sender_id ... ON DELETE CASCADE` would do the destructive thing here; it is inert because Turso runs
    with foreign keys off, and `teardown.rs` records it as a deliberate exemption so it is never "fixed"
    into firing.

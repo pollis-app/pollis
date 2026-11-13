@@ -20486,17 +20486,17 @@
       "kind": "behaviour",
       "anchors": [
         "pollis-delivery/src/teardown.rs",
+        "pollis-delivery/src/account.rs",
         "pollis-delivery/src/commit.rs",
         "pollis-delivery/src/devices.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/teardown.rs:104",
-        "pollis-delivery/src/commit.rs:247",
-        "pollis-delivery/src/devices.rs:409"
+        "pollis-delivery/src/teardown.rs:97",
+        "pollis-delivery/src/teardown.rs:538",
+        "pollis-delivery/src/teardown.rs:281"
       ],
-      "status": "disputed",
-      "note": "Page lists two things deletion cannot reach (terms.html also says 'its two limits'). Code keeps more on the server after account deletion: mls_commit_log rows with your real sender_id/added_user_id for as long as the conversation lives (exempt by design, pollis-delivery/src/teardown.rs:104; written raw at pollis-delivery/src/commit.rs:247), account_key_log (append-only), and mls_key_package_claim rows naming you as claimer or target, which nothing ever deletes (pollis-delivery/src/devices.rs:409; not in pollis-delivery/src/teardown.rs).",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "verified",
+      "verified_sha": "adb534c44adb06a712a868ef1eb5f2afe2c34172",
       "also_rendered_in": []
     },
     {
@@ -21209,9 +21209,9 @@
       "doc": "docs/metadata-retention-policy.md",
       "locator": {
         "heading": "2.1 Deletion is explicit, because the cascades never fired",
-        "quote": "reads the *live* schema and fails if any table naming a user is neither purged nor listed in `EXEMPT_FROM_USER_PURGE` with a stated reason"
+        "quote": "reads the *live* schema and fails if any table with a user-id column"
       },
-      "claim": "The completeness test fails on any table naming a user that teardown neither purges nor exempts.",
+      "claim": "The completeness test fails on any table with a listed user-id column that teardown neither purges nor exempts.",
       "kind": "security",
       "anchors": [
         "pollis-delivery/tests/teardown.rs",
@@ -21220,13 +21220,12 @@
         "pollis-schema/migrations/000022_key_package_claim_audit.sql"
       ],
       "evidence": [
-        "pollis-delivery/tests/teardown.rs:631",
-        "pollis-schema/migrations/000022_key_package_claim_audit.sql:24",
-        "pollis-delivery/src/devices.rs:409"
+        "pollis-delivery/tests/teardown.rs:734",
+        "pollis-delivery/src/teardown.rs:281",
+        "pollis-delivery/src/devices.rs:368"
       ],
-      "status": "disputed",
-      "note": "Doc says the test catches every table naming a user; the test only recognises a fixed list of column names (USERISH, pollis-delivery/tests/teardown.rs:631-635). mls_key_package_claim (claimer_id, target_user_id, target_device_id, claimed_at; migration 000022) names users through columns outside that list, so it is neither purged nor exempt: rows are inserted on every key-package claim (pollis-delivery/src/devices.rs:409) and nothing deletes them, not by age and not on account deletion, although the budget only reads the last CLAIM_WINDOW_SECS = 3600 (pollis-delivery/src/devices.rs:194). That is a permanent 'who added whom, when' record.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "verified",
+      "verified_sha": "adb534c44adb06a712a868ef1eb5f2afe2c34172",
       "also_rendered_in": []
     },
     {
@@ -21234,21 +21233,21 @@
       "doc": "docs/metadata-retention-policy.md",
       "locator": {
         "heading": "8. What we cannot delete on request",
-        "quote": "They carry a commit blob and, since #701, a windowed pseudonym rather than a stable sender id."
+        "quote": "Once your account is deleted they carry the commit blob and nothing that names you"
       },
-      "claim": "Retained mls_commit_log rows carry a pseudonym, not the real sender id.",
+      "claim": "After account deletion, retained mls_commit_log rows no longer name the account.",
       "kind": "security",
       "anchors": [
-        "pollis-delivery/src/commit.rs",
-        "pollis-schema/migrations/000000_baseline.sql"
+        "pollis-delivery/src/teardown.rs",
+        "pollis-delivery/src/account.rs",
+        "pollis-delivery/src/commit.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/commit.rs:247",
-        "pollis-schema/migrations/000000_baseline.sql:113"
+        "pollis-delivery/src/teardown.rs:538",
+        "pollis-delivery/src/account.rs:776"
       ],
-      "status": "disputed",
-      "note": "Doc says the DS's retained commit rows carry a windowed pseudonym; the DS table stores the committer's real sender_id and, for adds, added_user_id/added_device_ids (pollis-delivery/src/commit.rs:246-247; pollis-schema/migrations/000000_baseline.sql:109-113). #701 pseudonymises only the public ledger leaf (verifiable-log-builder/src/commit_log.rs:69). These rows survive account deletion (exempt, pollis-delivery/src/teardown.rs:104) until pruned below the tier-1 floor or the conversation is deleted.",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "status": "verified",
+      "verified_sha": "adb534c44adb06a712a868ef1eb5f2afe2c34172",
       "also_rendered_in": []
     },
     {
@@ -21270,7 +21269,7 @@
         "pollis-delivery/src/history_transfer.rs:985"
       ],
       "status": "disputed",
-      "note": "The §2 table, which store privacy forms are answered from, omits tables the DS now holds: vault_message / vault_attachment_ref (#107), history_transfer / history_transfer_chunk / history_transfer_budget (#1735, expired by expires_at at pollis-delivery/src/history_transfer.rs:985), read_cursor_sync, pinned_message / pin_keystate, custom_emoji_object, directory_lookup_budget, conversation / conversation_seq, and mls_key_package_claim (never deleted, see policy-retention-08). push_handle is covered in §4.",
+      "note": "The §2 table, which store privacy forms are answered from, omits tables the DS now holds: vault_message / vault_attachment_ref (#107), history_transfer / history_transfer_chunk / history_transfer_budget (#1735, expired by expires_at at pollis-delivery/src/history_transfer.rs:985), read_cursor_sync, pinned_message / pin_keystate, custom_emoji_object, directory_lookup_budget, conversation / conversation_seq. push_handle is covered in §4.",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },

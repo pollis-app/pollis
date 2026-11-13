@@ -967,6 +967,10 @@ target's own exhaustion lock out the honest adders retrying behind it. Nothing i
 recorded on the DS's no-auth path, which has no signed identity to attribute a
 claim to.
 
+Only the last hour (`CLAIM_WINDOW_SECS`) is ever counted, so the GC sweep deletes
+older rows (`devices::sweep_key_package_claims`); account deletion deletes every
+row naming the account as claimer or target.
+
 ### mls_commit_log _(migration 3 + 14)_
 - `seq` INTEGER PK AUTOINCREMENT
 - `conversation_id` TEXT NOT NULL
@@ -1297,7 +1301,10 @@ Rules that matter:
   append-only) and `mls_commit_log` for a *surviving* conversation (deleting a
   departed member's commits gaps the epoch chain for everyone still in it — the
   baseline's `sender_id ... ON DELETE CASCADE` would do exactly that if FKs were
-  ever switched on). `conversation` is append-only by its own design (#880).
+  ever switched on). Those commit rows stay but stop naming the account:
+  `scrub_commit_log` blanks `sender_id`, drops the account and its devices from
+  `added_user_id` / `added_device_ids`, and blanks `mls_group_info.updated_by_device_id`.
+  It runs on the log DB after the main transaction, and `purge_legacy_log_copies` does the same to the main DB's pre-#420 copies of those tables where they still exist. `mls_welcome.submitted_by` naming the account is nulled. `conversation` is append-only by its own design (#880).
 - **Adding a table with a `user_id` means adding it to the teardown.**
   `pollis-delivery/tests/teardown.rs` reads the live schema and fails if a table
   naming a user or a conversation is in neither the purge list nor an exemption

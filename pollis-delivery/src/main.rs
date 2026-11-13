@@ -146,6 +146,14 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
                             Ok(_) => {}
                             Err(e) => tracing::warn!("push-handle sweep failed: {e}"),
                         }
+                        // #847: key-package claim records past the budget window.
+                        match pollis_delivery::devices::sweep_key_package_claims(&conn).await {
+                            Ok(n) if n > 0 => tracing::info!(
+                                "retention sweep: aged out {n} mls_key_package_claim row(s)"
+                            ),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("key-package claim sweep failed: {e}"),
+                        }
                         // #1735: expired history transfers and their sealed chunks.
                         match pollis_delivery::history_transfer::sweep_expired(
                             &conn,

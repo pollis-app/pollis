@@ -32,9 +32,13 @@ const USER_COLUMNS: &[(&str, &str)] = &[
     ("group_member", "user_id"),
     ("message_envelope", "sender_id"),
     ("message_reaction", "user_id"),
+    ("mls_commit_log", "sender_id"),
     ("mls_commit_since", "user_id"),
     ("mls_key_package", "user_id"),
+    ("mls_key_package_claim", "claimer_id"),
+    ("mls_key_package_claim", "target_user_id"),
     ("mls_welcome", "recipient_id"),
+    ("mls_welcome", "submitted_by"),
     ("push_token", "user_id"),
     ("read_cursor_sync", "user_id"),
     ("security_event", "user_id"),
@@ -127,6 +131,14 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
          VALUES ('{u}_kp', '{u}', X'01')"
     )).await;
     exec(c, &format!(
+        "INSERT INTO mls_key_package_claim (id, claimer_id, target_user_id, target_device_id) \
+         VALUES ('{u}_claim_out', '{u}', '{u}_stranger', NULL)"
+    )).await;
+    exec(c, &format!(
+        "INSERT INTO mls_key_package_claim (id, claimer_id, target_user_id, target_device_id) \
+         VALUES ('{u}_claim_in', '{u}_stranger', '{u}', '{u}_dev')"
+    )).await;
+    exec(c, &format!(
         "INSERT INTO user_block (blocker_id, blocked_id) VALUES ('{u}', '{u}_stranger')"
     )).await;
     exec(c, &format!(
@@ -189,6 +201,10 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
          VALUES ('{u}_w', '{cid}', '{u}', X'01')"
     )).await;
     exec(c, &format!(
+        "INSERT INTO mls_welcome (id, conversation_id, recipient_id, welcome_data, submitted_by) \
+         VALUES ('{u}_w_out', '{cid}', '{u}_stranger', X'01', '{u}')"
+    )).await;
+    exec(c, &format!(
         "INSERT INTO mls_commit_since (conversation_id, user_id, device_id, since_epoch) \
          VALUES ('{cid}', '{u}', '{u}_dev', 0)"
     )).await;
@@ -242,23 +258,30 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     }
 }
 
+/// Every step `POST /v1/account/delete` runs, in its order. One DB stands in for
+/// both the main and the log DB here, so the log purge runs on it too.
+async fn delete_account(c: &Connection, user: &str) -> WriteOutcome {
+    let device_ids = pollis_delivery::broker::user_device_ids(c, user).await.unwrap();
+    let (outcome, dead) = apply_delete_account(
+        c,
+        Some(user),
+        &DeleteAccountBody { user_id: Some(user.into()) },
+    )
+    .await
+    .unwrap();
+    pollis_delivery::writes::purge_welcomes(c, user).await.unwrap();
+    pollis_delivery::teardown::purge_user_log_rows(c, user, &device_ids).await.unwrap();
+    pollis_delivery::teardown::purge_conversation_log(c, &dead).await.unwrap();
+    outcome
+}
+
 /// After deleting an account, no table names that user.
 #[tokio::test]
 async fn account_deletion_leaves_no_row_naming_the_user() {
     let c = conn().await;
     seed_user(&c, "victim", "bystander", true).await;
 
-    let (outcome, dead) = apply_delete_account(
-        &c,
-        Some("victim"),
-        &DeleteAccountBody { user_id: Some("victim".into()) },
-    )
-    .await
-    .unwrap();
-    assert!(matches!(outcome, WriteOutcome::Ok));
-    // One DB stands in for the log DB here, so run its purge too.
-    pollis_delivery::writes::purge_welcomes(&c, "victim").await.unwrap();
-    pollis_delivery::teardown::purge_conversation_log(&c, &dead).await.unwrap();
+    assert!(matches!(delete_account(&c, "victim").await, WriteOutcome::Ok));
 
     for (table, col) in USER_COLUMNS {
         let n = count_where(&c, table, col, "victim").await;
@@ -273,17 +296,7 @@ async fn account_deletion_leaves_no_row_naming_the_user_in_surviving_conversatio
     seed_user(&c, "bystander", "victim", true).await;
     seed_user(&c, "victim", "bystander", false).await;
 
-    let (outcome, dead) = apply_delete_account(
-        &c,
-        Some("victim"),
-        &DeleteAccountBody { user_id: Some("victim".into()) },
-    )
-    .await
-    .unwrap();
-    assert!(matches!(outcome, WriteOutcome::Ok));
-    pollis_delivery::writes::purge_welcomes(&c, "victim").await.unwrap();
-    pollis_delivery::teardown::purge_user_log_rows(&c, "victim").await.unwrap();
-    pollis_delivery::teardown::purge_conversation_log(&c, &dead).await.unwrap();
+    assert!(matches!(delete_account(&c, "victim").await, WriteOutcome::Ok));
 
     assert_eq!(count_where(&c, "groups", "id", "victim_g").await, 1);
     assert_eq!(count_where(&c, "dm_channel", "id", "victim_dm").await, 1);
@@ -346,6 +359,103 @@ async fn account_deletion_does_not_gap_a_surviving_conversations_commit_chain() 
     );
 }
 
+/// The surviving chain keeps every commit but no longer names the deleted
+/// account: sender blanked, the account and its devices dropped from the add
+/// lists, other users' entries untouched.
+#[tokio::test]
+async fn account_deletion_blanks_the_account_in_a_surviving_commit_chain() {
+    let c = conn().await;
+    seed_user(&c, "bystander", "victim", false).await;
+    seed_user(&c, "victim", "bystander", false).await;
+    exec(&c, "INSERT INTO user_device (device_id, user_id) VALUES ('victim_dev2', 'victim')").await;
+    // Bystander adds victim alone, then victim and carol together; victim adds carol.
+    exec(&c, "INSERT INTO mls_commit_log \
+              (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+              VALUES ('bystander_c', 1, 'bystander', X'02', 'victim', 'victim_dev,victim_dev2')").await;
+    exec(&c, "INSERT INTO mls_commit_log \
+              (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+              VALUES ('bystander_c', 2, 'bystander', X'03', 'victim,carol', 'victim_dev,carol_dev')").await;
+    exec(&c, "INSERT INTO mls_commit_log \
+              (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+              VALUES ('bystander_c', 3, 'victim', X'04', 'carol', 'carol_dev2')").await;
+    // A user id that merely contains the victim's must not match.
+    exec(&c, "INSERT INTO mls_commit_log \
+              (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+              VALUES ('bystander_c', 4, 'bystander', X'05', 'victim2', 'victim2_dev')").await;
+    exec(&c, "UPDATE mls_group_info SET updated_by_device_id = 'victim_dev2' \
+              WHERE conversation_id = 'bystander_c'").await;
+    exec(&c, "INSERT INTO pin_keystate (conversation_id, wrapped_kpin, nonce, epoch, updated_by_device_id) \
+              VALUES ('bystander_c', X'01', X'02', 1, 'victim_dev')").await;
+    exec(&c, "INSERT INTO file_keystate \
+              (conversation_id, wrapped_keyring, nonce, key_version, epoch, updated_by_device_id) \
+              VALUES ('bystander_c', X'01', X'02', 1, 1, 'victim_dev2')").await;
+
+    assert!(matches!(delete_account(&c, "victim").await, WriteOutcome::Ok));
+
+    for table in ["pin_keystate", "file_keystate"] {
+        let mut rows = c
+            .query(
+                &format!("SELECT updated_by_device_id FROM {table} WHERE conversation_id = 'bystander_c'"),
+                (),
+            )
+            .await
+            .unwrap();
+        let by: String = rows.next().await.unwrap().unwrap().get(0).unwrap();
+        assert_eq!(by, "", "{table} still names a deleted device");
+    }
+
+    let mut rows = c
+        .query(
+            "SELECT epoch, sender_id, added_user_id, added_device_ids FROM mls_commit_log \
+             WHERE conversation_id = 'bystander_c' ORDER BY epoch",
+            (),
+        )
+        .await
+        .unwrap();
+    let mut got: Vec<(i64, String, Option<String>, Option<String>)> = Vec::new();
+    while let Some(r) = rows.next().await.unwrap() {
+        got.push((r.get(0).unwrap(), r.get(1).unwrap(), r.get(2).unwrap(), r.get(3).unwrap()));
+    }
+    let s = |v: &str| Some(v.to_string());
+    assert_eq!(
+        got,
+        vec![
+            (0, "bystander".into(), None, None),
+            (1, "bystander".into(), None, None),
+            (2, "bystander".into(), s("carol"), s("carol_dev")),
+            (3, String::new(), s("carol"), s("carol_dev2")),
+            (4, "bystander".into(), s("victim2"), s("victim2_dev")),
+        ],
+        "every commit stays; only the deleted account's fields change"
+    );
+
+    let mut rows = c
+        .query(
+            "SELECT updated_by_device_id FROM mls_group_info WHERE conversation_id = 'bystander_c'",
+            (),
+        )
+        .await
+        .unwrap();
+    let updated_by: String = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(updated_by, "", "GroupInfo no longer names the deleted account's device");
+}
+
+/// Welcomes the deleted account sent to others stay deliverable, unattributed.
+#[tokio::test]
+async fn account_deletion_unattributes_welcomes_it_sent() {
+    let c = conn().await;
+    seed_user(&c, "victim", "bystander", false).await;
+
+    delete_account(&c, "victim").await;
+
+    let mut rows = c
+        .query("SELECT submitted_by FROM mls_welcome WHERE id = 'victim_w_out'", ())
+        .await
+        .unwrap();
+    let by: Option<String> = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(by, None);
+}
+
 /// The #878 defect class: deleting one account must not reach another's rows.
 #[tokio::test]
 async fn account_deletion_cannot_reach_another_account() {
@@ -361,15 +471,7 @@ async fn account_deletion_cannot_reach_another_account() {
         v
     };
 
-    let (_, dead) = apply_delete_account(
-        &c,
-        Some("victim"),
-        &DeleteAccountBody { user_id: Some("victim".into()) },
-    )
-    .await
-    .unwrap();
-    pollis_delivery::writes::purge_welcomes(&c, "victim").await.unwrap();
-    pollis_delivery::teardown::purge_conversation_log(&c, &dead).await.unwrap();
+    delete_account(&c, "victim").await;
 
     for (i, (table, col)) in USER_COLUMNS.iter().enumerate() {
         let after = count_where(&c, table, col, "bystander").await;
@@ -631,7 +733,8 @@ async fn every_user_scoped_table_is_accounted_for() {
     const USERISH: &[&str] = &[
         "user_id", "sender_id", "recipient_id", "blocker_id", "blocked_id",
         "inviter_id", "invitee_id", "requester_id", "created_by", "owner_id",
-        "reviewed_by", "added_by",
+        "reviewed_by", "added_by", "claimer_id", "target_user_id", "added_user_id",
+        "pinned_by", "reporter_id", "reported_id", "submitted_by",
     ];
 
     let mut tables: Vec<String> = Vec::new();
@@ -748,4 +851,59 @@ async fn purging_twice_is_a_no_op() {
     for (i, (table, _)) in USER_COLUMNS.iter().enumerate() {
         assert_eq!(count(&c, table).await, after_first[i], "{table} changed on the second purge");
     }
+}
+
+/// A main DB as an older deployment has it: the baseline's control-plane tables
+/// still hold rows from before the commit log moved out (#420).
+async fn main_only_conn() -> Connection {
+    let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+    let c = db.connect().unwrap();
+    c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+    pollis_schema::apply::main_db(&c).await.unwrap();
+    c
+}
+
+/// The main DB's pre-split copies are scrubbed of the deleted account.
+#[tokio::test]
+async fn the_main_dbs_legacy_log_copies_stop_naming_the_account() {
+    let c = main_only_conn().await;
+    exec(&c, "INSERT INTO mls_commit_log \
+              (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+              VALUES ('conv', 0, 'victim', X'01', 'victim,carol', 'victim_dev,carol_dev')").await;
+    exec(&c, "INSERT INTO mls_commit_log \
+              (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+              VALUES ('conv', 1, 'carol', X'02', 'victim', 'victim_dev')").await;
+    exec(&c, "INSERT INTO mls_welcome (id, conversation_id, recipient_id, welcome_data) \
+              VALUES ('w1', 'conv', 'victim', X'01')").await;
+    exec(&c, "INSERT INTO mls_group_info (conversation_id, epoch, group_info, updated_by_device_id) \
+              VALUES ('conv', 1, X'01', 'victim_dev')").await;
+
+    let devices = vec!["victim_dev".to_string()];
+    pollis_delivery::teardown::purge_legacy_log_copies(&c, "victim", &devices).await.unwrap();
+
+    assert_eq!(count_where(&c, "mls_commit_log", "sender_id", "victim").await, 0);
+    assert_eq!(count(&c, "mls_commit_log").await, 2, "the rows themselves stay");
+    let mut rows = c
+        .query("SELECT COUNT(*) FROM mls_commit_log \
+                WHERE added_user_id LIKE '%victim%' OR added_device_ids LIKE '%victim%'", ())
+        .await
+        .unwrap();
+    assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 0);
+    assert_eq!(count_where(&c, "mls_welcome", "recipient_id", "victim").await, 0);
+    assert_eq!(count_where(&c, "mls_group_info", "updated_by_device_id", "victim_dev").await, 0);
+    // Idempotent.
+    pollis_delivery::teardown::purge_legacy_log_copies(&c, "victim", &devices).await.unwrap();
+}
+
+/// A main DB without those tables (created after the split, or a test DB that
+/// drops them) is a no-op, not an error.
+#[tokio::test]
+async fn the_legacy_scrub_is_a_no_op_where_the_tables_are_gone() {
+    let c = main_only_conn().await;
+    for t in ["mls_commit_log", "mls_welcome", "mls_group_info"] {
+        exec(&c, &format!("DROP TABLE {t}")).await;
+    }
+    pollis_delivery::teardown::purge_legacy_log_copies(&c, "victim", &["d".to_string()])
+        .await
+        .unwrap();
 }
