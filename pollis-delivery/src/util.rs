@@ -5,6 +5,43 @@
 /// caller here keeps its path.
 pub use pollis_api::redact::redact_ip_literals;
 
+/// Runs one background job at a time in this process, without dropping a
+/// request: a [`SingleFlight::kick`] while the job is running makes the running
+/// one go round again instead of starting a second. Clones share the gate.
+#[derive(Clone, Default)]
+pub struct SingleFlight {
+    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SingleFlight {
+    /// Make sure `job` runs (again) after this call, at most one at a time.
+    pub fn kick<F, Fut>(&self, job: F)
+    where
+        F: Fn() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.pending.store(true, SeqCst);
+        if self.running.swap(true, SeqCst) {
+            return;
+        }
+        let gate = self.clone();
+        tokio::spawn(async move {
+            loop {
+                while gate.pending.swap(false, SeqCst) {
+                    job().await;
+                }
+                gate.running.store(false, SeqCst);
+                // A kick that landed between the last check and the release.
+                if !gate.pending.load(SeqCst) || gate.running.swap(true, SeqCst) {
+                    break;
+                }
+            }
+        });
+    }
+}
+
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

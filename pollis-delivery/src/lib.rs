@@ -109,6 +109,8 @@ pub struct AppState {
     pub client_policy: client_policy::PolicyMirror,
     /// Outcomes of the DS -> LiveKit server-API calls (#1751), behind `GET /v1/ops/livekit`.
     pub livekit_health: livekit::LiveKitHealth,
+    /// One drain of owed commit-log purges at a time (#1883); see [`account::spawn_account_log_purge_drain`].
+    pub log_purge_drain: util::SingleFlight,
 }
 
 impl AppState {
@@ -141,6 +143,7 @@ impl AppState {
             error_log: error_log::ErrorLog::default(),
             client_policy: client_policy::PolicyMirror::default(),
             livekit_health: livekit::LiveKitHealth::default(),
+            log_purge_drain: util::SingleFlight::default(),
         }
     }
 
