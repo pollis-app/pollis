@@ -119,6 +119,11 @@ pollis-api = { path = "../pollis-api" }
 # the leaf-certification tests feed the DS what a client would.
 openmls_basic_credential = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites", "clonable"] }
 
+# cargo-machete matches crate names in source text. `openmls_traits` is declared above only
+# to switch on `draft-ietf-mls-pq-ciphersuites` in openmls's own copy, so no source line names it.
+[package.metadata.cargo-machete]
+ignored = ["openmls_traits"]
+
 # Picks up `[workspace.lints]` from the root Cargo.toml, which declares the
 # `kani` cfg the proof harnesses in this crate are gated on.
 [lints]
