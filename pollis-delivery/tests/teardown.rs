@@ -655,7 +655,8 @@ async fn group_deletion_leaves_no_row_naming_the_group() {
         assert_eq!(n, 0, "{table}.{col} outlived the deleted group's channel ({n} rows)");
     }
     assert_eq!(count_where(&c, "message_reaction", "message_id", "owner_msg").await, 0);
-    assert_eq!(count_where(&c, "attachment_ref", "message_id", "owner_msg").await, 0);
+    // Members keep the deleted group's history, and its files with it (#1881).
+    assert_eq!(count_where(&c, "attachment_ref", "message_id", "owner_msg").await, 1);
     // The redemption row belongs to a user, so it survives with a blanked pointer.
     assert_eq!(count_where(&c, "group_invite_link_redemption", "id", "owner_red").await, 1);
     let mut rows = c
@@ -984,7 +985,8 @@ async fn account_deletion_withdraws_its_unfetched_sealed_envelopes() {
     for id in ["v_msg", "v_receipt", "v_edit"] {
         assert_eq!(count_where(&c, "message_envelope", "id", id).await, 0, "{id} survived");
     }
-    assert_eq!(count_where(&c, "attachment_ref", "message_id", "v_msg").await, 0);
+    // Members who fetched it keep the message, and its file with it (#1881).
+    assert_eq!(count_where(&c, "attachment_ref", "message_id", "v_msg").await, 1);
     assert_eq!(count_where(&c, "message_reaction", "message_id", "v_msg").await, 0);
     assert_eq!(
         count_where(&c, "message_envelope", "id", "v_wrong").await,

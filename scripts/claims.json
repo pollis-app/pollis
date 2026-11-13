@@ -1462,14 +1462,15 @@
       "kind": "behaviour",
       "anchors": [
         "pollis-schema/migrations/000012_attachment_ref.sql",
-        "pollis-delivery/src/teardown.rs"
+        "pollis-delivery/src/messages.rs"
       ],
       "evidence": [
         "pollis-schema/migrations/000012_attachment_ref.sql:47",
-        "pollis-delivery/src/teardown.rs:198"
+        "pollis-delivery/src/messages.rs:1568",
+        "pollis-delivery/src/messages.rs:1657"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "74110308b27b4246b4f183f2df63d0034425eec2",
       "also_rendered_in": []
     },
     {
@@ -8838,6 +8839,30 @@
       "also_rendered_in": []
     },
     {
+      "id": "wp-s9-19",
+      "doc": "docs/security-whitepaper.md",
+      "locator": {
+        "heading": "9.2 Visibility on R2 and the DS",
+        "quote": "An object is deleted once every message and Vault entry that refers to it has been deleted."
+      },
+      "claim": "An attachment object is deleted from R2 and the DS only after every message and Vault entry referring to it is deleted; envelope collection releases nothing; the DS keeps the row until the R2 delete succeeds.",
+      "kind": "behaviour",
+      "anchors": [
+        "pollis-delivery/src/messages.rs",
+        "pollis-delivery/src/teardown.rs",
+        "pollis-delivery/src/vault.rs",
+        "pollis-schema/migrations/000050_attachment_reclaim.sql"
+      ],
+      "evidence": [
+        "pollis-delivery/src/messages.rs:1568",
+        "pollis-delivery/src/messages.rs:1657",
+        "pollis-schema/migrations/000050_attachment_reclaim.sql:1"
+      ],
+      "status": "verified",
+      "verified_sha": "74110308b27b4246b4f183f2df63d0034425eec2",
+      "also_rendered_in": []
+    },
+    {
       "id": "wp-s9-13",
       "doc": "docs/security-whitepaper.md",
       "locator": {
@@ -16054,11 +16079,11 @@
         "pollis-delivery/src/messages.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:15",
-        "pollis-delivery/src/messages.rs:1441"
+        "pollis-delivery/src/messages.rs:1486",
+        "pollis-delivery/src/messages.rs:1568"
       ],
       "status": "verified",
-      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
+      "verified_sha": "74110308b27b4246b4f183f2df63d0034425eec2",
       "also_rendered_in": []
     },
     {

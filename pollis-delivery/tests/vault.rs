@@ -80,11 +80,13 @@ async fn ref_count(db: &common::TempDb, entry_id: &str) -> i64 {
     rows.next().await.unwrap().unwrap().get(0).unwrap()
 }
 
+/// Live: present and not released. A released row stays only until the DS
+/// has deleted its R2 object (#1881).
 async fn object_exists(db: &common::TempDb, hash: &str) -> bool {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
-            "SELECT 1 FROM attachment_object WHERE content_hash = ?1",
+            "SELECT 1 FROM attachment_object WHERE content_hash = ?1 AND reclaim_state IS NULL",
             libsql::params![hash],
         )
         .await

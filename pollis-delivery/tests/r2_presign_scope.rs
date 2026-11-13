@@ -270,9 +270,27 @@ async fn a_referenced_media_object_can_be_neither_overwritten_nor_deleted() {
         "deleting a live attachment 404s it for every conversation holding it"
     );
 
-    // An unreferenced object is still collectable (the cleanup path).
+    // Attachments are deleted by the DS alone (#1881): an unreferenced or
+    // unknown one gets no client DELETE either, and a known file id is never
+    // overwritten, referenced or not.
     assert_eq!(
         presign(&db, "alice", "delete", &format!("media/{HASH_B}.enc"), None).await,
+        StatusCode::FORBIDDEN
+    );
+    conn.execute(
+        &format!("DELETE FROM attachment_ref WHERE content_hash = '{HASH_A}'"),
+        (),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        presign(&db, "alice", "put", &key, Some(1024)).await,
+        StatusCode::FORBIDDEN,
+        "an unreferenced file may still be in someone's history"
+    );
+    // A fresh file id is uploadable.
+    assert_eq!(
+        presign(&db, "alice", "put", &format!("media/{HASH_B}.enc"), Some(1024)).await,
         StatusCode::OK
     );
 }

@@ -874,25 +874,20 @@ async fn conversation_recipients(
     conversation_id: &str,
     sender_id: &str,
 ) -> anyhow::Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT user_id FROM dm_channel_member \
-             WHERE dm_channel_id = ?1 AND user_id <> ?2 \
-             UNION \
-             SELECT user_id FROM group_member \
-             WHERE group_id = ?1 AND user_id <> ?2 \
-             UNION \
-             SELECT gm.user_id FROM channels c \
-             JOIN group_member gm ON gm.group_id = c.group_id \
-             WHERE c.id = ?1 AND gm.user_id <> ?2",
-            libsql::params![conversation_id.to_string(), sender_id.to_string()],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
+    crate::util::query_strings(
+        conn,
+        "SELECT user_id FROM dm_channel_member \
+         WHERE dm_channel_id = ?1 AND user_id <> ?2 \
+         UNION \
+         SELECT user_id FROM group_member \
+         WHERE group_id = ?1 AND user_id <> ?2 \
+         UNION \
+         SELECT gm.user_id FROM channels c \
+         JOIN group_member gm ON gm.group_id = c.group_id \
+         WHERE c.id = ?1 AND gm.user_id <> ?2",
+        libsql::params![conversation_id.to_string(), sender_id.to_string()],
+    )
+    .await
 }
 
 /// What a client registered it can do with a push (#1599), as stored in `push_token.caps`.

@@ -106,7 +106,7 @@ async fn a_hung_livekit_returns_504_instead_of_hanging_the_handler() {
 /// Every upstream variant must carry a sane deadline.
 #[test]
 fn every_upstream_declares_a_sane_deadline() {
-    for upstream in [Upstream::LiveKit, Upstream::Resend, Upstream::ExpoPush, Upstream::ClientPolicy] {
+    for upstream in [Upstream::LiveKit, Upstream::Resend, Upstream::ExpoPush, Upstream::ClientPolicy, Upstream::R2] {
         let t = upstream.timeout();
         assert!(
             t >= Duration::from_secs(1),

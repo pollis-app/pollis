@@ -42,6 +42,20 @@ impl SingleFlight {
     }
 }
 
+/// Every row of a query whose first column is `TEXT`, in order.
+pub async fn query_strings(
+    conn: &libsql::Connection,
+    sql: &str,
+    params: impl libsql::params::IntoParams,
+) -> anyhow::Result<Vec<String>> {
+    let mut rows = conn.query(sql, params).await?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        out.push(row.get::<String>(0)?);
+    }
+    Ok(out)
+}
+
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -64,6 +78,9 @@ pub enum Upstream {
     ExpoPush,
     /// The published client policy on the CDN (#1611); refreshed in the background.
     ClientPolicy,
+    /// R2's S3 API, for the object deletes of attachment reclaim (#1881); a
+    /// background pass, retried on the next one.
+    R2,
 }
 
 impl Upstream {
@@ -77,6 +94,7 @@ impl Upstream {
             Upstream::Resend => 10,
             Upstream::ExpoPush => 5,
             Upstream::ClientPolicy => 5,
+            Upstream::R2 => 10,
         })
     }
 
@@ -87,6 +105,7 @@ impl Upstream {
             Upstream::Resend => "resend",
             Upstream::ExpoPush => "expo-push",
             Upstream::ClientPolicy => "client-policy",
+            Upstream::R2 => "r2",
         }
     }
 }
@@ -100,6 +119,11 @@ pub fn http_post(upstream: Upstream, url: &str) -> reqwest::RequestBuilder {
 /// [`http_post`]'s GET twin, with the same mandatory deadline.
 pub fn http_get(upstream: Upstream, url: &str) -> reqwest::RequestBuilder {
     http_client().get(url).timeout(upstream.timeout())
+}
+
+/// [`http_post`]'s DELETE twin, with the same mandatory deadline.
+pub fn http_delete(upstream: Upstream, url: &str) -> reqwest::RequestBuilder {
+    http_client().delete(url).timeout(upstream.timeout())
 }
 
 /// The shared outbound HTTP client. **Private** — go through [`http_post`], which

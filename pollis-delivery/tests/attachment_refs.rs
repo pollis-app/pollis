@@ -28,16 +28,57 @@ async fn add_envelope(db: &Db, msg: &str) {
         .execute(
             // Every NOT NULL column is supplied, or `OR IGNORE` silently inserts nothing.
             "INSERT OR IGNORE INTO message_envelope \
-               (id, conversation_id, sender_id, ciphertext, sent_at) \
-             VALUES (?1, 'conv', 'sender', 'ct', '2026-01-01T00:00:00Z')",
-            libsql::params![msg.to_string()],
+               (id, conversation_id, sender_id, ciphertext, sent_at, delete_token_hash) \
+             VALUES (?1, 'conv', 'sender', 'ct', '2026-01-01T00:00:00Z', ?2)",
+            libsql::params![msg.to_string(), capability_hash(msg)],
         )
         .await
         .unwrap();
 }
 
-/// The only way a reference is released.
+/// `SHA-256(token)`, base64: the stored form of message `msg`'s capability (#1086).
+fn capability_hash(msg: &str) -> String {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+    base64::engine::general_purpose::STANDARD.encode(Sha256::digest(token_of(msg).as_bytes()))
+}
+
+fn token_of(msg: &str) -> String {
+    format!("tok-{msg}")
+}
+
+/// The author deletes the message for everyone: the only way a reference is
+/// released (#1881). Collecting the envelope (GC, retention, teardown) is not.
 async fn delete_envelope(db: &Db, msg: &str) {
+    let conn = db.conn().await.unwrap();
+    let sender: String = {
+        let mut rows = conn
+            .query(
+                "SELECT sender_id FROM message_envelope WHERE id = ?1",
+                libsql::params![msg.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().expect("envelope").get(0).unwrap()
+    };
+    let out = pollis_delivery::messages::apply_delete_message(
+        &conn,
+        None,
+        &pollis_delivery::messages::DeleteMessageBody {
+            message_id: msg.into(),
+            conversation_id: "conv".into(),
+            msg_sender_id: Some(sender.clone()),
+            actor_id: Some(sender),
+            delete_token: Some(token_of(msg)),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+}
+
+/// Envelope GC's effect: the envelope goes, the message stays in history.
+async fn collect_envelope(db: &Db, msg: &str) {
     db.conn().await
         .unwrap()
         .execute(
@@ -74,11 +115,13 @@ async fn release_ref(db: &Db, hash: &str, msg: &str) {
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
+/// The object is live: its row exists and no delete has released it. A
+/// released row stays only until the DS has deleted its R2 object (#1881).
 async fn object_exists(db: &Db, hash: &str) -> bool {
     let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
-            "SELECT 1 FROM attachment_object WHERE content_hash = ?1",
+            "SELECT 1 FROM attachment_object WHERE content_hash = ?1 AND reclaim_state IS NULL",
             libsql::params![hash.to_string()],
         )
         .await
@@ -177,21 +220,18 @@ async fn a_forged_attachment_delete_cannot_release_a_live_reference() {
     );
 }
 
-/// Deleting the envelope alone releases the reference (GC path is tested in `messages.rs`).
+/// Collecting the envelope (envelope GC) leaves the message in its recipients'
+/// history, so the reference stays; the author's delete releases it (#1881).
 #[tokio::test]
-async fn a_reference_cannot_outlive_its_message() {
+async fn a_reference_outlives_its_envelope_until_the_message_is_deleted() {
     let db = fresh().await;
     let hash = "gone";
     register_ref(&db, hash, "media/gone/f.enc", "m1").await;
-    assert!(referenced(&db, hash).await, "referenced while m1 lives");
-
-    delete_envelope(&db, "m1").await;
+    collect_envelope(&db, "m1").await;
     assert!(
-        !referenced(&db, hash).await,
-        "with m1's envelope gone the reference no longer counts — a reference must \
-         not outlive its message (#690 Blocking 2)"
+        referenced(&db, hash).await,
+        "a delivered message still shows its file after GC collects the envelope"
     );
-
     apply_delete_attachment(
         &db.conn().await.unwrap(),
         Some("u1"),
@@ -199,7 +239,7 @@ async fn a_reference_cannot_outlive_its_message() {
     )
     .await
     .unwrap();
-    assert!(!object_exists(&db, hash).await, "the orphaned object is collectable");
+    assert!(object_exists(&db, hash).await, "the collect must not take it either");
 }
 
 /// A pre-#690 delete with no `message_id` releases nothing and stays conditional.
@@ -238,8 +278,9 @@ async fn old_client_delete_cannot_strand_a_referenced_object() {
     .await
     .unwrap();
     assert!(
-        !object_exists(&db, "legacy").await,
-        "a zero-reference legacy row stays collectable — no worse than today"
+        object_exists(&db, "legacy").await,
+        "only a delete releases a file (#1881): an unreferenced row no delete \
+         released may still be in someone's history, so the collect keeps it"
     );
 }
 
@@ -293,9 +334,10 @@ async fn r2_presign_delete_is_refused_while_referenced() {
     release_ref(&db, "hhhh", "m_q").await;
     assert_eq!(
         presign_delete(&router, key).await,
-        StatusCode::OK,
-        "with no reference left the delete presign must be minted"
+        StatusCode::FORBIDDEN,
+        "the DS deletes attachments itself (#1881); a client never gets a delete"
     );
+    assert!(!object_exists(&db, "hhhh").await, "released for the DS to reclaim");
 }
 
 /// Non-media keys pass the gate so avatar/icon cleanup keeps working.
@@ -505,9 +547,9 @@ async fn add_envelope_from(db: &Db, msg: &str, sender: &str) {
         .unwrap()
         .execute(
             "INSERT OR IGNORE INTO message_envelope \
-               (id, conversation_id, sender_id, ciphertext, sent_at) \
-             VALUES (?1, 'conv', ?2, 'ct', '2026-01-01T00:00:00Z')",
-            libsql::params![msg.to_string(), sender.to_string()],
+               (id, conversation_id, sender_id, ciphertext, sent_at, delete_token_hash) \
+             VALUES (?1, 'conv', ?2, 'ct', '2026-01-01T00:00:00Z', ?3)",
+            libsql::params![msg.to_string(), sender.to_string(), capability_hash(msg)],
         )
         .await
         .unwrap();
@@ -586,11 +628,11 @@ async fn a_second_senders_attachment_survives_the_first_senders_delete() {
     delete_envelope(&db, "m-bob").await;
     assert_eq!(
         presign_delete_as(&router, &key, "alice").await,
-        StatusCode::OK,
-        "with the last reference gone the delete presign must be minted"
+        StatusCode::FORBIDDEN,
+        "the DS deletes attachments itself (#1881); a client never gets a delete"
     );
     collect_as(&db, &hash, "alice").await;
-    assert!(!object_exists(&db, &hash).await, "the unreferenced object is collected");
+    assert!(!object_exists(&db, &hash).await, "released for the DS to reclaim");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -640,7 +682,7 @@ async fn a_senders_own_second_message_still_blocks_their_delete() {
 
     delete_envelope(&db, "m-two").await;
     collect_as(&db, &hash, "alice").await;
-    assert!(!object_exists(&db, &hash).await, "with her last reference gone it collects");
+    assert!(!object_exists(&db, &hash).await, "with her last reference gone it is released");
 }
 
 /// Migration 000031's attribution columns are dead (000032): never written.

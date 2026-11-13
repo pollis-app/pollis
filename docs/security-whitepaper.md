@@ -579,6 +579,8 @@ Source: `pollis-core/src/commands/file_keys.rs`, `r2.rs`; DS side `pollis-delive
 
 R2 sees ciphertext, a random object name, the size and the upload time. The DS additionally holds the wrapped ring (`file_keystate`), its length, and the `(file id, message_id)` registrations it uses to reference-count objects (`attachment_object`, `attachment_ref`, `vault_attachment_ref`). None of that is key material: the file id is only an HKDF salt and the ring key never leaves members' devices unwrapped. Neither R2 nor the DS can decrypt a file. Because names are random, there is no confirmation-of-file attack and no cross-conversation linkage of identical content.
 
+An object is deleted once every message and Vault entry that refers to it has been deleted. Removing an envelope from the DS (after delivery, on account deletion, or with a deleted conversation) does not count, because members keep those messages and fetch their files when they open them. When the last reference goes, the DS deletes the object from R2 and keeps its record of the object until R2 confirms the delete (`pollis-delivery/src/messages.rs`, `reclaim_released_attachments`).
+
 ### 9.3 R2 transport
 
 **The client holds no R2 credentials.** It requests a short-lived presigned URL from the DS (`POST /v1/r2/presign`, `r2.rs::presign_r2`) and then does a plain HTTPS `PUT`/`GET`/`DELETE`. SigV4 signing happens in the DS, which holds `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` (`pollis-delivery/src/broker.rs`). Only `R2_S3_ENDPOINT` and `R2_PUBLIC_URL`, both public, are compiled into the client.

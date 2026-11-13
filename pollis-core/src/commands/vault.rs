@@ -484,11 +484,9 @@ async fn release_vault_file(
         content_hash: att.content_hash.clone(),
         message_id: None,
     };
+    // The DS removes the object and its row; the client never deletes it (#1881).
     if let Err(e) = super::mls::ds_post_ok(state, &collect).await {
-        crate::diag!("[vault] failed to collect attachment row {}: {e}", att.content_hash);
-    }
-    if let Err(e) = super::r2::delete_r2_object(state, &att.r2_key).await {
-        crate::diag!("[vault] failed to delete object {}: {e}", att.r2_key);
+        crate::diag!("[vault] failed to ask the DS to collect attachment {}: {e}", att.content_hash);
     }
     super::r2::evict_cached_file_for_user(user_id, &att.content_hash);
 }
