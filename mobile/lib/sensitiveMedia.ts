@@ -15,3 +15,13 @@ export function isCovered(attachment: MessageAttachment, revealed: boolean): boo
 export function tileTap(attachment: MessageAttachment, revealed: boolean): "reveal" | "open" {
   return isCovered(attachment, revealed) ? "reveal" : "open";
 }
+
+/** The eye on a revealed tile. */
+export function sensitiveHideTestID(attachmentId: string): string {
+  return `btn-sensitive-hide-${attachmentId}`;
+}
+
+/** The capsule around that eye. Its id keeps the eye reachable on iOS (see `AttachmentToolbar`). */
+export function sensitiveToolbarTestID(attachmentId: string): string {
+  return `toolbar-sensitive-${attachmentId}`;
+}

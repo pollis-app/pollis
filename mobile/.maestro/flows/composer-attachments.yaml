@@ -33,11 +33,10 @@ tags:
 - inputText: "E2E Composer Previews"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Composer Previews, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Composer Previews"
 - tapOn:
     text: "General"
     optional: true
@@ -145,7 +144,7 @@ tags:
 - extendedWaitUntil:
     notVisible:
       id: "row-message-pending-.*"
-    timeout: 120000
+    timeout: 150000
 - tapOn:
     id: "btn-attach"
 - waitForAnimationToEnd:

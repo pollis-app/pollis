@@ -38,11 +38,10 @@ tags:
 - inputText: "E2E iPad Group"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E iPad Group, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E iPad Group"
 - assertVisible:
     id: "panel-group"
 - extendedWaitUntil:

@@ -1582,6 +1582,14 @@ vault render offline. Deliberately NOT named `vault_message`: local and remote
 table names stay disjoint so the `no_client_side_remote_writes` guard can tell
 the two apart by name alone.
 
+### video_poster_cache _(local cache, #1894)_
+- `content_hash` TEXT PK _(the attachment's `_att` `hash`)_, `jpeg` TEXT _(base64, ≤ 16384 chars = `POSTER_MAX_JPEG_BYTES`, or NULL)_, `blurhash` TEXT NOT NULL, `width` / `height` INTEGER NOT NULL CHECK > 0, `created_at` TEXT
+
+The poster this device decoded for a video whose sender sent no `pv` (a build
+older than #1837), bounded by `poster::from_frame_b64`, so later renders read it
+instead of fetching and decoding the video again. Never written for a video that
+has `pv`, never sent anywhere; goes with the database on a wipe or reset.
+
 ### user_cache
 - `id` TEXT PK
 - `username` TEXT NOT NULL

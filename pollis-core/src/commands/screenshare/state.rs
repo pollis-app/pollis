@@ -56,6 +56,9 @@ pub struct ScreenShareState {
     /// Per-track demand from the renderer's tiles (`wants.rs`), local preview keys included.
     pub video_wants: std::collections::HashMap<String, super::wants::WantsTx>,
 
+    /// The outgoing share's height ceiling; the running pump holds a clone (#1902).
+    pub ceiling: super::codec::VideoCeiling,
+
     /// Bumped by every start and every effective stop; a start re-checks it after each await
     /// so a stop that lands mid-handshake cannot be followed by a publish with no capture.
     pub session_generation: u64,
@@ -92,6 +95,7 @@ impl ScreenShareState {
             remote_drain_tasks: std::collections::HashMap::new(),
             remote_publications: std::collections::HashMap::new(),
             video_wants: std::collections::HashMap::new(),
+            ceiling: super::codec::VideoCeiling::default(),
             session_generation: 0,
         }
     }

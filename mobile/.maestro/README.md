@@ -532,6 +532,12 @@ Layout changes that flows depend on (see `SELECTORS.md` for the ids):
   Creating a group (`btn-submit-group`) also lands here, with the new group
   selected: wait for `btn-group-menu` with text `"<name>, .*"` (its label is
   "<name>, group menu…") and `panel-group` — there is no back step.
+- **Waits against the dev DS (#1893):** each database query costs about
+  150 ms there, so creating a group takes 15 to 25 s on a phone and a new
+  group's first send can stay "sending" for more than 30 s. Wait for a new
+  group with `subflows/group-created.yaml` (`GROUP: "<name>"`, up to 90 s) and
+  for a first send with `subflows/message-settled.yaml` (up to 150 s), not
+  with a wait of your own: both end as soon as the app is ready.
 - **iPad (regular width):** Groups/Direct are two-pane; a conversation opens
   in the right pane (`screen-chat`, no `btn-back`) and the pages it opens
   (info, members, settings, thread, profile) push inside that pane. Flows that

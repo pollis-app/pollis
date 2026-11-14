@@ -60,10 +60,11 @@ tags:
 - takeScreenshot: tour-05-auth-pin
 - runFlow: ../subflows/enter-pin.yaml
 - runFlow: ../subflows/enter-pin.yaml
+# Key generation can outlast 15 s; subflows/sign-in.yaml allows the same 40 s.
 - extendedWaitUntil:
     visible:
       id: "screen-auth-emergency-kit"
-    timeout: 15000
+    timeout: 40000
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
@@ -77,13 +78,24 @@ tags:
           id: "toggle-recovery-ack"
       - tapOn:
           id: "btn-continue"
+# The emergency kit's Continue pushes away with an animation, and its own
+# btn-continue is on screen until that ends. Tapping "whichever btn-continue is
+# visible" matched the outgoing button and the tap landed after the tabs had
+# appeared: on iPad the bottom centre of the tab bar is the Link shortcut, so
+# the tour ended on Scan to sign in a device (#1896). Let the push finish, and
+# tap only when the initializing screen itself is showing.
+- waitForAnimationToEnd:
+    timeout: 5000
 - runFlow:
     when:
       visible:
-        id: "btn-continue"
+        id: "screen-auth-initializing"
     commands:
+      # optional: the screen moves on by itself once setup is done, and a
+      # button that has already gone is not a failed sign-in.
       - tapOn:
           id: "btn-continue"
+          optional: true
 - extendedWaitUntil:
     visible:
       id: "tab-groups"
@@ -144,11 +156,10 @@ tags:
     id: "btn-submit-group"
 # Creating lands on the Groups tab with the new group selected: tour-12 is
 # that tab's pill strip + the group's channel panel (no standalone group page).
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "Design Team, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "Design Team"
 - assertVisible:
     id: "panel-group"
 - waitForAnimationToEnd:
@@ -196,11 +207,7 @@ tags:
 # see messaging.yaml), and a pending row has no long-press action, so a long
 # press made too early does nothing. Let it settle, then use the retrying
 # subflow, which waits for the sheet's Edit row.
-- extendedWaitUntil:
-    visible:
-      id: "__never_matches__"
-    timeout: 30000
-    optional: true
+- runFlow: ../subflows/message-settled.yaml
 - runFlow: ../subflows/long-press-message.yaml
 - waitForAnimationToEnd:
     timeout: 3000

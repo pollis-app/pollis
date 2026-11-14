@@ -215,3 +215,64 @@ mod camera {
         assert!(pid_alive(new_pid));
     }
 }
+
+/// #1902: the resolution commands move the ceiling the running pump reads, with no restart.
+mod live_ceiling {
+    use super::*;
+    use crate::commands::camera;
+
+    #[tokio::test]
+    async fn the_share_command_moves_the_ceiling_a_running_pump_holds() {
+        let state = test_state();
+        let pump_side = state.screenshare.lock().await.ceiling.clone();
+        super::super::set_screen_share_max_height(&state, Some(720))
+            .await
+            .unwrap();
+        assert_eq!(pump_side.get(), Some(720));
+        assert_eq!(pump_side.fit(1920, 1080), Some((1280, 720)));
+        super::super::set_screen_share_max_height(&state, Some(0))
+            .await
+            .unwrap();
+        assert_eq!(pump_side.get(), None);
+    }
+
+    #[tokio::test]
+    async fn the_camera_command_moves_the_ceiling_a_running_capture_holds() {
+        let state = test_state();
+        let capture_side = state.camera.lock().await.ceiling.clone();
+        camera::set_camera_max_height(&state, Some(360)).await.unwrap();
+        assert_eq!(capture_side.fit(1280, 720), Some((640, 360)));
+        camera::set_camera_max_height(&state, None).await.unwrap();
+        assert_eq!(capture_side.fit(1280, 720), None);
+    }
+
+    /// macOS sizes the capture in SCK, so the helper is told too: a raise needs more pixels
+    /// than SCK was delivering.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn a_live_share_tells_the_macos_helper() {
+        let state = test_state();
+        let (parent, helper) = tokio::net::UnixStream::pair().expect("socketpair");
+        let (_parent_read, parent_write) = parent.into_split();
+        state.screenshare.lock().await.local_writer = Some(parent_write);
+        super::super::set_screen_share_max_height(&state, Some(1440))
+            .await
+            .unwrap();
+        let mut helper = tokio::io::BufReader::new(helper);
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            pollis_capture_proto::read_msg(&mut helper),
+        )
+        .await
+        .expect("message in time")
+        .expect("read")
+        .expect("not EOF");
+        assert!(
+            matches!(
+                msg,
+                pollis_capture_proto::CaptureMsg::SetMaxHeight { max_height: 1440 }
+            ),
+            "{msg:?}"
+        );
+    }
+}

@@ -24,11 +24,10 @@ use super::{
     codec::{pick_screenshare_codec, resolve_screenshare_encoding, ShareLimits},
     fail_capture,
     helper_subprocess::spawn_and_accept_helper,
-    pump::{FrameIn, LocalVideoPump, PumpHandle},
+    pump::{share_pump, FrameIn, PumpHandle},
     self_echo::SelfEchoCanceller,
     stop::{stop_screen_share, stop_screen_share_if},
-    wants::{wants_channel, PreviewMirror},
-    ScreenShareEvent, LOCAL_PREVIEW_KEY,
+    ScreenShareEvent,
 };
 
 /// macOS: spawn the helper to enumerate sources and park it for the pick.
@@ -42,7 +41,7 @@ pub async fn enumerate_screen_sources(
     cancel_screen_share_picker(state).await.ok();
 
     // Video-only, unbounded at spawn: macOS gets the audio choice and the limits in `Select`.
-    let mut session = spawn_and_accept_helper(state, false, None).await?;
+    let mut session = spawn_and_accept_helper(state, false, 0).await?;
     let msg = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         read_msg(&mut session.reader),
@@ -119,8 +118,9 @@ enum Handshake {
 }
 
 /// `with_audio` is the source of truth (macOS: on `Selection`; Linux: spawn flag).
-/// `max_height` is the "share resolution" setting (`None`/`0` = source); with the fps it
-/// bounds the capture itself, not only the publish.
+/// `max_height` is the "share resolution" setting (`None`/`0` = source). On macOS SCK
+/// captures at it; on Linux the pump scales to it. Either way it can change mid-share
+/// through [`super::set_screen_share_max_height`].
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     selection: Option<pollis_capture_proto::Selection>,
@@ -156,14 +156,16 @@ pub async fn start_screen_share(
         }
     }
 
-    // Reuse a parked picker session (macOS) or spawn fresh (Linux).
+    // Reuse a parked picker session (macOS) or spawn fresh (Linux). The ceiling is set
+    // first, so a live change made while the helper negotiates is not overwritten.
     let parked = {
         let mut ss = state.screenshare.lock().await;
+        ss.ceiling.set(limits.max_height);
         ss.picker_session.take()
     };
     let mut session = match parked {
         Some(s) => s,
-        None => spawn_and_accept_helper(state, with_audio, Some(capture_limits)).await?,
+        None => spawn_and_accept_helper(state, with_audio, capture_limits.max_fps).await?,
     };
 
     // Stamp the audio decision and the limits onto the selection for the parked macOS helper.
@@ -299,13 +301,7 @@ pub async fn start_screen_share(
     // remote tiles, sized and paced by what its own tile reports.
     let pump = {
         let mut ss = state.screenshare.lock().await;
-        LocalVideoPump::new(
-            Some(source.clone()),
-            limits,
-            PreviewMirror::new(wants_channel(&mut ss, LOCAL_PREVIEW_KEY)),
-            LOCAL_PREVIEW_KEY,
-            Arc::clone(&state.screenshare_frame_tx),
-        )
+        share_pump(state, &mut ss, source.clone(), limits.max_fps)
     };
     let state_for_task = Arc::clone(state);
     let room_for_task = room.clone();
@@ -409,8 +405,9 @@ pub async fn start_screen_share(
                 Ok(Some(CaptureMsg::Sources(_)))
                 | Ok(Some(CaptureMsg::Select(_)))
                 | Ok(Some(CaptureMsg::Cameras(_)))
-                | Ok(Some(CaptureMsg::SelectCamera(_))) => {
-                    // Picker-handshake only; ignore.
+                | Ok(Some(CaptureMsg::SelectCamera(_)))
+                | Ok(Some(CaptureMsg::SetMaxHeight { .. })) => {
+                    // Picker handshake, or parent → helper only; ignore.
                 }
                 Ok(Some(CaptureMsg::Error { message })) => {
                     // Audio loss keeps the video share: drop the pump, unpublish, disarm tap (#1040).
@@ -531,7 +528,8 @@ where
                 CaptureMsg::Sources(_)
                 | CaptureMsg::Select(_)
                 | CaptureMsg::Cameras(_)
-                | CaptureMsg::SelectCamera(_),
+                | CaptureMsg::SelectCamera(_)
+                | CaptureMsg::SetMaxHeight { .. },
             )) => {
                 skipped += 1;
                 crate::diag!(

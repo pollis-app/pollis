@@ -113,11 +113,10 @@ tags:
 - inputText: "E2E Photo Group"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Photo Group, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Photo Group"
 - tapOn:
     text: "General"
     optional: true
@@ -136,7 +135,7 @@ tags:
 - extendedWaitUntil:
     notVisible:
       id: "row-message-pending-.*"
-    timeout: 120000
+    timeout: 150000
 
 # Cold restart: the picture is on disk, so it draws without waiting on the network.
 - stopApp

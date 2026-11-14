@@ -71,6 +71,16 @@ pub async fn subscribe_camera_events(
     Ok(())
 }
 
+/// The camera resolution setting, changed live (#1902): the running capture scales its
+/// next frame to the new ceiling, with no republish. `None`/`0` = the camera's own size.
+/// Also holds with no camera running; `start_camera` carries its own value.
+pub async fn set_camera_max_height(state: &Arc<AppState>, max_height: Option<u32>) -> Result<()> {
+    let cam = state.camera.lock().await;
+    cam.ceiling.set(max_height);
+    crate::diag!("[camera] ceiling now {:?}", cam.ceiling.get());
+    Ok(())
+}
+
 /// Log the cause, emit `LocalError` and return a human error. Not for user cancels.
 #[cfg_attr(
     not(any(target_os = "macos", target_os = "linux", target_os = "windows")),

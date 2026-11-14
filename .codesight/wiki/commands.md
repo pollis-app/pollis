@@ -673,9 +673,9 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 ## screenshare (`commands/screenshare/`) and camera (`commands/camera/`)
 Capture, publish and the remote drain are described in [capture-split.md](./capture-split.md); the frame WebSocket in [media-server.md](./media-server.md). Both lifecycles carry a **session token** (`ScreenShareState::begin_session` / `CameraState::begin_session`): a start re-checks it after every await, so a stop that lands during the helper handshake or the publish ends the start quietly instead of leaving a published track with no capture behind it, and a reader task whose capture dies mid-share runs the stop path (`stop_screen_share_if` / `stop_camera_if`, token-checked, so a reader from a session the user already replaced cannot kill the new one) and then reports `LocalError` — never a frozen "sharing" state.
 - `enumerate_screen_sources()` → `SourceList` — macOS/Windows: the in-app picker's list (the macOS helper is spawned and parked here). Linux: empty, meaning the portal picks. The renderer's share state is `enumerating` from the click until this (or, on Linux, the start) resolves; a second click meanwhile is ignored.
-- `cancel_screen_share_picker()`, `start_screen_share(selection?, max_framerate?, with_audio?, max_height?)` (`max_height` is the share-resolution setting, `0`/absent = source), `stop_screen_share()`, `subscribe_screen_share_events(on_event)`, `screenshare_ws_url()` → the loopback frame socket URL or `null`. (`subscribe_screen_share_frames`, the per-frame IPC `Channel` the frame socket replaced in #305, is gone — nothing called it.)
+- `cancel_screen_share_picker()`, `start_screen_share(selection?, max_framerate?, with_audio?, max_height?)` (`max_height` is the share-resolution setting, `0`/absent = source), `set_screen_share_max_height(max_height?)` (#1902: moves a running share's ceiling with no republish; see capture-split.md "Changing the resolution mid-stream"), `stop_screen_share()`, `subscribe_screen_share_events(on_event)`, `screenshare_ws_url()` → the loopback frame socket URL or `null`. (`subscribe_screen_share_frames`, the per-frame IPC `Channel` the frame socket replaced in #305, is gone — nothing called it.)
 - `set_video_wants(track_key, wants: { width, height, fps } | null)` — **subscriber-driven video.** Every `RemoteVideoTile` reports its container's size in device pixels while it is on screen (ResizeObserver + IntersectionObserver + page visibility), and `null` when hidden; `frontend/src/screenshare/videoWants.ts` folds the tiles showing one track into a single demand (max size, max fps) and sends it only when it changes. Rust (`screenshare/wants.rs`) keeps it per track in a `watch`: for a remote track it calls `RemoteTrackPublication::update_video_dimensions` so the SFU sends the simulcast layer that fits, and `set_enabled(false)` for a hidden one so nothing is received or decoded; the drain task skips packing while hidden, paces to the wanted fps, and `I420Scale`s to the wanted box before packing when the decoded frame is at least 2× larger. The room joins with `adaptive_stream` + `dynacast`, so the publisher also stops encoding layers nobody subscribes to. The two local self-preview keys (`__local_preview__`, `__local_camera_preview__`) report through the same path.
-- camera: `list_video_devices()` → `CameraList` (helper parked for `start_camera`), `start_camera(device_id)`, `stop_camera()`, `start_camera_preview(device_id)` / `stop_camera_preview()` (settings self-preview, no publish), `subscribe_camera_events(on_event)`.
+- camera: `list_video_devices()` → `CameraList` (helper parked for `start_camera`), `start_camera(device_id, max_height?)` (`max_height` is the camera-resolution setting, `0`/absent = the camera's own size), `set_camera_max_height(max_height?)` (#1902, live like the share's), `stop_camera()`, `start_camera_preview(device_id)` / `stop_camera_preview()` (settings self-preview, no publish), `subscribe_camera_events(on_event)`.
 
 ## r2 (`commands/r2.rs`)
 - `download_file(key)` → bytes — returned over the JSON IPC as an array of integers (~3x inflation). Now only the FALLBACK path for legacy non-content-addressed keys; see `get_public_file_url`.
@@ -686,6 +686,7 @@ Capture, publish and the remote drain are described in [capture-split.md](./capt
 - `upload_media(path, filename, content_type, poster?)` / `download_media(r2_key, content_hash, sha256, key_scope)` — the sealed media path (#1382; see `file_keys` below). An upload picks a random 32-byte file id, seals the file (AES-256-GCM, 4 MiB chunks) under `HKDF(salt = file id, ikm = newest ring key of the conversation's file key ring)` — or the Vault file root for a Vault upload — PUTs it to `media/{hex file id}.enc` and registers the object with the DS (`attachment_object`, for reference counting only; nothing there is key material). `MediaUploadResult` carries `content_hash` (the file id — named for the `_att` `hash` wire field, NOT derived from content), `key_version` and `sha256`; the `_att` reference carries them as `hash`, `kv`, `sha`. `key_scope` is a tagged enum: `{ kind: "conversation", conversation_id, key_version }` or `{ kind: "vault" }`. A download refuses a reference without a key version (pre-#1382 convergent objects; no fallback) and refuses bytes whose SHA-256 differs from `sha256`. No cross-user dedup: every upload is a new object. A file over `R2_MEDIA_MAX_BYTES` (104 MiB) is refused from its metadata before it is read (#1491) — reading first held a 2 GB pick in memory just to say no. Hashing, image metadata (the blurhash is computed from a ≤64 px thumbnail; width/height stay the original's) and encryption run on the blocking pool, never on the bridge's four async workers, and at most three uploads hold their bytes at once (`MAX_CONCURRENT_UPLOADS`) — a twelve-image Vault entry used to park every worker in image decoding and starve its own HTTP requests (#1497). `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here. **The shim enforces that** — see "Path-taking commands are scoped to what the user picked" below.
 - `save_media_to_path(r2_key, content_hash, sha256, key_scope, target_path)` → `"marked"` | `"unsupported"` | `"failed: …"` — "save attachment as…". Downloads, decrypts, verifies `sha256` and writes the file in Rust, then applies this platform's download marker (macOS `com.apple.quarantine`, Windows `Zone.Identifier`). The renderer used to `fetch` the loopback URL and `writeFile` the bytes, which left the file with no provenance marker at all — Gatekeeper and SmartScreen both treat an unmarked file as locally authored. A marker that cannot be written (FAT32, a network share) does NOT fail the save; the return value says what happened. `target_path` is gated by `PathScope`. See `.codesight/wiki/media-server.md`.
 - `poster?` on both upload commands (and `OutgoingAttachment.poster` on `send_message`): a video's frame from the client's platform decoder, base64; the result then carries the video's `blurhash`, `width`, `height` and `poster` (the bounded JPEG for `pv`). See [media-server.md → Video posters](media-server.md#video-posters-1837).
+- `get_local_video_poster(content_hash)` → `SavedVideoPoster | null` / `save_local_video_poster(content_hash, frame)` → `SavedVideoPoster` (`commands/poster.rs`, #1894) — device-local: the poster this device decoded for a video with no `pv`, bounded by `poster::from_frame_b64` and kept in the local `video_poster_cache` table, so it is decoded once. `SavedVideoPoster` = `{ jpeg: string | null, blurhash, width, height }`. Never sent anywhere. See [media-server.md → Video posters](media-server.md#video-posters-1837).
 - `upload_media_staged(staged_id, filename, content_type, poster?)` — the same upload for bytes with no path: a paste, or a drop the webview surfaced as a `File`. Reads them from the in-memory staging registry (`commands/staging.rs`) and releases them **only on success**, so a failed upload is a retry rather than a lost paste.
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`), used for custom-emoji objects. Attachments are never deleted by a client: since #1881 the DS deletes them itself once every message referring to them is deleted, and refuses a `media/` DELETE presign. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 
@@ -781,7 +782,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`, `report_user`
 - **`client_policy`** — `check_client_policy`, `get_client_policy_status`, `peek_client_policy` (#1611)
 - **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `toggle_saved_message`, `unsave_message`
-- **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
+- **`camera`** — `list_video_devices`, `set_camera_max_height`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 - **`device_enrollment`** — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 - **`dm`** — `accept_dm_request`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`
 - **`emoji`** — `get_emoji_url`, `list_group_emoji`, `list_usable_emoji`, `prepare_emoji_text`, `remove_group_emoji`, `upload_group_emoji`
@@ -795,11 +796,12 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`pathscope`** — `pick_open_paths`, `pick_save_path`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 - **`pinned_messages`** — `list_pinned_messages`, `pin_message`, `unpin_message`
+- **`poster`** — `get_local_video_poster`, `save_local_video_poster` (#1894)
 - **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `save_media_to_path`, `upload_media`, `upload_media_staged`, `upload_public_file`
 - **`staging`** — `discard_staged_attachment`, `stage_attachment`
 - **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
 - **`safety`** — `get_safety_number`, `list_key_change_notices`, `list_peer_verifications`, `set_contact_verified`
-- **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`
+- **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_screen_share_max_height`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`
 - **`sfx`** — `play_sfx`, `start_ring`, `start_ringback`, `stop_ring`, `stop_ringback`
 - **`terminal`** — `get_terminal_enabled`, `set_terminal_enabled`, `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
 - **`transparency`** — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
@@ -820,7 +822,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **232 commands** in 35 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **234 commands** in 35 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -861,6 +863,8 @@ than hand-edit.
 
 **`pinned_messages`** (3) — `list_pinned_messages`, `pin_message`, `unpin_message`
 
+**`poster`** (2) — `get_local_video_poster`, `save_local_video_poster`
+
 **`vault`** (5) — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
 
 **`messages`** (28) — `add_reaction`, `delete_message`, `discard_unsent_message`, `edit_message`, `flush_outbox`, `get_conversation_receipts`, `get_message_retention`, `get_reactions`, `get_unread_counts`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_thread_summaries`, `mark_conversation_read`, `mark_messages_read`, `new_message_id`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_messages_after`, `read_messages_around`, `read_thread_messages`, `rebuild_search_index`, `remove_reaction`, `retry_message`, `search_messages`, `send_message`, `set_message_retention`, `refresh_read_cursors`
@@ -885,9 +889,9 @@ than hand-edit.
 
 **`voice_test`** (7) — `play_test_tone`, `record_and_play_back`, `set_mic_test_monitor`, `start_mic_test`, `stop_mic_test`, `stop_test_playback`, `subscribe_voice_test_events`
 
-**`screenshare`** (7) — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`
+**`screenshare`** (8) — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_screen_share_max_height`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`
 
-**`camera`** (6) — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
+**`camera`** (7) — `list_video_devices`, `set_camera_max_height`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 
 **`sfx`** (5) — `play_sfx`, `start_ring`, `start_ringback`, `stop_ring`, `stop_ringback`
 

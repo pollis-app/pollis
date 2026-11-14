@@ -6,7 +6,8 @@ import { PageShell } from "../components/Layout/PageShell";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
 import { VoiceInputModeSelect } from "../components/Voice/VoiceInputModeSelect";
-import { ShareResolutionSelect } from "../components/Voice/ShareResolutionSelect";
+import { ResolutionSelect } from "../components/Voice/ResolutionSelect";
+import { useOutgoingResolution } from "../hooks/useOutgoingResolution";
 import { MicLevelMeter } from "../components/Voice/MicLevelMeter";
 import {
   VOICE_INPUT_MODE_DEFAULT,
@@ -18,7 +19,6 @@ import {
   SCREEN_SHARE_FPS_DEFAULT,
   SCREEN_SHARE_AUDIO_DEFAULT,
   SCREEN_SHARE_FPS_OPTIONS,
-  SCREEN_SHARE_RESOLUTION_DEFAULT,
   usePreferences,
   type ApmConfig,
   type NoiseSuppressionLevel,
@@ -354,11 +354,8 @@ export const VoiceSettingsPage: React.FC = observer(() => {
   const handleScreenShareFps = (fps: number) => {
     preferences.save({ ...preferences.query.data, screen_share_max_fps: fps });
   };
-  const screenShareMaxHeight =
-    preferences.query.data?.screen_share_max_height ?? SCREEN_SHARE_RESOLUTION_DEFAULT;
-  const handleScreenShareMaxHeight = (maxHeight: number) => {
-    preferences.save({ ...preferences.query.data, screen_share_max_height: maxHeight });
-  };
+  // Shared with the in-call resolution panel; a change also moves a running share or camera.
+  const resolution = useOutgoingResolution();
 
   const screenShareAudio =
     preferences.query.data?.screen_share_audio ?? SCREEN_SHARE_AUDIO_DEFAULT;
@@ -451,6 +448,11 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                       : t("settings.testCamera")}
                 </Button>
               </div>
+              <ResolutionSelect
+                track="camera"
+                value={resolution.cameraMaxHeight}
+                onChange={resolution.setCameraMaxHeight}
+              />
             </>
           )}
         </section>
@@ -663,7 +665,11 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             {t("settings.screenShareHeading")}
           </h2>
           <ScreenShareFpsSelect value={screenShareFps} onChange={handleScreenShareFps} />
-          <ShareResolutionSelect value={screenShareMaxHeight} onChange={handleScreenShareMaxHeight} />
+          <ResolutionSelect
+            track="share"
+            value={resolution.shareMaxHeight}
+            onChange={resolution.setShareMaxHeight}
+          />
           <Switch
             label={t("settings.screenShareAudio")}
             checked={screenShareAudio}

@@ -492,6 +492,9 @@ const failingMediaKeys = new Set<string>((preload.failMediaKeys ?? []) as string
   }
 };
 
+/** `video_poster_cache` (#1894), by content hash. */
+const localVideoPosters = new Map<string, { jpeg: string | null; blurhash: string; width: number; height: number }>();
+
 /** Reject every `cmd` call with `message` until cleared, without revoking (#1338). */
 const rejectWith = new Map<string, string>();
 (window as any).__tauriRejectWith = (cmd: string, message: string | null) => {
@@ -1404,6 +1407,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'start_camera':
     case 'stop_camera':
     case 'set_video_wants':
+    // The live resolution ceilings (#1902); a spec reads the published value from `__tauriLastArgs`.
+    case 'set_screen_share_max_height':
+    case 'set_camera_max_height':
       return null;
 
     // The "use the byte path" sentinel (#874); a spec may serve a key via `publicFileUrls`.
@@ -1927,6 +1933,18 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       store.bookmarks.splice(at, 1);
       return true;
+    }
+
+    // #1894: the poster decoded for a video with no `pv`, saved device-locally.
+    case 'get_local_video_poster': {
+      const { contentHash } = args as { contentHash: string };
+      return localVideoPosters.get(contentHash) ?? null;
+    }
+    case 'save_local_video_poster': {
+      const { contentHash, frame } = args as { contentHash: string; frame: string };
+      const saved = { jpeg: frame, blurhash: 'L00000fQfQfQfQfQfQfQfQfQfQfQ', width: 1, height: 1 };
+      localVideoPosters.set(contentHash, saved);
+      return saved;
     }
 
     case 'resolve_message_permalink': {

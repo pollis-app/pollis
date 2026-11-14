@@ -28,6 +28,7 @@ pub mod pathscope;
 pub mod pin;
 pub mod file_keys;
 pub mod pinned_messages;
+pub mod poster;
 pub mod r2;
 pub mod relay_serving;
 pub mod safety;

@@ -17,14 +17,15 @@ use libwebrtc::{
 };
 
 use super::{
-    codec::{bound_to_limits, convert_to_i420, pack_frame_bytes, FramePacer, ShareLimits},
+    codec::{bound_to_ceiling, convert_to_i420, pack_frame_bytes, FramePacer, VideoCeiling},
     wants::PreviewMirror,
 };
 
 pub(crate) struct LocalVideoPump {
     /// `None` on a preview-only capture (the settings page's camera check).
     source: Option<NativeVideoSource>,
-    limits: ShareLimits,
+    /// Read on every frame, so a `set_*_max_height` lands on the running stream (#1902).
+    ceiling: VideoCeiling,
     pacer: FramePacer,
     mirror: PreviewMirror,
     preview_key: &'static str,
@@ -34,15 +35,16 @@ pub(crate) struct LocalVideoPump {
 impl LocalVideoPump {
     pub fn new(
         source: Option<NativeVideoSource>,
-        limits: ShareLimits,
+        max_fps: u32,
+        ceiling: VideoCeiling,
         mirror: PreviewMirror,
         preview_key: &'static str,
         preview_tx: Arc<crate::media_server::FrameFanout>,
     ) -> Self {
         Self {
             source,
-            limits,
-            pacer: FramePacer::new(limits.max_fps),
+            ceiling,
+            pacer: FramePacer::new(max_fps),
             mirror,
             preview_key,
             preview_tx,
@@ -99,9 +101,10 @@ impl LocalVideoPump {
         self.publish(buffer, timestamp_us, now);
     }
 
-    /// The limit's height is the backstop for a backend that could not size its own capture.
+    /// The ceiling applies here, per frame: the encoder's input shrinks or grows with it and
+    /// `NativeVideoSource` takes the new size as it is, so the track is never republished.
     fn publish(&mut self, buffer: I420Buffer, timestamp_us: i64, now: std::time::Instant) {
-        let buffer = bound_to_limits(buffer, &self.limits);
+        let buffer = bound_to_ceiling(buffer, &self.ceiling);
         let frame = VideoFrame {
             rotation: VideoRotation::VideoRotation0,
             timestamp_us,
@@ -129,6 +132,24 @@ impl LocalVideoPump {
         ));
         self.preview_tx.send(bytes);
     }
+}
+
+/// The screen share's publish pump: encoder frames under the share's live ceiling, plus the
+/// self-preview mirror its tile sizes and paces. Shared by the helper and WGC paths.
+pub(crate) fn share_pump(
+    state: &crate::state::AppState,
+    ss: &mut super::ScreenShareState,
+    source: NativeVideoSource,
+    max_fps: u32,
+) -> LocalVideoPump {
+    LocalVideoPump::new(
+        Some(source),
+        max_fps,
+        ss.ceiling.clone(),
+        PreviewMirror::new(super::wants::wants_channel(ss, super::LOCAL_PREVIEW_KEY)),
+        super::LOCAL_PREVIEW_KEY,
+        Arc::clone(&state.screenshare_frame_tx),
+    )
 }
 
 /// Tight rows into a (possibly padded) destination plane.
@@ -283,10 +304,8 @@ mod tests {
         let (tx, rx) = tokio::sync::watch::channel(super::super::wants::WantState::Hidden);
         let pump = LocalVideoPump::new(
             None,
-            ShareLimits {
-                max_fps: 60,
-                max_height: None,
-            },
+            60,
+            VideoCeiling::new(None),
             PreviewMirror::new(rx),
             "test",
             Arc::new(crate::media_server::FrameFanout::new()),

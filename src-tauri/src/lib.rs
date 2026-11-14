@@ -604,6 +604,9 @@ pub fn run() {
             commands::bookmarks::toggle_saved_message,
             commands::bookmarks::list_saved_messages,
             commands::bookmarks::resolve_message_permalink,
+            // A video poster decoded locally for an old sender's video (#1894); device-local only.
+            commands::poster::get_local_video_poster,
+            commands::poster::save_local_video_poster,
             // On-device export (#856).
             commands::export::export_archive,
             commands::export::fetch_export_attachments,
@@ -712,11 +715,13 @@ pub fn run() {
             commands::screenshare::enumerate_screen_sources,
             commands::screenshare::cancel_screen_share_picker,
             commands::screenshare::start_screen_share,
+            commands::screenshare::set_screen_share_max_height,
             commands::screenshare::stop_screen_share,
             commands::screenshare::set_video_wants,
             commands::camera::subscribe_camera_events,
             commands::camera::list_video_devices,
             commands::camera::start_camera,
+            commands::camera::set_camera_max_height,
             commands::camera::stop_camera,
             commands::camera::start_camera_preview,
             commands::camera::stop_camera_preview,

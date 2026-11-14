@@ -31,11 +31,10 @@ tags:
 - inputText: "E2E Reply Group"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Reply Group, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Reply Group"
 - tapOn:
     text: "General"
     optional: true
@@ -55,12 +54,8 @@ tags:
 - hideKeyboard
 # A row can be replied to only once it is no longer pending, and the first
 # message of a fresh group pays for MLS group setup (messaging.yaml has the
-# numbers). No queryable "settled" signal, so a deliberate flat wait.
-- extendedWaitUntil:
-    visible:
-      id: "__never_matches__"
-    timeout: 30000
-    optional: true
+# numbers), so wait for it to settle.
+- runFlow: ../subflows/message-settled.yaml
 
 # ── Swipe ───────────────────────────────────────────────────────────────
 - swipe:

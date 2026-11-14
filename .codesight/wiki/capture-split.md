@@ -39,15 +39,43 @@ excess after the parent had already paid to copy, convert and pack it:
   backstop for a backend that ignores the hint, and it runs *before* the
   conversion.
 - **Share Resolution** (`screen_share_max_height`, 720p/1080p/1440p/Source,
-  default 1080p) is a height ceiling: PipeWire's `VideoSize` preference and SCK's
-  stream width/height (the backends that can scale for us); on X11 and WGC the
-  parent's libyuv `I420Scale` (`bound_to_limits`) does it. Aspect is kept, dims
-  stay even. "Source" sends the display's own size — a 4K or 5K Retina source then
-  costs 4–6× the CPU of 1080p, which is why it is not the default.
+  default 1080p) is a height ceiling. SCK sizes its stream to it (macOS); on
+  Linux (PipeWire and X11) and Windows (WGC) the capture runs at the source's
+  size and the parent's libyuv `I420Scale` (`bound_to_ceiling`) applies it. Aspect
+  is kept, dims stay even. "Source" sends the display's own size — a 4K or 5K
+  Retina source then costs 4–6× the CPU of 1080p, which is why it is not the
+  default.
+- **Camera Resolution** (`camera_max_height`, 360p/720p/1080p/Source, default
+  Source) is the same ceiling for the camera track: the camera captures at its
+  own format and the parent scales (helper paths through the pump, Windows MF in
+  `push_frame`). The settings self-preview is not bound by it.
 
-Both travel to the helper as `CaptureLimits` — spawn flags on Linux (`--max-fps`,
-`--max-height`; the portal is the picker, so there is no later message), fields
-on `Selection` for macOS (defaulted, so an older sender still decodes).
+The fps travels to the helper as `CaptureLimits` — a spawn flag on Linux
+(`--max-fps`; the portal is the picker, so there is no later message), fields on
+`Selection` for macOS (defaulted, so an older sender still decodes; the height
+rides there too).
+
+### Changing the resolution mid-stream (#1902)
+
+Both ceilings change **live, without a republish**. Each is a `VideoCeiling`
+(`codec.rs`, an `Arc<AtomicU32>`, `0` = source) held in `ScreenShareState` /
+`CameraState`; the running pump (or the Windows camera loop) holds a clone and
+reads it on every frame. `set_screen_share_max_height` / `set_camera_max_height`
+store the new value, and the next frame goes to the encoder at the new size:
+`NativeVideoSource` takes per-frame size changes, and libwebrtc re-derives the
+simulcast layers from the frame it is handed, so the track, its SID and every
+subscriber stay as they are. A start sets the ceiling before it negotiates, so
+a change made mid-handshake is not overwritten.
+
+macOS also tells the helper, because SCK delivers frames already sized to the
+old ceiling and a raise needs more pixels than it was sending: the parent writes
+`SetMaxHeight` (0x0A) on the share socket, and the helper re-sizes the stream
+with `SCStream::update_configuration` (same config builder as the start, so fps,
+cursor and audio are kept). Should that fail, a lower ceiling still holds
+through the pump. This is also why Linux no longer asks PipeWire for a
+`VideoSize` at the ceiling: a compositor that honoured it could not be raised
+mid-share without renegotiating the stream, and most offer only their native
+size anyway.
 
 The macOS helper also configures SCK in **pixels, not points**:
 `SCDisplay::width/height` and `SCWindow::frame` are points, and a stream sized
@@ -102,6 +130,7 @@ message := [ u8 type ][ u32 LE payload_len ][ payload ]
 0x07 AudioFormat   payload = [u32 sample_rate][u32 channels]
 0x08 AudioFrame    payload = [u32 sample_rate][u32 channels][i64 ts_us][i16 PCM...]
 0x09 FrameI420     payload = [u32 w][u32 h][i64 ts_us][Y plane][U plane][V plane]
+0x0A SetMaxHeight  parent → helper, payload = [u32 max_height] (0 = source; mid-share, macOS, #1902)
 0xFF Error         payload = utf-8 message (`audio:` prefix = non-fatal, see Shared audio)
 ```
 
@@ -414,7 +443,8 @@ loops ran ~15% slower size-optimised.
 - Reader task — `read_msg_pooled` loop on the socket; frames go to the
   converter thread (`PumpHandle`, newest-wins, one in flight) which runs the
   `LocalVideoPump`: pacer → libyuv ARGB→I420 (or a plane copy for `FrameI420`)
-  → `bound_to_limits` → `source.capture_frame` → self-preview mirror. Shared
+  → `bound_to_ceiling` (the live `VideoCeiling`) → `source.capture_frame` →
+  self-preview mirror. Shared
   audio is handled inline (it is already 10 ms blocks).
 - `stop_screen_share` — Linux + macOS share one teardown: abort the
   reader task, kill the helper (killing the macOS helper IS the SCK
