@@ -287,6 +287,10 @@ interface MockStore {
   historyDeclines: string[];
   historyCancels: string[];
   historyRuns: string[];
+  /** #1901: whether the caller's ringback loop is playing (`start_ringback` / `stop_ringback`). */
+  ringback: boolean;
+  /** The call id the next `start_call` returns. */
+  nextCallId: string;
 }
 
 /** Mirrors `ClientPolicyStatus` in `pollis-core/src/client_policy.rs`. */
@@ -437,6 +441,8 @@ const store: MockStore = {
   historyDeclines: [],
   historyCancels: [],
   historyRuns: [],
+  ringback: false,
+  nextCallId: (preload.nextCallId as string | undefined) ?? 'call_mock',
 };
 
 (window as any).__tauriMock = store;
@@ -1248,6 +1254,20 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'stop_ring':
     case 'start_ring':
     case 'tray_set_unread':
+      return null;
+
+    case 'start_ringback':
+      store.ringback = true;
+      return null;
+    case 'stop_ringback':
+      store.ringback = false;
+      return null;
+
+    // A 1:1 call rings the callee at once; ending it is fire-and-forget.
+    case 'start_call':
+      return { call_id: store.nextCallId, room_name: `call-${store.nextCallId}` };
+    case 'cancel_call':
+    case 'dismiss_call_on_my_devices':
       return null;
 
     // #1628: report the newest newly-seen message from someone else past the read cursor.

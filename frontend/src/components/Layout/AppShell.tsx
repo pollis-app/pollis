@@ -27,6 +27,7 @@ import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useIncomingCallTakeover } from "../../hooks/useIncomingCallTakeover";
+import { useCallRingback } from "../../hooks/useCallRingback";
 import { useHistoryTransferRuntime } from "../../hooks/useHistoryTransferRuntime";
 import { acceptIncomingCall, declineIncomingCall } from "../../voice/incomingCall";
 import { flushOutbox } from "../../hooks/queries/useMessages";
@@ -283,6 +284,8 @@ export const AppShell: React.FC = observer(() => {
 
   useLiveKitRealtime();
   useIncomingCallTakeover(incomingCall);
+  // The caller's ringback (#1901), on the same allow_sound_effects gate as every other sound.
+  useCallRingback(prefsQuery.data?.allow_sound_effects ?? true);
   useHistoryTransferRuntime();
 
   // Warm the lazy call chunks when idle (#874): answering a call navigates programmatically, so no spinner there.

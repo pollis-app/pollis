@@ -728,6 +728,8 @@ pub fn run() {
             commands::sfx::play_sfx,
             commands::sfx::start_ring,
             commands::sfx::stop_ring,
+            commands::sfx::start_ringback,
+            commands::sfx::stop_ringback,
             commands::pathscope::pick_open_paths,
             commands::pathscope::pick_save_path,
             commands::terminal::get_terminal_enabled,

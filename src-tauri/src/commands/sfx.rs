@@ -22,3 +22,13 @@ pub fn start_ring() {
 pub fn stop_ring() {
     pollis_core::commands::sfx::stop_ring()
 }
+
+#[tauri::command]
+pub fn start_ringback() {
+    pollis_core::commands::sfx::start_ringback()
+}
+
+#[tauri::command]
+pub fn stop_ringback() {
+    pollis_core::commands::sfx::stop_ringback()
+}
