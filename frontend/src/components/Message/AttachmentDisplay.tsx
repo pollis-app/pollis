@@ -4,7 +4,9 @@ import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Play } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
-import { captureVideoPoster } from "../../utils/imageProcessing";
+import { blobToBase64, captureVideoPoster } from "../../utils/imageProcessing";
+import { localVideoPoster, type LocalVideoPoster, type SavedVideoPoster } from "../../utils/localVideoPoster";
+import { invoke } from "../../bridge";
 import { formatFileSize, formatDuration } from "../../utils/format";
 import { spotlightRoll } from "../../utils/mediaRoll";
 import {
@@ -135,21 +137,7 @@ export const AttachmentDisplay = observer(({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState<"idle" | "downloading" | "done">("idle");
   const [duration, setDuration] = useState<number | null>(null);
-  const [poster, setPoster] = useState<string | null>(null);
-
-  const prevPosterRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (prevPosterRef.current && prevPosterRef.current !== poster) {
-      URL.revokeObjectURL(prevPosterRef.current);
-    }
-    prevPosterRef.current = poster;
-    return () => {
-      if (poster) { URL.revokeObjectURL(poster); }
-    };
-  }, [poster]);
-
-  // Last src a poster capture ran for: a second GStreamer pipeline on the same blob races the lightbox.
-  const posterAttemptedSrcRef = useRef<string | null>(null);
+  const [poster, setPoster] = useState<LocalVideoPoster | null>(null);
 
   // Capture phase, so AppShell's Escape handler doesn't also fire.
   useEffect(() => {
@@ -173,42 +161,37 @@ export const AttachmentDisplay = observer(({
     prevViewerOpenRef.current = viewerOpen;
   }, [viewerOpen]);
 
-  // No `pv` from the sender (an older build, #1837): decode a frame here from the
-  // file once it is resolved, fetching it for that only while it is small.
+  // No `pv` from the sender (an older build, #1837): the poster this device saved for the
+  // video (#1894), else a frame decoded here and saved, fetching the file for that only
+  // while it is small. Once per video, not per render.
   const needsLocalPoster =
     isVideo && !attachment.poster && !isPending && !sensitivity.hidden;
   useEffect(() => {
-    if (!needsLocalPoster || downloadUrl) { return; }
-    const known = peekMediaUrl(attachment);
-    if (known) {
-      setDownloadUrl(known);
-      return;
-    }
-    if (attachment.file_size > LEGACY_POSTER_MAX_BYTES) { return; }
-    let mounted = true;
-    getMediaUrl(attachment)
-      .then((url) => { if (mounted) { setDownloadUrl(url); } })
-      // No frame: the filled placeholder stays, and a click still opens it.
-      .catch(() => {});
-    return () => { mounted = false; };
-  }, [needsLocalPoster, downloadUrl, attachment.object_key, attachment.content_hash]);
-
-  useEffect(() => {
     if (!needsLocalPoster) { return; }
-    const src = downloadUrl;
-    if (!src || posterAttemptedSrcRef.current === src) { return; }
-    posterAttemptedSrcRef.current = src;
     let mounted = true;
-
-    captureVideoPoster(src).then((result) => {
-      if (!result) { return; }
-      if (!mounted) { URL.revokeObjectURL(result.url); return; }
-      if (result.duration > 0) { setDuration(result.duration); }
-      setPoster(result.url);
+    const decode = async (): Promise<string | null> => {
+      let src = peekMediaUrl(attachment);
+      if (!src && attachment.file_size <= LEGACY_POSTER_MAX_BYTES) {
+        // No frame: the filled placeholder stays, and a click still opens it.
+        src = await getMediaUrl(attachment).catch(() => null);
+      }
+      if (!src) { return null; }
+      if (mounted) { setDownloadUrl((current) => current ?? src); }
+      const result = await captureVideoPoster(src);
+      if (!result) { return null; }
+      URL.revokeObjectURL(result.url);
+      if (mounted && result.duration > 0) { setDuration(result.duration); }
+      return blobToBase64(result.blob).catch(() => null);
+    };
+    void localVideoPoster(attachment, {
+      get: (contentHash) => invoke<SavedVideoPoster | null>("get_local_video_poster", { contentHash }),
+      save: (contentHash, frame) => invoke<SavedVideoPoster>("save_local_video_poster", { contentHash, frame }),
+      decode,
+    }).then((found) => {
+      if (mounted && found) { setPoster(found); }
     });
-
     return () => { mounted = false; };
-  }, [needsLocalPoster, downloadUrl]);
+  }, [needsLocalPoster, attachment.object_key, attachment.content_hash]);
 
   // Caps render-failure retries: onError nulls downloadUrl, which re-fetches.
   const renderFailuresRef = useRef(0);
@@ -521,13 +504,16 @@ export const AttachmentDisplay = observer(({
 
   if (isVideo) {
     // Poster sources in order (#1837): the sender's `pv`; a pending send's own frame
-    // (a video's `localPreviewUrl` is its captured poster); a frame decoded here; the blurhash.
+    // (a video's `localPreviewUrl` is its captured poster); a frame decoded here, or saved
+    // from an earlier decode (#1894); the blurhash.
     const posterSrc = attachment.poster
       ? `data:image/jpeg;base64,${attachment.poster}`
-      : (isPending ? attachment.localPreviewUrl : undefined) ?? poster;
+      : (isPending ? attachment.localPreviewUrl : undefined)
+        ?? (poster?.jpeg ? `data:image/jpeg;base64,${poster.jpeg}` : undefined);
+    const blurhash = attachment.blurhash ?? poster?.blurhash ?? undefined;
     const posterKind = posterSrc
       ? attachment.poster ? "pv" : "local"
-      : attachment.blurhash ? "blurhash" : "placeholder";
+      : blurhash ? "blurhash" : "placeholder";
     return (
       <>
         {withSensitiveChrome(sensitivity.hidden ? hiddenThumb() : (
@@ -554,7 +540,7 @@ export const AttachmentDisplay = observer(({
             flexShrink: 0,
           }}
         >
-          {(posterSrc || attachment.blurhash) && (
+          {(posterSrc || blurhash) && (
             <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
               {posterSrc ? (
                 <img
@@ -564,7 +550,7 @@ export const AttachmentDisplay = observer(({
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                 />
               ) : (
-                <BlurhashCanvas hash={attachment.blurhash!} />
+                <BlurhashCanvas hash={blurhash!} />
               )}
             </div>
           )}
