@@ -1387,6 +1387,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'start_camera':
     case 'stop_camera':
     case 'set_video_wants':
+    // The live resolution ceilings (#1902); a spec reads the published value from `__tauriLastArgs`.
+    case 'set_screen_share_max_height':
+    case 'set_camera_max_height':
       return null;
 
     // The "use the byte path" sentinel (#874); a spec may serve a key via `publicFileUrls`.

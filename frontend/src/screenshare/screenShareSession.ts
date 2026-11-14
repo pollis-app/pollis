@@ -9,12 +9,15 @@ import { appStore } from "../stores/appStore";
 import { voiceSession } from "../voice/VoiceSessionManager";
 import {
   clampScreenShareFps,
-  clampScreenShareResolution,
+  fetchPreferencesJson,
   getPreference,
   SCREEN_SHARE_AUDIO_DEFAULT,
   SCREEN_SHARE_FPS_DEFAULT,
-  SCREEN_SHARE_RESOLUTION_DEFAULT,
 } from "../hooks/queries/usePreferences";
+import {
+  clampScreenShareResolution,
+  SCREEN_SHARE_RESOLUTION_DEFAULT,
+} from "../voice/videoResolution";
 import { isMac } from "../utils/platform";
 import { playSfx, SFX } from "../utils/sfx";
 
@@ -330,6 +333,11 @@ class ScreenShareSession {
     });
   }
 
+  /** Move the running share's resolution ceiling; no restart (#1902). `0` = the source's own size. */
+  async setMaxHeight(maxHeight: number): Promise<void> {
+    await invoke("set_screen_share_max_height", { maxHeight });
+  }
+
   /** The in-flight `start()`'s audio choice, for Linux which has no picker. */
   private pendingWithAudio = false;
 
@@ -339,45 +347,21 @@ class ScreenShareSession {
 
   /** The "share sound" preference (Linux path and picker default); off on error. */
   async resolveWithAudio(): Promise<boolean> {
-    const userId = appStore.currentUser?.id;
-    if (!userId) {
-      return SCREEN_SHARE_AUDIO_DEFAULT;
-    }
-    try {
-      const json = await invoke<string>("get_preferences", { userId });
-      return getPreference<boolean>(
-        json,
-        "screen_share_audio",
-        SCREEN_SHARE_AUDIO_DEFAULT,
-      );
-    } catch {
-      return SCREEN_SHARE_AUDIO_DEFAULT;
-    }
+    const json = await fetchPreferencesJson();
+    return getPreference<boolean>(json, "screen_share_audio", SCREEN_SHARE_AUDIO_DEFAULT);
   }
 
   /** The framerate + resolution preferences, read directly (non-React); defaults on error. */
   private async resolveLimits(): Promise<{ maxFramerate: number; maxHeight: number }> {
-    const defaults = {
-      maxFramerate: SCREEN_SHARE_FPS_DEFAULT,
-      maxHeight: SCREEN_SHARE_RESOLUTION_DEFAULT,
+    const json = await fetchPreferencesJson();
+    return {
+      maxFramerate: clampScreenShareFps(
+        getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
+      ),
+      maxHeight: clampScreenShareResolution(
+        getPreference<number>(json, "screen_share_max_height", SCREEN_SHARE_RESOLUTION_DEFAULT),
+      ),
     };
-    const userId = appStore.currentUser?.id;
-    if (!userId) {
-      return defaults;
-    }
-    try {
-      const json = await invoke<string>("get_preferences", { userId });
-      return {
-        maxFramerate: clampScreenShareFps(
-          getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
-        ),
-        maxHeight: clampScreenShareResolution(
-          getPreference<number>(json, "screen_share_max_height", SCREEN_SHARE_RESOLUTION_DEFAULT),
-        ),
-      };
-    } catch {
-      return defaults;
-    }
   }
 
   async stop(): Promise<void> {

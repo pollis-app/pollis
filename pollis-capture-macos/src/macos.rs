@@ -208,6 +208,26 @@ async fn run_screen(
     let (tx, rx) = mpsc::channel::<Wire>(16);
     let stop = Arc::new(AtomicBool::new(false));
 
+    // Mid-share resolution changes (#1902): the parent sends SetMaxHeight on the same
+    // socket; the capture loop re-sizes the SCStream to it.
+    let (resize_tx, resize_rx) = std::sync::mpsc::channel::<u32>();
+    tokio::spawn(async move {
+        loop {
+            match read_msg(&mut reader).await {
+                Ok(Some(CaptureMsg::SetMaxHeight { max_height })) => {
+                    if resize_tx.send(max_height).is_err() {
+                        break;
+                    }
+                }
+                Ok(Some(other)) => {
+                    eprintln!("[capture-mac] ignoring unexpected message mid-share: {other:?}");
+                }
+                // EOF or a desync: the write side notices the parent going away.
+                Ok(None) | Err(_) => break,
+            }
+        }
+    });
+
     // SCK Swift FFI on a blocking context; errors before the first frame end the run.
     let stop_for_cap = Arc::clone(&stop);
     let tx_for_cap = tx.clone();
@@ -218,6 +238,7 @@ async fn run_screen(
             with_audio,
             tx_for_cap.clone(),
             stop_for_cap,
+            resize_rx,
         ) {
             eprintln!("[capture-mac] capture error: {e}");
             let _ = tx_for_cap.blocking_send(Wire::Bytes(encode_error(&format!("capture: {e}"))));
@@ -347,6 +368,7 @@ fn start_capture(
     with_audio: bool,
     tx: mpsc::Sender<Wire>,
     stop: Arc<AtomicBool>,
+    resize: std::sync::mpsc::Receiver<u32>,
 ) -> Result<()> {
     use screencapturekit::stream::configuration::pixel_format::PixelFormat;
     use screencapturekit::stream::configuration::SCStreamConfiguration;
@@ -394,11 +416,13 @@ fn start_capture(
     let native_h = (points_h as f32 * scale).round() as u32;
 
     // The publish's ceiling, applied by SCK's own scaler; then even for VP8 + I420 chroma.
-    let (width, height) = limits
-        .fit(native_w, native_h)
-        .unwrap_or((native_w, native_h));
-    let width = width & !1;
-    let height = height & !1;
+    let fitted = |limits: pollis_capture_proto::CaptureLimits| {
+        let (width, height) = limits
+            .fit(native_w, native_h)
+            .unwrap_or((native_w, native_h));
+        (width & !1, height & !1)
+    };
+    let (width, height) = fitted(limits);
     if width == 0 || height == 0 {
         return Err(anyhow!("selected source reported zero size"));
     }
@@ -408,27 +432,32 @@ fn start_capture(
         limits.max_fps
     );
 
-    let mut config = SCStreamConfiguration::new()
-        .with_width(width)
-        .with_height(height)
-        .with_pixel_format(PixelFormat::BGRA)
-        .with_shows_cursor(true);
-    if limits.max_fps > 0 {
-        use screencapturekit::cm::CMTime;
-        #[allow(clippy::cast_possible_wrap)]
-        let interval = CMTime::new(1, limits.max_fps as i32);
-        config = config.with_minimum_frame_interval(&interval);
-    }
-    if with_audio {
-        use screencapturekit::stream::configuration::{AudioChannelCount, AudioSampleRate};
-        config = config
-            .with_captures_audio(true)
-            // Same filter as the video: a window shares its app's audio, a display the system mix.
-            .with_sample_rate(AudioSampleRate::Rate48000)
-            .with_channel_count(AudioChannelCount::Stereo)
-            // Excludes our own output (the call itself); Linux uses `screenshare::self_echo` instead.
-            .with_excludes_current_process_audio(true);
-    }
+    // One builder for the start and every mid-share resize, so a resize keeps the rest.
+    let build_config = |width: u32, height: u32| {
+        let mut config = SCStreamConfiguration::new()
+            .with_width(width)
+            .with_height(height)
+            .with_pixel_format(PixelFormat::BGRA)
+            .with_shows_cursor(true);
+        if limits.max_fps > 0 {
+            use screencapturekit::cm::CMTime;
+            #[allow(clippy::cast_possible_wrap)]
+            let interval = CMTime::new(1, limits.max_fps as i32);
+            config = config.with_minimum_frame_interval(&interval);
+        }
+        if with_audio {
+            use screencapturekit::stream::configuration::{AudioChannelCount, AudioSampleRate};
+            config = config
+                .with_captures_audio(true)
+                // Same filter as the video: a window shares its app's audio, a display the system mix.
+                .with_sample_rate(AudioSampleRate::Rate48000)
+                .with_channel_count(AudioChannelCount::Stereo)
+                // Excludes our own output (the call itself); Linux uses `screenshare::self_echo` instead.
+                .with_excludes_current_process_audio(true);
+        }
+        config
+    };
+    let config = build_config(width, height);
     let mut stream = SCStream::new(&filter, &config);
 
     // Announce the format; the parent creates the track from it.
@@ -458,8 +487,36 @@ fn start_capture(
         .map_err(|e| anyhow!("SCStream::start_capture: {e}"))?;
     eprintln!("[capture-mac] SCStream capture started");
 
+    // Wait for stop, re-sizing the stream on each SetMaxHeight. The frames carry their own
+    // size and the parent's source takes it as it comes, so nothing else is re-announced.
+    let mut current = (width, height);
     while !stop.load(Ordering::Relaxed) {
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        let max_height = match resize.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(h) => h,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                continue;
+            }
+        };
+        let next = fitted(pollis_capture_proto::CaptureLimits {
+            max_height,
+            ..limits
+        });
+        if next == current || next.0 == 0 || next.1 == 0 {
+            continue;
+        }
+        match stream.update_configuration(&build_config(next.0, next.1)) {
+            Ok(()) => {
+                eprintln!(
+                    "[capture-mac] re-sized capture to {}x{} (max_height {max_height})",
+                    next.0, next.1
+                );
+                current = next;
+            }
+            // The parent's pump still holds the share to the new ceiling when it is lower.
+            Err(e) => eprintln!("[capture-mac] SCStream::update_configuration: {e}"),
+        }
     }
 
     eprintln!("[capture-mac] stopping SCStream");

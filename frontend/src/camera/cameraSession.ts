@@ -5,6 +5,8 @@ import { detachChannel, onSignOut } from "../utils/sessionTeardown";
 import { Channel, invoke } from "../bridge";
 import i18n from "../i18n";
 import { appStore } from "../stores/appStore";
+import { fetchPreferencesJson, getPreference } from "../hooks/queries/usePreferences";
+import { CAMERA_RESOLUTION_DEFAULT, clampCameraResolution } from "../voice/videoResolution";
 import type { CameraEvent, CameraList } from "./types";
 
 /** Must match `LOCAL_CAMERA_PREVIEW_KEY` in `pollis-core/src/commands/camera/mod.rs`. */
@@ -74,9 +76,23 @@ class CameraSession {
     return await invoke<CameraList>("list_video_devices");
   }
 
-  /** Start capture and publish into the voice room. */
+  /** Start capture and publish into the voice room, under the camera resolution preference. */
   async start(deviceId: string): Promise<void> {
-    await invoke("start_camera", { deviceId });
+    const maxHeight = await this.resolveMaxHeight();
+    await invoke("start_camera", { deviceId, maxHeight });
+  }
+
+  /** Move the running camera's resolution ceiling; no restart (#1902). `0` = the camera's own size. */
+  async setMaxHeight(maxHeight: number): Promise<void> {
+    await invoke("set_camera_max_height", { maxHeight });
+  }
+
+  /** The camera resolution preference, read directly (non-React); the default on error. */
+  private async resolveMaxHeight(): Promise<number> {
+    const json = await fetchPreferencesJson();
+    return clampCameraResolution(
+      getPreference<number>(json, "camera_max_height", CAMERA_RESOLUTION_DEFAULT),
+    );
   }
 
   async stop(): Promise<void> {

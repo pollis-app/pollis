@@ -58,6 +58,14 @@ pub async fn start_screen_share(
 }
 
 #[tauri::command]
+pub async fn set_screen_share_max_height(
+    state: State<'_, Arc<AppState>>,
+    max_height: Option<u32>,
+) -> Result<()> {
+    pollis_core::commands::screenshare::set_screen_share_max_height(&state, max_height).await
+}
+
+#[tauri::command]
 pub async fn stop_screen_share(state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::screenshare::stop_screen_share(&state).await
 }

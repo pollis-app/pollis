@@ -16,7 +16,11 @@ pub async fn list_video_devices(
     Err(unsupported())
 }
 
-pub async fn start_camera(_state: &Arc<AppState>, _device_id: String) -> Result<()> {
+pub async fn start_camera(
+    _state: &Arc<AppState>,
+    _device_id: String,
+    _max_height: Option<u32>,
+) -> Result<()> {
     Err(unsupported())
 }
 

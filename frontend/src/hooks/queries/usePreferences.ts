@@ -27,6 +27,12 @@ import {
   INCOMING_CALL_TAKEOVER_PREF,
 } from "../../utils/incomingCallTakeover";
 import {
+  CAMERA_RESOLUTION_DEFAULT,
+  clampCameraResolution,
+  clampScreenShareResolution,
+  SCREEN_SHARE_RESOLUTION_DEFAULT,
+} from "../../voice/videoResolution";
+import {
   mergePreferencesSave,
   parsePreferencesBlob,
   preferencesSaveJson,
@@ -77,8 +83,10 @@ export interface PreferencesData {
   click_suppression?: boolean;
   /** Screen-share fps ceiling, one of `SCREEN_SHARE_FPS_OPTIONS`. */
   screen_share_max_fps?: number;
-  /** Screen-share height ceiling, one of `SCREEN_SHARE_RESOLUTION_OPTIONS`; `0` = the source's own size. */
+  /** Screen-share height ceiling, one of `SCREEN_SHARE_RESOLUTION_OPTIONS`; `0` = the source's own size. Live mid-share (#1902). */
   screen_share_max_height?: number;
+  /** Camera height ceiling, one of `CAMERA_RESOLUTION_OPTIONS`; `0` (default) = the camera's own size. Live mid-call (#1902). */
+  camera_max_height?: number;
   /** Share machine sound; stored because Linux has no in-app picker. Absent → off. */
   screen_share_audio?: boolean;
   auto_join_voice?: boolean;
@@ -111,23 +119,6 @@ export interface PreferencesData {
 /** Screen-share framerate presets, in fps. */
 export const SCREEN_SHARE_FPS_OPTIONS = [15, 30, 60] as const;
 export const SCREEN_SHARE_FPS_DEFAULT = 30;
-
-/** Screen-share resolution presets as a height ceiling; `0` means the source's own size. */
-export const SCREEN_SHARE_RESOLUTION_OPTIONS = [720, 1080, 1440, 0] as const;
-export const SCREEN_SHARE_RESOLUTION_DEFAULT = 1080;
-
-/** Snap to an allowed preset; default if invalid. */
-export function clampScreenShareResolution(v: number | undefined): number {
-  if (v === undefined || !Number.isFinite(v)) {
-    return SCREEN_SHARE_RESOLUTION_DEFAULT;
-  }
-  if (v === 0) {
-    return 0;
-  }
-  return SCREEN_SHARE_RESOLUTION_OPTIONS.filter((opt) => opt !== 0).reduce((best, opt) =>
-    Math.abs(opt - v) < Math.abs(best - v) ? opt : best,
-  );
-}
 
 /** Shared audio is opt-in. See `screen_share_audio`. */
 export const SCREEN_SHARE_AUDIO_DEFAULT = false;
@@ -215,6 +206,20 @@ export function getPreference<T>(json: string, key: string, defaultValue: T): T 
   } catch {
   }
   return defaultValue;
+}
+
+/** The signed-in user's preferences blob for code outside React (session glue), as `getPreference`
+ *  reads it; `"{}"` (every key at its default) with no user or when the read fails. */
+export async function fetchPreferencesJson(): Promise<string> {
+  const userId = appStore.currentUser?.id;
+  if (!userId) {
+    return "{}";
+  }
+  try {
+    return await invoke<string>("get_preferences", { userId });
+  } catch {
+    return "{}";
+  }
 }
 
 const prefsKey = (userId: string | null) => ["user", "preferences", userId] as const;
@@ -321,6 +326,9 @@ export function usePreferences() {
         ),
         screen_share_max_height: clampScreenShareResolution(
           getPreference<number>(json, "screen_share_max_height", SCREEN_SHARE_RESOLUTION_DEFAULT),
+        ),
+        camera_max_height: clampCameraResolution(
+          getPreference<number>(json, "camera_max_height", CAMERA_RESOLUTION_DEFAULT),
         ),
         screen_share_audio: getPreference<boolean>(
           json,

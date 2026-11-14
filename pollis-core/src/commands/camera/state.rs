@@ -5,6 +5,7 @@ use std::sync::Arc;
 use libwebrtc::video_source::native::NativeVideoSource;
 use livekit::track::LocalVideoTrack;
 
+use crate::commands::screenshare::codec::VideoCeiling;
 use crate::sink::EventSink;
 
 use super::CameraEvent;
@@ -43,6 +44,10 @@ pub struct CameraState {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub preview_reader_task: Option<tokio::task::JoinHandle<()>>,
 
+    /// The outgoing camera's height ceiling; the running capture holds a clone (#1902).
+    /// The settings self-preview is not bound by it.
+    pub ceiling: VideoCeiling,
+
     /// Same contract as `ScreenShareState::session_generation`.
     pub session_generation: u64,
 }
@@ -71,6 +76,7 @@ impl CameraState {
             preview_writer: None,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             preview_reader_task: None,
+            ceiling: VideoCeiling::default(),
             session_generation: 0,
         }
     }
