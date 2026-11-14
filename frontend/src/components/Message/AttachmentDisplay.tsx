@@ -471,6 +471,7 @@ export const AttachmentDisplay = observer(({
 
         {viewerOpen && downloadUrl && (
           <div
+            data-window-viewer=""
             style={{
               position: "fixed",
               inset: 0,

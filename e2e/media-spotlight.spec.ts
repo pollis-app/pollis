@@ -141,6 +141,23 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("media-spotlight")).toHaveCount(0);
     });
 
+    // Linux draws overlay scrollbars above every stacking order, so the viewer blanks them (#1915).
+    test("the chat scrollbar is invisible while the spotlight is open", async ({ page }) => {
+      await boot(page, skin);
+      const scrollbarColor = () =>
+        page.getByTestId("message-list").evaluate((el) => getComputedStyle(el).scrollbarColor);
+      const CLEAR = "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)";
+      expect(await scrollbarColor()).not.toBe(CLEAR);
+
+      await thumb(page, PHOTO_A).click();
+      await expectShowing(page, "first.jpg", "1 / 3");
+      expect(await scrollbarColor()).toBe(CLEAR);
+
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("media-spotlight")).toHaveCount(0);
+      expect(await scrollbarColor()).not.toBe(CLEAR);
+    });
+
     test("opening the middle item starts there", async ({ page }) => {
       await boot(page, skin);
       await thumb(page, CLIP).click();
