@@ -9,6 +9,8 @@ import {
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
 import { CodeSnippet } from "../components/ui/CodeSnippet";
+import { ReleaseNotesText } from "../components/ReleaseNotesText";
+import { useLatestReleaseNotes } from "../hooks/queries/useReleaseNotes";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import type { ManagedInstallInfo } from "../types";
@@ -27,6 +29,8 @@ export const UpdatePage: React.FC = observer(() => {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [isInstalling, setIsInstalling] = useState(false);
   const [managed, setManaged] = useState<ManagedInstallInfo | null>(null);
+  // No answer (offline, or a release without a changelog entry) leaves the notes section out.
+  const { data: releaseNotes } = useLatestReleaseNotes();
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion(t("update.versionUnknown")));
@@ -182,6 +186,17 @@ export const UpdatePage: React.FC = observer(() => {
                 </Button>
               )}
             </section>
+
+            {releaseNotes && (
+              <section className="flex flex-col gap-4" data-testid="update-release-notes">
+                <h2
+                  className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
+                >
+                  {t("update.whatsNew", { version: releaseNotes.version })}
+                </h2>
+                <ReleaseNotesText notes={releaseNotes.notes} data-testid="update-release-notes-text" />
+              </section>
+            )}
           </div>
         </div>
       </div>

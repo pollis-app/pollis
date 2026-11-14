@@ -8,6 +8,14 @@ export type ManagedInstallInfo = {
   update_command: string | null;
 };
 
+/** Mirrors `ReleaseNotes` in `src-tauri/src/commands/release_notes.rs` (#1916). */
+export type ReleaseNotes = {
+  /** The newest released version, without a leading `v`. */
+  version: string;
+  /** That version's changelog entry: Markdown-style text in English, never HTML. */
+  notes: string;
+};
+
 /** Mirrors `ClientPolicyStatus` in `pollis-core/src/client_policy.rs` (#1611). */
 export type ClientPolicyStatus = {
   blocked: boolean;

@@ -814,7 +814,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**207 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**208 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -823,10 +823,11 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **main** — `frontend/src/main.tsx`
 - **router** — `frontend/src/router.tsx`
 
-### `components` (7)
+### `components` (8)
 
 - **ClientBlockedScreen** — `frontend/src/components/ClientBlockedScreen.tsx`
 - **ErrorBoundary** — `frontend/src/components/ErrorBoundary.tsx`
+- **ReleaseNotesText** — props: notes — `frontend/src/components/ReleaseNotesText.tsx`. A release's changelog entry on Software Update (#1916): paragraphs, bullets, bold and inline code from `utils/releaseNotes.ts`, every character a React text node (the text is unsigned CDN content: no HTML, no links). Always `lang="en" dir="ltr"`.
 - **SearchPanel** — props: isOpen, onClose — `frontend/src/components/SearchPanel.tsx`. Selection moves by arrows, Tab/Shift-Tab, and the rebindable `search.next` / `search.prev` commands (defaults `mod+j` / `mod+k`, vim's direction). Those two register at priority 10 and only while the menu is open, which is what lets `mod+k` move the selection instead of re-firing `app.toggleSearch` and closing the menu the user just opened — Esc already closes it. All three routes call the same wrapping `selectNext` / `selectPrev`, and the hint row renders the live combos via `useShortcutLabel`, so a rebind shows up there.
 - **TerminalApp** — props: onLogout, onLock, onDeleteAccount — `frontend/src/components/TerminalApp.tsx`
 - **TerminalView** — props: visible — `frontend/src/components/TerminalView.tsx`
@@ -1075,7 +1076,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SettingsPage** — `frontend/src/pages/SettingsPage.tsx`
 - **StartDM** — props: onSuccess — `frontend/src/pages/StartDM.tsx`
 - **StartDMPage** — `frontend/src/pages/StartDMPage.tsx`
-- **UpdatePage** — `frontend/src/pages/UpdatePage.tsx`
+- **UpdatePage** — `frontend/src/pages/UpdatePage.tsx`. Under the status block, a "What's new in <version>" section with the newest release's notes (`useLatestReleaseNotes` → `get_latest_release_notes`, see commands.md → release_notes); absent when there are none.
 - **UserProfilePage** — `frontend/src/pages/UserProfile.tsx`
 - **VaultPage** — `frontend/src/pages/Vault.tsx`
 - **VoiceChannelPage** — `frontend/src/pages/VoiceChannel.tsx`

@@ -356,7 +356,8 @@
     "checkFailed": "Failed to check for updates",
     "managedNote": "This install is managed by {{manager}}. Pollis can't update itself from inside the app — use your package manager, then relaunch.",
     "installButton": "Install update",
-    "installing": "Installing…"
+    "installing": "Installing…",
+    "whatsNew": "What's new in {{version}}"
   },
   "shortcuts": {
     "title": "Key Bindings",

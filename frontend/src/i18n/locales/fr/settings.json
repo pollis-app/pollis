@@ -335,7 +335,8 @@
     "checkFailed": "Échec de la recherche de mises à jour",
     "managedNote": "Cette installation est gérée par {{manager}}. Pollis ne peut pas se mettre à jour depuis l'application — utilisez votre gestionnaire de paquets, puis relancez.",
     "installButton": "Installer la mise à jour",
-    "installing": "Installation…"
+    "installing": "Installation…",
+    "whatsNew": "Nouveautés de la version {{version}}"
   },
   "shortcuts": {
     "title": "Raccourcis clavier",

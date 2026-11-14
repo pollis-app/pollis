@@ -1340,6 +1340,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_update_check_plan':
       return { kind: 'direct' };
 
+    case 'get_latest_release_notes':
+      return preload.releaseNotes ?? null;
+
     case 'pick_save_path':
       return store.exportSavePath;
 

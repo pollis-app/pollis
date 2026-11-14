@@ -335,7 +335,8 @@
     "checkFailed": "No se pudo buscar actualizaciones",
     "managedNote": "Esta instalación la gestiona {{manager}}. Pollis no puede actualizarse a sí mismo desde dentro de la app: usa tu gestor de paquetes y vuelve a abrirla.",
     "installButton": "Instalar la actualización",
-    "installing": "Instalando…"
+    "installing": "Instalando…",
+    "whatsNew": "Novedades de la versión {{version}}"
   },
   "shortcuts": {
     "title": "Atajos de teclado",
