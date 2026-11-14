@@ -115,13 +115,9 @@ where
     crate::writes::ok_response::<B>(pollis_api::StatusOk::Ok)
 }
 
+// Through `AppError`, so a dropped database connection is a 503 and the pool drops it (#1899).
 fn internal(e: anyhow::Error) -> Response {
-    tracing::error!("email-change internal error: {e:#}");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({ "error": "internal error" })),
-    )
-        .into_response()
+    crate::error::AppError::from(e.context("email-change")).into_response()
 }
 
 /// POST /v1/auth/request-email-change-otp — DEVICE-SIGNED. **Always 200** (anti-enumeration).
