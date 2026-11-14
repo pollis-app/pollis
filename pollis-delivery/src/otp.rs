@@ -977,13 +977,9 @@ fn ok_200() -> Response {
     crate::writes::ok_response::<RequestOtpBody>(pollis_api::StatusOk::Ok)
 }
 
+// Through `AppError`, so a dropped database connection is a 503 and the pool drops it (#1899).
 fn internal(e: anyhow::Error) -> Response {
-    tracing::error!("verify-otp internal error: {e:#}");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({ "error": "internal error" })),
-    )
-        .into_response()
+    crate::error::AppError::from(e.context("verify-otp")).into_response()
 }
 
 #[cfg(test)]
@@ -1666,5 +1662,14 @@ mod tests {
         let after =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
         assert!(matches!(after, Ok(VerifyOtpResult::LockedOut)));
+    }
+
+    /// A dropped database connection during sign-in is "try again", not a hard failure (#1899).
+    #[test]
+    fn a_dropped_database_connection_is_a_503_and_a_real_failure_a_500() {
+        let dropped = internal(anyhow::Error::new(libsql::Error::ConnectionFailed("reset".into())));
+        assert_eq!(dropped.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let real = internal(anyhow::anyhow!("no such column: x"));
+        assert_eq!(real.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
