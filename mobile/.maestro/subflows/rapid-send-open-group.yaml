@@ -17,11 +17,8 @@ appId: ${MAESTRO_APP_ID}
 - inputText: "${GROUP}"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "${GROUP}, .*"
-    timeout: 15000
+# ${GROUP} is this subflow's own argument; the wait reads the same one.
+- runFlow: group-created.yaml
 - tapOn:
     text: "General"
     optional: true

@@ -26,11 +26,10 @@ tags:
 - inputText: "E2E Long History"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Long History, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Long History"
 - tapOn:
     text: "General"
     optional: true
@@ -47,6 +46,9 @@ tags:
 - extendedWaitUntil:
     visible: ".*istory 0.*"
     timeout: 30000
+# The row shows at once, still sending, and Send stays disabled until it
+# lands: against the dev DS that can take more than 30 s (#1893).
+- runFlow: ../subflows/message-settled.yaml
 
 # Seed far more than one screen of messages (a Pixel 8 shows ~10 rows).
 - evalScript: ${output.n = 0}

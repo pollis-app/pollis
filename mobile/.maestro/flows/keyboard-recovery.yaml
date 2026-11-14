@@ -177,11 +177,10 @@ appId: ${MAESTRO_APP_ID}
 - inputText: "E2E Keyboard Resume"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Keyboard Resume, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Keyboard Resume"
 - tapOn:
     text: "General"
     optional: true

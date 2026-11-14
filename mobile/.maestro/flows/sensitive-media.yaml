@@ -35,11 +35,10 @@ tags:
 - inputText: "E2E Sensitive Media"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Sensitive Media, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Sensitive Media"
 - tapOn:
     text: "General"
     optional: true

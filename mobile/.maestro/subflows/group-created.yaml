@@ -1,0 +1,12 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Wait for the group just created (named ${GROUP}) to show its panel on the
+# Groups tab. Every flow that creates a group waits here, so the allowance is
+# set once: against the dev DS each database query costs about 150 ms, which
+# makes creating a group take 15 to 25 s on a phone (#1893). It is a ceiling,
+# not a delay: the step ends as soon as the panel header shows.
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP}, .*"
+    timeout: 90000

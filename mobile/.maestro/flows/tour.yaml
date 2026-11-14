@@ -144,11 +144,10 @@ tags:
     id: "btn-submit-group"
 # Creating lands on the Groups tab with the new group selected: tour-12 is
 # that tab's pill strip + the group's channel panel (no standalone group page).
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "Design Team, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "Design Team"
 - assertVisible:
     id: "panel-group"
 - waitForAnimationToEnd:
@@ -196,11 +195,7 @@ tags:
 # see messaging.yaml), and a pending row has no long-press action, so a long
 # press made too early does nothing. Let it settle, then use the retrying
 # subflow, which waits for the sheet's Edit row.
-- extendedWaitUntil:
-    visible:
-      id: "__never_matches__"
-    timeout: 30000
-    optional: true
+- runFlow: ../subflows/message-settled.yaml
 - runFlow: ../subflows/long-press-message.yaml
 - waitForAnimationToEnd:
     timeout: 3000
