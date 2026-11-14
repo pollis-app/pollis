@@ -10,6 +10,8 @@ static PING: &[u8] = include_bytes!("../../../assets/sfx/ping_fx.wav");
 static JOIN: &[u8] = include_bytes!("../../../assets/sfx/join_fx.wav");
 static LEAVE: &[u8] = include_bytes!("../../../assets/sfx/leave-fx.wav");
 static CALL: &[u8] = include_bytes!("../../../assets/sfx/call.wav");
+// Original, synthesized by scripts/gen-ringback-wav.py (#1901).
+static RINGBACK_CLIP: &[u8] = include_bytes!("../../../assets/sfx/ringback.wav");
 static MUTE: &[u8] = include_bytes!("../../../assets/sfx/mute_fx.wav");
 static UNMUTE: &[u8] = include_bytes!("../../../assets/sfx/unmute_fx.wav");
 static DEAFEN: &[u8] = include_bytes!("../../../assets/sfx/deafen_fx.wav");
@@ -89,66 +91,145 @@ pub fn play_sfx(sound: &str) {
     sink.detach();
 }
 
-/// Looping ringtone playback. The wav file has built-in inter-ring silence so
-/// looping the whole clip produces a natural ring-pause-ring pattern.
-static RING_STOP: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
+/// A clip played on a loop until stopped. Each wav carries its own silence, so
+/// looping the whole clip produces the ring-pause-ring pattern. One slot per
+/// tone: the incoming ringtone and the caller's ringback never stop each other.
+struct LoopingTone {
+    name: &'static str,
+    clip: &'static [u8],
+    stop: Mutex<Option<Arc<AtomicBool>>>,
+}
 
-/// Start the incoming-call ringtone on a loop. Idempotent — calling twice
-/// while already ringing is a no-op.
-pub fn start_ring() {
-    let Some(handle) = ensure_audio() else {
-        return;
-    };
-
-    let stop = Arc::new(AtomicBool::new(false));
-    {
-        let mut guard = match RING_STOP.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        if guard.is_some() {
-            return;
+impl LoopingTone {
+    const fn new(name: &'static str, clip: &'static [u8]) -> Self {
+        Self {
+            name,
+            clip,
+            stop: Mutex::new(None),
         }
-        *guard = Some(Arc::clone(&stop));
     }
 
-    let handle = handle.clone();
-    std::thread::spawn(move || {
-        let sink = match rodio::Sink::try_new(&handle) {
-            Ok(s) => s,
-            Err(e) => {
-                crate::diag!("[sfx] start_ring Sink::try_new failed: {e}");
-                return;
-            }
+    /// Claim the slot. `None` while the tone is already playing.
+    fn arm(&self) -> Option<Arc<AtomicBool>> {
+        let mut guard = self.stop.lock().ok()?;
+        if guard.is_some() {
+            return None;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        *guard = Some(Arc::clone(&stop));
+        Some(stop)
+    }
+
+    /// Start looping. Idempotent: a second start while playing is a no-op.
+    fn start(&'static self) {
+        let Some(handle) = ensure_audio() else {
+            return;
         };
-        while !stop.load(Ordering::Acquire) {
-            let source = match rodio::Decoder::new(Cursor::new(CALL)) {
+        let Some(stop) = self.arm() else {
+            return;
+        };
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            let sink = match rodio::Sink::try_new(&handle) {
                 Ok(s) => s,
                 Err(e) => {
-                    crate::diag!("[sfx] start_ring Decoder failed: {e}");
+                    crate::diag!("[sfx] {} Sink::try_new failed: {e}", self.name);
                     return;
                 }
             };
-            sink.append(source);
-            // Poll so a stop lands within ~100 ms.
-            while !sink.empty() && !stop.load(Ordering::Acquire) {
-                std::thread::sleep(Duration::from_millis(100));
+            while !stop.load(Ordering::Acquire) {
+                let source = match rodio::Decoder::new(Cursor::new(self.clip)) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        crate::diag!("[sfx] {} Decoder failed: {e}", self.name);
+                        return;
+                    }
+                };
+                sink.append(source);
+                // Poll so a stop lands within ~100 ms.
+                while !sink.empty() && !stop.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                if stop.load(Ordering::Acquire) {
+                    sink.stop();
+                    break;
+                }
             }
-            if stop.load(Ordering::Acquire) {
-                sink.stop();
-                break;
-            }
+        });
+    }
+
+    /// Stop looping, if playing. Idempotent.
+    fn stop(&self) {
+        let mut guard = match self.stop.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        if let Some(stop) = guard.take() {
+            stop.store(true, Ordering::Release);
         }
-    });
+    }
+}
+
+/// The callee's incoming-call ringtone.
+static RING: LoopingTone = LoopingTone::new("ring", CALL);
+/// The caller's ringback while a 1:1 DM call rings the other side (#1901).
+static RINGBACK: LoopingTone = LoopingTone::new("ringback", RINGBACK_CLIP);
+
+/// Start the incoming-call ringtone on a loop. Idempotent.
+pub fn start_ring() {
+    RING.start();
 }
 
 /// Stop the incoming-call ringtone, if any. Idempotent.
 pub fn stop_ring() {
-    let mut guard = match RING_STOP.lock() {
-        Ok(g) => g,
-        Err(_) => return,
-    };
-    if let Some(stop) = guard.take() {
-        stop.store(true, Ordering::Release);
+    RING.stop();
+}
+
+/// Start the caller's ringback on a loop, on the same output as every other
+/// sound effect. Idempotent.
+pub fn start_ringback() {
+    RINGBACK.start();
+}
+
+/// Stop the caller's ringback, if any. Idempotent.
+pub fn stop_ringback() {
+    RINGBACK.stop();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tone_arms_once_until_stopped() {
+        let tone = LoopingTone::new("test", RINGBACK_CLIP);
+        let first = tone.arm().expect("an idle tone arms");
+        assert!(tone.arm().is_none(), "a playing tone must not start a second loop");
+        tone.stop();
+        assert!(first.load(Ordering::Acquire), "stop signals the running loop");
+        assert!(tone.arm().is_some(), "a stopped tone can start again");
+    }
+
+    #[test]
+    fn stopping_an_idle_tone_is_a_no_op() {
+        let tone = LoopingTone::new("test", RINGBACK_CLIP);
+        tone.stop();
+        assert!(tone.arm().is_some());
+    }
+
+    #[test]
+    fn ring_and_ringback_have_separate_slots() {
+        let ring = LoopingTone::new("ring", CALL);
+        let ringback = LoopingTone::new("ringback", RINGBACK_CLIP);
+        let _ring = ring.arm().expect("ring arms");
+        assert!(ringback.arm().is_some(), "ringing must not block the ringback");
+        ringback.stop();
+        assert!(ring.arm().is_none(), "stopping the ringback leaves the ring playing");
+    }
+
+    #[test]
+    fn the_ringback_clip_decodes() {
+        let source = rodio::Decoder::new(Cursor::new(RINGBACK_CLIP)).expect("ringback.wav decodes");
+        assert_eq!(rodio::Source::channels(&source), 1);
     }
 }

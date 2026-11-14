@@ -240,6 +240,35 @@ Pure decisions (`shouldTakeOver`, `takeoverExit`) live in
 `e2e/incoming-call-takeover.spec.ts`, and the real two-client path by
 `e2e/two-client-call.js` (B answers from the takeover).
 
+## Caller ringback (#1901)
+
+While a 1:1 DM call rings the other side, the caller hears a looping ringback
+("ring-ring": two 0.4 s bursts of 400 + 450 Hz, then 2 s of silence, built into
+`assets/sfx/ringback.wav`). The clip is original and synthesized by
+`scripts/gen-ringback-wav.py`, which reproduces it byte for byte.
+
+- **Playback** is Rust's, beside the incoming ringtone: `start_ringback` /
+  `stop_ringback` in `pollis-core/src/commands/sfx.rs` loop the clip on the same
+  rodio output handle as every other sound effect. Each looping tone
+  (`LoopingTone`) has its own slot, so ringing and ringback never stop each other.
+- **When:** `ringbackWanted` (`frontend/src/voice/ringback.ts`) is true while
+  `appStore.outgoingCall` is set (only the DM call button sets it, so group and
+  channel voice never ring back), this device is joining or in that call's
+  `call-<id>` room, nobody else has joined it, and `allow_sound_effects` is on.
+  The device-local ringtone toggle is for incoming calls only and does not apply.
+  `useCallRingback` (mounted in `AppShell`) feeds it through a MobX `autorun` into
+  `Ringback`, which issues exactly one start per ring and one stop when it ends.
+- **Ends:** answered (the callee joins the room), declined or cancelled
+  (`call_canceled` clears `outgoingCall`), timed out (`Call.tsx` leaves after 30 s
+  alone), hung up (leaving the room), or the call screen closed (its backstop
+  `cancel_call`). Logging out unmounts the shell, which stops it too.
+- **Desktop only.** Voice and video are excluded on mobile by product decision.
+
+Pinned by `frontend/tests/call-ringback.test.ts` (the decision and the start/stop
+machine), `e2e/call-ringback.spec.ts` (start on ring; stop on answer, decline,
+cancel, timeout and hang-up; silent for group voice and with sound effects off),
+and the Rust slot tests in `sfx.rs`.
+
 ## Adding a new alert
 
 1. **Add a row to `CATEGORIES`** in `frontend/src/utils/notify.ts`:
@@ -746,7 +775,7 @@ dismissal still work by `data.h`. Build, signing and portal details:
 | `frontend/src/hooks/useBadge.ts` | Reads `unreadCounts` from the MobX store, applies dock/taskbar badge |
 | `pollis-core/src/realtime.rs` | `RealtimeEvent` enum (Rust → JS wire format) |
 | `pollis-core/src/commands/livekit/` | `dispatch_data()` parses payloads, sends typed events to JS |
-| `pollis-core/src/commands/sfx.rs` | `play_sfx` rodio implementation |
+| `pollis-core/src/commands/sfx.rs` | `play_sfx` rodio implementation; the looping `start_ring` / `start_ringback` tones (`LoopingTone`, one slot each) |
 | `pollis-core/src/commands/groups/` | Membership-change publishers (set `kind` here) |
 
 ## Related issues

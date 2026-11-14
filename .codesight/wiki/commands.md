@@ -800,7 +800,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
 - **`safety`** — `get_safety_number`, `list_key_change_notices`, `list_peer_verifications`, `set_contact_verified`
 - **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `set_video_wants`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`
-- **`sfx`** — `play_sfx`, `start_ring`, `stop_ring`
+- **`sfx`** — `play_sfx`, `start_ring`, `start_ringback`, `stop_ring`, `stop_ringback`
 - **`terminal`** — `get_terminal_enabled`, `set_terminal_enabled`, `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
 - **`transparency`** — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
 - **`tray`** — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
@@ -820,7 +820,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **230 commands** in 35 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **232 commands** in 35 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -889,7 +889,7 @@ than hand-edit.
 
 **`camera`** (6) — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 
-**`sfx`** (3) — `play_sfx`, `start_ring`, `stop_ring`
+**`sfx`** (5) — `play_sfx`, `start_ring`, `start_ringback`, `stop_ring`, `stop_ringback`
 
 **`pathscope`** (2) — `pick_open_paths`, `pick_save_path`
 

@@ -50,7 +50,7 @@
   },
   "patterns": [
     {
-      "match": "voice|camera|screen_?share|screen_sources|_call$|_ring$|mic_test|audio|video_devices|test_tone|test_playback|record_and_play_back|remote_user_volume|media_permission|revoke_media|open_privacy_settings|^connect_rooms$|^get_last_join_timings$",
+      "match": "voice|camera|screen_?share|screen_sources|_call$|_ring(back)?$|mic_test|audio|video_devices|test_tone|test_playback|record_and_play_back|remote_user_volume|media_permission|revoke_media|open_privacy_settings|^connect_rooms$|^get_last_join_timings$",
       "scopes": [
         "desktop_only"
       ],
