@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { useThemeRerender } from "../theme";
 import { AttachmentToolbar, TOOLBAR_GLYPH } from "./AttachmentToolbar";
+import { sensitiveHideTestID, sensitiveToolbarTestID } from "../../lib/sensitiveMedia";
 import { semantic } from "../../theme/tokens";
 
 const FILL = { position: "absolute", top: 0, bottom: 0, start: 0, end: 0 } as const;
@@ -40,20 +41,21 @@ export function SensitiveCover({ blurhash, testID }: { blurhash?: string; testID
 export function SensitiveHideButton({
   filename,
   onHide,
-  testID,
+  attachmentId,
 }: {
   filename: string;
   onHide: () => void;
-  testID?: string;
+  attachmentId: string;
 }) {
   useThemeRerender();
   const { t } = useTranslation("chat");
   return (
     <AttachmentToolbar
+      testID={sensitiveToolbarTestID(attachmentId)}
       actions={[
         {
           key: "hide",
-          testID: testID ?? "btn-sensitive-hide",
+          testID: sensitiveHideTestID(attachmentId),
           accessibilityLabel: t("attachment.sensitiveHide", { filename }),
           icon: (color) => <Icon.eye size={TOOLBAR_GLYPH} color={color} />,
           onPress: onHide,

@@ -1437,9 +1437,13 @@ Current state:
   surface (row tile, viewer page, Vault grid) covers a sensitive one until a
   tap reveals it — that tap only reveals, so a video never opens or plays on
   it — and a revealed one carries the one-action toolbar capsule to hide it
-  again. Reveal state is `stores/sensitiveRevealStore.ts` (in memory, per
-  attachment id); rules in `lib/sensitiveMedia.ts`; Maestro
-  `flows/sensitive-media.yaml`; quote replies
+  again. The capsule always has its own `testID` (`toolbar-sensitive-<id>`;
+  `AttachmentToolbar` requires one): under an accessible parent such as a
+  message row, iOS lists a view for assistive tools and Maestro only if it is
+  an element or has an id, and nothing inside a view that is neither, so a
+  capsule without one hides its own buttons (#1895). Reveal state is
+  `stores/sensitiveRevealStore.ts` (in memory, per attachment id); rules in
+  `lib/sensitiveMedia.ts`; Maestro `flows/sensitive-media.yaml`; quote replies
   (#1270, desktop's Reply: `send_message` with `replyToId`, a `ReplyBar` over the
   composer, a quote line on the replying row via `lib/replyPreview.ts`, tap jumps
   to the original). A reply starts from a Discord-style **swipe toward the start
