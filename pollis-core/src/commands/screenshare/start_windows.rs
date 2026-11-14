@@ -75,6 +75,8 @@ pub async fn start_screen_share(
     use std::sync::atomic::AtomicBool;
 
     let limits = ShareLimits::resolve(max_framerate, max_height);
+    // Set first, so a live change made during the publish is not overwritten.
+    state.screenshare.lock().await.ceiling.set(limits.max_height);
 
     let room = {
         let voice = state.voice.lock().await;
@@ -171,9 +173,11 @@ pub async fn start_screen_share(
     let active_flag = std::sync::Arc::new(AtomicBool::new(true));
     let (pump, events_sink) = {
         let mut ss = state.screenshare.lock().await;
+        // WGC captures at the source's size, so the pump's ceiling is the whole limit, live.
         let pump = LocalVideoPump::new(
             Some(source.clone()),
-            limits,
+            limits.max_fps,
+            ss.ceiling.clone(),
             PreviewMirror::new(wants_channel(&mut ss, LOCAL_PREVIEW_KEY)),
             LOCAL_PREVIEW_KEY,
             Arc::clone(&state.screenshare_frame_tx),

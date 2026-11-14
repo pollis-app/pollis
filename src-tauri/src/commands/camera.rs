@@ -29,8 +29,20 @@ pub async fn list_video_devices(
 }
 
 #[tauri::command]
-pub async fn start_camera(state: State<'_, Arc<AppState>>, device_id: String) -> Result<()> {
-    pollis_core::commands::camera::start_camera(&state, device_id).await
+pub async fn start_camera(
+    state: State<'_, Arc<AppState>>,
+    device_id: String,
+    max_height: Option<u32>,
+) -> Result<()> {
+    pollis_core::commands::camera::start_camera(&state, device_id, max_height).await
+}
+
+#[tauri::command]
+pub async fn set_camera_max_height(
+    state: State<'_, Arc<AppState>>,
+    max_height: Option<u32>,
+) -> Result<()> {
+    pollis_core::commands::camera::set_camera_max_height(&state, max_height).await
 }
 
 #[tauri::command]

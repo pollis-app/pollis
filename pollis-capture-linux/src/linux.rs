@@ -32,10 +32,8 @@ struct Args {
     /// (PipeWire framerate preference, X11 tick). 0 = the source's own rate.
     #[arg(long, default_value_t = 0)]
     max_fps: u32,
-    /// Tallest frame the publish will carry; the capture is asked for no more (PipeWire
-    /// size preference). 0 = the source's own size. Ignored in camera mode.
-    #[arg(long, default_value_t = 0)]
-    max_height: u32,
+    // No height flag: the parent's pump owns the share resolution, so it can rise and
+    // fall mid-share (#1902) without renegotiating the PipeWire stream.
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -142,7 +140,7 @@ pub fn run() -> Result<()> {
 
     let limits = CaptureLimits {
         max_fps: args.max_fps,
-        max_height: args.max_height,
+        max_height: 0,
     };
     rt.block_on(async move { run_async(&args.socket, args.mode, args.audio, limits).await })
 }
@@ -543,18 +541,13 @@ mod pw {
             })
             .register()?;
 
-        // The size and rate we would like: a preference, not a demand. Most compositors
-        // offer only their native size, and the parent scales down what arrives taller
-        // than the limit; the ranges stay wide so a fixed-rate compositor still negotiates.
-        let preferred_size = match limits.max_height {
-            0 => pw::spa::utils::Rectangle {
-                width: 7680,
-                height: 4320,
-            },
-            h => pw::spa::utils::Rectangle {
-                width: h * 16 / 9,
-                height: h,
-            },
+        // The size and rate we would like: a preference, not a demand; the ranges stay wide
+        // so a fixed-rate compositor still negotiates. The size is the source's own: the
+        // parent scales to the share resolution, which can change mid-share (#1902), and
+        // most compositors offer only their native size anyway.
+        let preferred_size = pw::spa::utils::Rectangle {
+            width: 7680,
+            height: 4320,
         };
         let preferred_fps = match limits.max_fps {
             0 => 60,

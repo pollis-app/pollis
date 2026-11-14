@@ -26,7 +26,9 @@ use windows::Win32::System::Com::{
     CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_MULTITHREADED,
 };
 
-use crate::commands::screenshare::codec::{convert_to_i420, pack_frame_bytes};
+use crate::commands::screenshare::codec::{
+    bound_to_ceiling, convert_to_i420, pack_frame_bytes, VideoCeiling,
+};
 use crate::sink::EventSink;
 use crate::{error::Result, state::AppState};
 
@@ -127,9 +129,16 @@ struct CameraCaptureFlags {
     source: NativeVideoSource,
     active: Arc<AtomicBool>,
     frame_tx: Arc<crate::media_server::FrameFanout>,
+    /// The live height ceiling (#1902), applied to every frame before the encoder.
+    ceiling: VideoCeiling,
 }
 
-pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()> {
+/// `max_height`: see `camera::capture::start_camera`.
+pub async fn start_camera(
+    state: &Arc<AppState>,
+    device_id: String,
+    max_height: Option<u32>,
+) -> Result<()> {
     let room = {
         let voice = state.voice.lock().await;
         voice.room.clone()
@@ -159,15 +168,17 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     );
 
     let active = Arc::new(AtomicBool::new(true));
-    let events_for_thread = {
+    let (events_for_thread, ceiling) = {
         let cam = state.camera.lock().await;
-        cam.events.clone()
+        cam.ceiling.set(max_height);
+        (cam.events.clone(), cam.ceiling.clone())
     };
     let flags = CameraCaptureFlags {
         device_id,
         source: source.clone(),
         active: Arc::clone(&active),
         frame_tx: state.screenshare_frame_tx.clone(),
+        ceiling,
     };
 
     let (size_tx, size_rx) = tokio::sync::oneshot::channel::<CamStart>();
@@ -260,6 +271,7 @@ fn run_capture_thread(
         source,
         active,
         frame_tx,
+        ceiling,
     } = flags;
 
     // Setup phase — MF + COM are torn down by `_mf`'s Drop on every exit path.
@@ -287,9 +299,11 @@ fn run_capture_thread(
     crate::diag!("[camera] MF negotiated {width}x{height} RGB32 stride={stride}");
     let _ = size_tx.send(CamStart::Size(width, height));
 
-    if let Err(e) =
-        unsafe { stream_frames(&reader, width, height, stride, &source, &active, &frame_tx) }
-    {
+    if let Err(e) = unsafe {
+        stream_frames(
+            &reader, width, height, stride, &source, &active, &frame_tx, &ceiling,
+        )
+    } {
         crate::diag!("[camera] MF capture error: {e}");
         if let Some(ev) = &events {
             let _ = ev.send(CameraEvent::LocalError {
@@ -400,6 +414,7 @@ unsafe fn pick_native_size(reader: &IMFSourceReader) -> AnyResult<(u32, u32)> {
 }
 
 /// Blocking `ReadSample` loop: pack top-down BGRx and push until fenced.
+#[allow(clippy::too_many_arguments)]
 unsafe fn stream_frames(
     reader: &IMFSourceReader,
     width: u32,
@@ -408,6 +423,7 @@ unsafe fn stream_frames(
     source: &NativeVideoSource,
     active: &AtomicBool,
     frame_tx: &Arc<crate::media_server::FrameFanout>,
+    ceiling: &VideoCeiling,
 ) -> AnyResult<()> {
     let row_bytes = width as usize * 4;
     let abs_stride = (stride.unsigned_abs() as usize).max(row_bytes);
@@ -478,6 +494,7 @@ unsafe fn stream_frames(
             row_bytes as u32,
             timestamp_us,
             &scratch,
+            ceiling,
             show_preview.then_some(frame_tx),
         );
     }
@@ -529,6 +546,7 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_frame(
     source: &NativeVideoSource,
     width: u32,
@@ -536,6 +554,7 @@ fn push_frame(
     stride: u32,
     timestamp_us: i64,
     bgrx: &[u8],
+    ceiling: &VideoCeiling,
     // `Some` on the throttled frames that also feed the sharer's self-preview.
     preview: Option<&Arc<crate::media_server::FrameFanout>>,
 ) {
@@ -545,8 +564,8 @@ fn push_frame(
     if w <= 0 || h <= 0 {
         return;
     }
-    // BGRA (== little-endian ARGB) → I420 at native resolution.
-    let buffer = convert_to_i420(w, h, stride, bgrx);
+    // BGRA (== little-endian ARGB) → I420, then down to the live ceiling.
+    let buffer = bound_to_ceiling(convert_to_i420(w, h, stride, bgrx), ceiling);
     let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,

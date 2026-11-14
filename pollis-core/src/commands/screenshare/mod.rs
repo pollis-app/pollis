@@ -35,7 +35,9 @@ mod unsupported;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod session_tests;
 
-pub use commands::{screenshare_ws_url, subscribe_screen_share_events};
+pub use commands::{
+    screenshare_ws_url, set_screen_share_max_height, subscribe_screen_share_events,
+};
 pub use remote_video::{
     on_participant_left, on_remote_video_subscribed, on_remote_video_unsubscribed,
     on_room_disconnected,

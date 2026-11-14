@@ -1,5 +1,10 @@
 //! Codec choice, I420 conversion, publish limits and frame-bytes packing, shared by push and drain.
 
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
+
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer};
 use livekit::options::VideoCodec;
 
@@ -56,12 +61,51 @@ impl ShareLimits {
     /// The even `(w, h)` a `(w, h)` source should be captured or scaled to, or `None`
     /// when it already fits.
     pub fn fit(&self, width: u32, height: u32) -> Option<(u32, u32)> {
-        let max_height = self.max_height?;
-        if height <= max_height || height == 0 {
-            return None;
-        }
-        let w = ((width as u64 * max_height as u64 + height as u64 / 2) / height as u64) as u32;
-        Some(((w.max(2)) & !1, (max_height.max(2)) & !1))
+        fit_to_height(self.max_height, width, height)
+    }
+}
+
+/// The even `(w, h)` a `(w, h)` frame is scaled to under a height ceiling, aspect kept, or
+/// `None` when there is no ceiling or the frame already fits.
+pub(crate) fn fit_to_height(
+    max_height: Option<u32>,
+    width: u32,
+    height: u32,
+) -> Option<(u32, u32)> {
+    let max_height = max_height?;
+    if height <= max_height || height == 0 {
+        return None;
+    }
+    let w = ((width as u64 * max_height as u64 + height as u64 / 2) / height as u64) as u32;
+    Some(((w.max(2)) & !1, (max_height.max(2)) & !1))
+}
+
+/// The outgoing height ceiling of one local video track (screen share or camera), shared by
+/// the command that changes it and the pump that applies it to every frame, so a change
+/// reaches a running stream on its next frame without a republish (#1902).
+/// `0` on the wire and `None` here both mean the source's own size.
+#[derive(Clone, Debug, Default)]
+pub struct VideoCeiling(Arc<AtomicU32>);
+
+impl VideoCeiling {
+    pub fn new(max_height: Option<u32>) -> Self {
+        let ceiling = Self::default();
+        ceiling.set(max_height);
+        ceiling
+    }
+
+    /// `None` or `Some(0)` lifts the ceiling.
+    pub fn set(&self, max_height: Option<u32>) {
+        self.0.store(max_height.unwrap_or(0), Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> Option<u32> {
+        Some(self.0.load(Ordering::Relaxed)).filter(|h| *h > 0)
+    }
+
+    /// [`fit_to_height`] under the ceiling as it stands now.
+    pub fn fit(&self, width: u32, height: u32) -> Option<(u32, u32)> {
+        fit_to_height(self.get(), width, height)
     }
 }
 
@@ -108,10 +152,11 @@ pub(crate) fn convert_to_i420(width: i32, height: i32, src_stride: u32, argb: &[
     buffer
 }
 
-/// The parent-side backstop for a capture backend that could not size itself: libyuv
-/// I420 scale down to the limit's height, aspect kept.
-pub(crate) fn bound_to_limits(mut buffer: I420Buffer, limits: &ShareLimits) -> I420Buffer {
-    match limits.fit(buffer.width(), buffer.height()) {
+/// The parent-side ceiling on every local video frame: libyuv I420 scale down to the
+/// ceiling's height, aspect kept. A no-op where the capture already sized itself (SCK);
+/// everywhere else it is what applies the ceiling, live.
+pub(crate) fn bound_to_ceiling(mut buffer: I420Buffer, ceiling: &VideoCeiling) -> I420Buffer {
+    match ceiling.fit(buffer.width(), buffer.height()) {
         Some((w, h)) => buffer.scale(w as i32, h as i32),
         None => buffer,
     }
@@ -199,6 +244,40 @@ mod tests {
             max_height: None,
         };
         assert_eq!(source.fit(7680, 4320), None);
+    }
+
+    #[test]
+    fn ceiling_treats_zero_and_none_as_source_and_changes_live() {
+        let c = VideoCeiling::new(None);
+        assert_eq!(c.get(), None);
+        assert_eq!(c.fit(3840, 2160), None);
+        // A clone is the same ceiling: the pump holds one, the command sets the other.
+        let pump_side = c.clone();
+        c.set(Some(720));
+        assert_eq!(pump_side.get(), Some(720));
+        assert_eq!(pump_side.fit(1920, 1080), Some((1280, 720)));
+        // Raising it lets the next frame through whole.
+        c.set(Some(1440));
+        assert_eq!(pump_side.fit(1920, 1080), None);
+        c.set(Some(0));
+        assert_eq!(pump_side.get(), None);
+        assert_eq!(VideoCeiling::new(Some(0)).get(), None);
+        assert_eq!(VideoCeiling::new(Some(1080)).get(), Some(1080));
+    }
+
+    #[test]
+    fn fit_to_height_matches_share_limits() {
+        for (w, h) in [(1920, 1080), (3840, 2160), (5120, 2880), (1366, 1300), (640, 480)] {
+            for max in [None, Some(360), Some(720), Some(1080)] {
+                let limits = ShareLimits {
+                    max_fps: 30,
+                    max_height: max,
+                };
+                assert_eq!(fit_to_height(max, w, h), limits.fit(w, h), "{w}x{h} under {max:?}");
+            }
+        }
+        // A 1080p camera under a 360p ceiling keeps 16:9.
+        assert_eq!(fit_to_height(Some(360), 1920, 1080), Some((640, 360)));
     }
 
     #[test]

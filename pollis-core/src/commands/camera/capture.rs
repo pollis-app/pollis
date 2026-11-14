@@ -13,7 +13,7 @@ use livekit::{
 };
 
 use crate::commands::screenshare::{
-    codec::ShareLimits,
+    codec::VideoCeiling,
     helper_subprocess::locate_capture_helper,
     pump::{FrameIn, LocalVideoPump, PumpHandle},
     wants::{wants_channel, PreviewMirror},
@@ -23,19 +23,21 @@ use crate::{error::Result, state::AppState};
 
 use super::{fail_capture, CameraEvent, LOCAL_CAMERA_PREVIEW_KEY};
 
-/// The camera publishes at 30 fps and its own size; the pump's pacer matches the encoder.
-const CAMERA_LIMITS: ShareLimits = ShareLimits {
-    max_fps: 30,
-    max_height: None,
-};
+/// The camera publishes at 30 fps; the pump's pacer matches the encoder.
+const CAMERA_MAX_FPS: u32 = 30;
 
-/// A pump for the local camera: the publish source (or none for the settings preview) plus
-/// the self-preview mirror, sized and paced by what the preview tile reports.
-async fn camera_pump(state: &Arc<AppState>, source: Option<NativeVideoSource>) -> LocalVideoPump {
+/// A pump for the local camera: the publish source (or none for the settings preview) under
+/// `ceiling`, plus the self-preview mirror, sized and paced by what the preview tile reports.
+async fn camera_pump(
+    state: &Arc<AppState>,
+    source: Option<NativeVideoSource>,
+    ceiling: VideoCeiling,
+) -> LocalVideoPump {
     let mut ss = state.screenshare.lock().await;
     LocalVideoPump::new(
         source,
-        CAMERA_LIMITS,
+        CAMERA_MAX_FPS,
+        ceiling,
         PreviewMirror::new(wants_channel(&mut ss, LOCAL_CAMERA_PREVIEW_KEY)),
         LOCAL_CAMERA_PREVIEW_KEY,
         Arc::clone(&state.screenshare_frame_tx),
@@ -231,7 +233,13 @@ pub async fn list_video_devices(state: &Arc<AppState>) -> Result<pollis_capture_
     Ok(list)
 }
 
-pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()> {
+/// `max_height` is the camera resolution setting (`None`/`0` = the camera's own size); it
+/// can change mid-stream through [`super::set_camera_max_height`].
+pub async fn start_camera(
+    state: &Arc<AppState>,
+    device_id: String,
+    max_height: Option<u32>,
+) -> Result<()> {
     use pollis_capture_proto::{
         encode_select_camera, read_msg, read_msg_pooled, CameraSelection, CaptureMsg,
     };
@@ -258,9 +266,11 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
         }
     }
 
-    // Reuse the parked enumeration session, else spawn and skip `Cameras`.
+    // Reuse the parked enumeration session, else spawn and skip `Cameras`. The ceiling is
+    // set first, so a live change made while the camera opens is not overwritten.
     let parked = {
         let mut cam = state.camera.lock().await;
+        cam.ceiling.set(max_height);
         cam.picker_session.take()
     };
     let mut session = match parked {
@@ -424,7 +434,8 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     }
 
     // Reader task feeds the converter; the self-preview follows the preview tile's wants.
-    let pump = camera_pump(state, Some(source.clone())).await;
+    let ceiling = state.camera.lock().await.ceiling.clone();
+    let pump = camera_pump(state, Some(source.clone()), ceiling).await;
     let state_for_exit = Arc::clone(state);
     let reader_task = tokio::spawn(async move {
         let frames = PumpHandle::spawn(pump);
@@ -466,9 +477,11 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                 | Ok(Some(CaptureMsg::SelectCamera(_)))
                 | Ok(Some(CaptureMsg::Sources(_)))
                 | Ok(Some(CaptureMsg::Select(_))) => {}
-                // Shared audio is screen share's; never requested here.
+                // Shared audio is screen share's; never requested here. SetMaxHeight is
+                // parent → helper only (the camera's ceiling is the pump's).
                 Ok(Some(CaptureMsg::AudioFormat { .. }))
-                | Ok(Some(CaptureMsg::AudioFrame { .. })) => {}
+                | Ok(Some(CaptureMsg::AudioFrame { .. }))
+                | Ok(Some(CaptureMsg::SetMaxHeight { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {
                     crate::diag!("[camera] helper error mid-stream: {message}");
                     on_reader_exit(
@@ -709,7 +722,8 @@ pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> R
     }
 
     // Reader task: preview only, no LiveKit publish.
-    let pump = camera_pump(state, None).await;
+    // The settings check shows the camera as it is, whatever the call ceiling.
+    let pump = camera_pump(state, None, VideoCeiling::new(None)).await;
     let reader_task = tokio::spawn(async move {
         let frames = PumpHandle::spawn(pump);
         loop {

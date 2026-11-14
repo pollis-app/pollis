@@ -50,6 +50,13 @@
 //!                [ i16 interleaved PCM ... ]
 //!     s16 interleaved PCM; the parent downmixes and resamples to 48 kHz.
 //!
+//!   type 0x0A  SetMaxHeight (parent -> helper)
+//!     payload := [ u32 max_height ]
+//!     The share resolution changed mid-share (#1902); `0` = the source's
+//!     own size. The macOS helper re-sizes its SCStream to fit; the parent's
+//!     pump applies the same ceiling to every frame, so a helper that
+//!     ignores it still publishes within it.
+//!
 //!   type 0xFF  Error
 //!     payload := utf-8 message
 //!     A message prefixed `audio:` is NON-FATAL: shared-audio capture
@@ -89,6 +96,8 @@ pub const MSG_AUDIO_FORMAT: u8 = 0x07;
 pub const MSG_AUDIO_FRAME: u8 = 0x08;
 /// A single tight-plane I420 frame.
 pub const MSG_FRAME_I420: u8 = 0x09;
+/// A new share height ceiling, parent → helper.
+pub const MSG_SET_MAX_HEIGHT: u8 = 0x0A;
 /// An error from the helper, carrying a human-readable utf-8 string.
 /// Fatal unless prefixed `audio:` — see the wire-protocol table above.
 pub const MSG_ERROR: u8 = 0xFF;
@@ -133,6 +142,10 @@ pub enum CaptureMsg {
         timestamp_us: i64,
         /// Interleaved signed 16-bit PCM, `channels` samples per frame.
         pcm: Vec<i16>,
+    },
+    /// The share's new height ceiling; `0` = the source's own size.
+    SetMaxHeight {
+        max_height: u32,
     },
     Error {
         message: String,
@@ -397,6 +410,15 @@ pub fn encode_audio_frame(
     buf
 }
 
+/// Serialize a SetMaxHeight message (parent → helper).
+pub fn encode_set_max_height(max_height: u32) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(1 + 4 + 4);
+    buf.push(MSG_SET_MAX_HEIGHT);
+    buf.extend_from_slice(&4u32.to_le_bytes());
+    buf.extend_from_slice(&max_height.to_le_bytes());
+    buf
+}
+
 /// Serialize an Error message to its exact wire bytes.
 pub fn encode_error(message: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + 4 + message.len());
@@ -458,6 +480,9 @@ where
                 pcm,
             ))
             .await
+        }
+        CaptureMsg::SetMaxHeight { max_height } => {
+            w.write_all(&encode_set_max_height(*max_height)).await
         }
         CaptureMsg::Error { message } => w.write_all(&encode_error(message)).await,
     }
@@ -638,6 +663,16 @@ where
                 pcm,
             }))
         }
+        MSG_SET_MAX_HEIGHT => {
+            if payload_len != 4 {
+                return Err(invalid_data("set max height payload != 4"));
+            }
+            let mut buf = [0u8; 4];
+            r.read_exact(&mut buf).await?;
+            Ok(Some(CaptureMsg::SetMaxHeight {
+                max_height: u32::from_le_bytes(buf),
+            }))
+        }
         MSG_ERROR => {
             let bytes = read_payload(r, payload_len).await?;
             let message = String::from_utf8_lossy(&bytes).into_owned();
@@ -659,6 +694,31 @@ mod tests {
         write_msg(&mut a, &msg).await.unwrap();
         drop(a);
         read_msg(&mut b).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn set_max_height_roundtrip() {
+        for max_height in [0u32, 720, 1440] {
+            match roundtrip(CaptureMsg::SetMaxHeight { max_height }).await {
+                CaptureMsg::SetMaxHeight { max_height: got } => assert_eq!(got, max_height),
+                other => panic!("wrong variant: {other:?}"),
+            }
+        }
+        // Exact bytes: type, u32 payload length 4, u32 height.
+        assert_eq!(
+            encode_set_max_height(720),
+            vec![MSG_SET_MAX_HEIGHT, 4, 0, 0, 0, 0xD0, 0x02, 0, 0]
+        );
+    }
+
+    #[tokio::test]
+    async fn set_max_height_with_a_wrong_length_is_a_desync() {
+        let (mut a, mut b) = tokio::io::duplex(64);
+        a.write_all(&[MSG_SET_MAX_HEIGHT, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            .await
+            .unwrap();
+        drop(a);
+        assert!(read_msg(&mut b).await.is_err());
     }
 
     #[tokio::test]
