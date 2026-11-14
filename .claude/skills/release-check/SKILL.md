@@ -68,6 +68,11 @@ fine; forgetting is the bug. Rules that change the decision:
   them. JS-only changes can go by OTA. Store builds follow `mobile/CLAUDE.md` →
   "Store builds", then tag `mobile-v*`.
 - **Desktop and CLI** release together from one `v*` tag.
+- **Desktop release notes.** Before the `v*` tag is pushed, `CHANGELOG.md` gets
+  the release's entry (`## vX.Y.Z — YYYY-MM-DD`), merged to `main` so the tagged
+  commit has it. The release publishes that text to the app's Software Update
+  page and the GitHub release. `node scripts/changelog-section.mjs vX.Y.Z`
+  prints what will ship; empty output means a release with no notes.
 - **Migrations** listed as pending ship with whichever runs first: the next prod
   DS deploy or the next desktop release.
 - **Transparency log.** Its daily cron republishes on its own, so a STALE row
