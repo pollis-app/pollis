@@ -1,0 +1,3 @@
+Fixes and improvements
+• Older videos in chats keep their still frame once it has been made, so it appears straight away the next time you open the chat.
+• Reliability improvements.
