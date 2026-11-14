@@ -10300,7 +10300,7 @@ dependencies = [
 
 [[package]]
 name = "verifiable-log-serve"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "clap",
  "hex",
