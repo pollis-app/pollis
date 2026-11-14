@@ -264,6 +264,7 @@ const GalleryViewer = observer(({
   return (
     <div
       data-testid="media-gallery-viewer"
+      data-window-viewer=""
       onClick={onClose}
       style={{
         position: "fixed",

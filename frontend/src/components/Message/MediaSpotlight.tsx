@@ -94,6 +94,7 @@ export const MediaSpotlight: React.FC<MediaSpotlightProps> = ({
     <div
       ref={rootRef}
       data-testid="media-spotlight"
+      data-window-viewer=""
       style={{
         position: "fixed",
         inset: 0,

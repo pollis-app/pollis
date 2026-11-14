@@ -543,6 +543,16 @@ input[type="range"]::-moz-range-thumb {
   background: var(--c-accent-dim);
 }
 
+/* The Linux webview draws thin overlay scrollbars in a last pass, above every stacking order, so a
+   full-window media viewer makes the ones behind it invisible while it is open (#1915). */
+html:has([data-window-viewer]) * {
+  scrollbar-color: transparent transparent;
+}
+
+html:has([data-window-viewer]) ::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
 /* ── Loader spinner (pure-CSS braille animation, no JS timer) ────── */
 @keyframes loader-spinner-frames {
   0% {
