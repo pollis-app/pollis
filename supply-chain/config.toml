@@ -2141,7 +2141,7 @@ criteria = "safe-to-deploy"
 notes = "No independent review performed. quinn's protocol-state-machine crate (the part that actually decodes QUIC packets from the wire) — same untrusted-input exposure and provenance rationale as [[exemptions.quinn]] above."
 
 [[exemptions.quinn-udp]]
-version = "0.5.14"
+version = "0.5.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.r-efi]]
