@@ -101,6 +101,9 @@ async function boot(page: Page, skin: Skin, fetched: string[]) {
 const tile = (page: Page, messageId: string, key: string) =>
   page.getByTestId(`message-${messageId}`).getByTestId(`attachment-${key}`);
 
+const invokeCount = (page: Page, cmd: string) =>
+  page.evaluate((c) => (window as any).__tauriInvokeCounts[c] ?? 0, cmd);
+
 async function shot(page: Page, name: string, skin: Skin) {
   const dir = process.env.VIDEO_POSTER_SHOTS;
   const file = `${name}-${skin}.png`;
@@ -120,10 +123,14 @@ for (const skin of SKINS) {
       await expect(img).toBeVisible();
       await expect.poll(() => img.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0);
 
-      // An older sender's video: a frame decoded here from the (small) file.
+      // An older sender's video: a frame decoded here from the (small) file, bounded by the
+      // core and saved locally (#1894), for that video only.
       const old = tile(page, "m_old", OLD_CLIP);
       await expect(old).toHaveAttribute("data-poster", "local");
-      await expect(old.locator('img[src^="blob:"]')).toBeVisible();
+      await expect(old.locator('img[src^="data:image/jpeg;base64,"]')).toBeVisible();
+      await expect.poll(() => invokeCount(page, "save_local_video_poster")).toBe(1);
+      expect(await page.evaluate(() => (window as any).__tauriLastArgs.save_local_video_poster.contentHash))
+        .toBe(`h-${OLD_CLIP}`);
 
       // Too big to fetch for a frame, and no blurhash: a filled tile with the play glyph.
       const big = tile(page, "m_big", BIG_OLD_CLIP);
@@ -143,6 +150,18 @@ for (const skin of SKINS) {
       // Only the posterless small video was fetched; nothing for the poster that came along.
       expect([...new Set(fetched)]).toEqual(["old-clip.webm"]);
       await shot(page, "video-posters", skin);
+
+      // Back to the channel: the saved poster draws, and nothing is fetched or decoded again.
+      const fetchesBefore = fetched.length;
+      await page.getByRole("button", { name: "Home" }).click();
+      await expect(old).toHaveCount(0);
+      await page.getByTestId("menu-item-groups").click();
+      await page.getByTestId(`group-option-${GROUP_ID}`).click();
+      await page.getByTestId(`channel-option-${CHANNEL_ID}`).click();
+      await expect(old).toHaveAttribute("data-poster", "saved");
+      await expect(old.locator('img[src^="data:image/jpeg;base64,"]')).toBeVisible();
+      expect(fetched.length).toBe(fetchesBefore);
+      expect(await invokeCount(page, "save_local_video_poster")).toBe(1);
     });
 
     test("a sent video hands its frame to the core and shows the poster that comes back", async ({ page }) => {

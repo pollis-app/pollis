@@ -908,12 +908,7 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
             for key in WIPED_USER_SLOTS {
                 let _ = state.keystore.delete_for_user(key, uid).await;
             }
-            let data_dir = state.local_data_dir();
-            if let Ok(db_path) = crate::db::local::user_db_path(&data_dir, uid) {
-                let _ = std::fs::remove_file(&db_path);
-                let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
-                let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
-            }
+            crate::db::local::remove_user_database(&state.local_data_dir(), uid);
             let _ = crate::accounts::remove_account(uid);
         }
     } else {
@@ -974,14 +969,7 @@ pub async fn delete_account(
 
     // Phase 3: local cleanup.
     state.unload_user_db().await;
-    {
-        let data_dir = state.local_data_dir();
-        if let Ok(db_path) = crate::db::local::user_db_path(&data_dir, &user_id) {
-            let _ = std::fs::remove_file(&db_path);
-            let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
-            let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
-        }
-    }
+    crate::db::local::remove_user_database(&state.local_data_dir(), &user_id);
 
     for key in WIPED_USER_SLOTS {
         let _ = state.keystore.delete_for_user(key, &user_id).await;

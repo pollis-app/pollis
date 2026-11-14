@@ -1211,6 +1211,20 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
                 .await?)
         }
 
+        // Device-local (#1894): the poster decoded for a video whose sender sent no `pv`.
+        "get_local_video_poster" => {
+            let content_hash: String = arg(&args, "contentHash")?;
+            ok(crate::commands::poster::get_local_video_poster(content_hash, &state()?).await?)
+        }
+        "save_local_video_poster" => {
+            let content_hash: String = arg(&args, "contentHash")?;
+            let frame: String = arg(&args, "frame")?;
+            ok(
+                crate::commands::poster::save_local_video_poster(content_hash, frame, &state()?)
+                    .await?,
+            )
+        }
+
         // #856: no "save as" in a sandbox, so the archive is zipped for the share sheet.
         "export_archive" => {
             let path: String = arg(&args, "path")?;
@@ -1572,6 +1586,9 @@ mod tests {
             "toggle_saved_message",
             "unsave_message",
             "resolve_message_permalink",
+            // #1894
+            "get_local_video_poster",
+            "save_local_video_poster",
             "list_usable_emoji",
             "list_group_emoji",
             "upload_group_emoji",

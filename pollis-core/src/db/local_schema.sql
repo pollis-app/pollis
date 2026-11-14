@@ -658,3 +658,21 @@ CREATE TABLE IF NOT EXISTS history_transfer_outgoing (
     sealed      BLOB NOT NULL,
     PRIMARY KEY (transfer_id, idx)
 );
+
+-- A poster this device decoded itself for a video whose sender had none (#1894):
+-- a build older than #1837 put no `pv` in the `_att` envelope, so the receiver
+-- decodes a frame locally. Saved here, keyed by the attachment's content hash,
+-- so that happens once instead of on every render. Device-local, never sent
+-- anywhere; dropped with the database on a wipe, a logout that deletes data,
+-- an account deletion or an identity reset (a fresh DB key). A video that
+-- carries `pv` never gets a row: the clients look here only when it is absent.
+-- `jpeg` is `poster::PosterJpeg` (12 KiB decoded at most, so 16384 base64
+-- characters); NULL when no JPEG that small could be made, as with `pv`.
+CREATE TABLE IF NOT EXISTS video_poster_cache (
+    content_hash TEXT PRIMARY KEY CHECK (length(content_hash) BETWEEN 1 AND 128),
+    jpeg         TEXT CHECK (jpeg IS NULL OR length(jpeg) BETWEEN 1 AND 16384),
+    blurhash     TEXT NOT NULL CHECK (length(blurhash) BETWEEN 6 AND 128),
+    width        INTEGER NOT NULL CHECK (width > 0),
+    height       INTEGER NOT NULL CHECK (height > 0),
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
