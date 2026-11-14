@@ -155,6 +155,9 @@ pub struct LiveKitState {
 
     /// Rooms mid-connect, so concurrent `connect_rooms` calls don't duplicate.
     pub connecting: HashSet<String>,
+
+    /// Held while a room's roster is read and reported, so a seed and a departure can't interleave.
+    pub presence_lane: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl LiveKitState {
@@ -164,6 +167,7 @@ impl LiveKitState {
             #[cfg(feature = "media")]
             rooms: HashMap::new(),
             connecting: HashSet::new(),
+            presence_lane: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }
