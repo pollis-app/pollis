@@ -604,6 +604,9 @@ pub fn run() {
             commands::bookmarks::toggle_saved_message,
             commands::bookmarks::list_saved_messages,
             commands::bookmarks::resolve_message_permalink,
+            // A video poster decoded locally for an old sender's video (#1894); device-local only.
+            commands::poster::get_local_video_poster,
+            commands::poster::save_local_video_poster,
             // On-device export (#856).
             commands::export::export_archive,
             commands::export::fetch_export_attachments,

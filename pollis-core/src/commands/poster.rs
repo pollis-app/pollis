@@ -7,9 +7,18 @@
 //! re-encoded until it fits [`POSTER_MAX_JPEG_BYTES`], plus a blurhash and the
 //! frame's dimensions. Receivers on older builds ignore `pv`; receivers without
 //! one fall back to the blurhash, a local decode or a placeholder.
+//!
+//! A local decode is bounded here too and saved in the local `video_poster_cache`
+//! table (#1894), so a video from an older sender is fetched and decoded once.
+
+use std::sync::Arc;
 
 use base64::Engine as _;
 use image::{DynamicImage, GenericImageView};
+use rusqlite::{Connection, OptionalExtension};
+
+use crate::error::{Error, Result};
+use crate::state::AppState;
 
 /// Longest edge of the poster that travels in the envelope.
 pub const POSTER_MAX_EDGE: u32 = 320;
@@ -122,6 +131,94 @@ pub fn within_budget<'a>(posters: impl IntoIterator<Item = &'a mut Option<String
     }
 }
 
+/// A poster this device decoded for a video whose sender sent no `pv` (#1894),
+/// as saved in the local `video_poster_cache` table and handed to the clients.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SavedVideoPoster {
+    /// The bounded JPEG as base64, or `None` when none fit (the blurhash stands in).
+    pub jpeg: Option<String>,
+    pub blurhash: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl From<VideoPoster> for SavedVideoPoster {
+    fn from(p: VideoPoster) -> Self {
+        Self {
+            jpeg: p.jpeg.map(PosterJpeg::into_string),
+            blurhash: p.blurhash,
+            width: p.width,
+            height: p.height,
+        }
+    }
+}
+
+/// The saved poster for `content_hash`, if this device made one.
+pub fn saved_poster(conn: &Connection, content_hash: &str) -> Result<Option<SavedVideoPoster>> {
+    Ok(conn
+        .query_row(
+            "SELECT jpeg, blurhash, width, height FROM video_poster_cache WHERE content_hash = ?1",
+            rusqlite::params![content_hash],
+            |row| {
+                Ok(SavedVideoPoster {
+                    jpeg: row.get(0)?,
+                    blurhash: row.get(1)?,
+                    width: row.get(2)?,
+                    height: row.get(3)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// Save `poster` for `content_hash`, replacing any earlier one.
+pub fn save_poster(conn: &Connection, content_hash: &str, poster: &SavedVideoPoster) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO video_poster_cache (content_hash, jpeg, blurhash, width, height)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![
+            content_hash,
+            poster.jpeg,
+            poster.blurhash,
+            poster.width,
+            poster.height
+        ],
+    )?;
+    Ok(())
+}
+
+/// The poster this device saved for a video with no `pv` (#1894); `None` before the first decode.
+pub async fn get_local_video_poster(
+    content_hash: String,
+    state: &Arc<AppState>,
+) -> Result<Option<SavedVideoPoster>> {
+    let guard = state.local_db.lock().await;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+    saved_poster(db.conn(), &content_hash)
+}
+
+/// Bound a frame the client decoded from a video with no `pv` and save it locally (#1894),
+/// so later renders read it instead of fetching and decoding the video again. Returns what
+/// was saved. Never sent anywhere.
+pub async fn save_local_video_poster(
+    content_hash: String,
+    frame: String,
+    state: &Arc<AppState>,
+) -> Result<SavedVideoPoster> {
+    let poster: SavedVideoPoster = tokio::task::spawn_blocking(move || from_frame_b64(&frame))
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("poster task failed: {e}")))??
+        .into();
+    let guard = state.local_db.lock().await;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+    save_poster(db.conn(), &content_hash, &poster)?;
+    Ok(poster)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +287,81 @@ mod tests {
         assert!(posters[2].is_some());
         assert!(posters[3].is_none(), "over budget");
         assert!(posters[4].is_none(), "the budget is spent exactly");
+    }
+
+    const HASH: &str = "ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12";
+
+    fn saved_frame() -> SavedVideoPoster {
+        from_frame(&frame(640, 360, false)).expect("poster").into()
+    }
+
+    /// #1894: the second render reads what the first decode saved.
+    #[test]
+    fn a_saved_poster_reads_back() {
+        let db = crate::db::local::LocalDb::open_in_memory().expect("db");
+        let conn = db.conn();
+        assert_eq!(saved_poster(conn, HASH).unwrap(), None, "nothing before the first decode");
+
+        let poster = saved_frame();
+        assert!(poster.jpeg.is_some());
+        save_poster(conn, HASH, &poster).expect("save");
+        assert_eq!(saved_poster(conn, HASH).unwrap(), Some(poster.clone()));
+        assert_eq!(saved_poster(conn, "another-video").unwrap(), None);
+
+        // A second save (two tiles racing) replaces, never duplicates.
+        save_poster(conn, HASH, &poster).expect("save again");
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM video_poster_cache", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1);
+    }
+
+    /// The table holds only what `from_frame` can produce: a bounded JPEG and a real size.
+    #[test]
+    fn the_table_refuses_an_unbounded_or_empty_poster() {
+        let db = crate::db::local::LocalDb::open_in_memory().expect("db");
+        let conn = db.conn();
+        let too_big = SavedVideoPoster {
+            jpeg: Some("A".repeat(16_388)),
+            ..saved_frame()
+        };
+        assert!(save_poster(conn, HASH, &too_big).is_err());
+        let no_size = SavedVideoPoster {
+            width: 0,
+            ..saved_frame()
+        };
+        assert!(save_poster(conn, HASH, &no_size).is_err());
+        assert!(save_poster(conn, "", &saved_frame()).is_err());
+        assert_eq!(saved_poster(conn, HASH).unwrap(), None);
+    }
+
+    /// Wiping the account's data (logout with delete, account deletion) and an identity
+    /// reset (a fresh DB key) leave no saved poster behind.
+    #[test]
+    fn a_wipe_or_reset_drops_saved_posters() {
+        use crate::db::local::{remove_user_database, LocalDb};
+        let dir = tempfile::tempdir().expect("tempdir");
+        const USER: &str = "poster-wipe";
+        let key = [0x11u8; 32];
+
+        {
+            let db = LocalDb::open_for_user_in(dir.path(), USER, &key).expect("open");
+            save_poster(db.conn(), HASH, &saved_frame()).expect("save");
+        }
+        {
+            let db = LocalDb::open_for_user_in(dir.path(), USER, &key).expect("reopen");
+            assert!(saved_poster(db.conn(), HASH).unwrap().is_some(), "kept across a restart");
+        }
+
+        remove_user_database(dir.path(), USER);
+        {
+            let db = LocalDb::open_for_user_in(dir.path(), USER, &key).expect("fresh");
+            assert_eq!(saved_poster(db.conn(), HASH).unwrap(), None, "wiped");
+            save_poster(db.conn(), HASH, &saved_frame()).expect("save");
+        }
+
+        let reset_key = [0x22u8; 32];
+        let db = LocalDb::open_for_user_in(dir.path(), USER, &reset_key).expect("reset");
+        assert_eq!(saved_poster(db.conn(), HASH).unwrap(), None, "reset");
     }
 }

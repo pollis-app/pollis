@@ -16,7 +16,7 @@ import { useThemeRerender } from "../theme";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { tileTap } from "../../lib/sensitiveMedia";
 import { SensitiveCover, SensitiveHideButton } from "./SensitiveCover";
-import { useNamedMediaUri } from "../../hooks/useNamedMediaUri";
+import { useLocalVideoPoster } from "../../hooks/useLocalVideoPoster";
 import { useVideoPoster } from "../../hooks/useVideoPoster";
 import { peekMediaUri } from "../../lib/media/cache";
 import { videoPosterPlan } from "../../lib/media/videoPoster";
@@ -59,10 +59,6 @@ export const AttachmentTile = observer(function AttachmentTile({
     !!onOpen && (!!attachment.object_key || !!attachment.localPreviewUri);
   const testID = testIDOverride ?? `btn-attachment-${attachment.id}`;
   const visualBox = boxOverride ?? imageSize(attachment);
-  const placeholder = useMemo(
-    () => (attachment.blurhash ? { blurhash: attachment.blurhash } : undefined),
-    [attachment.blurhash],
-  );
 
   const press = {
     testID,
@@ -82,17 +78,24 @@ export const AttachmentTile = observer(function AttachmentTile({
     kind === "video" && !covered
       ? videoPosterPlan(attachment, !!(attachment.object_key && peekMediaUri(attachment.content_hash)))
       : "none";
-  // The named copy: AVFoundation, like AVPlayer, types a file by its extension.
-  const legacyFile = useNamedMediaUri(attachment, plan === "legacy");
-  const decodeUri =
-    plan === "pending" ? attachment.localPreviewUri ?? null : plan === "legacy" ? legacyFile.uri : null;
-  const decoded = useVideoPoster(decodeUri);
+  // A pending send's own frame, decoded from its file each time (it has no content hash yet).
+  const decoded = useVideoPoster(plan === "pending" ? attachment.localPreviewUri ?? null : null);
+  // No `pv` (an older sender): the poster saved on this device (#1894), else decoded once and saved.
+  const local = useLocalVideoPoster(
+    attachment,
+    kind === "video" && !covered && plan !== "pv" && plan !== "pending",
+    plan === "legacy",
+  );
   const posterSource =
     plan === "pv" && attachment.poster
       ? posterUri(attachment.poster)
       : decoded
         ? posterUri(decoded)
-        : null;
+        : local?.jpeg
+          ? posterUri(local.jpeg)
+          : null;
+  const blurhash = attachment.blurhash ?? local?.blurhash ?? undefined;
+  const placeholder = useMemo(() => (blurhash ? { blurhash } : undefined), [blurhash]);
 
   if (covered) {
     const box = visualBox;
@@ -147,7 +150,16 @@ export const AttachmentTile = observer(function AttachmentTile({
 
   if (kind === "video") {
     const box = visualBox;
-    const posterKind = posterSource ? (plan === "pv" ? "pv" : "local") : placeholder ? "blurhash" : "placeholder";
+    // "saved": read from this device's saved poster, nothing decoded for this mount (#1894).
+    const posterKind = posterSource
+      ? plan === "pv"
+        ? "pv"
+        : !decoded && local?.from === "saved"
+          ? "saved"
+          : "local"
+      : placeholder
+        ? "blurhash"
+        : "placeholder";
     return withHide(
       <View style={box}>
       <Pressable

@@ -317,6 +317,18 @@ fn destroy_unusable_database(db_path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Delete a user's database and its sidecars, best-effort: `logout(delete_data)` and
+/// `delete_account`. Every local table goes with it, the caches included (#1894).
+pub fn remove_user_database(data_dir: &std::path::Path, user_id: &str) {
+    let Ok(db_path) = user_db_path(data_dir, user_id) else {
+        return;
+    };
+    let _ = std::fs::remove_file(&db_path);
+    for suffix in DB_SIDECAR_SUFFIXES {
+        let _ = std::fs::remove_file(sidecar_path(&db_path, suffix));
+    }
+}
+
 /// Tighten the database file and its WAL sidecars to owner-only.
 ///
 /// The VFS creates these, so [`crate::private_fs`] never sees them. Best-effort; no-op on Windows.

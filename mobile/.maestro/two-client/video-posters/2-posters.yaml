@@ -33,13 +33,35 @@ tags:
       id: "video-poster-pv"
     timeout: 30000
 # ── The older sender's video: a frame decoded on this device ────────────
+# `saved` too: the chat from part 1 may have decoded and saved it already (#1894).
 - extendedWaitUntil:
     visible:
-      id: "video-poster-local"
+      id: "video-poster-(local|saved)"
     timeout: 60000
 - assertNotVisible:
     id: "video-poster-placeholder"
 - takeScreenshot: video-posters-01-received
+
+# ── Leave and re-open: the saved poster draws, nothing is decoded (#1894) ──
+# `saved` means the tile read this device's saved poster and decoded nothing;
+# a second decode would draw `local`.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible:
+      id: "video-poster-pv"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "video-poster-saved"
+    timeout: 30000
+- assertNotVisible:
+    id: "video-poster-local"
+- takeScreenshot: video-posters-01b-reopened
 
 # ── This device sends a video; the composer card shows its frame ────────
 - addMedia:
