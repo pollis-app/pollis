@@ -50,6 +50,16 @@ test("the first render decodes and saves; the second reads the saved poster and 
   assert.equal(calls.save, 1);
 });
 
+test("tiles of one video mounting together share one decode", async () => {
+  const { calls, deps } = harness();
+  const video = { content_hash: "together" };
+  const [a, b, c] = await Promise.all([1, 2, 3].map(() => localVideoPoster(video, deps)));
+  assert.deepEqual(a, b);
+  assert.deepEqual(b, c);
+  assert.equal(calls.decode, 1);
+  assert.equal(calls.save, 1);
+});
+
 test("a video with `pv` never reads, decodes or writes a row", async () => {
   const { table, calls, deps } = harness();
   assert.equal(await localVideoPoster({ content_hash: HASH, poster: "UFY=" }, deps), null);

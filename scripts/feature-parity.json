@@ -38,6 +38,8 @@
     "disable_device_unlock": "Biometric unlock (#1685) stands in for typing the PIN at unlock on iOS (Face ID / Touch ID, keychain item bound to .biometryCurrentSet in an app-only access group) and Android (Class 3, CryptoObject per use). Desktop exemption: the keyring crate's apple-native backend cannot attach biometric access control to an item, and Linux and Windows have no equivalent store, so desktop keeps the PIN alone."
   },
   "missing_from_cli": {
+    "get_local_video_poster": "The terminal client draws no video tiles, so it has no poster to read (#1894).",
+    "save_local_video_poster": "The terminal client draws no video tiles and decodes no frames, so it has no poster to save (#1894).",
     "list_key_change_notices": "The terminal client has no safety-number surface at all (get_safety_number / list_peer_verifications / set_contact_verified are known debt below); the notices (#1605) are recorded by pollis-core on every client and belong with that surface when it lands.",
     "create_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",
     "await_device_offer": "The terminal client signs in by email or Secret Key; it does not show a sign-in QR (#1361).",

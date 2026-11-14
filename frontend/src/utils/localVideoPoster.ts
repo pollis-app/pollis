@@ -24,27 +24,44 @@ export interface LocalVideoPosterDeps {
   save(contentHash: string, frame: string): Promise<SavedVideoPoster>;
 }
 
+// One lookup per video at a time: tiles of the same video mounting together (a remount, the
+// message and the Vault grid) share it, so they decode once between them.
+const inFlight = new Map<string, Promise<LocalVideoPoster | null>>();
+
 /**
  * The poster for a video with no `pv`: the saved one, else a frame decoded now and saved.
  * A video that has `pv` resolves to null without touching the store, so it never gets a row.
  */
-export async function localVideoPoster(
+export function localVideoPoster(
   attachment: { poster?: string; content_hash: string },
   deps: LocalVideoPosterDeps,
 ): Promise<LocalVideoPoster | null> {
-  if (attachment.poster || !attachment.content_hash) {
-    return null;
+  const hash = attachment.content_hash;
+  if (attachment.poster || !hash) {
+    return Promise.resolve(null);
   }
-  const saved = await deps.get(attachment.content_hash).catch(() => null);
+  const running = inFlight.get(hash);
+  if (running) {
+    return running;
+  }
+  const lookup = savedOrDecoded(hash, deps).finally(() => {
+    inFlight.delete(hash);
+  });
+  inFlight.set(hash, lookup);
+  return lookup;
+}
+
+async function savedOrDecoded(hash: string, deps: LocalVideoPosterDeps): Promise<LocalVideoPoster | null> {
+  const saved = await deps.get(hash).catch(() => null);
   if (saved) {
     return { jpeg: saved.jpeg, blurhash: saved.blurhash };
   }
-  const frame = await deps.decode();
+  const frame = await deps.decode().catch(() => null);
   if (!frame) {
     return null;
   }
   try {
-    const made = await deps.save(attachment.content_hash, frame);
+    const made = await deps.save(hash, frame);
     return { jpeg: made.jpeg, blurhash: made.blurhash };
   } catch {
     // Not saved (the core refused the frame, or the DB is closed): still draw this frame.

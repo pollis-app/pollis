@@ -106,6 +106,13 @@ test("a second render reads the saved poster and decodes nothing", async () => {
   assert.equal(calls.save, 1);
 });
 
+test("tiles of one video mounting together share one decode", async () => {
+  const { calls, deps } = posterStore();
+  await Promise.all([1, 2, 3].map(() => localVideoPoster({ content_hash: "together" }, deps)));
+  assert.equal(calls.decode, 1);
+  assert.equal(calls.save, 1);
+});
+
 test("a video with pv never reads, decodes or writes a row", async () => {
   const { table, calls, deps } = posterStore();
   assert.equal(await localVideoPoster({ content_hash: "h1", poster: JPEG }, deps), null);

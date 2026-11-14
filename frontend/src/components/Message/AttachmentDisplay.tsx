@@ -176,11 +176,12 @@ export const AttachmentDisplay = observer(({
         src = await getMediaUrl(attachment).catch(() => null);
       }
       if (!src) { return null; }
-      if (mounted) { setDownloadUrl((current) => current ?? src); }
+      // Unguarded: another mount of this tile may be waiting on this same decode.
+      setDownloadUrl((current) => current ?? src);
       const result = await captureVideoPoster(src);
       if (!result) { return null; }
       URL.revokeObjectURL(result.url);
-      if (mounted && result.duration > 0) { setDuration(result.duration); }
+      if (result.duration > 0) { setDuration(result.duration); }
       return blobToBase64(result.blob).catch(() => null);
     };
     void localVideoPoster(attachment, {

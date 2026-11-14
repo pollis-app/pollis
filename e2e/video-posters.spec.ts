@@ -153,7 +153,7 @@ for (const skin of SKINS) {
 
       // Back to the channel: the saved poster draws, and nothing is fetched or decoded again.
       const fetchesBefore = fetched.length;
-      await page.getByTestId("menu-item-diagnostics").click();
+      await page.getByRole("button", { name: "Home" }).click();
       await expect(old).toHaveCount(0);
       await page.getByTestId("menu-item-groups").click();
       await page.getByTestId(`group-option-${GROUP_ID}`).click();
