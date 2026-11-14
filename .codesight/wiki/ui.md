@@ -560,6 +560,13 @@ offline while they're still in another. Two properties are load-bearing:
   dependency is one-way (`appStore → presenceStore`; presence imports nothing of
   ours) so it cannot cycle. Don't paper over this at a call site with a
   hardcoded `presence="online"`.
+- **A room's flag is per user, but a user holds several sessions in it** — one
+  per device, and in a DM a call's session beside the realtime one (#1919). The
+  core (`commands/livekit/realtime.rs`) therefore reports `present: false` only
+  when the user's *last* session leaves the room (`emit_departure`), and
+  `subscribe_realtime` replays presence for rooms already connected, so a
+  renderer that reloads does not start with everyone offline. Seeds and
+  departures share `LiveKitState::presence_lane`, so one can't overwrite the other.
 
 ### The right panel (#824, #904)
 

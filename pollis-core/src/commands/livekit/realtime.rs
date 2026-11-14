@@ -15,8 +15,20 @@ pub async fn subscribe_realtime(
     on_event: std::sync::Arc<dyn crate::sink::EventSink<RealtimeEvent>>,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let mut lk = state.livekit.lock().await;
-    lk.channel = Some(on_event);
+    let rooms: Vec<(String, Arc<livekit::Room>)> = {
+        let mut lk = state.livekit.lock().await;
+        lk.channel = Some(on_event);
+        lk.rooms.iter().map(|(id, (room, _))| (id.clone(), Arc::clone(room))).collect()
+    };
+    // A sink that arrives after the rooms (the renderer reloaded) missed their connect-time seed (#1919).
+    if rooms.is_empty() {
+        return Ok(());
+    }
+    if let Ok(user_id) = crate::commands::mls::current_user_id(state).await {
+        for (room_id, room) in rooms {
+            emit_room_initial_presence(&room, &room_id, state, &user_id).await;
+        }
+    }
     Ok(())
 }
 
@@ -91,6 +103,7 @@ pub async fn connect_rooms(
             match Room::connect(&url_owned, &token, RoomOptions::default()).await {
                 Ok((room, mut events)) => {
                     let room = Arc::new(room);
+                    let room_task = Arc::clone(&room);
 
                     // Look up the channel per event, so a late subscribe_realtime still works.
                     let lk_arc_task = Arc::clone(&lk_arc_connect);
@@ -116,6 +129,7 @@ pub async fn connect_rooms(
                             app_state: &Arc<AppState>,
                             user_id: &str,
                             room_id: &str,
+                            room: &Arc<livekit::Room>,
                         ) -> std::time::Duration {
                             let started = std::time::Instant::now();
                             while let Some(event) = events.recv().await {
@@ -131,12 +145,12 @@ pub async fn connect_rooms(
                                         .await;
                                     }
                                     RoomEvent::ParticipantDisconnected(p) => {
-                                        emit_presence(
+                                        emit_departure(
                                             app_state,
+                                            room,
                                             &p.identity().to_string(),
                                             room_id,
                                             user_id,
-                                            false,
                                         )
                                         .await;
                                     }
@@ -179,9 +193,9 @@ pub async fn connect_rooms(
                                     // SDK healed itself without closing the stream: renderer catches up from DS.
                                     RoomEvent::Reconnected => {
                                         crate::diag!("[realtime] resumed room {room_id}");
-                                        let (channel, room) = {
+                                        let channel = {
                                             let lk = lk_arc.lock().await;
-                                            (lk.channel.clone(), lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r)))
+                                            lk.channel.clone()
                                         };
                                         if let Some(ch) = channel {
                                             let _ = ch.send(RealtimeEvent::RealtimeReconnected {
@@ -189,9 +203,7 @@ pub async fn connect_rooms(
                                             });
                                         }
                                         // Re-seed presence (the renderer wiped it).
-                                        if let Some(room) = room {
-                                            emit_room_initial_presence(&room, room_id, app_state, user_id).await;
-                                        }
+                                        emit_room_initial_presence(room, room_id, app_state, user_id).await;
                                     }
                                     _ => {}
                                 }
@@ -199,7 +211,7 @@ pub async fn connect_rooms(
                             started.elapsed()
                         }
 
-                        let alive_dur = run_event_loop(&mut events, &lk_arc_task, &app_state_task, &user_id_task, &room_id_owned).await;
+                        let alive_dur = run_event_loop(&mut events, &lk_arc_task, &app_state_task, &user_id_task, &room_id_owned, &room_task).await;
                         crate::diag!(
                             "[realtime] event stream closed for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                             alive_dur.as_secs_f64()
@@ -270,7 +282,7 @@ pub async fn connect_rooms(
                                     )
                                     .await;
 
-                                    let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &app_state_task, &user_id_task, &room_id_owned).await;
+                                    let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &app_state_task, &user_id_task, &room_id_owned, &new_room).await;
                                     crate::diag!(
                                         "[realtime] event stream closed again for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                                         alive_dur.as_secs_f64()
@@ -335,6 +347,42 @@ pub(super) async fn emit_presence(
     }
 }
 
+/// A session left `room`. The user is gone from it only if that was their last one there: a user
+/// holds one per device, and in a DM a call's session sits beside the realtime one (#1919).
+async fn emit_departure(
+    state: &Arc<AppState>,
+    room: &Arc<livekit::Room>,
+    identity: &str,
+    room_id: &str,
+    self_user_id: &str,
+) {
+    let lane = presence_lane(state).await;
+    let _ordered = lane.lock().await;
+    // The SDK drops a participant from the map before it reports the departure.
+    let mut wire: Vec<String> = room.remote_participants().keys().map(|k| k.to_string()).collect();
+    let remaining = wire.len();
+    wire.push(identity.to_string());
+    let resolved = super::identity::resolve_participants(state, room_id, &wire).await;
+    let internal = |wire_id: &String| resolved.get(wire_id).map(|(internal, _)| internal.as_str());
+    let user_id = match internal(&wire[remaining]).and_then(user_id_from_identity) {
+        Some(uid) => uid,
+        None => return,
+    };
+    if user_remains(wire[..remaining].iter().filter_map(internal), user_id) {
+        return;
+    }
+    emit_presence(state, identity, room_id, self_user_id, false).await;
+}
+
+/// Whether `user_id` still has a session among `remaining`, a room's internal identities.
+fn user_remains<'a>(remaining: impl IntoIterator<Item = &'a str>, user_id: &str) -> bool {
+    remaining.into_iter().any(|identity| user_id_from_identity(identity) == Some(user_id))
+}
+
+async fn presence_lane(state: &Arc<AppState>) -> Arc<tokio::sync::Mutex<()>> {
+    Arc::clone(&state.livekit.lock().await.presence_lane)
+}
+
 /// On (re)connect, emit PresenceChanged for every existing participant.
 pub(super) async fn emit_room_initial_presence(
     room: &Arc<livekit::Room>,
@@ -342,11 +390,44 @@ pub(super) async fn emit_room_initial_presence(
     state: &Arc<AppState>,
     self_user_id: &str,
 ) {
+    let lane = presence_lane(state).await;
+    let _ordered = lane.lock().await;
     let participants = room.remote_participants();
     // One batched resolve for the whole snapshot.
     let wire: Vec<String> = participants.keys().map(|k| k.to_string()).collect();
     let _ = super::identity::resolve_participants(state, room_id, &wire).await;
     for identity in wire {
         emit_presence(state, &identity, room_id, self_user_id, true).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::user_remains;
+
+    /// #1919: a phone leaving the room must not take the same user's desktop offline with it.
+    #[test]
+    fn a_user_with_another_device_in_the_room_remains() {
+        assert!(user_remains(["bob:laptop", "carol:phone"], "bob"));
+    }
+
+    /// A DM call's session leaves when the call ends; the realtime one is still there.
+    #[test]
+    fn a_user_whose_call_or_viewer_session_is_left_remains() {
+        assert!(user_remains(["voice-bob:laptop"], "bob"));
+        assert!(user_remains(["bob:laptop:view"], "bob"));
+    }
+
+    #[test]
+    fn the_last_session_leaving_ends_presence() {
+        assert!(!user_remains(["carol:phone", "bobby:laptop"], "bob"));
+        assert!(!user_remains([], "bob"));
+    }
+
+    /// Unresolved pseudonyms and the DS's own participants are nobody: never guess a user.
+    #[test]
+    fn unresolved_and_internal_participants_are_not_the_user() {
+        assert!(!user_remains(["d-bob", "v-bob", "w-bob", "server", "pollis-ds"], "bob"));
+        assert!(!user_remains(["server"], "server"));
     }
 }
