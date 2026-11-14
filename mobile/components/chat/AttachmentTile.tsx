@@ -150,7 +150,16 @@ export const AttachmentTile = observer(function AttachmentTile({
 
   if (kind === "video") {
     const box = visualBox;
-    const posterKind = posterSource ? (plan === "pv" ? "pv" : "local") : placeholder ? "blurhash" : "placeholder";
+    // "saved": read from this device's saved poster, nothing decoded for this mount (#1894).
+    const posterKind = posterSource
+      ? plan === "pv"
+        ? "pv"
+        : !decoded && local?.from === "saved"
+          ? "saved"
+          : "local"
+      : placeholder
+        ? "blurhash"
+        : "placeholder";
     return withHide(
       <View style={box}>
       <Pressable

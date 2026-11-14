@@ -158,7 +158,7 @@ for (const skin of SKINS) {
       await page.getByTestId("menu-item-groups").click();
       await page.getByTestId(`group-option-${GROUP_ID}`).click();
       await page.getByTestId(`channel-option-${CHANNEL_ID}`).click();
-      await expect(old).toHaveAttribute("data-poster", "local");
+      await expect(old).toHaveAttribute("data-poster", "saved");
       await expect(old.locator('img[src^="data:image/jpeg;base64,"]')).toBeVisible();
       expect(fetched.length).toBe(fetchesBefore);
       expect(await invokeCount(page, "save_local_video_poster")).toBe(1);

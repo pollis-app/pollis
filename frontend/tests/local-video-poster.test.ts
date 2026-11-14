@@ -40,12 +40,12 @@ test("the first render decodes and saves; the second reads the saved poster and 
   const video = { content_hash: HASH };
 
   const first = await localVideoPoster(video, deps);
-  assert.deepEqual(first, { jpeg: "bounded:RlJBTUU=", blurhash: "LEHV6nWB2yk8" });
+  assert.deepEqual(first, { jpeg: "bounded:RlJBTUU=", blurhash: "LEHV6nWB2yk8", from: "decoded" });
   assert.equal(calls.decode, 1);
   assert.equal(table.size, 1);
 
   const second = await localVideoPoster(video, deps);
-  assert.deepEqual(second, first);
+  assert.deepEqual(second, { ...first, from: "saved" });
   assert.equal(calls.decode, 1, "a second render must not decode again");
   assert.equal(calls.save, 1);
 });
@@ -83,6 +83,7 @@ test("a failed save still draws the decoded frame", async () => {
   assert.deepEqual(await localVideoPoster({ content_hash: HASH }, deps), {
     jpeg: "RlJBTUU=",
     blurhash: null,
+    from: "decoded",
   });
 });
 

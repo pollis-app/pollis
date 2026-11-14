@@ -98,10 +98,10 @@ function posterStore(frame: string | null = "RlJBTUU=") {
 test("a second render reads the saved poster and decodes nothing", async () => {
   const { table, calls, deps } = posterStore();
   const first = await localVideoPoster({ content_hash: "h1" }, deps);
-  assert.deepEqual(first, { jpeg: "bounded:RlJBTUU=", blurhash: "LEHV6nWB2yk8" });
+  assert.deepEqual(first, { jpeg: "bounded:RlJBTUU=", blurhash: "LEHV6nWB2yk8", from: "decoded" });
   assert.equal(table.size, 1);
   const second = await localVideoPoster({ content_hash: "h1" }, deps);
-  assert.deepEqual(second, first);
+  assert.deepEqual(second, { ...first, from: "saved" });
   assert.equal(calls.decode, 1, "decoded once");
   assert.equal(calls.save, 1);
 });
@@ -132,6 +132,7 @@ test("no frame saves nothing; a failed save still draws the frame", async () => 
   assert.deepEqual(await localVideoPoster({ content_hash: "h1" }, refused.deps), {
     jpeg: "RlJBTUU=",
     blurhash: null,
+    from: "decoded",
   });
 });
 

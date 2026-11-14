@@ -512,8 +512,9 @@ export const AttachmentDisplay = observer(({
       : (isPending ? attachment.localPreviewUrl : undefined)
         ?? (poster?.jpeg ? `data:image/jpeg;base64,${poster.jpeg}` : undefined);
     const blurhash = attachment.blurhash ?? poster?.blurhash ?? undefined;
+    // "saved": read from this device's saved poster, nothing decoded for this mount (#1894).
     const posterKind = posterSrc
-      ? attachment.poster ? "pv" : "local"
+      ? attachment.poster ? "pv" : poster?.jpeg && poster.from === "saved" ? "saved" : "local"
       : blurhash ? "blurhash" : "placeholder";
     return (
       <>

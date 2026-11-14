@@ -13,8 +13,11 @@ export type SavedVideoPoster = {
   height: number;
 };
 
-/** What a tile draws for a video with no `pv`: a JPEG, else a blurhash. */
-export type LocalVideoPoster = { jpeg: string | null; blurhash: string | null };
+/**
+ * What a tile draws for a video with no `pv`: a JPEG, else a blurhash. `from` says whether it
+ * was read from the saved row ("saved") or decoded for this lookup ("decoded").
+ */
+export type LocalVideoPoster = { jpeg: string | null; blurhash: string | null; from: "saved" | "decoded" };
 
 export interface LocalVideoPosterDeps {
   /** `get_local_video_poster`. */
@@ -55,7 +58,7 @@ export function localVideoPoster(
 async function savedOrDecoded(hash: string, deps: LocalVideoPosterDeps): Promise<LocalVideoPoster | null> {
   const saved = await deps.get(hash).catch(() => null);
   if (saved) {
-    return { jpeg: saved.jpeg, blurhash: saved.blurhash };
+    return { jpeg: saved.jpeg, blurhash: saved.blurhash, from: "saved" };
   }
   const frame = await deps.decode().catch(() => null);
   if (!frame) {
@@ -63,9 +66,9 @@ async function savedOrDecoded(hash: string, deps: LocalVideoPosterDeps): Promise
   }
   try {
     const made = await deps.save(hash, frame);
-    return { jpeg: made.jpeg, blurhash: made.blurhash };
+    return { jpeg: made.jpeg, blurhash: made.blurhash, from: "decoded" };
   } catch {
     // Not saved (the core refused the frame, or the DB is closed): still draw this frame.
-    return { jpeg: frame, blurhash: null };
+    return { jpeg: frame, blurhash: null, from: "decoded" };
   }
 }
