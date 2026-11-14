@@ -38,11 +38,10 @@ tags:
 # Creating lands on the Groups tab with the new group selected (pill strip +
 # its channel panel, tab bar visible) — not a pushed group page. Wait for
 # THIS group's panel header (the account may already have other groups).
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Test Group, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Test Group"
 - assertVisible:
     id: "panel-group"
 # Its #General channel should be visible.
@@ -68,11 +67,10 @@ tags:
 # Creating lands on the Groups tab with the new group selected (pill strip +
 # its channel panel, tab bar visible) — not a pushed group page. Wait for
 # THIS group's panel header (the account may already have other groups).
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E No Channel Group, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E No Channel Group"
 - assertVisible:
     id: "panel-group"
 - assertNotVisible: "General"

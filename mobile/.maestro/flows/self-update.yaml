@@ -26,11 +26,10 @@ tags:
 - inputText: "Rotation"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "Rotation, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "Rotation"
 
 # --- 1. Back to the foreground: the overdue leaf rotates ---
 - pressKey: Home

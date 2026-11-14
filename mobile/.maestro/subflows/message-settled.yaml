@@ -6,9 +6,14 @@ appId: ${MAESTRO_APP_ID}
 # its Retry / Discard block makes the row taller, which moves the row's centre,
 # where a text selector taps, off the text. So press Retry once if it shows,
 # as outbox.yaml does, and require the row to settle.
+#
+# The 150 s is a ceiling, not a delay (the step ends when the row settles). A
+# new group's first send pays for the MLS group setup, and against the dev DS,
+# where each database query costs about 150 ms, that send can stay "sending"
+# for more than 30 s (#1893).
 - extendedWaitUntil:
     notVisible: ".*, sending"
-    timeout: 30000
+    timeout: 150000
 - runFlow:
     when:
       visible:
@@ -22,4 +27,4 @@ appId: ${MAESTRO_APP_ID}
     timeout: 60000
 - extendedWaitUntil:
     notVisible: ".*, sending"
-    timeout: 30000
+    timeout: 150000

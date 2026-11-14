@@ -62,11 +62,10 @@ tags:
 # Creating lands on the Groups tab with the new group selected (pill strip +
 # its channel panel, tab bar visible) — not a pushed group page. Wait for
 # THIS group's panel header (the account may already have other groups).
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Search Group, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Search Group"
 - assertVisible:
     id: "panel-group"
 - tapOn:
