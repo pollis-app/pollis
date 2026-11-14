@@ -22,9 +22,8 @@ use crate::{error::Result, state::AppState};
 use super::{
     codec::{pick_screenshare_codec, resolve_screenshare_encoding, ShareLimits},
     fail_capture,
-    pump::LocalVideoPump,
-    wants::{wants_channel, PreviewMirror},
-    ScreenShareEvent, LOCAL_PREVIEW_KEY,
+    pump::{share_pump, LocalVideoPump},
+    ScreenShareEvent,
 };
 
 // 320×200 (16:10) picker thumbnails, sent as PNG data URLs.
@@ -174,14 +173,7 @@ pub async fn start_screen_share(
     let (pump, events_sink) = {
         let mut ss = state.screenshare.lock().await;
         // WGC captures at the source's size, so the pump's ceiling is the whole limit, live.
-        let pump = LocalVideoPump::new(
-            Some(source.clone()),
-            limits.max_fps,
-            ss.ceiling.clone(),
-            PreviewMirror::new(wants_channel(&mut ss, LOCAL_PREVIEW_KEY)),
-            LOCAL_PREVIEW_KEY,
-            Arc::clone(&state.screenshare_frame_tx),
-        );
+        let pump = share_pump(state, &mut ss, source.clone(), limits.max_fps);
         (pump, ss.events.clone())
     };
 

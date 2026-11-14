@@ -50,6 +50,10 @@
     "speakerUnavailable": "No speaker — you won't hear anyone until an output device is available.",
     "layoutGrid": "Show everyone (grid)",
     "layoutSpotlight": "Spotlight the stream",
+    "resolution": "Resolution",
+    "resolutionShow": "Change the resolution you send",
+    "resolutionHide": "Hide resolution",
+    "resolutionPanel": "Resolution of what you send",
     "startedSpeaking": "{{name}} started speaking"
   },
   "tile": {
@@ -190,7 +194,9 @@
     "captureResolution": "Share Resolution",
     "resolutionOption": "{{height}}p",
     "resolutionSource": "Source",
-    "resolutionHint": "Caps how large your shared screen is sent. 1080p suits most calls; Source sends your display's full size, which costs more CPU and bandwidth on a 4K or Retina screen. Takes effect on your next screen share.",
+    "shareResolutionHint": "Caps how large your shared screen is sent. 1080p suits most calls; Source sends your display's full size, which costs more CPU and bandwidth on a 4K or Retina screen. A change applies at once, also to a share already running.",
+    "cameraResolution": "Camera Resolution",
+    "cameraResolutionHint": "Caps how large your camera is sent. Source sends what your camera captures; a lower setting saves CPU and bandwidth on a slow machine or network. A change applies at once, also to a camera already on.",
     "behaviorHeading": "Behavior",
     "autoJoinVoice": "Auto Join Voice",
     "autoJoinVoiceDescription": "Automatically join voice when opening a voice channel. Disable to preview who's in the channel before joining.",

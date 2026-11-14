@@ -321,6 +321,16 @@ channel). All of them read `appStore.voiceState` / `voiceParticipants`, which
   renders the one stream as a big `StageTile`, header hidden, tray kept), so there is exactly
   one WebGL consumer per track. Esc (`nav.back`), the X or a double-click leaves it. Grid ↔
   spotlight is a tray toggle while someone streams.
+- **Resolution of what you send (#1902).** While the user sends a screen share or a camera,
+  a borderless **Resolution** button (`voice-resolution-toggle`, beside Voice Settings)
+  opens `stage/ResolutionPanel.tsx`: a panel docked between `.vs-body` and the tray, in the
+  stage's flow (never an overlay), with one `ResolutionSelect` radio list per stream being
+  sent. It and Voice & Video settings are two surfaces over one synced preference each
+  (`screen_share_max_height`, `camera_max_height`; presets in `voice/videoResolution.ts`),
+  through `hooks/useOutgoingResolution.ts`: a pick lands in the preference cache on the same
+  frame (both surfaces redraw from it) and calls `set_screen_share_max_height` /
+  `set_camera_max_height`, which move the running stream's ceiling with no republish
+  (`e2e/voice-resolution.spec.ts`).
 - **Accessibility.** Toggles carry `aria-pressed`; video tiles are `role="button"` with
   Enter/Space spotlighting (and `NavigableGrid`'s `onActivate`); `SpeakingAnnouncer` is a
   throttled `aria-live="polite"` region naming who started speaking; the mic glyph on a tile
@@ -804,7 +814,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**206 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**207 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -994,9 +1004,9 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MicLevelMeter** — props: subscribe, label, testId — `frontend/src/components/Voice/MicLevelMeter.tsx`
 - **RemoteUserVolumeSlider** — props: identity, participantName — `frontend/src/components/Voice/RemoteUserVolumeSlider.tsx`
 - **RemoteVideoTile** — `frontend/src/components/Voice/RemoteVideoTile.tsx`
+- **ResolutionSelect** — props: track, value, onChange, showHint — `frontend/src/components/Voice/ResolutionSelect.tsx`
 - **ScreenSharePicker** — `frontend/src/components/Voice/ScreenSharePicker.tsx`
 - **ScreenShareViewer** — props: tile, onClose — `frontend/src/components/Voice/ScreenShareViewer.tsx`
-- **ShareResolutionSelect** — props: value, onChange — `frontend/src/components/Voice/ShareResolutionSelect.tsx`
 - **SidebarVoiceControls** — `frontend/src/components/Voice/SidebarVoiceControls.tsx`. Mic (four-state) + deafen for refined's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage`.
 - **SignalBars** — props: quality, testId, className — `frontend/src/components/Voice/SignalBars.tsx`
 - **SpeakingAnnouncer** — `frontend/src/components/Voice/SpeakingAnnouncer.tsx`
@@ -1004,8 +1014,9 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **VoiceChannelMembers** — props: channelId, enabled — `frontend/src/components/Voice/VoiceChannelMembers.tsx`
 - **VoiceInputModeSelect** — props: value, onChange — `frontend/src/components/Voice/VoiceInputModeSelect.tsx`
 
-### `components/Voice/stage` (2)
+### `components/Voice/stage` (3)
 
+- **ResolutionPanel** — props: shareActive, cameraActive — `frontend/src/components/Voice/stage/ResolutionPanel.tsx`
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 

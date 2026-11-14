@@ -24,11 +24,10 @@ use super::{
     codec::{pick_screenshare_codec, resolve_screenshare_encoding, ShareLimits},
     fail_capture,
     helper_subprocess::spawn_and_accept_helper,
-    pump::{FrameIn, LocalVideoPump, PumpHandle},
+    pump::{share_pump, FrameIn, PumpHandle},
     self_echo::SelfEchoCanceller,
     stop::{stop_screen_share, stop_screen_share_if},
-    wants::{wants_channel, PreviewMirror},
-    ScreenShareEvent, LOCAL_PREVIEW_KEY,
+    ScreenShareEvent,
 };
 
 /// macOS: spawn the helper to enumerate sources and park it for the pick.
@@ -302,14 +301,7 @@ pub async fn start_screen_share(
     // remote tiles, sized and paced by what its own tile reports.
     let pump = {
         let mut ss = state.screenshare.lock().await;
-        LocalVideoPump::new(
-            Some(source.clone()),
-            limits.max_fps,
-            ss.ceiling.clone(),
-            PreviewMirror::new(wants_channel(&mut ss, LOCAL_PREVIEW_KEY)),
-            LOCAL_PREVIEW_KEY,
-            Arc::clone(&state.screenshare_frame_tx),
-        )
+        share_pump(state, &mut ss, source.clone(), limits.max_fps)
     };
     let state_for_task = Arc::clone(state);
     let room_for_task = room.clone();

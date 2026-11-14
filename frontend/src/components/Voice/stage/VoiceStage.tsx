@@ -3,7 +3,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Volume2, VolumeX, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal, LayoutGrid, Focus } from "lucide-react";
+import { ArrowLeft, Volume2, VolumeX, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal, LayoutGrid, Focus, Ratio } from "lucide-react";
 
 import { appStore } from "../../../stores/appStore";
 import type { VoiceParticipant } from "../../../types";
@@ -32,6 +32,7 @@ import { CameraPicker } from "../CameraPicker";
 import { ScreenShareViewer } from "../ScreenShareViewer";
 import { SpeakingAnnouncer } from "../SpeakingAnnouncer";
 import { StageTile, type StageTileModel } from "./StageTile";
+import { ResolutionPanel } from "./ResolutionPanel";
 import { probeRender } from "../../../utils/renderProbe";
 import "./voice-stage.css";
 
@@ -138,6 +139,10 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const [focusId, setFocusId] = useState<string | null>(null);
     // "auto" spotlights whoever streams (Discord's default); "grid" keeps everyone equal while they do.
     const [layout, setLayout] = useState<StageLayout>("auto");
+    // The in-call resolution panel (#1902), only while the user sends a share or a camera.
+    const [resolutionOpen, setResolutionOpen] = useState(false);
+    const sending = shareActive || cameraActive;
+    const showResolution = resolutionOpen && sending;
     // Previous render's models by tile key: an unchanged tile keeps its reference, so one
     // participant's speaking flip re-renders exactly that tile (#874 for the stage). The list is
     // kept too, so a render that changes nothing hands the grid the same array.
@@ -442,6 +447,10 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           )}
         </div>
 
+        {showResolution && !footer && (
+          <ResolutionPanel shareActive={shareActive} cameraActive={cameraActive} />
+        )}
+
         {/* The tray mounts with the join (not after it) so the footer never jumps in late; mute,
             deafen and Leave work while connecting (camera/share need the room); a `footer` override
             always renders. */}
@@ -543,6 +552,19 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 >
                   {layout === "grid" ? <Focus size={15} /> : <LayoutGrid size={15} />}
                 </button>
+              )}
+              {sending && (isInCall || callMode) && (
+                <Button
+                  variant="ghost"
+                  size="md"
+                  data-testid="voice-resolution-toggle"
+                  aria-pressed={showResolution}
+                  aria-label={showResolution ? t("stage.resolutionHide") : t("stage.resolutionShow")}
+                  className={showResolution ? "text-fg" : ""}
+                  onClick={() => setResolutionOpen(!showResolution)}
+                >
+                  <Ratio size={15} /> {t("stage.resolution")}
+                </Button>
               )}
               <button
                 className="flex items-center gap-2 text-xs transition-colors text-muted hover:text-fg"

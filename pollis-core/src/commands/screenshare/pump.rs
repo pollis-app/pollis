@@ -134,6 +134,24 @@ impl LocalVideoPump {
     }
 }
 
+/// The screen share's publish pump: encoder frames under the share's live ceiling, plus the
+/// self-preview mirror its tile sizes and paces. Shared by the helper and WGC paths.
+pub(crate) fn share_pump(
+    state: &crate::state::AppState,
+    ss: &mut super::ScreenShareState,
+    source: NativeVideoSource,
+    max_fps: u32,
+) -> LocalVideoPump {
+    LocalVideoPump::new(
+        Some(source),
+        max_fps,
+        ss.ceiling.clone(),
+        PreviewMirror::new(super::wants::wants_channel(ss, super::LOCAL_PREVIEW_KEY)),
+        super::LOCAL_PREVIEW_KEY,
+        Arc::clone(&state.screenshare_frame_tx),
+    )
+}
+
 /// Tight rows into a (possibly padded) destination plane.
 fn copy_plane(src: &[u8], row_len: usize, dst: &mut [u8], dst_stride: usize) {
     if dst_stride == row_len {
