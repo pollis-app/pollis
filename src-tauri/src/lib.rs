@@ -676,6 +676,7 @@ pub fn run() {
             commands::update::mark_update_required,
             commands::update::clear_update_required,
             commands::update::get_update_check_plan,
+            commands::release_notes::get_latest_release_notes,
             commands::client_policy::check_client_policy,
             commands::client_policy::get_client_policy_status,
             commands::client_policy::peek_client_policy,

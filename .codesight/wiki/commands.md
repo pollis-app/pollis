@@ -763,6 +763,15 @@ The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *
 - **What a relaying device can do is bounded structurally**, not by policy: the node runs with an **empty destination allowlist** (so a `Connect` frame — the only frame naming a destination — is refused before any socket is opened; a peer can never be a circuit's exit) and listens on **loopback only** (no new externally-reachable port; traffic arrives over a link the device opened outbound). Path selection additionally refuses a peer at the guard or exit position (`net::peer::discovery`).
 - **Frontend surface:** Preferences → "Run a relay for others" (`PreferencesPage.tsx`). Consent + both conditions persist as three flat booleans in the synced prefs blob (`relay_serving`, `relay_serving_wifi_only`, `relay_serving_power_only`; defaults off / true / true). Every toggle calls `set_relay_serving`, as does login/restart once, guarded by a config diff against the live status. A failed call does **not** revert the toggle (consent is the user's statement, not the backend's) — the status line is the single place that says what is actually true.
 
+## release_notes (`src-tauri/src/commands/release_notes.rs`, #1916) — desktop only
+The newest desktop release's notes, shown on Software Update (`UpdatePage.tsx`) under the status block: for the update on offer, for the version already running, and for a managed install.
+- `get_latest_release_notes()` → `ReleaseNotes | null` — `{ version, notes }` (mirrored by `ReleaseNotes` in `frontend/src/types/index.ts`): the updater feed's version (no leading `v`) and its `notes` field. `null` when there are none: offline, a feed without `notes` (every release before v1.19.12, and any release without a changelog entry), or a strict overlay with no circuit. It never returns an error for a failed fetch; the reason goes to the on-device log.
+- **Where the text comes from.** `CHANGELOG.md` has one `## vX.Y.Z — YYYY-MM-DD` entry per release. In `desktop-release.yml`'s `release` job, the "Read this release's CHANGELOG entry" step runs `scripts/changelog-section.mjs <tag>` (always exits 0; prints nothing when the entry is missing) and the text becomes the `notes` field of every `update*.json` the job publishes and the "What changed" part of the GitHub release body. The step is `continue-on-error` and an empty result only leaves `notes` out, so a missing entry or a renamed heading cannot fail a release. `node --test scripts/test-changelog-section.mjs` (in `scripts-check.yml`) covers the extraction and checks that the newest dated entry in `CHANGELOG.md` is readable.
+- **No second destination.** The command asks the updater plugin itself (`UpdaterExt::updater_builder()` with a comparator that accepts any version, so the feed comes back even when the running version is the newest) and reads `Update::raw_json`. The endpoints, the per-bundle feed (`update-<bundle type>.json`, then `update.json`), the HTTP client and the overlay plan (`get_update_check_plan`: direct, proxy, or blocked → no notes) are therefore the ones every update check uses. One request per call, 10 s timeout, no retry.
+- **Why it is in the shell, not pollis-core.** The feed is picked by Tauri's bundle type, which only the shell knows, and a pollis-core change would move the mobile OTA fingerprint for a feature mobile does not have (the App Store and Google Play deliver and describe mobile updates; those notes are in `mobile/store/release-notes/`). Same reasoning as `save_diagnostics`.
+- **The text is untrusted.** The feed is not signed (only the update artifact is), so `parse_release_notes` accepts a version only if it looks like one, drops control characters, and caps the notes at 8,000 characters on a line end. The renderer never treats it as HTML: `frontend/src/utils/releaseNotes.ts` parses paragraphs, `-` bullets (a wrapped line joins its bullet), `#` headings, `**bold**`, `` `code` `` and `<https://…>` autolinks (shown as the bare address) into spans, and `components/ReleaseNotesText.tsx` renders them as React text nodes. No links, no images; anything else stays literal. The block is `lang="en" dir="ltr"` because the changelog is English in every locale; the heading (`settings:update.whatsNew`) is localised.
+- **Renderer:** `useLatestReleaseNotes` (`hooks/queries/useReleaseNotes.ts`) — one request each time the page opens, `retry: false`, no refetch on focus or reconnect. No answer means the page has no notes section. Playwright: `e2e/update-release-notes.spec.ts` (the mock answers from `__POLLIS_PRELOAD__.releaseNotes`).
+
 ---
 
 ## Appendix A — full registered-command inventory (names only)
@@ -807,6 +816,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`transparency`** — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
 - **`tray`** — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
 - **`update`** — `clear_update_required`, `get_update_check_plan`, `mark_update_required`
+- **`release_notes`** — `get_latest_release_notes` (#1916; desktop shell only, see above)
 - **`history_transfer`** (9, #1735) — `approve_history_transfer`, `cancel_history_transfer`, `decline_history_transfer`, `list_history_transfer_sources`, `list_history_transfers`, `list_pending_history_transfer_requests`, `request_history_transfer`, `run_history_transfer`
 - **`user`** — `get_preferences`, `get_user_profile`, `get_user_profiles`, `save_preferences`, `search_user_by_username`, `update_user_profile`
 - **`vault`** — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
@@ -822,7 +832,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **234 commands** in 35 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **235 commands** in 36 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -880,6 +890,8 @@ than hand-edit.
 **`staging`** (2) — `discard_staged_attachment`, `stage_attachment`
 
 **`update`** (3) — `clear_update_required`, `get_update_check_plan`, `mark_update_required`
+
+**`release_notes`** (1) — `get_latest_release_notes`
 
 **`client_policy`** (3) — `check_client_policy`, `get_client_policy_status`, `peek_client_policy`
 

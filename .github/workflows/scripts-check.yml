@@ -31,6 +31,8 @@ on:
       - "key-set.json"
       - "SECURITY.md"
       - "README.md"
+      # #1916: the desktop release reads its notes from this file's headings.
+      - "CHANGELOG.md"
       - ".github/workflows/scripts-check.yml"
       - "pollis-delivery/worker/**"
       - "pollis-delivery/wrangler.dev.jsonc"
@@ -150,6 +152,11 @@ jobs:
       # and its npm walk. The runner's own Node runs it.
       - name: oss-inventory unit tests
         run: node --test scripts/test-oss-inventory.mjs
+
+      # #1916: a release's notes are its CHANGELOG.md entry. The extraction must
+      # never fail a release, and the newest entry's heading must be readable.
+      - name: changelog-section unit tests
+        run: node --test scripts/test-changelog-section.mjs
 
       # And that the same checker refuses a credential in a release build job's
       # environment. The account-wide R2 write key and the LiveKit API secret sat

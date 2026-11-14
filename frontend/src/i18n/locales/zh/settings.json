@@ -323,7 +323,8 @@
     "checkFailed": "检查更新失败",
     "managedNote": "此安装由 {{manager}} 管理。Pollis 无法在应用内自我更新 — 请使用你的包管理器更新后重新启动。",
     "installButton": "安装更新",
-    "installing": "安装中…"
+    "installing": "安装中…",
+    "whatsNew": "{{version}} 版更新内容"
   },
   "shortcuts": {
     "title": "快捷键",

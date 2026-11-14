@@ -23,6 +23,88 @@ tag date, UTC.
 
 ---
 
+## v1.19.12 — 2026-11-14
+
+- **Release notes on the Software Update page.** The page shows what changed
+  in the newest release: the update on offer when there is one, otherwise the
+  version you are running.
+- On Linux, the chat scrollbar no longer shows on top of an opened image.
+- People no longer show as offline while they are connected: someone using
+  Pollis on two devices stays online when one of them leaves a conversation,
+  and so does the other person after a DM call ends.
+
+## v1.14.0 – v1.19.11
+
+These releases shipped between 2026-09-19 and 2026-11-14. What you would notice
+in the desktop app:
+
+**Calls**
+
+- An incoming DM call takes over the window until you answer or decline, the
+  caller hears a ringback tone while it rings, and the DM header offers Return
+  to call while you are in one.
+- Screen-share and camera resolution can be changed from inside a call.
+- Voice has less delay, joining is faster, and a call that drops its connection
+  reconnects in place.
+
+**Messages and media**
+
+- **An outgoing message is never silently lost.** Messages are stored before
+  they are sent and delivered in the order you wrote them, and one that could
+  not be sent says why on its own row. Edits are queued the same way.
+- A message this device could not read shows a placeholder in its place.
+- Sensitive media: mark an image or video as sensitive when you send it, and it
+  stays covered until the reader reveals it.
+- See who reacted: hover a reaction, or open View reactions.
+- The media viewer steps through a message's images and videos with the arrow
+  keys, and videos show a preview frame before they load.
+- An image the app cannot decode is shown as a file.
+- DMs are listed by latest activity, and a DM shows one receipt tick, on your
+  newest message.
+- A message you send from another device appears live, a DM or group created
+  on one device shows up on your others, and unread state follows you between
+  them.
+- Channels can be muted. A muted channel notifies you only when someone
+  mentions you.
+- **Copy your message history** from one of your own devices to another.
+- Group members: people you invited are listed under Invited, where an invite
+  can be revoked, and new members are tagged. Accepting an invite shows the
+  group at once.
+- Any member can add custom emoji; only admins can remove them.
+- Report a user or a message. A report carries identifiers and your reason,
+  never message content.
+- On Linux, pasting from a slow clipboard no longer stalls the window.
+
+**Devices and security**
+
+- **Sign in a new device with a QR code**: the new device shows the code and a
+  device that is already signed in scans it, with no email code.
+- The safety number is in the DM itself ("You & name"), and a change of safety
+  number is noted in the conversation.
+- A device you revoke is told so and signs itself out.
+- Security events can be paged and filtered.
+- Attachments are sealed under a per-conversation key ring carried by the
+  conversation's own encryption.
+- The app can require an update when a release is too old to work with the
+  service.
+
+**Updates and diagnostics**
+
+- Linux `.deb` and `.rpm` installs update themselves from inside the app.
+- A failed update offers Try again, the download page, and Continue without
+  updating.
+- A Diagnostics page in Settings keeps an on-device log you can copy or save as
+  a file.
+- The open-source licences are listed in the app.
+
+**Look and feel**
+
+- Buttons that only navigate act on press rather than on release.
+- Terminal view: attachments and reactions line up with the message text, and
+  other admins' name chips are filled with their own colour.
+
+Reliability and security improvements throughout.
+
 ## v1.13.0 — 2026-09-18
 
 - **Notifications do not tell Apple, Google or Expo which conversation they
@@ -133,3 +215,13 @@ Entries are written when a release is cut, from the pull requests merged since
 the previous tag, and describe each change from the user's side: "Message
 deletion is scoped to the conversation you are authorised in" is useful;
 "fix(delivery): scope message deletes" is not.
+
+An entry's heading is `## vX.Y.Z — YYYY-MM-DD`, exactly, and the entry is
+written before the `vX.Y.Z` tag is pushed. The release reads the text under
+that heading (`scripts/changelog-section.mjs`) and publishes it with the build:
+it is what the desktop app shows on its Software Update page, and the top of the
+GitHub release. A release without an entry still ships, with no notes. Keep an
+entry to paragraphs, `-` bullets, `**bold**` and `` `code` ``; the app shows
+anything else as plain text. A heading that spans versions
+(`## v1.14.0 – v1.19.11`) belongs to no single release and is never shown in
+the app.

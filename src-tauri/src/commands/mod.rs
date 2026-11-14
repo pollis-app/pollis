@@ -31,6 +31,8 @@ pub mod pinned_messages;
 pub mod poster;
 pub mod r2;
 pub mod relay_serving;
+// Release notes on the Update page (#1916): reads the updater feed, so it lives in the shell.
+pub mod release_notes;
 pub mod safety;
 pub mod staging;
 pub mod terminal;
