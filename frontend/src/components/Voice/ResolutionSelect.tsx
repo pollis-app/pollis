@@ -10,7 +10,7 @@ import {
   SCREEN_SHARE_RESOLUTION_OPTIONS,
 } from "../../voice/videoResolution";
 
-export type ResolutionTrack = "share" | "camera";
+type ResolutionTrack = "share" | "camera";
 
 const TRACKS: Record<
   ResolutionTrack,
