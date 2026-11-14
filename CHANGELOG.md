@@ -29,6 +29,9 @@ tag date, UTC.
   in the newest release: the update on offer when there is one, otherwise the
   version you are running.
 - On Linux, the chat scrollbar no longer shows on top of an opened image.
+- People no longer show as offline while they are connected: someone using
+  Pollis on two devices stays online when one of them leaves a conversation,
+  and so does the other person after a DM call ends.
 
 ## v1.14.0 – v1.19.11
 
