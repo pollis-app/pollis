@@ -32,11 +32,10 @@ tags:
 - inputText: "E2E Mute Group"
 - tapOn:
     id: "btn-submit-group"
-- extendedWaitUntil:
-    visible:
-      id: "btn-group-menu"
-      text: "E2E Mute Group, .*"
-    timeout: 15000
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Mute Group"
 - assertNotVisible:
     id: "row-channel-.*-muted"
 - tapOn:

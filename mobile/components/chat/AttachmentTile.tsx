@@ -121,7 +121,7 @@ export const AttachmentTile = observer(function AttachmentTile({
         <SensitiveHideButton
           filename={attachment.filename}
           onHide={sensitivity.hide}
-          testID={`btn-sensitive-hide-${attachment.id}`}
+          attachmentId={attachment.id}
         />
       </View>
     ) : (

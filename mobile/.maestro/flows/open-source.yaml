@@ -13,10 +13,14 @@ tags:
 - runFlow: ../subflows/sign-in.yaml
 - tapOn:
     id: "tab-self"
+# Centre the row before tapping it. A plain scroll stops as soon as the row is
+# on screen, which on an iPhone can be underneath the tab bar, and the tap then
+# opens the tab bar's Link shortcut instead (#1896).
 - scrollUntilVisible:
     element:
       id: "row-self-open-source"
     direction: DOWN
+    centerElement: true
 - tapOn:
     id: "row-self-open-source"
 - assertVisible:
@@ -33,7 +37,14 @@ tags:
 - tapOn:
     id: "input-open-source-filter"
 - inputText: "uniffi"
-- hideKeyboard
+# Android only. On iOS, hideKeyboard is a short swipe at the centre of the
+# screen, and on an iPhone that lands on a hit and opens it (#1896). The list
+# takes taps with the keyboard up, and the uniffi row is the first one, above it.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
 - extendedWaitUntil:
     visible:
       id: "row-open-source-uniffi"
@@ -52,7 +63,14 @@ tags:
       id: "text-open-source-license"
       text: ".*MPL-2.0"
     timeout: 5000
-- assertVisible:
-    id: "text-open-source-text"
-    text: "(?s).*Mozilla Public License.*"
+# Not on an iPhone: the licence is one text about twelve screens tall there, and
+# the iOS accessibility snapshot Maestro reads leaves an element that size out,
+# so nothing can match it. The screenshot below still shows the text.
+- runFlow:
+    when:
+      true: ${IPAD == "1" || maestro.platform != "ios"}
+    commands:
+      - assertVisible:
+          id: "text-open-source-text"
+          text: "(?s).*Mozilla Public License.*"
 - takeScreenshot: open-source-03-license

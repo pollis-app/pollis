@@ -3,7 +3,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseContent } from "../lib/messageContent.ts";
-import { isCovered, revealKey, tileTap } from "../lib/sensitiveMedia.ts";
+import {
+  isCovered,
+  revealKey,
+  sensitiveHideTestID,
+  sensitiveToolbarTestID,
+  tileTap,
+} from "../lib/sensitiveMedia.ts";
 import { sensitiveRevealStore } from "../stores/sensitiveRevealStore.ts";
 import { editedVaultContent } from "../lib/vault.ts";
 
@@ -141,4 +147,21 @@ test("the hide button is the toolbar capsule, and the cover's disc is themed", (
   assert.match(src, /backgroundColor: semantic\.raised,/);
   assert.doesNotMatch(src, /semantic\.bg\b/);
   assert.doesNotMatch(src, /["'`]#[0-9a-fA-F]{3,8}["'`]|rgba?\(/);
+});
+
+test("the hide capsule always carries its own id, so iOS exposes the eye inside it (#1895)", () => {
+  // Under an accessible message row iOS lists a view only if it is an element or has an id, and nothing below one that is neither.
+  const toolbar = readFileSync(new URL("../components/chat/AttachmentToolbar.tsx", import.meta.url), "utf8");
+  assert.match(toolbar, /actions: AttachmentToolbarAction\[\];\s*testID: string;/);
+  assert.match(toolbar, /<View\s*testID=\{testID\}/);
+  const src = readFileSync(new URL("../components/chat/SensitiveCover.tsx", import.meta.url), "utf8");
+  assert.match(src, /<AttachmentToolbar\s*testID=\{sensitiveToolbarTestID\(attachmentId\)\}/);
+  assert.match(src, /testID: sensitiveHideTestID\(attachmentId\),/);
+  // The flows match the eye by `btn-sensitive-hide-.*` and a cover by `sensitive-cover-.*`: the capsule is neither.
+  const capsule = sensitiveToolbarTestID("att1");
+  assert.equal(sensitiveHideTestID("att1"), "btn-sensitive-hide-att1");
+  assert.equal(capsule, "toolbar-sensitive-att1");
+  assert.doesNotMatch(capsule, /^btn-sensitive-hide-.*$/);
+  assert.doesNotMatch(capsule, /^sensitive-cover-.*$/);
+  assert.doesNotMatch(capsule, /^btn-attachment-.*$/);
 });

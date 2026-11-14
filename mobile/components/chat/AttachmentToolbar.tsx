@@ -29,12 +29,13 @@ function sharedSlop(first: boolean, last: boolean) {
     : { top: SLOP, bottom: SLOP, left: start, right: end };
 }
 
+// `testID` is required. Under an accessible parent (a message row), iOS shows assistive tools only the views that are elements or carry an id, and nothing inside a view that is neither: a capsule with no id hides its own buttons.
 export function AttachmentToolbar({
   actions,
   testID,
 }: {
   actions: AttachmentToolbarAction[];
-  testID?: string;
+  testID: string;
 }) {
   const lone = actions.length === 1;
   return (
