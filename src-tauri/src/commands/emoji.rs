@@ -35,8 +35,3 @@ pub async fn remove_group_emoji(group_id: String, shortcode: String, state: Stat
 pub async fn get_emoji_url(content_hash: String, state: State<'_, Arc<AppState>>) -> Result<String> {
     pollis_core::commands::emoji::get_emoji_url(content_hash, &state).await
 }
-
-#[tauri::command]
-pub async fn prepare_emoji_text(user_id: String, text: String, state: State<'_, Arc<AppState>>) -> Result<String> {
-    pollis_core::commands::emoji::prepare_emoji_text(user_id, text, &state).await
-}

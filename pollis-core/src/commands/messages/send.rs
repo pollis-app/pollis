@@ -179,6 +179,9 @@ pub(super) async fn deliver_queued(
     ))
     .await;
 
+    // The custom-emoji use rule (#848, #1808), before the first seal fixes the text.
+    let content = apply_emoji_rule(state, &id, content).await?;
+
     // Pad text to a size bucket (#331); attachments stay unpadded unless threaded (#825), whose id rides the frame.
     let plaintext: Vec<u8> = match thread_id.as_deref() {
         Some(thread) => super::framing::pad_threaded(content.as_bytes(), thread),
@@ -380,6 +383,45 @@ pub(super) async fn deliver_queued(
         thread_id,
         sent_at: now,
     })
+}
+
+/// Apply the custom-emoji use rule (#848) to a queued message's text, and store the
+/// result as the row's text, so the sender's copy matches what recipients get.
+///
+/// Only until the first seal: once the row has a ciphertext the DS may already hold that
+/// envelope, so its text is fixed and every later attempt (Retry, the drain, a re-seal)
+/// sends exactly what was stored. Before then a re-run is harmless: nothing has left the
+/// device. Runs under the message's outbox lock, so no other attempt races it.
+async fn apply_emoji_rule(state: &Arc<AppState>, id: &str, content: String) -> Result<String> {
+    if crate::commands::emoji::parse_emoji_tokens(&content).is_empty() {
+        return Ok(content);
+    }
+    let never_sealed = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        db.conn().query_row(
+            "SELECT length(ciphertext) = 0 FROM message WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get::<_, bool>(0),
+        )?
+    };
+    if !never_sealed {
+        return Ok(content);
+    }
+    let ruled = crate::commands::emoji::enforce_use_rule(&content, state).await;
+    if ruled != content {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        db.conn().execute(
+            "UPDATE message SET content = ?1 WHERE id = ?2 AND length(ciphertext) = 0",
+            rusqlite::params![ruled, id],
+        )?;
+    }
+    Ok(ruled)
 }
 
 /// True when `content` contains an `@all` mention as a standalone token —
@@ -718,6 +760,27 @@ pub mod test_hooks {
     /// A dead process marks nothing failed, so neither may its stand-in.
     pub(crate) fn is_simulated_crash(e: &crate::error::Error) -> bool {
         e.to_string().contains(SIMULATED_CRASH)
+    }
+
+    #[cfg(feature = "test-harness")]
+    static FAIL_EMOJI_LOOKUP: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    /// Make the next usable-emoji lookup a send or edit runs fail (#1808). One-shot.
+    #[cfg(feature = "test-harness")]
+    pub fn fail_next_emoji_lookup() {
+        FAIL_EMOJI_LOOKUP.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Consume an armed lookup failure. Always `false` outside the harness.
+    pub(crate) fn take_emoji_lookup_failure() -> bool {
+        #[cfg(feature = "test-harness")]
+        {
+            if FAIL_EMOJI_LOOKUP.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                return true;
+            }
+        }
+        false
     }
 
     #[cfg(feature = "test-harness")]

@@ -2023,3 +2023,198 @@ async fn a_users_own_message_reaches_their_other_device_live() {
     drop(alice_d2);
     drop(bob);
 }
+// ── Custom-emoji use rule on send and edit (#848, #1808) ────────────────────
+
+/// Alice and Bob share "Home", whose emoji `mine` Alice may use; Carol's "Elsewhere"
+/// registers `theirs`, which Alice may not. Returns (alice, bob, channel, mine, theirs).
+async fn emoji_rule_world() -> (TestClient, TestClient, String, String, String) {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let alice_profile = alice.sign_up("emoji-alice@test.local").await;
+    let bob_profile = bob.sign_up("emoji-bob@test.local").await;
+    let carol_profile = carol.sign_up("emoji-carol@test.local").await;
+
+    let home = alice.create_group("Home").await;
+    let channel = alice.general_channel_id(&home).await;
+    alice.invite(&home, &bob_profile.username).await;
+    let invite_id = bob.first_pending_invite().await.expect("bob invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    alice.process_commits_for(&channel).await;
+
+    let elsewhere = carol.create_group("Elsewhere").await;
+    let mine = "a".repeat(64);
+    let theirs = "c".repeat(64);
+    crate::harness::seed_group_emoji(&home, "mine", &mine, &alice_profile.id).await;
+    crate::harness::seed_group_emoji(&elsewhere, "theirs", &theirs, &carol_profile.id).await;
+    drop(carol);
+    (alice, bob, channel, mine, theirs)
+}
+
+async fn content_of(c: &TestClient, channel: &str, id: &str) -> serde_json::Value {
+    c.fetch_channel_messages(channel)
+        .await
+        .into_iter()
+        .find(|m| m["id"] == id)
+        .unwrap_or_else(|| panic!("{id} missing"))
+}
+
+/// GUARD (#1808): a token for an emoji registered only to a group the sender is not in
+/// reaches the recipient as plain `:shortcode:`, on send and on edit; an allowed one survives.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn emoji_use_rule_strips_disallowed_tokens_on_send_and_edit() {
+    let (alice, bob, channel, mine, theirs) = emoji_rule_world().await;
+
+    let id = alice
+        .send_channel_message_id(
+            &channel,
+            &format!("hi <:mine:{mine}> and <:theirs:{theirs}>"),
+        )
+        .await;
+    let want = format!("hi <:mine:{mine}> and :theirs:");
+    assert_eq!(
+        content_of(&bob, &channel, &id).await["content"],
+        want.as_str()
+    );
+    assert_eq!(
+        content_of(&alice, &channel, &id).await["content"],
+        want.as_str(),
+        "the sender's own copy must match what recipients got"
+    );
+
+    alice
+        .edit_message(
+            &channel,
+            &id,
+            &format!("edited <:theirs:{theirs}> <:mine:{mine}>"),
+        )
+        .await;
+    let want = format!("edited :theirs: <:mine:{mine}>");
+    let bobs = content_of(&bob, &channel, &id).await;
+    assert_eq!(bobs["content"], want.as_str());
+    assert!(bobs["edited_at"].as_str().is_some());
+    let alices = content_of(&alice, &channel, &id).await;
+    assert_eq!(alices["content"], want.as_str());
+    assert!(
+        alices["edit_state"].is_null(),
+        "the edit is confirmed, not queued: {alices}"
+    );
+
+    // A recipient is bound by its own memberships when IT sends.
+    let from_bob = bob
+        .send_channel_message_id(&channel, &format!("<:theirs:{theirs}><:mine:{mine}>"))
+        .await;
+    assert_eq!(
+        content_of(&alice, &channel, &from_bob).await["content"],
+        format!(":theirs:<:mine:{mine}>").as_str()
+    );
+}
+
+/// A failed allowed-set lookup never blocks a send or an edit (#1808): every token
+/// degrades to plain `:shortcode:` and the message is delivered.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn emoji_use_rule_lookup_failure_degrades_and_still_delivers() {
+    use pollis_core::commands::messages::test_hooks;
+    let (alice, bob, channel, mine, _theirs) = emoji_rule_world().await;
+
+    test_hooks::fail_next_emoji_lookup();
+    let id = alice
+        .send_channel_message_id(&channel, &format!("<:mine:{mine}> still goes"))
+        .await;
+    assert_eq!(
+        content_of(&bob, &channel, &id).await["content"],
+        ":mine: still goes"
+    );
+
+    test_hooks::fail_next_emoji_lookup();
+    alice
+        .edit_message(&channel, &id, &format!("<:mine:{mine}> edit goes too"))
+        .await;
+    assert_eq!(
+        content_of(&bob, &channel, &id).await["content"],
+        ":mine: edit goes too"
+    );
+
+    // Unarmed again: the allowed emoji is kept.
+    let ok = alice
+        .send_channel_message_id(&channel, &format!("<:mine:{mine}>"))
+        .await;
+    assert_eq!(
+        content_of(&bob, &channel, &ok).await["content"],
+        format!("<:mine:{mine}>").as_str()
+    );
+}
+
+/// A sealed message's text is fixed (#1808): a retry after the first seal sends exactly
+/// what was sealed, even if the sender's allowed set has changed since — the DS may
+/// already hold that envelope, so the rule must not produce a second text under its id.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn emoji_use_rule_text_is_fixed_at_the_first_seal() {
+    use pollis_core::commands::messages::test_hooks::{self, Crash};
+    let (alice, bob, channel, mine, _theirs) = emoji_rule_world().await;
+
+    let id = alice
+        .invoke_json("new_message_id", json!({}))
+        .await
+        .as_str()
+        .expect("id")
+        .to_string();
+    test_hooks::crash_next_send(Crash::AfterSeal);
+    let err = alice
+        .invoke_try(
+            "send_message",
+            json!({
+                "conversationId": channel,
+                "senderId": alice.user_id(),
+                "content": format!("<:mine:{mine}> sealed"),
+                "replyToId": null,
+                "threadId": null,
+                "senderUsername": null,
+                "messageId": id,
+            }),
+        )
+        .await
+        .expect_err("the simulated kill ends the send");
+    assert!(err.contains("simulated process death"), "{err}");
+
+    // `mine` stops being usable by anyone.
+    let remote = writable_remote().await;
+    remote
+        .conn()
+        .await
+        .expect("writable conn")
+        .execute(
+            "DELETE FROM group_emoji WHERE content_hash = ?1",
+            libsql::params![mine.clone()],
+        )
+        .await
+        .expect("unregister mine");
+
+    let report = alice.flush_outbox().await;
+    assert!(
+        report["failed"].as_array().is_none_or(|f| f.is_empty()),
+        "the retry must deliver: {report}"
+    );
+    assert_eq!(
+        content_of(&bob, &channel, &id).await["content"],
+        format!("<:mine:{mine}> sealed").as_str(),
+        "the retry must carry the text that was sealed"
+    );
+
+    // Teeth: a NEW send now degrades the same token.
+    let fresh = alice
+        .send_channel_message_id(&channel, &format!("<:mine:{mine}>"))
+        .await;
+    assert_eq!(
+        content_of(&bob, &channel, &fresh).await["content"],
+        ":mine:"
+    );
+}

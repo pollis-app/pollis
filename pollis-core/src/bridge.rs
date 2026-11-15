@@ -1481,11 +1481,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             emoji::remove_group_emoji(group_id, shortcode, &state()?).await?;
             ok(())
         }
-        "prepare_emoji_text" => {
-            let user_id: String = arg(&args, "userId")?;
-            let text: String = arg(&args, "text")?;
-            ok(emoji::prepare_emoji_text(user_id, text, &state()?).await?)
-        }
         // No loopback server on mobile: write the hash-verified emoji to a sandbox file and return `file://`.
         "get_emoji_path" => {
             let content_hash: String = arg(&args, "contentHash")?;
@@ -1594,7 +1589,6 @@ mod tests {
             "upload_group_emoji",
             "remove_group_emoji",
             "get_emoji_path",
-            "prepare_emoji_text",
             "get_conversation_receipts",
             "mark_messages_read",
             "read_thread_messages",

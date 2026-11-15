@@ -662,7 +662,6 @@ pub fn run() {
             commands::emoji::upload_group_emoji,
             commands::emoji::remove_group_emoji,
             commands::emoji::get_emoji_url,
-            commands::emoji::prepare_emoji_text,
             commands::r2::upload_public_file,
             commands::r2::get_public_file_url,
             commands::r2::save_media_to_path,
