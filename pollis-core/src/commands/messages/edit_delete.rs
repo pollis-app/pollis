@@ -649,10 +649,9 @@ pub(super) async fn post_edit(
     state.check_not_outdated()?;
     let super::edit_outbox::QueuedEdit {
         target_message_id: message_id,
-        envelope_id,
         conversation_id,
         sender_id: user_id,
-        content: new_content,
+        ..
     } = edit;
 
     // Not (or no longer) a member: the outbox records `rejected`.
@@ -663,6 +662,12 @@ pub(super) async fn post_edit(
     }
     let mls_group_id = resolved.mls_group_id;
     let membership_version = resolved.membership_version;
+
+    // The custom-emoji use rule (#848, #1808); text it changes is posted as a new edit.
+    let ruled = super::edit_outbox::apply_emoji_rule(state, edit).await?;
+    let edit = &ruled;
+    let new_content = &edit.content;
+    let envelope_id = &edit.envelope_id;
 
     // Catch up before encrypting, or the edit seals at a stale epoch (#371).
     {

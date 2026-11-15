@@ -81,6 +81,42 @@ pub(super) fn enqueue_edit_on(
     })
 }
 
+/// Apply the custom-emoji use rule (#848, #1808) to a stored edit before it is sealed.
+///
+/// Text the rule changes becomes a new edit, under a new envelope id, exactly as
+/// [`enqueue_edit_on`] treats new text: one envelope id never carries two texts, so an
+/// earlier attempt the DS may already hold cannot disagree with this one under the same id
+/// (the DS replaces a target's pending edit, so the newer one wins). Stored, so the
+/// overlay, a retry and the confirmation all see the text that was sent.
+pub(super) async fn apply_emoji_rule(
+    state: &Arc<AppState>,
+    edit: &QueuedEdit,
+) -> Result<QueuedEdit> {
+    let ruled = crate::commands::emoji::enforce_use_rule(&edit.content, state).await;
+    if ruled == edit.content {
+        return Ok(edit.clone());
+    }
+    let next = QueuedEdit {
+        envelope_id: Ulid::new().to_string(),
+        content: ruled,
+        ..edit.clone()
+    };
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(not_signed_in)?;
+    // Conditional on the old id: an edit made meanwhile is newer and stays as it is.
+    db.conn().execute(
+        "UPDATE outbox_edit SET envelope_id = ?1, content = ?2
+         WHERE target_message_id = ?3 AND envelope_id = ?4",
+        rusqlite::params![
+            next.envelope_id,
+            next.content,
+            edit.target_message_id,
+            edit.envelope_id
+        ],
+    )?;
+    Ok(next)
+}
+
 fn not_editable() -> Error {
     Error::Other(anyhow::anyhow!(
         "Message not found, already deleted, or you are not the sender"

@@ -722,27 +722,47 @@ pub async fn download_verified_emoji(
     Ok((Vec::from(bytes), content_type))
 }
 
-/// Strip any custom-emoji token `user_id` is not permitted to use from outgoing
-/// message text, leaving the shortcode as plain `:name:` text.
+/// Apply the #848 use rule to outgoing message text: keep a `<:shortcode:hash>` token
+/// only if the emoji is registered to a group the signed-in user is currently in, and
+/// degrade every other token to plain `:shortcode:`.
 ///
-/// Enforced on the sender's device because the DS cannot see message content. Degrades
-/// rather than refuses: the recipient sees plain `:name:`.
-pub async fn prepare_emoji_text(
-    user_id: String,
-    text: String,
-    state: &Arc<AppState>,
-) -> Result<String> {
-    let tokens = parse_emoji_tokens(&text);
-    if tokens.is_empty() {
-        return Ok(text);
+/// Enforced on the sender's device because the DS cannot see message content (#1808).
+/// The send and edit outboxes in `commands::messages` call this just before sealing, so
+/// every client (desktop, mobile through the bridge, the CLI) goes through it.
+///
+/// Never fails: a message is not worth failing over an emoji. If the allowed set cannot
+/// be looked up (network or DS error), every token degrades to plain `:shortcode:`. The
+/// rule exists to keep emoji the sender may not use out of their messages, so an unknown
+/// set is treated as empty rather than as "anything goes"; the message is still sealed
+/// and delivered.
+pub(crate) async fn enforce_use_rule(text: &str, state: &Arc<AppState>) -> String {
+    if parse_emoji_tokens(text).is_empty() {
+        return text.to_string();
     }
-    let usable = list_usable_emoji(user_id, state).await?;
-    let allowed: std::collections::HashSet<&str> =
-        usable.iter().map(|e| e.content_hash.as_str()).collect();
-    Ok(strip_disallowed_emoji(&text, &allowed))
+    let lookup = if crate::commands::messages::test_hooks::take_emoji_lookup_failure() {
+        Err(Error::Other(anyhow::anyhow!(
+            "simulated emoji lookup failure (test harness)"
+        )))
+    } else {
+        // The DS answers for the device-signed caller; the user id is not an input.
+        list_usable_emoji(String::new(), state).await
+    };
+    match lookup {
+        Ok(usable) => {
+            let allowed: std::collections::HashSet<&str> =
+                usable.iter().map(|e| e.content_hash.as_str()).collect();
+            strip_disallowed_emoji(text, &allowed)
+        }
+        Err(e) => {
+            crate::diag!(
+                "[emoji] usable-emoji lookup failed; custom emoji go out as plain shortcodes: {e}"
+            );
+            strip_disallowed_emoji(text, &std::collections::HashSet::new())
+        }
+    }
 }
 
-/// The pure half of [`prepare_emoji_text`]: rewrite `text`, keeping every token
+/// The pure half of [`enforce_use_rule`]: rewrite `text`, keeping every token
 /// whose hash is in `allowed` and degrading the rest to plain `:shortcode:`.
 pub fn strip_disallowed_emoji(
     text: &str,

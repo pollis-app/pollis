@@ -4,7 +4,6 @@
     "An entry skips the command in every category, so give the exact reason and the ticket that removes it."
   ],
   "exempt": {
-    "prepare_emoji_text": "The sender-side check for the #848 emoji use rule, documented as enforced but never called (#1808). Kept until send and edit apply it inside pollis-core; then delete it.",
     "delete_group": "Registered on desktop for parity debt: mobile deletes groups, desktop has no UI for it yet (scripts/feature-parity.json known_debt.mobile_only).",
     "get_dm_channel": "Registered on desktop for parity debt: mobile reads one DM, desktop does not yet (scripts/feature-parity.json known_debt.mobile_only).",
     "list_known_accounts": "Mobile bridge arm kept for parity debt: desktop's account picker uses it, mobile has none yet (scripts/feature-parity.json known_debt.desktop_only).",
