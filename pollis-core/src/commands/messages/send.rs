@@ -199,12 +199,7 @@ pub(super) async fn deliver_queued(
 
         // `sent_at` refreshes per attempt until the first seal, then stays fixed (the DS may hold it).
         // Never earlier than the stored stamp, and later rows stay behind it (#1636).
-        let never_sealed: bool = conn.query_row(
-            "SELECT length(ciphertext) = 0 FROM message WHERE id = ?1",
-            rusqlite::params![id],
-            |row| row.get(0),
-        )?;
-        let sent_at = if never_sealed {
+        let sent_at = if never_sealed_on(conn, &id)? {
             super::outbox::restamp_on(conn, &id, &conversation_id, &sent_at, chrono::Utc::now())?
         } else {
             sent_at
@@ -385,6 +380,16 @@ pub(super) async fn deliver_queued(
     })
 }
 
+/// Whether the stored row has never been sealed — until then nothing of it can have
+/// left the device, so its text and stamp may still change.
+fn never_sealed_on(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT length(ciphertext) = 0 FROM message WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    )?)
+}
+
 /// Apply the custom-emoji use rule (#848) to a queued message's text, and store the
 /// result as the row's text, so the sender's copy matches what recipients get.
 ///
@@ -401,11 +406,7 @@ async fn apply_emoji_rule(state: &Arc<AppState>, id: &str, content: String) -> R
         let db = guard
             .as_ref()
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        db.conn().query_row(
-            "SELECT length(ciphertext) = 0 FROM message WHERE id = ?1",
-            rusqlite::params![id],
-            |row| row.get::<_, bool>(0),
-        )?
+        never_sealed_on(db.conn(), id)?
     };
     if !never_sealed {
         return Ok(content);
