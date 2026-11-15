@@ -28,8 +28,19 @@
     "heading": "Apparence",
     "ariaLabel": "Habillage de l'interface",
     "skinTerminal": "Terminal",
-    "skinRefined": "Raffiné",
-    "description": "Terminal est l'apparence IRC/monospace par défaut. Raffiné est une mise en page plus accueillante, en police proportionnelle, pour celles et ceux qui préfèrent une application de messagerie plus conventionnelle. Se synchronise entre vos appareils."
+    "skinModern": "Moderne",
+    "description": "Terminal est l'apparence IRC/monospace par défaut. Moderne est une mise en page plus accueillante, en police proportionnelle, pour celles et ceux qui préfèrent une application de messagerie plus conventionnelle. Se synchronise entre vos appareils.",
+    "skinTerminalDetail": "Monospace et compact, comme IRC dans un terminal",
+    "skinModernDetail": "Police proportionnelle, avatars et lignes plus aérées",
+    "firstRun": {
+      "title": "Choisissez l'apparence de Pollis",
+      "subtitle": "Choisissez une apparence pour commencer. Vous pourrez la changer à tout moment dans les Préférences, et elle se synchronise entre vos appareils.",
+      "continue": "Continuer",
+      "saveFailed": "Impossible d'enregistrer votre choix. Vérifiez votre connexion et réessayez.",
+      "preview": "Aperçu",
+      "sampleMessage": "Bonjour ! Un café à dix heures ?",
+      "sampleReply": "J'arrive."
+    }
   },
   "accent": {
     "heading": "Couleur d'accentuation",
