@@ -23,6 +23,19 @@ tag date, UTC.
 
 ---
 
+## v1.19.13 — 2026-11-15
+
+- **Choose your look on first sign-in.** A new account picks Terminal (the
+  default) or Modern before the app opens, so the second theme no longer has
+  to be found in Preferences. The theme formerly called Refined is now called
+  Modern.
+- Opening Pollis while it is already running, for example after closing the
+  window to the tray, brings the open window forward instead of starting a
+  second copy. Separate installs, OS users or data directories still run side
+  by side.
+- A custom emoji from a group you are no longer in is sent as its plain
+  `:name:` text, whether you send or edit the message.
+
 ## v1.19.12 — 2026-11-14
 
 - **Release notes on the Software Update page.** The page shows what changed
