@@ -114,6 +114,10 @@ impl StateLock {
     }
 }
 
+/// Unix only: the Windows arm below always grants, so nothing else may rely on it there.
+#[cfg(unix)]
+pub use sys::try_lock_exclusive;
+
 #[cfg(unix)]
 mod sys {
     use std::fs::File;

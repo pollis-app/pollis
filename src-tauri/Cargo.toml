@@ -145,6 +145,9 @@ dotenvy = "0.15"
 libsql = { version = "0.10", default-features = false, features = ["core", "remote"], optional = true }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
+# The single-instance key (#1923): a stable hash of the binary path, user and data dir.
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 # default-features off (mirrors the [dependencies] entry) so the flows test
@@ -235,7 +238,7 @@ cocoa = "0.26"
 objc = "0.2.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Registry"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_System_IO"] }
 
 # The flows harness's own rusqlite handle, split by target for the reason given
 # beside the [dev-dependencies] entry it replaced: these features are unioned

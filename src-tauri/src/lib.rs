@@ -9,6 +9,8 @@ pub mod pathscope;
 pub mod clipboard;
 #[cfg(feature = "native-shell")]
 pub mod tray;
+#[cfg(feature = "native-shell")]
+pub mod single_instance;
 
 #[cfg(feature = "test-harness")]
 pub mod test_harness;
@@ -105,14 +107,6 @@ fn apply_windows_rounded_corners(window: &tauri::WebviewWindow) {
                 std::mem::size_of::<u32>() as u32,
             );
         }
-    }
-}
-
-#[cfg(all(feature = "native-shell", target_os = "macos"))]
-fn show_on_reopen(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
     }
 }
 
@@ -337,6 +331,14 @@ fn hide_window(window: tauri::Window) {
 #[cfg(feature = "native-shell")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // #1923: a second launch of this binary raises the running window and exits here,
+    // before any window, local DB, keystore or LiveKit connection exists.
+    let instance = match single_instance::claim() {
+        single_instance::Claim::Secondary => std::process::exit(0),
+        single_instance::Claim::Primary(guard) => Some(guard),
+        single_instance::Claim::Unavailable => None,
+    };
+
     // macOS GUI apps get a soft RLIMIT_NOFILE of 256; EMFILE breaks CoreAudio, DNS and websockets.
     #[cfg(unix)]
     unsafe {
@@ -376,7 +378,15 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .setup(|app| {
+        .setup(move |app| {
+            if let Some(guard) = instance {
+                let handle = app.handle().clone();
+                // Arguments are accepted but unused: the app takes none today (no deep links).
+                guard.on_launch(move |_args| tray::show_main_window(&handle));
+                // In the resources table so `cleanup_before_exit` releases it before a relaunch.
+                app.resources_table().add(guard);
+            }
+
             #[cfg(debug_assertions)]
             let _ = dotenvy::from_filename(".env.development");
 
@@ -792,7 +802,7 @@ pub fn run() {
         .run(|_app, _event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
-                show_on_reopen(_app);
+                tray::show_main_window(_app);
             }
             // Wipe the whole media cache on exit; readers treat a missing file as a miss.
             if let tauri::RunEvent::ExitRequested { .. } = _event {

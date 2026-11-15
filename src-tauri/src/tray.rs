@@ -32,7 +32,8 @@ const DEFAULT_ICON: Image<'static> = include_image!("icons/tray-default.png");
 const NOTIFICATION_ICON: Image<'static> = include_image!("icons/tray-notification.png");
 const MAC_ICON: Image<'static> = include_image!("icons/tray-mac.png");
 
-fn show_main_window(app: &AppHandle) {
+/// Shows, unminimises and focuses the main window (it may be hidden to the tray).
+pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
