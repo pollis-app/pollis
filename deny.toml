@@ -366,6 +366,9 @@ skip = [
     { name = "spki", version = "0.7.3" },
     { name = "strsim", version = "0.10.0" },
     { name = "syn", version = "1.0.109" },
+    # thiserror 2.0.19+ (required by rsqlite-vfs 0.2, under rusqlite 0.43's
+    # wasm32-only sqlite-wasm-rs, #1798) is on syn 3; most proc-macros are still on 2.
+    { name = "syn", version = "2.0.117" },
     { name = "system-deps", version = "6.2.2" },
     { name = "target-lexicon", version = "0.12.16" },
     { name = "thiserror", version = "1.0.69" },
