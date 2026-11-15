@@ -62,6 +62,7 @@ src-tauri/src/       # Tauri desktop host — the shipping shell
   commands/          # Thin #[tauri::command] shims forwarding to pollis_core
   sink.rs            # ChannelSink adapter (Tauri's ipc::Channel → EventSink)
   test_harness.rs    # Multi-client integration harness (feature = "test-harness")
+  single_instance.rs # One running app per (binary path, OS user, data dir) — see below
   lib.rs             # tauri::Builder, plugin setup, invoke_handler!, lifecycle
   main.rs            # Binary entry
 
@@ -126,6 +127,32 @@ identical copies before the pollis-core sweep. Lowercase hex is
 hand-rolled `hex_lower` loops are gone. The two `util` modules are separate
 because `pollis-core` and `pollis-delivery` deliberately do not depend on each
 other; a genuinely shared home needs a crate below both, which does not exist yet.
+
+### Single instance (desktop, #1923)
+
+The first thing `run()` does is `single_instance::claim()`. A second launch of the
+**same binary** by the **same OS user** with the **same data dir** sends its
+arguments (`argv[1..]`) to the running instance and exits before any window, local
+DB, keystore or LiveKit connection exists; the running instance shows, unminimises
+and focuses its main window (`tray::show_main_window`), which may be hidden to the
+tray. The key is `sha256("pollis-single-instance-v1", canonical binary path, uid
+(Windows: `DOMAIN\user`), dirs_path())`, truncated to 32 hex chars, so a copy at
+another path (a second install, `pnpm dev`'s `target/debug/pollis`, a test build),
+another OS user, or another `POLLIS_DATA_DIR` (the two-client e2e runs) gets its own
+instance. On Linux an AppImage is keyed on `$APPIMAGE` — its payload mounts at a
+fresh path every run.
+
+Mechanism: an exclusive OS file lock (`flock` / `LockFileEx`) on `pollis-<key>.lock` in a
+per-user dir (`$XDG_RUNTIME_DIR` on Linux, else the temp dir) picks the primary; the
+kernel drops it if the process dies, so a crash leaves nothing stale. The primary
+listens on a Unix socket `pollis-<key>.sock` beside it (0600) or the named pipe
+`\\.\pipe\pollis-<key>` on Windows; a secondary connects (briefly retrying while
+the primary finishes opening its listener), writes, and exits. The guard lives in the
+app's resources table, so `cleanup_before_exit` releases it before an updater relaunch
+starts the new process. Every failure fails open — the app starts normally.
+`tauri-plugin-single-instance` was not used: it keys on the bundle identifier, so a
+dev build and the installed app would block each other. The app takes no launch
+arguments or deep links today; forwarded arguments are received and ignored.
 
 ## Storage Model
 
