@@ -15,7 +15,11 @@
 # checksum in the crates.io index). The only edits below are this header and
 # the removed `"http2",` line under `[dependencies.hyper]`. To verify:
 #   curl -sL https://static.crates.io/crates/libsql/libsql-0.10.0.crate | tar xz
-#   diff -r libsql-0.10.0/ patches/libsql/   # only Cargo.toml differs
+#   diff -r libsql-0.10.0/ patches/libsql/   # only Cargo.toml differs, and
+#                                            # Cargo.lock is absent here
+# The crate's own Cargo.lock is left out: cargo ignores a path dependency's
+# lockfile (the workspace Cargo.lock decides every version), and keeping it only
+# made dependency scanners report versions that are never built.
 #
 # Delete this directory and its patch entry when a libsql release moves to
 # hyper 1.x or stops enabling hyper's `http2` (then check `cargo tree -i h2`).
