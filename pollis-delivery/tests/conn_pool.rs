@@ -162,7 +162,7 @@ async fn concurrent_transactions_get_their_own_streams() {
         let barrier = Arc::clone(&barrier);
         tasks.push(tokio::spawn(async move {
             let conn = db.conn().await.expect("checkout");
-            let tx = conn.transaction().await.expect("begin");
+            let tx = pollis_delivery::db::write_tx(&conn).await.expect("begin");
             barrier.wait().await;
             tx.execute(&format!("INSERT INTO tx VALUES ({i})"), ())
                 .await

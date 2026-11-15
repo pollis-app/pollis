@@ -116,6 +116,15 @@ every transaction runs on its own stream regardless of pooling. Pooling also doe
 not widen concurrency — every request already had its own connection; they are
 now reused rather than rebuilt.
 
+**Every DS write transaction is `BEGIN IMMEDIATE` (#1890).** Open one with
+`db::write_tx`, a read-only snapshot with `db::read_tx`; `pollis-delivery/clippy.toml`
+forbids libsql's `transaction()`/`transaction_with_behavior()` anywhere else. A
+deferred transaction that reads before its first write holds a read snapshot, and
+if any other writer commits in between (the spawned `last_seen` bump, a concurrent
+request) the upgrade fails with `SQLITE_BUSY` immediately — the busy timeout does
+not apply — which the DS answers as a spurious 503. `IMMEDIATE` takes the write
+lock at BEGIN, so the other writer waits instead. Pinned by `db::tests`.
+
 ### How it dials Turso (TLS) (#1303)
 
 Every libsql dependent in the workspace builds libsql **0.10** with

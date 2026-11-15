@@ -105,7 +105,7 @@ pub async fn apply_establish_identity(
     nonce: &[u8],
     wrapped: &[u8],
 ) -> anyhow::Result<EstablishOutcome> {
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
 
     // CAS: claim the identity only if none is set, so a re-login can never overwrite the account key.
     let affected = tx

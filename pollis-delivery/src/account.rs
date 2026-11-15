@@ -154,7 +154,7 @@ pub async fn apply_rotate_identity(
     let wrapped = b64_decode(&body.wrapped_key)?;
     let new_version = body.based_on_version + 1;
 
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
 
     // The atomic CAS: append at `new_version` only if `based_on_version` is the
     // current head of THIS user's account_key_log.
@@ -560,7 +560,7 @@ pub async fn apply_revoke_device(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     // #1874: the device's leaves must go before anyone seals to them again.
     crate::directory::bump_membership_versions_of(&tx, &actor).await?;
     purge_device_state(&tx, &actor, &body.device_id).await?;
@@ -616,7 +616,7 @@ pub async fn apply_logout_device(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     // #1874: the device's leaves must go before anyone seals to them again.
     crate::directory::bump_membership_versions_of(&tx, &actor).await?;
     purge_device_state(&tx, &actor, &body.device_id).await?;
@@ -669,7 +669,7 @@ pub async fn apply_reset_recover(
         Ok(a) => a,
         Err(o) => return Ok((o, Vec::new())),
     };
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     let dead_conversations =
         reset_recover_in_tx(&tx, &actor, body.current_device_id.as_deref()).await?;
     crate::teardown::record_account_log_purge(
@@ -900,7 +900,7 @@ pub async fn apply_delete_account(
     if body.withdraw.len() > pollis_api::account::WITHDRAW_MAX {
         return Ok((WriteOutcome::Invalid("too many envelopes to withdraw"), Vec::new()));
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
 
     // The actor's undelivered envelopes, by capability: sealed ones carry no
     // sender id for `purge_user_rows` to match.

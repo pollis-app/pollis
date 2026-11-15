@@ -227,3 +227,100 @@ impl Db {
         })
     }
 }
+
+/// Begin a transaction that writes: `BEGIN IMMEDIATE`, taking the write lock up front (#1890).
+///
+/// A deferred transaction that reads before it writes holds a read snapshot; if
+/// any other writer commits in between (the spawned `last_seen` bump, another
+/// request), the upgrade to a writer fails with `SQLITE_BUSY` at once, without
+/// waiting out the busy timeout, and the request becomes a spurious 503.
+/// `IMMEDIATE` waits for the lock instead and reads the state it then writes on.
+///
+/// Every DS write transaction opens through here; `clippy.toml` forbids the bare
+/// `Connection::transaction`.
+#[allow(clippy::disallowed_methods)]
+pub async fn write_tx(conn: &Connection) -> Result<libsql::Transaction> {
+    Ok(conn
+        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
+        .await?)
+}
+
+/// Begin a READ-ONLY transaction: one consistent snapshot, no write lock.
+///
+/// Never write through it — that is [`write_tx`]'s job (see there for why).
+#[allow(clippy::disallowed_methods)]
+pub async fn read_tx(conn: &Connection) -> Result<libsql::Transaction> {
+    Ok(conn
+        .transaction_with_behavior(libsql::TransactionBehavior::Deferred)
+        .await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The write `revoke_device` lost in #1890.
+    const BUMP: &str = "UPDATE conversation_membership_version SET version = version + 1 \
+                        WHERE conversation_id = 'c'";
+
+    /// Two connections on one WAL file and a row for both to update.
+    async fn two_conns() -> (tempfile::TempDir, ConnGuard, ConnGuard) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_local(dir.path().join("t.db").to_str().unwrap())
+            .await
+            .unwrap();
+        let a = db.conn().await.unwrap();
+        pollis_schema::apply::single_db(&a).await.unwrap();
+        a.execute(
+            "INSERT INTO conversation_membership_version (conversation_id, version) VALUES ('c', 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        let b = db.conn().await.unwrap();
+        (dir, a, b)
+    }
+
+    async fn read_n(conn: &Connection) -> i64 {
+        let mut rows = conn
+            .query(
+                "SELECT version FROM conversation_membership_version WHERE conversation_id = 'c'",
+                (),
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    }
+
+    /// The #1890 race, pinned: another writer commits between a transaction's
+    /// first read and its first write. Deferred, that transaction can no longer
+    /// write at all, and the DS would answer with a spurious 503.
+    #[tokio::test]
+    #[allow(clippy::disallowed_methods)]
+    async fn a_deferred_transaction_that_read_first_loses_to_a_concurrent_writer() {
+        let (_dir, a, b) = two_conns().await;
+        let tx = a.transaction().await.unwrap();
+        read_n(&tx).await;
+        b.execute(BUMP, ()).await.unwrap();
+        let err = anyhow::Error::new(tx.execute(BUMP, ()).await.expect_err("stale snapshot"));
+        assert!(crate::error::is_transient_db_error(&err));
+    }
+
+    /// [`write_tx`] holds the write lock from BEGIN, so no writer can commit
+    /// between its read and its write: the other writer is the one kept waiting
+    /// (here, with no busy timeout, refused outright), and the transaction lands.
+    #[tokio::test]
+    async fn a_write_tx_that_read_first_cannot_be_overtaken() {
+        let (_dir, a, b) = two_conns().await;
+        b.query("PRAGMA busy_timeout=0", ()).await.unwrap();
+        let tx = write_tx(&a).await.unwrap();
+        read_n(&tx).await;
+        b.execute(BUMP, ())
+            .await
+            .expect_err("the write lock is the transaction's from BEGIN");
+        tx.execute(BUMP, ()).await.expect("the write it read for");
+        tx.commit().await.unwrap();
+        b.execute(BUMP, ()).await.expect("the lock is free again");
+        assert_eq!(read_n(&b).await, 2);
+    }
+}

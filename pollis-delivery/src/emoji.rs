@@ -253,7 +253,7 @@ pub async fn apply_create_emoji(
     // The key is DERIVED. Nothing the client sent decides where the bytes live.
     let r2_key = emoji_r2_key(&body.content_hash, ext);
 
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "INSERT OR IGNORE INTO custom_emoji_object \
            (content_hash, r2_key, content_type, size_bytes, animated) \
@@ -342,7 +342,7 @@ pub async fn apply_remove_emoji(
     // writes, which fail `database is locked` after a concurrent write (#1618).
     drop(rows);
 
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "DELETE FROM group_emoji WHERE group_id = ?1 AND shortcode = ?2",
         libsql::params![body.group_id.clone(), body.shortcode.clone()],

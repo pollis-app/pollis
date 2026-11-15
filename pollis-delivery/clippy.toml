@@ -1,0 +1,7 @@
+# #1890: a deferred transaction that reads before it writes fails with SQLITE_BUSY
+# when another writer commits in between. Open transactions through
+# `db::write_tx` (BEGIN IMMEDIATE) or, for read-only snapshots, `db::read_tx`.
+disallowed-methods = [
+    { path = "libsql::Connection::transaction", reason = "use pollis_delivery::db::write_tx (or read_tx for a read-only snapshot), #1890" },
+    { path = "libsql::Connection::transaction_with_behavior", reason = "use pollis_delivery::db::write_tx (or read_tx for a read-only snapshot), #1890" },
+]

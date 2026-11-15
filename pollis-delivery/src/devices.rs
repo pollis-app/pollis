@@ -70,7 +70,7 @@ pub async fn apply_publish_key_packages(
             return Ok(WriteOutcome::Invalid(why));
         }
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     for (pkg, kp) in decoded {
         if pkg.last_resort {
             // A device has ONE last-resort package per suite (the partial
@@ -190,7 +190,7 @@ pub async fn apply_replenish_key_packages(
     suites.sort_unstable();
     suites.dedup();
 
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     // Remove THIS device's unclaimed packages (their keys may be gone), plus legacy NULL-device rows.
     // Including the last-resort package (#1571); a current client sends a fresh one alongside.
     if suites.is_empty() {
@@ -634,7 +634,7 @@ pub async fn apply_resign_device_certs(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     for cert in &body.certs {
         let cert_bytes = b64_decode(&cert.device_cert)?;
         tx.execute(

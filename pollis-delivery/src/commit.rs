@@ -275,9 +275,7 @@ pub async fn submit_commit_with(
     };
 
     // One IMMEDIATE bundle: commit, GroupInfo and Welcomes all commit or roll back; one winner per epoch.
-    let tx = conn
-        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
-        .await?;
+    let tx = crate::db::write_tx(conn).await?;
 
     // Atomic two-branch decision mirroring [`accepts`]: (a) continue the head lineage, (b) open the next.
     // `?8 IS NOT NULL` makes an omitted `closes_epoch` an explicit reject, not a NULL-compare accident.
