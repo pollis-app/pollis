@@ -1,0 +1,3 @@
+Fixes and improvements
+• Custom emoji you can no longer use, such as one from a group you have left, are now sent as plain text.
+• Reliability improvements.
