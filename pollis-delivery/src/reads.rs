@@ -211,7 +211,7 @@ pub async fn snapshot(
     who: &Reader,
     device_registered: Option<bool>,
 ) -> Result<ConversationState, AppError> {
-    let tx = log.transaction().await?;
+    let tx = crate::db::read_tx(log).await?;
 
     let head_generation = crate::commit::head_generation(&tx, &q.conversation_id).await?;
     let generation = q.generation.unwrap_or(head_generation);

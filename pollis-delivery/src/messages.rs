@@ -420,7 +420,7 @@ pub async fn apply_send_message(
         ));
     }
     // Sequence allocation and row land together (see `insert_envelope_with_seq`).
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     insert_envelope_with_seq(
         &tx,
         &body.conversation_id,
@@ -718,7 +718,7 @@ pub async fn apply_edit_message(
     // Read BEFORE the tx: the DELETE below removes the row the fallback reads.
     let inherited_capability =
         edit_capability_hash(conn, &body.conversation_id, &body.target_message_id).await?;
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "DELETE FROM message_envelope \
          WHERE conversation_id = ?1 AND target_message_id = ?2 AND type = 'edit'",
@@ -1007,7 +1007,7 @@ pub async fn apply_delete_message(
             return Ok(WriteOutcome::Forbidden);
         }
         // SCOPED to the authorized conversation, or membership anywhere would authorize deleting any envelope.
-        let tx = conn.transaction().await?;
+        let tx = crate::db::write_tx(conn).await?;
         let removed = remove_envelope_and_edit(&tx, &body.conversation_id, &body.message_id).await?;
         // The message's attachments go with it (#1881): those registered
         // against the envelope just removed, or, once envelope GC has
@@ -1032,7 +1032,7 @@ pub async fn apply_delete_message(
     // #1087: a tombstone takes the next seq, above every cursor; `sent_at` is display-only.
     let now = now_rfc3339();
     // Scoped like the self-branch, or one group's admin could delete anywhere.
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     let removed = remove_envelope_and_edit(&tx, &body.conversation_id, &body.message_id).await?;
     // The tombstone removes the message for every member, so its attachments
     // are released (#1881): only those registered against the envelope this
@@ -1950,7 +1950,7 @@ pub async fn apply_register_attachment(
             return Ok(WriteOutcome::Forbidden);
         }
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     // No uploader recorded: lifetime depends only on live references (000032).
     tx.execute(
         "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
@@ -4854,7 +4854,7 @@ mod delivery_sequence_tests {
         let first = seq_of(&writer, "m1").await.expect("committed envelope has a seq");
 
         // A send caught mid-flight: sequence taken, row written, not yet committed.
-        let tx = writer.transaction().await.unwrap();
+        let tx = crate::db::write_tx(&writer).await.unwrap();
         insert_envelope_with_seq(
             &tx,
             "c1",

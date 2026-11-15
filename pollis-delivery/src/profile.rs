@@ -389,7 +389,7 @@ pub async fn apply_block_user(
     if blocker == body.blocked_id {
         return Ok(WriteOutcome::Forbidden);
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "INSERT OR IGNORE INTO user_block (blocker_id, blocked_id) VALUES (?1, ?2)",
         libsql::params![blocker.clone(), body.blocked_id.clone()],
@@ -663,7 +663,7 @@ pub async fn apply_create_dm(
     if conversation_id_taken(conn, &body.id).await? {
         return Ok(DmOutcome::Forbidden);
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     // Claim the id in the SAME transaction as the DM it names, so a claim the
     // registry refuses rolls the DM back with it (#880).
     claim_conversation_id(&tx, &body.id, ConversationKind::Dm).await?;
@@ -824,7 +824,7 @@ pub async fn apply_add_dm_member(
     if authed.is_some() && !is_dm_member(conn, &body.dm_channel_id, &actor).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "INSERT OR IGNORE INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) \
          VALUES (?1, ?2, ?3, ?4)",
@@ -987,7 +987,7 @@ async fn leave_dm_in_tx(
     dm_channel_id: &str,
     user_id: &str,
 ) -> anyhow::Result<bool> {
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
         libsql::params![dm_channel_id, user_id],

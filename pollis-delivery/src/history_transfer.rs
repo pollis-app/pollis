@@ -241,7 +241,7 @@ async fn end_transfer(
     ended: TransferState,
     now: i64,
 ) -> anyhow::Result<bool> {
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     let mut moved = 0;
     for f in from {
         moved += tx
@@ -310,7 +310,7 @@ pub async fn apply_request(
     if body.src_device_id == device {
         return Ok(Outcome::Invalid("a device cannot copy history from itself"));
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     // The source must be a live, ENROLLED device (it has a signing key) of the
     // SAME account — read inside the transaction that files the request.
     // Another account's device, a revoked one, a half-registered one and an
@@ -941,7 +941,7 @@ pub async fn apply_ack_chunk(
     if body.idx != row.acked_through + 1 {
         return Ok(Outcome::Conflict("ack out of order"));
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     let removed = tx
         .execute(
             "DELETE FROM history_transfer_chunk WHERE transfer_id = ?1 AND idx = ?2",

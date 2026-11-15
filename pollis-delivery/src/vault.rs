@@ -118,7 +118,7 @@ pub async fn apply_save_vault_message(
 
     // One transaction: the entry and its reference set change together, so a
     // failure part-way never leaves the entry without the files it holds.
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     let affected = tx
         .execute(
             // `updated_at` = `created_at` on insert; it changes only on a real edit (#1316, #1497).
@@ -200,7 +200,7 @@ pub async fn apply_delete_vault_message(
         Ok(u) => u,
         Err(o) => return Ok(o),
     };
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     let removed = tx
         .execute(
             "DELETE FROM vault_message WHERE id = ?1 AND user_id = ?2",

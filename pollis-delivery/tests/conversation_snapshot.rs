@@ -62,7 +62,7 @@ async fn insert_commit(conn: &libsql::Connection, conversation_id: &str, epoch: 
 
 /// Publish a GroupInfo and this device's Welcome in one transaction, as `submit_commit` does.
 async fn publish_pair(conn: &libsql::Connection, epoch: i64) {
-    let tx = conn.transaction().await.expect("tx");
+    let tx = pollis_delivery::db::write_tx(conn).await.expect("tx");
     tx.execute(
         "INSERT INTO mls_group_info \
            (conversation_id, generation, epoch, group_info, updated_by_device_id) \
@@ -91,7 +91,7 @@ async fn publish_pair(conn: &libsql::Connection, epoch: i64) {
 
 /// Retract both halves in one transaction: any observation of one alone is a torn read.
 async fn retract_pair(conn: &libsql::Connection) {
-    let tx = conn.transaction().await.expect("tx");
+    let tx = pollis_delivery::db::write_tx(conn).await.expect("tx");
     tx.execute(
         "DELETE FROM mls_group_info WHERE conversation_id = ?1",
         libsql::params![CONV.to_string()],

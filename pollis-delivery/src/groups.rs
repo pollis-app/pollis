@@ -184,7 +184,7 @@ pub async fn apply_create_group(
         return Ok(WriteOutcome::Forbidden);
     }
 
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     // Claim the ids in the SAME transaction as the rows they name, so a claim
     // the registry refuses takes the whole creation with it.
     for (id, kind) in &claims {
@@ -337,7 +337,7 @@ pub async fn apply_delete_group(
     if authed.is_some() && !is_admin(conn, &body.group_id, &requester).await? {
         return Ok((WriteOutcome::Forbidden, Vec::new()));
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     let mut dead = crate::teardown::purge_group(&tx, &body.group_id).await?;
     tx.commit().await?;
     dead.push(body.group_id.clone());
@@ -386,7 +386,7 @@ pub async fn apply_leave_group(
     if authed.is_some() && group_role(conn, &body.group_id, &user).await?.is_none() {
         return Ok((WriteOutcome::Forbidden, Vec::new()));
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
         libsql::params![body.group_id.clone(), user.clone()],
@@ -444,7 +444,7 @@ pub async fn apply_create_channel(
     }
     // One transaction, so the registry claim and the channel it names commit
     // together or not at all (#880).
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     claim_conversation_id(&tx, &body.id, ConversationKind::Channel).await?;
     tx.execute(
         "INSERT INTO channels (id, group_id, name, description, channel_type) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -585,7 +585,7 @@ pub async fn apply_delete_channel(
     if authed.is_some() && !is_admin(conn, &group_id, &requester).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     crate::teardown::purge_conversation_rows(&tx, &body.channel_id).await?;
     tx.execute(
         "DELETE FROM channels WHERE id = ?1",
@@ -631,7 +631,7 @@ pub async fn apply_remove_member(
     {
         return Ok(WriteOutcome::Forbidden);
     }
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
         libsql::params![body.group_id.clone(), body.user_id.clone()],
@@ -892,7 +892,7 @@ pub async fn apply_accept_invite(
     };
     drop(rows);
 
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     add_member_rows(&tx, &group_id, &user).await?;
     tx.execute(
         "DELETE FROM group_invite WHERE id = ?1",
@@ -1128,7 +1128,7 @@ pub async fn apply_approve_join_request(
         return Ok(ReviewOutcome::Forbidden);
     }
 
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     add_member_rows(&tx, &group_id, &requester_id).await?;
     tx.execute(
         "UPDATE group_join_request SET status = 'approved', reviewed_by = ?1, reviewed_at = ?2 WHERE id = ?3",
@@ -1501,7 +1501,7 @@ pub async fn apply_redeem_invite_link(
         });
     }
 
-    let tx = conn.transaction().await?;
+    let tx = crate::db::write_tx(conn).await?;
     // The shared membership primitive, so a link is not a second admission path.
     add_member_rows(&tx, &group_id, &user).await?;
     // Re-check bounds INSIDE the tx; the row count settles concurrent last-use redemptions.

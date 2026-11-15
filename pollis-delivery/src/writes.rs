@@ -691,9 +691,7 @@ pub async fn upsert_group_info(
 
     // One transaction for the ceiling read and the CAS: the head the write is
     // checked against is the head the write lands on.
-    let tx = log_conn
-        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
-        .await?;
+    let tx = crate::db::write_tx(log_conn).await?;
     if let Some(refused) = refuse_above_head(&tx, conversation_id, generation, epoch).await? {
         tx.rollback().await?;
         return Ok(refused);
@@ -1063,9 +1061,7 @@ pub async fn upsert_welcome(
     submitted_by: Option<&str>,
     may_override: bool,
 ) -> anyhow::Result<WelcomeUpsertOutcome> {
-    let tx = log_conn
-        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
-        .await?;
+    let tx = crate::db::write_tx(log_conn).await?;
 
     if !may_override {
         let mut rows = tx
