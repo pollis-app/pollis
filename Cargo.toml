@@ -27,10 +27,9 @@ exclude = [
     "fuzz",
     # Stand-ins swapped in by the [patch] tables below. Excluded so a
     # `--workspace` build does not compile them as members: the openmls one is a
-    # deliberate `compile_error!`, and sqlcipher-src is vendored upstream code
-    # with its own lints and tests (as is libsql).
+    # deliberate `compile_error!`, and libsql is vendored upstream code with its
+    # own lints and tests.
     "patches/openmls-sqlite-storage",
-    "patches/sqlcipher-src",
     "patches/libsql",
 ]
 
@@ -139,12 +138,6 @@ openmls_memory_storage = { git = "https://github.com/openmls/openmls", rev = "34
 # (#1320). This stand-in reports none. See patches/device-info/src/lib.rs; the
 # guard is pollis-core/tests/livekit_join_sends_no_device_model.rs.
 device-info = { path = "patches/device-info" }
-# RUSTSEC-2026-0459 (#1797): crates.io sqlcipher-src 420.0.0 (SQLCipher 4.20.0
-# on SQLite 3.54.1, which fixes it), relabelled 419.0.6 to meet libsqlite3-sys
-# 0.39.1's `=419.0.6` pin. Without it every SQLCipher build (all of ours) would
-# still compile SQLite 3.53.4. See patches/sqlcipher-src/Cargo.toml for the
-# provenance check; delete it once a libsqlite3-sys release takes 420.
-sqlcipher-src = { path = "patches/sqlcipher-src" }
 # #1847: crates.io libsql 0.10.0 with `http2` removed from its hyper 0.14
 # features, which takes h2 0.3 out of the graph. Every remote handle speaks
 # HTTP/1.1 to Turso through pollis-libsql-connector anyway (#1303). See

@@ -1,9 +1,9 @@
 //! Compiles the SQLCipher amalgamation from `sqlcipher-src`.
 //!
 //! The source is the same file `libsqlite3-sys`'s `bundled-sqlcipher` builds on
-//! every other platform (today the workspace's patched `sqlcipher-src`, SQLCipher
-//! 4.20.0 on SQLite 3.54.1; see patches/sqlcipher-src/Cargo.toml). Flags mirror
-//! `libsqlite3-sys` 0.39.1's `build_bundled` list for `bundled-sqlcipher`.
+//! every other platform (`sqlcipher-src` 420: SQLCipher 4.20.0 on SQLite 3.54.1).
+//! Flags mirror `libsqlite3-sys` 0.40.0's `build_bundled` list for
+//! `bundled-sqlcipher`.
 
 fn main() {
     let source = sqlcipher_src::source_dir().join(sqlcipher_src::SOURCE_FILE);

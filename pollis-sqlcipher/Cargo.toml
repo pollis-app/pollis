@@ -29,10 +29,8 @@ cc = "1"
 # file, that `libsqlite3-sys`'s `bundled-sqlcipher` builds on every other
 # platform. Keep this requirement equal to libsqlite3-sys's own `sqlcipher-src`
 # pin, so Windows always runs the SQLCipher whose bindings rusqlite was built
-# with. `=419.0.6` resolves to the workspace's patched copy, which is really
-# SQLCipher 4.20.0 on SQLite 3.54.1 (RUSTSEC-2026-0459, #1797; see
-# patches/sqlcipher-src/Cargo.toml).
-sqlcipher-src = "=419.0.6"
+# with: SQLCipher 4.20.0 on SQLite 3.54.1 (RUSTSEC-2026-0459, #1797).
+sqlcipher-src = "=420.0.0"
 
 [dev-dependencies]
 # Scratch directories for tests/sqlcipher.rs, which has to write a real file and

@@ -7,7 +7,7 @@
 ** contact with the outside world is `#include <tomcrypt.h>` plus the ~20
 ** symbols declared below. This header, and the Rust implementations in
 ** `src/abi.rs` that back it, are that contact surface. The amalgamation itself
-** is byte-identical to upstream (see patches/sqlcipher-src/Cargo.toml) — there is no patch
+** is byte-identical to upstream (the crates.io `sqlcipher-src` crate) — there is no patch
 ** to audit, only this file.
 **
 ** It is deliberately NOT libtomcrypt. Every primitive resolves to the same

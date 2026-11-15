@@ -7991,19 +7991,19 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "7. Local Encrypted Storage (SQLCipher)",
-        "quote": "`rusqlite` 0.41 linking SQLCipher 4.20.0 on SQLite 3.54.1, the same amalgamation on every platform"
+        "quote": "`rusqlite` 0.43 linking SQLCipher 4.20.0 on SQLite 3.54.1, the same amalgamation on every platform"
       },
-      "claim": "The local DB uses rusqlite 0.41 with SQLCipher 4.20.0 on SQLite 3.54.1 on every platform.",
+      "claim": "The local DB uses rusqlite 0.43 with SQLCipher 4.20.0 on SQLite 3.54.1 on every platform.",
       "kind": "number",
       "anchors": [
         "pollis-core/Cargo.toml",
-        "patches/sqlcipher-src/Cargo.toml",
+        "pollis-sqlcipher/Cargo.toml",
         "Cargo.lock"
       ],
       "evidence": [
         "pollis-core/Cargo.toml:424",
-        "patches/sqlcipher-src/Cargo.toml:1",
-        "Cargo.lock:7231"
+        "pollis-sqlcipher/Cargo.toml:33",
+        "Cargo.lock:8617"
       ],
       "status": "verified",
       "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",

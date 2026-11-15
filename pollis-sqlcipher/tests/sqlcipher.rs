@@ -153,7 +153,7 @@ fn the_linked_library_is_our_sqlcipher() {
     assert!(
         parts.as_slice() >= [3, 54, 0].as_slice(),
         "the SQLCipher this crate compiled is on SQLite {sqlite}, older than 3.54.0 \
-         (RUSTSEC-2026-0459): is the workspace's `sqlcipher-src` patch still applying?"
+         (RUSTSEC-2026-0459): did the `sqlcipher-src` pin move back?"
     );
 }
 

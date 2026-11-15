@@ -65,7 +65,7 @@ Rules that follow from it:
 - **Never add a dependency edge just to reuse a helper.** Move the helper to a crate both sides already depend on, or leave the copy and say why in the PR. Example: `constant_time_eq`, once copied five times across `pollis-core` and `pollis-delivery`, lives in `pollis-device-cert`, a leaf both already depend on (#1731).
 - `src-tauri` is a thin shim layer: logic lives in `pollis-core` (CLAUDE.md "Command path"), so a helper in `src-tauri` that `pollis-core` also needs belongs in `pollis-core`.
 - The capture helpers are separate processes; they share only `pollis-capture-proto`.
-- `fuzz/` and `patches/openmls-sqlite-storage`, `patches/sqlcipher-src` are excluded from the workspace (`Cargo.toml` `exclude`).
+- `fuzz/` and `patches/openmls-sqlite-storage`, `patches/libsql` are excluded from the workspace (`Cargo.toml` `exclude`).
 - `patches/openmls-rust-crypto` and `patches/openmls-basic-credential` are in-tree copies of those openmls crates at the pinned rev, swapped in by `[patch]` (#1846). Not workspace members; `fuzz/Cargo.toml` mirrors the patch entries. Each one's `Cargo.toml` says what differs from upstream.
 
 ## website/
