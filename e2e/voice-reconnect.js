@@ -59,7 +59,7 @@ async function signUp(browser, email, tag) {
   await h.waitTestId(browser, "pin-create-screen");
   await h.typeCode(browser, PIN);
   await h.typeCode(browser, PIN);
-  await h.waitTestId(browser, "app-ready", 60000);
+  await h.waitAppReadyAfterSignUp(browser, 60000);
   console.log(`[voice-reconnect] ${tag}: reached app-ready`);
 }
 

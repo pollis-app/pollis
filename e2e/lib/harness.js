@@ -134,6 +134,24 @@ async function waitTestId(browser, testId, timeoutMs = 30000, label = testId) {
   throw new Error(`timed out waiting for [data-testid="${label}"]`);
 }
 
+// After a new account's PIN: the first-run appearance step (#1924) comes before the app.
+// Takes the preselected Terminal, so specs keep the default skin, then waits for the app.
+async function waitAppReadyAfterSignUp(browser, timeoutMs = 60000) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    if (await present(browser, "app-ready")) {
+      return;
+    }
+    if (await present(browser, "appearance-choice-continue")) {
+      await clickTestId(browser, "appearance-choice-continue");
+      await waitTestId(browser, "app-ready", Math.max(end - Date.now(), 1000));
+      return;
+    }
+    await sleep(400);
+  }
+  throw new Error('timed out waiting for [data-testid="app-ready"] after sign-up');
+}
+
 // WebKitWebDriver's native click doesn't reliably fire React handlers here; a
 // DOM click dispatched in-page does.
 async function clickTestId(browser, testId) {
@@ -281,7 +299,7 @@ module.exports = {
   ROOT, UI_PORT, DS_PORT, DS_URL, DS_BIN, APP_BIN, TAURI_DRIVER,
   sleep, reap, waitPort, curl, warmVite, spawnVite, waitViteReady,
   readEnvFile, tursoEnv,
-  present, waitTestId, clickTestId, setTestIdValue, setComposerText, typeCode,
+  present, waitTestId, waitAppReadyAfterSignUp, clickTestId, setTestIdValue, setComposerText, typeCode,
   presentSelector, waitSelector, clickSelector, setSelectorValue,
   clientPorts, startClient,
   makeShot, dumpFailure,

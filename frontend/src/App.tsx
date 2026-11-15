@@ -20,6 +20,8 @@ import { BackdropScreen } from "./components/Auth/BackdropScreen";
 import { Card } from "./components/ui/Card";
 import { UpdateScreen } from "./components/UpdateScreen";
 import { HistoryOfferScreen } from "./components/HistoryTransfer/HistoryOfferScreen";
+import { AppearanceChoiceScreen } from "./components/Auth/AppearanceChoiceScreen";
+import { isFreshSignIn, needsAppearanceChoice } from "./utils/firstRunAppearance";
 import { isSupported } from "./utils/historyTransfer";
 import { ClientBlockedScreen } from "./components/ClientBlockedScreen";
 import type { ManagedInstallInfo, ClientPolicyStatus } from "./types";
@@ -47,6 +49,7 @@ type AppState =
   | "logout-confirm"
   | "identity-setup"
   | "history-offer"
+  | "appearance-choice"
   | "update-required"
   | "ready";
 
@@ -89,6 +92,8 @@ function MainApp() {
   // #1735: this sign-in enrolled the device through another one, so offer that device's history.
   const enrolledThisSessionRef = useRef(false);
   const [historyOffer, setHistoryOffer] = useState<{ user: User; sources: api.TransferSource[] } | null>(null);
+  // #1924: this sign-in is the account's first on this install, so a skin-less account picks its look.
+  const freshSignInRef = useRef(false);
 
 
   /// Final phase of any sign-in; call only after signup or enrollment completes.
@@ -103,8 +108,10 @@ function MainApp() {
     if (import.meta.env.DEV) {
       setupDebugDevices(user.id);
     }
+    let preferencesJson: string | null = null;
     try {
       const json = await invoke<string>("get_preferences", { userId: user.id });
+      preferencesJson = json;
       const prefs = {
         accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
         background_color: getPreference<string | undefined>(json, "background_color", undefined),
@@ -120,8 +127,10 @@ function MainApp() {
       applyDeviceFontSize(user.id, prefs);
     } catch {
     }
+    const askAppearance = needsAppearanceChoice(freshSignInRef.current, preferencesJson);
+    freshSignInRef.current = false;
     setCurrentUser(user);
-    setAppState("ready");
+    setAppState(askAppearance ? "appearance-choice" : "ready");
   }, [setCurrentUser]);
 
   // skipUpdate: the user already chose to keep this build after a failed update (#1758).
@@ -310,6 +319,7 @@ function MainApp() {
   }, [appState, queryClient]);
 
   const handleAuthSuccess = useCallback(async (result: api.AuthResult) => {
+    freshSignInRef.current = isFreshSignIn(result, knownAccounts.map((a) => a.user_id));
     // First-device signup: confirm the Secret Key was saved.
     if (result.newSecretKey) {
       setPendingSecretKey(result.newSecretKey);
@@ -336,7 +346,7 @@ function MainApp() {
       setPendingPinUser(result.user);
       setAppState("pin-create");
     }
-  }, []);
+  }, [knownAccounts]);
 
   const handleSecretKeySaved = useCallback(async () => {
     setPendingSecretKey(null);
@@ -685,6 +695,10 @@ function MainApp() {
         }}
       />
     );
+  }
+
+  if (appState === "appearance-choice" && currentUser) {
+    return <AppearanceChoiceScreen onDone={() => setAppState("ready")} />;
   }
 
   if (appState === "save-secret-key" && pendingSecretKey) {

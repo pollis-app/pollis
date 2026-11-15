@@ -351,7 +351,7 @@ someone else's renders as a quiet tinted chip.
 
 Composer UX branches per skin (`useSkin()`): terminal gets a ghosted inline
 autosuggest accepted with Tab — the fish / zsh-autosuggestions idiom, offered
-only when the caret is at the end of the line — and refined gets the
+only when the caret is at the end of the line — and Modern gets the
 Slack-style list above the composer (arrows / Enter / Tab / Esc). Neither is a
 modal, a portal, or a fixed overlay.
 
@@ -755,7 +755,7 @@ dismissal still work by `data.h`. Build, signing and portal details:
 | `frontend/src/utils/mentions.ts` | Mention parsing + ranking; mirrors the Rust matcher |
 | `frontend/src/hooks/queries/useMentionCandidates.ts` | Roster-derived mention pool (the no-leak boundary) |
 | `frontend/src/components/ui/RichTextInput.tsx` | The composer field: contentEditable projection of the wire text, and the terminal skin's inline ghost (shared with `:shortcode:` completion) |
-| `frontend/src/components/ui/MentionSuggestList.tsx` | Refined skin's Slack-style suggestion list |
+| `frontend/src/components/ui/MentionSuggestList.tsx` | Modern skin's Slack-style suggestion list |
 | `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` / `direct_mentions()` — the inbox fanout and the push audience |
 | `pollis-delivery/src/push.rs` | `PushAudience` + `push_recipients` — membership intersection and the per-channel mute; `dismiss_push` / `read_dismissed_push_handles` — clearing read notifications (#1508); `dm_push_plan` / `notify_dm_request` / `dismiss_conversations_now` — DM requests (#1734) |

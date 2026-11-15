@@ -30,8 +30,19 @@
     "heading": "Appearance",
     "ariaLabel": "UI skin",
     "skinTerminal": "Terminal",
-    "skinRefined": "Refined",
-    "description": "Terminal is the default IRC/monospace look. Refined is a friendlier, proportional-sans layout for people who prefer a more conventional chat app. Syncs across your devices."
+    "skinModern": "Modern",
+    "description": "Terminal is the default IRC/monospace look. Modern is a friendlier, proportional-sans layout for people who prefer a more conventional chat app. Syncs across your devices.",
+    "skinTerminalDetail": "Monospace and compact, like IRC in a terminal",
+    "skinModernDetail": "Proportional type, avatars and roomier rows",
+    "firstRun": {
+      "title": "Choose how Pollis looks",
+      "subtitle": "Pick a look to start with. You can change it any time in Preferences, and it syncs across your devices.",
+      "continue": "Continue",
+      "saveFailed": "Couldn't save your choice. Check your connection and try again.",
+      "preview": "Preview",
+      "sampleMessage": "Morning! Coffee at ten?",
+      "sampleReply": "On my way."
+    }
   },
   "accent": {
     "heading": "Accent Color",

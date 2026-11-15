@@ -28,8 +28,19 @@
     "heading": "Aspecto",
     "ariaLabel": "Aspecto de la interfaz",
     "skinTerminal": "Terminal",
-    "skinRefined": "Refinado",
-    "description": "Terminal es el aspecto por defecto, tipo IRC y monoespaciado. Refinado es una disposición más amable, con tipografía proporcional, para quien prefiera una app de chat más convencional. Se sincroniza entre tus dispositivos."
+    "skinModern": "Moderno",
+    "description": "Terminal es el aspecto por defecto, tipo IRC y monoespaciado. Moderno es una disposición más amable, con tipografía proporcional, para quien prefiera una app de chat más convencional. Se sincroniza entre tus dispositivos.",
+    "skinTerminalDetail": "Monoespaciado y compacto, como IRC en una terminal",
+    "skinModernDetail": "Tipografía proporcional, avatares y filas más holgadas",
+    "firstRun": {
+      "title": "Elige el aspecto de Pollis",
+      "subtitle": "Elige un aspecto para empezar. Puedes cambiarlo cuando quieras en Preferencias, y se sincroniza entre tus dispositivos.",
+      "continue": "Continuar",
+      "saveFailed": "No se pudo guardar tu elección. Comprueba tu conexión y vuelve a intentarlo.",
+      "preview": "Vista previa",
+      "sampleMessage": "¡Buenos días! ¿Café a las diez?",
+      "sampleReply": "Voy para allá."
+    }
   },
   "accent": {
     "heading": "Color de acento",

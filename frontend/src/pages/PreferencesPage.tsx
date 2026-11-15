@@ -56,6 +56,7 @@ import { INCOMING_CALL_TAKEOVER_DEFAULT } from "../utils/incomingCallTakeover";
 import { isMac } from "../utils/platform";
 import { useShortcutLabel } from "../keyboard";
 import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
+import { SkinPicker } from "../components/Preferences/SkinPicker";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -461,31 +462,15 @@ export const PreferencesPage: React.FC = observer(() => {
               >
                 {t("appearance.heading")}
               </h2>
-              <div
-                role="radiogroup"
-                aria-label={t("appearance.ariaLabel")}
-                className="flex gap-2 flex-wrap"
-              >
-                {([
-                  { value: "terminal", label: t("appearance.skinTerminal") },
-                  { value: "refined", label: t("appearance.skinRefined") },
-                ] as const).map((opt) => (
-                  <Button
-                    key={opt.value}
-                    variant={skin === opt.value ? "primary" : "secondary"}
-                    size="sm"
-                    aria-label={opt.label}
-                    data-testid={`pref-skin-${opt.value}`}
-                    onClick={() => {
-                      if (skin !== opt.value) {
-                        handleSkin(opt.value);
-                      }
-                    }}
-                  >
-                    {opt.label}
-                  </Button>
-                ))}
-              </div>
+              <SkinPicker
+                data-testid="pref-skin"
+                value={skin}
+                onChange={(val) => {
+                  if (skin !== val) {
+                    handleSkin(val);
+                  }
+                }}
+              />
               <p className="text-xs font-mono text-muted">
                 {t("appearance.description")}
               </p>

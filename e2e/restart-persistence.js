@@ -56,7 +56,7 @@ async function signUp(browser, email) {
   await h.waitTestId(browser, "pin-create-screen");
   await h.typeCode(browser, PIN);
   await h.typeCode(browser, PIN);
-  await h.waitTestId(browser, "app-ready", 60000);
+  await h.waitAppReadyAfterSignUp(browser, 60000);
   console.log("[restart] reached app-ready (initial signup)");
 }
 
