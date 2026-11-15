@@ -56,6 +56,9 @@ interface MockProfile {
 
 /// The only code the mocked email-change flow accepts, for BOTH of its codes.
 const MOCK_OTP_CODE = '000000';
+/// The Secret Key a `newAccount` signup hands back (#1924).
+const MOCK_NEW_SECRET_KEY = 'A3-MOCK42-SECRET-KEY00-FOR-SIGNUP';
+
 /// `verify_otp` rejects this code as the DS's 401 does (#1305).
 const MOCK_WRONG_OTP_CODE = '111111';
 /// `verify_otp` accepts this code, then a later bootstrap step fails (#1305).
@@ -1015,8 +1018,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'detect_read_only_location':
       return null;
 
+    // Accounts this install already knows (`knownAccounts` preload, #1924); none by default.
     case 'list_known_accounts':
-      return { accounts: [], active_user_id: store.session?.id ?? null };
+      return { accounts: preload.knownAccounts ?? [], active_user_id: store.session?.id ?? null };
 
     case 'get_message_retention':
       return 0;
@@ -2336,6 +2340,10 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         username: email.split('@')[0],
       };
       store.session = user;
+      // `newAccount` (#1924): a first-device signup, which hands back a Secret Key to save once.
+      if (preload.newAccount) {
+        return { ...user, new_secret_key: MOCK_NEW_SECRET_KEY };
+      }
       return user;
     }
 

@@ -61,7 +61,7 @@ async function signUp(browser, email, tag) {
   await h.typeCode(browser, PIN);
 
   // 6. Ready app.
-  await h.waitTestId(browser, "app-ready", 60000);
+  await h.waitAppReadyAfterSignUp(browser, 60000);
   console.log(`[two-client] ${tag}: reached app-ready`);
 }
 

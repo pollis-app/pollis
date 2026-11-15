@@ -230,6 +230,8 @@ const SAVE_THROTTLE_MS = 500;
 interface PendingSave {
   userId: string;
   merged: MergedSave;
+  /** Callers awaiting this save landing (`saveAndWait`); settled when it is sent. */
+  waiters: { resolve: () => void; reject: (e: unknown) => void }[];
 }
 
 // The raw stored blob per user, keys desktop does not parse included (#1650): every save
@@ -256,8 +258,10 @@ async function flushPendingSave(): Promise<void> {
       userId: job.userId,
       preferencesJson: preferencesSaveJson(job.merged),
     });
+    job.waiters.forEach((w) => w.resolve());
   } catch (e) {
     console.warn("[prefs] save_preferences failed", e);
+    job.waiters.forEach((w) => w.reject(e));
   }
 }
 
@@ -265,13 +269,23 @@ function scheduleSave(
   userId: string,
   prefs: PreferencesData,
   queryClient: QueryClient,
+  waiter?: PendingSave["waiters"][number],
 ): void {
   queryClient.setQueryData(prefsKey(userId), prefs);
-  // Deletes from a save still waiting on the throttle ride along with this one.
-  const carried = pendingSave?.userId === userId ? pendingSave.merged.deleted : undefined;
+  // Deletes and waiters from a save still waiting on the throttle ride along with this one.
+  const sameUser = pendingSave?.userId === userId;
+  const carried = sameUser ? pendingSave?.merged.deleted : undefined;
+  const waiters = sameUser ? [...(pendingSave?.waiters ?? [])] : [];
+  if (!sameUser) {
+    // Another user's unsent save is replaced, so nobody may keep waiting on it.
+    pendingSave?.waiters.forEach((w) => w.reject(new Error("superseded")));
+  }
+  if (waiter) {
+    waiters.push(waiter);
+  }
   const merged = mergePreferencesSave(rawBlobs.get(userId) ?? {}, { ...prefs }, carried);
   rawBlobs.set(userId, merged.blob);
-  pendingSave = { userId, merged };
+  pendingSave = { userId, merged, waiters };
 
   const elapsed = performance.now() - lastSaveInvokeAt;
   if (elapsed >= SAVE_THROTTLE_MS) {
@@ -382,7 +396,21 @@ export function usePreferences() {
     [currentUser, queryClient],
   );
 
-  return { query, save };
+  /** `save`, resolving once the save reaches the server and rejecting if it fails, for a busy state. */
+  const saveAndWait = useCallback(
+    (prefs: PreferencesData): Promise<void> => {
+      if (!currentUser) {
+        return Promise.reject(new Error("not signed in"));
+      }
+      const userId = currentUser.id;
+      return new Promise<void>((resolve, reject) => {
+        scheduleSave(userId, prefs, queryClient, { resolve, reject });
+      });
+    },
+    [currentUser, queryClient],
+  );
+
+  return { query, save, saveAndWait };
 }
 
 /** Current skin, for structural branches; pure styling should use `:root[data-skin]` CSS. */

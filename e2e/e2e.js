@@ -106,7 +106,7 @@ async function main() {
     console.log("[e2e] PIN created");
 
     // 6. Ready app → proof.
-    await h.waitTestId(browser, "app-ready", 60000);
+    await h.waitAppReadyAfterSignUp(browser, 60000);
     await shot(browser, "99-app-ready.png");
     console.log("[e2e] SUCCESS: reached app-ready");
     code = 0;

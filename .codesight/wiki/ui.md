@@ -164,6 +164,30 @@ through the same `tapLink`. A link span takes its own touch, so a long press on
 it opens the link sheet, not the message sheet; swipe to reply is unaffected.
 Maestro: `.maestro/flows/message-links.yaml`.
 
+### Skins: Terminal and Modern (#565, #1924)
+
+Desktop has two skins, picked in Preferences → Appearance (`SkinPicker`, a vertical
+`RadioList`) and synced in the preferences blob under `skin`. Users read them as
+**Terminal** (default) and **Modern**. Modern's stored value, its `Skin` type member,
+the `data-skin` attribute and every `:root[data-skin="refined"]` selector stay
+`refined`: shipped desktop builds run `normalizeSkin`, which maps any other value to
+terminal, so writing `"modern"` would flip a user's not-yet-updated devices. The
+constant is `MODERN_SKIN` (`utils/firstRunAppearance.ts`), pinned by
+`frontend/tests/first-run-appearance.test.ts`. Mobile has no skins.
+
+**First-run choice (#1924).** A new user picks the skin once, after sign-in and
+before the app opens: `App.tsx`'s `appearance-choice` state renders
+`AppearanceChoiceScreen` (full window, not a dialog). The pick re-skins the window
+live and shows a two-line sample; Continue saves through `usePreferences().saveAndWait`
+(busy until the save lands; a failure says so and Continue retries). It is shown only
+when `needsAppearanceChoice` holds: the sign-in was **fresh** — a first-device signup
+(a Secret Key came back) or a device enrollment — by an account the install's
+known-accounts index did not already list (so Forgot-PIN recovery and re-sign-ins
+never qualify), **and** the synced blob has no `skin` yet (an account that chose on
+another device inherits it). Existing installs never take the fresh path, and once a
+skin is saved the account is never asked again. Coverage:
+`e2e/first-run-appearance.spec.ts`.
+
 ### Design tokens: utilities, not `var()` (#874)
 
 Tokens are CSS custom properties in `frontend/src/index.css` and are surfaced as
@@ -193,7 +217,7 @@ this sweep.
 its top hairline on the root *above* that row, so the composer's real footprint
 is `--composer-h` **+ 1px**.
 
-The sidebar Close bar, the right-panel Close bar and refined's profile strip each
+The sidebar Close bar, the right-panel Close bar and Modern's profile strip each
 draw their own `border-t` on the **same element** that carries the height — and
 under `box-sizing: border-box` that hairline is taken *out of* the height rather
 than added to it. All three therefore rendered exactly 1px shorter than the
@@ -282,7 +306,7 @@ Concretely, in the message log:
 
 The voice UI is `components/Voice/stage/VoiceStage.tsx` (the channel/call screen),
 `VoiceBar.tsx` (terminal's bottom strip), `SidebarProfilePanel` + `SidebarVoiceControls`
-(refined's sidebar strip) and `VoiceChannelMembers` (the roster under each sidebar voice
+(Modern's sidebar strip) and `VoiceChannelMembers` (the roster under each sidebar voice
 channel). All of them read `appStore.voiceState` / `voiceParticipants`, which
 `voice/VoiceSessionManager.ts` mirrors from its own state; Rust owns the truth.
 
@@ -368,7 +392,7 @@ Things worth knowing before touching it:
 
 - **Rows are `position: absolute` inside `[data-testid="message-window"]`**,
   which is what makes each row's position independent of its neighbours and
-  contains the refined day divider's margins (an escaping margin would leave
+  contains the Modern day divider's margins (an escaping margin would leave
   every measurement short and the window drifting). It changes nothing about
   how the hover action bar and its `z-40` menu paint: both are still positioned
   against the row's own `relative` box, and nothing clips.
@@ -579,7 +603,7 @@ The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay 
 | Is the panel open? | `stores/rightPanelStore` → `localStorage` key `pollis-right-panel-open:<userId>` | **No.** Only the user toggling it moves it. |
 | Which shape, and whose data? | `?thread=<ULID>` for a thread; otherwise the members roster, scoped by `appStore` selection | **Yes.** That is what the panel is for. |
 
-Open/closed used to be a `?panel=` search param, which is what broke it: nothing in the app carries search params across a navigation (every `router.navigate({ to })` produces a bare URL), so the param was dropped on every sidebar click and the panel fell back to a SKIN default — shut in `terminal`, open in `refined`. One bug, two faces: a terminal panel that would not stay open, a refined one that would not stay shut. It is now device-local and **keyed by user id**, the same scheme as the device-local language (`i18n/storage.ts`) and font size (`loadDeviceFontSize`), so a shared OS account never leaks one person's layout to the next.
+Open/closed used to be a `?panel=` search param, which is what broke it: nothing in the app carries search params across a navigation (every `router.navigate({ to })` produces a bare URL), so the param was dropped on every sidebar click and the panel fell back to a SKIN default — shut in `terminal`, open in `refined`. One bug, two faces: a terminal panel that would not stay open, a Modern one that would not stay shut. It is now device-local and **keyed by user id**, the same scheme as the device-local language (`i18n/storage.ts`) and font size (`loadDeviceFontSize`), so a shared OS account never leaks one person's layout to the next.
 
 **Seeding.** A device with nothing remembered falls back to the synced `right_panel_open_by_default` preference, else the skin's historical default — and then **writes that answer down**, once the preferences query has settled (the skin is read from that same query, so an earlier seed would record the loading placeholder). The write is what keeps the skin out of it: after seeding, the skin is never consulted again, so switching between `terminal` and `refined` cannot open or close the panel. The Preferences switch writes BOTH halves — device-local (so it actually moves the panel you are looking at) and synced (so the next new device seeds from it).
 
@@ -589,7 +613,7 @@ Open/closed used to be a `?panel=` search param, which is what broke it: nothing
 
 Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 
-**Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-composer border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, refined re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; refined keeps the airier avatar rows.
+**Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-composer border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, Modern (`refined`) re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; Modern keeps the airier avatar rows.
 
 **Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?thread=` on such a route falls back to the roster rather than rendering an empty thread.
 
@@ -689,7 +713,7 @@ shape, so learning one is learning the other:
 | --- | --- | --- |
 | trigger | `@` at a word start | `:` at a word start |
 | parser | `utils/mentions.ts` → `mentionQueryAt` | `components/Emoji/emojiShortcodeQuery.ts` → `shortcodeQueryAt` |
-| refined skin | `ui/MentionSuggestList` above the composer | `ui/EmojiSuggestList`, same anchoring |
+| Modern skin | `ui/MentionSuggestList` above the composer | `ui/EmojiSuggestList`, same anchoring |
 | terminal skin | ghost node inside `ui/RichTextInput`, Tab accepts | same ghost node, Tab accepts |
 | candidates | the conversation's roster | custom emoji the user may send, then the standard table |
 
@@ -821,7 +845,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**208 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**210 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -841,8 +865,9 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TypingIndicator** — props: channelId, conversationId — `frontend/src/components/TypingIndicator.tsx`
 - **UpdateScreen** — `frontend/src/components/UpdateScreen.tsx`
 
-### `components/Auth` (12)
+### `components/Auth` (13)
 
+- **AppearanceChoiceScreen** — props: onDone — `frontend/src/components/Auth/AppearanceChoiceScreen.tsx`. A new user's one-time Terminal / Modern pick after sign-in, before the app opens (#1924); see "Skins" above.
 - **AuthCard** — `frontend/src/components/Auth/AuthCard.tsx`. The narrow (360) centred card of the sign-in and PIN screens (#1731).
 - **AuthError** — props: message — `frontend/src/components/Auth/AuthError.tsx`
 - **BackdropScreen** — props: backdropOpacity, backdropSpeed, children — `frontend/src/components/Auth/BackdropScreen.tsx`. Full-window pre-app shell: dot-matrix backdrop + `TitleBar`; used by the sign-in, PIN, secret-key and enrollment screens and `App.tsx`'s logout / identity-setup states (#1731).
@@ -897,7 +922,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
 - **ResizeHandle** — props: panelRef, edge, label, maxPx, onCommit, onCollapse, onReset — `frontend/src/components/Layout/ResizeHandle.tsx`. Shared by both side panels; drags write `style.width` straight to the panel and never through React. See [Resizable side panels](#resizable-side-panels-985).
 - **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`. Its settings rows carry `sidebar-row-*` testids like `SectionHeader`'s, so navigation tests never match on a translated label (#932).
-- **SidebarProfilePanel** — `frontend/src/components/Layout/SidebarProfilePanel.tsx`. Refined only; identity row + the persistent voice strip (channel, mic, deafen, screenshare, disconnect) that replaces terminal's `VoiceBar`. The status/channel text is a button that navigates back to the connected room (same targets as `VoiceBar`'s channel pill), and the strip floors on `min-h-composer` so it lines up with the composer across the sidebar edge.
+- **SidebarProfilePanel** — `frontend/src/components/Layout/SidebarProfilePanel.tsx`. Modern skin only; identity row + the persistent voice strip (channel, mic, deafen, screenshare, disconnect) that replaces terminal's `VoiceBar`. The status/channel text is a button that navigates back to the connected room (same targets as `VoiceBar`'s channel pill), and the strip floors on `min-h-composer` so it lines up with the composer across the sidebar edge.
 - **StatusBarSummary** — props: color — `frontend/src/components/Layout/StatusBarSummary.tsx`
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
 - **WindowResizeEdges** — `frontend/src/components/Layout/WindowResizeEdges.tsx`
@@ -935,21 +960,22 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, isAuthorNew, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, onReport, onTogglePin, copyLinkState, isSaved, isPinned, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed. The row's `hover:bg-hover focus-within:bg-hover` is its pointer/keyboard feedback; mobile's counterpart (`mobile/components/chat/MessageRow.tsx`, #1282) fades a touched row from `bg` to `raised` (`accentFaint` to `accentSoft` on a mention or jump-to tint) after a 100 ms delay, held through the long press and cleared on release, scroll or swipe, on the UI thread (timings in `mobile/lib/pressFeedback.ts`). The long press that opens the sheet also plays a haptic (#1286). Mobile gives tactile feedback for every significant non-navigation action — mutations through one `MutationCache` keyed on `meta.haptic` (`mobile/lib/queryClient.ts`), plus gestures, switches, two-tap confirms and copies; the rules are in `mobile/CLAUDE.md` → Haptics (desktop has no haptic surface).
 - **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, hasNewer, isFetchingNewer, onLoadNewer, windowEpoch, focusComposer, pinsConversationId, onVerifyKeyChange — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
-- **MessageReactions** — props: messageId, className — `frontend/src/components/Message/MessageReactions.tsx`. The reaction pills, rendered by **both** skins from `MessageItem` and gated on `!isDeleted`. Placement is the row's: both skins render them **inside** the body column. Terminal's body column is the flex column after `name :`, which also holds the media unfurl and the attachment strip/file rows, so pictures, files and pills line up with the message text rather than the timestamp (#1489; they used to start at the far left, pills at `ms-20`). Refined needs the same: as a third child of the `[3.5rem_minmax(0,1fr)]` grid they fell into the avatar gutter of the next row and stacked one per line. Writes are optimistic (`useReactions.ts`): `add_reaction` / `remove_reaction` patch the `["reactions", id]` cache in `onMutate`, roll back on error, and refetch on settle, so a pill appears the instant the emoji is picked; `useToggleReaction` decides add-vs-remove from the cache at click time, so a second quick click takes the reaction back rather than adding it twice. Returns `null` — no wrapper, no reserved height — until the message has a reaction: the previous permanent row with a hover-revealed `+` put a blank line under every message. Adding a reaction is `ReactionAddButton` in the hover bar. Restored in #931 after #874 deleted it as a dead path: the Rust commands survived and mobile still called them, so the feature was live with no desktop UI. A pill toggles — clicking one you are already in removes your reaction, keyed on `(message, user, emoji)` so it never touches anyone else's (`useToggleReaction`, shared with the bar). The emoji is run through `splitEmojiSegments` and a custom one renders via `CustomEmojiImage`, which is what lets a `<:name:hash>` reaction display as an image for a viewer who is not in the group that owns it (#848); reactions are stored as opaque strings, so a custom reaction simply *is* its wire token. **Who reacted (#1684):** hovering a pill names who reacted in its native tooltip ("Ann, Bo and You reacted with 👍", the first three named and the rest counted) and right-clicking it — or the context-menu key / Shift+F10 on a focused pill — opens `ReactionBreakdownPanel` anchored above the row (below when there is no room; outside click or Escape closes). Names come from ONE batched `get_user_profiles` read (`useUserProfiles`, a Tauri shim over the core command mobile's avatars already use), fired only once a pill is hovered/focused or the panel opens; it also seeds each `otherProfile` cache entry. The reactor ids were always on the wire (`get_reactions` → `user_ids`, oldest first, since the DS reads `message_reaction ORDER BY created_at`), so no core or DS change. Grouping is `utils/reactionBreakdown.ts`, which `mobile/lib/reactionBreakdown.ts` copies verbatim (pinned by `frontend/tests/reaction-breakdown.test.ts`). Mobile's counterpart is a long press on a pill (`mobile/components/chat/ReactionPills.tsx` → `ReactionBreakdownSheet.tsx`): a half-height `SheetOverlay` with the same tabs and rows, draggable up to expand and down to collapse or close by its tab strip; a short tap still toggles, the pill is the touch responder so the row's long press (message sheet) never fires, and the row offers "View reactions" as an accessibility action. The chat screen's senders and roster name the first frame, then the same one batched read fills in display names.
+- **MessageReactions** — props: messageId, className — `frontend/src/components/Message/MessageReactions.tsx`. The reaction pills, rendered by **both** skins from `MessageItem` and gated on `!isDeleted`. Placement is the row's: both skins render them **inside** the body column. Terminal's body column is the flex column after `name :`, which also holds the media unfurl and the attachment strip/file rows, so pictures, files and pills line up with the message text rather than the timestamp (#1489; they used to start at the far left, pills at `ms-20`). Modern needs the same: as a third child of the `[3.5rem_minmax(0,1fr)]` grid they fell into the avatar gutter of the next row and stacked one per line. Writes are optimistic (`useReactions.ts`): `add_reaction` / `remove_reaction` patch the `["reactions", id]` cache in `onMutate`, roll back on error, and refetch on settle, so a pill appears the instant the emoji is picked; `useToggleReaction` decides add-vs-remove from the cache at click time, so a second quick click takes the reaction back rather than adding it twice. Returns `null` — no wrapper, no reserved height — until the message has a reaction: the previous permanent row with a hover-revealed `+` put a blank line under every message. Adding a reaction is `ReactionAddButton` in the hover bar. Restored in #931 after #874 deleted it as a dead path: the Rust commands survived and mobile still called them, so the feature was live with no desktop UI. A pill toggles — clicking one you are already in removes your reaction, keyed on `(message, user, emoji)` so it never touches anyone else's (`useToggleReaction`, shared with the bar). The emoji is run through `splitEmojiSegments` and a custom one renders via `CustomEmojiImage`, which is what lets a `<:name:hash>` reaction display as an image for a viewer who is not in the group that owns it (#848); reactions are stored as opaque strings, so a custom reaction simply *is* its wire token. **Who reacted (#1684):** hovering a pill names who reacted in its native tooltip ("Ann, Bo and You reacted with 👍", the first three named and the rest counted) and right-clicking it — or the context-menu key / Shift+F10 on a focused pill — opens `ReactionBreakdownPanel` anchored above the row (below when there is no room; outside click or Escape closes). Names come from ONE batched `get_user_profiles` read (`useUserProfiles`, a Tauri shim over the core command mobile's avatars already use), fired only once a pill is hovered/focused or the panel opens; it also seeds each `otherProfile` cache entry. The reactor ids were always on the wire (`get_reactions` → `user_ids`, oldest first, since the DS reads `message_reaction ORDER BY created_at`), so no core or DS change. Grouping is `utils/reactionBreakdown.ts`, which `mobile/lib/reactionBreakdown.ts` copies verbatim (pinned by `frontend/tests/reaction-breakdown.test.ts`). Mobile's counterpart is a long press on a pill (`mobile/components/chat/ReactionPills.tsx` → `ReactionBreakdownSheet.tsx`): a half-height `SheetOverlay` with the same tabs and rows, draggable up to expand and down to collapse or close by its tab strip; a short tap still toggles, the pill is the touch responder so the row's long press (message sheet) never fires, and the row offers "View reactions" as an accessibility action. The chat screen's senders and roster name the first frame, then the same one batched read fills in display names.
 - **ReactionAddButton** — props: messageId, iconSize, className, onOpenChange — `frontend/src/components/Message/ReactionAddButton.tsx`. The add-reaction trigger in the message hover bar, second from the left (reply, **react**, edit, more — the Discord order). A thin skin over `EmojiPickerButton`, so the panel is lazy-loaded, anchored, non-modal, and flipped to whichever side of the row has room (a row at the top of the log opens downward). `onOpenChange` lets `MessageActions` hold the bar visible while the panel is up, exactly as it does for its own menu; `data-nav-action="react"` puts it on the arrow-key path.
 - **ReactionBreakdownPanel** — props: tabs, initialEmoji, resolving, onClose — `frontend/src/components/Message/ReactionBreakdownPanel.tsx`. Discord's "View reactions": a `tablist` of filled emoji tabs (All first when there are several, its count the total; the right-clicked emoji selected; ←/→ move between tabs, mirrored under RTL) over the people who used that emoji in reaction order — avatar, display name, `@handle` when it differs, a "You" chip for yourself, the emojis each person used on the All tab. A row opens `/user/$userId` (not for yourself or an unknown user). A user no profile read can name (left, deleted) is "Unknown user" with the default avatar, never a raw id; while the read is out an unnamed row shows "…". Not a modal: anchored `absolute` by `MessageReactions` like the emoji picker, no portal, no backdrop.
 - **ReactionEmoji** — `frontend/src/components/Message/ReactionEmoji.tsx`. A reaction's face (Unicode, or a custom `<:name:hash>` token as `CustomEmojiImage`) plus `spokenEmoji`, which labels a custom one as `:name:` in tooltips and ARIA labels instead of the raw token.
-- **ReceiptIndicator** — props: receipts, peerCount, visible — `frontend/src/components/Message/ReceiptIndicator.tsx`. Rendered by the refined skin's message row only; the terminal skin draws no receipt ticks (the receipts query still runs). One tick per DM (#1637), iMessage-style: `MessageList` hands a receipt only to the viewer's newest own message that has one (`receiptTargetId`, `frontend/src/utils/receiptTarget.ts`; mobile's copy is `mobile/lib/receiptTarget.ts`, pinned identical by `frontend/tests/receipt-target.test.ts`). An own message no peer has acknowledged yet is skipped, so the tick stays put until the next one is delivered, and a window anchored on older history (`hasNewer`) shows none. On mobile the tick's state is also read into the row's spoken label (`receiptLabel`).
+- **ReceiptIndicator** — props: receipts, peerCount, visible — `frontend/src/components/Message/ReceiptIndicator.tsx`. Rendered by the Modern skin's message row only; the terminal skin draws no receipt ticks (the receipts query still runs). One tick per DM (#1637), iMessage-style: `MessageList` hands a receipt only to the viewer's newest own message that has one (`receiptTargetId`, `frontend/src/utils/receiptTarget.ts`; mobile's copy is `mobile/lib/receiptTarget.ts`, pinned identical by `frontend/tests/receipt-target.test.ts`). An own message no peer has acknowledged yet is skipped, so the tick stays put until the next one is delivered, and a window anchored on older history (`hasNewer`) shows none. On mobile the tick's state is also read into the row's spoken label (`receiptLabel`).
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`. Mobile's counterpart is `mobile/components/chat/ReplyBar.tsx` (#1270), where a reply starts from a swipe toward the start edge or a double tap on the row (`SwipeToReply.tsx`) as well as the message sheet's Reply.
 - **ThreadReplyCount** — props: count, onOpen — `frontend/src/components/Message/ThreadReplyCount.tsx`
 - **UndecryptableMessage** — props: message, skin — `frontend/src/components/Message/UndecryptableMessage.tsx`
 - **UnsentMessageActions** — props: message — `frontend/src/components/Message/UnsentMessageActions.tsx`. "[Not sent]", one line on why (`unsentReason`: the outbox will resend a `failed` row; a `rejected` or never-stored one "couldn't be delivered", #1668), then Retry / Discard beside an own message the durable outbox has not delivered (#1335), rendered by both skins' `MessageItem` and by the thread panel's `ThreadMessageRow`; Retry is absent when the send failed before the core stored it (an upload). Mobile's counterpart is `mobile/components/chat/UnsentActions.tsx`.
 
-### `components/Preferences` (3)
+### `components/Preferences` (4)
 
 - **HexColorField** — props: color, hexInput, onHexInputChange, onColor, title, swatchStyle — `frontend/src/components/Preferences/HexColorField.tsx`. Swatch + hex box of the accent and background rows in `PreferencesPage` (#1731).
 - **LanguageSection** — props: userId — `frontend/src/components/Preferences/LanguageSection.tsx`
 - **RelayServingSection** — props: config, status, applyError, onChange — `frontend/src/components/Preferences/RelayServingSection.tsx`
+- **SkinPicker** — props: value, onChange — `frontend/src/components/Preferences/SkinPicker.tsx`. The Terminal / Modern `RadioList`, shared by Preferences and the first-run step; row test ids carry the stored value (`pref-skin-refined` is Modern).
 
 ### `components/Saved` (1)
 
@@ -1015,7 +1041,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ResolutionSelect** — props: track, value, onChange, showHint — `frontend/src/components/Voice/ResolutionSelect.tsx`
 - **ScreenSharePicker** — `frontend/src/components/Voice/ScreenSharePicker.tsx`
 - **ScreenShareViewer** — props: tile, onClose — `frontend/src/components/Voice/ScreenShareViewer.tsx`
-- **SidebarVoiceControls** — `frontend/src/components/Voice/SidebarVoiceControls.tsx`. Mic (four-state) + deafen for refined's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage`.
+- **SidebarVoiceControls** — `frontend/src/components/Voice/SidebarVoiceControls.tsx`. Mic (four-state) + deafen for Modern's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage`.
 - **SignalBars** — props: quality, testId, className — `frontend/src/components/Voice/SignalBars.tsx`
 - **SpeakingAnnouncer** — `frontend/src/components/Voice/SpeakingAnnouncer.tsx`
 - **VoiceBar** — props: channelId, channelName — `frontend/src/components/Voice/VoiceBar.tsx`
