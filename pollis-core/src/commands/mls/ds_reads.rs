@@ -94,13 +94,19 @@ pub(crate) async fn fetch_welcomes(
     user_id: &str,
     device_id: &str,
 ) -> Result<FetchedWelcomes> {
-    let body = FetchWelcomesBody {
-        user_id: Some(user_id.to_string()),
-        device_id: Some(device_id.to_string()),
-        // #1412: the drain doubles as the low-pool signal.
-        count_key_packages_in_suite: Some(i64::from(u16::from(super::provider::current_suite()))),
+    // A push fetch's one-request prefetch (#1804): only ever an empty read.
+    let resp = match crate::notify::scope::welcomes() {
+        Some(resp) => resp,
+        None => {
+            let body = FetchWelcomesBody {
+                user_id: Some(user_id.to_string()),
+                device_id: Some(device_id.to_string()),
+                // #1412: the drain doubles as the low-pool signal.
+                count_key_packages_in_suite: Some(welcome_drain_suite()),
+            };
+            ds_post_json(state, &body).await?
+        }
     };
-    let resp = ds_post_json(state, &body).await?;
     let items = resp
         .welcomes
         .into_iter()
@@ -118,6 +124,11 @@ pub(crate) async fn fetch_welcomes(
         unclaimed_key_packages: resp.unclaimed_key_packages,
         has_last_resort_key_package: resp.has_last_resort_key_package,
     })
+}
+
+/// The suite the Welcome drain counts this device's KeyPackages in (#1412).
+pub(crate) fn welcome_drain_suite() -> i64 {
+    i64::from(u16::from(super::provider::current_suite()))
 }
 
 /// One undelivered Welcome row.

@@ -82,6 +82,12 @@ async fn post_catch_up(
     want_roster: bool,
     want_membership_version: bool,
 ) -> Result<dir::CatchUpResponse> {
+    // A push fetch's one-request prefetch (#1804); the roster and the pre-seal version are never prefetched.
+    if !want_roster && !want_membership_version {
+        if let Some(resp) = crate::notify::scope::catch_up(conversation_id, want_envelopes, want_dm) {
+            return Ok(resp);
+        }
+    }
     let body = dir::CatchUpBody {
         conversation_id: conversation_id.to_string(),
         want_envelopes,
@@ -254,12 +260,17 @@ pub(crate) async fn account_keys(
     if user_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let body = ar::AccountKeysBody {
-        user_ids: user_ids.to_vec(),
+    // A push fetch's one-request prefetch (#1804).
+    let keys = match crate::notify::scope::account_keys(user_ids) {
+        Some(keys) => keys,
+        None => {
+            let body = ar::AccountKeysBody {
+                user_ids: user_ids.to_vec(),
+            };
+            ds_post_json(state, &body).await?.keys
+        }
     };
-    let resp = ds_post_json(state, &body).await?;
-    resp.keys
-        .into_iter()
+    keys.into_iter()
         .map(|k| {
             let bytes = decode_b64("account_id_pub", &k.account_id_pub)?;
             Ok((k.user_id, bytes, k.identity_version))

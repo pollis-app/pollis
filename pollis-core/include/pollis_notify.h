@@ -49,6 +49,13 @@ char *pollis_notify_fetch(const char *data_dir, const char *handle, uint32_t bud
 // fetch failed). Never message content. NULL or "" is ignored.
 void pollis_notify_note(const char *line);
 
+// #1804: wait up to `timeout_ms` for the follow-up work earlier fetches left running (the
+// watermark advance and the delivered receipt, which a notification does not wait for). Call it
+// after posting the notification and before letting the process go (Android: before stopping
+// the push foreground service). True when nothing is left. An iOS extension's fetch leaves
+// nothing behind, so it never needs this.
+bool pollis_notify_settle(uint32_t timeout_ms);
+
 // Free a string returned above. NULL is a no-op.
 void pollis_string_free(char *s);
 

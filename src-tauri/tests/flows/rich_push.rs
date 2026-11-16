@@ -9,10 +9,14 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::harness::{wipe, world, writable_remote, TestClient, TEST_PIN};
+use crate::harness::{
+    ds_request_mark, ds_requests_since, wipe, world, writable_remote, OldDeliveryService, TestClient,
+    TEST_PIN,
+};
 use pollis_core::notify::escrow::{self, test_support, NotificationContent, ESCROW_SLOT};
 use pollis_core::notify::fetch::{self, Outcome, Params, Reason};
 use pollis_core::notify::lock::StateLock;
+use pollis_core::notify::scope::settle;
 use pollis_delivery::push::mint_push_handles;
 use serial_test::serial;
 
@@ -32,7 +36,14 @@ impl Drop for MobileBuild {
     }
 }
 
+/// The fetch, then what the Android host does after posting: wait for the posts it deferred.
 async fn headless(client: &TestClient, handle: Option<String>, budget: Duration) -> Outcome {
+    let out = headless_unsettled(client, handle, budget).await;
+    assert!(settle(Duration::from_secs(30)).await, "the deferred posts finished");
+    out
+}
+
+async fn headless_unsettled(client: &TestClient, handle: Option<String>, budget: Duration) -> Outcome {
     client.activate();
     fetch::run(Params {
         keystore: client.state.keystore.clone(),
@@ -42,6 +53,26 @@ async fn headless(client: &TestClient, handle: Option<String>, budget: Duration)
         local_dir: Some(client.state.local_data_dir()),
     })
     .await
+}
+
+async fn device_of(client: &TestClient) -> String {
+    client.state.device_id.lock().await.clone().expect("device id")
+}
+
+/// `(message_id, reader_id, kind)` of every receipt `client` holds in `conversation`.
+async fn receipts(client: &TestClient, conversation: &str) -> Vec<(String, String, String)> {
+    let guard = client.state.local_db.lock().await;
+    let conn = guard.as_ref().expect("db").conn();
+    let mut st = conn
+        .prepare(
+            "SELECT r.message_id, r.reader_id, r.kind FROM message_receipt r \
+             JOIN message m ON m.id = r.message_id WHERE m.conversation_id = ?1",
+        )
+        .unwrap();
+    st.query_map([conversation], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
 }
 
 async fn handle_for(user_id: &str, conversation_id: &str, kind: &str) -> String {
@@ -786,4 +817,104 @@ async fn a_dm_request_shows_the_requester_and_never_a_preview() {
     assert!(contents(&bob.fetch_dm_messages(&dm).await)
         .iter()
         .any(|(_, c)| c == "hello stranger"));
+}
+
+/// #1804: a DM push is answered by ONE request before the preview, not resolve, Welcome
+/// drain, catch-up and key reads one after another; the watermark and the delivered receipt
+/// go after the answer, and still land once the host settles.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_dm_push_reads_in_one_request_and_posts_the_rest_after() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+    let bob_device = device_of(&bob).await;
+
+    let m = alice.send_channel_message_id(&dm, "one trip").await;
+    let mark = ds_request_mark();
+    let handle = handle_for(&bob_p.id, &dm, "dm").await;
+    let out = headless_unsettled(&bob, Some(handle), Duration::from_secs(20)).await;
+    let bodies: Vec<String> = items(&out).into_iter().map(|i| i.body).collect();
+    assert_eq!(bodies, vec!["one trip".to_string()]);
+
+    assert!(settle(Duration::from_secs(30)).await, "the deferred posts finished");
+    let paths = ds_requests_since(mark, &bob_device);
+    assert_eq!(paths.first().map(String::as_str), Some("/v1/push/fetch"), "{paths:?}");
+    assert_eq!(paths.iter().filter(|p| *p == "/v1/push/fetch").count(), 1, "{paths:?}");
+    for separate in ["/v1/push/resolve", "/v1/welcomes/fetch", "/v1/read/account-keys"] {
+        assert!(!paths.iter().any(|p| p == separate), "{separate} was answered by the prefetch: {paths:?}");
+    }
+    assert!(paths.iter().any(|p| p == "/v1/watermarks/advance"), "the watermark still advances: {paths:?}");
+
+    // The delivered receipt the fetch deferred reached alice.
+    alice.fetch_dm_messages(&dm).await;
+    let delivered = (m.clone(), bob_p.id.clone(), "delivered".to_string());
+    assert!(receipts(&alice, &dm).await.contains(&delivered), "alice sees it delivered");
+
+    // And nothing is fetched twice: the watermark moved.
+    let again = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    assert!(items(&again).is_empty(), "{again:?}");
+}
+
+/// #1804: a Delivery Service that predates `/v1/push/fetch` still gets the preview, through
+/// the separate requests (a store build may meet an older DS, and the other way round).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_older_delivery_service_still_previews() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let dm = alice.create_dm(&[alice_p.id.as_str(), bob_p.id.as_str()]).await;
+    bob.accept_dm_request(&dm).await;
+    alice.fetch_dm_messages(&dm).await;
+    bob.fetch_dm_messages(&dm).await;
+    let bob_device = device_of(&bob).await;
+
+    let _old = OldDeliveryService::on();
+    alice.send_channel_message(&dm, "from the old days").await;
+    let mark = ds_request_mark();
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
+    let bodies: Vec<String> = items(&out).into_iter().map(|i| i.body).collect();
+    assert_eq!(bodies, vec!["from the old days".to_string()]);
+    let paths = ds_requests_since(mark, &bob_device);
+    assert!(paths.iter().any(|p| p == "/v1/push/resolve"), "fell back to resolve: {paths:?}");
+    assert!(paths.iter().any(|p| p == "/v1/welcomes/fetch"), "and the Welcome drain: {paths:?}");
+}
+
+/// #1804: a channel push for a group whose Welcome is still waiting is not served from the
+/// prefetch (that Welcome was read before the lock); it is drained fresh and the message shows.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_pending_welcome_is_drained_fresh_and_the_message_shows() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    set_content(&bob, "full").await;
+
+    let group_id = alice.create_group("Fresh Welcome").await;
+    alice.invite(&group_id, &bob_p.username).await;
+    let invite = bob.first_pending_invite().await.expect("pending invite");
+    bob.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    alice.poll().await;
+    let general = alice.general_channel_id(&group_id).await;
+    alice.send_channel_message(&general, "welcome aboard").await;
+
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &general, "channel").await), Duration::from_secs(20)).await;
+    assert!(
+        items(&out).iter().any(|i| i.body == "welcome aboard"),
+        "the message after the Welcome shows: {out:?}"
+    );
 }

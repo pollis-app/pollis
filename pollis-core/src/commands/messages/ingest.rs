@@ -327,40 +327,52 @@ async fn catch_up_once(
 
     // Advance each watermark via the DS (best-effort). Envelope GC runs server-side (#689).
     // Independent posts, so they and the receipts go out together (#1610).
-    let watermarks = futures_util::future::join_all(results.iter().filter_map(|res| {
-        let (Some((seq, sent_at)), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) else {
-            return None;
-        };
-        let cid = res.conversation_id.clone();
-        let body = pollis_api::messages::WatermarkBody {
-            conversation_id: cid.clone(),
-            user_id: Some(user_id.to_string()),
-            device_id: did.clone(),
-            // The cursor (#1087). `last_fetched_at` rides along for the
-            // legacy column only; delivery and retention read `last_seq`.
-            last_seq: Some(*seq),
-            last_fetched_at: sent_at.clone(),
-        };
-        Some(async move {
-            if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
-                crate::diag!("[watermark] catch_up_group: DS advance failed for {cid}: {e}");
-            }
+    let watermark_bodies: Vec<pollis_api::messages::WatermarkBody> = results
+        .iter()
+        .filter_map(|res| {
+            let (Some((seq, sent_at)), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) else {
+                return None;
+            };
+            Some(pollis_api::messages::WatermarkBody {
+                conversation_id: res.conversation_id.clone(),
+                user_id: Some(user_id.to_string()),
+                device_id: did.clone(),
+                // The cursor (#1087). `last_fetched_at` rides along for the
+                // legacy column only; delivery and retention read `last_seq`.
+                last_seq: Some(*seq),
+                last_fetched_at: sent_at.clone(),
+            })
         })
-    }));
-
+        .collect();
     // Delivery receipts (#857), batched per conversation; `emit_receipt` re-checks the gates. Best-effort.
-    let receipts = async {
-        if is_dm {
-            emit_delivered_batches(
-                state,
-                results
-                    .iter()
-                    .map(|r| (r.conversation_id.as_str(), r.newly_delivered.as_slice())),
-            )
-            .await;
-        }
+    let delivered: Vec<(String, Vec<String>)> = if is_dm {
+        results
+            .iter()
+            .map(|r| (r.conversation_id.clone(), r.newly_delivered.clone()))
+            .collect()
+    } else {
+        Vec::new()
     };
-    tokio::join!(watermarks, receipts);
+    let tail_state = Arc::clone(state);
+    let tail = async move {
+        let state = &tail_state;
+        let watermarks = futures_util::future::join_all(watermark_bodies.iter().map(|body| async move {
+            if let Err(e) = crate::commands::mls::ds_post_ok(state, body).await {
+                crate::diag!(
+                    "[watermark] catch_up_group: DS advance failed for {}: {e}",
+                    body.conversation_id
+                );
+            }
+        }));
+        let receipts = emit_delivered_batches(
+            state,
+            delivered.iter().map(|(c, ids)| (c.as_str(), ids.as_slice())),
+        );
+        tokio::join!(watermarks, receipts);
+    };
+    // Everything above is stored; a push fetch posts its notification without waiting for
+    // this (#1804). Anywhere else it runs inline, as before.
+    crate::notify::scope::defer_or_run(tail).await;
 
     Ok(())
 }
