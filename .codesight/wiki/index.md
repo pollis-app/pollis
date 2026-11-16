@@ -8,7 +8,7 @@ Start here. Navigate to the article you need.
 - [Database](./database.md) — Remote (Turso) and local (SQLite) schemas with all columns
 - [MLS](./mls.md) — Message Layer Security: encryption, group membership, multi-device
 - [Backend Commands](./commands.md) — Rust backend command reference
-- [UI Components](./ui.md) — React component inventory
+- [UI Components](./ui.md) — React component inventory. The design language (looks, tokens, colour rules, copy) is [`docs/design/README.md`](../../docs/design/README.md); colours come from `design/theme.ts`
 - [Libraries](./libraries.md) — Frontend hooks, services, utilities
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
 - [Drift sweeps](./sweeps.md) — Checks that keep published docs, commands and facts true to the code (epic #1720): CLI invocations (#1721), the facts registry `scripts/facts.json` (#1722), the public-claims ledger `scripts/claims.json` + `/sweep-claims` (#1723), the surface registry `scripts/surfaces.json`, the `scripts/sweep.mjs` engine + ledger and the platform coverage matrix (#1728), the clone ratchet `scripts/check-clones.mjs` + `/reuse-check` (#1731), i18n coverage: `scripts/i18n-surfaces.json` + `i18n-check.mjs --report` (#1724)

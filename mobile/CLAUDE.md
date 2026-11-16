@@ -1171,9 +1171,10 @@ truncates thread names and won't show them).
 
 ## App structure (expo-router)
 
-Dark, two-colour (accent + background) UI in Geist, re-skinned in 2026-10 to
-match the desktop Modern skin: titles and back at the top, grouped lists,
-bottom sheets, AA contrast throughout (see "Design tokens").
+Dark UI in Geist derived from two base colours (accent + background), on the
+same palette as the desktop Modern skin (`design/theme.ts`, rules in
+`docs/design/README.md`): titles and back at the top, grouped lists, bottom
+sheets, AA contrast throughout (see "Design tokens").
 
 ```
 app/
@@ -1955,25 +1956,42 @@ key.
 
 ## Design tokens
 
-Defined in `theme/tokens.ts`; the colour math lives in `theme/derive.ts` (pure,
-no react-native) and the accent presets in `theme/accents.ts`.
+Defined in `theme/tokens.ts`. The colour math, the defaults and the presets are
+NOT mobile's: they live in the repo-root `design/theme.ts`, shared with the
+desktop renderer (Metro watches `../design`). `theme/derive.ts` only maps the
+shared token names onto mobile's (`surface`→`panel`, `surfaceRaised`→`raised`,
+`surfaceHigh`→`high`, `border`→`hair`, `borderSoft`→`hairSoft`,
+`borderStrong`→`edge`, `textDim`→`dim`, `textMuted`→`muted`). Change a colour
+there, never here; the rules for using them are `docs/design/README.md`.
 
-- **Exactly two base colours: accent and background.** Every other colour is
-  derived by `deriveTheme(accent, bg)` — the background mixed toward white for
-  the neutrals, the accent mixed into them for tint, the accent at an alpha for
-  hairlines. No other hex may appear in UI code. Defaults: accent `#fabf5a`
-  (brand amber), background `#0a0907`. Both are runtime-configurable
-  (`setAccentRgb`, `setBackgroundRgb`; `<ThemeProvider>` holds them and
-  `useTheme()` re-renders subscribers). `semantic.*` and the
-  `type.*` colours are getters over the live derived theme.
-- **The saved accent paints the first frame (#1447).** The synced
-  `accent_hex` preference lands only after sign-in and a DS round trip, so
-  the device also keeps the last accent it showed in `expo-secure-store`
-  (`theme/accentStore.ts`, key `pollis.theme.accent`), and `theme/tokens.ts`
-  reads it with the SYNCHRONOUS `SecureStore.getItem` while the module loads —
-  before any render, PIN screen included. `ThemeProvider` starts from the live
-  tokens, refetches the synced blob the moment the app is unlocked, applies a
-  saved `accent_hex` and writes every change back. `get_preferences` answers
+- **Two base colours: accent and background.** Every neutral is derived by
+  `deriveTheme(accent, bg)` — the background mixed toward white, the accent
+  mixed into it for tint, the accent at an alpha for hairlines. The one fixed
+  hue besides them is `danger`, the shared destructive red (`#ff6b6b` on dark
+  grounds), with `onDanger` for ink on it: every destructive action (remove,
+  revoke, reject, decline, leave, delete) uses it — a `Button`/`Chip` with
+  `variant="danger"`, or a `ListRow` whose glyph and name are `semantic.danger`.
+  No other hex may appear in UI code. Defaults: accent `#fabf5a` (brand amber),
+  background `#0a0907`. Both are runtime-configurable (`setAccentRgb`,
+  `setBackgroundRgb`; `<ThemeProvider>` holds them and `useTheme()` re-renders
+  subscribers). `semantic.*` and the `type.*` colours are getters over the live
+  derived theme.
+- **Synced keys, shared with desktop.** The accent is `accent_color` and the
+  background `background_color` in the preferences blob; desktop picks the
+  background, mobile follows it. Builds before the unification read only
+  `accent_hex`, so every accent save also writes it
+  (`colorPreferencesPatch`) and reads fall back to it (`accentFromPrefs`);
+  drop the mirror once the oldest mobile build in the stores reads
+  `accent_color`.
+- **The saved colours paint the first frame (#1447).** The synced
+  preferences land only after sign-in and a DS round trip, so the device also
+  keeps the last accent and background it showed in `expo-secure-store`
+  (`theme/accentStore.ts`, keys `pollis.theme.accent` and
+  `pollis.theme.background`), and `theme/tokens.ts` reads them with the
+  SYNCHRONOUS `SecureStore.getItem` while the module loads — before any
+  render, PIN screen included. `ThemeProvider` starts from the live tokens,
+  refetches the synced blob the moment the app is unlocked, applies the saved
+  colours and writes every change back. `get_preferences` answers
   `{}` before the unlock (remote read fails, local cache locked), so a blob
   with no accent means the default only when read after the unlock; sign-out
   also resets to the default. Never read a token at module scope

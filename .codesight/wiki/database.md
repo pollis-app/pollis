@@ -669,7 +669,10 @@ anonymous-membership (not shipped — tracked in #489).
 - `updated_at` TEXT NOT NULL DEFAULT now
 
 One blob shared by desktop and mobile, and neither knows all its keys (mobile
-writes `accent_hex` and `mobile_behavior`, which desktop never parses). So
+writes `mobile_behavior`, which desktop never parses). The colour keys are
+shared: `accent_color` and `background_color` (`design/theme.ts`), with
+`accent_hex` kept as a write-only mirror of the accent for mobile builds that
+predate the unification. So
 `POST /v1/profile/preferences` **merges** rather than replaces (#1650,
 `profile::apply_save_preferences`): in one statement, each top-level key the
 save names takes the new value whole (nested objects replaced, not deep-merged),
