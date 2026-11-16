@@ -17,6 +17,8 @@
     "settingsKeywords": "préférences utilisateur sécurité",
     "preferencesName": "Préférences",
     "preferencesKeywords": "thème couleur police notifications apparence",
+    "languageName": "Langue",
+    "languageKeywords": "langue langage traduction interface language",
     "voiceName": "Voix et vidéo",
     "voiceKeywords": "microphone micro haut-parleur audio suppression du bruit annulation d'écho agc rejoindre automatiquement caméra webcam vidéo aperçu autorisations",
     "securityName": "Sécurité",

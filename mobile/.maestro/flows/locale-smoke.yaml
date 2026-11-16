@@ -8,7 +8,8 @@ tags:
 # to each (so the app's first-run auto-detect is what picks it), and passes
 # LOCALE. A new locale is covered by adding its catalogue; nothing here changes.
 #
-# Screens: sign-in, chat list, a conversation, the composer, settings, PIN.
+# Screens: sign-in, chat list, a conversation, the composer, settings, the
+# Language page, PIN.
 # Every screen asserts no element's whole text is a raw catalogue key
 # (`section.item` or `ns:section.item`), which is what i18next renders for a
 # key with no entry in any language. Overflow and clipping are judged from the
@@ -65,13 +66,23 @@ tags:
 - tapOn:
     id: "btn-back"
 
-# --- Settings: the auto-detected language is the selected row ---
+# --- Settings: Preferences' Language row, then the Language page (#1944) ---
 - tapOn:
     id: "tab-self"
 - tapOn:
     id: "row-self-preferences"
 - assertVisible:
     id: "screen-self-preferences"
+- assertVisible:
+    id: "row-preferences-language"
+- assertNotVisible:
+    text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
+- takeScreenshot: locale-${LOCALE}-05-settings
+# The auto-detected language is the selected row of the list.
+- tapOn:
+    id: "row-preferences-language"
+- assertVisible:
+    id: "screen-self-language"
 - scrollUntilVisible:
     element:
       id: "radio-language-${LOCALE}"
@@ -81,7 +92,7 @@ tags:
     selected: true
 - assertNotVisible:
     text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
-- takeScreenshot: locale-${LOCALE}-05-settings
+- takeScreenshot: locale-${LOCALE}-06-language
 
 # --- PIN, after a relaunch ---
 - stopApp
@@ -92,4 +103,4 @@ tags:
     timeout: 30000
 - assertNotVisible:
     text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
-- takeScreenshot: locale-${LOCALE}-06-pin
+- takeScreenshot: locale-${LOCALE}-07-pin

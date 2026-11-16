@@ -11,6 +11,7 @@ import {
   Users,
   MessageCircle,
   Palette,
+  Globe,
   User as UserIcon,
   ShieldCheck,
   ScrollText,
@@ -147,6 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   const settingsItems = [
     { id: "saved", label: t("sidebar.saved"), icon: <Bookmark {...iconProps} />, to: "/saved" as const, isActive: pathname === "/saved" },
     { id: "preferences", label: t("sidebar.preferences"), icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
+    { id: "language", label: t("sidebar.language"), icon: <Globe {...iconProps} />, to: "/preferences/language" as const, isActive: pathname === "/preferences/language" },
     { id: "user", label: t("sidebar.userSettings"), icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
     { id: "voice-settings", label: t("sidebar.voiceAndVideo"), icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
     { id: "security", label: t("sidebar.security"), icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || (pathname.startsWith("/security/") && pathname !== "/security/events" && pathname !== "/security/copy-history") },

@@ -1,9 +1,9 @@
 import { ScrollView, Text, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useObserver } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Group } from "../../components/ui";
-import { LanguageSection } from "../../components/LanguageSection";
+import { Screen, Header, Group, ListRow } from "../../components/ui";
+import { Icon } from "../../components/icons";
 import { AccentSwatch } from "../../components/self/AccentSwatch";
 import { ChoiceGrid } from "../../components/self/ChoiceGrid";
 import { ToggleRow } from "../../components/self/ToggleRow";
@@ -12,7 +12,8 @@ import { accentPresetLabel } from "../../components/self/accentName";
 import { useNotificationPermission } from "../../components/self/useNotificationPermission";
 import { useSectionScroll } from "../../components/self/useSectionScroll";
 import { useTheme } from "../../components/theme";
-import { type as ty, space, ACCENT_PRESETS } from "../../theme/tokens";
+import { type as ty, semantic, space, ACCENT_PRESETS } from "../../theme/tokens";
+import { languageOption } from "../../i18n/languages";
 import { usePreferences, useNotificationContent } from "../../hooks/queries";
 import {
   NOTIFICATION_CONTENT_OPTIONS,
@@ -146,7 +147,8 @@ function NotificationContentSetting() {
 }
 
 export default function Preferences() {
-  const { t } = useTranslation("settings");
+  const { t, i18n } = useTranslation("settings");
+  const router = useRouter();
   const { section } = useLocalSearchParams<{ section?: string }>();
   const { scrollRef, sectionLayout } = useSectionScroll(section);
   const { accentHex, setAccent } = useTheme();
@@ -212,7 +214,19 @@ export default function Preferences() {
           </Group>
         </View>
 
-        <LanguageSection onLayout={sectionLayout("language")} />
+        {/* #1944: one row; the list is its own page so it never pushes the rest down. */}
+        <View onLayout={sectionLayout("language")}>
+          <Group>
+            <ListRow
+              testID="row-preferences-language"
+              glyph={<Icon.globe size={22} color={semantic.text} />}
+              name={t("language.heading")}
+              value={languageOption(i18n.language)?.label}
+              chevron
+              onPress={() => router.push("/self/language")}
+            />
+          </Group>
+        </View>
 
         <View onLayout={sectionLayout("behavior")}>
           <Group title={t("voice:settings.behaviorHeading")}>

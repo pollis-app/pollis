@@ -12,9 +12,11 @@ tags:
 # Headings are sentence case since the 2026-10 redesign ("Language" / "Idioma",
 # no uppercasing), and Maestro's text match is a full, case-sensitive regex, so
 # the strings below must match the catalogue exactly. Each assertion pins the
-# heading element itself (pref-language-heading) AND its text, so it cannot be
-# satisfied by the chip row's accessibility label (settings:language.ariaLabel,
-# which is the same word) or by the Self hub's Language row.
+# heading element itself (pref-language-heading, the Language page's header
+# title) AND its text, so it cannot be satisfied by the radio group's
+# accessibility label (settings:language.ariaLabel, which is the same word) or
+# by a Language row. The list is its own page (#1944), reached from
+# Preferences' Language row and from the Self hub's.
 
 - runFlow: ../subflows/sign-in.yaml
 
@@ -24,10 +26,18 @@ tags:
     id: "row-self-preferences"
 - assertVisible:
     id: "screen-self-preferences"
-- scrollUntilVisible:
-    element:
-      id: "pref-language"
-    direction: DOWN
+# Preferences holds one Language row naming the current language, not the list.
+- assertVisible:
+    id: "row-preferences-language"
+- assertNotVisible:
+    id: "radio-language-en"
+- tapOn:
+    id: "row-preferences-language"
+- assertVisible:
+    id: "screen-self-language"
+# The drill-in is still sliding when the screen is first visible; a tap then
+# lands short of the row.
+- waitForAnimationToEnd
 - assertVisible:
     id: "pref-language-heading"
     text: "Language"
@@ -54,14 +64,16 @@ tags:
     visible:
       id: "tab-self"
     timeout: 30000
+# This time through the Self hub's Language row, which opens the page directly.
 - tapOn:
     id: "tab-self"
 - tapOn:
-    id: "row-self-preferences"
-- scrollUntilVisible:
-    element:
-      id: "pref-language"
-    direction: DOWN
+    id: "row-self-language"
+- assertVisible:
+    id: "screen-self-language"
+# The drill-in is still sliding when the screen is first visible; a tap then
+# lands short of the row.
+- waitForAnimationToEnd
 - assertVisible:
     id: "pref-language-heading"
     text: "Idioma"
@@ -90,10 +102,13 @@ tags:
     id: "tab-self"
 - tapOn:
     id: "row-self-preferences"
-- scrollUntilVisible:
-    element:
-      id: "pref-language"
-    direction: DOWN
+- tapOn:
+    id: "row-preferences-language"
+- assertVisible:
+    id: "screen-self-language"
+# The drill-in is still sliding when the screen is first visible; a tap then
+# lands short of the row.
+- waitForAnimationToEnd
 # Mirrored now: the restart notice is gone and the back affordance sits on the
 # trailing (right) edge — the screenshot is what the visual evaluator checks.
 - assertNotVisible:

@@ -304,6 +304,10 @@ export default function RootLayout() {
                 options={drillIn}
               />
               <Stack.Screen
+                name="self/language"
+                options={drillIn}
+              />
+              <Stack.Screen
                 name="self/user-settings"
                 options={drillIn}
               />

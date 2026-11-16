@@ -28,6 +28,7 @@ import {
 import { appStore } from "../../stores/appStore";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useThemeRerender } from "../theme";
+import { languageOption } from "../../i18n/languages";
 
 // Operators are typed literally, so they are not translated.
 const SEARCH_FILTERS = [
@@ -53,7 +54,7 @@ export function GlobalSearchResults({
   useThemeRerender();
   const router = useRouter();
   const { openConversation, openGroup } = useOpenConversation();
-  const { t } = useTranslation("mobile");
+  const { t, i18n } = useTranslation("mobile");
   const trimmed = q.trim();
   const { t: ts } = useTranslation("search");
   // null = let Rust choose; the page reports what it applied.
@@ -140,6 +141,13 @@ export function GlobalSearchResults({
         to: "/self/preferences" as const,
       },
       {
+        id: "language",
+        n: t("search:pages.languageName"),
+        s: languageOption(i18n.language)?.label ?? "",
+        k: t("search:pages.languageKeywords"),
+        to: "/self/language" as const,
+      },
+      {
         id: "user-settings",
         n: t("settings:user.title"),
         s: t("mobile:self.hub.userSettingsSub"),
@@ -177,7 +185,7 @@ export function GlobalSearchResults({
         p.s.toLowerCase().includes(lower) ||
         (p.k ?? "").toLowerCase().includes(lower),
     );
-  }, [trimmed, t]);
+  }, [trimmed, t, i18n.language]);
 
   const totalResults =
     (userShown ? 1 : 0) +

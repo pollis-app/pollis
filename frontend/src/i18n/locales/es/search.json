@@ -17,6 +17,8 @@
     "settingsKeywords": "preferencias usuario seguridad",
     "preferencesName": "Preferencias",
     "preferencesKeywords": "tema color fuente letra notificaciones apariencia",
+    "languageName": "Idioma",
+    "languageKeywords": "idioma lengua traducción interfaz language",
     "voiceName": "Voz y vídeo",
     "voiceKeywords": "micrófono altavoz audio mic supresión de ruido cancelación de eco agc unirse automáticamente cámara webcam vídeo vista previa permisos",
     "securityName": "Seguridad",

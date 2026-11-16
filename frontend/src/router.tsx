@@ -188,6 +188,13 @@ const preferencesRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/PreferencesPage"), "PreferencesPage"),
 });
 
+// #1944: the language list, reached from Preferences' Language row.
+const languageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/preferences/language",
+  component: lazyRouteComponent(() => import("./pages/LanguagePage"), "LanguagePage"),
+});
+
 const voiceSettingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/voice-settings",
@@ -385,6 +392,7 @@ const routeTree = rootRoute.addChildren([
   dmRoute,
   dmSettingsRoute,
   preferencesRoute,
+  languageRoute,
   voiceSettingsRoute,
   settingsRoute,
   userRoute,

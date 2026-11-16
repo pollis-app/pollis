@@ -18,6 +18,8 @@
     "settingsKeywords": "preferences user security",
     "preferencesName": "Preferences",
     "preferencesKeywords": "theme color font notifications appearance",
+    "languageName": "Language",
+    "languageKeywords": "language locale translation interface english",
     "voiceName": "Voice & Video",
     "voiceKeywords": "microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "Security",

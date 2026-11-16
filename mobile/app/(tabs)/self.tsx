@@ -245,8 +245,8 @@ function Self() {
               chevron
               onPress={() =>
                 router.push({
-                  pathname: "/self/preferences",
-                  params: { section: "language" },
+                  pathname: "/self/language",
+                  params: { from: "self" },
                 })
               }
             />

@@ -18,6 +18,8 @@
     "settingsKeywords": "環境設定 ユーザー セキュリティ preferences user security",
     "preferencesName": "環境設定",
     "preferencesKeywords": "テーマ 色 カラー フォント 通知 外観 theme color font notifications appearance",
+    "languageName": "言語",
+    "languageKeywords": "言語 表示言語 翻訳 日本語 language",
     "voiceName": "音声とビデオ",
     "voiceKeywords": "マイク スピーカー オーディオ 音声 ノイズ抑制 エコーキャンセル 自動ゲイン 自動参加 カメラ ウェブカメラ ビデオ プレビュー 権限 microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "セキュリティ",

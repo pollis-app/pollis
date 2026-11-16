@@ -40,7 +40,8 @@ export function supportedLanguageCodes(): string[] {
   return registry.map((l) => l.code);
 }
 
-function languageOption(code: string): LanguageOption | undefined {
+/** The registry entry for a code, if shipped (or registered for a test). */
+export function languageOption(code: string): LanguageOption | undefined {
   return registry.find((l) => l.code === code);
 }
 
