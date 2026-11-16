@@ -50,6 +50,14 @@ Checks that keep what we publish true to what the code does (epic #1720). Each s
 - **Self-test:** `scripts/test-sweep.sh` builds a throwaway git repo from the files the registry and checkers read and proves an unregistered page, a registered page that was deleted, a `checked_by` that disagrees with `claims.json`, and an empty registry each fail; that a missing lane file reports NOT BUILT; that the due list follows `--since` and the ledger; and that `--bump` writes the ledger. Run it after changing `sweep.mjs`; not in CI.
 - **Adding a dimension:** add an entry to `DIMENSIONS` in `scripts/sweep.mjs` (`files` that mean it is built, `checks`, a `due` function), a section with its procedure to `.claude/skills/pre-release-sweeps/SKILL.md` under the same id, and its id to the `checked_by` of the content it checks.
 
+## i18n coverage (#1724)
+
+- **Registry:** `scripts/i18n-surfaces.json` records every place a user reads Pollis text outside the app catalogues, and the app UIs themselves: a `decision` (`localize` or `english-only`, always with a `reason`), for `localize` a `status` (`localized`, `partial`, `debt`) with `debt` text saying what is left and what it needs, `paths` (which must exist) and `checked_by`. Work that needs a wire or DS change is recorded as debt, not built client-side. `scripts/surfaces.json` → `data_files.i18n_surfaces` points at it.
+- **Report:** `node scripts/i18n-check.mjs --report` (`scripts/i18n-report.mjs`) prints coverage per locale and namespace and every surface by status. It fails on an invalid registry: empty, a surface #1724 requires missing, a bad decision or status, a debt with no `debt`, a localized surface with no `checked_by`, a path that does not exist.
+- **Sweep:** the `i18n-surfaces` dimension of `scripts/sweep.mjs` runs the report; it is due when the code behind a surface that is not yet localized changes (`/pre-release-sweeps` § i18n-surfaces). Not in CI.
+- **In CI, not a sweep:** the hardcoded-copy ratchet (`scripts/i18n-hardcoded.mjs` + `scripts/i18n-hardcoded.json`), which `i18n-check.mjs` runs in `frontend-check.yml` and `mobile-core-check.yml`. It is a lint on the apps' own code, so it gates merges like the rest of `i18n-check`. Details in [i18n.md](i18n.md#coverage-hardcoded-copy-surfaces-the-report-1724).
+- **Self-test:** `node --test scripts/test-i18n-coverage.mjs` (in `frontend-check.yml`): each lint rule fires and `t()` never does, the ratchet's new and stale entries, a hardcoded string in each app's tree, and each registry failure.
+
 ## Reuse and clones (#1731)
 
 - **Boundaries:** `code-boundaries.md` says where code may be shared (inside `frontend/`, inside `mobile/`, along the Rust crate graph, through shared files in `website/`) and where it deliberately is not (frontend ↔ mobile parity twins, a new crate edge, a website build step).

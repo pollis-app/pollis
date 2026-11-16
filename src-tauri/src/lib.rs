@@ -500,6 +500,7 @@ pub fn run() {
             tray::tray_set_close_to_tray,
             tray::tray_set_enabled,
             tray::tray_set_voice_state,
+            tray::tray_set_labels,
             commands::media_permissions::get_media_permission_status,
             commands::media_permissions::open_privacy_settings,
             commands::media_permissions::revoke_media_permissions,

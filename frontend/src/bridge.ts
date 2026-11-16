@@ -48,6 +48,7 @@ export { check } from "./bridge/updater";
 
 export {
   setTrayUnread,
+  setTrayLabels,
   setTrayCloseToTray,
   setTrayEnabled,
 } from "./bridge/tray";

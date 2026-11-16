@@ -5,5 +5,13 @@
     "restart": "Restart",
     "tag": "FATAL ERROR",
     "title": "Something went wrong"
+  },
+  "core": {
+    "pinIncorrect_one": "Wrong PIN. {{count}} attempt remaining.",
+    "pinIncorrect_other": "Wrong PIN. {{count}} attempts remaining.",
+    "pinLockedOut": "Too many wrong PINs. Recover your account with your Secret Key.",
+    "pinNotSet": "This device has no PIN yet. Sign in again to set one.",
+    "noActiveUser": "You're not signed in on this device. Sign in again.",
+    "unlockFirst": "Unlock Pollis first."
   }
 }

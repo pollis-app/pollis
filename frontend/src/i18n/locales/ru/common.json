@@ -101,5 +101,17 @@
     "years_few": "{{count}} года",
     "years_many": "{{count}} лет",
     "years_other": "{{count}} года"
+  },
+  "tray": {
+    "open": "Открыть Pollis",
+    "muteMic": "Выключить микрофон",
+    "unmuteMic": "Включить микрофон",
+    "muteMicIdle": "Выключить микрофон (вы не в звонке)",
+    "version": "Версия {{version}}",
+    "quit": "Выйти из Pollis",
+    "unread_one": "Pollis — {{count}} непрочитанное",
+    "unread_few": "Pollis — {{count}} непрочитанных",
+    "unread_many": "Pollis — {{count}} непрочитанных",
+    "unread_other": "Pollis — {{count}} непрочитанного"
   }
 }

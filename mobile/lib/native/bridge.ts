@@ -4,6 +4,7 @@ import { Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as pollisNative from "pollis-native";
 import { plainBridgeError } from "./bridgeError";
+import { localizeCoreFailure } from "../../i18n/coreErrors";
 import { noticeDeviceRevoked } from "../deviceRevoked";
 import { noticeUpgradeRequired } from "../clientPolicy";
 
@@ -38,7 +39,8 @@ const pollisNativeBridge: NativeBridge = {
       noticeDeviceRevoked(failure);
       // #1611: a DS 426 blocks the app; the root layout swaps in the update screen.
       noticeUpgradeRequired(failure);
-      throw failure;
+      // #1724: a core message the catalogues carry (wrong PIN, lockout) in the user's language.
+      throw localizeCoreFailure(failure);
     }
     if (resultJson === "" || resultJson === "null") {
       return null as T;

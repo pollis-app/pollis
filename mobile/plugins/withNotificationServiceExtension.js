@@ -22,6 +22,7 @@ const {
   withInfoPlist,
   withXcodeProject,
 } = require("expo/config-plugins");
+const { LOCALES_DIR, LPROJ, mobileSection, escapeStrings, addKnownRegions } = require("./iosLocales");
 
 const TARGET = "PollisNotificationService";
 const SOURCE_DIR = path.join(__dirname, "notification-service");
@@ -33,9 +34,6 @@ const KEYCHAIN_SUFFIX = "com.pollis.shared";
 // Relative to ios/ (SRCROOT).
 const XCFRAMEWORK = "../modules/pollis-native/PollisNativeFramework.xcframework";
 const CORE_HEADERS = "$(SRCROOT)/../../pollis-core/include";
-const LOCALES_DIR = path.join(__dirname, "..", "..", "frontend", "src", "i18n", "locales");
-// Catalogue language → .lproj name. `zh` is Simplified Chinese (mobile/i18n/languages.ts).
-const LPROJ = { en: "en", es: "es", fr: "fr", ru: "ru", uk: "uk", zh: "zh-Hans", ar: "ar" };
 const STRING_KEYS = [
   "genericTitle",
   "genericBody",
@@ -98,10 +96,6 @@ function sharedEntitlements(entitlements, { group, keychain }) {
   };
 }
 
-function escapeStrings(value) {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
-}
-
 function toFormat(value) {
   return value
     .replace(/%/g, "%%")
@@ -115,8 +109,7 @@ function toFormat(value) {
 
 /** `<lproj>` → Localizable.strings text, from `mobile:push.*`; English fills any gap. */
 function localizableStrings(localesDir = LOCALES_DIR) {
-  const read = (lng) =>
-    JSON.parse(fs.readFileSync(path.join(localesDir, lng, "mobile.json"), "utf8"))?.push ?? {};
+  const read = (lng) => mobileSection(lng, "push", localesDir);
   const en = read("en");
   const out = {};
   for (const [lng, lproj] of Object.entries(LPROJ)) {
@@ -325,14 +318,7 @@ function addExtensionTarget(config, ids, project) {
     }
   }
 
-  const known = project.getFirstProject().firstProject.knownRegions ?? [];
-  for (const lproj of Object.values(LPROJ)) {
-    const quoted = lproj.includes("-") ? `"${lproj}"` : lproj;
-    if (!known.includes(lproj) && !known.includes(quoted)) {
-      known.push(quoted);
-    }
-  }
-  project.getFirstProject().firstProject.knownRegions = known;
+  addKnownRegions(project);
 
   const deploymentTarget = config.ios?.deploymentTarget ?? "16.4";
   const configs = project.pbxXCBuildConfigurationSection();

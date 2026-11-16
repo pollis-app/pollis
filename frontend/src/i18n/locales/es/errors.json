@@ -5,5 +5,13 @@
     "restart": "Reiniciar",
     "tag": "ERROR FATAL",
     "title": "Algo ha salido mal"
+  },
+  "core": {
+    "pinIncorrect_one": "PIN incorrecto. Te queda {{count}} intento.",
+    "pinIncorrect_other": "PIN incorrecto. Te quedan {{count}} intentos.",
+    "pinLockedOut": "Demasiados intentos fallidos. Recupera tu cuenta con tu clave secreta.",
+    "pinNotSet": "Este dispositivo aún no tiene PIN. Vuelve a iniciar sesión para crear uno.",
+    "noActiveUser": "No has iniciado sesión en este dispositivo. Vuelve a iniciar sesión.",
+    "unlockFirst": "Primero desbloquea Pollis."
   }
 }

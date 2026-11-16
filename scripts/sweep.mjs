@@ -483,6 +483,20 @@ function dueI18n(base, diff) {
   return { lines, count: missing.length ? added.length : 0 };
 }
 
+// #1724: a change to the code or content behind a recorded surface may change its decision or status.
+function dueI18nSurfaces(base, diff) {
+  const surfaces = readJson("scripts/i18n-surfaces.json").surfaces ?? {};
+  const under = (file, p) => file === p || file.startsWith(`${p.replace(/\/$/, "")}/`);
+  const hit = Object.entries(surfaces)
+    .filter(([, s]) => s.decision === "localize" && s.status !== "localized")
+    .filter(([, s]) => diff.files.some((f) => (s.paths ?? []).some((p) => under(f, p))))
+    .map(([id]) => id);
+  return {
+    lines: hit.length ? [`${hit.length} surface(s) not yet localized whose code changed: re-check status and debt: ${listShort(hit)}`] : [],
+    count: hit.length,
+  };
+}
+
 function dueSurfaces(base, diff) {
   const globs = surfaces?.registration?.globs ?? [];
   const added = diff.added.filter((f) => matchesAny(globs, f));
@@ -541,7 +555,7 @@ const DIMENSIONS = [
   },
   {
     id: "i18n-surfaces", ticket: "#1724", what: "user-facing copy outside the catalogues",
-    files: ["scripts/i18n-surfaces.json"],
+    files: ["scripts/i18n-surfaces.json", "scripts/i18n-report.mjs"], checks: [["node", "scripts/i18n-check.mjs", "--report"]], due: dueI18nSurfaces,
   },
   {
     id: "ui-inventory", ticket: "#933", what: ".codesight/wiki/ui.md lists every component",

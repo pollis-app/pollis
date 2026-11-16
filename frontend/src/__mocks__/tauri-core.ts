@@ -1429,6 +1429,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'tray_set_enabled':
     case 'tray_set_close_to_tray':
     case 'tray_set_voice_state':
+    case 'tray_set_labels':
     case 'set_revoke_media_on_exit':
     case 'mark_update_required':
     case 'clear_update_required':

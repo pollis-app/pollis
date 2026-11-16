@@ -5,5 +5,13 @@
     "restart": "Redémarrer",
     "tag": "ERREUR FATALE",
     "title": "Une erreur est survenue"
+  },
+  "core": {
+    "pinIncorrect_one": "Code PIN incorrect. Il vous reste {{count}} tentative.",
+    "pinIncorrect_other": "Code PIN incorrect. Il vous reste {{count}} tentatives.",
+    "pinLockedOut": "Trop de codes PIN incorrects. Récupérez votre compte avec votre Clé secrète.",
+    "pinNotSet": "Aucun code PIN n'est encore défini sur cet appareil. Reconnectez-vous pour en créer un.",
+    "noActiveUser": "Vous n'êtes pas connecté sur cet appareil. Reconnectez-vous.",
+    "unlockFirst": "Déverrouillez d'abord Pollis."
   }
 }

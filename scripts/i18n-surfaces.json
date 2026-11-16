@@ -1,0 +1,204 @@
+{
+  "_comment": [
+    "Every place a user reads Pollis text, and whether it follows their language (#1724). Read by `node scripts/i18n-check.mjs --report` (scripts/i18n-report.mjs) and by the i18n-surfaces dimension of scripts/sweep.mjs; scripts/surfaces.json (#1728) points here.",
+    "decision: `localize` (it should follow the user's language) or `english-only` (it deliberately does not; `reason` says why).",
+    "status (localize only): `localized` (every shipped locale, from the shared catalogues), `partial` (some of it; `debt` says what is left), or `debt` (not yet; `debt` says what it needs). A surface that needs a wire or Delivery Service change is debt, never built client-side around the DS.",
+    "paths: the code or content that produces the text; each must exist. checked_by: the test or check that keeps a localized surface localized.",
+    "Adding a surface: add an entry here when you add a new place copy can come from (a native string table, a server-written message, a new public page type), then run `node scripts/i18n-check.mjs --report`."
+  ],
+  "surfaces": {
+    "desktop-renderer": {
+      "title": "Desktop app UI (React renderer)",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "The app's own screens, menus, toasts and errors, in all 7 locales from frontend/src/i18n/locales.",
+      "paths": ["frontend/src"],
+      "checked_by": "scripts/i18n-check.mjs (catalogue integrity, call sites, hardcoded-copy ratchet), e2e/i18n.spec.ts, e2e/rtl.spec.ts"
+    },
+    "mobile-app": {
+      "title": "Mobile app UI (Expo)",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "Same catalogues as desktop (mobile namespace for mobile-only copy).",
+      "paths": ["mobile/app", "mobile/components", "mobile/hooks", "mobile/i18n"],
+      "checked_by": "scripts/i18n-check.mjs, mobile/tests/i18n.test.ts, mobile/.maestro/flows/i18n.yaml"
+    },
+    "ios-permission-strings": {
+      "title": "iOS permission prompts (NS*UsageDescription)",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "Camera, photo library (read and add) and Face ID prompts, from mobile:permissions.*, written as <lproj>/InfoPlist.strings at prebuild. iOS picks the language from the device (or iOS Settings → Pollis → Language), not the in-app picker, which iOS cannot see.",
+      "paths": ["mobile/plugins/withPermissionStrings.js", "mobile/app.json"],
+      "checked_by": "mobile/tests/permission-strings.test.ts"
+    },
+    "android-permission-rationale": {
+      "title": "Android permission dialogs and rationale",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "Android's runtime permission dialog is written and localized by the OS; the app declares no rationale strings of its own. The in-app copy around a permission (allow camera, saving to photos denied) is in the catalogues.",
+      "paths": ["mobile/app.json", "mobile/app/(auth)/link.tsx", "mobile/components/media"],
+      "checked_by": "scripts/i18n-check.mjs"
+    },
+    "push-android": {
+      "title": "Android notifications (rich push handler, channel name)",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "values-<lng>/pollis_push_strings.xml generated from mobile:push.*; Android picks the device language.",
+      "paths": ["scripts/mobile-android-push-strings.mjs", "mobile/modules/pollis-native/android/src/main/res"],
+      "checked_by": "node scripts/mobile-android-push-strings.mjs --check (mobile/tests/rich-push.test.ts)"
+    },
+    "push-ios": {
+      "title": "iOS notifications (Notification Service Extension)",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "<lproj>/Localizable.strings generated from mobile:push.* at prebuild; the extension follows the iOS language.",
+      "paths": ["mobile/plugins/withNotificationServiceExtension.js", "mobile/plugins/notification-service"],
+      "checked_by": "mobile/tests/notification-service-extension.test.ts"
+    },
+    "push-ds-fallback": {
+      "title": "The Delivery Service's own push text (\"New message\")",
+      "decision": "localize",
+      "status": "debt",
+      "reason": "Shown when the device cannot fetch the message itself (a token without the rich capability, the iOS extension timing out, before the first unlock on a new build).",
+      "debt": "Needs a DS change: send localization keys the app bundle resolves (APNs title-loc-key/loc-key, an Android data-only fallback) or the device's language, backward-compatible with the oldest store build, which sends no language.",
+      "paths": ["pollis-delivery/src/push.rs"]
+    },
+    "desktop-notifications": {
+      "title": "Desktop OS notifications",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "Built in the renderer from chat:notify.* and friends.",
+      "paths": ["frontend/src/utils/notify.ts"],
+      "checked_by": "scripts/i18n-check.mjs, frontend/tests/notificationText.test.ts"
+    },
+    "desktop-tray": {
+      "title": "Desktop tray menu and tooltip",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "The shell draws the menu but the renderer owns the language: it sends common:tray.* through tray_set_labels / tray_set_unread on start and on every language switch. English until the renderer's first call.",
+      "paths": ["src-tauri/src/tray.rs", "frontend/src/hooks/useBadge.ts"],
+      "checked_by": "scripts/i18n-check.mjs (literal call sites)"
+    },
+    "core-errors": {
+      "title": "pollis-core error text shown verbatim",
+      "decision": "localize",
+      "status": "partial",
+      "reason": "Screens show a failed command's message. The PIN and lock messages (wrong PIN with attempts left, locked out, no PIN, not signed in, unlock first) are mapped to errors:core.* at the bridge on both apps.",
+      "debt": "The rest of the core's messages reach the UI in English. They need stable error codes across the Tauri and uniffi boundaries (a pollis-core change, so a store build for mobile) and a key per code; map them incrementally, auth and security flows first.",
+      "paths": ["frontend/src/i18n/coreErrors.ts", "mobile/i18n/coreErrors.ts", "pollis-core/src/commands/pin.rs", "pollis-core/src/commands/device_unlock.rs"],
+      "checked_by": "mobile/tests/core-errors.test.ts"
+    },
+    "ds-errors": {
+      "title": "Delivery Service error text passed through to the UI",
+      "decision": "localize",
+      "status": "debt",
+      "reason": "DS error bodies (an invalid code, a rate limit) are English strings the core forwards.",
+      "debt": "Needs an error code in the DS's error body, which the client maps to a key; the client must keep showing the text for a DS that sends no code.",
+      "paths": ["pollis-delivery/src/error.rs", "pollis-core/src/commands/mls/ds_client.rs"]
+    },
+    "server-detail-strings": {
+      "title": "Server-written detail strings (build verification, account-key audit, voice errors)",
+      "decision": "localize",
+      "status": "debt",
+      "reason": "Human-readable `detail` text written by the server or the core and rendered verbatim.",
+      "debt": "Needs a code instead of prose on the wire (or from the core), with the copy moved into the catalogues.",
+      "paths": ["pollis-core/src/commands/transparency.rs", "pollis-core/src/commands/voice_join_error.rs"]
+    },
+    "email-otp": {
+      "title": "Sign-in code email",
+      "decision": "localize",
+      "status": "debt",
+      "reason": "Sent by the DS in English.",
+      "debt": "The user's language must reach the DS with the OTP request (a wire change). The oldest store build sends none, so the DS defaults to English for it.",
+      "paths": ["pollis-delivery/src/otp.rs"]
+    },
+    "email-change": {
+      "title": "Email-change verification emails",
+      "decision": "localize",
+      "status": "debt",
+      "reason": "Sent by the DS in English.",
+      "debt": "Same as email-otp: the language must travel with the request, back-compatible with the oldest store build.",
+      "paths": ["pollis-delivery/src/email_change.rs"]
+    },
+    "emoji-names": {
+      "title": "Emoji picker names and search keywords",
+      "decision": "localize",
+      "status": "localized",
+      "reason": "CLDR annotations per shipped locale, generated for both apps.",
+      "paths": ["scripts/emoji-annotations.json", "frontend/src/components/Emoji/annotations", "mobile/components/emoji/annotations"],
+      "checked_by": "frontend/tests/emoji-search-i18n.test.ts, mobile/tests/emoji-search-i18n.test.ts"
+    },
+    "tui": {
+      "title": "Terminal client (pollis-tui)",
+      "decision": "english-only",
+      "reason": "A developer-facing terminal client with no localization layer; its help text is pinned by its own tests. Revisit if it becomes a supported end-user product.",
+      "paths": ["pollis-tui/src"]
+    },
+    "pollis-verify": {
+      "title": "Verifier CLI (pollis-verify)",
+      "decision": "english-only",
+      "reason": "A developer tool whose commands and output are quoted verbatim in the English docs.",
+      "paths": ["verifiable-log-serve/src"]
+    },
+    "app-name": {
+      "title": "App name, window title, bundle display name",
+      "decision": "english-only",
+      "reason": "Pollis is a brand name, the same in every language.",
+      "paths": ["src-tauri/tauri.conf.json", "mobile/app.json"]
+    },
+    "device-names": {
+      "title": "Default device names (\"Pollis on macOS\", \"Pollis on iPhone\")",
+      "decision": "english-only",
+      "reason": "Stored once at enrolment and shown on every device of the account, which may each use a different language; it is a name, not UI copy.",
+      "paths": ["frontend/src/components/Auth/EmailOTPAuth.tsx", "mobile/lib/linkCodes.ts"]
+    },
+    "release-notes": {
+      "title": "Release notes (desktop update screen, store \"What's new\")",
+      "decision": "english-only",
+      "reason": "Written per release in English (CHANGELOG.md, mobile/store/release-notes); translating them would need a reviewed translation per release.",
+      "paths": ["CHANGELOG.md", "frontend/src/components/ReleaseNotesText.tsx", "mobile/store/release-notes"]
+    },
+    "diagnostics": {
+      "title": "Diagnostics reports",
+      "decision": "english-only",
+      "reason": "Developer-facing logs a user chooses to share with us; the controls around them are localized.",
+      "paths": ["frontend/src/components/Diagnostics", "mobile/app/self/diagnostics.tsx"]
+    },
+    "installers": {
+      "title": "Install scripts and desktop installers",
+      "decision": "english-only",
+      "reason": "Terminal install scripts and the platform installers' few lines; run once, before any language choice exists.",
+      "paths": ["website/install.sh", "website/cli-install.sh", "src-tauri/tauri.conf.json"]
+    },
+    "store-listing": {
+      "title": "App Store and Play listings",
+      "decision": "english-only",
+      "reason": "Maintained in docs/store-listing.md and entered in the store consoles by hand. Per-locale listings need reviewed marketing translations before they go public; revisit together with per-locale store screenshots (#1729).",
+      "paths": ["docs/store-listing.md"]
+    },
+    "website": {
+      "title": "Website (pollis.com)",
+      "decision": "english-only",
+      "reason": "English only for now: public marketing, legal and policy pages need reviewed translations, and legal pages must stay authoritative in one language.",
+      "paths": ["website"]
+    },
+    "learn": {
+      "title": "/learn videos, captions and transcripts",
+      "decision": "english-only",
+      "reason": "English only for now: narrated videos whose scripts, captions and transcripts are kept in sync by check-learn-sync.mjs.",
+      "paths": ["learn", "website/learn.html"]
+    },
+    "whitepaper": {
+      "title": "Security whitepaper",
+      "decision": "english-only",
+      "reason": "English only for now: a technical document audited claim by claim (scripts/claims.json); a translation would need the same audit.",
+      "paths": ["docs/security-whitepaper.md"]
+    },
+    "docs": {
+      "title": "Docs and READMEs",
+      "decision": "english-only",
+      "reason": "English only for now: developer and operator documentation.",
+      "paths": ["docs", "README.md"]
+    }
+  }
+}

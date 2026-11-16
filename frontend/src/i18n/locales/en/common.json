@@ -102,5 +102,15 @@
     "months_other": "{{count}}mo",
     "years_one": "{{count}}y",
     "years_other": "{{count}}y"
+  },
+  "tray": {
+    "open": "Open Pollis",
+    "muteMic": "Mute mic",
+    "unmuteMic": "Unmute mic",
+    "muteMicIdle": "Mute mic (not in a call)",
+    "version": "Version {{version}}",
+    "quit": "Quit Pollis",
+    "unread_one": "Pollis — {{count}} unread",
+    "unread_other": "Pollis — {{count}} unread"
   }
 }

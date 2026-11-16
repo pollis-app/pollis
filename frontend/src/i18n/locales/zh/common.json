@@ -80,5 +80,14 @@
     "weeks_other": "{{count}}周",
     "months_other": "{{count}}个月",
     "years_other": "{{count}}年"
+  },
+  "tray": {
+    "open": "打开 Pollis",
+    "muteMic": "关闭麦克风",
+    "unmuteMic": "打开麦克风",
+    "muteMicIdle": "关闭麦克风（未在通话中）",
+    "version": "版本 {{version}}",
+    "quit": "退出 Pollis",
+    "unread_other": "Pollis — {{count}} 条未读"
   }
 }

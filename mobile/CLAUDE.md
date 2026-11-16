@@ -117,6 +117,17 @@ Adding a locale: follow the desktop README, then add the same row to
 The Maestro flow `.maestro/flows/i18n.yaml` is the device-tier proof: copy
 re-renders on switch, the choice survives a relaunch, Arabic mirrors after one.
 
+Native strings follow the **OS** language, not the in-app picker (#1724): the
+iOS permission prompts come from `mobile:permissions.*`, written as
+`<lproj>/InfoPlist.strings` by `plugins/withPermissionStrings.js` (shared
+helpers in `plugins/iosLocales.js`, also used by the push extension), and
+`tests/permission-strings.test.ts` keeps app.json's English plugin options
+equal to the `en` catalogue — change the copy in the catalogue and app.json
+together. Android's permission dialogs are the OS's own. Core PIN/lock errors
+are localized at the bridge (`i18n/coreErrors.ts`, a byte copy of desktop's;
+`tests/core-errors.test.ts`). Hardcoded JSX copy fails `scripts/i18n-check.mjs`
+(see `.codesight/wiki/i18n.md` → "Coverage").
+
 ## Rust bridge (`modules/pollis-native`)
 
 The bridge is a local RN turbo-module that links our `pollis-core` Rust crate into the Expo app via JSI.
