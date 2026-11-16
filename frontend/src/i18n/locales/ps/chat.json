@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "د {{name}} پیغام",
+    "unknownAuthor": "نامعلوم",
+    "deleted": "[ړنګ شوی]",
+    "encrypted": "[کوډ شوی]",
+    "redacted": "[پټ شوی]",
+    "edited": "(سم شوی)",
+    "editUnsent": "(سمون ونه لېږل شو)",
+    "newMember": "نوی",
+    "newMemberTitle": "په تېرو 7 ورځو کې ورګډ شوی",
+    "undecryptable": {
+      "tag": "د کوډ خلاصولو وړ نه دی",
+      "title": "کوډ یې خلاص نه شو",
+      "body_one": "د دې پیغام کوډ په دې وسیله کې خلاص نه شو.",
+      "body_other": "د {{count}} پیغامونو کوډ په دې وسیله کې خلاص نه شو.",
+      "detail": "دلته یو څه لېږل شوي، خو دې وسیلې ونه شو لوستلی. ښايي ستاسو نورې وسیلې یې لا هم ولري.",
+      "diagnostics": "تشخیص وګورئ"
+    }
+  },
+  "status": {
+    "pending": "په تمه",
+    "sending": "لېږل کېږي",
+    "sent": "ولېږل شو",
+    "failed": "ناکام",
+    "cancelled": "لغوه شو"
+  },
+  "outbox": {
+    "retry": "بیا هڅه",
+    "discard": "پرېږدئ",
+    "retryLabel": "د دې پیغام بیا لېږلو هڅه وکړئ",
+    "discardLabel": "دا نه لېږل شوی پیغام لرې کړئ",
+    "notSent": "ونه لېږل شو",
+    "willResend": "کله چې Pollis بیا وصل شي، په خپله به ولېږل شي.",
+    "notDelivered": "دا پیغام ونه رسېد."
+  },
+  "actions": {
+    "reply": "ځواب",
+    "replyInThread": "په تار کې ځواب",
+    "save": "پیغام خوندي کړئ",
+    "removeBookmark": "نښه لرې کړئ",
+    "copyLink": "د پیغام لینک کاپي کړئ",
+    "copyLinkCopied": "لینک کاپي شو",
+    "copyLinkFailed": "لینک کاپي نه شو",
+    "edit": "پیغام سم کړئ",
+    "delete": "پیغام ړنګ کړئ",
+    "deleteAsAdmin": "پیغام ړنګ کړئ (اډمین)",
+    "more": "نورې کړنې",
+    "pin": "پیغام پن کړئ",
+    "unpin": "د پیغام پن لرې کړئ",
+    "report": "راپور ورکړئ"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} ځواب",
+    "replyCount_other": "{{count}} ځوابونه"
+  },
+  "receipts": {
+    "readByEveryone": "ټولو لوستی",
+    "readByCount_one": "له {{total}} څخه {{count}} لوستی",
+    "readByCount_other": "له {{total}} څخه {{count}} لوستی",
+    "deliveredCount_one": "له {{total}} څخه {{count}} ته رسېدلی",
+    "deliveredCount_other": "له {{total}} څخه {{count}} ته رسېدلی"
+  },
+  "list": {
+    "empty": "لا پیغام نشته. خبرې اترې پیل کړئ.",
+    "unknownAuthor": "نامعلوم",
+    "blockedAuthor": "بلاک شوی کارن",
+    "blockedBody": "[بلاک شوی]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name> ته ځواب",
+    "scrollToMessage": "هغه پیغام ته ورشئ چې ځواب ورته ورکړل شوی",
+    "dismiss": "ځواب لرې کړئ",
+    "encrypted": "[کوډ شوی پیغام]"
+  },
+  "queue": {
+    "heading": "کتار",
+    "pendingPlaceholder": "[په تمه پیغام]",
+    "cancel": "پیغام لغوه کړئ",
+    "retry": "بیا هڅه",
+    "failedCount_one": "ناکام ×{{count}}",
+    "failedCount_other": "ناکام ×{{count}}"
+  },
+  "reactions": {
+    "add": "غبرګون ورزیات کړئ",
+    "all": "ټول",
+    "allTabLabel_one": "ټول، {{count}} غبرګون",
+    "allTabLabel_other": "ټول، {{count}} غبرګونونه",
+    "contextHint": "د دې لیدلو لپاره چې چا غبرګون ښودلی، ښي کلیک وکړئ",
+    "hoverMore_one": "{{names}} او {{count}} نور په {{emoji}} غبرګون وښود",
+    "hoverMore_other": "{{names}} او {{count}} نورو په {{emoji}} غبرګون وښود",
+    "hoverNames": "{{names}} په {{emoji}} غبرګون وښود",
+    "pillLabel_one": "{{emoji}} {{count}} غبرګون",
+    "pillLabel_other": "{{emoji}} {{count}} غبرګونونه",
+    "rowLabel": "{{name}}، په {{emojis}} یې غبرګون وښود",
+    "selfName": "{{name}} (تاسو)",
+    "sheetTitle": "غبرګونونه",
+    "tabLabel_one": "{{emoji}}، {{count}} غبرګون",
+    "tabLabel_other": "{{emoji}}، {{count}} غبرګونونه",
+    "unknownUser": "نامعلوم کارن",
+    "viewWho": "غبرګونونه وګورئ",
+    "you": "تاسو"
+  },
+  "preview": {
+    "noMessages": "لا پیغام نشته",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} ضمیمه]",
+    "attachments_other": "[{{count}} ضمیمې]",
+    "undecryptable": "د یوه پیغام کوډ په دې وسیله کې خلاص نه شو"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} وګورئ",
+    "openLabel": "{{filename}} پرانیزئ",
+    "downloadLabel": "{{filename}} ډاونلوډ کړئ",
+    "loading": "بارېږي…",
+    "error": "تېروتنه",
+    "failedToLoad": "بار نه شو",
+    "failedToDownload": "ډاونلوډ نه شو",
+    "lightboxFetch": "راوړل",
+    "lightboxDone": "[ بشپړ ]",
+    "lightboxDownload": "[ډاونلوډ]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "حساسه رسنۍ وښایئ: {{filename}}",
+    "sensitiveHide": "{{filename}} پټ کړئ"
+  },
+  "unfurl": {
+    "loadImage": "انځور بار کړئ",
+    "loadVideo": "ویډیو بار کړئ",
+    "loadTitle": "له {{url}} څخه رسنۍ بار کړئ — دا مستقیم له هغې ویبپاڼې سره اړیکه نیسي",
+    "loadDescription": "له {{url}} څخه رسنۍ بار کړئ. دا مستقیم له هغې ویبپاڼې سره اړیکه نیسي او ستاسو IP پته هغې ته ښکاره کوي.",
+    "openLabel": "{{url}} پرانیزئ"
+  },
+  "notify": {
+    "newMessageTitle": "نوی پیغام",
+    "newMessageBody": "{{name}}: نوی پیغام",
+    "mentionTitle": "نوې یادونه",
+    "allMentionBody": "{{name}} د ‎@all یادونه وکړه",
+    "userMentionBody": "{{name}} ستاسو یادونه وکړه"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "دا کس",
+    "titleMessage": "د پیغام راپور ورکړئ",
+    "titleUser": "د {{name}} راپور ورکړئ",
+    "intro": "Pollis حساب او لامل ترلاسه کوي. پیغامونه کوډ شوي پاتې کېږي، نو موږ هېڅکله نه وینو چې څه ویل شوي.",
+    "reasonLabel": "لامل",
+    "reason": {
+      "spam": "سپیم",
+      "harassment": "ځورونه یا ګواښونه",
+      "illegal": "غیرقانوني منځپانګه",
+      "other": "بل څه"
+    },
+    "submit": "راپور ورکړئ",
+    "submitAndBlock": "راپور ورکړئ او بلاک یې کړئ",
+    "failed": "راپور ونه لېږل شو. بیا هڅه وکړئ.",
+    "doneTitle": "راپور ولېږل شو",
+    "done": "مننه. موږ هر راپور ګورو.",
+    "doneBlocked": "مننه. موږ هر راپور ګورو. تاسو {{name}} هم بلاک کړ.",
+    "close": "بشپړ"
+  },
+  "keyChange": {
+    "notice": "له {{name}} سره ستاسو خوندیتوب شمېره بدله شوه.",
+    "verify": "تایید یې کړئ",
+    "defaultName": "دا اړیکه"
+  },
+  "typing": {
+    "one": "{{name}} لیکي…",
+    "two": "{{first}} او {{second}} لیکي…",
+    "several_one": "{{count}} کس لیکي…",
+    "several_other": "{{count}} کسان لیکي…"
+  }
+}

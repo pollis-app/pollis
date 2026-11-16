@@ -127,6 +127,21 @@ import pa_Arab_search from "../../frontend/src/i18n/locales/pa-Arab/search.json"
 import pa_Arab_settings from "../../frontend/src/i18n/locales/pa-Arab/settings.json";
 import pa_Arab_vault from "../../frontend/src/i18n/locales/pa-Arab/vault.json";
 import pa_Arab_voice from "../../frontend/src/i18n/locales/pa-Arab/voice.json";
+import ps_arcade from "../../frontend/src/i18n/locales/ps/arcade.json";
+import ps_auth from "../../frontend/src/i18n/locales/ps/auth.json";
+import ps_channels from "../../frontend/src/i18n/locales/ps/channels.json";
+import ps_chat from "../../frontend/src/i18n/locales/ps/chat.json";
+import ps_common from "../../frontend/src/i18n/locales/ps/common.json";
+import ps_dms from "../../frontend/src/i18n/locales/ps/dms.json";
+import ps_emoji from "../../frontend/src/i18n/locales/ps/emoji.json";
+import ps_errors from "../../frontend/src/i18n/locales/ps/errors.json";
+import ps_mobile from "../../frontend/src/i18n/locales/ps/mobile.json";
+import ps_nav from "../../frontend/src/i18n/locales/ps/nav.json";
+import ps_saved from "../../frontend/src/i18n/locales/ps/saved.json";
+import ps_search from "../../frontend/src/i18n/locales/ps/search.json";
+import ps_settings from "../../frontend/src/i18n/locales/ps/settings.json";
+import ps_vault from "../../frontend/src/i18n/locales/ps/vault.json";
+import ps_voice from "../../frontend/src/i18n/locales/ps/voice.json";
 import ru_arcade from "../../frontend/src/i18n/locales/ru/arcade.json";
 import ru_auth from "../../frontend/src/i18n/locales/ru/auth.json";
 import ru_channels from "../../frontend/src/i18n/locales/ru/channels.json";
@@ -326,6 +341,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": pa_Arab_settings,
     "vault": pa_Arab_vault,
     "voice": pa_Arab_voice,
+  },
+  "ps": {
+    "arcade": ps_arcade,
+    "auth": ps_auth,
+    "channels": ps_channels,
+    "chat": ps_chat,
+    "common": ps_common,
+    "dms": ps_dms,
+    "emoji": ps_emoji,
+    "errors": ps_errors,
+    "mobile": ps_mobile,
+    "nav": ps_nav,
+    "saved": ps_saved,
+    "search": ps_search,
+    "settings": ps_settings,
+    "vault": ps_vault,
+    "voice": ps_voice,
   },
   "ru": {
     "arcade": ru_arcade,

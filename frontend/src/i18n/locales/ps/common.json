@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "شاته",
+    "cancel": "لغوه",
+    "close": "بند کړئ",
+    "copy": "کاپي",
+    "copied": "کاپي شو",
+    "copyFailed": "کاپي نه شو",
+    "delete": "ړنګ کړئ",
+    "forward": "مخکې ولېږئ",
+    "goBack": "شاته لاړ شئ",
+    "moreOptions": "نور انتخابونه",
+    "save": "خوندي کړئ"
+  },
+  "states": {
+    "buttonLoading": "بارېږي...",
+    "loading": "بارېږي…"
+  },
+  "time": {
+    "today": "نن",
+    "yesterday": "پرون"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "سپېس",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "شتون: {{status}}",
+    "offline": "آفلاین",
+    "online": "آنلاین"
+  },
+  "list": {
+    "empty": "هېڅ توکی نشته."
+  },
+  "grid": {
+    "empty": "دلته لا هېڅوک نشته."
+  },
+  "menu": {
+    "escHint": "د شاته تګ لپاره Esc",
+    "navigationLabel": "د لارښوونې مېنو",
+    "navigateHint": "ګرځېدل",
+    "selectHint": "د ټاکلو لپاره Enter"
+  },
+  "media": {
+    "mute": "بې غږه کړئ",
+    "pause": "ودروئ",
+    "play": "پلی کړئ",
+    "seek": "په غږ کې ځای ومومئ",
+    "skipBackward": "10 ثانیې شاته",
+    "skipForward": "10 ثانیې مخکې",
+    "unmute": "غږ پرانیزئ",
+    "volume": "د غږ کچه"
+  },
+  "composer": {
+    "addAttachment": "ضمیمه ورزیاته کړئ",
+    "allMentionHint": "په دې چینل کې هرچا ته خبر ورکوي",
+    "filePickerTitle": "فایلونه ورزیات کړئ",
+    "inputLabel": "د پیغام لیکلو ځای",
+    "placeholder": "پیغام ولیکئ…",
+    "previewAlt": "مخکتنه",
+    "removeAttachment": "{{name}} لرې کړئ",
+    "send": "پیغام ولېږئ",
+    "markSensitive": "{{name}} حساس په نښه کړئ",
+    "unmarkSensitive": "د {{name}} حساس نښه لرې کړئ"
+  },
+  "mentions": {
+    "listLabel": "د یادونې وړاندیزونه",
+    "matching": "هغه غړي چې له <hl>@{{query}}</hl> سره سمون لري"
+  },
+  "emojiSuggest": {
+    "listLabel": "د ایموجي وړاندیزونه",
+    "matching": "هغه ایموجي چې له <hl>:{{query}}</hl> سره سمون لري"
+  },
+  "a11y": {
+    "avatar": "انځورګوټی",
+    "loading": "بارېږي",
+    "otpDigit": "د OTP {{index}}م عدد"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} ثا",
+    "seconds_other": "{{count}} ثا",
+    "minutes_one": "{{count}} دق",
+    "minutes_other": "{{count}} دق",
+    "hours_one": "{{count}} ساعت",
+    "hours_other": "{{count}} ساعته",
+    "days_one": "{{count}} ورځ",
+    "days_other": "{{count}} ورځې",
+    "weeks_one": "{{count}} اونۍ",
+    "weeks_other": "{{count}} اونۍ",
+    "months_one": "{{count}} میاشت",
+    "months_other": "{{count}} میاشتې",
+    "years_one": "{{count}} کال",
+    "years_other": "{{count}} کاله"
+  },
+  "tray": {
+    "open": "Pollis پرانیزئ",
+    "muteMic": "مایک بې غږه کړئ",
+    "unmuteMic": "د مایک غږ پرانیزئ",
+    "muteMicIdle": "مایک بې غږه کړئ (په زنګ کې نه یاست)",
+    "version": "نسخه {{version}}",
+    "quit": "له Pollis څخه ووځئ",
+    "unread_one": "Pollis — {{count}} نالوستی",
+    "unread_other": "Pollis — {{count}} نالوستي"
+  }
+}

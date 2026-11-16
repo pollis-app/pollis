@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "د ایموجي ټاکونکی",
+    "triggerLabel": "ایموجي",
+    "searchLabel": "لټون",
+    "searchPlaceholder": "ایموجي ولټوئ",
+    "resultsFor": "د \"{{query}}\" پایلې",
+    "recent": "ډېر کارول شوي",
+    "custom": "ځانګړي",
+    "empty": "هېڅ ایموجي له دې سره سمون نه خوري.",
+    "previewHint": "یو ایموجي وټاکئ",
+    "railLabel": "د ایموجي ډلې"
+  },
+  "categories": {
+    "people": "خلک",
+    "nature": "طبیعت",
+    "food": "خواړه",
+    "activity": "فعالیتونه",
+    "travel": "سفر",
+    "objects": "شیان",
+    "symbols": "نښې",
+    "flags": "بیرغونه"
+  },
+  "skinTone": {
+    "groupLabel": "د پوستکي رنګ",
+    "default": "د پوستکي ډیفالټ رنګ",
+    "numbered": "د پوستکي رنګ {{index}}"
+  },
+  "manage": {
+    "title": "ځانګړي ایموجي",
+    "signInRequired": "مهرباني وکړئ ننوځئ",
+    "dropPrompt": "یو انځور دلته راکش کړئ، یا د لټولو لپاره کلیک وکړئ",
+    "dropNow": "د دې انځور د کارولو لپاره یې پرېږدئ",
+    "dropHint": "{{formats}} · متحرک GIFونه خپل حرکت ساتي",
+    "replaceHint": "د بدلولو لپاره بل انځور راکش کړئ، یا کلیک وکړئ",
+    "sourceSize": "{{size}} اصلي فایل · د اپلوډ پر مهال تر 48 KB لاندې بیا کوډ کېږي",
+    "reencodeNote": "د اپلوډ پر مهال تر 48 KB لاندې بیا کوډ کېږي",
+    "fileTooLarge": "دا انځور له {{size}} څخه لوی دی — کوچنی اصلي فایل وټاکئ",
+    "unsupportedFile": "‎{{name}}‎ PNG، JPEG، GIF یا WebP نه دی",
+    "shortcodeLabel": "لنډ کوډ",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "داسې لیکل کېږي: ‎:shortcode:‎ — a–z، 0–9 او _",
+    "shortcodeRequired": "د ورزیاتولو لپاره دې ایموجي ته نوم ورکړئ",
+    "shortcodeInvalid": "2–32 توري وکاروئ: a–z، 0–9 او _",
+    "shortcodeTaken": "‎:{{shortcode}}:‎ لا دمخه په دې ګروپ کې نیول شوی",
+    "samplePlaceholder": "په پیغام کې به څنګه ښکاري",
+    "add": "ایموجي ورزیات کړئ",
+    "shrinking": "کوچنی کېږي…",
+    "filePickerTitle": "د ایموجي انځور وټاکئ",
+    "imageFilterName": "انځورونه",
+    "addFailed": "دا ایموجي ورزیات نه شو",
+    "removeFailed": "دا ایموجي لرې نه شو",
+    "storageNote": "انځورونه له اپلوډ مخکې تر 48 KB لاندې بیا کوډ کېږي، نو لوی اصلي فایل هم سم دی. ورته انځورونه په ټولو هغو ګروپونو کې چې کاروي یې یوه خوندي شوې کاپي شریکوي. دا ګروپ څومره ایموجي چې وغواړي لرلی شي، کوم حد نشته.",
+    "stored_one": "{{count}} ایموجي · {{size}} زېرمه شوي",
+    "stored_other": "{{count}} ایموجي · {{size}} زېرمه شوي",
+    "empty": "لا ځانګړي ایموجي نشته. په ګروپ کې هر څوک یو ورزیاتولی شي.",
+    "sizeAnimated": "متحرک · {{size}}",
+    "remove": "‎:{{shortcode}}:‎ لرې کړئ",
+    "removeAdminsOnly": "یوازې د ګروپ اډمینان ایموجي لرې کولی شي."
+  }
+}
