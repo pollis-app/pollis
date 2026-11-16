@@ -341,7 +341,9 @@
     "nameOnlyBody": "መልዕክት ልኳል",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "የመልዕክት ጥያቄ",
-    "requestBody": "{{sender}} መልዕክት ሊልክልዎ ይፈልጋል"
+    "requestBody": "{{sender}} መልዕክት ሊልክልዎ ይፈልጋል",
+    "fetchingChannel": "የመልዕክት ማድረስ",
+    "fetchingBody": "አዲስ መልዕክቶችን በመፈለግ ላይ"
   },
   "search": {
     "channels": "ቻናሎች",

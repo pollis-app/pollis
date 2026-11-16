@@ -341,7 +341,9 @@
     "nameOnlyBody": "ஒரு செய்தியை அனுப்பினார்",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "செய்தி கோரிக்கை",
-    "requestBody": "{{sender}} உங்களுக்குச் செய்தி அனுப்ப விரும்புகிறார்"
+    "requestBody": "{{sender}} உங்களுக்குச் செய்தி அனுப்ப விரும்புகிறார்",
+    "fetchingChannel": "செய்தி விநியோகம்",
+    "fetchingBody": "புதிய செய்திகளைச் சரிபார்க்கிறது"
   },
   "search": {
     "channels": "சேனல்கள்",

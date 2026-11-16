@@ -173,6 +173,56 @@ pub struct ResolvePushHandleResponse {
     pub kind: Option<String>,
 }
 
+/// Everything a push notification's fetch needs, in one round trip (#1804).
+///
+/// The rich-push fetch used to run resolve, Welcome drain and catch-up one after
+/// another; on a slow mobile network those serial round trips were most of the
+/// time it had. This answers all three at once, plus the DM peers' account keys
+/// the ingest re-verifies. The device is the VERIFIED signing device, never a
+/// body field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushFetchBody {
+    pub handle: String,
+    /// No-auth fallback only (a DS with auth off); signed, the DS uses the
+    /// verified identity and a body naming another user is a 403.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+    /// Also count this device's unclaimed KeyPackages in this suite, as
+    /// [`crate::reads::FetchWelcomesBody::count_key_packages_in_suite`] does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count_key_packages_in_suite: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushFetchResponse {
+    /// `None` when the handle is unknown, expired or not this user's, exactly
+    /// as [`ResolvePushHandleResponse`]; every other field is then empty.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    /// `"dm"`, `"channel"` or [`PUSH_KIND_DM_REQUEST`].
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// This device's undelivered Welcomes (the `/v1/welcomes/fetch` answer).
+    /// Read, never acked: the client acks after applying, as it always does.
+    /// `None` for a DM request, which fetches nothing.
+    #[serde(default)]
+    pub welcomes: Option<crate::reads::FetchWelcomesResponse>,
+    /// The `/v1/conversations/catch-up` answer for the conversation: envelopes
+    /// for a DM or channel, the DM's members for a DM or a DM request.
+    #[serde(default)]
+    pub catch_up: Option<crate::directory::CatchUpResponse>,
+    /// `account_id_pub` of every other member of a DM, as `/v1/read/account-keys`
+    /// answers it (a user with no key is omitted).
+    #[serde(default)]
+    pub account_keys: Vec<crate::account_reads::AccountKeyRow>,
+    /// The user ids `account_keys` was read for, so the client can tell an
+    /// omitted key from one it never asked about.
+    #[serde(default)]
+    pub account_keys_for: Vec<String>,
+}
+
 /// Most conversations one dismiss request may name. A client sends the
 /// conversations whose read cursor moved in one short debounce window, which
 /// is a handful; anything past this is refused as a bad request.

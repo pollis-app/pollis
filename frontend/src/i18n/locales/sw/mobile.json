@@ -341,7 +341,9 @@
     "nameOnlyBody": "Ametuma ujumbe",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "Ombi la ujumbe",
-    "requestBody": "{{sender}} anataka kukutumia ujumbe"
+    "requestBody": "{{sender}} anataka kukutumia ujumbe",
+    "fetchingChannel": "Uwasilishaji wa ujumbe",
+    "fetchingBody": "Inakagua ujumbe mpya"
   },
   "search": {
     "channels": "Chaneli",

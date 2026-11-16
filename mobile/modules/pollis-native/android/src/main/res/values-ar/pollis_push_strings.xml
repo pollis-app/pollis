@@ -14,4 +14,6 @@
     <string name="pollis_push_group_title">%1$s · %2$s</string>
     <string name="pollis_push_request_title">طلب مراسلة</string>
     <string name="pollis_push_request_body">يريد %1$s مراسلتك</string>
+    <string name="pollis_push_fetching_channel">توصيل الرسائل</string>
+    <string name="pollis_push_fetching_body">جارٍ التحقق من الرسائل الجديدة</string>
 </resources>

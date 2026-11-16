@@ -52,6 +52,7 @@ Java_com_pollisnative_PollisNativeModule_nativeCleanupRustCrate(JNIEnv *env, jcl
 extern "C" char *pollis_notify_fetch(const char *data_dir, const char *handle, uint32_t budget_ms);
 extern "C" void pollis_string_free(char *s);
 extern "C" void pollis_notify_note(const char *line);
+extern "C" bool pollis_notify_settle(uint32_t timeout_ms);
 
 // Returns UTF-8 bytes, not a jstring: NewStringUTF takes modified UTF-8 and
 // mangles 4-byte sequences (an emoji in a preview).
@@ -100,4 +101,12 @@ Java_com_pollisnative_PollisNotify_nativeNote(JNIEnv *env, jclass type, jstring 
         pollis_notify_note(l);
         env->ReleaseStringUTFChars(line, l);
     }
+}
+// #1804: wait for the posts a fetch deferred past its answer.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_pollisnative_PollisNotify_nativeSettle(JNIEnv *env, jclass type, jint timeoutMs) {
+    (void) env;
+    (void) type;
+    return pollis_notify_settle(timeoutMs > 0 ? static_cast<uint32_t>(timeoutMs) : 0u) ? JNI_TRUE : JNI_FALSE;
 }

@@ -333,7 +333,9 @@
     "nameOnlyBody": "Fi ìfiránṣẹ́ kan ránṣẹ́",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "Ìbéèrè ìfiránṣẹ́",
-    "requestBody": "{{sender}} fẹ́ fi ìfiránṣẹ́ ránṣẹ́ sí ọ"
+    "requestBody": "{{sender}} fẹ́ fi ìfiránṣẹ́ ránṣẹ́ sí ọ",
+    "fetchingChannel": "Ìfijíṣẹ́ ìfiránṣẹ́",
+    "fetchingBody": "Ń ṣàyẹ̀wò fún àwọn ìfiránṣẹ́ tuntun"
   },
   "search": {
     "channels": "Àwọn ìkànnì",

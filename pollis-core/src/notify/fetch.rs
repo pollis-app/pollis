@@ -15,6 +15,7 @@ use serde::Serialize;
 use super::escrow::{self, NotificationContent};
 use super::lock::{LockError, LockPolicy, SharedStateLock, StateLock};
 use super::preview;
+use super::scope::{self, Scope, TailSet};
 use crate::config::Config;
 use crate::db::local::LocalDb;
 use crate::keystore::Keystore;
@@ -147,11 +148,18 @@ pub async fn run_in_app(app: &Arc<AppState>, handle: Option<&str>, budget: Durat
                 items: Vec::new(),
             });
         }
+        // The app lives on in this process: its watermark and receipt posts run after the
+        // answer, and the host's `settle` waits for them (#1804).
+        let tail = Arc::new(TailSet::default());
         let result = tokio::time::timeout_at(
             ingest_deadline.into(),
-            ingest_for_handle(app, &user_id, handle),
+            ingest_for_handle(app, &user_id, handle, Some(Arc::clone(&tail))),
         )
         .await;
+        let pending = tail.take();
+        if !pending.is_empty() {
+            scope::finish_after(pending, async {});
+        }
         Some(match result {
             Ok(Ok(target)) => finish(app, &user_id, mode, floor, target, deadline, None).await,
             Ok(Err(reason)) => {
@@ -221,14 +229,37 @@ pub async fn run(p: Params) -> Outcome {
     }
     let state = Arc::new(state);
     *state.device_id.lock().await = Some(device_id);
-    let outcome = run_locked(&state, &user_id, &db_key, p.handle.as_deref(), started, p.budget).await;
+    let (outcome, deferred) =
+        run_locked(&state, &user_id, &db_key, p.handle.as_deref(), started, p.budget).await;
 
     // Close the database before returning (#1599): an extension or FCM process must not keep the
-    // App Group file (and its WAL/SHM locks) open after its work is done.
-    let db = state.local_db.lock().await.take();
-    drop(db);
+    // App Group file (and its WAL/SHM locks) open after its work is done. Work the ingest
+    // deferred (#1804) still needs both, so then they close when it ends.
+    match deferred {
+        None => {
+            let db = state.local_db.lock().await.take();
+            drop(db);
+        }
+        Some((pending, lock)) => {
+            let state = Arc::clone(&state);
+            scope::finish_after(pending, async move {
+                let db = state.local_db.lock().await.take();
+                drop(db);
+                drop(lock);
+            });
+        }
+    }
     outcome
 }
+
+/// Whether the headless fetch may finish its watermark and receipt posts after it answers
+/// (#1804). Not on iOS: the extension can be suspended as soon as it hands the notification
+/// over, and a suspended process holding the App Group lock is killed (`0xdead10cc`). The
+/// extension has about 30 s, so it keeps the posts inside the fetch, as before.
+const DEFER_HEADLESS: bool = cfg!(not(target_os = "ios"));
+
+/// The headless fetch's deferred posts, and the lock they run under.
+type Deferred = Option<(Vec<tokio::task::JoinHandle<()>>, StateLock)>;
 
 /// Steps 3 to 6 of [`run`], on the headless state.
 async fn run_locked(
@@ -238,7 +269,7 @@ async fn run_locked(
     handle: Option<&str>,
     started: Instant,
     budget: Duration,
-) -> Outcome {
+) -> (Outcome, Deferred) {
     let deadline = started + budget;
     let data_dir = state.local_data_dir();
 
@@ -246,10 +277,10 @@ async fn run_locked(
     let lock_deadline = started + budget.mul_f64(LOCK_SHARE);
     let lock = match StateLock::try_acquire_until_in(&data_dir, lock_deadline).await {
         Ok(l) => l,
-        Err(LockError::Busy) => return Outcome::Failed(Reason::LockBusy),
+        Err(LockError::Busy) => return (Outcome::Failed(Reason::LockBusy), None),
         Err(e) => {
             crate::diag!("[notify] state lock: {e}");
-            return Outcome::Failed(Reason::Internal);
+            return (Outcome::Failed(Reason::Internal), None);
         }
     };
 
@@ -260,11 +291,11 @@ async fn run_locked(
             if f.code == rusqlite::ErrorCode::NotADatabase =>
         {
             // A stale escrow. Never wipe; the app re-escrows on its next unlock.
-            return Outcome::Failed(Reason::Decrypt);
+            return (Outcome::Failed(Reason::Decrypt), None);
         }
         Err(e) => {
             crate::diag!("[notify] local database would not open: {e}");
-            return Outcome::Failed(Reason::NotLoggedIn);
+            return (Outcome::Failed(Reason::NotLoggedIn), None);
         }
     };
 
@@ -277,10 +308,13 @@ async fn run_locked(
         if let Err(e) = escrow::delete_escrow(state.keystore.as_ref(), user_id).await {
             crate::diag!("[notify] stale escrow not deleted: {e}");
         }
-        return Outcome::Ok {
-            mode,
-            items: Vec::new(),
-        };
+        return (
+            Outcome::Ok {
+                mode,
+                items: Vec::new(),
+            },
+            None,
+        );
     }
     let floor: i64 = db
         .conn()
@@ -289,34 +323,52 @@ async fn run_locked(
     *state.local_db.lock().await = Some(db);
 
     // 5. Fetch, decrypt and persist through the app's own path.
-    let ingest = ingest_for_handle(state, user_id, handle);
-    let result = tokio::time::timeout_at(deadline.into(), ingest).await;
+    let tail = DEFER_HEADLESS.then(|| Arc::new(TailSet::default()));
+    // A spent budget starts nothing: `timeout_at` polls the ingest before it looks at the
+    // deadline, and on every wake after, so on a fast link an ingest begun late can still run
+    // to the end. `None` is the timeout.
+    let result = if Instant::now() < deadline {
+        let ingest = ingest_for_handle(state, user_id, handle, tail.clone());
+        tokio::time::timeout_at(deadline.into(), ingest).await.ok()
+    } else {
+        None
+    };
 
     // 6. The state is written; let the app have the lock back before any more round trips
     // (names, mutes), so a foreground app's own ingest is never stalled behind previews.
-    drop(lock);
+    // Deferred posts (#1804) seal under it, so they keep it until they end.
+    let pending = tail.map(|t| t.take()).unwrap_or_default();
+    let deferred = if pending.is_empty() {
+        drop(lock);
+        None
+    } else {
+        Some((pending, lock))
+    };
 
-    match result {
-        Ok(Ok(target)) => finish(state, user_id, mode, floor, target, deadline, None).await,
-        Ok(Err(reason)) => {
+    let outcome = match result {
+        Some(Ok(target)) => finish(state, user_id, mode, floor, target, deadline, None).await,
+        Some(Err(reason)) => {
             // Whatever did persist is still shown; only an empty result fails.
             crate::diag!("[notify] ingest failed: {reason:?}");
             finish(state, user_id, mode, floor, None, deadline, Some(reason)).await
         }
-        Err(_) => {
+        None => {
             crate::diag!("[notify] ingest ran out of time");
             finish(state, user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await
         }
-    }
+    };
+    (outcome, deferred)
 }
 
 /// The conversation a resolved handle names.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Target {
     conversation_id: String,
     is_dm: bool,
     /// A pending DM request (#1734): nothing is ingested or previewed for it.
     request: bool,
+    /// The fetch's scope, so a DM request's lookups read the same prefetch (#1804).
+    scope: Arc<Scope>,
 }
 
 /// First pause before retrying a fetch that failed on the network, doubled up to [`RETRY_MAX`].
@@ -332,8 +384,32 @@ async fn ingest_for_handle(
     state: &Arc<AppState>,
     user_id: &str,
     handle: Option<&str>,
+    tail: Option<Arc<TailSet>>,
 ) -> Result<Option<Target>, Reason> {
-    retry_on_network(|| ingest_once(state, user_id, handle)).await
+    retry_on_network(|| ingest_once(state, user_id, handle, tail.clone())).await
+}
+
+/// `POST /v1/push/fetch` (#1804): the handle resolve, Welcome read, catch-up and DM peer keys
+/// in one round trip. `Ok(None)` when this Delivery Service does not answer it (it predates
+/// the endpoint): the fetch then makes the separate requests, as before.
+async fn push_fetch(
+    state: &Arc<AppState>,
+    user_id: &str,
+    handle: &str,
+) -> Result<Option<pollis_api::devices::PushFetchResponse>, Reason> {
+    let body = pollis_api::devices::PushFetchBody {
+        handle: handle.to_string(),
+        user_id: Some(user_id.to_string()),
+        device_id: state.device_id.lock().await.clone(),
+        count_key_packages_in_suite: Some(crate::commands::mls::ds_reads::welcome_drain_suite()),
+    };
+    match crate::commands::mls::ds_client::ds_post_json(state, &body).await {
+        Ok(resp) => Ok(Some(resp)),
+        Err(e) => match classify(e) {
+            Reason::Network => Err(Reason::Network),
+            _ => Ok(None),
+        },
+    }
 }
 
 async fn retry_on_network<T, F, Fut>(mut attempt: F) -> Result<T, Reason>
@@ -364,17 +440,27 @@ async fn ingest_once(
     state: &Arc<AppState>,
     user_id: &str,
     handle: Option<&str>,
+    tail: Option<Arc<TailSet>>,
 ) -> Result<Option<Target>, Reason> {
     let Some(handle) = handle.filter(|h| !h.is_empty()) else {
         return Ok(None);
     };
-    let resolved = crate::commands::push::resolve_push_handle(handle.to_string(), state)
-        .await
-        .map_err(classify)?;
+    let fetched = push_fetch(state, user_id, handle).await?;
+    let resolved = match fetched.as_ref() {
+        Some(r) => r.conversation_id.clone().zip(r.kind.clone()),
+        None => crate::commands::push::resolve_push_handle(handle.to_string(), state)
+            .await
+            .map_err(classify)?,
+    };
     let Some((conversation_id, kind)) = resolved else {
         // Unknown or expired: nothing to fetch for it.
         return Ok(None);
     };
+    let had_fetch = fetched.is_some();
+    let scope = Scope::new(fetched, tail);
+    if had_fetch && !scope.has_prefetch() {
+        crate::diag!("[notify] a Welcome is pending; reading it fresh under the lock");
+    }
     let is_dm = match kind.as_str() {
         "dm" => true,
         "channel" => false,
@@ -385,21 +471,26 @@ async fn ingest_once(
                 conversation_id,
                 is_dm: true,
                 request: true,
+                scope,
             }))
         }
         _ => return Ok(None),
     };
-    let result = if is_dm {
-        crate::commands::messages::ingest_dm_envelopes_inner(state, user_id, &conversation_id).await
-    } else {
-        crate::commands::messages::ingest_channel_envelopes_inner(state, user_id, &conversation_id)
-            .await
+    let ingest = async {
+        if is_dm {
+            crate::commands::messages::ingest_dm_envelopes_inner(state, user_id, &conversation_id)
+                .await
+        } else {
+            crate::commands::messages::ingest_channel_envelopes_inner(state, user_id, &conversation_id)
+                .await
+        }
     };
-    result.map_err(classify)?;
+    scope::run(Arc::clone(&scope), ingest).await.map_err(classify)?;
     Ok(Some(Target {
         conversation_id,
         is_dm,
         request: false,
+        scope,
     }))
 }
 
@@ -511,7 +602,8 @@ async fn finish(
 ) -> Outcome {
     // #1734: a request shows who is asking and nothing they wrote, whatever is stored.
     if let Some(t) = target.as_ref().filter(|t| t.request) {
-        return match request_item(state, user_id, &t.conversation_id, deadline).await {
+        let lookup = request_item(state, user_id, &t.conversation_id, deadline);
+        return match scope::run(Arc::clone(&t.scope), lookup).await {
             Ok(item) => Outcome::Ok {
                 mode,
                 items: item.into_iter().collect(),

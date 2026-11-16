@@ -341,7 +341,9 @@
     "nameOnlyBody": "ਇੱਕ ਸੁਨੇਹਾ ਭੇਜਿਆ",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "ਸੁਨੇਹਾ ਬੇਨਤੀ",
-    "requestBody": "{{sender}} ਤੁਹਾਨੂੰ ਸੁਨੇਹਾ ਭੇਜਣਾ ਚਾਹੁੰਦਾ ਹੈ"
+    "requestBody": "{{sender}} ਤੁਹਾਨੂੰ ਸੁਨੇਹਾ ਭੇਜਣਾ ਚਾਹੁੰਦਾ ਹੈ",
+    "fetchingChannel": "ਸੁਨੇਹਿਆਂ ਦੀ ਡਿਲੀਵਰੀ",
+    "fetchingBody": "ਨਵੇਂ ਸੁਨੇਹਿਆਂ ਦੀ ਜਾਂਚ ਕੀਤੀ ਜਾ ਰਹੀ ਹੈ"
   },
   "search": {
     "channels": "ਚੈਨਲ",

@@ -348,7 +348,9 @@
     "nameOnlyBody": "Надіслав(ла) повідомлення",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "Запит на листування",
-    "requestBody": "{{sender}} хоче написати вам"
+    "requestBody": "{{sender}} хоче написати вам",
+    "fetchingChannel": "Отримання повідомлень",
+    "fetchingBody": "Перевірка нових повідомлень"
   },
   "search": {
     "channels": "Канали",

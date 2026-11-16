@@ -12,7 +12,6 @@ const blocked: string[] = app.android.blockedPermissions;
 
 const MUST_BLOCK = [
   "android.permission.SYSTEM_ALERT_WINDOW",
-  "android.permission.FOREGROUND_SERVICE",
   "android.permission.BLUETOOTH",
   "android.permission.BLUETOOTH_ADMIN",
   "android.permission.MODIFY_AUDIO_SETTINGS",
@@ -38,6 +37,9 @@ const MUST_KEEP = [
   // Biometric unlock (#1685): androidx.biometric declares both; USE_FINGERPRINT for API 23-27.
   "android.permission.USE_BIOMETRIC",
   "android.permission.USE_FINGERPRINT",
+  // The push fetch's foreground service (#1804): network under Data Saver.
+  "android.permission.FOREGROUND_SERVICE",
+  "android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING",
 ];
 
 test("permissions the app never uses are blocked", () => {
@@ -50,6 +52,22 @@ test("permissions the app needs are never blocked", () => {
   for (const p of MUST_KEEP) {
     assert.ok(!blocked.includes(p), `${p} is needed and must not be blocked`);
   }
+});
+
+test("the push fetch's foreground service is declared with its type and permissions (#1804)", () => {
+  const manifest = readFileSync(
+    join(root, "modules/pollis-native/android/src/main/AndroidManifestNew.xml"),
+    "utf8",
+  );
+  assert.match(manifest, /<uses-permission android:name="android\.permission\.FOREGROUND_SERVICE" \/>/);
+  assert.match(manifest, /<uses-permission android:name="android\.permission\.FOREGROUND_SERVICE_REMOTE_MESSAGING" \/>/);
+  assert.match(
+    manifest,
+    /android:name="com\.pollisnative\.push\.PushFetchService"\s+android:exported="false"\s+android:foregroundServiceType="remoteMessaging"/,
+  );
+  // One service type only: no other foreground-service permission rides along.
+  const types = [...manifest.matchAll(/android\.permission\.FOREGROUND_SERVICE_[A-Z_]+/g)].map((m) => m[0]);
+  assert.deepEqual([...new Set(types)], ["android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING"]);
 });
 
 test("release builds are minified and resource-shrunk", () => {

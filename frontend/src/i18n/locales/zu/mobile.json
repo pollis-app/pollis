@@ -341,7 +341,9 @@
     "nameOnlyBody": "Uthumele umlayezo",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "Isicelo somlayezo",
-    "requestBody": "{{sender}} ufuna ukukuthumelela umlayezo"
+    "requestBody": "{{sender}} ufuna ukukuthumelela umlayezo",
+    "fetchingChannel": "Ukulethwa kwemilayezo",
+    "fetchingBody": "Ihlola imilayezo emisha"
   },
   "search": {
     "channels": "Iziteshi",

@@ -348,7 +348,9 @@
     "nameOnlyBody": "Отправил(а) сообщение",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "Запрос на переписку",
-    "requestBody": "{{sender}} хочет написать вам"
+    "requestBody": "{{sender}} хочет написать вам",
+    "fetchingChannel": "Получение сообщений",
+    "fetchingBody": "Проверка новых сообщений"
   },
   "search": {
     "channels": "Каналы",

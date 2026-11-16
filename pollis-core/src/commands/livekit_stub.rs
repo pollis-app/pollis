@@ -15,13 +15,15 @@ type LiveKit = Arc<tokio::sync::Mutex<LiveKitState>>;
 
 /// Fire-and-forget SendData to `room_name` via the DS. Non-fatal — the DS treats
 /// a room with no participants (404) as success and errors are only logged.
+/// From a push fetch's deferred posts (a delivered receipt's wake) the host's settle
+/// waits for it (#1804).
 async fn send_data_to_room(
     state: &Arc<AppState>,
     room_name: String,
     payload: serde_json::Value,
 ) -> Result<()> {
     let state = Arc::clone(state);
-    tokio::spawn(async move {
+    crate::notify::scope::spawn_in_tail(async move {
         if let Err(e) = crate::commands::mls::ds_livekit_send_data(&state, &room_name, payload).await {
             crate::diag!("[realtime] SendData -> {room_name} error (non-fatal): {e}");
         }

@@ -444,7 +444,8 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
                     .with_state(fault_state)
                     .fallback_service(pollis_delivery::build_router_with_state(real_state))
                     .layer(axum::middleware::from_fn(record_send_data))
-                    .layer(axum::middleware::from_fn(inject_message_fault));
+                    .layer(axum::middleware::from_fn(inject_message_fault))
+                    .layer(axum::middleware::from_fn(record_requests));
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                     .await
                     .expect("delivery: bind loopback");
@@ -458,6 +459,62 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
         .expect("delivery: spawn thread");
 
     rx.recv().expect("delivery: receive url")
+}
+
+/// Every request the in-process DS received, as `(signing device, path)`, in arrival order.
+static DS_REQUESTS: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// While set, `/v1/push/fetch` answers 404, as a Delivery Service that predates it (#1804).
+static PUSH_FETCH_UNROUTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+async fn record_requests(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let path = req.uri().path().to_string();
+    let device = req
+        .headers()
+        .get("X-Pollis-Device")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    DS_REQUESTS.lock().expect("request log").push((device, path.clone()));
+    let fetch_path = <pollis_api::devices::PushFetchBody as pollis_api::DsRequest>::PATH;
+    if path == fetch_path && PUSH_FETCH_UNROUTED.load(std::sync::atomic::Ordering::SeqCst) {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(req).await
+}
+
+/// How many requests the in-process DS has received so far; pass it to [`ds_requests_since`].
+pub(crate) fn ds_request_mark() -> usize {
+    DS_REQUESTS.lock().expect("request log").len()
+}
+
+/// The paths `device` requested since `mark`, in order.
+pub(crate) fn ds_requests_since(mark: usize, device: &str) -> Vec<String> {
+    DS_REQUESTS.lock().expect("request log")[mark..]
+        .iter()
+        .filter(|(d, _)| d == device)
+        .map(|(_, p)| p.clone())
+        .collect()
+}
+
+/// Make `/v1/push/fetch` answer 404 (an older DS) until the guard drops.
+pub(crate) struct OldDeliveryService;
+
+impl OldDeliveryService {
+    pub(crate) fn on() -> Self {
+        PUSH_FETCH_UNROUTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for OldDeliveryService {
+    fn drop(&mut self) {
+        PUSH_FETCH_UNROUTED.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// One `POST /v1/livekit/send-data` wake-up as the in-process DS saw it.

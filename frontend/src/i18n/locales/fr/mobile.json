@@ -332,7 +332,9 @@
     "nameOnlyBody": "Vous a envoyé un message",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "Demande de message",
-    "requestBody": "{{sender}} souhaite vous envoyer un message"
+    "requestBody": "{{sender}} souhaite vous envoyer un message",
+    "fetchingChannel": "Réception des messages",
+    "fetchingBody": "Recherche de nouveaux messages"
   },
   "search": {
     "channels": "Canaux",

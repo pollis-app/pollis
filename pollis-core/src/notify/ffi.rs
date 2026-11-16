@@ -43,6 +43,19 @@ pub unsafe extern "C" fn pollis_notify_note(line: *const c_char) {
     }
 }
 
+/// Wait up to `timeout_ms` for the follow-up work earlier fetches deferred (#1804): their
+/// watermark advance and delivered receipt. True when nothing is left.
+#[no_mangle]
+pub extern "C" fn pollis_notify_settle(timeout_ms: u32) -> bool {
+    std::panic::catch_unwind(|| {
+        let rt = crate::bridge::worker_runtime();
+        let timeout = Duration::from_millis(u64::from(timeout_ms));
+        rt.block_on(rt.spawn(super::scope::settle(timeout)))
+            .unwrap_or(false)
+    })
+    .unwrap_or(false)
+}
+
 /// The outcome of a fetch without its content: `ok mode=full items=2` or `failed network`.
 fn summary(json: &str) -> String {
     let v: serde_json::Value = serde_json::from_str(json).unwrap_or_default();

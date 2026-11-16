@@ -33,6 +33,9 @@ object PollisNotify {
   @JvmStatic
   private external fun nativeNote(line: String)
 
+  @JvmStatic
+  private external fun nativeSettle(timeoutMs: Int): Boolean
+
   /** Add a line to the core's diagnostics log under `[notify]`; never content. Never throws. */
   fun note(line: String) {
     if (!ensureLoaded()) {
@@ -53,6 +56,22 @@ object PollisNotify {
       nativeFetch(dataDir, handle, budgetMs)?.toString(Charsets.UTF_8) ?: FAILED
     } catch (t: Throwable) {
       FAILED
+    }
+  }
+
+  /**
+   * Wait up to [timeoutMs] for the posts earlier fetches left running (#1804): the watermark
+   * advance and the delivered receipt, which the notification does not wait for. True when
+   * nothing is left. Never throws.
+   */
+  fun settle(timeoutMs: Int): Boolean {
+    if (!ensureLoaded()) {
+      return true
+    }
+    return try {
+      nativeSettle(timeoutMs)
+    } catch (t: Throwable) {
+      true
     }
   }
 }

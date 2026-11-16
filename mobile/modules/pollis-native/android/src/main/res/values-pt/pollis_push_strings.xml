@@ -14,4 +14,6 @@
     <string name="pollis_push_group_title">%1$s · %2$s</string>
     <string name="pollis_push_request_title">Pedido de mensagem</string>
     <string name="pollis_push_request_body">%1$s quer enviar-lhe mensagens</string>
+    <string name="pollis_push_fetching_channel">Entrega de mensagens</string>
+    <string name="pollis_push_fetching_body">A verificar se há novas mensagens</string>
 </resources>

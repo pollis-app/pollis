@@ -44,12 +44,26 @@ pub async fn catch_up(
         Err(resp) => return Ok(resp),
     };
     let device_id = parsed.device_id.clone().unwrap_or_default();
+    let answer = catch_up_answer(&state, &who, &device_id, &parsed).await?;
+    Ok(ok_response::<CatchUpBody>(answer))
+}
+
+/// The `/v1/conversations/catch-up` answer for one authenticated user; shared
+/// with `/v1/push/fetch` (#1804).
+pub(crate) async fn catch_up_answer(
+    state: &AppState,
+    who: &str,
+    device_id: &str,
+    parsed: &CatchUpBody,
+) -> Result<CatchUpResponse, AppError> {
+    let who = who.to_string();
+    let device_id = device_id.to_string();
 
     let conn = state.db.conn().await?;
     let Some((mls_group_id, kind)) = resolve_conversation(&conn, &parsed.conversation_id).await?
     else {
         // Unknown id: unauthorized, never invented.
-        return Ok(ok_response::<CatchUpBody>(CatchUpResponse {
+        return Ok(CatchUpResponse {
             authorized: false,
             mls_group_id: parsed.conversation_id.clone(),
             kind: ConversationKind::Group,
@@ -59,11 +73,11 @@ pub async fn catch_up(
             roster: Vec::new(),
             head: None,
             membership_version: None,
-        }));
+        });
     };
 
     if !crate::writes::is_member(&conn, &mls_group_id, &who).await? {
-        return Ok(ok_response::<CatchUpBody>(CatchUpResponse {
+        return Ok(CatchUpResponse {
             authorized: false,
             mls_group_id,
             kind,
@@ -73,7 +87,7 @@ pub async fn catch_up(
             roster: Vec::new(),
             head: None,
             membership_version: None,
-        }));
+        });
     }
 
     let conversation_ids = match kind {
@@ -111,7 +125,7 @@ pub async fn catch_up(
         None
     };
 
-    Ok(ok_response::<CatchUpBody>(CatchUpResponse {
+    Ok(CatchUpResponse {
         authorized: true,
         mls_group_id,
         kind,
@@ -121,7 +135,7 @@ pub async fn catch_up(
         roster,
         head,
         membership_version,
-    }))
+    })
 }
 
 /// The user ids that SHOULD have a leaf in this conversation's MLS tree.

@@ -14,4 +14,6 @@
     <string name="pollis_push_group_title">%1$s · %2$s</string>
     <string name="pollis_push_request_title">የመልዕክት ጥያቄ</string>
     <string name="pollis_push_request_body">%1$s መልዕክት ሊልክልዎ ይፈልጋል</string>
+    <string name="pollis_push_fetching_channel">የመልዕክት ማድረስ</string>
+    <string name="pollis_push_fetching_body">አዲስ መልዕክቶችን በመፈለግ ላይ</string>
 </resources>

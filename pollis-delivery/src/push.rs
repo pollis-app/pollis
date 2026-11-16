@@ -39,7 +39,8 @@ use axum::Json;
 use libsql::Connection;
 use pollis_api::devices::{
     DismissEntry, DismissPushBody, DismissPushResponse, DismissedPushHandlesBody,
-    DismissedPushHandlesResponse, ResolvePushHandleBody, ResolvePushHandleResponse,
+    DismissedPushHandlesResponse, PushFetchBody, PushFetchResponse, ResolvePushHandleBody,
+    ResolvePushHandleResponse, PUSH_KIND_DM_REQUEST,
     DISMISSED_QUERY_MAX_HANDLES, DISMISS_MAX_CONVERSATIONS,
 };
 use rand::rngs::OsRng;
@@ -1125,6 +1126,120 @@ pub async fn resolve_push_handle(
     Ok(crate::writes::ok_response::<ResolvePushHandleBody>(
         ResolvePushHandleResponse { conversation_id, kind },
     ))
+}
+
+/// POST `/v1/push/fetch` — a push notification's resolve, Welcome read,
+/// catch-up and DM peer keys in ONE round trip (#1804).
+///
+/// Answers exactly what the separate endpoints would, for the verified signing
+/// device: the same scoping, the same "not yours reads as unknown". Nothing is
+/// written; the client acks Welcomes and advances watermarks as it always has.
+pub async fn push_fetch(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let parsed: PushFetchBody = match serde_json::from_slice(&req.body) {
+        Ok(b) => b,
+        Err(_) => return Ok(crate::writes::bad_request("invalid body")),
+    };
+    let who = match crate::reads::reader(
+        &state,
+        &req,
+        parsed.user_id.as_deref(),
+        parsed.device_id.as_deref(),
+    )
+    .await?
+    {
+        Ok(r) => r,
+        Err(resp) => return Ok(resp),
+    };
+    // A body naming a DIFFERENT user is a 403, not an ignored field.
+    if let Some(u) = parsed.user_id.as_deref() {
+        if state.require_auth && u != who.user_id {
+            return Ok(crate::error::AuthRejection::Forbidden.into_response());
+        }
+    }
+    let answer = push_fetch_answer(&state, &who, &parsed).await?;
+    Ok(crate::writes::ok_response::<PushFetchBody>(answer))
+}
+
+async fn push_fetch_answer(
+    state: &AppState,
+    who: &crate::reads::Reader,
+    parsed: &PushFetchBody,
+) -> Result<PushFetchResponse, AppError> {
+    let mut answer = PushFetchResponse {
+        conversation_id: None,
+        kind: None,
+        welcomes: None,
+        catch_up: None,
+        account_keys: Vec::new(),
+        account_keys_for: Vec::new(),
+    };
+    let found = {
+        let conn = state.db.conn().await?;
+        lookup_push_handle(&conn, &who.user_id, &parsed.handle).await?
+    };
+    let Some((conversation_id, kind)) = found else {
+        return Ok(answer);
+    };
+    let (want_envelopes, want_dm, want_welcomes) = match kind.as_str() {
+        "dm" => (true, true, true),
+        "channel" => (true, false, true),
+        // A request the user has not accepted: who is asking, nothing they wrote.
+        k if k == PUSH_KIND_DM_REQUEST => (false, true, false),
+        _ => {
+            answer.conversation_id = Some(conversation_id);
+            answer.kind = Some(kind);
+            return Ok(answer);
+        }
+    };
+    let catch_up_body = crate::directory::CatchUpBody {
+        conversation_id: conversation_id.clone(),
+        want_envelopes,
+        want_dm,
+        want_roster: false,
+        want_membership_version: false,
+        user_id: None,
+        device_id: None,
+    };
+    let welcomes = async {
+        if want_welcomes {
+            crate::reads::welcomes_answer(state, who, parsed.count_key_packages_in_suite)
+                .await
+                .map(Some)
+        } else {
+            Ok(None)
+        }
+    };
+    let catch_up = crate::directory::catch_up_answer(state, &who.user_id, &who.device_id, &catch_up_body);
+    let (welcomes, catch_up) = tokio::join!(welcomes, catch_up);
+    let catch_up = catch_up?;
+    // The peers whose keys the DM ingest re-verifies (TOFU), read here so it needs no
+    // second round trip. Only for a DM this user is in.
+    if kind == "dm" && catch_up.authorized {
+        let peers: Vec<String> = catch_up
+            .dm
+            .as_ref()
+            .map(|dm| {
+                dm.members
+                    .iter()
+                    .map(|m| m.user_id.clone())
+                    .filter(|id| id != &who.user_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !peers.is_empty() {
+            let conn = state.db.conn().await?;
+            answer.account_keys = crate::account_reads::account_key_rows(&conn, &peers).await?;
+            answer.account_keys_for = peers;
+        }
+    }
+    answer.conversation_id = Some(conversation_id);
+    answer.kind = Some(kind);
+    answer.welcomes = welcomes?;
+    answer.catch_up = Some(catch_up);
+    Ok(answer)
 }
 
 /// The scoped lookup: handle AND owner, inside the TTL.

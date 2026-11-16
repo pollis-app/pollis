@@ -341,7 +341,9 @@
     "nameOnlyBody": "یو پیغام یې ولېږه",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "د پیغام غوښتنه",
-    "requestBody": "{{sender}} غواړي تاسو ته پیغام ولېږي"
+    "requestBody": "{{sender}} غواړي تاسو ته پیغام ولېږي",
+    "fetchingChannel": "د پیغامونو رسول",
+    "fetchingBody": "د نویو پیغامونو کتنه کېږي"
   },
   "search": {
     "channels": "چینلونه",

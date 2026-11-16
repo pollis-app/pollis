@@ -418,6 +418,8 @@ fn is_read_path(path: &str) -> bool {
         || path == "/v1/mls/conversation-state"
         || path == "/v1/welcomes/fetch"
         || path == "/v1/messages/lookup"
+        // #1804: one push notification's resolve, Welcome read and catch-up in one request.
+        || path == "/v1/push/fetch"
 }
 
 /// Axum middleware: per-IP rate limiting for the whole service, keyed by [`ClientKey`] (#345).
@@ -524,6 +526,7 @@ mod tests {
         assert_eq!(tier("/v1/conversations/catch-up"), Some("read"));
         assert_eq!(tier("/v1/mls/conversation-state"), Some("read"));
         assert_eq!(tier("/v1/welcomes/fetch"), Some("read"));
+        assert_eq!(tier("/v1/push/fetch"), Some("read"));
         assert_eq!(tier("/v1/directory/group-by-slug"), Some("probe"));
         assert_eq!(tier("/v1/auth/account-probe"), Some("probe"));
         // A guessable-input WRITE belongs in the probe tier too (L3).

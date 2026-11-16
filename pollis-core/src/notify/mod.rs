@@ -7,6 +7,7 @@
 //! - [`escrow`]: the notification setting and the DB-key escrow it controls (security-relevant).
 //! - [`host`]: the data dir, the saved connection config and the iOS App Group migration.
 //! - [`preview`]: what a notification shows of a message body.
+//! - [`scope`]: one fetch's single-request prefetch and its deferred follow-up work (#1804).
 
 pub mod escrow;
 pub mod ffi;
@@ -14,3 +15,4 @@ pub mod fetch;
 pub mod host;
 pub mod lock;
 pub mod preview;
+pub mod scope;

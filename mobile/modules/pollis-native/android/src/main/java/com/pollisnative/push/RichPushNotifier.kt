@@ -1,6 +1,5 @@
 package com.pollisnative.push
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -73,20 +72,7 @@ class RichPushNotifier(private val context: Context) {
 
   /** JS creates it at startup (`lib/push/index.ts`); recreate with the same settings if it is gone. */
   private fun ensureChannel() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-      return
-    }
-    val system = context.getSystemService(NotificationManager::class.java) ?: return
-    if (system.getNotificationChannel(CHANNEL_ID) != null) {
-      return
-    }
-    val channel = NotificationChannel(
-      CHANNEL_ID,
-      context.getString(R.string.pollis_push_channel_messages),
-      NotificationManager.IMPORTANCE_DEFAULT,
-    )
-    channel.setShowBadge(false)
-    system.createNotificationChannel(channel)
+    ensureNotificationChannel(context, CHANNEL_ID, R.string.pollis_push_channel_messages, NotificationManager.IMPORTANCE_DEFAULT)
   }
 
   private fun base(handle: String, data: Map<String, String>, messageId: String?, sentTime: Long): NotificationCompat.Builder {

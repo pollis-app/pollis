@@ -14,4 +14,6 @@
     <string name="pollis_push_group_title">%1$s · %2$s</string>
     <string name="pollis_push_request_title">Ìbéèrè ìfiránṣẹ́</string>
     <string name="pollis_push_request_body">%1$s fẹ́ fi ìfiránṣẹ́ ránṣẹ́ sí ọ</string>
+    <string name="pollis_push_fetching_channel">Ìfijíṣẹ́ ìfiránṣẹ́</string>
+    <string name="pollis_push_fetching_body">Ń ṣàyẹ̀wò fún àwọn ìfiránṣẹ́ tuntun</string>
 </resources>
