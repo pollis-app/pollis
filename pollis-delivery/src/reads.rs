@@ -45,7 +45,7 @@ pub(crate) async fn reader_identity(
 /// Authenticate a read and resolve the reader identity.
 // The `Err` IS the response returned to the client, as elsewhere in this crate.
 #[allow(clippy::result_large_err)]
-async fn reader(
+pub(crate) async fn reader(
     state: &AppState,
     req: &RawRequest,
     body_user_id: Option<&str>,
@@ -617,13 +617,24 @@ pub async fn fetch_welcomes(
         }
     }
 
+    let answer = welcomes_answer(&state, &who, parsed.count_key_packages_in_suite).await?;
+    Ok(ok_response::<FetchWelcomesBody>(answer))
+}
+
+/// The `/v1/welcomes/fetch` answer for one verified reader; shared with
+/// `/v1/push/fetch` (#1804). Reads only: the client acks what it applied.
+pub(crate) async fn welcomes_answer(
+    state: &AppState,
+    who: &Reader,
+    count_key_packages_in_suite: Option<i64>,
+) -> Result<FetchWelcomesResponse, AppError> {
     let conn = state.log_db.conn().await?;
     let welcomes = pending_welcomes(&conn, &who.user_id, &who.device_id).await?;
 
     // #1412: this device's pool size, best-effort (the drain must never fail on it).
     // #1571: plus whether it holds a last-resort package.
     let (unclaimed_key_packages, has_last_resort_key_package) =
-        match parsed.count_key_packages_in_suite {
+        match count_key_packages_in_suite {
             Some(suite) => {
                 let counted = async {
                     let main = state.db.conn().await?;
@@ -655,11 +666,11 @@ pub async fn fetch_welcomes(
             None => (None, None),
         };
 
-    Ok(ok_response::<FetchWelcomesBody>(FetchWelcomesResponse {
+    Ok(FetchWelcomesResponse {
         welcomes,
         unclaimed_key_packages,
         has_last_resort_key_package,
-    }))
+    })
 }
 
 /// The undelivered Welcomes for one `(user, device)`, oldest first, legacy rows included.

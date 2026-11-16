@@ -381,6 +381,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<devices::ResignDeviceCertsBody as DsRequest>::PATH, post(devices::resign_device_certs))
         .route(<devices::PushTokenBody as DsRequest>::PATH, post(devices::register_push_token))
         .route(<devices::ResolvePushHandleBody as DsRequest>::PATH, post(push::resolve_push_handle))
+        // #1804: a push's resolve, Welcome read and catch-up in one request.
+        .route(<devices::PushFetchBody as DsRequest>::PATH, post(push::push_fetch))
         // #1508: a read clears its notifications on every device.
         .route(<devices::DismissPushBody as DsRequest>::PATH, post(push::dismiss_push))
         .route(<devices::DismissedPushHandlesBody as DsRequest>::PATH, post(push::read_dismissed_push_handles))

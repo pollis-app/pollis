@@ -234,6 +234,7 @@ endpoints! {
     Client   devices::ResignDeviceCertsBody     => "/v1/devices/resign",                 StatusOk;
     Client   devices::PushTokenBody             => "/v1/push-tokens",                    StatusOk;
     Client   devices::ResolvePushHandleBody     => "/v1/push/resolve",                   devices::ResolvePushHandleResponse;
+    Client   devices::PushFetchBody             => "/v1/push/fetch",                     devices::PushFetchResponse;
     Client   devices::DismissPushBody           => "/v1/push/dismiss",                   devices::DismissPushResponse;
     Client   devices::DismissedPushHandlesBody  => "/v1/push/dismissed",                 devices::DismissedPushHandlesResponse;
 

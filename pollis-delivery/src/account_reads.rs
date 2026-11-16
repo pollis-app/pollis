@@ -42,8 +42,18 @@ pub async fn account_keys(
     }
 
     let conn = state.db.conn().await?;
+    let keys = account_key_rows(&conn, &parsed.user_ids).await?;
+    Ok(ok_response::<AccountKeysBody>(AccountKeysResponse { keys }))
+}
+
+/// Each user's `account_id_pub`; a user with no key is omitted. Shared with
+/// `/v1/push/fetch` (#1804).
+pub(crate) async fn account_key_rows(
+    conn: &libsql::Connection,
+    user_ids: &[String],
+) -> Result<Vec<AccountKeyRow>, AppError> {
     let mut keys = Vec::new();
-    for chunk in parsed.user_ids.chunks(BIND_CHUNK) {
+    for chunk in user_ids.chunks(BIND_CHUNK) {
         let sql = format!(
             "SELECT id, account_id_pub, identity_version FROM users WHERE id IN ({})",
             placeholders(chunk.len(), 1)
@@ -62,7 +72,7 @@ pub async fn account_keys(
             });
         }
     }
-    Ok(ok_response::<AccountKeysBody>(AccountKeysResponse { keys }))
+    Ok(keys)
 }
 
 /// POST `/v1/read/devices` — a user's devices, with the columns the caller is
