@@ -35,6 +35,9 @@ tags:
     id: "row-preferences-language"
 - assertVisible:
     id: "screen-self-language"
+# The drill-in is still sliding when the screen is first visible; a tap then
+# lands short of the row.
+- waitForAnimationToEnd
 - assertVisible:
     id: "pref-language-heading"
     text: "Language"
@@ -68,6 +71,9 @@ tags:
     id: "row-self-language"
 - assertVisible:
     id: "screen-self-language"
+# The drill-in is still sliding when the screen is first visible; a tap then
+# lands short of the row.
+- waitForAnimationToEnd
 - assertVisible:
     id: "pref-language-heading"
     text: "Idioma"
@@ -100,6 +106,9 @@ tags:
     id: "row-preferences-language"
 - assertVisible:
     id: "screen-self-language"
+# The drill-in is still sliding when the screen is first visible; a tap then
+# lands short of the row.
+- waitForAnimationToEnd
 # Mirrored now: the restart notice is gone and the back affordance sits on the
 # trailing (right) edge — the screenshot is what the visual evaluator checks.
 - assertNotVisible:
