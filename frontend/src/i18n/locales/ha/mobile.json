@@ -342,7 +342,9 @@
     "nameOnlyBody": "An aiko saƙo",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "Buƙatar saƙo",
-    "requestBody": "{{sender}} na son aiko muku da saƙo"
+    "requestBody": "{{sender}} na son aiko muku da saƙo",
+    "fetchingChannel": "Isar da saƙonni",
+    "fetchingBody": "Ana duba sababbin saƙonni"
   },
   "search": {
     "channels": "Tashoshi",

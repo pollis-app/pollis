@@ -14,4 +14,6 @@
     <string name="pollis_push_group_title">%1$s · %2$s</string>
     <string name="pollis_push_request_title">سنیہے دی درخواست</string>
     <string name="pollis_push_request_body">%1$s تہانوں سنیہا بھیجنا چاہندا اے</string>
+    <string name="pollis_push_fetching_channel">سنیہیاں دی ترسیل</string>
+    <string name="pollis_push_fetching_body">نویں سنیہیاں دی جانچ کیتی جا رہی اے</string>
 </resources>

@@ -342,7 +342,9 @@
     "nameOnlyBody": "ఒక మెసేజ్ పంపారు",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "మెసేజ్ అభ్యర్థన",
-    "requestBody": "{{sender}} మీకు మెసేజ్ చేయాలనుకుంటున్నారు"
+    "requestBody": "{{sender}} మీకు మెసేజ్ చేయాలనుకుంటున్నారు",
+    "fetchingChannel": "మెసేజ్ డెలివరీ",
+    "fetchingBody": "కొత్త మెసేజ్‌ల కోసం చూస్తోంది"
   },
   "search": {
     "channels": "ఛానెల్‌లు",

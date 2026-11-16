@@ -14,4 +14,6 @@
     <string name="pollis_push_group_title">%1$s · %2$s</string>
     <string name="pollis_push_request_title">ਸੁਨੇਹਾ ਬੇਨਤੀ</string>
     <string name="pollis_push_request_body">%1$s ਤੁਹਾਨੂੰ ਸੁਨੇਹਾ ਭੇਜਣਾ ਚਾਹੁੰਦਾ ਹੈ</string>
+    <string name="pollis_push_fetching_channel">ਸੁਨੇਹਿਆਂ ਦੀ ਡਿਲੀਵਰੀ</string>
+    <string name="pollis_push_fetching_body">ਨਵੇਂ ਸੁਨੇਹਿਆਂ ਦੀ ਜਾਂਚ ਕੀਤੀ ਜਾ ਰਹੀ ਹੈ</string>
 </resources>

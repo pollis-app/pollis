@@ -14,4 +14,6 @@
     <string name="pollis_push_group_title">%1$s · %2$s</string>
     <string name="pollis_push_request_title">செய்தி கோரிக்கை</string>
     <string name="pollis_push_request_body">%1$s உங்களுக்குச் செய்தி அனுப்ப விரும்புகிறார்</string>
+    <string name="pollis_push_fetching_channel">செய்தி விநியோகம்</string>
+    <string name="pollis_push_fetching_body">புதிய செய்திகளைச் சரிபார்க்கிறது</string>
 </resources>

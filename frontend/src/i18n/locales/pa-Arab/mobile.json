@@ -342,7 +342,9 @@
     "nameOnlyBody": "اک سنیہا بھیجیا",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "سنیہے دی درخواست",
-    "requestBody": "{{sender}} تہانوں سنیہا بھیجنا چاہندا اے"
+    "requestBody": "{{sender}} تہانوں سنیہا بھیجنا چاہندا اے",
+    "fetchingChannel": "سنیہیاں دی ترسیل",
+    "fetchingBody": "نویں سنیہیاں دی جانچ کیتی جا رہی اے"
   },
   "search": {
     "channels": "چینل",

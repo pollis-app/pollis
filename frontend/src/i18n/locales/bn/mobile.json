@@ -342,7 +342,9 @@
     "nameOnlyBody": "একটি মেসেজ পাঠিয়েছেন",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "মেসেজ অনুরোধ",
-    "requestBody": "{{sender}} আপনাকে মেসেজ পাঠাতে চান"
+    "requestBody": "{{sender}} আপনাকে মেসেজ পাঠাতে চান",
+    "fetchingChannel": "মেসেজ ডেলিভারি",
+    "fetchingBody": "নতুন মেসেজ দেখা হচ্ছে"
   },
   "search": {
     "channels": "চ্যানেল",
