@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "Àwọn tí a fi pamọ́",
+    "unresolved": "O kò ní ìfiránṣẹ́ yìí lórí ẹ̀rọ yìí.",
+    "empty": "Kò sí ìfiránṣẹ́ tí a fi pamọ́. Lo àmì ìfipamọ́ lórí ìfiránṣẹ́ kan láti fi pamọ́.",
+    "unsave": "yọ kúrò nínú ìfipamọ́"
+  },
+  "row": {
+    "conversationFallback": "ìjíròrò",
+    "noText": "(kò sí ọ̀rọ̀)",
+    "unavailable": "O kò ní ìfiránṣẹ́ yìí lórí ẹ̀rọ yìí."
+  }
+}

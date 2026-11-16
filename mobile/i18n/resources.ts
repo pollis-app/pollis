@@ -322,6 +322,21 @@ import ur_search from "../../frontend/src/i18n/locales/ur/search.json";
 import ur_settings from "../../frontend/src/i18n/locales/ur/settings.json";
 import ur_vault from "../../frontend/src/i18n/locales/ur/vault.json";
 import ur_voice from "../../frontend/src/i18n/locales/ur/voice.json";
+import yo_arcade from "../../frontend/src/i18n/locales/yo/arcade.json";
+import yo_auth from "../../frontend/src/i18n/locales/yo/auth.json";
+import yo_channels from "../../frontend/src/i18n/locales/yo/channels.json";
+import yo_chat from "../../frontend/src/i18n/locales/yo/chat.json";
+import yo_common from "../../frontend/src/i18n/locales/yo/common.json";
+import yo_dms from "../../frontend/src/i18n/locales/yo/dms.json";
+import yo_emoji from "../../frontend/src/i18n/locales/yo/emoji.json";
+import yo_errors from "../../frontend/src/i18n/locales/yo/errors.json";
+import yo_mobile from "../../frontend/src/i18n/locales/yo/mobile.json";
+import yo_nav from "../../frontend/src/i18n/locales/yo/nav.json";
+import yo_saved from "../../frontend/src/i18n/locales/yo/saved.json";
+import yo_search from "../../frontend/src/i18n/locales/yo/search.json";
+import yo_settings from "../../frontend/src/i18n/locales/yo/settings.json";
+import yo_vault from "../../frontend/src/i18n/locales/yo/vault.json";
+import yo_voice from "../../frontend/src/i18n/locales/yo/voice.json";
 import zh_arcade from "../../frontend/src/i18n/locales/zh/arcade.json";
 import zh_auth from "../../frontend/src/i18n/locales/zh/auth.json";
 import zh_channels from "../../frontend/src/i18n/locales/zh/channels.json";
@@ -697,6 +712,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ur_settings,
     "vault": ur_vault,
     "voice": ur_voice,
+  },
+  "yo": {
+    "arcade": yo_arcade,
+    "auth": yo_auth,
+    "channels": yo_channels,
+    "chat": yo_chat,
+    "common": yo_common,
+    "dms": yo_dms,
+    "emoji": yo_emoji,
+    "errors": yo_errors,
+    "mobile": yo_mobile,
+    "nav": yo_nav,
+    "saved": yo_saved,
+    "search": yo_search,
+    "settings": yo_settings,
+    "vault": yo_vault,
+    "voice": yo_voice,
   },
   "zh": {
     "arcade": zh_arcade,

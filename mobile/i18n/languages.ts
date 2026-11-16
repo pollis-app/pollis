@@ -35,6 +35,7 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "pt", label: "Português", dir: "ltr" },
   { code: "ha", label: "Hausa", dir: "ltr" },
   { code: "am", label: "አማርኛ", dir: "ltr" },
+  { code: "yo", label: "Èdè Yorùbá", dir: "ltr" },
 ];
 
 export function supportedLanguageCodes(): string[] {

@@ -38,6 +38,7 @@ const SHIPPED_LANGUAGES: readonly LanguageOption[] = [
   { code: "pt", label: "Português", dir: "ltr" },
   { code: "ha", label: "Hausa", dir: "ltr" },
   { code: "am", label: "አማርኛ", dir: "ltr" },
+  { code: "yo", label: "Èdè Yorùbá", dir: "ltr" },
 ];
 
 /** The live registry; Playwright may add a synthetic locale (`registerTestLanguage`). */

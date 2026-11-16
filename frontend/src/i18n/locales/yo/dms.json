@@ -1,0 +1,77 @@
+{
+  "list": {
+    "newMessage": "Ìfiránṣẹ́ Tuntun",
+    "requests": "Ìbéèrè",
+    "blocked": "Àwọn Olùmúlò Tí A Dènà",
+    "avatarAlt": "Àwòrán {{name}}",
+    "settingsFor": "Ètò fún {{name}}",
+    "verified": "Olùbásọ̀rọ̀ tí a ti jẹ́rìísí",
+    "keyChanged": "Kọ́kọ́rọ́ ìdánimọ̀ ti yí padà — tún jẹ́rìísí"
+  },
+  "conversation": {
+    "fallbackTitle": "Ìfiránṣẹ́ àdáni",
+    "viewProfile": "Wo profáìlì @{{name}}",
+    "call": "Pe @{{name}}",
+    "returnToCall": "Padà sí ìpè pẹ̀lú @{{name}}",
+    "pinsLabel": "Ìfiránṣẹ́ tí a lẹ̀ mọ́ òkè"
+  },
+  "settings": {
+    "pageTitle": "Ètò Ìjíròrò",
+    "leave": "Kúrò nínú ìjíròrò",
+    "submitting": "Ó ń kúrò…",
+    "leaveFailed": "Kò ṣeé ṣe láti kúrò nínú ìjíròrò",
+    "cancel": "Fagilé (Esc)"
+  },
+  "start": {
+    "pageTitle": "Ìfiránṣẹ́ Tuntun",
+    "identifierLabel": "Orúkọ olùmúlò tàbí Ímeèlì",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "Bẹ̀rẹ̀ Ìjíròrò",
+    "submitting": "Ó ń bẹ̀rẹ̀…",
+    "identifierRequired": "A nílò ìdánimọ̀ olùmúlò",
+    "userNotFound": "A kò rí olùmúlò náà",
+    "startFailed": "Kò ṣeé ṣe láti bẹ̀rẹ̀ ìjíròrò"
+  },
+  "requests": {
+    "pageTitle": "Ìbéèrè ìfiránṣẹ́",
+    "empty": "Kò sí ìbéèrè tó ń dúró.",
+    "noMessageYet": "(kò sí ìfiránṣẹ́ síbẹ̀)",
+    "unknownSender": "Àìmọ̀",
+    "others_other": "(+{{count}} míì)",
+    "accept": "gbà",
+    "block": "dènà"
+  },
+  "blocked": {
+    "pageTitle": "Àwọn Olùmúlò Tí A Dènà",
+    "empty": "Kò sí olùmúlò tí a dènà.",
+    "unblock": "mú ìdènà kúrò"
+  },
+  "profile": {
+    "fallbackName": "Olùmúlò",
+    "fallbackTitle": "Profáìlì",
+    "notFound": "A kò rí olùmúlò náà",
+    "avatarAlt": "Àwòrán {{name}}",
+    "sendMessage": "Fi Ìfiránṣẹ́ Ránṣẹ́",
+    "block": "Dènà",
+    "safetyNumber": "Nọ́mbà ààbò",
+    "statusVerified": "A ti jẹ́rìísí",
+    "statusChanged": "Ó ti yí padà — tún jẹ́rìísí",
+    "statusUnverified": "A kò tíì jẹ́rìísí",
+    "keyChangedWarning": "Kọ́kọ́rọ́ ìdánimọ̀ olùbásọ̀rọ̀ yìí ti yí padà láti ìgbà tí o jẹ́rìísí rẹ̀ kẹ́yìn. Tún fi nọ́mbà náà wéra ní ọ̀nà míì lẹ́yìn áàpù yìí kí o tó gbẹ́kẹ̀lé e.",
+    "removeVerification": "Yọ ìjẹ́rìísí kúrò",
+    "markVerified": "Sàmì sí i pé a ti jẹ́rìísí",
+    "report": "Fi ẹjọ́ sùn"
+  },
+  "safety": {
+    "title": "Ìwọ àti {{name}}",
+    "verify": "Jẹ́rìísí nọ́mbà ààbò",
+    "headingMany": "Nọ́mbà ààbò",
+    "shared": "Ìwọ àti {{name}} rí nọ́mbà kan náà. Fi í wéra lójúkojú tàbí lórí ìpè láti rí i dájú pé kò sí ẹnikẹ́ni láàrin yín.",
+    "qrLabel": "Kóòdù QR ti nọ́mbà ààbò tí ìwọ àti {{name}} jọ ní",
+    "failed": "Kò ṣeé ṣe láti gbé nọ́mbà ààbò wọlé."
+  },
+  "notify": {
+    "requestTitle": "Ìjíròrò tuntun",
+    "requestBody": "{{name}} bẹ̀rẹ̀ ìjíròrò pẹ̀lú rẹ"
+  }
+}

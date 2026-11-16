@@ -89,6 +89,10 @@
       "annotations": "c922699d0eb51157a49d86957eaeb19af51503e6e4cefe75fda6678728a642a4",
       "annotationsDerived": "50dc11c9af3b34cfd38cc0a9d2840daad21a4ca0a184bc9906dc133d40a49936"
     },
+    "yo": {
+      "annotations": "3cec516ef18446c505465ce99db9e183004afc09e68d3fe7eba251c792e18710",
+      "annotationsDerived": "ab4b373f3ec18086043f0527b8be8bf9ca138de2f69044a45835aa446436ed46"
+    },
     "zh": {
       "annotations": "92389f71659998736530c72d4dcc86e453fe0be170cde5c5ad27094cab2a2de8",
       "annotationsDerived": "777acebb7c4ed103c34f5605881a2537656e0a17d9d1127518da7cd54f612bcc"
@@ -241842,6 +241846,8637 @@
         "خفیہ",
         "گول",
         "گول خفیہ کی تصویری علامت"
+      ]
+    },
+    "yo": {
+      "00A9": [
+        "òfin ìdábòbò iṣẹ́"
+      ],
+      "00AE": [
+        "ìforúkọsílẹ"
+      ],
+      "1F004": [
+        "dragoni pupa mahjong",
+        "eré",
+        "mahjong",
+        "pupa"
+      ],
+      "1F0CF": [
+        "joka",
+        "eré",
+        "káàdì",
+        "káàdí ọlọ́pọ̀ ìlò"
+      ],
+      "1F170": [
+        "bọ́tìnì a (irúfé̩ ẹ̀jẹ̀)",
+        "a",
+        "irúfẹ́ ẹ̀jẹ̀"
+      ],
+      "1F171": [
+        "bọ́tìnì b(irúfé̩ ẹ̀jẹ̀)",
+        "b",
+        "irúfé̩ ẹ̀jẹ̀"
+      ],
+      "1F17E": [
+        "bọ́tìnì o (irúfé̩ èjè)",
+        "irúfé̩ èjè",
+        "o"
+      ],
+      "1F17F": [
+        "bó̩tìnì p",
+        "àyè ìgbékọ̀sí"
+      ],
+      "1F18E": [
+        "bọtini ab (irufẹ ẹjẹ)",
+        "ab",
+        "irúfé̩ ẹ̀jẹ̀"
+      ],
+      "1F191": [
+        "bọtini cl",
+        "cl"
+      ],
+      "1F192": [
+        "bọtini kuulu",
+        "tútù"
+      ],
+      "1F193": [
+        "bọtini ọfẹ",
+        "ọ̀fẹ́"
+      ],
+      "1F194": [
+        "bọtini id",
+        "ìdánimò̩"
+      ],
+      "1F195": [
+        "bọtini tuntun",
+        "tuntun"
+      ],
+      "1F196": [
+        "bọtini ng",
+        "ng"
+      ],
+      "1F197": [
+        "bọtini dara",
+        "ó dára"
+      ],
+      "1F198": [
+        "bọtini sos",
+        "ìrànwọ́",
+        "sos"
+      ],
+      "1F199": [
+        "oke! bọ̀tìnì",
+        "oke! oke! oke! bọ̀tìnì"
+      ],
+      "1F19A": [
+        "bọtini vs",
+        "figagbága pẹ̀lú",
+        "fp"
+      ],
+      "1F1E6-1F1E9": [
+        "filaagi: ààndórà",
+        "filaagi"
+      ],
+      "1F1E6-1F1EA": [
+        "filaagi: ẹmirate ti awọn arabu",
+        "filaagi"
+      ],
+      "1F1E6-1F1EB": [
+        "filaagi: àfùgànístánì",
+        "filaagi"
+      ],
+      "1F1E6-1F1EC": [
+        "filaagi: ààntígúà àti báríbúdà",
+        "filaagi"
+      ],
+      "1F1E6-1F1EE": [
+        "filaagi: ààngúlílà",
+        "filaagi"
+      ],
+      "1F1E6-1F1F1": [
+        "filaagi: àlùbàníánì",
+        "filaagi"
+      ],
+      "1F1E6-1F1F2": [
+        "filaagi: améníà",
+        "filaagi"
+      ],
+      "1F1E6-1F1F4": [
+        "filaagi: ààngólà",
+        "filaagi"
+      ],
+      "1F1E6-1F1F6": [
+        "filaagi: antakítíkà",
+        "filaagi"
+      ],
+      "1F1E6-1F1F7": [
+        "filaagi: agentínà",
+        "filaagi"
+      ],
+      "1F1E6-1F1F8": [
+        "filaagi: sámóánì ti orílẹ́ède àméríkà",
+        "filaagi"
+      ],
+      "1F1E6-1F1F9": [
+        "filaagi: asítíríà",
+        "filaagi"
+      ],
+      "1F1E6-1F1FA": [
+        "filaagi: austrálíà",
+        "filaagi"
+      ],
+      "1F1E6-1F1FC": [
+        "filaagi: árúbà",
+        "filaagi"
+      ],
+      "1F1E6-1F1FD": [
+        "filaagi: àwọn erékùsù ti aland",
+        "filaagi"
+      ],
+      "1F1E6-1F1FF": [
+        "filaagi: asẹ́bájánì",
+        "filaagi"
+      ],
+      "1F1E7-1F1E6": [
+        "filaagi: bọ̀síníà àti ẹtisẹgófínà",
+        "filaagi"
+      ],
+      "1F1E7-1F1E7": [
+        "filaagi: bábádósì",
+        "filaagi"
+      ],
+      "1F1E7-1F1E9": [
+        "filaagi: bángáládésì",
+        "filaagi"
+      ],
+      "1F1E7-1F1EA": [
+        "filaagi: bégíọ́mù",
+        "filaagi"
+      ],
+      "1F1E7-1F1EB": [
+        "filaagi: bùùkíná fasò",
+        "filaagi"
+      ],
+      "1F1E7-1F1EC": [
+        "filaagi: bùùgáríà",
+        "filaagi"
+      ],
+      "1F1E7-1F1ED": [
+        "filaagi: báránì",
+        "filaagi"
+      ],
+      "1F1E7-1F1EE": [
+        "filaagi: bùùrúndì",
+        "filaagi"
+      ],
+      "1F1E7-1F1EF": [
+        "filaagi: bẹ̀nẹ̀",
+        "filaagi"
+      ],
+      "1F1E7-1F1F1": [
+        "filaagi: ìlú bátílẹ́mì",
+        "filaagi"
+      ],
+      "1F1E7-1F1F2": [
+        "filaagi: bémúdà",
+        "filaagi"
+      ],
+      "1F1E7-1F1F3": [
+        "filaagi: búrúnẹ́lì",
+        "filaagi"
+      ],
+      "1F1E7-1F1F4": [
+        "filaagi: bọ̀lífíyà",
+        "filaagi"
+      ],
+      "1F1E7-1F1F6": [
+        "filaagi: kàríbíánì ti nẹ́dálándì",
+        "filaagi"
+      ],
+      "1F1E7-1F1F7": [
+        "filaagi: bàràsílì",
+        "filaagi"
+      ],
+      "1F1E7-1F1F8": [
+        "filaagi: bàhámásì",
+        "filaagi"
+      ],
+      "1F1E7-1F1F9": [
+        "filaagi: bútánì",
+        "filaagi"
+      ],
+      "1F1E7-1F1FB": [
+        "filaagi: erékùsù bouvet",
+        "filaagi"
+      ],
+      "1F1E7-1F1FC": [
+        "filaagi: bọ̀tìsúwánà",
+        "filaagi"
+      ],
+      "1F1E7-1F1FE": [
+        "filaagi: bélárúsì",
+        "filaagi"
+      ],
+      "1F1E7-1F1FF": [
+        "filaagi: bèlísẹ̀",
+        "filaagi"
+      ],
+      "1F1E8-1F1E6": [
+        "filaagi: kánádà",
+        "filaagi"
+      ],
+      "1F1E8-1F1E8": [
+        "filaagi: erékùsù cocos (keeling)",
+        "filaagi"
+      ],
+      "1F1E8-1F1E9": [
+        "filaagi: kóńgò – kinshasa",
+        "filaagi"
+      ],
+      "1F1E8-1F1EB": [
+        "filaagi: àrin gùngun áfíríkà",
+        "filaagi"
+      ],
+      "1F1E8-1F1EC": [
+        "filaagi: kóńgò – brazaville",
+        "filaagi"
+      ],
+      "1F1E8-1F1ED": [
+        "filaagi: súwísìlanìdì",
+        "filaagi"
+      ],
+      "1F1E8-1F1EE": [
+        "filaagi: kóútè forà",
+        "filaagi"
+      ],
+      "1F1E8-1F1F0": [
+        "filaagi: etíokun kùúkù",
+        "filaagi"
+      ],
+      "1F1E8-1F1F1": [
+        "filaagi: ṣílè",
+        "filaagi"
+      ],
+      "1F1E8-1F1F2": [
+        "filaagi: kamerúúnì",
+        "filaagi"
+      ],
+      "1F1E8-1F1F3": [
+        "filaagi: ṣáínà",
+        "filaagi"
+      ],
+      "1F1E8-1F1F4": [
+        "filaagi: kòlómíbìa",
+        "filaagi"
+      ],
+      "1F1E8-1F1F7": [
+        "filaagi: kuusita ríkà",
+        "filaagi"
+      ],
+      "1F1E8-1F1FA": [
+        "filaagi: kúbà",
+        "filaagi"
+      ],
+      "1F1E8-1F1FB": [
+        "filaagi: etíokun kápé féndè",
+        "filaagi"
+      ],
+      "1F1E8-1F1FC": [
+        "filaagi: curaçao",
+        "filaagi"
+      ],
+      "1F1E8-1F1FD": [
+        "filaagi: erékùsù christmas",
+        "filaagi"
+      ],
+      "1F1E8-1F1FE": [
+        "filaagi: kúrúsì",
+        "filaagi"
+      ],
+      "1F1E8-1F1FF": [
+        "filaagi: ṣẹ́ẹ́kì",
+        "filaagi"
+      ],
+      "1F1E9-1F1EA": [
+        "filaagi: jámánì",
+        "filaagi"
+      ],
+      "1F1E9-1F1EF": [
+        "filaagi: díbọ́ótì",
+        "filaagi"
+      ],
+      "1F1E9-1F1F0": [
+        "filaagi: dẹ́mákì",
+        "filaagi"
+      ],
+      "1F1E9-1F1F2": [
+        "filaagi: dòmíníkà",
+        "filaagi"
+      ],
+      "1F1E9-1F1F4": [
+        "filaagi: dòmíníkánì",
+        "filaagi"
+      ],
+      "1F1E9-1F1FF": [
+        "filaagi: àlùgèríánì",
+        "filaagi"
+      ],
+      "1F1EA-1F1E8": [
+        "filaagi: ekuádò",
+        "filaagi"
+      ],
+      "1F1EA-1F1EA": [
+        "filaagi: esitonia",
+        "filaagi"
+      ],
+      "1F1EA-1F1EC": [
+        "filaagi: égípítì",
+        "filaagi"
+      ],
+      "1F1EA-1F1ED": [
+        "filaagi: ìwọ̀òòrùn sàhárà",
+        "filaagi"
+      ],
+      "1F1EA-1F1F7": [
+        "filaagi: eritira",
+        "filaagi"
+      ],
+      "1F1EA-1F1F8": [
+        "filaagi: sípéìnì",
+        "filaagi"
+      ],
+      "1F1EA-1F1F9": [
+        "filaagi: etopia",
+        "filaagi"
+      ],
+      "1F1EB-1F1EE": [
+        "filaagi: filandi",
+        "filaagi"
+      ],
+      "1F1EB-1F1EF": [
+        "filaagi: fíjì",
+        "filaagi"
+      ],
+      "1F1EB-1F1F0": [
+        "filaagi: etikun fakalandi",
+        "filaagi"
+      ],
+      "1F1EB-1F1F2": [
+        "filaagi: makoronesia",
+        "filaagi"
+      ],
+      "1F1EB-1F1F4": [
+        "filaagi: àwọn erékùsù ti faroe",
+        "filaagi"
+      ],
+      "1F1EB-1F1F7": [
+        "filaagi: faranse",
+        "filaagi"
+      ],
+      "1F1EC-1F1E6": [
+        "filaagi: gabon",
+        "filaagi"
+      ],
+      "1F1EC-1F1E7": [
+        "filaagi: gẹ̀ẹ́sì",
+        "filaagi"
+      ],
+      "1F1EC-1F1E9": [
+        "filaagi: genada",
+        "filaagi"
+      ],
+      "1F1EC-1F1EA": [
+        "filaagi: gọgia",
+        "filaagi"
+      ],
+      "1F1EC-1F1EB": [
+        "filaagi: firenṣi guana",
+        "filaagi"
+      ],
+      "1F1EC-1F1EC": [
+        "filaagi: guernsey",
+        "filaagi"
+      ],
+      "1F1EC-1F1ED": [
+        "filaagi: gana",
+        "filaagi"
+      ],
+      "1F1EC-1F1EE": [
+        "filaagi: gibaratara",
+        "filaagi"
+      ],
+      "1F1EC-1F1F1": [
+        "filaagi: gerelandi",
+        "filaagi"
+      ],
+      "1F1EC-1F1F2": [
+        "filaagi: gambia",
+        "filaagi"
+      ],
+      "1F1EC-1F1F3": [
+        "filaagi: gene",
+        "filaagi"
+      ],
+      "1F1EC-1F1F5": [
+        "filaagi: gadelope",
+        "filaagi"
+      ],
+      "1F1EC-1F1F6": [
+        "filaagi: ekutoria gini",
+        "filaagi"
+      ],
+      "1F1EC-1F1F7": [
+        "filaagi: gíríìsì",
+        "filaagi"
+      ],
+      "1F1EC-1F1F8": [
+        "filaagi: gúúsù georgia àti gúúsù àwọn erékùsù sandwich",
+        "filaagi"
+      ],
+      "1F1EC-1F1F9": [
+        "filaagi: guatemálà",
+        "filaagi"
+      ],
+      "1F1EC-1F1FA": [
+        "filaagi: guamu",
+        "filaagi"
+      ],
+      "1F1EC-1F1FC": [
+        "filaagi: gene-busau",
+        "filaagi"
+      ],
+      "1F1EC-1F1FE": [
+        "filaagi: guyana",
+        "filaagi"
+      ],
+      "1F1ED-1F1F0": [
+        "filaagi: agbègbè ìṣàkóso ìṣúná hong kong tí ṣánà ń darí",
+        "filaagi"
+      ],
+      "1F1ED-1F1F2": [
+        "filaagi: erékùsù heard àti erékùsù mcdonald",
+        "filaagi"
+      ],
+      "1F1ED-1F1F3": [
+        "filaagi: hondurasi",
+        "filaagi"
+      ],
+      "1F1ED-1F1F7": [
+        "filaagi: kòróátíà",
+        "filaagi"
+      ],
+      "1F1ED-1F1F9": [
+        "filaagi: haati",
+        "filaagi"
+      ],
+      "1F1ED-1F1FA": [
+        "filaagi: hungari",
+        "filaagi"
+      ],
+      "1F1EE-1F1E9": [
+        "filaagi: indonéṣíà",
+        "filaagi"
+      ],
+      "1F1EE-1F1EA": [
+        "filaagi: ailandi",
+        "filaagi"
+      ],
+      "1F1EE-1F1F1": [
+        "filaagi: iserẹli",
+        "filaagi"
+      ],
+      "1F1EE-1F1F2": [
+        "filaagi: erékùṣù ilẹ̀ man",
+        "filaagi"
+      ],
+      "1F1EE-1F1F3": [
+        "filaagi: íńdíà",
+        "filaagi"
+      ],
+      "1F1EE-1F1F4": [
+        "filaagi: etíkun índíánì ti ìlú bírítísì",
+        "filaagi"
+      ],
+      "1F1EE-1F1F6": [
+        "filaagi: iraki",
+        "filaagi"
+      ],
+      "1F1EE-1F1F7": [
+        "filaagi: irani",
+        "filaagi"
+      ],
+      "1F1EE-1F1F8": [
+        "filaagi: aṣilandi",
+        "filaagi"
+      ],
+      "1F1EE-1F1F9": [
+        "filaagi: itáli",
+        "filaagi"
+      ],
+      "1F1EF-1F1EA": [
+        "filaagi: jẹsì",
+        "filaagi"
+      ],
+      "1F1EF-1F1F2": [
+        "filaagi: jamaika",
+        "filaagi"
+      ],
+      "1F1EF-1F1F4": [
+        "filaagi: jọdani",
+        "filaagi"
+      ],
+      "1F1EF-1F1F5": [
+        "filaagi: japani",
+        "filaagi"
+      ],
+      "1F1F0-1F1EA": [
+        "filaagi: kenya",
+        "filaagi"
+      ],
+      "1F1F0-1F1EC": [
+        "filaagi: kuriṣisitani",
+        "filaagi"
+      ],
+      "1F1F0-1F1ED": [
+        "filaagi: kàmùbódíà",
+        "filaagi"
+      ],
+      "1F1F0-1F1EE": [
+        "filaagi: kiribati",
+        "filaagi"
+      ],
+      "1F1F0-1F1F2": [
+        "filaagi: kòmòrósì",
+        "filaagi"
+      ],
+      "1F1F0-1F1F3": [
+        "filaagi: kiiti ati neefi",
+        "filaagi"
+      ],
+      "1F1F0-1F1F5": [
+        "filaagi: guusu kọria",
+        "filaagi"
+      ],
+      "1F1F0-1F1F7": [
+        "filaagi: ariwa kọria",
+        "filaagi"
+      ],
+      "1F1F0-1F1FC": [
+        "filaagi: kuweti",
+        "filaagi"
+      ],
+      "1F1F0-1F1FE": [
+        "filaagi: etíokun kámánì",
+        "filaagi"
+      ],
+      "1F1F0-1F1FF": [
+        "filaagi: kaṣaṣatani",
+        "filaagi"
+      ],
+      "1F1F1-1F1E6": [
+        "filaagi: laosi",
+        "filaagi"
+      ],
+      "1F1F1-1F1E7": [
+        "filaagi: lebanoni",
+        "filaagi"
+      ],
+      "1F1F1-1F1E8": [
+        "filaagi: luṣia",
+        "filaagi"
+      ],
+      "1F1F1-1F1EE": [
+        "filaagi: lẹṣitẹnisiteni",
+        "filaagi"
+      ],
+      "1F1F1-1F1F0": [
+        "filaagi: siri lanka",
+        "filaagi"
+      ],
+      "1F1F1-1F1F7": [
+        "filaagi: laberia",
+        "filaagi"
+      ],
+      "1F1F1-1F1F8": [
+        "filaagi: lesoto",
+        "filaagi"
+      ],
+      "1F1F1-1F1F9": [
+        "filaagi: lituania",
+        "filaagi"
+      ],
+      "1F1F1-1F1FA": [
+        "filaagi: lusemogi",
+        "filaagi"
+      ],
+      "1F1F1-1F1FB": [
+        "filaagi: latifia",
+        "filaagi"
+      ],
+      "1F1F1-1F1FE": [
+        "filaagi: libiya",
+        "filaagi"
+      ],
+      "1F1F2-1F1E6": [
+        "filaagi: moroko",
+        "filaagi"
+      ],
+      "1F1F2-1F1E8": [
+        "filaagi: monako",
+        "filaagi"
+      ],
+      "1F1F2-1F1E9": [
+        "filaagi: modofia",
+        "filaagi"
+      ],
+      "1F1F2-1F1EA": [
+        "filaagi: montenégrò",
+        "filaagi"
+      ],
+      "1F1F2-1F1EB": [
+        "filaagi: ìlú màtìnì",
+        "filaagi"
+      ],
+      "1F1F2-1F1EC": [
+        "filaagi: madasika",
+        "filaagi"
+      ],
+      "1F1F2-1F1ED": [
+        "filaagi: etikun máṣali",
+        "filaagi"
+      ],
+      "1F1F2-1F1F0": [
+        "filaagi: àríwá macedonia",
+        "filaagi"
+      ],
+      "1F1F2-1F1F1": [
+        "filaagi: mali",
+        "filaagi"
+      ],
+      "1F1F2-1F1F2": [
+        "filaagi: manamari",
+        "filaagi"
+      ],
+      "1F1F2-1F1F3": [
+        "filaagi: mogolia",
+        "filaagi"
+      ],
+      "1F1F2-1F1F4": [
+        "filaagi: agbègbè ìṣàkóso pàtàkì macao",
+        "filaagi"
+      ],
+      "1F1F2-1F1F5": [
+        "filaagi: etikun guusu mariana",
+        "filaagi"
+      ],
+      "1F1F2-1F1F6": [
+        "filaagi: matinikuwi",
+        "filaagi"
+      ],
+      "1F1F2-1F1F7": [
+        "filaagi: maritania",
+        "filaagi"
+      ],
+      "1F1F2-1F1F8": [
+        "filaagi: motserati",
+        "filaagi"
+      ],
+      "1F1F2-1F1F9": [
+        "filaagi: malata",
+        "filaagi"
+      ],
+      "1F1F2-1F1FA": [
+        "filaagi: maritiusi",
+        "filaagi"
+      ],
+      "1F1F2-1F1FB": [
+        "filaagi: maladifi",
+        "filaagi"
+      ],
+      "1F1F2-1F1FC": [
+        "filaagi: malawi",
+        "filaagi"
+      ],
+      "1F1F2-1F1FD": [
+        "filaagi: mesiko",
+        "filaagi"
+      ],
+      "1F1F2-1F1FE": [
+        "filaagi: malasia",
+        "filaagi"
+      ],
+      "1F1F2-1F1FF": [
+        "filaagi: moṣamibiku",
+        "filaagi"
+      ],
+      "1F1F3-1F1E6": [
+        "filaagi: namibia",
+        "filaagi"
+      ],
+      "1F1F3-1F1E8": [
+        "filaagi: kaledonia titun",
+        "filaagi"
+      ],
+      "1F1F3-1F1EA": [
+        "filaagi: nàìjá",
+        "filaagi"
+      ],
+      "1F1F3-1F1EB": [
+        "filaagi: erékùsù nọ́úfókì",
+        "filaagi"
+      ],
+      "1F1F3-1F1EC": [
+        "filaagi: nàìjíríà",
+        "filaagi"
+      ],
+      "1F1F3-1F1EE": [
+        "filaagi: nikaragua",
+        "filaagi"
+      ],
+      "1F1F3-1F1F1": [
+        "filaagi: nedalandi",
+        "filaagi"
+      ],
+      "1F1F3-1F1F4": [
+        "filaagi: nọọwii",
+        "filaagi"
+      ],
+      "1F1F3-1F1F5": [
+        "filaagi: nepa",
+        "filaagi"
+      ],
+      "1F1F3-1F1F7": [
+        "filaagi: nauru",
+        "filaagi"
+      ],
+      "1F1F3-1F1FA": [
+        "filaagi: niue",
+        "filaagi"
+      ],
+      "1F1F3-1F1FF": [
+        "filaagi: ṣilandi titun",
+        "filaagi"
+      ],
+      "1F1F4-1F1F2": [
+        "filaagi: ọọma",
+        "filaagi"
+      ],
+      "1F1F5-1F1E6": [
+        "filaagi: paramá",
+        "filaagi"
+      ],
+      "1F1F5-1F1EA": [
+        "filaagi: pèérù",
+        "filaagi"
+      ],
+      "1F1F5-1F1EB": [
+        "filaagi: firenṣi polinesia",
+        "filaagi"
+      ],
+      "1F1F5-1F1EC": [
+        "filaagi: paapu ti giini",
+        "filaagi"
+      ],
+      "1F1F5-1F1ED": [
+        "filaagi: filipini",
+        "filaagi"
+      ],
+      "1F1F5-1F1F0": [
+        "filaagi: pakisitan",
+        "filaagi"
+      ],
+      "1F1F5-1F1F1": [
+        "filaagi: polandi",
+        "filaagi"
+      ],
+      "1F1F5-1F1F2": [
+        "filaagi: pẹẹri ati mikuloni",
+        "filaagi"
+      ],
+      "1F1F5-1F1F3": [
+        "filaagi: pikarini",
+        "filaagi"
+      ],
+      "1F1F5-1F1F7": [
+        "filaagi: pọto riko",
+        "filaagi"
+      ],
+      "1F1F5-1F1F8": [
+        "filaagi: agbègbè ara palẹsítínì",
+        "filaagi"
+      ],
+      "1F1F5-1F1F9": [
+        "filaagi: pọ́túgà",
+        "filaagi"
+      ],
+      "1F1F5-1F1FC": [
+        "filaagi: paalu",
+        "filaagi"
+      ],
+      "1F1F5-1F1FE": [
+        "filaagi: paraguye",
+        "filaagi"
+      ],
+      "1F1F6-1F1E6": [
+        "filaagi: kota",
+        "filaagi"
+      ],
+      "1F1F7-1F1EA": [
+        "filaagi: riuniyan",
+        "filaagi"
+      ],
+      "1F1F7-1F1F4": [
+        "filaagi: romaniya",
+        "filaagi"
+      ],
+      "1F1F7-1F1F8": [
+        "filaagi: sẹ́bíà",
+        "filaagi"
+      ],
+      "1F1F7-1F1FA": [
+        "filaagi: rọṣia",
+        "filaagi"
+      ],
+      "1F1F7-1F1FC": [
+        "filaagi: ruwanda",
+        "filaagi"
+      ],
+      "1F1F8-1F1E6": [
+        "filaagi: saudi arabia",
+        "filaagi"
+      ],
+      "1F1F8-1F1E7": [
+        "filaagi: etikun solomoni",
+        "filaagi"
+      ],
+      "1F1F8-1F1E8": [
+        "filaagi: ṣeṣẹlẹsi",
+        "filaagi"
+      ],
+      "1F1F8-1F1E9": [
+        "filaagi: sudani",
+        "filaagi"
+      ],
+      "1F1F8-1F1EA": [
+        "filaagi: swidini",
+        "filaagi"
+      ],
+      "1F1F8-1F1EC": [
+        "filaagi: singapo",
+        "filaagi"
+      ],
+      "1F1F8-1F1ED": [
+        "filaagi: hẹlena",
+        "filaagi"
+      ],
+      "1F1F8-1F1EE": [
+        "filaagi: silofania",
+        "filaagi"
+      ],
+      "1F1F8-1F1EF": [
+        "filaagi: sífábáàdì àti jánì máyẹ̀nì",
+        "filaagi"
+      ],
+      "1F1F8-1F1F0": [
+        "filaagi: silofakia",
+        "filaagi"
+      ],
+      "1F1F8-1F1F1": [
+        "filaagi: siria looni",
+        "filaagi"
+      ],
+      "1F1F8-1F1F2": [
+        "filaagi: sani marino",
+        "filaagi"
+      ],
+      "1F1F8-1F1F3": [
+        "filaagi: sẹnẹga",
+        "filaagi"
+      ],
+      "1F1F8-1F1F4": [
+        "filaagi: sòmálíà",
+        "filaagi"
+      ],
+      "1F1F8-1F1F7": [
+        "filaagi: surinami",
+        "filaagi"
+      ],
+      "1F1F8-1F1F8": [
+        "filaagi: gúúsù sudan",
+        "filaagi"
+      ],
+      "1F1F8-1F1F9": [
+        "filaagi: sao tomi ati piriiṣipi",
+        "filaagi"
+      ],
+      "1F1F8-1F1FB": [
+        "filaagi: ẹẹsáfádò",
+        "filaagi"
+      ],
+      "1F1F8-1F1FD": [
+        "filaagi: síntì mátẹ́ẹ̀nì",
+        "filaagi"
+      ],
+      "1F1F8-1F1FE": [
+        "filaagi: siria",
+        "filaagi"
+      ],
+      "1F1F8-1F1FF": [
+        "filaagi: saṣiland",
+        "filaagi"
+      ],
+      "1F1F9-1F1E8": [
+        "filaagi: tọọki ati etikun kakọsi",
+        "filaagi"
+      ],
+      "1F1F9-1F1E9": [
+        "filaagi: ṣààdì",
+        "filaagi"
+      ],
+      "1F1F9-1F1EB": [
+        "filaagi: agbègbè gúúsù faranṣé",
+        "filaagi"
+      ],
+      "1F1F9-1F1EC": [
+        "filaagi: togo",
+        "filaagi"
+      ],
+      "1F1F9-1F1ED": [
+        "filaagi: tailandi",
+        "filaagi"
+      ],
+      "1F1F9-1F1EF": [
+        "filaagi: takisitani",
+        "filaagi"
+      ],
+      "1F1F9-1F1F0": [
+        "filaagi: tokelau",
+        "filaagi"
+      ],
+      "1F1F9-1F1F1": [
+        "filaagi: tímọ̀ lẹsiti",
+        "filaagi"
+      ],
+      "1F1F9-1F1F2": [
+        "filaagi: tọ́kìmẹ́nísítànì",
+        "filaagi"
+      ],
+      "1F1F9-1F1F3": [
+        "filaagi: tuniṣia",
+        "filaagi"
+      ],
+      "1F1F9-1F1F4": [
+        "filaagi: tonga",
+        "filaagi"
+      ],
+      "1F1F9-1F1F7": [
+        "filaagi: tọọki",
+        "filaagi"
+      ],
+      "1F1F9-1F1F9": [
+        "filaagi: tirinida ati tobaga",
+        "filaagi"
+      ],
+      "1F1F9-1F1FB": [
+        "filaagi: tufalu",
+        "filaagi"
+      ],
+      "1F1F9-1F1FC": [
+        "filaagi: taiwani",
+        "filaagi"
+      ],
+      "1F1F9-1F1FF": [
+        "filaagi: tàǹsáníà",
+        "filaagi"
+      ],
+      "1F1FA-1F1E6": [
+        "filaagi: ukarini",
+        "filaagi"
+      ],
+      "1F1FA-1F1EC": [
+        "filaagi: uganda",
+        "filaagi"
+      ],
+      "1F1FA-1F1F2": [
+        "filaagi: àwọn erékùsù kékèké agbègbè us",
+        "filaagi"
+      ],
+      "1F1FA-1F1F8": [
+        "filaagi: amẹrikà",
+        "filaagi"
+      ],
+      "1F1FA-1F1FE": [
+        "filaagi: úrúgúwè",
+        "filaagi"
+      ],
+      "1F1FA-1F1FF": [
+        "filaagi: nṣibẹkisitani",
+        "filaagi"
+      ],
+      "1F1FB-1F1E6": [
+        "filaagi: ìlú vatican",
+        "filaagi"
+      ],
+      "1F1FB-1F1E8": [
+        "filaagi: fisẹnnti ati genadina",
+        "filaagi"
+      ],
+      "1F1FB-1F1EA": [
+        "filaagi: fẹnẹṣuẹla",
+        "filaagi"
+      ],
+      "1F1FB-1F1EC": [
+        "filaagi: etíkun fágínì ti ìlú bírítísì",
+        "filaagi"
+      ],
+      "1F1FB-1F1EE": [
+        "filaagi: etikun fagini ti amẹrika",
+        "filaagi"
+      ],
+      "1F1FB-1F1F3": [
+        "filaagi: fẹtinami",
+        "filaagi"
+      ],
+      "1F1FB-1F1FA": [
+        "filaagi: faniatu",
+        "filaagi"
+      ],
+      "1F1FC-1F1EB": [
+        "filaagi: wali ati futuna",
+        "filaagi"
+      ],
+      "1F1FC-1F1F8": [
+        "filaagi: samọ",
+        "filaagi"
+      ],
+      "1F1FE-1F1EA": [
+        "filaagi: yemeni",
+        "filaagi"
+      ],
+      "1F1FE-1F1F9": [
+        "filaagi: mayote",
+        "filaagi"
+      ],
+      "1F1FF-1F1E6": [
+        "filaagi: gúúṣù áfíríkà",
+        "filaagi"
+      ],
+      "1F1FF-1F1F2": [
+        "filaagi: ṣamibia",
+        "filaagi"
+      ],
+      "1F1FF-1F1FC": [
+        "filaagi: ṣimibabe",
+        "filaagi"
+      ],
+      "1F201": [
+        "bọtini japanisi \"nibi\"",
+        "\"níbí\"",
+        "japanese",
+        "katakana",
+        "ココ"
+      ],
+      "1F202": [
+        "bọ́tìnì japanísì \"ìdíyelé fún owó ọ̀yà\"",
+        "\"ìdíyelé fún owó ọ̀yà\"",
+        "japanese",
+        "katakana",
+        "サ"
+      ],
+      "1F21A": [
+        "bọtini japanisi \"lọ́fẹ̀é̩\"",
+        "\"lọ́fẹ̀é̩\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "無"
+      ],
+      "1F22F": [
+        "bọtini japanisi \"nipamọ\"",
+        "\"ìpamó̩\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "指"
+      ],
+      "1F232": [
+        "bọtini japanisi \"ṣediwọ\"",
+        "\"àìfàyègbà\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "禁"
+      ],
+      "1F233": [
+        "bọtini \"aaye\" japanisi",
+        "\"ààyè\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "空"
+      ],
+      "1F234": [
+        "bọtini \"gbendeke iyege\" japanisi",
+        "\"gbendéke ìkẹ́kọ̀ó̩ yege\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "合"
+      ],
+      "1F235": [
+        "bọtini \"kosi aaye\" japanisi",
+        "\"kosi aaye\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "満"
+      ],
+      "1F236": [
+        "bọtini japanisi \"kosi lọfẹ\"",
+        "\"kòṣọ̀fé̩\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "有"
+      ],
+      "1F237": [
+        "bó̩tìnì japanisi \"owó ìdíyelé oṣoòṣù\"",
+        "\"owó ìdíyelé oṣoòṣù\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "月"
+      ],
+      "1F238": [
+        "bọtini \"ohun elo\" japanisi",
+        "\"ohun èlò\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "申"
+      ],
+      "1F239": [
+        "bọtini japanisi \"ẹdinwo\"",
+        "\"ẹ̀dínwó\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "割"
+      ],
+      "1F23A": [
+        "bọtini \"ṣi fun okowo\" japanisi",
+        "\"ṣí fún okòwò\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "営"
+      ],
+      "1F250": [
+        "bọtini japanisi \"idunadura\"",
+        "\"ìdúnàdúrà\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "得"
+      ],
+      "1F251": [
+        "bọtini \"itẹwọgba\" japanisi",
+        "\"ìté̩wó̩gbà\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "可"
+      ],
+      "1F300": [
+        "ẹfuufu",
+        "àyí",
+        "ìjì",
+        "òyì"
+      ],
+      "1F301": [
+        "ojuju",
+        "kùrukùru"
+      ],
+      "1F302": [
+        "agboorun toti",
+        "agbòrùn",
+        "aṣọ",
+        "òjò"
+      ],
+      "1F303": [
+        "aṣalẹ pẹlu awọn irawọ",
+        "alẹ́",
+        "ìràwọ̀"
+      ],
+      "1F304": [
+        "lila oorun lori awọn oke",
+        "àárọ̀",
+        "ìla òrùn",
+        "òkè",
+        "òrù"
+      ],
+      "1F305": [
+        "ìlà oòrùn",
+        "àárọ̀",
+        "òrùn"
+      ],
+      "1F306": [
+        "iwo ilu ni aṣalẹ",
+        "àṣàlẹ́",
+        "ìlú",
+        "ìwọ òrùn",
+        "oníbùú",
+        "òrùn"
+      ],
+      "1F307": [
+        "ìwọ̀ oòrùn",
+        "àṣálé",
+        "òrún"
+      ],
+      "1F308": [
+        "òṣùmarè",
+        "òjò"
+      ],
+      "1F309": [
+        "afara ni aṣalẹ",
+        "afárá",
+        "alẹ́"
+      ],
+      "1F30A": [
+        "iji omi",
+        "ìjì",
+        "òkun",
+        "omi"
+      ],
+      "1F30B": [
+        "ifẹ-ilẹ",
+        "ìfẹ̀ ilẹ̀",
+        "òkè"
+      ],
+      "1F30C": [
+        "ọna oniwara",
+        "ààyè"
+      ],
+      "1F30D": [
+        "gulobu to n ṣafihan uropu-afirika",
+        "áfíríkà",
+        "àgbáyé",
+        "ayé",
+        "gílóbù",
+        "írópù"
+      ],
+      "1F30E": [
+        "gulobu to n ṣafihan amẹrika",
+        "àgbáyé",
+        "àwọn amẹ́ríkà",
+        "ayé",
+        "gúlóbù"
+      ],
+      "1F30F": [
+        "gulobu to n ṣafihan aṣia-ọsiteria",
+        "àgbáyé",
+        "áṣíà",
+        "ayé",
+        "gúlóbù",
+        "ọsiteria"
+      ],
+      "1F310": [
+        "gulobu pẹlu mẹridiani",
+        "àgbáyé",
+        "ayé",
+        "gúlóbù",
+        "mẹ̀rídíánì"
+      ],
+      "1F311": [
+        "òṣùpá tuntun",
+        "dúdú",
+        "òṣùpá"
+      ],
+      "1F312": [
+        "yíyọ́ ààbọ̀ oṣùpá",
+        "kírísẹ́ntì",
+        "òṣùpá",
+        "yíyọ́"
+      ],
+      "1F313": [
+        "oṣùpá ìlàrin àkọ́kọ́",
+        "ìdámẹ́rin",
+        "òṣùpá"
+      ],
+      "1F314": [
+        "yíyọ́ kíkún oṣùpá",
+        "kíkùn",
+        "òṣùpá",
+        "yíyọ́"
+      ],
+      "1F315": [
+        "ẹ̀kúnrẹ́rẹ́ òṣùpá",
+        "ẹ̀kúnrẹ́rẹ́",
+        "òṣùpá"
+      ],
+      "1F316": [
+        "títàn kíkún oṣùpá",
+        "kíkún",
+        "oṣùpá",
+        "títàn"
+      ],
+      "1F317": [
+        "oṣùpá ìlàrin ìgbẹ̀yìn",
+        "ìdámẹ́rin",
+        "òṣùpá"
+      ],
+      "1F318": [
+        "títàn ààbọ̀ oṣùpá",
+        "kírísẹ́ntì",
+        "òṣùpá",
+        "òṣùpa kékeré"
+      ],
+      "1F319": [
+        "ààbọ̀ oṣùpá",
+        "ààbọ̀",
+        "oṣùpá"
+      ],
+      "1F31A": [
+        "oju òṣùpá tuntun",
+        "ojú",
+        "oṣupa"
+      ],
+      "1F31B": [
+        "oṣùpá ìlàrin àkọ́kọ́ pẹ̀lú ojú",
+        "ìdámẹ́rin",
+        "ojú",
+        "òṣùpá"
+      ],
+      "1F31C": [
+        "oṣùpá ìlàrin ìgbẹ̀yìn pẹ̀lú ojú",
+        "ìdámẹ́rin",
+        "ojú",
+        "òṣùpá"
+      ],
+      "1F31D": [
+        "ẹ̀kúnrẹ́rẹ́ òṣùpá pẹ̀lú ojú",
+        "ẹ̀kún",
+        "ìmọ̀lẹ̀",
+        "ojú",
+        "òṣùpá"
+      ],
+      "1F31E": [
+        "oorun pẹlu oju",
+        "ìmọ́lẹ̀",
+        "ojú",
+        "òrùn"
+      ],
+      "1F31F": [
+        "irawọ titan",
+        "dán",
+        "dídán",
+        "ìràwọ̀",
+        "tàn"
+      ],
+      "1F320": [
+        "irawọ yiyọ",
+        "ìràwọ̀",
+        "jíjábọ́",
+        "títa"
+      ],
+      "1F321": [
+        "òṣùwọ̀n ìgbóná",
+        "ojú ọjọ́"
+      ],
+      "1F324": [
+        "òòrùn lẹ́yìn òfurufú kékeré",
+        "òfurufú",
+        "òòrùn"
+      ],
+      "1F325": [
+        "òòrùn lẹ́yìn òfurufú tó tóbi",
+        "òfurufú",
+        "òòrùn"
+      ],
+      "1F326": [
+        "òòrùn lẹ́yìn òfurufú òjò",
+        "òfurufú",
+        "òjò",
+        "òòrùn"
+      ],
+      "1F327": [
+        "òfurufú pẹ̀lú òjò",
+        "òfurufú",
+        "òjò"
+      ],
+      "1F328": [
+        "òfurufú pẹ̀lú yìnyín",
+        "òfurufú",
+        "òtútù",
+        "yìnyín"
+      ],
+      "1F329": [
+        "òfurufú pẹlu ṣíṣáná",
+        "òfurufú",
+        "ṣíṣáná"
+      ],
+      "1F32A": [
+        "ìjì tó le",
+        "ìjì",
+        "òfurufú"
+      ],
+      "1F32B": [
+        "kùrukùru",
+        "òfurufú"
+      ],
+      "1F32C": [
+        "ojú atẹ́gùn",
+        "atẹ́gùn",
+        "òfurufú",
+        "ojú",
+        "tayọ"
+      ],
+      "1F32D": [
+        "hot dog",
+        "àlọ́pọ̀ ẹrán",
+        "àlọ́pọ̀ ẹran àti ẹran ẹlẹ́dẹ̀",
+        "èran ẹlẹ́dẹ̀ papọ̀ pẹ̀lú ẹran"
+      ],
+      "1F32E": [
+        "taco",
+        "ónjẹ mẹ́síkò"
+      ],
+      "1F32F": [
+        "burito",
+        "ónjẹ mẹ́síkò",
+        "wépò"
+      ],
+      "1F330": [
+        "kóró inú èso búránù",
+        "õgbìn"
+      ],
+      "1F331": [
+        "ihoro eso",
+        "wẹ́wẹ́"
+      ],
+      "1F332": [
+        "igi aruwe",
+        "igi"
+      ],
+      "1F333": [
+        "igi igbo",
+        "igi",
+        "igi to nta ewe lôdọ dún",
+        "ti"
+      ],
+      "1F334": [
+        "ọpẹ",
+        "agbègbè ilẹ̀ olóoru",
+        "etíkun",
+        "igi",
+        "ọ̀gbìn",
+        "ọ̀pẹ"
+      ],
+      "1F335": [
+        "igi ọrọ́",
+        "aṣálẹ̀",
+        "ẹ̀dá",
+        "igi ọrọ̀",
+        "ọgbẹlẹ̀",
+        "ọ̀gbìn"
+      ],
+      "1F336": [
+        "ata gbígbónọ̀",
+        "ata",
+        "gbígbónọ̀"
+      ],
+      "1F337": [
+        "tulipu",
+        "odòdó"
+      ],
+      "1F338": [
+        "iruwe ṣẹri",
+        "ìtànná",
+        "odòdó",
+        "ṣẹẹri"
+      ],
+      "1F339": [
+        "ododo",
+        "odòdó"
+      ],
+      "1F33A": [
+        "ododo ibisikọsi",
+        "odòdó"
+      ],
+      "1F33B": [
+        "ìtàná",
+        "odòdó",
+        "òòrùn"
+      ],
+      "1F33C": [
+        "iruwe",
+        "odòdó"
+      ],
+      "1F33D": [
+        "agbado",
+        "àgbàdo",
+        "àgbàdo yínyín",
+        "etí",
+        "ọ̀nà ìrújú"
+      ],
+      "1F33E": [
+        "idi ti irẹsi",
+        "etí",
+        "irẹsi",
+        "ọkà"
+      ],
+      "1F33F": [
+        "egbo igi",
+        "ewéẹ"
+      ],
+      "1F340": [
+        "ahoro elewe merin",
+        "4",
+        "ahoro",
+        "ewé",
+        "mẹ́rin"
+      ],
+      "1F341": [
+        "ewe mapulu",
+        "ewé",
+        "igi",
+        "jàbọ"
+      ],
+      "1F342": [
+        "irawe",
+        "igi",
+        "jàbọ"
+      ],
+      "1F343": [
+        "ewe ti n fanka ninu iji",
+        "afẹfẹ",
+        "ewé",
+        "fẹ",
+        "fo bákàn"
+      ],
+      "1F344": [
+        "olu",
+        "olú pupa"
+      ],
+      "1F345": [
+        "timati",
+        "ẹ̀fọ́",
+        "èso"
+      ],
+      "1F346": [
+        "igba",
+        "èso",
+        "ìgbá"
+      ],
+      "1F347": [
+        "girapu",
+        "èso",
+        "èso àjàrà"
+      ],
+      "1F348": [
+        "ẹ̀gúsí",
+        "èso"
+      ],
+      "1F349": [
+        "eso bara",
+        "èso"
+      ],
+      "1F34A": [
+        "tanjarini",
+        "èso",
+        "ôsán"
+      ],
+      "1F34B": [
+        "orombo-wẹwẹ chiffon",
+        "èso",
+        "ọsàn"
+      ],
+      "1F34C": [
+        "ọ̀gẹ̀dẹ̀",
+        "èso"
+      ],
+      "1F34D": [
+        "ọpẹ-oyinbo",
+        "èso"
+      ],
+      "1F34E": [
+        "apu pupa",
+        "apù",
+        "èso",
+        "pupa"
+      ],
+      "1F34F": [
+        "apu alawọ ewe",
+        "apù",
+        "àwọ̀ ewé",
+        "èso"
+      ],
+      "1F350": [
+        "píà",
+        "èso"
+      ],
+      "1F351": [
+        "píísì",
+        "èso"
+      ],
+      "1F352": [
+        "ṣẹẹri",
+        "aláwọ̀ ewé",
+        "apù",
+        "èso"
+      ],
+      "1F353": [
+        "eso dundun",
+        "bẹ́rì",
+        "èso"
+      ],
+      "1F354": [
+        "hamburger",
+        "bọ́gà"
+      ],
+      "1F355": [
+        "písà",
+        "gígé",
+        "wàrà"
+      ],
+      "1F356": [
+        "ẹran ara egungun",
+        "eegun",
+        "ẹran"
+      ],
+      "1F357": [
+        "ẹsẹ adiyẹ",
+        "adìye",
+        "eegun",
+        "ẹsẹ̀",
+        "ilé àdìyé"
+      ],
+      "1F358": [
+        "biskit irẹsi",
+        "bisikí",
+        "ìrẹ̀sì"
+      ],
+      "1F359": [
+        "irẹsi roboto",
+        "bọ̀ọ́lú",
+        "ìrẹsì",
+        "japanese"
+      ],
+      "1F35A": [
+        "irẹsi sise",
+        "irẹsi",
+        "sise"
+      ],
+      "1F35B": [
+        "irẹsi kọri",
+        "irẹsi",
+        "kọri"
+      ],
+      "1F35C": [
+        "abọ ibọhun",
+        "abọ́",
+        "núdù",
+        "oru",
+        "rámẹ̀n"
+      ],
+      "1F35D": [
+        "spagẹti",
+        "pásítà"
+      ],
+      "1F35E": [
+        "búrẹ́dì",
+        "búrẹ́dì gígé"
+      ],
+      "1F35F": [
+        "ounjẹ ipanu didun",
+        "didin",
+        "french"
+      ],
+      "1F360": [
+        "anamọ dindin",
+        "ànàmọ́",
+        "dídùn",
+        "yíyan"
+      ],
+      "1F361": [
+        "dango",
+        "àdídùn",
+        "igi",
+        "japanese",
+        "ónjé dídùn",
+        "skewer"
+      ],
+      "1F362": [
+        "oden",
+        "igi",
+        "keháb",
+        "ónjẹ omi",
+        "síkíwà"
+      ],
+      "1F363": [
+        "sushi"
+      ],
+      "1F364": [
+        "ede dindin",
+        "dídín",
+        "ẹdẹ",
+        "ṣírímpù",
+        "tẹ́mpúrà"
+      ],
+      "1F365": [
+        "eja dindin pẹlu swirl",
+        "àkàrà òyìnbó",
+        "ónjẹ oní fíláwà",
+        "swirl"
+      ],
+      "1F366": [
+        "wara didi rirọ",
+        "àdídùn",
+        "fẹ́lẹ́",
+        "kírímù",
+        "ónjẹ dídùn",
+        "yìnyín",
+        "yìnyín dídùn"
+      ],
+      "1F367": [
+        "yinyin gige",
+        "àdídùn",
+        "fá",
+        "ónjẹ dídùn",
+        "yìnyín"
+      ],
+      "1F368": [
+        "wara didi",
+        "àdídùn",
+        "kírímù",
+        "ónjẹ dídùn",
+        "yìnyín"
+      ],
+      "1F369": [
+        "dónọ́ọ̀tì",
+        "àdídùn",
+        "dónọtì",
+        "ónjẹ dídùn"
+      ],
+      "1F36A": [
+        "kuki",
+        "àdídùn",
+        "ónjẹ dídùn"
+      ],
+      "1F36B": [
+        "ṣokoleti didi",
+        "àdídùn",
+        "ilé otí",
+        "ónjẹ dídùn",
+        "ṣokolétì"
+      ],
+      "1F36C": [
+        "kandi",
+        "àdídùn",
+        "ónjẹ dídùn"
+      ],
+      "1F36D": [
+        "suuti onigi",
+        "àdídùn",
+        "káńdì",
+        "ónjẹ dídùn"
+      ],
+      "1F36E": [
+        "kọ́sítàdì",
+        "àdídùn",
+        "ónjẹ dídùn",
+        "púdínì"
+      ],
+      "1F36F": [
+        "koko oyin",
+        "àdídùn",
+        "ìkòkò",
+        "oyin"
+      ],
+      "1F370": [
+        "akara kekere",
+        "àdídùn",
+        "àkàrà òyìnbó",
+        "gígé",
+        "ónjẹ dídùn",
+        "ónjẹ oní fíláwà"
+      ],
+      "1F371": [
+        "apoti bento",
+        "apoti",
+        "bento"
+      ],
+      "1F372": [
+        "ikoko ounjẹ",
+        "ìkòkò",
+        "ọbẹ̀"
+      ],
+      "1F373": [
+        "dídáná",
+        "dídín",
+        "ẹyin",
+        "páànù"
+      ],
+      "1F374": [
+        "fọki ati ọbẹ",
+        "fọ́ọ̀kì",
+        "ọ̀bẹ",
+        "ónjẹ sísè"
+      ],
+      "1F375": [
+        "ife tii laini ọwọ",
+        "ife",
+        "mímu",
+        "o ohun mímu oní kòkó",
+        "tíì"
+      ],
+      "1F376": [
+        "sake",
+        "ife",
+        "ìgò",
+        "ilé ọtí",
+        "ohun mímu",
+        "ohun mímu oní kòkó"
+      ],
+      "1F377": [
+        "gilasi waini",
+        "gílásì",
+        "ilé ọtí",
+        "ohun mímu",
+        "ohun mímu oní kòkó",
+        "wáìnì"
+      ],
+      "1F378": [
+        "gilasi ounjẹ amulumala",
+        "ilé ọtí",
+        "ónjẹ àmúlùmálà"
+      ],
+      "1F379": [
+        "ohun mimu akoko oorun",
+        "ilé ọtí",
+        "ohun mímu",
+        "ọlọ́pẹ"
+      ],
+      "1F37A": [
+        "imuti",
+        "ilé ọtí",
+        "ìmutí",
+        "ohun mímu",
+        "ọtí"
+      ],
+      "1F37B": [
+        "imuti dídún",
+        "dídún",
+        "ilé ọtí",
+        "ímu",
+        "ìmutí",
+        "ọtí"
+      ],
+      "1F37C": [
+        "igo ikoko",
+        "ìgò",
+        "ìkókó",
+        "mílíkì",
+        "ohun mímu"
+      ],
+      "1F37D": [
+        "fọ́ọ̀kì àti ọ̀bẹ pẹ̀lú àwo",
+        "àwo",
+        "fọ́ọ̀kì",
+        "ọ̀bẹ",
+        "ónjẹ sísè"
+      ],
+      "1F37E": [
+        "igo olori yiyọ",
+        "ìdérí ọtí",
+        "ìgò",
+        "ilé ọtí",
+        "ìṣí ọtí",
+        "ohun mímu"
+      ],
+      "1F37F": [
+        "gúgúrú"
+      ],
+      "1F380": [
+        "ríbìnnì",
+        "ayẹyẹ"
+      ],
+      "1F381": [
+        "ẹbun didi",
+        "àpótí",
+        "ayẹyẹ",
+        "ẹ̀bùn",
+        "wépọ̀"
+      ],
+      "1F382": [
+        "àkàrà òyìnbó ọjọ́ìbí",
+        "àdídùn",
+        "àkàrà òyìnbó",
+        "ayẹyẹ",
+        "ọjọ́ìbí",
+        "ónjẹ dídùn",
+        "ónjẹ oní fíláwà"
+      ],
+      "1F383": [
+        "jack-o-atupa",
+        "alowínì",
+        "àtùpà",
+        "ayẹyẹ",
+        "jáàkì"
+      ],
+      "1F384": [
+        "igi keresimesi",
+        "ayẹyẹ",
+        "igi",
+        "kérésìmesì"
+      ],
+      "1F385": [
+        "baba keresi",
+        "ayẹyẹ",
+        "baba",
+        "kérésì"
+      ],
+      "1F386": [
+        "iṣẹ́iná",
+        "ayẹyẹ"
+      ],
+      "1F387": [
+        "olutan",
+        "ayẹyẹ",
+        "dán",
+        "iṣẹ́iná"
+      ],
+      "1F388": [
+        "bàlúùnù",
+        "ayẹyẹ"
+      ],
+      "1F389": [
+        "ariwo ayẹye",
+        "aláríyá",
+        "àríyá",
+        "ayẹyẹ",
+        "tádà"
+      ],
+      "1F38A": [
+        "bọọlu kọnfẹti",
+        "ayẹyẹ",
+        "bọ́ọ̀lù",
+        "kọnfetí"
+      ],
+      "1F38B": [
+        "igi tanabata",
+        "ánà",
+        "ayẹyẹ",
+        "igi",
+        "japanese"
+      ],
+      "1F38C": [
+        "awọn asia onidabu",
+        "àgbélébù",
+        "ayẹyẹ",
+        "japanese",
+        "rekoja"
+      ],
+      "1F38D": [
+        "ẹṣọ ọpẹ oyinbo",
+        "ayẹyẹ",
+        "eso ọ̀pẹ òyìnbó",
+        "igi bambú",
+        "japanese"
+      ],
+      "1F38E": [
+        "awọn ere japanisi",
+        "àjọyọ̀",
+        "ayẹyẹ",
+        "japanese",
+        "omolankidi"
+      ],
+      "1F38F": [
+        "olugekere capu",
+        "ayẹyẹ",
+        "ìbọsẹ̀ tí ń fò",
+        "káàpù"
+      ],
+      "1F390": [
+        "idun iji",
+        "agogo",
+        "atẹ́gùn",
+        "ayẹyẹ",
+        "ìdún agogo"
+      ],
+      "1F391": [
+        "wiwo ayẹyẹ oṣupa",
+        "ayẹyẹ",
+        "òṣùpá"
+      ],
+      "1F392": [
+        "baagi ile-ẹkọ agbekẹyin",
+        "àpamọ́wọ́",
+        "ilé ìwé",
+        "sáṣẹ̀lì"
+      ],
+      "1F393": [
+        "fila aṣeyọri",
+        "àṣeyọrí",
+        "aṣọ",
+        "ayẹyẹ",
+        "fìlà"
+      ],
+      "1F396": [
+        "fàdákà ológun",
+        "ayẹyẹ"
+      ],
+      "1F397": [
+        "ríbínì ìránilétí",
+        "ayẹyẹ",
+        "ìránilétí",
+        "ríbínì"
+      ],
+      "1F399": [
+        "maikurofóònù sítúdíò",
+        "ilé-agódo",
+        "maikì",
+        "maikurofóònù",
+        "orin"
+      ],
+      "1F39A": [
+        "ìpele yíyò̩",
+        "ipele",
+        "orin",
+        "yíyò̩"
+      ],
+      "1F39B": [
+        "kókó ibìdárí",
+        "kókó",
+        "olùdarí",
+        "orin"
+      ],
+      "1F39E": [
+        "àwọn férémù fíìmù",
+        "àwọn férémù",
+        "fíìmù",
+        "sinemá"
+      ],
+      "1F39F": [
+        "àwọn ìwọlé ìgbaniwọlé",
+        "ìgbaniwọlé",
+        "ìwọlé"
+      ],
+      "1F3A0": [
+        "ẹṣin aladun",
+        "aládùn",
+        "ẹṣin"
+      ],
+      "1F3A1": [
+        "kẹ̀kẹ́ ferris",
+        "ferris",
+        "páàkì ìgbafẹ́",
+        "róboto"
+      ],
+      "1F3A2": [
+        "kẹkẹ olobiri",
+        "olóbírí",
+        "páàkì ìgbafẹ́",
+        "yíyí"
+      ],
+      "1F3A3": [
+        "opo ipẹja",
+        "ẹja",
+        "òpó"
+      ],
+      "1F3A4": [
+        "ẹ̀rọ gbohùngbohùn kékeré",
+        "maikurofóònù"
+      ],
+      "1F3A5": [
+        "kamẹra fíìmù",
+        "fíìmù",
+        "kámé̩rà",
+        "sinimá"
+      ],
+      "1F3A6": [
+        "sinima",
+        "fíìmù",
+        "kámẹ́rà"
+      ],
+      "1F3A7": [
+        "ẹ̀rọ àdágbórinsétí",
+        "ìrintí"
+      ],
+      "1F3A8": [
+        "pẹpẹ oṣere",
+        "ilé ọnà",
+        "iṣẹ́ ọná",
+        "kíkùn",
+        "pálẹ́tì"
+      ],
+      "1F3A9": [
+        "haati oke",
+        "aṣọ",
+        "fìlà",
+        "òkè"
+      ],
+      "1F3AA": [
+        "aba ere-idaraya",
+        "aba",
+        "ere-idaraya"
+      ],
+      "1F3AB": [
+        "iwe iwọle",
+        "ìgbaniwọlé"
+      ],
+      "1F3AC": [
+        "pataki alapade",
+        "fíìmù",
+        "kílápà"
+      ],
+      "1F3AD": [
+        "eré oríìtàgé",
+        "àwòkọ́ṣe",
+        "ere awokọṣe",
+        "ìbòjú",
+        "iṣẹ́ ọná",
+        "ìtàgé",
+        "tíátà"
+      ],
+      "1F3AE": [
+        "ere-idaraya fidio",
+        "eré",
+        "olùdarí"
+      ],
+      "1F3AF": [
+        "igba taara",
+        "àfojúsùn",
+        "akọ màlú",
+        "eré",
+        "gún",
+        "ọ̀gángọ́ ayò",
+        "pálí ayò"
+      ],
+      "1F3B0": [
+        "ẹrọ ifisi",
+        "eré",
+        "ìfisí"
+      ],
+      "1F3B1": [
+        "bọọlu odo 8",
+        "8",
+        "bílíádì",
+        "bọ́ọ̀lù",
+        "ẹ́ẹ́jọ",
+        "eré"
+      ],
+      "1F3B2": [
+        "ere-idaraya ludo",
+        "ayò",
+        "eré"
+      ],
+      "1F3B3": [
+        "bolin",
+        "bọ́ọ̀lù",
+        "eré"
+      ],
+      "1F3B4": [
+        "káàdì ìṣeré olódòdó",
+        "eré",
+        "japanese",
+        "káàdì",
+        "ń ṣeré",
+        "òdòdó"
+      ],
+      "1F3B5": [
+        "ọ̀rọ̀ orin",
+        "orin",
+        "ò̩rọ̀"
+      ],
+      "1F3B6": [
+        "nóòtì orin",
+        "àwọn ò̩rò̩",
+        "orin",
+        "ọ̀rọ̀"
+      ],
+      "1F3B7": [
+        "ipè",
+        "irinṣẹ́",
+        "orin",
+        "sáàsì"
+      ],
+      "1F3B8": [
+        "jìtá",
+        "irinṣẹ́",
+        "orin"
+      ],
+      "1F3B9": [
+        "duuru orin",
+        "dùrù",
+        "ohun èlò",
+        "orin"
+      ],
+      "1F3BA": [
+        "kakaaki",
+        "irinṣẹ́",
+        "orin"
+      ],
+      "1F3BB": [
+        "faolini",
+        "irinṣẹ́",
+        "orin"
+      ],
+      "1F3BC": [
+        "akọsilẹ orin",
+        "akọsílẹ̀",
+        "orin"
+      ],
+      "1F3BD": [
+        "ṣẹẹti isare",
+        "àwọn tí ń sáré",
+        "sáàṣì",
+        "ṣẹ́ẹ̀tì",
+        "sísáré"
+      ],
+      "1F3BE": [
+        "tẹnisi",
+        "bọ́ọ̀lù",
+        "rákẹ̀tì"
+      ],
+      "1F3BF": [
+        "awọn siki",
+        "síkì",
+        "yínyìn"
+      ],
+      "1F3C0": [
+        "bọ́ọ̀lùalágbọ̀n",
+        "bọ́ọ̀lù",
+        "òrùka onírin ńlá roboto"
+      ],
+      "1F3C1": [
+        "asia péńpé onílà",
+        "eré ìje",
+        "ìsàmìsí aláwọ̀ méjì"
+      ],
+      "1F3C2": [
+        "iṣere ori yiyin",
+        "ìṣeré orí yìnyín",
+        "síkì",
+        "yìnyín"
+      ],
+      "1F3C3": [
+        "ẹni n sare",
+        "eré",
+        "sáré"
+      ],
+      "1F3C4": [
+        "ẹni n gun iji",
+        "wíwáìtanẹti"
+      ],
+      "1F3C5": [
+        "fadaka ere idaraya",
+        "fàdákà"
+      ],
+      "1F3C6": [
+        "ife",
+        "ẹ̀bùn"
+      ],
+      "1F3C7": [
+        "ereje ẹlẹsin",
+        "eré ẹlẹ́ṣin",
+        "ẹṣin",
+        "ìdíje eré"
+      ],
+      "1F3C8": [
+        "bọọlu amẹrika",
+        "amẹ́ríkà",
+        "bọ́ọ̀lù",
+        "bọ́ọ̀lù àfẹṣẹ̀gbá"
+      ],
+      "1F3C9": [
+        "bọọlu rọgibi",
+        "bọ́ọ̀lù",
+        "bọ́ọ̀lù àfẹṣẹ̀gbá",
+        "bọ́ọ̀lù rọ́gíbì"
+      ],
+      "1F3CA": [
+        "ẹni tí ń wẹdò",
+        "wẹdò"
+      ],
+      "1F3CB": [
+        "ẹni fa ìwọ̀n sókè",
+        "a fà ńkan sókè",
+        "ìwọ̀n"
+      ],
+      "1F3CC": [
+        "ẹni gọ́ọ̀fù",
+        "bọ́ọ̀lù",
+        "gọ́ọ̀fù"
+      ],
+      "1F3CD": [
+        "alùpùpù",
+        "ìdíje eré"
+      ],
+      "1F3CE": [
+        "ọkọ̀ ìdíje eré",
+        "ìdíje eré",
+        "ọkọ̀"
+      ],
+      "1F3CF": [
+        "eré bọ́ọ̀lù afi pátákó gbá",
+        "bọ̀ọ́lù",
+        "eré",
+        "pátákó ìgbá bọ́ọ̀lù"
+      ],
+      "1F3D0": [
+        "folliboolu",
+        "bọ́ọ̀lù",
+        "eré"
+      ],
+      "1F3D1": [
+        "họki papa",
+        "bọ́ọ̀lù",
+        "eré",
+        "họ́kì",
+        "igi",
+        "pápá"
+      ],
+      "1F3D2": [
+        "họki yinyin",
+        "eré",
+        "họ́kì",
+        "igi",
+        "pọ́kì",
+        "yìnyín"
+      ],
+      "1F3D3": [
+        "bọọlu ori tabili",
+        "ajé ìwakọ̀",
+        "báàtì",
+        "bọ́ọ́lù"
+      ],
+      "1F3D4": [
+        "òkè yìnyín",
+        "òkè",
+        "òtútù",
+        "yìnyín"
+      ],
+      "1F3D5": [
+        "pípàgọ́"
+      ],
+      "1F3D6": [
+        "ọ̀sà pẹ̀lú agbòrùn",
+        "agbòrùn",
+        "ọ̀sà"
+      ],
+      "1F3D7": [
+        "iṣẹ́ ọnà ilé",
+        "iṣẹ́ ọnà"
+      ],
+      "1F3D8": [
+        "àwọn ilé"
+      ],
+      "1F3D9": [
+        "fífẹ̀ìlú",
+        "ìlú"
+      ],
+      "1F3DA": [
+        "ilé àìdára",
+        "àìdára",
+        "ilé"
+      ],
+      "1F3DB": [
+        "ilé tó kílásíkà",
+        "kílásíkà"
+      ],
+      "1F3DC": [
+        "aṣálẹ̀"
+      ],
+      "1F3DD": [
+        "erékùṣù aṣálẹ̀",
+        "aṣálẹ̀",
+        "erékùṣù"
+      ],
+      "1F3DE": [
+        "páàkì orílẹ̀",
+        "páàkì"
+      ],
+      "1F3DF": [
+        "pápá ìṣeré"
+      ],
+      "1F3E0": [
+        "ilé",
+        "ara ilé"
+      ],
+      "1F3E1": [
+        "ile pelu ọgba",
+        "ilé",
+        "ọgbà"
+      ],
+      "1F3E2": [
+        "ile ibi-iṣẹ",
+        "ilé"
+      ],
+      "1F3E3": [
+        "ile-iṣẹ ifiweranṣẹ japani",
+        "ìfiránṣẹ́",
+        "japani"
+      ],
+      "1F3E4": [
+        "àpótí ìfìwéránṣẹ́",
+        "ìrópù"
+      ],
+      "1F3E5": [
+        "ile-iwosan",
+        "dókítà",
+        "òògùn"
+      ],
+      "1F3E6": [
+        "ile-ifowopamọsi",
+        "ilé"
+      ],
+      "1F3E7": [
+        "aami atm",
+        "àdásísẹ́",
+        "ẹ̀rọ apọwó",
+        "ilé-ìfowópamó̩",
+        "tẹ́là"
+      ],
+      "1F3E8": [
+        "ilé ìtura",
+        "ilé"
+      ],
+      "1F3E9": [
+        "ilé ìtura ifẹ",
+        "ilé ìtura"
+      ],
+      "1F3EA": [
+        "ibi itura",
+        "ibi",
+        "itura"
+      ],
+      "1F3EB": [
+        "ilé ìwé",
+        "ilé"
+      ],
+      "1F3EC": [
+        "ẹka itaja",
+        "ẹka",
+        "itaja"
+      ],
+      "1F3ED": [
+        "ilé-iṣẹ́",
+        "ilé"
+      ],
+      "1F3EE": [
+        "atupa iwe pupa",
+        "àtùpà",
+        "ìdènà",
+        "iná",
+        "pupa"
+      ],
+      "1F3EF": [
+        "ile nla japanisi",
+        "ilé ńlá",
+        "japanese"
+      ],
+      "1F3F0": [
+        "ile nla",
+        "íròpù"
+      ],
+      "1F3F5": [
+        "ohun odòdó ọṣọ",
+        "õgbìn"
+      ],
+      "1F3F7": [
+        "àkọ́lé"
+      ],
+      "1F3F8": [
+        "badimitin",
+        "bẹ́ẹ̀dì",
+        "eré",
+        "ihò bọ́ọ̀lù",
+        "rákẹ̀tì"
+      ],
+      "1F3F9": [
+        "ọkọ ati ọfa",
+        "àmi oṣù ìbí",
+        "irinṣé̩",
+        "irinṣẹ́ ìjagun",
+        "ọfà",
+        "ọfà títa",
+        "sagittarius",
+        "tafàtafà"
+      ],
+      "1F3FA": [
+        "amphora",
+        "àmi oṣù ìbí",
+        "aquarius",
+        "dídáná",
+        "ife omi",
+        "irinṣẹ́",
+        "irinṣẹ́ ìjagun",
+        "ohun mímu"
+      ],
+      "1F400": [
+        "ekute"
+      ],
+      "1F401": [
+        "eku"
+      ],
+      "1F402": [
+        "ẹgbọrọ maalu",
+        "àmi oṣù ìbí",
+        "ẹgbọrọ màlálù",
+        "taurus"
+      ],
+      "1F403": [
+        "ẹfọn omi",
+        "ẹfọ̀n",
+        "omi"
+      ],
+      "1F404": [
+        "maalu"
+      ],
+      "1F405": [
+        "ẹkùn"
+      ],
+      "1F406": [
+        "àmọ̀tẹ́kùn"
+      ],
+      "1F407": [
+        "ehoro",
+        "ǹkan ìsìn"
+      ],
+      "1F408": [
+        "olóńgbò",
+        "ńkan ìsìn"
+      ],
+      "1F409": [
+        "drágónì",
+        "ìtàn àrõnì"
+      ],
+      "1F40A": [
+        "ọni"
+      ],
+      "1F40B": [
+        "ẹja nla"
+      ],
+      "1F40C": [
+        "ìgbín"
+      ],
+      "1F40D": [
+        "ejò",
+        "àmi oṣù ìbí",
+        "olùgbé",
+        "ophiuchus"
+      ],
+      "1F40E": [
+        "ẹṣin",
+        "equestrian",
+        "eṣi ìsáré",
+        "ìsáré"
+      ],
+      "1F40F": [
+        "agbo",
+        "àgùntàn",
+        "akọ",
+        "àmi oṣù ìbí",
+        "aries"
+      ],
+      "1F410": [
+        "ewúrẹ́",
+        "àmi oṣù ìbí",
+        "capricorn"
+      ],
+      "1F411": [
+        "abo àgùntàn",
+        "abo",
+        "àgùntàn"
+      ],
+      "1F412": [
+        "ọ̀bọ"
+      ],
+      "1F413": [
+        "akukọ",
+        "àkùkọ",
+        "ẹyẹ"
+      ],
+      "1F414": [
+        "adìyẹ",
+        "adìye",
+        "ẹyẹ"
+      ],
+      "1F415": [
+        "ajá",
+        "àwọn aja",
+        "àwọn ẹranko",
+        "ẹranko",
+        "ohun ọ̀sìn ìṣeré"
+      ],
+      "1F416": [
+        "ẹlẹdẹ",
+        "abo ẹlẹ́dẹ̀"
+      ],
+      "1F417": [
+        "biari",
+        "ẹlẹdẹ"
+      ],
+      "1F418": [
+        "erin"
+      ],
+      "1F419": [
+        "ẹja ẹlẹsẹ mẹjọ"
+      ],
+      "1F41A": [
+        "onikaraun pinpin",
+        "àyíká",
+        "ikarahun"
+      ],
+      "1F41B": [
+        "ìyanjú àṣìṣe",
+        "kòkòrò"
+      ],
+      "1F41C": [
+        "kokoro",
+        "kòkòrò"
+      ],
+      "1F41D": [
+        "oyin",
+        "kòkòrò"
+      ],
+      "1F41E": [
+        "yigbẹ-yigbẹ",
+        "kòkòrò",
+        "obounboùn",
+        "obounboùn kékeré"
+      ],
+      "1F41F": [
+        "ẹja",
+        "àmi oṣù ìbí",
+        "pisces"
+      ],
+      "1F420": [
+        "ẹja oorùn",
+        "ẹja",
+        "oorùn"
+      ],
+      "1F421": [
+        "ẹja awura",
+        "ẹja"
+      ],
+      "1F422": [
+        "adaba",
+        "awun",
+        "awun kékeré",
+        "ìjàpá"
+      ],
+      "1F423": [
+        "ọmọ adiyẹ pipa",
+        "ẹyẹ",
+        "ìkókó",
+        "ọmọ adìyẹ",
+        "pípa"
+      ],
+      "1F424": [
+        "ọmọ adiyẹ",
+        "ẹyẹ",
+        "ìkókó",
+        "ọmọ adìyẹ"
+      ],
+      "1F425": [
+        "ọmọ adiyẹ ti now iwaju",
+        "ẹyẹ",
+        "ìkókó",
+        "ọmọ adìyẹ"
+      ],
+      "1F426": [
+        "ẹyẹ"
+      ],
+      "1F427": [
+        "ẹyẹ oko",
+        "ẹyẹ"
+      ],
+      "1F428": [
+        "koala",
+        "bíárì"
+      ],
+      "1F429": [
+        "ajá kékeré",
+        "ajá"
+      ],
+      "1F42A": [
+        "kẹtẹkẹtẹ",
+        "iké",
+        "ràkúmí"
+      ],
+      "1F42B": [
+        "kẹtẹkẹtẹ onike-meji",
+        "iké",
+        "ràkúmí",
+        "ràkúmí oníké méjì"
+      ],
+      "1F42C": [
+        "dọfini",
+        "ohun lúwë"
+      ],
+      "1F42D": [
+        "ọju eku",
+        "ekú",
+        "ojú"
+      ],
+      "1F42E": [
+        "oju maalu",
+        "maalu",
+        "oju"
+      ],
+      "1F42F": [
+        "oju ẹkùn",
+        "ẹkùn",
+        "ojú"
+      ],
+      "1F430": [
+        "oju ehoro",
+        "ehoro",
+        "ǹkan ìsìn",
+        "ojú"
+      ],
+      "1F431": [
+        "ojú olóńgbò",
+        "ẹranko",
+        "ohun ọ̀sìn ìṣeré",
+        "ojú",
+        "olóńgbò",
+        "ọmọ ológbò"
+      ],
+      "1F432": [
+        "oju dragoni",
+        "drágónì",
+        "ìtàn àrõnì",
+        "oju"
+      ],
+      "1F433": [
+        "ẹja nla atutọ",
+        "ẹja nla",
+        "oju",
+        "yọ jade tì ipá"
+      ],
+      "1F434": [
+        "oju ẹṣin",
+        "ẹṣin",
+        "ojú"
+      ],
+      "1F435": [
+        "oju ọbọ",
+        "ẹranko",
+        "ọ̀bọ",
+        "ọ̀gẹ̀dẹ̀",
+        "ojú"
+      ],
+      "1F436": [
+        "ojú ajá",
+        "ajá",
+        "ǹkan ìsìn",
+        "ojú"
+      ],
+      "1F437": [
+        "oju ẹlẹdẹ",
+        "ẹlẹ́dẹ̀",
+        "ojú"
+      ],
+      "1F438": [
+        "ọ̀pọ̀lọ́",
+        "ojú",
+        "oju ọpọlọ",
+        "ọpọlọ"
+      ],
+      "1F439": [
+        "oju eku oko",
+        "eku oko",
+        "ǹkan ìsìn",
+        "ojú"
+      ],
+      "1F43A": [
+        "ikooko",
+        "ẹranko",
+        "ìkookò",
+        "ojú"
+      ],
+      "1F43B": [
+        "oju biari",
+        "biari",
+        "oju"
+      ],
+      "1F43C": [
+        "oju panda",
+        "ojú",
+        "pándà"
+      ],
+      "1F43D": [
+        "imu ẹlẹdẹ",
+        "ẹlẹ́dẹ̀",
+        "imú",
+        "ojú"
+      ],
+      "1F43E": [
+        "apa eekan",
+        "àtẹ́lẹ́ ọwa",
+        "ẹsẹ̀",
+        "ipa"
+      ],
+      "1F43F": [
+        "eku ńlá"
+      ],
+      "1F440": [
+        "awọn ojú",
+        "eyinjú",
+        "ojú"
+      ],
+      "1F441": [
+        "eyinjú",
+        "ara"
+      ],
+      "1F442": [
+        "etí",
+        "ara"
+      ],
+      "1F443": [
+        "imu",
+        "ara"
+      ],
+      "1F444": [
+        "ẹnu",
+        "ètè"
+      ],
+      "1F445": [
+        "ahọn",
+        "ara"
+      ],
+      "1F446": [
+        "ẹyin ọwọ ti o tọka si oke",
+        "ẹ̀yìn ọwọ́",
+        "ìka",
+        "ìka kékeré",
+        "ọwọ́",
+        "sókè",
+        "tọ́ka"
+      ],
+      "1F447": [
+        "ẹyin ọwọ ti o tọka si isalẹ",
+        "ẹ̀yìn ọwọ́",
+        "ìka",
+        "ìka kékeré",
+        "ìsàlẹ̀",
+        "ọwọ́",
+        "tọ́ka"
+      ],
+      "1F448": [
+        "ẹyin ọwọ ti o tọka si apa osi",
+        "ẹ̀yìn ọwọ́",
+        "ìka",
+        "ìka kékeré",
+        "ọ̀gángán",
+        "ọwọ́"
+      ],
+      "1F449": [
+        "ẹyin ọwọ ti o tọka si apa ọtun",
+        "ẹ̀yìn ọwọ́",
+        "ìka",
+        "ìka kékeré",
+        "ọ̀gángán",
+        "ọwọ́"
+      ],
+      "1F44A": [
+        "ẹṣẹ ti o nbọ",
+        "fún ọwọ́ pọ̀",
+        "ìṣẹ́",
+        "òwọ́ ẹ̀ṣẹ́"
+      ],
+      "1F44B": [
+        "n juwọ",
+        "báwo",
+        "ìkínni",
+        "ìwọ",
+        "ju wọ́",
+        "ó dàbọ̀",
+        "ó dìgbà kan",
+        "ọwọ́"
+      ],
+      "1F44C": [
+        "ọwọ odara",
+        "ódára",
+        "ọwọ́"
+      ],
+      "1F44D": [
+        "atanpako loke",
+        "+1",
+        "àtànpàkò",
+        "òkè",
+        "ọwọ́"
+      ],
+      "1F44E": [
+        "atanpako nisalẹ",
+        "-1",
+        "àtànpàkò",
+        "ìsàlẹ̀",
+        "ọwọ́"
+      ],
+      "1F44F": [
+        "n patẹwọ",
+        "ọwọ́",
+        "pàtẹ́wọ́"
+      ],
+      "1F450": [
+        "awọn ọwọ ṣiṣi",
+        "ọwọ́",
+        "ṣí"
+      ],
+      "1F451": [
+        "ade",
+        "aṣọ",
+        "ọba",
+        "olorì"
+      ],
+      "1F452": [
+        "haati obinrin",
+        "aṣọ",
+        "fìlà",
+        "obìnrin"
+      ],
+      "1F453": [
+        "dígí",
+        "aṣọ",
+        "ẹyinjú",
+        "gíláásì ojú",
+        "ìbòjú"
+      ],
+      "1F454": [
+        "okùnọrùn",
+        "wíwọṣọ"
+      ],
+      "1F455": [
+        "ṣẹ́ẹ̀tì",
+        "aṣọ",
+        "ṣẹẹti",
+        "tṣẹ́ẹ̀tì"
+      ],
+      "1F456": [
+        "jinsi",
+        "aṣọ",
+        "pátá",
+        "ṣòkòtò"
+      ],
+      "1F457": [
+        "aṣọ",
+        "wíwọṣọ"
+      ],
+      "1F458": [
+        "kimono",
+        "wíwọṣọ"
+      ],
+      "1F459": [
+        "pata obinrin",
+        "aṣọ",
+        "wẹdò"
+      ],
+      "1F45A": [
+        "awọn aṣọ obinrin",
+        "aṣọ",
+        "obìnrin"
+      ],
+      "1F45B": [
+        "pọọsi",
+        "aṣọ",
+        "kóbọ̀"
+      ],
+      "1F45C": [
+        "ìpamọ́wọ́",
+        "àpamọ́wọ́",
+        "aṣọ",
+        "pọ́ọ̀sì"
+      ],
+      "1F45D": [
+        "baagi ipamọwọ",
+        "àpamọ́wọ́",
+        "aṣọ",
+        "páùṣì"
+      ],
+      "1F45E": [
+        "bata ọkunrin",
+        "aṣọ",
+        "bàtà",
+        "ọkùnrin"
+      ],
+      "1F45F": [
+        "bata isare",
+        "aṣọ",
+        "bàtà",
+        "ẹní sáré"
+      ],
+      "1F460": [
+        "bata gogoro",
+        "aṣọ",
+        "bàtà",
+        "bàtà gogoro",
+        "obìnrin"
+      ],
+      "1F461": [
+        "bata obinrin pẹlẹbẹ",
+        "aṣọ",
+        "bàtà",
+        "bátá pẹlẹbẹ",
+        "obìnrin"
+      ],
+      "1F462": [
+        "buutu obinrin",
+        "aṣọ",
+        "bàtà",
+        "búùtù",
+        "obìnrin"
+      ],
+      "1F463": [
+        "ipa ẹsẹ",
+        "aṣọ",
+        "ipasẹ̀",
+        "ìpasẹ̀"
+      ],
+      "1F464": [
+        "bujade ni biribiri",
+        "bíríbírí",
+        "bújáde"
+      ],
+      "1F465": [
+        "awọn ibujade ni biribiri",
+        "bíríbírí",
+        "bújáde"
+      ],
+      "1F466": [
+        "ọmọkùnrin",
+        "ọ̀dọ́"
+      ],
+      "1F467": [
+        "ọmọbìrin",
+        "àmi oṣù ìbí",
+        "ọ̀dọ́",
+        "virgo"
+      ],
+      "1F468": [
+        "ọkùnrin"
+      ],
+      "1F469": [
+        "obìnrin"
+      ],
+      "1F46A": [
+        "ẹbí"
+      ],
+      "1F46B": [
+        "ọkunrin ati obirin ti o dọwọ ara wọn mu",
+        "dìmú",
+        "obìnrin",
+        "ọkùnrin",
+        "ọwọ́",
+        "tọkọtaya"
+      ],
+      "1F46C": [
+        "ọkunrin meji ti o dọwọ ara wọn mu",
+        "àmi oṣù ìbí",
+        "dìmú",
+        "gemini",
+        "ìbejì",
+        "ọkùnrin",
+        "ọwọ́",
+        "tọkọtaya"
+      ],
+      "1F46D": [
+        "obinrin meji ti o dọwọ ara wọn mu",
+        "dìmú",
+        "obìnrin",
+        "ọwọ́",
+        "tọkọtaya"
+      ],
+      "1F46E": [
+        "ọlọpa",
+        "ọlọ́pàá",
+        "òṣìṣẹ́"
+      ],
+      "1F46F": [
+        "awọn eniyan eleti ehoro",
+        "àríyá",
+        "awọn eniyan eleti ehoro n sariya",
+        "etí ehoro",
+        "oníjó"
+      ],
+      "1F470": [
+        "iyawo pẹlu iboju",
+        "ìbòjú",
+        "ìgbéyàwó",
+        "ìyàwó"
+      ],
+      "1F471": [
+        "eniyan onirun funfun",
+        "oníru funfun"
+      ],
+      "1F472": [
+        "ọkunrin pẹlu fila ṣainisi",
+        "fìlà",
+        "gua pi mao",
+        "ọkùnrin"
+      ],
+      "1F473": [
+        "ẹni wọ lawani",
+        "láwàní"
+      ],
+      "1F474": [
+        "agbalagba ọkunrin",
+        "àgbàlagbà",
+        "ọkùnrin"
+      ],
+      "1F475": [
+        "agbalagba obinrin",
+        "agbalagba",
+        "obinrin"
+      ],
+      "1F476": [
+        "ìkókó",
+        "ọ̀dọ́"
+      ],
+      "1F477": [
+        "oṣiṣẹ ikọle",
+        "fìlà",
+        "òṣìṣẹ́",
+        "òṣiṣẹ́ ìkọle"
+      ],
+      "1F478": [
+        "ọmọbinrin alade",
+        "àlá",
+        "ìtàn ọmọdé"
+      ],
+      "1F479": [
+        "omiran ajẹniyan",
+        "abàmì",
+        "àlá",
+        "ẹ̀dá",
+        "ìtàn ọmọdé",
+        "ojú"
+      ],
+      "1F47A": [
+        "abàmì aràrá",
+        "abàmì",
+        "àlá",
+        "ẹ̀dá",
+        "ìtàn ọmọdé",
+        "ojú"
+      ],
+      "1F47B": [
+        "òkú",
+        "abàmì",
+        "àlá",
+        "ẹ̀dá",
+        "ìtàn ọmọdé",
+        "ojú"
+      ],
+      "1F47C": [
+        "ángẹli ìkókó",
+        "àlá",
+        "áńgẹ́lì",
+        "ìkókó",
+        "ìtàn ọmọdé",
+        "ojú"
+      ],
+      "1F47D": [
+        "àjòjì",
+        "àbàmì",
+        "àlá",
+        "ẹ̀dá",
+        "ìtàn ọmọdé",
+        "ojú",
+        "ufo"
+      ],
+      "1F47E": [
+        "àjòjì abami",
+        "àbàmì",
+        "àjòjì",
+        "àlá",
+        "ẹ̀dá",
+        "ìtàn ọmọdé",
+        "ojú",
+        "ufo"
+      ],
+      "1F47F": [
+        "oju ibinu pẹlu awọn iwo",
+        "àlá",
+        "èṣù",
+        "ẹṣù",
+        "imp",
+        "ìtàn ọmọdé",
+        "ojú",
+        "oju ibinu pẹlu iho"
+      ],
+      "1F480": [
+        "ipakọ",
+        "abàmì",
+        "ikú",
+        "ìtán ọmọdé",
+        "ojú"
+      ],
+      "1F481": [
+        "ẹni n tọka ọwọ",
+        "ìrànwọ́",
+        "ìròyìn",
+        "ọlọyaya",
+        "ọwọ́",
+        "tọ́ka"
+      ],
+      "1F482": [
+        "oluṣọ"
+      ],
+      "1F483": [
+        "obinrin ti njo",
+        "obinrin",
+        "ti njo"
+      ],
+      "1F484": [
+        "ikun-ete",
+        "aṣaralaṣọ̀",
+        "aṣaralóge"
+      ],
+      "1F485": [
+        "ikun eekanna",
+        "àkun ojú",
+        "aṣaralóge",
+        "èékánná",
+        "ìtọ́jú",
+        "kíkùn"
+      ],
+      "1F486": [
+        "ẹni n gba ifọwọwọnilara",
+        "ẹni n gba iṣẹ",
+        "ìfiránṣẹ́",
+        "ilé onídìrí",
+        "ojú"
+      ],
+      "1F487": [
+        "ẹni n gẹrun",
+        "agẹrun",
+        "ẹwà",
+        "gérun",
+        "ìyàrá ìgbàlejò"
+      ],
+      "1F488": [
+        "opo onigbajamọ",
+        "agerun",
+        "gérun",
+        "òpó"
+      ],
+      "1F489": [
+        "abẹrẹ",
+        "àìsàn",
+        "dókítà",
+        "ikin",
+        "irinṣẹ́",
+        "òògùn",
+        "yìn"
+      ],
+      "1F48A": [
+        "pili",
+        "àìsàn",
+        "dókítà",
+        "òògùn"
+      ],
+      "1F48B": [
+        "aami ifẹnuko",
+        "ètè",
+        "fẹnukonu"
+      ],
+      "1F48C": [
+        "lẹta ifẹ",
+        "ìfẹ́",
+        "lẹ́tà",
+        "méèlì",
+        "ọkàn"
+      ],
+      "1F48D": [
+        "dún",
+        "díámọ́ndì"
+      ],
+      "1F48E": [
+        "okuta iyebiye",
+        "díámọ́ndì",
+        "ẹ̀gbà",
+        "òkúta iyebíye"
+      ],
+      "1F48F": [
+        "ifẹnuko",
+        "tọkọtaya"
+      ],
+      "1F490": [
+        "àsè",
+        "odòdó"
+      ],
+      "1F491": [
+        "lọkọlaya pẹlu ọkan",
+        "ìfẹ́",
+        "tọkọtaya"
+      ],
+      "1F492": [
+        "ìgbéyàwó",
+        "ìfẹ̀",
+        "ilé ìjọsìn"
+      ],
+      "1F493": [
+        "ọkan ti o n mi",
+        "mímí",
+        "mímí ọkàn"
+      ],
+      "1F494": [
+        "ibanujẹ ọkan",
+        "kán",
+        "ti kán"
+      ],
+      "1F495": [
+        "awọn ọkan meji",
+        "ìfẹ́"
+      ],
+      "1F496": [
+        "ọkan didan",
+        "dán",
+        "dunú"
+      ],
+      "1F497": [
+        "ọkan didagba",
+        "bẹ̀rù",
+        "dàgbà",
+        "dunú",
+        "ṣọkùlú"
+      ],
+      "1F498": [
+        "ọkan ti o ni ọfa",
+        "ọfà",
+        "ọmọ ọlọ́fà"
+      ],
+      "1F499": [
+        "ọkan bulu",
+        "búlù"
+      ],
+      "1F49A": [
+        "ọkan awọ ewe",
+        "àwọ̀ ewé"
+      ],
+      "1F49B": [
+        "ọkan awọ ofeefe",
+        "yẹ́lò"
+      ],
+      "1F49C": [
+        "ọkan awọ pọpu",
+        "pọ́pù"
+      ],
+      "1F49D": [
+        "ọkan pẹlu riboni",
+        "ríbọ́nì àyájọ́ olólùfẹ̀"
+      ],
+      "1F49E": [
+        "ọkan ti o n yi",
+        "yíyí"
+      ],
+      "1F49F": [
+        "ọṣọ ọkan",
+        "ọkàn",
+        "ọkan ti a ṣe lọṣọ"
+      ],
+      "1F4A0": [
+        "diamọndi pẹlu dọti kan",
+        "apanilé̩rìn-ín",
+        "díámọ́ndì",
+        "inú ilé",
+        "jiomẹ́tíríkì"
+      ],
+      "1F4A1": [
+        "gólòbù iná",
+        "bó̩ọ̀bù",
+        "ẹ̀lẹ́tíríìkì",
+        "iná",
+        "kọ́míìkì",
+        "òye"
+      ],
+      "1F4A2": [
+        "àmì ibinu",
+        "àwàdà",
+        "bínú"
+      ],
+      "1F4A3": [
+        "bọmbu",
+        "àwàdà"
+      ],
+      "1F4A4": [
+        "zzz",
+        "àwàdà",
+        "sùn"
+      ],
+      "1F4A5": [
+        "ikọlu",
+        "àwàdà",
+        "bóòmù"
+      ],
+      "1F4A6": [
+        "ilaagun ti n kan",
+        "àwàdà",
+        "òógùn",
+        "tami"
+      ],
+      "1F4A7": [
+        "drọ́púlẹ́ẹ̀tì",
+        "àwàdà",
+        "kán òógùn",
+        "òtútù"
+      ],
+      "1F4A8": [
+        "n salọ",
+        "àwàdà",
+        "dáàṣì",
+        "ń sáré"
+      ],
+      "1F4A9": [
+        "okiti igbẹ",
+        "abàmì",
+        "apanilẹ́rìń",
+        "ìgbẹ́",
+        "ògùn",
+        "ojú"
+      ],
+      "1F4AA": [
+        "aya fifẹ",
+        "àwàdà",
+        "egun ọwọ́",
+        "iṣan",
+        "nà"
+      ],
+      "1F4AB": [
+        "itoogbe",
+        "àwàdà",
+        "ìràwọ̀"
+      ],
+      "1F4AC": [
+        "bàlúnù ọ̀rọ̀ sísọ",
+        "àdàlú",
+        "àwàdà",
+        "bàlú",
+        "ìtàkùrọ̀sọ",
+        "ọ̀rọ̀"
+      ],
+      "1F4AD": [
+        "bàlúnù ero",
+        "àdàlú",
+        "àwàdà",
+        "bàlúnù",
+        "èrò"
+      ],
+      "1F4AE": [
+        "ododo funfun",
+        "odòdó"
+      ],
+      "1F4AF": [
+        "koko ọgọrun",
+        "100",
+        "ìṣirò",
+        "kún",
+        "ọgọ́rùn"
+      ],
+      "1F4B0": [
+        "apo owo",
+        "àpò",
+        "dó̩là",
+        "owó"
+      ],
+      "1F4B1": [
+        "paṣiparọ owo",
+        "ìlé ìfowópamọ́",
+        "owó",
+        "pàṣépàrò̩"
+      ],
+      "1F4B2": [
+        "aami dọla nla",
+        "dọ́là",
+        "owó"
+      ],
+      "1F4B3": [
+        "káàdì ìsọdowó",
+        "ààwìn",
+        "ilé ìfowópamó̩",
+        "káàdì",
+        "owó"
+      ],
+      "1F4B4": [
+        "owo yen",
+        "ilé-ìfowópamó̩",
+        "ìwó iye owó",
+        "owó",
+        "owó bánkì",
+        "yẹn"
+      ],
+      "1F4B5": [
+        "owo dọla",
+        "dọ́là",
+        "ilé-ìfowópamó",
+        "ìwó iye owó",
+        "owó",
+        "owó bánkì"
+      ],
+      "1F4B6": [
+        "owo uro",
+        "ilé-ìfowópamó̩",
+        "ìwó iye owó",
+        "owó",
+        "owó bánkì",
+        "úrò"
+      ],
+      "1F4B7": [
+        "owo pọun",
+        "ilé-ìfowópamó̩",
+        "ìwó iye owó",
+        "owó",
+        "owó bánkì",
+        "pó̩ùn"
+      ],
+      "1F4B8": [
+        "owo pẹlu awọn iyẹ",
+        "dó̩là",
+        "fò",
+        "ilé-ìfowópamó̩",
+        "ìwó iye owó",
+        "owó",
+        "owó bánkì"
+      ],
+      "1F4B9": [
+        "àtẹ n pọsi pẹlu yẹn",
+        "àtẹ",
+        "ìdàgbàsókè",
+        "ìdìde",
+        "ìgbàlódé",
+        "ilà atọ́ka àwòrán",
+        "ilé ìfowópamọ́n",
+        "ìlọsókè",
+        "ọjà",
+        "owó",
+        "yen"
+      ],
+      "1F4BA": [
+        "ìjòkó",
+        "àga"
+      ],
+      "1F4BB": [
+        "kọ̀ǹpútà àgbélétan",
+        "àdáni",
+        "kọ̀npútà",
+        "kọ̀npútà aládàni"
+      ],
+      "1F4BC": [
+        "àpamọ́wọ́"
+      ],
+      "1F4BD": [
+        "dísìkì kọ̀ǹpútà",
+        "àwo",
+        "àwo pélébé",
+        "kọ̀npútà",
+        "ojú àwo"
+      ],
+      "1F4BE": [
+        "dísìkì fílọ̀pì",
+        "àwo",
+        "fíló̩pì",
+        "kọ̀npútà"
+      ],
+      "1F4BF": [
+        "àwo aká-ọ̀rọ̀ aláfojúrí",
+        "àwo",
+        "àwo ìgbàlódé",
+        "kọ̀npútà",
+        "ojú àwo"
+      ],
+      "1F4C0": [
+        "dvd",
+        "búlúù-réè",
+        "dísìkì",
+        "kọ̀npútà",
+        "ojú àwo"
+      ],
+      "1F4C1": [
+        "fódà fáìlì",
+        "fáìlì",
+        "fódà"
+      ],
+      "1F4C2": [
+        "fódà fáìlì ti o ṣi",
+        "fáìlì",
+        "fódà",
+        "ṣí"
+      ],
+      "1F4C3": [
+        "oju-iwe pẹlu lilọ",
+        "ìló̩pọ̀",
+        "ìwé ìpamó̩",
+        "ojú ìwé"
+      ],
+      "1F4C4": [
+        "oju-iwe wa loke",
+        "dọ́kúmé̩ẹ̀tì",
+        "ojú ìwé"
+      ],
+      "1F4C5": [
+        "kàlẹ́ndà",
+        "déètì"
+      ],
+      "1F4C6": [
+        "kàlẹ́ndà ti a ya",
+        "kàlẹ́ndà"
+      ],
+      "1F4C7": [
+        "káàdì àtòjọ atọ́kà-ọ̀rọ̀",
+        "àtòjọ atọ́ka-ọ̀rọ̀",
+        "fáìlì oní káàdì",
+        "káàdì"
+      ],
+      "1F4C8": [
+        "àtẹ n pọsi",
+        "àtẹ",
+        "ìdàgbàsókè",
+        "ilà ató̩ka àwòrán",
+        "ìlọṣíwájú",
+        "ìlọsókè"
+      ],
+      "1F4C9": [
+        "àtẹ n dinku",
+        "àtẹ",
+        "àtẹ alátó̩ka",
+        "ìsàlẹ̀",
+        "tírẹ́ndì"
+      ],
+      "1F4CA": [
+        "pẹpẹ ìwe àwòrán àfihàn",
+        "àtẹ",
+        "àtẹ alátọ́ka",
+        "àtẹ onígun"
+      ],
+      "1F4CB": [
+        "aka ọlọ́pọ̀n"
+      ],
+      "1F4CC": [
+        "abẹ́rẹ́ohunyíyà",
+        "abẹ́rẹ́"
+      ],
+      "1F4CD": [
+        "abẹ́rẹ́ohunyíyà roboto",
+        "abẹ́rẹ́",
+        "píìnì àgbáwọlé"
+      ],
+      "1F4CE": [
+        "àfimúwèépọ̀"
+      ],
+      "1F4CF": [
+        "rula gbọọrọ",
+        "etí gbọọrọ",
+        "rúlà"
+      ],
+      "1F4D0": [
+        "rula onigun mẹta",
+        "onígun-mé̩ta",
+        "rúlà",
+        "sẹ́ẹ́tì"
+      ],
+      "1F4D1": [
+        "àmì ìwé àwọn táàbù",
+        "àmì",
+        "ìfàmìsí",
+        "ohun èlò ìfàmìsí",
+        "táàbù"
+      ],
+      "1F4D2": [
+        "lé̩jà",
+        "àfikọ̀wé"
+      ],
+      "1F4D3": [
+        "àfikọ̀wé"
+      ],
+      "1F4D4": [
+        "àfikọ̀wé pẹ̀lú ẹ̀yìn ọlọ́ọ̀ṣó",
+        "ẹ̀kọ́",
+        "ẹ̀yìn ìwé",
+        "ilé-ìwé",
+        "ìṣelẹ́ṣọ̀ó̩",
+        "ìwé",
+        "ìwé àkọsílè̩",
+        "ohun àfi ṣẹ̀ṣọ́"
+      ],
+      "1F4D5": [
+        "ìwé tó padé",
+        "ìwé",
+        "iwe ti pade",
+        "pípadé"
+      ],
+      "1F4D6": [
+        "iwe ṣi silẹ",
+        "ìwé",
+        "ṣíṣí"
+      ],
+      "1F4D7": [
+        "iwe alawọ ewe",
+        "àwò̩ ewé",
+        "ìwé"
+      ],
+      "1F4D8": [
+        "iwe alawọ bulu",
+        "bulu",
+        "iwe alawọ"
+      ],
+      "1F4D9": [
+        "iwe alawọ ọsan",
+        "aláwò̩ ọsàn",
+        "ìwé"
+      ],
+      "1F4DA": [
+        "àwọn ìwé",
+        "ìwé"
+      ],
+      "1F4DB": [
+        "orúkọ àmì",
+        "báájì",
+        "orúkọ"
+      ],
+      "1F4DC": [
+        "gbéjáde",
+        "pépà"
+      ],
+      "1F4DD": [
+        "mẹ́mò",
+        "pẹ́nsùlù"
+      ],
+      "1F4DE": [
+        "olùgbà fóònù",
+        "fóònù",
+        "olùgbà",
+        "tẹlifóònù"
+      ],
+      "1F4DF": [
+        "ẹ̀rọ atanilólobó"
+      ],
+      "1F4E0": [
+        "ẹ̀rọ fákìsì",
+        "fákìsì"
+      ],
+      "1F4E1": [
+        "eria satalaiti",
+        "àtagbà",
+        "àwo",
+        "ẹ̀rọ alátagbà nlá"
+      ],
+      "1F4E2": [
+        "gbohùngbohùn",
+        "ìfitóniléti ìta gbangban",
+        "pariwo"
+      ],
+      "1F4E3": [
+        "ẹ̀rọ gbohùngbohùn ńlá",
+        "ìbáraniyò̩"
+      ],
+      "1F4E4": [
+        "tire àpótí ìgbọ́rọ̀jáde",
+        "àpótì",
+        "àpótí ìgbọ́rọ̀jáde",
+        "àtẹ",
+        "ìfiránṣẹ́",
+        "lẹ́tá",
+        "meèlì"
+      ],
+      "1F4E5": [
+        "tire àpótí àgbàwọ́lé",
+        "àpótì",
+        "àpótí ìgbọ́rọ̀jáde",
+        "àtẹ",
+        "ìgbàwọlé",
+        "lẹ́tá",
+        "meèlì"
+      ],
+      "1F4E6": [
+        "ṣí àkójọpọ̀",
+        "àpótí",
+        "ẹgbìnrìn"
+      ],
+      "1F4E7": [
+        "í-meèlì",
+        "lẹ́tà",
+        "meèlì"
+      ],
+      "1F4E8": [
+        "apo iwe ti o nbọ",
+        "àpò ìwé",
+        "í-meèlì",
+        "ìgbàwọlé",
+        "ìwọlé",
+        "lẹ́tá",
+        "meèlì"
+      ],
+      "1F4E9": [
+        "apo iwe pelu ọfa",
+        "àpò ìwé",
+        "í-meèlì",
+        "ìfiránṣé̩",
+        "ìjáde",
+        "ìsàlẹ̀",
+        "lẹ́tà",
+        "meèlì",
+        "ọfà"
+      ],
+      "1F4EA": [
+        "àpótíméèlì ti a tipa pẹlu asia nina walẹ",
+        "àpótí ìfigba ìwé ránṣẹ́",
+        "àpótí meèlì",
+        "meèlì",
+        "pípadé",
+        "wálẹ̀"
+      ],
+      "1F4EB": [
+        "àpótíméèlì ti a tipa pẹlu asia nina soke",
+        "àpótí ìfigba ìwé ránṣẹ́",
+        "àpótí meèlì",
+        "meèlì",
+        "pípadé"
+      ],
+      "1F4EC": [
+        "àpótíméèlì ti a ṣi pẹlu asia nina soke",
+        "àpótí ìfigba ìwé ránṣẹ́",
+        "àpótí meèlì",
+        "meèlì",
+        "sí"
+      ],
+      "1F4ED": [
+        "àpótíméèlì ti a ṣi pẹlu asia nina wale",
+        "àpótí ìfigba ìwé ránṣẹ́",
+        "àpótí meèlì",
+        "meèlì",
+        "sí",
+        "wálẹ̀"
+      ],
+      "1F4EE": [
+        "apoti ifigba iwe iranṣẹ",
+        "àpótí meèlì",
+        "meèlì"
+      ],
+      "1F4EF": [
+        "gbohùngbohùn ifiranṣẹ",
+        "gbohùngbohùn",
+        "ìfiránṣé̩"
+      ],
+      "1F4F0": [
+        "ìwé ìròyìn",
+        "ìròyìn",
+        "pépà"
+      ],
+      "1F4F1": [
+        "fóònù alágbèéká",
+        "alágbèéká",
+        "fóònù",
+        "tẹlifóònù"
+      ],
+      "1F4F2": [
+        "fóònù alágbèéká pẹ̀lú ofà",
+        "alágbèéká",
+        "fóònù",
+        "gbà",
+        "ìpè",
+        "ọfà",
+        "tẹlifóònù"
+      ],
+      "1F4F3": [
+        "moodu gbigbọn",
+        "àgbéká",
+        "ẹ̀rọ alágbéèká",
+        "fóònù",
+        "gbígbọ̀n",
+        "móòdù",
+        "tẹlifóònù"
+      ],
+      "1F4F4": [
+        "pipa ẹ̀rọ ìbánisọ̀rọ̀ alágbèéká",
+        "alágbèéká",
+        "fóònù",
+        "tẹlifóònù"
+      ],
+      "1F4F5": [
+        "kosi awọn foonu alagbeka",
+        "àgbéká",
+        "èèwò",
+        "ẹ̀rọ alágbéèká",
+        "fóònù",
+        "kò",
+        "kòsáyè",
+        "rárá",
+        "tẹlifóònù"
+      ],
+      "1F4F6": [
+        "àwọn òpó antẹna",
+        "alátagbà",
+        "báà",
+        "è̩ro̩ alágbéèká",
+        "fóònù",
+        "fóònù alágbèéká",
+        "ìfihàn",
+        "tẹlifóònù"
+      ],
+      "1F4F7": [
+        "kámẹ́rà",
+        "fídíò"
+      ],
+      "1F4F8": [
+        "kámẹ́rà pẹlu filaṣi",
+        "fídíò",
+        "fílásì",
+        "kámẹ́rà"
+      ],
+      "1F4F9": [
+        "ayàwòrán fídíò",
+        "fídíò",
+        "kámé̩rà"
+      ],
+      "1F4FA": [
+        "àmóhùnmáwòrán",
+        "fídíò"
+      ],
+      "1F4FB": [
+        "rédíò",
+        "fídíò"
+      ],
+      "1F4FC": [
+        "awọn kaadi ododo iṣere",
+        "fídíò",
+        "téèpù"
+      ],
+      "1F4FD": [
+        "è̩rọ agbéwòrán jáde",
+        "fídíò",
+        "fíìmù",
+        "pìròjẹ́kítọ̀",
+        "sínímà"
+      ],
+      "1F4FF": [
+        "ilẹkẹ adura",
+        "àdúrà",
+        "aṣọ",
+        "ẹ̀gbà ọrùn",
+        "ẹ̀sìn",
+        "ilẹ̀kẹ̀"
+      ],
+      "1F500": [
+        "yiyọ bọtini tiraki",
+        "àmì atọ́nà ọlọ́fà",
+        "ìfagilé"
+      ],
+      "1F501": [
+        "atunṣe bọtini",
+        "àmì atọ́nà ọló̩fà",
+        "àtúnsọ",
+        "olọ́wọ́ aago"
+      ],
+      "1F502": [
+        "atunṣe bọtini ẹlẹyọ",
+        "àmì ató̩nà ọlọfà",
+        "ẹ̀ẹ̀kan",
+        "olọ́wọ́ aago"
+      ],
+      "1F503": [
+        "awọn ọfa yiyi ọna ago",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "àtúngbé",
+        "ọlọ́wọ́-aago"
+      ],
+      "1F504": [
+        "bọtini awọn ọfa yiyi lodi sọna ago",
+        "ìlòdìsọ́wọ́ aago",
+        "o̩fà"
+      ],
+      "1F505": [
+        "bọtini baibai",
+        "àfikún iná",
+        "ìdínákù díẹ̀",
+        "ìdínákù pátápátá"
+      ],
+      "1F506": [
+        "bọtini titan",
+        "àfikún ìmọ́lẹ̀",
+        "ìmọ́lẹ̀"
+      ],
+      "1F507": [
+        "gbohungbohun ti ko sọrọ",
+        "dáké",
+        "dákè",
+        "gboùngboùn"
+      ],
+      "1F508": [
+        "gbohungbohun ti ohun rẹ wa labẹ",
+        "fẹ́lẹ́"
+      ],
+      "1F509": [
+        "gbohungbohun ti ohun rẹ wa laarin",
+        "àárín"
+      ],
+      "1F50A": [
+        "gbohungbohun ti ohun rẹ lọsoke",
+        "pariwo"
+      ],
+      "1F50B": [
+        "bátìrì"
+      ],
+      "1F50C": [
+        "pulọgi onina",
+        "ẹ̀lé̩tíríìkì",
+        "ìná mọ̀nà-mọ́ná",
+        "púlọ́ọ̀gì"
+      ],
+      "1F50D": [
+        "gilasi itọka-osi amohun tobi",
+        "díígí",
+        "ìfojúsóde",
+        "irinṣẹ́",
+        "ìsọdinlá"
+      ],
+      "1F50E": [
+        "gilasi itọka-ọtun amohun tobi",
+        "díígí",
+        "ìfojúsóde",
+        "irinṣẹ́",
+        "ìsọdinlá"
+      ],
+      "1F50F": [
+        "ti tìí pẹlu pẹni",
+        "góngó",
+        "ìkọ̀kọ̀",
+        "ínkì",
+        "padé",
+        "pẹ́ẹ̀nì"
+      ],
+      "1F510": [
+        "ti tìí pẹlu kọkọrọ",
+        "ààbò",
+        "kó̩kọ́ró̩",
+        "pípadé",
+        "títì"
+      ],
+      "1F511": [
+        "kọ́kọ́rọ́",
+        "pásìwọdù",
+        "tì"
+      ],
+      "1F512": [
+        "ti tìí",
+        "pípadé"
+      ],
+      "1F513": [
+        "ti síi",
+        "ṣí",
+        "ṣíṣí",
+        "tì"
+      ],
+      "1F514": [
+        "agago"
+      ],
+      "1F515": [
+        "agogo pẹlu idinku",
+        "agogo",
+        "àìlesọ̀rọ̀",
+        "bẹ́ẹ̀ kó̩",
+        "èèwọ̀",
+        "kò",
+        "ṣèdíwó̩"
+      ],
+      "1F516": [
+        "àmì ìwé",
+        "àmì"
+      ],
+      "1F517": [
+        "ìtọ́kasí"
+      ],
+      "1F518": [
+        "bọ́tìnnì rédíò",
+        "bó̩tìnì",
+        "jiomẹ́tíríkì",
+        "rédíò"
+      ],
+      "1F519": [
+        "ọfa ẹyin",
+        "ẹ̀yìn",
+        "o̩fà"
+      ],
+      "1F51A": [
+        "ọfa ipari",
+        "ìparí",
+        "ọfà"
+      ],
+      "1F51B": [
+        "ọfa lori!",
+        "àmì",
+        "lórí",
+        "o̩fà"
+      ],
+      "1F51C": [
+        "ọfa laipẹ",
+        "láìpẹ́",
+        "o̩fà"
+      ],
+      "1F51D": [
+        "ọfa loke",
+        "o̩fà",
+        "òkè",
+        "orí òkè"
+      ],
+      "1F51E": [
+        "kosi eniyan labẹ ejidinlogun",
+        "18",
+        "bẹ́ẹ̀kọ́",
+        "ejìdínlógún",
+        "èwọ̀",
+        "ẹwọ",
+        "ìdìwọ́ ojó orí",
+        "ojọ́ orí tó kéré",
+        "ráráa"
+      ],
+      "1F51F": [
+        "keyacap: 10",
+        "keyacap"
+      ],
+      "1F520": [
+        "ṣafikun latini ọ̀rọ̀ gbólóhùn ńlá",
+        "abcd",
+        "àgbéwọlé",
+        "látíìnì",
+        "lẹ́tà",
+        "lé̩tà nlá"
+      ],
+      "1F521": [
+        "ṣafikun latini ọ̀rọ̀ gbólóhùn kékeré",
+        "abcd",
+        "àgbéwọlé",
+        "látíìnì",
+        "lẹ́tà",
+        "lé̩tà nlá"
+      ],
+      "1F522": [
+        "ṣafikun awọn nọnba",
+        "1234",
+        "àgbéwọlé",
+        "nọ́mbà"
+      ],
+      "1F523": [
+        "ṣafikun awọn àmì",
+        "〒♪&%",
+        "àgbéwọlé"
+      ],
+      "1F524": [
+        "ṣafikun awọn lẹta latini",
+        "abc",
+        "àgbéwọlé",
+        "álífábẹ́ẹ̀tì",
+        "àwọn lẹ́tà",
+        "látíìnì"
+      ],
+      "1F525": [
+        "iná",
+        "irinṣẹ́"
+      ],
+      "1F526": [
+        "iná fílásì",
+        "iná",
+        "iná mọ̀nà-mó̩ná",
+        "irjṣé̩",
+        "tọ́ọ́ṣì"
+      ],
+      "1F527": [
+        "oolu",
+        "irinṣẹ́",
+        "irinṣẹ́ afagbára dè",
+        "sípánà"
+      ],
+      "1F528": [
+        "oòlù",
+        "irinsẹ́"
+      ],
+      "1F529": [
+        "nọti ati botu",
+        "bóòtù",
+        "irinṣé̩",
+        "nó̩ọ̀tì"
+      ],
+      "1F52A": [
+        "ọbẹ iyara-idana",
+        "àsè",
+        "hocho",
+        "irinṣẹ́",
+        "irinṣẹ́ ìjagun",
+        "ò̩bẹ"
+      ],
+      "1F52B": [
+        "ibọn ilewọ",
+        "ìbọn",
+        "ìbọn ìléwó̩",
+        "ìbọn ṣakabùlà",
+        "irinṣẹ́"
+      ],
+      "1F52C": [
+        "maikirosikopu",
+        "irinṣẹ́",
+        "sáyé̩nsì"
+      ],
+      "1F52D": [
+        "tẹlisikopu",
+        "irinṣẹ́",
+        "sáyé̩nsì"
+      ],
+      "1F52E": [
+        "bọọlu aworawọ",
+        "àìbáyému",
+        "àló̩ ajẹmó̩win",
+        "bọ́ó̩lù",
+        "òkúta aworàwò̩",
+        "ọrọ̀",
+        "pàápàá"
+      ],
+      "1F52F": [
+        "irawọ totooto oni-mẹfa",
+        "ìràwọ̀",
+        "oríre"
+      ],
+      "1F530": [
+        "àmì japanisi fun olubẹre",
+        "àwò̩ ewé",
+        "ewé",
+        "ìbẹ̀rè̩",
+        "irjnṣé̩",
+        "jàpànísì",
+        "ṣé̩fúró̩ọ̀nù",
+        "yé̩lò"
+      ],
+      "1F531": [
+        "aami apẹẹrẹ trident",
+        "ẹ̀mbé̩ẹ̀mù",
+        "ìdákọ̀ró",
+        "irinṣé̩",
+        "ọkọ̀",
+        "tírídẹ̀ntì"
+      ],
+      "1F532": [
+        "bọtini onigunmẹrin dudu",
+        "bó̩tìnì",
+        "jiomẹ́tíríkì",
+        "onígun mé̩rin"
+      ],
+      "1F533": [
+        "bọtini onigunmẹrin funfun",
+        "ààtò",
+        "bó̩tìnì",
+        "jiomẹ́tíríkì",
+        "onígun mé̩rin"
+      ],
+      "1F534": [
+        "rogodo aláwọ̀ pupa",
+        "jiomẹ́tíríkì",
+        "pupa",
+        "rogodo"
+      ],
+      "1F535": [
+        "rogodo búlúù",
+        "búlù",
+        "jiomẹ́tíríkì",
+        "rogodo"
+      ],
+      "1F536": [
+        "diamọndi alawọ oronbo nla",
+        "díámọ́ndì",
+        "jiomẹ́tíríkì",
+        "òronbó"
+      ],
+      "1F537": [
+        "diamọndi alawọ bulu nla",
+        "búlù",
+        "díámọ́ndì",
+        "jiomẹ́tíríkì"
+      ],
+      "1F538": [
+        "diamọndi alawọ oronbo kekere",
+        "díámọ́ndì",
+        "jiomẹ́tíríkì",
+        "òronbó"
+      ],
+      "1F539": [
+        "diamọndi alawọ bulu kekere",
+        "búlù",
+        "díámọ́ndì",
+        "jiomẹ́tíríkì"
+      ],
+      "1F53A": [
+        "alawọ pupa onigun mẹta toka soke",
+        "jiomẹ́tíríkì",
+        "pupa"
+      ],
+      "1F53B": [
+        "alawọ pupa onigun mẹta toka sisalẹ",
+        "ilẹ̀",
+        "jiomẹ́tíríkì",
+        "pupa"
+      ],
+      "1F53C": [
+        "bọtini oke",
+        "àmì atọ́nà ọlọ́fà",
+        "bọ́tìnì",
+        "pupa"
+      ],
+      "1F53D": [
+        "bọtini isalẹ",
+        "àmì atọ́nà ọlọ́fà",
+        "bọ́tìnì",
+        "ilè̩",
+        "pupa"
+      ],
+      "1F550": [
+        "ago kan an",
+        "00",
+        "1",
+        "1:00",
+        "ago",
+        "ìkan",
+        "lù gérégé"
+      ],
+      "1F551": [
+        "ago meji",
+        "00",
+        "2",
+        "2:00",
+        "ago",
+        "lù gérégé",
+        "méjì"
+      ],
+      "1F552": [
+        "ago mẹta",
+        "00",
+        "3",
+        "3:00",
+        "ago",
+        "lù gérégé",
+        "mẹ́tàa"
+      ],
+      "1F553": [
+        "ago mẹrin",
+        "00",
+        "4",
+        "4:00",
+        "ago",
+        "lù gérégé",
+        "mẹ́rìn"
+      ],
+      "1F554": [
+        "ago marun un",
+        "00",
+        "4",
+        "4:00",
+        "ago",
+        "lù gérégé",
+        "márùn"
+      ],
+      "1F555": [
+        "ago mẹfa",
+        "00",
+        "6",
+        "6:00",
+        "ago",
+        "lù gérégé",
+        "mẹ́fàa"
+      ],
+      "1F556": [
+        "ago meje",
+        "00",
+        "7",
+        "7:00",
+        "ago",
+        "lù gérégé",
+        "méje"
+      ],
+      "1F557": [
+        "ago mẹjọ",
+        "00",
+        "8",
+        "8:00",
+        "ago",
+        "lù gérégé",
+        "méjọ"
+      ],
+      "1F558": [
+        "ago mẹsan an",
+        "00",
+        "9",
+        "9:00",
+        "ago",
+        "lù gérégé",
+        "mẹ́san an"
+      ],
+      "1F559": [
+        "ago mẹwa",
+        "00",
+        "10",
+        "10:00",
+        "ago",
+        "lù gérégé",
+        "mẹ́wàá"
+      ],
+      "1F55A": [
+        "ago mọkanla",
+        "00",
+        "11",
+        "11:00",
+        "ago",
+        "lù gérégé",
+        "mọ́kànlá"
+      ],
+      "1F55B": [
+        "ago mejila",
+        "00",
+        "12",
+        "12:00",
+        "ago",
+        "lù gérégé",
+        "méjìlá"
+      ],
+      "1F55C": [
+        "ago kan an aabọ",
+        "1",
+        "1:30",
+        "30",
+        "ago",
+        "ìkan",
+        "ọgbọ̀n"
+      ],
+      "1F55D": [
+        "ago meji aaabọ",
+        "2",
+        "2:30",
+        "ago",
+        "méjì",
+        "ọgbọ̀n"
+      ],
+      "1F55E": [
+        "ago mẹta aabọ",
+        "3",
+        "3:30",
+        "ago",
+        "mẹ́tàa",
+        "ọgbọ̀n"
+      ],
+      "1F55F": [
+        "ago merin aabọ",
+        "30",
+        "4",
+        "4:30",
+        "ago",
+        "mẹ́rìn",
+        "ọgbọ̀n"
+      ],
+      "1F560": [
+        "ago marun un aabọ",
+        "30",
+        "4",
+        "4:30",
+        "ago",
+        "márùn",
+        "ọgbọ̀n"
+      ],
+      "1F561": [
+        "ago mẹfa aabọ",
+        "30",
+        "6",
+        "6:30",
+        "ago",
+        "mẹ́fàa",
+        "ọgbọ̀n"
+      ],
+      "1F562": [
+        "ago meje aabọ",
+        "30",
+        "7",
+        "7:30",
+        "ago",
+        "méje",
+        "ọgbọ̀n"
+      ],
+      "1F563": [
+        "ago mejọ aabọ",
+        "30",
+        "8",
+        "8:30",
+        "ago",
+        "méjọ",
+        "ọgbọ̀n"
+      ],
+      "1F564": [
+        "ago mẹsan an aabọ",
+        "30",
+        "9",
+        "9:30",
+        "ago",
+        "mẹ́san an",
+        "ọgbọ̀n"
+      ],
+      "1F565": [
+        "ago mẹwa aabọ",
+        "10",
+        "10:30",
+        "30",
+        "ago",
+        "mẹ́wàá",
+        "ọgbọ̀n"
+      ],
+      "1F566": [
+        "ago mọkanla aabọ",
+        "11",
+        "11:30",
+        "30",
+        "ago",
+        "mọ́kánlá",
+        "ọgbọ̀n"
+      ],
+      "1F567": [
+        "ago mejila aabọ",
+        "12",
+        "12:30",
+        "30",
+        "ago",
+        "méjìlá",
+        "ọgbọ̀n"
+      ],
+      "1F56F": [
+        "kándúùlù",
+        "iná"
+      ],
+      "1F570": [
+        "ago àgbélẹ̀",
+        "ago"
+      ],
+      "1F574": [
+        "ọkùnrin nínu kóòtú òwò",
+        "kóòtù",
+        "ọkùnrin",
+        "òwò"
+      ],
+      "1F575": [
+        "ọ̀tẹlèmúyé",
+        "aṣèwádìí"
+      ],
+      "1F576": [
+        "gíláásì òrùn",
+        "dúdú",
+        "gíláásì",
+        "ìbòjú",
+        "ojú"
+      ],
+      "1F577": [
+        "aláõtakùn",
+        "kòkòrò"
+      ],
+      "1F578": [
+        "ìtakùnaláõtakùn",
+        "ìtakùn"
+      ],
+      "1F579": [
+        "ìdarí eré",
+        "ere-idaraya",
+        "ere-idaraya fidio"
+      ],
+      "1F57A": [
+        "ọkunrin ti njo",
+        "ijọ́",
+        "ọkùnrin"
+      ],
+      "1F587": [
+        "àsopọ̀ ìfimúwèépọ̀",
+        "àfimúwèépò̩",
+        "ìsopọ̀"
+      ],
+      "1F58A": [
+        "gègé pẹlu rogodo",
+        "gègé"
+      ],
+      "1F58B": [
+        "gègé orísun",
+        "gègé",
+        "orísun"
+      ],
+      "1F58C": [
+        "búró̩sì ìkùndà",
+        "ọ̀dà"
+      ],
+      "1F58D": [
+        "kereyọ́nù"
+      ],
+      "1F590": [
+        "nawọ́ sókè pẹ̀lú ìyàka",
+        "ìka",
+        "ọwọ́",
+        "yàka"
+      ],
+      "1F595": [
+        "ìka àárín",
+        "ìka",
+        "ọwọ́"
+      ],
+      "1F596": [
+        "kiki ibẹri funni",
+        "ìka",
+        "ọwọ́",
+        "spock",
+        "vulcan"
+      ],
+      "1F5A4": [
+        "ọkàn dúdú",
+        "dúdú",
+        "èṣù",
+        "ìkà"
+      ],
+      "1F5A5": [
+        "kọ̀npútà a-gbé-lórí-tábílì",
+        "a-gbé-lórí-tábílì",
+        "kọ̀npútà"
+      ],
+      "1F5A8": [
+        "pínríntà",
+        "kọ̀npútà"
+      ],
+      "1F5B1": [
+        "máòsì kọ̀npútà",
+        "kọ̀npútà"
+      ],
+      "1F5B2": [
+        "òntè̩ afinimọ̀nà",
+        "kọ̀npútà"
+      ],
+      "1F5BC": [
+        "àwọrán inú férémù",
+        "àwòrán",
+        "férémù",
+        "ilé ọnà",
+        "iṣẹ́ ọná",
+        "kíkùn"
+      ],
+      "1F5C2": [
+        "ohun èlò ìpínyà àtòjọ atọ́ka-ọ̀rọ̀ káàdì",
+        "àtòjọ atọ́ka-ọ̀rọ̀",
+        "káàdì",
+        "ohun èlò ìpínyà"
+      ],
+      "1F5C3": [
+        "àpótí káàdì fún fáìlì",
+        "àpótí",
+        "fáìlì",
+        "káàdì"
+      ],
+      "1F5C4": [
+        "àpótí fáàlì",
+        "àpótí",
+        "fáàlì",
+        "ìforúkọ fáàlì sílẹ̀"
+      ],
+      "1F5D1": [
+        "apẹ̀rẹ̀ ìdalè̩sí"
+      ],
+      "1F5D2": [
+        "nóòtì páàdì alákápò̩",
+        "àkápọ̀",
+        "nóòtì",
+        "páàdì"
+      ],
+      "1F5D3": [
+        "kàlẹ́ndà alákápọ̀",
+        "àkápọ̀",
+        "kàlẹ́ndà",
+        "páàdì"
+      ],
+      "1F5DC": [
+        "gbámú",
+        "ìfúnpọ̀",
+        "irinṣẹ́",
+        "ohun èlò irinṣẹ́"
+      ],
+      "1F5DD": [
+        "kó̩kọ́ró̩ àtijó̩",
+        "àtijó̩",
+        "kọ́kọ́ró̩",
+        "olobó",
+        "títì"
+      ],
+      "1F5DE": [
+        "ìwé ìròyìn aláyípọ̀",
+        "àkápọ̀",
+        "ìròyìn",
+        "ìwé ìròyìn",
+        "pépà"
+      ],
+      "1F5E1": [
+        "dágà",
+        "irinṣẹ́ ìjagun",
+        "ò̩bẹ"
+      ],
+      "1F5E3": [
+        "orí tí ń sọ̀rọ̀",
+        "bíríbírí",
+        "ń sọ̀rọ̀",
+        "ojú",
+        "orí",
+        "sọ̀rọ̀"
+      ],
+      "1F5E8": [
+        "bàlúnù ọ̀rọ̀ sísọ òsì",
+        "ìtàkùrọ̀sọ",
+        "ọ̀rọ̀"
+      ],
+      "1F5EF": [
+        "bàlúnù ọ̀rọ̀ sísọ ọ̀tún",
+        "àdàlú",
+        "bàlúnù",
+        "bínú"
+      ],
+      "1F5F3": [
+        "àpótí ìdìbò pẹ̀lú ìwé ìdìbò",
+        "àpótí",
+        "ìwé ìdìbò"
+      ],
+      "1F5FA": [
+        "máàpù àgbáyé",
+        "àgbáyé",
+        "máàpù"
+      ],
+      "1F5FB": [
+        "oke fuji",
+        "fújì",
+        "òkè"
+      ],
+      "1F5FC": [
+        "ile iṣọ tokiyo",
+        "ile iṣọ",
+        "tokiyo"
+      ],
+      "1F5FD": [
+        "ere ominira",
+        "ère",
+        "òmìnira"
+      ],
+      "1F5FE": [
+        "maapu ti japanu",
+        "jàpánù",
+        "máàpù"
+      ],
+      "1F5FF": [
+        "moai",
+        "ère",
+        "ojú"
+      ],
+      "1F600": [
+        "ojú tó rẹ́rìn",
+        "fẹyín",
+        "ojú"
+      ],
+      "1F601": [
+        "ojú tó fẹyín pẹ̀lú ẹyinjú tó rẹ́rìn músẹ́",
+        "ẹyinjú",
+        "fẹyín",
+        "ojú",
+        "rẹ́rìn músẹ́"
+      ],
+      "1F602": [
+        "ojú pẹ̀lú ẹkún ayọ̀",
+        "àyọ̀",
+        "ẹkún",
+        "ẹ̀rín",
+        "ojú"
+      ],
+      "1F603": [
+        "ojú tó rẹ́rìn pẹ̀lú ẹnu lílà sílẹ̀",
+        "ẹnu",
+        "ojú",
+        "rẹ́rìń músẹ́",
+        "ṣí"
+      ],
+      "1F604": [
+        "ojú tó ń rẹ́rìń músẹ́ pẹ̀lú ẹnu lílà sílẹ̀ àti ẹyinjú tó ń rkrìń músẹ́",
+        "ẹnu",
+        "ẹyinjú",
+        "ojú",
+        "rẹ́rìń músẹ́",
+        "ṣí"
+      ],
+      "1F605": [
+        "ojú tó ń rẹ́rìń pẹ̀lú ẹnu lílà sílẹ̀ àti òógùn",
+        "ojú",
+        "òógùn",
+        "òtútù",
+        "rẹ́rìń músẹ́",
+        "ṣí"
+      ],
+      "1F606": [
+        "ojú tó ń rẹ́rìń músẹ́ pẹ̀lú ẹnu lílà sílẹ̀ àti òógùn tútù",
+        "ẹnu",
+        "ẹ̀rín",
+        "ìtẹ́larùn",
+        "ojú",
+        "rẹ́rìń músẹ́"
+      ],
+      "1F607": [
+        "oju ẹrin ati bawo",
+        "àlá",
+        "àla fú ọmọdé",
+        "aláìṣẹ̀",
+        "àńgẹ́lì",
+        "báwo",
+        "ojú",
+        "rẹ́rìn músẹ́"
+      ],
+      "1F608": [
+        "oju ẹrin pẹlu awọn iwo",
+        "àlá",
+        "ìtàn ọmọdé",
+        "ìwo",
+        "ojú",
+        "oju ẹrin pẹlu awọn iho",
+        "rẹ́rìn músẹ́"
+      ],
+      "1F609": [
+        "ojú tó ṣẹ́jù",
+        "ojú",
+        "ṣẹ́jú"
+      ],
+      "1F60A": [
+        "ojú tó rẹ́rìn músẹ́ pẹ̀lú ẹyinjú tó rẹ́rìn músẹ́",
+        "ẹyinjú",
+        "ojú",
+        "rẹ́rìń ìtìjù",
+        "rẹ́rìń músẹ́"
+      ],
+      "1F60B": [
+        "oju ti o n jẹ ounjẹ aladidun",
+        "aládídùn",
+        "jíjẹ aládídùn",
+        "ojú",
+        "rẹ́rìń músẹ́",
+        "um",
+        "yum"
+      ],
+      "1F60C": [
+        "oju itura",
+        "ìtura",
+        "ojú"
+      ],
+      "1F60D": [
+        "oju ti o n rẹrin pẹlu awọn oju ọkan",
+        "ẹyinjú",
+        "ìfẹ́",
+        "ojú",
+        "rẹ́rìn músẹ́"
+      ],
+      "1F60E": [
+        "oju ti o n rẹrin pẹlu digi oju",
+        "àwọn gílásì",
+        "àwọn gílásì òrùn",
+        "ẹyinjú",
+        "ìbojú",
+        "mọ́lẹ̀",
+        "ojú",
+        "òrùn",
+        "rẹ́rìń músẹ́",
+        "tutù"
+      ],
+      "1F60F": [
+        "oju ẹrin abosi",
+        "ojú",
+        "rẹ́rín àbòsí"
+      ],
+      "1F610": [
+        "ojú ìbíìbí",
+        "àárín",
+        "àìpani lẹ́rìń",
+        "ojú"
+      ],
+      "1F611": [
+        "oju ti ko fanimọra",
+        "àìfanimọ́ra",
+        "àìlè sọ̀rọ̀",
+        "àìlèsọ̀rọ̀",
+        "ojú"
+      ],
+      "1F612": [
+        "oju aifanimọra",
+        "àìdunú",
+        "àìfanimọ́ra",
+        "ojú"
+      ],
+      "1F613": [
+        "oju pẹlu ilaagun tutu",
+        "ojú",
+        "òógùn",
+        "òtútù"
+      ],
+      "1F614": [
+        "oju ironu",
+        "ìpòruru",
+        "jákulẹ̀",
+        "ojú"
+      ],
+      "1F615": [
+        "oju iporuru",
+        "iporuru",
+        "ojú"
+      ],
+      "1F616": [
+        "oju itiju",
+        "itiju",
+        "ojú"
+      ],
+      "1F617": [
+        "ojú tó fẹnuko ẹnu",
+        "ìfẹnukonu",
+        "ojú"
+      ],
+      "1F618": [
+        "oju ti o n fẹ ifẹnuko",
+        "ìfẹnukonu",
+        "ojú"
+      ],
+      "1F619": [
+        "ojú tó fẹnuko ẹnu pẹ̀lú ẹyinjú tọ rẹ́rìn músẹ́",
+        "ẹyinjú",
+        "ìfẹnukonu",
+        "ojú",
+        "rẹ́rìń músẹ́"
+      ],
+      "1F61A": [
+        "oju ti o n fẹnuko pẹlu awọn oju didi",
+        "ẹyinjú",
+        "ìfẹnukonu",
+        "ojú",
+        "ti padé"
+      ],
+      "1F61B": [
+        "oju ti ahọn ti o yọ sita",
+        "ahọ́n",
+        "ojú"
+      ],
+      "1F61C": [
+        "ojú pẹ̀lú ahọ́n lílà sílẹ̀ àti ẹyinjú tí ń ṣẹ́jú",
+        "ahọ́n",
+        "ẹyinjú",
+        "ojú",
+        "ṣẹ́jú",
+        "yẹ̀yẹ́"
+      ],
+      "1F61D": [
+        "ojú pẹ̀lú ahọ́n lílà sílẹ̀ àti ẹyinjú tó padé",
+        "ahọ́n",
+        "burújù",
+        "ẹyinjú",
+        "ìtọ́wò",
+        "ojú"
+      ],
+      "1F61E": [
+        "ojú ìjakulẹ̀",
+        "ìjakulẹ",
+        "ojú"
+      ],
+      "1F61F": [
+        "oju idamu",
+        "ìdàmú",
+        "ojú"
+      ],
+      "1F620": [
+        "oju ibinu",
+        "bínú",
+        "ìbínú",
+        "ojú"
+      ],
+      "1F621": [
+        "oju iyaahan",
+        "bínú",
+        "ojú",
+        "yànhàn"
+      ],
+      "1F622": [
+        "oju ẹkun",
+        "ẹkún",
+        "ìbànújẹ",
+        "ojú"
+      ],
+      "1F623": [
+        "oju ifarada",
+        "ìfaradà",
+        "ojú"
+      ],
+      "1F624": [
+        "oju pẹlu ooru nimu",
+        "ìjagunmólú",
+        "ojú",
+        "oju pẹlu ikun nimu",
+        "yege"
+      ],
+      "1F625": [
+        "oju ijakulẹ ṣugbọn itura",
+        "hmmm",
+        "ìjákulẹ̀",
+        "ìtura",
+        "ojú"
+      ],
+      "1F626": [
+        "oju ti o faro pẹlu ẹnu lila silẹ",
+        "ẹnu",
+        "fajúro",
+        "ojú",
+        "ṣí"
+      ],
+      "1F627": [
+        "ojú ìrora",
+        "ìrora",
+        "ojú"
+      ],
+      "1F628": [
+        "oju ẹru",
+        "ìbẹ̀rù",
+        "ojú"
+      ],
+      "1F629": [
+        "oju ti o rẹ̀",
+        "ojú",
+        "rírẹ̀"
+      ],
+      "1F62A": [
+        "oju iloorun",
+        "ojú",
+        "sùn"
+      ],
+      "1F62B": [
+        "oju rirẹ",
+        "ojú",
+        "rírẹ̀"
+      ],
+      "1F62C": [
+        "oju ifaro",
+        "ìfaro",
+        "ojú"
+      ],
+      "1F62D": [
+        "oju ti n sunkun gidi",
+        "ẹkún",
+        "ìbànújẹ",
+        "ojú",
+        "sunkún"
+      ],
+      "1F62E": [
+        "oju pẹlu ẹnu lila",
+        "ẹnu",
+        "kẹ́dùn",
+        "ojú",
+        "ṣí"
+      ],
+      "1F62F": [
+        "oju idakẹjẹ",
+        "dákẹ́jẹ́",
+        "ìyàlẹ́nu",
+        "ojú"
+      ],
+      "1F630": [
+        "ojú pẹ̀lú ẹnu lílà sílẹ̀ àti òógùn tútù",
+        "búlù",
+        "ẹnu",
+        "ojú",
+        "òógùn",
+        "sáré",
+        "ṣí",
+        "tútù"
+      ],
+      "1F631": [
+        "oju fifi ẹru han an",
+        "bẹ̀rù",
+        "han",
+        "ìbẹ̀rù",
+        "jẹ",
+        "ojú"
+      ],
+      "1F632": [
+        "ojú ìyalẹnu",
+        "ìpaláyà",
+        "ìyàlẹ́nu",
+        "ojú",
+        "pátápátá"
+      ],
+      "1F633": [
+        "oju idunnu",
+        "ìdùnú",
+        "ojú",
+        "yàlẹ́nu"
+      ],
+      "1F634": [
+        "oju ti o n sun",
+        "ojú",
+        "sss",
+        "sùn"
+      ],
+      "1F635": [
+        "oju itoogbe",
+        "itoogbe",
+        "ojú"
+      ],
+      "1F636": [
+        "ojú tí kò ní ẹnu",
+        "dáké",
+        "ẹnu",
+        "ojú"
+      ],
+      "1F637": [
+        "oju pẹlu iboju iṣoogun",
+        "àárẹ̀",
+        "dókítà",
+        "ìbòjú",
+        "ògùn",
+        "ojú",
+        "otútù"
+      ],
+      "1F638": [
+        "oju ibinu ologbo pẹlu awọn oju arẹrin",
+        "fẹyín",
+        "ojú",
+        "olóngbò",
+        "rẹ́rìn músẹ́"
+      ],
+      "1F639": [
+        "oju ologbo pẹlu ẹkun ayọ",
+        "ayọ̀",
+        "ẹkún",
+        "ojú",
+        "olóngbò"
+      ],
+      "1F63A": [
+        "oju arẹrin ologbo pẹlu ẹnu yiya",
+        "ẹnu",
+        "ẹranko",
+        "ẹ̀rín",
+        "ẹ́rìń músẹ́",
+        "ń rẹ́rìn-ín",
+        "ojú",
+        "ológbò",
+        "ṣí"
+      ],
+      "1F63B": [
+        "oju arẹrin ologbo pẹlu oju-ọkan",
+        "ẹyinjú",
+        "ìfẹ́",
+        "ojú",
+        "olóngbò",
+        "rẹ́rìn músẹ́"
+      ],
+      "1F63C": [
+        "oju ologbo pẹlu ẹrin afiniṣẹsin",
+        "aláìríbóṣeyẹ",
+        "ojú",
+        "olóngbò",
+        "rẹ́rìń músẹ́",
+        "ṣẹ̀sín"
+      ],
+      "1F63D": [
+        "oju ologbo afẹnukonu",
+        "ẹyinjú",
+        "ìfenukonu",
+        "oju ologbo afẹnukonu pẹlu awọn oju didi",
+        "olóngbò"
+      ],
+      "1F63E": [
+        "oju ete ologbo",
+        "ojú",
+        "olóngbo",
+        "ṣu ètè síta"
+      ],
+      "1F63F": [
+        "oju ẹkun ologbo",
+        "ẹkún",
+        "ìbànújẹ́",
+        "ojú",
+        "olóngbò"
+      ],
+      "1F640": [
+        "oju ologbo ti o rẹ",
+        "haa",
+        "ìyàlẹ́nu",
+        "ojú",
+        "olóngbò",
+        "rírẹ̀"
+      ],
+      "1F641": [
+        "oju ifajuro diẹ",
+        "fajúro",
+        "ojú"
+      ],
+      "1F642": [
+        "oju ti o n rẹrin muṣẹn",
+        "ojú",
+        "rẹ́rín músẹ́"
+      ],
+      "1F643": [
+        "oju ti o rọ walẹ",
+        "dojú kodò",
+        "ojú"
+      ],
+      "1F644": [
+        "ojú pẹ̀lú ẹyinjú tó yín",
+        "àwọn ẹyinjú",
+        "ojú",
+        "tó yín"
+      ],
+      "1F645": [
+        "ẹni nsọ rara",
+        "èwọ̀",
+        "fowọ́júwè",
+        "ọwọ́",
+        "rárá"
+      ],
+      "1F646": [
+        "ẹni nsọ o dara",
+        "fowọ́júwè",
+        "ódára",
+        "ọwọ́"
+      ],
+      "1F647": [
+        "ẹni n tẹriba",
+        "bẹ̀bẹ̀",
+        "fọwọ́júwè",
+        "pẹ̀lẹ́",
+        "tẹríba"
+      ],
+      "1F648": [
+        "ọbọ mari ibi",
+        "èṣù",
+        "èwọ̀",
+        "ìfọwọ́júwè",
+        "ọ̀bọ",
+        "ojú",
+        "rárá",
+        "wòó"
+      ],
+      "1F649": [
+        "ọbọ magbọ ibi",
+        "èṣù",
+        "èwọ̀",
+        "gbọ́",
+        "ìfọwọ́júwè",
+        "ojú",
+        "rárá"
+      ],
+      "1F64A": [
+        "ọbọ masọ ibi",
+        "èṣù",
+        "èwọ̀",
+        "ìfọwọ́júwè",
+        "ọ̀bọ",
+        "ojú",
+        "rárá",
+        "sọ̀rọ̀"
+      ],
+      "1F64B": [
+        "ẹni n nawọ soke",
+        "fọwọ́júwè",
+        "gbéga",
+        "ìdùnú",
+        "ọwọ́"
+      ],
+      "1F64C": [
+        "ina awọn ọwọ",
+        "ayẹyẹ",
+        "fọwọ́júwè",
+        "hooray",
+        "nawọ́",
+        "ọwọ́"
+      ],
+      "1F64D": [
+        "ẹni n bojujẹ",
+        "fajúro",
+        "fọwọ́júwè"
+      ],
+      "1F64E": [
+        "ẹni yahọn sita",
+        "fífowọ́júwè",
+        "ṣíṣù ètè síta"
+      ],
+      "1F64F": [
+        "ika awọn ọwọ",
+        "adúpé",
+        "bèrè",
+        "fọwọ́júwè",
+        "gbèdúrà",
+        "jọ̀wọ́",
+        "kákò",
+        "ọwọ́",
+        "tẹríba"
+      ],
+      "1F680": [
+        "rọ́kẹ̀tì",
+        "ààyè"
+      ],
+      "1F681": [
+        "ẹlikọputa",
+        "nṣe ọkọ́"
+      ],
+      "1F682": [
+        "yiyi",
+        "ẹ̀rọ",
+        "ojú irin",
+        "ọks ojú irin",
+        "òru"
+      ],
+      "1F683": [
+        "ọkọ oju-irin",
+        "bọ́ọ̀sì gígùn",
+        "ìná",
+        "ojú irin",
+        "ọkọ̀",
+        "ọkọ̀ ojú irin",
+        "ọ̀nà ọkọ̀ ojú irin"
+      ],
+      "1F684": [
+        "ọkọ oju-irin alare",
+        "aré",
+        "ojú irin",
+        "ọkọ̀ ojú irin",
+        "ọkọ̀ ojú irin abẹ́ ilẹ̀"
+      ],
+      "1F685": [
+        "ọkọ oju-irin alare pẹlu imu ọta",
+        "aré",
+        "ojú irin",
+        "ọkọ̀ ojú irin",
+        "ọkọ̀ ojú irin abẹ́ ilẹ̀",
+        "ọta"
+      ],
+      "1F686": [
+        "ṣèdánilẹ́kọ̀ọ́",
+        "ọkọ oju-irin"
+      ],
+      "1F687": [
+        "àjà ilẹ̀",
+        "ọ̀nà ọkọ̀ ojú irin"
+      ],
+      "1F688": [
+        "ọkọ oju-irin kekere",
+        "ọkọ oju-irin"
+      ],
+      "1F689": [
+        "ibudo",
+        "ojú-irin",
+        "ọkọ ojú-irin"
+      ],
+      "1F68A": [
+        "tiramu",
+        "ọkọ akero oniwiwọ"
+      ],
+      "1F68B": [
+        "ọkọ tiramu",
+        "ọkọ̀",
+        "ọkọ̀ akérò oníwíwọ́",
+        "ọkọ̀ ojú irin gígùn"
+      ],
+      "1F68C": [
+        "ọkọ akero",
+        "nṣe ọkọ́"
+      ],
+      "1F68D": [
+        "ọkọ akero ti nbọ",
+        "ọkọ̀ akérò",
+        "tí ń bọ̀"
+      ],
+      "1F68E": [
+        "ọkọ akero oniwiwọ",
+        "ọkọ̀ akérò",
+        "ọkọ̀ akérò oníwíwọ́",
+        "ọkọ̀ ojú irin gígùn"
+      ],
+      "1F68F": [
+        "ibudokọ",
+        "dúró",
+        "ibùdókọ̀",
+        "ọkọ̀ akérò"
+      ],
+      "1F690": [
+        "ọkọ akero kekere",
+        "ọkọ akero"
+      ],
+      "1F691": [
+        "ọkọ alaisan",
+        "nṣe ọkọ́"
+      ],
+      "1F692": [
+        "ẹnjini onina",
+        "ẹ̀rọ",
+        "iná",
+        "ọkọ̀ akkrù ńlá"
+      ],
+      "1F693": [
+        "ọkọ ọlọpa",
+        "ọkọ̀",
+        "ọlọ́pàá",
+        "olùṣọ́"
+      ],
+      "1F694": [
+        "ọkọ ọlọpa ti nbọ",
+        "ọkọ́",
+        "ọlọ́pàá",
+        "tí ń bọ̀"
+      ],
+      "1F695": [
+        "taasi",
+        "nṣe ọkọ́"
+      ],
+      "1F696": [
+        "taasi ti nbọ",
+        "taasi",
+        "ti nbọ"
+      ],
+      "1F697": [
+        "ọko",
+        "ọkọ́"
+      ],
+      "1F698": [
+        "ọkọ ti nbọ",
+        "ọkọ̀",
+        "tí ń bọ̀"
+      ],
+      "1F699": [
+        "ọkọ agbafẹ daradara",
+        "ìgbafẹ́",
+        "òks agbafẹ́ tó dára"
+      ],
+      "1F69A": [
+        "ọkọ akẹru",
+        "ifijiṣẹ"
+      ],
+      "1F69B": [
+        "ọkọ nla akẹru",
+        "díẹ̀",
+        "ọkọ̀ akérò ńlá",
+        "ọkọ̀ akẹ́rù"
+      ],
+      "1F69C": [
+        "katakata",
+        "nṣe ọkọ́"
+      ],
+      "1F69D": [
+        "oju irin kan",
+        "nṣe ọkọ́"
+      ],
+      "1F69E": [
+        "reluwe oloke",
+        "òké",
+        "ọkọ̀",
+        "ọkọ ojú-irin"
+      ],
+      "1F69F": [
+        "ọkọ oju irin oloke",
+        "ọkọ oju irin",
+        "olókè"
+      ],
+      "1F6A0": [
+        "ọkọ oniwaya ori-oke",
+        "gòndólà",
+        "òkè",
+        "wáyà"
+      ],
+      "1F6A1": [
+        "tramway eriali",
+        "éríklì",
+        "gòndólà",
+        "ọkọ̀",
+        "ọ̀nà ọkọ̀ ojú irin",
+        "wáyà"
+      ],
+      "1F6A2": [
+        "ọkọ̀ ojú omi ńlá",
+        "èrò",
+        "ọkọ̀ ojú omi"
+      ],
+      "1F6A3": [
+        "ẹni n wa ọkọ",
+        "kọ́ ojú omi kékeré",
+        "ọkọ̀ ojú omi"
+      ],
+      "1F6A4": [
+        "ọkọ omi alare",
+        "ọkọ̀ ojú omi"
+      ],
+      "1F6A5": [
+        "ina adariko onidubu",
+        "adarí",
+        "adaríkọ̀",
+        "iná"
+      ],
+      "1F6A6": [
+        "ina adariko olopo",
+        "adarí",
+        "adaríkọ̀",
+        "iná"
+      ],
+      "1F6A7": [
+        "iṣẹ́ ọnà",
+        "ìdènà"
+      ],
+      "1F6A8": [
+        "ina ọkọ ọlọpa",
+        "ẹran ẹlẹ́dẹ̀",
+        "iná",
+        "ọkọ̀",
+        "ọlọ́pàá",
+        "yípo"
+      ],
+      "1F6A9": [
+        "asia onigun mẹta",
+        "ìfiránṣé̩"
+      ],
+      "1F6AA": [
+        "ìlẹ̀kùn"
+      ],
+      "1F6AB": [
+        "kosaye",
+        "àbáwo̩lé",
+        "èèwọ̀",
+        "kò",
+        "rárá"
+      ],
+      "1F6AC": [
+        "siga",
+        "sìgá mímu"
+      ],
+      "1F6AD": [
+        "kosi mimu siga",
+        "èèwọ̀",
+        "kò",
+        "kòsáyè",
+        "rárá",
+        "sìgá mímu"
+      ],
+      "1F6AE": [
+        "idoti ninu aami idọti",
+        "dọ̀tí",
+        "ike ìdalẹ̀sí"
+      ],
+      "1F6AF": [
+        "kosi idahun-silẹ",
+        "dọ̀tí",
+        "èèwọ̀",
+        "kò",
+        "kòsáyè",
+        "rárá"
+      ],
+      "1F6B0": [
+        "omi aṣeegbe kiri",
+        "lábó̩dé",
+        "mímu",
+        "omi"
+      ],
+      "1F6B1": [
+        "omi ti koṣeemu",
+        "àìmọlábọ́dé",
+        "kòṣéèmu",
+        "omi"
+      ],
+      "1F6B2": [
+        "kẹ̀kẹ́"
+      ],
+      "1F6B3": [
+        "kosi awọn kẹkẹ",
+        "báíkì",
+        "èèwọ̀",
+        "kẹ̀ké̩",
+        "kò",
+        "kòsáyè",
+        "rárá"
+      ],
+      "1F6B4": [
+        "ẹni n gun kẹkẹ",
+        "awa kẹ̀kẹ́",
+        "ìwákẹ̀kẹ́",
+        "kẹ̀kẹ́"
+      ],
+      "1F6B5": [
+        "ẹni n gun kẹkẹ gun apata",
+        "awakẹ̀kẹ́",
+        "kẹ̀kẹ́",
+        "òkè"
+      ],
+      "1F6B6": [
+        "ẹni n rin",
+        "ìrìn",
+        "ń rìn"
+      ],
+      "1F6B7": [
+        "kosi olufẹsẹrin",
+        "èèwọ̀",
+        "kò",
+        "kòsáyè",
+        "olùfẹsẹ̀rìn",
+        "rárá"
+      ],
+      "1F6B8": [
+        "awọn ọmọde n sọda",
+        "ìsọdá",
+        "olùfẹsẹ̀rìn",
+        "ọmọ",
+        "súkẹrẹ-fàkẹrẹ"
+      ],
+      "1F6B9": [
+        "iyara awọn ọkunrin",
+        "ilé ìgbọ̀nṣẹ̀",
+        "ilé ìgbò̩nṣẹ̀ olómi",
+        "ìyàrá ìsinmi",
+        "ọkùnrin"
+      ],
+      "1F6BA": [
+        "iyara awọn obinrin",
+        "ilé ìgbọ̀nṣẹ̀",
+        "ilé ìgbò̩nṣẹ̀ olómi",
+        "ìyàrá ìsinmi",
+        "obìnrin"
+      ],
+      "1F6BB": [
+        "iléìyàgbẹ́",
+        "ilé ìgbọ̀nṣẹ̀",
+        "ilé ìgbò̩nṣẹ̀ olómi",
+        "ìyàrá ìsinmi"
+      ],
+      "1F6BC": [
+        "àmì ọmọ",
+        "àyípadà",
+        "ọmọ ìkókó"
+      ],
+      "1F6BD": [
+        "ilé ìgbẹ́"
+      ],
+      "1F6BE": [
+        "iléìyàgbẹ́ olomi",
+        "ilé ìgbọ̀nṣẹ̀",
+        "ilé ìgbọ̀nṣẹ̀ olómi",
+        "ìyàrá ìsinmi",
+        "ìyẹ̀wù",
+        "omi"
+      ],
+      "1F6BF": [
+        "ìwẹ̀",
+        "omi"
+      ],
+      "1F6C0": [
+        "ẹni nwẹ",
+        "àgbá ìwé",
+        "ìwẹ̀"
+      ],
+      "1F6C1": [
+        "àgbá ìwẹ̀",
+        "ìwẹ̀"
+      ],
+      "1F6C2": [
+        "iṣakoso aworan ori",
+        "darí",
+        "ìwé ìrìnnà"
+      ],
+      "1F6C3": [
+        "awọn aṣọbode"
+      ],
+      "1F6C4": [
+        "igba ẹru ẹni",
+        "ẹrù",
+        "gba"
+      ],
+      "1F6C5": [
+        "fifi ẹru silẹ",
+        "àtìpa",
+        "ẹrù"
+      ],
+      "1F6CC": [
+        "ẹniyan nibusun",
+        "ilé ìtura",
+        "sùn"
+      ],
+      "1F6D0": [
+        "ibi ijọsin",
+        "ẹ̀sìn",
+        "ìjó̩sìn"
+      ],
+      "1F6D1": [
+        "aami idaduro",
+        "àmì",
+        "dúró",
+        "onígun mẹ́jọ"
+      ],
+      "1F6D2": [
+        "àtẹ iraja",
+        "àtẹ",
+        "ìrajà",
+        "kẹ̀kẹ́ ìkójàsí"
+      ],
+      "1F6D5": [
+        "ilé ìjọ́sìn hindu",
+        "hindù",
+        "ibi ijọ́sìn"
+      ],
+      "1F6D6": [
+        "abà",
+        "ilé",
+        "ilé onípo"
+      ],
+      "1F6D7": [
+        "ohun ìgbésókè",
+        "aye ririn",
+        "ìgbésókè"
+      ],
+      "1F6DC": [
+        "aini okun ina",
+        "ero ayarabiasa",
+        "intaneeti",
+        "konputa"
+      ],
+      "1F6DD": [
+        "ibi eré",
+        "páàkì eré",
+        "ṣeré"
+      ],
+      "1F6DE": [
+        "keke",
+        "sakù",
+        "táyà",
+        "yí"
+      ],
+      "1F6DF": [
+        "ríngì",
+        "àbò",
+        "gbayọ",
+        "wẹ̀"
+      ],
+      "1F6E0": [
+        "òòlù àti irinṣẹ́ afagbára dè",
+        "irinṣẹ́",
+        "irinṣẹ́ afagbára dè",
+        "òòlù",
+        "sípánà"
+      ],
+      "1F6E1": [
+        "ohun èlò àbò",
+        "irinṣẹ́ ìjagun"
+      ],
+      "1F6E2": [
+        "àgbá epo",
+        "àgbá",
+        "epo"
+      ],
+      "1F6E3": [
+        "ojú ọ̀nà ọkọ̀",
+        "ọ́nà",
+        "pópó"
+      ],
+      "1F6E4": [
+        "ọ̀nà ojú-irin",
+        "ojú-irin",
+        "ọkọ ojú-irin"
+      ],
+      "1F6E5": [
+        "ọkọ̀ ojú omi tó ń lo ẹ̀rọ",
+        "ọkọ̀ ojú omi"
+      ],
+      "1F6E9": [
+        "bàlú òfurufú kékeré",
+        "bàlú òfurufú",
+        "ọkọ̀ òfurufú"
+      ],
+      "1F6EB": [
+        "ibi idagbere baalu",
+        "bàlú òfurufú",
+        "ìjáde",
+        "ọkọ̀ òfurufú",
+        "ṣàyẹ̀wò wọlé"
+      ],
+      "1F6EC": [
+        "ibi ikaabọ baalu",
+        "àwọn ìwọlé",
+        "bàlú òfurufú",
+        "bíbalẹ̀",
+        "ìwọlé",
+        "ọkọ̀ òfurufú",
+        "wíwọlé"
+      ],
+      "1F6F0": [
+        "alátagbà",
+        "ààyè"
+      ],
+      "1F6F3": [
+        "ọkọ̀ ojú omi ńlá èrò",
+        "èrò",
+        "ọkọ̀ ojú omi ńlá"
+      ],
+      "1F6F4": [
+        "alupupu kekere",
+        "alupùpù ẹlẹ́sẹ̀ méjì",
+        "gbá"
+      ],
+      "1F6F5": [
+        "alupupu onimọto",
+        "alupupu",
+        "onimọto"
+      ],
+      "1F6F6": [
+        "obele",
+        "òbèlé",
+        "ọkọ̀ ojú omi"
+      ],
+      "1F6F7": [
+        "sílẹ́dì",
+        "sílẹ̀",
+        "sílẹ́jì"
+      ],
+      "1F6F8": [
+        "àwọ kékeré tí ń fò",
+        "ufo"
+      ],
+      "1F6F9": [
+        "bọ́ọ̀dù ti síkéètì",
+        "bọ́ọ̀dù"
+      ],
+      "1F6FA": [
+        "ẹ̀rọ ríìkì",
+        "túùkì"
+      ],
+      "1F6FB": [
+        "ọkọ̀ ńlá fún gbígbé nǹkan",
+        "gbé",
+        "gbígbé nǹkan",
+        "ọkọ̀ ńlá"
+      ],
+      "1F6FC": [
+        "síkéètì ti ó s;are",
+        "are",
+        "saré",
+        "síkéètì",
+        "síkéètì ti ó s"
+      ],
+      "1F7E0": [
+        "osan saku",
+        "osan",
+        "saku"
+      ],
+      "1F7E1": [
+        "saku yelo",
+        "saku",
+        "yelo"
+      ],
+      "1F7E2": [
+        "saku girini",
+        "girini",
+        "saku"
+      ],
+      "1F7E3": [
+        "pọ́pù rogodo",
+        "pọ́pù",
+        "rogodo"
+      ],
+      "1F7E4": [
+        "rogodo aláwọ igi",
+        "aláwọ igi",
+        "rogodo"
+      ],
+      "1F7E5": [
+        "síkúwẹ́ẹ̀ pupa",
+        "pupa",
+        "síkúwẹ́ẹ̀"
+      ],
+      "1F7E6": [
+        "síkúwẹ́ẹ̀ búlúù",
+        "bùlúù",
+        "síkúwẹ́ẹ̀"
+      ],
+      "1F7E7": [
+        "síkúwẹ́ẹ̀ orénjì",
+        "orénjì",
+        "síkúwẹ́ẹ̀"
+      ],
+      "1F7E8": [
+        "síkúwẹ́ẹ̀ yẹ́lọ̀",
+        "orénjì",
+        "síkúwẹ́ẹ̀"
+      ],
+      "1F7E9": [
+        "síkúwẹ́ẹ̀ aláwọ̀ ewé",
+        "aláwọ̀ ewé",
+        "síkúwẹ́ẹ̀"
+      ],
+      "1F7EA": [
+        "síkúwẹ́ẹ̀ pọ́pù",
+        "pọ́pù",
+        "síkúwẹ́ẹ̀"
+      ],
+      "1F7EB": [
+        "síkúwẹ́ẹ̀ aláwọ̀ igi",
+        "aláwọ̀ igi",
+        "síkúwẹ́ẹ̀"
+      ],
+      "1F7F0": [
+        "ami jíje nlá",
+        "bákan",
+        "isiro"
+      ],
+      "1F90C": [
+        "ìka kíkákò",
+        "ẹ̀fẹ̀",
+        "ìfiwọ́ sọ̀rọ̀",
+        "ìka",
+        "ìwanulẹ́nuwò",
+        "yín"
+      ],
+      "1F90D": [
+        "ọkàn funfun",
+        "ọkàn / funfun"
+      ],
+      "1F90E": [
+        "ọkàn awo igi",
+        "awo igi / ọkàn"
+      ],
+      "1F90F": [
+        "ìka kíká",
+        "owó kẹ̀keré",
+        "ọwọ́ yínyín"
+      ],
+      "1F918": [
+        "aami awọn iwo",
+        "19900",
+        "ìka",
+        "ìwo",
+        "ọwọ́"
+      ],
+      "1F919": [
+        "ọwọ ipeni",
+        "ìpè",
+        "ọwọ́"
+      ],
+      "1F91A": [
+        "na ẹhin ọwọ soke",
+        "ẹ̀yìn ọwọ́",
+        "nà sókè"
+      ],
+      "1F91B": [
+        "ẹsẹ ti o kọju sosi",
+        "apá ọ̀sì",
+        "ẹ̀ṣẹ́"
+      ],
+      "1F91C": [
+        "ẹsẹ ti o kọju sọtun",
+        "apá ọ̀tún",
+        "ẹ̀ṣẹ́"
+      ],
+      "1F91D": [
+        "ìbọwọ́",
+        "gbọn",
+        "ìfaramọ́",
+        "ìpàdé",
+        "ọwọ"
+      ],
+      "1F91E": [
+        "igbekalera",
+        "dábùú",
+        "ìka",
+        "orírere",
+        "ọwọ́"
+      ],
+      "1F91F": [
+        "ìfọwọ́júwè mo ní ìfẹ́",
+        "ily",
+        "ọwọ́"
+      ],
+      "1F920": [
+        "oju fila adaran",
+        "adaran",
+        "fìlà",
+        "obìnrin ẹlẹ́ṣin",
+        "ojú"
+      ],
+      "1F921": [
+        "ojú apanilẹrin",
+        "apanilẹrin",
+        "ojú"
+      ],
+      "1F922": [
+        "oju ailera",
+        "àìlera",
+        "èébì",
+        "ojú"
+      ],
+      "1F923": [
+        "yíyí ní ilẹ̀nlẹ̀ tún rẹ́rìn",
+        "ilẹ̀",
+        "ojú",
+        "rẹ́rìń",
+        "yíyí"
+      ],
+      "1F924": [
+        "oju adatọ",
+        "adatọ",
+        "ojú"
+      ],
+      "1F925": [
+        "oju irọ",
+        "irọ́",
+        "ojú",
+        "onímú gígùn"
+      ],
+      "1F926": [
+        "ẹni fọwọ boju",
+        "àìgbàgbọ́",
+        "àtẹ́lẹ́ ọwa",
+        "ìkórira",
+        "ojú"
+      ],
+      "1F927": [
+        "oju sinsin",
+        "gesundheit",
+        "ojú",
+        "sín"
+      ],
+      "1F928": [
+        "ìrun ojú ta gbé sókè",
+        "àìgbàgbọ́",
+        "oníyèméjì"
+      ],
+      "1F929": [
+        "pípa pè̩lú ìràwọ̀",
+        "ẹyinjú",
+        "ìràwọ̀",
+        "ojú",
+        "rẹ́rìn-ín ìyàlé̩nu"
+      ],
+      "1F92A": [
+        "ojú aṣiwèrè",
+        "kékeré",
+        "nlá",
+        "ojú"
+      ],
+      "1F92B": [
+        "ojú tó sùpò̩",
+        "dákẹ́",
+        "panu mọ́"
+      ],
+      "1F92C": [
+        "àmì ojú tó rékọjá ẹnu",
+        "bíbúra"
+      ],
+      "1F92D": [
+        "ojú tá fọwọ́ bo ẹnu",
+        "ikó̩"
+      ],
+      "1F92E": [
+        "èébì ajẹmọ́jú",
+        "àìsàn",
+        "èébì"
+      ],
+      "1F92F": [
+        "orí tó bú gbàmù",
+        "ìjayà"
+      ],
+      "1F930": [
+        "obinrin alaboyun",
+        "alaboyun",
+        "obinrin"
+      ],
+      "1F931": [
+        "ìfọ́mọlọ́yàn",
+        "ìkókó",
+        "ìtọ́jú ọmọ",
+        "ọyọ̀n"
+      ],
+      "1F932": [
+        "àtẹ́lẹ́ọwọ́ papọ̀",
+        "àdúrà"
+      ],
+      "1F933": [
+        "yiya ara ẹni",
+        "fóònù",
+        "fọ́tò àdáyà",
+        "kámẹ́rà"
+      ],
+      "1F934": [
+        "ọmọkunrin alade"
+      ],
+      "1F935": [
+        "ọkunrin pẹlu kootu",
+        "kóòtù",
+        "ọkọ ìyàwó",
+        "ọkùnrin"
+      ],
+      "1F936": [
+        "arabinrin keresi",
+        "[kẹrẹsí",
+        "ayẹyẹ",
+        "ìyá",
+        "kérésì",
+        "omidan"
+      ],
+      "1F937": [
+        "ẹni n gunpa",
+        "àìmọ̀kan",
+        "àìnání",
+        "gúnpá",
+        "iyèméjì"
+      ],
+      "1F938": [
+        "ẹni kawọ tilẹ kẹsẹ soke",
+        "ìdárayá",
+        "kẹ̀kẹ́ alágbọ̀n"
+      ],
+      "1F939": [
+        "ẹni n ju nnkan soke",
+        "ìdọ́gba",
+        "ìmọ̀ọ́ṣe",
+        "jíju ǹkan sókè",
+        "ọ̀pọ̀ iṣẹ́"
+      ],
+      "1F93A": [
+        "ẹni n ja pẹlu ida",
+        "eré ìjà",
+        "eré jíjà",
+        "idà"
+      ],
+      "1F93C": [
+        "awọn onigidigbo",
+        "gídígò",
+        "onígídígbò"
+      ],
+      "1F93D": [
+        "ẹni n ṣere olomi",
+        "omi",
+        "pólò"
+      ],
+      "1F93E": [
+        "ẹni n ṣere bọọlu ọlọwọ",
+        "bọ́ọ̀lù",
+        "bọ́ọ̀lù ọlọ́wọ́"
+      ],
+      "1F942": [
+        "gilasi didun",
+        "ayẹyẹ",
+        "dún",
+        "gílásì",
+        "ohun mímu"
+      ],
+      "1F943": [
+        "gilasi tọnbila",
+        "gílásì",
+        "ọtí",
+        "ọtí líle",
+        "ṣọ́ọ̀tí",
+        "tọ́mbílà"
+      ],
+      "1F944": [
+        "ṣíbí",
+        "ǹkan ilé ìdáná"
+      ],
+      "1F945": [
+        "àwọ̀n góòlù",
+        "àwọ̀n",
+        "góòlù"
+      ],
+      "1F947": [
+        "fadaka ipo akọkọ",
+        "àkọ́kọ́",
+        "fádákà",
+        "góòlù"
+      ],
+      "1F948": [
+        "fadaka ipo ekeji",
+        "fádákà",
+        "ipò kejì",
+        "sílífà"
+      ],
+      "1F949": [
+        "fadaka ipo ẹkẹta",
+        "bírónsì",
+        "fàdákà",
+        "ipò kẹta"
+      ],
+      "1F94A": [
+        "gilofu ikanṣẹ",
+        "gilofu",
+        "ikanṣẹ"
+      ],
+      "1F94B": [
+        "aṣọ ere itapa",
+        "àǹkóò",
+        "àwon eré onípàá àti ẹlẹ́sẹ̀",
+        "eré ẹlẹ́sẹ̀",
+        "eré ọlọ́wọ́",
+        "eré onípàá àti ọwọ́"
+      ],
+      "1F94C": [
+        "òkúta ìwọ́",
+        "eré",
+        "òkúta"
+      ],
+      "1F950": [
+        "kurosanti",
+        "búrẹ́dì",
+        "faransé",
+        "kírísẹ́ntì",
+        "ónjẹ"
+      ],
+      "1F951": [
+        "afokado",
+        "afokádò",
+        "èso",
+        "ónjẹ"
+      ],
+      "1F952": [
+        "kùkúmbà",
+        "ẹ̀fọ́",
+        "ónjẹ",
+        "píkù"
+      ],
+      "1F953": [
+        "ẹran ẹlẹdẹ",
+        "ẹran",
+        "ẹran ẹlẹ́dẹ̀",
+        "ónjẹ"
+      ],
+      "1F954": [
+        "ànàmọ́",
+        "ẹ̀fọ́",
+        "ónjẹ"
+      ],
+      "1F955": [
+        "kárọ̀tì",
+        "ẹ̀fọ́",
+        "kárọ́tì",
+        "ónjẹ"
+      ],
+      "1F956": [
+        "burẹdi baguette",
+        "búrẹ́dì",
+        "búrẹ́dì gbọọrọ",
+        "faransé",
+        "ónjẹ"
+      ],
+      "1F957": [
+        "saladi elewe",
+        "eléwé",
+        "ónjẹ",
+        "sàláádì"
+      ],
+      "1F958": [
+        "paanu ijẹun kekere",
+        "kásẹrọ̀",
+        "ónjẹ",
+        "páànù ṣálò",
+        "pàẹ́là",
+        "ṣálò"
+      ],
+      "1F959": [
+        "burẹdi afunpọ pẹlẹbẹ",
+        "búrẹdì àfúnpọ̀ pẹlẹbẹ",
+        "falafe",
+        "gyro",
+        "kebab",
+        "ónjẹ",
+        "stuufe"
+      ],
+      "1F95A": [
+        "ẹyin",
+        "ónjẹ"
+      ],
+      "1F95B": [
+        "ife wara",
+        "gílásì",
+        "mílíkì",
+        "mu"
+      ],
+      "1F95C": [
+        "ẹpa",
+        "ẹ̀fọ́",
+        "ẹ̀pà",
+        "kóró inú èso",
+        "ónjẹ"
+      ],
+      "1F95D": [
+        "eso kiwi",
+        "èso",
+        "kíwì",
+        "ónjẹ"
+      ],
+      "1F95E": [
+        "atike ikunju",
+        "búrẹ́dì pẹlẹbẹ",
+        "crepe",
+        "ónjẹ"
+      ],
+      "1F95F": [
+        "ìgbẹ́",
+        "empanada",
+        "gyōza",
+        "jiaozi",
+        "pierogi",
+        "potsticker"
+      ],
+      "1F960": [
+        "kúkì fortune",
+        "asọtẹ́lẹ̀"
+      ],
+      "1F961": [
+        "àpótí àgbéjáde",
+        "péèlìa ọ́yẹ́stà"
+      ],
+      "1F962": [
+        "igi ìjẹun",
+        "áṣì",
+        "ìlàrí"
+      ],
+      "1F963": [
+        "abọ́ pẹ̀lú ṣíbí",
+        "àgbàdo",
+        "congee",
+        "ónjẹ àrọ̀"
+      ],
+      "1F964": [
+        "ife pẹ̀lú sírọ̀",
+        "ẹlẹ́rìndòdò",
+        "sódà"
+      ],
+      "1F965": [
+        "àgbọn",
+        "ọ̀pẹ",
+        "pina colada"
+      ],
+      "1F966": [
+        "ewé ẹlẹ́fọ̀ọ́",
+        "kabeji ìbílẹ̀"
+      ],
+      "1F967": [
+        "róbótó",
+        "àkàrà",
+        "kíkún"
+      ],
+      "1F968": [
+        "pretzel",
+        "lọ́pọ̀"
+      ],
+      "1F969": [
+        "ìgé ẹran",
+        "ijẹ àgùntàn",
+        "ijẹ ẹlẹ́dẹ̀",
+        "ìjẹun",
+        "steak"
+      ],
+      "1F96A": [
+        "búrẹ́dì alákànpọ̀",
+        "búrẹ́dì"
+      ],
+      "1F96B": [
+        "ónjẹ inú agolo",
+        "agolo"
+      ],
+      "1F96C": [
+        "ẹ̀fọ́",
+        "efo",
+        "kabẹ́ẹ̀jì",
+        "tete"
+      ],
+      "1F96D": [
+        "mángò",
+        "eka ojo rírọ̀",
+        "èso"
+      ],
+      "1F96E": [
+        "àkàrà òsùpá",
+        "akara osupa",
+        "ayeye",
+        "igba ogbele"
+      ],
+      "1F96F": [
+        "bágẹ́lì",
+        "bageli",
+        "ibi ipese buredi",
+        "ounje aaro"
+      ],
+      "1F970": [
+        "ojú erin pelu okan",
+        "ẹyinjú",
+        "kẹ́",
+        "ní ìfẹ́",
+        "oju tí ó ń rẹ́rìn pẹ̀lú ọkàn",
+        "ọkàn"
+      ],
+      "1F971": [
+        "ojú tón yán",
+        "ojú yíyán",
+        "rẹ̀",
+        "sú",
+        "yán"
+      ],
+      "1F972": [
+        "ojú ẹ̀rín pẹ̀lú ẹkún",
+        "ekún",
+        "fọwọ́kàn",
+        "gbéraga",
+        "more",
+        "rẹ́rìń músẹ́",
+        "rẹ́rìń músẹ́ pẹ̀lú ẹkún",
+        "simi"
+      ],
+      "1F973": [
+        "ojú patí",
+        "àsè",
+        "ayọ̀",
+        "fìlà",
+        "ìho",
+        "ojú àsè"
+      ],
+      "1F974": [
+        "ojú to wópọ̀",
+        "oorun kíkún"
+      ],
+      "1F975": [
+        "ojú gbígbóná",
+        "gbona",
+        "iba",
+        "oju to gbona",
+        "ooru"
+      ],
+      "1F976": [
+        "ojú tútú",
+        "oju bulu",
+        "oju tutu",
+        "otutu n mú",
+        "tutu"
+      ],
+      "1F977": [
+        "nínjà",
+        "ajagun",
+        "ninja",
+        "oja",
+        "sápamọ́"
+      ],
+      "1F978": [
+        "ojú ìsápamọ́",
+        "àìmọ̀",
+        "gíláàsì",
+        "imú",
+        "ojú",
+        "ojú tó sapamọ",
+        "sápamọ"
+      ],
+      "1F979": [
+        "ojú tón mu ẹkún dúró",
+        "banújẹ́",
+        "bínú",
+        "gbẹ́raga",
+        "kọ̀",
+        "ojú tí ò fẹ́ sunkún",
+        "sunkún"
+      ],
+      "1F97A": [
+        "ojú tónbẹ̀bẹ̀",
+        "àánú",
+        "bẹ̀bẹ̀",
+        "ojú ọmọ ajá",
+        "ojú tí ń bẹ̀bẹ̀"
+      ],
+      "1F97B": [
+        "sari",
+        "aso",
+        "kaba"
+      ],
+      "1F97C": [
+        "aṣọ ilé ìṣàyẹ̀wò",
+        "aso laabi",
+        "aso láabù",
+        "ise laabu",
+        "onimo sayensi",
+        "onísegub"
+      ],
+      "1F97D": [
+        "gọ́gú",
+        "bẹ̀ sómi",
+        "ìdáàbò bò",
+        "jíjọ́ irin pọ̀",
+        "ojú",
+        "wíwẹ́",
+        "wíwẹ́ nínú odò pẹ̀lù ohun èlò tí a fi ń mí"
+      ],
+      "1F97E": [
+        "bóòtì ìgokè",
+        "botì",
+        "didi nnkan seyin",
+        "rinrin"
+      ],
+      "1F97F": [
+        "bàtà pẹlẹbẹ",
+        "bata kekere",
+        "bata pelebe"
+      ],
+      "1F980": [
+        "alákàn",
+        "àmi oṣù ìbí",
+        "cancer"
+      ],
+      "1F981": [
+        "kiniun",
+        "àmi oṣù ìbí",
+        "kìnìu",
+        "leo",
+        "ojú",
+        "oju kiniun"
+      ],
+      "1F982": [
+        "àkekè",
+        "àmi oṣù ìbí",
+        "scorpio",
+        "scorpius"
+      ],
+      "1F983": [
+        "tólòtólò",
+        "ẹyẹ",
+        "tòlótòló"
+      ],
+      "1F984": [
+        "oju ẹṣin oniwo",
+        "eṣin oníwo",
+        "ojú"
+      ],
+      "1F985": [
+        "àṣá",
+        "ẹyẹ"
+      ],
+      "1F986": [
+        "pẹ́pẹ́yẹ",
+        "ẹyẹ"
+      ],
+      "1F987": [
+        "adan",
+        "àdán",
+        "amùjẹ́"
+      ],
+      "1F988": [
+        "ṣáàkì",
+        "ẹja"
+      ],
+      "1F989": [
+        "owiwi",
+        "ẹyẹ",
+        "ọlọ́ngbọ́n",
+        "òwìwí"
+      ],
+      "1F98A": [
+        "kọlọkọlọ",
+        "ẹranko",
+        "kọ̀lọ̀kọ̀lọ̀",
+        "ojú"
+      ],
+      "1F98B": [
+        "labalaba",
+        "arẹwà",
+        "kòkòrò",
+        "labalábá"
+      ],
+      "1F98C": [
+        "agbọnrin"
+      ],
+      "1F98D": [
+        "inaki",
+        "ẹranko",
+        "ìnàkí"
+      ],
+      "1F98E": [
+        "aláǹgba",
+        "aláǹgbà",
+        "ẹranko tí nfí àìyà fà"
+      ],
+      "1F98F": [
+        "ẹranko imado"
+      ],
+      "1F990": [
+        "ede",
+        "edé",
+        "ẹja inú ìkarahun",
+        "kékeré",
+        "ónjẹ"
+      ],
+      "1F991": [
+        "sikidi",
+        "mólúsì",
+        "ónjẹ",
+        "síkídì"
+      ],
+      "1F992": [
+        "àgùfọn",
+        "àwọn àyè"
+      ],
+      "1F993": [
+        "kẹ́tẹ́kẹ́tẹ́ abìla",
+        "onílà"
+      ],
+      "1F994": [
+        "hedgehog",
+        "ẹlẹ́gùń"
+      ],
+      "1F995": [
+        "sauropod",
+        "brachiosaurus",
+        "brontosaurus",
+        "diplodocus"
+      ],
+      "1F996": [
+        "t-rex",
+        "tyrannosaurus rex"
+      ],
+      "1F997": [
+        "tata gígùn",
+        "tata"
+      ],
+      "1F998": [
+        "kangaròó",
+        "fo",
+        "kangaròó } australia"
+      ],
+      "1F999": [
+        "llama",
+        "alapaka",
+        "owu"
+      ],
+      "1F99A": [
+        "ọ̀kín",
+        "eye",
+        "fihan",
+        "gberaga",
+        "okin"
+      ],
+      "1F99B": [
+        "hipopotámọ́ọ̀sì",
+        "hipopo"
+      ],
+      "1F99C": [
+        "àparò",
+        "aparo",
+        "eye",
+        "soro"
+      ],
+      "1F99D": [
+        "rakumi",
+        "rakumin",
+        "wiwa"
+      ],
+      "1F99E": [
+        "akàn",
+        "alakan",
+        "ounje omi"
+      ],
+      "1F99F": [
+        "ẹ̀fọ́n",
+        "aisan",
+        "arun",
+        "ẹfọn",
+        "farọ́ọ̀sì",
+        "iba"
+      ],
+      "1F9A0": [
+        "maikirobu",
+        "à[san",
+        "maíkírobù"
+      ],
+      "1F9A1": [
+        "bájà",
+        "bája oloyin"
+      ],
+      "1F9A2": [
+        "ẹyẹ swan",
+        "eye",
+        "pepeye",
+        "síwan"
+      ],
+      "1F9A3": [
+        "mamotì",
+        "mamoti",
+        "pare",
+        "tobi"
+      ],
+      "1F9A4": [
+        "ẹyẹ dodo",
+        "dodo",
+        "pare",
+        "tobi"
+      ],
+      "1F9A5": [
+        "àsẹ́wó",
+        "asẹ́wó",
+        "dìẹ̀dìẹ̀",
+        "ọlẹ́"
+      ],
+      "1F9A6": [
+        "ota",
+        "peja",
+        "sere"
+      ],
+      "1F9A7": [
+        "oraguta",
+        "aapù",
+        "oragutan"
+      ],
+      "1F9A8": [
+        "vote òkété igbó",
+        "rùn",
+        "skọ́nk"
+      ],
+      "1F9A9": [
+        "vote ẹyẹ flamingò",
+        "fìlàmígò",
+        "tobi"
+      ],
+      "1F9AA": [
+        "alákàn ńlá",
+        "bibe somi",
+        "pálì"
+      ],
+      "1F9AB": [
+        "bifa",
+        "damú"
+      ],
+      "1F9AC": [
+        "bison",
+        "bísonú",
+        "búfálò"
+      ],
+      "1F9AD": [
+        "alákàsà",
+        "kìnìún odò"
+      ],
+      "1F9AE": [
+        "ajá ìtóni",
+        "ajá ìtọ̀ni",
+        "fọ́jú",
+        "tọ́ni"
+      ],
+      "1F9AF": [
+        "egba funfun",
+        "aye ona",
+        "fọ́jú"
+      ],
+      "1F9B0": [
+        "irun pupa",
+        "irun",
+        "jínjà",
+        "orí-pupa",
+        "pupa"
+      ],
+      "1F9B1": [
+        "irun rírọ̀",
+        "àwọn ríngì",
+        "dúdúláwọ̀",
+        "rírọ̀"
+      ],
+      "1F9B2": [
+        "orí pípá",
+        "àìínírun",
+        "ìfárí",
+        "kimotẹ́rápì",
+        "kòsí irun"
+      ],
+      "1F9B3": [
+        "irun funfun",
+        "arúgbó",
+        "funfun",
+        "gíréè",
+        "irun"
+      ],
+      "1F9B4": [
+        "eegun",
+        "egun",
+        "igi ara"
+      ],
+      "1F9B5": [
+        "ese",
+        "ẹ́sẹ",
+        "gbá"
+      ],
+      "1F9B6": [
+        "ẹsẹ̀",
+        "ese",
+        "gba",
+        "idiurop"
+      ],
+      "1F9B7": [
+        "eyín",
+        "àwọ́n eyín",
+        "yọyínyọyín"
+      ],
+      "1F9B8": [
+        "akọni alágbára",
+        "akin nlá",
+        "akin obìnrin",
+        "akin ọ̀kùnrin",
+        "alágbára ńla",
+        "dára"
+      ],
+      "1F9B9": [
+        "alátakọ̀ alágbára",
+        "[búburú",
+        "alágbára nlá",
+        "alátakọ̀",
+        "ọ̀dàran"
+      ],
+      "1F9BB": [
+        "etí pẹ̀lú ohun ìgbọ́ràn",
+        "gbọ̀ pẹ̀lu elo",
+        "ona igba"
+      ],
+      "1F9BC": [
+        "àga ìgbérìn oníná",
+        "ní ọ̀nà fún gbígbà"
+      ],
+      "1F9BD": [
+        "aga ìgbérìn ọlọ́wọ́",
+        "aye irin"
+      ],
+      "1F9BE": [
+        "apá iṣẹ̀",
+        "apa ise",
+        "ona lati gba"
+      ],
+      "1F9BF": [
+        "ese ise",
+        "ona lati gba",
+        "pa ise"
+      ],
+      "1F9C0": [
+        "waara wedge",
+        "wàrà"
+      ],
+      "1F9C1": [
+        "akara oyinbo",
+        "ile ipese buredi"
+      ],
+      "1F9C2": [
+        "iyọ̀",
+        "ero ounje",
+        "iyo"
+      ],
+      "1F9C3": [
+        "àpótí ohun mímu",
+        "dun",
+        "ibi",
+        "ibi oúnjẹ́",
+        "júùsì"
+      ],
+      "1F9C4": [
+        "gálíìkì",
+        "fifi awo sí",
+        "galilki"
+      ],
+      "1F9C5": [
+        "àlùbọ́sà",
+        "alùbosà",
+        "fifi awo si"
+      ],
+      "1F9C6": [
+        "faláfẹ́l]i",
+        "ewa"
+      ],
+      "1F9C7": [
+        "wáfù",
+        "aimo nnkan",
+        "ounje arro",
+        "wafu"
+      ],
+      "1F9C8": [
+        "bọ́tà",
+        "mílíkì"
+      ],
+      "1F9C9": [
+        "ẹgbẹ́",
+        "mu"
+      ],
+      "1F9CA": [
+        "omi dídì",
+        "ìrísín àpótí",
+        "ọ̀kìtì yìyín inún òòkun",
+        "tútù"
+      ],
+      "1F9CB": [
+        "tíì bọ́bù",
+        "tíì",
+        "wara"
+      ],
+      "1F9CD": [
+        "ènìyàn dídúró",
+        "dídúró",
+        "dúró"
+      ],
+      "1F9CE": [
+        "ènìyàn kíkúnlẹ̀",
+        "kíkúnlẹ̀",
+        "kúnlẹ̀"
+      ],
+      "1F9CF": [
+        "odi",
+        "etí",
+        "gbọ́",
+        "odí ènìyàn"
+      ],
+      "1F9D0": [
+        "ojú tó súnkì",
+        "sítọ́fì"
+      ],
+      "1F9D1": [
+        "àgbà",
+        "gé̩ndà-ṣekuṣẹyẹ"
+      ],
+      "1F9D2": [
+        "ọmọ",
+        "gé̩ndà-ṣekuṣẹyẹ",
+        "màjèsín"
+      ],
+      "1F9D3": [
+        "àgbàlagbà",
+        "arúgbó",
+        "gé̩ndà-ṣekuṣẹyẹ"
+      ],
+      "1F9D4": [
+        "apárí",
+        "irùngbọ̀n"
+      ],
+      "1F9D5": [
+        "obinrin tó wé gèlè",
+        "gèlè",
+        "gèlè àwọn sípánì",
+        "ìbòrí",
+        "ìbòrí àwọn júù"
+      ],
+      "1F9D6": [
+        "ènìyàn nínú ìyàrá tó n gbóná",
+        "ìyàrá tó n gbóná"
+      ],
+      "1F9D7": [
+        "ènìyàn tó n gòkè",
+        "agùnkè"
+      ],
+      "1F9D8": [
+        "ènìyàn nípò ìgbàgbé",
+        "ṣàṣàrò",
+        "yógà"
+      ],
+      "1F9D9": [
+        "onídán",
+        "àjẹ́",
+        "oṣó"
+      ],
+      "1F9DA": [
+        "iwin",
+        "oberon",
+        "puck",
+        "titania"
+      ],
+      "1F9DB": [
+        "fánpáyà",
+        "àìkú",
+        "dàràkúlà"
+      ],
+      "1F9DC": [
+        "yemọja ènìyàn",
+        "yemọja"
+      ],
+      "1F9DD": [
+        "egbére",
+        "ìdán"
+      ],
+      "1F9DE": [
+        "ànjọ̀nnú",
+        "ànjọ̀nnú arabia"
+      ],
+      "1F9DF": [
+        "ẹbọra",
+        "àìlèkú",
+        "àkúdáàyà"
+      ],
+      "1F9E0": [
+        "ọpọlọ",
+        "ọmọwé"
+      ],
+      "1F9E1": [
+        "ọlọkàn omi ọsàn",
+        "aláwọ̀ ọsàn",
+        "ọlakàn ọsàn"
+      ],
+      "1F9E2": [
+        "fìla billed",
+        "fìla bọ́ọ̀lùòkè"
+      ],
+      "1F9E3": [
+        "síkáfù",
+        "ọrùn"
+      ],
+      "1F9E4": [
+        "ìbọ̀wọ́",
+        "ọwọ́"
+      ],
+      "1F9E5": [
+        "kóòtù",
+        "jákẹ́tì"
+      ],
+      "1F9E6": [
+        "ìbọ̀sẹ̀",
+        "ìbọ̀sẹ̀ obìnrin gígùn"
+      ],
+      "1F9E7": [
+        "akolẹ́tàsí pupa",
+        "ẹ̀bùn",
+        "oríre",
+        "owó"
+      ],
+      "1F9E8": [
+        "olufa iná",
+        "àwọn iṣẹ́ nǹkan",
+        "ohun iná",
+        "olùfa iná"
+      ],
+      "1F9E9": [
+        "ohun àdìtú",
+        "ìsopọ̀",
+        "itosona"
+      ],
+      "1F9EA": [
+        "tubu ayewo",
+        "ayewo",
+        "kemisir]i",
+        "lábù",
+        "sayensi"
+      ],
+      "1F9EB": [
+        "ounje",
+        "aarun",
+        "asa",
+        "bioloji"
+      ],
+      "1F9EC": [
+        "dínà",
+        "baolojì",
+        "d",
+        "emi",
+        "inà",
+        "jíni"
+      ],
+      "1F9ED": [
+        "atọ́nà",
+        "lílẹ̀mọ́",
+        "sísọfún"
+      ],
+      "1F9EE": [
+        "abakuọ́sì",
+        "abakusi",
+        "isirò"
+      ],
+      "1F9EF": [
+        "ohun ìpaná",
+        "ina",
+        "ohun ipana",
+        "pana"
+      ],
+      "1F9F0": [
+        "nńkan èlo",
+        "àya",
+        "elo",
+        "mekáníkì"
+      ],
+      "1F9F1": [
+        "bíríkì",
+        "àwọn bíríkì",
+        "ògiri",
+        "yẹ̀pẹ̀"
+      ],
+      "1F9F2": [
+        "lílẹ̀ mọ́",
+        "bata ẹsin",
+        "fífàmọ́ra"
+      ],
+      "1F9F3": [
+        "ẹrù",
+        "kíkó ẹrù",
+        "rín ìrínájò"
+      ],
+      "1F9F4": [
+        "ìgò ìpára",
+        "ibora fun oorùn",
+        "ife",
+        "ipara",
+        "pori"
+      ],
+      "1F9F5": [
+        "òwú",
+        "abere",
+        "owú",
+        "rírán"
+      ],
+      "1F9F6": [
+        "asọ",
+        "bólì",
+        "rán",
+        "yáni"
+      ],
+      "1F9F7": [
+        "àbẹ́rẹ́ ààbò",
+        "àpáta lilé",
+        "dápà"
+      ],
+      "1F9F8": [
+        "ekùn ifi",
+        "ẹkùn",
+        "kopo",
+        "ohun ifiṣeré"
+      ],
+      "1F9F9": [
+        "ìgbálẹ̀",
+        "aje",
+        "gbigbale",
+        "igbalẹ̀"
+      ],
+      "1F9FA": [
+        "apẹ̀rẹ̀",
+        "àgbẹ̀ síse",
+        "àsè",
+        "aṣọ fífọ̀"
+      ],
+      "1F9FB": [
+        "bẹ́bà kíkà",
+        "beba inudi",
+        "beba inuwo"
+      ],
+      "1F9FC": [
+        "ọṣẹ",
+        "fifo",
+        "ose",
+        "ose abo",
+        "we",
+        "wiwe"
+      ],
+      "1F9FD": [
+        "kàyìnkàyìn",
+        "faye gbomi",
+        "fífọ̀",
+        "kàìnkaìn"
+      ],
+      "1F9FE": [
+        "ìwé owó",
+        "erí",
+        "ìdájú"
+      ],
+      "1F9FF": [
+        "amuleti ti nasari",
+        "eso ara",
+        "ogun",
+        "ondán"
+      ],
+      "1FA70": [
+        "bàtà ijó",
+        "bata ijo",
+        "ijo",
+        "jó"
+      ],
+      "1FA71": [
+        "aso ìwẹ̀",
+        "aso ìlúwẹ́ẹ̀"
+      ],
+      "1FA72": [
+        "aṣọ kékeré",
+        "aso awọ́tẹ́lẹ̀",
+        "aso ìlúwẹ́ẹ̀",
+        "aso ìwẹ̀"
+      ],
+      "1FA73": [
+        "aṣọ pẹ́npé",
+        "aso ìlúwẹ́ẹ̀",
+        "aso ìwẹ̀",
+        "àwọ̀ tẹ́lẹ̀",
+        "sokoto pẹ́npé"
+      ],
+      "1FA74": [
+        "salubata tongi",
+        "salúbàtà",
+        "salúbàtà ibi omi",
+        "sorí"
+      ],
+      "1FA75": [
+        "okàn buluu díè",
+        "búlùú díẹ̀",
+        "ọkàn",
+        "síyánì",
+        "tílì"
+      ],
+      "1FA76": [
+        "ọkan eerú",
+        "eérú",
+        "ọkàn",
+        "sífà",
+        "síléètì"
+      ],
+      "1FA77": [
+        "ọkàn pinki",
+        "dára",
+        "fẹ́ràn",
+        "ìfẹ́",
+        "ọkàn",
+        "pínkì"
+      ],
+      "1FA78": [
+        "ita ẹ̀jẹ̀",
+        "eje",
+        "eje fifun",
+        "nnkan osù",
+        "ogun"
+      ],
+      "1FA79": [
+        "bándeèjì",
+        "bándéèjì",
+        "bándéèjì lílẹ̀mọ́"
+      ],
+      "1FA7A": [
+        "sitesitosikoop]u",
+        "o]ogùn",
+        "okan",
+        "onisegun",
+        "sítẹ́sítósikóòpù"
+      ],
+      "1FA7B": [
+        "aworan ayewo",
+        "egun",
+        "onisegun"
+      ],
+      "1FA7C": [
+        "igi ifirin",
+        "aro",
+        "egba",
+        "igi",
+        "nnkan ifirin"
+      ],
+      "1FA80": [
+        "yóyò",
+        "aidúró",
+        "ohun isere omode"
+      ],
+      "1FA81": [
+        "káìtì",
+        "fò"
+      ],
+      "1FA82": [
+        "páráṣútì",
+        "fo lóké",
+        "párás",
+        "utì"
+      ],
+      "1FA83": [
+        "ipadawa",
+        "atubotan",
+        "ositerila"
+      ],
+      "1FA84": [
+        "idán",
+        "aje",
+        "emere"
+      ],
+      "1FA85": [
+        "pinátà",
+        "ase",
+        "ayeye",
+        "vote pinátà"
+      ],
+      "1FA86": [
+        "dọ́lù ìsimi",
+        "dọ́lù",
+        "rosíà"
+      ],
+      "1FA87": [
+        "marakasi",
+        "èlò",
+        "gbọ̀n",
+        "jin",
+        "orin"
+      ],
+      "1FA88": [
+        "fèrè",
+        "agbohunsile",
+        "fere",
+        "orin"
+      ],
+      "1FA89": [
+        "háàpù",
+        "ẹgbẹ́ akọrin",
+        "ìfẹ́",
+        "ohun èlò",
+        "orin",
+        "òrìṣà ìfẹ́"
+      ],
+      "1FA90": [
+        "plánẹ́tì oiringì",
+        "sàtọ́nì"
+      ],
+      "1FA91": [
+        "àga",
+        "aga",
+        "ìjọ́kọ̀",
+        "jòkọ́"
+      ],
+      "1FA92": [
+        "ọ̀bẹ́",
+        "gé",
+        "mú",
+        "obe"
+      ],
+      "1FA93": [
+        "àáké",
+        "ake",
+        "igi",
+        "pin"
+      ],
+      "1FA94": [
+        "àtùpà díya",
+        "àtùpà",
+        "díya",
+        "epo"
+      ],
+      "1FA95": [
+        "bánjò",
+        "banjo",
+        "lọ́pọ̀",
+        "orin"
+      ],
+      "1FA96": [
+        "ìbòrí ológun",
+        "ámì",
+        "jagunjagun",
+        "soja"
+      ],
+      "1FA97": [
+        "akodíà",
+        "fún",
+        "kosatinà"
+      ],
+      "1FA98": [
+        "ilu gigun",
+        "didún",
+        "ìlù",
+        "ìlù gigun",
+        "kóngà"
+      ],
+      "1FA99": [
+        "koínì",
+        "irin",
+        "isura",
+        "kóini",
+        "owo"
+      ],
+      "1FA9A": [
+        "sọ́ọ̀ káfíntà",
+        "sọ́ọ̀"
+      ],
+      "1FA9B": [
+        "elo ìtú ìdè",
+        "elo",
+        "ìdè"
+      ],
+      "1FA9C": [
+        "àkàbà",
+        "gùn",
+        "igbésẹ̀"
+      ],
+      "1FA9D": [
+        "ako",
+        "ibi títà",
+        "mu",
+        "yi"
+      ],
+      "1FA9E": [
+        "jígí",
+        "ifinihan",
+        "jigi",
+        "ohun ifihan"
+      ],
+      "1FA9F": [
+        "fèrèsé",
+        "ategun tuntun",
+        "ferese",
+        "sisile",
+        "wiwo"
+      ],
+      "1FAA0": [
+        "ohun iti",
+        "ibi igbonsè",
+        "ife imu nnkan sele",
+        "pulumbà"
+      ],
+      "1FAA1": [
+        "òwú ìránṣọ",
+        "abere",
+        "owú",
+        "ríránso",
+        "sopo"
+      ],
+      "1FAA2": [
+        "ìsopọ̀",
+        "dì",
+        "kó",
+        "lọ́ } yí"
+      ],
+      "1FAA3": [
+        "bọ́kẹ́ẹ̀tì",
+        "abo",
+        "ibomi si",
+        "peelì"
+      ],
+      "1FAA4": [
+        "pánpẹ́ ẹmọ́",
+        "koto",
+        "panpe",
+        "panpe eku",
+        "panpeeku"
+      ],
+      "1FAA5": [
+        "búrọ̀ọ́ṣì ìfọnu",
+        "buroshi",
+        "eto eyín",
+        "eyiín",
+        "ibaluwe",
+        "nu"
+      ],
+      "1FAA6": [
+        "okutaori",
+        "iboji",
+        "iboji okú",
+        "irori"
+      ],
+      "1FAA7": [
+        "ohun ìkéde",
+        "ami",
+        "duòkò",
+        "ìwòde",
+        "káàdí"
+      ],
+      "1FAA8": [
+        "àpáta",
+        "le",
+        "òkúta",
+        "wúwo"
+      ],
+      "1FAA9": [
+        "bọ́ọ̀lu onijigí",
+        "àsè",
+        "ijọ́ } tàn"
+      ],
+      "1FAAA": [
+        "káàdì ìdánimoọ̀",
+        "abo",
+        "iwe èrí",
+        "káàdì ìdánimọ̀"
+      ],
+      "1FAAB": [
+        "batírì kékeré",
+        "agbara kekere",
+        "batiri kekere",
+        "onina"
+      ],
+      "1FAAC": [
+        "mámúsà",
+        "amúlẹ́ẹ̀tì",
+        "fatima",
+        "ìdáàbòbò",
+        "máríà",
+        "mííamù"
+      ],
+      "1FAAD": [
+        "fáànì ọlọ́wọ́",
+        "fanu",
+        "gbona",
+        "jo",
+        "oju titi"
+      ],
+      "1FAAE": [
+        "ẹ̀sọ́ irun",
+        "irun",
+        "ìyarun",
+        "mú"
+      ],
+      "1FAAF": [
+        "kandá",
+        "ẹ̀sìn",
+        "síkì"
+      ],
+      "1FAB0": [
+        "eṣinṣin",
+        "arun",
+        "baje",
+        "esinsin",
+        "idun"
+      ],
+      "1FAB1": [
+        "ekòló",
+        "ekolo",
+        "ekolo ile",
+        "kokoro"
+      ],
+      "1FAB2": [
+        "bítù",
+        "eèra",
+        "kokoro"
+      ],
+      "1FAB3": [
+        "ayán",
+        "eera",
+        "eṣinṣin",
+        "irawọ"
+      ],
+      "1FAB4": [
+        "eso pootù",
+        "dagba",
+        "ile",
+        "sá",
+        "tojú"
+      ],
+      "1FAB5": [
+        "igi",
+        "lúnbà",
+        "tínbà"
+      ],
+      "1FAB6": [
+        "ìyẹ́",
+        "eye",
+        "ina",
+        "iye",
+        "sare"
+      ],
+      "1FAB7": [
+        "lotosi",
+        "esin hindu",
+        "india",
+        "ododo"
+      ],
+      "1FAB8": [
+        "kórà",
+        "kóra",
+        "okun",
+        "rifu"
+      ],
+      "1FAB9": [
+        "ibi ìyéeyin òfìfo",
+        "ibi iyeyin ofo",
+        "yiye"
+      ],
+      "1FABA": [
+        "ibi ìyéeyin pẹ̀lú ẹyin",
+        "yíyé"
+      ],
+      "1FABB": [
+        "hayasinti",
+        "lafendà",
+        "lupini",
+        "ododo"
+      ],
+      "1FABC": [
+        "ẹ̀ja jẹ́lì",
+        "jeli",
+        "jo",
+        "omi"
+      ],
+      "1FABD": [
+        "iye",
+        "angeli",
+        "eye",
+        "fifo",
+        "itan"
+      ],
+      "1FABE": [
+        "igi tí kò léwẹ́",
+        "ìgbà òtútù",
+        "igi tí kò léwé",
+        "ọ̀gbẹlẹ̀",
+        "yàgàn"
+      ],
+      "1FABF": [
+        "tòlotòló",
+        "adie",
+        "atioro",
+        "eye",
+        "lekeleke"
+      ],
+      "1FAC0": [
+        "ọ̀kan alára",
+        "ọkàn",
+        "pa ise",
+        "pọ́ọ̀sì"
+      ],
+      "1FAC1": [
+        "ẹ̀yà èémí",
+        "e sínú",
+        "eémi",
+        "igb",
+        "igbe síta"
+      ],
+      "1FAC2": [
+        "àwọn ènìyàn tóndìmọ́ra",
+        "àwọn ènìyanń dí mọ́ra",
+        "bawo ni",
+        "di mọra",
+        "o dabo",
+        "o ṣé"
+      ],
+      "1FAC3": [
+        "aláboyún ọkùnrin",
+        "ikù",
+        "kún",
+        "lóyún ọkùnrin",
+        "tobi"
+      ],
+      "1FAC4": [
+        "aláboyún",
+        "aláboyún ọkùnrin",
+        "ikù",
+        "kún",
+        "lóyún",
+        "tobi"
+      ],
+      "1FAC5": [
+        "ènìyàn pẹ̀lú adé",
+        "idile oba",
+        "idíle oba",
+        "ọmọ idile ọba"
+      ],
+      "1FAD0": [
+        "bẹ́rì búlù",
+        "àwọ́n bẹ́rì búlù",
+        "bẹ́rì",
+        "bilìbẹ́rì",
+        "búlù"
+      ],
+      "1FAD1": [
+        "tàtàsé",
+        "ata",
+        "efo",
+        "tatase"
+      ],
+      "1FAD2": [
+        "olifi",
+        "oúnjẹ́"
+      ],
+      "1FAD3": [
+        "búrẹ́ẹ̀dì pẹlẹpẹ",
+        "buredi pelebe",
+        "pita"
+      ],
+      "1FAD4": [
+        "tamalé",
+        "kopọ̀",
+        "ti mesiko"
+      ],
+      "1FAD5": [
+        "fóndù",
+        "pọ́ọ̀tù",
+        "wara"
+      ],
+      "1FAD6": [
+        "pọ́ọ̀tù tíì",
+        "mu",
+        "pootu",
+        "tíì"
+      ],
+      "1FAD7": [
+        "nǹkan olómi dídà",
+        "dà",
+        "dída nnkan olómi",
+        "gilaasì",
+        "mu",
+        "ofo"
+      ],
+      "1FAD8": [
+        "ẹ̀wà",
+        "edo",
+        "efo",
+        "ewa",
+        "ounje"
+      ],
+      "1FAD9": [
+        "ife nla",
+        "eroja ounje",
+        "ibi idáná",
+        "sofo"
+      ],
+      "1FADA": [
+        "jínjà",
+        "ata",
+        "oti"
+      ],
+      "1FADB": [
+        "eap",
+        "ea",
+        "efo",
+        "ewa"
+      ],
+      "1FADC": [
+        "ohun ọ̀gbìn onígbòǹgbọ̀",
+        "bíìtì",
+        "ẹ̀fọ́",
+        "gbòǹgbò",
+        "ọgbà",
+        "túníìpù"
+      ],
+      "1FAF0": [
+        "ọwọ́ pẹ̀lú ìka kẹ́keré àti ìka ńlá ní pípapọ̀",
+        "heart",
+        "ìfẹ́",
+        "owó",
+        "ọwọ́ pẹ̀lú ìka kekeré",
+        "snap àti atanpako to wà papọ̀",
+        "wọ́n"
+      ],
+      "1FAF1": [
+        "ọwọ́ ọ̀tún",
+        "apá ọtún",
+        "ọtún",
+        "owọ́"
+      ],
+      "1FAF2": [
+        "ọwọ́ òsì",
+        "apa [posí",
+        "òsì",
+        "owo"
+      ],
+      "1FAF3": [
+        "àtẹ́lẹ̀wọ́ ìsàlẹ̀",
+        "jabọ̀",
+        "lé lọ",
+        "ọwọ́ ìsàlẹ̀",
+        "shoo"
+      ],
+      "1FAF4": [
+        "àtẹ́lẹwọ́ òkè",
+        "fún",
+        "mú",
+        "ọwọ́ òkè",
+        "pè",
+        "wá"
+      ],
+      "1FAF5": [
+        "títọ́ka sí olùwòran",
+        "idi",
+        "iwo",
+        "nina owo kekere si oluworan"
+      ],
+      "1FAF6": [
+        "ọwọ́ ọkàn",
+        "ìfẹ́"
+      ],
+      "1FAF7": [
+        "títi ọwọ́ sọ́sì",
+        "apa osi",
+        "duro",
+        "ìka ọwọ́ márùn",
+        "kùnà",
+        "ti"
+      ],
+      "1FAF8": [
+        "títi ọwọ́ sọ́tun",
+        "apa ọ̀tún",
+        "duro",
+        "ìka ọwọ́ márùn",
+        "kùnà",
+        "ti"
+      ],
+      "203C": [
+        "àmì ìyanu oníbejì",
+        "àmì",
+        "àmì ìyanu",
+        "gbàgbà",
+        "ìfàmìsí"
+      ],
+      "2049": [
+        "àmì ìyanu oníbéèrè",
+        "àmì",
+        "àmì ìyanu",
+        "ìfàmìsí",
+        "ìfọ̀rọ̀wánilé̩nuwò"
+      ],
+      "2122": [
+        "àmì ìdánimọ̀ iléeṣẹ́",
+        "àmì",
+        "àmì ìdámọ̀ fún iléeṣẹ́",
+        "tm"
+      ],
+      "2139": [
+        "àlàyé",
+        "i"
+      ],
+      "2194": [
+        "àmì ìtó̩sọ́nà o̩lọ́fà tọ̀tún-tòsì",
+        "ọfà"
+      ],
+      "2195": [
+        "ọfà tòkètilẹ̀",
+        "ọfà"
+      ],
+      "2196": [
+        "àmì òkè ìtó̩sọ́nà o̩lọ́fà apá òsì",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "ìlọ́pọ̀ kádínàlì",
+        "ìtọ́sọ́nà",
+        "iwọ̀ oòrùn àríwá"
+      ],
+      "2197": [
+        "àmì òkè ìtó̩sọ́nà o̩lọ́fà apá ọ̀tún",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "ilà oòrùn àríwá",
+        "ìlọ́pọ̀ kádínàlì",
+        "ìtọ́sọ́nà"
+      ],
+      "2198": [
+        "àmì ilẹ̀ ìtó̩sọ́nà o̩lọ́fà apá ọ̀tún",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "gúúsù ilà oòrùn",
+        "ìlọ́pọ̀ kádínàlì",
+        "ìtọ́sọ́nà"
+      ],
+      "2199": [
+        "àmì ilẹ̀ ìtó̩sọ́nà o̩lọ́fà apá òsì",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "ìlọ́pọ̀ kádínàlì",
+        "ìtọ́sọ́nà",
+        "iwọ̀ oòrùn gúúsù"
+      ],
+      "21A9": [
+        "àmì ìtó̩sọ́nà o̩lọ́fà apá ọ̀tún onígun",
+        "ọfà"
+      ],
+      "21AA": [
+        "àmì ìtó̩sọ́nà o̩lọ́fà apá òsì onígun",
+        "ọfà"
+      ],
+      "231A": [
+        "ago"
+      ],
+      "231B": [
+        "gilasiakoko",
+        "adíwọ̀n àkókò",
+        "iyẹ̀pẹ̀"
+      ],
+      "2328": [
+        "kííbọọ̀dù",
+        "kọ̀npútà"
+      ],
+      "23CF": [
+        "bó̩tínì àtẹ̀jáde",
+        "àtẹ̀jáde"
+      ],
+      "23E9": [
+        "mu bọtini sare lọwaju",
+        "àmì atọ́nà ọlọ́fà",
+        "méjì",
+        "sáré",
+        "tẹ̀síwájú"
+      ],
+      "23EA": [
+        "mu bọtini sare rẹhin",
+        "àmì atọ́nà ọlọ́fà",
+        "àmúrẹ̀yìn",
+        "oníbejì"
+      ],
+      "23EB": [
+        "bọtini imusoke kia",
+        "àmì atọ́nà ọlọ́fà",
+        "oníbejì"
+      ],
+      "23EC": [
+        "bọtini imussalẹ kia",
+        "àmì atọ́nà ọlọ́fà",
+        "ilè̩",
+        "oníbejì"
+      ],
+      "23ED": [
+        "bọ́tìnì tírákì tó kàn",
+        "àmì atọ́nà ọlọ́fà",
+        "ipele àwòrán tí ó kàn",
+        "onigun mẹta",
+        "tírákì tí ó kàn"
+      ],
+      "23EE": [
+        "tíráàkì tó ké̩yìn",
+        "àmì atọ́nà ọlọ́fà",
+        "ìṣe ta wò kẹ́yìn",
+        "onigun mẹta",
+        "tíráàkì ta gbọ́ kẹ́yìn"
+      ],
+      "23EF": [
+        "bó̩tìnìpíílè tàbí ìdúró",
+        "àmì atọ́nà ọlọ́fà",
+        "dúró",
+        "onigun mẹta",
+        "ọ̀tún",
+        "píílè"
+      ],
+      "23F0": [
+        "ago itaniji",
+        "ago",
+        "itaniji"
+      ],
+      "23F1": [
+        "ago aláfọwọ́yí",
+        "ago"
+      ],
+      "23F2": [
+        "ago adíwọ̀n àkókò",
+        "adíwọ̀n àkókò",
+        "ago"
+      ],
+      "23F3": [
+        "gilasiakoko pẹlu iyẹpẹ ti n fẹ",
+        "adíwọ̀n àkókò",
+        "gílásì àkókò",
+        "ìyẹ̀pẹ̀"
+      ],
+      "23F8": [
+        "bọ́tínì ìdánudúró fúngbà díẹ̀",
+        "báà",
+        "dadúró",
+        "olóòró",
+        "oníbejì"
+      ],
+      "23F9": [
+        "bọ́tínì ìdànudúró",
+        "dúró",
+        "onígun mẹ́rin"
+      ],
+      "23FA": [
+        "bọ́tínì agbohùnsílẹ̀",
+        "ré̩kọ́ọ̀dù",
+        "rogodo"
+      ],
+      "24C2": [
+        "m òdo",
+        "m",
+        "òdo"
+      ],
+      "25AA": [
+        "kékeré onígun mẹ́rin dúdú",
+        "ilà onigun mé̩rin",
+        "jiomé̩tíríkì"
+      ],
+      "25AB": [
+        "kékeré onígun mẹ́rin funfun",
+        "ilà onigun mé̩rin",
+        "jiomé̩tíríkì"
+      ],
+      "25B6": [
+        "bọ́tínì píílè",
+        "àmì atọ́nà ọló̩fà",
+        "onígun mé̩ta",
+        "ọ̀tún",
+        "píílè"
+      ],
+      "25C0": [
+        "bọ́tínì ìdápadà",
+        "àmì atọ́nà ọlọ́fà",
+        "dapadà",
+        "onigun mẹta",
+        "òsì"
+      ],
+      "25FB": [
+        "ilà onígun mé̩rin aláàárín funfun",
+        "ilà onigun mé̩rin",
+        "jiomé̩tíríkì"
+      ],
+      "25FC": [
+        "ilà onígun mé̩rin aláàárín dúdú",
+        "ilà onigun mé̩rin",
+        "jiomé̩tíríkì"
+      ],
+      "25FD": [
+        "onigunmẹrin idaji-kekere funfun",
+        "ilà onigun mé̩rin",
+        "jiomé̩tíríkì"
+      ],
+      "25FE": [
+        "onigunmẹrin idaji-kekere dudu",
+        "ilà onigun mé̩rin",
+        "jiomé̩tíríkì"
+      ],
+      "2600": [
+        "òrùn",
+        "ìmọ́lẹ̀",
+        "itanṣan oòrùn"
+      ],
+      "2601": [
+        "òfurufú",
+        "ojú ọjọ́"
+      ],
+      "2602": [
+        "agbòrùn",
+        "aṣọ",
+        "òjò"
+      ],
+      "2603": [
+        "ọkùnrin yìnyín",
+        "òtútù",
+        "yìnyín"
+      ],
+      "2604": [
+        "kamẹ́tì",
+        "ààyè"
+      ],
+      "260E": [
+        "tẹlifóònù",
+        "ẹ̀rọ ìbánisọ̀rọ̀"
+      ],
+      "2611": [
+        "àyẹ̀wò àpótí ìdìbò",
+        "àpótí",
+        "àpótí ìdìbò",
+        "àyẹ̀wò"
+      ],
+      "2614": [
+        "agboorun pẹlu omi ojo kikan",
+        "agbòrùn",
+        "aṣọ",
+        "kán",
+        "òjó"
+      ],
+      "2615": [
+        "tii gbigbona",
+        "gbígóná",
+        "kọfí",
+        "mímu",
+        "ohun mímu oní kòkó",
+        "tíì",
+        "yíyọ oru"
+      ],
+      "261D": [
+        "ìka kékeré tí ń tọ́ka sókè",
+        "ìka",
+        "ìka kékeré",
+        "ọwọ́",
+        "sókè",
+        "tọ́ka"
+      ],
+      "2626": [
+        "àgbélèbú àtijó",
+        "àgbélèbú",
+        "ẹlẹ́sìn ìgbàgbó̩",
+        "ẹ̀sìn"
+      ],
+      "262A": [
+        "ìràwọ̀ àti òṣùpá tí kò tí yọ tán",
+        "ẹ̀sìn",
+        "ìmàle",
+        "mùsùlùmí"
+      ],
+      "262E": [
+        "àmì àláàáfíà",
+        "àláàáfíà"
+      ],
+      "262F": [
+        "yínì yángì",
+        "ẹlé̩sìn táó",
+        "ẹ̀sìn",
+        "táó",
+        "yángì",
+        "yínì"
+      ],
+      "2638": [
+        "kẹ̀ké̩ è̩sìn dáámà",
+        "e̩lẹ́sìn bó̩ó̩dà",
+        "ẹlẹ́sìn dáámà",
+        "ẹ̀sìn",
+        "kè̩ké̩"
+      ],
+      "2639": [
+        "ojú tó fajúro",
+        "fajúro",
+        "ojú"
+      ],
+      "263A": [
+        "ojú tó ń rẹ́rìń músẹ́",
+        "ìgbafẹ́",
+        "ìlànà",
+        "ojú",
+        "rẹ́rìń músẹ́"
+      ],
+      "2648": [
+        "aries",
+        "àgbò",
+        "àmi oṣù ìbí"
+      ],
+      "2649": [
+        "taurus",
+        "àmi oṣù ìbí",
+        "ẹgbọrọ màlúù",
+        "màlúù igbò"
+      ],
+      "264A": [
+        "gemini",
+        "àmi oṣù ìbí",
+        "ìbejì"
+      ],
+      "264B": [
+        "cancer",
+        "akàn",
+        "àmi oṣù ìbí"
+      ],
+      "264C": [
+        "leo",
+        "àmi oṣù ìbí",
+        "kìnìhún"
+      ],
+      "264D": [
+        "virgo",
+        "àmi oṣù ìbí"
+      ],
+      "264E": [
+        "libra",
+        "àmi oṣù ìbí",
+        "ìdájó̩",
+        "ìwọ̀ntúnwò̩nsì",
+        "òṣùwò̩n"
+      ],
+      "264F": [
+        "scorpius",
+        "àkeèké",
+        "àmi oṣù ìbí",
+        "scorpio"
+      ],
+      "2650": [
+        "sagittarius",
+        "àmi oṣù ìbí",
+        "tafàtafà"
+      ],
+      "2651": [
+        "capricorn",
+        "àmi oṣù ìbí",
+        "ewúré̩"
+      ],
+      "2652": [
+        "aquarius",
+        "àmi oṣù ìbí",
+        "olùjẹ́ orúkọ",
+        "omi"
+      ],
+      "2653": [
+        "pisces",
+        "àmi oṣù ìbí",
+        "ẹja"
+      ],
+      "265F": [
+        "pọ́nì ṣẹ́ẹ̀sì",
+        "dúpẹ́",
+        "ṣẹ́ẹ̀sì"
+      ],
+      "267B": [
+        "àmì àtúnrọ",
+        "àtúnrọ"
+      ],
+      "267E": [
+        "ailopin",
+        "gbogboogbò",
+        "títí"
+      ],
+      "267F": [
+        "àmì kẹkẹ ẹni-ẹsẹ-ndun",
+        "ìfàyègbà"
+      ],
+      "2692": [
+        "òòlù àti ìsà",
+        "òòlù"
+      ],
+      "2694": [
+        "idà alágbèélèbú",
+        "àgbélèbú",
+        "idà",
+        "irinṣẹ́ ìjagun"
+      ],
+      "2695": [
+        "àmì egbògiogùn",
+        "aesculapius",
+        "ògùn",
+        "òṣìṣẹ́"
+      ],
+      "2696": [
+        "ìwọ̀ntúnwọ̀nsí síkélì",
+        "àmi oṣù ìbí",
+        "ìdájọ́",
+        "ìwọ̀n",
+        "ìwọ̀ntúnwọ̀nsí",
+        "líbérà",
+        "síkélì"
+      ],
+      "2697": [
+        "àlẹ́mbìk",
+        "irinṣé̩",
+        "kẹ́mísìrì"
+      ],
+      "2699": [
+        "gíà",
+        "irinsẹ́"
+      ],
+      "269B": [
+        "àmì átọ́mù",
+        "aláìgbàgbó̩",
+        "átọ́mù"
+      ],
+      "269C": [
+        "fleur-de-lis"
+      ],
+      "26A0": [
+        "ìkìlọ̀"
+      ],
+      "26A1": [
+        "agbara ina giga",
+        "agbára iná",
+        "ewu",
+        "iná",
+        "mọ̀nọ̀mọ́nọ́",
+        "sáàpù"
+      ],
+      "26A7": [
+        "ami ìyíeda",
+        "ìyíeda"
+      ],
+      "26AA": [
+        "rogodo funfun",
+        "rogodo"
+      ],
+      "26AB": [
+        "rogodo aláwọ̀ dúdú",
+        "rogodo"
+      ],
+      "26B0": [
+        "pósí",
+        "ikú"
+      ],
+      "26B1": [
+        "igbá ìsìnkú",
+        "ahá",
+        "eérú",
+        "ikú",
+        "ìsìnkú"
+      ],
+      "26BD": [
+        "bọọlu afẹsẹgba",
+        "bọ́ọ̀lù",
+        "bọ́ọ̀lù àfẹsẹ̀gbá"
+      ],
+      "26BE": [
+        "bọ́ọ̀lùòkè",
+        "bọ́ọ̀lù"
+      ],
+      "26C4": [
+        "ọkunrin yinyin laini yinyin",
+        "ọkùnrin yìnyín",
+        "òtútù",
+        "yìnyín"
+      ],
+      "26C5": [
+        "oorun lẹhin ofurufu",
+        "òfurufú",
+        "òòrùn"
+      ],
+      "26C8": [
+        "òfurufú pẹ̀lú ṣíṣáná àti òjò",
+        "àrá",
+        "òfurufú",
+        "òjò"
+      ],
+      "26CE": [
+        "ophiuchus",
+        "afàyàfà",
+        "àmi oṣù ìbí",
+        "ejò",
+        "ẹní gba ǹkan"
+      ],
+      "26CF": [
+        "sà",
+        "irinṣé̩",
+        "ìwakusà"
+      ],
+      "26D1": [
+        "koto òṣìṣẹ́ ìrànwọ́",
+        "ìrànwọ́ àgbélébù",
+        "koto",
+        "ojú"
+      ],
+      "26D3": [
+        "àwọn ṣe̩kẹ́ṣẹkẹ̀",
+        "ṣe̩kẹ́ṣẹkẹ̀"
+      ],
+      "26D4": [
+        "kosi iwọle",
+        "àbáwọlé",
+        "èèwọ̀",
+        "kò",
+        "kòsáyè",
+        "rárá",
+        "súkẹrẹ-fàkẹrẹ"
+      ],
+      "26E9": [
+        "ilé òrìṣà ṣíntò",
+        "ẹ̀sìn",
+        "ilé òrìṣà",
+        "ṣíntò"
+      ],
+      "26EA": [
+        "ṣọọṣi",
+        "àgbélèbú",
+        "ẹlẹ́sìn ìgbàgbó̩",
+        "ẹ̀sìn"
+      ],
+      "26F0": [
+        "òkè"
+      ],
+      "26F1": [
+        "agbòrùn ní ilẹ̀",
+        "agbòrùn",
+        "òjò",
+        "òrùn"
+      ],
+      "26F2": [
+        "orísun omi"
+      ],
+      "26F3": [
+        "asia ninu iho",
+        "gọ́ọ̀fù",
+        "ihò"
+      ],
+      "26F4": [
+        "ferí",
+        "èrò",
+        "ọkọ̀ ojú omi"
+      ],
+      "26F5": [
+        "ọkọ kekere",
+        "ibi ìgbafẹ́",
+        "ọkọ̀ ojú omi",
+        "ọkọ̀ ojú omi ibi ìgbafẹ́",
+        "okun"
+      ],
+      "26F7": [
+        "ẹni n síkì",
+        "ẹni síkì",
+        "síkì",
+        "yínyìn"
+      ],
+      "26F8": [
+        "yìnyín síkétì",
+        "síkétì",
+        "yìnyín"
+      ],
+      "26F9": [
+        "ẹni tà boun bọ́ọ̀lù",
+        "bọ́ọ̀lù"
+      ],
+      "26FA": [
+        "àgọ́",
+        "pípàgọ́"
+      ],
+      "26FD": [
+        "pọ̀mpù epo",
+        "afa epo",
+        "epo",
+        "gáàsì",
+        "ibùdó epo"
+      ],
+      "2702": [
+        "sísọ́ọ̀sì",
+        "gígé",
+        "irinṣé̩"
+      ],
+      "2705": [
+        "maaki iṣayewo funfun nla",
+        "àmì",
+        "àyẹ̀wò"
+      ],
+      "2708": [
+        "bàlú òfurufú",
+        "ọkọ̀ òfurufú"
+      ],
+      "2709": [
+        "àpò ìwé",
+        "í-meèlì",
+        "lé̩tà"
+      ],
+      "270A": [
+        "ẹṣẹ ti a na soke",
+        "fún ọwọ́ pọ̀",
+        "ìṣẹ́",
+        "naṣẹ soke",
+        "òwọ́ ẹ̀ṣẹ́"
+      ],
+      "270B": [
+        "ọwọ nina soke",
+        "ọwọ́"
+      ],
+      "270C": [
+        "aṣeyọrí ọwọ́",
+        "aṣeyọrí",
+        "ọwọ́",
+        "v"
+      ],
+      "270D": [
+        "ńkọ́wé",
+        "kọ̀wé",
+        "ọwọ́"
+      ],
+      "270F": [
+        "pẹ́nsùlù"
+      ],
+      "2712": [
+        "góngó dúdú",
+        "gègé",
+        "góngó"
+      ],
+      "2714": [
+        "fínnífínní",
+        "àmì",
+        "àyẹ̀wò"
+      ],
+      "2716": [
+        "ìsọdipúpò̩ tó nípọn x",
+        "fagilé",
+        "ìsọdipúpò̩",
+        "x"
+      ],
+      "271D": [
+        "àgbélèbú látíìnì",
+        "àgbélèbú",
+        "ẹlẹ́sìn ìgbàgbó̩",
+        "ẹ̀sìn"
+      ],
+      "2721": [
+        "ìràwọ̀ dáfídì",
+        "dáfídì",
+        "e̩lẹ́sìn júù",
+        "ẹ̀sìn",
+        "ìràwọ̀",
+        "júù"
+      ],
+      "2728": [
+        "awọn titan",
+        "dán",
+        "ìràwọ̀"
+      ],
+      "2733": [
+        "àmì àkíyèsí onígbá-mé̩jọ",
+        "àmì àkíyésì"
+      ],
+      "2734": [
+        "àmì àkíyèsí onígun-mé̩jọ",
+        "ìràwọ̀"
+      ],
+      "2744": [
+        "ìdìjọ òjò yìnyín",
+        "òtútù",
+        "yìnyín"
+      ],
+      "2747": [
+        "dán"
+      ],
+      "274C": [
+        "aami idabu",
+        "àmì",
+        "fagilé",
+        "ìsọdipúpò̩",
+        "x"
+      ],
+      "274E": [
+        "bọtini aami idabu",
+        "àmì",
+        "oníhàmẹ́rin"
+      ],
+      "2753": [
+        "àmì ìbéèrè ìdàkodò",
+        "àmì",
+        "ìbéèrè",
+        "ìfàmìsí"
+      ],
+      "2754": [
+        "aami ibeere funfun",
+        "ààtò",
+        "àmì",
+        "ìbéèrè",
+        "ìfàmìsí"
+      ],
+      "2755": [
+        "aami iyalẹnu funfun",
+        "ààtò",
+        "àmì",
+        "àmì ìyanu",
+        "ìfàmìsí"
+      ],
+      "2757": [
+        "àmì ìyàlẹ́nu ìdàkodò",
+        "àmì",
+        "àmì ìyanu",
+        "ìfàmìsí"
+      ],
+      "2763": [
+        "àmì ìyanú ọkàn tó wúwo",
+        "àmì",
+        "àmì ìyanu",
+        "ìfàmìsí"
+      ],
+      "2764": [
+        "ọkàn pupa",
+        "ọkàn"
+      ],
+      "2795": [
+        "aami àròpọ̀ nla",
+        "àròpọ̀",
+        "ẹ̀kó̩ ìsirò"
+      ],
+      "2796": [
+        "aami ayọkuro nla",
+        "àyọkúrò",
+        "ẹ̀kó̩ ìsirò"
+      ],
+      "2797": [
+        "aami gige nla",
+        "ẹ̀kọ́ ìsirò",
+        "ìpín"
+      ],
+      "27A1": [
+        "àmì ìtó̩sọ́nà o̩lọ́fà apá ọ̀tún",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "ilà oòrùn",
+        "ìtọ́sọ́nà",
+        "kádínàlì"
+      ],
+      "27B0": [
+        "iho wọlọwọlo",
+        "ìyípọ̀",
+        "lúpù"
+      ],
+      "27BF": [
+        "iho wọlọwọlo meji",
+        "àyípọ̀",
+        "lúpù",
+        "méjì"
+      ],
+      "2934": [
+        "àmì ìtó̩sọ́nà o̩lọ́fà apá ọ̀tún onígun òkè",
+        "ọfà"
+      ],
+      "2935": [
+        "àmì ìtó̩sọ́nà o̩lọ́fà apá ọ̀tún onígun ìsàlẹ̀",
+        "ilẹ̀",
+        "o̩fà"
+      ],
+      "2B05": [
+        "àmì ìtó̩sọ́nà o̩lọ́fà apá òsì",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "ìtọ́sọ́nà",
+        "iwọ̀ oòrùn",
+        "kádínàlì"
+      ],
+      "2B06": [
+        "àmì òkè ìtó̩sọ́nà o̩lọ́fà",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "àríwá",
+        "ìtọ́sọ́nà",
+        "kádínàlì"
+      ],
+      "2B07": [
+        "àmì ilẹ̀ ìtó̩sọ́nà o̩lọ́fà",
+        "àmì ìtó̩sọ́nà o̩lọ́fà",
+        "gúúsù",
+        "ilè̩",
+        "ìtọ́sọ́nà",
+        "kádínàlì"
+      ],
+      "2B1B": [
+        "onigunmẹrin dudu nla",
+        "ilà onigun mé̩rin",
+        "jiomé̩tíríkì"
+      ],
+      "2B1C": [
+        "onigunmẹrin funfun nla",
+        "ilà onigun mé̩rin",
+        "jiomé̩tíríkì"
+      ],
+      "2B50": [
+        "irawọ alaabọ funfun",
+        "ìràwọ̀"
+      ],
+      "2B55": [
+        "roboto wiwo nla",
+        "o",
+        "òdo"
+      ],
+      "3030": [
+        "dáàṣì onísàn omi",
+        "dáàṣì",
+        "ìfàmìsí",
+        "ìsàn omi"
+      ],
+      "303D": [
+        "ara máàkì ti a ti tọwó̩bọ̀",
+        "àmì",
+        "ara"
+      ],
+      "3297": [
+        "bó̩tìnì \"kú oríre\" japanisi",
+        "\"kú oríre\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "祝"
+      ],
+      "3299": [
+        "bó̩tìnì \"àṣírí\"japanisi",
+        "\"àṣírí\"",
+        "àmì ajẹmáwòrán",
+        "japanese",
+        "秘"
       ]
     },
     "zh": {

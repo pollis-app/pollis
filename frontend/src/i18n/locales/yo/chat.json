@@ -1,0 +1,166 @@
+{
+  "message": {
+    "fromLabel": "Ìfiránṣẹ́ láti ọ̀dọ̀ {{name}}",
+    "unknownAuthor": "àìmọ̀",
+    "deleted": "[a ti pa á rẹ́]",
+    "encrypted": "[ó ní ìpàrokò]",
+    "redacted": "[a ti bò ó mọ́lẹ̀]",
+    "edited": "(a ti ṣàtúnṣe)",
+    "editUnsent": "(a kò fi àtúnṣe ránṣẹ́)",
+    "newMember": "tuntun",
+    "newMemberTitle": "Ó darapọ̀ láàrin ọjọ́ 7 sẹ́yìn",
+    "undecryptable": {
+      "tag": "kò ṣeé ṣí",
+      "title": "Kò ṣeé ṣí ìpàrokò",
+      "body_other": "A kò lè ṣí ìpàrokò ìfiránṣẹ́ {{count}} lórí ẹ̀rọ yìí.",
+      "detail": "Wọ́n fi nǹkan kan ránṣẹ́ síbí, ṣùgbọ́n ẹ̀rọ yìí kò lè kà á. Àwọn ẹ̀rọ rẹ míì lè ṣì ní i.",
+      "diagnostics": "Wo àyẹ̀wò ìṣòro"
+    }
+  },
+  "status": {
+    "pending": "ó ń dúró",
+    "sending": "ó ń lọ",
+    "sent": "ó ti lọ",
+    "failed": "kò ṣeé ṣe",
+    "cancelled": "a ti fagilé"
+  },
+  "outbox": {
+    "retry": "Tún gbìyànjú",
+    "discard": "Jù ú nù",
+    "retryLabel": "Tún gbìyànjú láti fi ìfiránṣẹ́ yìí ránṣẹ́",
+    "discardLabel": "Ju ìfiránṣẹ́ tí kò lọ yìí nù",
+    "notSent": "Kò lọ",
+    "willResend": "Yóò lọ fúnra rẹ̀ nígbà tí Pollis bá tún sopọ̀.",
+    "notDelivered": "Ìfiránṣẹ́ yìí kò dé ọ̀dọ̀ ẹni tí a fi ránṣẹ́ sí."
+  },
+  "actions": {
+    "reply": "Fèsì",
+    "replyInThread": "Fèsì nínú okùn ìjíròrò",
+    "save": "Fi ìfiránṣẹ́ pamọ́",
+    "removeBookmark": "Yọ ìfipamọ́ kúrò",
+    "copyLink": "Ṣe àdàkọ líǹkì ìfiránṣẹ́",
+    "copyLinkCopied": "A ti ṣe àdàkọ líǹkì",
+    "copyLinkFailed": "Kò ṣeé ṣe láti ṣe àdàkọ líǹkì",
+    "edit": "Ṣàtúnṣe ìfiránṣẹ́",
+    "delete": "Pa ìfiránṣẹ́ rẹ́",
+    "deleteAsAdmin": "Pa ìfiránṣẹ́ rẹ́ (alábòójútó)",
+    "more": "Àwọn ìṣe míì",
+    "pin": "Lẹ̀ mọ́ òkè",
+    "unpin": "Yọ ìlẹ̀mọ́ kúrò",
+    "report": "Fi ẹjọ́ sùn"
+  },
+  "thread": {
+    "replyCount_other": "ìfèsì {{count}}"
+  },
+  "receipts": {
+    "readByEveryone": "Gbogbo ènìyàn ti kà á",
+    "readByCount_other": "{{count}} nínú {{total}} ti kà á",
+    "deliveredCount_other": "Ó ti dé ọ̀dọ̀ {{count}} nínú {{total}}"
+  },
+  "list": {
+    "empty": "Kò sí ìfiránṣẹ́ síbẹ̀. Bẹ̀rẹ̀ ìjíròrò.",
+    "unknownAuthor": "Àìmọ̀",
+    "blockedAuthor": "olùmúlò tí a dènà",
+    "blockedBody": "[a ti dènà]"
+  },
+  "replyBar": {
+    "replyingTo": "ò ń fèsì sí <name>{{name}}</name>",
+    "scrollToMessage": "Lọ sí ìfiránṣẹ́ tí o fèsì sí",
+    "dismiss": "Fagilé ìfèsì",
+    "encrypted": "[Ìfiránṣẹ́ tó ní ìpàrokò]"
+  },
+  "queue": {
+    "heading": "Ìlà ìdúró",
+    "pendingPlaceholder": "[Ìfiránṣẹ́ tó ń dúró]",
+    "cancel": "Fagilé ìfiránṣẹ́",
+    "retry": "tún gbìyànjú",
+    "failedCount_other": "kò ṣeé ṣe ×{{count}}"
+  },
+  "reactions": {
+    "add": "Fi àmì ìmọ̀lára kún un",
+    "all": "Gbogbo",
+    "allTabLabel_other": "Gbogbo, àmì ìmọ̀lára {{count}}",
+    "contextHint": "Tẹ bọ́tìnnì ọ̀tún láti rí àwọn tó fi àmì ìmọ̀lára sí i",
+    "hoverMore_other": "{{names}} àti {{count}} míì fi àmì ìmọ̀lára {{emoji}} sí i",
+    "hoverNames": "{{names}} fi àmì ìmọ̀lára {{emoji}} sí i",
+    "pillLabel_other": "{{emoji}} àmì ìmọ̀lára {{count}}",
+    "rowLabel": "{{name}}, fi àmì ìmọ̀lára {{emojis}} sí i",
+    "selfName": "{{name}} (ìwọ)",
+    "sheetTitle": "Àmì ìmọ̀lára",
+    "tabLabel_other": "{{emoji}}, àmì ìmọ̀lára {{count}}",
+    "unknownUser": "Olùmúlò àìmọ̀",
+    "viewWho": "Wo àwọn àmì ìmọ̀lára",
+    "you": "Ìwọ"
+  },
+  "preview": {
+    "noMessages": "Kò sí ìfiránṣẹ́ síbẹ̀",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_other": "[àsomọ́ {{count}}]",
+    "undecryptable": "A kò lè ṣí ìpàrokò ìfiránṣẹ́ kan lórí ẹ̀rọ yìí"
+  },
+  "attachment": {
+    "viewLabel": "Wo {{filename}}",
+    "openLabel": "Ṣí {{filename}}",
+    "downloadLabel": "Ṣe ìgbàsílẹ̀ {{filename}}",
+    "loading": "ó ń gbé e wọlé…",
+    "error": "àṣìṣe",
+    "failedToLoad": "Kò ṣeé gbé wọlé",
+    "failedToDownload": "Kò ṣeé ṣe ìgbàsílẹ̀",
+    "lightboxFetch": "mú wá",
+    "lightboxDone": "[ parí ]",
+    "lightboxDownload": "[ìgbàsílẹ̀]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "Fi mídíà ẹlẹgẹ́ hàn: {{filename}}",
+    "sensitiveHide": "Fi {{filename}} pamọ́ kúrò lójú"
+  },
+  "unfurl": {
+    "loadImage": "Gbé àwòrán wọlé",
+    "loadVideo": "Gbé fídíò wọlé",
+    "loadTitle": "Gbé mídíà wọlé láti {{url}} — èyí ń kàn sí ojú òpó náà tààrà",
+    "loadDescription": "Gbé mídíà wọlé láti {{url}}. Èyí ń kàn sí ojú òpó náà tààrà, ó sì ń fi àdírẹ́sì IP rẹ hàn án.",
+    "openLabel": "Ṣí {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "Ìfiránṣẹ́ tuntun",
+    "newMessageBody": "{{name}}: Ìfiránṣẹ́ tuntun",
+    "mentionTitle": "Wọ́n dárúkọ rẹ",
+    "allMentionBody": "{{name}} dárúkọ @all",
+    "userMentionBody": "{{name}} dárúkọ rẹ"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "ẹni yìí",
+    "titleMessage": "Fi ẹjọ́ ìfiránṣẹ́ sùn",
+    "titleUser": "Fi ẹjọ́ {{name}} sùn",
+    "intro": "Pollis máa gba àkáǹtì náà àti ìdí rẹ̀. Àwọn ìfiránṣẹ́ máa wà nínú ìpàrokò, nítorí náà a kò ní rí ohun tí wọ́n sọ láé.",
+    "reasonLabel": "Ìdí",
+    "reason": {
+      "spam": "Ìfiránṣẹ́ àìfẹ́",
+      "harassment": "Ìyọlẹ́nu tàbí ìhalẹ̀",
+      "illegal": "Àkóónú tí kò bófin mu",
+      "other": "Nǹkan míì"
+    },
+    "submit": "Fi ẹjọ́ sùn",
+    "submitAndBlock": "Fi ẹjọ́ sùn kí o sì dènà",
+    "failed": "Kò ṣeé ṣe láti fi ẹjọ́ náà ránṣẹ́. Tún gbìyànjú.",
+    "doneTitle": "A ti fi ẹjọ́ ránṣẹ́",
+    "done": "A dúpẹ́. A máa ń ṣàyẹ̀wò gbogbo ẹjọ́.",
+    "doneBlocked": "A dúpẹ́. A máa ń ṣàyẹ̀wò gbogbo ẹjọ́. O tún ti dènà {{name}}.",
+    "close": "Parí"
+  },
+  "keyChange": {
+    "notice": "Nọ́mbà ààbò rẹ pẹ̀lú {{name}} ti yí padà.",
+    "verify": "Jẹ́rìísí rẹ̀",
+    "defaultName": "olùbásọ̀rọ̀ yìí"
+  },
+  "typing": {
+    "one": "{{name}} ń tẹ̀wé…",
+    "two": "{{first}} àti {{second}} ń tẹ̀wé…",
+    "several_other": "Ènìyàn {{count}} ń tẹ̀wé…"
+  }
+}

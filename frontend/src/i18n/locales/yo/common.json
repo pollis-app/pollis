@@ -1,0 +1,108 @@
+{
+  "actions": {
+    "back": "Padà",
+    "cancel": "Fagilé",
+    "close": "Pa dé",
+    "copy": "Ṣe àdàkọ",
+    "copied": "A ti ṣe àdàkọ",
+    "copyFailed": "Kò ṣeé ṣe àdàkọ",
+    "delete": "Pa rẹ́",
+    "forward": "Fi ránṣẹ́ síwájú",
+    "goBack": "Padà sẹ́yìn",
+    "moreOptions": "Àṣàyàn míì",
+    "save": "Fi pamọ́"
+  },
+  "states": {
+    "buttonLoading": "Ó ń gbé e wọlé...",
+    "loading": "Ó ń gbé e wọlé…"
+  },
+  "time": {
+    "today": "Òní",
+    "yesterday": "Àná"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "Space",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "Ipò: {{status}}",
+    "offline": "kò sí lórí ayélujára",
+    "online": "wà lórí ayélujára"
+  },
+  "list": {
+    "empty": "Kò sí nǹkan kan."
+  },
+  "grid": {
+    "empty": "Kò sí ẹnìkan níbí síbẹ̀."
+  },
+  "menu": {
+    "escHint": "Esc láti padà sẹ́yìn",
+    "navigationLabel": "Àkójọ ìrìnkiri",
+    "navigateHint": "rìn kiri",
+    "selectHint": "Enter láti yàn"
+  },
+  "media": {
+    "mute": "Pa ohùn",
+    "pause": "Dánudúró",
+    "play": "Ṣe é",
+    "seek": "Wá ibì kan nínú ohùn",
+    "skipBackward": "Padà sẹ́yìn ìṣẹ́jú-àáyá 10",
+    "skipForward": "Lọ síwájú ìṣẹ́jú-àáyá 10",
+    "unmute": "Ṣí ohùn",
+    "volume": "Ìwọ̀n ohùn"
+  },
+  "composer": {
+    "addAttachment": "Fi àsomọ́ kún un",
+    "allMentionHint": "ó ń fi tó gbogbo ènìyàn nínú ìkànnì yìí létí",
+    "filePickerTitle": "Fi fáìlì kún un",
+    "inputLabel": "Ibi ìkọ̀wé ìfiránṣẹ́",
+    "placeholder": "Tẹ ìfiránṣẹ́ kan…",
+    "previewAlt": "Àwòtẹ́lẹ̀",
+    "removeAttachment": "Yọ {{name}} kúrò",
+    "send": "Fi ìfiránṣẹ́ ránṣẹ́",
+    "markSensitive": "Sàmì sí {{name}} pé ó jẹ́ ẹlẹgẹ́",
+    "unmarkSensitive": "Yọ àmì ẹlẹgẹ́ kúrò lára {{name}}"
+  },
+  "mentions": {
+    "listLabel": "Àbá ìdárúkọ",
+    "matching": "Ọmọ ẹgbẹ́ tó bá <hl>@{{query}}</hl> mu"
+  },
+  "emojiSuggest": {
+    "listLabel": "Àbá èmójì",
+    "matching": "Èmójì tó bá <hl>:{{query}}</hl> mu"
+  },
+  "a11y": {
+    "avatar": "Àwòrán profáìlì",
+    "loading": "Ó ń gbé e wọlé",
+    "otpDigit": "Nọ́mbà OTP {{index}}"
+  },
+  "timeAgo": {
+    "seconds_other": "àáyá {{count}}",
+    "minutes_other": "ìṣẹ́jú {{count}}",
+    "hours_other": "wákàtí {{count}}",
+    "days_other": "ọjọ́ {{count}}",
+    "weeks_other": "ọ̀sẹ̀ {{count}}",
+    "months_other": "oṣù {{count}}",
+    "years_other": "ọdún {{count}}"
+  },
+  "tray": {
+    "open": "Ṣí Pollis",
+    "muteMic": "Pa ohùn máíkì",
+    "unmuteMic": "Ṣí ohùn máíkì",
+    "muteMicIdle": "Pa ohùn máíkì (o kò sí lórí ìpè)",
+    "version": "Ẹ̀dà {{version}}",
+    "quit": "Pa Pollis dé",
+    "unread_other": "Pollis — {{count}} tí a kò tíì kà"
+  }
+}
