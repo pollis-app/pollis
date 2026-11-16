@@ -26,6 +26,7 @@ const SHIPPED_LANGUAGES: readonly LanguageOption[] = [
   { code: "ko", label: "한국어", dir: "ltr" },
   { code: "ja", label: "日本語", dir: "ltr" },
   { code: "ur", label: "اردو", dir: "rtl" },
+  { code: "hi", label: "हिन्दी", dir: "ltr" },
 ];
 
 /** The live registry; Playwright may add a synthetic locale (`registerTestLanguage`). */

@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "नया मैसेज",
+    "requests": "अनुरोध",
+    "blocked": "ब्लॉक किए गए यूज़र",
+    "avatarAlt": "{{name}} का अवतार",
+    "settingsFor": "{{name}} के लिए सेटिंग",
+    "verified": "सत्यापित संपर्क",
+    "keyChanged": "पहचान कुंजी बदल गई — फिर से सत्यापित करें"
+  },
+  "conversation": {
+    "fallbackTitle": "डायरेक्ट मैसेज",
+    "viewProfile": "@{{name}} की प्रोफ़ाइल देखें",
+    "call": "@{{name}} को कॉल करें",
+    "returnToCall": "@{{name}} के साथ कॉल पर वापस जाएं",
+    "pinsLabel": "पिन किए गए मैसेज"
+  },
+  "settings": {
+    "pageTitle": "बातचीत की सेटिंग",
+    "leave": "बातचीत छोड़ें",
+    "submitting": "छोड़ा जा रहा है…",
+    "leaveFailed": "बातचीत नहीं छोड़ी जा सकी",
+    "cancel": "रद्द करें (Esc)"
+  },
+  "start": {
+    "pageTitle": "नया मैसेज",
+    "identifierLabel": "यूज़रनेम या ईमेल",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "बातचीत शुरू करें",
+    "submitting": "शुरू हो रही है…",
+    "identifierRequired": "यूज़रनेम या ईमेल डालना ज़रूरी है",
+    "userNotFound": "यूज़र नहीं मिला",
+    "startFailed": "बातचीत शुरू नहीं हो सकी"
+  },
+  "requests": {
+    "pageTitle": "मैसेज अनुरोध",
+    "empty": "कोई अनुरोध बाकी नहीं है।",
+    "noMessageYet": "(अभी कोई मैसेज नहीं)",
+    "unknownSender": "अनजान",
+    "others_one": "(+{{count}} अन्य)",
+    "others_other": "(+{{count}} अन्य)",
+    "accept": "स्वीकार करें",
+    "block": "ब्लॉक करें"
+  },
+  "blocked": {
+    "pageTitle": "ब्लॉक किए गए यूज़र",
+    "empty": "कोई ब्लॉक किया गया यूज़र नहीं है।",
+    "unblock": "अनब्लॉक करें"
+  },
+  "profile": {
+    "fallbackName": "यूज़र",
+    "fallbackTitle": "प्रोफ़ाइल",
+    "notFound": "यूज़र नहीं मिला",
+    "avatarAlt": "{{name}} का अवतार",
+    "sendMessage": "मैसेज भेजें",
+    "block": "ब्लॉक करें",
+    "safetyNumber": "सुरक्षा नंबर",
+    "statusVerified": "सत्यापित",
+    "statusChanged": "बदल गया — फिर से सत्यापित करें",
+    "statusUnverified": "सत्यापित नहीं",
+    "keyChangedWarning": "आपके पिछली बार सत्यापित करने के बाद इस संपर्क की पहचान कुंजी बदल गई है। इस पर भरोसा करने से पहले Pollis के बाहर किसी और तरीके से नंबर फिर से मिलाएं।",
+    "removeVerification": "सत्यापन हटाएं",
+    "markVerified": "सत्यापित मार्क करें",
+    "report": "रिपोर्ट करें"
+  },
+  "safety": {
+    "title": "आप और {{name}}",
+    "verify": "सुरक्षा नंबर सत्यापित करें",
+    "headingMany": "सुरक्षा नंबर",
+    "shared": "आपको और {{name}} को एक ही नंबर दिखता है। आमने-सामने या कॉल पर इसे मिलाएं, ताकि पक्का हो जाए कि बीच में कोई नहीं है।",
+    "qrLabel": "{{name}} के साथ आपके सुरक्षा नंबर का QR कोड",
+    "failed": "सुरक्षा नंबर लोड नहीं हो सका।"
+  },
+  "notify": {
+    "requestTitle": "नई बातचीत",
+    "requestBody": "{{name}} ने आपके साथ बातचीत शुरू की"
+  }
+}

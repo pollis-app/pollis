@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "आर्केड"
+  },
+  "hud": {
+    "score": "स्कोर  {{score}}",
+    "time": "समय   {{time}}",
+    "gameOver": "गेम ओवर",
+    "final_one": "फ़ाइनल {{count}} पॉइंट · {{time}}",
+    "final_other": "फ़ाइनल {{count}} पॉइंट · {{time}}",
+    "restartHint": "फिर से शुरू करने के लिए R दबाएं · बाहर निकलने के लिए Esc",
+    "controls": "WASD से चलें · माउस से निशाना · क्लिक/स्पेस से फ़ायर · Esc से बाहर"
+  }
+}

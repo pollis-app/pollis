@@ -130,4 +130,5 @@ test("storage keys are SecureStore-safe and user-scoped", () => {
 
 test("South Asian locales are auto-detected from OS tags (#1726)", () => {
   assert.equal(resolveDeviceLanguage(["ur-PK"]), "ur");
+  assert.equal(resolveDeviceLanguage(["hi-IN"]), "hi");
 });

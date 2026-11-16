@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "{{name}} का मैसेज",
+    "unknownAuthor": "अनजान",
+    "deleted": "[मिटाया गया]",
+    "encrypted": "[एन्क्रिप्टेड]",
+    "redacted": "[छिपाया गया]",
+    "edited": "(बदला गया)",
+    "editUnsent": "(बदलाव नहीं भेजा गया)",
+    "newMember": "नया",
+    "newMemberTitle": "पिछले 7 दिनों में शामिल हुए",
+    "undecryptable": {
+      "tag": "डिक्रिप्ट नहीं हो सका",
+      "title": "डिक्रिप्ट नहीं हो सका",
+      "body_one": "{{count}} मैसेज इस डिवाइस पर डिक्रिप्ट नहीं हो सका।",
+      "body_other": "{{count}} मैसेज इस डिवाइस पर डिक्रिप्ट नहीं हो सके।",
+      "detail": "यहां कुछ भेजा गया था, लेकिन यह डिवाइस उसे पढ़ नहीं सका। हो सकता है यह आपके दूसरे डिवाइस पर मौजूद हो।",
+      "diagnostics": "डायग्नोस्टिक्स देखें"
+    }
+  },
+  "status": {
+    "pending": "बाकी",
+    "sending": "भेजा जा रहा है",
+    "sent": "भेजा गया",
+    "failed": "नहीं भेजा जा सका",
+    "cancelled": "रद्द किया गया"
+  },
+  "outbox": {
+    "retry": "फिर से कोशिश करें",
+    "discard": "हटाएं",
+    "retryLabel": "यह मैसेज फिर से भेजने की कोशिश करें",
+    "discardLabel": "न भेजा गया यह मैसेज हटाएं",
+    "notSent": "नहीं भेजा गया",
+    "willResend": "Pollis के फिर से कनेक्ट होने पर यह अपने-आप भेज दिया जाएगा।",
+    "notDelivered": "यह मैसेज डिलीवर नहीं हो सका।"
+  },
+  "actions": {
+    "reply": "जवाब दें",
+    "replyInThread": "थ्रेड में जवाब दें",
+    "save": "मैसेज सेव करें",
+    "removeBookmark": "बुकमार्क हटाएं",
+    "copyLink": "मैसेज का लिंक कॉपी करें",
+    "copyLinkCopied": "लिंक कॉपी किया गया",
+    "copyLinkFailed": "लिंक कॉपी नहीं हो सका",
+    "edit": "मैसेज में बदलाव करें",
+    "delete": "मैसेज मिटाएं",
+    "deleteAsAdmin": "मैसेज मिटाएं (एडमिन)",
+    "more": "और कार्रवाइयां",
+    "pin": "मैसेज पिन करें",
+    "unpin": "मैसेज अनपिन करें",
+    "report": "रिपोर्ट करें"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} जवाब",
+    "replyCount_other": "{{count}} जवाब"
+  },
+  "receipts": {
+    "readByEveryone": "सभी ने पढ़ लिया",
+    "readByCount_one": "{{total}} में से {{count}} ने पढ़ा",
+    "readByCount_other": "{{total}} में से {{count}} ने पढ़ा",
+    "deliveredCount_one": "{{total}} में से {{count}} को डिलीवर हुआ",
+    "deliveredCount_other": "{{total}} में से {{count}} को डिलीवर हुआ"
+  },
+  "list": {
+    "empty": "अभी कोई मैसेज नहीं है। बातचीत शुरू करें।",
+    "unknownAuthor": "अनजान",
+    "blockedAuthor": "ब्लॉक किया गया यूज़र",
+    "blockedBody": "[ब्लॉक किया गया]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name> को जवाब दे रहे हैं",
+    "scrollToMessage": "जिस मैसेज का जवाब दिया गया, उस पर जाएं",
+    "dismiss": "जवाब हटाएं",
+    "encrypted": "[एन्क्रिप्टेड मैसेज]"
+  },
+  "queue": {
+    "heading": "कतार",
+    "pendingPlaceholder": "[बाकी मैसेज]",
+    "cancel": "मैसेज रद्द करें",
+    "retry": "फिर से कोशिश करें",
+    "failedCount_one": "नहीं भेजा जा सका ×{{count}}",
+    "failedCount_other": "नहीं भेजा जा सका ×{{count}}"
+  },
+  "reactions": {
+    "add": "प्रतिक्रिया जोड़ें",
+    "all": "सभी",
+    "allTabLabel_one": "सभी, {{count}} प्रतिक्रिया",
+    "allTabLabel_other": "सभी, {{count}} प्रतिक्रियाएं",
+    "contextHint": "किसने प्रतिक्रिया दी, यह देखने के लिए राइट-क्लिक करें",
+    "hoverMore_one": "{{names}} और {{count}} अन्य ने {{emoji}} से प्रतिक्रिया दी",
+    "hoverMore_other": "{{names}} और {{count}} अन्य ने {{emoji}} से प्रतिक्रिया दी",
+    "hoverNames": "{{names}} ने {{emoji}} से प्रतिक्रिया दी",
+    "pillLabel_one": "{{emoji}} {{count}} प्रतिक्रिया",
+    "pillLabel_other": "{{emoji}} {{count}} प्रतिक्रियाएं",
+    "rowLabel": "{{name}}, {{emojis}} से प्रतिक्रिया दी",
+    "selfName": "{{name}} (आप)",
+    "sheetTitle": "प्रतिक्रियाएं",
+    "tabLabel_one": "{{emoji}}, {{count}} प्रतिक्रिया",
+    "tabLabel_other": "{{emoji}}, {{count}} प्रतिक्रियाएं",
+    "unknownUser": "अनजान यूज़र",
+    "viewWho": "प्रतिक्रियाएं देखें",
+    "you": "आप"
+  },
+  "preview": {
+    "noMessages": "अभी कोई मैसेज नहीं",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} अटैचमेंट]",
+    "attachments_other": "[{{count}} अटैचमेंट]",
+    "undecryptable": "एक मैसेज इस डिवाइस पर डिक्रिप्ट नहीं हो सका"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} देखें",
+    "openLabel": "{{filename}} खोलें",
+    "downloadLabel": "{{filename}} डाउनलोड करें",
+    "loading": "लोड हो रहा है…",
+    "error": "गड़बड़ी",
+    "failedToLoad": "लोड नहीं हो सका",
+    "failedToDownload": "डाउनलोड नहीं हो सका",
+    "lightboxFetch": "लाएं",
+    "lightboxDone": "[ हो गया ]",
+    "lightboxDownload": "[डाउनलोड]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "संवेदनशील मीडिया दिखाएं: {{filename}}",
+    "sensitiveHide": "{{filename}} छिपाएं"
+  },
+  "unfurl": {
+    "loadImage": "इमेज लोड करें",
+    "loadVideo": "वीडियो लोड करें",
+    "loadTitle": "{{url}} से मीडिया लोड करें — यह उस साइट से सीधे कनेक्ट करता है",
+    "loadDescription": "{{url}} से मीडिया लोड करें। यह उस साइट से सीधे कनेक्ट करता है और उसे आपका IP पता दिखा देता है।",
+    "openLabel": "{{url}} खोलें"
+  },
+  "notify": {
+    "newMessageTitle": "नया मैसेज",
+    "newMessageBody": "{{name}}: नया मैसेज",
+    "mentionTitle": "नया मेंशन",
+    "allMentionBody": "{{name}} ने @all को मेंशन किया",
+    "userMentionBody": "{{name}} ने आपको मेंशन किया"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "इस व्यक्ति",
+    "titleMessage": "मैसेज की रिपोर्ट करें",
+    "titleUser": "{{name}} की रिपोर्ट करें",
+    "intro": "Pollis को खाता और वजह मिलती है। मैसेज एन्क्रिप्टेड रहते हैं, इसलिए हम कभी नहीं देखते कि क्या कहा गया था।",
+    "reasonLabel": "वजह",
+    "reason": {
+      "spam": "स्पैम",
+      "harassment": "उत्पीड़न या धमकी",
+      "illegal": "गैर-कानूनी कॉन्टेंट",
+      "other": "कुछ और"
+    },
+    "submit": "रिपोर्ट करें",
+    "submitAndBlock": "रिपोर्ट करें और ब्लॉक करें",
+    "failed": "रिपोर्ट नहीं भेजी जा सकी। फिर से कोशिश करें।",
+    "doneTitle": "रिपोर्ट भेजी गई",
+    "done": "धन्यवाद। हम हर रिपोर्ट की समीक्षा करते हैं।",
+    "doneBlocked": "धन्यवाद। हम हर रिपोर्ट की समीक्षा करते हैं। आपने {{name}} को ब्लॉक भी कर दिया है।",
+    "close": "हो गया"
+  },
+  "keyChange": {
+    "notice": "{{name}} के साथ आपका सुरक्षा नंबर बदल गया है।",
+    "verify": "इसे सत्यापित करें",
+    "defaultName": "इस संपर्क"
+  },
+  "typing": {
+    "one": "{{name}} लिख रहे हैं…",
+    "two": "{{first}} और {{second}} लिख रहे हैं…",
+    "several_one": "{{count}} व्यक्ति लिख रहा है…",
+    "several_other": "{{count}} लोग लिख रहे हैं…"
+  }
+}
