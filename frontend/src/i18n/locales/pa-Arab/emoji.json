@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "ایموجی چنن والا",
+    "triggerLabel": "ایموجی",
+    "searchLabel": "سرچ",
+    "searchPlaceholder": "ایموجی سرچ کرو",
+    "resultsFor": "\"{{query}}\" دے نتیجے",
+    "recent": "اکثر ورتے",
+    "custom": "اپنے",
+    "empty": "کوئی ایموجی ایہدے نال نہیں ملدا۔",
+    "previewHint": "کوئی ایموجی چنو",
+    "railLabel": "ایموجی دیاں قسماں"
+  },
+  "categories": {
+    "people": "لوک",
+    "nature": "قدرت",
+    "food": "کھانا",
+    "activity": "سرگرمیاں",
+    "travel": "سفر",
+    "objects": "چیزاں",
+    "symbols": "نشان",
+    "flags": "جھنڈے"
+  },
+  "skinTone": {
+    "groupLabel": "چمڑی دا رنگ",
+    "default": "ڈیفالٹ چمڑی دا رنگ",
+    "numbered": "چمڑی دا رنگ {{index}}"
+  },
+  "manage": {
+    "title": "اپنے ایموجی",
+    "signInRequired": "مہربانی کر کے سائن ان کرو",
+    "dropPrompt": "کوئی تصویر ایتھے کھچ کے لیاؤ، یا لبھن لئی کلک کرو",
+    "dropNow": "ایہہ تصویر ورتن لئی ایتھے سٹو",
+    "dropHint": "{{formats}} · اینیمیٹڈ GIF اپنی اینیمیشن رکھدے نیں",
+    "replaceHint": "ایہنوں بدلن لئی ہور تصویر سٹو، یا کلک کرو",
+    "sourceSize": "{{size}} اصل فائل · اپلوڈ ویلے 48 KB توں گھٹ وچ دوبارہ انکوڈ ہووے گی",
+    "reencodeNote": "اپلوڈ ویلے 48 KB توں گھٹ وچ دوبارہ انکوڈ ہووے گی",
+    "fileTooLarge": "ایہہ تصویر {{size}} توں وڈی اے — کوئی نکی فائل چنو",
+    "unsupportedFile": "‎{{name}}‎ PNG، JPEG، GIF یا WebP نہیں اے",
+    "shortcodeLabel": "شارٹ کوڈ",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "‎:shortcode:‎ وانگوں لکھیا جاندا اے — a–z، 0–9 تے _",
+    "shortcodeRequired": "ایہہ ایموجی شامل کرن لئی ایہدا ناں رکھو",
+    "shortcodeInvalid": "2–32 اکھر ورتو: a–z، 0–9 تے _",
+    "shortcodeTaken": "‎:{{shortcode}}:‎ ایس گروپ وچ پہلاں ای ورتیا جا چکیا اے",
+    "samplePlaceholder": "سنیہے وچ ایہہ کیویں دسے گا",
+    "add": "ایموجی شامل کرو",
+    "shrinking": "نکا کر رہے آں…",
+    "filePickerTitle": "ایموجی لئی تصویر چنو",
+    "imageFilterName": "تصویراں",
+    "addFailed": "اوہ ایموجی شامل نہیں ہو سکیا",
+    "removeFailed": "اوہ ایموجی ہٹایا نہیں جا سکیا",
+    "storageNote": "اپلوڈ توں پہلاں تصویراں 48 KB توں گھٹ وچ دوبارہ انکوڈ ہوندیاں نیں، ایس لئی وڈی اصل فائل وی ٹھیک اے۔ اکو جہیاں تصویراں دی اک ای کاپی ہر اوس گروپ وچ سانجھی رہندی اے جہڑا اوہناں نوں ورتدا اے۔ ایہہ گروپ جنے مرضی ایموجی رکھ سکدا اے، کوئی حد نہیں۔",
+    "stored_one": "{{count}} ایموجی · {{size}} سٹور",
+    "stored_other": "{{count}} ایموجی · {{size}} سٹور",
+    "empty": "حالے کوئی اپنا ایموجی نہیں۔ گروپ دا کوئی وی بندہ اک شامل کر سکدا اے۔",
+    "sizeAnimated": "اینیمیٹڈ · {{size}}",
+    "remove": "‎:{{shortcode}}:‎ ہٹاؤ",
+    "removeAdminsOnly": "صرف گروپ ایڈمن ای ایموجی ہٹا سکدے نیں۔"
+  }
+}

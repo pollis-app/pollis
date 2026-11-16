@@ -24,6 +24,7 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "ja", label: "日本語", dir: "ltr" },
   { code: "ur", label: "اردو", dir: "rtl" },
   { code: "hi", label: "हिन्दी", dir: "ltr" },
+  { code: "pa-Arab", label: "پنجابی", dir: "rtl" },
 ];
 
 export function supportedLanguageCodes(): string[] {

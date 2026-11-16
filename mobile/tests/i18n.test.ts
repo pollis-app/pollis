@@ -88,7 +88,7 @@ test("script subtags: Punjabi follows its script, everything else its base tag, 
   ] as const) {
     assert.equal(matchLanguageTag(tag, codes), want, tag);
   }
-  assert.equal(matchLanguageTag("pa-PK", [...supportedLanguageCodes(), "pa-Guru"]), null);
+  assert.equal(matchLanguageTag("pa-PK", [...supportedLanguageCodes().filter((c) => c !== "pa-Arab"), "pa-Guru"]), null);
   for (const stored of ["en", "es", "uk", "fr", "ru", "zh", "ar"]) {
     assert.equal(normalizeLanguage(stored), stored);
   }
@@ -131,4 +131,5 @@ test("storage keys are SecureStore-safe and user-scoped", () => {
 test("South Asian locales are auto-detected from OS tags (#1726)", () => {
   assert.equal(resolveDeviceLanguage(["ur-PK"]), "ur");
   assert.equal(resolveDeviceLanguage(["hi-IN"]), "hi");
+  assert.equal(resolveDeviceLanguage(["pa-PK"]), "pa-Arab");
 });

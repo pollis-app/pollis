@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "پچھے",
+    "cancel": "کینسل",
+    "close": "بند کرو",
+    "copy": "کاپی کرو",
+    "copied": "کاپی ہو گیا",
+    "copyFailed": "کاپی نہیں ہو سکیا",
+    "delete": "ڈیلیٹ کرو",
+    "forward": "فارورڈ کرو",
+    "goBack": "پچھے جاؤ",
+    "moreOptions": "ہور آپشن",
+    "save": "سیو کرو"
+  },
+  "states": {
+    "buttonLoading": "لوڈ ہو رہیا اے...",
+    "loading": "لوڈ ہو رہیا اے…"
+  },
+  "time": {
+    "today": "اج",
+    "yesterday": "کل"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "سپیس",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "سٹیٹس: {{status}}",
+    "offline": "آف لائن",
+    "online": "آن لائن"
+  },
+  "list": {
+    "empty": "کوئی آئٹم نہیں۔"
+  },
+  "grid": {
+    "empty": "ایتھے حالے کوئی نہیں۔"
+  },
+  "menu": {
+    "escHint": "پچھے جان لئی Esc",
+    "navigationLabel": "نیویگیشن مینیو",
+    "navigateHint": "اگے پچھے جاؤ",
+    "selectHint": "چنن لئی Enter"
+  },
+  "media": {
+    "mute": "میوٹ کرو",
+    "pause": "روکو",
+    "play": "چلاؤ",
+    "seek": "آڈیو اگے پچھے کرو",
+    "skipBackward": "10 سیکنڈ پچھے",
+    "skipForward": "10 سیکنڈ اگے",
+    "unmute": "ان میوٹ کرو",
+    "volume": "آواز"
+  },
+  "composer": {
+    "addAttachment": "اٹیچمنٹ لاؤ",
+    "allMentionHint": "ایس چینل وچ سب نوں نوٹیفکیشن جاندی اے",
+    "filePickerTitle": "فائلاں لاؤ",
+    "inputLabel": "سنیہا لکھن دی تھاں",
+    "placeholder": "سنیہا لکھو…",
+    "previewAlt": "پریویو",
+    "removeAttachment": "{{name}} ہٹاؤ",
+    "send": "سنیہا بھیجو",
+    "markSensitive": "{{name}} نوں حساس نشان لاؤ",
+    "unmarkSensitive": "{{name}} توں حساس نشان ہٹاؤ"
+  },
+  "mentions": {
+    "listLabel": "مینشن دیاں تجویزاں",
+    "matching": "<hl>@{{query}}</hl> نال ملدے ممبر"
+  },
+  "emojiSuggest": {
+    "listLabel": "ایموجی دیاں تجویزاں",
+    "matching": "<hl>:{{query}}</hl> نال ملدے ایموجی"
+  },
+  "a11y": {
+    "avatar": "اوتار",
+    "loading": "لوڈ ہو رہیا اے",
+    "otpDigit": "OTP دا ہندسہ {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} سیکنڈ",
+    "seconds_other": "{{count}} سیکنڈ",
+    "minutes_one": "{{count}} منٹ",
+    "minutes_other": "{{count}} منٹ",
+    "hours_one": "{{count}} گھنٹہ",
+    "hours_other": "{{count}} گھنٹے",
+    "days_one": "{{count}} دن",
+    "days_other": "{{count}} دن",
+    "weeks_one": "{{count}} ہفتہ",
+    "weeks_other": "{{count}} ہفتے",
+    "months_one": "{{count}} مہینہ",
+    "months_other": "{{count}} مہینے",
+    "years_one": "{{count}} سال",
+    "years_other": "{{count}} سال"
+  },
+  "tray": {
+    "open": "Pollis کھولو",
+    "muteMic": "مائیک میوٹ کرو",
+    "unmuteMic": "مائیک ان میوٹ کرو",
+    "muteMicIdle": "مائیک میوٹ کرو (کال وچ نہیں)",
+    "version": "ورژن {{version}}",
+    "quit": "Pollis بند کرو",
+    "unread_one": "Pollis — {{count}} ان پڑھیا",
+    "unread_other": "Pollis — {{count}} ان پڑھے"
+  }
+}

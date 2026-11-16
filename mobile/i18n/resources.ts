@@ -112,6 +112,21 @@ import ko_search from "../../frontend/src/i18n/locales/ko/search.json";
 import ko_settings from "../../frontend/src/i18n/locales/ko/settings.json";
 import ko_vault from "../../frontend/src/i18n/locales/ko/vault.json";
 import ko_voice from "../../frontend/src/i18n/locales/ko/voice.json";
+import pa_Arab_arcade from "../../frontend/src/i18n/locales/pa-Arab/arcade.json";
+import pa_Arab_auth from "../../frontend/src/i18n/locales/pa-Arab/auth.json";
+import pa_Arab_channels from "../../frontend/src/i18n/locales/pa-Arab/channels.json";
+import pa_Arab_chat from "../../frontend/src/i18n/locales/pa-Arab/chat.json";
+import pa_Arab_common from "../../frontend/src/i18n/locales/pa-Arab/common.json";
+import pa_Arab_dms from "../../frontend/src/i18n/locales/pa-Arab/dms.json";
+import pa_Arab_emoji from "../../frontend/src/i18n/locales/pa-Arab/emoji.json";
+import pa_Arab_errors from "../../frontend/src/i18n/locales/pa-Arab/errors.json";
+import pa_Arab_mobile from "../../frontend/src/i18n/locales/pa-Arab/mobile.json";
+import pa_Arab_nav from "../../frontend/src/i18n/locales/pa-Arab/nav.json";
+import pa_Arab_saved from "../../frontend/src/i18n/locales/pa-Arab/saved.json";
+import pa_Arab_search from "../../frontend/src/i18n/locales/pa-Arab/search.json";
+import pa_Arab_settings from "../../frontend/src/i18n/locales/pa-Arab/settings.json";
+import pa_Arab_vault from "../../frontend/src/i18n/locales/pa-Arab/vault.json";
+import pa_Arab_voice from "../../frontend/src/i18n/locales/pa-Arab/voice.json";
 import ru_arcade from "../../frontend/src/i18n/locales/ru/arcade.json";
 import ru_auth from "../../frontend/src/i18n/locales/ru/auth.json";
 import ru_channels from "../../frontend/src/i18n/locales/ru/channels.json";
@@ -294,6 +309,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ko_settings,
     "vault": ko_vault,
     "voice": ko_voice,
+  },
+  "pa-Arab": {
+    "arcade": pa_Arab_arcade,
+    "auth": pa_Arab_auth,
+    "channels": pa_Arab_channels,
+    "chat": pa_Arab_chat,
+    "common": pa_Arab_common,
+    "dms": pa_Arab_dms,
+    "emoji": pa_Arab_emoji,
+    "errors": pa_Arab_errors,
+    "mobile": pa_Arab_mobile,
+    "nav": pa_Arab_nav,
+    "saved": pa_Arab_saved,
+    "search": pa_Arab_search,
+    "settings": pa_Arab_settings,
+    "vault": pa_Arab_vault,
+    "voice": pa_Arab_voice,
   },
   "ru": {
     "arcade": ru_arcade,

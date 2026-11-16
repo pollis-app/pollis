@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "آرکیڈ"
+  },
+  "hud": {
+    "score": "سکور  {{score}}",
+    "time": "ٹائم   {{time}}",
+    "gameOver": "گیم ختم",
+    "final_one": "آخری {{count}} پوائنٹ · {{time}}",
+    "final_other": "آخری {{count}} پوائنٹ · {{time}}",
+    "restartHint": "دوبارہ شروع کرن لئی R دباؤ · باہر جان لئی Esc",
+    "controls": "WASD نال چلو · ماؤس نال نشانہ · کلک/سپیس نال فائر · Esc نال باہر"
+  }
+}

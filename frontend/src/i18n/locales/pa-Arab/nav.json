@@ -1,0 +1,212 @@
+{
+  "sidebar": {
+    "groups": "گروپ",
+    "dms": "DM",
+    "account": "اکاؤنٹ",
+    "saved": "سیو کیتے",
+    "preferences": "ترجیحاں",
+    "userSettings": "یوزر سیٹنگز",
+    "voiceAndVideo": "آواز تے ویڈیو",
+    "security": "سکیورٹی",
+    "keyBindings": "کی بورڈ شارٹ کٹ",
+    "softwareUpdate": "سافٹ ویئر اپڈیٹ",
+    "expandGroup": "{{name}} کھولو",
+    "collapseGroup": "{{name}} سمیٹو",
+    "keyChanged": "شناختی کنجی بدل گئی — دوبارہ تصدیق کرو",
+    "verified": "تصدیق شدہ رابطہ",
+    "dmAvatarAlt": "{{name}} دا اوتار",
+    "close": "سائیڈ بار بند کرو ({{shortcut}})",
+    "resize": "سائیڈ بار دا سائز بدلو (کھچو؛ ری سیٹ لئی ڈبل کلک)",
+    "searchMessages": "سنیہے سرچ کرو",
+    "vault": "والٹ",
+    "securityEvents": "سکیورٹی واقعات",
+    "copyHistory": "ہسٹری کاپی کرو"
+  },
+  "profile": {
+    "you": "تسیں",
+    "call": "کال",
+    "voice": "آواز",
+    "settings": "سیٹنگز",
+    "voiceConnected": "آواز جڑ گئی",
+    "stopScreenShare": "سکرین شیئر بند کرو",
+    "shareScreen": "سکرین شیئر کرو",
+    "disconnect": "کنکشن توڑو"
+  },
+  "breadcrumb": {
+    "home": "ہوم",
+    "groups": "گروپ",
+    "createGroup": "گروپ بناؤ",
+    "findGroup": "گروپ لبھو",
+    "newChannel": "نواں چینل",
+    "voice": "آواز",
+    "joinRequests": "شامل ہون دیاں درخواستاں",
+    "inviteMember": "ممبر نوں دعوت دیو",
+    "leaveGroup": "گروپ چھڈو",
+    "members": "ممبر",
+    "removeMember": "ممبر ہٹاؤ",
+    "directMessages": "سدھے سنیہے",
+    "newMessage": "نواں سنیہا",
+    "requests": "درخواستاں",
+    "blockedUsers": "بلاک کیتے یوزر",
+    "conversationSettings": "گل بات دیاں سیٹنگز",
+    "account": "اکاؤنٹ",
+    "preferences": "ترجیحاں",
+    "userSettings": "یوزر سیٹنگز",
+    "profile": "پروفائل",
+    "security": "سکیورٹی",
+    "voiceSettings": "آواز",
+    "invites": "دعوتاں",
+    "joinAGroup": "کسے گروپ وچ شامل ہوو",
+    "search": "سرچ",
+    "searchButton": "سرچ ({{shortcut}})",
+    "settings": "سیٹنگز",
+    "securityEvents": "سکیورٹی واقعات",
+    "copyHistory": "سنیہیاں دی ہسٹری کاپی کرو",
+    "historyRequest": "ہسٹری دی درخواست"
+  },
+  "statusBar": {
+    "groupsUnread_one": "گروپ دے ان پڑھے سنیہے: {{count}}",
+    "groupsUnread_other": "گروپ دے ان پڑھے سنیہے: {{count}}",
+    "dmsUnread_one": "ان پڑھے سدھے سنیہے: {{count}}",
+    "dmsUnread_other": "ان پڑھے سدھے سنیہے: {{count}}",
+    "joinRequests_one": "شامل ہون دیاں باقی درخواستاں: {{count}}",
+    "joinRequests_other": "شامل ہون دیاں باقی درخواستاں: {{count}}",
+    "invites_one": "باقی دعوتاں: {{count}}",
+    "invites_other": "باقی دعوتاں: {{count}}",
+    "someone": "کوئی",
+    "updateAvailable": "اپڈیٹ آئی اے",
+    "updateAvailableTitle": "اپڈیٹ آئی اے: {{version}}",
+    "answerCall": "‎@{{username}} دی کال چکو",
+    "declineCall": "کال رد کرو",
+    "dismissVoiceError": "آواز دی غلطی ہٹاؤ",
+    "dismissScreenShareError": "سکرین شیئر دی غلطی ہٹاؤ",
+    "dismissCameraError": "کیمرے دی غلطی ہٹاؤ",
+    "syncing": "سنک ہو رہیا اے…"
+  },
+  "shell": {
+    "dropFiles": "بھیجن لئی فائلاں ایتھے سٹو",
+    "voiceChannelFallback": "آواز",
+    "callChannel": "کال"
+  },
+  "panel": {
+    "thread": "تھریڈ",
+    "details": "تفصیل",
+    "ariaLabel": "گل بات دی تفصیل",
+    "closeThread": "تھریڈ پینل بند کرو ({{shortcut}})",
+    "closeDetails": "تفصیل پینل بند کرو ({{shortcut}})",
+    "resize": "تفصیل پینل دا سائز بدلو (کھچو؛ ری سیٹ لئی ڈبل کلک)"
+  },
+  "members": {
+    "count_one": "ممبر — {{count}}",
+    "count_other": "ممبر — {{count}}",
+    "onlineCount_one": "آن لائن — {{count}}",
+    "onlineCount_other": "آن لائن — {{count}}",
+    "empty": "وکھان لئی کوئی ممبر نہیں۔",
+    "noneOnline": "کوئی آن لائن نہیں۔",
+    "you": "تسیں",
+    "admin": "ایڈمن"
+  },
+  "media": {
+    "heading": "میڈیا",
+    "empty": "حالے کوئی میڈیا شیئر نہیں ہویا۔"
+  },
+  "thread": {
+    "loading": "جواب لوڈ ہو رہے نیں…",
+    "empty": "حالے کوئی جواب نہیں۔ تھلے تھریڈ شروع کرو۔",
+    "placeholder": "تھریڈ وچ جواب دیو…",
+    "messageDeleted": "سنیہا ڈیلیٹ ہو گیا",
+    "encrypted": "[انکرپٹڈ]"
+  },
+  "chat": {
+    "noSelection": "سنیہے بھیجنا شروع کرن لئی کوئی چینل چنو"
+  },
+  "dmRequest": {
+    "heading": "سنیہے دی درخواست",
+    "body": "<name>{{name}}</name> تہانوں سنیہے بھیجنا چاہندا اے۔",
+    "accept": "منظور کرو",
+    "accepting": "منظور ہو رہی اے…",
+    "block": "بلاک کرو",
+    "blocking": "بلاک ہو رہیا اے…"
+  },
+  "editBar": {
+    "heading": "سنیہا ایڈٹ ہو رہیا اے",
+    "cancel": "ایڈٹ کینسل کرو",
+    "hint": "سیو کرن لئی Enter · نویں لائن لئی Shift+Enter · کینسل کرن لئی Esc"
+  },
+  "deleteChannel": {
+    "heading": "چینل ڈیلیٹ کرو",
+    "cancel": "ڈیلیٹ کینسل کرو",
+    "body": "ایہہ چینل تے ایہدے سارے سنیہے ہمیشہ لئی ڈیلیٹ ہو جان گے۔ ایہہ واپس نہیں ہو سکدا۔",
+    "deleting": "ڈیلیٹ ہو رہیا اے…"
+  },
+  "deleteMessage": {
+    "heading": "سنیہا ڈیلیٹ کرو",
+    "moderateHeading": "سنیہا ہٹاؤ (ایڈمن)",
+    "body": "ایہہ سنیہا سب لئی ڈیلیٹ ہو جائے گا، اوہناں لوکاں لئی وی جنہاں نوں ایہہ پہلاں ای مل چکیا اے۔",
+    "moderateBody": "ایہہ سنیہا تے ایہدیاں اٹیچمنٹاں چینل وچ سب لئی ہٹا دتیاں جان گیاں۔",
+    "cancel": "ڈیلیٹ کینسل کرو",
+    "deleting": "ڈیلیٹ ہو رہیا اے…",
+    "remove": "ہٹاؤ"
+  },
+  "update": {
+    "preparing": "اپڈیٹ دی تیاری ہو رہی اے…",
+    "checking": "اپڈیٹاں چیک ہو رہیاں نیں…",
+    "downloading": "اپڈیٹ ڈاؤن لوڈ ہو رہی اے…",
+    "downloadingProgress": "اپڈیٹ ڈاؤن لوڈ ہو رہی اے… {{progress}}%",
+    "installing": "اپڈیٹ انسٹال ہو رہی اے…",
+    "relaunching": "دوبارہ کھل رہیا اے…",
+    "failed": "اپڈیٹ ناکام: {{error}}",
+    "tryAgain": "فیر کوشش کرو",
+    "continueWithout": "اپڈیٹ کیتے بغیر جاری رکھو",
+    "readOnlyDiskImage": "Pollis ڈسک امیج توں چل رہیا اے، جہڑی صرف پڑھن لئی اے۔ Pollis بند کرو، اوہنوں Applications وچ کھچ کے لے جاؤ، ڈسک امیج ایجیکٹ کرو، تے فیر اوہنوں Applications توں کھولو۔",
+    "readOnlyTranslocated": "macOS ولوں Pollis اک عارضی صرف پڑھن والی تھاں توں چلایا جا رہیا اے۔ Pollis بند کرو، Finder نال اوہنوں Applications توں باہر کڈھو تے فیر واپس اندر رکھو، فیر اوہنوں دوبارہ کھولو۔",
+    "readOnlyTranslocatedHealed": "macOS ولوں Pollis اک عارضی صرف پڑھن والی تھاں توں چلایا جا رہیا اے جہڑی پچھلی اپڈیٹ پچھے چھڈ گئی سی۔ ایہہ ٹھیک کر دتا گیا اے۔ Pollis بند کرو تے Applications توں دوبارہ کھولو۔",
+    "readOnlyGeneric": "Pollis اپنے آپ نوں اپڈیٹ نہیں کر سکدا کیوں جے اوہدی تھاں صرف پڑھن والی اے۔ Pollis بند کرو، پکا کرو کہ ایہہ تہاڈے Applications فولڈر وچ اے (Finder نال اوتھے لے جایا گیا ہووے)، تے فیر اوہنوں دوبارہ کھولو۔"
+  },
+  "clientBlocked": {
+    "title": "اپڈیٹ ضروری اے",
+    "body": "Pollis دا ایہہ ورژن ہن سپورٹ نہیں ہوندا۔ ورتدے رہن لئی اپڈیٹ کرو۔ تہاڈے سنیہے تے سیٹنگز ایسے ڈیوائس تے رہن گے۔",
+    "versions": "انسٹال {{version}} · ضروری {{minimum}} یا اوس توں نواں",
+    "installed": "انسٹال {{version}}",
+    "updateNow": "ہن اپڈیٹ کرو",
+    "updating": "اپڈیٹ ہو رہیا اے…",
+    "download": "سب توں نواں ورژن ڈاؤن لوڈ کرو",
+    "updateFailed": "اپڈیٹ پوری نہیں ہوئی۔ ایہدی تھاں سب توں نواں ورژن ڈاؤن لوڈ کرو۔",
+    "packageManager": "Pollis نوں {{source}} نال انسٹال کیتا گیا سی۔ اوتھے ای اپڈیٹ کرو:",
+    "openAppStore": "App Store کھولو",
+    "openPlay": "Google Play کھولو",
+    "openTestflight": "TestFlight کھولو",
+    "openWebsite": "pollis.com کھولو",
+    "openFailed": "لنک نہیں کھل سکیا۔ {{url}} تے جاؤ",
+    "retry": "فیر چیک کرو",
+    "checking": "چیک ہو رہیا اے…"
+  },
+  "home": {
+    "groups": "گروپ",
+    "groupsDescription": "کمیونٹیاں، ادارے، ٹیماں، تے حد توں ودھ شوقین گروپ چیٹاں",
+    "dms": "سدھے سنیہے",
+    "dmsDescription": "اکلے بندیاں نال پرائیویٹ، اینڈ ٹو اینڈ انکرپٹڈ گل بات",
+    "invites": "دعوتاں",
+    "noPendingInvites": "کوئی دعوت باقی نہیں",
+    "pending_one": "{{count}} باقی",
+    "pending_other": "{{count}} باقی",
+    "join": "کسے گروپ وچ شامل ہوو",
+    "joinDescription": "دعوت والا لنک یا شامل ہون والا کوڈ ورتو",
+    "joinRequests": "شامل ہون دیاں درخواستاں",
+    "logout": "سائن آؤٹ",
+    "exit": "باہر جاؤ"
+  },
+  "titleBar": {
+    "minimize": "نکا کرو",
+    "maximize": "وڈا کرو"
+  },
+  "terminal": {
+    "shellFailed": "شیل شروع نہیں ہو سکی: {{error}}"
+  },
+  "pins": {
+    "heading": "پن کیتے",
+    "empty": "حالے کوئی پن کیتا سنیہا نہیں۔",
+    "unavailable": "پن حالے ایس ڈیوائس تے نہیں ملدے — گل بات سنک ہون توں بعد نظر آ جان گے۔",
+    "unpin": "پن ہٹاؤ"
+  }
+}
