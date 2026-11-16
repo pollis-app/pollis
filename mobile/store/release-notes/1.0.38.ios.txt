@@ -1,0 +1,15 @@
+New
+• 17 more languages, including Korean, Japanese, Hindi, Urdu, Bengali, Portuguese and Swahili.
+• Language has its own page in Self.
+• Videos in chats show a still frame from the video, or a placeholder with a play button, instead of an empty tile.
+• Direct messages are listed by latest activity, with the newest at the top.
+• Self now lists the open source licenses the app uses.
+
+Fixes
+• Message notifications arrive faster.
+• Deleted messages say "Message deleted" instead of leaving an empty row.
+• Messages that can't be read say "Couldn't decrypt".
+• Long-pressing a message while the keyboard is open now opens its actions straight away.
+• An image or video that failed to load now appears as soon as the same file loads elsewhere in the app.
+• Custom emoji you can no longer use, such as one from a group you have left, are now sent as plain text.
+• Reliability and security improvements.

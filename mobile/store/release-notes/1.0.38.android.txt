@@ -1,0 +1,9 @@
+New
+• 17 more languages, including Korean, Japanese, Hindi, Urdu, Bengali, Portuguese and Swahili.
+• Language has its own page in Self.
+
+Fixes
+• Message notifications arrive faster and show the message even with Data Saver on.
+• Deleted messages say "Message deleted" instead of leaving an empty row.
+• Messages that can't be read say "Couldn't decrypt".
+• Other fixes and improvements.
