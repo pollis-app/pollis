@@ -1,0 +1,77 @@
+{
+  "list": {
+    "newMessage": "新しいメッセージ",
+    "requests": "リクエスト",
+    "blocked": "ブロックしたユーザー",
+    "avatarAlt": "{{name}}のアバター",
+    "settingsFor": "{{name}}の設定",
+    "verified": "検証済みの連絡先",
+    "keyChanged": "IDキーが変更されました — 再検証してください"
+  },
+  "conversation": {
+    "fallbackTitle": "ダイレクトメッセージ",
+    "viewProfile": "@{{name}}のプロフィールを表示",
+    "call": "@{{name}}に発信",
+    "returnToCall": "@{{name}}との通話に戻る",
+    "pinsLabel": "ピン留めされたメッセージ"
+  },
+  "settings": {
+    "pageTitle": "会話の設定",
+    "leave": "会話から退出",
+    "submitting": "退出中…",
+    "leaveFailed": "会話から退出できませんでした",
+    "cancel": "キャンセル（Esc）"
+  },
+  "start": {
+    "pageTitle": "新しいメッセージ",
+    "identifierLabel": "ユーザー名またはメールアドレス",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "会話を開始",
+    "submitting": "開始中…",
+    "identifierRequired": "ユーザーの指定は必須です",
+    "userNotFound": "ユーザーが見つかりません",
+    "startFailed": "会話を開始できませんでした"
+  },
+  "requests": {
+    "pageTitle": "メッセージリクエスト",
+    "empty": "保留中のリクエストはありません。",
+    "noMessageYet": "（まだメッセージはありません）",
+    "unknownSender": "不明",
+    "others_other": "（ほか{{count}}人）",
+    "accept": "承諾",
+    "block": "ブロック"
+  },
+  "blocked": {
+    "pageTitle": "ブロックしたユーザー",
+    "empty": "ブロックしたユーザーはいません。",
+    "unblock": "ブロック解除"
+  },
+  "profile": {
+    "fallbackName": "ユーザー",
+    "fallbackTitle": "プロフィール",
+    "notFound": "ユーザーが見つかりません",
+    "avatarAlt": "{{name}}のアバター",
+    "sendMessage": "メッセージを送信",
+    "block": "ブロック",
+    "safetyNumber": "安全番号",
+    "statusVerified": "検証済み",
+    "statusChanged": "変更あり — 再検証してください",
+    "statusUnverified": "未検証",
+    "keyChangedWarning": "前回検証してから、この連絡先のIDキーが変更されました。信頼する前に、別の経路でもう一度番号を照合してください。",
+    "removeVerification": "検証を解除",
+    "markVerified": "検証済みにする",
+    "report": "通報"
+  },
+  "safety": {
+    "title": "あなたと{{name}}",
+    "verify": "安全番号を検証",
+    "headingMany": "安全番号",
+    "shared": "あなたと{{name}}には同じ番号が表示されています。直接会うか通話で照合し、間に誰も入り込んでいないことを確認してください。",
+    "qrLabel": "{{name}}と共有している安全番号のQRコード",
+    "failed": "安全番号を読み込めませんでした。"
+  },
+  "notify": {
+    "requestTitle": "新しい会話",
+    "requestBody": "{{name}}があなたとの会話を開始しました"
+  }
+}

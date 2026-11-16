@@ -1,0 +1,60 @@
+{
+  "picker": {
+    "label": "絵文字ピッカー",
+    "triggerLabel": "絵文字",
+    "searchLabel": "検索",
+    "searchPlaceholder": "絵文字を検索",
+    "resultsFor": "「{{query}}」の検索結果",
+    "recent": "よく使う絵文字",
+    "custom": "カスタム",
+    "empty": "一致する絵文字はありません。",
+    "previewHint": "絵文字を選択",
+    "railLabel": "絵文字のカテゴリ"
+  },
+  "categories": {
+    "people": "人",
+    "nature": "自然",
+    "food": "食べ物",
+    "activity": "アクティビティ",
+    "travel": "旅行",
+    "objects": "物",
+    "symbols": "記号",
+    "flags": "旗"
+  },
+  "skinTone": {
+    "groupLabel": "肌の色",
+    "default": "デフォルトの肌の色",
+    "numbered": "肌の色{{index}}"
+  },
+  "manage": {
+    "title": "カスタム絵文字",
+    "signInRequired": "ログインしてください",
+    "dropPrompt": "ここに画像をドラッグするか、クリックして選択",
+    "dropNow": "ドロップしてこの画像を使用",
+    "dropHint": "{{formats}} · アニメーションGIFはアニメーションが保持されます",
+    "replaceHint": "別の画像をドロップするか、クリックして差し替え",
+    "sourceSize": "元のサイズ{{size}} · アップロード時に48 KB未満に再エンコードされます",
+    "reencodeNote": "アップロード時に48 KB未満に再エンコードされます",
+    "fileTooLarge": "この画像は{{size}}を超えています。もっと小さい元ファイルを選んでください",
+    "unsupportedFile": "{{name}}はPNG、JPEG、GIF、WebPのいずれでもありません",
+    "shortcodeLabel": "ショートコード",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": ":shortcode: の形式で入力 — a–z、0–9、_",
+    "shortcodeRequired": "追加するには絵文字に名前を付けてください",
+    "shortcodeInvalid": "2–32文字で入力してください: a–z、0–9、_",
+    "shortcodeTaken": ":{{shortcode}}: はこのグループですでに使われています",
+    "samplePlaceholder": "メッセージでの表示例",
+    "add": "絵文字を追加",
+    "shrinking": "縮小中…",
+    "filePickerTitle": "絵文字の画像を選択",
+    "imageFilterName": "画像",
+    "addFailed": "絵文字を追加できませんでした",
+    "removeFailed": "絵文字を削除できませんでした",
+    "storageNote": "画像はアップロード前に48 KB未満に再エンコードされるため、大きな元ファイルでも問題ありません。同じ画像は、それを使うすべてのグループで1つの保存データを共有します。このグループで追加できる数に上限はありません。",
+    "stored_other": "絵文字{{count}}個 · 保存容量{{size}}",
+    "empty": "カスタム絵文字はまだありません。グループの誰でも追加できます。",
+    "sizeAnimated": "アニメーション · {{size}}",
+    "remove": ":{{shortcode}}: を削除",
+    "removeAdminsOnly": "絵文字を削除できるのはグループの管理者のみです。"
+  }
+}

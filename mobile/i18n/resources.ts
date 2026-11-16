@@ -67,6 +67,21 @@ import fr_search from "../../frontend/src/i18n/locales/fr/search.json";
 import fr_settings from "../../frontend/src/i18n/locales/fr/settings.json";
 import fr_vault from "../../frontend/src/i18n/locales/fr/vault.json";
 import fr_voice from "../../frontend/src/i18n/locales/fr/voice.json";
+import ja_arcade from "../../frontend/src/i18n/locales/ja/arcade.json";
+import ja_auth from "../../frontend/src/i18n/locales/ja/auth.json";
+import ja_channels from "../../frontend/src/i18n/locales/ja/channels.json";
+import ja_chat from "../../frontend/src/i18n/locales/ja/chat.json";
+import ja_common from "../../frontend/src/i18n/locales/ja/common.json";
+import ja_dms from "../../frontend/src/i18n/locales/ja/dms.json";
+import ja_emoji from "../../frontend/src/i18n/locales/ja/emoji.json";
+import ja_errors from "../../frontend/src/i18n/locales/ja/errors.json";
+import ja_mobile from "../../frontend/src/i18n/locales/ja/mobile.json";
+import ja_nav from "../../frontend/src/i18n/locales/ja/nav.json";
+import ja_saved from "../../frontend/src/i18n/locales/ja/saved.json";
+import ja_search from "../../frontend/src/i18n/locales/ja/search.json";
+import ja_settings from "../../frontend/src/i18n/locales/ja/settings.json";
+import ja_vault from "../../frontend/src/i18n/locales/ja/vault.json";
+import ja_voice from "../../frontend/src/i18n/locales/ja/voice.json";
 import ko_arcade from "../../frontend/src/i18n/locales/ko/arcade.json";
 import ko_auth from "../../frontend/src/i18n/locales/ko/auth.json";
 import ko_channels from "../../frontend/src/i18n/locales/ko/channels.json";
@@ -198,6 +213,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": fr_settings,
     "vault": fr_vault,
     "voice": fr_voice,
+  },
+  "ja": {
+    "arcade": ja_arcade,
+    "auth": ja_auth,
+    "channels": ja_channels,
+    "chat": ja_chat,
+    "common": ja_common,
+    "dms": ja_dms,
+    "emoji": ja_emoji,
+    "errors": ja_errors,
+    "mobile": ja_mobile,
+    "nav": ja_nav,
+    "saved": ja_saved,
+    "search": ja_search,
+    "settings": ja_settings,
+    "vault": ja_vault,
+    "voice": ja_voice,
   },
   "ko": {
     "arcade": ko_arcade,

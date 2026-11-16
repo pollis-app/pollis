@@ -82,6 +82,7 @@ test("script subtags: Punjabi follows its script, everything else its base tag, 
     ["pa-IN", "pa-Guru"],
     ["pa", "pa-Guru"],
     ["zh-Hant-TW", "zh"],
+    ["ja-JP", "ja"],
     ["ko-KR", "ko"],
   ] as const) {
     assert.equal(matchLanguageTag(tag, codes), want, tag);
@@ -90,6 +91,7 @@ test("script subtags: Punjabi follows its script, everything else its base tag, 
   for (const stored of ["en", "es", "uk", "fr", "ru", "zh", "ar"]) {
     assert.equal(normalizeLanguage(stored), stored);
   }
+  assert.equal(resolveDeviceLanguage(["ja-JP"]), "ja");
   assert.equal(resolveDeviceLanguage(["ko-KR"]), "ko");
 });
 

@@ -21,6 +21,7 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "zh", label: "简体中文", dir: "ltr" },
   { code: "ar", label: "العربية", dir: "rtl" },
   { code: "ko", label: "한국어", dir: "ltr" },
+  { code: "ja", label: "日本語", dir: "ltr" },
 ];
 
 export function supportedLanguageCodes(): string[] {
