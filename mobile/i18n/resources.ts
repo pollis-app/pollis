@@ -127,6 +127,21 @@ import ko_search from "../../frontend/src/i18n/locales/ko/search.json";
 import ko_settings from "../../frontend/src/i18n/locales/ko/settings.json";
 import ko_vault from "../../frontend/src/i18n/locales/ko/vault.json";
 import ko_voice from "../../frontend/src/i18n/locales/ko/voice.json";
+import mr_arcade from "../../frontend/src/i18n/locales/mr/arcade.json";
+import mr_auth from "../../frontend/src/i18n/locales/mr/auth.json";
+import mr_channels from "../../frontend/src/i18n/locales/mr/channels.json";
+import mr_chat from "../../frontend/src/i18n/locales/mr/chat.json";
+import mr_common from "../../frontend/src/i18n/locales/mr/common.json";
+import mr_dms from "../../frontend/src/i18n/locales/mr/dms.json";
+import mr_emoji from "../../frontend/src/i18n/locales/mr/emoji.json";
+import mr_errors from "../../frontend/src/i18n/locales/mr/errors.json";
+import mr_mobile from "../../frontend/src/i18n/locales/mr/mobile.json";
+import mr_nav from "../../frontend/src/i18n/locales/mr/nav.json";
+import mr_saved from "../../frontend/src/i18n/locales/mr/saved.json";
+import mr_search from "../../frontend/src/i18n/locales/mr/search.json";
+import mr_settings from "../../frontend/src/i18n/locales/mr/settings.json";
+import mr_vault from "../../frontend/src/i18n/locales/mr/vault.json";
+import mr_voice from "../../frontend/src/i18n/locales/mr/voice.json";
 import pa_Arab_arcade from "../../frontend/src/i18n/locales/pa-Arab/arcade.json";
 import pa_Arab_auth from "../../frontend/src/i18n/locales/pa-Arab/auth.json";
 import pa_Arab_channels from "../../frontend/src/i18n/locales/pa-Arab/channels.json";
@@ -356,6 +371,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ko_settings,
     "vault": ko_vault,
     "voice": ko_voice,
+  },
+  "mr": {
+    "arcade": mr_arcade,
+    "auth": mr_auth,
+    "channels": mr_channels,
+    "chat": mr_chat,
+    "common": mr_common,
+    "dms": mr_dms,
+    "emoji": mr_emoji,
+    "errors": mr_errors,
+    "mobile": mr_mobile,
+    "nav": mr_nav,
+    "saved": mr_saved,
+    "search": mr_search,
+    "settings": mr_settings,
+    "vault": mr_vault,
+    "voice": mr_voice,
   },
   "pa-Arab": {
     "arcade": pa_Arab_arcade,

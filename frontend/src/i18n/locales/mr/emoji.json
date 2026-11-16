@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "इमोजी निवडक",
+    "triggerLabel": "इमोजी",
+    "searchLabel": "शोधा",
+    "searchPlaceholder": "इमोजी शोधा",
+    "resultsFor": "\"{{query}}\" साठी परिणाम",
+    "recent": "वारंवार वापरलेले",
+    "custom": "कस्टम",
+    "empty": "याच्याशी जुळणारे इमोजी नाहीत.",
+    "previewHint": "एक इमोजी निवडा",
+    "railLabel": "इमोजी श्रेण्या"
+  },
+  "categories": {
+    "people": "लोक",
+    "nature": "निसर्ग",
+    "food": "खाद्यपदार्थ",
+    "activity": "ॲक्टिव्हिटी",
+    "travel": "प्रवास",
+    "objects": "वस्तू",
+    "symbols": "चिन्हे",
+    "flags": "ध्वज"
+  },
+  "skinTone": {
+    "groupLabel": "त्वचेचा रंग",
+    "default": "डीफॉल्ट त्वचेचा रंग",
+    "numbered": "त्वचेचा रंग {{index}}"
+  },
+  "manage": {
+    "title": "कस्टम इमोजी",
+    "signInRequired": "कृपया साइन इन करा",
+    "dropPrompt": "इमेज इथे ड्रॅग करा, किंवा ब्राउझ करण्यासाठी क्लिक करा",
+    "dropNow": "ही इमेज वापरण्यासाठी सोडा",
+    "dropHint": "{{formats}} · ॲनिमेटेड GIF चे ॲनिमेशन कायम राहते",
+    "replaceHint": "बदलण्यासाठी दुसरी इमेज सोडा किंवा क्लिक करा",
+    "sourceSize": "मूळ फाइल {{size}} · अपलोड करताना 48 KB पेक्षा कमी आकारात पुन्हा एन्कोड होते",
+    "reencodeNote": "अपलोड करताना 48 KB पेक्षा कमी आकारात पुन्हा एन्कोड होते",
+    "fileTooLarge": "ती इमेज {{size}} पेक्षा मोठी आहे — लहान मूळ फाइल निवडा",
+    "unsupportedFile": "{{name}} ही PNG, JPEG, GIF किंवा WebP फाइल नाही",
+    "shortcodeLabel": "शॉर्टकोड",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": ":shortcode: असे टाइप केले जाते — a–z, 0–9 आणि _",
+    "shortcodeRequired": "हे इमोजी जोडण्यासाठी त्याला नाव द्या",
+    "shortcodeInvalid": "2–32 अक्षरे वापरा: a–z, 0–9 आणि _",
+    "shortcodeTaken": ":{{shortcode}}: या ग्रुपमध्ये आधीच वापरले आहे",
+    "samplePlaceholder": "मेसेजमध्ये हे कसे दिसेल",
+    "add": "इमोजी जोडा",
+    "shrinking": "आकार कमी करत आहे…",
+    "filePickerTitle": "इमोजी इमेज निवडा",
+    "imageFilterName": "इमेज",
+    "addFailed": "ते इमोजी जोडता आले नाही",
+    "removeFailed": "ते इमोजी काढता आले नाही",
+    "storageNote": "अपलोड करण्यापूर्वी इमेज 48 KB पेक्षा कमी आकारात पुन्हा एन्कोड केल्या जातात, त्यामुळे मोठी मूळ फाइल चालेल. सारख्या इमेज वापरणाऱ्या सर्व ग्रुपमध्ये त्यांची एकच प्रत साठवली जाते. हा ग्रुप किती इमोजी ठेवू शकतो याला मर्यादा नाही.",
+    "stored_one": "{{count}} इमोजी · {{size}} साठवले",
+    "stored_other": "{{count}} इमोजी · {{size}} साठवले",
+    "empty": "अजून कस्टम इमोजी नाहीत. ग्रुपमधील कोणीही एखादे जोडू शकते.",
+    "sizeAnimated": "ॲनिमेटेड · {{size}}",
+    "remove": ":{{shortcode}}: काढा",
+    "removeAdminsOnly": "फक्त ग्रुप ॲडमिन इमोजी काढू शकतात."
+  }
+}
