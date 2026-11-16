@@ -91,8 +91,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           <div className="flex flex-col gap-5">
             <div>
 
-              <p className="text-xs mt-1 font-mono text-accent">
-                {t("login.prompt")}
+              <p className="text-xs mt-1 font-mono text-accent" data-testid="login-prompt">
+                {authStep === "otp" ? t("login.otpPrompt") : t("login.prompt")}
               </p>
             </div>
 
