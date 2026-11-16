@@ -159,6 +159,7 @@ export default function Security() {
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
                       <Button
                         testID={`btn-reject-${req.request_id}`}
+                        variant="danger"
                         surface="raised"
                         accessibilityLabel={t("mobile:self.security.rejectA11y")}
                         onPress={() => rejectEnrollment.mutate(req.request_id)}
@@ -258,7 +259,7 @@ export default function Security() {
                       </Text>
                     ) : (
                       <Chip
-                        variant={armed ? "solid" : "outline"}
+                        variant="danger"
                         testID={`btn-revoke-device-${d.device_id}`}
                         accessibilityLabel={
                           armed

@@ -83,7 +83,7 @@ export function PendingRows({
                     <Chip
                       testID={`btn-decline-invite-${inv.id}`}
                       accessibilityLabel={`${t("groups.declineInviteLabel")}, ${inv.group_name}`}
-                      variant="outline"
+                      variant="danger"
                       onPress={() => declineInvite.mutate(inv.id)}
                     >
                       {t("groups.decline")}

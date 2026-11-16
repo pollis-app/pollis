@@ -68,7 +68,7 @@ export default function JoinRequests() {
                       {approve.isPending ? "…" : t("mobile:group.requests.approve")}
                     </Chip>
                     <Chip
-                      variant="outline"
+                      variant="danger"
                       testID={`btn-reject-${r.id}`}
                       accessibilityLabel={`${t("mobile:group.requests.declineLabel")}, ${handle}`}
                       onPress={() => reject.mutate(r.id)}

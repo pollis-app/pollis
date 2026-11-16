@@ -123,6 +123,7 @@ export default function ApproveDevice() {
         </Button>
         <Button
           full
+          variant="danger"
           testID="btn-reject-device"
           disabled={busy}
           loading={busy && acting === "reject"}

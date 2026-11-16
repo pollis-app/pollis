@@ -65,10 +65,12 @@ export const Button: React.FC<ButtonProps> = ({
     disabled || isLoading,
   );
 
+  // Destructive actions are the one red (`danger`, design/theme.ts), filled like primary so a
+  // remove/revoke/leave never reads as the affirmative accent beside it (docs/design/README.md).
   const variantClass = isDanger
-    ? "border-2 border-[hsl(0_70%_50%/0.4)] bg-transparent text-[hsl(0_70%_55%)] enabled:hover:bg-[hsl(0_70%_50%/0.1)]"
+    ? "border-2 border-transparent bg-danger text-on-danger enabled:hover:opacity-[0.85]"
     : isPrimary
-      ? "border-2 border-transparent bg-accent text-bg enabled:hover:opacity-[0.85]"
+      ? "border-2 border-transparent bg-accent text-on-accent enabled:hover:opacity-[0.85]"
       : isGhost
         ? "border-none bg-transparent text-muted enabled:hover:text-fg"
         : "border-2 border-line-strong bg-transparent text-accent enabled:hover:bg-hover";

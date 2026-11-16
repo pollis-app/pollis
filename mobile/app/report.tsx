@@ -159,7 +159,7 @@ export default function ReportScreen() {
         </Button>
         <Button
           testID="btn-report-and-block"
-          variant="secondary"
+          variant="danger"
           full
           disabled={!reason || report.isPending}
           onPress={() => submit(true)}

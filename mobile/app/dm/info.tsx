@@ -123,8 +123,8 @@ function DMInfo() {
           <Button
             full
             testID="btn-leave"
-            variant="secondary"
-            icon={<Icon.logOut size={20} color={semantic.text} />}
+            variant="danger"
+            icon={<Icon.logOut size={20} color={semantic.onDanger} />}
             onPress={onLeave}
             disabled={leave.isPending || !channelId}
           >

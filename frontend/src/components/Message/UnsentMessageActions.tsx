@@ -39,7 +39,7 @@ export const UnsentMessageActions: React.FC<UnsentMessageActionsProps> = ({ mess
       )}
       <Button
         data-testid={`message-discard-${message.id}`}
-        variant="ghost"
+        variant="danger"
         size="xs"
         aria-label={t("outbox.discardLabel")}
         disabled={retry.isPending || discard.isPending}

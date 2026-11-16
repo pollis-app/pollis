@@ -158,7 +158,7 @@ function Members() {
                             : t("mobile:group.members.makeAdmin")}
                       </Chip>
                       <Chip
-                        variant="outline"
+                        variant="danger"
                         selected={armed}
                         testID={`btn-remove-member-${m.user_id}`}
                         accessibilityLabel={
@@ -216,7 +216,7 @@ function Members() {
                         }}
                       >
                         <Chip
-                          variant="outline"
+                          variant="danger"
                           testID={`btn-revoke-invite-${inv.invitee_id}`}
                           accessibilityLabel={t("members.invited.revokeLabel", { name: handle })}
                           disabled={revokeInvite.isPending && !busy}

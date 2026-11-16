@@ -150,7 +150,7 @@ function GroupEmoji() {
                   end={
                     iAmAdmin ? (
                       <Chip
-                        variant="outline"
+                        variant="danger"
                         selected={armed}
                         testID={`btn-remove-emoji-${e.shortcode}`}
                         accessibilityLabel={

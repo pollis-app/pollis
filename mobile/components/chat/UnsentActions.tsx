@@ -40,6 +40,7 @@ export function UnsentActions({
         ) : null}
         {onDiscard ? (
           <Chip
+            variant="danger"
             onPress={onDiscard}
             testID={`btn-discard-message-${messageId}`}
             accessibilityLabel={t("outbox.discardLabel")}

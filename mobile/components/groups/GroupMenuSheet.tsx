@@ -94,9 +94,9 @@ export function GroupMenuSheet({
       <Group surface="high">
         <ListRow
           testID="btn-leave-group"
-          glyph={<Icon.logOut size={22} color={semantic.accent} />}
+          glyph={<Icon.logOut size={22} color={semantic.danger} />}
           name={leaveLabel}
-          nameStyle={{ color: semantic.accent }}
+          nameStyle={{ color: semantic.danger }}
           sub={t("group.panel.leaveHint")}
           disabled={leaveGroup.isPending}
           onPress={onLeave}

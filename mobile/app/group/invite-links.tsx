@@ -119,7 +119,7 @@ export default function GroupInviteLinks() {
                   </View>
                   {link.is_live ? (
                     <Chip
-                      variant="outline"
+                      variant="danger"
                       selected={armed}
                       testID={`btn-revoke-invite-link-${link.id}`}
                       accessibilityLabel={

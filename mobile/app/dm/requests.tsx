@@ -92,7 +92,7 @@ export default function DMRequests() {
                     <Chip
                       testID={`btn-block-request-${d.id}`}
                       accessibilityLabel={t("direct.blockSender")}
-                      variant="outline"
+                      variant="danger"
                       disabled={blockUser.isPending}
                       onPress={() => {
                         if (d.user2_id) {

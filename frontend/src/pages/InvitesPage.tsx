@@ -76,7 +76,7 @@ export const InvitesPage: React.FC = () => {
               data-testid={`decline-invite-${invite.id}`}
               onClick={() => handleDecline(invite.id)}
               disabled={acceptMutation.isPending || declineMutation.isPending}
-              variant="secondary"
+              variant="danger"
             >
               {t("invites.decline")}
             </Button>,
