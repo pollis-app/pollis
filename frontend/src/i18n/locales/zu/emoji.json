@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "Isikhethi se-emoji",
+    "triggerLabel": "I-emoji",
+    "searchLabel": "Sesha",
+    "searchPlaceholder": "Sesha i-emoji",
+    "resultsFor": "Imiphumela ka-\"{{query}}\"",
+    "recent": "Ezisetshenziswa kaningi",
+    "custom": "Ezenziwe ngokwezifiso",
+    "empty": "Ayikho i-emoji efana nalokho.",
+    "previewHint": "Khetha i-emoji",
+    "railLabel": "Izigaba ze-emoji"
+  },
+  "categories": {
+    "people": "Abantu",
+    "nature": "Imvelo",
+    "food": "Ukudla",
+    "activity": "Imisebenzi",
+    "travel": "Ukuvakasha",
+    "objects": "Izinto",
+    "symbols": "Izimpawu",
+    "flags": "Amafulegi"
+  },
+  "skinTone": {
+    "groupLabel": "Umbala wesikhumba",
+    "default": "Umbala wesikhumba ozenzakalelayo",
+    "numbered": "Umbala wesikhumba {{index}}"
+  },
+  "manage": {
+    "title": "Ama-emoji Enziwe Ngokwezifiso",
+    "signInRequired": "Sicela ungene",
+    "dropPrompt": "Hudulela isithombe lapha, noma uchofoze ukuze uphequlule",
+    "dropNow": "Yiyeke ukuze usebenzise lesi sithombe",
+    "dropHint": "{{formats}} · ama-GIF anyakazayo agcina ukunyakaza kwawo",
+    "replaceHint": "Faka esinye isithombe, noma uchofoze, ukuze usishintshe",
+    "sourceSize": "umthombo ongu-{{size}} · uyabhalwa kabusha ube ngaphansi kuka-48 KB uma ulayishwa",
+    "reencodeNote": "Kubhalwa kabusha kube ngaphansi kuka-48 KB uma kulayishwa",
+    "fileTooLarge": "Leso sithombe singaphezu kuka-{{size}} — khetha ifayela lomthombo elincane",
+    "unsupportedFile": "{{name}} akuyona i-PNG, i-JPEG, i-GIF noma i-WebP",
+    "shortcodeLabel": "Ikhodi emfushane",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Ithayiphwa njengo-:shortcode: — a–z, 0–9 kanye no-_",
+    "shortcodeRequired": "Qamba le emoji igama ukuze uyengeze",
+    "shortcodeInvalid": "Sebenzisa izinhlamvu ezingu-2–32: a–z, 0–9 kanye no-_",
+    "shortcodeTaken": ":{{shortcode}}: isivele ithathiwe kuleli qembu",
+    "samplePlaceholder": "Izobukeka kanjani emlayezweni",
+    "add": "Engeza i-emoji",
+    "shrinking": "Iyanciphisa…",
+    "filePickerTitle": "Khetha isithombe se-emoji",
+    "imageFilterName": "Izithombe",
+    "addFailed": "Ayikwazanga ukwengeza leyo emoji",
+    "removeFailed": "Ayikwazanga ukususa leyo emoji",
+    "storageNote": "Izithombe zibhalwa kabusha zibe ngaphansi kuka-48 KB ngaphambi kokulayishwa, ngakho ifayela lomthombo elikhulu lilungile. Izithombe ezifanayo zabelana ngekhophi eyodwa egciniwe kuwo wonke amaqembu azisebenzisayo. Awukho umkhawulo wokuthi leli qembu lingaba nezingaki.",
+    "stored_one": "i-emoji engu-{{count}} · {{size}} egciniwe",
+    "stored_other": "ama-emoji angu-{{count}} · {{size}} egciniwe",
+    "empty": "Awakabikho ama-emoji enziwe ngokwezifiso. Noma ubani oseqenjini angayengeza.",
+    "sizeAnimated": "iyanyakaza · {{size}}",
+    "remove": "Susa :{{shortcode}}:",
+    "removeAdminsOnly": "Abaphathi beqembu kuphela abangasusa ama-emoji."
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "boundary": {
+    "instruction": "Sicela uqale kabusha uhlelo lokusebenza.",
+    "message": "Kwenzeke iphutha elingalindelekile.",
+    "restart": "Qala kabusha",
+    "tag": "IPHUTHA ELIBUCAYI",
+    "title": "Kukhona okungahambanga kahle"
+  },
+  "core": {
+    "pinIncorrect_one": "I-PIN engalungile. Kusele umzamo ongu-{{count}}.",
+    "pinIncorrect_other": "I-PIN engalungile. Kusele imizamo engu-{{count}}.",
+    "pinLockedOut": "Ufake i-PIN engalungile kaningi kakhulu. Buyisa i-akhawunti yakho ngoKhiye Oyimfihlo wakho.",
+    "pinNotSet": "Le divayisi ayikabi nayo i-PIN. Ngena futhi ukuze uyisethe.",
+    "noActiveUser": "Awungenile kule divayisi. Ngena futhi.",
+    "unlockFirst": "Vula i-Pollis kuqala."
+  }
+}

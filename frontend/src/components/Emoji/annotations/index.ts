@@ -42,6 +42,7 @@ export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [
   "ur",
   "yo",
   "zh",
+  "zu",
 ];
 
 /** The rows for `locale`, or null when no table ships for it. */
@@ -95,6 +96,8 @@ export function loadEmojiAnnotationRows(
       return import("./yo").then((m) => m.default);
     case "zh":
       return import("./zh").then((m) => m.default);
+    case "zu":
+      return import("./zu").then((m) => m.default);
     default:
       return null;
   }

@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "I-ARCADE"
+  },
+  "hud": {
+    "score": "AMAPHUZU  {{score}}",
+    "time": "ISIKHATHI  {{time}}",
+    "gameOver": "UMDLALO UPHELILE",
+    "final_one": "ekugcineni iphuzu elingu-{{count}} · {{time}}",
+    "final_other": "ekugcineni amaphuzu angu-{{count}} · {{time}}",
+    "restartHint": "cindezela u-R ukuze uqale kabusha · u-Esc ukuze uphume",
+    "controls": "WASD hamba · igundane qondisa · chofoza/Space dubula · Esc phuma"
+  }
+}

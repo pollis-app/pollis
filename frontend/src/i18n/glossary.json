@@ -85,6 +85,10 @@
       "yo": [
         "àpótí ìpamọ́",
         "Àpótí ìpamọ́"
+      ],
+      "zu": [
+        "phephelo",
+        "phephelw"
       ]
     },
     {
@@ -147,6 +151,9 @@
       "yo": [
         "ẹ̀rọ",
         "Ẹ̀rọ"
+      ],
+      "zu": [
+        "divayisi"
       ]
     },
     {
@@ -211,6 +218,11 @@
       "yo": [
         "nọ́mbà ààbò",
         "Nọ́mbà ààbò"
+      ],
+      "zu": [
+        "nombolo yokuphepha",
+        "nombolo zokuphepha",
+        "nombolweni yokuphepha"
       ]
     },
     {
@@ -275,6 +287,10 @@
       "yo": [
         "kọ́kọ́rọ́ ìdánimọ̀",
         "Kọ́kọ́rọ́ ìdánimọ̀"
+      ],
+      "zu": [
+        "khiye womazisi",
+        "khiye bomazisi"
       ]
     },
     {
@@ -339,6 +355,10 @@
       "yo": [
         "jẹ́rìísí",
         "Jẹ́rìísí"
+      ],
+      "zu": [
+        "qinisek",
+        "Qinisek"
       ]
     },
     {
@@ -392,6 +412,9 @@
         "PIN"
       ],
       "yo": [
+        "PIN"
+      ],
+      "zu": [
         "PIN"
       ]
     },
@@ -459,6 +482,11 @@
         "Lẹ̀ mọ́ òkè",
         "ìlẹ̀mọ́",
         "Ìlẹ̀mọ́"
+      ],
+      "zu": [
+        "phina",
+        "Phina",
+        "phiniw"
       ]
     },
     {
@@ -528,6 +556,11 @@
         "ẹgbẹ́",
         "Ẹgbẹ́",
         "ẸGBẸ́"
+      ],
+      "zu": [
+        "qembu",
+        "qenjini",
+        "QEMBU"
       ]
     },
     {
@@ -593,6 +626,9 @@
       "yo": [
         "ìkànnì",
         "Ìkànnì"
+      ],
+      "zu": [
+        "teshi"
       ]
     },
     {
@@ -675,6 +711,10 @@
         "ìfiránṣẹ́ àdáni",
         "Ìfiránṣẹ́ àdáni",
         "DM"
+      ],
+      "zu": [
+        "qondile",
+        "DM"
       ]
     },
     {
@@ -740,6 +780,11 @@
       "yo": [
         "ìbéèrè ìfiránṣẹ́",
         "Ìbéèrè ìfiránṣẹ́"
+      ],
+      "zu": [
+        "celo somlayezo",
+        "celo zemilayezo",
+        "celo Zemilayezo"
       ]
     },
     {
@@ -798,6 +843,10 @@
       "yo": [
         "àkọsílẹ̀ gbangba",
         "Àkọsílẹ̀ gbangba"
+      ],
+      "zu": [
+        "rekhodi lokusobala",
+        "rekhodini lokusobala"
       ]
     },
     {
@@ -865,6 +914,10 @@
       "yo": [
         "ẹjọ́",
         "Ẹjọ́"
+      ],
+      "zu": [
+        "bik",
+        "Bik"
       ]
     },
     {
@@ -933,6 +986,11 @@
       "yo": [
         "dènà",
         "Dènà"
+      ],
+      "zu": [
+        "vimb",
+        "Vimb",
+        "vinj"
       ]
     },
     {
@@ -990,6 +1048,12 @@
       ],
       "yo": [
         "Kọ́kọ́rọ́ Àṣírí"
+      ],
+      "zu": [
+        "khiye Oyimfihlo",
+        "Khiye Oyimfihlo",
+        "KHIYE OYIMFIHLO",
+        "khiye oyimfihlo"
       ]
     },
     {
@@ -1048,6 +1112,10 @@
       "yo": [
         "kọ́kọ́rọ́ ìmúpadà",
         "Kọ́kọ́rọ́ ìmúpadà"
+      ],
+      "zu": [
+        "khiye wokubuyisela",
+        "Khiye Wokubuyisela"
       ]
     },
     {
@@ -1107,6 +1175,10 @@
       ],
       "yo": [
         "Ìwé Pàjáwìrì"
+      ],
+      "zu": [
+        "Khithi Yezimo Eziphuthumayo",
+        "KHITHI YEZIMO EZIPHUTHUMAYO"
       ]
     },
     {
@@ -1186,6 +1258,14 @@
         "ké sí",
         "Ké sí",
         "ÌKÉSÍNI"
+      ],
+      "zu": [
+        "mem",
+        "Mem",
+        "menyiw",
+        "menyw",
+        "Menyw",
+        "MEMO"
       ]
     },
     {
@@ -1249,6 +1329,10 @@
       "yo": [
         "ọmọ ẹgbẹ́",
         "Ọmọ ẹgbẹ́"
+      ],
+      "zu": [
+        "lungu",
+        "lungw"
       ]
     },
     {
@@ -1307,6 +1391,9 @@
       "yo": [
         "alábòójútó",
         "Alábòójútó"
+      ],
+      "zu": [
+        "phathi"
       ]
     },
     {
@@ -1369,6 +1456,9 @@
       "yo": [
         "okùn ìjíròrò",
         "Okùn ìjíròrò"
+      ],
+      "zu": [
+        "chungechunge"
       ]
     },
     {
@@ -1431,6 +1521,10 @@
       "yo": [
         "àmì ìmọ̀lára",
         "Àmì ìmọ̀lára"
+      ],
+      "zu": [
+        "sabel",
+        "Sabel"
       ]
     },
     {
@@ -1499,6 +1593,10 @@
       "yo": [
         "dárúkọ",
         "Dárúkọ"
+      ],
+      "zu": [
+        "balul",
+        "Balul"
       ]
     },
     {
@@ -1569,6 +1667,10 @@
       "yo": [
         "pín ojú ẹ̀rọ",
         "Pín ojú ẹ̀rọ"
+      ],
+      "zu": [
+        "ngesikrini",
+        "Ngesikrini"
       ]
     },
     {
@@ -1645,6 +1747,13 @@
       "yo": [
         "wọlé",
         "Wọlé"
+      ],
+      "zu": [
+        "ngena",
+        "ngene",
+        "Ngena",
+        "ngeni",
+        "Ngeni"
       ]
     },
     {
@@ -1721,6 +1830,10 @@
       "yo": [
         "jáde",
         "Jáde"
+      ],
+      "zu": [
+        "phum",
+        "Phum"
       ]
     },
     {
@@ -1793,6 +1906,10 @@
         "Ṣí sílẹ̀",
         "ṣí Pollis sílẹ̀",
         "Ṣí Pollis sílẹ̀"
+      ],
+      "zu": [
+        "vul",
+        "Vul"
       ]
     },
     {
@@ -1854,6 +1971,11 @@
       "yo": [
         "kó jáde",
         "Kó jáde"
+      ],
+      "zu": [
+        "khiph",
+        "Khiph",
+        "khish"
       ]
     },
     {
@@ -1915,6 +2037,9 @@
       "yo": [
         "láti òpin dé òpin",
         "Láti òpin dé òpin"
+      ],
+      "zu": [
+        "ekuqaleni kuya ekugcineni"
       ]
     },
     {
@@ -1978,6 +2103,9 @@
         "Dí etí",
         "ṣí etí",
         "Ṣí etí"
+      ],
+      "zu": [
+        "zindlebe"
       ]
     }
   ]

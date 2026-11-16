@@ -352,6 +352,21 @@ import zh_search from "../../frontend/src/i18n/locales/zh/search.json";
 import zh_settings from "../../frontend/src/i18n/locales/zh/settings.json";
 import zh_vault from "../../frontend/src/i18n/locales/zh/vault.json";
 import zh_voice from "../../frontend/src/i18n/locales/zh/voice.json";
+import zu_arcade from "../../frontend/src/i18n/locales/zu/arcade.json";
+import zu_auth from "../../frontend/src/i18n/locales/zu/auth.json";
+import zu_channels from "../../frontend/src/i18n/locales/zu/channels.json";
+import zu_chat from "../../frontend/src/i18n/locales/zu/chat.json";
+import zu_common from "../../frontend/src/i18n/locales/zu/common.json";
+import zu_dms from "../../frontend/src/i18n/locales/zu/dms.json";
+import zu_emoji from "../../frontend/src/i18n/locales/zu/emoji.json";
+import zu_errors from "../../frontend/src/i18n/locales/zu/errors.json";
+import zu_mobile from "../../frontend/src/i18n/locales/zu/mobile.json";
+import zu_nav from "../../frontend/src/i18n/locales/zu/nav.json";
+import zu_saved from "../../frontend/src/i18n/locales/zu/saved.json";
+import zu_search from "../../frontend/src/i18n/locales/zu/search.json";
+import zu_settings from "../../frontend/src/i18n/locales/zu/settings.json";
+import zu_vault from "../../frontend/src/i18n/locales/zu/vault.json";
+import zu_voice from "../../frontend/src/i18n/locales/zu/voice.json";
 
 type Catalogue = Record<string, unknown>;
 
@@ -746,5 +761,22 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": zh_settings,
     "vault": zh_vault,
     "voice": zh_voice,
+  },
+  "zu": {
+    "arcade": zu_arcade,
+    "auth": zu_auth,
+    "channels": zu_channels,
+    "chat": zu_chat,
+    "common": zu_common,
+    "dms": zu_dms,
+    "emoji": zu_emoji,
+    "errors": zu_errors,
+    "mobile": zu_mobile,
+    "nav": zu_nav,
+    "saved": zu_saved,
+    "search": zu_search,
+    "settings": zu_settings,
+    "vault": zu_vault,
+    "voice": zu_voice,
   },
 };
