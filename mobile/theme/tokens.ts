@@ -63,7 +63,7 @@ export function scriptLineHeight(base: number, fontSize: number): number {
 }
 
 /** A Latin letter-spacing, or none while an Arabic-script or Indic language is active. */
-export function scriptLetterSpacing(base: number): number {
+function scriptLetterSpacing(base: number): number {
   return _untracked ? 0 : base;
 }
 
