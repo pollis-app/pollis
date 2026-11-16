@@ -57,6 +57,10 @@
       "annotations": "325bc6bb96aff4a5a9124a9087313669b0e88da920b84e261d61a402ea9405a8",
       "annotationsDerived": "cd3aa5d40a42d473c7796584d560cac9b35f223561dd3e0e57594fec5003c010"
     },
+    "sw": {
+      "annotations": "b8046174b77c586cd2bc43b0c598ba20d25943118c90e42e942a3c073eb4218d",
+      "annotationsDerived": "78553babd02507633dc8d68f522d1c315e36411da53ae4b29a712e953e103aaf"
+    },
     "ta": {
       "annotations": "3d8788c754b9090cbb1373f3e4039175ad48471edb51fde17f49cbe27b9bd2aa",
       "annotationsDerived": "a6f4d3af064c735fc36c7e58600a4ff0bee6fd7e8b0ff29bb71f7bc85db4d099"
@@ -146404,6 +146408,9718 @@
         "кнопка",
         "тайна",
         "япония"
+      ]
+    },
+    "sw": {
+      "00A9": [
+        "hakimiliki",
+        "c",
+        "hatimiliki"
+      ],
+      "00AE": [
+        "iliyosajiliwa",
+        "imesajiliwa",
+        "r",
+        "sajili"
+      ],
+      "1F004": [
+        "dragoni jekundu la mahjong",
+        "mahjong",
+        "mchezo",
+        "nyekundu"
+      ],
+      "1F0CF": [
+        "jokari",
+        "kadi",
+        "kucheza",
+        "mchezo"
+      ],
+      "1F170": [
+        "kitufe chenye herufi a",
+        "a",
+        "aina ya damu",
+        "damu",
+        "kitufe"
+      ],
+      "1F171": [
+        "kitufe chenye herufi b",
+        "aina ya damu",
+        "b",
+        "damu",
+        "kitufe"
+      ],
+      "1F17E": [
+        "kitufe cha o",
+        "damu",
+        "o"
+      ],
+      "1F17F": [
+        "kitufe cha p",
+        "egesho",
+        "maegesho"
+      ],
+      "1F18E": [
+        "kitufe chenye herufi ab",
+        "ab",
+        "aina ya damu",
+        "damu"
+      ],
+      "1F191": [
+        "kitufe chenye herufi cl",
+        "cl"
+      ],
+      "1F192": [
+        "kitufe chenye neno ‘cool’",
+        "baridi"
+      ],
+      "1F193": [
+        "kitufe cheney neno ‘free’",
+        "huru",
+        "kitufe chenye neno ‘free’"
+      ],
+      "1F194": [
+        "herufi id kwenye mraba",
+        "id",
+        "kitambulisho",
+        "utambulisho"
+      ],
+      "1F195": [
+        "kitufe chenye neno ‘new’",
+        "mpya"
+      ],
+      "1F196": [
+        "kitufe chenye herufi ng",
+        "ng"
+      ],
+      "1F197": [
+        "kitufe chenye neno ‘ok’",
+        "sawa"
+      ],
+      "1F198": [
+        "kitufe chenye neno ‘sos’",
+        "sos",
+        "usaidizi"
+      ],
+      "1F199": [
+        "kitufe cha up!",
+        "alama",
+        "juu",
+        "kitufe cha juu!"
+      ],
+      "1F19A": [
+        "kitufe cha vs",
+        "dhidi ya",
+        "kitufe",
+        "vs"
+      ],
+      "1F1E6-1F1E9": [
+        "bendera: andorra",
+        "bendera"
+      ],
+      "1F1E6-1F1EA": [
+        "bendera: falme za kiarabu",
+        "bendera"
+      ],
+      "1F1E6-1F1EB": [
+        "bendera: afghanistan",
+        "bendera"
+      ],
+      "1F1E6-1F1EC": [
+        "bendera: antigua na barbuda",
+        "bendera"
+      ],
+      "1F1E6-1F1EE": [
+        "bendera: anguilla",
+        "bendera"
+      ],
+      "1F1E6-1F1F1": [
+        "bendera: albania",
+        "bendera"
+      ],
+      "1F1E6-1F1F2": [
+        "bendera: armenia",
+        "bendera"
+      ],
+      "1F1E6-1F1F4": [
+        "bendera: angola",
+        "bendera"
+      ],
+      "1F1E6-1F1F6": [
+        "bendera: antaktiki",
+        "bendera"
+      ],
+      "1F1E6-1F1F7": [
+        "bendera: ajentina",
+        "bendera"
+      ],
+      "1F1E6-1F1F8": [
+        "bendera: samoa ya marekani",
+        "bendera"
+      ],
+      "1F1E6-1F1F9": [
+        "bendera: austria",
+        "bendera"
+      ],
+      "1F1E6-1F1FA": [
+        "bendera: australia",
+        "bendera"
+      ],
+      "1F1E6-1F1FC": [
+        "bendera: aruba",
+        "bendera"
+      ],
+      "1F1E6-1F1FD": [
+        "bendera: visiwa vya aland",
+        "bendera"
+      ],
+      "1F1E6-1F1FF": [
+        "bendera: azerbaijani",
+        "bendera"
+      ],
+      "1F1E7-1F1E6": [
+        "bendera: bosnia na hezegovina",
+        "bendera"
+      ],
+      "1F1E7-1F1E7": [
+        "bendera: babadosi",
+        "bendera"
+      ],
+      "1F1E7-1F1E9": [
+        "bendera: bangladeshi",
+        "bendera"
+      ],
+      "1F1E7-1F1EA": [
+        "bendera: ubelgiji",
+        "bendera"
+      ],
+      "1F1E7-1F1EB": [
+        "bendera: bukinafaso",
+        "bendera"
+      ],
+      "1F1E7-1F1EC": [
+        "bendera: bulgaria",
+        "bendera"
+      ],
+      "1F1E7-1F1ED": [
+        "bendera: bahareni",
+        "bendera"
+      ],
+      "1F1E7-1F1EE": [
+        "bendera: burundi",
+        "bendera"
+      ],
+      "1F1E7-1F1EF": [
+        "bendera: benin",
+        "bendera"
+      ],
+      "1F1E7-1F1F1": [
+        "bendera: st. barthelemy",
+        "bendera"
+      ],
+      "1F1E7-1F1F2": [
+        "bendera: bermuda",
+        "bendera"
+      ],
+      "1F1E7-1F1F3": [
+        "bendera: brunei",
+        "bendera"
+      ],
+      "1F1E7-1F1F4": [
+        "bendera: bolivia",
+        "bendera"
+      ],
+      "1F1E7-1F1F6": [
+        "bendera: uholanzi ya karibiani",
+        "bendera"
+      ],
+      "1F1E7-1F1F7": [
+        "bendera: brazil",
+        "bendera"
+      ],
+      "1F1E7-1F1F8": [
+        "bendera: bahama",
+        "bendera"
+      ],
+      "1F1E7-1F1F9": [
+        "bendera: bhutan",
+        "bendera"
+      ],
+      "1F1E7-1F1FB": [
+        "bendera: kisiwa cha bouvet",
+        "bendera"
+      ],
+      "1F1E7-1F1FC": [
+        "bendera: botswana",
+        "bendera"
+      ],
+      "1F1E7-1F1FE": [
+        "bendera: belarus",
+        "bendera"
+      ],
+      "1F1E7-1F1FF": [
+        "bendera: belize",
+        "bendera"
+      ],
+      "1F1E8-1F1E6": [
+        "bendera: kanada",
+        "bendera"
+      ],
+      "1F1E8-1F1E8": [
+        "bendera: visiwa vya cocos (keeling)",
+        "bendera"
+      ],
+      "1F1E8-1F1E9": [
+        "bendera: kongo - kinshasa",
+        "bendera"
+      ],
+      "1F1E8-1F1EB": [
+        "bendera: jamhuri ya afrika ya kati",
+        "bendera"
+      ],
+      "1F1E8-1F1EC": [
+        "bendera: kongo - brazzaville",
+        "bendera"
+      ],
+      "1F1E8-1F1ED": [
+        "bendera: uswisi",
+        "bendera"
+      ],
+      "1F1E8-1F1EE": [
+        "bendera: cote d’ivoire",
+        "bendera"
+      ],
+      "1F1E8-1F1F0": [
+        "bendera: visiwa vya cook",
+        "bendera"
+      ],
+      "1F1E8-1F1F1": [
+        "bendera: chile",
+        "bendera"
+      ],
+      "1F1E8-1F1F2": [
+        "bendera: kameruni",
+        "bendera"
+      ],
+      "1F1E8-1F1F3": [
+        "bendera: uchina",
+        "bendera"
+      ],
+      "1F1E8-1F1F4": [
+        "bendera: kolombia",
+        "bendera"
+      ],
+      "1F1E8-1F1F7": [
+        "bendera: kostarika",
+        "bendera"
+      ],
+      "1F1E8-1F1FA": [
+        "bendera: kuba",
+        "bendera"
+      ],
+      "1F1E8-1F1FB": [
+        "bendera: cape verde",
+        "bendera"
+      ],
+      "1F1E8-1F1FC": [
+        "bendera: curacao",
+        "bendera"
+      ],
+      "1F1E8-1F1FD": [
+        "bendera: kisiwa cha krismasi",
+        "bendera"
+      ],
+      "1F1E8-1F1FE": [
+        "bendera: saiprasi",
+        "bendera"
+      ],
+      "1F1E8-1F1FF": [
+        "bendera: chechia",
+        "bendera"
+      ],
+      "1F1E9-1F1EA": [
+        "bendera: ujerumani",
+        "bendera"
+      ],
+      "1F1E9-1F1EF": [
+        "bendera: jibuti",
+        "bendera"
+      ],
+      "1F1E9-1F1F0": [
+        "bendera: denmaki",
+        "bendera"
+      ],
+      "1F1E9-1F1F2": [
+        "bendera: dominika",
+        "bendera"
+      ],
+      "1F1E9-1F1F4": [
+        "bendera: jamhuri ya dominika",
+        "bendera"
+      ],
+      "1F1E9-1F1FF": [
+        "bendera: aljeria",
+        "bendera"
+      ],
+      "1F1EA-1F1E8": [
+        "bendera: ecuador",
+        "bendera"
+      ],
+      "1F1EA-1F1EA": [
+        "bendera: estonia",
+        "bendera"
+      ],
+      "1F1EA-1F1EC": [
+        "bendera: misri",
+        "bendera"
+      ],
+      "1F1EA-1F1ED": [
+        "bendera: sahara magharibi",
+        "bendera"
+      ],
+      "1F1EA-1F1F7": [
+        "bendera: eritrea",
+        "bendera"
+      ],
+      "1F1EA-1F1F8": [
+        "bendera: uhispania",
+        "bendera"
+      ],
+      "1F1EA-1F1F9": [
+        "bendera: ethiopia",
+        "bendera"
+      ],
+      "1F1EB-1F1EE": [
+        "bendera: ufini",
+        "bendera"
+      ],
+      "1F1EB-1F1EF": [
+        "bendera: fiji",
+        "bendera"
+      ],
+      "1F1EB-1F1F0": [
+        "bendera: visiwa vya falkland",
+        "bendera"
+      ],
+      "1F1EB-1F1F2": [
+        "bendera: mikronesia",
+        "bendera"
+      ],
+      "1F1EB-1F1F4": [
+        "bendera: visiwa vya faroe",
+        "bendera"
+      ],
+      "1F1EB-1F1F7": [
+        "bendera: ufaransa",
+        "bendera"
+      ],
+      "1F1EC-1F1E6": [
+        "bendera: gabon",
+        "bendera"
+      ],
+      "1F1EC-1F1E7": [
+        "bendera: ufalme wa muungano",
+        "bendera"
+      ],
+      "1F1EC-1F1E9": [
+        "bendera: grenada",
+        "bendera"
+      ],
+      "1F1EC-1F1EA": [
+        "bendera: jojia",
+        "bendera"
+      ],
+      "1F1EC-1F1EB": [
+        "bendera: guiana ya ufaransa",
+        "bendera"
+      ],
+      "1F1EC-1F1EC": [
+        "bendera: guernsey",
+        "bendera"
+      ],
+      "1F1EC-1F1ED": [
+        "bendera: ghana",
+        "bendera"
+      ],
+      "1F1EC-1F1EE": [
+        "bendera: gibraltar",
+        "bendera"
+      ],
+      "1F1EC-1F1F1": [
+        "bendera: greenland",
+        "bendera"
+      ],
+      "1F1EC-1F1F2": [
+        "bendera: gambia",
+        "bendera"
+      ],
+      "1F1EC-1F1F3": [
+        "bendera: gine",
+        "bendera"
+      ],
+      "1F1EC-1F1F5": [
+        "bendera: guadeloupe",
+        "bendera"
+      ],
+      "1F1EC-1F1F6": [
+        "bendera: guinea ya ikweta",
+        "bendera"
+      ],
+      "1F1EC-1F1F7": [
+        "bendera: ugiriki",
+        "bendera"
+      ],
+      "1F1EC-1F1F8": [
+        "bendera: visiwa vya georgia kusini na sandwich kusini",
+        "bendera"
+      ],
+      "1F1EC-1F1F9": [
+        "bendera: guatemala",
+        "bendera"
+      ],
+      "1F1EC-1F1FA": [
+        "bendera: guam",
+        "bendera"
+      ],
+      "1F1EC-1F1FC": [
+        "bendera: ginebisau",
+        "bendera"
+      ],
+      "1F1EC-1F1FE": [
+        "bendera: guyana",
+        "bendera"
+      ],
+      "1F1ED-1F1F0": [
+        "bendera: hong kong sar china",
+        "bendera"
+      ],
+      "1F1ED-1F1F2": [
+        "bendera: kisiwa cha heard na visiwa vya mcdonald",
+        "bendera"
+      ],
+      "1F1ED-1F1F3": [
+        "bendera: honduras",
+        "bendera"
+      ],
+      "1F1ED-1F1F7": [
+        "bendera: croatia",
+        "bendera"
+      ],
+      "1F1ED-1F1F9": [
+        "bendera: haiti",
+        "bendera"
+      ],
+      "1F1ED-1F1FA": [
+        "bendera: hungaria",
+        "bendera"
+      ],
+      "1F1EE-1F1E9": [
+        "bendera: indonesia",
+        "bendera"
+      ],
+      "1F1EE-1F1EA": [
+        "bendera: ayalandi",
+        "bendera"
+      ],
+      "1F1EE-1F1F1": [
+        "bendera: israeli",
+        "bendera"
+      ],
+      "1F1EE-1F1F2": [
+        "bendera: kisiwa cha man",
+        "bendera"
+      ],
+      "1F1EE-1F1F3": [
+        "bendera: india",
+        "bendera"
+      ],
+      "1F1EE-1F1F4": [
+        "bendera: eneo la uingereza katika bahari hindi",
+        "bendera"
+      ],
+      "1F1EE-1F1F6": [
+        "bendera: iraki",
+        "bendera"
+      ],
+      "1F1EE-1F1F7": [
+        "bendera: iran",
+        "bendera"
+      ],
+      "1F1EE-1F1F8": [
+        "bendera: aisilandi",
+        "bendera"
+      ],
+      "1F1EE-1F1F9": [
+        "bendera: italia",
+        "bendera"
+      ],
+      "1F1EF-1F1EA": [
+        "bendera: jersey",
+        "bendera"
+      ],
+      "1F1EF-1F1F2": [
+        "bendera: jamaika",
+        "bendera"
+      ],
+      "1F1EF-1F1F4": [
+        "bendera: jordan",
+        "bendera"
+      ],
+      "1F1EF-1F1F5": [
+        "bendera: japani",
+        "bendera"
+      ],
+      "1F1F0-1F1EA": [
+        "bendera: kenya",
+        "bendera"
+      ],
+      "1F1F0-1F1EC": [
+        "bendera: kirigizistani",
+        "bendera"
+      ],
+      "1F1F0-1F1ED": [
+        "bendera: kambodia",
+        "bendera"
+      ],
+      "1F1F0-1F1EE": [
+        "bendera: kiribati",
+        "bendera"
+      ],
+      "1F1F0-1F1F2": [
+        "bendera: komoro",
+        "bendera"
+      ],
+      "1F1F0-1F1F3": [
+        "bendera: st. kitts na nevis",
+        "bendera"
+      ],
+      "1F1F0-1F1F5": [
+        "bendera: korea kaskazini",
+        "bendera"
+      ],
+      "1F1F0-1F1F7": [
+        "bendera: korea kusini",
+        "bendera"
+      ],
+      "1F1F0-1F1FC": [
+        "bendera: kuwait",
+        "bendera"
+      ],
+      "1F1F0-1F1FE": [
+        "bendera: visiwa vya cayman",
+        "bendera"
+      ],
+      "1F1F0-1F1FF": [
+        "bendera: kazakistani",
+        "bendera"
+      ],
+      "1F1F1-1F1E6": [
+        "bendera: laos",
+        "bendera"
+      ],
+      "1F1F1-1F1E7": [
+        "bendera: lebanon",
+        "bendera"
+      ],
+      "1F1F1-1F1E8": [
+        "bendera: st. lucia",
+        "bendera"
+      ],
+      "1F1F1-1F1EE": [
+        "bendera: liechtenstein",
+        "bendera"
+      ],
+      "1F1F1-1F1F0": [
+        "bendera: sri lanka",
+        "bendera"
+      ],
+      "1F1F1-1F1F7": [
+        "bendera: liberia",
+        "bendera"
+      ],
+      "1F1F1-1F1F8": [
+        "bendera: lesoto",
+        "bendera"
+      ],
+      "1F1F1-1F1F9": [
+        "bendera: lithuania",
+        "bendera"
+      ],
+      "1F1F1-1F1FA": [
+        "bendera: luxembourg",
+        "bendera"
+      ],
+      "1F1F1-1F1FB": [
+        "bendera: latvia",
+        "bendera"
+      ],
+      "1F1F1-1F1FE": [
+        "bendera: libya",
+        "bendera"
+      ],
+      "1F1F2-1F1E6": [
+        "bendera: morocco",
+        "bendera"
+      ],
+      "1F1F2-1F1E8": [
+        "bendera: monaco",
+        "bendera"
+      ],
+      "1F1F2-1F1E9": [
+        "bendera: moldova",
+        "bendera"
+      ],
+      "1F1F2-1F1EA": [
+        "bendera: montenegro",
+        "bendera"
+      ],
+      "1F1F2-1F1EB": [
+        "bendera: st. martin",
+        "bendera"
+      ],
+      "1F1F2-1F1EC": [
+        "bendera: madagaska",
+        "bendera"
+      ],
+      "1F1F2-1F1ED": [
+        "bendera: visiwa vya marshall",
+        "bendera"
+      ],
+      "1F1F2-1F1F0": [
+        "bendera: masedonia ya kaskazini",
+        "bendera"
+      ],
+      "1F1F2-1F1F1": [
+        "bendera: mali",
+        "bendera"
+      ],
+      "1F1F2-1F1F2": [
+        "bendera: myanmar (burma)",
+        "bendera"
+      ],
+      "1F1F2-1F1F3": [
+        "bendera: mongolia",
+        "bendera"
+      ],
+      "1F1F2-1F1F4": [
+        "bendera: makau sar china",
+        "bendera"
+      ],
+      "1F1F2-1F1F5": [
+        "bendera: visiwa vya mariana vya kaskazini",
+        "bendera"
+      ],
+      "1F1F2-1F1F6": [
+        "bendera: martinique",
+        "bendera"
+      ],
+      "1F1F2-1F1F7": [
+        "bendera: moritania",
+        "bendera"
+      ],
+      "1F1F2-1F1F8": [
+        "bendera: montserrat",
+        "bendera"
+      ],
+      "1F1F2-1F1F9": [
+        "bendera: malta",
+        "bendera"
+      ],
+      "1F1F2-1F1FA": [
+        "bendera: morisi",
+        "bendera"
+      ],
+      "1F1F2-1F1FB": [
+        "bendera: maldivi",
+        "bendera"
+      ],
+      "1F1F2-1F1FC": [
+        "bendera: malawi",
+        "bendera"
+      ],
+      "1F1F2-1F1FD": [
+        "bendera: meksiko",
+        "bendera"
+      ],
+      "1F1F2-1F1FE": [
+        "bendera: malesia",
+        "bendera"
+      ],
+      "1F1F2-1F1FF": [
+        "bendera: msumbiji",
+        "bendera"
+      ],
+      "1F1F3-1F1E6": [
+        "bendera: namibia",
+        "bendera"
+      ],
+      "1F1F3-1F1E8": [
+        "bendera: new caledonia",
+        "bendera"
+      ],
+      "1F1F3-1F1EA": [
+        "bendera: niger",
+        "bendera"
+      ],
+      "1F1F3-1F1EB": [
+        "bendera: kisiwa cha norfolk",
+        "bendera"
+      ],
+      "1F1F3-1F1EC": [
+        "bendera: nigeria",
+        "bendera"
+      ],
+      "1F1F3-1F1EE": [
+        "bendera: nikaragwa",
+        "bendera"
+      ],
+      "1F1F3-1F1F1": [
+        "bendera: uholanzi",
+        "bendera"
+      ],
+      "1F1F3-1F1F4": [
+        "bendera: norway",
+        "bendera"
+      ],
+      "1F1F3-1F1F5": [
+        "bendera: nepal",
+        "bendera"
+      ],
+      "1F1F3-1F1F7": [
+        "bendera: nauru",
+        "bendera"
+      ],
+      "1F1F3-1F1FA": [
+        "bendera: niue",
+        "bendera"
+      ],
+      "1F1F3-1F1FF": [
+        "bendera: nyuzilandi",
+        "bendera"
+      ],
+      "1F1F4-1F1F2": [
+        "bendera: oman",
+        "bendera"
+      ],
+      "1F1F5-1F1E6": [
+        "bendera: panama",
+        "bendera"
+      ],
+      "1F1F5-1F1EA": [
+        "bendera: peru",
+        "bendera"
+      ],
+      "1F1F5-1F1EB": [
+        "bendera: polynesia ya ufaransa",
+        "bendera"
+      ],
+      "1F1F5-1F1EC": [
+        "bendera: papua new guinea",
+        "bendera"
+      ],
+      "1F1F5-1F1ED": [
+        "bendera: ufilipino",
+        "bendera"
+      ],
+      "1F1F5-1F1F0": [
+        "bendera: pakistani",
+        "bendera"
+      ],
+      "1F1F5-1F1F1": [
+        "bendera: poland",
+        "bendera"
+      ],
+      "1F1F5-1F1F2": [
+        "bendera: santapierre na miquelon",
+        "bendera"
+      ],
+      "1F1F5-1F1F3": [
+        "bendera: visiwa vya pitcairn",
+        "bendera"
+      ],
+      "1F1F5-1F1F7": [
+        "bendera: puerto rico",
+        "bendera"
+      ],
+      "1F1F5-1F1F8": [
+        "bendera: maeneo ya palestina",
+        "bendera"
+      ],
+      "1F1F5-1F1F9": [
+        "bendera: ureno",
+        "bendera"
+      ],
+      "1F1F5-1F1FC": [
+        "bendera: palau",
+        "bendera"
+      ],
+      "1F1F5-1F1FE": [
+        "bendera: paraguay",
+        "bendera"
+      ],
+      "1F1F6-1F1E6": [
+        "bendera: qatar",
+        "bendera"
+      ],
+      "1F1F7-1F1EA": [
+        "bendera: reunion",
+        "bendera"
+      ],
+      "1F1F7-1F1F4": [
+        "bendera: romania",
+        "bendera"
+      ],
+      "1F1F7-1F1F8": [
+        "bendera: serbia",
+        "bendera"
+      ],
+      "1F1F7-1F1FA": [
+        "bendera: urusi",
+        "bendera"
+      ],
+      "1F1F7-1F1FC": [
+        "bendera: rwanda",
+        "bendera"
+      ],
+      "1F1F8-1F1E6": [
+        "bendera: saudia",
+        "bendera"
+      ],
+      "1F1F8-1F1E7": [
+        "bendera: visiwa vya solomon",
+        "bendera"
+      ],
+      "1F1F8-1F1E8": [
+        "bendera: ushelisheli",
+        "bendera"
+      ],
+      "1F1F8-1F1E9": [
+        "bendera: sudan",
+        "bendera"
+      ],
+      "1F1F8-1F1EA": [
+        "bendera: uswidi",
+        "bendera"
+      ],
+      "1F1F8-1F1EC": [
+        "bendera: singapore",
+        "bendera"
+      ],
+      "1F1F8-1F1ED": [
+        "bendera: st. helena",
+        "bendera"
+      ],
+      "1F1F8-1F1EE": [
+        "bendera: slovenia",
+        "bendera"
+      ],
+      "1F1F8-1F1EF": [
+        "bendera: svalbard na jan mayen",
+        "bendera"
+      ],
+      "1F1F8-1F1F0": [
+        "bendera: slovakia",
+        "bendera"
+      ],
+      "1F1F8-1F1F1": [
+        "bendera: siera leoni",
+        "bendera"
+      ],
+      "1F1F8-1F1F2": [
+        "bendera: san marino",
+        "bendera"
+      ],
+      "1F1F8-1F1F3": [
+        "bendera: senegali",
+        "bendera"
+      ],
+      "1F1F8-1F1F4": [
+        "bendera: somalia",
+        "bendera"
+      ],
+      "1F1F8-1F1F7": [
+        "bendera: suriname",
+        "bendera"
+      ],
+      "1F1F8-1F1F8": [
+        "bendera: sudan kusini",
+        "bendera"
+      ],
+      "1F1F8-1F1F9": [
+        "bendera: sao tome na principe",
+        "bendera"
+      ],
+      "1F1F8-1F1FB": [
+        "bendera: el salvador",
+        "bendera"
+      ],
+      "1F1F8-1F1FD": [
+        "bendera: sint maarten",
+        "bendera"
+      ],
+      "1F1F8-1F1FE": [
+        "bendera: syria",
+        "bendera"
+      ],
+      "1F1F8-1F1FF": [
+        "bendera: eswatini",
+        "bendera"
+      ],
+      "1F1F9-1F1E8": [
+        "bendera: visiwa vya turks na caicos",
+        "bendera"
+      ],
+      "1F1F9-1F1E9": [
+        "bendera: chad",
+        "bendera"
+      ],
+      "1F1F9-1F1EB": [
+        "bendera: himaya za kusini za kifaranza",
+        "bendera"
+      ],
+      "1F1F9-1F1EC": [
+        "bendera: togo",
+        "bendera"
+      ],
+      "1F1F9-1F1ED": [
+        "bendera: tailandi",
+        "bendera"
+      ],
+      "1F1F9-1F1EF": [
+        "bendera: tajikistani",
+        "bendera"
+      ],
+      "1F1F9-1F1F0": [
+        "bendera: tokelau",
+        "bendera"
+      ],
+      "1F1F9-1F1F1": [
+        "bendera: timor-leste",
+        "bendera"
+      ],
+      "1F1F9-1F1F2": [
+        "bendera: turkmenistan",
+        "bendera"
+      ],
+      "1F1F9-1F1F3": [
+        "bendera: tunisia",
+        "bendera"
+      ],
+      "1F1F9-1F1F4": [
+        "bendera: tonga",
+        "bendera"
+      ],
+      "1F1F9-1F1F7": [
+        "bendera: uturuki",
+        "bendera"
+      ],
+      "1F1F9-1F1F9": [
+        "bendera: trinidad na tobago",
+        "bendera"
+      ],
+      "1F1F9-1F1FB": [
+        "bendera: tuvalu",
+        "bendera"
+      ],
+      "1F1F9-1F1FC": [
+        "bendera: taiwan",
+        "bendera"
+      ],
+      "1F1F9-1F1FF": [
+        "bendera: tanzania",
+        "bendera"
+      ],
+      "1F1FA-1F1E6": [
+        "bendera: ukraine",
+        "bendera"
+      ],
+      "1F1FA-1F1EC": [
+        "bendera: uganda",
+        "bendera"
+      ],
+      "1F1FA-1F1F2": [
+        "bendera: visiwa vidogo vya nje vya marekani",
+        "bendera"
+      ],
+      "1F1FA-1F1F8": [
+        "bendera: marekani",
+        "bendera"
+      ],
+      "1F1FA-1F1FE": [
+        "bendera: uruguay",
+        "bendera"
+      ],
+      "1F1FA-1F1FF": [
+        "bendera: uzibekistani",
+        "bendera"
+      ],
+      "1F1FB-1F1E6": [
+        "bendera: mji wa vatican",
+        "bendera"
+      ],
+      "1F1FB-1F1E8": [
+        "bendera: st. vincent na grenadines",
+        "bendera"
+      ],
+      "1F1FB-1F1EA": [
+        "bendera: venezuela",
+        "bendera"
+      ],
+      "1F1FB-1F1EC": [
+        "bendera: visiwa vya virgin, uingereza",
+        "bendera"
+      ],
+      "1F1FB-1F1EE": [
+        "bendera: visiwa vya virgin, marekani",
+        "bendera"
+      ],
+      "1F1FB-1F1F3": [
+        "bendera: vietnamu",
+        "bendera"
+      ],
+      "1F1FB-1F1FA": [
+        "bendera: vanuatu",
+        "bendera"
+      ],
+      "1F1FC-1F1EB": [
+        "bendera: wallis na futuna",
+        "bendera"
+      ],
+      "1F1FC-1F1F8": [
+        "bendera: samoa",
+        "bendera"
+      ],
+      "1F1FE-1F1EA": [
+        "bendera: yemeni",
+        "bendera"
+      ],
+      "1F1FE-1F1F9": [
+        "bendera: mayotte",
+        "bendera"
+      ],
+      "1F1FF-1F1E6": [
+        "bendera: afrika kusini",
+        "bendera"
+      ],
+      "1F1FF-1F1F2": [
+        "bendera: zambia",
+        "bendera"
+      ],
+      "1F1FF-1F1FC": [
+        "bendera: zimbabwe",
+        "bendera"
+      ],
+      "1F201": [
+        "katakana koko kwenye mraba",
+        "hapa",
+        "kijapani"
+      ],
+      "1F202": [
+        "katakana sa kwenye mraba",
+        "kijapani"
+      ],
+      "1F21A": [
+        "idiografu ya kutoa kwenye mraba",
+        "bure",
+        "kijapani"
+      ],
+      "1F22F": [
+        "idiografu ya kidole kwenye mraba",
+        "kijapani"
+      ],
+      "1F232": [
+        "idiografu ya marufuku kwenye mraba",
+        "kijapani"
+      ],
+      "1F233": [
+        "idiografu tupu kwenye mraba",
+        "kichina"
+      ],
+      "1F234": [
+        "idiografu ya pamoja kwenye mraba",
+        "kichina",
+        "kijapani",
+        "kitufe"
+      ],
+      "1F235": [
+        "idiografu ya kujaa kwenye mraba",
+        "kichina"
+      ],
+      "1F236": [
+        "idiografu ya kuwepo kwenye mraba",
+        "kijapani",
+        "maandishi"
+      ],
+      "1F237": [
+        "idiografu ya mwezi kwenye mraba",
+        "kijapani"
+      ],
+      "1F238": [
+        "idiografu ya kutumia kwenye mraba",
+        "kichina"
+      ],
+      "1F239": [
+        "idiografu ya kugawanya kwenye mraba",
+        "kijapani",
+        "kitufe cha discount"
+      ],
+      "1F23A": [
+        "idiografu ya kuendesha kwenye mraba",
+        "kichina"
+      ],
+      "1F250": [
+        "idiografu ya manufaa kwenye mduara",
+        "kijapani"
+      ],
+      "1F251": [
+        "idiografu ya kukubali kwenye mduara",
+        "kichina"
+      ],
+      "1F300": [
+        "tufani",
+        "hali ya hewa",
+        "kimbunga",
+        "kizunguzungu"
+      ],
+      "1F301": [
+        "mandhari yenye ukungu",
+        "hali ya hewa"
+      ],
+      "1F302": [
+        "mwavuli uliokunjwa",
+        "hali ya hewa",
+        "mavazi",
+        "mvua",
+        "mwavuli"
+      ],
+      "1F303": [
+        "usiku wenye nyota",
+        "hali ya hewa",
+        "nyota",
+        "usiku"
+      ],
+      "1F304": [
+        "macheo kwenye milima",
+        "asubuhi",
+        "hali yahewa",
+        "jua",
+        "macheo",
+        "mlima"
+      ],
+      "1F305": [
+        "macheo",
+        "asubuhi",
+        "hali ya hewa",
+        "jua",
+        "machweo"
+      ],
+      "1F306": [
+        "mwonekano wa jiji usiku",
+        "jiji",
+        "jioni",
+        "machweo",
+        "mandhari",
+        "usiku"
+      ],
+      "1F307": [
+        "machweo",
+        "giza",
+        "hali ya hewa",
+        "jengo",
+        "jua"
+      ],
+      "1F308": [
+        "upinde wa mvua",
+        "hali ya hewa",
+        "jinsiambili",
+        "mvua",
+        "shoga"
+      ],
+      "1F309": [
+        "daraja usiku",
+        "daraja",
+        "hali ya hewa",
+        "usiku"
+      ],
+      "1F30A": [
+        "wimbi la maji",
+        "bahari",
+        "maji",
+        "wimbi’ hali ya hewa"
+      ],
+      "1F30B": [
+        "volkano",
+        "hali ya hewa",
+        "kulipuka",
+        "mlima"
+      ],
+      "1F30C": [
+        "kilimia",
+        "anga",
+        "hali ya jewa",
+        "hali ya jwa"
+      ],
+      "1F30D": [
+        "tufe linaloonyesha ulaya-afrika",
+        "afrika",
+        "dunia",
+        "tufe",
+        "tufe linaloonyesha ulaya na afrika",
+        "ulaya",
+        "ulimwengu"
+      ],
+      "1F30E": [
+        "tufe linaloonyesha amerika",
+        "dunia",
+        "marekani",
+        "tufe",
+        "ulimwengu"
+      ],
+      "1F30F": [
+        "tufe linaloonyesha asia-australia",
+        "asia",
+        "australia",
+        "dunia",
+        "tufe",
+        "ulimwengu"
+      ],
+      "1F310": [
+        "tufe lenye meridiani",
+        "dunia",
+        "meridiani",
+        "tufe",
+        "ulimwengu"
+      ],
+      "1F311": [
+        "mwezi mpya",
+        "anga",
+        "hali ya hewa",
+        "mwezi",
+        "nyeusi"
+      ],
+      "1F312": [
+        "mwezi mwandamo",
+        "anga",
+        "hali ya hewa",
+        "hali yahewa",
+        "kuanza",
+        "mwezi"
+      ],
+      "1F313": [
+        "mwezi wa robo ya kwanza",
+        "anga",
+        "hali ya hewa",
+        "kushikwa kwa mwezi",
+        "mwezi",
+        "robo"
+      ],
+      "1F314": [
+        "mwezi ulioangazwa zaidi ya nusu unaopevuka",
+        "anga",
+        "hali ya hewa",
+        "kuanza",
+        "mwezi",
+        "mwezi ulioangazwa zaidi ya nusu",
+        "mwezi ulioangazwa zaidi ya nusu unaotanda"
+      ],
+      "1F315": [
+        "mwezi kamili",
+        "anga",
+        "hali ya hewa",
+        "kamili",
+        "mwezi"
+      ],
+      "1F316": [
+        "mwezi ulioangazwa zaidi ya nusu unaofifia",
+        "anga",
+        "hali ya hewa",
+        "kuisha",
+        "kupatwa kwa mwezi",
+        "mwezi",
+        "mwezi ulioangazwa zaidi ya nusu"
+      ],
+      "1F317": [
+        "mwezi wa robo ya mwisho",
+        "anga",
+        "hali ya hewa",
+        "kupatwa kwa mwezi",
+        "mwezi",
+        "robo"
+      ],
+      "1F318": [
+        "mwezi kongo",
+        "anga",
+        "hali ya hewa",
+        "hali yahewa",
+        "kuisha",
+        "mwezi",
+        "mwezi mwandamo"
+      ],
+      "1F319": [
+        "mwezi unaoandama mwezi mpya",
+        "anga",
+        "hali ya hewa",
+        "mwandamo wa mwezi",
+        "mwezi",
+        "mwezi mwandamo"
+      ],
+      "1F31A": [
+        "uso wa mwezi mpya",
+        "anga",
+        "hali ya hewa",
+        "mwezi",
+        "uso"
+      ],
+      "1F31B": [
+        "mwezi wa robo ya kwanza wenye uso",
+        "anga",
+        "hali ya hewa",
+        "mwezi",
+        "robo",
+        "uso"
+      ],
+      "1F31C": [
+        "mwezi wa robo ya mwisho wenye uso",
+        "anga",
+        "hali ya hewa",
+        "mwezi",
+        "robo",
+        "uso"
+      ],
+      "1F31D": [
+        "uso unaokaa mwezi",
+        "anga",
+        "hali ya hewa",
+        "kamili",
+        "kung’aa",
+        "uso"
+      ],
+      "1F31E": [
+        "uso unaokaa jua",
+        "anga",
+        "hali ya hewa",
+        "jua",
+        "kua lenye uso",
+        "kung’aa",
+        "usi"
+      ],
+      "1F31F": [
+        "nyota inayong’aa",
+        "kumetameta",
+        "kung’ara",
+        "metameta",
+        "ng’aa",
+        "nyota"
+      ],
+      "1F320": [
+        "kimwondo",
+        "anga",
+        "kaunguka",
+        "kimondo",
+        "nyota",
+        "nyota iangukayo"
+      ],
+      "1F321": [
+        "pima joto",
+        "hali ya hewa"
+      ],
+      "1F324": [
+        "jua nyuma ya wingu dogo",
+        "hali ya hewa",
+        "jua",
+        "wingu"
+      ],
+      "1F325": [
+        "jua nyuma ya wingu kubwa",
+        "hali ya hewa",
+        "jua",
+        "wingu"
+      ],
+      "1F326": [
+        "jua nyuma ya wingu lenye mvua",
+        "hali ya jewa",
+        "jua",
+        "mvua",
+        "wingu"
+      ],
+      "1F327": [
+        "wingu lenye mvua",
+        "hali ya hewa",
+        "mvua",
+        "wingu"
+      ],
+      "1F328": [
+        "wingu lenye theluji",
+        "baridi",
+        "baridi na theluji",
+        "hali ya hewa",
+        "theluji",
+        "wingu"
+      ],
+      "1F329": [
+        "wingu lenye radi",
+        "hali ya hewa",
+        "radi",
+        "wingu"
+      ],
+      "1F32A": [
+        "kimbunga",
+        "hali ya hewa",
+        "wingu"
+      ],
+      "1F32B": [
+        "ukungu",
+        "hali ya hewa",
+        "wingu"
+      ],
+      "1F32C": [
+        "uso unaopuliza upepo",
+        "hali ya hewa",
+        "puliza",
+        "upepo",
+        "uso",
+        "wingu"
+      ],
+      "1F32D": [
+        "soseji katika mkate",
+        "frankfurter",
+        "soseji"
+      ],
+      "1F32E": [
+        "chapati iliyojazwa vyakula mbalimbali",
+        "meksiko"
+      ],
+      "1F32F": [
+        "mkate wa kimeksiko uliowekwa nyama au maharage ndani",
+        "kunja",
+        "meksiko"
+      ],
+      "1F330": [
+        "aina ya njugu",
+        "mbegu ya mlozi",
+        "mmea"
+      ],
+      "1F331": [
+        "mche",
+        "mmea",
+        "mmea mchanga"
+      ],
+      "1F332": [
+        "mmea wenye majani mwaka mzima",
+        "mmea",
+        "mti",
+        "mti wa krismasi"
+      ],
+      "1F333": [
+        "mti unaopukutika majani yake",
+        "kupuputika",
+        "mmea",
+        "mti",
+        "puputika majani"
+      ],
+      "1F334": [
+        "mnazi",
+        "mmea",
+        "mti"
+      ],
+      "1F335": [
+        "dungusi kakati",
+        "mmea"
+      ],
+      "1F336": [
+        "pilipili kali",
+        "mmea",
+        "moto",
+        "pilipili"
+      ],
+      "1F337": [
+        "tulipu",
+        "mmea",
+        "ua"
+      ],
+      "1F338": [
+        "ua la mcheri",
+        "chanua",
+        "cheri",
+        "mmea",
+        "ua",
+        "uzuri"
+      ],
+      "1F339": [
+        "ua la waridi",
+        "mmea",
+        "nyekundu",
+        "ua"
+      ],
+      "1F33A": [
+        "haibiskasi",
+        "mmea",
+        "ua"
+      ],
+      "1F33B": [
+        "alizeti",
+        "jua",
+        "mmea",
+        "ua"
+      ],
+      "1F33C": [
+        "maua mengi",
+        "mmea",
+        "ua"
+      ],
+      "1F33D": [
+        "mahindi",
+        "mmea",
+        "nafaka",
+        "sikio",
+        "tazaa"
+      ],
+      "1F33E": [
+        "shada la mchele",
+        "mchele",
+        "mmea",
+        "punje",
+        "shada la mpunga",
+        "sikio"
+      ],
+      "1F33F": [
+        "mimea ya msimu",
+        "jani",
+        "mmea",
+        "tawi"
+      ],
+      "1F340": [
+        "klova yenye majani manne",
+        "4",
+        "jani",
+        "klova",
+        "mmea",
+        "nne",
+        "tawi"
+      ],
+      "1F341": [
+        "jani la mshira",
+        "jani",
+        "kuanguka",
+        "mmea",
+        "mshira",
+        "msimu wa kipupwe"
+      ],
+      "1F342": [
+        "jani lililoanguka",
+        "kipupwe",
+        "kuanguka",
+        "majani",
+        "mmea"
+      ],
+      "1F343": [
+        "jani linalopepea kwenye upepo",
+        "mmea",
+        "pepea",
+        "puliza",
+        "tawi",
+        "upepo"
+      ],
+      "1F344": [
+        "uyoga",
+        "mmea"
+      ],
+      "1F345": [
+        "nyanya",
+        "mboga",
+        "mbogamboga",
+        "mmea",
+        "mnyama"
+      ],
+      "1F346": [
+        "biringanya",
+        "mboga",
+        "mbogamboga",
+        "mmea"
+      ],
+      "1F347": [
+        "zabibu",
+        "mmea",
+        "tunda"
+      ],
+      "1F348": [
+        "tikiti",
+        "mmea",
+        "tikiti maji",
+        "tunda"
+      ],
+      "1F349": [
+        "tikitimaji",
+        "mmea",
+        "tunda"
+      ],
+      "1F34A": [
+        "chenza",
+        "chungwa",
+        "mmea",
+        "tunda",
+        "vitamini c"
+      ],
+      "1F34B": [
+        "limau",
+        "mmea",
+        "tunda"
+      ],
+      "1F34C": [
+        "ndizi",
+        "mmea",
+        "potassium",
+        "tunda"
+      ],
+      "1F34D": [
+        "nanasi",
+        "mmea",
+        "tunda"
+      ],
+      "1F34E": [
+        "tufaha jekundu",
+        "chakula",
+        "jekundu",
+        "mmea",
+        "tufaha",
+        "tunda"
+      ],
+      "1F34F": [
+        "tufaha la kijani",
+        "apo la kijani",
+        "kijani",
+        "mmea",
+        "tufaha",
+        "tunda"
+      ],
+      "1F350": [
+        "pea",
+        "mmea",
+        "tunda"
+      ],
+      "1F351": [
+        "pichi",
+        "fyulisi",
+        "mmea",
+        "tunda"
+      ],
+      "1F352": [
+        "cheri",
+        "mmea",
+        "moheri",
+        "tunda"
+      ],
+      "1F353": [
+        "stroberi",
+        "beri",
+        "mmea",
+        "tunda"
+      ],
+      "1F354": [
+        "hambaga",
+        "baga"
+      ],
+      "1F355": [
+        "piza",
+        "jibini",
+        "kipande"
+      ],
+      "1F356": [
+        "nyama kwenye mfupa",
+        "mfupa",
+        "nyama"
+      ],
+      "1F357": [
+        "paja la kuku",
+        "kuku",
+        "mfupa",
+        "mguu",
+        "ndege wanaofugwa"
+      ],
+      "1F358": [
+        "biskuti za mchele",
+        "chakula kilichotengenezwa kutoka kwa mchele",
+        "mchele"
+      ],
+      "1F359": [
+        "mchele uliotengenezwa kwa mtindo wa tufe",
+        "kijapani",
+        "mchele",
+        "mpira"
+      ],
+      "1F35A": [
+        "wali",
+        "chakula",
+        "mchele",
+        "uliopikwa"
+      ],
+      "1F35B": [
+        "wali ulio na mchuzi wa viungo",
+        "mchele",
+        "mchele ulio pokwa",
+        "mchuzi wa viungo",
+        "wali"
+      ],
+      "1F35C": [
+        "bakuli yenye tambi",
+        "bakuli",
+        "bakuli lenye tambi",
+        "kupika kwa mvuke",
+        "tambi",
+        "tambi za kijapani"
+      ],
+      "1F35D": [
+        "tambi",
+        "chakula",
+        "supaget"
+      ],
+      "1F35E": [
+        "mkate",
+        "resteuranti"
+      ],
+      "1F35F": [
+        "chipsi",
+        "chakula",
+        "viazi",
+        "vibanzi"
+      ],
+      "1F360": [
+        "kiazi kitamu kilichochomwa",
+        "kiazi",
+        "kuchoma",
+        "tamu"
+      ],
+      "1F361": [
+        "dango",
+        "ijiti",
+        "kibaniko",
+        "kijapani",
+        "kitafunio",
+        "kitindamlo",
+        "tamu"
+      ],
+      "1F362": [
+        "odeni",
+        "chakula cha majini",
+        "kebabu",
+        "kibaniko",
+        "kijiti"
+      ],
+      "1F363": [
+        "sushi",
+        "chakula"
+      ],
+      "1F364": [
+        "uduvi iliyokaangwa",
+        "ilikaangwa",
+        "karangwa",
+        "kukaanga",
+        "tempura",
+        "uduvi",
+        "ushimba"
+      ],
+      "1F365": [
+        "keki ya samaki iliyozingwa",
+        "keki",
+        "samaki",
+        "vitobosha",
+        "zinga"
+      ],
+      "1F366": [
+        "aisikrimu laini",
+        "aisikrimu",
+        "barafu",
+        "kitandamlo",
+        "krimu",
+        "laini",
+        "tamu"
+      ],
+      "1F367": [
+        "barafu iliyochongwa",
+        "aisikrimu",
+        "barafu",
+        "kitindamlo",
+        "tamu"
+      ],
+      "1F368": [
+        "aisikrimu",
+        "barafu",
+        "kitindamlo",
+        "krimu",
+        "tamu"
+      ],
+      "1F369": [
+        "kitumbua",
+        "disati",
+        "donati",
+        "kitindamlo",
+        "tamu"
+      ],
+      "1F36A": [
+        "biskuti",
+        "kitindamlo",
+        "peremende"
+      ],
+      "1F36B": [
+        "chokoleti",
+        "diseti",
+        "kitindamlo",
+        "mche",
+        "tamu"
+      ],
+      "1F36C": [
+        "peremende",
+        "dizati",
+        "kitindamlo",
+        "pipi"
+      ],
+      "1F36D": [
+        "pipi",
+        "dizeti",
+        "kitindamlo",
+        "tamu"
+      ],
+      "1F36E": [
+        "faluda",
+        "disati",
+        "kitindamlo",
+        "pudini",
+        "tamu"
+      ],
+      "1F36F": [
+        "chungu cha asali",
+        "asali",
+        "chakula",
+        "jungu",
+        "tamu"
+      ],
+      "1F370": [
+        "keki",
+        "kipande",
+        "kitindamlo",
+        "tamu",
+        "vitobosha"
+      ],
+      "1F371": [
+        "boksi ya kuweka chakula",
+        "bento",
+        "boksi"
+      ],
+      "1F372": [
+        "chungu cha chakula",
+        "chungu",
+        "mchuzi"
+      ],
+      "1F373": [
+        "kupika",
+        "kaanga yai",
+        "kukaang’a",
+        "sufuria",
+        "yai",
+        "yai jicho ngombe"
+      ],
+      "1F374": [
+        "uma na kisu",
+        "chakula",
+        "kifungua kinywa",
+        "kisu",
+        "kupika",
+        "uma",
+        "vyombo"
+      ],
+      "1F375": [
+        "kikombe kisicho na kishikio",
+        "chai",
+        "kikombe",
+        "kikombe cha chai",
+        "kinywaji"
+      ],
+      "1F376": [
+        "mvinyo wa kijapani unaotokana na mchele",
+        "baa",
+        "chupa",
+        "kikombe",
+        "kinywaji",
+        "sake"
+      ],
+      "1F377": [
+        "glasi ya divai",
+        "baa",
+        "divai",
+        "glasi",
+        "kinywaji",
+        "mvinyo"
+      ],
+      "1F378": [
+        "glasi ya kokteli",
+        "baa",
+        "glasi",
+        "kinywaji",
+        "kokteli",
+        "pombe"
+      ],
+      "1F379": [
+        "kinywaji cha tropiki",
+        "baa",
+        "juisi mchanganyiko",
+        "kinywaji",
+        "tropikali"
+      ],
+      "1F37A": [
+        "kikombe cha bia",
+        "baa",
+        "bia",
+        "kikombe",
+        "kinywaji",
+        "kukombe"
+      ],
+      "1F37B": [
+        "vikombe vya bia vilivyogonganishwa",
+        "baa",
+        "bia",
+        "gonganisha",
+        "kikombe",
+        "kinywaji",
+        "pombe",
+        "vikombe vya bia vinavyogonganishwa"
+      ],
+      "1F37C": [
+        "chupa ya maziwa ya mtoto",
+        "chupa",
+        "kinywaji",
+        "maziwa",
+        "mtoto"
+      ],
+      "1F37D": [
+        "uma na kisu na sahani",
+        "kisu",
+        "kupika",
+        "sahani",
+        "uma"
+      ],
+      "1F37E": [
+        "chupa yenye kifuniko kilichofunguliwa",
+        "baa",
+        "chupa",
+        "kifuniko",
+        "kinywaji",
+        "kufungua"
+      ],
+      "1F37F": [
+        "bisi",
+        "popkoni"
+      ],
+      "1F380": [
+        "utepe",
+        "kusherehekea"
+      ],
+      "1F381": [
+        "zawadi iliyofungwa",
+        "chrismasi",
+        "iliyofungwa",
+        "kusherehekea",
+        "sanduku",
+        "zawadi"
+      ],
+      "1F382": [
+        "keki ya kusherehekea siku ya kuzaliwa",
+        "keki",
+        "kitindamlo",
+        "kusherehekea",
+        "sherehe",
+        "siku ya kuzaliwa",
+        "tamu",
+        "vitobosha"
+      ],
+      "1F383": [
+        "taa ya malenge yenye umbo la uso wa mtu",
+        "halloween",
+        "jack",
+        "kusherehekea",
+        "taa"
+      ],
+      "1F384": [
+        "mti wa krismasi",
+        "krismasi",
+        "mti",
+        "sherehe"
+      ],
+      "1F385": [
+        "baba krismasi",
+        "baba",
+        "kichimbakazi",
+        "krismasi",
+        "njozi",
+        "santa",
+        "sherehe"
+      ],
+      "1F386": [
+        "fataki",
+        "kufurahisha",
+        "sherehe"
+      ],
+      "1F387": [
+        "kimetameta",
+        "fataki",
+        "kusherehekea",
+        "metameta"
+      ],
+      "1F388": [
+        "puto",
+        "sherehe",
+        "sherehe ya kuzaliwa",
+        "sherehekea"
+      ],
+      "1F389": [
+        "mapambo ya sherehe",
+        "kusherehekea",
+        "puto",
+        "sherehe",
+        "tada"
+      ],
+      "1F38A": [
+        "mpira wa mapambo",
+        "kusherehekea",
+        "mapambo",
+        "mpira"
+      ],
+      "1F38B": [
+        "mti wa tanabata",
+        "bango",
+        "kijapani",
+        "kusherehekea",
+        "mti"
+      ],
+      "1F38C": [
+        "bendera mbili zilizopishana",
+        "iliyopishanishwa",
+        "kijapani",
+        "kusherehekea",
+        "pishana",
+        "pishanisha"
+      ],
+      "1F38D": [
+        "mapambo ya msonobari",
+        "kijapani",
+        "kusherehekea",
+        "mmea",
+        "msonobari",
+        "mwanzi"
+      ],
+      "1F38E": [
+        "wanaserere wa kijapani",
+        "kijapani",
+        "kusherehekea",
+        "mwanaserere",
+        "mwanasesera",
+        "sherehe"
+      ],
+      "1F38F": [
+        "bendera ya kambare mamba",
+        "bendera",
+        "kambare",
+        "kusherehekea"
+      ],
+      "1F390": [
+        "kengele ya upepo",
+        "kengele",
+        "kulia",
+        "kusherehekea",
+        "upepo"
+      ],
+      "1F391": [
+        "sherehe ya mwezi",
+        "kusherehekea",
+        "mwezi",
+        "sherehe"
+      ],
+      "1F392": [
+        "mfuko wa shuleni",
+        "begi",
+        "mkoba",
+        "shule"
+      ],
+      "1F393": [
+        "kofia ya mahafali",
+        "hitimu",
+        "kofia",
+        "kofia inayovaliwa kwenye sherehe za kuhitimu masomo",
+        "kofia ya afali",
+        "kusherehekea",
+        "mavazi"
+      ],
+      "1F396": [
+        "tuzo ya kijeshi",
+        "jeshi",
+        "kusherehekea",
+        "medali"
+      ],
+      "1F397": [
+        "utepe wa ukumbusho",
+        "kikumbusho",
+        "kusherehekea",
+        "sherehe za kumbukumbu",
+        "utepe"
+      ],
+      "1F399": [
+        "maikrofoni ya studio",
+        "kinakili sauti",
+        "maikrofoni",
+        "muziki",
+        "studio"
+      ],
+      "1F39A": [
+        "kitelezi cha kurekebisha sauti",
+        "kitelezi",
+        "kiwango",
+        "muziki"
+      ],
+      "1F39B": [
+        "vitufe vya kudhibiti",
+        "muziki",
+        "vidhibiti",
+        "vitufe"
+      ],
+      "1F39E": [
+        "fremu za utepe wa filamu",
+        "filamu",
+        "fremu",
+        "sinema"
+      ],
+      "1F39F": [
+        "tiketi za kuingia",
+        "karibu",
+        "kuingia",
+        "tiketi"
+      ],
+      "1F3A0": [
+        "farasi inayozunguka",
+        "farasi",
+        "kuzunguka"
+      ],
+      "1F3A1": [
+        "gurudumu linalozunguka",
+        "ferris",
+        "gurudumu",
+        "sehemu za burudani"
+      ],
+      "1F3A2": [
+        "rola kosta",
+        "gurudumu",
+        "sehemu za burudani",
+        "viti vinavyozunguka"
+      ],
+      "1F3A3": [
+        "ndoano ya uvuvi",
+        "mchezo wa kuvua",
+        "ndoana",
+        "ndoano",
+        "samaki"
+      ],
+      "1F3A4": [
+        "maikrofoni",
+        "imba",
+        "karaoke",
+        "kinasa sauti",
+        "muziki",
+        "sauti"
+      ],
+      "1F3A5": [
+        "kamera ya kurekodi filamu",
+        "filamu",
+        "kamera",
+        "sinema"
+      ],
+      "1F3A6": [
+        "filamu",
+        "flamu",
+        "kamera",
+        "mshine ya filamu",
+        "sinema"
+      ],
+      "1F3A7": [
+        "spika za masikioni",
+        "kifaa cha sauti cha masikioni",
+        "sauti"
+      ],
+      "1F3A8": [
+        "paleti ya msanii",
+        "kuchora",
+        "makumbusho",
+        "mchoraji",
+        "msanii",
+        "paleti",
+        "sanaa"
+      ],
+      "1F3A9": [
+        "kofia ya mwanamume",
+        "juu",
+        "kofia",
+        "mavazi"
+      ],
+      "1F3AA": [
+        "hema ya sarakasi",
+        "hema",
+        "sarakasi"
+      ],
+      "1F3AB": [
+        "tiketi",
+        "kuingia"
+      ],
+      "1F3AC": [
+        "ubao wa kuanzisha matukio wakati wa kutengeneza filamu",
+        "filamu"
+      ],
+      "1F3AD": [
+        "sanaa",
+        "barakoa",
+        "kuigiza",
+        "kusherehesha",
+        "ukumbi wa maigizo"
+      ],
+      "1F3AE": [
+        "mchezo wa video",
+        "kidhibiti",
+        "mchezo"
+      ],
+      "1F3AF": [
+        "kulenga shabaha",
+        "gonga",
+        "jicho la dume",
+        "kigumba",
+        "lengo",
+        "lengo kuu",
+        "mchezo"
+      ],
+      "1F3B0": [
+        "mashine ya kamari",
+        "mchezo"
+      ],
+      "1F3B1": [
+        "biliadi",
+        "8",
+        "mchezo",
+        "mpira",
+        "nane"
+      ],
+      "1F3B2": [
+        "dadu",
+        "burudani",
+        "mchezo"
+      ],
+      "1F3B3": [
+        "mchezo wa kuvingirisha matufe chini",
+        "mchezo",
+        "mpira"
+      ],
+      "1F3B4": [
+        "kadi za karata za maua",
+        "kadi",
+        "kijapani",
+        "kucheza",
+        "maua",
+        "mchezo",
+        "ua"
+      ],
+      "1F3B5": [
+        "noti ya muziki",
+        "muziki",
+        "noti"
+      ],
+      "1F3B6": [
+        "manoti ya muziki",
+        "manoti",
+        "muziki",
+        "mziki",
+        "noti",
+        "noti za muziki",
+        "notoni"
+      ],
+      "1F3B7": [
+        "saksafoni",
+        "ala",
+        "muziki",
+        "zeze"
+      ],
+      "1F3B8": [
+        "gita",
+        "ala",
+        "muziki"
+      ],
+      "1F3B9": [
+        "kinanda",
+        "ala",
+        "muziki",
+        "piano"
+      ],
+      "1F3BA": [
+        "tarumbeta",
+        "ala",
+        "muziki"
+      ],
+      "1F3BB": [
+        "fidla",
+        "ala",
+        "muziki"
+      ],
+      "1F3BC": [
+        "karatasi ya muziki",
+        "muziki",
+        "mziki"
+      ],
+      "1F3BD": [
+        "shati la kukimbia",
+        "kukimbia",
+        "mshipi",
+        "shati",
+        "shati ya kukimbia"
+      ],
+      "1F3BE": [
+        "mpira wa tenisi",
+        "mpira",
+        "raketi"
+      ],
+      "1F3BF": [
+        "skii",
+        "relitheluji",
+        "ski",
+        "theluji"
+      ],
+      "1F3C0": [
+        "mpira wa kikapu",
+        "kikapu",
+        "mchezo",
+        "mpira"
+      ],
+      "1F3C1": [
+        "bendera yenye mirabaraba",
+        "bendera ya kuonyesha michezo",
+        "maliza",
+        "mashindano ya mbio",
+        "michezo",
+        "mirabamiraba"
+      ],
+      "1F3C2": [
+        "mtu anayeteleza kwenye theluji",
+        "mchezo",
+        "ski",
+        "theluji",
+        "ubao wa kuteleza kwenye theluji"
+      ],
+      "1F3C3": [
+        "mkimbiaji",
+        "kukimbia",
+        "marathoni",
+        "mbio za masafa marefu"
+      ],
+      "1F3C4": [
+        "mtu anayeteleza kwenye mawimbi",
+        "bahari",
+        "kuteleza kwenye mawimbi",
+        "mchezo",
+        "ufukweni"
+      ],
+      "1F3C5": [
+        "medali ya michezo",
+        "medali"
+      ],
+      "1F3C6": [
+        "kikombe",
+        "michezo",
+        "ushindi",
+        "zawadi"
+      ],
+      "1F3C7": [
+        "mbio za farasi",
+        "farasi",
+        "farasi ya mashindano",
+        "mashindano",
+        "mwendesha farasi"
+      ],
+      "1F3C8": [
+        "mpira wa marekani",
+        "marekani",
+        "mchezo wa mpira wa kimarekani",
+        "mpira",
+        "mpira wa miguu"
+      ],
+      "1F3C9": [
+        "mpira wa raga",
+        "mpira",
+        "mpira wa miguu",
+        "raga"
+      ],
+      "1F3CA": [
+        "mwogeleaji",
+        "kuogelea",
+        "mchezo",
+        "mtu akiogelea"
+      ],
+      "1F3CB": [
+        "mbeba vyuma vizito",
+        "mazoezi ya mwili",
+        "mbeba vyuma",
+        "uzito"
+      ],
+      "1F3CC": [
+        "mcheza gofu",
+        "gofu",
+        "mpira",
+        "mwanamume anayecheza gofu"
+      ],
+      "1F3CD": [
+        "pikipiki",
+        "mashindano"
+      ],
+      "1F3CE": [
+        "gari la mashindano",
+        "gari",
+        "mashindano"
+      ],
+      "1F3CF": [
+        "kriketi",
+        "gongo",
+        "mchezo",
+        "mpira"
+      ],
+      "1F3D0": [
+        "mpira wa wavu",
+        "mchezo",
+        "mpira"
+      ],
+      "1F3D1": [
+        "mpira wa magongo",
+        "kijiti",
+        "kiwanja",
+        "mchezo",
+        "mpira"
+      ],
+      "1F3D2": [
+        "kigoe cha hoki ya barafuni",
+        "barafu",
+        "kijiti",
+        "kitufe cha kucheza",
+        "mchezo",
+        "mpira wa magongo"
+      ],
+      "1F3D3": [
+        "tenisi ya mezani",
+        "gongo",
+        "mchezo",
+        "mpira",
+        "ubao"
+      ],
+      "1F3D4": [
+        "mlima wenye theluji",
+        "baridi",
+        "mlima",
+        "theluji"
+      ],
+      "1F3D5": [
+        "kupiga kambi",
+        "hema",
+        "tenti"
+      ],
+      "1F3D6": [
+        "ufuo na mwavuli",
+        "mwavuli",
+        "ufuo"
+      ],
+      "1F3D7": [
+        "ujenzi wa jengo",
+        "jengo",
+        "kreni ya ujenzi",
+        "ujenzi"
+      ],
+      "1F3D8": [
+        "majengo ya nyumba",
+        "jengo",
+        "nyumba"
+      ],
+      "1F3D9": [
+        "mwonekano wa jiji",
+        "jengo",
+        "jiji",
+        "majengo"
+      ],
+      "1F3DA": [
+        "jengo la nyumba lililochakaa",
+        "chakaa",
+        "jengo",
+        "nyumba"
+      ],
+      "1F3DB": [
+        "jengo la zamani",
+        "jengo",
+        "zamani"
+      ],
+      "1F3DC": [
+        "jangwa",
+        "jangwani"
+      ],
+      "1F3DD": [
+        "kisiwa cha jangwa",
+        "jangwa",
+        "kisiwa"
+      ],
+      "1F3DE": [
+        "mbuga ya taifa ya wanyama",
+        "mbuga",
+        "mbuga ya kitaifa ya wanyama"
+      ],
+      "1F3DF": [
+        "uwanja wa michezo",
+        "uga",
+        "uwanja wa mpira"
+      ],
+      "1F3E0": [
+        "jengo la nyumba",
+        "jengo",
+        "nyumba",
+        "nyumbani"
+      ],
+      "1F3E1": [
+        "nyumba yenye ua",
+        "bustani",
+        "jengo",
+        "nyumba",
+        "nyumbani"
+      ],
+      "1F3E2": [
+        "jengo la ofisi",
+        "jengo"
+      ],
+      "1F3E3": [
+        "posta ya japani",
+        "jengo",
+        "kijapani",
+        "posta"
+      ],
+      "1F3E4": [
+        "posta",
+        "jengo",
+        "ulaya"
+      ],
+      "1F3E5": [
+        "hospitali",
+        "daktari",
+        "dawa",
+        "jengo"
+      ],
+      "1F3E6": [
+        "benki",
+        "jengo"
+      ],
+      "1F3E7": [
+        "alama ya atm",
+        "atm",
+        "benki",
+        "mwenye kuhesabu",
+        "otomatiki",
+        "pesa"
+      ],
+      "1F3E8": [
+        "hoteli",
+        "jengo"
+      ],
+      "1F3E9": [
+        "hoteli ya mapenzi",
+        "hoteli",
+        "jengo",
+        "upendo"
+      ],
+      "1F3EA": [
+        "duka la karibu",
+        "duka",
+        "jengo"
+      ],
+      "1F3EB": [
+        "shule",
+        "jengo"
+      ],
+      "1F3EC": [
+        "duka kuu",
+        "duka",
+        "jengo"
+      ],
+      "1F3ED": [
+        "kiwanda",
+        "jengo"
+      ],
+      "1F3EE": [
+        "taa nyekundu ya karatasi",
+        "baa",
+        "kijapani",
+        "mwanga",
+        "nyekundu",
+        "taa"
+      ],
+      "1F3EF": [
+        "kasri la kijapani",
+        "jengo",
+        "kasri",
+        "kijapani"
+      ],
+      "1F3F0": [
+        "kasri",
+        "jengo",
+        "jengo la kifalme",
+        "ulaya"
+      ],
+      "1F3F5": [
+        "waridi",
+        "mmea"
+      ],
+      "1F3F7": [
+        "lebo"
+      ],
+      "1F3F8": [
+        "mpira wa vinyoya",
+        "mchezo",
+        "mpigo mmoja",
+        "raketi"
+      ],
+      "1F3F9": [
+        "upinde na mshale",
+        "mpiga mishale",
+        "mshale",
+        "silaha",
+        "upinde",
+        "zana",
+        "zodiaki"
+      ],
+      "1F3FA": [
+        "jungu",
+        "birika",
+        "kunywa",
+        "kupika",
+        "ndoo",
+        "silaha",
+        "zana",
+        "zodiaki"
+      ],
+      "1F400": [
+        "panya",
+        "mnyama"
+      ],
+      "1F401": [
+        "kipanya",
+        "mnyama",
+        "panya"
+      ],
+      "1F402": [
+        "maksai",
+        "fahali",
+        "mnyama",
+        "ng’ombe",
+        "zodiaki"
+      ],
+      "1F403": [
+        "nyati",
+        "maji",
+        "mnyama"
+      ],
+      "1F404": [
+        "ng’ombe",
+        "maziwa",
+        "mnyama",
+        "moo",
+        "shamba la ng’ombe"
+      ],
+      "1F405": [
+        "chui mkubwa mwenye milia",
+        "chui mwenye milia",
+        "mnyama",
+        "taiga"
+      ],
+      "1F406": [
+        "chui",
+        "mnyama"
+      ],
+      "1F407": [
+        "sungura",
+        "mnayama kipenzi",
+        "sungura wa kufugwa"
+      ],
+      "1F408": [
+        "paka",
+        "mnyama kipenzi"
+      ],
+      "1F409": [
+        "dragoni",
+        "kichimbakazi"
+      ],
+      "1F40A": [
+        "mamba",
+        "mnyama"
+      ],
+      "1F40B": [
+        "nyangumi",
+        "bahari"
+      ],
+      "1F40C": [
+        "konokono",
+        "asilia",
+        "shamba"
+      ],
+      "1F40D": [
+        "nyoka",
+        "dubu",
+        "joka",
+        "opichasi",
+        "zodiaki"
+      ],
+      "1F40E": [
+        "farasi",
+        "kuendesha farasi",
+        "mashindano"
+      ],
+      "1F40F": [
+        "kondoo dume",
+        "kondoo",
+        "mnyama",
+        "zodiaki"
+      ],
+      "1F410": [
+        "mbuzi",
+        "zodiaki"
+      ],
+      "1F411": [
+        "kondoo",
+        "kike",
+        "kondoo wa kike"
+      ],
+      "1F412": [
+        "tumbili",
+        "mnyama",
+        "ndizi"
+      ],
+      "1F413": [
+        "jogoo",
+        "jimbi"
+      ],
+      "1F414": [
+        "kuku",
+        "ndege"
+      ],
+      "1F415": [
+        "mbwa",
+        "mnyama kipenzi"
+      ],
+      "1F416": [
+        "nguruwe",
+        "mnyama",
+        "nene",
+        "nguruwe jike"
+      ],
+      "1F417": [
+        "uso wa nguruwe dume",
+        "nguruwe"
+      ],
+      "1F418": [
+        "ndovu",
+        "tembo"
+      ],
+      "1F419": [
+        "pweza",
+        "bahari"
+      ],
+      "1F41A": [
+        "kombe la mzunguko",
+        "ganda la baharini",
+        "ganda la ufukoni",
+        "kombe",
+        "mzunguko",
+        "ufuko"
+      ],
+      "1F41B": [
+        "mdudu",
+        "duduwasha"
+      ],
+      "1F41C": [
+        "siafu",
+        "chunguchungu",
+        "mdudu"
+      ],
+      "1F41D": [
+        "nyuki",
+        "asali",
+        "mandhari",
+        "mdudu"
+      ],
+      "1F41E": [
+        "kombamwiko mwenye madoa",
+        "bimbirisa kimba",
+        "kombamwiko",
+        "mdudu",
+        "mende"
+      ],
+      "1F41F": [
+        "samaki",
+        "chakula",
+        "zodiaki"
+      ],
+      "1F420": [
+        "samaki wa tropiki",
+        "samaki",
+        "tropikali"
+      ],
+      "1F421": [
+        "aina ya samaki",
+        "pweza",
+        "samaki"
+      ],
+      "1F422": [
+        "mzee kobe",
+        "kobe"
+      ],
+      "1F423": [
+        "kifaranga kinachoanguliwa",
+        "kifaranga",
+        "kuanguliwa",
+        "mtoto",
+        "ndege",
+        "yai"
+      ],
+      "1F424": [
+        "kifaranga",
+        "mtoto",
+        "ndege"
+      ],
+      "1F425": [
+        "kifaranga kinachotazama mbele",
+        "kifaranga",
+        "mtoto"
+      ],
+      "1F426": [
+        "ndege"
+      ],
+      "1F427": [
+        "pengwini",
+        "ngwini"
+      ],
+      "1F428": [
+        "koala",
+        "dubu"
+      ],
+      "1F429": [
+        "kijibwa",
+        "mbwa"
+      ],
+      "1F42A": [
+        "ngamia",
+        "ngamia mwenye nundu moja",
+        "nundu"
+      ],
+      "1F42B": [
+        "ngamia mwenye nundu mbili",
+        "ngamia",
+        "nundu"
+      ],
+      "1F42C": [
+        "pomboo",
+        "kikono",
+        "papa",
+        "samaki"
+      ],
+      "1F42D": [
+        "uso wa panya",
+        "panya",
+        "uso"
+      ],
+      "1F42E": [
+        "uso wa ng’ombe",
+        "maziwa",
+        "mnyama",
+        "ng’ombe",
+        "shamba la ng’ombe",
+        "uso"
+      ],
+      "1F42F": [
+        "uso wa chui milia",
+        "chui",
+        "chui milia",
+        "uso"
+      ],
+      "1F430": [
+        "uso wa sungura",
+        "mnayama kipenzi",
+        "sungura",
+        "uso"
+      ],
+      "1F431": [
+        "uso wa paka",
+        "mnyama kipenzi",
+        "paka",
+        "uso"
+      ],
+      "1F432": [
+        "uso wa dragoni",
+        "dragoni",
+        "kichimbakazi",
+        "uso"
+      ],
+      "1F433": [
+        "nyangumi anayerusha maji",
+        "kurusha",
+        "nyangumi",
+        "uso"
+      ],
+      "1F434": [
+        "uso wa farasi",
+        "farasi",
+        "myama",
+        "uso"
+      ],
+      "1F435": [
+        "uso wa tumbili",
+        "tumbili",
+        "uso"
+      ],
+      "1F436": [
+        "uso wa mbwa",
+        "mbwa",
+        "mnyama",
+        "mnyama kipenzi",
+        "uso"
+      ],
+      "1F437": [
+        "uso wa nguruwe",
+        "mnyama",
+        "nguruwe",
+        "nyama ya nguruwe",
+        "uso"
+      ],
+      "1F438": [
+        "uso wa chura",
+        "chura",
+        "uso"
+      ],
+      "1F439": [
+        "uso wa buku",
+        "mnyama kipenzi",
+        "panya buku",
+        "uso"
+      ],
+      "1F43A": [
+        "mbwa mwitu",
+        "mnyama",
+        "uso"
+      ],
+      "1F43B": [
+        "dubu",
+        "uso"
+      ],
+      "1F43C": [
+        "panda",
+        "uso"
+      ],
+      "1F43D": [
+        "pua la nguruwe",
+        "nguruwe",
+        "pua",
+        "uso"
+      ],
+      "1F43E": [
+        "nyayo za mnyama",
+        "alama",
+        "nyayo",
+        "nyayo zenye makucha"
+      ],
+      "1F43F": [
+        "kindimilia",
+        "kindi milia",
+        "squiro"
+      ],
+      "1F440": [
+        "macho",
+        "angalia",
+        "jicho",
+        "kuona",
+        "mwili",
+        "ona",
+        "uso"
+      ],
+      "1F441": [
+        "jicho",
+        "jicho moja",
+        "mwili"
+      ],
+      "1F442": [
+        "sikio",
+        "mwili"
+      ],
+      "1F443": [
+        "pua",
+        "harufu",
+        "mwili"
+      ],
+      "1F444": [
+        "mdomo",
+        "busu",
+        "midomo",
+        "mwili"
+      ],
+      "1F445": [
+        "ulimi",
+        "lamba",
+        "mwili"
+      ],
+      "1F446": [
+        "kidole cha kwanza kinachoelekeza juu kwa nyuma",
+        "cha shahada",
+        "elekeza",
+        "juu",
+        "kidole cha shahada kinachoelekeza juu kwa nyuma",
+        "kidole chanda",
+        "mkono",
+        "nyuma ya mkono"
+      ],
+      "1F447": [
+        "kidole cha kwanza kinachoelekeza chini kwa nyuma",
+        "cha shahada",
+        "elekeza",
+        "kidole",
+        "kidole cha shahada kinachoelekeza chini kwa nyuma",
+        "mkono",
+        "nyuma ya mkono"
+      ],
+      "1F448": [
+        "kidole cha shahada kinachoelekeza kushoto",
+        "cha shahada",
+        "elekeza",
+        "kidole",
+        "mkono",
+        "nyuma ya mkono"
+      ],
+      "1F449": [
+        "kidole cha shahada kinachoelekeza kulia",
+        "cha shahada",
+        "elekeza",
+        "kidole",
+        "mkono",
+        "nyuma ya mkono"
+      ],
+      "1F44A": [
+        "ngumi uliyonyooshewa",
+        "konde",
+        "kunja ngumi",
+        "mkono",
+        "mwili",
+        "ngumi",
+        "ngumi iliyonyooshewa"
+      ],
+      "1F44B": [
+        "mkono unaopunga",
+        "aga",
+        "kupunga",
+        "kwaheri",
+        "mkono",
+        "mwili",
+        "punga",
+        "salamu",
+        "upo?"
+      ],
+      "1F44C": [
+        "mkono wa kuonyesha mambo yako shwari",
+        "ishara ya kukubali",
+        "kiganja",
+        "mkono",
+        "mwili",
+        "poa",
+        "sawa",
+        "sawa kabisa",
+        "vizuri"
+      ],
+      "1F44D": [
+        "dole gumba juu",
+        "1",
+        "dole juu",
+        "gumba",
+        "juu",
+        "kubali",
+        "mkono",
+        "mwili",
+        "ndiyo",
+        "nzuri",
+        "sawa",
+        "vizuri"
+      ],
+      "1F44E": [
+        "dole gumba chini",
+        "-1",
+        "alama ya kukataa",
+        "chini",
+        "gumba",
+        "hapana",
+        "kutoridhika",
+        "mkono",
+        "mwili",
+        "si nzuri",
+        "sitaki"
+      ],
+      "1F44F": [
+        "mikono inayopiga makofi",
+        "hongera",
+        "kazi nzuri",
+        "makofi",
+        "mkono",
+        "mwili",
+        "piga makofi",
+        "vizuri"
+      ],
+      "1F450": [
+        "mikono iliyowazi",
+        "mkono",
+        "mwili",
+        "wazi"
+      ],
+      "1F451": [
+        "taji",
+        "malkia",
+        "mavazi",
+        "mfalme"
+      ],
+      "1F452": [
+        "kofia ya mwanamke",
+        "kofia",
+        "mavazi",
+        "mwanamke"
+      ],
+      "1F453": [
+        "miwani",
+        "jicho",
+        "maiwani",
+        "mavazi",
+        "miwani ya macho"
+      ],
+      "1F454": [
+        "tai",
+        "mavazi",
+        "shati"
+      ],
+      "1F455": [
+        "fulana",
+        "mavazi",
+        "shati"
+      ],
+      "1F456": [
+        "suruali ya jinzi",
+        "mavazi",
+        "suruali"
+      ],
+      "1F457": [
+        "nguo",
+        "mavazi",
+        "vazi la kike"
+      ],
+      "1F458": [
+        "kimono",
+        "mavazi",
+        "vazi"
+      ],
+      "1F459": [
+        "bikini",
+        "chupi na brazia",
+        "kuogelea",
+        "mavazi"
+      ],
+      "1F45A": [
+        "nguo za wanawake",
+        "mavazi",
+        "mwanamke",
+        "shati"
+      ],
+      "1F45B": [
+        "kibeti",
+        "mavazi",
+        "sarafu"
+      ],
+      "1F45C": [
+        "mfuko",
+        "begi la mkononi",
+        "kununua",
+        "mavazi",
+        "nguo",
+        "pochi",
+        "pochi ya mwanamke"
+      ],
+      "1F45D": [
+        "kipochi",
+        "begi",
+        "mavazi",
+        "mkoba",
+        "nguo"
+      ],
+      "1F45E": [
+        "kiatu cha wanaume",
+        "kiatu",
+        "mavazi",
+        "mwanamume"
+      ],
+      "1F45F": [
+        "kiatu cha kukimbia",
+        "kiatu",
+        "kiatu cha kukimbilia",
+        "mavazi",
+        "mbio",
+        "michezo",
+        "raba ya kukimbia"
+      ],
+      "1F460": [
+        "kiatu chenye kisigino kirefu",
+        "kiatu",
+        "kisigino",
+        "mavazi",
+        "mwanamke"
+      ],
+      "1F461": [
+        "ndara ya mwanamke",
+        "kiatu",
+        "kiatu cha mwanamke",
+        "mavazi",
+        "mwanamke",
+        "ndara"
+      ],
+      "1F462": [
+        "buti la mwanamke",
+        "buti",
+        "buti ya mwanamke",
+        "kiatu",
+        "mavazi",
+        "mwanamke"
+      ],
+      "1F463": [
+        "nyayo",
+        "alama",
+        "mavazi",
+        "miguu tupu",
+        "mwili",
+        "tembea"
+      ],
+      "1F464": [
+        "kivuli cha kichwa na mabega ya mtu",
+        "kivuli",
+        "sanamu ya kichwa na mabega ya mtu"
+      ],
+      "1F465": [
+        "vivuli vya vichwa na mabega ya watu",
+        "kivuli",
+        "marafiki",
+        "rafiki",
+        "sanamu ya kichwa na mabega ya mtu",
+        "sanamu za kichwa na mabega ya mtu katika kivuli"
+      ],
+      "1F466": [
+        "mvulana",
+        "kijana"
+      ],
+      "1F467": [
+        "msichana",
+        "bikira",
+        "kijana",
+        "mashuke",
+        "mwali",
+        "zodiaki"
+      ],
+      "1F468": [
+        "mwanamume",
+        "mtu",
+        "mtu mzima",
+        "mvulana",
+        "rafiki"
+      ],
+      "1F469": [
+        "mwanamke",
+        "msichana",
+        "ukataji nywele"
+      ],
+      "1F46A": [
+        "familia",
+        "baba",
+        "mama",
+        "mtoto"
+      ],
+      "1F46B": [
+        "mwanamke na mwanamume walioshikana mikono",
+        "kushikana mikono",
+        "mkono",
+        "mume na mke",
+        "mwanamke",
+        "mwanamume",
+        "shikilia"
+      ],
+      "1F46C": [
+        "wanaume walioshikana mikono",
+        "gemini",
+        "kushikana mikono",
+        "mapacha",
+        "mashoga",
+        "mwanamume",
+        "wanaume",
+        "wanaume wawili",
+        "zodiaki"
+      ],
+      "1F46D": [
+        "wanawake walioshikana mikono",
+        "dada",
+        "jinsia moja",
+        "kushikana mikono",
+        "marafiki wa kike",
+        "mashoga",
+        "mkono",
+        "wagaji",
+        "wanawake",
+        "wanawake wawili"
+      ],
+      "1F46E": [
+        "askari polisi",
+        "afisa",
+        "afisa wa polisi",
+        "askari polisi wa kiume",
+        "mtu mume",
+        "polisi"
+      ],
+      "1F46F": [
+        "watu wanaosherehekea",
+        "mapacha",
+        "mcheza dansi",
+        "msichana",
+        "mwanamke",
+        "sikio",
+        "sungura",
+        "wacheza dansi",
+        "washereheshaji",
+        "wasichana washereheshaji"
+      ],
+      "1F470": [
+        "mtu aliyevaa shela",
+        "bi harusi",
+        "bi harusi aliyevaa shela",
+        "bibi harusi",
+        "harusi",
+        "shela"
+      ],
+      "1F471": [
+        "mtu mwenye nywele za shaba",
+        "mtu: nywele ya shaba",
+        "nywele",
+        "nywele za shaba",
+        "rangi ya shaba"
+      ],
+      "1F472": [
+        "mwanamume aliyevaa kofia ya kichina",
+        "gua pi mao",
+        "kofia",
+        "mwanamume"
+      ],
+      "1F473": [
+        "mwanaume aliyefunga kilemba",
+        "kilemba",
+        "mwanamume",
+        "mwanamume aliyefunga kkilemba"
+      ],
+      "1F474": [
+        "babu",
+        "mtu mzee",
+        "mwanamume",
+        "mzee"
+      ],
+      "1F475": [
+        "bibi",
+        "busura",
+        "kunyolewa vibaya",
+        "mwanamke",
+        "mzee"
+      ],
+      "1F476": [
+        "mtoto",
+        "kijana",
+        "mchanga",
+        "mimba"
+      ],
+      "1F477": [
+        "mfanyakazi wa ujenzi",
+        "kofia",
+        "kofia ngumu",
+        "mfanyakazi",
+        "ujenzi"
+      ],
+      "1F478": [
+        "binti mfalme",
+        "kichimbakazi",
+        "malkia",
+        "njozi",
+        "taji"
+      ],
+      "1F479": [
+        "zimwi",
+        "kichimbakazi",
+        "kijapani",
+        "kinyago",
+        "kiumbe",
+        "mila",
+        "njozi",
+        "uso"
+      ],
+      "1F47A": [
+        "afriti",
+        "kichimbakazi",
+        "kijapani",
+        "kiumbe",
+        "njozi",
+        "uso",
+        "zimwi"
+      ],
+      "1F47B": [
+        "pepo",
+        "kichimbakazi",
+        "kiumbe",
+        "njozi",
+        "uso",
+        "zimwi"
+      ],
+      "1F47C": [
+        "mtoto malaika",
+        "kanisa",
+        "kichimbakazi",
+        "malaika",
+        "mtoto",
+        "njozi",
+        "uso"
+      ],
+      "1F47D": [
+        "jitu geni",
+        "anga",
+        "hadithi",
+        "kitu kisichojulikana kinachopaa hewani",
+        "kiumbe",
+        "njozi",
+        "uso",
+        "zimwi"
+      ],
+      "1F47E": [
+        "dubwana geni",
+        "anga",
+        "geni",
+        "kitu kisichojulikana kinachopaa hewani",
+        "kiumbe",
+        "njozi",
+        "zimwi"
+      ],
+      "1F47F": [
+        "kishetani",
+        "kichimbakazi",
+        "njozi",
+        "pepo",
+        "shetani",
+        "uso"
+      ],
+      "1F480": [
+        "fuvu",
+        "kichimbakazi",
+        "kifo",
+        "uso",
+        "zimwi"
+      ],
+      "1F481": [
+        "mhudumu anayetoa maelezo",
+        "anayejiamini",
+        "maelezo",
+        "mkono",
+        "umbea",
+        "usaidizi"
+      ],
+      "1F482": [
+        "mlinzi",
+        "askari mlinda gati"
+      ],
+      "1F483": [
+        "mwanamke anayecheza",
+        "cheza",
+        "densi",
+        "furahia",
+        "mwanamke anayecheza dansi",
+        "ngoma"
+      ],
+      "1F484": [
+        "rangi ya midomo",
+        "urembo",
+        "vipodozi"
+      ],
+      "1F485": [
+        "rangi ya kupaka kwenye kucha",
+        "kucha",
+        "mwili",
+        "rangi",
+        "rangi ya kupaka",
+        "tengeneza kucha",
+        "tunza",
+        "vipodozi"
+      ],
+      "1F486": [
+        "kukanda uso",
+        "kukanda",
+        "kusinga",
+        "mahali panapotoa huduma zinazohusiana na mitindo",
+        "saluni ya kike"
+      ],
+      "1F487": [
+        "kukata nywele",
+        "kinyozi",
+        "ukumbi",
+        "urembo"
+      ],
+      "1F488": [
+        "nguzo ya kinyozi",
+        "kinyozi",
+        "kunyolewa",
+        "nguzo"
+      ],
+      "1F489": [
+        "bomba la sindano",
+        "daktari",
+        "dawa",
+        "kuchoma sindano",
+        "mgonjwa",
+        "sindano",
+        "sindano ya mafua",
+        "zana"
+      ],
+      "1F48A": [
+        "kidonge",
+        "dakitari",
+        "daktari",
+        "dawa",
+        "mgonjwa",
+        "punje",
+        "vitamini"
+      ],
+      "1F48B": [
+        "alama ya busu",
+        "alama",
+        "busu",
+        "mapenzi",
+        "midomo",
+        "moyo"
+      ],
+      "1F48C": [
+        "barua ya mapenzi",
+        "barua",
+        "mapenzi",
+        "moyo",
+        "upendo"
+      ],
+      "1F48D": [
+        "pete",
+        "almasi",
+        "mapenzi",
+        "pete ya almasi"
+      ],
+      "1F48E": [
+        "kito",
+        "almasi",
+        "harusi",
+        "mapenzi"
+      ],
+      "1F48F": [
+        "busu",
+        "mahaba",
+        "mapenzi",
+        "moyo",
+        "mume na mke"
+      ],
+      "1F490": [
+        "shada la maua",
+        "mapenzi",
+        "mmea",
+        "ua"
+      ],
+      "1F491": [
+        "mume na mke na ishara ya moyo",
+        "mapenzi",
+        "moyo",
+        "mume na mke",
+        "upendo"
+      ],
+      "1F492": [
+        "harusi",
+        "kanisa",
+        "mapenzi"
+      ],
+      "1F493": [
+        "moyo unaodunda",
+        "kupiga",
+        "mapigo ya moyo",
+        "mbio",
+        "moyo"
+      ],
+      "1F494": [
+        "moyo uliovunjika",
+        "hisia",
+        "huzuni",
+        "kuvunjika moyo",
+        "moyo",
+        "upweke",
+        "vunja",
+        "vunjika"
+      ],
+      "1F495": [
+        "mioyo miwili",
+        "moyo’ upendo"
+      ],
+      "1F496": [
+        "moyo unaong’aa",
+        "furahia",
+        "metameta",
+        "moyo"
+      ],
+      "1F497": [
+        "moyo uaokua",
+        "furahia",
+        "kukua",
+        "moyo",
+        "mpaigo ya moyo",
+        "wasiwasi"
+      ],
+      "1F498": [
+        "moyo uliopenyezwa mshale",
+        "alama ya mapenzi",
+        "deti",
+        "mahaba",
+        "mapenzi",
+        "moyo",
+        "mshale"
+      ],
+      "1F499": [
+        "moyo ya samawati",
+        "moyo",
+        "moyo wa bluu",
+        "samawati",
+        "upendo"
+      ],
+      "1F49A": [
+        "moyo wa kijani",
+        "kijani",
+        "moyo",
+        "upendo mbichi"
+      ],
+      "1F49B": [
+        "moyo wa manjano",
+        "143",
+        "hisia",
+        "manjano",
+        "moyo",
+        "upendo"
+      ],
+      "1F49C": [
+        "moyo wa zambarau",
+        "moyo",
+        "zambarau"
+      ],
+      "1F49D": [
+        "moyo uliofungwa kwa utepe",
+        "143",
+        "busu",
+        "moyo",
+        "utepe",
+        "valentine"
+      ],
+      "1F49E": [
+        "mioyo inayozunguka",
+        "kuzunguka",
+        "moyo"
+      ],
+      "1F49F": [
+        "mapambo ya moyo",
+        "hisia",
+        "moyo",
+        "moyo wa zambarawe"
+      ],
+      "1F4A0": [
+        "almasi yenye kitone",
+        "almasi",
+        "jiometri",
+        "kibonzo",
+        "ndani"
+      ],
+      "1F4A1": [
+        "taa",
+        "balbu",
+        "kibonzo",
+        "mwanga",
+        "umeme",
+        "wazo"
+      ],
+      "1F4A2": [
+        "alama ya hasira",
+        "ghadhabu",
+        "hasira",
+        "kasirika",
+        "kibonzo"
+      ],
+      "1F4A3": [
+        "bomu",
+        "kibonzo"
+      ],
+      "1F4A4": [
+        "usingizi",
+        "kibonzo",
+        "kulala",
+        "lala",
+        "sinzia"
+      ],
+      "1F4A5": [
+        "mgongano",
+        "bomu",
+        "kibonzo",
+        "lipua",
+        "mlio"
+      ],
+      "1F4A6": [
+        "matone ya jasho",
+        "jasho",
+        "kibonzo",
+        "kuchoka",
+        "maji",
+        "matone"
+      ],
+      "1F4A7": [
+        "tone",
+        "hali ya hewa",
+        "jasho",
+        "jembamba",
+        "kibonzo"
+      ],
+      "1F4A8": [
+        "kuharakisha",
+        "dashi",
+        "kibonzo",
+        "kukimbia"
+      ],
+      "1F4A9": [
+        "kinyesi",
+        "kibonzo",
+        "mavi",
+        "uso",
+        "zimwi"
+      ],
+      "1F4AA": [
+        "misuli iliyotunishwa",
+        "kibonzo",
+        "misuli za mikono",
+        "musuli",
+        "mwili",
+        "tunisha"
+      ],
+      "1F4AB": [
+        "kizunguzungu",
+        "kibonzo",
+        "nyota"
+      ],
+      "1F4AC": [
+        "kitufe cha usemi",
+        "ishara",
+        "kibonzo",
+        "mazungumzo",
+        "povu",
+        "puto",
+        "usemi"
+      ],
+      "1F4AD": [
+        "kitufe cha mawazo",
+        "ishara",
+        "kibonzo",
+        "puto",
+        "wazo"
+      ],
+      "1F4AE": [
+        "ua jeupe",
+        "ua"
+      ],
+      "1F4AF": [
+        "pointi mia moja",
+        "100",
+        "alama",
+        "hakika",
+        "kamili",
+        "mia moja"
+      ],
+      "1F4B0": [
+        "mfuko wa pesa",
+        "benki",
+        "dola",
+        "kulipa",
+        "mfuko",
+        "pesa"
+      ],
+      "1F4B1": [
+        "sarafu mbalimbali",
+        "benki",
+        "pesa",
+        "sarafu",
+        "ubadilishaji wa pesa"
+      ],
+      "1F4B2": [
+        "alama ya dola",
+        "alama nzito ya dola",
+        "dola",
+        "pesa",
+        "sarafu"
+      ],
+      "1F4B3": [
+        "kadi ya mkopo",
+        "benki",
+        "kadi",
+        "mkopo",
+        "pesa"
+      ],
+      "1F4B4": [
+        "noti ya yeni",
+        "benki",
+        "noti",
+        "pesa",
+        "sarafu",
+        "yeni"
+      ],
+      "1F4B5": [
+        "noti ya dola",
+        "benki",
+        "dola",
+        "noti",
+        "pesa",
+        "sarafu"
+      ],
+      "1F4B6": [
+        "noti ya yuro",
+        "benki",
+        "noti",
+        "pesa",
+        "sarafu",
+        "yuro"
+      ],
+      "1F4B7": [
+        "noti ya pauni",
+        "benki",
+        "noti",
+        "noti ya paundi",
+        "paundi",
+        "pauni",
+        "pesa",
+        "sarafu"
+      ],
+      "1F4B8": [
+        "pesa za noti zenye mabawa",
+        "benki",
+        "dola",
+        "mabawa",
+        "noti",
+        "pepea",
+        "pesa"
+      ],
+      "1F4B9": [
+        "chati inayopanda yenye yeni",
+        "benki",
+        "chati",
+        "chayi inayopanda yenye yeni",
+        "grafu",
+        "kupanda",
+        "ongezeka",
+        "pesa",
+        "sarafu",
+        "soko",
+        "yeni"
+      ],
+      "1F4BA": [
+        "kikalio",
+        "kiti"
+      ],
+      "1F4BB": [
+        "kompyuta ndogo",
+        "binafsi",
+        "kompyuta",
+        "pc"
+      ],
+      "1F4BC": [
+        "mkoba",
+        "mkoba wa ofisini"
+      ],
+      "1F4BD": [
+        "diski ndogo",
+        "diski",
+        "kompyuta",
+        "ya macho"
+      ],
+      "1F4BE": [
+        "diski laini",
+        "diski",
+        "kompyuta"
+      ],
+      "1F4BF": [
+        "diski",
+        "blu-ray",
+        "cd",
+        "dvd",
+        "kompyuta",
+        "mwangaza",
+        "ya macho"
+      ],
+      "1F4C0": [
+        "diski dijitali",
+        "blu-ray",
+        "cd",
+        "diski",
+        "kompyuta",
+        "mwangaza",
+        "ya macho"
+      ],
+      "1F4C1": [
+        "folda ya faili",
+        "faili",
+        "folda"
+      ],
+      "1F4C2": [
+        "folda ya faili iliyofunguliwa",
+        "faili",
+        "folda",
+        "funguliwa"
+      ],
+      "1F4C3": [
+        "ukurasa uliokunjwa",
+        "hati",
+        "kukunja",
+        "ukurasa"
+      ],
+      "1F4C4": [
+        "ukurasa unaotazama juu",
+        "hati",
+        "ukurasa"
+      ],
+      "1F4C5": [
+        "kalenda",
+        "tarehe"
+      ],
+      "1F4C6": [
+        "kalenda unayoweza kuchana kurasa",
+        "kalenda"
+      ],
+      "1F4C7": [
+        "kadi",
+        "farahasa",
+        "mwongozo"
+      ],
+      "1F4C8": [
+        "chati inayopanda",
+        "chati",
+        "grafu",
+        "juu",
+        "kukua",
+        "uelekeo"
+      ],
+      "1F4C9": [
+        "chati inayoshuka",
+        "chati",
+        "chini",
+        "grafu",
+        "uelekeo"
+      ],
+      "1F4CA": [
+        "chati ya miraba",
+        "chati",
+        "grafu",
+        "mraba"
+      ],
+      "1F4CB": [
+        "ubao wa kunakili"
+      ],
+      "1F4CC": [
+        "pini",
+        "bandika",
+        "kibandiko",
+        "unga"
+      ],
+      "1F4CD": [
+        "pini yenye kichwa cha mduara",
+        "bandika",
+        "kibandiko",
+        "pini"
+      ],
+      "1F4CE": [
+        "kishikizo",
+        "kishikizo cha karatasi"
+      ],
+      "1F4CF": [
+        "rula",
+        "ukingo ulionyooka"
+      ],
+      "1F4D0": [
+        "rula ya pembe",
+        "pembe",
+        "rula",
+        "seti"
+      ],
+      "1F4D1": [
+        "vichupo vya alamisho",
+        "alama",
+        "alamisho",
+        "vichupo",
+        "weka alama"
+      ],
+      "1F4D2": [
+        "leja",
+        "daftari"
+      ],
+      "1F4D3": [
+        "daftari"
+      ],
+      "1F4D4": [
+        "daftari lenye jalada lililopambwa",
+        "daftari",
+        "elimu",
+        "jalada",
+        "kitabu",
+        "kuandika",
+        "lililopambwa",
+        "shule"
+      ],
+      "1F4D5": [
+        "kitabu kilichofungwa",
+        "kitabu",
+        "kufungwa"
+      ],
+      "1F4D6": [
+        "kitabu kilichofunguliwa",
+        "kitabu",
+        "kufunguliwa"
+      ],
+      "1F4D7": [
+        "kitabu cha kijani",
+        "elimu",
+        "kijani",
+        "kitabu",
+        "maktaba"
+      ],
+      "1F4D8": [
+        "kitabu cha samawati",
+        "kitabu",
+        "maktaba",
+        "samawati"
+      ],
+      "1F4D9": [
+        "kitabu cha njano",
+        "kitabu",
+        "maktaba",
+        "manjano"
+      ],
+      "1F4DA": [
+        "vitabu",
+        "elimu",
+        "kitabu",
+        "kusoma",
+        "librari",
+        "shule",
+        "soma"
+      ],
+      "1F4DB": [
+        "beji ya jina",
+        "beji",
+        "jina"
+      ],
+      "1F4DC": [
+        "hati ya kukunja kwa kuviringisha",
+        "karatasi"
+      ],
+      "1F4DD": [
+        "hati",
+        "mawasiliano",
+        "media",
+        "muhtasari",
+        "mwandiko",
+        "penseli",
+        "ujumbe"
+      ],
+      "1F4DE": [
+        "mkono wa simu",
+        "mawasiliano",
+        "simu"
+      ],
+      "1F4DF": [
+        "peja",
+        "mawasiliano"
+      ],
+      "1F4E0": [
+        "mashine ya faksi",
+        "faksi"
+      ],
+      "1F4E1": [
+        "antena ya setilaiti",
+        "antena",
+        "dishi",
+        "setilaiti",
+        "ungo"
+      ],
+      "1F4E2": [
+        "kipaza sauti",
+        "sauti"
+      ],
+      "1F4E3": [
+        "megafoni",
+        "kushangilia"
+      ],
+      "1F4E4": [
+        "trei ya majalada ya kutoka",
+        "barua",
+        "imetumwa",
+        "sanduku",
+        "sanduku la kutuma",
+        "trei",
+        "trei ya kutoa"
+      ],
+      "1F4E5": [
+        "trei ya majalada ya kuingia",
+        "barua",
+        "pokea",
+        "sanduku",
+        "sanduku la kupokea",
+        "trei",
+        "trei ya kupokea"
+      ],
+      "1F4E6": [
+        "kifurushi",
+        "mawasiliano",
+        "sanduku"
+      ],
+      "1F4E7": [
+        "barua pepe",
+        "barua"
+      ],
+      "1F4E8": [
+        "bahasha inayoingia",
+        "bahasha",
+        "barua",
+        "barua pepe",
+        "inayoingia",
+        "pokea"
+      ],
+      "1F4E9": [
+        "bahasha na kishale",
+        "bahasha",
+        "barua",
+        "barua pepe",
+        "inayotoka",
+        "mshale"
+      ],
+      "1F4EA": [
+        "sanduku la barua lililofungwa lenye bendera iliyoshushwa",
+        "fungwa",
+        "kushushwa",
+        "sanduku",
+        "sanduku la barua",
+        "sanduku la barua lisilo na barua ya kuchukuliwa",
+        "sanduku la posta"
+      ],
+      "1F4EB": [
+        "sanduku la barua lililofungwa lenye bendera iliyoinuliwa",
+        "barua",
+        "fungwa",
+        "sanduku la barua",
+        "sanduku la posta",
+        "sanduku la posta lenye barua ndani"
+      ],
+      "1F4EC": [
+        "sanduku la barua lililofunguliwa lenye bendera iliyoinuliwa",
+        "barua",
+        "funguliwa",
+        "sanduku la barua",
+        "sanduku la posta"
+      ],
+      "1F4ED": [
+        "sanduku la barua lililofunguliwa lenye bendera iliyoshushwa",
+        "barua",
+        "funguliwa",
+        "kushushwa",
+        "sanduku la barua",
+        "sanduku la posta"
+      ],
+      "1F4EE": [
+        "sanduku la barua",
+        "barua"
+      ],
+      "1F4EF": [
+        "honi ya posta",
+        "honi",
+        "posta"
+      ],
+      "1F4F0": [
+        "gazeti",
+        "habari",
+        "karatasi"
+      ],
+      "1F4F1": [
+        "simu ya mkononi",
+        "mawasiliano",
+        "simu",
+        "ya mkononi"
+      ],
+      "1F4F2": [
+        "simu ya mkononi yenye kishale",
+        "mshale",
+        "piga simu",
+        "pokea",
+        "simu",
+        "simu ya mkononi",
+        "ya mkononi"
+      ],
+      "1F4F3": [
+        "hali ya mtetemo",
+        "hali",
+        "mtetemo",
+        "simu",
+        "simu ina tetemeka",
+        "simu ya mkononi",
+        "ya mkononi"
+      ],
+      "1F4F4": [
+        "zima simu za mkononi",
+        "imezimwa",
+        "simu",
+        "simu ya mkononi",
+        "ya mkononi",
+        "zima simu ya mkononi"
+      ],
+      "1F4F5": [
+        "simu za mkononi haziruhusiwi",
+        "hapana",
+        "katazwa",
+        "marufuku",
+        "simu",
+        "simu ya mkononi",
+        "siyo",
+        "somu ya mkononi",
+        "ya mkononi"
+      ],
+      "1F4F6": [
+        "pau za antena",
+        "antena",
+        "ishara",
+        "mawasiliano",
+        "pau",
+        "simu",
+        "simu ya mkononi",
+        "ya mkononi"
+      ],
+      "1F4F7": [
+        "kamera",
+        "instagram",
+        "video"
+      ],
+      "1F4F8": [
+        "kamera yenye mmweko",
+        "kamera",
+        "mmweko",
+        "video"
+      ],
+      "1F4F9": [
+        "kamera ya kurekodi video",
+        "kamera",
+        "video"
+      ],
+      "1F4FA": [
+        "runinga",
+        "tv",
+        "video"
+      ],
+      "1F4FB": [
+        "redio",
+        "video"
+      ],
+      "1F4FC": [
+        "kaseti ya video",
+        "kanda",
+        "kaseti ya zamani",
+        "vhs",
+        "video"
+      ],
+      "1F4FD": [
+        "projekta ya filamu",
+        "filamu",
+        "projekta",
+        "sinema",
+        "video"
+      ],
+      "1F4FF": [
+        "shanga za maombi",
+        "dini",
+        "maombi",
+        "mavazi",
+        "mkufu",
+        "ombi",
+        "shanga"
+      ],
+      "1F500": [
+        "kitufe cha kuchanganya",
+        "kupishana",
+        "kupishanishwa",
+        "mshale"
+      ],
+      "1F501": [
+        "kitufe cha kurudia",
+        "mshale",
+        "mzunguko wa akrabu",
+        "rudia"
+      ],
+      "1F502": [
+        "kitufe cha kurudia wimbo mmoja",
+        "mara moja",
+        "mshale",
+        "mzunguko wa akrabu"
+      ],
+      "1F503": [
+        "mishale wima inayoelekeza kwa mzunguko wa akrabu",
+        "mshale",
+        "mzunguko wa akrabu",
+        "pakia upya",
+        "pakua upya"
+      ],
+      "1F504": [
+        "kitufe cha mishale ya kinyume saa",
+        "anzisha upya",
+        "chakaa",
+        "kinyume saa",
+        "mshale"
+      ],
+      "1F505": [
+        "kitufe cha kufifiza mwanga",
+        "chini",
+        "fifia",
+        "kung’aa",
+        "mwanga mdogo"
+      ],
+      "1F506": [
+        "kitufe cha kuongeza mwanga",
+        "kung’aa",
+        "mng’ao",
+        "mwanga"
+      ],
+      "1F507": [
+        "spika imezimwa",
+        "kimya",
+        "sauti",
+        "spika",
+        "zima"
+      ],
+      "1F508": [
+        "spika",
+        "sauti",
+        "sauti ya chini ya spika"
+      ],
+      "1F509": [
+        "spika imewashwa",
+        "chini",
+        "sauti",
+        "spika",
+        "spika imewashwa sauti ya kati",
+        "wingu"
+      ],
+      "1F50A": [
+        "spika yenye sauti ya juu",
+        "juu",
+        "sauti",
+        "spika"
+      ],
+      "1F50B": [
+        "betri"
+      ],
+      "1F50C": [
+        "plagi ya umeme",
+        "nguvu za umeme",
+        "plagi",
+        "umeme"
+      ],
+      "1F50D": [
+        "kioo cha ukuzaji kinachoelekeza kushoto",
+        "glasi",
+        "kikuzi",
+        "kukuza",
+        "tafuta",
+        "zana"
+      ],
+      "1F50E": [
+        "kioo cha ukuzaji kinachoelekeza kulia",
+        "glasi",
+        "kukuza",
+        "tafuta",
+        "zana"
+      ],
+      "1F50F": [
+        "kufuli na kalamu",
+        "faragha",
+        "kalamu",
+        "kufuli",
+        "nibu",
+        "wino"
+      ],
+      "1F510": [
+        "kufuli iliyofungwa na ufunguo",
+        "fungwa",
+        "kufuli",
+        "salama",
+        "ufunguo"
+      ],
+      "1F511": [
+        "ufunguo",
+        "fungua",
+        "kufuli",
+        "nenosiri"
+      ],
+      "1F512": [
+        "kufuli",
+        "binafsi",
+        "fungwa"
+      ],
+      "1F513": [
+        "kufuli iliyofunguliwa",
+        "funga",
+        "fungua",
+        "funguliwa"
+      ],
+      "1F514": [
+        "kengele",
+        "kanisa",
+        "sauti"
+      ],
+      "1F515": [
+        "kengele yenye alama ya mkato",
+        "hapana",
+        "katazwa",
+        "kengele",
+        "kimya",
+        "marufuku",
+        "zima"
+      ],
+      "1F516": [
+        "alamisho",
+        "weka alama"
+      ],
+      "1F517": [
+        "pete ya mnyororo",
+        "pete"
+      ],
+      "1F518": [
+        "kitufe",
+        "jiometri"
+      ],
+      "1F519": [
+        "mshale wa nyuma",
+        "mshale",
+        "nyuma"
+      ],
+      "1F51A": [
+        "mshale wa mwisho",
+        "mshale",
+        "mshale kuelekeza mwisho",
+        "mwisho"
+      ],
+      "1F51B": [
+        "mshale wa hewani!",
+        "alama",
+        "hewani",
+        "mshale",
+        "washa"
+      ],
+      "1F51C": [
+        "mshale unaoashiria hivi karibuni",
+        "hivi karibuni",
+        "mshale"
+      ],
+      "1F51D": [
+        "mshale unaoangalia juu",
+        "juu",
+        "mshale",
+        "mshale unaoelekea juu"
+      ],
+      "1F51E": [
+        "walio chini ya miaka kumi na nane hawaruhusiwi",
+        "18",
+        "chini ya miaka inayoruhusiwa",
+        "kikwazo cha umri",
+        "kufika na nane marufuku",
+        "kumi na nane",
+        "marufuku"
+      ],
+      "1F51F": [
+        "kitufe: 10",
+        "kitufe"
+      ],
+      "1F520": [
+        "weka herufi kubwa za kilatini",
+        "abcd",
+        "herufi",
+        "herufi kubwa",
+        "latini",
+        "weka"
+      ],
+      "1F521": [
+        "weka hefuri ndogo za kilatini",
+        "abcd",
+        "herufi",
+        "herufi ndogo",
+        "latini",
+        "weka"
+      ],
+      "1F522": [
+        "weka nambari",
+        "1234",
+        "namba",
+        "nambari",
+        "weka"
+      ],
+      "1F523": [
+        "weka alama",
+        "weka"
+      ],
+      "1F524": [
+        "weka herufi za kilatini",
+        "abc",
+        "alfabeti",
+        "herufi",
+        "latini",
+        "weka"
+      ],
+      "1F525": [
+        "moto",
+        "choma",
+        "mwale",
+        "mwali",
+        "zana"
+      ],
+      "1F526": [
+        "kurunzi",
+        "mwanga",
+        "tochi",
+        "umeme",
+        "zana"
+      ],
+      "1F527": [
+        "spana malaya",
+        "spana",
+        "zana",
+        "zana za nyumbani"
+      ],
+      "1F528": [
+        "nyundo",
+        "zana"
+      ],
+      "1F529": [
+        "nati na bolti",
+        "bolti",
+        "nati",
+        "zana"
+      ],
+      "1F52A": [
+        "kisu kinachotumika jikoni",
+        "hocho",
+        "kisu",
+        "kupika",
+        "silaha",
+        "zana"
+      ],
+      "1F52B": [
+        "bastola ya maji",
+        "bastola",
+        "bunduki",
+        "maji",
+        "silaha",
+        "zana"
+      ],
+      "1F52C": [
+        "hadubini",
+        "zana"
+      ],
+      "1F52D": [
+        "darubini",
+        "zana"
+      ],
+      "1F52E": [
+        "tufe la kioo",
+        "bahati",
+        "kichimbakazi",
+        "kioo",
+        "mpira",
+        "njozi",
+        "zana"
+      ],
+      "1F52F": [
+        "nyota yenye pembe sita na kitone katikati",
+        "bahati",
+        "nyota"
+      ],
+      "1F530": [
+        "alama ya kijapani ya anayeanza",
+        "anayeanza",
+        "kifaa",
+        "kijapani",
+        "tawi",
+        "tepe ya v"
+      ],
+      "1F531": [
+        "nembo ya ncha tatu",
+        "manga ya meli",
+        "meli",
+        "mkuki wa vyembe vitatu",
+        "nanga",
+        "nembo",
+        "nembo ya chusa chenye ncha tatu",
+        "zana"
+      ],
+      "1F532": [
+        "kitufe cheusi cha mraba",
+        "jiometri",
+        "kitufe",
+        "mraba"
+      ],
+      "1F533": [
+        "kitufe cheupe cha mraba",
+        "iliyobainishwa",
+        "jiometri",
+        "kitufe",
+        "mraba"
+      ],
+      "1F534": [
+        "mduara mwekundu",
+        "jiometri",
+        "mduara",
+        "nyekundu"
+      ],
+      "1F535": [
+        "mduara wa samawati",
+        "jiometri",
+        "mduara",
+        "mduara wa bluu",
+        "samawati"
+      ],
+      "1F536": [
+        "almasi kubwa ya njano",
+        "almasi",
+        "jiometri",
+        "manjano"
+      ],
+      "1F537": [
+        "almasi kubwa ya samawati",
+        "almasi",
+        "jiometri",
+        "samawati"
+      ],
+      "1F538": [
+        "almasi ndogo ya njano",
+        "almasi",
+        "jiometri",
+        "manjano",
+        "rangi ya chungwa"
+      ],
+      "1F539": [
+        "almasi ndogo ya samawati",
+        "almasi",
+        "jiometri",
+        "samawati"
+      ],
+      "1F53A": [
+        "pembetatu inayoelekeza juu",
+        "jiometri",
+        "nyekundu",
+        "pembetatu"
+      ],
+      "1F53B": [
+        "pembetatu inayoelekeza chini",
+        "chini",
+        "jiometri",
+        "nyekundu"
+      ],
+      "1F53C": [
+        "kitufe cha juu",
+        "kitufe",
+        "mshale",
+        "nyekundu"
+      ],
+      "1F53D": [
+        "kitufe cha chini",
+        "chini",
+        "kitufe",
+        "mshale",
+        "nyekundu"
+      ],
+      "1F550": [
+        "saa saba",
+        "00",
+        "1",
+        "1:00",
+        "saa",
+        "saba"
+      ],
+      "1F551": [
+        "saa nane",
+        "00",
+        "2",
+        "2:00",
+        "nane",
+        "saa"
+      ],
+      "1F552": [
+        "saa tisa",
+        "00",
+        "3",
+        "3:00",
+        "saa",
+        "tisa"
+      ],
+      "1F553": [
+        "saa kumi",
+        "00",
+        "4",
+        "4:00",
+        "kumi",
+        "saa"
+      ],
+      "1F554": [
+        "saa kumi na moja",
+        "00",
+        "5",
+        "5:00",
+        "kumi na moja",
+        "saa"
+      ],
+      "1F555": [
+        "saa kumi na mbili",
+        "00",
+        "6",
+        "6:00",
+        "kumi na mbili",
+        "saa"
+      ],
+      "1F556": [
+        "saa moja",
+        "00",
+        "7",
+        "7:00",
+        "moja",
+        "saa"
+      ],
+      "1F557": [
+        "saa mbili",
+        "00",
+        "8",
+        "8:00",
+        "mbili",
+        "saa"
+      ],
+      "1F558": [
+        "saa tatu",
+        "00",
+        "9",
+        "9:00",
+        "muda",
+        "saa",
+        "saa tisa",
+        "tatu"
+      ],
+      "1F559": [
+        "saa nne",
+        "00",
+        "10",
+        "10:00",
+        "nne",
+        "saa"
+      ],
+      "1F55A": [
+        "saa tano",
+        "00",
+        "11",
+        "11:00",
+        "saa",
+        "tano"
+      ],
+      "1F55B": [
+        "saa sita",
+        "00",
+        "12",
+        "12:00",
+        "saa",
+        "sita"
+      ],
+      "1F55C": [
+        "saa saba na nusu",
+        "1",
+        "1:30",
+        "30",
+        "moja",
+        "muda",
+        "nusu",
+        "saa",
+        "saba"
+      ],
+      "1F55D": [
+        "saa nane na nusu",
+        "2",
+        "2:30",
+        "30",
+        "mbili",
+        "nane",
+        "nusu",
+        "saa"
+      ],
+      "1F55E": [
+        "saa tisa na nusu",
+        "3",
+        "3:30",
+        "30",
+        "nusu",
+        "saa",
+        "tisa"
+      ],
+      "1F55F": [
+        "saa kumi na nusu",
+        "30",
+        "4",
+        "4:30",
+        "kumi",
+        "nusu",
+        "saa"
+      ],
+      "1F560": [
+        "saa kumi na moja na nusu",
+        "30",
+        "5",
+        "5:30",
+        "kumi na moja",
+        "nusu",
+        "saa"
+      ],
+      "1F561": [
+        "sa kumi na mbili na nusu",
+        "30",
+        "6",
+        "6:30",
+        "kumi na mbili",
+        "nusu",
+        "saa",
+        "saa kumi na mbili na nusu"
+      ],
+      "1F562": [
+        "saa moja na nusu",
+        "30",
+        "7",
+        "7:30",
+        "moja",
+        "nusu",
+        "saa"
+      ],
+      "1F563": [
+        "saa mbili na nusu",
+        "30",
+        "8",
+        "8:30",
+        "mbili",
+        "nusu",
+        "saa"
+      ],
+      "1F564": [
+        "saa tatu na nusu",
+        "30",
+        "9",
+        "9:30",
+        "nusu",
+        "saa",
+        "tatu"
+      ],
+      "1F565": [
+        "saa nne na nusu",
+        "10",
+        "10:30",
+        "30",
+        "nne",
+        "nusu",
+        "saa"
+      ],
+      "1F566": [
+        "saa tano na nusu",
+        "11",
+        "11:30",
+        "30",
+        "nusu",
+        "saa",
+        "tano"
+      ],
+      "1F567": [
+        "saa sita na nusu",
+        "12",
+        "12:30",
+        "30",
+        "nusu",
+        "saa",
+        "sita"
+      ],
+      "1F56F": [
+        "mshumaa",
+        "angaza",
+        "mwanga"
+      ],
+      "1F570": [
+        "saa ya mezani",
+        "majira",
+        "mda",
+        "saa",
+        "wakati"
+      ],
+      "1F574": [
+        "mwanaume aliyevaa suti anayeelea hewani",
+        "biashara",
+        "mwanamume",
+        "suti"
+      ],
+      "1F575": [
+        "mpelelezi",
+        "jasusi",
+        "mtu mpelelezi"
+      ],
+      "1F576": [
+        "miwani ya jua",
+        "jicho",
+        "miwani",
+        "miwani ya macho",
+        "nyeusi"
+      ],
+      "1F577": [
+        "buibui",
+        "mdudu"
+      ],
+      "1F578": [
+        "tandabui",
+        "buibui",
+        "utandu"
+      ],
+      "1F579": [
+        "usukani",
+        "mchezo",
+        "mchezo wa video"
+      ],
+      "1F57A": [
+        "kusakata rumba",
+        "kucheza",
+        "sakata",
+        "sakati rumba"
+      ],
+      "1F587": [
+        "klipu za karatasi zilizounganishwa",
+        "klipu ya karatasi",
+        "unganisha"
+      ],
+      "1F58A": [
+        "kalamu"
+      ],
+      "1F58B": [
+        "kalamu ya wino",
+        "kalamu"
+      ],
+      "1F58C": [
+        "brashi ya kupaka rangi",
+        "chora",
+        "kuchora"
+      ],
+      "1F58D": [
+        "penseli laini",
+        "krayoni"
+      ],
+      "1F590": [
+        "mkono ulioinuliwa wenye vidole vilivyotanuliwa",
+        "kidole",
+        "mkono",
+        "mwili",
+        "tanuliwa"
+      ],
+      "1F595": [
+        "kidole cha kati",
+        "kidole",
+        "mkono",
+        "mwili"
+      ],
+      "1F596": [
+        "ishara ya vulkani",
+        "kidole",
+        "mkono",
+        "mwili",
+        "spoku",
+        "vulkani"
+      ],
+      "1F5A4": [
+        "umbo nyeusi la moyo",
+        "chuki",
+        "mbaya",
+        "moyo",
+        "moyo mweusi",
+        "nyeusi",
+        "uovu"
+      ],
+      "1F5A5": [
+        "kompyuta ya mezani",
+        "kompyuta"
+      ],
+      "1F5A8": [
+        "printa",
+        "kichapishi",
+        "kompyuta"
+      ],
+      "1F5B1": [
+        "kipanya cha kompyuta",
+        "3",
+        "kipanya",
+        "kitufe",
+        "kompyuta",
+        "tatu"
+      ],
+      "1F5B2": [
+        "kitufe cha kompyuta kinachoendesha kishale",
+        "kompyuta"
+      ],
+      "1F5BC": [
+        "fremu yenye picha",
+        "fremu",
+        "kuchora",
+        "makumbusho",
+        "picha",
+        "sanaa"
+      ],
+      "1F5C2": [
+        "vigawanishi vya kadi",
+        "farahasa",
+        "kadi",
+        "vigawanishi"
+      ],
+      "1F5C3": [
+        "sanduku la faili",
+        "faili",
+        "kadi",
+        "sanduku"
+      ],
+      "1F5C4": [
+        "kabati la hati",
+        "faili",
+        "kabati"
+      ],
+      "1F5D1": [
+        "ndoo la taka",
+        "kikapu cha taka",
+        "taka"
+      ],
+      "1F5D2": [
+        "daftari lililobanwa kwa waya wa mzunguko",
+        "daftari",
+        "dokezo",
+        "mzunguko"
+      ],
+      "1F5D3": [
+        "kalenda iliyofungwa kwa waya wa mzunguko",
+        "daftari",
+        "kalenda",
+        "mzunguko"
+      ],
+      "1F5DC": [
+        "kubana",
+        "jiliwa ya seremala",
+        "zana"
+      ],
+      "1F5DD": [
+        "ufunguo wa zamani",
+        "dalili",
+        "funga",
+        "kufuli",
+        "nzee",
+        "ufunguo"
+      ],
+      "1F5DE": [
+        "gazeti lililokunjwa",
+        "gazeti",
+        "habari",
+        "karatasi",
+        "kukunjwa"
+      ],
+      "1F5E1": [
+        "sime",
+        "kisu",
+        "silaha"
+      ],
+      "1F5E3": [
+        "kichwa kinachozugumza",
+        "alama ya kuzungumza",
+        "kichwa",
+        "kivuli",
+        "kuzungumza",
+        "sema",
+        "uso",
+        "zungumza"
+      ],
+      "1F5E8": [
+        "kitufe cha usemi cha kushoto",
+        "mazungumzo",
+        "usemi"
+      ],
+      "1F5EF": [
+        "kitufe cha usemi wa hasira cha kulia",
+        "ghadhabu",
+        "hasira",
+        "ishara",
+        "puto"
+      ],
+      "1F5F3": [
+        "sanduku la kupiga kura na kura",
+        "kura",
+        "sanduku"
+      ],
+      "1F5FA": [
+        "ramani ya dunia",
+        "dunia",
+        "ramani"
+      ],
+      "1F5FB": [
+        "mlima fuji",
+        "fuji",
+        "mlima"
+      ],
+      "1F5FC": [
+        "mnara wa tokyo",
+        "mnara",
+        "tokyo"
+      ],
+      "1F5FD": [
+        "sanamu ya uhuru",
+        "new york",
+        "sanamu",
+        "uhuru"
+      ],
+      "1F5FE": [
+        "ramani ya japani",
+        "japani",
+        "ramani"
+      ],
+      "1F5FF": [
+        "kinyago",
+        "moyai",
+        "uso"
+      ],
+      "1F600": [
+        "uso unaokenua",
+        "kenua",
+        "kukenua",
+        "uso"
+      ],
+      "1F601": [
+        "uso uliokenua na macho yanayotabasamu",
+        "kenua",
+        "macho",
+        "tabasamu",
+        "uso"
+      ],
+      "1F602": [
+        "uso wenye machozi ya furaha",
+        "cheka",
+        "chekesha",
+        "chozi",
+        "furaha",
+        "uso"
+      ],
+      "1F603": [
+        "uso unaotabasamu wenye macho makubwa",
+        "funguliwa",
+        "mdomo",
+        "tabasamu",
+        "uso",
+        "uso unaokenua wenye macho makubwa"
+      ],
+      "1F604": [
+        "uso unaotabasamu wenye macho ya tabasamu",
+        "funguliwa",
+        "jicho",
+        "mdomo",
+        "tabasamu",
+        "uso",
+        "uso unaokenua wenye macho ya tabasamu"
+      ],
+      "1F605": [
+        "uso unaotabasamu wenye tone la jasho",
+        "aridi",
+        "funguliwa",
+        "jasho",
+        "kijasho",
+        "tabasamu",
+        "uso",
+        "uso unaotabasamu wenye tone la jasho na mdomo uliofunguliwa"
+      ],
+      "1F606": [
+        "uso unaotabasamu wenye mdomo wazi na macho yaliyofungwa",
+        "cheka",
+        "funguliwa",
+        "furaha",
+        "mdomo",
+        "ridhika",
+        "tabasamu",
+        "uso"
+      ],
+      "1F607": [
+        "uso unaotabasamu ulio na mduara wa mwangaza juu yake",
+        "asiye na hatia",
+        "duara ya mwangaza",
+        "kichimbakazi",
+        "malaika",
+        "njozi",
+        "tabasamu"
+      ],
+      "1F608": [
+        "uso unaotabasamu wenye pembe",
+        "kichimbakazi",
+        "njozi",
+        "pembe",
+        "tabasamu",
+        "uso"
+      ],
+      "1F609": [
+        "uso unaokonyeza",
+        "konyeza",
+        "kuvunjika moyo",
+        "telezesha",
+        "uso"
+      ],
+      "1F60A": [
+        "uso unaotabasamu na macho yanayotabasamu",
+        "jicho",
+        "tabasamu",
+        "uso",
+        "wekundu wa uso"
+      ],
+      "1F60B": [
+        "uso unaofurahia chakula kitamu",
+        "kufurahia",
+        "tabasamu",
+        "tamu",
+        "uso",
+        "utamu"
+      ],
+      "1F60C": [
+        "uso uliofarijika",
+        "farijika",
+        "kufarijika",
+        "uso"
+      ],
+      "1F60D": [
+        "uso unaotabasamu wenye macho ya umbo la moyo",
+        "jicho",
+        "moyo",
+        "tabasamu",
+        "tabasamu la upendo",
+        "upendo",
+        "uso"
+      ],
+      "1F60E": [
+        "uso unaotabasamu uliovaa miwani",
+        "hali ya hewa",
+        "inayong’aa",
+        "jua",
+        "tabasamu",
+        "vali la macho",
+        "wimani ya jua"
+      ],
+      "1F60F": [
+        "uso unaobeza",
+        "beza",
+        "dharau",
+        "kubeza",
+        "uso"
+      ],
+      "1F610": [
+        "uso uliotulia",
+        "bila hisia",
+        "kutulia",
+        "sikufurahishwa",
+        "uso"
+      ],
+      "1F611": [
+        "uso uliojikausha",
+        "usioeleza chochote",
+        "usioonyesha hisia",
+        "uso",
+        "wenye kujikausha"
+      ],
+      "1F612": [
+        "uso usio na furaha",
+        "kukosa furaha",
+        "kutofurahi",
+        "uso"
+      ],
+      "1F613": [
+        "uso wenye huzuni na jasho jembamba",
+        "jasho",
+        "jembamba",
+        "uso"
+      ],
+      "1F614": [
+        "uso uliozama katika mawazo",
+        "huzunishwa",
+        "uso",
+        "wenye mawazo"
+      ],
+      "1F615": [
+        "uso uliochanganyikiwa",
+        "kuchanganyikiwa",
+        "uso"
+      ],
+      "1F616": [
+        "uso ulioshangazwa",
+        "kushangazwa",
+        "uso"
+      ],
+      "1F617": [
+        "uso unaobusu",
+        "busu",
+        "deti",
+        "nakupenda",
+        "uso"
+      ],
+      "1F618": [
+        "uso unaotoa busu",
+        "busu",
+        "mahaba",
+        "moyo",
+        "sawa",
+        "uso"
+      ],
+      "1F619": [
+        "uso unaobusu na macho yanayotabasamu",
+        "busu",
+        "jicho",
+        "tabasamu",
+        "uso"
+      ],
+      "1F61A": [
+        "uso unaobusu na macho yaliyofungwa",
+        "busu",
+        "deti",
+        "iliyofungwa",
+        "jicho",
+        "macho",
+        "uso"
+      ],
+      "1F61B": [
+        "uso wenye ulimi nje",
+        "ulimi",
+        "uso"
+      ],
+      "1F61C": [
+        "uso unaotoa ulimi nje na kukonyeza jicho",
+        "jicho",
+        "konyeza",
+        "mtu atoaye ulimi nje na kukonyeza kwa jicho",
+        "ulimi",
+        "uso",
+        "utani"
+      ],
+      "1F61D": [
+        "uso wenye makengeza na ulimi unaochomoza",
+        "jicho",
+        "ladha",
+        "mbaya",
+        "ulimi",
+        "uso",
+        "uso unaotoa ulimi nje na kufunga macho kabisa"
+      ],
+      "1F61E": [
+        "uso uliosikitika",
+        "asiye nafuraha",
+        "kukataliwa",
+        "kushindwa",
+        "sikitiko",
+        "uso",
+        "uso ulio kata tamaa"
+      ],
+      "1F61F": [
+        "uso ulio na wasiwasi",
+        "kosafuraha",
+        "uso",
+        "wasiwasi"
+      ],
+      "1F620": [
+        "uso uliojaa hasira",
+        "hasira",
+        "kasirika",
+        "kujaa hasira",
+        "uso"
+      ],
+      "1F621": [
+        "uso uliobibidua midomo",
+        "bibidua midomo",
+        "chukiza",
+        "ghadhabu",
+        "hasira",
+        "kasirika",
+        "nyekundu",
+        "uso"
+      ],
+      "1F622": [
+        "uso unaolia",
+        "chozi",
+        "huzuni",
+        "lia",
+        "mtu anaye lia",
+        "uso"
+      ],
+      "1F623": [
+        "uso unaovumilia",
+        "kuvumilia",
+        "uso",
+        "vumilia"
+      ],
+      "1F624": [
+        "uso wenye mvuke unaotoka puani",
+        "hakuna furaha",
+        "hasira",
+        "hisia",
+        "kuzira",
+        "shinda",
+        "ushindi",
+        "uso"
+      ],
+      "1F625": [
+        "uso wenye huzuni lakini unaoonyesha kufarijika",
+        "faraja",
+        "kufarijika",
+        "kusikitika",
+        "uso",
+        "uso uliosikitika lakini unaoonyesha kufarijika"
+      ],
+      "1F626": [
+        "uso ulionuna wenye mdomo uliofunguliwa",
+        "alama ya kushangazwa",
+        "funguliwa",
+        "kukutwa bila kutegemea",
+        "kununa",
+        "mdomo",
+        "uso"
+      ],
+      "1F627": [
+        "uso unaoonyesha uchungu",
+        "uchungu",
+        "uso"
+      ],
+      "1F628": [
+        "uso unaoogopa",
+        "kuhofu",
+        "kuogopa",
+        "uso",
+        "woga"
+      ],
+      "1F629": [
+        "uso unaoonyesha uchovu",
+        "kuchoka",
+        "uchovu",
+        "uso"
+      ],
+      "1F62A": [
+        "uso unaosinzia",
+        "usingizi",
+        "uso"
+      ],
+      "1F62B": [
+        "uso uliochoka",
+        "kuchoka",
+        "kuhisi",
+        "uchovu",
+        "uso"
+      ],
+      "1F62C": [
+        "uso uliokunjwa",
+        "kunja",
+        "meno",
+        "mganga wa meno",
+        "onyesha meno",
+        "uso"
+      ],
+      "1F62D": [
+        "uso unaolia kwa sauti",
+        "chozi",
+        "huzuni",
+        "kulia",
+        "lia",
+        "machozi",
+        "uso"
+      ],
+      "1F62E": [
+        "uso wenye mdomo ulio wazi",
+        "funguliwa",
+        "huruma",
+        "mdomo",
+        "shangaa",
+        "uso"
+      ],
+      "1F62F": [
+        "uso ulionyamaa",
+        "kunyamaa",
+        "kushangazwa",
+        "kustaajabu",
+        "uso"
+      ],
+      "1F630": [
+        "uso wenye wasiwasi unaotokwa na jasho",
+        "funguliwa",
+        "jasho",
+        "jembamba",
+        "mdomo",
+        "samawati",
+        "sisimka",
+        "uso wenye midomo wazi",
+        "wasiwasi"
+      ],
+      "1F631": [
+        "uso unaopiga mayowe ya hofu",
+        "kuhofu",
+        "kula",
+        "kuogopa",
+        "mayowe",
+        "uso",
+        "woga"
+      ],
+      "1F632": [
+        "uso uliostaajabu",
+        "kabisa",
+        "kushangaa",
+        "kushtuliwa",
+        "kustaajabishwa",
+        "uso"
+      ],
+      "1F633": [
+        "uso uliojawa msisimko",
+        "inashangaza",
+        "kizunguzungu",
+        "kutoamini",
+        "shangaza",
+        "sisimka",
+        "uso"
+      ],
+      "1F634": [
+        "uso unaoonyesha usingizi",
+        "kusinzia",
+        "lala",
+        "usiku",
+        "usingizi",
+        "uso"
+      ],
+      "1F635": [
+        "uso unaoonyesha kuwa na kizunguzungu",
+        "kizunguzungu",
+        "kuchoka",
+        "uso"
+      ],
+      "1F636": [
+        "uso bila mdomo",
+        "kimya",
+        "kunyamaza",
+        "mdomo",
+        "uso"
+      ],
+      "1F637": [
+        "uso uliovaa barakoa ya matibabu",
+        "barakoa",
+        "daktari",
+        "dawa",
+        "mafua",
+        "mgonjwa",
+        "uso"
+      ],
+      "1F638": [
+        "uso wa paka mwenye tabasamu wenye macho ya tabasamu",
+        "jicho",
+        "kenua",
+        "paka",
+        "tabasamu",
+        "uso",
+        "uso wa paka unaokenua wenye macho yanayotabasamu"
+      ],
+      "1F639": [
+        "paka mwenye machozi ya furaha",
+        "chozi",
+        "furaha",
+        "paka",
+        "uso"
+      ],
+      "1F63A": [
+        "uso wa paka mwenye tabasamu",
+        "funguliwa",
+        "kucheka",
+        "mdomo",
+        "onyesha taba samu",
+        "paka",
+        "tabasamu",
+        "uso"
+      ],
+      "1F63B": [
+        "uso wa paka unaotabasamu wenye macho yenye umbo la moyo",
+        "jicho",
+        "moyo",
+        "paka",
+        "tabasamu",
+        "upendo",
+        "uso"
+      ],
+      "1F63C": [
+        "uso wa paka wenye tabasamu la kulazimisha",
+        "kejeli",
+        "kulazimisha",
+        "paka",
+        "tabasamu",
+        "uso"
+      ],
+      "1F63D": [
+        "uso wa paka anayebusu",
+        "busu",
+        "jicho",
+        "paka",
+        "uso"
+      ],
+      "1F63E": [
+        "uso wa paka uliobibidua midomo",
+        "kubibidua midomo",
+        "paka",
+        "uso"
+      ],
+      "1F63F": [
+        "uso wa paka unaolia",
+        "chozi",
+        "huzuni",
+        "lia",
+        "mnyama",
+        "paka",
+        "uso"
+      ],
+      "1F640": [
+        "uso wa paka uliochoka",
+        "lo!",
+        "paka",
+        "shangazwa",
+        "uchovu",
+        "uso"
+      ],
+      "1F641": [
+        "uso ulionuna kiasi",
+        "kununa",
+        "uso"
+      ],
+      "1F642": [
+        "uso unaotabasamu kwa mbali",
+        "tabasamu",
+        "uso"
+      ],
+      "1F643": [
+        "uso uliogeuzwa juu chini",
+        "kugeuzwa juu chini",
+        "uso"
+      ],
+      "1F644": [
+        "usio wenye macho yanayorembua",
+        "kubiringika",
+        "kurembua",
+        "macho",
+        "siamini",
+        "uso",
+        "uso wenye macho yanayorembua"
+      ],
+      "1F645": [
+        "mtu anayeonyesha ishara ya kukataa",
+        "hapana",
+        "ishara",
+        "ishara ya kukataa",
+        "katazwa",
+        "marufuku",
+        "mkono",
+        "siyo"
+      ],
+      "1F646": [
+        "mtu anayeonyesha ishara ya kukubali",
+        "ishara",
+        "ishara ya kukubali",
+        "mkono",
+        "sawa"
+      ],
+      "1F647": [
+        "mtu aliyeinama",
+        "hali ya kujutia",
+        "inama",
+        "ishara",
+        "msamaha",
+        "samahani"
+      ],
+      "1F648": [
+        "nyani aliyefumba macho kwa mikono",
+        "aibu",
+        "angalia",
+        "marufuku",
+        "mnyama",
+        "nyani",
+        "uovu",
+        "uso"
+      ],
+      "1F649": [
+        "nyani aliyefunika masikio kwa mikono",
+        "kusikia",
+        "marufuku",
+        "nyani",
+        "sikiliza",
+        "uovu",
+        "usisikie maovu",
+        "uso"
+      ],
+      "1F64A": [
+        "nyani aliyefunika mdomo kwa mikono",
+        "kuzungumza",
+        "marufuku",
+        "nyani",
+        "uovu",
+        "uso"
+      ],
+      "1F64B": [
+        "mtu mwenye furaha aliyeinua mkono",
+        "furaha",
+        "inua mkono",
+        "inuliwa",
+        "ishara",
+        "mimi",
+        "mkono",
+        "naelewa",
+        "najua",
+        "swali"
+      ],
+      "1F64C": [
+        "mikono iliyoinuliwa",
+        "inuliwa",
+        "ishara",
+        "kusherehekea",
+        "mkono",
+        "mwili",
+        "shangwe"
+      ],
+      "1F64D": [
+        "mtu anayekunja kipaji cha uso",
+        "chukizwa",
+        "ishara",
+        "kasirika",
+        "kukosa matumaini",
+        "mtu aliye chukizwa"
+      ],
+      "1F64E": [
+        "mtu aliyebibidua midomo",
+        "bibidua midomo",
+        "ishara",
+        "kukosa matumaini",
+        "kununa"
+      ],
+      "1F64F": [
+        "mikono iliyokunjwa",
+        "asante",
+        "inama",
+        "kunjwa",
+        "omba",
+        "shukrani",
+        "tafadhali",
+        "uliza"
+      ],
+      "1F680": [
+        "roketi",
+        "anga",
+        "gari",
+        "roketi ya angani"
+      ],
+      "1F681": [
+        "helikopta",
+        "gari"
+      ],
+      "1F682": [
+        "garimoshi",
+        "gari",
+        "ingini ya garimoshi",
+        "injini",
+        "mvuke",
+        "reli",
+        "treni"
+      ],
+      "1F683": [
+        "gari la moshi",
+        "basi la tramu",
+        "gari",
+        "reli",
+        "tramu",
+        "treni",
+        "umeme"
+      ],
+      "1F684": [
+        "treni yenye kasi",
+        "gari",
+        "kasi",
+        "reli",
+        "shinkansen",
+        "trani ya mwendo kasi",
+        "treni"
+      ],
+      "1F685": [
+        "treni yenye kasi yenye umbo la risasi",
+        "gari",
+        "kasi",
+        "reli",
+        "risasi",
+        "shinkansen",
+        "treni",
+        "treni ya mwendo kasi"
+      ],
+      "1F686": [
+        "treni",
+        "gari",
+        "reli"
+      ],
+      "1F687": [
+        "metro",
+        "gari",
+        "reli ya chini ya ardhi",
+        "safari",
+        "treni ya mjini"
+      ],
+      "1F688": [
+        "reli nyepesi",
+        "gari",
+        "reli"
+      ],
+      "1F689": [
+        "kituo",
+        "gari",
+        "kituo cha treni",
+        "reli",
+        "teni",
+        "treni"
+      ],
+      "1F68A": [
+        "tramu",
+        "basi la tramu",
+        "mwendokasi"
+      ],
+      "1F68B": [
+        "gari la tramu",
+        "basi la tramu",
+        "gari",
+        "tramu"
+      ],
+      "1F68C": [
+        "basi",
+        "basi la shule",
+        "gari"
+      ],
+      "1F68D": [
+        "basi linalokuja",
+        "basi",
+        "gari",
+        "linalokuja"
+      ],
+      "1F68E": [
+        "kiberenge",
+        "basi",
+        "gari",
+        "toroli",
+        "tramu"
+      ],
+      "1F68F": [
+        "kituo cha basi",
+        "gari",
+        "kituo"
+      ],
+      "1F690": [
+        "basi dogo",
+        "basi",
+        "gari"
+      ],
+      "1F691": [
+        "ambulansi",
+        "gari",
+        "gari la wagojwa"
+      ],
+      "1F692": [
+        "gari la zimamoto",
+        "gari",
+        "injini",
+        "lori",
+        "moto"
+      ],
+      "1F693": [
+        "gari la polisi",
+        "gari",
+        "polisi",
+        "ziara"
+      ],
+      "1F694": [
+        "gari la polisi linalokuja",
+        "gari",
+        "linalokuja",
+        "polisi"
+      ],
+      "1F695": [
+        "teksi",
+        "gari"
+      ],
+      "1F696": [
+        "teksi inayokuja",
+        "gari",
+        "linalokuja",
+        "teksi"
+      ],
+      "1F697": [
+        "gari",
+        "kuendesha",
+        "motokaa"
+      ],
+      "1F698": [
+        "gari linalokuja",
+        "gari",
+        "linalokuja",
+        "motokaa"
+      ],
+      "1F699": [
+        "gari la burudani",
+        "gari",
+        "gari la huduma",
+        "la burudani",
+        "rv"
+      ],
+      "1F69A": [
+        "gari la kusafirisha mizigo",
+        "gari",
+        "gari la kusambazia mizigo",
+        "kusafirisha",
+        "lori"
+      ],
+      "1F69B": [
+        "lori linalobeba mizigo",
+        "gari",
+        "lori",
+        "lori dogo",
+        "lori la mizigo"
+      ],
+      "1F69C": [
+        "trekta",
+        "gari"
+      ],
+      "1F69D": [
+        "reli moja",
+        "gari"
+      ],
+      "1F69E": [
+        "reli ya milimani",
+        "gari",
+        "mlima",
+        "reli",
+        "safari"
+      ],
+      "1F69F": [
+        "reli inayoelea angani",
+        "elea",
+        "gari",
+        "reli"
+      ],
+      "1F6A0": [
+        "gari linalosafiri milimani kwa kamba",
+        "gari",
+        "gari linalosafiri kwenye kamba zilizoning’ing’izwa",
+        "gari linalosafiri kwenye kamba zilizoning’ing’izwa hewani",
+        "kebo"
+      ],
+      "1F6A1": [
+        "tramu inayosafiri angani kwa kamba",
+        "gari",
+        "gari linalosafiri kwenye kamba zilizoning’ing’izwa hewani",
+        "gari linalosafiri kwenye kamba zilizoning’inizwa hewani",
+        "hewani",
+        "kebo",
+        "njia ya kamba",
+        "njia ya tramu"
+      ],
+      "1F6A2": [
+        "meli",
+        "abiria",
+        "mashua",
+        "titanic"
+      ],
+      "1F6A3": [
+        "ngalawa",
+        "boti",
+        "gari",
+        "kupiga makasia",
+        "mashua",
+        "mpiga kasia",
+        "ziwa"
+      ],
+      "1F6A4": [
+        "mashua ya kasi",
+        "boti",
+        "gari"
+      ],
+      "1F6A5": [
+        "taa mlalo ya trafiki",
+        "ishara",
+        "taa",
+        "trafiki"
+      ],
+      "1F6A6": [
+        "taa wima ya trafiki",
+        "ishara",
+        "taa",
+        "taa ya trafiki",
+        "trafiki"
+      ],
+      "1F6A7": [
+        "ujenzi",
+        "kizuizi"
+      ],
+      "1F6A8": [
+        "taa ya gari la polisi",
+        "gari",
+        "kuzunguka",
+        "mwanga",
+        "polisi",
+        "taa"
+      ],
+      "1F6A9": [
+        "bendera yenye pembe",
+        "mlingoti"
+      ],
+      "1F6AA": [
+        "mlango"
+      ],
+      "1F6AB": [
+        "imepigwa marufuku",
+        "hapana",
+        "katazwa",
+        "kuingia",
+        "siyo"
+      ],
+      "1F6AC": [
+        "sigara iliyowashwa",
+        "kuvuta sigara",
+        "sigara"
+      ],
+      "1F6AD": [
+        "hakuna kuvuta sigara",
+        "hapana",
+        "katazwa",
+        "kuvuta sigara",
+        "marufuku",
+        "siyo"
+      ],
+      "1F6AE": [
+        "weka taka kwenye pipa",
+        "pipa la taka",
+        "taka",
+        "takataka"
+      ],
+      "1F6AF": [
+        "hakuna kutupa taka",
+        "hapana",
+        "katazwa",
+        "kutupa taka",
+        "marufuku",
+        "siyo"
+      ],
+      "1F6B0": [
+        "maji safi ya kunywa",
+        "kunywa",
+        "maji",
+        "safi kwa kunywa"
+      ],
+      "1F6B1": [
+        "maji hayafai kwa matumizi ya kunywa",
+        "isiyo bebeka",
+        "kavu",
+        "maji",
+        "si ya kunywa",
+        "yamezuiwa"
+      ],
+      "1F6B2": [
+        "baisikeli",
+        "gari"
+      ],
+      "1F6B3": [
+        "baisikeli haziruhusiwi",
+        "baisikeli",
+        "gari",
+        "hapana",
+        "katazwa",
+        "marufuku",
+        "siyo"
+      ],
+      "1F6B4": [
+        "mwendesha baisikeli",
+        "baisikeli",
+        "mwendesha baiskeli"
+      ],
+      "1F6B5": [
+        "mtu anayeendesha baisikeli mlimani",
+        "baisikeli",
+        "kuendesha baiskeli",
+        "mlima",
+        "mwendesha baisikeli"
+      ],
+      "1F6B6": [
+        "mtu anayetembea",
+        "kutembea",
+        "kutembea umbali mrefu",
+        "matembezi",
+        "natoka",
+        "tembea"
+      ],
+      "1F6B7": [
+        "watembea kwa miguu hawaruhusiwi",
+        "hapana",
+        "katazwa",
+        "marufuku",
+        "mtembea kwa miguu",
+        "siyo"
+      ],
+      "1F6B8": [
+        "watoto wanavuka barabara",
+        "kuvuka",
+        "mtembea kwa miguu",
+        "mtoto",
+        "trafiki"
+      ],
+      "1F6B9": [
+        "maliwato ya wanaume",
+        "choo",
+        "maliwato",
+        "mwanamume"
+      ],
+      "1F6BA": [
+        "maliwato ya wanawake",
+        "maliwato",
+        "mwanamke"
+      ],
+      "1F6BB": [
+        "maliwato",
+        "choo"
+      ],
+      "1F6BC": [
+        "alama ya mtoto",
+        "kubadilisha nguo",
+        "mtoto"
+      ],
+      "1F6BD": [
+        "choo",
+        "maliwato"
+      ],
+      "1F6BE": [
+        "msala",
+        "choo",
+        "maji",
+        "maliwato"
+      ],
+      "1F6BF": [
+        "bafu ya manyunyu",
+        "maji"
+      ],
+      "1F6C0": [
+        "mtu anayeoga",
+        "bafu",
+        "hodhi"
+      ],
+      "1F6C1": [
+        "bafu",
+        "hamamu"
+      ],
+      "1F6C2": [
+        "udhibiti wa pasipoti",
+        "pasipoti",
+        "udhibiti"
+      ],
+      "1F6C3": [
+        "forodha",
+        "eneo la kuegesha",
+        "eneo la kuingia"
+      ],
+      "1F6C4": [
+        "madai ya mzigo",
+        "dai",
+        "mzigo",
+        "safari",
+        "sanduku",
+        "sehemu ya mizigo",
+        "tayari"
+      ],
+      "1F6C5": [
+        "mahali pa kuhifadhi mizigo",
+        "hifadhi",
+        "mzigo"
+      ],
+      "1F6CC": [
+        "mtu aliyelala kitandani",
+        "hoteli",
+        "kitanda",
+        "kulala",
+        "lala"
+      ],
+      "1F6D0": [
+        "mahali pa kuabudu",
+        "abudu",
+        "dini"
+      ],
+      "1F6D1": [
+        "taa ya kusimama",
+        "alama ya kusimama",
+        "alama ya kusimama ya pembe nane",
+        "somama",
+        "trafiki"
+      ],
+      "1F6D2": [
+        "mkokoteni",
+        "kigari cha kununulia bidhaa",
+        "toroli",
+        "ununuzi"
+      ],
+      "1F6D5": [
+        "hekalu la kihindi",
+        "hekalu",
+        "kihindi",
+        "mhindu"
+      ],
+      "1F6D6": [
+        "kibanda cha mviringo",
+        "kibanda",
+        "nyumba",
+        "nyumba ya mviringo",
+        "nyumbani"
+      ],
+      "1F6D7": [
+        "kambarau",
+        "kuinua",
+        "lifti",
+        "ufikivu"
+      ],
+      "1F6DC": [
+        "pasiwaya",
+        "hotspot",
+        "intaneti",
+        "kompyuta",
+        "mtandao",
+        "muunganisho",
+        "simu janja",
+        "simu mahiri",
+        "wifi"
+      ],
+      "1F6DD": [
+        "mtelezo wa watoto",
+        "bustani",
+        "bustani ya burudani",
+        "kucheza",
+        "kuteleza",
+        "mchezo"
+      ],
+      "1F6DE": [
+        "gurudumu",
+        "gari",
+        "mviringo",
+        "mzunguko",
+        "tairi"
+      ],
+      "1F6DF": [
+        "boya okozi",
+        "boya",
+        "kihifadhi maisha",
+        "kiokoa maisha",
+        "kivukoni",
+        "kuogelea",
+        "kuokoa",
+        "msaada",
+        "okoa",
+        "usalama"
+      ],
+      "1F6E0": [
+        "nyundo na spana malaya",
+        "nyungo",
+        "spana malaya",
+        "zana",
+        "zana za ujenzi"
+      ],
+      "1F6E1": [
+        "ngao",
+        "kinga",
+        "silaha"
+      ],
+      "1F6E2": [
+        "pipa la mafuta",
+        "mafuta",
+        "ngoma",
+        "oili"
+      ],
+      "1F6E3": [
+        "barabara kuu",
+        "barabara"
+      ],
+      "1F6E4": [
+        "njia ya reli",
+        "reli",
+        "treni"
+      ],
+      "1F6E5": [
+        "motaboti",
+        "boti",
+        "gari"
+      ],
+      "1F6E9": [
+        "ndege ndogo",
+        "gari",
+        "ndege"
+      ],
+      "1F6EB": [
+        "ndege inayoondoka",
+        "gari",
+        "kuingia",
+        "kuondoka",
+        "ndege"
+      ],
+      "1F6EC": [
+        "ndege inayowasili",
+        "gari",
+        "inaasili",
+        "kutua",
+        "kuwasili",
+        "ndege",
+        "uwanja wa ndege"
+      ],
+      "1F6F0": [
+        "setilaiti",
+        "anga",
+        "angani",
+        "gari"
+      ],
+      "1F6F3": [
+        "meli ya abiria",
+        "abiria",
+        "meli"
+      ],
+      "1F6F4": [
+        "skuta",
+        "skuta ya umeme"
+      ],
+      "1F6F5": [
+        "pikipiki (skuta)",
+        "pikipiki",
+        "skuta"
+      ],
+      "1F6F6": [
+        "mtumbwi",
+        "mashua",
+        "ngalawa"
+      ],
+      "1F6F7": [
+        "sleji",
+        "sleji ya kuteleza thelujini"
+      ],
+      "1F6F8": [
+        "kisahani kinachopaa",
+        "chombo kisichotambulika kinachopaa"
+      ],
+      "1F6F9": [
+        "ubao mtelezo",
+        "ubao"
+      ],
+      "1F6FA": [
+        "riksho",
+        "tuk tuk"
+      ],
+      "1F6FB": [
+        "gari la mizigo",
+        "gari",
+        "kubeba mizigo",
+        "lori",
+        "motokaa",
+        "uchukuzi",
+        "usafirishaji"
+      ],
+      "1F6FC": [
+        "rolasketi",
+        "mchezo",
+        "michezo",
+        "rola",
+        "teleza"
+      ],
+      "1F7E0": [
+        "mduara wa chungwa",
+        "chungwa",
+        "duara",
+        "duara rangu ya chungwa",
+        "mduara",
+        "rangi ya chungwa"
+      ],
+      "1F7E1": [
+        "mduara wa manjano",
+        "duara",
+        "manjano",
+        "mduara"
+      ],
+      "1F7E2": [
+        "mduara wa kijani",
+        "duara",
+        "kijani",
+        "mduara"
+      ],
+      "1F7E3": [
+        "mduara wa zambarau",
+        "duara",
+        "mduara",
+        "zambarau"
+      ],
+      "1F7E4": [
+        "mduara wa hudhurungi",
+        "duara",
+        "hudhurungi",
+        "kahawia",
+        "mduara"
+      ],
+      "1F7E5": [
+        "mraba mwekundu",
+        "mraba",
+        "nyekundu"
+      ],
+      "1F7E6": [
+        "mraba wa samawati",
+        "bluu",
+        "mraba",
+        "mraba wa bluu",
+        "samawati"
+      ],
+      "1F7E7": [
+        "mraba wa chungwa",
+        "chungwa",
+        "mraba",
+        "rangi ya chungwa"
+      ],
+      "1F7E8": [
+        "mraba wa manjano",
+        "manjano",
+        "mraba"
+      ],
+      "1F7E9": [
+        "mraba wa kijani",
+        "kijani",
+        "mraba"
+      ],
+      "1F7EA": [
+        "mraba wa zambarau",
+        "mraba",
+        "mraba wa zambarawe",
+        "zambarau"
+      ],
+      "1F7EB": [
+        "mraba wa hudhurungi",
+        "hudhurungi",
+        "kahawia",
+        "mraba"
+      ],
+      "1F7F0": [
+        "ishara ya usawa",
+        "hisabati",
+        "jibu",
+        "sawa na",
+        "usawa"
+      ],
+      "1F90C": [
+        "mkono wenye vidole vinavyobana",
+        "ishara ya mkono",
+        "kejeli",
+        "kidogo",
+        "kubanwa",
+        "kuuliza",
+        "mkono",
+        "subiri kidogo",
+        "vidole"
+      ],
+      "1F90D": [
+        "moyo mweupe",
+        "moyo",
+        "moyo safi",
+        "nyeupe"
+      ],
+      "1F90E": [
+        "moyo wa hudhurungi",
+        "hudhurungi",
+        "kahawia",
+        "moyo",
+        "moyo wa kahawia"
+      ],
+      "1F90F": [
+        "vidole vinavyobana",
+        "kiasi fulani",
+        "kiasi kidogo",
+        "kidogo",
+        "kidunchu"
+      ],
+      "1F918": [
+        "ishara ya pembe",
+        "cheza",
+        "kidole",
+        "mkono",
+        "mwili",
+        "pembe"
+      ],
+      "1F919": [
+        "ishara ya “nipigie simu”",
+        "mkono",
+        "nipigie simu"
+      ],
+      "1F91A": [
+        "kuinua mkono",
+        "kiganja",
+        "mkono juu"
+      ],
+      "1F91B": [
+        "ngumi ya kulia"
+      ],
+      "1F91C": [
+        "ngumi ya kushoto",
+        "ngumi"
+      ],
+      "1F91D": [
+        "kusalimiana",
+        "kukutana",
+        "maafikiano",
+        "makubaliano",
+        "salamu"
+      ],
+      "1F91E": [
+        "ishara ya kubahatisha",
+        "bahati",
+        "kubahatisha",
+        "mkono"
+      ],
+      "1F91F": [
+        "ishara ya \"nakupenda\"",
+        "mkono",
+        "nakupenda"
+      ],
+      "1F920": [
+        "uso wenye kofia",
+        "kofia",
+        "uso"
+      ],
+      "1F921": [
+        "katuni",
+        "uso"
+      ],
+      "1F922": [
+        "kichefuchefu",
+        "kizunguzungu",
+        "kutapika",
+        "mgonjwa",
+        "ugonjwa",
+        "uso"
+      ],
+      "1F923": [
+        "angua kicheko",
+        "cheka",
+        "chekesha",
+        "furaha",
+        "kugaragara",
+        "sakafu",
+        "uso"
+      ],
+      "1F924": [
+        "kutema mate",
+        "uso"
+      ],
+      "1F925": [
+        "uso unaodanganya",
+        "kudanganya",
+        "pinocchio",
+        "uwongo"
+      ],
+      "1F926": [
+        "ishara ya kutoamini",
+        "hali ya kushangaa"
+      ],
+      "1F927": [
+        "kupiga chafya",
+        "gesundheit",
+        "homa",
+        "mafua",
+        "ugonjwa",
+        "uso"
+      ],
+      "1F928": [
+        "uso wenye nyusi zilizoinuka",
+        "kushuku",
+        "tuhumu"
+      ],
+      "1F929": [
+        "uso wenye macho ya nyota",
+        "kukenua",
+        "macho",
+        "nyota",
+        "uso"
+      ],
+      "1F92A": [
+        "uso wa kutania",
+        "jicho",
+        "kubwa",
+        "ndogo"
+      ],
+      "1F92B": [
+        "uso unaonyamazisha",
+        "kimya",
+        "nyamaza",
+        "shh"
+      ],
+      "1F92C": [
+        "uso wenye ishara mdomoni",
+        "kuapa",
+        "kutukana"
+      ],
+      "1F92D": [
+        "uso uliofunika mdomo kwa mkono",
+        "kugundua kwa ghafla",
+        "lo!",
+        "mshangao",
+        "mshtuko",
+        "siri"
+      ],
+      "1F92E": [
+        "uso unaotapika",
+        "mgonjwa",
+        "tapika"
+      ],
+      "1F92F": [
+        "kichwa kinacholipuka",
+        "haiwezekani",
+        "lipuka",
+        "mshtuko"
+      ],
+      "1F930": [
+        "mwanamke mjamzito",
+        "mjamzito",
+        "mwanamke"
+      ],
+      "1F931": [
+        "kunyonyesha mtoto",
+        "kunyonyesha",
+        "mtoto",
+        "titi"
+      ],
+      "1F932": [
+        "viganja vilivyoshikana",
+        "maombi"
+      ],
+      "1F933": [
+        "selfi",
+        "kamera",
+        "selfie",
+        "simu"
+      ],
+      "1F934": [
+        "mwana wa mfalme"
+      ],
+      "1F935": [
+        "mtu aliyevaa tuxedo",
+        "bwana harusi",
+        "mtu wa kiume",
+        "mwanamume mwenye tuxedo",
+        "tuxedo"
+      ],
+      "1F936": [
+        "mkongwe",
+        "bibi",
+        "krismasi",
+        "mama",
+        "nyanya",
+        "sherehe"
+      ],
+      "1F937": [
+        "ishara ya kutojali",
+        "sielewi",
+        "sijali"
+      ],
+      "1F938": [
+        "sarakasi",
+        "mchezaji",
+        "mwanasarakasi",
+        "shauku"
+      ],
+      "1F939": [
+        "shughuli nyingi",
+        "kurusha mipira mingi kwa mikono"
+      ],
+      "1F93A": [
+        "mtu aliyeshika upanga",
+        "spoti",
+        "upanga"
+      ],
+      "1F93C": [
+        "wanandondi",
+        "bondia",
+        "miereka",
+        "ndondi",
+        "spoti",
+        "wanamiereka"
+      ],
+      "1F93D": [
+        "michezo kwenye bwawa la kuogelea",
+        "bwawa la kuogelea",
+        "maji",
+        "spoti"
+      ],
+      "1F93E": [
+        "mpira wa mikono",
+        "mchezaji wa mpira wa mikono",
+        "mpira",
+        "spoti"
+      ],
+      "1F942": [
+        "kugonga glasi",
+        "glasi mbili",
+        "kunywa",
+        "sherehe"
+      ],
+      "1F943": [
+        "glasi",
+        "mvinyo",
+        "pombe"
+      ],
+      "1F944": [
+        "kijiko",
+        "kula",
+        "vyombo vya kulia"
+      ],
+      "1F945": [
+        "wavu",
+        "funga bao",
+        "goli",
+        "spoti"
+      ],
+      "1F947": [
+        "nishani ya dhababu",
+        "dhahabu",
+        "nafasi ya kwanza",
+        "nishani"
+      ],
+      "1F948": [
+        "nishani ya fedha",
+        "fedha",
+        "nafasi ya pili",
+        "nishani"
+      ],
+      "1F949": [
+        "nishani ya shaba",
+        "nafasi ya tatu",
+        "nishani",
+        "shaba"
+      ],
+      "1F94A": [
+        "glavu za ndondi",
+        "glavu",
+        "ndondi",
+        "spoti"
+      ],
+      "1F94B": [
+        "vazi la karate",
+        "judo",
+        "karate",
+        "spoti",
+        "taekwondo"
+      ],
+      "1F94C": [
+        "mpira wa kutelezesha",
+        "jiwe",
+        "mchezo",
+        "mwamba"
+      ],
+      "1F950": [
+        "mahamri",
+        "chakula",
+        "maandazi",
+        "mkate",
+        "vitumbua"
+      ],
+      "1F951": [
+        "parachichi",
+        "chakula",
+        "matunda",
+        "tunda"
+      ],
+      "1F952": [
+        "tango",
+        "chakula",
+        "mboga",
+        "tango pepeta"
+      ],
+      "1F953": [
+        "nyama",
+        "chakula",
+        "nyama ya nguruwe"
+      ],
+      "1F954": [
+        "viazi",
+        "chakula",
+        "kiazi",
+        "mboga"
+      ],
+      "1F955": [
+        "karoti",
+        "chakula",
+        "mboga"
+      ],
+      "1F956": [
+        "mkate wa kifaransa",
+        "chakula",
+        "mkate"
+      ],
+      "1F957": [
+        "kachumbari",
+        "chakula",
+        "kijani",
+        "saladi"
+      ],
+      "1F958": [
+        "kikaango",
+        "chakula",
+        "chapati",
+        "karai",
+        "kikaangio",
+        "paella",
+        "sufuria"
+      ],
+      "1F959": [
+        "shawarma",
+        "chakula",
+        "kababu"
+      ],
+      "1F95A": [
+        "yai",
+        "chakula"
+      ],
+      "1F95B": [
+        "glasi yenye maziwa",
+        "glasi",
+        "kinywaji",
+        "maziwa"
+      ],
+      "1F95C": [
+        "njugu",
+        "chakula",
+        "karanga"
+      ],
+      "1F95D": [
+        "tunda la kiwi",
+        "chakula",
+        "matunda"
+      ],
+      "1F95E": [
+        "chapati",
+        "chakula"
+      ],
+      "1F95F": [
+        "pudini ya kinyunya",
+        "empanada",
+        "gyoza",
+        "jiaozi",
+        "pierogi",
+        "potsticker",
+        "pudini"
+      ],
+      "1F960": [
+        "biskuti ya bahati",
+        "ubashiri"
+      ],
+      "1F961": [
+        "kisanduku cha chakula",
+        "katoni ya chakula",
+        "wakilisha chakula"
+      ],
+      "1F962": [
+        "vijiti vya kutumia kula",
+        "hashi",
+        "vijiti vya kulia"
+      ],
+      "1F963": [
+        "bakuli lenye kijiko",
+        "kiamsha kinywa",
+        "nafaka",
+        "uji"
+      ],
+      "1F964": [
+        "kikombe chenye mrija",
+        "juisi",
+        "kijwaji",
+        "maji",
+        "maji ya machungwa",
+        "soda"
+      ],
+      "1F965": [
+        "nazi",
+        "mnazi",
+        "pina kolada",
+        "tui"
+      ],
+      "1F966": [
+        "brokoli",
+        "kabichi ya msitu"
+      ],
+      "1F967": [
+        "pai",
+        "vijazo",
+        "vitobosho"
+      ],
+      "1F968": [
+        "pretzel",
+        "iliyosokotwa"
+      ],
+      "1F969": [
+        "kipande cha nyama",
+        "kipande cha nyama ya kondoo",
+        "kipande cha nyama ya nguruwe",
+        "nyama"
+      ],
+      "1F96A": [
+        "sandwichi",
+        "mkate"
+      ],
+      "1F96B": [
+        "chakula kilicho koponi",
+        "chakula cha kopo",
+        "kopo"
+      ],
+      "1F96C": [
+        "sukumawiki",
+        "bok choy",
+        "jani la kijani",
+        "kabichi",
+        "mchicha",
+        "saladi"
+      ],
+      "1F96D": [
+        "embe",
+        "chakula",
+        "embe dodo",
+        "tropiki",
+        "tunda"
+      ],
+      "1F96E": [
+        "mkate wa sinia",
+        "keki",
+        "mapukutiko",
+        "sherehe",
+        "yuebing"
+      ],
+      "1F96F": [
+        "mkate wa kuoka",
+        "kifungua kinywa",
+        "kuoka",
+        "mkate",
+        "siagi"
+      ],
+      "1F970": [
+        "uso wenye tabasamu na maumbo ya moyo",
+        "huba",
+        "mahaba",
+        "mapenzi",
+        "moyo",
+        "nakupenda",
+        "tabasamu",
+        "tamani",
+        "uso",
+        "uso wenye tabasamu na mahaba"
+      ],
+      "1F971": [
+        "uso unaopiga miayo",
+        "choka",
+        "kuchoka",
+        "piga miayo",
+        "sinzia",
+        "uchovu"
+      ],
+      "1F972": [
+        "uso unaotabasamu na wenye chozi",
+        "asante",
+        "chozi",
+        "faraja",
+        "furaha",
+        "kujivunia",
+        "kutabasamu",
+        "kutulia"
+      ],
+      "1F973": [
+        "uso wenye kofia ya karamu",
+        "filimbi",
+        "furaha",
+        "karamu",
+        "kofia",
+        "sherehe",
+        "siku ya kuzaliwa",
+        "uso"
+      ],
+      "1F974": [
+        "uso uliolewa",
+        "kilevilevi",
+        "kizunguzungu",
+        "mlevi",
+        "mvinyo",
+        "ulevi"
+      ],
+      "1F975": [
+        "uso wenye joto",
+        "homa",
+        "joto",
+        "joto jingi",
+        "kijasho",
+        "kufa",
+        "ulimi nje",
+        "uso mwekundu"
+      ],
+      "1F976": [
+        "uso wenye baridi",
+        "barafu",
+        "baridi",
+        "buluu",
+        "kuganda",
+        "theluji",
+        "uso",
+        "uso wa samawati"
+      ],
+      "1F977": [
+        "ninja",
+        "askari",
+        "chinichini",
+        "jeshi",
+        "kachinja",
+        "mpiganaji",
+        "muuaji",
+        "shushushu",
+        "siri",
+        "vita"
+      ],
+      "1F978": [
+        "uso uliogeuzwa ili kuficha",
+        "jasusi",
+        "kodoa macho",
+        "kujificha",
+        "kujifunika",
+        "masharubu",
+        "miwani",
+        "mtu",
+        "pua",
+        "uso"
+      ],
+      "1F979": [
+        "uso unaolengwalengwa na machozi",
+        "aibu",
+        "huzuni",
+        "kasirika",
+        "kiburi",
+        "lia",
+        "macho",
+        "machozi",
+        "zuia"
+      ],
+      "1F97A": [
+        "uso unaosihi",
+        "hisi",
+        "kuhuzunika",
+        "kuomba",
+        "kwanini",
+        "macho makumbwa",
+        "macho yanayosihi",
+        "onea huruma",
+        "sihi",
+        "tafadhali"
+      ],
+      "1F97B": [
+        "sari",
+        "mavazi",
+        "nguo",
+        "vazi"
+      ],
+      "1F97C": [
+        "koti jeupe",
+        "daktari",
+        "koti la maabara",
+        "maabara",
+        "mwanasayansi",
+        "nguo",
+        "sayansi"
+      ],
+      "1F97D": [
+        "miwani ya kuogelea",
+        "kilinda macho",
+        "kufua vyuma",
+        "kuogelea",
+        "linda macho",
+        "piga mbizi"
+      ],
+      "1F97E": [
+        "kiatu cha kutembea mbali",
+        "begi ya mgongoni",
+        "buti",
+        "kiatu cha kahawia",
+        "kupiga kambi",
+        "kutembea"
+      ],
+      "1F97F": [
+        "kiatu kisicho na kisigino",
+        "ingiza mguu",
+        "kandambili",
+        "ndara",
+        "viatu vya bale"
+      ],
+      "1F980": [
+        "kaa",
+        "zodiaki"
+      ],
+      "1F981": [
+        "simba",
+        "leo",
+        "uso",
+        "zodiaki"
+      ],
+      "1F982": [
+        "ng’e",
+        "zodiaki"
+      ],
+      "1F983": [
+        "bata mzinga",
+        "ndege"
+      ],
+      "1F984": [
+        "uso wa farasi mwenye pembe moja",
+        "farasi",
+        "uso"
+      ],
+      "1F985": [
+        "tai (ndege)",
+        "ndege",
+        "tai"
+      ],
+      "1F986": [
+        "bata",
+        "ndege"
+      ],
+      "1F987": [
+        "popo",
+        "mnyama",
+        "ndege"
+      ],
+      "1F988": [
+        "papa",
+        "pweza",
+        "samaki"
+      ],
+      "1F989": [
+        "bundi",
+        "busara",
+        "mnyama",
+        "ndege"
+      ],
+      "1F98A": [
+        "mbweha",
+        "uso"
+      ],
+      "1F98B": [
+        "kipepeo",
+        "maridadi",
+        "mdudu"
+      ],
+      "1F98C": [
+        "kulungu",
+        "mnyama"
+      ],
+      "1F98D": [
+        "sokwe",
+        "mnyama"
+      ],
+      "1F98E": [
+        "mjusi",
+        "kenge",
+        "mnyama",
+        "mnyama anayetamba"
+      ],
+      "1F98F": [
+        "kifaru",
+        "mnyama"
+      ],
+      "1F990": [
+        "uduvi",
+        "chakula",
+        "kamba",
+        "shrimpu"
+      ],
+      "1F991": [
+        "ngisi",
+        "chakula",
+        "samaki"
+      ],
+      "1F992": [
+        "twiga",
+        "madoa"
+      ],
+      "1F993": [
+        "punda milia",
+        "milia"
+      ],
+      "1F994": [
+        "nungunungu",
+        "yenye miiba"
+      ],
+      "1F995": [
+        "sauropodi",
+        "brachiosaurusi",
+        "brontosaurusi",
+        "diplodocusi"
+      ],
+      "1F996": [
+        "t-rex",
+        "dinosaura",
+        "tyrannosaria rex"
+      ],
+      "1F997": [
+        "nyenje",
+        "kriketi",
+        "mdudu",
+        "panzi"
+      ],
+      "1F998": [
+        "kangaruu",
+        "australia",
+        "mnyama",
+        "mtoto wa kangaruu",
+        "ruka"
+      ],
+      "1F999": [
+        "ilama",
+        "alpaca",
+        "guanaco",
+        "mnyama",
+        "sufi",
+        "sufu",
+        "vicuna"
+      ],
+      "1F99A": [
+        "tausi",
+        "kiburi",
+        "majivuno",
+        "ndege"
+      ],
+      "1F99B": [
+        "kiboko",
+        "mnyama"
+      ],
+      "1F99C": [
+        "kasuku",
+        "kuzungumza",
+        "maharamia",
+        "ndege",
+        "ongea"
+      ],
+      "1F99D": [
+        "rakuni",
+        "mdadisi",
+        "mjanja",
+        "myama"
+      ],
+      "1F99E": [
+        "kambamti",
+        "gando",
+        "supu",
+        "vyakula vya baharini"
+      ],
+      "1F99F": [
+        "mbu",
+        "homa",
+        "malaria",
+        "mdudu",
+        "ugojwa",
+        "ugonjwa",
+        "uma",
+        "virusi"
+      ],
+      "1F9A0": [
+        "bakteria",
+        "amoeba",
+        "sayansi",
+        "virusi"
+      ],
+      "1F9A1": [
+        "melesi",
+        "melesi mla asali",
+        "mnyama",
+        "sumbua"
+      ],
+      "1F9A2": [
+        "bata maji",
+        "bata",
+        "mtoto wa bata",
+        "ndege"
+      ],
+      "1F9A3": [
+        "tembo wa kale",
+        "kubwa",
+        "kutoweka",
+        "manyoya",
+        "mnyama",
+        "ndovu",
+        "pembe"
+      ],
+      "1F9A4": [
+        "dodo",
+        "kubwa",
+        "kutoweka",
+        "mnyama",
+        "morisi",
+        "ndege"
+      ],
+      "1F9A5": [
+        "slothi",
+        "mvivu",
+        "mzembe",
+        "polepole",
+        "taratibu"
+      ],
+      "1F9A6": [
+        "fisi-maji",
+        "cheshi",
+        "kuvua samaki"
+      ],
+      "1F9A7": [
+        "orangutanu (sokwe)",
+        "myama",
+        "nyani",
+        "nyani dume",
+        "sokwe"
+      ],
+      "1F9A8": [
+        "kicheche",
+        "kunuka"
+      ],
+      "1F9A9": [
+        "flamingo",
+        "kwenye joto",
+        "madaha",
+        "tropiki"
+      ],
+      "1F9AA": [
+        "chaza",
+        "kupiga mbizi",
+        "lulu"
+      ],
+      "1F9AB": [
+        "buku",
+        "bwawa",
+        "meno",
+        "mnyama",
+        "wanyama na asili"
+      ],
+      "1F9AC": [
+        "baisani",
+        "kundi",
+        "mnyama",
+        "nyati"
+      ],
+      "1F9AD": [
+        "sili",
+        "bahari",
+        "mnyama",
+        "sili mkubwa"
+      ],
+      "1F9AE": [
+        "mbwa wa kuongoza",
+        "kiongozi",
+        "kipofu",
+        "mbwa kiongozi",
+        "sehemu ya wasio ona",
+        "ufikivu"
+      ],
+      "1F9AF": [
+        "mkongojo wa vipofu",
+        "alama ya kipofu",
+        "kipofu",
+        "ufikivu"
+      ],
+      "1F9B0": [
+        "nywele nyekundu",
+        "nyekundu"
+      ],
+      "1F9B1": [
+        "nywele yenye mawimbi",
+        "afro",
+        "mawimbi"
+      ],
+      "1F9B2": [
+        "upara",
+        "bila nywele",
+        "kichwa kilichonyolewa",
+        "tibakemikali"
+      ],
+      "1F9B3": [
+        "nywele nyeupe",
+        "kijivu",
+        "mzee",
+        "nyeupe",
+        "nywele"
+      ],
+      "1F9B4": [
+        "mfupa",
+        "gofu",
+        "mbwa",
+        "mifupa"
+      ],
+      "1F9B5": [
+        "mguu",
+        "goti",
+        "kiungo",
+        "mguu ulio jikunja",
+        "teke"
+      ],
+      "1F9B6": [
+        "wayo",
+        "kanyaga",
+        "piga teke",
+        "unyayo"
+      ],
+      "1F9B7": [
+        "jino",
+        "daktari wa meno",
+        "jino jeupe",
+        "meno"
+      ],
+      "1F9B8": [
+        "shujaa",
+        "mshindi",
+        "mzuri",
+        "nguvu zisizo za kawaida",
+        "shujaa wa kike"
+      ],
+      "1F9B9": [
+        "jambazi sugu",
+        "jambazi",
+        "mhalifu",
+        "mtu mbaya",
+        "mwovu",
+        "nguvu zisizo za kawaida",
+        "uovu"
+      ],
+      "1F9BB": [
+        "sikio lenye kifaa cha kusikia",
+        "tatizo la kutosikia vizuri",
+        "ufikivu"
+      ],
+      "1F9BC": [
+        "kiti cha magurudumu chenye mota",
+        "mapito ya walemavu",
+        "ufikivu"
+      ],
+      "1F9BD": [
+        "kiti cha magurudumu kisicho na mota",
+        "sehemu ya walemavu",
+        "ufikivu"
+      ],
+      "1F9BE": [
+        "mkono bandia",
+        "mkono wa roboti",
+        "ufikivu"
+      ],
+      "1F9BF": [
+        "mguu bandia",
+        "mguu wa roboti",
+        "ufikivu"
+      ],
+      "1F9C0": [
+        "kipande cha jibini",
+        "jibini"
+      ],
+      "1F9C1": [
+        "keki ndogo",
+        "keki ya kikapu",
+        "kuoka",
+        "sukari",
+        "tamu"
+      ],
+      "1F9C2": [
+        "chumvi",
+        "chukiza",
+        "kidau",
+        "kiungo",
+        "pilipili"
+      ],
+      "1F9C3": [
+        "chupa ya kinywaji",
+        "juisi",
+        "katoni ya juisi",
+        "katoni ya kinywaji",
+        "kinywaji",
+        "sanduku",
+        "sanduku la juisi",
+        "tamu"
+      ],
+      "1F9C4": [
+        "kitunguu saumu",
+        "ladha"
+      ],
+      "1F9C5": [
+        "kitunguu",
+        "kiungo",
+        "ladha"
+      ],
+      "1F9C6": [
+        "felafeli",
+        "kababu",
+        "njegere kubwa",
+        "nyama kababu",
+        "nyama ya mviringo"
+      ],
+      "1F9C7": [
+        "mkate wa sega la nyuki",
+        "chakula cha asubuhi",
+        "chuma",
+        "kutoweza kufanya uamuzi"
+      ],
+      "1F9C8": [
+        "siagi",
+        "bidhaa ya maziwa"
+      ],
+      "1F9C9": [
+        "kinywaji cha mate",
+        "kinywaji",
+        "pombe",
+        "pombe ya kienyeji"
+      ],
+      "1F9CA": [
+        "kidonge cha barafu",
+        "barafu",
+        "baridi",
+        "siwa barafu"
+      ],
+      "1F9CB": [
+        "chai ya maziwa ya boba",
+        "chai",
+        "chakula",
+        "lulu",
+        "maziwa",
+        "taiwan",
+        "viputo"
+      ],
+      "1F9CD": [
+        "mtu aliyesimama",
+        "kusimama",
+        "simama"
+      ],
+      "1F9CE": [
+        "mtu aliyepiga magoti",
+        "kupiga magoti",
+        "magoti",
+        "mtu magotini",
+        "piga magoti"
+      ],
+      "1F9CF": [
+        "kiziwi",
+        "kiziwi mwanamke",
+        "kusikia",
+        "mtu kiziwi",
+        "sikio",
+        "ufikivu"
+      ],
+      "1F9D0": [
+        "uso wenye miwani kwenye jicho moja",
+        "iliyorembwa",
+        "yakupendeza"
+      ],
+      "1F9D1": [
+        "mtu mzima",
+        "asiyejitambulisha na jinsia yoyote",
+        "jinsia"
+      ],
+      "1F9D2": [
+        "kijana",
+        "asiyejitambulisha na jinsia yoyote",
+        "jinsia"
+      ],
+      "1F9D3": [
+        "mzee",
+        "asiyejitambulisha na jinsia yoyote",
+        "mtu mzee"
+      ],
+      "1F9D4": [
+        "mtu mwenye ndevu",
+        "mtu",
+        "mtu: ndevu",
+        "mwanamume mwenye ndevu",
+        "ndevu",
+        "ndevu za mwanamumu"
+      ],
+      "1F9D5": [
+        "mwanamke aliyejifunga kitambaa kichwani",
+        "hijab",
+        "kitambaa",
+        "kitambaa cha kichwani",
+        "neti ya kichwani"
+      ],
+      "1F9D6": [
+        "mtu katika bafu la mvuke",
+        "chumba cha mvuke",
+        "kujifukiza",
+        "sauna"
+      ],
+      "1F9D7": [
+        "mtu anayekwea",
+        "mkwezi"
+      ],
+      "1F9D8": [
+        "mtu anayetaamali",
+        "mwanamke anayefanya yoga",
+        "tafakuri",
+        "yoga"
+      ],
+      "1F9D9": [
+        "mlozi",
+        "mchawi",
+        "mchawi wa kike",
+        "mlozi mwanamke",
+        "mwanga"
+      ],
+      "1F9DA": [
+        "kichimbakazi",
+        "jini",
+        "kichimbakazi malkia",
+        "kichimbakazi mfalme"
+      ],
+      "1F9DB": [
+        "mnyonya damu",
+        "dracula",
+        "zimwi"
+      ],
+      "1F9DC": [
+        "nguva mtu",
+        "nguva",
+        "nguva dume",
+        "nguva jike",
+        "nguva kike"
+      ],
+      "1F9DD": [
+        "kibwengo",
+        "mazingaombwe"
+      ],
+      "1F9DE": [
+        "jini",
+        "pepo jini"
+      ],
+      "1F9DF": [
+        "dubwana",
+        "mazimwi",
+        "zimwi"
+      ],
+      "1F9E0": [
+        "ubongo",
+        "akili",
+        "mwerevu"
+      ],
+      "1F9E1": [
+        "moyo wa rangi ya chungwa",
+        "chungwa",
+        "moyo"
+      ],
+      "1F9E2": [
+        "chepeo",
+        "kibandiko cha baba",
+        "kofia",
+        "kofia iliyochorwa emoji",
+        "kofia ya besiboli"
+      ],
+      "1F9E3": [
+        "shali",
+        "shingo"
+      ],
+      "1F9E4": [
+        "glavu",
+        "mkono"
+      ],
+      "1F9E5": [
+        "koti",
+        "baridi",
+        "jaketi"
+      ],
+      "1F9E6": [
+        "soksi",
+        "soksi ndefu"
+      ],
+      "1F9E7": [
+        "bahasha nyekundu",
+        "hongbao",
+        "kila la heri",
+        "lai see",
+        "pesa",
+        "zawadi"
+      ],
+      "1F9E8": [
+        "fataki ya kuchezea",
+        "baruti",
+        "fataki",
+        "kilipuzi",
+        "moto",
+        "mwanga"
+      ],
+      "1F9E9": [
+        "mchezofumbo",
+        "dokezo",
+        "fumbo",
+        "fungamana",
+        "kipande",
+        "kipande cha mchezo wa mafumbo"
+      ],
+      "1F9EA": [
+        "neli ya majaribio",
+        "kemia",
+        "maabara",
+        "majaribio",
+        "mwanakemia",
+        "sayansi"
+      ],
+      "1F9EB": [
+        "chombo cha kupondea",
+        "bakteria",
+        "biolojia",
+        "maabara",
+        "mwanabiolojia"
+      ],
+      "1F9EC": [
+        "dna",
+        "biologist",
+        "jenetiki",
+        "jeni",
+        "mageuko",
+        "mageuzi",
+        "maisha",
+        "mwanabiolojia"
+      ],
+      "1F9ED": [
+        "dira",
+        "kuelekeza",
+        "maelekezo",
+        "smaku",
+        "usafiri"
+      ],
+      "1F9EE": [
+        "abaki",
+        "kokotoa"
+      ],
+      "1F9EF": [
+        "kizima moto",
+        "moto",
+        "zima"
+      ],
+      "1F9F0": [
+        "kisanduku cha vifaa",
+        "kisanduku",
+        "kisanduku cha zana",
+        "kisanduku chekundu",
+        "makanika",
+        "zana"
+      ],
+      "1F9F1": [
+        "tofali",
+        "matofali",
+        "udongo",
+        "ukuta",
+        "zege"
+      ],
+      "1F9F2": [
+        "sumaku",
+        "kiatu cha farasi",
+        "mvuto"
+      ],
+      "1F9F3": [
+        "mzigo",
+        "funganya virago",
+        "safiri",
+        "sanduku"
+      ],
+      "1F9F4": [
+        "chupa ya losheni",
+        "kisitiri jua",
+        "losheni",
+        "mafuta",
+        "shampuu"
+      ],
+      "1F9F5": [
+        "uzi",
+        "kigurudumu cha uzi",
+        "kushona",
+        "sindano"
+      ],
+      "1F9F6": [
+        "uzi uliosokotwa",
+        "kroshia",
+        "shona",
+        "uzi"
+      ],
+      "1F9F7": [
+        "kikwasi",
+        "nepi",
+        "pini ya usalama"
+      ],
+      "1F9F8": [
+        "mwanaserere wa dubu",
+        "dubu",
+        "kidude cha kuchezea",
+        "kikorokoro",
+        "mwanaserere"
+      ],
+      "1F9F9": [
+        "ufagio",
+        "kufagia",
+        "kusafisha",
+        "mchawi",
+        "mfyagio"
+      ],
+      "1F9FA": [
+        "kikapu",
+        "kufua nguo",
+        "kulima",
+        "mandari"
+      ],
+      "1F9FB": [
+        "karatasi",
+        "karatasi ya kuchambia",
+        "taulo ya mikono"
+      ],
+      "1F9FC": [
+        "sabuni",
+        "kipande",
+        "kisahani cha sabuni",
+        "kuoga",
+        "kupaka",
+        "kusafisha",
+        "safisha"
+      ],
+      "1F9FD": [
+        "sifongo",
+        "fyonza",
+        "kufyonza",
+        "kunyonya",
+        "kusafisha"
+      ],
+      "1F9FE": [
+        "risiti",
+        "rekodi",
+        "thibitisho",
+        "uhasibu",
+        "ushahidi"
+      ],
+      "1F9FF": [
+        "hirizi",
+        "jicho baya",
+        "kago",
+        "pepo",
+        "shanga",
+        "talasimu"
+      ],
+      "1FA70": [
+        "viatu vya bale",
+        "bale",
+        "dansi",
+        "dansi ya maigizo",
+        "densi",
+        "viatu vya dansi"
+      ],
+      "1FA71": [
+        "nguo ya kuogelea",
+        "suti ya kuogelea",
+        "vazi la kuogelea"
+      ],
+      "1FA72": [
+        "chupi",
+        "nguo",
+        "nguo ya kuogelea",
+        "suti ya kuogelea",
+        "vazi la kuogelea"
+      ],
+      "1FA73": [
+        "kaptura",
+        "chupi",
+        "nguo",
+        "suruali",
+        "vazi la kuogea",
+        "vazi la kuogelea"
+      ],
+      "1FA74": [
+        "ndara",
+        "kandambili",
+        "malapa",
+        "sapatu",
+        "zori"
+      ],
+      "1FA75": [
+        "moyo wa buluu hafifu",
+        "143",
+        "bluu bahari",
+        "bluu kijani",
+        "buluu",
+        "hafifu",
+        "hisia",
+        "maalum",
+        "mawingu ya bluu",
+        "moyo",
+        "nakupenda",
+        "penda",
+        "rembo",
+        "upendo"
+      ],
+      "1FA76": [
+        "moyo wa kijivu",
+        "143",
+        "fedha",
+        "hisia",
+        "kijivu",
+        "maalum",
+        "moyo",
+        "nakupenda",
+        "tabasamu na hisia",
+        "upendo"
+      ],
+      "1FA77": [
+        "moyo wa waridi",
+        "143",
+        "husudu",
+        "maalum",
+        "mlimbwende",
+        "moyo",
+        "mzuri",
+        "nakupenda",
+        "penda",
+        "rembo",
+        "tabasamu na hisia",
+        "upendo",
+        "waridi"
+      ],
+      "1FA78": [
+        "tone la damu",
+        "changia damu",
+        "dawa",
+        "hedhi",
+        "jeraha",
+        "kuchangia damu",
+        "kuumia",
+        "tokwa na damu",
+        "vuja damu"
+      ],
+      "1FA79": [
+        "bendeji inayonata",
+        "bandeji",
+        "bandeji inatayo",
+        "bendeji"
+      ],
+      "1FA7A": [
+        "stetoskopu",
+        "daktari",
+        "dawa",
+        "moyo"
+      ],
+      "1FA7B": [
+        "eksirei",
+        "daktari",
+        "kiunzi cha mifupa",
+        "mfupa",
+        "mifupa",
+        "tiba",
+        "x ray"
+      ],
+      "1FA7C": [
+        "gongo",
+        "jeraha",
+        "kifaa cha kutembea",
+        "mkongojo",
+        "mkwaju",
+        "ulemavu"
+      ],
+      "1FA80": [
+        "kigurudumu cha uzi",
+        "badilika badilika",
+        "kidude cha kuchezea",
+        "kupanda na kushuka"
+      ],
+      "1FA81": [
+        "kishada",
+        "paa",
+        "ruka",
+        "tiara"
+      ],
+      "1FA82": [
+        "parachuti",
+        "mrukaji kwa mwavuli",
+        "mwavuli wa kurukia",
+        "ruka kutoka angani",
+        "ruka kwa nyiririko",
+        "ruka kwa parachuti"
+      ],
+      "1FA83": [
+        "bumerangi",
+        "australia",
+        "bumarengi",
+        "kurudi",
+        "matokeo",
+        "silaha",
+        "wananchi wa asili"
+      ],
+      "1FA84": [
+        "kifimbo cha mazingaombwe",
+        "kiini macho",
+        "mazingaombwe",
+        "mganga",
+        "mlozi wa kike",
+        "mlozi wa kiume",
+        "muujiza"
+      ],
+      "1FA85": [
+        "pinata",
+        "dhifa",
+        "karamu",
+        "sherehe",
+        "tamu"
+      ],
+      "1FA86": [
+        "mwanaserere wa kirusi",
+        "babushka",
+        "doli za uzazi",
+        "kutunza",
+        "mwanaserere",
+        "urusi"
+      ],
+      "1FA87": [
+        "maraka",
+        "chacharisha",
+        "cheza",
+        "dansi",
+        "gonganisha",
+        "muziki",
+        "tikisa",
+        "tingisha",
+        "zana"
+      ],
+      "1FA88": [
+        "zumari",
+        "bendi",
+        "bendi ya kumachi",
+        "bomba",
+        "filimbi",
+        "filimbi ya mti",
+        "kifaa cha muziki",
+        "muziki",
+        "zeze"
+      ],
+      "1FA89": [
+        "kinubi",
+        "ala",
+        "alama ya mapenzi",
+        "mapenzi",
+        "muziki",
+        "okestra"
+      ],
+      "1FA90": [
+        "sayari yenye duara",
+        "baridi",
+        "dunia",
+        "sayari",
+        "zohali"
+      ],
+      "1FA91": [
+        "kiti",
+        "kaa",
+        "keti"
+      ],
+      "1FA92": [
+        "wembe",
+        "kali",
+        "kunyoa",
+        "nyoa"
+      ],
+      "1FA93": [
+        "shoka",
+        "kishoka",
+        "kukata",
+        "kukatika",
+        "kuni",
+        "pasua"
+      ],
+      "1FA94": [
+        "taa ya diya",
+        "diya",
+        "mafuta",
+        "taa"
+      ],
+      "1FA95": [
+        "gambusi",
+        "muziki",
+        "nyuzi",
+        "zeze"
+      ],
+      "1FA96": [
+        "kofia ya wanajeshi",
+        "askari",
+        "askari wa vita",
+        "jeshi",
+        "kofia",
+        "mwanajeshi",
+        "vita",
+        "wanajeshi"
+      ],
+      "1FA97": [
+        "kodiani",
+        "ala",
+        "harimuni",
+        "konsertina",
+        "muziki"
+      ],
+      "1FA98": [
+        "ngoma refu",
+        "ala",
+        "mapigo",
+        "mdundo",
+        "ngoma"
+      ],
+      "1FA99": [
+        "sarafu",
+        "chuma",
+        "dhahabu",
+        "hazina",
+        "hela",
+        "pesa",
+        "shaba",
+        "shilingi"
+      ],
+      "1FA9A": [
+        "msumeno",
+        "kata",
+        "mbao",
+        "seremala",
+        "zana"
+      ],
+      "1FA9B": [
+        "bisibisi",
+        "bisbisi",
+        "parafujo",
+        "zana"
+      ],
+      "1FA9C": [
+        "ngazi",
+        "daraja",
+        "kidato",
+        "panda"
+      ],
+      "1FA9D": [
+        "ndoano",
+        "bakora",
+        "kishawishi cha mauzo",
+        "ndoana",
+        "pinda",
+        "shika",
+        "tega"
+      ],
+      "1FA9E": [
+        "kioo",
+        "kiakisi",
+        "kuakisi",
+        "vipodozi"
+      ],
+      "1FA9F": [
+        "dirisha",
+        "angavu",
+        "fremu",
+        "hewa safi",
+        "kuona",
+        "mwanya"
+      ],
+      "1FAA0": [
+        "kizibuo",
+        "choo",
+        "fundi bomba",
+        "kifyonzaji",
+        "kinyesi",
+        "ufyonzaji"
+      ],
+      "1FAA1": [
+        "sindano ya kushona",
+        "kushona",
+        "mishono",
+        "mshono",
+        "shona",
+        "sindano",
+        "taraza",
+        "ushonaji",
+        "uzi"
+      ],
+      "1FAA2": [
+        "fundo",
+        "funga",
+        "kamba",
+        "msokotano",
+        "sokota",
+        "songa"
+      ],
+      "1FAA3": [
+        "ndoo",
+        "pipa",
+        "pipa kubwa"
+      ],
+      "1FAA4": [
+        "mtego wa panya",
+        "chambo",
+        "jibini",
+        "kitanzi",
+        "mtego"
+      ],
+      "1FAA5": [
+        "mswaki",
+        "bafu",
+        "meno",
+        "safi",
+        "sugua",
+        "usafi"
+      ],
+      "1FAA6": [
+        "jiwe la kaburi",
+        "kaburi",
+        "kufa",
+        "kumbukumbu",
+        "makaburini",
+        "mavani",
+        "pumzika kwa amani"
+      ],
+      "1FAA7": [
+        "bango",
+        "ilani",
+        "ishara",
+        "kadi",
+        "kuandamana",
+        "kupinga",
+        "maandamano"
+      ],
+      "1FAA8": [
+        "mwamba",
+        "jabali",
+        "jiwe",
+        "ngumu",
+        "nzito",
+        "thabiti"
+      ],
+      "1FAA9": [
+        "tufe la vioo",
+        "dansi",
+        "densi",
+        "disko",
+        "karamu",
+        "kimeto",
+        "kioo"
+      ],
+      "1FAAA": [
+        "kitambulisho",
+        "hati",
+        "huduma",
+        "leseni",
+        "usalama",
+        "uthibitisho"
+      ],
+      "1FAAB": [
+        "betri iliyopungua chaji",
+        "betri",
+        "chaji",
+        "elektroniki",
+        "stima",
+        "umeme"
+      ],
+      "1FAAC": [
+        "ishara ya hamsa",
+        "fatima",
+        "hamsa",
+        "hirizi",
+        "jicho",
+        "mary",
+        "miriam",
+        "mkono",
+        "ulinzi"
+      ],
+      "1FAAD": [
+        "feni ya kujipepeta",
+        "baridi",
+        "dansi",
+        "feni",
+        "feni ya kijipepea",
+        "joto",
+        "kujipoza",
+        "kupoa",
+        "kupunga upepo",
+        "moto",
+        "pepea",
+        "soni"
+      ],
+      "1FAAE": [
+        "kitana",
+        "afro",
+        "chana nywele",
+        "chanio",
+        "kuchana",
+        "kuza nywele",
+        "nywele",
+        "nywele za afro"
+      ],
+      "1FAAF": [
+        "khanda",
+        "dini",
+        "ibada",
+        "imani",
+        "kalasinga"
+      ],
+      "1FAB0": [
+        "nzi",
+        "dudu",
+        "funza",
+        "kiumbe",
+        "kuoza",
+        "mdudu",
+        "ugonjwa"
+      ],
+      "1FAB1": [
+        "mnyoo",
+        "anelidi",
+        "jongoo",
+        "mdudu",
+        "mnyama",
+        "nyungunyungu"
+      ],
+      "1FAB2": [
+        "mende",
+        "dudu",
+        "kijidudu",
+        "kiumbe",
+        "mdudu"
+      ],
+      "1FAB3": [
+        "kombamwiko",
+        "dudu",
+        "kijidudu",
+        "kiumbe",
+        "mdudu",
+        "mende"
+      ],
+      "1FAB4": [
+        "mmea ndani ya mkebe",
+        "bila faida",
+        "chungu",
+        "kutunza",
+        "mea",
+        "mmea",
+        "mtungi",
+        "nyumba",
+        "pambo",
+        "uchoshi"
+      ],
+      "1FAB5": [
+        "kuni",
+        "gogo",
+        "kisiki",
+        "makorokoro",
+        "mbao"
+      ],
+      "1FAB6": [
+        "unyoya",
+        "kuruka",
+        "manyoya",
+        "ndege",
+        "nyepesi"
+      ],
+      "1FAB7": [
+        "yungiyungi",
+        "india",
+        "kihindu",
+        "ua",
+        "ubudha",
+        "usafi",
+        "vietinamu",
+        "yungi"
+      ],
+      "1FAB8": [
+        "matumbawe",
+        "bahari",
+        "mabadiliko ya tabianchi",
+        "tabianchi"
+      ],
+      "1FAB9": [
+        "kiota tupu",
+        "kiota",
+        "nyumba",
+        "tawi"
+      ],
+      "1FABA": [
+        "kiota chenye mayai",
+        "kiota",
+        "kiota kilicho na mayai",
+        "mayai",
+        "ndege",
+        "yai"
+      ],
+      "1FABB": [
+        "hyacinthi",
+        "chanua",
+        "chipuka",
+        "kichaka",
+        "maua",
+        "maua ya samawati",
+        "maua ya zambarau",
+        "mmea",
+        "mrujuani",
+        "rangi maridadi",
+        "ua",
+        "zambarau"
+      ],
+      "1FABC": [
+        "kiwavi wa baharini",
+        "bahari",
+        "baharini",
+        "bila uti wa mgongo",
+        "choma",
+        "jeli",
+        "kuuma",
+        "maisha ya baharini",
+        "mnyama",
+        "samaki wa kufugwa",
+        "uchungu",
+        "umiza"
+      ],
+      "1FABD": [
+        "bawa",
+        "angani",
+        "kupaa",
+        "kuruka",
+        "malaika",
+        "mbinguni",
+        "mithiolojia",
+        "ndege",
+        "paa",
+        "safari za ndege",
+        "visasili"
+      ],
+      "1FABE": [
+        "mti bila majani",
+        "baridi",
+        "kavu",
+        "kiangazi"
+      ],
+      "1FABF": [
+        "bata bukini",
+        "bata",
+        "honi",
+        "jinga",
+        "kundi",
+        "kundi la ndege",
+        "mjinga",
+        "mnyama",
+        "mpuuzi",
+        "ndege",
+        "puuzi"
+      ],
+      "1FAC0": [
+        "moyo",
+        "kadiolojia",
+        "katikati",
+        "mapigo",
+        "mapigo ya moyo",
+        "mdundo",
+        "pigo la moyo",
+        "roho",
+        "sehemu ya mwili"
+      ],
+      "1FAC1": [
+        "mapafu",
+        "kupumua",
+        "kutoa pumzi",
+        "kuvuta pumzi",
+        "pafu",
+        "pumzi",
+        "sehemu ya mwili"
+      ],
+      "1FAC2": [
+        "watu wanaokumbatiana",
+        "asante",
+        "hujambo",
+        "kumbatia",
+        "kwaheri",
+        "mapenzi",
+        "pambaja",
+        "urafiki"
+      ],
+      "1FAC3": [
+        "mwanamume mwenye kitambi",
+        "kitambi",
+        "kuvimba",
+        "mimba",
+        "mtu",
+        "tumbo lililojaa",
+        "utambi"
+      ],
+      "1FAC4": [
+        "mtu mwenye mimba",
+        "kitambi",
+        "kuvimba",
+        "kuvimbiwa",
+        "mimba",
+        "mjamzito",
+        "tumbo lililojaa"
+      ],
+      "1FAC5": [
+        "kichwa chenye taji",
+        "hadhi",
+        "kifalme",
+        "lodi",
+        "malkia",
+        "mfalme",
+        "mtu"
+      ],
+      "1FAD0": [
+        "forosadi",
+        "beri",
+        "buluu",
+        "chakula",
+        "tunda",
+        "tunda dogo"
+      ],
+      "1FAD1": [
+        "pilipili boga",
+        "boga",
+        "chakula",
+        "pilipili",
+        "pilipili hoho"
+      ],
+      "1FAD2": [
+        "zeituni",
+        "chakula"
+      ],
+      "1FAD3": [
+        "chapati ya maji",
+        "arepa",
+        "chakula",
+        "chapati",
+        "mkate",
+        "naan",
+        "pita"
+      ],
+      "1FAD4": [
+        "tamale",
+        "chakula",
+        "meksiko",
+        "mkate uliofungwa wa kimeksiko"
+      ],
+      "1FAD5": [
+        "jibini iliyoyeyushwa",
+        "chakula",
+        "chokoleti",
+        "jibini",
+        "kuyeyushwa",
+        "sufuria",
+        "uswisi"
+      ],
+      "1FAD6": [
+        "birika la chai",
+        "birika",
+        "buli",
+        "chai",
+        "chakula",
+        "kinywaji"
+      ],
+      "1FAD7": [
+        "kinywaji kinachomiminika",
+        "bilauri",
+        "glasi",
+        "kinywaji",
+        "kumwagika",
+        "maji",
+        "tupu"
+      ],
+      "1FAD8": [
+        "maharagwe",
+        "chakula",
+        "kunde",
+        "maharage",
+        "ndogo"
+      ],
+      "1FAD9": [
+        "chupa kubwa",
+        "chombo",
+        "chupa",
+        "kiungo",
+        "kuhifadhi",
+        "rojo",
+        "tupu"
+      ],
+      "1FADA": [
+        "tangawizi",
+        "afya",
+        "asili",
+        "bia",
+        "kiungo",
+        "miti shamba",
+        "mzizi",
+        "pombe",
+        "tiba asili"
+      ],
+      "1FADB": [
+        "ganda la njegere",
+        "ganda",
+        "kunde",
+        "maharage",
+        "mboga",
+        "njegere"
+      ],
+      "1FADC": [
+        "mzizi mboga",
+        "kiazisukari",
+        "mboga",
+        "mzizi",
+        "shamba",
+        "tanipu"
+      ],
+      "1FAF0": [
+        "vidole vya shahada na gumba vinavyopitana",
+        "ghali",
+        "hela",
+        "moyo",
+        "mshiko",
+        "mwaliko",
+        "pesa",
+        "upendo"
+      ],
+      "1FAF1": [
+        "mkono unaoelekea kulia",
+        "kuelekea",
+        "kulia",
+        "mkono"
+      ],
+      "1FAF2": [
+        "mkono unaoelekea kushoto",
+        "kuelekea kushoto",
+        "kushoto",
+        "mkono"
+      ],
+      "1FAF3": [
+        "mkono wenye kiganja kinachoelekea chini",
+        "angusha",
+        "dondosha",
+        "fukuza",
+        "mkono",
+        "puuza"
+      ],
+      "1FAF4": [
+        "mkono wenye kiganja kinachoelekea juu",
+        "ita",
+        "mkono",
+        "nipe",
+        "njoo",
+        "patia",
+        "shika"
+      ],
+      "1FAF5": [
+        "kidole cha shahada kinachomwelekea mtazamaji",
+        "kidole",
+        "kuelekezea kidole",
+        "wewe"
+      ],
+      "1FAF6": [
+        "mikono inayoonyesha ishara ya moyo",
+        "mapenzi",
+        "mikono",
+        "moyo",
+        "penzi",
+        "upendo"
+      ],
+      "1FAF7": [
+        "mkono unaosukuma kushoto",
+        "kataa",
+        "kushoto",
+        "mkono",
+        "ngoja kwanza",
+        "nipe tano",
+        "salamu",
+        "simama",
+        "simamisha",
+        "sitisha",
+        "subiri",
+        "sukuma",
+        "zuia"
+      ],
+      "1FAF8": [
+        "mkono unaosukuma kulia",
+        "kataa",
+        "kulia",
+        "mkono",
+        "ngoja kwanza",
+        "nipe tano",
+        "salamu",
+        "simama",
+        "simamisha",
+        "sitisha",
+        "subiri",
+        "sukuma"
+      ],
+      "203C": [
+        "alama mbili za mshangao",
+        "!",
+        "!!",
+        "alama",
+        "mlio mkubwa",
+        "mshangao",
+        "uakifishaji"
+      ],
+      "2049": [
+        "alama ya mshangao na kuuliza",
+        "!",
+        "!?",
+        "?",
+        "mshangao",
+        "swali",
+        "uakifishaji"
+      ],
+      "2122": [
+        "chapa ya biashara",
+        "alama",
+        "alama ya biashara"
+      ],
+      "2139": [
+        "kitufe cha maelezo",
+        "i",
+        "maelezo"
+      ],
+      "2194": [
+        "mshale unaoeleza kushoto na kulia",
+        "mshale",
+        "pande zote"
+      ],
+      "2195": [
+        "mshale unaoelekeza chini na juu",
+        "mshale"
+      ],
+      "2196": [
+        "mshale unaoelekeza juu kushoto",
+        "kaskazini magharibi",
+        "kati ya sehemu kuu ya dira",
+        "mshale",
+        "mshale unaoelekeza kaskazini magharibi",
+        "uelekeo"
+      ],
+      "2197": [
+        "mshale unaoelekeza juu kulia",
+        "kaskazini mashariki",
+        "kati ya sehemu kuu ya dira",
+        "mshale",
+        "uelekeo"
+      ],
+      "2198": [
+        "mshale unaoelekeza chini kulia",
+        "kaskazini kusini mashariki",
+        "kati ya sehemu kuu ya dira",
+        "kusini mashariki",
+        "mshale",
+        "mwelekeo",
+        "uelekeo"
+      ],
+      "2199": [
+        "mshale unaoelekeza chini kushoto",
+        "kati ya sehemu kuu ya dira",
+        "kusini magharibi",
+        "mshale",
+        "uelekeo"
+      ],
+      "21A9": [
+        "mshale wa kulia unaopinda kushoto",
+        "mshale",
+        "mshale wa kulia unaoelekeza kushoto"
+      ],
+      "21AA": [
+        "mshale wa kushoto unaopinda kulia",
+        "elekea kulia",
+        "geukia kulia",
+        "mshale"
+      ],
+      "231A": [
+        "saa",
+        "muda"
+      ],
+      "231B": [
+        "shisha",
+        "kipima muda",
+        "mchanga"
+      ],
+      "2328": [
+        "kibodi",
+        "kompyuta"
+      ],
+      "23CF": [
+        "kitufe cha kutoa",
+        "ondoa"
+      ],
+      "23E9": [
+        "kitufe cha kupeleka mbele kwa kasi",
+        "kasi",
+        "kitufe cha haraka mbele",
+        "mbele",
+        "mbili",
+        "mshale"
+      ],
+      "23EA": [
+        "kitufe cha kurudisha nyuma kwa kasi",
+        "kurudisha nyuma",
+        "mbili",
+        "mshale",
+        "nyuma haraka"
+      ],
+      "23EB": [
+        "kitufe cha juu kwa kasi",
+        "mbili",
+        "mshale"
+      ],
+      "23EC": [
+        "kitufe cha chini kwa kasi",
+        "chini",
+        "chini haraka",
+        "mbili",
+        "mshale"
+      ],
+      "23ED": [
+        "kitufe cha kwenda kwenye wimbo unaofuata",
+        "ijayo",
+        "mbele",
+        "mbele hadi mwisho",
+        "mshale",
+        "pembetatu",
+        "tukio linalofuata",
+        "wimbo unaofuata"
+      ],
+      "23EE": [
+        "kitufe cha kurudia wimbo uliopita",
+        "mshale",
+        "pembetatu",
+        "rudi nyuma",
+        "rudi nyuma hadi mwisho",
+        "tukio lililotangulia",
+        "wimbo uliotangulia"
+      ],
+      "23EF": [
+        "kitufe cha kucheza au kusitisha",
+        "cheza",
+        "kulia",
+        "mshale",
+        "nenda mwisho haraka",
+        "pembetatu",
+        "sitisha"
+      ],
+      "23F0": [
+        "kipima muda",
+        "saa"
+      ],
+      "23F1": [
+        "saa ya michezo",
+        "saa"
+      ],
+      "23F2": [
+        "saa ya kupima muda",
+        "kipima muda",
+        "saa"
+      ],
+      "23F3": [
+        "shisha inayotiririsha mchanga",
+        "kipima muda",
+        "mchanga",
+        "shisha"
+      ],
+      "23F8": [
+        "kitufe cha kusitisha",
+        "mbili",
+        "sitisha",
+        "upau",
+        "wima"
+      ],
+      "23F9": [
+        "kitufe cha kusimamisha",
+        "kitufe cha kuzuia",
+        "mraba",
+        "sitisha"
+      ],
+      "23FA": [
+        "kitufe cha kurekodi",
+        "mduara",
+        "rekodi"
+      ],
+      "24C2": [
+        "herufi m kwenye mduara",
+        "m",
+        "mduara"
+      ],
+      "25AA": [
+        "mraba mdogo mweusi",
+        "jiometri",
+        "mraba"
+      ],
+      "25AB": [
+        "mraba mdogo mweupe",
+        "jiometri",
+        "mraba"
+      ],
+      "25B6": [
+        "kitufe cha kucheza",
+        "cheza",
+        "kulia",
+        "mshale",
+        "pembetatu"
+      ],
+      "25C0": [
+        "kitufe cha kurudisha nyuma",
+        "kurudi nyuma",
+        "kushoto",
+        "mshale",
+        "nyuma",
+        "pembetatu",
+        "rudi"
+      ],
+      "25FB": [
+        "mraba wa wastani mweupe",
+        "jiometri",
+        "mraba"
+      ],
+      "25FC": [
+        "mraba wa wastani mweusi",
+        "jiometri",
+        "mraba",
+        "mraba mweusi",
+        "nyeusi"
+      ],
+      "25FD": [
+        "mraba wastani mdogo mweupe",
+        "jiometri",
+        "mraba"
+      ],
+      "25FE": [
+        "mraba wastani mdogo mweusi",
+        "jiometri",
+        "mraba",
+        "mraba mdogo mweusi wa wastani"
+      ],
+      "2600": [
+        "jua",
+        "anga",
+        "hali ya hewa",
+        "kung’aa",
+        "miali"
+      ],
+      "2601": [
+        "wingu",
+        "hali ya hewa"
+      ],
+      "2602": [
+        "mwavuli",
+        "hali ya hewa",
+        "mavazi",
+        "mvua"
+      ],
+      "2603": [
+        "sanamu ya mtu ya theluji",
+        "baridi",
+        "hali ya hewa",
+        "mtu wa theluji",
+        "theluji"
+      ],
+      "2604": [
+        "kimondo",
+        "anga"
+      ],
+      "260E": [
+        "simu",
+        "simu ya mezani"
+      ],
+      "2611": [
+        "sanduku la kuteua lenye tiki",
+        "✓",
+        "alama hakikishi",
+        "kamilika",
+        "kubali",
+        "sanduku",
+        "tia tiki"
+      ],
+      "2614": [
+        "mwavuli na matone ya mvua",
+        "hali ya hewa",
+        "mavazi",
+        "mvua",
+        "mwavuli",
+        "tone"
+      ],
+      "2615": [
+        "kinywaji moto",
+        "chai",
+        "kahawa",
+        "kinywaji",
+        "moto"
+      ],
+      "261D": [
+        "kidole cha shahada kinachoelekeza juu",
+        "cha shahada",
+        "elekeza",
+        "juu",
+        "kidole",
+        "mkono"
+      ],
+      "2626": [
+        "msalaba",
+        "dini",
+        "mkristo",
+        "msalaba wa orthodox"
+      ],
+      "262A": [
+        "nyota na mwezi mwandamo",
+        "dini",
+        "muislamu",
+        "ramadhani",
+        "uislamu"
+      ],
+      "262E": [
+        "alama ya amani",
+        "amani"
+      ],
+      "262F": [
+        "yin yang",
+        "dini",
+        "maisha",
+        "mfuasi wa tao",
+        "tao",
+        "vigumu",
+        "yang",
+        "yin"
+      ],
+      "2638": [
+        "gurudumu la dharma",
+        "dharma",
+        "dini",
+        "gurudumu",
+        "mfuasi wa budha"
+      ],
+      "2639": [
+        "uso ulionuna",
+        "kununa",
+        "nuna",
+        "uso"
+      ],
+      "263A": [
+        "uso unaotabasamu",
+        "iliyobainishwa",
+        "tabasamu",
+        "tulivu",
+        "uso"
+      ],
+      "2648": [
+        "nyota ya kondoo",
+        "zodiaki"
+      ],
+      "2649": [
+        "fahali",
+        "dume",
+        "zodiaki"
+      ],
+      "264A": [
+        "mapacha",
+        "zodiaki"
+      ],
+      "264B": [
+        "nyota ya kaa",
+        "zodiaki"
+      ],
+      "264C": [
+        "nyota ya simba",
+        "simba",
+        "zodiaki"
+      ],
+      "264D": [
+        "mashuke",
+        "bikira",
+        "mwali",
+        "zodiaki"
+      ],
+      "264E": [
+        "mizani",
+        "haki",
+        "pima",
+        "zodiaki"
+      ],
+      "264F": [
+        "nyota ya ng’e",
+        "nge",
+        "zodiaki"
+      ],
+      "2650": [
+        "mshale",
+        "mpiga mishale",
+        "zodiaki"
+      ],
+      "2651": [
+        "nyota ya mbuzi",
+        "mbuzi",
+        "zodiaki"
+      ],
+      "2652": [
+        "nyota ya ndoo",
+        "hamali",
+        "maji",
+        "ndoo",
+        "zodiaki"
+      ],
+      "2653": [
+        "nyota ya samaki",
+        "zodiaki"
+      ],
+      "265F": [
+        "kipande cha saratanji",
+        "danganya",
+        "saratanji",
+        "toa mhanga"
+      ],
+      "267B": [
+        "alama ya kutumia tena",
+        "tumia tena"
+      ],
+      "267E": [
+        "milele",
+        "bila kikomo",
+        "kote"
+      ],
+      "267F": [
+        "kiti cha magurudumu",
+        "alama ya kiti cha magurudumu",
+        "ufikiaji"
+      ],
+      "2692": [
+        "nyundo na sululu",
+        "nyundo",
+        "sululu",
+        "zana"
+      ],
+      "2694": [
+        "panga zilizopishanishwa",
+        "kupishanishwa",
+        "silaha",
+        "sime"
+      ],
+      "2695": [
+        "ishara ya taaluma ya matibabu",
+        "dawa",
+        "ishara",
+        "tiba"
+      ],
+      "2696": [
+        "mzani",
+        "haki",
+        "mizani",
+        "pima",
+        "uzito",
+        "zana",
+        "zodiaki"
+      ],
+      "2697": [
+        "alembiki",
+        "kemia",
+        "zana"
+      ],
+      "2699": [
+        "gia",
+        "zana"
+      ],
+      "269B": [
+        "alama ya atomu",
+        "asiyemwamini mungu",
+        "atomu"
+      ],
+      "269C": [
+        "ua la yungi",
+        "yungiyungi"
+      ],
+      "26A0": [
+        "onyo",
+        "uwe makini"
+      ],
+      "26A1": [
+        "volteji ya juu",
+        "hatari",
+        "kuungua kwa umeme",
+        "radi",
+        "umeme",
+        "volteji"
+      ],
+      "26A7": [
+        "ishara ya wabadili jinsia",
+        "wabadili jinsia"
+      ],
+      "26AA": [
+        "mduara mweupe",
+        "jiometri",
+        "mduara"
+      ],
+      "26AB": [
+        "mduara mweusi",
+        "jiometri",
+        "mduara"
+      ],
+      "26B0": [
+        "jeneza",
+        "kifo"
+      ],
+      "26B1": [
+        "chombo cha kutia majivu ya maiti aliyechomwa",
+        "chombo cha kutia majivu ya maiti",
+        "kifo",
+        "msiba"
+      ],
+      "26BD": [
+        "mpira wa miguu",
+        "mchezo",
+        "mpira",
+        "soka"
+      ],
+      "26BE": [
+        "mpira wa besibali",
+        "mpira"
+      ],
+      "26C4": [
+        "sanamu ya mtu ya theluji bila theluji",
+        "baridi",
+        "hali ya hewa",
+        "theluji"
+      ],
+      "26C5": [
+        "jua nyuma ya wingu",
+        "hali ya hewa",
+        "jua",
+        "wingu"
+      ],
+      "26C8": [
+        "wingu pamoja na radi na mvua",
+        "hali ya hewa",
+        "mvua",
+        "ngurumo",
+        "wingu",
+        "wingu mvua na radi"
+      ],
+      "26CE": [
+        "opichasi",
+        "hamali",
+        "joka",
+        "nyoka",
+        "zodiaki"
+      ],
+      "26CF": [
+        "sululu",
+        "kuchimba mgodi",
+        "nyundo",
+        "zana"
+      ],
+      "26D1": [
+        "helmeti iliyo na msalaba mweupe",
+        "helmeti",
+        "kofia",
+        "msaada",
+        "msalaba",
+        "uso"
+      ],
+      "26D3": [
+        "minyororo",
+        "mnyororo"
+      ],
+      "26D4": [
+        "hakuna kuingia",
+        "hapana",
+        "katazwa",
+        "kuingia",
+        "marufuku",
+        "siyo",
+        "trafiki",
+        "usipite"
+      ],
+      "26E9": [
+        "madhabahu ya shinto",
+        "dini",
+        "madhabahu",
+        "shinto"
+      ],
+      "26EA": [
+        "kanisa",
+        "dini",
+        "jengo",
+        "msalaba",
+        "ukristo"
+      ],
+      "26F0": [
+        "mlima"
+      ],
+      "26F1": [
+        "mwavuli ulio kwenye ardhi",
+        "hali ya hewa",
+        "jua",
+        "mvua",
+        "mwavuli"
+      ],
+      "26F2": [
+        "mlizamu",
+        "mahali pa kunjwa maji"
+      ],
+      "26F3": [
+        "bendera katika shimo",
+        "gofu",
+        "shimo"
+      ],
+      "26F4": [
+        "kivuko",
+        "boti",
+        "feri"
+      ],
+      "26F5": [
+        "mashua",
+        "bahari",
+        "boti",
+        "gari",
+        "mahali pa kutembelea watalii",
+        "mashura"
+      ],
+      "26F7": [
+        "mtu anayecheza mchezo wa kuskii",
+        "ski",
+        "theluji"
+      ],
+      "26F8": [
+        "viatu vya kuteleza kwenye theluji",
+        "barafu",
+        "kucheza barafuni",
+        "kuteleza",
+        "theluji"
+      ],
+      "26F9": [
+        "mtu na mpira",
+        "mchezaji wa mpira wa kikapu",
+        "mpira",
+        "mpira wa vikapu"
+      ],
+      "26FA": [
+        "hema",
+        "kupiga kambi"
+      ],
+      "26FD": [
+        "pampu ya mafuta",
+        "kituo",
+        "kituo cha mafuta",
+        "mafuta",
+        "pampu"
+      ],
+      "2702": [
+        "makasi",
+        "zana"
+      ],
+      "2705": [
+        "alama nyeupe ya tiki",
+        "✓",
+        "alama hakikishi",
+        "hakikishi",
+        "kitufe",
+        "tia tiki",
+        "tiki nyeupe"
+      ],
+      "2708": [
+        "eropleni",
+        "gari",
+        "ndege",
+        "ruka"
+      ],
+      "2709": [
+        "bahasha",
+        "barua pepe"
+      ],
+      "270A": [
+        "ngumi iliyoinuliwa",
+        "konde",
+        "kunja ngumi",
+        "mkono",
+        "mwili",
+        "ngumi",
+        "pamoja",
+        "umoja"
+      ],
+      "270B": [
+        "mkono ulioinuliwa",
+        "mkono"
+      ],
+      "270C": [
+        "mkono wa ushindi",
+        "mkono",
+        "mwili",
+        "ushindi",
+        "v"
+      ],
+      "270D": [
+        "mkono unaoandika",
+        "andika",
+        "mkono",
+        "mwili"
+      ],
+      "270F": [
+        "penseli"
+      ],
+      "2712": [
+        "nibu nyeusi",
+        "kalamu",
+        "nibu"
+      ],
+      "2714": [
+        "alama ya tiki",
+        "✓",
+        "tia tiki",
+        "tiki nyeusi",
+        "tiki ya kijani"
+      ],
+      "2716": [
+        "zidisha",
+        "×",
+        "alama",
+        "alama ya kuzidisha",
+        "ghairi"
+      ],
+      "271D": [
+        "msalaba wa kilatini",
+        "dini",
+        "mkristo",
+        "msalaba"
+      ],
+      "2721": [
+        "nyota ya daudi",
+        "daudi",
+        "dini",
+        "myahudi",
+        "nyota",
+        "uyahudi"
+      ],
+      "2728": [
+        "nyota",
+        "kumetameta",
+        "metameta"
+      ],
+      "2733": [
+        "kinyota chenye ncha nane",
+        "*",
+        "kinyota"
+      ],
+      "2734": [
+        "nyota yenye ncha nane",
+        "*",
+        "nyota"
+      ],
+      "2744": [
+        "chembe ya theluji",
+        "baridi",
+        "chembe chembe za theluji",
+        "hali ya hewa",
+        "theluji"
+      ],
+      "2747": [
+        "metameta",
+        "*",
+        "ngara"
+      ],
+      "274C": [
+        "alama ya x",
+        "×",
+        "alama",
+        "alama ya kuzidisha",
+        "ghairi",
+        "kuzidisha",
+        "x",
+        "zidisha"
+      ],
+      "274E": [
+        "kitufe cha alama ya kuzidisha",
+        "×",
+        "alama",
+        "mraba",
+        "x",
+        "zidisha"
+      ],
+      "2753": [
+        "alama nyekundu ya kuuliza",
+        "?",
+        "alama",
+        "alama ya kuuliza",
+        "swali",
+        "uakifishaji"
+      ],
+      "2754": [
+        "alama nyeupe ya kuuliza",
+        "?",
+        "alama",
+        "iliyobainishwa",
+        "swali",
+        "uakifishaji"
+      ],
+      "2755": [
+        "alama nyeupe ya mshangao",
+        "!",
+        "alama",
+        "iliyobainishwa",
+        "mshangao",
+        "uakifishaji"
+      ],
+      "2757": [
+        "alama nyekundu ya mshangao",
+        "!",
+        "alama",
+        "alama ya mshangao",
+        "mshangao",
+        "uakifishaji"
+      ],
+      "2763": [
+        "umbo la moyo lenye alama ya mshangao",
+        "alama",
+        "alama ya moyo mzito",
+        "moyo mzito",
+        "moyo wenye mshangao",
+        "mshangao",
+        "uakifishaji"
+      ],
+      "2764": [
+        "moyo mwekundu",
+        "hisia",
+        "moyo",
+        "upendo"
+      ],
+      "2795": [
+        "kuongeza",
+        "+",
+        "alama",
+        "alama ya kuongeza",
+        "hisabati"
+      ],
+      "2796": [
+        "kutoa",
+        "-",
+        "−",
+        "alama",
+        "alama ya kutoa",
+        "hisabati"
+      ],
+      "2797": [
+        "gawanya",
+        "÷",
+        "alama",
+        "alama ya kugawanya",
+        "hisabati",
+        "kugawanya"
+      ],
+      "27A1": [
+        "mshale unaoelekeza kulia",
+        "mashariki",
+        "mshale",
+        "muelekeo",
+        "sehemu kuu ya dira",
+        "uelekeo"
+      ],
+      "27B0": [
+        "kitanzi kilichopinda",
+        "kitanzi",
+        "pinda"
+      ],
+      "27BF": [
+        "kitanzi kilichopinda mara mbili",
+        "kitanzi",
+        "mara mbili",
+        "pinda"
+      ],
+      "2934": [
+        "mshale wa kulia unaopinda juu",
+        "mshale"
+      ],
+      "2935": [
+        "mshale wa kulia unaopinda chini",
+        "chini",
+        "elekea kulia",
+        "kata kulia",
+        "mshale"
+      ],
+      "2B05": [
+        "mshale unaoelekeza kushoto",
+        "magharibi",
+        "mshale",
+        "sehemu kuu ya dira",
+        "uelekeo"
+      ],
+      "2B06": [
+        "mshale unaoelekeza juu",
+        "endelea",
+        "kaskazini",
+        "mshale",
+        "sehemu kuu ya dira",
+        "uelekeo"
+      ],
+      "2B07": [
+        "mshale unaoangalia chini",
+        "chini",
+        "kusini",
+        "mshale",
+        "mwelekeo wa chini",
+        "sehemu kuu ya dira",
+        "uelekeo"
+      ],
+      "2B1B": [
+        "mraba mkubwa mweusi",
+        "jiometri",
+        "mraba"
+      ],
+      "2B1C": [
+        "mraba mkubwa mweupe",
+        "jiometri",
+        "mraba"
+      ],
+      "2B50": [
+        "nyota nyeupe ya wastani",
+        "nyota",
+        "nyota nyeupe"
+      ],
+      "2B55": [
+        "mduara mwekundu wenye shimo",
+        "mduara",
+        "mkubwa",
+        "mwekundu",
+        "o"
+      ],
+      "3030": [
+        "dashi iliyopinda",
+        "dashi",
+        "kupinda",
+        "uakifishaji"
+      ],
+      "303D": [
+        "alama ya mbadala ya sehemu",
+        "alama",
+        "sehemu"
+      ],
+      "3297": [
+        "idiografu ya pongezi kwenye mduara",
+        "hongera",
+        "idiografu",
+        "kichina",
+        "pongezi"
+      ],
+      "3299": [
+        "idiografu ya siri kwenye mduara",
+        "idiografu",
+        "kichina",
+        "siri"
       ]
     },
     "ta": {

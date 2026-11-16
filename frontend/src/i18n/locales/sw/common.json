@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "Rudi",
+    "cancel": "Ghairi",
+    "close": "Funga",
+    "copy": "Nakili",
+    "copied": "Imenakiliwa",
+    "copyFailed": "Imeshindwa kunakili",
+    "delete": "Futa",
+    "forward": "Sambaza",
+    "goBack": "Rudi nyuma",
+    "moreOptions": "Chaguo zaidi",
+    "save": "Hifadhi"
+  },
+  "states": {
+    "buttonLoading": "Inapakia...",
+    "loading": "Inapakia…"
+  },
+  "time": {
+    "today": "Leo",
+    "yesterday": "Jana"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "Nafasi",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "Hali: {{status}}",
+    "offline": "nje ya mtandao",
+    "online": "mtandaoni"
+  },
+  "list": {
+    "empty": "Hakuna vipengee."
+  },
+  "grid": {
+    "empty": "Hakuna mtu hapa bado."
+  },
+  "menu": {
+    "escHint": "Esc ili kurudi",
+    "navigationLabel": "Menyu ya urambazaji",
+    "navigateHint": "sogea",
+    "selectHint": "Enter ili kuchagua"
+  },
+  "media": {
+    "mute": "Zima sauti",
+    "pause": "Sitisha",
+    "play": "Cheza",
+    "seek": "Sogeza sauti",
+    "skipBackward": "Rudi nyuma sekunde 10",
+    "skipForward": "Ruka mbele sekunde 10",
+    "unmute": "Rejesha sauti",
+    "volume": "Kiwango cha sauti"
+  },
+  "composer": {
+    "addAttachment": "Ongeza kiambatisho",
+    "allMentionHint": "inamjulisha kila mtu kwenye chaneli hii",
+    "filePickerTitle": "Ongeza faili",
+    "inputLabel": "Sehemu ya kuandika ujumbe",
+    "placeholder": "Andika ujumbe…",
+    "previewAlt": "Onyesho la kuchungulia",
+    "removeAttachment": "Ondoa {{name}}",
+    "send": "Tuma ujumbe",
+    "markSensitive": "Weka alama kwamba {{name}} ni nyeti",
+    "unmarkSensitive": "Ondoa alama ya nyeti kwenye {{name}}"
+  },
+  "mentions": {
+    "listLabel": "Mapendekezo ya kutaja",
+    "matching": "Wanachama wanaolingana na <hl>@{{query}}</hl>"
+  },
+  "emojiSuggest": {
+    "listLabel": "Mapendekezo ya emoji",
+    "matching": "Emoji zinazolingana na <hl>:{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Picha ya wasifu",
+    "loading": "Inapakia",
+    "otpDigit": "Tarakimu ya OTP {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "sek {{count}}",
+    "seconds_other": "sek {{count}}",
+    "minutes_one": "dak {{count}}",
+    "minutes_other": "dak {{count}}",
+    "hours_one": "saa {{count}}",
+    "hours_other": "saa {{count}}",
+    "days_one": "siku {{count}}",
+    "days_other": "siku {{count}}",
+    "weeks_one": "wiki {{count}}",
+    "weeks_other": "wiki {{count}}",
+    "months_one": "mwezi {{count}}",
+    "months_other": "miezi {{count}}",
+    "years_one": "mwaka {{count}}",
+    "years_other": "miaka {{count}}"
+  },
+  "tray": {
+    "open": "Fungua Pollis",
+    "muteMic": "Zima maikrofoni",
+    "unmuteMic": "Washa maikrofoni",
+    "muteMicIdle": "Zima maikrofoni (hauko kwenye simu)",
+    "version": "Toleo {{version}}",
+    "quit": "Funga Pollis",
+    "unread_one": "Pollis — {{count}} haujasomwa",
+    "unread_other": "Pollis — {{count}} haijasomwa"
+  }
+}

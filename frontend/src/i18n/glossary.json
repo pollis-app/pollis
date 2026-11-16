@@ -66,6 +66,10 @@
       ],
       "pa-Guru": [
         "ਵਾਲਟ"
+      ],
+      "sw": [
+        "hazina",
+        "Hazina"
       ]
     },
     {
@@ -105,6 +109,12 @@
       ],
       "pa-Guru": [
         "ਡਿਵਾਈਸ"
+      ],
+      "sw": [
+        "kifaa",
+        "vifaa",
+        "Kifaa",
+        "Vifaa"
       ]
     },
     {
@@ -144,6 +154,12 @@
       ],
       "pa-Guru": [
         "ਸੁਰੱਖਿਆ ਨੰਬਰ"
+      ],
+      "sw": [
+        "nambari ya usalama",
+        "nambari za usalama",
+        "Nambari ya usalama",
+        "Nambari za usalama"
       ]
     },
     {
@@ -183,6 +199,12 @@
       ],
       "pa-Guru": [
         "ਪਛਾਣ ਕੁੰਜੀ"
+      ],
+      "sw": [
+        "ufunguo wa utambulisho",
+        "funguo za utambulisho",
+        "Ufunguo wa utambulisho",
+        "Funguo za utambulisho"
       ]
     },
     {
@@ -223,6 +245,12 @@
       ],
       "pa-Guru": [
         "ਪੁਸ਼ਟੀ"
+      ],
+      "sw": [
+        "thibitish",
+        "Thibitish",
+        "uthibitisho",
+        "Uthibitisho"
       ]
     },
     {
@@ -261,6 +289,9 @@
         "PIN"
       ],
       "pa-Guru": [
+        "PIN"
+      ],
+      "sw": [
         "PIN"
       ]
     },
@@ -301,6 +332,13 @@
       ],
       "pa-Guru": [
         "ਪਿੰਨ"
+      ],
+      "sw": [
+        "bana",
+        "Bana",
+        "banwa",
+        "banua",
+        "Banua"
       ]
     },
     {
@@ -343,6 +381,13 @@
       ],
       "pa-Guru": [
         "ਗਰੁੱਪ"
+      ],
+      "sw": [
+        "kikundi",
+        "vikundi",
+        "Kikundi",
+        "Vikundi",
+        "KIKUNDI"
       ]
     },
     {
@@ -385,6 +430,10 @@
       ],
       "pa-Guru": [
         "ਚੈਨਲ"
+      ],
+      "sw": [
+        "chaneli",
+        "Chaneli"
       ]
     },
     {
@@ -437,6 +486,13 @@
         "ਸਿੱਧਾ ਸੁਨੇਹਾ",
         "ਸਿੱਧੇ ਸੁਨੇਹ",
         "DM"
+      ],
+      "sw": [
+        "ujumbe wa moja kwa moja",
+        "jumbe za moja kwa moja",
+        "Ujumbe wa moja kwa moja",
+        "Jumbe za moja kwa moja",
+        "DM"
       ]
     },
     {
@@ -477,6 +533,12 @@
       ],
       "pa-Guru": [
         "ਸੁਨੇਹਾ ਬੇਨਤੀ"
+      ],
+      "sw": [
+        "ombi la ujumbe",
+        "maombi ya ujumbe",
+        "Ombi la ujumbe",
+        "Maombi ya ujumbe"
       ]
     },
     {
@@ -516,6 +578,10 @@
       ],
       "pa-Guru": [
         "ਪਾਰਦਰਸ਼ਤਾ ਲੌਗ"
+      ],
+      "sw": [
+        "kumbukumbu ya uwazi",
+        "Kumbukumbu ya uwazi"
       ]
     },
     {
@@ -561,6 +627,10 @@
       ],
       "pa-Guru": [
         "ਰਿਪੋਰਟ"
+      ],
+      "sw": [
+        "ripoti",
+        "Ripoti"
       ]
     },
     {
@@ -603,6 +673,10 @@
       ],
       "pa-Guru": [
         "ਬਲੌਕ"
+      ],
+      "sw": [
+        "zui",
+        "Zui"
       ]
     },
     {
@@ -643,6 +717,9 @@
       ],
       "pa-Guru": [
         "ਗੁਪਤ ਕੁੰਜੀ"
+      ],
+      "sw": [
+        "Ufunguo wa Siri"
       ]
     },
     {
@@ -682,6 +759,10 @@
       ],
       "pa-Guru": [
         "ਰਿਕਵਰੀ ਕੁੰਜੀ"
+      ],
+      "sw": [
+        "ufunguo wa urejeshaji",
+        "Ufunguo wa urejeshaji"
       ]
     },
     {
@@ -722,6 +803,10 @@
       ],
       "pa-Guru": [
         "ਐਮਰਜੈਂਸੀ ਕਿੱਟ"
+      ],
+      "sw": [
+        "Kifurushi cha Dharura",
+        "KIFURUSHI CHA DHARURA"
       ]
     },
     {
@@ -763,6 +848,14 @@
       ],
       "pa-Guru": [
         "ਸੱਦ"
+      ],
+      "sw": [
+        "alik",
+        "Alik",
+        "aliko",
+        "Mwaliko",
+        "Mialiko",
+        "MWALIKO"
       ]
     },
     {
@@ -802,6 +895,11 @@
       ],
       "pa-Guru": [
         "ਮੈਂਬਰ"
+      ],
+      "sw": [
+        "wanachama",
+        "Wanachama",
+        "Mwanachama"
       ]
     },
     {
@@ -840,6 +938,9 @@
       ],
       "pa-Guru": [
         "ਐਡਮਿਨ"
+      ],
+      "sw": [
+        "simamizi"
       ]
     },
     {
@@ -878,6 +979,12 @@
       ],
       "pa-Guru": [
         "ਥ੍ਰੈਡ"
+      ],
+      "sw": [
+        "uzi",
+        "Uzi",
+        "nyuzi",
+        "Nyuzi"
       ]
     },
     {
@@ -916,6 +1023,10 @@
       ],
       "pa-Guru": [
         "ਪ੍ਰਤੀਕਿਰਿਆ"
+      ],
+      "sw": [
+        "itikio",
+        "Itikio"
       ]
     },
     {
@@ -954,6 +1065,10 @@
       ],
       "pa-Guru": [
         "ਮੈਨਸ਼ਨ"
+      ],
+      "sw": [
+        "taj",
+        "Taj"
       ]
     },
     {
@@ -992,6 +1107,10 @@
       ],
       "pa-Guru": [
         "ਸਕ੍ਰੀਨ ਸ਼ੇਅਰ"
+      ],
+      "sw": [
+        "shiriki skrini",
+        "Shiriki skrini"
       ]
     },
     {
@@ -1031,6 +1150,13 @@
       ],
       "pa-Guru": [
         "ਸਾਈਨ ਇਨ"
+      ],
+      "sw": [
+        "ingia",
+        "Ingia",
+        "ingie",
+        "ingiza",
+        "Ingiza"
       ]
     },
     {
@@ -1070,6 +1196,11 @@
       ],
       "pa-Guru": [
         "ਸਾਈਨ ਆਉਟ"
+      ],
+      "sw": [
+        "ondoka",
+        "Ondoka",
+        "ondoke"
       ]
     },
     {
@@ -1112,6 +1243,13 @@
       ],
       "pa-Guru": [
         "ਅਨਲੌਕ"
+      ],
+      "sw": [
+        "fungua",
+        "Fungua",
+        "funguliwa",
+        "fungue",
+        "Fungue"
       ]
     },
     {
@@ -1152,6 +1290,10 @@
       ],
       "pa-Guru": [
         "ਐਕਸਪੋਰਟ"
+      ],
+      "sw": [
+        "hamish",
+        "Hamish"
       ]
     },
     {
@@ -1190,6 +1332,9 @@
       ],
       "pa-Guru": [
         "ਐਂਡ-ਟੂ-ਐਂਡ ਇਨਕ੍ਰਿਪ"
+      ],
+      "sw": [
+        "kutoka mwanzo hadi mwisho"
       ]
     },
     {
@@ -1229,6 +1374,9 @@
       ],
       "pa-Guru": [
         "ਸੁਣਨਾ"
+      ],
+      "sw": [
+        "masikio"
       ]
     }
   ]

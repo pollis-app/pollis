@@ -202,6 +202,21 @@ import ru_search from "../../frontend/src/i18n/locales/ru/search.json";
 import ru_settings from "../../frontend/src/i18n/locales/ru/settings.json";
 import ru_vault from "../../frontend/src/i18n/locales/ru/vault.json";
 import ru_voice from "../../frontend/src/i18n/locales/ru/voice.json";
+import sw_arcade from "../../frontend/src/i18n/locales/sw/arcade.json";
+import sw_auth from "../../frontend/src/i18n/locales/sw/auth.json";
+import sw_channels from "../../frontend/src/i18n/locales/sw/channels.json";
+import sw_chat from "../../frontend/src/i18n/locales/sw/chat.json";
+import sw_common from "../../frontend/src/i18n/locales/sw/common.json";
+import sw_dms from "../../frontend/src/i18n/locales/sw/dms.json";
+import sw_emoji from "../../frontend/src/i18n/locales/sw/emoji.json";
+import sw_errors from "../../frontend/src/i18n/locales/sw/errors.json";
+import sw_mobile from "../../frontend/src/i18n/locales/sw/mobile.json";
+import sw_nav from "../../frontend/src/i18n/locales/sw/nav.json";
+import sw_saved from "../../frontend/src/i18n/locales/sw/saved.json";
+import sw_search from "../../frontend/src/i18n/locales/sw/search.json";
+import sw_settings from "../../frontend/src/i18n/locales/sw/settings.json";
+import sw_vault from "../../frontend/src/i18n/locales/sw/vault.json";
+import sw_voice from "../../frontend/src/i18n/locales/sw/voice.json";
 import ta_arcade from "../../frontend/src/i18n/locales/ta/arcade.json";
 import ta_auth from "../../frontend/src/i18n/locales/ta/auth.json";
 import ta_channels from "../../frontend/src/i18n/locales/ta/channels.json";
@@ -501,6 +516,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ru_settings,
     "vault": ru_vault,
     "voice": ru_voice,
+  },
+  "sw": {
+    "arcade": sw_arcade,
+    "auth": sw_auth,
+    "channels": sw_channels,
+    "chat": sw_chat,
+    "common": sw_common,
+    "dms": sw_dms,
+    "emoji": sw_emoji,
+    "errors": sw_errors,
+    "mobile": sw_mobile,
+    "nav": sw_nav,
+    "saved": sw_saved,
+    "search": sw_search,
+    "settings": sw_settings,
+    "vault": sw_vault,
+    "voice": sw_voice,
   },
   "ta": {
     "arcade": ta_arcade,

@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "Ujumbe kutoka kwa {{name}}",
+    "unknownAuthor": "haijulikani",
+    "deleted": "[ujumbe umefutwa]",
+    "encrypted": "[ujumbe umesimbwa kwa njia fiche]",
+    "redacted": "[ujumbe umefichwa]",
+    "edited": "(umehaririwa)",
+    "editUnsent": "(uhariri haujatumwa)",
+    "newMember": "mpya",
+    "newMemberTitle": "Amejiunga katika siku 7 zilizopita",
+    "undecryptable": {
+      "tag": "hausimbuliki",
+      "title": "Imeshindwa kusimbua",
+      "body_one": "Ujumbe huu haukuweza kusimbuliwa kwenye kifaa hiki.",
+      "body_other": "Ujumbe {{count}} haukuweza kusimbuliwa kwenye kifaa hiki.",
+      "detail": "Kitu kilitumwa hapa, lakini kifaa hiki hakikuweza kukisoma. Huenda vifaa vyako vingine bado vinacho.",
+      "diagnostics": "Angalia uchunguzi"
+    }
+  },
+  "status": {
+    "pending": "unasubiri",
+    "sending": "unatuma",
+    "sent": "umetumwa",
+    "failed": "umeshindwa",
+    "cancelled": "umeghairiwa"
+  },
+  "outbox": {
+    "retry": "Jaribu tena",
+    "discard": "Tupa",
+    "retryLabel": "Jaribu tena kutuma ujumbe huu",
+    "discardLabel": "Tupa ujumbe huu ambao haujatumwa",
+    "notSent": "Haujatumwa",
+    "willResend": "Utatumwa kiotomatiki Pollis itakapounganishwa tena.",
+    "notDelivered": "Ujumbe huu haukuweza kuwasilishwa."
+  },
+  "actions": {
+    "reply": "Jibu",
+    "replyInThread": "Jibu kwenye uzi",
+    "save": "Hifadhi ujumbe",
+    "removeBookmark": "Ondoa alamisho",
+    "copyLink": "Nakili kiungo cha ujumbe",
+    "copyLinkCopied": "Kiungo kimenakiliwa",
+    "copyLinkFailed": "Imeshindwa kunakili kiungo",
+    "edit": "Hariri ujumbe",
+    "delete": "Futa ujumbe",
+    "deleteAsAdmin": "Futa ujumbe (msimamizi)",
+    "more": "Vitendo zaidi",
+    "pin": "Bana ujumbe",
+    "unpin": "Banua ujumbe",
+    "report": "Ripoti"
+  },
+  "thread": {
+    "replyCount_one": "Jibu {{count}}",
+    "replyCount_other": "Majibu {{count}}"
+  },
+  "receipts": {
+    "readByEveryone": "Umesomwa na kila mtu",
+    "readByCount_one": "Umesomwa na {{count}} kati ya {{total}}",
+    "readByCount_other": "Umesomwa na {{count}} kati ya {{total}}",
+    "deliveredCount_one": "Umewasilishwa kwa {{count}} kati ya {{total}}",
+    "deliveredCount_other": "Umewasilishwa kwa {{count}} kati ya {{total}}"
+  },
+  "list": {
+    "empty": "Bado hakuna ujumbe. Anzisha mazungumzo.",
+    "unknownAuthor": "Haijulikani",
+    "blockedAuthor": "mtumiaji aliyezuiwa",
+    "blockedBody": "[ujumbe umezuiwa]"
+  },
+  "replyBar": {
+    "replyingTo": "unamjibu <name>{{name}}</name>",
+    "scrollToMessage": "Sogeza hadi ujumbe uliojibiwa",
+    "dismiss": "Ondoa jibu",
+    "encrypted": "[Ujumbe uliosimbwa kwa njia fiche]"
+  },
+  "queue": {
+    "heading": "Foleni",
+    "pendingPlaceholder": "[Ujumbe unaosubiri]",
+    "cancel": "Ghairi ujumbe",
+    "retry": "jaribu tena",
+    "failedCount_one": "imeshindwa ×{{count}}",
+    "failedCount_other": "imeshindwa ×{{count}}"
+  },
+  "reactions": {
+    "add": "Ongeza mwitikio",
+    "all": "Yote",
+    "allTabLabel_one": "Yote, mwitikio {{count}}",
+    "allTabLabel_other": "Yote, miitikio {{count}}",
+    "contextHint": "Bofya kulia ili kuona walioitikia",
+    "hoverMore_one": "{{names}} na {{count}} mwingine wameitikia kwa {{emoji}}",
+    "hoverMore_other": "{{names}} na {{count}} wengine wameitikia kwa {{emoji}}",
+    "hoverNames": "{{names}} wameitikia kwa {{emoji}}",
+    "pillLabel_one": "{{emoji}} mwitikio {{count}}",
+    "pillLabel_other": "{{emoji}} miitikio {{count}}",
+    "rowLabel": "{{name}}, ameitikia kwa {{emojis}}",
+    "selfName": "{{name}} (wewe)",
+    "sheetTitle": "Miitikio",
+    "tabLabel_one": "{{emoji}}, mwitikio {{count}}",
+    "tabLabel_other": "{{emoji}}, miitikio {{count}}",
+    "unknownUser": "Mtumiaji asiyejulikana",
+    "viewWho": "Angalia miitikio",
+    "you": "Wewe"
+  },
+  "preview": {
+    "noMessages": "Bado hakuna ujumbe",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[kiambatisho]",
+    "attachments_other": "[viambatisho {{count}}]",
+    "undecryptable": "Ujumbe mmoja haukuweza kusimbuliwa kwenye kifaa hiki"
+  },
+  "attachment": {
+    "viewLabel": "Angalia {{filename}}",
+    "openLabel": "Fungua {{filename}}",
+    "downloadLabel": "Pakua {{filename}}",
+    "loading": "inapakia…",
+    "error": "hitilafu",
+    "failedToLoad": "Imeshindwa kupakia",
+    "failedToDownload": "Imeshindwa kupakua",
+    "lightboxFetch": "leta",
+    "lightboxDone": "[ imekamilika ]",
+    "lightboxDownload": "[pakua]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "Onyesha midia nyeti: {{filename}}",
+    "sensitiveHide": "Ficha {{filename}}"
+  },
+  "unfurl": {
+    "loadImage": "Pakia picha",
+    "loadVideo": "Pakia video",
+    "loadTitle": "Pakia midia kutoka {{url}} — hii inawasiliana na tovuti hiyo moja kwa moja",
+    "loadDescription": "Pakia midia kutoka {{url}}. Hii inawasiliana na tovuti hiyo moja kwa moja na kuifichulia anwani yako ya IP.",
+    "openLabel": "Fungua {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "Ujumbe mpya",
+    "newMessageBody": "{{name}}: Ujumbe mpya",
+    "mentionTitle": "Umetajwa",
+    "allMentionBody": "{{name}} ametaja @all",
+    "userMentionBody": "{{name}} amekutaja"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "mtu huyu",
+    "titleMessage": "Ripoti ujumbe",
+    "titleUser": "Ripoti {{name}}",
+    "intro": "Pollis hupokea akaunti na sababu. Ujumbe unabaki umesimbwa kwa njia fiche, kwa hivyo hatuoni kamwe kilichosemwa.",
+    "reasonLabel": "Sababu",
+    "reason": {
+      "spam": "Barua taka",
+      "harassment": "Unyanyasaji au vitisho",
+      "illegal": "Maudhui haramu",
+      "other": "Kitu kingine"
+    },
+    "submit": "Ripoti",
+    "submitAndBlock": "Ripoti na uzuie",
+    "failed": "Imeshindwa kutuma ripoti. Jaribu tena.",
+    "doneTitle": "Ripoti imetumwa",
+    "done": "Asante. Tunakagua kila ripoti.",
+    "doneBlocked": "Asante. Tunakagua kila ripoti. Pia umemzuia {{name}}.",
+    "close": "Imekamilika"
+  },
+  "keyChange": {
+    "notice": "Nambari ya usalama kati yako na {{name}} imebadilika.",
+    "verify": "Ithibitishe",
+    "defaultName": "mwasiliani huyu"
+  },
+  "typing": {
+    "one": "{{name}} anaandika…",
+    "two": "{{first}} na {{second}} wanaandika…",
+    "several_one": "Mtu {{count}} anaandika…",
+    "several_other": "Watu {{count}} wanaandika…"
+  }
+}

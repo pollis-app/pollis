@@ -31,6 +31,7 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "te", label: "తెలుగు", dir: "ltr" },
   { code: "ta", label: "தமிழ்", dir: "ltr" },
   { code: "pa-Guru", label: "ਪੰਜਾਬੀ", dir: "ltr" },
+  { code: "sw", label: "Kiswahili", dir: "ltr" },
 ];
 
 export function supportedLanguageCodes(): string[] {
