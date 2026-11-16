@@ -841,7 +841,6 @@
     "mobile/store/ExportOptions.plist": "iOS build export config",
     "mobile/store/ota-code-signing.pem": "OTA public signing cert (build input)",
     "mobile/store/runtime-versions.json": "OTA runtime ledger (build input)",
-    "patches/sqlcipher-src/README.md": "vendored-patch note",
     "pollis-sqlcipher/tests/fixtures/README.md": "test fixture note",
     "scripts/x11-clipboard-repro/README.md": "repro harness note",
     "specs/tla/README.md": "formal-spec guide"

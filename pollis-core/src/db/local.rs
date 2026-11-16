@@ -867,9 +867,9 @@ mod tests {
 
     /// RUSTSEC-2026-0459 / CVE-2026-119375 (#1797): SQLite before 3.54.0 can hand back uninitialized page-cache memory.
     ///
-    /// It needs a database opened beside a `-wal` whose page size differs. `libsqlite3-sys` 0.39.1 still builds
-    /// `bundled-sqlcipher` from SQLite 3.53.4, so this holds only while the workspace's `sqlcipher-src` patch applies.
-    /// It asks the library that actually linked, on every platform, so a patch that silently stops applying fails here.
+    /// It needs a database opened beside a `-wal` whose page size differs. `libsqlite3-sys` 0.40 builds
+    /// `bundled-sqlcipher` from `sqlcipher-src` 420 (SQLite 3.54.1). This asks the library that actually linked, on
+    /// every platform, so a dependency change that brings back an older SQLite fails here.
     #[test]
     fn the_linked_sqlite_has_the_wal_page_size_fix() {
         let conn = Connection::open_in_memory().expect("open");
@@ -882,8 +882,8 @@ mod tests {
             .collect();
         assert!(
             parts.as_slice() >= [3, 54, 0].as_slice(),
-            "linked SQLite is {sqlite}, older than 3.54.0 (RUSTSEC-2026-0459). Is the `sqlcipher-src` \
-             [patch] in the workspace Cargo.toml still applying?"
+            "linked SQLite is {sqlite}, older than 3.54.0 (RUSTSEC-2026-0459). Did `libsqlite3-sys` \
+             or `sqlcipher-src` move back?"
         );
         assert!(rusqlite::version_number() >= 3_054_000, "sqlite3_libversion_number() disagrees");
     }

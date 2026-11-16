@@ -307,9 +307,6 @@ skip = [
     { name = "ghash", version = "0.5.1" },
     { name = "hashbrown", version = "0.12.3" },
     { name = "hashbrown", version = "0.15.5" },
-    # wasm32 only: rusqlite 0.41 -> sqlite-wasm-rs 0.5 -> rsqlite-vfs 0.1. Never
-    # built for any target we ship (#1797).
-    { name = "hashbrown", version = "0.16.1" },
     # libcrux-intrinsics 0.0.9 (under hpke-rs 0.8's libcrux-sha3, #1846) uses
     # hax-lib 0.4 itself and 0.3 through core-models.
     { name = "hax-lib", version = "0.3.7" },
@@ -369,6 +366,9 @@ skip = [
     { name = "spki", version = "0.7.3" },
     { name = "strsim", version = "0.10.0" },
     { name = "syn", version = "1.0.109" },
+    # thiserror 2.0.19+ (required by rsqlite-vfs 0.2, under rusqlite 0.43's
+    # wasm32-only sqlite-wasm-rs, #1798) is on syn 3; most proc-macros are still on 2.
+    { name = "syn", version = "2.0.117" },
     { name = "system-deps", version = "6.2.2" },
     { name = "target-lexicon", version = "0.12.16" },
     { name = "thiserror", version = "1.0.69" },

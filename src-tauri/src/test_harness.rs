@@ -445,13 +445,13 @@ async fn wipe_tables(conn: &libsql::Connection, tables: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Link shim: the one SQLite API `rusqlite` 0.41 references that libsql's SQLite lacks (#1797).
+/// Link shim: the one SQLite API `rusqlite` 0.43 references that libsql's SQLite lacks (#1797).
 ///
 /// This harness runs the real DS in-process, so its binaries link libsql's SQLite (a 3.47 fork, required
 /// for its `libsql_*` calls) beside pollis-core's SQLCipher. Both define every `sqlite3_*` symbol and
 /// only one may be linked. `db::local::sqlcipher_is_linked` documents that libsql's copy serves the
 /// whole process here, so the client database in these tests is plaintext, and until #1797 that held
-/// by itself. rusqlite 0.41 also references `sqlite3_set_errmsg` (SQLite 3.51), which only SQLCipher
+/// by itself. rusqlite 0.43 also references `sqlite3_set_errmsg` (SQLite 3.51), which only SQLCipher
 /// defines, so the linker pulled SQLCipher's whole object in too: two SQLites in one process, a
 /// duplicate-symbol error under rust-lld and a silent mix of the two under ld64.
 ///

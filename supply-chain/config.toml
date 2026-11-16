@@ -52,9 +52,6 @@ audit-as-crates-io = true
 [policy.openmls_traits]
 audit-as-crates-io = true
 
-[policy.sqlcipher-src]
-audit-as-crates-io = true
-
 [[exemptions.aead]]
 version = "0.5.2"
 criteria = "safe-to-deploy"
@@ -979,7 +976,7 @@ notes = "No longer in the lockfile (#1303 dropped libsql's replication stack, it
 [[exemptions.hashlink]]
 version = "0.12.2"
 criteria = "safe-to-deploy"
-notes = "Comes with rusqlite 0.41 (#1797, RUSTSEC-2026-0459). Statement-cache LRU map; no unsafe of its own beyond hashbrown's."
+notes = "Comes with rusqlite 0.43 (#1797, RUSTSEC-2026-0459). Statement-cache LRU map; no unsafe of its own beyond hashbrown's."
 
 [[exemptions.hax-lib]]
 version = "0.3.7"
@@ -1489,9 +1486,9 @@ version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsqlite3-sys]]
-version = "0.39.1"
+version = "0.40.0"
 criteria = "safe-to-deploy"
-notes = "Bumped from 0.35 for RUSTSEC-2026-0459 (#1797). Its bundled-sqlcipher source comes from sqlcipher-src, which the workspace patches to SQLCipher 4.20.0 / SQLite 3.54.1."
+notes = "Bumped from 0.35 for RUSTSEC-2026-0459 (#1797); 0.40 builds bundled-sqlcipher from sqlcipher-src 420 (SQLCipher 4.20.0 / SQLite 3.54.1), which retired the workspace patch (#1798)."
 
 [[exemptions.libwebrtc]]
 version = "0.3.52"
@@ -2246,18 +2243,18 @@ version = "0.19.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rsqlite-vfs]]
-version = "0.1.1"
+version = "0.2.0"
 criteria = "safe-to-deploy"
-notes = "wasm32-only dependency of rusqlite 0.41 (via sqlite-wasm-rs); never built for a target Pollis ships (#1797)."
+notes = "wasm32-only dependency of rusqlite 0.43 (via sqlite-wasm-rs); never built for a target Pollis ships (#1797)."
 
 [[exemptions.rtrb]]
 version = "0.3.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusqlite]]
-version = "0.41.1"
+version = "0.43.0"
 criteria = "safe-to-deploy"
-notes = "Bumped from 0.37 for RUSTSEC-2026-0459 (#1797), the first release on libsqlite3-sys 0.39."
+notes = "Bumped from 0.37 for RUSTSEC-2026-0459 (#1797); 0.43 is on libsqlite3-sys 0.40, whose sqlcipher-src 420 pin retired the workspace patch (#1798)."
 
 [[exemptions.rustc-hash]]
 version = "2.1.2"
@@ -2542,14 +2539,14 @@ version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.sqlcipher-src]]
-version = "419.0.6+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2"
+version = "420.0.0+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2"
 criteria = "safe-to-deploy"
-notes = "patches/sqlcipher-src: crates.io sqlcipher-src 420.0.0 (sha256 fd6b5280ed2593d07b2816ec531821c15c306903bcca224716f1fbcc2bbfedfe) with only Cargo.toml's version changed, to meet libsqlite3-sys 0.39.1's =419.0.6 pin and get SQLite 3.54.1 (RUSTSEC-2026-0459, #1797). Source only: the SQLCipher amalgamation every client build compiles. Not independently reviewed."
+notes = "Pinned by libsqlite3-sys 0.40 (and pollis-sqlcipher, to match): SQLCipher 4.20.0 on SQLite 3.54.1 for RUSTSEC-2026-0459 (#1797, #1798). Source only: the SQLCipher amalgamation every client build compiles. Not independently reviewed."
 
 [[exemptions.sqlite-wasm-rs]]
-version = "0.5.5"
+version = "0.6.3"
 criteria = "safe-to-deploy"
-notes = "wasm32-only dependency of rusqlite 0.41; never built for a target Pollis ships (#1797)."
+notes = "wasm32-only dependency of rusqlite 0.43; never built for a target Pollis ships (#1797)."
 
 [[exemptions.stable_deref_trait]]
 version = "1.2.1"
@@ -2712,11 +2709,11 @@ version = "1.4.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.thiserror]]
-version = "2.0.18"
+version = "2.0.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.thiserror-impl]]
-version = "2.0.18"
+version = "2.0.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.tiff]]
