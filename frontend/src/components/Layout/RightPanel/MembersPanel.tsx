@@ -31,7 +31,7 @@ interface Person {
   isAdmin: boolean;
 }
 
-/** Members + shared media (#824). DMs derive members from the record; with no conversation, just the online roster. */
+/** People + shared media (#824): a DM's members, a group's online members, or else your online DM contacts. */
 export const MembersPanel: React.FC<MembersPanelProps> = observer(
   ({ groupId, channelId, conversationId }) => {
     const { t } = useTranslation("nav");
@@ -43,43 +43,17 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const currentUser = appStore.currentUser;
     // React Query, not `appStore.dmConversations` (never written, #906).
     const { data: dmConversations = [] } = useDMConversations();
-    const hasContext = Boolean(groupId || channelId || conversationId);
+    // Only a DM lists everyone; a group and the default list who is online.
+    const listsEveryone = Boolean(conversationId);
+    // Media needs a message log: a channel or a DM.
+    const showMedia = Boolean(channelId || conversationId);
 
-    // Online first; reading `isOnline` in the observer keeps order live.
+    // Who the panel lists (#824), by the page's context (`panelContext.ts`):
+    // - a DM: everyone in it, you included, with safety numbers and media;
+    // - a group page or channel: that group's OTHER members who are online;
+    // - any other page: the people you have a DM open with who are online.
+    // Reading `isOnline` / `byUser` in the observer keeps it live.
     const people = useMemo<Person[]>(() => {
-      if (!hasContext) {
-        // No conversation: everyone visible online, named from the DM list.
-        const known = new Map<string, { label: string; avatarKey: string | null }>();
-        for (const dm of dmConversations) {
-          if (dm.user2_id) {
-            known.set(dm.user2_id, {
-              label: dm.user2_identifier,
-              avatarKey: dm.user2_avatar_url ?? null,
-            });
-          }
-        }
-        const self: Person[] = currentUser
-          ? [
-              {
-                userId: currentUser.id,
-                label: t("members.you"),
-                avatarKey: null,
-                isAdmin: false,
-              },
-            ]
-          : [];
-        const others = Object.keys(presenceStore.byUser)
-          .filter((userId) => userId !== currentUser?.id)
-          .map((userId) => ({
-            userId,
-            label: known.get(userId)?.label ?? userId,
-            avatarKey: known.get(userId)?.avatarKey ?? null,
-            isAdmin: false,
-          }))
-          .sort((a, b) => a.label.localeCompare(b.label));
-        return [...self, ...others];
-      }
-
       if (conversationId) {
         const dm = dmConversations.find((c) => c.id === conversationId);
         if (!dm) {
@@ -116,24 +90,37 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
         return [...peer, ...self];
       }
 
-      return [...groupMembers]
-        .map((m) => ({
-          userId: m.user_id,
-          label: m.display_name || m.username || m.user_id,
-          avatarKey: m.avatar_url ?? null,
-          isAdmin: m.role === "admin",
-        }))
-        .sort((a, b) => {
-          const aOnline = presenceStore.isOnline(a.userId);
-          const bOnline = presenceStore.isOnline(b.userId);
-          if (aOnline !== bOnline) {
-            return aOnline ? -1 : 1;
+      if (groupId) {
+        return groupMembers
+          .filter((m) => m.user_id !== currentUser?.id && presenceStore.isOnline(m.user_id))
+          .map((m) => ({
+            userId: m.user_id,
+            label: m.display_name || m.username || m.user_id,
+            avatarKey: m.avatar_url ?? null,
+            isAdmin: m.role === "admin",
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label));
+      }
+
+      // No conversation: online DM contacts, named from the DM list (never a raw id).
+      const contacts = new Map<string, Person>();
+      for (const dm of dmConversations) {
+        const peers = (dm.peers ?? []).length > 0
+          ? (dm.peers ?? []).map((p) => ({ id: p.user_id, label: p.username || p.user_id, avatar: p.avatar_url ?? null }))
+          : dm.user2_id
+            ? [{ id: dm.user2_id, label: dm.user2_identifier, avatar: dm.user2_avatar_url ?? null }]
+            : [];
+        for (const p of peers) {
+          if (p.id === currentUser?.id || contacts.has(p.id) || !presenceStore.isOnline(p.id)) {
+            continue;
           }
-          return a.label.localeCompare(b.label);
-        });
+          contacts.set(p.id, { userId: p.id, label: p.label, avatarKey: p.avatar, isAdmin: false });
+        }
+      }
+      return [...contacts.values()].sort((a, b) => a.label.localeCompare(b.label));
     }, [
       t,
-      hasContext,
+      groupId,
       conversationId,
       dmConversations,
       currentUser,
@@ -178,7 +165,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
         <section className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}>
           <SectionHeader
             label={
-              hasContext
+              listsEveryone
                 ? t("members.count", { count: people.length })
                 : t("members.onlineCount", { count: people.length })
             }
@@ -186,7 +173,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           />
           {people.length === 0 ? (
             <p className={emptyClass}>
-              {hasContext ? t("members.empty") : t("members.noneOnline")}
+              {listsEveryone ? t("members.empty") : t("members.noneOnline")}
             </p>
           ) : (
             people.map((person) => (
@@ -238,7 +225,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           </section>
         )}
 
-        {hasContext && (
+        {showMedia && (
           <section
             className={isTerminal ? "flex flex-col gap-1 pb-2" : "flex flex-col gap-2"}
           >

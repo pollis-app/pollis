@@ -8,6 +8,7 @@ import i18n from "./i18n";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { appStore } from "./stores/appStore";
+import { presenceStore } from "./stores/presenceStore";
 import { voiceSession } from "./voice";
 import { audioLevels } from "./voice/audioLevels";
 import { appHandlesPaste, readClipboardText } from "./bridge";
@@ -41,6 +42,7 @@ if (import.meta.env.VITE_PLAYWRIGHT === 'true') {
   (window as any).__pollisStore = appStore;
   (window as any).__pollisVoice = voiceSession;
   (window as any).__pollisAudioLevels = audioLevels;
+  (window as any).__pollisPresence = presenceStore;
 }
 
 const container = document.getElementById("root");
