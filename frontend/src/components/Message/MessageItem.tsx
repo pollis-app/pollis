@@ -119,19 +119,22 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     ? getUsernameColor(replyTo.sender_username ?? replyTo.sender_id, isLightBg)
     : null;
 
-  // Every message is encrypted, so a quote says what happened: the original could not be
-  // decrypted here, or it predates this user joining (mobile's MessageRow says the same).
+  // Every message is encrypted, so a quote says what happened: the original was deleted, could
+  // not be decrypted here (or is not on this device), or predates this user joining. Mobile's
+  // MessageRow says the same.
   const replyQuoteText = replyTo
-    ? replyTo.content_decrypted == null
-      ? t("message.undecryptable.title")
-      : replyTo.content_decrypted.slice(0, 80) ||
-        replyTo.attachments?.[0]?.filename ||
-        t("message.undecryptable.title")
+    ? replyTo.deleted_at
+      ? t("message.deleted")
+      : replyTo.content_decrypted == null
+        ? t("message.undecryptable.title")
+        : replyTo.content_decrypted.slice(0, 80) ||
+          replyTo.attachments?.[0]?.filename ||
+          t("message.undecryptable.title")
     : "";
   const missingQuoteText =
     message.reply_to_message_id && sentBeforeJoin(message.reply_to_message_id, ctx.viewerJoinedAtMs)
       ? t("message.beforeJoin")
-      : t("message.redacted");
+      : t("message.undecryptable.title");
 
   const isDeleted = !!message.deleted_at;
 
@@ -255,10 +258,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             ) : (
               <div
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
-                className="flex items-center gap-1 text-xs mb-0.5 text-dim"
+                className="flex items-center gap-1 text-xs mb-0.5 opacity-70 min-w-0 text-muted"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
-                <span>{missingQuoteText}</span>
+                <span className="truncate max-w-xs">{missingQuoteText}</span>
               </div>
             )
           )}
@@ -287,7 +290,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <div
             data-testid="message-content"
             dir="auto"
-            className={`text-sm break-words leading-msg ${isDeleted ? "text-muted" : "text-fg"}`}
+            className={`text-sm break-words leading-msg ${isDeleted ? "italic text-muted" : "text-fg"}`}
             style={{
               whiteSpace: "pre-wrap",
             }}
@@ -349,10 +352,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
-            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 text-dim"
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 text-muted"
           >
             <Reply size={10} className="rtl-unmirror" />
-            <span>{missingQuoteText}</span>
+            <span className="truncate max-w-xs">{missingQuoteText}</span>
           </div>
         )
       )}
@@ -390,7 +393,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <span
             data-testid="message-content"
             dir="auto"
-            className={`block font-mono text-sm break-words ${isDeleted ? "text-muted" : "text-fg"}`}
+            className={`block font-mono text-sm break-words ${isDeleted ? "italic text-muted" : "text-fg"}`}
             style={{
               whiteSpace: "pre-wrap",
             }}

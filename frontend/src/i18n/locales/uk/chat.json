@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Повідомлення від {{name}}",
     "unknownAuthor": "невідомо",
-    "deleted": "[видалено]",
+    "deleted": "Повідомлення видалено",
     "beforeJoin": "Надіслано до того, як ви приєдналися",
-    "redacted": "[приховано]",
     "edited": "(змінено)",
     "editUnsent": "(зміну не надіслано)",
     "newMember": "новий",

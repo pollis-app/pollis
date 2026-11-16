@@ -127,7 +127,6 @@
     "ownPreview": "أنت: {{text}}",
     "noMatches": "لا توجد محادثات مطابقة.",
     "emptyHint": "ابدأ محادثة مع شخص باستخدام اسم المستخدم أو البريد الإلكتروني.",
-    "previewDeleted": "تم حذف الرسالة",
     "previewAttachment": "مرفق"
   },
   "dm": {

@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Message de {{name}}",
     "unknownAuthor": "inconnu",
-    "deleted": "[supprimé]",
+    "deleted": "Message supprimé",
     "beforeJoin": "Envoyé avant votre arrivée",
-    "redacted": "[expurgé]",
     "edited": "(modifié)",
     "editUnsent": "(modification non envoyée)",
     "newMember": "nouveau",

@@ -112,7 +112,6 @@
     "ownPreview": "あなた: {{text}}",
     "noMatches": "一致する会話はありません。",
     "emptyHint": "ユーザー名またはメールアドレスで相手を指定して会話を始めましょう。",
-    "previewDeleted": "メッセージは削除されました",
     "previewAttachment": "添付ファイル"
   },
   "dm": {

@@ -115,7 +115,6 @@
     "ownPreview": "Tú: {{text}}",
     "noMatches": "Ninguna conversación coincide.",
     "emptyHint": "Empieza una conversación con alguien por su nombre de usuario o correo.",
-    "previewDeleted": "Mensaje eliminado",
     "previewAttachment": "Adjunto"
   },
   "dm": {

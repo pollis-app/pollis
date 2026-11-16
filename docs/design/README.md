@@ -29,6 +29,10 @@ Pollis is end-to-end encrypted, and the UI never performs that. No hacker theatr
 - No security words as decoration. Everything is encrypted, so nothing is labelled
   `[encrypted]`, "secure channel", "E2EE ✓" or similar. Name a security fact only where a person
   must act on it (a changed safety number, an unverified device), in plain words.
+- A message that shows no text says why, in muted words, the same on every look and platform:
+  "Message deleted" (italic on desktop), "Couldn't decrypt" for a quote whose original is
+  unreadable or not on this device, "Sent before you joined" for one that predates the reader.
+  Never `[deleted]`, `[redacted]` or another bracketed tag.
 - No emoji as icons or ornament. Emoji are user content and reactions only.
 - Terminal idioms (brackets around words, `> prompt`, `↑↓ navigate`, UPPERCASE spaced labels, the
   braille spinner) belong to the Terminal skin only, behind a skin check or a terminal-only string.

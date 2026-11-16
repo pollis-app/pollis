@@ -77,7 +77,7 @@ entry point (see below):
 | `restart-persistence.js` | single client; account survives a full app restart on the same data dir (no blank re-signup) | yes | yes (writable) |
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
 | `two-client-dm-reply.js` | bidirectional 1:1 DM — B replies and A sees it (reverse leg of two-client) | yes | yes (writable) |
-| `two-client-delete.js` | delete-for-everyone — after A's DM converges into B, A deletes it and B's already-delivered copy flips to `[deleted]` (E2EE redaction) | yes | yes (writable) |
+| `two-client-delete.js` | delete-for-everyone — after A's DM converges into B, A deletes it and B's already-delivered copy flips to "Message deleted" (E2EE redaction) | yes | yes (writable) |
 | `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
 | `voice-ptt-deafen.js` | push-to-talk + self-deafen (#849): deafen implies mute and undeafen restores the *prior* mute state; PTT-idle renders distinctly from muted | yes | yes (writable) + LiveKit + audio |
 | `two-client-voice-channel.js` | A + B join a group voice channel, both see 2 participants, A leaves, B sees the drop | yes | yes (writable) + LiveKit + audio |

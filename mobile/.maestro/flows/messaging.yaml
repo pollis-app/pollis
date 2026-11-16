@@ -105,6 +105,11 @@ tags:
 - runFlow: ../subflows/long-press-message.yaml
 - tapOn:
     id: "btn-delete"
+# The row stays and says so, in words (never "[deleted]").
+- extendedWaitUntil:
+    visible:
+      text: "Message deleted"
+    timeout: 15000
 - takeScreenshot: messaging-06-deleted
 
 # Multi-line (#1247): Return in the composer inserts a newline instead of

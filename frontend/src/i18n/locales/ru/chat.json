@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Сообщение от {{name}}",
     "unknownAuthor": "неизвестно",
-    "deleted": "[удалено]",
+    "deleted": "Сообщение удалено",
     "beforeJoin": "Отправлено до того, как вы присоединились",
-    "redacted": "[скрыто]",
     "edited": "(изменено)",
     "editUnsent": "(изменение не отправлено)",
     "newMember": "новый",

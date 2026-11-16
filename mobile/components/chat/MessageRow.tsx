@@ -51,6 +51,7 @@ export function MessageRow({
   name,
   time,
   text,
+  deleted = false,
   pending,
   failed,
   unsentReason,
@@ -92,6 +93,8 @@ export function MessageRow({
   name: string;
   time: string;
   text?: string;
+  // Deleted for everyone: the row stays and says so (desktop's MessageItem says the same).
+  deleted?: boolean;
   pending?: boolean;
   failed?: boolean;
   /** Whether the outbox will resend a failed row; defaults to it will. */
@@ -212,7 +215,9 @@ export function MessageRow({
     ? replyTo.snippet || t("message.undecryptable.title")
     : replyBeforeJoin
       ? t("message.beforeJoin")
-      : t("message.redacted");
+      : t("message.undecryptable.title");
+  const deletedText = deleted ? t("message.deleted") : null;
+  const spokenText = deletedText ?? text;
   const quoteLabel = isReply
     ? `${t("mobile:chat.replyQuoteLabel", { name: replyTo?.name ?? "", text: quoteText })}. `
     : "";
@@ -232,7 +237,7 @@ export function MessageRow({
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         testID={testID}
-        accessibilityLabel={`${quoteLabel}${text ? t("preview.withSender", { name: spokenName, text }) : spokenName}, ${spokenStatus}${
+        accessibilityLabel={`${quoteLabel}${spokenText ? t("preview.withSender", { name: spokenName, text: spokenText }) : spokenName}, ${spokenStatus}${
           spokenReceipt ? `, ${spokenReceipt}` : ""
         }`}
         accessibilityActions={a11yActions}
@@ -377,7 +382,11 @@ export function MessageRow({
                 />
               </View>
             ) : null}
-            {text ? (
+            {deletedText ? (
+              <Text testID={messageId ? `text-deleted-${messageId}` : undefined} style={[ty.body, { color: semantic.muted }]}>
+                {deletedText}
+              </Text>
+            ) : text ? (
               <Text style={[ty.body, { color: semantic.text }]}>
                 <MessageBodyInline
                   text={text}

@@ -112,7 +112,6 @@
     "ownPreview": "나: {{text}}",
     "noMatches": "일치하는 대화가 없습니다.",
     "emptyHint": "사용자 이름이나 이메일로 대화를 시작하세요.",
-    "previewDeleted": "삭제된 메시지",
     "previewAttachment": "첨부 파일"
   },
   "dm": {

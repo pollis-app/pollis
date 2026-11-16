@@ -1,6 +1,8 @@
 /**
- * Every message is encrypted, so nothing says "[encrypted]". A message this device could not read
- * says it could not be decrypted; a quote of a message sent before the viewer joined says that.
+ * Every message is encrypted, so nothing says "[encrypted]", "[redacted]" or "[deleted]". A message
+ * this device could not read says it could not be decrypted, and so does a quote of one that is not
+ * on this device; a quote of a message sent before the viewer joined says that; a deleted message
+ * and its quotes say "Message deleted".
  */
 
 import { test, expect, type Page } from "./lib/zero-loss";
@@ -12,6 +14,9 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const UNREADABLE_ID = "01K1ZZZZZZZZZZZZZZZZZZZZZ1";
 // A ULID from 2024: sent long before alice joined (2026-08-01), so it never reached her.
 const BEFORE_JOIN_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0QQQ";
+// Sent after alice joined (2026-08-14) but not on this device.
+const MISSING_ID = "01KZZZZZZZZZZZZZZZZZZZZZY0";
+const DELETED_ID = "01K1ZZZZZZZZZZZZZZZZZZZZZ4";
 const SKINS = ["terminal", "modern"] as const;
 
 function preloadState(skin: string) {
@@ -48,6 +53,32 @@ function preloadState(skin: string) {
           reply_to_id: BEFORE_JOIN_ID,
           sent_at: "2026-08-02T10:02:00.000Z",
         },
+        {
+          id: DELETED_ID,
+          conversation_id: CHANNEL_ID,
+          sender_id: "u-bob",
+          sender_username: "bob",
+          deleted_at: "2026-08-02T10:04:00.000Z",
+          sent_at: "2026-08-02T10:03:00.000Z",
+        },
+        {
+          id: "01K1ZZZZZZZZZZZZZZZZZZZZZ5",
+          conversation_id: CHANNEL_ID,
+          sender_id: "u-bob",
+          sender_username: "bob",
+          content: "about the deleted one",
+          reply_to_id: DELETED_ID,
+          sent_at: "2026-08-02T10:05:00.000Z",
+        },
+        {
+          id: "01K1ZZZZZZZZZZZZZZZZZZZZZ6",
+          conversation_id: CHANNEL_ID,
+          sender_id: "u-bob",
+          sender_username: "bob",
+          content: "about the missing one",
+          reply_to_id: MISSING_ID,
+          sent_at: "2026-08-02T10:06:00.000Z",
+        },
       ],
     },
   };
@@ -64,13 +95,16 @@ async function boot(page: Page, skin: string) {
 }
 
 for (const skin of SKINS) {
-  test(`${skin}: an unreadable message and quotes say what happened, never "encrypted"`, async ({ page }) => {
+  test(`${skin}: unreadable, missing and deleted messages and their quotes say what happened`, async ({ page }) => {
     await boot(page, skin);
     const list = page.getByTestId("message-list");
 
     await expect(list.getByText("This message couldn't be decrypted on this device.")).toBeVisible();
     await expect(page.getByTestId(`reply-preview-${UNREADABLE_ID}`)).toContainText("Couldn't decrypt");
     await expect(page.getByTestId(`reply-preview-${BEFORE_JOIN_ID}`)).toContainText("Sent before you joined");
-    await expect(list).not.toContainText(/encrypted/i);
+    await expect(page.getByTestId(`reply-preview-${MISSING_ID}`)).toContainText("Couldn't decrypt");
+    await expect(page.getByTestId(`message-${DELETED_ID}`).getByTestId("message-content")).toHaveText("Message deleted");
+    await expect(page.getByTestId(`reply-preview-${DELETED_ID}`)).toContainText("Message deleted");
+    await expect(list).not.toContainText(/encrypted|redacted|\[deleted\]/i);
   });
 }

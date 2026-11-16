@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "رسالة من {{name}}",
     "unknownAuthor": "غير معروف",
-    "deleted": "[محذوفة]",
+    "deleted": "حُذفت الرسالة",
     "beforeJoin": "أُرسلت قبل انضمامك",
-    "redacted": "[محجوبة]",
     "edited": "(مُعدَّلة)",
     "editUnsent": "(لم يُرسَل التعديل)",
     "newMember": "جديد",

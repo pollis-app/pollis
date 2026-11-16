@@ -104,8 +104,7 @@
   "thread": {
     "loading": "正在加载回复…",
     "empty": "还没有回复。在下方开始这个话题吧。",
-    "placeholder": "在话题中回复…",
-    "messageDeleted": "消息已删除"
+    "placeholder": "在话题中回复…"
   },
   "chat": {
     "noSelection": "选择一个频道以开始聊天"

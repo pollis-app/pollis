@@ -725,11 +725,14 @@ function TextChat(props: ChatViewProps = {}) {
               name:
                 authorName(original.sender_id, original.sender_username, currentUser) ??
                 t("chat:list.unknownAuthor"),
-              snippet: replySnippet(original),
+              snippet: original.deleted_at
+                ? t("chat:message.deleted")
+                : replySnippet(original),
             }
           : null
         : undefined;
-      const settled = !m.pending && !m.failed;
+      // A deleted row has nothing to reply to or act on (desktop hides its actions too).
+      const settled = !m.pending && !m.failed && !m.deleted_at;
       const retryId = retryTarget(m);
       return (
         <MessageRow
@@ -742,6 +745,7 @@ function TextChat(props: ChatViewProps = {}) {
           name={name}
           time={timeLabel(m.created_at)}
           text={m.content}
+          deleted={!!m.deleted_at}
           attachments={m.attachments}
           onOpenAttachment={openMedia}
           pending={m.pending}
@@ -751,7 +755,7 @@ function TextChat(props: ChatViewProps = {}) {
           onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
           edited={!!m.edited_at}
           editUnsent={m.edit_unsent}
-          reactions={reactionsByMessage?.get(m.id)}
+          reactions={m.deleted_at ? undefined : reactionsByMessage?.get(m.id)}
           currentUserId={currentUser?.id}
           receipt={m.id === receiptMessageId ? receiptsByMessage?.get(m.id) : undefined}
           peerCount={peerCount}

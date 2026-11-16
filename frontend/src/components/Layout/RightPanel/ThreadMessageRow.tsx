@@ -26,7 +26,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
 
     const body = message.deleted_at ? (
       <p className={`italic text-muted ${isTerminal ? "text-base" : "text-sm"}`}>
-        {t("thread.messageDeleted")}
+        {t("chat:message.deleted")}
       </p>
     ) : (
       <>

@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "{{name}}からのメッセージ",
     "unknownAuthor": "不明",
-    "deleted": "[削除済み]",
+    "deleted": "メッセージは削除されました",
     "beforeJoin": "参加前に送信されたメッセージ",
-    "redacted": "[非表示]",
     "edited": "（編集済み）",
     "editUnsent": "（編集は未送信）",
     "newMember": "新規",

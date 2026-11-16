@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "{{name}} 님의 메시지",
     "unknownAuthor": "알 수 없음",
-    "deleted": "[삭제됨]",
+    "deleted": "삭제된 메시지",
     "beforeJoin": "참여하기 전에 보낸 메시지",
-    "redacted": "[가려짐]",
     "edited": "(수정됨)",
     "editUnsent": "(수정 내용 전송 안 됨)",
     "newMember": "신규",
