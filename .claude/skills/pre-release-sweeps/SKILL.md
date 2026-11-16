@@ -198,10 +198,25 @@ about is not this sweep's to clear.
 
 ## i18n-surfaces (#1724)
 
-User-facing copy that escapes the catalogues. Not built yet: report it as
-"not yet built (#1724)". When #1724 lands, its data file
-(`scripts/i18n-surfaces.json`) and checker are wired into `DIMENSIONS` in
-`scripts/sweep.mjs` and its procedure goes here.
+User-facing copy that escapes the catalogues.
+
+```bash
+node scripts/i18n-check.mjs --report   # coverage per locale/namespace + every surface's status; fails on an invalid registry
+```
+
+`scripts/i18n-surfaces.json` records every place a user reads Pollis text,
+with a decision (`localize` or `english-only`, with the reason) and, for
+`localize`, a status (`localized`, `partial`, `debt`). The checker fails on a
+missing required surface, a path that no longer exists, a `debt`/`partial`
+entry with no `debt` text, or a localized one with no `checked_by`. **Due:**
+"N surface(s) not yet localized whose code changed". For each, read the diff:
+if it localized part of the surface, update `status` and `debt`; if it added a
+new source of copy (a native string table, a server-written message, a new
+kind of public page), add a surface. Then look for sources the registry does
+not know about yet: new `Info.plist` usage keys or Android string resources,
+new DS emails or push text, new user-visible strings in `pollis-delivery/src`.
+Hardcoded copy inside the two apps is not this sweep's: the
+`scripts/i18n-hardcoded.mjs` ratchet catches it in CI.
 
 ## ui-inventory (#933), ds-config (#760)
 
