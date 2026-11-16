@@ -9,10 +9,13 @@
  *   4. no empty values (an empty string renders as a blank UI slot, which
  *      reads as a bug rather than as missing copy)
  *   5. every `t('ns:key')` call site in the renderer resolves in `en`
+ *   8. no new hardcoded user-facing copy in either app (scripts/i18n-hardcoded.mjs, #1724)
  *
  * Missing keys only WARN (fallbackLng renders English); anything WRONG rather than BEHIND fails.
  *
  * Run: `node scripts/i18n-check.mjs`
+ *      `node scripts/i18n-check.mjs --report` — coverage per locale and namespace, and the
+ *      status of every surface in scripts/i18n-surfaces.json (scripts/i18n-report.mjs, #1724)
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -20,6 +23,11 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+if (process.argv.includes("--report")) {
+  const { report } = await import("./i18n-report.mjs");
+  process.exit(report());
+}
 const LOCALES_DIR = join(ROOT, "frontend/src/i18n/locales");
 // The two apps that call into the catalogues. Mobile reads the same files
 // (see mobile/metro.config.js), so its call sites are held to the same rule.
@@ -362,6 +370,15 @@ for (const key of unresolved) {
       fail(`mobile/components/emoji/${name} has drifted from frontend/src/components/Emoji/${name} — edit the desktop one and copy it across`);
     }
   }
+}
+
+// 8. Hardcoded copy outside t(), against the ratchet baseline in scripts/i18n-hardcoded.json (#1724).
+console.log("\nhardcoded copy:");
+try {
+  const { check } = await import("./i18n-hardcoded.mjs");
+  check({ fail });
+} catch (error) {
+  fail(`hardcoded-copy lint could not run: ${error.message}`);
 }
 
 // Untranslated coverage, as a standing report rather than a gate.

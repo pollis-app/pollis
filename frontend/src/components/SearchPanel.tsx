@@ -510,7 +510,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
               borderRadius: "4px",
             }}
           >
-            esc
+            {t("common:keys.escape")}
           </kbd>
         </div>
 

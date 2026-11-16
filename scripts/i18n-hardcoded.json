@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "Hardcoded-copy lint (#1724): scripts/i18n-hardcoded.mjs, run by scripts/i18n-check.mjs in CI.",
+    "It parses frontend/src/**/*.tsx and mobile/{app,components,hooks}/**/*.tsx and reports user-facing string literals that do not go through t(): JSX text, the props placeholder/title/aria-label/alt/accessibilityLabel/accessibilityHint/label, JSX child expressions, and the arguments of error setters and Alert.alert.",
+    "allow: exact strings (after whitespace is collapsed) that are the same in every language, each with the reason. Reviewed like code: a brand name, a format mask or a wire token belongs here; a sentence never does. An entry that matches nothing fails the check.",
+    "ignore_files: whole files that never reach a user (dev-only screens), each with the reason. A path that is not a scanned file fails the check.",
+    "baseline: the ratchet. Violations that existed when the lint landed, as { file: { text: count } }. A violation not covered here fails; so does an entry that no longer occurs. After fixing one, shrink it with `node scripts/i18n-hardcoded.mjs --update-baseline`. Never grow it by hand to get a new string past the check: put the string in a catalogue."
+  ],
+  "allow": {
+    "Pollis": "Brand name, the same in every language (the desktop title bar).",
+    "A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX": "Format mask of the Secret Key, which is the same Latin-alphabet string in every locale.",
+    "pollis-link:v2:…": "Format of a device-link code (a wire value the user pastes), shown as the input's placeholder.",
+    "@all": "The mention token itself, typed literally in every language; its description next to it is translated.",
+    "/g/": "A group's URL path (/g/<slug>), an identifier rather than prose.",
+    "v{…}": "Version-number prefix (v1.2.3) under the mobile launch screen; numbers and the v are not translated anywhere in the app."
+  },
+  "ignore_files": {
+    "mobile/app/dev/client-policy.tsx": "Dev-build-only screen (pollis://dev/client-policy) for overriding the client policy; never reachable in a store build."
+  },
+  "baseline": {}
+}

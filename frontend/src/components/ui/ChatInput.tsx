@@ -899,7 +899,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             className="mt-3 text-xs font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
             style={{ border: "1px solid transparent", borderRadius: 4, cursor: "pointer" }}
           >
-            [esc]
+            [{t("keys.escape")}]
           </button>
         </div>
       )}

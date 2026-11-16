@@ -93,6 +93,9 @@ on:
       - 'scripts/mobile-i18n-resources.mjs'
       - 'scripts/mobile-android-push-strings.mjs'
       - 'scripts/i18n-check.mjs'
+      - 'scripts/i18n-hardcoded.mjs'
+      - 'scripts/i18n-hardcoded.json'
+      - 'scripts/i18n-report.mjs'
       - 'scripts/oss-inventory.mjs'
       - 'supply-chain/license-texts/**'
       - 'pollis-delivery/worker/**'
@@ -193,6 +196,9 @@ jobs:
               - 'scripts/mobile-i18n-resources.mjs'
               - 'scripts/mobile-android-push-strings.mjs'
               - 'scripts/i18n-check.mjs'
+              - 'scripts/i18n-hardcoded.mjs'
+              - 'scripts/i18n-hardcoded.json'
+              - 'scripts/i18n-report.mjs'
               # OTA updates (#1250): the update routes in the DS front-door
               # Worker and the release workflows the mobile tests pin.
               - 'pollis-delivery/worker/**'
@@ -417,6 +423,12 @@ jobs:
       - name: Unit tests
         working-directory: mobile
         run: pnpm test
+
+      # Catalogue integrity plus the hardcoded-copy ratchet (#1724) over mobile's
+      # screens, here too so a mobile-only PR is held to it. The lint parses with
+      # the `typescript` package from mobile's install above.
+      - name: i18n check
+        run: node scripts/i18n-check.mjs
 
       # The OTA update routes in the DS front-door Worker (api.pollis.com/updates/,
       # #1250): protocol responses and the no-client-IP config. Pure node, no

@@ -71,8 +71,14 @@ jobs:
 
       # Catalogue integrity for BOTH apps (#1074): plural families, placeholders,
       # every t() call site in frontend/src and mobile/ resolving in `en`, the
-      # generated mobile resource table being fresh, and the emoji ranking
-      # modules mobile carries as copies matching the desktop originals. Node
-      # only — no deps beyond the checkout.
+      # generated mobile resource table being fresh, the emoji ranking modules
+      # mobile carries as copies matching the desktop originals, and (#1724) no
+      # new hardcoded user-facing copy in either app against the committed
+      # baseline (scripts/i18n-hardcoded.json; it parses with frontend's
+      # `typescript`).
       - name: i18n check
         run: pnpm i18n:check
+
+      # The hardcoded-copy lint's and the surface registry's own tests (#1724).
+      - name: i18n coverage unit tests
+        run: node --test scripts/test-i18n-coverage.mjs
