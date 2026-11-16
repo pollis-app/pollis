@@ -360,7 +360,7 @@ const SHIPPED = JSON.parse(
 ) as Array<{ code: string; dir: "ltr" | "rtl" }>;
 
 test.describe("shipped locales", () => {
-  test("the registry is the seven we intend to ship", () => {
+  test("the registry is the eight we intend to ship", () => {
     expect(SHIPPED.map((l) => l.code)).toEqual([
       "en",
       "es",
@@ -369,6 +369,7 @@ test.describe("shipped locales", () => {
       "ru",
       "zh",
       "ar",
+      "ko",
     ]);
   });
 

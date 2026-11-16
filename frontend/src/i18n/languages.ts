@@ -23,6 +23,7 @@ const SHIPPED_LANGUAGES: readonly LanguageOption[] = [
   // `zh`, not `zh-Hans`: one Chinese script ships, so it keeps the base tag (languageTag.ts).
   { code: "zh", label: "简体中文", dir: "ltr" },
   { code: "ar", label: "العربية", dir: "rtl" },
+  { code: "ko", label: "한국어", dir: "ltr" },
 ];
 
 /** The live registry; Playwright may add a synthetic locale (`registerTestLanguage`). */

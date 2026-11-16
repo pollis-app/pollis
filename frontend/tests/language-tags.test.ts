@@ -41,6 +41,8 @@ test("every other language keeps the base-tag rule", () => {
     ["zh-Hans-CN", "zh"],
     ["zh-Hant-TW", "zh"],
     ["zh_CN", "zh"],
+    ["ko-KR", "ko"],
+    ["ko-Kore-KR", "ko"],
     ["ar-EG", "ar"],
     ["es-419", "es"],
     ["pt-BR", null],
@@ -61,6 +63,10 @@ test("every stored preference for an existing locale still resolves to itself", 
   assert.equal(normalizeLanguage("xx"), null);
 });
 
+test("Korean is auto-detected from OS tags", () => {
+  assert.equal(normalizeLanguage("ko-KR"), "ko");
+  assert.equal(normalizeLanguage("ko"), "ko");
+});
 
 test("registered codes have the shape i18next keeps, and script codes are declared", () => {
   for (const code of supportedLanguageCodes()) {

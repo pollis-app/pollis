@@ -1,0 +1,60 @@
+{
+  "picker": {
+    "label": "이모지 선택기",
+    "triggerLabel": "이모지",
+    "searchLabel": "검색",
+    "searchPlaceholder": "이모지 검색",
+    "resultsFor": "\"{{query}}\" 검색 결과",
+    "recent": "자주 사용",
+    "custom": "사용자 지정",
+    "empty": "일치하는 이모지가 없습니다.",
+    "previewHint": "이모지를 선택하세요",
+    "railLabel": "이모지 카테고리"
+  },
+  "categories": {
+    "people": "사람",
+    "nature": "자연",
+    "food": "음식",
+    "activity": "활동",
+    "travel": "여행",
+    "objects": "사물",
+    "symbols": "기호",
+    "flags": "깃발"
+  },
+  "skinTone": {
+    "groupLabel": "피부색",
+    "default": "기본 피부색",
+    "numbered": "피부색 {{index}}"
+  },
+  "manage": {
+    "title": "사용자 지정 이모지",
+    "signInRequired": "로그인해 주세요",
+    "dropPrompt": "이미지를 여기로 끌어오거나 클릭하여 찾아보세요",
+    "dropNow": "놓으면 이 이미지를 사용합니다",
+    "dropHint": "{{formats}} · 애니메이션 GIF는 애니메이션이 유지됩니다",
+    "replaceHint": "다른 이미지를 놓거나 클릭하여 교체하세요",
+    "sourceSize": "원본 {{size}} · 업로드 시 48 KB 미만으로 다시 인코딩됨",
+    "reencodeNote": "업로드 시 48 KB 미만으로 다시 인코딩됨",
+    "fileTooLarge": "이미지가 {{size}}를 초과합니다 — 더 작은 원본 파일을 선택하세요",
+    "unsupportedFile": "{{name}}은(는) PNG, JPEG, GIF 또는 WebP 파일이 아닙니다",
+    "shortcodeLabel": "단축 코드",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": ":shortcode: 형식으로 입력 — a–z, 0–9 및 _",
+    "shortcodeRequired": "추가하려면 이모지 이름을 입력하세요",
+    "shortcodeInvalid": "2–32자로 입력하세요: a–z, 0–9 및 _",
+    "shortcodeTaken": ":{{shortcode}}:은(는) 이 그룹에서 이미 사용 중입니다",
+    "samplePlaceholder": "메시지에서 보이는 모습",
+    "add": "이모지 추가",
+    "shrinking": "축소 중…",
+    "filePickerTitle": "이모지 이미지 선택",
+    "imageFilterName": "이미지",
+    "addFailed": "이모지를 추가할 수 없습니다",
+    "removeFailed": "이모지를 삭제할 수 없습니다",
+    "storageNote": "이미지는 업로드 전에 48 KB 미만으로 다시 인코딩되므로 원본 파일이 커도 괜찮습니다. 동일한 이미지는 이를 사용하는 모든 그룹에서 저장된 사본 하나를 공유합니다. 이 그룹이 가질 수 있는 이모지 수에는 제한이 없습니다.",
+    "stored_other": "이모지 {{count}}개 · {{size}} 저장됨",
+    "empty": "아직 사용자 지정 이모지가 없습니다. 그룹의 누구나 추가할 수 있습니다.",
+    "sizeAnimated": "애니메이션 · {{size}}",
+    "remove": ":{{shortcode}}: 삭제",
+    "removeAdminsOnly": "그룹 관리자만 이모지를 삭제할 수 있습니다."
+  }
+}

@@ -23,6 +23,7 @@ export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [
   "en",
   "es",
   "fr",
+  "ko",
   "ru",
   "uk",
   "zh",
@@ -41,6 +42,8 @@ export function loadEmojiAnnotationRows(
       return import("./es").then((m) => m.default);
     case "fr":
       return import("./fr").then((m) => m.default);
+    case "ko":
+      return import("./ko").then((m) => m.default);
     case "ru":
       return import("./ru").then((m) => m.default);
     case "uk":
