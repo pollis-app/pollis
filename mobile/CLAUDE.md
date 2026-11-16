@@ -96,7 +96,8 @@ Rules that are easy to get wrong here:
   `upper(t(...))`, never `.toUpperCase()` on translated text
   (locale-invariant casing is wrong in Turkish and a no-op in Arabic).
 - **RTL is `I18nManager`.** `setLanguage` calls `forceRTL` for the language's
-  `dir`, which React Native applies on the **next launch**; `LanguageSection`
+  `dir`, which React Native applies on the **next launch**; the Language page
+  (`app/self/language.tsx`, body `components/LanguagePicker.tsx`, #1944)
   shows `mobile:language.restartRequired` until then (`layoutRestartPending`).
   Never write the direction before `hydrateLanguage` has read the stored
   choice: Android's Fabric re-reads it on every root measure, so a boot-time

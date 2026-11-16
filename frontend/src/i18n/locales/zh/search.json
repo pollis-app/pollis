@@ -17,6 +17,8 @@
     "settingsKeywords": "设置 偏好设置 用户 安全 preferences user security",
     "preferencesName": "偏好设置",
     "preferencesKeywords": "偏好设置 主题 颜色 字体 字号 通知 外观 theme color font notifications appearance",
+    "languageName": "语言",
+    "languageKeywords": "语言 界面语言 翻译 中文 language",
     "voiceName": "语音与视频",
     "voiceKeywords": "语音 视频 麦克风 扬声器 音频 噪音抑制 回声消除 自动加入 摄像头 预览 权限 microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "安全",

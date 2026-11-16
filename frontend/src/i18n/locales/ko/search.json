@@ -18,6 +18,8 @@
     "settingsKeywords": "환경설정 사용자 보안 preferences user security",
     "preferencesName": "환경설정",
     "preferencesKeywords": "테마 색상 글꼴 알림 모양 theme color font notifications appearance",
+    "languageName": "언어",
+    "languageKeywords": "언어 표시 언어 번역 한국어 language",
     "voiceName": "음성 및 비디오",
     "voiceKeywords": "마이크 스피커 오디오 소음 억제 에코 제거 자동 참여 카메라 웹캠 비디오 미리보기 권한 microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "보안",

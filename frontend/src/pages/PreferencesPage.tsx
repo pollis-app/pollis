@@ -451,9 +451,9 @@ export const PreferencesPage: React.FC = observer(() => {
           <div className="w-full max-w-md flex flex-col gap-8">
 
             {/* Language (this device). Deliberately first: someone who cannot
-                read the UI needs the control that fixes that at the top, not
-                buried under colour pickers. */}
-            <LanguageSection userId={currentUser?.id ?? null} />
+                read the UI needs the way to fix that at the top. One row; the
+                list is its own page (#1944). */}
+            <LanguageSection />
 
             {/* Appearance — UI skin (synced across devices) */}
             <section className="flex flex-col gap-4 mb-12">

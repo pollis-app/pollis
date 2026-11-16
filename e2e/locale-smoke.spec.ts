@@ -1,5 +1,5 @@
 // Locale smoke (#1725): every SHIPPED locale × both skins, through the key screens (sign-in, chat
-// list, a conversation, the composer, settings, PIN). Fails on a raw catalogue key on screen, the
+// list, a conversation, the composer, settings, the Language page, PIN). Fails on a raw catalogue key on screen, the
 // locale not taking, or layout overflow; saves a screenshot per screen. The locale list is the
 // catalogue directory listing, so a new locale is covered by adding its catalogue — nothing here.
 //
@@ -182,7 +182,7 @@ for (const language of LOCALES) {
         await audit(page, language, skin, "sign-in");
       });
 
-      test("chat list, conversation, composer, settings, PIN", async ({ page }) => {
+      test("chat list, conversation, composer, settings, language, PIN", async ({ page }) => {
         await boot(page, skin, language, true);
         await expect(page.getByTestId("sidebar")).toBeVisible();
         await audit(page, language, skin, "chat-list");
@@ -200,8 +200,14 @@ for (const language of LOCALES) {
         // The sidebar row, not search: page keywords are translated and need not keep the English word.
         await page.getByTestId("sidebar-row-preferences").click();
         await expect(page.getByTestId("preferences-page")).toBeVisible();
-        await expect(page.getByTestId(`pref-language-${language}`)).toHaveAttribute("aria-checked", "true");
+        // One Language row naming the detected language (#1944); the list is its own page.
+        await expect(page.getByTestId("pref-language-row").locator(`[lang="${language}"]`)).toBeVisible();
         await audit(page, language, skin, "settings");
+
+        await page.getByTestId("pref-language-row").click();
+        await expect(page.getByTestId("language-page")).toBeVisible();
+        await expect(page.getByTestId(`pref-language-${language}`)).toHaveAttribute("aria-checked", "true");
+        await audit(page, language, skin, "language");
 
         await page.evaluate(() => {
           (window as unknown as { __tauriEmit: (e: string) => void }).__tauriEmit("auto-lock");

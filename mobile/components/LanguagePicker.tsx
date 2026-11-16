@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { View, Text, type LayoutChangeEvent } from "react-native";
+import { View, Text } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useObserver } from "mobx-react-lite";
-import { Group, SectionTitle } from "./ui";
+import { Group } from "./ui";
 import { RadioRow } from "./RadioRow";
 import { Icon } from "./icons";
 import { type as ty, semantic, space } from "../theme/tokens";
@@ -10,22 +10,16 @@ import { SUPPORTED_LANGUAGES } from "../i18n/languages";
 import { layoutRestartPending, setLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
 
-// A pick-one setting, so a vertical radio list (#1725): it grows with every locale, which a chip row cannot.
-// Endonyms outside Geist's Latin/Cyrillic fall back to the platform font for their script.
-export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent) => void }) {
+// The Language page's body (#1944). A pick-one setting, so a vertical radio list (#1725): it grows with every
+// locale, which a chip row cannot. Endonyms outside Geist's Latin/Cyrillic fall back to the platform font.
+export function LanguagePicker() {
   const { t, i18n } = useTranslation("settings");
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
   const [restartPending, setRestartPending] = useState(layoutRestartPending);
   const active = i18n.language;
 
   return (
-    <View testID="pref-language" onLayout={onLayout} style={{ gap: space.sm }}>
-      <SectionTitle
-        testID="pref-language-heading"
-        style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}
-      >
-        {t("language.heading")}
-      </SectionTitle>
+    <View testID="pref-language" style={{ gap: space.sm }}>
       <View accessibilityRole="radiogroup" accessibilityLabel={t("language.ariaLabel")}>
         <Group>
           {SUPPORTED_LANGUAGES.map((option) => (
@@ -47,7 +41,9 @@ export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent
         </Group>
       </View>
       {/* #1231: "left" is the start edge under RTL. */}
-      <Text style={[ty.meta, { textAlign: "left" }]}>{t("language.description")}</Text>
+      <Text testID="pref-language-note" style={[ty.meta, { textAlign: "left" }]}>
+        {t("language.description")}
+      </Text>
       {restartPending ? (
         <View
           style={{ flexDirection: "row", alignItems: "flex-start", gap: space.xs }}

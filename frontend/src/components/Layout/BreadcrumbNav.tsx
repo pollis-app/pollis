@@ -118,6 +118,10 @@ function useBreadcrumbTrail(): Segment[] {
     } else if (pathname === "/preferences") {
       out.push({ label: t("breadcrumb.account"), to: "/settings" });
       out.push({ label: t("breadcrumb.preferences"), to: "/preferences" });
+    } else if (pathname === "/preferences/language") {
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
+      out.push({ label: t("breadcrumb.preferences"), to: "/preferences" });
+      out.push({ label: t("breadcrumb.language"), to: "/preferences/language" });
     } else if (pathname === "/user") {
       out.push({ label: t("breadcrumb.account"), to: "/settings" });
       out.push({ label: t("breadcrumb.userSettings"), to: "/user" });

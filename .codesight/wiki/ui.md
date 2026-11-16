@@ -845,7 +845,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**210 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**212 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -973,7 +973,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 ### `components/Preferences` (4)
 
 - **HexColorField** — props: color, hexInput, onHexInputChange, onColor, title, swatchStyle — `frontend/src/components/Preferences/HexColorField.tsx`. Swatch + hex box of the accent and background rows in `PreferencesPage` (#1731).
-- **LanguageSection** — props: userId — `frontend/src/components/Preferences/LanguageSection.tsx`
+- **LanguageSection** — `frontend/src/components/Preferences/LanguageSection.tsx`. Preferences' Language heading and one `NavRow` (`pref-language-row`) naming the current language by its endonym; opens `LanguagePage` (#1944).
 - **RelayServingSection** — props: config, status, applyError, onChange — `frontend/src/components/Preferences/RelayServingSection.tsx`
 - **SkinPicker** — props: value, onChange — `frontend/src/components/Preferences/SkinPicker.tsx`. The Terminal / Modern `RadioList`, shared by Preferences and the first-run step; row test ids carry the stored value (`pref-skin-refined` is Modern).
 
@@ -994,7 +994,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 - **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
-### `components/ui` (35)
+### `components/ui` (36)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
@@ -1016,6 +1016,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MentionSuggestList** — props: candidates, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/MentionSuggestList.tsx`
 - **NavigableGrid** — props: items, getKey, renderCell, onActivate, minCellWidth, maxCellWidth, aspect, gap, autoFocus, emptyLabel, testId — `frontend/src/components/ui/NavigableGrid.tsx`
 - **NavigableList** — props: items, getKey, renderRow, controls, trailing, onEnterRow, onClickRow, activateRowOn, isLoading, loadingLabel, emptyLabel, rowTestId, testId, autoFocus, cursorOnlyWhenFocused — `frontend/src/components/ui/NavigableList.tsx`
+- **NavRow** — props: children, onClick, lang, textId — `frontend/src/components/ui/NavRow.tsx`. A filled, unbordered row with a trailing chevron (mirrored under RTL) that opens another page; acts on press (#1529). Styled as an unselected `RadioList` row so a setting's row and its page's list read as one family.
 - **PillButton** — props: accent, onClick, title, square, children — `frontend/src/components/ui/PillButton.tsx`
 - **PollisLogo** — props: size, color — `frontend/src/components/ui/PollisLogo.tsx`
 - **PresenceAvatar** — props: userId, avatarKey, size, alt, testId, variant — `frontend/src/components/ui/PresenceAvatar.tsx`
@@ -1054,7 +1055,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (58)
+### `pages` (59)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -1087,6 +1088,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **JoinRequestsPage** — `frontend/src/pages/JoinRequestsPage.tsx`
 - **KeyboardShortcutsPage** — `frontend/src/pages/KeyboardShortcutsPage.tsx`
 - **KickMemberPage** — `frontend/src/pages/KickMemberPage.tsx`
+- **LanguagePage** — `frontend/src/pages/LanguagePage.tsx`. `/preferences/language` (#1944): the language `RadioList` (`pref-language-<code>`) and the device-only note; a pick applies at once.
 - **LeaveGroupPage** — `frontend/src/pages/LeaveGroup.tsx`
 - **LinkDevicePage** — `frontend/src/pages/LinkDevicePage.tsx`
 - **Members** — props: groupId, isAdmin — `frontend/src/pages/Members.tsx`

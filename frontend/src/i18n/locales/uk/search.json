@@ -17,6 +17,8 @@
     "settingsKeywords": "параметри користувач безпека settings preferences security",
     "preferencesName": "Параметри",
     "preferencesKeywords": "тема колір шрифт сповіщення вигляд оформлення theme color font notifications appearance",
+    "languageName": "Мова",
+    "languageKeywords": "мова локаль переклад інтерфейс language",
     "voiceName": "Звук і відео",
     "voiceKeywords": "мікрофон динамік звук аудіо шумозаглушення відлуння луна камера вебкамера відео перегляд дозволи voice audio mic camera video",
     "securityName": "Безпека",

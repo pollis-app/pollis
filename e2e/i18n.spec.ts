@@ -135,6 +135,13 @@ async function gotoPreferences(page: Page) {
   await expect(page.getByTestId("preferences-page")).toBeVisible();
 }
 
+/** Preferences → its Language row → the Language page, which holds the list (#1944). */
+async function gotoLanguage(page: Page) {
+  await gotoPreferences(page);
+  await page.getByTestId("pref-language-row").click();
+  await expect(page.getByTestId("language-page")).toBeVisible();
+}
+
 const EN_LOCALE_DIR = path.join(
   __dirname,
   "..",
@@ -226,9 +233,18 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoPreferences(page);
 
+      // Preferences holds one row naming the current language, not the list (#1944).
       const section = page.getByTestId("pref-language");
       await expect(section).toBeVisible();
       await expect(page.getByTestId("pref-language-heading")).toHaveText(EN_HEADING);
+      await expect(page.getByTestId("pref-language-row")).toHaveText("English");
+      await expect(page.getByTestId("pref-language-row")).toHaveAccessibleName(`${EN_HEADING} English`);
+      await expect(section.getByRole("radiogroup")).toHaveCount(0);
+
+      await page.getByTestId("pref-language-row").click();
+      await expect(page.getByTestId("language-page")).toBeVisible();
+      await expect(page.getByTestId("language-page-heading")).toHaveText(EN_HEADING);
+      await expect(page.getByTestId("language-page-note")).toContainText(EN_DESCRIPTION_FRAGMENT);
 
       // English always ships; the synthetic locale is registered on top.
       await expect(page.getByTestId("pref-language-en")).toBeVisible();
@@ -252,9 +268,9 @@ for (const skin of SKINS) {
 
     agnosticTest("switching language changes the rendered copy", async ({ page }) => {
       await boot(page, skin);
-      await gotoPreferences(page);
+      await gotoLanguage(page);
 
-      const heading = page.getByTestId("pref-language-heading");
+      const heading = page.getByTestId("language-page-heading");
       await expect(heading).toHaveText(EN_HEADING);
 
       await page.getByTestId(`pref-language-${TEST_LANG}`).click();
@@ -275,24 +291,29 @@ for (const skin of SKINS) {
       // `<html lang>` follows, which is what drives hyphenation, spellcheck
       // and the screen-reader voice.
       await expect(page.locator("html")).toHaveAttribute("lang", TEST_LANG);
+
+      // Back in Preferences, the row names the new language in its own name.
+      await page.getByTestId("sidebar-row-preferences").click();
+      await expect(page.getByTestId("pref-language-heading")).toHaveText(TEST_HEADING);
+      await expect(page.getByTestId("pref-language-row")).toHaveText(TEST_LANG_LABEL);
     });
 
     test("a missing key falls back to English instead of rendering the key", async ({ page }) => {
       await boot(page, skin);
-      await gotoPreferences(page);
+      await gotoLanguage(page);
       await page.getByTestId(`pref-language-${TEST_LANG}`).click();
-      await expect(page.getByTestId("pref-language-heading")).toHaveText(TEST_HEADING);
+      await expect(page.getByTestId("language-page-heading")).toHaveText(TEST_HEADING);
 
       // `settings:language.description` exists in the namespace the synthetic
       // locale DOES provide, but is absent from it — so it must render the
       // English string.
-      await expect(page.getByTestId("pref-language")).toContainText(
+      await expect(page.getByTestId("language-page")).toContainText(
         EN_DESCRIPTION_FRAGMENT,
       );
 
       // `settings:language.ariaLabel` is likewise absent.
       await expect(
-        page.getByTestId("pref-language").getByRole("radiogroup"),
+        page.getByTestId("language-page").getByRole("radiogroup"),
       ).toHaveAttribute("aria-label", EN_HEADING);
 
       // And nothing anywhere in the tree — including the many namespaces the
@@ -302,9 +323,9 @@ for (const skin of SKINS) {
 
     agnosticTest("the language choice persists across a reload", async ({ page }) => {
       await boot(page, skin);
-      await gotoPreferences(page);
+      await gotoLanguage(page);
       await page.getByTestId(`pref-language-${TEST_LANG}`).click();
-      await expect(page.getByTestId("pref-language-heading")).toHaveText(TEST_HEADING);
+      await expect(page.getByTestId("language-page-heading")).toHaveText(TEST_HEADING);
 
       await page.reload();
       await expect(page.getByTestId("sidebar")).toBeVisible();
@@ -312,8 +333,8 @@ for (const skin of SKINS) {
       // Restored before any UI is touched — `<html lang>` is set during init.
       await expect(page.locator("html")).toHaveAttribute("lang", TEST_LANG);
 
-      await gotoPreferences(page);
-      await expect(page.getByTestId("pref-language-heading")).toHaveText(TEST_HEADING);
+      await gotoLanguage(page);
+      await expect(page.getByTestId("language-page-heading")).toHaveText(TEST_HEADING);
       await expect(page.getByTestId(`pref-language-${TEST_LANG}`)).toHaveAttribute(
         "aria-checked",
         "true",
@@ -392,10 +413,10 @@ test.describe("shipped locales", () => {
       expect(heading).not.toBe(EN_HEADING);
 
       await boot(page, "terminal");
-      await gotoPreferences(page);
+      await gotoLanguage(page);
       await page.getByTestId(`pref-language-${code}`).click();
 
-      await expect(page.getByTestId("pref-language-heading")).toHaveText(heading);
+      await expect(page.getByTestId("language-page-heading")).toHaveText(heading);
       await expect(page.locator("html")).toHaveAttribute("lang", code);
       // Direction travels with the language; Arabic is the only rtl entry.
       await expect(page.locator("html")).toHaveAttribute("dir", dir);
@@ -639,6 +660,7 @@ test.describe("sidebar settings rows are located by testid, not by label", () =>
   const NAV_TRANSLATED: Record<string, string> = {
     saved: "NAV-SAVED",
     preferences: "NAV-PREFERENCES",
+    language: "NAV-LANGUAGE",
     userSettings: "NAV-USER",
     voiceAndVideo: "NAV-VOICE",
     security: "NAV-SECURITY",
@@ -657,6 +679,7 @@ test.describe("sidebar settings rows are located by testid, not by label", () =>
   const ROWS: ReadonlyArray<readonly [string, string, string]> = [
     ["saved", "saved-page", "saved"],
     ["preferences", "preferences-page", "preferences"],
+    ["language", "language-page", "language"],
     ["user", "settings-page", "userSettings"],
     ["voice-settings", "voice-settings-page", "voiceAndVideo"],
     ["security", "security-page", "security"],

@@ -17,6 +17,8 @@
     "settingsKeywords": "التفضيلات المستخدم الأمان settings preferences user security",
     "preferencesName": "التفضيلات",
     "preferencesKeywords": "السمة اللون الخط الإشعارات المظهر theme color font notifications appearance",
+    "languageName": "اللغة",
+    "languageKeywords": "اللغة لغة الواجهة الترجمة العربية language",
     "voiceName": "الصوت والفيديو",
     "voiceKeywords": "الميكروفون السماعة الصوت كتم الضوضاء إلغاء الصدى الانضمام التلقائي الكاميرا الفيديو المعاينة الأذونات microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "الأمان",

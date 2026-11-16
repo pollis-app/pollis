@@ -166,6 +166,7 @@ const PAGE_RESULTS: PageResultSpec[] = [
   { id: "page-settings", nameKey: "pages.userName", keywordsKey: "pages.userKeywords", breadcrumb: "/user", path: "/user" },
   { id: "page-settings-hub", nameKey: "pages.settingsName", keywordsKey: "pages.settingsKeywords", breadcrumb: "/settings", path: "/settings" },
   { id: "page-preferences", nameKey: "pages.preferencesName", keywordsKey: "pages.preferencesKeywords", breadcrumb: "/preferences", path: "/preferences" },
+  { id: "page-language", nameKey: "pages.languageName", keywordsKey: "pages.languageKeywords", breadcrumb: "/preferences/language", path: "/preferences/language" },
   { id: "page-voice-settings", nameKey: "pages.voiceName", keywordsKey: "pages.voiceKeywords", breadcrumb: "/settings/voice", path: "/voice-settings" },
   { id: "page-security", nameKey: "pages.securityName", keywordsKey: "pages.securityKeywords", breadcrumb: "/security", path: "/security" },
   { id: "page-security-events", nameKey: "pages.securityEventsName", keywordsKey: "pages.securityEventsKeywords", breadcrumb: "/security/events", path: "/security/events" },
