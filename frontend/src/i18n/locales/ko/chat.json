@@ -3,7 +3,7 @@
     "fromLabel": "{{name}} 님의 메시지",
     "unknownAuthor": "알 수 없음",
     "deleted": "[삭제됨]",
-    "encrypted": "[암호화됨]",
+    "beforeJoin": "참여하기 전에 보낸 메시지",
     "redacted": "[가려짐]",
     "edited": "(수정됨)",
     "editUnsent": "(수정 내용 전송 안 됨)",
@@ -66,8 +66,7 @@
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> 님에게 답장",
     "scrollToMessage": "답장한 메시지로 스크롤",
-    "dismiss": "답장 취소",
-    "encrypted": "[암호화된 메시지]"
+    "dismiss": "답장 취소"
   },
   "queue": {
     "heading": "대기열",

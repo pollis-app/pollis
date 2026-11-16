@@ -116,8 +116,7 @@
     "loading": "Loading replies…",
     "empty": "No replies yet. Start the thread below.",
     "placeholder": "Reply in thread…",
-    "messageDeleted": "Message deleted",
-    "encrypted": "[encrypted]"
+    "messageDeleted": "Message deleted"
   },
   "chat": {
     "noSelection": "Select a channel to start messaging"

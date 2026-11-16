@@ -3,7 +3,7 @@
     "fromLabel": "Mensaje de {{name}}",
     "unknownAuthor": "desconocido",
     "deleted": "[eliminado]",
-    "encrypted": "[cifrado]",
+    "beforeJoin": "Enviado antes de que te unieras",
     "redacted": "[retirado]",
     "edited": "(editado)",
     "editUnsent": "(edición no enviada)",
@@ -62,8 +62,7 @@
   "replyBar": {
     "replyingTo": "respondiendo a <name>{{name}}</name>",
     "scrollToMessage": "Ir al mensaje respondido",
-    "dismiss": "Descartar respuesta",
-    "encrypted": "[Mensaje cifrado]"
+    "dismiss": "Descartar respuesta"
   },
   "queue": {
     "heading": "Cola",

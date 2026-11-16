@@ -29,6 +29,7 @@ Not scanned, each for a reason: `e2e/` (test code), `pollis-delivery/worker/` (o
   | Mobile copy | Desktop original | Held by |
   |---|---|---|
   | `mobile/lib/drafts.ts` | `frontend/src/utils/drafts.ts` | `mobile/tests/drafts.test.ts` |
+  | `mobile/lib/replyQuote.ts` | `frontend/src/utils/replyQuote.ts` | `mobile/tests/reply-quote.test.ts` |
   | `mobile/lib/links.ts` | `frontend/src/utils/links.ts` | `mobile/tests/links.test.ts` (byte-identical) |
   | `mobile/lib/username.ts` | `frontend/src/utils/username.ts` | `mobile/tests/username.test.ts` |
   | `mobile/lib/identityFields.ts` | `frontend/src/utils/identityFields.ts` | `mobile/tests/identity-fields.test.ts` |

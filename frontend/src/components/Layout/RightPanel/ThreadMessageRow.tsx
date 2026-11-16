@@ -40,13 +40,14 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
             {/* An unsent reply (#1335). */}
             {message.status === "failed" && <UnsentMessageActions message={message} />}
           </p>
-        ) : (
+        ) : message.content_decrypted == null ? (
+          // No text on this device: it could not be decrypted (every message is encrypted).
           <p
             className={`italic text-muted ${isTerminal ? "text-base" : "text-sm"}`}
           >
-            {t("thread.encrypted")}
+            {t("chat:message.undecryptable.body_one")}
           </p>
-        )}
+        ) : null}
         {(message.attachments ?? []).map((attachment) => (
           <div key={attachment.id} className="mt-1">
             <AttachmentDisplay attachment={attachment} roll={message.attachments} />

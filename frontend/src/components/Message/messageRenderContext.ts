@@ -9,4 +9,6 @@ export interface MessageRenderContext {
   /** Lowercased names an `@mention` may resolve to. */
   mentionNames: ReadonlySet<string>;
   selfName?: string;
+  /** When the viewer joined this group (ms), so a quote of an earlier message says so; null in DMs. */
+  viewerJoinedAtMs?: number | null;
 }

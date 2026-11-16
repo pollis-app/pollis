@@ -26,6 +26,7 @@ import { outgoingText } from "../../lib/messageText";
 import { EditBar } from "../../components/chat/EditBar";
 import { ReplyBar } from "../../components/chat/ReplyBar";
 import { replySnippet, replyTargets } from "../../lib/replyPreview";
+import { sentBeforeJoin } from "../../lib/replyQuote";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
 import { EmojiPickerSheet } from "../../components/emoji/EmojiPickerSheet";
@@ -569,6 +570,12 @@ function TextChat(props: ChatViewProps = {}) {
   const { data: groupMembers } = useGroupMembers(
     kind === "channel" ? groupId ?? null : null,
   );
+  // When this user joined the group: a quoted original from before then never reaches them.
+  const viewerJoinedAtMs = useMemo(() => {
+    const me = (groupMembers ?? []).find((m) => m.user_id === currentUser?.id);
+    const ms = me ? Date.parse(me.joined_at) : NaN;
+    return Number.isFinite(ms) ? ms : null;
+  }, [groupMembers, currentUser?.id]);
   // The "new" member tag (#1506), same rule as desktop (`lib/newMember.ts`).
   const newMemberJoinMs = useMemo(
     () => newMemberJoins(groupMembers ?? [], group?.owner_id),
@@ -780,6 +787,7 @@ function TextChat(props: ChatViewProps = {}) {
           onLongPress={settled ? () => setActionTarget(m) : undefined}
           onReply={settled ? () => startReply(m) : undefined}
           replyTo={replyTo}
+          replyBeforeJoin={replyTo === null && !!m.reply_to_id && sentBeforeJoin(m.reply_to_id, viewerJoinedAtMs)}
           onPressReplyQuote={original ? () => scrollToMessage(original.id) : undefined}
           highlighted={highlightId === m.id}
         />
@@ -806,6 +814,7 @@ function TextChat(props: ChatViewProps = {}) {
       retryMessage,
       discardUnsent,
       newMemberJoinMs,
+      viewerJoinedAtMs,
       peerLabel,
       avatarKeyById,
       t,
@@ -985,7 +994,7 @@ function TextChat(props: ChatViewProps = {}) {
                 authorName(replyTarget.sender_id, replyTarget.sender_username, currentUser) ??
                 t("chat:list.unknownAuthor")
               }
-              snippet={replySnippet(replyTarget) || t("chat:message.encrypted")}
+              snippet={replySnippet(replyTarget) || t("chat:message.undecryptable.title")}
               onPressQuote={() => scrollToMessage(replyTarget.id)}
               onDismiss={() => setReplyTarget(null)}
             />

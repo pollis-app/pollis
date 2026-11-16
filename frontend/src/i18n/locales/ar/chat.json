@@ -3,7 +3,7 @@
     "fromLabel": "رسالة من {{name}}",
     "unknownAuthor": "غير معروف",
     "deleted": "[محذوفة]",
-    "encrypted": "[مشفَّرة]",
+    "beforeJoin": "أُرسلت قبل انضمامك",
     "redacted": "[محجوبة]",
     "edited": "(مُعدَّلة)",
     "editUnsent": "(لم يُرسَل التعديل)",
@@ -74,8 +74,7 @@
   "replyBar": {
     "replyingTo": "رد على <name>{{name}}</name>",
     "scrollToMessage": "التمرير إلى الرسالة المُردّ عليها",
-    "dismiss": "إلغاء الرد",
-    "encrypted": "[رسالة مشفَّرة]"
+    "dismiss": "إلغاء الرد"
   },
   "queue": {
     "heading": "قائمة الانتظار",

@@ -3,7 +3,7 @@
     "fromLabel": "Message from {{name}}",
     "unknownAuthor": "unknown",
     "deleted": "[deleted]",
-    "encrypted": "[encrypted]",
+    "beforeJoin": "Sent before you joined",
     "redacted": "[redacted]",
     "edited": "(edited)",
     "editUnsent": "(edit not sent)",
@@ -70,8 +70,7 @@
   "replyBar": {
     "replyingTo": "replying to <name>{{name}}</name>",
     "scrollToMessage": "Scroll to replied message",
-    "dismiss": "Dismiss reply",
-    "encrypted": "[Encrypted message]"
+    "dismiss": "Dismiss reply"
   },
   "queue": {
     "heading": "Queue",

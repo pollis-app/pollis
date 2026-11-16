@@ -110,8 +110,7 @@
     "loading": "返信を読み込み中…",
     "empty": "返信はまだありません。下からスレッドを始めましょう。",
     "placeholder": "スレッドで返信…",
-    "messageDeleted": "メッセージは削除されました",
-    "encrypted": "[暗号化済み]"
+    "messageDeleted": "メッセージは削除されました"
   },
   "chat": {
     "noSelection": "チャンネルを選択してメッセージを始めましょう"

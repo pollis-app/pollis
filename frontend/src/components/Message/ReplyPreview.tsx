@@ -26,7 +26,11 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
   }
   const author = message.sender_username ?? message.sender_id;
   const authorColor = getUsernameColor(author, isLightBg);
-  const content = message.content_decrypted || t('replyBar.encrypted');
+  // The text, else the first file's name, else (no text on this device) that it could not be decrypted.
+  const content =
+    message.content_decrypted ||
+    (message.content_decrypted != null ? message.attachments?.[0]?.filename : undefined) ||
+    t('message.undecryptable.title');
   const snippet = content.length > 80 ? content.substring(0, 80) + '...' : content;
 
   return (

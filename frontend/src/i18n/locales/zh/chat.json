@@ -3,7 +3,7 @@
     "fromLabel": "来自 {{name}} 的消息",
     "unknownAuthor": "未知",
     "deleted": "[已删除]",
-    "encrypted": "[已加密]",
+    "beforeJoin": "在你加入之前发送",
     "redacted": "[已隐去]",
     "edited": "（已编辑）",
     "editUnsent": "（编辑未发送）",
@@ -59,8 +59,7 @@
   "replyBar": {
     "replyingTo": "正在回复 <name>{{name}}</name>",
     "scrollToMessage": "滚动到被回复的消息",
-    "dismiss": "取消回复",
-    "encrypted": "[加密消息]"
+    "dismiss": "取消回复"
   },
   "queue": {
     "heading": "队列",

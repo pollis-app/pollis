@@ -3,7 +3,7 @@
     "fromLabel": "{{name}}からのメッセージ",
     "unknownAuthor": "不明",
     "deleted": "[削除済み]",
-    "encrypted": "[暗号化済み]",
+    "beforeJoin": "参加前に送信されたメッセージ",
     "redacted": "[非表示]",
     "edited": "（編集済み）",
     "editUnsent": "（編集は未送信）",
@@ -66,8 +66,7 @@
   "replyBar": {
     "replyingTo": "<name>{{name}}</name>に返信中",
     "scrollToMessage": "返信先のメッセージまでスクロール",
-    "dismiss": "返信をやめる",
-    "encrypted": "[暗号化されたメッセージ]"
+    "dismiss": "返信をやめる"
   },
   "queue": {
     "heading": "キュー",

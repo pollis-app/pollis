@@ -18,6 +18,7 @@ import { probeRender } from "../../utils/renderProbe";
 import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
 import { PressButton } from "../ui/PressButton";
+import { sentBeforeJoin } from "../../utils/replyQuote";
 
 interface MessageItemProps {
   message: Message;
@@ -118,11 +119,25 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     ? getUsernameColor(replyTo.sender_username ?? replyTo.sender_id, isLightBg)
     : null;
 
+  // Every message is encrypted, so a quote says what happened: the original could not be
+  // decrypted here, or it predates this user joining (mobile's MessageRow says the same).
+  const replyQuoteText = replyTo
+    ? replyTo.content_decrypted == null
+      ? t("message.undecryptable.title")
+      : replyTo.content_decrypted.slice(0, 80) ||
+        replyTo.attachments?.[0]?.filename ||
+        t("message.undecryptable.title")
+    : "";
+  const missingQuoteText =
+    message.reply_to_message_id && sentBeforeJoin(message.reply_to_message_id, ctx.viewerJoinedAtMs)
+      ? t("message.beforeJoin")
+      : t("message.redacted");
+
   const isDeleted = !!message.deleted_at;
 
   const content = isDeleted
     ? t("message.deleted")
-    : (message.content_decrypted ?? t("message.encrypted"));
+    : (message.content_decrypted ?? t("message.undecryptable.body_one"));
 
   const isVisualMedia = (ct: string) =>
     ct.startsWith("image/") || ct.startsWith("video/");
@@ -234,7 +249,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                   </bdi>
                 )}
                 <span className="truncate max-w-xs" dir="auto">
-                  {replyTo.content_decrypted?.slice(0, 80) || t("message.encrypted")}
+                  {replyQuoteText}
                 </span>
               </PressButton>
             ) : (
@@ -243,7 +258,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 className="flex items-center gap-1 text-xs mb-0.5 text-dim"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
-                <span>{t("message.redacted")}</span>
+                <span>{missingQuoteText}</span>
               </div>
             )
           )}
@@ -328,7 +343,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               </bdi>
             )}
             <span className="truncate max-w-xs" dir="auto">
-              {replyTo.content_decrypted?.slice(0, 80) || t("message.encrypted")}
+              {replyQuoteText}
             </span>
           </PressButton>
         ) : (
@@ -337,7 +352,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 text-dim"
           >
             <Reply size={10} className="rtl-unmirror" />
-            <span>{t("message.redacted")}</span>
+            <span>{missingQuoteText}</span>
           </div>
         )
       )}

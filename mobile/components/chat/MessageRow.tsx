@@ -76,6 +76,7 @@ export function MessageRow({
   onLongPress,
   onReply,
   replyTo,
+  replyBeforeJoin = false,
   onPressReplyQuote,
   highlighted = false,
   continued = false,
@@ -120,6 +121,8 @@ export function MessageRow({
   onReply?: () => void;
   // Undefined: not a reply. Null: a reply whose original is not loaded.
   replyTo?: { name: string; snippet: string } | null;
+  // The original is missing because it was sent before this user joined (`lib/replyQuote.ts`).
+  replyBeforeJoin?: boolean;
   onPressReplyQuote?: () => void;
   highlighted?: boolean;
   continued?: boolean;
@@ -204,7 +207,12 @@ export function MessageRow({
     ...linkActions.map(({ name, label }) => ({ name, label })),
   ];
 
-  const quoteText = replyTo ? replyTo.snippet || t("message.encrypted") : t("message.redacted");
+  // Every message is encrypted, so the quote names what actually happened (desktop says the same).
+  const quoteText = replyTo
+    ? replyTo.snippet || t("message.undecryptable.title")
+    : replyBeforeJoin
+      ? t("message.beforeJoin")
+      : t("message.redacted");
   const quoteLabel = isReply
     ? `${t("mobile:chat.replyQuoteLabel", { name: replyTo?.name ?? "", text: quoteText })}. `
     : "";
