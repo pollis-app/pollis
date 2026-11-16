@@ -5,5 +5,12 @@
     "restart": "重新启动",
     "tag": "严重错误",
     "title": "出错了"
+  },
+  "core": {
+    "pinIncorrect_other": "PIN 码错误。还可以尝试 {{count}} 次。",
+    "pinLockedOut": "PIN 码错误次数过多。请使用安全密钥恢复你的账户。",
+    "pinNotSet": "此设备尚未设置 PIN 码。请重新登录后设置。",
+    "noActiveUser": "你尚未在此设备上登录。请重新登录。",
+    "unlockFirst": "请先解锁 Pollis。"
   }
 }

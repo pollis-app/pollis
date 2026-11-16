@@ -38,6 +38,7 @@ import {
   wasOffered,
 } from "../../lib/deviceUnlock";
 import { haptic } from "../../lib/haptics";
+import { isPinLockedOut } from "../../i18n/coreErrors";
 
 function AuthPIN() {
   useThemeRerender();
@@ -126,7 +127,7 @@ function AuthPIN() {
         return;
       } catch (e) {
         const message = (e as Error).message ?? "";
-        if (/locked out/i.test(message)) {
+        if (isPinLockedOut(message)) {
           setError(message);
         } else {
           // The key no longer matches what core holds: the PIN re-arms it.

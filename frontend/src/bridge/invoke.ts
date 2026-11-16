@@ -7,6 +7,7 @@ import {
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { hasTauri } from "./runtime";
+import { localizeCoreFailure } from "../i18n/coreErrors";
 
 type UnlistenFn = () => void;
 
@@ -107,7 +108,7 @@ export function invoke<T>(
   return tauriInvoke<T>(cmd, args, options).catch((error: unknown) => {
     noticeDeviceRevoked(error);
     noticeUpgradeRequired(error);
-    throw error;
+    throw localizeCoreFailure(error);
   });
 }
 
