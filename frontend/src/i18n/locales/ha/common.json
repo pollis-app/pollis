@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "Baya",
+    "cancel": "Soke",
+    "close": "Rufe",
+    "copy": "Kwafa",
+    "copied": "An kwafa",
+    "copyFailed": "Ba a iya kwafawa ba",
+    "delete": "Goge",
+    "forward": "Tura",
+    "goBack": "Koma baya",
+    "moreOptions": "Ƙarin zaɓuɓɓuka",
+    "save": "Adana"
+  },
+  "states": {
+    "buttonLoading": "Ana lodawa...",
+    "loading": "Ana lodawa…"
+  },
+  "time": {
+    "today": "Yau",
+    "yesterday": "Jiya"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "Space",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "Kasancewa: {{status}}",
+    "offline": "ba a kan layi",
+    "online": "a kan layi"
+  },
+  "list": {
+    "empty": "Babu abubuwa."
+  },
+  "grid": {
+    "empty": "Babu kowa a nan tukuna."
+  },
+  "menu": {
+    "escHint": "Esc don komawa baya",
+    "navigationLabel": "Menu na kewayawa",
+    "navigateHint": "kewaya",
+    "selectHint": "Enter don zaɓa"
+  },
+  "media": {
+    "mute": "Kashe sauti",
+    "pause": "Dakata",
+    "play": "Kunna",
+    "seek": "Matsa cikin sauti",
+    "skipBackward": "Koma baya daƙiƙa 10",
+    "skipForward": "Tsallaka gaba daƙiƙa 10",
+    "unmute": "Dawo da sauti",
+    "volume": "Ƙarfin sauti"
+  },
+  "composer": {
+    "addAttachment": "Ƙara abin haɗawa",
+    "allMentionHint": "yana sanar da kowa a wannan tasha",
+    "filePickerTitle": "Ƙara fayiloli",
+    "inputLabel": "Wurin rubuta saƙo",
+    "placeholder": "Rubuta saƙo…",
+    "previewAlt": "Samfoti",
+    "removeAttachment": "Cire {{name}}",
+    "send": "Aika saƙo",
+    "markSensitive": "Yi wa {{name}} alama a matsayin mai muhimmanci na sirri",
+    "unmarkSensitive": "Cire alamar sirri daga {{name}}"
+  },
+  "mentions": {
+    "listLabel": "Shawarwarin ambato",
+    "matching": "Mambobi da suka dace da <hl>@{{query}}</hl>"
+  },
+  "emojiSuggest": {
+    "listLabel": "Shawarwarin emoji",
+    "matching": "Emoji da suka dace da <hl>:{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Hoton bayani",
+    "loading": "Ana lodawa",
+    "otpDigit": "Lamba ta {{index}} ta OTP"
+  },
+  "timeAgo": {
+    "seconds_one": "daƙ. {{count}}",
+    "seconds_other": "daƙ. {{count}}",
+    "minutes_one": "minti {{count}}",
+    "minutes_other": "minti {{count}}",
+    "hours_one": "awa {{count}}",
+    "hours_other": "awa {{count}}",
+    "days_one": "kwana {{count}}",
+    "days_other": "kwana {{count}}",
+    "weeks_one": "mako {{count}}",
+    "weeks_other": "mako {{count}}",
+    "months_one": "wata {{count}}",
+    "months_other": "wata {{count}}",
+    "years_one": "shekara {{count}}",
+    "years_other": "shekara {{count}}"
+  },
+  "tray": {
+    "open": "Buɗe Pollis",
+    "muteMic": "Kashe makirofo",
+    "unmuteMic": "Kunna makirofo",
+    "muteMicIdle": "Kashe makirofo (ba a cikin kira)",
+    "version": "Sigar {{version}}",
+    "quit": "Rufe Pollis",
+    "unread_one": "Pollis — {{count}} ba a karanta ba",
+    "unread_other": "Pollis — {{count}} ba a karanta ba"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "Ujumbe mpya",
+    "requests": "Maombi",
+    "blocked": "Watumiaji waliozuiwa",
+    "avatarAlt": "Picha ya wasifu ya {{name}}",
+    "settingsFor": "Mipangilio ya {{name}}",
+    "verified": "Mwasiliani aliyethibitishwa",
+    "keyChanged": "Ufunguo wa utambulisho umebadilika — thibitisha tena"
+  },
+  "conversation": {
+    "fallbackTitle": "Ujumbe wa moja kwa moja",
+    "viewProfile": "Angalia wasifu wa @{{name}}",
+    "call": "Mpigie @{{name}}",
+    "returnToCall": "Rudi kwenye simu na @{{name}}",
+    "pinsLabel": "Ujumbe uliobanwa"
+  },
+  "settings": {
+    "pageTitle": "Mipangilio ya mazungumzo",
+    "leave": "Ondoka kwenye mazungumzo",
+    "submitting": "Inaondoka…",
+    "leaveFailed": "Imeshindwa kuondoka kwenye mazungumzo",
+    "cancel": "Ghairi (Esc)"
+  },
+  "start": {
+    "pageTitle": "Ujumbe mpya",
+    "identifierLabel": "Jina la mtumiaji au barua pepe",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "Anzisha mazungumzo",
+    "submitting": "Inaanzisha…",
+    "identifierRequired": "Kitambulisho cha mtumiaji kinahitajika",
+    "userNotFound": "Mtumiaji hajapatikana",
+    "startFailed": "Imeshindwa kuanzisha mazungumzo"
+  },
+  "requests": {
+    "pageTitle": "Maombi ya ujumbe",
+    "empty": "Hakuna maombi yanayosubiri.",
+    "noMessageYet": "(bado hakuna ujumbe)",
+    "unknownSender": "Haijulikani",
+    "others_one": "(+{{count}} mwingine)",
+    "others_other": "(+{{count}} wengine)",
+    "accept": "kubali",
+    "block": "zuia"
+  },
+  "blocked": {
+    "pageTitle": "Watumiaji waliozuiwa",
+    "empty": "Hakuna watumiaji waliozuiwa.",
+    "unblock": "ondoa kizuizi"
+  },
+  "profile": {
+    "fallbackName": "Mtumiaji",
+    "fallbackTitle": "Wasifu",
+    "notFound": "Mtumiaji hajapatikana",
+    "avatarAlt": "Picha ya wasifu ya {{name}}",
+    "sendMessage": "Tuma ujumbe",
+    "block": "Zuia",
+    "safetyNumber": "Nambari ya usalama",
+    "statusVerified": "Imethibitishwa",
+    "statusChanged": "Imebadilika — thibitisha tena",
+    "statusUnverified": "Haijathibitishwa",
+    "keyChangedWarning": "Ufunguo wa utambulisho wa mwasiliani huyu umebadilika tangu ulipouthibitisha mara ya mwisho. Linganisha nambari tena nje ya programu kabla ya kuuamini.",
+    "removeVerification": "Ondoa uthibitisho",
+    "markVerified": "Weka kama imethibitishwa",
+    "report": "Ripoti"
+  },
+  "safety": {
+    "title": "Wewe na {{name}}",
+    "verify": "Thibitisha nambari ya usalama",
+    "headingMany": "Nambari za usalama",
+    "shared": "Wewe na {{name}} mnaona nambari ileile. Ilinganisheni ana kwa ana au kwenye simu ili kuhakikisha hakuna mtu katikati yenu.",
+    "qrLabel": "Msimbo wa QR wa nambari ya usalama mnayoshiriki wewe na {{name}}",
+    "failed": "Imeshindwa kupakia nambari ya usalama."
+  },
+  "notify": {
+    "requestTitle": "Mazungumzo mapya",
+    "requestBody": "{{name}} ameanzisha mazungumzo nawe"
+  }
+}

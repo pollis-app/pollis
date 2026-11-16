@@ -58,7 +58,7 @@ test("normalizeLanguage reduces device tags to shipped base languages", () => {
   assert.equal(normalizeLanguage("es-MX"), "es");
   assert.equal(normalizeLanguage("zh-Hans-CN"), "zh");
   assert.equal(normalizeLanguage("UK"), "uk");
-  assert.equal(normalizeLanguage("pt-BR"), null);
+  assert.equal(normalizeLanguage("de-DE"), null);
   assert.equal(normalizeLanguage(""), null);
   assert.equal(normalizeLanguage(undefined), null);
 });
@@ -97,9 +97,28 @@ test("script subtags: Punjabi follows its script, everything else its base tag, 
   assert.equal(resolveDeviceLanguage(["ko-KR"]), "ko");
 });
 
+test("African locales are auto-detected from device tags; every Portuguese region maps to pt (#1727)", () => {
+  for (const [tag, want] of [
+    ["sw-KE", "sw"],
+    ["sw-TZ", "sw"],
+    ["pt-AO", "pt"],
+    ["pt-MZ", "pt"],
+    ["pt-PT", "pt"],
+    ["pt-BR", "pt"],
+    ["ha-NG", "ha"],
+    ["ha-Latn-NE", "ha"],
+    ["am-ET", "am"],
+    ["yo-NG", "yo"],
+    ["zu-ZA", "zu"],
+  ] as const) {
+    assert.equal(normalizeLanguage(tag), want, tag);
+    assert.equal(resolveDeviceLanguage([tag]), want, tag);
+  }
+});
+
 test("resolveDeviceLanguage takes the first shipped candidate, else English", () => {
-  assert.equal(resolveDeviceLanguage(["pt-BR", "ar-EG", "en-US"]), "ar");
-  assert.equal(resolveDeviceLanguage(["pt-BR"]), DEFAULT_LANGUAGE);
+  assert.equal(resolveDeviceLanguage(["de-DE", "ar-EG", "en-US"]), "ar");
+  assert.equal(resolveDeviceLanguage(["de-DE"]), DEFAULT_LANGUAGE);
   assert.equal(resolveDeviceLanguage(undefined), DEFAULT_LANGUAGE);
 });
 

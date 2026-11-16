@@ -1,0 +1,44 @@
+{
+  "title": "Isiphephelo",
+  "placeholder": "Amanothi avikelekile, izixhumanisi, noma amafayela",
+  "empty": "Isiphephelo sakho asinalutho. Amanothi, izixhumanisi namafayela owafaka lapha abethelwe kusukela ekuqaleni kuya ekugcineni futhi akulandela kuyo yonke idivayisi yakho.",
+  "searchPlaceholder": "Sesha isiphephelo sakho…",
+  "searchEmpty": "Akukho esiphephelweni sakho okufana nalokho.",
+  "clearSearch": "Sula usesho",
+  "viewToggle": "Ukubuka isiphephelo",
+  "viewChat": "Ingxoxo",
+  "viewMedia": "Imidiya",
+  "saving": "Iyalondoloza…",
+  "saveFailed": "Ayikwazanga ukulondoloza esiphephelweni sakho. Okusalungiswa kwakho kubuyele endaweni yokubhala.",
+  "saveFailedOffline": "Ayikwazanga ukufinyelela i-Pollis ukuze ilondoloze lokhu. Okusalungiswa kwakho kubuyele endaweni yokubhala — hlola uxhumano lwakho bese uzama futhi.",
+  "saveFailedTooLarge": "Ifayela elithile likhulu kakhulu esiphephelweni sakho. Okusalungiswa kwakho kubuyele endaweni yokubhala — lisuse bese uthumela futhi.",
+  "saveRetry": "Zama futhi",
+  "entry": {
+    "pinned": "Kuphiniwe",
+    "edited": "(kuhleliwe)",
+    "pin": "Phina okufakiwe",
+    "unpin": "Susa ukuphina okufakiwe",
+    "edit": "Hlela okufakiwe",
+    "delete": "Susa okufakiwe"
+  },
+  "edit": {
+    "heading": "Hlela okufakiwe",
+    "cancel": "Khansela ukuhlela",
+    "hint": "Enter ukuze ulondoloze · Shift+Enter ulayini omusha · Esc ukuze ukhansele"
+  },
+  "delete": {
+    "heading": "Susa okufakiwe",
+    "body": "Susa lokhu okufakiwe esiphephelweni sakho kuwo onke amadivayisi? Lokhu akukwazi ukuhlehliswa.",
+    "cancel": "Khansela ukususa",
+    "confirm": "Susa",
+    "deleting": "Iyasusa…"
+  },
+  "media": {
+    "empty": "Ayikabikho imidiya esiphephelweni sakho — faka izithombe noma amafayela ekubukeni kwengxoxo.",
+    "filesHeading": "Amafayela",
+    "close": "Vala isibukeli",
+    "previous": "Okwedlule",
+    "next": "Okulandelayo",
+    "position": "{{index}} / {{total}}"
+  }
+}

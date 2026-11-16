@@ -1,0 +1,17 @@
+{
+  "boundary": {
+    "instruction": "እባክዎ መተግበሪያውን እንደገና ያስጀምሩ።",
+    "message": "ያልተጠበቀ ስህተት ተከስቷል።",
+    "restart": "እንደገና አስጀምር",
+    "tag": "ከባድ ስህተት",
+    "title": "የሆነ ችግር ተፈጥሯል"
+  },
+  "core": {
+    "pinIncorrect_one": "የተሳሳተ PIN። {{count}} ሙከራ ቀርቷል።",
+    "pinIncorrect_other": "የተሳሳተ PIN። {{count}} ሙከራዎች ቀርተዋል።",
+    "pinLockedOut": "በጣም ብዙ የተሳሳቱ PINዎች። መለያዎን በሚስጥራዊ ቁልፍዎ መልሰው ያግኙ።",
+    "pinNotSet": "ይህ መሣሪያ እስካሁን PIN የለውም። PIN ለማዘጋጀት እንደገና ይግቡ።",
+    "noActiveUser": "በዚህ መሣሪያ ላይ አልገቡም። እንደገና ይግቡ።",
+    "unlockFirst": "መጀመሪያ Pollisን ይክፈቱ።"
+  }
+}

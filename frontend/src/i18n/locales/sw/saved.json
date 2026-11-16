@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "Vilivyohifadhiwa",
+    "unresolved": "Huna ujumbe huu kwenye kifaa hiki.",
+    "empty": "Hakuna ujumbe uliohifadhiwa. Tumia kitendo cha alamisho kwenye ujumbe ili kuuhifadhi.",
+    "unsave": "ondoa kwenye vilivyohifadhiwa"
+  },
+  "row": {
+    "conversationFallback": "mazungumzo",
+    "noText": "(hakuna maandishi)",
+    "unavailable": "Huna ujumbe huu kwenye kifaa hiki."
+  }
+}

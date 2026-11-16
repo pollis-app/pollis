@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { REGISTERED_CODE, SCRIPT_VARIANTS, matchLanguageTag } from "../src/i18n/languageTag.ts";
-import { normalizeLanguage, supportedLanguageCodes } from "../src/i18n/languages.ts";
+import { normalizeLanguage, resolveOsLanguage, supportedLanguageCodes } from "../src/i18n/languages.ts";
 
 // A registry with both Punjabi scripts, as L5b will ship it, plus today's locales.
 const WITH_PUNJABI = [...supportedLanguageCodes(), "pa-Arab", "pa-Guru"];
@@ -50,7 +50,16 @@ test("every other language keeps the base-tag rule", () => {
     ["ko-Kore-KR", "ko"],
     ["ar-EG", "ar"],
     ["es-419", "es"],
-    ["pt-BR", null],
+    ["pt-BR", "pt"],
+    ["pt-PT", "pt"],
+    ["pt-AO", "pt"],
+    ["pt-MZ", "pt"],
+    ["sw-KE", "sw"],
+    ["ha-Latn-NG", "ha"],
+    ["am-ET", "am"],
+    ["yo-NG", "yo"],
+    ["zu-ZA", "zu"],
+    ["de-DE", null],
     ["", null],
   ];
   for (const [tag, want] of table) {
@@ -72,6 +81,25 @@ test("Korean and Japanese are auto-detected from OS tags", () => {
   assert.equal(normalizeLanguage("ko-KR"), "ko");
   assert.equal(normalizeLanguage("ja-JP"), "ja");
   assert.equal(normalizeLanguage("ja"), "ja");
+});
+
+test("African locales are auto-detected from OS tags; every Portuguese region lands on the one pt catalogue (#1727)", () => {
+  for (const [tag, want] of [
+    ["sw-KE", "sw"],
+    ["sw-TZ", "sw"],
+    ["pt-AO", "pt"],
+    ["pt-MZ", "pt"],
+    ["pt-PT", "pt"],
+    ["pt-BR", "pt"],
+    ["ha-NG", "ha"],
+    ["am-ET", "am"],
+    ["yo-NG", "yo"],
+    ["yo-BJ", "yo"],
+    ["zu-ZA", "zu"],
+  ] as const) {
+    assert.equal(normalizeLanguage(tag), want, tag);
+    assert.equal(resolveOsLanguage([tag]), want, tag);
+  }
 });
 
 test("registered codes have the shape i18next keeps, and script codes are declared", () => {

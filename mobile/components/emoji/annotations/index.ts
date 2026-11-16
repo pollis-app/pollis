@@ -19,11 +19,13 @@ export type EmojiAnnotationRow = readonly [
 ];
 
 export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [
+  "am",
   "ar",
   "bn",
   "en",
   "es",
   "fr",
+  "ha",
   "hi",
   "ja",
   "ko",
@@ -31,12 +33,16 @@ export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [
   "pa-Arab",
   "pa-Guru",
   "ps",
+  "pt",
   "ru",
+  "sw",
   "ta",
   "te",
   "uk",
   "ur",
+  "yo",
   "zh",
+  "zu",
 ];
 
 /** The rows for `locale`, or null when no table ships for it. */
@@ -44,6 +50,8 @@ export function loadEmojiAnnotationRows(
   locale: string,
 ): Promise<readonly EmojiAnnotationRow[]> | null {
   switch (locale) {
+    case "am":
+      return import("./am").then((m) => m.default);
     case "ar":
       return import("./ar").then((m) => m.default);
     case "bn":
@@ -54,6 +62,8 @@ export function loadEmojiAnnotationRows(
       return import("./es").then((m) => m.default);
     case "fr":
       return import("./fr").then((m) => m.default);
+    case "ha":
+      return import("./ha").then((m) => m.default);
     case "hi":
       return import("./hi").then((m) => m.default);
     case "ja":
@@ -68,8 +78,12 @@ export function loadEmojiAnnotationRows(
       return import("./pa-Guru").then((m) => m.default);
     case "ps":
       return import("./ps").then((m) => m.default);
+    case "pt":
+      return import("./pt").then((m) => m.default);
     case "ru":
       return import("./ru").then((m) => m.default);
+    case "sw":
+      return import("./sw").then((m) => m.default);
     case "ta":
       return import("./ta").then((m) => m.default);
     case "te":
@@ -78,8 +92,12 @@ export function loadEmojiAnnotationRows(
       return import("./uk").then((m) => m.default);
     case "ur":
       return import("./ur").then((m) => m.default);
+    case "yo":
+      return import("./yo").then((m) => m.default);
     case "zh":
       return import("./zh").then((m) => m.default);
+    case "zu":
+      return import("./zu").then((m) => m.default);
     default:
       return null;
   }

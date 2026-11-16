@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "Mensagem de {{name}}",
+    "unknownAuthor": "desconhecido",
+    "deleted": "[eliminada]",
+    "encrypted": "[encriptada]",
+    "redacted": "[ocultada]",
+    "edited": "(editada)",
+    "editUnsent": "(edição não enviada)",
+    "newMember": "novo",
+    "newMemberTitle": "Aderiu nos últimos 7 dias",
+    "undecryptable": {
+      "tag": "não desencriptável",
+      "title": "Não foi possível desencriptar",
+      "body_one": "Não foi possível desencriptar {{count}} mensagem neste dispositivo.",
+      "body_other": "Não foi possível desencriptar {{count}} mensagens neste dispositivo.",
+      "detail": "Foi enviada uma coisa aqui, mas este dispositivo não a conseguiu ler. Os seus outros dispositivos ainda podem tê-la.",
+      "diagnostics": "Ver diagnóstico"
+    }
+  },
+  "status": {
+    "pending": "pendente",
+    "sending": "a enviar",
+    "sent": "enviada",
+    "failed": "falhou",
+    "cancelled": "cancelada"
+  },
+  "outbox": {
+    "retry": "Tentar novamente",
+    "discard": "Descartar",
+    "retryLabel": "Tentar enviar esta mensagem novamente",
+    "discardLabel": "Descartar esta mensagem não enviada",
+    "notSent": "Não enviada",
+    "willResend": "Será enviada automaticamente quando o Pollis voltar a ligar-se.",
+    "notDelivered": "Não foi possível entregar esta mensagem."
+  },
+  "actions": {
+    "reply": "Responder",
+    "replyInThread": "Responder no tópico",
+    "save": "Guardar mensagem",
+    "removeBookmark": "Remover marcador",
+    "copyLink": "Copiar ligação para a mensagem",
+    "copyLinkCopied": "Ligação copiada",
+    "copyLinkFailed": "Não foi possível copiar a ligação",
+    "edit": "Editar mensagem",
+    "delete": "Eliminar mensagem",
+    "deleteAsAdmin": "Eliminar mensagem (administrador)",
+    "more": "Mais ações",
+    "pin": "Afixar mensagem",
+    "unpin": "Desafixar mensagem",
+    "report": "Denunciar"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} resposta",
+    "replyCount_other": "{{count}} respostas"
+  },
+  "receipts": {
+    "readByEveryone": "Lida por todos",
+    "readByCount_one": "Lida por {{count}} de {{total}}",
+    "readByCount_other": "Lida por {{count}} de {{total}}",
+    "deliveredCount_one": "Entregue a {{count}} de {{total}}",
+    "deliveredCount_other": "Entregue a {{count}} de {{total}}"
+  },
+  "list": {
+    "empty": "Ainda sem mensagens. Comece a conversa.",
+    "unknownAuthor": "Desconhecido",
+    "blockedAuthor": "utilizador bloqueado",
+    "blockedBody": "[bloqueado]"
+  },
+  "replyBar": {
+    "replyingTo": "a responder a <name>{{name}}</name>",
+    "scrollToMessage": "Ir para a mensagem respondida",
+    "dismiss": "Cancelar resposta",
+    "encrypted": "[Mensagem encriptada]"
+  },
+  "queue": {
+    "heading": "Fila",
+    "pendingPlaceholder": "[Mensagem pendente]",
+    "cancel": "Cancelar mensagem",
+    "retry": "tentar novamente",
+    "failedCount_one": "falhou ×{{count}}",
+    "failedCount_other": "falhou ×{{count}}"
+  },
+  "reactions": {
+    "add": "Adicionar reação",
+    "all": "Todas",
+    "allTabLabel_one": "Todas, {{count}} reação",
+    "allTabLabel_other": "Todas, {{count}} reações",
+    "contextHint": "Clique com o botão direito para ver quem reagiu",
+    "hoverMore_one": "{{names}} e mais {{count}} pessoa reagiram com {{emoji}}",
+    "hoverMore_other": "{{names}} e mais {{count}} pessoas reagiram com {{emoji}}",
+    "hoverNames": "{{names}} reagiu com {{emoji}}",
+    "pillLabel_one": "{{emoji}} {{count}} reação",
+    "pillLabel_other": "{{emoji}} {{count}} reações",
+    "rowLabel": "{{name}}, reagiu com {{emojis}}",
+    "selfName": "{{name}} (eu)",
+    "sheetTitle": "Reações",
+    "tabLabel_one": "{{emoji}}, {{count}} reação",
+    "tabLabel_other": "{{emoji}}, {{count}} reações",
+    "unknownUser": "Utilizador desconhecido",
+    "viewWho": "Ver reações",
+    "you": "Eu"
+  },
+  "preview": {
+    "noMessages": "Ainda sem mensagens",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} anexo]",
+    "attachments_other": "[{{count}} anexos]",
+    "undecryptable": "Não foi possível desencriptar uma mensagem neste dispositivo"
+  },
+  "attachment": {
+    "viewLabel": "Ver {{filename}}",
+    "openLabel": "Abrir {{filename}}",
+    "downloadLabel": "Transferir {{filename}}",
+    "loading": "a carregar…",
+    "error": "erro",
+    "failedToLoad": "Não foi possível carregar",
+    "failedToDownload": "Não foi possível transferir",
+    "lightboxFetch": "obter",
+    "lightboxDone": "[ concluído ]",
+    "lightboxDownload": "[transferir]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "Mostrar multimédia sensível: {{filename}}",
+    "sensitiveHide": "Ocultar {{filename}}"
+  },
+  "unfurl": {
+    "loadImage": "Carregar imagem",
+    "loadVideo": "Carregar vídeo",
+    "loadTitle": "Carregar multimédia de {{url}} — isto contacta esse site diretamente",
+    "loadDescription": "Carregar multimédia de {{url}}. Isto contacta esse site diretamente e revela-lhe o seu endereço IP.",
+    "openLabel": "Abrir {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "Nova mensagem",
+    "newMessageBody": "{{name}}: Nova mensagem",
+    "mentionTitle": "Nova menção",
+    "allMentionBody": "{{name}} mencionou @all",
+    "userMentionBody": "{{name}} mencionou-o"
+  },
+  "fileSize": {
+    "bytes": "{{size}} B",
+    "kilobytes": "{{size}} KB",
+    "megabytes": "{{size}} MB",
+    "gigabytes": "{{size}} GB"
+  },
+  "report": {
+    "someone": "esta pessoa",
+    "titleMessage": "Denunciar mensagem",
+    "titleUser": "Denunciar {{name}}",
+    "intro": "O Pollis recebe a conta e o motivo. As mensagens continuam encriptadas, por isso nunca vemos o que foi dito.",
+    "reasonLabel": "Motivo",
+    "reason": {
+      "spam": "Spam",
+      "harassment": "Assédio ou ameaças",
+      "illegal": "Conteúdo ilegal",
+      "other": "Outro motivo"
+    },
+    "submit": "Denunciar",
+    "submitAndBlock": "Denunciar e bloquear",
+    "failed": "Não foi possível enviar a denúncia. Tente novamente.",
+    "doneTitle": "Denúncia enviada",
+    "done": "Obrigado. Analisamos todas as denúncias.",
+    "doneBlocked": "Obrigado. Analisamos todas as denúncias. Também bloqueou {{name}}.",
+    "close": "Concluído"
+  },
+  "keyChange": {
+    "notice": "O seu número de segurança com {{name}} mudou.",
+    "verify": "Verificar",
+    "defaultName": "este contacto"
+  },
+  "typing": {
+    "one": "{{name}} está a escrever…",
+    "two": "{{first}} e {{second}} estão a escrever…",
+    "several_one": "{{count}} pessoa está a escrever…",
+    "several_other": "{{count}} pessoas estão a escrever…"
+  }
+}

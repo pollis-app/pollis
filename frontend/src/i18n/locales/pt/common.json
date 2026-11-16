@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "Voltar",
+    "cancel": "Cancelar",
+    "close": "Fechar",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "copyFailed": "Não foi possível copiar",
+    "delete": "Eliminar",
+    "forward": "Reencaminhar",
+    "goBack": "Voltar atrás",
+    "moreOptions": "Mais opções",
+    "save": "Guardar"
+  },
+  "states": {
+    "buttonLoading": "A carregar...",
+    "loading": "A carregar…"
+  },
+  "time": {
+    "today": "Hoje",
+    "yesterday": "Ontem"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "Espaço",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "Presença: {{status}}",
+    "offline": "offline",
+    "online": "online"
+  },
+  "list": {
+    "empty": "Sem itens."
+  },
+  "grid": {
+    "empty": "Ainda não está aqui ninguém."
+  },
+  "menu": {
+    "escHint": "Esc para voltar",
+    "navigationLabel": "Menu de navegação",
+    "navigateHint": "navegar",
+    "selectHint": "Enter para selecionar"
+  },
+  "media": {
+    "mute": "Desativar som",
+    "pause": "Pausa",
+    "play": "Reproduzir",
+    "seek": "Avançar/recuar no áudio",
+    "skipBackward": "Recuar 10 segundos",
+    "skipForward": "Avançar 10 segundos",
+    "unmute": "Ativar som",
+    "volume": "Volume"
+  },
+  "composer": {
+    "addAttachment": "Adicionar anexo",
+    "allMentionHint": "notifica todos neste canal",
+    "filePickerTitle": "Adicionar ficheiros",
+    "inputLabel": "Campo de mensagem",
+    "placeholder": "Escreva uma mensagem…",
+    "previewAlt": "Pré-visualização",
+    "removeAttachment": "Remover {{name}}",
+    "send": "Enviar mensagem",
+    "markSensitive": "Marcar {{name}} como sensível",
+    "unmarkSensitive": "Desmarcar {{name}} como sensível"
+  },
+  "mentions": {
+    "listLabel": "Sugestões de menções",
+    "matching": "Membros que correspondem a <hl>@{{query}}</hl>"
+  },
+  "emojiSuggest": {
+    "listLabel": "Sugestões de emojis",
+    "matching": "Emojis que correspondem a <hl>:{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Avatar",
+    "loading": "A carregar",
+    "otpDigit": "Dígito {{index}} do código"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} s",
+    "seconds_other": "{{count}} s",
+    "minutes_one": "{{count}} min",
+    "minutes_other": "{{count}} min",
+    "hours_one": "{{count}} h",
+    "hours_other": "{{count}} h",
+    "days_one": "{{count}} d",
+    "days_other": "{{count}} d",
+    "weeks_one": "{{count}} sem.",
+    "weeks_other": "{{count}} sem.",
+    "months_one": "{{count}} mês",
+    "months_other": "{{count}} meses",
+    "years_one": "{{count}} ano",
+    "years_other": "{{count}} anos"
+  },
+  "tray": {
+    "open": "Abrir o Pollis",
+    "muteMic": "Desativar microfone",
+    "unmuteMic": "Ativar microfone",
+    "muteMicIdle": "Desativar microfone (fora de chamada)",
+    "version": "Versão {{version}}",
+    "quit": "Sair do Pollis",
+    "unread_one": "Pollis — {{count}} não lida",
+    "unread_other": "Pollis — {{count}} não lidas"
+  }
+}

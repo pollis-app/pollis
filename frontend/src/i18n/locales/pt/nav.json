@@ -1,0 +1,214 @@
+{
+  "sidebar": {
+    "groups": "grupos",
+    "dms": "mensagens diretas",
+    "account": "conta",
+    "saved": "Guardadas",
+    "preferences": "Preferências",
+    "language": "Idioma",
+    "userSettings": "Definições do utilizador",
+    "voiceAndVideo": "Voz e vídeo",
+    "security": "Segurança",
+    "keyBindings": "Atalhos de teclado",
+    "softwareUpdate": "Atualização de software",
+    "expandGroup": "Expandir {{name}}",
+    "collapseGroup": "Recolher {{name}}",
+    "keyChanged": "A chave de identidade mudou — verifique novamente",
+    "verified": "Contacto verificado",
+    "dmAvatarAlt": "Avatar de {{name}}",
+    "close": "Fechar barra lateral ({{shortcut}})",
+    "resize": "Redimensionar barra lateral (arraste; duplo clique para repor)",
+    "searchMessages": "Pesquisar mensagens",
+    "vault": "Cofre",
+    "securityEvents": "Eventos de segurança",
+    "copyHistory": "Copiar histórico"
+  },
+  "profile": {
+    "you": "Eu",
+    "call": "Chamada",
+    "voice": "Voz",
+    "settings": "Definições",
+    "voiceConnected": "Voz ligada",
+    "stopScreenShare": "Parar partilha de ecrã",
+    "shareScreen": "Partilhar ecrã",
+    "disconnect": "Desligar"
+  },
+  "breadcrumb": {
+    "home": "Início",
+    "groups": "Grupos",
+    "createGroup": "Criar grupo",
+    "findGroup": "Encontrar grupo",
+    "newChannel": "Novo canal",
+    "voice": "voz",
+    "joinRequests": "Pedidos de adesão",
+    "inviteMember": "Convidar membro",
+    "leaveGroup": "Sair do grupo",
+    "members": "Membros",
+    "removeMember": "Remover membro",
+    "directMessages": "Mensagens diretas",
+    "newMessage": "Nova mensagem",
+    "requests": "Pedidos",
+    "blockedUsers": "Utilizadores bloqueados",
+    "conversationSettings": "Definições da conversa",
+    "account": "Conta",
+    "preferences": "Preferências",
+    "language": "Idioma",
+    "userSettings": "Definições do utilizador",
+    "profile": "Perfil",
+    "security": "Segurança",
+    "voiceSettings": "Voz",
+    "invites": "Convites",
+    "joinAGroup": "Aderir a um grupo",
+    "search": "Pesquisar",
+    "searchButton": "Pesquisar ({{shortcut}})",
+    "settings": "Definições",
+    "securityEvents": "Eventos de segurança",
+    "copyHistory": "Copiar histórico de mensagens",
+    "historyRequest": "Pedido de histórico"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Mensagens de grupo não lidas: {{count}}",
+    "groupsUnread_other": "Mensagens de grupo não lidas: {{count}}",
+    "dmsUnread_one": "Mensagens diretas não lidas: {{count}}",
+    "dmsUnread_other": "Mensagens diretas não lidas: {{count}}",
+    "joinRequests_one": "Pedidos de adesão pendentes: {{count}}",
+    "joinRequests_other": "Pedidos de adesão pendentes: {{count}}",
+    "invites_one": "Convites pendentes: {{count}}",
+    "invites_other": "Convites pendentes: {{count}}",
+    "someone": "Alguém",
+    "updateAvailable": "Atualização disponível",
+    "updateAvailableTitle": "Atualização disponível: {{version}}",
+    "answerCall": "Atender chamada de @{{username}}",
+    "declineCall": "Recusar chamada",
+    "dismissVoiceError": "Ignorar erro de voz",
+    "dismissScreenShareError": "Ignorar erro de partilha de ecrã",
+    "dismissCameraError": "Ignorar erro da câmara",
+    "syncing": "a sincronizar…"
+  },
+  "shell": {
+    "dropFiles": "largue ficheiros para enviar",
+    "voiceChannelFallback": "voz",
+    "callChannel": "Chamada"
+  },
+  "panel": {
+    "thread": "Tópico",
+    "details": "Detalhes",
+    "ariaLabel": "Detalhes da conversa",
+    "closeThread": "Fechar painel do tópico ({{shortcut}})",
+    "closeDetails": "Fechar painel de detalhes ({{shortcut}})",
+    "resize": "Redimensionar painel de detalhes (arraste; duplo clique para repor)"
+  },
+  "members": {
+    "count_one": "Membros — {{count}}",
+    "count_other": "Membros — {{count}}",
+    "onlineCount_one": "Online — {{count}}",
+    "onlineCount_other": "Online — {{count}}",
+    "empty": "Sem membros para mostrar.",
+    "noneOnline": "Ninguém online.",
+    "you": "Eu",
+    "admin": "administrador"
+  },
+  "media": {
+    "heading": "Multimédia",
+    "empty": "Ainda não foi partilhada multimédia."
+  },
+  "thread": {
+    "loading": "A carregar respostas…",
+    "empty": "Ainda sem respostas. Comece o tópico abaixo.",
+    "placeholder": "Responder no tópico…",
+    "messageDeleted": "Mensagem eliminada",
+    "encrypted": "[encriptada]"
+  },
+  "chat": {
+    "noSelection": "Selecione um canal para começar a enviar mensagens"
+  },
+  "dmRequest": {
+    "heading": "pedido de mensagem",
+    "body": "<name>{{name}}</name> quer enviar-lhe mensagens.",
+    "accept": "Aceitar",
+    "accepting": "A aceitar…",
+    "block": "Bloquear",
+    "blocking": "A bloquear…"
+  },
+  "editBar": {
+    "heading": "a editar mensagem",
+    "cancel": "Cancelar edição",
+    "hint": "Enter para guardar · Shift+Enter para nova linha · Esc para cancelar"
+  },
+  "deleteChannel": {
+    "heading": "eliminar canal",
+    "cancel": "Cancelar eliminação",
+    "body": "Este canal e todas as suas mensagens serão eliminados permanentemente. Esta ação não pode ser anulada.",
+    "deleting": "A eliminar…"
+  },
+  "deleteMessage": {
+    "heading": "eliminar mensagem",
+    "moderateHeading": "remover mensagem (administrador)",
+    "body": "Esta mensagem será eliminada para todos, incluindo as pessoas que já a receberam.",
+    "moderateBody": "Esta mensagem e os respetivos anexos serão removidos para todos no canal.",
+    "cancel": "Cancelar eliminação",
+    "deleting": "A eliminar…",
+    "remove": "Remover"
+  },
+  "update": {
+    "preparing": "A preparar a atualização…",
+    "checking": "A procurar atualizações…",
+    "downloading": "A transferir a atualização…",
+    "downloadingProgress": "A transferir a atualização… {{progress}}%",
+    "installing": "A instalar a atualização…",
+    "relaunching": "A reiniciar…",
+    "failed": "A atualização falhou: {{error}}",
+    "tryAgain": "Tentar novamente",
+    "continueWithout": "Continuar sem atualizar",
+    "readOnlyDiskImage": "O Pollis está a ser executado a partir da imagem de disco, que é só de leitura. Saia do Pollis, arraste-o para Aplicações, ejete a imagem de disco e abra-o a partir de Aplicações.",
+    "readOnlyTranslocated": "O macOS está a executar o Pollis a partir de uma localização temporária só de leitura. Saia do Pollis, retire-o de Aplicações e volte a colocá-lo lá com o Finder, e depois abra-o novamente.",
+    "readOnlyTranslocatedHealed": "O macOS está a executar o Pollis a partir de uma localização temporária só de leitura deixada por uma atualização anterior. Isso já foi corrigido. Saia do Pollis e abra-o novamente a partir de Aplicações.",
+    "readOnlyGeneric": "O Pollis não se consegue atualizar porque a sua localização é só de leitura. Saia do Pollis, confirme que está na pasta Aplicações (movido para lá com o Finder) e abra-o novamente."
+  },
+  "clientBlocked": {
+    "title": "Atualização obrigatória",
+    "body": "Esta versão do Pollis já não é suportada. Atualize para continuar a usá-lo. As suas mensagens e definições ficam neste dispositivo.",
+    "versions": "Instalada {{version}} · Necessária {{minimum}} ou posterior",
+    "installed": "Instalada {{version}}",
+    "updateNow": "Atualizar agora",
+    "updating": "A atualizar…",
+    "download": "Transferir a versão mais recente",
+    "updateFailed": "A atualização não terminou. Em alternativa, transfira a versão mais recente.",
+    "packageManager": "O Pollis foi instalado com {{source}}. Atualize-o aí:",
+    "openAppStore": "Abrir a App Store",
+    "openPlay": "Abrir o Google Play",
+    "openTestflight": "Abrir o TestFlight",
+    "openWebsite": "Abrir pollis.com",
+    "openFailed": "Não foi possível abrir a ligação. Aceda a {{url}}",
+    "retry": "Verificar novamente",
+    "checking": "A verificar…"
+  },
+  "home": {
+    "groups": "Grupos",
+    "groupsDescription": "Comunidades, organizações, equipas e conversas de grupo demasiado ambiciosas",
+    "dms": "Mensagens diretas",
+    "dmsDescription": "Conversas privadas com encriptação ponto a ponto com outras pessoas",
+    "invites": "Convites",
+    "noPendingInvites": "Sem convites pendentes",
+    "pending_one": "{{count}} pendente",
+    "pending_other": "{{count}} pendentes",
+    "join": "Aderir a um grupo",
+    "joinDescription": "Use uma ligação de convite ou um código de adesão",
+    "joinRequests": "Pedidos de adesão",
+    "logout": "Terminar sessão",
+    "exit": "Sair"
+  },
+  "titleBar": {
+    "minimize": "Minimizar",
+    "maximize": "Maximizar"
+  },
+  "terminal": {
+    "shellFailed": "não foi possível iniciar a shell: {{error}}"
+  },
+  "pins": {
+    "heading": "Afixadas",
+    "empty": "Ainda não há mensagens afixadas.",
+    "unavailable": "As mensagens afixadas ainda não estão disponíveis neste dispositivo — aparecerão depois de a conversa sincronizar.",
+    "unpin": "Desafixar"
+  }
+}

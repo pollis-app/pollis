@@ -1,0 +1,44 @@
+{
+  "title": "Hazina",
+  "placeholder": "Madokezo, viungo au faili salama",
+  "empty": "Hazina yako ni tupu. Madokezo, viungo na faili unazoweka hapa zimesimbwa kwa njia fiche kutoka mwanzo hadi mwisho na zinakufuata kwenye kila kifaa.",
+  "searchPlaceholder": "Tafuta kwenye hazina yako…",
+  "searchEmpty": "Hakuna kitu kwenye hazina yako kinacholingana na hicho.",
+  "clearSearch": "Futa utafutaji",
+  "viewToggle": "Mwonekano wa hazina",
+  "viewChat": "Gumzo",
+  "viewMedia": "Midia",
+  "saving": "Inahifadhi…",
+  "saveFailed": "Imeshindwa kuhifadhi kwenye hazina yako. Rasimu yako imerudi kwenye sehemu ya kuandika.",
+  "saveFailedOffline": "Imeshindwa kufikia Pollis ili kuhifadhi hiki. Rasimu yako imerudi kwenye sehemu ya kuandika — angalia muunganisho wako kisha ujaribu tena.",
+  "saveFailedTooLarge": "Faili moja ni kubwa mno kwa hazina yako. Rasimu yako imerudi kwenye sehemu ya kuandika — iondoe kisha utume tena.",
+  "saveRetry": "Jaribu tena",
+  "entry": {
+    "pinned": "Imebanwa",
+    "edited": "(imehaririwa)",
+    "pin": "Bana kipengee",
+    "unpin": "Banua kipengee",
+    "edit": "Hariri kipengee",
+    "delete": "Futa kipengee"
+  },
+  "edit": {
+    "heading": "Hariri kipengee",
+    "cancel": "Ghairi uhariri",
+    "hint": "Enter ili kuhifadhi · Shift+Enter kwa mstari mpya · Esc ili kughairi"
+  },
+  "delete": {
+    "heading": "Futa kipengee",
+    "body": "Ungependa kufuta kipengee hiki kwenye hazina yako katika kila kifaa? Hatua hii haiwezi kutenduliwa.",
+    "cancel": "Ghairi ufutaji",
+    "confirm": "Futa",
+    "deleting": "Inafuta…"
+  },
+  "media": {
+    "empty": "Bado hakuna midia kwenye hazina yako — weka picha au faili kwenye mwonekano wa gumzo.",
+    "filesHeading": "Faili",
+    "close": "Funga kitazamaji",
+    "previous": "Iliyotangulia",
+    "next": "Inayofuata",
+    "position": "{{index}} / {{total}}"
+  }
+}

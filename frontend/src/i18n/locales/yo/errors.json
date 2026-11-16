@@ -1,0 +1,16 @@
+{
+  "boundary": {
+    "instruction": "Jọ̀wọ́ tún áàpù náà bẹ̀rẹ̀.",
+    "message": "Àṣìṣe àìròtẹ́lẹ̀ kan ṣẹlẹ̀.",
+    "restart": "Tún bẹ̀rẹ̀",
+    "tag": "ÀṢÌṢE ŃLÁ",
+    "title": "Nǹkan kan ṣẹlẹ̀ tí kò tọ́"
+  },
+  "core": {
+    "pinIncorrect_other": "PIN kò tọ́. Ìgbìyànjú {{count}} ló kù.",
+    "pinLockedOut": "PIN tí kò tọ́ ti pọ̀ jù. Gba àkáǹtì rẹ padà pẹ̀lú Kọ́kọ́rọ́ Àṣírí rẹ.",
+    "pinNotSet": "Ẹ̀rọ yìí kò tíì ní PIN. Tún wọlé láti ṣètò ọ̀kan.",
+    "noActiveUser": "O kò tíì wọlé lórí ẹ̀rọ yìí. Tún wọlé.",
+    "unlockFirst": "Kọ́kọ́ ṣí Pollis sílẹ̀."
+  }
+}

@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "ከ{{name}} የመጣ መልዕክት",
+    "unknownAuthor": "ያልታወቀ",
+    "deleted": "[ተሰርዟል]",
+    "encrypted": "[የተመሰጠረ]",
+    "redacted": "[ተደብቋል]",
+    "edited": "(ተስተካክሏል)",
+    "editUnsent": "(ማስተካከያው አልተላከም)",
+    "newMember": "አዲስ",
+    "newMemberTitle": "ባለፉት 7 ቀናት ውስጥ የተቀላቀለ",
+    "undecryptable": {
+      "tag": "ሊፈታ የማይችል",
+      "title": "መፍታት አልተቻለም",
+      "body_one": "{{count}} መልዕክት በዚህ መሣሪያ ላይ ሊፈታ አልቻለም።",
+      "body_other": "{{count}} መልዕክቶች በዚህ መሣሪያ ላይ ሊፈቱ አልቻሉም።",
+      "detail": "የሆነ ነገር እዚህ ተልኳል፣ ግን ይህ መሣሪያ ሊያነበው አልቻለም። ሌሎች መሣሪያዎችዎ አሁንም ሊኖራቸው ይችላል።",
+      "diagnostics": "ምርመራውን ይመልከቱ"
+    }
+  },
+  "status": {
+    "pending": "በመጠባበቅ ላይ",
+    "sending": "በመላክ ላይ",
+    "sent": "ተልኳል",
+    "failed": "አልተሳካም",
+    "cancelled": "ተሰርዟል"
+  },
+  "outbox": {
+    "retry": "እንደገና ሞክር",
+    "discard": "አስወግድ",
+    "retryLabel": "ይህን መልዕክት እንደገና ለመላክ ሞክር",
+    "discardLabel": "ይህን ያልተላከ መልዕክት አስወግድ",
+    "notSent": "አልተላከም",
+    "willResend": "Pollis እንደገና ሲገናኝ በራስ-ሰር ይላካል።",
+    "notDelivered": "ይህ መልዕክት ሊደርስ አልቻለም።"
+  },
+  "actions": {
+    "reply": "መልስ",
+    "replyInThread": "በክር ውስጥ መልስ",
+    "save": "መልዕክቱን አስቀምጥ",
+    "removeBookmark": "ዕልባቱን አስወግድ",
+    "copyLink": "የመልዕክቱን አገናኝ ቅዳ",
+    "copyLinkCopied": "አገናኙ ተቀድቷል",
+    "copyLinkFailed": "አገናኙን መቅዳት አልተቻለም",
+    "edit": "መልዕክቱን አርትዕ",
+    "delete": "መልዕክቱን ሰርዝ",
+    "deleteAsAdmin": "መልዕክቱን ሰርዝ (አስተዳዳሪ)",
+    "more": "ተጨማሪ እርምጃዎች",
+    "pin": "መልዕክቱን ሰካ",
+    "unpin": "የመልዕክቱን መሰካት አንሳ",
+    "report": "ሪፖርት አድርግ"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} መልስ",
+    "replyCount_other": "{{count}} መልሶች"
+  },
+  "receipts": {
+    "readByEveryone": "ሁሉም አንብበውታል",
+    "readByCount_one": "ከ{{total}} {{count}} አንብቦታል",
+    "readByCount_other": "ከ{{total}} {{count}} አንብበውታል",
+    "deliveredCount_one": "ከ{{total}} ለ{{count}} ደርሷል",
+    "deliveredCount_other": "ከ{{total}} ለ{{count}} ደርሷል"
+  },
+  "list": {
+    "empty": "እስካሁን መልዕክቶች የሉም። ውይይቱን ይጀምሩ።",
+    "unknownAuthor": "ያልታወቀ",
+    "blockedAuthor": "የታገደ ተጠቃሚ",
+    "blockedBody": "[ታግዷል]"
+  },
+  "replyBar": {
+    "replyingTo": "ለ<name>{{name}}</name> በመመለስ ላይ",
+    "scrollToMessage": "መልስ ወደተሰጠው መልዕክት ሸብልል",
+    "dismiss": "መልሱን ተው",
+    "encrypted": "[የተመሰጠረ መልዕክት]"
+  },
+  "queue": {
+    "heading": "ወረፋ",
+    "pendingPlaceholder": "[በመጠባበቅ ላይ ያለ መልዕክት]",
+    "cancel": "መልዕክቱን ተው",
+    "retry": "እንደገና ሞክር",
+    "failedCount_one": "አልተሳካም ×{{count}}",
+    "failedCount_other": "አልተሳካም ×{{count}}"
+  },
+  "reactions": {
+    "add": "ምላሽ አክል",
+    "all": "ሁሉም",
+    "allTabLabel_one": "ሁሉም፣ {{count}} ምላሽ",
+    "allTabLabel_other": "ሁሉም፣ {{count}} ምላሾች",
+    "contextHint": "ማን ምላሽ እንደሰጠ ለማየት በቀኝ ጠቅ ያድርጉ",
+    "hoverMore_one": "{{names}} እና {{count}} ሌላ ሰው በ{{emoji}} ምላሽ ሰጥተዋል",
+    "hoverMore_other": "{{names}} እና {{count}} ሌሎች ሰዎች በ{{emoji}} ምላሽ ሰጥተዋል",
+    "hoverNames": "{{names}} በ{{emoji}} ምላሽ ሰጥተዋል",
+    "pillLabel_one": "{{emoji}} {{count}} ምላሽ",
+    "pillLabel_other": "{{emoji}} {{count}} ምላሾች",
+    "rowLabel": "{{name}}፣ በ{{emojis}} ምላሽ ሰጥቷል",
+    "selfName": "{{name}} (እርስዎ)",
+    "sheetTitle": "ምላሾች",
+    "tabLabel_one": "{{emoji}}፣ {{count}} ምላሽ",
+    "tabLabel_other": "{{emoji}}፣ {{count}} ምላሾች",
+    "unknownUser": "ያልታወቀ ተጠቃሚ",
+    "viewWho": "ምላሾችን ይመልከቱ",
+    "you": "እርስዎ"
+  },
+  "preview": {
+    "noMessages": "እስካሁን መልዕክቶች የሉም",
+    "withSender": "{{name}}፦ {{text}}",
+    "attachments_one": "[{{count}} አባሪ]",
+    "attachments_other": "[{{count}} አባሪዎች]",
+    "undecryptable": "አንድ መልዕክት በዚህ መሣሪያ ላይ ሊፈታ አልቻለም"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}}ን ይመልከቱ",
+    "openLabel": "{{filename}}ን ክፈት",
+    "downloadLabel": "{{filename}}ን አውርድ",
+    "loading": "በመጫን ላይ…",
+    "error": "ስህተት",
+    "failedToLoad": "መጫን አልተሳካም",
+    "failedToDownload": "ማውረድ አልተሳካም",
+    "lightboxFetch": "አምጣ",
+    "lightboxDone": "[ ተከናውኗል ]",
+    "lightboxDownload": "[አውርድ]",
+    "lightboxClose": "[Esc]",
+    "sensitiveReveal": "ስሱ ሚዲያ አሳይ፦ {{filename}}",
+    "sensitiveHide": "{{filename}}ን ደብቅ"
+  },
+  "unfurl": {
+    "loadImage": "ምስል ጫን",
+    "loadVideo": "ቪዲዮ ጫን",
+    "loadTitle": "ሚዲያ ከ{{url}} ጫን — ይህ ያንን ጣቢያ በቀጥታ ያገናኛል",
+    "loadDescription": "ሚዲያ ከ{{url}} ጫን። ይህ ያንን ጣቢያ በቀጥታ ያገናኛል፤ የIP አድራሻዎንም ለጣቢያው ይገልጣል።",
+    "openLabel": "{{url}}ን ክፈት"
+  },
+  "notify": {
+    "newMessageTitle": "አዲስ መልዕክት",
+    "newMessageBody": "{{name}}፦ አዲስ መልዕክት",
+    "mentionTitle": "አዲስ ጥቀሳ",
+    "allMentionBody": "{{name}} @allን ጠቅሷል",
+    "userMentionBody": "{{name}} እርስዎን ጠቅሷል"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "ይህ ሰው",
+    "titleMessage": "መልዕክቱን ሪፖርት አድርግ",
+    "titleUser": "{{name}}ን ሪፖርት አድርግ",
+    "intro": "Pollis መለያውን እና ምክንያቱን ያገኛል። መልዕክቶች ተመስጥረው ስለሚቆዩ የተባለውን በፍጹም አናይም።",
+    "reasonLabel": "ምክንያት",
+    "reason": {
+      "spam": "አይፈለጌ መልዕክት",
+      "harassment": "ትንኮሳ ወይም ዛቻ",
+      "illegal": "ሕገ-ወጥ ይዘት",
+      "other": "ሌላ ነገር"
+    },
+    "submit": "ሪፖርት አድርግ",
+    "submitAndBlock": "ሪፖርት አድርግ እና አግድ",
+    "failed": "ሪፖርቱን መላክ አልተቻለም። እንደገና ይሞክሩ።",
+    "doneTitle": "ሪፖርቱ ተልኳል",
+    "done": "እናመሰግናለን። እያንዳንዱን ሪፖርት እንገመግማለን።",
+    "doneBlocked": "እናመሰግናለን። እያንዳንዱን ሪፖርት እንገመግማለን። {{name}}ንም አግደዋል።",
+    "close": "ተጠናቅቋል"
+  },
+  "keyChange": {
+    "notice": "ከ{{name}} ጋር ያለዎት የደህንነት ቁጥር ተቀይሯል።",
+    "verify": "ያረጋግጡት",
+    "defaultName": "ይህ እውቂያ"
+  },
+  "typing": {
+    "one": "{{name}} እየጻፈ ነው…",
+    "two": "{{first}} እና {{second}} እየጻፉ ነው…",
+    "several_one": "{{count}} ሰው እየጻፈ ነው…",
+    "several_other": "{{count}} ሰዎች እየጻፉ ነው…"
+  }
+}

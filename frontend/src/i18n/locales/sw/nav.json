@@ -1,0 +1,214 @@
+{
+  "sidebar": {
+    "groups": "vikundi",
+    "dms": "DM",
+    "account": "akaunti",
+    "saved": "Vilivyohifadhiwa",
+    "preferences": "Mapendeleo",
+    "language": "Lugha",
+    "userSettings": "Mipangilio ya mtumiaji",
+    "voiceAndVideo": "Sauti na video",
+    "security": "Usalama",
+    "keyBindings": "Mikato ya kibodi",
+    "softwareUpdate": "Sasisho la programu",
+    "expandGroup": "Panua {{name}}",
+    "collapseGroup": "Kunja {{name}}",
+    "keyChanged": "Ufunguo wa utambulisho umebadilika — thibitisha tena",
+    "verified": "Mwasiliani aliyethibitishwa",
+    "dmAvatarAlt": "Picha ya wasifu ya {{name}}",
+    "close": "Funga upau wa pembeni ({{shortcut}})",
+    "resize": "Badilisha ukubwa wa upau wa pembeni (buruta; bofya mara mbili ili kurejesha)",
+    "searchMessages": "Tafuta ujumbe",
+    "vault": "Hazina",
+    "securityEvents": "Matukio ya usalama",
+    "copyHistory": "Nakili historia"
+  },
+  "profile": {
+    "you": "Wewe",
+    "call": "Simu",
+    "voice": "Sauti",
+    "settings": "Mipangilio",
+    "voiceConnected": "Sauti imeunganishwa",
+    "stopScreenShare": "Acha kushiriki skrini",
+    "shareScreen": "Shiriki skrini",
+    "disconnect": "Tenganisha"
+  },
+  "breadcrumb": {
+    "home": "Mwanzo",
+    "groups": "Vikundi",
+    "createGroup": "Unda kikundi",
+    "findGroup": "Tafuta kikundi",
+    "newChannel": "Chaneli mpya",
+    "voice": "sauti",
+    "joinRequests": "Maombi ya kujiunga",
+    "inviteMember": "Alika mwanachama",
+    "leaveGroup": "Ondoka kwenye kikundi",
+    "members": "Wanachama",
+    "removeMember": "Ondoa mwanachama",
+    "directMessages": "Jumbe za moja kwa moja",
+    "newMessage": "Ujumbe mpya",
+    "requests": "Maombi",
+    "blockedUsers": "Watumiaji waliozuiwa",
+    "conversationSettings": "Mipangilio ya mazungumzo",
+    "account": "Akaunti",
+    "preferences": "Mapendeleo",
+    "language": "Lugha",
+    "userSettings": "Mipangilio ya mtumiaji",
+    "profile": "Wasifu",
+    "security": "Usalama",
+    "voiceSettings": "Sauti",
+    "invites": "Mialiko",
+    "joinAGroup": "Jiunge na kikundi",
+    "search": "Tafuta",
+    "searchButton": "Tafuta ({{shortcut}})",
+    "settings": "Mipangilio",
+    "securityEvents": "Matukio ya usalama",
+    "copyHistory": "Nakili historia ya ujumbe",
+    "historyRequest": "Ombi la historia"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Ujumbe wa vikundi ambao haujasomwa: {{count}}",
+    "groupsUnread_other": "Ujumbe wa vikundi ambao haujasomwa: {{count}}",
+    "dmsUnread_one": "Ujumbe wa moja kwa moja ambao haujasomwa: {{count}}",
+    "dmsUnread_other": "Jumbe za moja kwa moja ambazo hazijasomwa: {{count}}",
+    "joinRequests_one": "Maombi ya kujiunga yanayosubiri: {{count}}",
+    "joinRequests_other": "Maombi ya kujiunga yanayosubiri: {{count}}",
+    "invites_one": "Mialiko inayosubiri: {{count}}",
+    "invites_other": "Mialiko inayosubiri: {{count}}",
+    "someone": "Mtu fulani",
+    "updateAvailable": "Sasisho linapatikana",
+    "updateAvailableTitle": "Sasisho linapatikana: {{version}}",
+    "answerCall": "Pokea simu kutoka kwa @{{username}}",
+    "declineCall": "Kataa simu",
+    "dismissVoiceError": "Ondoa hitilafu ya sauti",
+    "dismissScreenShareError": "Ondoa hitilafu ya kushiriki skrini",
+    "dismissCameraError": "Ondoa hitilafu ya kamera",
+    "syncing": "inasawazisha…"
+  },
+  "shell": {
+    "dropFiles": "achilia faili ili kuzituma",
+    "voiceChannelFallback": "sauti",
+    "callChannel": "Simu"
+  },
+  "panel": {
+    "thread": "Uzi",
+    "details": "Maelezo",
+    "ariaLabel": "Maelezo ya mazungumzo",
+    "closeThread": "Funga paneli ya uzi ({{shortcut}})",
+    "closeDetails": "Funga paneli ya maelezo ({{shortcut}})",
+    "resize": "Badilisha ukubwa wa paneli ya maelezo (buruta; bofya mara mbili ili kurejesha)"
+  },
+  "members": {
+    "count_one": "Wanachama — {{count}}",
+    "count_other": "Wanachama — {{count}}",
+    "onlineCount_one": "Mtandaoni — {{count}}",
+    "onlineCount_other": "Mtandaoni — {{count}}",
+    "empty": "Hakuna wanachama wa kuonyesha.",
+    "noneOnline": "Hakuna aliye mtandaoni.",
+    "you": "Wewe",
+    "admin": "msimamizi"
+  },
+  "media": {
+    "heading": "Midia",
+    "empty": "Bado hakuna midia iliyoshirikiwa."
+  },
+  "thread": {
+    "loading": "Inapakia majibu…",
+    "empty": "Bado hakuna majibu. Anzisha uzi hapa chini.",
+    "placeholder": "Jibu kwenye uzi…",
+    "messageDeleted": "Ujumbe umefutwa",
+    "encrypted": "[ujumbe umesimbwa kwa njia fiche]"
+  },
+  "chat": {
+    "noSelection": "Chagua chaneli ili uanze kutuma ujumbe"
+  },
+  "dmRequest": {
+    "heading": "ombi la ujumbe",
+    "body": "<name>{{name}}</name> anataka kukutumia ujumbe.",
+    "accept": "Kubali",
+    "accepting": "Inakubali…",
+    "block": "Zuia",
+    "blocking": "Inazuia…"
+  },
+  "editBar": {
+    "heading": "inahariri ujumbe",
+    "cancel": "Ghairi uhariri",
+    "hint": "Enter ili kuhifadhi · Shift+Enter kwa mstari mpya · Esc ili kughairi"
+  },
+  "deleteChannel": {
+    "heading": "futa chaneli",
+    "cancel": "Ghairi ufutaji",
+    "body": "Chaneli hii na ujumbe wake wote vitafutwa kabisa. Hatua hii haiwezi kutenduliwa.",
+    "deleting": "Inafuta…"
+  },
+  "deleteMessage": {
+    "heading": "futa ujumbe",
+    "moderateHeading": "ondoa ujumbe (msimamizi)",
+    "body": "Ujumbe huu utafutwa kwa kila mtu, wakiwemo watu ambao tayari wameupokea.",
+    "moderateBody": "Ujumbe huu na viambatisho vyake vitaondolewa kwa kila mtu kwenye chaneli.",
+    "cancel": "Ghairi ufutaji",
+    "deleting": "Inafuta…",
+    "remove": "Ondoa"
+  },
+  "update": {
+    "preparing": "Inajiandaa kusasisha…",
+    "checking": "Inatafuta masasisho…",
+    "downloading": "Inapakua sasisho…",
+    "downloadingProgress": "Inapakua sasisho… {{progress}}%",
+    "installing": "Inasakinisha sasisho…",
+    "relaunching": "Inafungua upya…",
+    "failed": "Imeshindwa kusasisha: {{error}}",
+    "tryAgain": "Jaribu tena",
+    "continueWithout": "Endelea bila kusasisha",
+    "readOnlyDiskImage": "Pollis inaendeshwa kutoka kwenye picha ya diski, ambayo ni ya kusoma tu. Funga Pollis, iburute hadi kwenye Applications, ondoa picha ya diski, kisha uifungue kutoka kwenye Applications.",
+    "readOnlyTranslocated": "macOS inaendesha Pollis kutoka mahali pa muda pa kusoma tu. Funga Pollis, iondoe kwenye Applications kisha uirudishe kwa kutumia Finder, kisha uifungue tena.",
+    "readOnlyTranslocatedHealed": "macOS inaendesha Pollis kutoka mahali pa muda pa kusoma tu palipoachwa na sasisho la awali. Hilo limerekebishwa. Funga Pollis kisha uifungue tena kutoka kwenye Applications.",
+    "readOnlyGeneric": "Pollis haiwezi kujisasisha kwa sababu mahali ilipo ni pa kusoma tu. Funga Pollis, hakikisha iko kwenye folda yako ya Applications (imehamishwa huko kwa Finder), kisha uifungue tena."
+  },
+  "clientBlocked": {
+    "title": "Sasisho linahitajika",
+    "body": "Toleo hili la Pollis halitumiki tena. Sasisha ili uendelee kuitumia. Ujumbe na mipangilio yako inabaki kwenye kifaa hiki.",
+    "versions": "Iliyosakinishwa {{version}} · Inayohitajika {{minimum}} au mpya zaidi",
+    "installed": "Iliyosakinishwa {{version}}",
+    "updateNow": "Sasisha sasa",
+    "updating": "Inasasisha…",
+    "download": "Pakua toleo jipya zaidi",
+    "updateFailed": "Sasisho halikukamilika. Pakua toleo jipya zaidi badala yake.",
+    "packageManager": "Pollis ilisakinishwa kwa {{source}}. Isasishe huko:",
+    "openAppStore": "Fungua App Store",
+    "openPlay": "Fungua Google Play",
+    "openTestflight": "Fungua TestFlight",
+    "openWebsite": "Fungua pollis.com",
+    "openFailed": "Imeshindwa kufungua kiungo. Nenda {{url}}",
+    "retry": "Angalia tena",
+    "checking": "Inaangalia…"
+  },
+  "home": {
+    "groups": "Vikundi",
+    "groupsDescription": "Jumuiya, mashirika, timu na magumzo ya vikundi yenye malengo makubwa kupita kiasi",
+    "dms": "Jumbe za moja kwa moja",
+    "dmsDescription": "Mazungumzo ya faragha na watu binafsi, yaliyosimbwa kwa njia fiche kutoka mwanzo hadi mwisho",
+    "invites": "Mialiko",
+    "noPendingInvites": "Hakuna mialiko inayosubiri",
+    "pending_one": "{{count}} inasubiri",
+    "pending_other": "{{count}} zinasubiri",
+    "join": "Jiunge na kikundi",
+    "joinDescription": "Tumia kiungo cha mwaliko au msimbo wa kujiunga",
+    "joinRequests": "Maombi ya kujiunga",
+    "logout": "Ondoka kwenye akaunti",
+    "exit": "Toka"
+  },
+  "titleBar": {
+    "minimize": "Punguza",
+    "maximize": "Panua"
+  },
+  "terminal": {
+    "shellFailed": "imeshindwa kuanzisha shell: {{error}}"
+  },
+  "pins": {
+    "heading": "Vilivyobanwa",
+    "empty": "Bado hakuna ujumbe uliobanwa.",
+    "unavailable": "Ujumbe uliobanwa bado haupatikani kwenye kifaa hiki — utaonekana baada ya mazungumzo kusawazishwa.",
+    "unpin": "Banua"
+  }
+}

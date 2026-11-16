@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "Umlayezo Omusha",
+    "requests": "Izicelo",
+    "blocked": "Abasebenzisi Abavinjiwe",
+    "avatarAlt": "Isithombe sika-{{name}}",
+    "settingsFor": "Izilungiselelo zika-{{name}}",
+    "verified": "Oxhumana naye oqinisekisiwe",
+    "keyChanged": "Ukhiye womazisi ushintshile — qinisekisa futhi"
+  },
+  "conversation": {
+    "fallbackTitle": "Umlayezo Oqondile",
+    "viewProfile": "Buka iphrofayela ka-@{{name}}",
+    "call": "Shayela u-@{{name}}",
+    "returnToCall": "Buyela kukholi no-@{{name}}",
+    "pinsLabel": "Imilayezo ephiniwe"
+  },
+  "settings": {
+    "pageTitle": "Izilungiselelo Zengxoxo",
+    "leave": "Shiya ingxoxo",
+    "submitting": "Iyashiya…",
+    "leaveFailed": "Yehlulekile ukushiya ingxoxo",
+    "cancel": "Khansela (Esc)"
+  },
+  "start": {
+    "pageTitle": "Umlayezo Omusha",
+    "identifierLabel": "Igama lomsebenzisi noma i-imeyili",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "Qala Ingxoxo",
+    "submitting": "Iyaqala…",
+    "identifierRequired": "Kudingeka isihlonzi somsebenzisi",
+    "userNotFound": "Umsebenzisi akatholakalanga",
+    "startFailed": "Yehlulekile ukuqala ingxoxo"
+  },
+  "requests": {
+    "pageTitle": "Izicelo Zemilayezo",
+    "empty": "Azikho izicelo ezilindile.",
+    "noMessageYet": "(awukabikho umlayezo)",
+    "unknownSender": "Akaziwa",
+    "others_one": "(+{{count}} omunye)",
+    "others_other": "(+{{count}} abanye)",
+    "accept": "yamukela",
+    "block": "vimba"
+  },
+  "blocked": {
+    "pageTitle": "Abasebenzisi Abavinjiwe",
+    "empty": "Abekho abasebenzisi abavinjiwe.",
+    "unblock": "susa ukuvimba"
+  },
+  "profile": {
+    "fallbackName": "Umsebenzisi",
+    "fallbackTitle": "Iphrofayela",
+    "notFound": "Umsebenzisi akatholakalanga",
+    "avatarAlt": "Isithombe sika-{{name}}",
+    "sendMessage": "Thumela Umlayezo",
+    "block": "Vimba",
+    "safetyNumber": "Inombolo yokuphepha",
+    "statusVerified": "Kuqinisekisiwe",
+    "statusChanged": "Kushintshile — qinisekisa futhi",
+    "statusUnverified": "Akuqinisekisiwe",
+    "keyChangedWarning": "Ukhiye womazisi walo oxhumana naye ushintshile selokhu wagcina ukuwuqinisekisa. Qhathanisa inombolo futhi ngenye indlela ngaphambi kokuyethemba.",
+    "removeVerification": "Susa ukuqinisekisa",
+    "markVerified": "Maka njengokuqinisekisiwe",
+    "report": "Bika"
+  },
+  "safety": {
+    "title": "Wena no-{{name}}",
+    "verify": "Qinisekisa inombolo yokuphepha",
+    "headingMany": "Izinombolo zokuphepha",
+    "shared": "Wena no-{{name}} nibona inombolo efanayo. Niyiqhathanise nibonana ubuso nobuso noma kukholi ukuze niqiniseke ukuthi akekho ophakathi kwenu.",
+    "qrLabel": "Ikhodi ye-QR yenombolo yokuphepha owabelana ngayo no-{{name}}",
+    "failed": "Ayikwazanga ukulayisha inombolo yokuphepha."
+  },
+  "notify": {
+    "requestTitle": "Ingxoxo entsha",
+    "requestBody": "{{name}} uqale ingxoxo nawe"
+  }
+}

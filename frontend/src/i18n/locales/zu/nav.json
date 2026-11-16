@@ -1,0 +1,214 @@
+{
+  "sidebar": {
+    "groups": "amaqembu",
+    "dms": "ama-DM",
+    "account": "i-akhawunti",
+    "saved": "Okulondoloziwe",
+    "preferences": "Okuthandayo",
+    "language": "Ulimi",
+    "userSettings": "Izilungiselelo Zomsebenzisi",
+    "voiceAndVideo": "Izwi Nevidiyo",
+    "security": "Ukuphepha",
+    "keyBindings": "Izinqamuleli Zekhibhodi",
+    "softwareUpdate": "Isibuyekezo Sesofthiwe",
+    "expandGroup": "Nweba {{name}}",
+    "collapseGroup": "Goqa {{name}}",
+    "keyChanged": "Ukhiye womazisi ushintshile — qinisekisa futhi",
+    "verified": "Oxhumana naye oqinisekisiwe",
+    "dmAvatarAlt": "Isithombe sika-{{name}}",
+    "close": "Vala ibha eseceleni ({{shortcut}})",
+    "resize": "Shintsha usayizi webha eseceleni (hudula; chofoza kabili ukuze usethe kabusha)",
+    "searchMessages": "Sesha Imilayezo",
+    "vault": "Isiphephelo",
+    "securityEvents": "Izehlakalo Zokuphepha",
+    "copyHistory": "Kopisha Umlando"
+  },
+  "profile": {
+    "you": "Wena",
+    "call": "Ikholi",
+    "voice": "Izwi",
+    "settings": "Izilungiselelo",
+    "voiceConnected": "Izwi Lixhunyiwe",
+    "stopScreenShare": "Misa ukwabelana ngesikrini",
+    "shareScreen": "Yabelana ngesikrini",
+    "disconnect": "Nqamula"
+  },
+  "breadcrumb": {
+    "home": "Ikhaya",
+    "groups": "Amaqembu",
+    "createGroup": "Dala Iqembu",
+    "findGroup": "Thola Iqembu",
+    "newChannel": "Isiteshi Esisha",
+    "voice": "izwi",
+    "joinRequests": "Izicelo Zokujoyina",
+    "inviteMember": "Mema Ilungu",
+    "leaveGroup": "Shiya Iqembu",
+    "members": "Amalungu",
+    "removeMember": "Susa Ilungu",
+    "directMessages": "Imilayezo Eqondile",
+    "newMessage": "Umlayezo Omusha",
+    "requests": "Izicelo",
+    "blockedUsers": "Abasebenzisi Abavinjiwe",
+    "conversationSettings": "Izilungiselelo Zengxoxo",
+    "account": "I-akhawunti",
+    "preferences": "Okuthandayo",
+    "language": "Ulimi",
+    "userSettings": "Izilungiselelo Zomsebenzisi",
+    "profile": "Iphrofayela",
+    "security": "Ukuphepha",
+    "voiceSettings": "Izwi",
+    "invites": "Izimemo",
+    "joinAGroup": "Joyina Iqembu",
+    "search": "Sesha",
+    "searchButton": "Sesha ({{shortcut}})",
+    "settings": "Izilungiselelo",
+    "securityEvents": "Izehlakalo Zokuphepha",
+    "copyHistory": "Kopisha Umlando Wemilayezo",
+    "historyRequest": "Isicelo Somlando"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Imilayezo yamaqembu engafundiwe: {{count}}",
+    "groupsUnread_other": "Imilayezo yamaqembu engafundiwe: {{count}}",
+    "dmsUnread_one": "Imilayezo eqondile engafundiwe: {{count}}",
+    "dmsUnread_other": "Imilayezo eqondile engafundiwe: {{count}}",
+    "joinRequests_one": "Izicelo zokujoyina ezilindile: {{count}}",
+    "joinRequests_other": "Izicelo zokujoyina ezilindile: {{count}}",
+    "invites_one": "Izimemo ezilindile: {{count}}",
+    "invites_other": "Izimemo ezilindile: {{count}}",
+    "someone": "Othile",
+    "updateAvailable": "Isibuyekezo siyatholakala",
+    "updateAvailableTitle": "Isibuyekezo siyatholakala: {{version}}",
+    "answerCall": "Phendula ikholi evela ku-@{{username}}",
+    "declineCall": "Yenqaba ikholi",
+    "dismissVoiceError": "Chitha iphutha lezwi",
+    "dismissScreenShareError": "Chitha iphutha lokwabelana ngesikrini",
+    "dismissCameraError": "Chitha iphutha lekhamera",
+    "syncing": "iyavumelanisa…"
+  },
+  "shell": {
+    "dropFiles": "faka amafayela ukuze uwathumele",
+    "voiceChannelFallback": "izwi",
+    "callChannel": "Ikholi"
+  },
+  "panel": {
+    "thread": "Uchungechunge",
+    "details": "Imininingwane",
+    "ariaLabel": "Imininingwane yengxoxo",
+    "closeThread": "Vala iphaneli yochungechunge ({{shortcut}})",
+    "closeDetails": "Vala iphaneli yemininingwane ({{shortcut}})",
+    "resize": "Shintsha usayizi wephaneli yemininingwane (hudula; chofoza kabili ukuze usethe kabusha)"
+  },
+  "members": {
+    "count_one": "Amalungu — {{count}}",
+    "count_other": "Amalungu — {{count}}",
+    "onlineCount_one": "Abaxhunyiwe — {{count}}",
+    "onlineCount_other": "Abaxhunyiwe — {{count}}",
+    "empty": "Awekho amalungu angakhonjiswa.",
+    "noneOnline": "Akekho oxhunyiwe.",
+    "you": "Wena",
+    "admin": "umphathi"
+  },
+  "media": {
+    "heading": "Imidiya",
+    "empty": "Ayikabikho imidiya eyabiwe."
+  },
+  "thread": {
+    "loading": "Ilayisha izimpendulo…",
+    "empty": "Azikabikho izimpendulo. Qala uchungechunge ngezansi.",
+    "placeholder": "Phendula ochungechungeni…",
+    "messageDeleted": "Umlayezo ususiwe",
+    "encrypted": "[kubethelwe]"
+  },
+  "chat": {
+    "noSelection": "Khetha isiteshi ukuze uqale ukuthumela imilayezo"
+  },
+  "dmRequest": {
+    "heading": "isicelo somlayezo",
+    "body": "<name>{{name}}</name> ufuna ukukuthumelela imilayezo.",
+    "accept": "Yamukela",
+    "accepting": "Iyamukela…",
+    "block": "Vimba",
+    "blocking": "Iyavimba…"
+  },
+  "editBar": {
+    "heading": "uhlela umlayezo",
+    "cancel": "Khansela ukuhlela",
+    "hint": "Enter ukuze ulondoloze · Shift+Enter ulayini omusha · Esc ukuze ukhansele"
+  },
+  "deleteChannel": {
+    "heading": "susa isiteshi",
+    "cancel": "Khansela ukususa",
+    "body": "Lesi siteshi nayo yonke imilayezo yaso kuzosuswa unomphela. Lokhu akukwazi ukuhlehliswa.",
+    "deleting": "Iyasusa…"
+  },
+  "deleteMessage": {
+    "heading": "susa umlayezo",
+    "moderateHeading": "susa umlayezo (umphathi)",
+    "body": "Lo mlayezo uzosuswa kubo bonke, kuhlanganise nabantu asebewutholile.",
+    "moderateBody": "Lo mlayezo nokunamathiselwe kwawo kuzosuswa kubo bonke abasesiteshini.",
+    "cancel": "Khansela ukususa",
+    "deleting": "Iyasusa…",
+    "remove": "Susa"
+  },
+  "update": {
+    "preparing": "Ilungiselela ukubuyekeza…",
+    "checking": "Ihlola izibuyekezo…",
+    "downloading": "Ilanda isibuyekezo…",
+    "downloadingProgress": "Ilanda isibuyekezo… {{progress}}%",
+    "installing": "Ifaka isibuyekezo…",
+    "relaunching": "Iqala kabusha…",
+    "failed": "Isibuyekezo sehlulekile: {{error}}",
+    "tryAgain": "Zama futhi",
+    "continueWithout": "Qhubeka ngaphandle kokubuyekeza",
+    "readOnlyDiskImage": "I-Pollis isebenza isuka ku-disk image, okungeyokufundwa kuphela. Phuma ku-Pollis, uyihudulele ku-Applications, ukhiphe i-disk image, bese uyivula ku-Applications.",
+    "readOnlyTranslocated": "I-macOS isebenzisa i-Pollis isuka endaweni yesikhashana engeyokufundwa kuphela. Phuma ku-Pollis, uyikhiphe ku-Applications bese uyibuyisela usebenzisa i-Finder, bese uyivula futhi.",
+    "readOnlyTranslocatedHealed": "I-macOS isebenzisa i-Pollis isuka endaweni yesikhashana engeyokufundwa kuphela eyashiywa yisibuyekezo sangaphambilini. Lokho sekulungisiwe. Phuma ku-Pollis bese uyivula futhi ku-Applications.",
+    "readOnlyGeneric": "I-Pollis ayikwazi ukuzibuyekeza ngoba indawo ekuyo ingeyokufundwa kuphela. Phuma ku-Pollis, qiniseka ukuthi isefolda yakho ye-Applications (ithuthelwe lapho nge-Finder), bese uyivula futhi."
+  },
+  "clientBlocked": {
+    "title": "Isibuyekezo siyadingeka",
+    "body": "Le nguqulo ye-Pollis ayisasekelwa. Buyekeza ukuze uqhubeke uyisebenzisa. Imilayezo nezilungiselelo zakho zihlala kule divayisi.",
+    "versions": "Efakiwe {{version}} · Edingekayo {{minimum}} noma kamuva",
+    "installed": "Efakiwe {{version}}",
+    "updateNow": "Buyekeza manje",
+    "updating": "Iyabuyekeza…",
+    "download": "Landa inguqulo yakamuva",
+    "updateFailed": "Isibuyekezo asiqedanga. Landa inguqulo yakamuva esikhundleni salokho.",
+    "packageManager": "I-Pollis yafakwa nge-{{source}}. Yibuyekeze lapho:",
+    "openAppStore": "Vula i-App Store",
+    "openPlay": "Vula i-Google Play",
+    "openTestflight": "Vula i-TestFlight",
+    "openWebsite": "Vula i-pollis.com",
+    "openFailed": "Ayikwazanga ukuvula isixhumanisi. Iya ku-{{url}}",
+    "retry": "Hlola futhi",
+    "checking": "Iyahlola…"
+  },
+  "home": {
+    "groups": "Amaqembu",
+    "groupsDescription": "Imiphakathi, Izinhlangano, Amathimba, nezingxoxo zamaqembu ezinamaphupho amakhulu kakhulu",
+    "dms": "Imilayezo Eqondile",
+    "dmsDescription": "Izingxoxo eziyimfihlo, ezibethelwe kusukela ekuqaleni kuya ekugcineni nabantu ngabanye",
+    "invites": "Izimemo",
+    "noPendingInvites": "Azikho izimemo ezilindile",
+    "pending_one": "{{count}} esilindile",
+    "pending_other": "{{count}} ezilindile",
+    "join": "Joyina Iqembu",
+    "joinDescription": "Sebenzisa isixhumanisi sesimemo noma ikhodi yokujoyina",
+    "joinRequests": "Izicelo Zokujoyina",
+    "logout": "Phuma",
+    "exit": "Vala uhlelo"
+  },
+  "titleBar": {
+    "minimize": "Nciphisa",
+    "maximize": "Khulisa"
+  },
+  "terminal": {
+    "shellFailed": "yehlulekile ukuqala i-shell: {{error}}"
+  },
+  "pins": {
+    "heading": "Okuphiniwe",
+    "empty": "Ayikabikho imilayezo ephiniwe.",
+    "unavailable": "Okuphiniwe akukatholakali kule divayisi — kuzovela ngemuva kokuthi ingxoxo ivumelanise.",
+    "unpin": "Susa ukuphina"
+  }
+}

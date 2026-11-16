@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "ERÉ ÀTIJỌ́"
+  },
+  "hud": {
+    "score": "ÀMÌ  {{score}}",
+    "time": "ÀKÓKÒ  {{time}}",
+    "gameOver": "ERÉ TI PARÍ",
+    "final_other": "àmì ìkẹyìn {{count}} · {{time}}",
+    "restartHint": "tẹ R láti tún bẹ̀rẹ̀ · Esc láti jáde",
+    "controls": "WASD láti rìn · máòsì láti fojú sùn · tẹ̀/Space láti yìnbọn · Esc láti jáde"
+  }
+}

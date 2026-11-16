@@ -401,6 +401,12 @@ test.describe("shipped locales", () => {
       "te",
       "ta",
       "pa-Guru",
+      "sw",
+      "pt",
+      "ha",
+      "am",
+      "yo",
+      "zu",
     ]);
   });
 

@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "Emuva",
+    "cancel": "Khansela",
+    "close": "Vala",
+    "copy": "Kopisha",
+    "copied": "Kukopishiwe",
+    "copyFailed": "Ayikwazanga ukukopisha",
+    "delete": "Susa",
+    "forward": "Dlulisela",
+    "goBack": "Buyela emuva",
+    "moreOptions": "Ezinye izinketho",
+    "save": "Londoloza"
+  },
+  "states": {
+    "buttonLoading": "Iyalayisha...",
+    "loading": "Iyalayisha…"
+  },
+  "time": {
+    "today": "Namuhla",
+    "yesterday": "Izolo"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "Space",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "Ukuba khona: {{status}}",
+    "offline": "akaxhunyiwe",
+    "online": "uxhunyiwe"
+  },
+  "list": {
+    "empty": "Azikho izinto."
+  },
+  "grid": {
+    "empty": "Akekho lapha okwamanje."
+  },
+  "menu": {
+    "escHint": "Esc ukuze ubuyele emuva",
+    "navigationLabel": "Imenyu yokuzulazula",
+    "navigateHint": "zulazula",
+    "selectHint": "Enter ukuze ukhethe"
+  },
+  "media": {
+    "mute": "Thulisa",
+    "pause": "Misa okwesikhashana",
+    "play": "Dlala",
+    "seek": "Funa endaweni yomsindo",
+    "skipBackward": "Yeqa emuva imizuzwana eyi-10",
+    "skipForward": "Yeqa phambili imizuzwana eyi-10",
+    "unmute": "Susa ukuthulisa",
+    "volume": "Ivolumu"
+  },
+  "composer": {
+    "addAttachment": "Engeza okunamathiselwe",
+    "allMentionHint": "yazisa wonke umuntu kulesi siteshi",
+    "filePickerTitle": "Engeza amafayela",
+    "inputLabel": "Indawo yokubhala umlayezo",
+    "placeholder": "Bhala umlayezo…",
+    "previewAlt": "Ukubuka kuqala",
+    "removeAttachment": "Susa {{name}}",
+    "send": "Thumela umlayezo",
+    "markSensitive": "Maka u-{{name}} njengokuzwelayo",
+    "unmarkSensitive": "Susa uphawu lokuzwelayo ku-{{name}}"
+  },
+  "mentions": {
+    "listLabel": "Iziphakamiso zokubalula",
+    "matching": "Amalungu afana no-<hl>@{{query}}</hl>"
+  },
+  "emojiSuggest": {
+    "listLabel": "Iziphakamiso ze-emoji",
+    "matching": "Ama-emoji afana no-<hl>:{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Isithombe sephrofayela",
+    "loading": "Iyalayisha",
+    "otpDigit": "Idijithi ye-OTP {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} isek",
+    "seconds_other": "{{count}} isek",
+    "minutes_one": "{{count}} umz",
+    "minutes_other": "{{count}} imiz",
+    "hours_one": "{{count}} ihora",
+    "hours_other": "{{count}} amahora",
+    "days_one": "{{count}} usuku",
+    "days_other": "{{count}} izinsuku",
+    "weeks_one": "{{count}} iviki",
+    "weeks_other": "{{count}} amaviki",
+    "months_one": "{{count}} inyanga",
+    "months_other": "{{count}} izinyanga",
+    "years_one": "{{count}} unyaka",
+    "years_other": "{{count}} iminyaka"
+  },
+  "tray": {
+    "open": "Vula i-Pollis",
+    "muteMic": "Thulisa imakrofoni",
+    "unmuteMic": "Susa ukuthulisa imakrofoni",
+    "muteMicIdle": "Thulisa imakrofoni (awukho kukholi)",
+    "version": "Inguqulo {{version}}",
+    "quit": "Phuma ku-Pollis",
+    "unread_one": "Pollis — {{count}} engafundiwe",
+    "unread_other": "Pollis — {{count}} ezingafundiwe"
+  }
+}

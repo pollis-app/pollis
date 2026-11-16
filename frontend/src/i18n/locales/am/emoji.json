@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "ኢሞጂ መምረጫ",
+    "triggerLabel": "ኢሞጂ",
+    "searchLabel": "ፈልግ",
+    "searchPlaceholder": "ኢሞጂ ፈልግ",
+    "resultsFor": "የ\"{{query}}\" ውጤቶች",
+    "recent": "በብዛት የሚጠቀሙባቸው",
+    "custom": "ብጁ",
+    "empty": "ከዚህ ጋር የሚዛመድ ኢሞጂ የለም።",
+    "previewHint": "ኢሞጂ ይምረጡ",
+    "railLabel": "የኢሞጂ ምድቦች"
+  },
+  "categories": {
+    "people": "ሰዎች",
+    "nature": "ተፈጥሮ",
+    "food": "ምግብ",
+    "activity": "እንቅስቃሴዎች",
+    "travel": "ጉዞ",
+    "objects": "ቁሳቁሶች",
+    "symbols": "ምልክቶች",
+    "flags": "ሰንደቅ ዓላማዎች"
+  },
+  "skinTone": {
+    "groupLabel": "የቆዳ ቀለም",
+    "default": "ነባሪ የቆዳ ቀለም",
+    "numbered": "የቆዳ ቀለም {{index}}"
+  },
+  "manage": {
+    "title": "ብጁ ኢሞጂ",
+    "signInRequired": "እባክዎ ይግቡ",
+    "dropPrompt": "ምስል እዚህ ይጎትቱ፣ ወይም ለማሰስ ጠቅ ያድርጉ",
+    "dropNow": "ይህን ምስል ለመጠቀም ይልቀቁት",
+    "dropHint": "{{formats}} · ተንቀሳቃሽ GIFዎች እንቅስቃሴያቸውን ይይዛሉ",
+    "replaceHint": "ለመተካት ሌላ ምስል ይጎትቱ ወይም ጠቅ ያድርጉ",
+    "sourceSize": "{{size}} ምንጭ · ሲሰቀል ከ48 KB በታች እንደገና ይቀየራል",
+    "reencodeNote": "ሲሰቀል ከ48 KB በታች እንደገና ይቀየራል",
+    "fileTooLarge": "ያ ምስል ከ{{size}} ይበልጣል — ያነሰ የምንጭ ፋይል ይምረጡ",
+    "unsupportedFile": "{{name}} PNG፣ JPEG፣ GIF ወይም WebP አይደለም",
+    "shortcodeLabel": "አጭር ኮድ",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "እንደ :shortcode: ይጻፋል — a–z፣ 0–9 እና _",
+    "shortcodeRequired": "ይህን ኢሞጂ ለማከል ስም ይስጡት",
+    "shortcodeInvalid": "2–32 ቁምፊዎችን ይጠቀሙ፦ a–z፣ 0–9 እና _",
+    "shortcodeTaken": ":{{shortcode}}: በዚህ ቡድን ውስጥ አስቀድሞ ተይዟል",
+    "samplePlaceholder": "በመልዕክት ውስጥ እንዴት እንደሚታይ",
+    "add": "ኢሞጂ አክል",
+    "shrinking": "በማሳነስ ላይ…",
+    "filePickerTitle": "የኢሞጂ ምስል ይምረጡ",
+    "imageFilterName": "ምስሎች",
+    "addFailed": "ያንን ኢሞጂ ማከል አልተቻለም",
+    "removeFailed": "ያንን ኢሞጂ ማስወገድ አልተቻለም",
+    "storageNote": "ምስሎች ከመሰቀላቸው በፊት ከ48 KB በታች እንደገና ስለሚቀየሩ ትልቅ የምንጭ ፋይል ችግር የለውም። ተመሳሳይ ምስሎች በሚጠቀሙባቸው ቡድኖች ሁሉ አንድ የተቀመጠ ቅጂ ይጋራሉ። ይህ ቡድን ሊኖረው በሚችለው የኢሞጂ ብዛት ላይ ገደብ የለም።",
+    "stored_one": "{{count}} ኢሞጂ · {{size}} ተቀምጧል",
+    "stored_other": "{{count}} ኢሞጂዎች · {{size}} ተቀምጠዋል",
+    "empty": "እስካሁን ብጁ ኢሞጂ የለም። በቡድኑ ውስጥ ያለ ማንኛውም ሰው ማከል ይችላል።",
+    "sizeAnimated": "ተንቀሳቃሽ · {{size}}",
+    "remove": ":{{shortcode}}:ን አስወግድ",
+    "removeAdminsOnly": "ኢሞጂ ማስወገድ የሚችሉት የቡድን አስተዳዳሪዎች ብቻ ናቸው።"
+  }
+}

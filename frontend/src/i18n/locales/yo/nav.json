@@ -1,0 +1,207 @@
+{
+  "sidebar": {
+    "groups": "ẹgbẹ́",
+    "dms": "ìfiránṣẹ́ àdáni",
+    "account": "àkáǹtì",
+    "saved": "Àwọn tí a fi pamọ́",
+    "preferences": "Àṣàyàn",
+    "language": "Èdè",
+    "userSettings": "Ètò Olùmúlò",
+    "voiceAndVideo": "Ohùn àti Fídíò",
+    "security": "Ààbò",
+    "keyBindings": "Àwọn Bọ́tìnnì Ọ̀nà Àbùjá",
+    "softwareUpdate": "Ìmúdójúìwọ̀n Sọ́fítíwọ̀ọ̀",
+    "expandGroup": "Ṣí {{name}} sílẹ̀ kí ó gbòòrò",
+    "collapseGroup": "Ká {{name}} kò",
+    "keyChanged": "Kọ́kọ́rọ́ ìdánimọ̀ ti yí padà — tún jẹ́rìísí",
+    "verified": "Olùbásọ̀rọ̀ tí a ti jẹ́rìísí",
+    "dmAvatarAlt": "Àwòrán {{name}}",
+    "close": "Pa ọ̀pá ẹ̀gbẹ́ dé ({{shortcut}})",
+    "resize": "Yí ìtóbi ọ̀pá ẹ̀gbẹ́ padà (fà á; tẹ̀ ẹ́ lẹ́ẹ̀mejì láti dá a padà)",
+    "searchMessages": "Wá Ìfiránṣẹ́",
+    "vault": "Àpótí ìpamọ́",
+    "securityEvents": "Ìṣẹ̀lẹ̀ Ààbò",
+    "copyHistory": "Ṣe Àdàkọ Ìtàn"
+  },
+  "profile": {
+    "you": "Ìwọ",
+    "call": "Pè",
+    "voice": "Ohùn",
+    "settings": "Ètò",
+    "voiceConnected": "Ohùn ti Sopọ̀",
+    "stopScreenShare": "Dá pín ojú ẹ̀rọ dúró",
+    "shareScreen": "Pín ojú ẹ̀rọ",
+    "disconnect": "Já ìsopọ̀"
+  },
+  "breadcrumb": {
+    "home": "Ilé",
+    "groups": "Ẹgbẹ́",
+    "createGroup": "Ṣẹ̀dá Ẹgbẹ́",
+    "findGroup": "Wá Ẹgbẹ́",
+    "newChannel": "Ìkànnì Tuntun",
+    "voice": "ohùn",
+    "joinRequests": "Ìbéèrè Ìdarapọ̀",
+    "inviteMember": "Ké sí Ọmọ ẹgbẹ́",
+    "leaveGroup": "Kúrò nínú Ẹgbẹ́",
+    "members": "Ọmọ ẹgbẹ́",
+    "removeMember": "Yọ Ọmọ ẹgbẹ́ Kúrò",
+    "directMessages": "Ìfiránṣẹ́ àdáni",
+    "newMessage": "Ìfiránṣẹ́ Tuntun",
+    "requests": "Ìbéèrè",
+    "blockedUsers": "Àwọn Olùmúlò Tí A Dènà",
+    "conversationSettings": "Ètò Ìjíròrò",
+    "account": "Àkáǹtì",
+    "preferences": "Àṣàyàn",
+    "language": "Èdè",
+    "userSettings": "Ètò Olùmúlò",
+    "profile": "Profáìlì",
+    "security": "Ààbò",
+    "voiceSettings": "Ohùn",
+    "invites": "Ìkésíni",
+    "joinAGroup": "Darapọ̀ mọ́ Ẹgbẹ́",
+    "search": "Wá",
+    "searchButton": "Wá ({{shortcut}})",
+    "settings": "Ètò",
+    "securityEvents": "Ìṣẹ̀lẹ̀ Ààbò",
+    "copyHistory": "Ṣe Àdàkọ Ìtàn Ìfiránṣẹ́",
+    "historyRequest": "Ìbéèrè Ìtàn"
+  },
+  "statusBar": {
+    "groupsUnread_other": "Ìfiránṣẹ́ ẹgbẹ́ tí a kò tíì kà: {{count}}",
+    "dmsUnread_other": "Ìfiránṣẹ́ àdáni tí a kò tíì kà: {{count}}",
+    "joinRequests_other": "Ìbéèrè ìdarapọ̀ tó ń dúró: {{count}}",
+    "invites_other": "Ìkésíni tó ń dúró: {{count}}",
+    "someone": "Ẹnìkan",
+    "updateAvailable": "Ìmúdójúìwọ̀n wà",
+    "updateAvailableTitle": "Ìmúdójúìwọ̀n wà: {{version}}",
+    "answerCall": "Gba ìpè láti ọ̀dọ̀ @{{username}}",
+    "declineCall": "Kọ̀ ìpè",
+    "dismissVoiceError": "Pa àṣìṣe ohùn tì",
+    "dismissScreenShareError": "Pa àṣìṣe pín ojú ẹ̀rọ tì",
+    "dismissCameraError": "Pa àṣìṣe kámẹ́rà tì",
+    "syncing": "ó ń ṣe ìmúṣọ̀kan…"
+  },
+  "shell": {
+    "dropFiles": "ju fáìlì sílẹ̀ láti fi ránṣẹ́",
+    "voiceChannelFallback": "ohùn",
+    "callChannel": "Ìpè"
+  },
+  "panel": {
+    "thread": "Okùn ìjíròrò",
+    "details": "Àlàyé",
+    "ariaLabel": "Àlàyé ìjíròrò",
+    "closeThread": "Pa pánẹ́ẹ̀lì okùn ìjíròrò dé ({{shortcut}})",
+    "closeDetails": "Pa pánẹ́ẹ̀lì àlàyé dé ({{shortcut}})",
+    "resize": "Yí ìtóbi pánẹ́ẹ̀lì àlàyé padà (fà á; tẹ̀ ẹ́ lẹ́ẹ̀mejì láti dá a padà)"
+  },
+  "members": {
+    "count_other": "Ọmọ ẹgbẹ́ — {{count}}",
+    "onlineCount_other": "Wà lórí ayélujára — {{count}}",
+    "empty": "Kò sí ọmọ ẹgbẹ́ láti fi hàn.",
+    "noneOnline": "Kò sí ẹni tó wà lórí ayélujára.",
+    "you": "Ìwọ",
+    "admin": "alábòójútó"
+  },
+  "media": {
+    "heading": "Mídíà",
+    "empty": "A kò tíì pín mídíà kankan."
+  },
+  "thread": {
+    "loading": "Ó ń gbé àwọn ìfèsì wọlé…",
+    "empty": "Kò sí ìfèsì síbẹ̀. Bẹ̀rẹ̀ okùn ìjíròrò nísàlẹ̀.",
+    "placeholder": "Fèsì nínú okùn ìjíròrò…",
+    "messageDeleted": "A ti pa ìfiránṣẹ́ rẹ́",
+    "encrypted": "[ó ní ìpàrokò]"
+  },
+  "chat": {
+    "noSelection": "Yan ìkànnì kan láti bẹ̀rẹ̀ sí í fi ìfiránṣẹ́ ránṣẹ́"
+  },
+  "dmRequest": {
+    "heading": "ìbéèrè ìfiránṣẹ́",
+    "body": "<name>{{name}}</name> fẹ́ fi ìfiránṣẹ́ ránṣẹ́ sí ọ.",
+    "accept": "Gbà",
+    "accepting": "Ó ń gbà á…",
+    "block": "Dènà",
+    "blocking": "Ó ń dènà…"
+  },
+  "editBar": {
+    "heading": "ò ń ṣàtúnṣe ìfiránṣẹ́",
+    "cancel": "Fagilé àtúnṣe",
+    "hint": "Enter láti fi pamọ́ · Shift+Enter fún ìlà tuntun · Esc láti fagilé"
+  },
+  "deleteChannel": {
+    "heading": "pa ìkànnì rẹ́",
+    "cancel": "Fagilé ìparẹ́",
+    "body": "A máa pa ìkànnì yìí àti gbogbo ìfiránṣẹ́ inú rẹ̀ rẹ́ títí láé. A kò lè dá èyí padà.",
+    "deleting": "Ó ń pa á rẹ́…"
+  },
+  "deleteMessage": {
+    "heading": "pa ìfiránṣẹ́ rẹ́",
+    "moderateHeading": "yọ ìfiránṣẹ́ kúrò (alábòójútó)",
+    "body": "A máa pa ìfiránṣẹ́ yìí rẹ́ fún gbogbo ènìyàn, títí kan àwọn tó ti gbà á.",
+    "moderateBody": "A máa yọ ìfiránṣẹ́ yìí àti àwọn àsomọ́ rẹ̀ kúrò fún gbogbo ènìyàn nínú ìkànnì náà.",
+    "cancel": "Fagilé ìparẹ́",
+    "deleting": "Ó ń pa á rẹ́…",
+    "remove": "Yọ kúrò"
+  },
+  "update": {
+    "preparing": "Ó ń múra láti ṣe ìmúdójúìwọ̀n…",
+    "checking": "Ó ń wá ìmúdójúìwọ̀n…",
+    "downloading": "Ó ń ṣe ìgbàsílẹ̀ ìmúdójúìwọ̀n…",
+    "downloadingProgress": "Ó ń ṣe ìgbàsílẹ̀ ìmúdójúìwọ̀n… {{progress}}%",
+    "installing": "Ó ń fi ìmúdójúìwọ̀n sórí ẹ̀rọ…",
+    "relaunching": "Ó ń tún un ṣí…",
+    "failed": "Ìmúdójúìwọ̀n kò ṣeé ṣe: {{error}}",
+    "tryAgain": "Tún gbìyànjú",
+    "continueWithout": "Tẹ̀síwájú láìṣe ìmúdójúìwọ̀n",
+    "readOnlyDiskImage": "Pollis ń ṣiṣẹ́ láti inú disk image, èyí tí a kò lè kọ sí. Pa Pollis dé, fà á sínú Applications, yọ disk image náà jáde, kí o sì ṣí i láti inú Applications.",
+    "readOnlyTranslocated": "macOS ń ṣe Pollis láti ibi ìgbà díẹ̀ tí a kò lè kọ sí. Pa Pollis dé, gbé e jáde kúrò nínú Applications kí o sì dá a padà síbẹ̀ pẹ̀lú Finder, lẹ́yìn náà tún un ṣí.",
+    "readOnlyTranslocatedHealed": "macOS ń ṣe Pollis láti ibi ìgbà díẹ̀ tí a kò lè kọ sí, tí ìmúdójúìwọ̀n àtẹ̀yìnwá kan fi sílẹ̀. A ti tún ìyẹn ṣe. Pa Pollis dé kí o sì tún un ṣí láti inú Applications.",
+    "readOnlyGeneric": "Pollis kò lè ṣe ìmúdójúìwọ̀n ara rẹ̀ nítorí pé a kò lè kọ sí ibi tó wà. Pa Pollis dé, rí i dájú pé ó wà nínú fódà Applications rẹ (tí o gbé síbẹ̀ pẹ̀lú Finder), kí o sì tún un ṣí."
+  },
+  "clientBlocked": {
+    "title": "Ìmúdójúìwọ̀n pọndandan",
+    "body": "Ẹ̀dà Pollis yìí kò ní àtìlẹ́yìn mọ́. Ṣe ìmúdójúìwọ̀n láti máa lò ó lọ. Àwọn ìfiránṣẹ́ àti ètò rẹ wà lórí ẹ̀rọ yìí síbẹ̀.",
+    "versions": "Èyí tó wà lórí ẹ̀rọ {{version}} · Èyí tí a nílò {{minimum}} tàbí èyí tó tẹ̀lé e",
+    "installed": "Èyí tó wà lórí ẹ̀rọ {{version}}",
+    "updateNow": "Ṣe ìmúdójúìwọ̀n báyìí",
+    "updating": "Ó ń ṣe ìmúdójúìwọ̀n…",
+    "download": "Ṣe ìgbàsílẹ̀ ẹ̀dà tuntun jùlọ",
+    "updateFailed": "Ìmúdójúìwọ̀n náà kò parí. Ṣe ìgbàsílẹ̀ ẹ̀dà tuntun jùlọ dípò rẹ̀.",
+    "packageManager": "A fi {{source}} gbé Pollis sórí ẹ̀rọ. Ṣe ìmúdójúìwọ̀n rẹ̀ níbẹ̀:",
+    "openAppStore": "Ṣí App Store",
+    "openPlay": "Ṣí Google Play",
+    "openTestflight": "Ṣí TestFlight",
+    "openWebsite": "Ṣí pollis.com",
+    "openFailed": "Kò ṣeé ṣe láti ṣí líǹkì náà. Lọ sí {{url}}",
+    "retry": "Tún ṣàyẹ̀wò",
+    "checking": "Ó ń ṣàyẹ̀wò…"
+  },
+  "home": {
+    "groups": "Ẹgbẹ́",
+    "groupsDescription": "Àwùjọ, Àjọ, Ẹgbẹ́ iṣẹ́, àti ìjíròrò ẹgbẹ́ tí ìfẹ́ ọkàn wọn pọ̀ jù",
+    "dms": "Ìfiránṣẹ́ àdáni",
+    "dmsDescription": "Ìjíròrò àdáni pẹ̀lú ẹnìkọ̀ọ̀kan, pẹ̀lú ìpàrokò láti òpin dé òpin",
+    "invites": "Ìkésíni",
+    "noPendingInvites": "Kò sí ìkésíni tó ń dúró",
+    "pending_other": "{{count}} ló ń dúró",
+    "join": "Darapọ̀ mọ́ Ẹgbẹ́",
+    "joinDescription": "Lo líǹkì ìkésíni tàbí kóòdù ìdarapọ̀",
+    "joinRequests": "Ìbéèrè Ìdarapọ̀",
+    "logout": "Jáde",
+    "exit": "Kúrò"
+  },
+  "titleBar": {
+    "minimize": "Sọ ọ́ di kékeré",
+    "maximize": "Sọ ọ́ di ńlá"
+  },
+  "terminal": {
+    "shellFailed": "kò ṣeé ṣe láti bẹ̀rẹ̀ shell: {{error}}"
+  },
+  "pins": {
+    "heading": "Ìlẹ̀mọ́",
+    "empty": "Kò sí ìfiránṣẹ́ tí a lẹ̀ mọ́ òkè síbẹ̀.",
+    "unavailable": "Ìlẹ̀mọ́ kò tíì sí lórí ẹ̀rọ yìí — wọ́n máa fara hàn lẹ́yìn tí ìjíròrò bá ṣe ìmúṣọ̀kan.",
+    "unpin": "Yọ ìlẹ̀mọ́ kúrò"
+  }
+}

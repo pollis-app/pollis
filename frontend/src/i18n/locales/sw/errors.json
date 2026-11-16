@@ -1,0 +1,17 @@
+{
+  "boundary": {
+    "instruction": "Tafadhali anzisha programu upya.",
+    "message": "Hitilafu isiyotarajiwa imetokea.",
+    "restart": "Anzisha upya",
+    "tag": "HITILAFU KUBWA",
+    "title": "Hitilafu fulani imetokea"
+  },
+  "core": {
+    "pinIncorrect_one": "PIN si sahihi. Limebaki jaribio {{count}}.",
+    "pinIncorrect_other": "PIN si sahihi. Yamebaki majaribio {{count}}.",
+    "pinLockedOut": "PIN zisizo sahihi zimekuwa nyingi mno. Rejesha akaunti yako kwa Ufunguo wa Siri wako.",
+    "pinNotSet": "Kifaa hiki bado hakina PIN. Ingia tena ili uweke PIN.",
+    "noActiveUser": "Hujaingia kwenye kifaa hiki. Ingia tena.",
+    "unlockFirst": "Fungua Pollis kwanza."
+  }
+}

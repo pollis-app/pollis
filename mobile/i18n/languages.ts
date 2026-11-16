@@ -31,6 +31,12 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "te", label: "తెలుగు", dir: "ltr" },
   { code: "ta", label: "தமிழ்", dir: "ltr" },
   { code: "pa-Guru", label: "ਪੰਜਾਬੀ", dir: "ltr" },
+  { code: "sw", label: "Kiswahili", dir: "ltr" },
+  { code: "pt", label: "Português", dir: "ltr" },
+  { code: "ha", label: "Hausa", dir: "ltr" },
+  { code: "am", label: "አማርኛ", dir: "ltr" },
+  { code: "yo", label: "Èdè Yorùbá", dir: "ltr" },
+  { code: "zu", label: "isiZulu", dir: "ltr" },
 ];
 
 export function supportedLanguageCodes(): string[] {

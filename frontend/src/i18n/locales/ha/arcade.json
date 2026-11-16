@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "WASANNI"
+  },
+  "hud": {
+    "score": "MAKI  {{score}}",
+    "time": "LOKACI  {{time}}",
+    "gameOver": "WASA YA ƘARE",
+    "final_one": "jimilla maki {{count}} · {{time}}",
+    "final_other": "jimilla maki {{count}} · {{time}}",
+    "restartHint": "danna R don sake farawa · Esc don fita",
+    "controls": "WASD motsi · linzami nufi · danna/Space harbi · Esc fita"
+  }
+}

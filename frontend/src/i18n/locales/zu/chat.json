@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "Umlayezo ovela ku-{{name}}",
+    "unknownAuthor": "akaziwa",
+    "deleted": "[kususiwe]",
+    "encrypted": "[kubethelwe]",
+    "redacted": "[kufihliwe]",
+    "edited": "(kuhleliwe)",
+    "editUnsent": "(ukuhlela akuthunyelwanga)",
+    "newMember": "omusha",
+    "newMemberTitle": "Ujoyine ezinsukwini ezi-7 ezedlule",
+    "undecryptable": {
+      "tag": "akufundeki",
+      "title": "Ayikwazanga ukususa ukubethela",
+      "body_one": "Umlayezo ongu-{{count}} awukwazanga ukususwa ukubethela kule divayisi.",
+      "body_other": "Imilayezo engu-{{count}} ayikwazanga ukususwa ukubethela kule divayisi.",
+      "detail": "Kukhona okuthunyelwe lapha, kodwa le divayisi ayikwazanga ukukufunda. Amanye amadivayisi akho kungenzeka asenakho.",
+      "diagnostics": "Bona ukuhlolwa kwenkinga"
+    }
+  },
+  "status": {
+    "pending": "kulindile",
+    "sending": "kuyathunyelwa",
+    "sent": "kuthunyelwe",
+    "failed": "kwehlulekile",
+    "cancelled": "kukhanseliwe"
+  },
+  "outbox": {
+    "retry": "Zama futhi",
+    "discard": "Lahla",
+    "retryLabel": "Zama futhi ukuthumela lo mlayezo",
+    "discardLabel": "Lahla lo mlayezo ongathunyelwanga",
+    "notSent": "Akuthunyelwanga",
+    "willResend": "Uzothunyelwa ngokuzenzakalela uma i-Pollis iphinde ixhumeke.",
+    "notDelivered": "Lo mlayezo awukwazanga ukulethwa."
+  },
+  "actions": {
+    "reply": "Phendula",
+    "replyInThread": "Phendula ochungechungeni",
+    "save": "Londoloza umlayezo",
+    "removeBookmark": "Susa ibhukhimakhi",
+    "copyLink": "Kopisha isixhumanisi somlayezo",
+    "copyLinkCopied": "Isixhumanisi sikopishiwe",
+    "copyLinkFailed": "Ayikwazanga ukukopisha isixhumanisi",
+    "edit": "Hlela umlayezo",
+    "delete": "Susa umlayezo",
+    "deleteAsAdmin": "Susa umlayezo (umphathi)",
+    "more": "Ezinye izenzo",
+    "pin": "Phina umlayezo",
+    "unpin": "Susa ukuphina umlayezo",
+    "report": "Bika"
+  },
+  "thread": {
+    "replyCount_one": "impendulo engu-{{count}}",
+    "replyCount_other": "izimpendulo ezingu-{{count}}"
+  },
+  "receipts": {
+    "readByEveryone": "Kufundwe yibo bonke",
+    "readByCount_one": "Kufundwe ngu-{{count}} kwabangu-{{total}}",
+    "readByCount_other": "Kufundwe ngabangu-{{count}} kwabangu-{{total}}",
+    "deliveredCount_one": "Kulethwe ku-{{count}} kwabangu-{{total}}",
+    "deliveredCount_other": "Kulethwe kwabangu-{{count}} kwabangu-{{total}}"
+  },
+  "list": {
+    "empty": "Ayikabikho imilayezo. Qala ingxoxo.",
+    "unknownAuthor": "Akaziwa",
+    "blockedAuthor": "umsebenzisi ovinjiwe",
+    "blockedBody": "[kuvinjiwe]"
+  },
+  "replyBar": {
+    "replyingTo": "uphendula u-<name>{{name}}</name>",
+    "scrollToMessage": "Skrolela kumlayezo ophendulwayo",
+    "dismiss": "Chitha impendulo",
+    "encrypted": "[Umlayezo obethelwe]"
+  },
+  "queue": {
+    "heading": "Ulayini",
+    "pendingPlaceholder": "[Umlayezo olindile]",
+    "cancel": "Khansela umlayezo",
+    "retry": "zama futhi",
+    "failedCount_one": "kwehlulekile ×{{count}}",
+    "failedCount_other": "kwehlulekile ×{{count}}"
+  },
+  "reactions": {
+    "add": "Engeza ukusabela",
+    "all": "Konke",
+    "allTabLabel_one": "Konke, ukusabela okungu-{{count}}",
+    "allTabLabel_other": "Konke, ukusabela okungu-{{count}}",
+    "contextHint": "Chofoza kwesokudla ukuze ubone ukuthi ubani osabele",
+    "hoverMore_one": "{{names}} nomunye ongu-{{count}} basabele nge-{{emoji}}",
+    "hoverMore_other": "{{names}} nabanye abangu-{{count}} basabele nge-{{emoji}}",
+    "hoverNames": "{{names}} basabele nge-{{emoji}}",
+    "pillLabel_one": "{{emoji}} ukusabela okungu-{{count}}",
+    "pillLabel_other": "{{emoji}} ukusabela okungu-{{count}}",
+    "rowLabel": "{{name}}, usabele nge-{{emojis}}",
+    "selfName": "{{name}} (wena)",
+    "sheetTitle": "Ukusabela",
+    "tabLabel_one": "{{emoji}}, ukusabela okungu-{{count}}",
+    "tabLabel_other": "{{emoji}}, ukusabela okungu-{{count}}",
+    "unknownUser": "Umsebenzisi ongaziwa",
+    "viewWho": "Buka ukusabela",
+    "you": "Wena"
+  },
+  "preview": {
+    "noMessages": "Ayikabikho imilayezo",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[okunamathiselwe okungu-{{count}}]",
+    "attachments_other": "[okunamathiselwe okungu-{{count}}]",
+    "undecryptable": "Umlayezo othile awukwazanga ukususwa ukubethela kule divayisi"
+  },
+  "attachment": {
+    "viewLabel": "Buka {{filename}}",
+    "openLabel": "Vula {{filename}}",
+    "downloadLabel": "Landa {{filename}}",
+    "loading": "iyalayisha…",
+    "error": "iphutha",
+    "failedToLoad": "Yehlulekile ukulayisha",
+    "failedToDownload": "Yehlulekile ukulanda",
+    "lightboxFetch": "landa",
+    "lightboxDone": "[ kuqediwe ]",
+    "lightboxDownload": "[landa]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "Khombisa imidiya ezwelayo: {{filename}}",
+    "sensitiveHide": "Fihla {{filename}}"
+  },
+  "unfurl": {
+    "loadImage": "Layisha isithombe",
+    "loadVideo": "Layisha ividiyo",
+    "loadTitle": "Layisha imidiya esuka ku-{{url}} — lokhu kuxhumana naleyo sayithi ngqo",
+    "loadDescription": "Layisha imidiya esuka ku-{{url}}. Lokhu kuxhumana naleyo sayithi ngqo futhi kuyembulela ikheli lakho le-IP.",
+    "openLabel": "Vula {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "Umlayezo omusha",
+    "newMessageBody": "{{name}}: Umlayezo omusha",
+    "mentionTitle": "Ukubalulwa okusha",
+    "allMentionBody": "{{name}} ubalule @all",
+    "userMentionBody": "{{name}} ukubalulile"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "lo muntu",
+    "titleMessage": "Bika umlayezo",
+    "titleUser": "Bika u-{{name}}",
+    "intro": "I-Pollis ithola i-akhawunti nesizathu. Imilayezo ihlala ibethelwe, ngakho asilokothi sibone okushiwo.",
+    "reasonLabel": "Isizathu",
+    "reason": {
+      "spam": "Ugaxekile",
+      "harassment": "Ukuhlukumeza noma izinsongo",
+      "illegal": "Okuqukethwe okungekho emthethweni",
+      "other": "Okunye"
+    },
+    "submit": "Bika",
+    "submitAndBlock": "Bika futhi uvimbe",
+    "failed": "Ayikwazanga ukuthumela umbiko. Zama futhi.",
+    "doneTitle": "Umbiko uthunyelwe",
+    "done": "Siyabonga. Sibuyekeza wonke umbiko.",
+    "doneBlocked": "Siyabonga. Sibuyekeza wonke umbiko. Uphinde wavimba u-{{name}}.",
+    "close": "Kwenziwe"
+  },
+  "keyChange": {
+    "notice": "Inombolo yokuphepha yakho no-{{name}} ishintshile.",
+    "verify": "Yiqinisekise",
+    "defaultName": "lo oxhumana naye"
+  },
+  "typing": {
+    "one": "{{name}} uyabhala…",
+    "two": "{{first}} no-{{second}} bayabhala…",
+    "several_one": "Umuntu ongu-{{count}} uyabhala…",
+    "several_other": "Abantu abangu-{{count}} bayabhala…"
+  }
+}

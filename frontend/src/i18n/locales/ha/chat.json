@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "Saƙo daga {{name}}",
+    "unknownAuthor": "ba a sani ba",
+    "deleted": "[an goge]",
+    "encrypted": "[an ɓoye]",
+    "redacted": "[an ɓoye wani sashi]",
+    "edited": "(an gyara)",
+    "editUnsent": "(ba a aika gyaran ba)",
+    "newMember": "sabo",
+    "newMemberTitle": "Sabon shiga cikin kwanaki 7 da suka wuce",
+    "undecryptable": {
+      "tag": "ba za a iya buɗewa ba",
+      "title": "Ba a iya buɗe ɓoyayyen saƙo ba",
+      "body_one": "Ba a iya buɗe ɓoyewar wannan saƙo a wannan na'ura ba.",
+      "body_other": "Ba a iya buɗe ɓoyewar saƙonni {{count}} a wannan na'ura ba.",
+      "detail": "An aiko wani abu a nan, amma wannan na'ura ba ta iya karanta shi ba. Sauran na'urorinku na iya samunsa har yanzu.",
+      "diagnostics": "Duba bayanan bincike"
+    }
+  },
+  "status": {
+    "pending": "yana jira",
+    "sending": "ana aikawa",
+    "sent": "an aika",
+    "failed": "ya kasa",
+    "cancelled": "an soke"
+  },
+  "outbox": {
+    "retry": "Sake gwadawa",
+    "discard": "Watsar",
+    "retryLabel": "Sake gwada aika wannan saƙo",
+    "discardLabel": "Watsar da wannan saƙon da ba a aika ba",
+    "notSent": "Ba a aika ba",
+    "willResend": "Zai aika da kansa idan Pollis ya sake haɗuwa.",
+    "notDelivered": "Ba a iya isar da wannan saƙo ba."
+  },
+  "actions": {
+    "reply": "Amsa",
+    "replyInThread": "Amsa a cikin zare",
+    "save": "Adana saƙo",
+    "removeBookmark": "Cire alamar adanawa",
+    "copyLink": "Kwafa mahaɗin saƙo",
+    "copyLinkCopied": "An kwafa mahaɗi",
+    "copyLinkFailed": "Ba a iya kwafa mahaɗi ba",
+    "edit": "Gyara saƙo",
+    "delete": "Goge saƙo",
+    "deleteAsAdmin": "Goge saƙo (mai gudanarwa)",
+    "more": "Ƙarin ayyuka",
+    "pin": "Maƙala saƙo",
+    "unpin": "Cire maƙalawar saƙo",
+    "report": "Kai rahoto"
+  },
+  "thread": {
+    "replyCount_one": "amsa {{count}}",
+    "replyCount_other": "amsoshi {{count}}"
+  },
+  "receipts": {
+    "readByEveryone": "Kowa ya karanta",
+    "readByCount_one": "{{count}} cikin {{total}} sun karanta",
+    "readByCount_other": "{{count}} cikin {{total}} sun karanta",
+    "deliveredCount_one": "Ya isa ga {{count}} cikin {{total}}",
+    "deliveredCount_other": "Ya isa ga {{count}} cikin {{total}}"
+  },
+  "list": {
+    "empty": "Babu saƙonni tukuna. Fara tattaunawar.",
+    "unknownAuthor": "Ba a sani ba",
+    "blockedAuthor": "mai amfani da aka toshe",
+    "blockedBody": "[an toshe]"
+  },
+  "replyBar": {
+    "replyingTo": "ana amsa wa <name>{{name}}</name>",
+    "scrollToMessage": "Gungura zuwa saƙon da aka amsa",
+    "dismiss": "Soke amsa",
+    "encrypted": "[Ɓoyayyen saƙo]"
+  },
+  "queue": {
+    "heading": "Layin jira",
+    "pendingPlaceholder": "[Saƙo mai jira]",
+    "cancel": "Soke saƙo",
+    "retry": "sake gwadawa",
+    "failedCount_one": "ya kasa ×{{count}}",
+    "failedCount_other": "ya kasa ×{{count}}"
+  },
+  "reactions": {
+    "add": "Ƙara martani",
+    "all": "Duka",
+    "allTabLabel_one": "Duka, martani {{count}}",
+    "allTabLabel_other": "Duka, martani {{count}}",
+    "contextHint": "Danna dama don ganin waɗanda suka mayar da martani",
+    "hoverMore_one": "{{names}} da ƙarin {{count}} sun mayar da martani da {{emoji}}",
+    "hoverMore_other": "{{names}} da ƙarin {{count}} sun mayar da martani da {{emoji}}",
+    "hoverNames": "Martani da {{emoji}}: {{names}}",
+    "pillLabel_one": "{{emoji}} martani {{count}}",
+    "pillLabel_other": "{{emoji}} martani {{count}}",
+    "rowLabel": "{{name}}, martani da {{emojis}}",
+    "selfName": "{{name}} (ku)",
+    "sheetTitle": "Martani",
+    "tabLabel_one": "{{emoji}}, martani {{count}}",
+    "tabLabel_other": "{{emoji}}, martani {{count}}",
+    "unknownUser": "Mai amfani da ba a sani ba",
+    "viewWho": "Duba martani",
+    "you": "Ku"
+  },
+  "preview": {
+    "noMessages": "Babu saƙonni tukuna",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[abin haɗawa]",
+    "attachments_other": "[abubuwan haɗawa {{count}}]",
+    "undecryptable": "Ba a iya buɗe ɓoyewar wani saƙo a wannan na'ura ba"
+  },
+  "attachment": {
+    "viewLabel": "Duba {{filename}}",
+    "openLabel": "Buɗe {{filename}}",
+    "downloadLabel": "Sauke {{filename}}",
+    "loading": "ana lodawa…",
+    "error": "kuskure",
+    "failedToLoad": "Ba a iya lodawa ba",
+    "failedToDownload": "Ba a iya saukewa ba",
+    "lightboxFetch": "ɗauko",
+    "lightboxDone": "[ an gama ]",
+    "lightboxDownload": "[sauke]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "Nuna kafar sirri: {{filename}}",
+    "sensitiveHide": "Ɓoye {{filename}}"
+  },
+  "unfurl": {
+    "loadImage": "Loda hoto",
+    "loadVideo": "Loda bidiyo",
+    "loadTitle": "Loda kafa daga {{url}} — wannan yana tuntuɓar shafin kai tsaye",
+    "loadDescription": "Loda kafa daga {{url}}. Wannan yana tuntuɓar shafin kai tsaye kuma yana bayyana masa adireshin IP ɗinku.",
+    "openLabel": "Buɗe {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "Sabon saƙo",
+    "newMessageBody": "{{name}}: Sabon saƙo",
+    "mentionTitle": "Sabon ambato",
+    "allMentionBody": "Ambato daga {{name}}: @all",
+    "userMentionBody": "Ambato daga {{name}}"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "wannan mutum",
+    "titleMessage": "Kai rahoton saƙo",
+    "titleUser": "Kai rahoton {{name}}",
+    "intro": "Pollis yana samun asusun da dalilin. Saƙonni suna nan a ɓoye, don haka ba za mu taɓa ganin abin da aka faɗa ba.",
+    "reasonLabel": "Dalili",
+    "reason": {
+      "spam": "Saƙon banza",
+      "harassment": "Cin zarafi ko barazana",
+      "illegal": "Abun da ya saɓa wa doka",
+      "other": "Wani abu dabam"
+    },
+    "submit": "Kai rahoto",
+    "submitAndBlock": "Kai rahoto kuma toshe",
+    "failed": "Ba a iya aika rahoton ba. Sake gwadawa.",
+    "doneTitle": "An aika rahoto",
+    "done": "Mun gode. Muna duba kowane rahoto.",
+    "doneBlocked": "Mun gode. Muna duba kowane rahoto. An kuma toshe {{name}}.",
+    "close": "An gama"
+  },
+  "keyChange": {
+    "notice": "Lambar tsaro tsakaninku da {{name}} ta canja.",
+    "verify": "Tantance ta",
+    "defaultName": "wannan abokin hulɗa"
+  },
+  "typing": {
+    "one": "{{name}} na rubutu…",
+    "two": "{{first}} da {{second}} suna rubutu…",
+    "several_one": "Mutum {{count}} na rubutu…",
+    "several_other": "Mutane {{count}} suna rubutu…"
+  }
+}

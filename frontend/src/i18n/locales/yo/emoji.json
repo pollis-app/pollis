@@ -1,0 +1,60 @@
+{
+  "picker": {
+    "label": "Olùyàn èmójì",
+    "triggerLabel": "Èmójì",
+    "searchLabel": "Wá",
+    "searchPlaceholder": "Wá èmójì",
+    "resultsFor": "Àbájáde fún \"{{query}}\"",
+    "recent": "Èyí tí o máa ń lò",
+    "custom": "Àdáni",
+    "empty": "Kò sí èmójì tó bá ìyẹn mu.",
+    "previewHint": "Yan èmójì kan",
+    "railLabel": "Ẹ̀ka èmójì"
+  },
+  "categories": {
+    "people": "Ènìyàn",
+    "nature": "Ìṣẹ̀dá",
+    "food": "Oúnjẹ",
+    "activity": "Ìgbòkègbodò",
+    "travel": "Ìrìn àjò",
+    "objects": "Nǹkan",
+    "symbols": "Àmì",
+    "flags": "Àsíá"
+  },
+  "skinTone": {
+    "groupLabel": "Àwọ̀ ara",
+    "default": "Àwọ̀ ara àkọ́kọ́",
+    "numbered": "Àwọ̀ ara {{index}}"
+  },
+  "manage": {
+    "title": "Èmójì Àkànṣe",
+    "signInRequired": "Jọ̀wọ́ wọlé",
+    "dropPrompt": "Fa àwòrán wá síbí, tàbí tẹ̀ láti wá a",
+    "dropNow": "Jù ú sílẹ̀ láti lo àwòrán yìí",
+    "dropHint": "{{formats}} · GIF tó ń rìn máa ń rìn síbẹ̀",
+    "replaceHint": "Ju àwòrán míì sílẹ̀, tàbí tẹ̀, láti fi rọ́pò rẹ̀",
+    "sourceSize": "orísun {{size}} · a máa sọ ọ́ di èyí tí kò tó 48 KB nígbà ìgbéwọlé",
+    "reencodeNote": "A máa sọ ọ́ di èyí tí kò tó 48 KB nígbà ìgbéwọlé",
+    "fileTooLarge": "Àwòrán yẹn ju {{size}} lọ — yan fáìlì orísun tó kéré",
+    "unsupportedFile": "{{name}} kì í ṣe PNG, JPEG, GIF tàbí WebP",
+    "shortcodeLabel": "Kóòdù kúkúrú",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "A máa ń tẹ̀ ẹ́ bí :shortcode: — a–z, 0–9 àti _",
+    "shortcodeRequired": "Fún èmójì yìí ní orúkọ láti fi kún un",
+    "shortcodeInvalid": "Lo lẹ́tà 2–32: a–z, 0–9 àti _",
+    "shortcodeTaken": ":{{shortcode}}: ti wà ní lílò nínú ẹgbẹ́ yìí",
+    "samplePlaceholder": "Bí yóò ṣe rí nínú ìfiránṣẹ́",
+    "add": "Fi èmójì kún un",
+    "shrinking": "Ó ń dín in kù…",
+    "filePickerTitle": "Yan àwòrán èmójì kan",
+    "imageFilterName": "Àwòrán",
+    "addFailed": "Kò ṣeé ṣe láti fi èmójì yẹn kún un",
+    "removeFailed": "Kò ṣeé ṣe láti yọ èmójì yẹn kúrò",
+    "storageNote": "A máa ń sọ àwòrán di èyí tí kò tó 48 KB kí a tó gbé e wọlé, nítorí náà fáìlì orísun ńlá kò burú. Àwòrán tó jọra pín ẹ̀dà kan ṣoṣo tí a fi pamọ́ ní gbogbo ẹgbẹ́ tó ń lò ó. Kò sí ààlà lórí iye tí ẹgbẹ́ yìí lè ní.",
+    "stored_other": "èmójì {{count}} · {{size}} ni a fi pamọ́",
+    "empty": "Kò sí èmójì àdáni síbẹ̀. Ẹnikẹ́ni nínú ẹgbẹ́ lè fi ọ̀kan kún un.",
+    "sizeAnimated": "ó ń rìn · {{size}}",
+    "remove": "Yọ :{{shortcode}}: kúrò",
+    "removeAdminsOnly": "Àwọn alábòójútó ẹgbẹ́ nìkan ló lè yọ èmójì kúrò."
+  }
+}

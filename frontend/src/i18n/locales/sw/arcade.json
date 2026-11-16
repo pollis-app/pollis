@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "MICHEZO"
+  },
+  "hud": {
+    "score": "ALAMA  {{score}}",
+    "time": "MUDA   {{time}}",
+    "gameOver": "MCHEZO UMEKWISHA",
+    "final_one": "mwisho alama {{count}} · {{time}}",
+    "final_other": "mwisho alama {{count}} · {{time}}",
+    "restartHint": "bonyeza R kuanza upya · Esc kutoka",
+    "controls": "WASD kusogea · kipanya kulenga · bofya/Nafasi kufyatua · Esc kutoka"
+  }
+}

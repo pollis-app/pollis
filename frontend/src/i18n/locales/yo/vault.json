@@ -1,0 +1,44 @@
+{
+  "title": "Àpótí ìpamọ́",
+  "placeholder": "Àkọsílẹ̀, líǹkì tàbí fáìlì tó ní ààbò",
+  "empty": "Àpótí ìpamọ́ rẹ ṣófo. Àkọsílẹ̀, líǹkì àti fáìlì tí o bá fi síbí ní ìpàrokò láti òpin dé òpin, wọ́n sì ń tẹ̀ lé ọ dé gbogbo ẹ̀rọ rẹ.",
+  "searchPlaceholder": "Wá nínú àpótí ìpamọ́ rẹ…",
+  "searchEmpty": "Kò sí nǹkan kan nínú àpótí ìpamọ́ rẹ tó bá ìyẹn mu.",
+  "clearSearch": "Pa ìwákiri rẹ́",
+  "viewToggle": "Ìwò àpótí ìpamọ́",
+  "viewChat": "Ìjíròrò",
+  "viewMedia": "Mídíà",
+  "saving": "Ó ń fi pamọ́…",
+  "saveFailed": "Kò ṣeé ṣe láti fi pamọ́ sínú àpótí ìpamọ́ rẹ. Àkọ̀pamọ́ rẹ ti padà sínú ibi ìkọ̀wé.",
+  "saveFailedOffline": "Kò ṣeé ṣe láti dé Pollis láti fi èyí pamọ́. Àkọ̀pamọ́ rẹ ti padà sínú ibi ìkọ̀wé — ṣàyẹ̀wò ìsopọ̀ rẹ kí o sì tún gbìyànjú.",
+  "saveFailedTooLarge": "Fáìlì kan tóbi jù fún àpótí ìpamọ́ rẹ. Àkọ̀pamọ́ rẹ ti padà sínú ibi ìkọ̀wé — yọ ọ́ kúrò kí o sì tún fi ránṣẹ́.",
+  "saveRetry": "Tún gbìyànjú",
+  "entry": {
+    "pinned": "Ó ti lẹ̀ mọ́ òkè",
+    "edited": "(a ti ṣàtúnṣe)",
+    "pin": "Lẹ̀ mọ́ òkè",
+    "unpin": "Yọ ìlẹ̀mọ́ kúrò",
+    "edit": "Ṣàtúnṣe àkọsílẹ̀",
+    "delete": "Pa àkọsílẹ̀ rẹ́"
+  },
+  "edit": {
+    "heading": "Ṣàtúnṣe àkọsílẹ̀",
+    "cancel": "Fagilé àtúnṣe",
+    "hint": "Enter láti fi pamọ́ · Shift+Enter fún ìlà tuntun · Esc láti fagilé"
+  },
+  "delete": {
+    "heading": "Pa àkọsílẹ̀ rẹ́",
+    "body": "Ṣé o fẹ́ pa àkọsílẹ̀ yìí rẹ́ kúrò nínú àpótí ìpamọ́ rẹ lórí gbogbo ẹ̀rọ? A kò lè dá èyí padà.",
+    "cancel": "Fagilé ìparẹ́",
+    "confirm": "Pa á rẹ́",
+    "deleting": "Ó ń pa á rẹ́…"
+  },
+  "media": {
+    "empty": "Kò sí mídíà nínú àpótí ìpamọ́ rẹ síbẹ̀ — fi àwòrán tàbí fáìlì sínú ìwò ìjíròrò.",
+    "filesHeading": "Fáìlì",
+    "close": "Pa ìwòran dé",
+    "previous": "Ti tẹ́lẹ̀",
+    "next": "Èyí tó kàn",
+    "position": "{{index}} / {{total}}"
+  }
+}

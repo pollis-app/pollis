@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "Kichagua emoji",
+    "triggerLabel": "Emoji",
+    "searchLabel": "Tafuta",
+    "searchPlaceholder": "Tafuta emoji",
+    "resultsFor": "Matokeo ya \"{{query}}\"",
+    "recent": "Zinazotumiwa mara kwa mara",
+    "custom": "Maalum",
+    "empty": "Hakuna emoji inayolingana na hiyo.",
+    "previewHint": "Chagua emoji",
+    "railLabel": "Kategoria za emoji"
+  },
+  "categories": {
+    "people": "Watu",
+    "nature": "Mazingira",
+    "food": "Chakula",
+    "activity": "Shughuli",
+    "travel": "Safari",
+    "objects": "Vitu",
+    "symbols": "Alama",
+    "flags": "Bendera"
+  },
+  "skinTone": {
+    "groupLabel": "Rangi ya ngozi",
+    "default": "Rangi ya ngozi ya chaguomsingi",
+    "numbered": "Rangi ya ngozi {{index}}"
+  },
+  "manage": {
+    "title": "Emoji maalum",
+    "signInRequired": "Tafadhali ingia",
+    "dropPrompt": "Buruta picha hapa, au bofya ili kuvinjari",
+    "dropNow": "Achilia ili kutumia picha hii",
+    "dropHint": "{{formats}} · GIF zenye uhuishaji hubaki na uhuishaji wake",
+    "replaceHint": "Achilia picha nyingine, au bofya, ili kuibadilisha",
+    "sourceSize": "chanzo {{size}} · inasimbwa upya hadi chini ya 48 KB wakati wa kupakia",
+    "reencodeNote": "Inasimbwa upya hadi chini ya 48 KB wakati wa kupakia",
+    "fileTooLarge": "Picha hiyo inazidi {{size}} — chagua faili ndogo zaidi",
+    "unsupportedFile": "{{name}} si PNG, JPEG, GIF wala WebP",
+    "shortcodeLabel": "Msimbo mfupi",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Huandikwa kama :msimbomfupi: — a–z, 0–9 na _",
+    "shortcodeRequired": "Ipe emoji hii jina ili uiongeze",
+    "shortcodeInvalid": "Tumia herufi 2–32: a–z, 0–9 na _",
+    "shortcodeTaken": ":{{shortcode}}: tayari inatumika katika kikundi hiki",
+    "samplePlaceholder": "Itakavyoonekana kwenye ujumbe",
+    "add": "Ongeza emoji",
+    "shrinking": "Inapunguza…",
+    "filePickerTitle": "Chagua picha ya emoji",
+    "imageFilterName": "Picha",
+    "addFailed": "Imeshindwa kuongeza emoji hiyo",
+    "removeFailed": "Imeshindwa kuondoa emoji hiyo",
+    "storageNote": "Picha husimbwa upya hadi chini ya 48 KB kabla ya kupakiwa, kwa hivyo faili kubwa ya chanzo si tatizo. Picha zinazofanana hushiriki nakala moja iliyohifadhiwa katika kila kikundi kinachozitumia. Hakuna kikomo cha idadi ambayo kikundi hiki kinaweza kuwa nayo.",
+    "stored_one": "Emoji {{count}} · {{size}} zimehifadhiwa",
+    "stored_other": "Emoji {{count}} · {{size}} zimehifadhiwa",
+    "empty": "Bado hakuna emoji maalum. Mtu yeyote kwenye kikundi anaweza kuongeza moja.",
+    "sizeAnimated": "yenye uhuishaji · {{size}}",
+    "remove": "Ondoa :{{shortcode}}:",
+    "removeAdminsOnly": "Wasimamizi wa kikundi pekee wanaweza kuondoa emoji."
+  }
+}

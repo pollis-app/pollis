@@ -1,0 +1,214 @@
+{
+  "sidebar": {
+    "groups": "rukunoni",
+    "dms": "DM",
+    "account": "asusu",
+    "saved": "Waɗanda aka adana",
+    "preferences": "Zaɓuɓɓuka",
+    "language": "Harshe",
+    "userSettings": "Saitunan Mai amfani",
+    "voiceAndVideo": "Murya da Bidiyo",
+    "security": "Tsaro",
+    "keyBindings": "Gajerun hanyoyin madannai",
+    "softwareUpdate": "Sabunta Manhaja",
+    "expandGroup": "Faɗaɗa {{name}}",
+    "collapseGroup": "Naɗe {{name}}",
+    "keyChanged": "Maɓallin shaida ya canja — sake tantancewa",
+    "verified": "Abokin hulɗa da aka tantance",
+    "dmAvatarAlt": "Hoton {{name}}",
+    "close": "Rufe labarun gefe ({{shortcut}})",
+    "resize": "Canja girman labarun gefe (ja; danna sau biyu don maidowa)",
+    "searchMessages": "Bincika Saƙonni",
+    "vault": "Ma'ajiya",
+    "securityEvents": "Abubuwan Tsaro",
+    "copyHistory": "Kwafi Tarihi"
+  },
+  "profile": {
+    "you": "Ku",
+    "call": "Kira",
+    "voice": "Murya",
+    "settings": "Saituna",
+    "voiceConnected": "Murya ta Haɗu",
+    "stopScreenShare": "Dakatar da raba allo",
+    "shareScreen": "Raba allo",
+    "disconnect": "Katse haɗi"
+  },
+  "breadcrumb": {
+    "home": "Gida",
+    "groups": "Rukunoni",
+    "createGroup": "Ƙirƙiri Rukuni",
+    "findGroup": "Nemi Rukuni",
+    "newChannel": "Sabuwar Tasha",
+    "voice": "murya",
+    "joinRequests": "Buƙatun Shiga",
+    "inviteMember": "Gayyato Mamba",
+    "leaveGroup": "Bar Rukuni",
+    "members": "Mambobi",
+    "removeMember": "Cire Mamba",
+    "directMessages": "Saƙonnin kai tsaye",
+    "newMessage": "Sabon Saƙo",
+    "requests": "Buƙatu",
+    "blockedUsers": "Masu amfani da aka toshe",
+    "conversationSettings": "Saitunan Tattaunawa",
+    "account": "Asusu",
+    "preferences": "Zaɓuɓɓuka",
+    "language": "Harshe",
+    "userSettings": "Saitunan Mai amfani",
+    "profile": "Bayanan mutum",
+    "security": "Tsaro",
+    "voiceSettings": "Murya",
+    "invites": "Gayyatoci",
+    "joinAGroup": "Shiga Rukuni",
+    "search": "Bincike",
+    "searchButton": "Bincike ({{shortcut}})",
+    "settings": "Saituna",
+    "securityEvents": "Abubuwan Tsaro",
+    "copyHistory": "Kwafi Tarihin Saƙonni",
+    "historyRequest": "Buƙatar Tarihi"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Saƙonnin rukuni da ba a karanta ba: {{count}}",
+    "groupsUnread_other": "Saƙonnin rukuni da ba a karanta ba: {{count}}",
+    "dmsUnread_one": "Saƙonnin kai tsaye da ba a karanta ba: {{count}}",
+    "dmsUnread_other": "Saƙonnin kai tsaye da ba a karanta ba: {{count}}",
+    "joinRequests_one": "Buƙatun shiga da ke jira: {{count}}",
+    "joinRequests_other": "Buƙatun shiga da ke jira: {{count}}",
+    "invites_one": "Gayyatocin da ke jira: {{count}}",
+    "invites_other": "Gayyatocin da ke jira: {{count}}",
+    "someone": "Wani",
+    "updateAvailable": "Akwai sabuntawa",
+    "updateAvailableTitle": "Akwai sabuntawa: {{version}}",
+    "answerCall": "Amsa kira daga @{{username}}",
+    "declineCall": "Ƙi kira",
+    "dismissVoiceError": "Watsar da kuskuren murya",
+    "dismissScreenShareError": "Watsar da kuskuren raba allo",
+    "dismissCameraError": "Watsar da kuskuren kyamara",
+    "syncing": "ana daidaitawa…"
+  },
+  "shell": {
+    "dropFiles": "saki fayiloli don aikawa",
+    "voiceChannelFallback": "murya",
+    "callChannel": "Kira"
+  },
+  "panel": {
+    "thread": "Zare",
+    "details": "Cikakkun bayanai",
+    "ariaLabel": "Cikakkun bayanan tattaunawa",
+    "closeThread": "Rufe allon zare ({{shortcut}})",
+    "closeDetails": "Rufe allon cikakkun bayanai ({{shortcut}})",
+    "resize": "Canja girman allon cikakkun bayanai (ja; danna sau biyu don maidowa)"
+  },
+  "members": {
+    "count_one": "Mambobi — {{count}}",
+    "count_other": "Mambobi — {{count}}",
+    "onlineCount_one": "A kan layi — {{count}}",
+    "onlineCount_other": "A kan layi — {{count}}",
+    "empty": "Babu mambobin da za a nuna.",
+    "noneOnline": "Babu kowa a kan layi.",
+    "you": "Ku",
+    "admin": "mai gudanarwa"
+  },
+  "media": {
+    "heading": "Kafofi",
+    "empty": "Ba a raba kafofi ba tukuna."
+  },
+  "thread": {
+    "loading": "Ana loda amsoshi…",
+    "empty": "Babu amsoshi tukuna. Fara zaren a ƙasa.",
+    "placeholder": "Amsa a cikin zare…",
+    "messageDeleted": "An goge saƙo",
+    "encrypted": "[an ɓoye]"
+  },
+  "chat": {
+    "noSelection": "Zaɓi tasha don fara aika saƙonni"
+  },
+  "dmRequest": {
+    "heading": "buƙatar saƙo",
+    "body": "<name>{{name}}</name> na son aiko muku da saƙonni.",
+    "accept": "Karɓa",
+    "accepting": "Ana karɓa…",
+    "block": "Toshe",
+    "blocking": "Ana toshewa…"
+  },
+  "editBar": {
+    "heading": "ana gyara saƙo",
+    "cancel": "Soke gyarawa",
+    "hint": "Enter don adanawa · Shift+Enter don sabon layi · Esc don sokewa"
+  },
+  "deleteChannel": {
+    "heading": "goge tasha",
+    "cancel": "Soke gogewa",
+    "body": "Za a goge wannan tasha da duk saƙonninta har abada. Ba za a iya mayar da wannan ba.",
+    "deleting": "Ana gogewa…"
+  },
+  "deleteMessage": {
+    "heading": "goge saƙo",
+    "moderateHeading": "cire saƙo (mai gudanarwa)",
+    "body": "Za a goge wannan saƙo ga kowa, har da mutanen da suka riga suka karɓe shi.",
+    "moderateBody": "Za a cire wannan saƙo da abubuwan da aka haɗa da shi ga kowa a cikin tashar.",
+    "cancel": "Soke gogewa",
+    "deleting": "Ana gogewa…",
+    "remove": "Cire"
+  },
+  "update": {
+    "preparing": "Ana shirin sabuntawa…",
+    "checking": "Ana duba sabuntawa…",
+    "downloading": "Ana sauke sabuntawa…",
+    "downloadingProgress": "Ana sauke sabuntawa… {{progress}}%",
+    "installing": "Ana shigar da sabuntawa…",
+    "relaunching": "Ana sake buɗewa…",
+    "failed": "Sabuntawa bai yi nasara ba: {{error}}",
+    "tryAgain": "Sake gwadawa",
+    "continueWithout": "Ci gaba ba tare da sabuntawa ba",
+    "readOnlyDiskImage": "Pollis yana aiki ne daga hoton faifai, wanda ba a iya rubutu a kansa. Rufe Pollis, ja shi zuwa Applications, fitar da hoton faifan, sannan a buɗe shi daga Applications.",
+    "readOnlyTranslocated": "macOS yana gudanar da Pollis daga wani wuri na wucin gadi da ba a iya rubutu a kansa. Rufe Pollis, fitar da shi daga Applications sannan a mayar da shi ta amfani da Finder, sannan a sake buɗe shi.",
+    "readOnlyTranslocatedHealed": "macOS yana gudanar da Pollis daga wani wuri na wucin gadi da ba a iya rubutu a kansa wanda wani sabuntawa na baya ya bari. An gyara hakan. Rufe Pollis sannan a sake buɗe shi daga Applications.",
+    "readOnlyGeneric": "Pollis ba zai iya sabunta kansa ba saboda wurin da yake ba a iya rubutu a kansa. Rufe Pollis, tabbatar yana cikin babban fayil na Applications (an matsar da shi can da Finder), sannan a sake buɗe shi."
+  },
+  "clientBlocked": {
+    "title": "Ana buƙatar sabuntawa",
+    "body": "Ba a ƙara tallafa wa wannan sigar Pollis. Sabunta don ci gaba da amfani da shi. Saƙonni da saituna suna nan a wannan na'ura.",
+    "versions": "An shigar da {{version}} · Ana buƙatar {{minimum}} ko sama da haka",
+    "installed": "An shigar da {{version}}",
+    "updateNow": "Sabunta yanzu",
+    "updating": "Ana sabuntawa…",
+    "download": "Sauke sabuwar siga",
+    "updateFailed": "Sabuntawar ba ta kammala ba. Sauke sabuwar siga maimakon haka.",
+    "packageManager": "An shigar da Pollis ta hanyar {{source}}. Sabunta shi a can:",
+    "openAppStore": "Buɗe App Store",
+    "openPlay": "Buɗe Google Play",
+    "openTestflight": "Buɗe TestFlight",
+    "openWebsite": "Buɗe pollis.com",
+    "openFailed": "Ba a iya buɗe mahaɗin ba. Je zuwa {{url}}",
+    "retry": "Sake dubawa",
+    "checking": "Ana dubawa…"
+  },
+  "home": {
+    "groups": "Rukunoni",
+    "groupsDescription": "Al'ummomi, Ƙungiyoyi, Tawagogi, da hirarrakin rukuni masu babban buri",
+    "dms": "Saƙonnin kai tsaye",
+    "dmsDescription": "Tattaunawa ta sirri da mutane, an ɓoye ta daga ƙarshe zuwa ƙarshe",
+    "invites": "Gayyatoci",
+    "noPendingInvites": "Babu gayyatocin da ke jira",
+    "pending_one": "{{count}} na jira",
+    "pending_other": "{{count}} na jira",
+    "join": "Shiga Rukuni",
+    "joinDescription": "Yi amfani da mahaɗin gayyata ko lambar shiga",
+    "joinRequests": "Buƙatun Shiga",
+    "logout": "Fita",
+    "exit": "Rufe"
+  },
+  "titleBar": {
+    "minimize": "Rage",
+    "maximize": "Ƙara girma"
+  },
+  "terminal": {
+    "shellFailed": "ba a iya fara shell ba: {{error}}"
+  },
+  "pins": {
+    "heading": "Waɗanda aka maƙala",
+    "empty": "Babu saƙonnin da aka maƙala tukuna.",
+    "unavailable": "Saƙonnin da aka maƙala ba su samu a wannan na'ura ba tukuna — za su bayyana bayan an daidaita tattaunawar.",
+    "unpin": "Cire maƙalawa"
+  }
+}
