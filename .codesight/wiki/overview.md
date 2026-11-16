@@ -173,6 +173,16 @@ mid-session (a store split across two backends is worse than either):
 | **OS keychain** | A credential store answers a read probe — macOS Keychain, Windows Credential Manager, Linux Secret Service. Preferred always. | The OS |
 | **Encrypted file** | No credential store answers (a server over SSH), or a debug build (no dev-loop prompts), or mobile | AES-256-GCM under a machine-bound KEK (desktop) / an OS-held key (Android Keystore, iOS Keychain) |
 
+**Windows entry limit.** Credential Manager holds at most 1280 characters per
+entry, and the account's ML-DSA-44 public key is 1752 in base64. On Windows
+the keychain backend writes any value over 1024 characters as numbered parts
+(`<key>#part1`, …) plus a `pollis-parts:<n>` header under the key itself
+(`keystore.rs` → `entry_parts`). Parts are written before the header, and a
+shorter rewrite or a delete removes them. Before this, a Windows device could not
+record the account identity key, so every new-device enrollment there failed.
+Other keychains keep one entry per value. `windows-link.yml` runs the round trip
+against the real Credential Manager.
+
 There is no third backend. `BackendKind` has exactly two variants and neither
 writes plaintext; before #882 the file backend was plaintext JSON and reachable
 by turning one Cargo feature off.

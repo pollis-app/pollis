@@ -233,6 +233,28 @@ jobs:
             fi
           done
 
+      # Credential Manager caps one entry at 1280 characters; the account's identity key is 1752
+      # in base64, so the keychain backend writes large values in parts. Only a real Windows host
+      # has that limit, so the round trip runs here.
+      - name: Keychain holds values over Credential Manager's entry limit
+        shell: bash
+        run: |
+          set -uo pipefail
+          rc=0
+          out="$(cargo test -p pollis-core --lib --target x86_64-pc-windows-msvc -- keystore:: 2>&1)" || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::keystore tests failed on Windows"
+            exit "$rc"
+          fi
+          for t in credential_manager_holds_a_value_over_its_entry_limit \
+                   erasing_a_value_in_parts_removes_every_part; do
+            if ! printf '%s\n' "$out" | grep -q "keychain_backend::windows_tests::$t"; then
+              echo "::error::$t did not run on Windows"
+              exit 1
+            fi
+          done
+
       # Prove the artifact exists rather than trusting the exit code alone.
       - name: Verify the DLL was produced
         shell: bash
