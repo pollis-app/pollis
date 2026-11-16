@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "نوی پیغام",
+    "requests": "غوښتنې",
+    "blocked": "بلاک شوي کارنان",
+    "avatarAlt": "د {{name}} انځورګوټی",
+    "settingsFor": "د {{name}} تنظیمات",
+    "verified": "تایید شوې اړیکه",
+    "keyChanged": "هویت کیلي بدله شوې — بیا یې تایید کړئ"
+  },
+  "conversation": {
+    "fallbackTitle": "مستقیم پیغام",
+    "viewProfile": "د ‎@{{name}} پروفایل وګورئ",
+    "call": "‎@{{name}} ته زنګ ووهئ",
+    "returnToCall": "له ‎@{{name}} سره زنګ ته بېرته ورشئ",
+    "pinsLabel": "پن شوي پیغامونه"
+  },
+  "settings": {
+    "pageTitle": "د خبرو اترو تنظیمات",
+    "leave": "له خبرو اترو ووځئ",
+    "submitting": "وځي…",
+    "leaveFailed": "له خبرو اترو وتل ناکام شول",
+    "cancel": "لغوه (Esc)"
+  },
+  "start": {
+    "pageTitle": "نوی پیغام",
+    "identifierLabel": "کارن نوم یا برېښنالیک",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "خبرې اترې پیل کړئ",
+    "submitting": "پیلېږي…",
+    "identifierRequired": "د کارن پېژندنه اړینه ده",
+    "userNotFound": "کارن ونه موندل شو",
+    "startFailed": "د خبرو اترو پیلول ناکام شول"
+  },
+  "requests": {
+    "pageTitle": "د پیغام غوښتنې",
+    "empty": "هېڅ پاتې غوښتنه نشته.",
+    "noMessageYet": "(لا پیغام نشته)",
+    "unknownSender": "نامعلوم",
+    "others_one": "(+{{count}} نور)",
+    "others_other": "(+{{count}} نور)",
+    "accept": "منل",
+    "block": "بلاک"
+  },
+  "blocked": {
+    "pageTitle": "بلاک شوي کارنان",
+    "empty": "هېڅ بلاک شوی کارن نشته.",
+    "unblock": "له بلاک وباسئ"
+  },
+  "profile": {
+    "fallbackName": "کارن",
+    "fallbackTitle": "پروفایل",
+    "notFound": "کارن ونه موندل شو",
+    "avatarAlt": "د {{name}} انځورګوټی",
+    "sendMessage": "پیغام ولېږئ",
+    "block": "بلاک کړئ",
+    "safetyNumber": "خوندیتوب شمېره",
+    "statusVerified": "تایید شوی",
+    "statusChanged": "بدل شوی — بیا یې تایید کړئ",
+    "statusUnverified": "نه دی تایید شوی",
+    "keyChangedWarning": "د دې اړیکې هویت کیلي له هغه وخته چې تاسو وروستی ځل تایید کړې وه بدله شوې. مخکې له دې چې پرې باور وکړئ، شمېره بیا د یوې بلې لارې (مخامخ یا په زنګ کې) پرتله کړئ.",
+    "removeVerification": "تایید لرې کړئ",
+    "markVerified": "تایید شوی په نښه کړئ",
+    "report": "راپور ورکړئ"
+  },
+  "safety": {
+    "title": "تاسو او {{name}}",
+    "verify": "خوندیتوب شمېره تایید کړئ",
+    "headingMany": "خوندیتوب شمېرې",
+    "shared": "تاسو او {{name}} یوه شمېره وینئ. مخامخ یا په زنګ کې یې پرتله کړئ ترڅو ډاډه شئ چې څوک ستاسو تر منځ نشته.",
+    "qrLabel": "د هغې خوندیتوب شمېرې QR کوډ چې له {{name}} سره یې شریکه لرئ",
+    "failed": "خوندیتوب شمېره بار نه شوه."
+  },
+  "notify": {
+    "requestTitle": "نوې خبرې اترې",
+    "requestBody": "{{name}} له تاسو سره خبرې اترې پیل کړې"
+  }
+}

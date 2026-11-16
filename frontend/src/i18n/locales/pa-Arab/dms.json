@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "نواں سنیہا",
+    "requests": "درخواستاں",
+    "blocked": "بلاک کیتے یوزر",
+    "avatarAlt": "{{name}} دا اوتار",
+    "settingsFor": "{{name}} دیاں سیٹنگز",
+    "verified": "تصدیق شدہ رابطہ",
+    "keyChanged": "شناختی کنجی بدل گئی — دوبارہ تصدیق کرو"
+  },
+  "conversation": {
+    "fallbackTitle": "سدھا سنیہا",
+    "viewProfile": "‎@{{name}} دی پروفائل ویکھو",
+    "call": "‎@{{name}} نوں کال کرو",
+    "returnToCall": "‎@{{name}} نال کال تے واپس جاؤ",
+    "pinsLabel": "پن کیتے سنیہے"
+  },
+  "settings": {
+    "pageTitle": "گل بات دیاں سیٹنگز",
+    "leave": "گل بات چھڈو",
+    "submitting": "چھڈ رہے آں…",
+    "leaveFailed": "گل بات نہیں چھڈی جا سکی",
+    "cancel": "کینسل (Esc)"
+  },
+  "start": {
+    "pageTitle": "نواں سنیہا",
+    "identifierLabel": "یوزر نیم یا ای میل",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "گل بات شروع کرو",
+    "submitting": "شروع ہو رہی اے…",
+    "identifierRequired": "یوزر دی پچھان ضروری اے",
+    "userNotFound": "یوزر نہیں لبھیا",
+    "startFailed": "گل بات شروع نہیں ہو سکی"
+  },
+  "requests": {
+    "pageTitle": "سنیہے دیاں درخواستاں",
+    "empty": "کوئی درخواست باقی نہیں۔",
+    "noMessageYet": "(حالے کوئی سنیہا نہیں)",
+    "unknownSender": "انجان",
+    "others_one": "(+{{count}} ہور)",
+    "others_other": "(+{{count}} ہور)",
+    "accept": "منظور کرو",
+    "block": "بلاک کرو"
+  },
+  "blocked": {
+    "pageTitle": "بلاک کیتے یوزر",
+    "empty": "کوئی بلاک کیتا یوزر نہیں۔",
+    "unblock": "ان بلاک کرو"
+  },
+  "profile": {
+    "fallbackName": "یوزر",
+    "fallbackTitle": "پروفائل",
+    "notFound": "یوزر نہیں لبھیا",
+    "avatarAlt": "{{name}} دا اوتار",
+    "sendMessage": "سنیہا بھیجو",
+    "block": "بلاک کرو",
+    "safetyNumber": "حفاظتی نمبر",
+    "statusVerified": "تصدیق شدہ",
+    "statusChanged": "بدل گیا — دوبارہ تصدیق کرو",
+    "statusUnverified": "تصدیق نہیں ہوئی",
+    "keyChangedWarning": "تہاڈی پچھلی تصدیق توں بعد ایس رابطے دی شناختی کنجی بدل گئی اے۔ ایہدے تے بھروسہ کرن توں پہلاں نمبر نوں کسے وکھرے ذریعے نال فیر ملاؤ۔",
+    "removeVerification": "تصدیق ہٹاؤ",
+    "markVerified": "تصدیق شدہ نشان لاؤ",
+    "report": "رپورٹ کرو"
+  },
+  "safety": {
+    "title": "تسیں تے {{name}}",
+    "verify": "حفاظتی نمبر دی تصدیق کرو",
+    "headingMany": "حفاظتی نمبر",
+    "shared": "تسیں تے {{name}} اکو نمبر ویکھدے او۔ ایہنوں آمنے سامنے یا کال تے ملاؤ تاں جے پکا ہووے کہ وچکار کوئی نہیں۔",
+    "qrLabel": "{{name}} نال سانجھے حفاظتی نمبر دا QR کوڈ",
+    "failed": "حفاظتی نمبر لوڈ نہیں ہو سکیا۔"
+  },
+  "notify": {
+    "requestTitle": "نویں گل بات",
+    "requestBody": "{{name}} نے تہاڈے نال گل بات شروع کیتی اے"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "आर्केड"
+  },
+  "hud": {
+    "score": "स्कोअर  {{score}}",
+    "time": "वेळ   {{time}}",
+    "gameOver": "गेम संपला",
+    "final_one": "अंतिम {{count}} गुण · {{time}}",
+    "final_other": "अंतिम {{count}} गुण · {{time}}",
+    "restartHint": "पुन्हा सुरू करण्यासाठी R दाबा · बाहेर पडण्यासाठी esc",
+    "controls": "WASD हालचाल · माउसने नेम · क्लिक/space फायर · esc बाहेर पडा"
+  }
+}

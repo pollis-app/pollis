@@ -1,0 +1,214 @@
+{
+  "sidebar": {
+    "groups": "ګروپونه",
+    "dms": "مستقیم پیغامونه",
+    "account": "حساب",
+    "saved": "خوندي شوي",
+    "preferences": "غوره توبونه",
+    "language": "ژبه",
+    "userSettings": "د کارن تنظیمات",
+    "voiceAndVideo": "غږ او ویډیو",
+    "security": "امنیت",
+    "keyBindings": "د کیبورډ شارټ‌کټونه",
+    "softwareUpdate": "د سافټویر تازه کول",
+    "expandGroup": "{{name}} پراخ کړئ",
+    "collapseGroup": "{{name}} راټول کړئ",
+    "keyChanged": "هویت کیلي بدله شوې — بیا یې تایید کړئ",
+    "verified": "تایید شوې اړیکه",
+    "dmAvatarAlt": "د {{name}} انځورګوټی",
+    "close": "د څنګ پټه بنده کړئ ({{shortcut}})",
+    "resize": "د څنګ پټې اندازه بدله کړئ (کش کړئ؛ د بېرته اړولو لپاره دوه ځله کلیک)",
+    "searchMessages": "په پیغامونو کې لټون",
+    "vault": "والټ",
+    "securityEvents": "امنیتي پېښې",
+    "copyHistory": "تاریخچه کاپي کړئ"
+  },
+  "profile": {
+    "you": "تاسو",
+    "call": "زنګ",
+    "voice": "غږ",
+    "settings": "تنظیمات",
+    "voiceConnected": "غږ وصل دی",
+    "stopScreenShare": "سکرین شریکول ودروئ",
+    "shareScreen": "سکرین شریک کړئ",
+    "disconnect": "اړیکه پرې کړئ"
+  },
+  "breadcrumb": {
+    "home": "کور",
+    "groups": "ګروپونه",
+    "createGroup": "ګروپ جوړ کړئ",
+    "findGroup": "ګروپ ومومئ",
+    "newChannel": "نوی چینل",
+    "voice": "غږ",
+    "joinRequests": "د ګډون غوښتنې",
+    "inviteMember": "غړي ته بلنه ورکړئ",
+    "leaveGroup": "له ګروپ ووځئ",
+    "members": "غړي",
+    "removeMember": "غړی لرې کړئ",
+    "directMessages": "مستقیم پیغامونه",
+    "newMessage": "نوی پیغام",
+    "requests": "غوښتنې",
+    "blockedUsers": "بلاک شوي کارنان",
+    "conversationSettings": "د خبرو اترو تنظیمات",
+    "account": "حساب",
+    "preferences": "غوره توبونه",
+    "language": "ژبه",
+    "userSettings": "د کارن تنظیمات",
+    "profile": "پروفایل",
+    "security": "امنیت",
+    "voiceSettings": "غږ",
+    "invites": "بلنې",
+    "joinAGroup": "په ګروپ کې ګډون وکړئ",
+    "search": "لټون",
+    "searchButton": "لټون ({{shortcut}})",
+    "settings": "تنظیمات",
+    "securityEvents": "امنیتي پېښې",
+    "copyHistory": "د پیغامونو تاریخچه کاپي کړئ",
+    "historyRequest": "د تاریخچې غوښتنه"
+  },
+  "statusBar": {
+    "groupsUnread_one": "د ګروپ نالوستي پیغامونه: {{count}}",
+    "groupsUnread_other": "د ګروپ نالوستي پیغامونه: {{count}}",
+    "dmsUnread_one": "نالوستي مستقیم پیغامونه: {{count}}",
+    "dmsUnread_other": "نالوستي مستقیم پیغامونه: {{count}}",
+    "joinRequests_one": "د ګډون پاتې غوښتنې: {{count}}",
+    "joinRequests_other": "د ګډون پاتې غوښتنې: {{count}}",
+    "invites_one": "پاتې بلنې: {{count}}",
+    "invites_other": "پاتې بلنې: {{count}}",
+    "someone": "یو څوک",
+    "updateAvailable": "تازه نسخه شته",
+    "updateAvailableTitle": "تازه نسخه شته: {{version}}",
+    "answerCall": "د ‎@{{username}} زنګ ځواب کړئ",
+    "declineCall": "زنګ رد کړئ",
+    "dismissVoiceError": "د غږ تېروتنه لرې کړئ",
+    "dismissScreenShareError": "د سکرین شریکولو تېروتنه لرې کړئ",
+    "dismissCameraError": "د کمرې تېروتنه لرې کړئ",
+    "syncing": "همغږي کېږي…"
+  },
+  "shell": {
+    "dropFiles": "د لېږلو لپاره فایلونه دلته پرېږدئ",
+    "voiceChannelFallback": "غږ",
+    "callChannel": "زنګ"
+  },
+  "panel": {
+    "thread": "تار",
+    "details": "جزئیات",
+    "ariaLabel": "د خبرو اترو جزئیات",
+    "closeThread": "د تار پاڼه بنده کړئ ({{shortcut}})",
+    "closeDetails": "د جزئیاتو پاڼه بنده کړئ ({{shortcut}})",
+    "resize": "د جزئیاتو پاڼې اندازه بدله کړئ (کش کړئ؛ د بېرته اړولو لپاره دوه ځله کلیک)"
+  },
+  "members": {
+    "count_one": "غړي — {{count}}",
+    "count_other": "غړي — {{count}}",
+    "onlineCount_one": "آنلاین — {{count}}",
+    "onlineCount_other": "آنلاین — {{count}}",
+    "empty": "د ښودلو لپاره هېڅ غړی نشته.",
+    "noneOnline": "هېڅوک آنلاین نه دي.",
+    "you": "تاسو",
+    "admin": "اډمین"
+  },
+  "media": {
+    "heading": "رسنۍ",
+    "empty": "لا هېڅ رسنۍ نه ده شریکه شوې."
+  },
+  "thread": {
+    "loading": "ځوابونه بارېږي…",
+    "empty": "لا ځواب نشته. لاندې تار پیل کړئ.",
+    "placeholder": "په تار کې ځواب ولیکئ…",
+    "messageDeleted": "پیغام ړنګ شو",
+    "encrypted": "[کوډ شوی]"
+  },
+  "chat": {
+    "noSelection": "د پیغام لېږلو د پیلولو لپاره یو چینل وټاکئ"
+  },
+  "dmRequest": {
+    "heading": "د پیغام غوښتنه",
+    "body": "<name>{{name}}</name> غواړي تاسو ته پیغامونه ولېږي.",
+    "accept": "ومنئ",
+    "accepting": "منل کېږي…",
+    "block": "بلاک کړئ",
+    "blocking": "بلاک کېږي…"
+  },
+  "editBar": {
+    "heading": "پیغام سمېږي",
+    "cancel": "سمون لغوه کړئ",
+    "hint": "د خوندي کولو لپاره Enter · د نوې کرښې لپاره Shift+Enter · د لغوه کولو لپاره Esc"
+  },
+  "deleteChannel": {
+    "heading": "چینل ړنګ کړئ",
+    "cancel": "ړنګول لغوه کړئ",
+    "body": "دا چینل او ټول پیغامونه یې د تل لپاره ړنګېږي. دا کار بېرته نه شي اړول کېدای.",
+    "deleting": "ړنګېږي…"
+  },
+  "deleteMessage": {
+    "heading": "پیغام ړنګ کړئ",
+    "moderateHeading": "پیغام لرې کړئ (اډمین)",
+    "body": "دا پیغام به د ټولو لپاره ړنګ شي، د هغو خلکو په ګډون چې دمخه یې ترلاسه کړی.",
+    "moderateBody": "دا پیغام او ضمیمې یې به په چینل کې د ټولو لپاره لرې شي.",
+    "cancel": "ړنګول لغوه کړئ",
+    "deleting": "ړنګېږي…",
+    "remove": "لرې کړئ"
+  },
+  "update": {
+    "preparing": "تازه کولو ته چمتو کېږي…",
+    "checking": "د تازه نسخې لټون کېږي…",
+    "downloading": "تازه نسخه ډاونلوډ کېږي…",
+    "downloadingProgress": "تازه نسخه ډاونلوډ کېږي… {{progress}}%",
+    "installing": "تازه نسخه نصبېږي…",
+    "relaunching": "بیا پیلېږي…",
+    "failed": "تازه کول ناکام شول: {{error}}",
+    "tryAgain": "بیا هڅه وکړئ",
+    "continueWithout": "پرته له تازه کولو دوام ورکړئ",
+    "readOnlyDiskImage": "Pollis د ډیسک انځور (disk image) څخه چلېږي، چې یوازې د لوستلو وړ دی. له Pollis ووځئ، Applications ته یې کش کړئ، د ډیسک انځور وباسئ (eject)، او له Applications څخه یې پرانیزئ.",
+    "readOnlyTranslocated": "macOS، Pollis له یو لنډمهاله یوازې‌لوستونکي ځای څخه چلوي. له Pollis ووځئ، د Finder په مرسته یې له Applications بهر او بیا بېرته دننه کړئ، بیا یې پرانیزئ.",
+    "readOnlyTranslocatedHealed": "macOS، Pollis له یو لنډمهاله یوازې‌لوستونکي ځای څخه چلوي چې له یوې پخوانۍ تازه کولو پاتې و. دا ستونزه حل شوه. له Pollis ووځئ او بیا یې له Applications څخه پرانیزئ.",
+    "readOnlyGeneric": "Pollis ځان نه شي تازه کولی ځکه چې ځای یې یوازې د لوستلو وړ دی. له Pollis ووځئ، ډاډ ترلاسه کړئ چې ستاسو په Applications فولډر کې دی (د Finder په مرسته هلته وړل شوی)، او بیا یې پرانیزئ."
+  },
+  "clientBlocked": {
+    "title": "تازه کول اړین دي",
+    "body": "د Pollis له دې نسخې نور ملاتړ نه کېږي. د کارولو د دوام لپاره یې تازه کړئ. ستاسو پیغامونه او تنظیمات په دې وسیله کې پاتې کېږي.",
+    "versions": "نصب شوې {{version}} · اړینه {{minimum}} یا نوې",
+    "installed": "نصب شوې {{version}}",
+    "updateNow": "اوس تازه کړئ",
+    "updating": "تازه کېږي…",
+    "download": "وروستۍ نسخه ډاونلوډ کړئ",
+    "updateFailed": "تازه کول بشپړ نه شول. پر ځای یې وروستۍ نسخه ډاونلوډ کړئ.",
+    "packageManager": "Pollis د {{source}} په مرسته نصب شوی. هلته یې تازه کړئ:",
+    "openAppStore": "App Store پرانیزئ",
+    "openPlay": "Google Play پرانیزئ",
+    "openTestflight": "TestFlight پرانیزئ",
+    "openWebsite": "pollis.com پرانیزئ",
+    "openFailed": "لینک خلاص نه شو. {{url}} ته ورشئ",
+    "retry": "بیا وګورئ",
+    "checking": "کتل کېږي…"
+  },
+  "home": {
+    "groups": "ګروپونه",
+    "groupsDescription": "ټولنې، سازمانونه، ټیمونه، او ډېر لوړ هوډه ګروپي چټونه",
+    "dms": "مستقیم پیغامونه",
+    "dmsDescription": "له افرادو سره شخصي، له سر تر پایه کوډ شوې خبرې اترې",
+    "invites": "بلنې",
+    "noPendingInvites": "هېڅ پاتې بلنه نشته",
+    "pending_one": "{{count}} پاتې",
+    "pending_other": "{{count}} پاتې",
+    "join": "په ګروپ کې ګډون وکړئ",
+    "joinDescription": "د بلنې لینک یا د ګډون کوډ وکاروئ",
+    "joinRequests": "د ګډون غوښتنې",
+    "logout": "ووځئ",
+    "exit": "وتل"
+  },
+  "titleBar": {
+    "minimize": "کوچنی کړئ",
+    "maximize": "لوی کړئ"
+  },
+  "terminal": {
+    "shellFailed": "شیل پیل نه شو: {{error}}"
+  },
+  "pins": {
+    "heading": "پن شوي",
+    "empty": "لا هېڅ پن شوی پیغام نشته.",
+    "unavailable": "پنونه لا په دې وسیله کې نشته — د خبرو اترو له همغږي کېدو وروسته به ښکاره شي.",
+    "unpin": "پن لرې کړئ"
+  }
+}

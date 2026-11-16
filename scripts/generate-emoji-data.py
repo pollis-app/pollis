@@ -219,6 +219,8 @@ ANNOTATIONS_DIRS = (
 LANGUAGES_TS = REPO_ROOT / "frontend" / "src" / "i18n" / "languages.ts"
 
 CLDR_RELEASE = "release-48"
+# The Unicode version the committed tables were built from; an older Python refuses to run (main).
+MIN_UNICODE_VERSION = (16, 0, 0)
 CLDR_RAW_BASE = f"https://raw.githubusercontent.com/unicode-org/cldr/{CLDR_RELEASE}/common"
 CLDR_ANNOTATION_FILES = ("annotations", "annotationsDerived")
 CLDR_SKIPPED_DRAFTS = {"provisional", "unconfirmed"}
@@ -790,9 +792,20 @@ def shipped_language_codes() -> list[str]:
     return sorted(set(codes))
 
 
+# A shipped code whose CLDR file has another name: CLDR files a language's
+# default script under the bare tag, so Gurmukhi Punjabi is `pa.xml` (#1726).
+CLDR_FILE_OVERRIDES = {"pa-Guru": "pa"}
+
+# Where CLDR has no name for an emoji in a locale: Shahmukhi Punjabi (about a
+# third missing in release 48) takes the Urdu name, which its readers read in
+# the same script; Marathi takes the Hindi one (Devanagari).
+CLDR_GAP_FALLBACKS = {"pa-Arab": "ur", "mr": "hi"}
+
+
 def fetch_cldr_file(lang: str, kind: str) -> bytes:
     # CLDR names script variants with an underscore: `pa-Arab` is `pa_Arab.xml`.
-    url = f"{CLDR_RAW_BASE}/{kind}/{lang.replace('-', '_')}.xml"
+    name = CLDR_FILE_OVERRIDES.get(lang, lang).replace("-", "_")
+    url = f"{CLDR_RAW_BASE}/{kind}/{name}.xml"
     with urllib.request.urlopen(url, timeout=60) as response:
         return response.read()
 
@@ -856,6 +869,16 @@ def refresh_annotations(entries: list[dict[str, object]]) -> None:
             table[key] = [name] + [k for k in keywords if k != name]
         locales[lang] = table
         print(f"annotations {lang}: {len(table)}/{len(entries)} entries", file=sys.stderr)
+
+    # CLDR leaves some locales short; fill each gap from a shipped language in
+    # the same script that the readers also read, never from English (#1726).
+    for lang, fallback in CLDR_GAP_FALLBACKS.items():
+        if lang not in locales or fallback not in locales:
+            continue
+        gaps = {key: values for key, values in locales[fallback].items() if key not in locales[lang]}
+        if gaps:
+            locales[lang] = dict(sorted({**locales[lang], **gaps}.items()))
+            print(f"annotations {lang}: {len(gaps)} gaps filled from {fallback}", file=sys.stderr)
 
     doc = {
         "_source": "https://github.com/unicode-org/cldr — common/annotations/<lang>.xml + common/annotationsDerived/<lang>.xml (flags)",
@@ -1123,6 +1146,17 @@ def main() -> None:
         help="re-download the CLDR annotations for every shipped locale (network)",
     )
     args = parser.parse_args()
+
+    # The emoji set comes from this Python's `unicodedata`: an older Python
+    # (macOS's /usr/bin/python3 is 3.9, Unicode 13) silently drops every newer
+    # emoji from every table, so refuse rather than shrink them (#1726).
+    have = tuple(int(part) for part in unicodedata.unidata_version.split("."))
+    if have < MIN_UNICODE_VERSION:
+        want = ".".join(str(part) for part in MIN_UNICODE_VERSION)
+        raise SystemExit(
+            f"this Python has Unicode {unicodedata.unidata_version} data; the tables need {want}+ "
+            "(run it with Python 3.14 or newer)"
+        )
 
     entries, counts, source, shortcode_version = build_entries()
     if args.refresh_annotations:

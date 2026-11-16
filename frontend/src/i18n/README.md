@@ -69,7 +69,9 @@ That one covers the design decisions; this one is the working checklist.
    python3 scripts/generate-emoji-data.py --refresh-annotations
    ```
 
-   It reads the locale list from `languages.ts`, so nothing else needs
+   It needs Python 3.14+ (its `unicodedata` decides the emoji set; macOS's
+   `/usr/bin/python3` is too old and the script refuses to run on it). It
+   reads the locale list from `languages.ts`, so nothing else needs
    pointing at the new code; commit `scripts/emoji-annotations.json` and the
    new `components/Emoji/annotations/<code>.ts` (the generator writes the
    mobile copy too). `frontend/tests/emoji-search-i18n.test.ts` fails until

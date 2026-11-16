@@ -20,13 +20,22 @@ export type EmojiAnnotationRow = readonly [
 
 export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [
   "ar",
+  "bn",
   "en",
   "es",
   "fr",
+  "hi",
   "ja",
   "ko",
+  "mr",
+  "pa-Arab",
+  "pa-Guru",
+  "ps",
   "ru",
+  "ta",
+  "te",
   "uk",
+  "ur",
   "zh",
 ];
 
@@ -37,20 +46,38 @@ export function loadEmojiAnnotationRows(
   switch (locale) {
     case "ar":
       return import("./ar").then((m) => m.default);
+    case "bn":
+      return import("./bn").then((m) => m.default);
     case "en":
       return import("./en").then((m) => m.default);
     case "es":
       return import("./es").then((m) => m.default);
     case "fr":
       return import("./fr").then((m) => m.default);
+    case "hi":
+      return import("./hi").then((m) => m.default);
     case "ja":
       return import("./ja").then((m) => m.default);
     case "ko":
       return import("./ko").then((m) => m.default);
+    case "mr":
+      return import("./mr").then((m) => m.default);
+    case "pa-Arab":
+      return import("./pa-Arab").then((m) => m.default);
+    case "pa-Guru":
+      return import("./pa-Guru").then((m) => m.default);
+    case "ps":
+      return import("./ps").then((m) => m.default);
     case "ru":
       return import("./ru").then((m) => m.default);
+    case "ta":
+      return import("./ta").then((m) => m.default);
+    case "te":
+      return import("./te").then((m) => m.default);
     case "uk":
       return import("./uk").then((m) => m.default);
+    case "ur":
+      return import("./ur").then((m) => m.default);
     case "zh":
       return import("./zh").then((m) => m.default);
     default:

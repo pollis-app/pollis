@@ -1,0 +1,214 @@
+{
+  "sidebar": {
+    "groups": "ग्रुप",
+    "dms": "DM",
+    "account": "खाते",
+    "saved": "सेव्ह केलेले",
+    "preferences": "प्राधान्ये",
+    "language": "भाषा",
+    "userSettings": "वापरकर्ता सेटिंग्ज",
+    "voiceAndVideo": "व्हॉइस आणि व्हिडिओ",
+    "security": "सुरक्षा",
+    "keyBindings": "की बाइंडिंग",
+    "softwareUpdate": "सॉफ्टवेअर अपडेट",
+    "expandGroup": "{{name}} विस्तृत करा",
+    "collapseGroup": "{{name}} संकुचित करा",
+    "keyChanged": "ओळख की बदलली — पुन्हा पडताळा",
+    "verified": "पडताळलेला संपर्क",
+    "dmAvatarAlt": "{{name}} चा अवतार",
+    "close": "साइडबार बंद करा ({{shortcut}})",
+    "resize": "साइडबारचा आकार बदला (ड्रॅग करा; रीसेट करण्यासाठी डबल-क्लिक करा)",
+    "searchMessages": "मेसेज शोधा",
+    "vault": "व्हॉल्ट",
+    "securityEvents": "सुरक्षा इव्हेंट",
+    "copyHistory": "इतिहास कॉपी करा"
+  },
+  "profile": {
+    "you": "तुम्ही",
+    "call": "कॉल",
+    "voice": "व्हॉइस",
+    "settings": "सेटिंग्ज",
+    "voiceConnected": "व्हॉइस कनेक्ट झाले",
+    "stopScreenShare": "स्क्रीन शेअर थांबवा",
+    "shareScreen": "स्क्रीन शेअर करा",
+    "disconnect": "डिस्कनेक्ट करा"
+  },
+  "breadcrumb": {
+    "home": "होम",
+    "groups": "ग्रुप",
+    "createGroup": "ग्रुप तयार करा",
+    "findGroup": "ग्रुप शोधा",
+    "newChannel": "नवीन चॅनेल",
+    "voice": "व्हॉइस",
+    "joinRequests": "सामील होण्याच्या विनंत्या",
+    "inviteMember": "सदस्याला आमंत्रित करा",
+    "leaveGroup": "ग्रुप सोडा",
+    "members": "सदस्य",
+    "removeMember": "सदस्याला काढा",
+    "directMessages": "थेट मेसेज",
+    "newMessage": "नवीन मेसेज",
+    "requests": "विनंत्या",
+    "blockedUsers": "ब्लॉक केलेले वापरकर्ते",
+    "conversationSettings": "संभाषण सेटिंग्ज",
+    "account": "खाते",
+    "preferences": "प्राधान्ये",
+    "language": "भाषा",
+    "userSettings": "वापरकर्ता सेटिंग्ज",
+    "profile": "प्रोफाइल",
+    "security": "सुरक्षा",
+    "voiceSettings": "व्हॉइस",
+    "invites": "आमंत्रणे",
+    "joinAGroup": "ग्रुपमध्ये सामील व्हा",
+    "search": "शोध",
+    "searchButton": "शोधा ({{shortcut}})",
+    "settings": "सेटिंग्ज",
+    "securityEvents": "सुरक्षा इव्हेंट",
+    "copyHistory": "मेसेज इतिहास कॉपी करा",
+    "historyRequest": "इतिहास विनंती"
+  },
+  "statusBar": {
+    "groupsUnread_one": "न वाचलेले ग्रुप मेसेज: {{count}}",
+    "groupsUnread_other": "न वाचलेले ग्रुप मेसेज: {{count}}",
+    "dmsUnread_one": "न वाचलेले थेट मेसेज: {{count}}",
+    "dmsUnread_other": "न वाचलेले थेट मेसेज: {{count}}",
+    "joinRequests_one": "सामील होण्याच्या प्रलंबित विनंत्या: {{count}}",
+    "joinRequests_other": "सामील होण्याच्या प्रलंबित विनंत्या: {{count}}",
+    "invites_one": "प्रलंबित आमंत्रणे: {{count}}",
+    "invites_other": "प्रलंबित आमंत्रणे: {{count}}",
+    "someone": "कोणीतरी",
+    "updateAvailable": "अपडेट उपलब्ध आहे",
+    "updateAvailableTitle": "अपडेट उपलब्ध आहे: {{version}}",
+    "answerCall": "@{{username}} यांचा कॉल उचला",
+    "declineCall": "कॉल नाकारा",
+    "dismissVoiceError": "व्हॉइस एरर डिसमिस करा",
+    "dismissScreenShareError": "स्क्रीन शेअर एरर डिसमिस करा",
+    "dismissCameraError": "कॅमेरा एरर डिसमिस करा",
+    "syncing": "सिंक होत आहे…"
+  },
+  "shell": {
+    "dropFiles": "पाठवण्यासाठी फाइल इथे सोडा",
+    "voiceChannelFallback": "व्हॉइस",
+    "callChannel": "कॉल"
+  },
+  "panel": {
+    "thread": "थ्रेड",
+    "details": "तपशील",
+    "ariaLabel": "संभाषणाचे तपशील",
+    "closeThread": "थ्रेड पॅनल बंद करा ({{shortcut}})",
+    "closeDetails": "तपशील पॅनल बंद करा ({{shortcut}})",
+    "resize": "तपशील पॅनलचा आकार बदला (ड्रॅग करा; रीसेट करण्यासाठी डबल-क्लिक करा)"
+  },
+  "members": {
+    "count_one": "सदस्य — {{count}}",
+    "count_other": "सदस्य — {{count}}",
+    "onlineCount_one": "ऑनलाइन — {{count}}",
+    "onlineCount_other": "ऑनलाइन — {{count}}",
+    "empty": "दाखवण्यासाठी कोणतेही सदस्य नाहीत.",
+    "noneOnline": "कोणीही ऑनलाइन नाही.",
+    "you": "तुम्ही",
+    "admin": "ॲडमिन"
+  },
+  "media": {
+    "heading": "मीडिया",
+    "empty": "अजून कोणताही मीडिया शेअर केलेला नाही."
+  },
+  "thread": {
+    "loading": "उत्तरे लोड होत आहेत…",
+    "empty": "अजून उत्तरे नाहीत. खाली थ्रेड सुरू करा.",
+    "placeholder": "थ्रेडमध्ये उत्तर द्या…",
+    "messageDeleted": "मेसेज हटवला",
+    "encrypted": "[एन्क्रिप्ट केलेला]"
+  },
+  "chat": {
+    "noSelection": "मेसेज पाठवणे सुरू करण्यासाठी चॅनेल निवडा"
+  },
+  "dmRequest": {
+    "heading": "मेसेज विनंती",
+    "body": "<name>{{name}}</name> यांना तुम्हाला मेसेज पाठवायचे आहेत.",
+    "accept": "स्वीकारा",
+    "accepting": "स्वीकारत आहे…",
+    "block": "ब्लॉक करा",
+    "blocking": "ब्लॉक करत आहे…"
+  },
+  "editBar": {
+    "heading": "मेसेज संपादित करत आहे",
+    "cancel": "संपादन रद्द करा",
+    "hint": "सेव्ह करण्यासाठी Enter · नवीन ओळीसाठी Shift+Enter · रद्द करण्यासाठी Esc"
+  },
+  "deleteChannel": {
+    "heading": "चॅनेल हटवा",
+    "cancel": "हटवणे रद्द करा",
+    "body": "हे चॅनेल आणि त्यातील सर्व मेसेज कायमचे हटवले जातील. हे पूर्ववत करता येणार नाही.",
+    "deleting": "हटवत आहे…"
+  },
+  "deleteMessage": {
+    "heading": "मेसेज हटवा",
+    "moderateHeading": "मेसेज काढा (ॲडमिन)",
+    "body": "हा मेसेज सर्वांसाठी हटवला जाईल, ज्यांना तो आधीच मिळाला आहे त्यांच्यासह.",
+    "moderateBody": "हा मेसेज आणि त्याच्या अटॅचमेंट चॅनेलमधील सर्वांसाठी काढल्या जातील.",
+    "cancel": "हटवणे रद्द करा",
+    "deleting": "हटवत आहे…",
+    "remove": "काढा"
+  },
+  "update": {
+    "preparing": "अपडेटची तयारी करत आहे…",
+    "checking": "अपडेट तपासत आहे…",
+    "downloading": "अपडेट डाउनलोड करत आहे…",
+    "downloadingProgress": "अपडेट डाउनलोड करत आहे… {{progress}}%",
+    "installing": "अपडेट इंस्टॉल करत आहे…",
+    "relaunching": "पुन्हा सुरू करत आहे…",
+    "failed": "अपडेट अयशस्वी झाले: {{error}}",
+    "tryAgain": "पुन्हा प्रयत्न करा",
+    "continueWithout": "अपडेट न करता पुढे जा",
+    "readOnlyDiskImage": "Pollis डिस्क इमेजमधून चालत आहे, जी फक्त-वाचनीय आहे. Pollis मधून बाहेर पडा, ते Applications मध्ये ड्रॅग करा, डिस्क इमेज इजेक्ट करा आणि Applications मधून ते उघडा.",
+    "readOnlyTranslocated": "macOS तात्पुरत्या फक्त-वाचनीय ठिकाणावरून Pollis चालवत आहे. Pollis मधून बाहेर पडा, Finder वापरून ते Applications मधून बाहेर आणि पुन्हा आत हलवा, मग ते पुन्हा उघडा.",
+    "readOnlyTranslocatedHealed": "आधीच्या अपडेटमुळे राहिलेल्या तात्पुरत्या फक्त-वाचनीय ठिकाणावरून macOS Pollis चालवत आहे. ते दुरुस्त केले आहे. Pollis मधून बाहेर पडा आणि Applications मधून ते पुन्हा उघडा.",
+    "readOnlyGeneric": "Pollis चे ठिकाण फक्त-वाचनीय असल्यामुळे ते स्वतःला अपडेट करू शकत नाही. Pollis मधून बाहेर पडा, ते तुमच्या Applications फोल्डरमध्ये आहे याची खात्री करा (Finder ने तिथे हलवलेले), आणि ते पुन्हा उघडा."
+  },
+  "clientBlocked": {
+    "title": "अपडेट आवश्यक आहे",
+    "body": "Pollis ची ही आवृत्ती आता समर्थित नाही. ते वापरत राहण्यासाठी अपडेट करा. तुमचे मेसेज आणि सेटिंग्ज या डिव्हाइसवरच राहतात.",
+    "versions": "इंस्टॉल केलेली {{version}} · आवश्यक {{minimum}} किंवा नंतरची",
+    "installed": "इंस्टॉल केलेली {{version}}",
+    "updateNow": "आत्ता अपडेट करा",
+    "updating": "अपडेट करत आहे…",
+    "download": "नवीनतम आवृत्ती डाउनलोड करा",
+    "updateFailed": "अपडेट पूर्ण झाले नाही. त्याऐवजी नवीनतम आवृत्ती डाउनलोड करा.",
+    "packageManager": "Pollis {{source}} ने इंस्टॉल केले होते. ते तिथेच अपडेट करा:",
+    "openAppStore": "App Store उघडा",
+    "openPlay": "Google Play उघडा",
+    "openTestflight": "TestFlight उघडा",
+    "openWebsite": "pollis.com उघडा",
+    "openFailed": "लिंक उघडता आली नाही. {{url}} वर जा",
+    "retry": "पुन्हा तपासा",
+    "checking": "तपासत आहे…"
+  },
+  "home": {
+    "groups": "ग्रुप",
+    "groupsDescription": "समुदाय, संस्था, टीम आणि अति-महत्त्वाकांक्षी ग्रुप चॅट",
+    "dms": "थेट मेसेज",
+    "dmsDescription": "व्यक्तींसोबत खाजगी, एंड-टू-एंड एन्क्रिप्ट केलेली संभाषणे",
+    "invites": "आमंत्रणे",
+    "noPendingInvites": "कोणतीही प्रलंबित आमंत्रणे नाहीत",
+    "pending_one": "{{count}} प्रलंबित",
+    "pending_other": "{{count}} प्रलंबित",
+    "join": "ग्रुपमध्ये सामील व्हा",
+    "joinDescription": "आमंत्रण लिंक किंवा सामील होण्याचा कोड वापरा",
+    "joinRequests": "सामील होण्याच्या विनंत्या",
+    "logout": "लॉग आउट करा",
+    "exit": "बाहेर पडा"
+  },
+  "titleBar": {
+    "minimize": "लहान करा",
+    "maximize": "मोठे करा"
+  },
+  "terminal": {
+    "shellFailed": "शेल सुरू करता आला नाही: {{error}}"
+  },
+  "pins": {
+    "heading": "पिन केलेले",
+    "empty": "अजून कोणतेही पिन केलेले मेसेज नाहीत.",
+    "unavailable": "या डिव्हाइसवर पिन अजून उपलब्ध नाहीत — संभाषण सिंक झाल्यावर ते दिसतील.",
+    "unpin": "अनपिन करा"
+  }
+}

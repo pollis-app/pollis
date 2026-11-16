@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "নতুন মেসেজ",
+    "requests": "অনুরোধ",
+    "blocked": "ব্লক করা ব্যবহারকারী",
+    "avatarAlt": "{{name}}-এর অবতার",
+    "settingsFor": "{{name}}-এর সেটিংস",
+    "verified": "যাচাই করা পরিচিতি",
+    "keyChanged": "পরিচয় কী বদলে গেছে — আবার যাচাই করুন"
+  },
+  "conversation": {
+    "fallbackTitle": "সরাসরি মেসেজ",
+    "viewProfile": "@{{name}}-এর প্রোফাইল দেখুন",
+    "call": "@{{name}}-কে কল করুন",
+    "returnToCall": "@{{name}}-এর সাথে কলে ফিরে যান",
+    "pinsLabel": "পিন করা মেসেজ"
+  },
+  "settings": {
+    "pageTitle": "কথোপকথনের সেটিংস",
+    "leave": "কথোপকথন ছেড়ে দিন",
+    "submitting": "ছেড়ে যাওয়া হচ্ছে…",
+    "leaveFailed": "কথোপকথন ছাড়া যায়নি",
+    "cancel": "বাতিল করুন (Esc)"
+  },
+  "start": {
+    "pageTitle": "নতুন মেসেজ",
+    "identifierLabel": "ইউজারনেম বা ইমেল",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "কথোপকথন শুরু করুন",
+    "submitting": "শুরু হচ্ছে…",
+    "identifierRequired": "ইউজারনেম বা ইমেল দিতে হবে",
+    "userNotFound": "ব্যবহারকারীকে পাওয়া যায়নি",
+    "startFailed": "কথোপকথন শুরু করা যায়নি"
+  },
+  "requests": {
+    "pageTitle": "মেসেজ অনুরোধ",
+    "empty": "কোনো অপেক্ষমাণ অনুরোধ নেই।",
+    "noMessageYet": "(এখনও কোনো মেসেজ নেই)",
+    "unknownSender": "অজানা",
+    "others_one": "(+আরও {{count}} জন)",
+    "others_other": "(+আরও {{count}} জন)",
+    "accept": "গ্রহণ করুন",
+    "block": "ব্লক করুন"
+  },
+  "blocked": {
+    "pageTitle": "ব্লক করা ব্যবহারকারী",
+    "empty": "কোনো ব্লক করা ব্যবহারকারী নেই।",
+    "unblock": "আনব্লক করুন"
+  },
+  "profile": {
+    "fallbackName": "ব্যবহারকারী",
+    "fallbackTitle": "প্রোফাইল",
+    "notFound": "ব্যবহারকারীকে পাওয়া যায়নি",
+    "avatarAlt": "{{name}}-এর অবতার",
+    "sendMessage": "মেসেজ পাঠান",
+    "block": "ব্লক করুন",
+    "safetyNumber": "নিরাপত্তা নম্বর",
+    "statusVerified": "যাচাই করা",
+    "statusChanged": "বদলে গেছে — আবার যাচাই করুন",
+    "statusUnverified": "যাচাই করা হয়নি",
+    "keyChangedWarning": "আপনি শেষবার যাচাই করার পর এই পরিচিতির পরিচয় কী বদলে গেছে। বিশ্বাস করার আগে অন্য কোনো মাধ্যমে নম্বরটি আবার মিলিয়ে দেখুন।",
+    "removeVerification": "যাচাই সরান",
+    "markVerified": "যাচাই করা হিসেবে চিহ্নিত করুন",
+    "report": "রিপোর্ট করুন"
+  },
+  "safety": {
+    "title": "আপনি ও {{name}}",
+    "verify": "নিরাপত্তা নম্বর যাচাই করুন",
+    "headingMany": "নিরাপত্তা নম্বর",
+    "shared": "আপনি আর {{name}} একই নম্বর দেখছেন। মাঝখানে কেউ নেই তা নিশ্চিত করতে সামনাসামনি বা কলে নম্বরটি মিলিয়ে দেখুন।",
+    "qrLabel": "{{name}}-এর সাথে আপনার নিরাপত্তা নম্বরের QR কোড",
+    "failed": "নিরাপত্তা নম্বর লোড করা যায়নি।"
+  },
+  "notify": {
+    "requestTitle": "নতুন কথোপকথন",
+    "requestBody": "{{name}} আপনার সাথে একটি কথোপকথন শুরু করেছেন"
+  }
+}

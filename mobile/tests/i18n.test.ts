@@ -14,6 +14,8 @@ import {
   normalizeLanguage,
   resolveDeviceLanguage,
   supportedLanguageCodes,
+  usesNastaliq,
+  dropsLetterSpacing,
 } from "../i18n/languages.ts";
 import { REGISTERED_CODE, SCRIPT_VARIANTS, matchLanguageTag } from "../i18n/languageTag.ts";
 import { NAMESPACES } from "../i18n/namespaces.ts";
@@ -87,7 +89,7 @@ test("script subtags: Punjabi follows its script, everything else its base tag, 
   ] as const) {
     assert.equal(matchLanguageTag(tag, codes), want, tag);
   }
-  assert.equal(matchLanguageTag("pa-PK", [...supportedLanguageCodes(), "pa-Guru"]), null);
+  assert.equal(matchLanguageTag("pa-PK", [...supportedLanguageCodes().filter((c) => c !== "pa-Arab"), "pa-Guru"]), null);
   for (const stored of ["en", "es", "uk", "fr", "ru", "zh", "ar"]) {
     assert.equal(normalizeLanguage(stored), stored);
   }
@@ -107,6 +109,24 @@ test("direction is rtl only for the Arabic-script locale", () => {
   assert.equal(languageDirection("nope"), "ltr");
 });
 
+test("only the Nastaliq languages get the taller type line heights (#1726)", () => {
+  assert.equal(usesNastaliq("ur"), true);
+  assert.equal(usesNastaliq("pa-Arab"), true);
+  // Pashto and Arabic are Naskh, which fits the Latin-sized steps.
+  for (const code of ["ps", "ar", "pa-Guru", "hi", "en", null]) {
+    assert.equal(usesNastaliq(code), false, String(code));
+  }
+});
+
+test("Arabic-script and Indic languages drop Latin letter-spacing (#1726)", () => {
+  for (const code of ["ar", "ur", "pa-Arab", "ps", "hi", "mr", "bn", "te", "ta", "pa-Guru"]) {
+    assert.equal(dropsLetterSpacing(code), true, code);
+  }
+  for (const code of ["en", "es", "ru", "zh", "ja", "ko", null]) {
+    assert.equal(dropsLetterSpacing(code), false, String(code));
+  }
+});
+
 test("localeUpperCase uses the language's own casing", () => {
   assert.equal(localeUpperCase("istanbul", "tr"), "İSTANBUL");
   assert.equal(localeUpperCase("preferences", "en"), "PREFERENCES");
@@ -116,4 +136,16 @@ test("storage keys are SecureStore-safe and user-scoped", () => {
   assert.equal(languageKey(null), "pollis-language.device");
   assert.match(languageKey("user:with/odd chars"), /^pollis-language\.user\.[A-Za-z0-9._-]+$/);
   assert.notEqual(languageKey("a"), languageKey("b"));
+});
+
+test("South Asian locales are auto-detected from OS tags (#1726)", () => {
+  assert.equal(resolveDeviceLanguage(["ur-PK"]), "ur");
+  assert.equal(resolveDeviceLanguage(["hi-IN"]), "hi");
+  assert.equal(resolveDeviceLanguage(["pa-PK"]), "pa-Arab");
+  assert.equal(resolveDeviceLanguage(["ps-AF"]), "ps");
+  assert.equal(resolveDeviceLanguage(["bn-BD"]), "bn");
+  assert.equal(resolveDeviceLanguage(["mr-IN"]), "mr");
+  assert.equal(resolveDeviceLanguage(["te-IN"]), "te");
+  assert.equal(resolveDeviceLanguage(["ta-LK"]), "ta");
+  assert.equal(resolveDeviceLanguage(["pa-IN"]), "pa-Guru");
 });

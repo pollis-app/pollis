@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "मागे",
+    "cancel": "रद्द करा",
+    "close": "बंद करा",
+    "copy": "कॉपी करा",
+    "copied": "कॉपी केले",
+    "copyFailed": "कॉपी करता आले नाही",
+    "delete": "हटवा",
+    "forward": "फॉरवर्ड करा",
+    "goBack": "मागे जा",
+    "moreOptions": "आणखी पर्याय",
+    "save": "सेव्ह करा"
+  },
+  "states": {
+    "buttonLoading": "लोड होत आहे...",
+    "loading": "लोड होत आहे…"
+  },
+  "time": {
+    "today": "आज",
+    "yesterday": "काल"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "स्पेस",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "उपस्थिती: {{status}}",
+    "offline": "ऑफलाइन",
+    "online": "ऑनलाइन"
+  },
+  "list": {
+    "empty": "कोणतेही आयटम नाहीत."
+  },
+  "grid": {
+    "empty": "इथे अजून कोणी नाही."
+  },
+  "menu": {
+    "escHint": "मागे जाण्यासाठी Esc",
+    "navigationLabel": "नेव्हिगेशन मेनू",
+    "navigateHint": "नेव्हिगेट करा",
+    "selectHint": "निवडण्यासाठी Enter"
+  },
+  "media": {
+    "mute": "म्यूट करा",
+    "pause": "थांबवा",
+    "play": "प्ले करा",
+    "seek": "ऑडिओ पुढे-मागे करा",
+    "skipBackward": "10 सेकंद मागे जा",
+    "skipForward": "10 सेकंद पुढे जा",
+    "unmute": "अनम्यूट करा",
+    "volume": "आवाज"
+  },
+  "composer": {
+    "addAttachment": "अटॅचमेंट जोडा",
+    "allMentionHint": "या चॅनेलमधील सर्वांना सूचना पाठवते",
+    "filePickerTitle": "फाइल जोडा",
+    "inputLabel": "मेसेज इनपुट",
+    "placeholder": "मेसेज टाइप करा…",
+    "previewAlt": "पूर्वावलोकन",
+    "removeAttachment": "{{name}} काढा",
+    "send": "मेसेज पाठवा",
+    "markSensitive": "{{name}} संवेदनशील म्हणून चिन्हांकित करा",
+    "unmarkSensitive": "{{name}} वरील संवेदनशील चिन्ह काढा"
+  },
+  "mentions": {
+    "listLabel": "उल्लेख सूचवणी",
+    "matching": "<hl>@{{query}}</hl> शी जुळणारे सदस्य"
+  },
+  "emojiSuggest": {
+    "listLabel": "इमोजी सूचवणी",
+    "matching": "<hl>:{{query}}</hl> शी जुळणारे इमोजी"
+  },
+  "a11y": {
+    "avatar": "अवतार",
+    "loading": "लोड होत आहे",
+    "otpDigit": "OTP अंक {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} से.",
+    "seconds_other": "{{count}} से.",
+    "minutes_one": "{{count}} मि.",
+    "minutes_other": "{{count}} मि.",
+    "hours_one": "{{count}} ता.",
+    "hours_other": "{{count}} ता.",
+    "days_one": "{{count}} दि.",
+    "days_other": "{{count}} दि.",
+    "weeks_one": "{{count}} आ.",
+    "weeks_other": "{{count}} आ.",
+    "months_one": "{{count}} म.",
+    "months_other": "{{count}} म.",
+    "years_one": "{{count}} व.",
+    "years_other": "{{count}} व."
+  },
+  "tray": {
+    "open": "Pollis उघडा",
+    "muteMic": "माइक म्यूट करा",
+    "unmuteMic": "माइक अनम्यूट करा",
+    "muteMicIdle": "माइक म्यूट करा (कॉलमध्ये नाही)",
+    "version": "आवृत्ती {{version}}",
+    "quit": "Pollis मधून बाहेर पडा",
+    "unread_one": "Pollis — {{count}} न वाचलेला",
+    "unread_other": "Pollis — {{count}} न वाचलेले"
+  }
+}

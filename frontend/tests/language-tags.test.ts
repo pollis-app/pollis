@@ -31,9 +31,12 @@ test("Punjabi resolves to the script its readers use", () => {
 });
 
 test("a reader is never handed the other script", () => {
-  assert.equal(matchLanguageTag("pa-PK", [...supportedLanguageCodes(), "pa-Guru"]), null);
-  assert.equal(matchLanguageTag("pa-Arab", [...supportedLanguageCodes(), "pa-Guru"]), null);
-  assert.equal(matchLanguageTag("pa-IN", [...supportedLanguageCodes(), "pa-Arab"]), null);
+  // Only the other script registered: the registry minus this script, plus the other one.
+  const onlyGuru = [...supportedLanguageCodes().filter((c) => c !== "pa-Arab"), "pa-Guru"];
+  const onlyArab = [...supportedLanguageCodes().filter((c) => c !== "pa-Guru"), "pa-Arab"];
+  assert.equal(matchLanguageTag("pa-PK", onlyGuru), null);
+  assert.equal(matchLanguageTag("pa-Arab", onlyGuru), null);
+  assert.equal(matchLanguageTag("pa-IN", onlyArab), null);
 });
 
 test("every other language keeps the base-tag rule", () => {
@@ -86,4 +89,16 @@ test("registered codes have the shape i18next keeps, and script codes are declar
       assert.equal(Intl.getCanonicalLocales(`${base}-${script}`)[0], `${base}-${script}`);
     }
   }
+});
+
+test("South Asian locales are auto-detected from OS tags (#1726)", () => {
+  assert.equal(normalizeLanguage("ur-PK"), "ur");
+  assert.equal(normalizeLanguage("hi-IN"), "hi");
+  assert.equal(normalizeLanguage("pa-PK"), "pa-Arab");
+  assert.equal(normalizeLanguage("ps-AF"), "ps");
+  assert.equal(normalizeLanguage("bn-BD"), "bn");
+  assert.equal(normalizeLanguage("mr-IN"), "mr");
+  assert.equal(normalizeLanguage("te-IN"), "te");
+  assert.equal(normalizeLanguage("ta-LK"), "ta");
+  assert.equal(normalizeLanguage("pa-IN"), "pa-Guru");
 });

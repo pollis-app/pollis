@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "ইমোজি পিকার",
+    "triggerLabel": "ইমোজি",
+    "searchLabel": "সার্চ",
+    "searchPlaceholder": "ইমোজি সার্চ করুন",
+    "resultsFor": "\"{{query}}\"-এর ফলাফল",
+    "recent": "প্রায়ই ব্যবহৃত",
+    "custom": "কাস্টম",
+    "empty": "এর সাথে মেলে এমন কোনো ইমোজি নেই।",
+    "previewHint": "একটি ইমোজি বেছে নিন",
+    "railLabel": "ইমোজি বিভাগ"
+  },
+  "categories": {
+    "people": "মানুষ",
+    "nature": "প্রকৃতি",
+    "food": "খাবার",
+    "activity": "অ্যাক্টিভিটি",
+    "travel": "ভ্রমণ",
+    "objects": "বস্তু",
+    "symbols": "চিহ্ন",
+    "flags": "পতাকা"
+  },
+  "skinTone": {
+    "groupLabel": "ত্বকের রং",
+    "default": "ডিফল্ট ত্বকের রং",
+    "numbered": "ত্বকের রং {{index}}"
+  },
+  "manage": {
+    "title": "কাস্টম ইমোজি",
+    "signInRequired": "অনুগ্রহ করে সাইন ইন করুন",
+    "dropPrompt": "এখানে একটি ছবি টেনে আনুন, বা ব্রাউজ করতে ক্লিক করুন",
+    "dropNow": "এই ছবি ব্যবহার করতে ছেড়ে দিন",
+    "dropHint": "{{formats}} · অ্যানিমেটেড GIF-এর অ্যানিমেশন থেকে যায়",
+    "replaceHint": "বদলাতে অন্য একটি ছবি ছেড়ে দিন, বা ক্লিক করুন",
+    "sourceSize": "মূল ফাইল {{size}} · আপলোডের সময় 48 KB-র কমে রি-এনকোড করা হবে",
+    "reencodeNote": "আপলোডের সময় 48 KB-র কমে রি-এনকোড করা হবে",
+    "fileTooLarge": "ছবিটি {{size}}-এর বেশি — আরও ছোট একটি ফাইল বেছে নিন",
+    "unsupportedFile": "{{name}} কোনো PNG, JPEG, GIF বা WebP ফাইল নয়",
+    "shortcodeLabel": "শর্টকোড",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": ":shortcode: হিসেবে টাইপ করা হয় — a–z, 0–9 এবং _",
+    "shortcodeRequired": "যোগ করতে এই ইমোজির একটি নাম দিন",
+    "shortcodeInvalid": "2–32টি অক্ষর ব্যবহার করুন: a–z, 0–9 এবং _",
+    "shortcodeTaken": ":{{shortcode}}: এই গ্রুপে আগে থেকেই ব্যবহৃত হচ্ছে",
+    "samplePlaceholder": "মেসেজে এটি কেমন দেখাবে",
+    "add": "ইমোজি যোগ করুন",
+    "shrinking": "ছোট করা হচ্ছে…",
+    "filePickerTitle": "ইমোজির জন্য একটি ছবি বেছে নিন",
+    "imageFilterName": "ছবি",
+    "addFailed": "ইমোজিটি যোগ করা যায়নি",
+    "removeFailed": "ইমোজিটি সরানো যায়নি",
+    "storageNote": "আপলোডের আগে ছবিগুলি 48 KB-র কমে রি-এনকোড করা হয়, তাই বড় মূল ফাইলেও সমস্যা নেই। একই ছবি যত গ্রুপই ব্যবহার করুক, সেটি একবারই সংরক্ষিত থাকে। এই গ্রুপে কতগুলি ইমোজি রাখা যাবে তার কোনো সীমা নেই।",
+    "stored_one": "{{count}}টি ইমোজি · {{size}} সংরক্ষিত",
+    "stored_other": "{{count}}টি ইমোজি · {{size}} সংরক্ষিত",
+    "empty": "এখনও কোনো কাস্টম ইমোজি নেই। গ্রুপের যে কেউ যোগ করতে পারেন।",
+    "sizeAnimated": "অ্যানিমেটেড · {{size}}",
+    "remove": ":{{shortcode}}: সরান",
+    "removeAdminsOnly": "শুধু গ্রুপ অ্যাডমিনরাই ইমোজি সরাতে পারেন।"
+  }
+}

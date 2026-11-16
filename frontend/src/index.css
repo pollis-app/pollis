@@ -214,6 +214,15 @@
   :root:lang(ps), :root:lang(fa) {
     --font-script: 'Geeza Pro', 'Segoe UI', 'Noto Naskh Arabic', 'Noto Sans Arabic', system-ui;
   }
+  /* Tracking is Latin typography (#1726). In the Indic scripts it pulls a
+     word's clusters apart (குழுக்கள் read as கு ழு க் க ள்), and in
+     Arabic-script text it breaks the joins, so the tracked label styles drop
+     it under those languages. Inline letter-spacing on Latin codes (the
+     enrollment code, the Secret Key) is left alone. */
+  :root:is(:lang(ar), :lang(ur), :lang(pa), :lang(ps), :lang(fa), :lang(hi), :lang(mr), :lang(ne), :lang(bn), :lang(ta), :lang(te))
+    :is(.section-label, .tracking-wide, .tracking-wider, .tracking-widest, [class*="tracking-["]) {
+    letter-spacing: normal;
+  }
   :root:lang(am), :root:lang(ti) {
     --font-script: 'Kefa', 'Ebrima', 'Nyala', 'Noto Sans Ethiopic', system-ui;
   }

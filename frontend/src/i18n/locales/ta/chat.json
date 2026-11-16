@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "{{name}}-இடமிருந்து செய்தி",
+    "unknownAuthor": "தெரியாதவர்",
+    "deleted": "[நீக்கப்பட்டது]",
+    "encrypted": "[மறைகுறியாக்கப்பட்டது]",
+    "redacted": "[மறைக்கப்பட்டது]",
+    "edited": "(திருத்தப்பட்டது)",
+    "editUnsent": "(திருத்தம் அனுப்பப்படவில்லை)",
+    "newMember": "புதியவர்",
+    "newMemberTitle": "கடந்த 7 நாட்களில் சேர்ந்தவர்",
+    "undecryptable": {
+      "tag": "மறைவிலக்க முடியாதது",
+      "title": "மறைவிலக்க முடியவில்லை",
+      "body_one": "இந்தச் சாதனத்தில் இந்தச் செய்தியை மறைவிலக்க முடியவில்லை.",
+      "body_other": "இந்தச் சாதனத்தில் {{count}} செய்திகளை மறைவிலக்க முடியவில்லை.",
+      "detail": "இங்கே ஏதோ அனுப்பப்பட்டது, ஆனால் இந்தச் சாதனத்தால் அதைப் படிக்க முடியவில்லை. உங்கள் பிற சாதனங்களில் அது இன்னும் இருக்கலாம்.",
+      "diagnostics": "கண்டறிதல் தகவலைப் பார்"
+    }
+  },
+  "status": {
+    "pending": "நிலுவையில்",
+    "sending": "அனுப்புகிறது",
+    "sent": "அனுப்பப்பட்டது",
+    "failed": "தோல்வி",
+    "cancelled": "ரத்துசெய்யப்பட்டது"
+  },
+  "outbox": {
+    "retry": "மீண்டும் முயல்க",
+    "discard": "நிராகரி",
+    "retryLabel": "இந்தச் செய்தியை அனுப்ப மீண்டும் முயல்க",
+    "discardLabel": "அனுப்பப்படாத இந்தச் செய்தியை நிராகரி",
+    "notSent": "அனுப்பப்படவில்லை",
+    "willResend": "Pollis மீண்டும் இணைந்ததும் இது தானாக அனுப்பப்படும்.",
+    "notDelivered": "இந்தச் செய்தியை வழங்க முடியவில்லை."
+  },
+  "actions": {
+    "reply": "பதிலளி",
+    "replyInThread": "இழையில் பதிலளி",
+    "save": "செய்தியைச் சேமி",
+    "removeBookmark": "புக்மார்க்கை அகற்று",
+    "copyLink": "செய்திக்கான இணைப்பை நகலெடு",
+    "copyLinkCopied": "இணைப்பு நகலெடுக்கப்பட்டது",
+    "copyLinkFailed": "இணைப்பை நகலெடுக்க முடியவில்லை",
+    "edit": "செய்தியைத் திருத்து",
+    "delete": "செய்தியை நீக்கு",
+    "deleteAsAdmin": "செய்தியை நீக்கு (நிர்வாகி)",
+    "more": "மேலும் செயல்கள்",
+    "pin": "செய்தியைப் பின் செய்",
+    "unpin": "செய்தியின் பின்னை அகற்று",
+    "report": "புகாரளி"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} பதில்",
+    "replyCount_other": "{{count}} பதில்கள்"
+  },
+  "receipts": {
+    "readByEveryone": "அனைவரும் படித்தனர்",
+    "readByCount_one": "{{total}} பேரில் {{count}} பேர் படித்தனர்",
+    "readByCount_other": "{{total}} பேரில் {{count}} பேர் படித்தனர்",
+    "deliveredCount_one": "{{total}} பேரில் {{count}} பேருக்கு வழங்கப்பட்டது",
+    "deliveredCount_other": "{{total}} பேரில் {{count}} பேருக்கு வழங்கப்பட்டது"
+  },
+  "list": {
+    "empty": "இன்னும் செய்திகள் இல்லை. உரையாடலைத் தொடங்குங்கள்.",
+    "unknownAuthor": "தெரியாதவர்",
+    "blockedAuthor": "தடுக்கப்பட்ட பயனர்",
+    "blockedBody": "[தடுக்கப்பட்டது]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name>-க்குப் பதிலளிக்கிறீர்கள்",
+    "scrollToMessage": "பதிலளித்த செய்திக்குச் செல்",
+    "dismiss": "பதிலை நிராகரி",
+    "encrypted": "[மறைகுறியாக்கப்பட்ட செய்தி]"
+  },
+  "queue": {
+    "heading": "வரிசை",
+    "pendingPlaceholder": "[நிலுவையில் உள்ள செய்தி]",
+    "cancel": "செய்தியை ரத்துசெய்",
+    "retry": "மீண்டும் முயல்க",
+    "failedCount_one": "தோல்வி ×{{count}}",
+    "failedCount_other": "தோல்வி ×{{count}}"
+  },
+  "reactions": {
+    "add": "எதிர்வினையைச் சேர்",
+    "all": "அனைத்தும்",
+    "allTabLabel_one": "அனைத்தும், {{count}} எதிர்வினை",
+    "allTabLabel_other": "அனைத்தும், {{count}} எதிர்வினைகள்",
+    "contextHint": "யார் எதிர்வினையாற்றினர் எனப் பார்க்க வலது கிளிக் செய்யவும்",
+    "hoverMore_one": "{{names}} மற்றும் இன்னும் {{count}} பேர் {{emoji}} மூலம் எதிர்வினையாற்றினர்",
+    "hoverMore_other": "{{names}} மற்றும் இன்னும் {{count}} பேர் {{emoji}} மூலம் எதிர்வினையாற்றினர்",
+    "hoverNames": "{{names}} {{emoji}} மூலம் எதிர்வினையாற்றினர்",
+    "pillLabel_one": "{{emoji}} {{count}} எதிர்வினை",
+    "pillLabel_other": "{{emoji}} {{count}} எதிர்வினைகள்",
+    "rowLabel": "{{name}}, {{emojis}} மூலம் எதிர்வினையாற்றினார்",
+    "selfName": "{{name}} (நீங்கள்)",
+    "sheetTitle": "எதிர்வினைகள்",
+    "tabLabel_one": "{{emoji}}, {{count}} எதிர்வினை",
+    "tabLabel_other": "{{emoji}}, {{count}} எதிர்வினைகள்",
+    "unknownUser": "தெரியாத பயனர்",
+    "viewWho": "எதிர்வினைகளைக் காட்டு",
+    "you": "நீங்கள்"
+  },
+  "preview": {
+    "noMessages": "இன்னும் செய்திகள் இல்லை",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} இணைப்பு]",
+    "attachments_other": "[{{count}} இணைப்புகள்]",
+    "undecryptable": "இந்தச் சாதனத்தில் ஒரு செய்தியை மறைவிலக்க முடியவில்லை"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}}-ஐக் காட்டு",
+    "openLabel": "{{filename}}-ஐத் திற",
+    "downloadLabel": "{{filename}}-ஐப் பதிவிறக்கு",
+    "loading": "ஏற்றுகிறது…",
+    "error": "பிழை",
+    "failedToLoad": "ஏற்ற முடியவில்லை",
+    "failedToDownload": "பதிவிறக்க முடியவில்லை",
+    "lightboxFetch": "பெறு",
+    "lightboxDone": "[ முடிந்தது ]",
+    "lightboxDownload": "[பதிவிறக்கு]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "உணர்திறன் மிக்க மீடியாவைக் காட்டு: {{filename}}",
+    "sensitiveHide": "{{filename}}-ஐ மறை"
+  },
+  "unfurl": {
+    "loadImage": "படத்தை ஏற்று",
+    "loadVideo": "வீடியோவை ஏற்று",
+    "loadTitle": "{{url}}-இலிருந்து மீடியாவை ஏற்று — இது அந்தத் தளத்தை நேரடியாகத் தொடர்புகொள்ளும்",
+    "loadDescription": "{{url}}-இலிருந்து மீடியாவை ஏற்று. இது அந்தத் தளத்தை நேரடியாகத் தொடர்புகொண்டு உங்கள் IP முகவரியை அதற்கு வெளிப்படுத்தும்.",
+    "openLabel": "{{url}}-ஐத் திற"
+  },
+  "notify": {
+    "newMessageTitle": "புதிய செய்தி",
+    "newMessageBody": "{{name}}: புதிய செய்தி",
+    "mentionTitle": "புதிய குறிப்பிடல்",
+    "allMentionBody": "{{name}} @all-ஐக் குறிப்பிட்டார்",
+    "userMentionBody": "{{name}} உங்களைக் குறிப்பிட்டார்"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "இவர்",
+    "titleMessage": "செய்தி குறித்துப் புகாரளி",
+    "titleUser": "{{name}} குறித்துப் புகாரளி",
+    "intro": "Pollis-க்குக் கணக்கும் காரணமும் கிடைக்கும். செய்திகள் மறைகுறியாக்கப்பட்டே இருப்பதால், என்ன பேசப்பட்டது என்பதை நாங்கள் ஒருபோதும் பார்க்க மாட்டோம்.",
+    "reasonLabel": "காரணம்",
+    "reason": {
+      "spam": "ஸ்பேம்",
+      "harassment": "துன்புறுத்தல் அல்லது அச்சுறுத்தல்",
+      "illegal": "சட்டவிரோத உள்ளடக்கம்",
+      "other": "வேறு ஏதாவது"
+    },
+    "submit": "புகாரளி",
+    "submitAndBlock": "புகாரளித்துத் தடு",
+    "failed": "புகாரை அனுப்ப முடியவில்லை. மீண்டும் முயலவும்.",
+    "doneTitle": "புகார் அனுப்பப்பட்டது",
+    "done": "நன்றி. ஒவ்வொரு புகாரையும் நாங்கள் மதிப்பாய்வு செய்கிறோம்.",
+    "doneBlocked": "நன்றி. ஒவ்வொரு புகாரையும் நாங்கள் மதிப்பாய்வு செய்கிறோம். நீங்கள் {{name}}-ஐயும் தடுத்துவிட்டீர்கள்.",
+    "close": "முடிந்தது"
+  },
+  "keyChange": {
+    "notice": "{{name}} உடனான உங்கள் பாதுகாப்பு எண் மாறியுள்ளது.",
+    "verify": "சரிபார்",
+    "defaultName": "இந்தத் தொடர்பு"
+  },
+  "typing": {
+    "one": "{{name}} தட்டச்சு செய்கிறார்…",
+    "two": "{{first}}, {{second}} தட்டச்சு செய்கின்றனர்…",
+    "several_one": "{{count}} நபர் தட்டச்சு செய்கிறார்…",
+    "several_other": "{{count}} பேர் தட்டச்சு செய்கின்றனர்…"
+  }
+}

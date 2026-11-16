@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "آرکېډ"
+  },
+  "hud": {
+    "score": "نمرې  {{score}}",
+    "time": "وخت   {{time}}",
+    "gameOver": "لوبه پای ته ورسېده",
+    "final_one": "وروستۍ {{count}} نمره · {{time}}",
+    "final_other": "وروستۍ {{count}} نمرې · {{time}}",
+    "restartHint": "د بیا پیلولو لپاره R کېکاږئ · د وتلو لپاره Esc",
+    "controls": "WASD حرکت · موږک موخه · کلیک/Space ډزې · Esc وتل"
+  }
+}

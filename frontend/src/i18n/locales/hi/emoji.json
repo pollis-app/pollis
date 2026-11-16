@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "इमोजी पिकर",
+    "triggerLabel": "इमोजी",
+    "searchLabel": "खोजें",
+    "searchPlaceholder": "इमोजी खोजें",
+    "resultsFor": "\"{{query}}\" के नतीजे",
+    "recent": "अक्सर इस्तेमाल किए गए",
+    "custom": "कस्टम",
+    "empty": "कोई इमोजी मेल नहीं खाता।",
+    "previewHint": "कोई इमोजी चुनें",
+    "railLabel": "इमोजी की कैटगरी"
+  },
+  "categories": {
+    "people": "लोग",
+    "nature": "प्रकृति",
+    "food": "खाना",
+    "activity": "गतिविधियां",
+    "travel": "यात्रा",
+    "objects": "चीज़ें",
+    "symbols": "चिह्न",
+    "flags": "झंडे"
+  },
+  "skinTone": {
+    "groupLabel": "त्वचा का रंग",
+    "default": "डिफ़ॉल्ट त्वचा का रंग",
+    "numbered": "त्वचा का रंग {{index}}"
+  },
+  "manage": {
+    "title": "कस्टम इमोजी",
+    "signInRequired": "कृपया साइन इन करें",
+    "dropPrompt": "कोई इमेज यहां खींचकर लाएं, या ब्राउज़ करने के लिए क्लिक करें",
+    "dropNow": "इस इमेज का इस्तेमाल करने के लिए छोड़ें",
+    "dropHint": "{{formats}} · एनिमेटेड GIF का एनिमेशन बना रहता है",
+    "replaceHint": "इसे बदलने के लिए दूसरी इमेज छोड़ें या क्लिक करें",
+    "sourceSize": "{{size}} सोर्स · अपलोड पर 48 KB से कम में री-एन्कोड होगी",
+    "reencodeNote": "अपलोड पर 48 KB से कम में री-एन्कोड होगी",
+    "fileTooLarge": "यह इमेज {{size}} से बड़ी है — कोई छोटी सोर्स फ़ाइल चुनें",
+    "unsupportedFile": "{{name}} PNG, JPEG, GIF या WebP नहीं है",
+    "shortcodeLabel": "शॉर्टकोड",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": ":shortcode: की तरह लिखा जाता है — a–z, 0–9 और _",
+    "shortcodeRequired": "इस इमोजी को जोड़ने के लिए इसे नाम दें",
+    "shortcodeInvalid": "2–32 कैरेक्टर इस्तेमाल करें: a–z, 0–9 और _",
+    "shortcodeTaken": ":{{shortcode}}: इस ग्रुप में पहले से इस्तेमाल हो रहा है",
+    "samplePlaceholder": "मैसेज में यह कैसा दिखेगा",
+    "add": "इमोजी जोड़ें",
+    "shrinking": "छोटा किया जा रहा है…",
+    "filePickerTitle": "इमोजी के लिए इमेज चुनें",
+    "imageFilterName": "इमेज",
+    "addFailed": "यह इमोजी नहीं जोड़ा जा सका",
+    "removeFailed": "यह इमोजी नहीं हटाया जा सका",
+    "storageNote": "अपलोड से पहले इमेज 48 KB से कम में री-एन्कोड की जाती हैं, इसलिए बड़ी सोर्स फ़ाइल से कोई दिक्कत नहीं। एक जैसी इमेज की एक ही कॉपी स्टोर होती है, चाहे कितने भी ग्रुप उसका इस्तेमाल करें। इस ग्रुप में इमोजी की संख्या की कोई सीमा नहीं है।",
+    "stored_one": "{{count}} इमोजी · {{size}} स्टोर",
+    "stored_other": "{{count}} इमोजी · {{size}} स्टोर",
+    "empty": "अभी कोई कस्टम इमोजी नहीं है। ग्रुप में कोई भी इमोजी जोड़ सकता है।",
+    "sizeAnimated": "एनिमेटेड · {{size}}",
+    "remove": ":{{shortcode}}: हटाएं",
+    "removeAdminsOnly": "सिर्फ़ ग्रुप एडमिन ही इमोजी हटा सकते हैं।"
+  }
+}

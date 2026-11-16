@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "ਇਮੋਜੀ ਚੋਣਕਾਰ",
+    "triggerLabel": "ਇਮੋਜੀ",
+    "searchLabel": "ਖੋਜੋ",
+    "searchPlaceholder": "ਇਮੋਜੀ ਖੋਜੋ",
+    "resultsFor": "\"{{query}}\" ਲਈ ਨਤੀਜੇ",
+    "recent": "ਅਕਸਰ ਵਰਤੇ",
+    "custom": "ਕਸਟਮ",
+    "empty": "ਇਸ ਨਾਲ ਕੋਈ ਇਮੋਜੀ ਮੇਲ ਨਹੀਂ ਖਾਂਦਾ।",
+    "previewHint": "ਕੋਈ ਇਮੋਜੀ ਚੁਣੋ",
+    "railLabel": "ਇਮੋਜੀ ਸ਼੍ਰੇਣੀਆਂ"
+  },
+  "categories": {
+    "people": "ਲੋਕ",
+    "nature": "ਕੁਦਰਤ",
+    "food": "ਭੋਜਨ",
+    "activity": "ਗਤੀਵਿਧੀਆਂ",
+    "travel": "ਯਾਤਰਾ",
+    "objects": "ਵਸਤੂਆਂ",
+    "symbols": "ਚਿੰਨ੍ਹ",
+    "flags": "ਝੰਡੇ"
+  },
+  "skinTone": {
+    "groupLabel": "ਚਮੜੀ ਦਾ ਰੰਗ",
+    "default": "ਪੂਰਵ-ਨਿਰਧਾਰਤ ਚਮੜੀ ਦਾ ਰੰਗ",
+    "numbered": "ਚਮੜੀ ਦਾ ਰੰਗ {{index}}"
+  },
+  "manage": {
+    "title": "ਕਸਟਮ ਇਮੋਜੀ",
+    "signInRequired": "ਕਿਰਪਾ ਕਰਕੇ ਸਾਈਨ ਇਨ ਕਰੋ",
+    "dropPrompt": "ਤਸਵੀਰ ਇੱਥੇ ਖਿੱਚ ਕੇ ਲਿਆਓ, ਜਾਂ ਚੁਣਨ ਲਈ ਕਲਿੱਕ ਕਰੋ",
+    "dropNow": "ਇਹ ਤਸਵੀਰ ਵਰਤਣ ਲਈ ਛੱਡੋ",
+    "dropHint": "{{formats}} · ਐਨੀਮੇਟਡ GIF ਦੀ ਐਨੀਮੇਸ਼ਨ ਬਣੀ ਰਹਿੰਦੀ ਹੈ",
+    "replaceHint": "ਬਦਲਣ ਲਈ ਕੋਈ ਹੋਰ ਤਸਵੀਰ ਛੱਡੋ ਜਾਂ ਕਲਿੱਕ ਕਰੋ",
+    "sourceSize": "{{size}} ਮੂਲ ਫ਼ਾਈਲ · ਅੱਪਲੋਡ ਵੇਲੇ 48 KB ਤੋਂ ਘੱਟ ਵਿੱਚ ਦੁਬਾਰਾ ਐਨਕੋਡ ਕੀਤੀ ਜਾਂਦੀ ਹੈ",
+    "reencodeNote": "ਅੱਪਲੋਡ ਵੇਲੇ 48 KB ਤੋਂ ਘੱਟ ਵਿੱਚ ਦੁਬਾਰਾ ਐਨਕੋਡ ਕੀਤੀ ਜਾਂਦੀ ਹੈ",
+    "fileTooLarge": "ਇਹ ਤਸਵੀਰ {{size}} ਤੋਂ ਵੱਡੀ ਹੈ — ਕੋਈ ਛੋਟੀ ਮੂਲ ਫ਼ਾਈਲ ਚੁਣੋ",
+    "unsupportedFile": "{{name}} PNG, JPEG, GIF ਜਾਂ WebP ਨਹੀਂ ਹੈ",
+    "shortcodeLabel": "ਸ਼ਾਰਟਕੋਡ",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": ":shortcode: ਵਜੋਂ ਲਿਖਿਆ ਜਾਂਦਾ ਹੈ — a–z, 0–9 ਅਤੇ _",
+    "shortcodeRequired": "ਇਸ ਇਮੋਜੀ ਨੂੰ ਜੋੜਨ ਲਈ ਇਸਦਾ ਨਾਮ ਰੱਖੋ",
+    "shortcodeInvalid": "2–32 ਅੱਖਰ ਵਰਤੋ: a–z, 0–9 ਅਤੇ _",
+    "shortcodeTaken": ":{{shortcode}}: ਇਸ ਗਰੁੱਪ ਵਿੱਚ ਪਹਿਲਾਂ ਹੀ ਵਰਤਿਆ ਜਾ ਚੁੱਕਾ ਹੈ",
+    "samplePlaceholder": "ਸੁਨੇਹੇ ਵਿੱਚ ਇਹ ਕਿਵੇਂ ਦਿਸੇਗਾ",
+    "add": "ਇਮੋਜੀ ਜੋੜੋ",
+    "shrinking": "ਛੋਟਾ ਕੀਤਾ ਜਾ ਰਿਹਾ ਹੈ…",
+    "filePickerTitle": "ਇਮੋਜੀ ਲਈ ਤਸਵੀਰ ਚੁਣੋ",
+    "imageFilterName": "ਤਸਵੀਰਾਂ",
+    "addFailed": "ਉਹ ਇਮੋਜੀ ਜੋੜਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ",
+    "removeFailed": "ਉਹ ਇਮੋਜੀ ਹਟਾਇਆ ਨਹੀਂ ਜਾ ਸਕਿਆ",
+    "storageNote": "ਅੱਪਲੋਡ ਤੋਂ ਪਹਿਲਾਂ ਤਸਵੀਰਾਂ 48 KB ਤੋਂ ਘੱਟ ਵਿੱਚ ਦੁਬਾਰਾ ਐਨਕੋਡ ਕੀਤੀਆਂ ਜਾਂਦੀਆਂ ਹਨ, ਇਸ ਲਈ ਵੱਡੀ ਮੂਲ ਫ਼ਾਈਲ ਵੀ ਠੀਕ ਹੈ। ਇੱਕੋ ਜਿਹੀਆਂ ਤਸਵੀਰਾਂ ਉਹਨਾਂ ਨੂੰ ਵਰਤਣ ਵਾਲੇ ਹਰ ਗਰੁੱਪ ਵਿੱਚ ਇੱਕੋ ਸਟੋਰ ਕੀਤੀ ਕਾਪੀ ਸਾਂਝੀ ਕਰਦੀਆਂ ਹਨ। ਇਹ ਗਰੁੱਪ ਜਿੰਨੇ ਮਰਜ਼ੀ ਇਮੋਜੀ ਰੱਖ ਸਕਦਾ ਹੈ।",
+    "stored_one": "{{count}} ਇਮੋਜੀ · {{size}} ਸਟੋਰ ਕੀਤਾ",
+    "stored_other": "{{count}} ਇਮੋਜੀ · {{size}} ਸਟੋਰ ਕੀਤਾ",
+    "empty": "ਹਾਲੇ ਕੋਈ ਕਸਟਮ ਇਮੋਜੀ ਨਹੀਂ। ਗਰੁੱਪ ਵਿੱਚ ਕੋਈ ਵੀ ਇੱਕ ਜੋੜ ਸਕਦਾ ਹੈ।",
+    "sizeAnimated": "ਐਨੀਮੇਟਡ · {{size}}",
+    "remove": ":{{shortcode}}: ਹਟਾਓ",
+    "removeAdminsOnly": "ਸਿਰਫ਼ ਗਰੁੱਪ ਐਡਮਿਨ ਹੀ ਇਮੋਜੀ ਹਟਾ ਸਕਦੇ ਹਨ।"
+  }
+}

@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "{{name}} कडून मेसेज",
+    "unknownAuthor": "अज्ञात",
+    "deleted": "[हटवला]",
+    "encrypted": "[एन्क्रिप्ट केलेला]",
+    "redacted": "[लपवलेला]",
+    "edited": "(संपादित)",
+    "editUnsent": "(संपादन पाठवले नाही)",
+    "newMember": "नवीन",
+    "newMemberTitle": "मागील 7 दिवसांत सामील झाले",
+    "undecryptable": {
+      "tag": "डिक्रिप्ट न होणारा",
+      "title": "डिक्रिप्ट करता आला नाही",
+      "body_one": "{{count}} मेसेज या डिव्हाइसवर डिक्रिप्ट करता आला नाही.",
+      "body_other": "{{count}} मेसेज या डिव्हाइसवर डिक्रिप्ट करता आले नाहीत.",
+      "detail": "इथे काहीतरी पाठवले गेले, पण हे डिव्हाइस ते वाचू शकले नाही. तुमच्या इतर डिव्हाइसवर ते अजूनही असू शकते.",
+      "diagnostics": "डायग्नोस्टिक्स पहा"
+    }
+  },
+  "status": {
+    "pending": "प्रलंबित",
+    "sending": "पाठवत आहे",
+    "sent": "पाठवला",
+    "failed": "अयशस्वी",
+    "cancelled": "रद्द केला"
+  },
+  "outbox": {
+    "retry": "पुन्हा प्रयत्न करा",
+    "discard": "टाकून द्या",
+    "retryLabel": "हा मेसेज पुन्हा पाठवण्याचा प्रयत्न करा",
+    "discardLabel": "हा न पाठवलेला मेसेज टाकून द्या",
+    "notSent": "पाठवला नाही",
+    "willResend": "Pollis पुन्हा कनेक्ट झाल्यावर तो आपोआप पाठवला जाईल.",
+    "notDelivered": "हा मेसेज पोहोचवता आला नाही."
+  },
+  "actions": {
+    "reply": "उत्तर द्या",
+    "replyInThread": "थ्रेडमध्ये उत्तर द्या",
+    "save": "मेसेज सेव्ह करा",
+    "removeBookmark": "बुकमार्क काढा",
+    "copyLink": "मेसेजची लिंक कॉपी करा",
+    "copyLinkCopied": "लिंक कॉपी केली",
+    "copyLinkFailed": "लिंक कॉपी करता आली नाही",
+    "edit": "मेसेज संपादित करा",
+    "delete": "मेसेज हटवा",
+    "deleteAsAdmin": "मेसेज हटवा (ॲडमिन)",
+    "more": "आणखी क्रिया",
+    "pin": "मेसेज पिन करा",
+    "unpin": "मेसेज अनपिन करा",
+    "report": "तक्रार करा"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} उत्तर",
+    "replyCount_other": "{{count}} उत्तरे"
+  },
+  "receipts": {
+    "readByEveryone": "सर्वांनी वाचला",
+    "readByCount_one": "{{total}} पैकी {{count}} ने वाचला",
+    "readByCount_other": "{{total}} पैकी {{count}} जणांनी वाचला",
+    "deliveredCount_one": "{{total}} पैकी {{count}} ला पोहोचला",
+    "deliveredCount_other": "{{total}} पैकी {{count}} जणांना पोहोचला"
+  },
+  "list": {
+    "empty": "अजून कोणतेही मेसेज नाहीत. संभाषण सुरू करा.",
+    "unknownAuthor": "अज्ञात",
+    "blockedAuthor": "ब्लॉक केलेला वापरकर्ता",
+    "blockedBody": "[ब्लॉक केलेले]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name> यांना उत्तर देत आहे",
+    "scrollToMessage": "उत्तर दिलेल्या मेसेजवर जा",
+    "dismiss": "उत्तर रद्द करा",
+    "encrypted": "[एन्क्रिप्ट केलेला मेसेज]"
+  },
+  "queue": {
+    "heading": "रांग",
+    "pendingPlaceholder": "[प्रलंबित मेसेज]",
+    "cancel": "मेसेज रद्द करा",
+    "retry": "पुन्हा प्रयत्न करा",
+    "failedCount_one": "अयशस्वी ×{{count}}",
+    "failedCount_other": "अयशस्वी ×{{count}}"
+  },
+  "reactions": {
+    "add": "प्रतिक्रिया जोडा",
+    "all": "सर्व",
+    "allTabLabel_one": "सर्व, {{count}} प्रतिक्रिया",
+    "allTabLabel_other": "सर्व, {{count}} प्रतिक्रिया",
+    "contextHint": "कोणी प्रतिक्रिया दिली हे पाहण्यासाठी राइट-क्लिक करा",
+    "hoverMore_one": "{{names}} आणि आणखी {{count}} जणांनी {{emoji}} ने प्रतिक्रिया दिली",
+    "hoverMore_other": "{{names}} आणि आणखी {{count}} जणांनी {{emoji}} ने प्रतिक्रिया दिली",
+    "hoverNames": "{{names}} यांनी {{emoji}} ने प्रतिक्रिया दिली",
+    "pillLabel_one": "{{emoji}} {{count}} प्रतिक्रिया",
+    "pillLabel_other": "{{emoji}} {{count}} प्रतिक्रिया",
+    "rowLabel": "{{name}}, {{emojis}} ने प्रतिक्रिया दिली",
+    "selfName": "{{name}} (तुम्ही)",
+    "sheetTitle": "प्रतिक्रिया",
+    "tabLabel_one": "{{emoji}}, {{count}} प्रतिक्रिया",
+    "tabLabel_other": "{{emoji}}, {{count}} प्रतिक्रिया",
+    "unknownUser": "अज्ञात वापरकर्ता",
+    "viewWho": "प्रतिक्रिया पहा",
+    "you": "तुम्ही"
+  },
+  "preview": {
+    "noMessages": "अजून कोणतेही मेसेज नाहीत",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} अटॅचमेंट]",
+    "attachments_other": "[{{count}} अटॅचमेंट]",
+    "undecryptable": "एक मेसेज या डिव्हाइसवर डिक्रिप्ट करता आला नाही"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} पहा",
+    "openLabel": "{{filename}} उघडा",
+    "downloadLabel": "{{filename}} डाउनलोड करा",
+    "loading": "लोड होत आहे…",
+    "error": "एरर",
+    "failedToLoad": "लोड करता आले नाही",
+    "failedToDownload": "डाउनलोड करता आले नाही",
+    "lightboxFetch": "मिळवा",
+    "lightboxDone": "[ पूर्ण झाले ]",
+    "lightboxDownload": "[डाउनलोड]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "संवेदनशील मीडिया दाखवा: {{filename}}",
+    "sensitiveHide": "{{filename}} लपवा"
+  },
+  "unfurl": {
+    "loadImage": "इमेज लोड करा",
+    "loadVideo": "व्हिडिओ लोड करा",
+    "loadTitle": "{{url}} वरून मीडिया लोड करा — यामुळे त्या साइटशी थेट संपर्क होतो",
+    "loadDescription": "{{url}} वरून मीडिया लोड करा. यामुळे त्या साइटशी थेट संपर्क होतो आणि तुमचा IP ॲड्रेस तिला दिसतो.",
+    "openLabel": "{{url}} उघडा"
+  },
+  "notify": {
+    "newMessageTitle": "नवीन मेसेज",
+    "newMessageBody": "{{name}}: नवीन मेसेज",
+    "mentionTitle": "नवीन उल्लेख",
+    "allMentionBody": "{{name}} यांनी @all चा उल्लेख केला",
+    "userMentionBody": "{{name}} यांनी तुमचा उल्लेख केला"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "ही व्यक्ती",
+    "titleMessage": "मेसेजची तक्रार करा",
+    "titleUser": "{{name}} यांची तक्रार करा",
+    "intro": "Pollis ला खाते आणि कारण मिळते. मेसेज एन्क्रिप्टच राहतात, त्यामुळे काय बोलले गेले हे आम्हाला कधीच दिसत नाही.",
+    "reasonLabel": "कारण",
+    "reason": {
+      "spam": "स्पॅम",
+      "harassment": "छळ किंवा धमक्या",
+      "illegal": "बेकायदेशीर मजकूर",
+      "other": "दुसरे काहीतरी"
+    },
+    "submit": "तक्रार करा",
+    "submitAndBlock": "तक्रार करा आणि ब्लॉक करा",
+    "failed": "तक्रार पाठवता आली नाही. पुन्हा प्रयत्न करा.",
+    "doneTitle": "तक्रार पाठवली",
+    "done": "धन्यवाद. आम्ही प्रत्येक तक्रारीचे पुनरावलोकन करतो.",
+    "doneBlocked": "धन्यवाद. आम्ही प्रत्येक तक्रारीचे पुनरावलोकन करतो. तुम्ही {{name}} यांना ब्लॉकही केले आहे.",
+    "close": "पूर्ण झाले"
+  },
+  "keyChange": {
+    "notice": "{{name}} सोबतचा तुमचा सुरक्षा क्रमांक बदलला आहे.",
+    "verify": "तो पडताळा",
+    "defaultName": "हा संपर्क"
+  },
+  "typing": {
+    "one": "{{name}} टाइप करत आहेत…",
+    "two": "{{first}} आणि {{second}} टाइप करत आहेत…",
+    "several_one": "{{count}} व्यक्ती टाइप करत आहे…",
+    "several_other": "{{count}} लोक टाइप करत आहेत…"
+  }
+}

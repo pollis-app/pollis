@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "ਆਰਕੇਡ"
+  },
+  "hud": {
+    "score": "ਸਕੋਰ  {{score}}",
+    "time": "ਸਮਾਂ   {{time}}",
+    "gameOver": "ਗੇਮ ਖ਼ਤਮ",
+    "final_one": "ਅੰਤਿਮ {{count}} ਅੰਕ · {{time}}",
+    "final_other": "ਅੰਤਿਮ {{count}} ਅੰਕ · {{time}}",
+    "restartHint": "ਦੁਬਾਰਾ ਸ਼ੁਰੂ ਕਰਨ ਲਈ R ਦਬਾਓ · ਬਾਹਰ ਜਾਣ ਲਈ Esc",
+    "controls": "WASD ਨਾਲ ਚੱਲੋ · ਮਾਊਸ ਨਾਲ ਨਿਸ਼ਾਨਾ · ਕਲਿੱਕ/ਸਪੇਸ ਨਾਲ ਫ਼ਾਇਰ · Esc ਨਾਲ ਬਾਹਰ"
+  }
+}

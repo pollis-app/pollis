@@ -22,6 +22,15 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "ar", label: "العربية", dir: "rtl" },
   { code: "ko", label: "한국어", dir: "ltr" },
   { code: "ja", label: "日本語", dir: "ltr" },
+  { code: "ur", label: "اردو", dir: "rtl" },
+  { code: "hi", label: "हिन्दी", dir: "ltr" },
+  { code: "pa-Arab", label: "پنجابی", dir: "rtl" },
+  { code: "ps", label: "پښتو", dir: "rtl" },
+  { code: "bn", label: "বাংলা", dir: "ltr" },
+  { code: "mr", label: "मराठी", dir: "ltr" },
+  { code: "te", label: "తెలుగు", dir: "ltr" },
+  { code: "ta", label: "தமிழ்", dir: "ltr" },
+  { code: "pa-Guru", label: "ਪੰਜਾਬੀ", dir: "ltr" },
 ];
 
 export function supportedLanguageCodes(): string[] {
@@ -34,6 +43,22 @@ export function languageOption(code: string): LanguageOption | undefined {
 
 function isSupportedLanguage(code: string | null | undefined): boolean {
   return !!code && SUPPORTED_LANGUAGES.some((l) => l.code === code);
+}
+
+// Languages written in Nastaliq, whose lines need far more height than Latin (#1726).
+const NASTALIQ_LANGUAGES: readonly string[] = ["ur", "pa-Arab"];
+
+/** True for a Nastaliq language; the desktop twin is `:lang(ur)` / `:lang(pa-Arab)` in frontend/src/index.css. */
+export function usesNastaliq(language: string | null | undefined): boolean {
+  return NASTALIQ_LANGUAGES.includes(language ?? "");
+}
+
+// Arabic-script and Indic languages, where Latin tracking breaks joins or pulls clusters apart (#1726).
+const UNTRACKED_LANGUAGES: readonly string[] = ["ar", "ur", "pa-Arab", "ps", "hi", "mr", "bn", "te", "ta", "pa-Guru"];
+
+/** True when type should drop its letter-spacing; the desktop twin is the `:lang()` rule in frontend/src/index.css. */
+export function dropsLetterSpacing(language: string | null | undefined): boolean {
+  return UNTRACKED_LANGUAGES.includes(language ?? "");
 }
 
 export function languageDirection(code: string | null | undefined): "ltr" | "rtl" {

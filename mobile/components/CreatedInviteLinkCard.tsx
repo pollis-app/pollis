@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
 import { Card, Button } from "./ui";
 import { Icon } from "./icons";
-import { semantic, type as ty, fonts, r, space } from "../theme/tokens";
+import { semantic, type as ty, fonts, r, space, scriptLineHeight } from "../theme/tokens";
 import { activeLocale } from "../i18n";
 import type { CreatedInviteLink } from "../hooks/queries";
 import { haptic } from "../lib/haptics";
@@ -68,7 +68,7 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
           {t("mobile:group.invite.linkCreated")}
         </Text>
       </View>
-      <Text style={[ty.secondary, { lineHeight: 20 }]}>{t("mobile:group.invite.linkOnce")}</Text>
+      <Text style={[ty.secondary, { lineHeight: scriptLineHeight(20, ty.secondary.fontSize) }]}>{t("mobile:group.invite.linkOnce")}</Text>
       <View
         style={{
           backgroundColor: semantic.panel,

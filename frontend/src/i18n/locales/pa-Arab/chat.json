@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "{{name}} ولوں سنیہا",
+    "unknownAuthor": "انجان",
+    "deleted": "[ڈیلیٹ ہو گیا]",
+    "encrypted": "[انکرپٹڈ]",
+    "redacted": "[لکایا گیا]",
+    "edited": "(ایڈٹ کیتا)",
+    "editUnsent": "(ایڈٹ نہیں گیا)",
+    "newMember": "نواں",
+    "newMemberTitle": "پچھلے 7 دناں وچ شامل ہویا",
+    "undecryptable": {
+      "tag": "ڈیکرپٹ نہیں ہو سکدا",
+      "title": "ڈیکرپٹ نہیں ہو سکیا",
+      "body_one": "{{count}} سنیہا ایس ڈیوائس تے ڈیکرپٹ نہیں ہو سکیا۔",
+      "body_other": "{{count}} سنیہے ایس ڈیوائس تے ڈیکرپٹ نہیں ہو سکے۔",
+      "detail": "ایتھے کجھ بھیجیا گیا سی، پر ایہہ ڈیوائس اوہنوں پڑھ نہیں سکی۔ ہو سکدا اے تہاڈیاں دوجیاں ڈیوائساں کول ایہہ ہووے۔",
+      "diagnostics": "ڈائیگناسٹکس ویکھو"
+    }
+  },
+  "status": {
+    "pending": "باقی",
+    "sending": "جا رہیا اے",
+    "sent": "چلا گیا",
+    "failed": "ناکام",
+    "cancelled": "کینسل"
+  },
+  "outbox": {
+    "retry": "فیر کوشش کرو",
+    "discard": "ہٹاؤ",
+    "retryLabel": "ایہہ سنیہا فیر بھیجن دی کوشش کرو",
+    "discardLabel": "ایہہ نہ گیا سنیہا ہٹاؤ",
+    "notSent": "نہیں گیا",
+    "willResend": "Pollis دوبارہ جڑن تے ایہہ آپے چلا جائے گا۔",
+    "notDelivered": "ایہہ سنیہا اپڑ نہیں سکیا۔"
+  },
+  "actions": {
+    "reply": "جواب دیو",
+    "replyInThread": "تھریڈ وچ جواب دیو",
+    "save": "سنیہا سیو کرو",
+    "removeBookmark": "بک مارک ہٹاؤ",
+    "copyLink": "سنیہے دا لنک کاپی کرو",
+    "copyLinkCopied": "لنک کاپی ہو گیا",
+    "copyLinkFailed": "لنک کاپی نہیں ہو سکیا",
+    "edit": "سنیہا ایڈٹ کرو",
+    "delete": "سنیہا ڈیلیٹ کرو",
+    "deleteAsAdmin": "سنیہا ڈیلیٹ کرو (ایڈمن)",
+    "more": "ہور کم",
+    "pin": "سنیہا پن کرو",
+    "unpin": "سنیہے توں پن ہٹاؤ",
+    "report": "رپورٹ کرو"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} جواب",
+    "replyCount_other": "{{count}} جواب"
+  },
+  "receipts": {
+    "readByEveryone": "سب نے پڑھ لیا",
+    "readByCount_one": "{{total}} وچوں {{count}} نے پڑھیا",
+    "readByCount_other": "{{total}} وچوں {{count}} نے پڑھیا",
+    "deliveredCount_one": "{{total}} وچوں {{count}} تیک اپڑیا",
+    "deliveredCount_other": "{{total}} وچوں {{count}} تیک اپڑیا"
+  },
+  "list": {
+    "empty": "حالے کوئی سنیہا نہیں۔ گل بات شروع کرو۔",
+    "unknownAuthor": "انجان",
+    "blockedAuthor": "بلاک کیتا یوزر",
+    "blockedBody": "[بلاک]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name> نوں جواب",
+    "scrollToMessage": "جس سنیہے دا جواب اے اوتھے جاؤ",
+    "dismiss": "جواب ہٹاؤ",
+    "encrypted": "[انکرپٹڈ سنیہا]"
+  },
+  "queue": {
+    "heading": "قطار",
+    "pendingPlaceholder": "[باقی سنیہا]",
+    "cancel": "سنیہا کینسل کرو",
+    "retry": "فیر کوشش",
+    "failedCount_one": "ناکام ×{{count}}",
+    "failedCount_other": "ناکام ×{{count}}"
+  },
+  "reactions": {
+    "add": "ردعمل لاؤ",
+    "all": "سارے",
+    "allTabLabel_one": "سارے، {{count}} ردعمل",
+    "allTabLabel_other": "سارے، {{count}} ردعمل",
+    "contextHint": "کس نے ردعمل دتا ویکھن لئی رائٹ کلک کرو",
+    "hoverMore_one": "{{names}} تے {{count}} ہور نے {{emoji}} نال ردعمل دتا",
+    "hoverMore_other": "{{names}} تے {{count}} ہور نے {{emoji}} نال ردعمل دتا",
+    "hoverNames": "{{names}} نے {{emoji}} نال ردعمل دتا",
+    "pillLabel_one": "{{emoji}} {{count}} ردعمل",
+    "pillLabel_other": "{{emoji}} {{count}} ردعمل",
+    "rowLabel": "{{name}}، {{emojis}} نال ردعمل دتا",
+    "selfName": "{{name}} (تسیں)",
+    "sheetTitle": "ردعمل",
+    "tabLabel_one": "{{emoji}}، {{count}} ردعمل",
+    "tabLabel_other": "{{emoji}}، {{count}} ردعمل",
+    "unknownUser": "انجان یوزر",
+    "viewWho": "ردعمل ویکھو",
+    "you": "تسیں"
+  },
+  "preview": {
+    "noMessages": "حالے کوئی سنیہا نہیں",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} اٹیچمنٹ]",
+    "attachments_other": "[{{count}} اٹیچمنٹاں]",
+    "undecryptable": "اک سنیہا ایس ڈیوائس تے ڈیکرپٹ نہیں ہو سکیا"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} ویکھو",
+    "openLabel": "{{filename}} کھولو",
+    "downloadLabel": "{{filename}} ڈاؤن لوڈ کرو",
+    "loading": "لوڈ ہو رہیا اے…",
+    "error": "غلطی",
+    "failedToLoad": "لوڈ نہیں ہو سکیا",
+    "failedToDownload": "ڈاؤن لوڈ نہیں ہو سکیا",
+    "lightboxFetch": "لیاؤ",
+    "lightboxDone": "[ ہو گیا ]",
+    "lightboxDownload": "[ڈاؤن لوڈ]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "حساس میڈیا وکھاؤ: {{filename}}",
+    "sensitiveHide": "{{filename}} لکاؤ"
+  },
+  "unfurl": {
+    "loadImage": "تصویر لوڈ کرو",
+    "loadVideo": "ویڈیو لوڈ کرو",
+    "loadTitle": "{{url}} توں میڈیا لوڈ کرو — ایہہ اوس سائٹ نال سدھا رابطہ کردا اے",
+    "loadDescription": "{{url}} توں میڈیا لوڈ کرو۔ ایہہ اوس سائٹ نال سدھا رابطہ کردا اے تے تہاڈا IP ایڈریس اوہنوں دس دیندا اے۔",
+    "openLabel": "{{url}} کھولو"
+  },
+  "notify": {
+    "newMessageTitle": "نواں سنیہا",
+    "newMessageBody": "{{name}}: نواں سنیہا",
+    "mentionTitle": "نواں مینشن",
+    "allMentionBody": "{{name}} نے ‎@all نوں مینشن کیتا",
+    "userMentionBody": "{{name}} نے تہانوں مینشن کیتا"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "ایس بندے",
+    "titleMessage": "سنیہا رپورٹ کرو",
+    "titleUser": "{{name}} نوں رپورٹ کرو",
+    "intro": "Pollis نوں اکاؤنٹ تے وجہ ملدی اے۔ سنیہے انکرپٹڈ رہندے نیں، ایس لئی اسیں کدی نہیں ویکھدے کہ کی کہیا گیا سی۔",
+    "reasonLabel": "وجہ",
+    "reason": {
+      "spam": "سپیم",
+      "harassment": "تنگ کرنا یا دھمکیاں",
+      "illegal": "غیر قانونی مواد",
+      "other": "کجھ ہور"
+    },
+    "submit": "رپورٹ کرو",
+    "submitAndBlock": "رپورٹ کرو تے بلاک کرو",
+    "failed": "رپورٹ نہیں جا سکی۔ فیر کوشش کرو۔",
+    "doneTitle": "رپورٹ چلی گئی",
+    "done": "شکریہ۔ اسیں ہر رپورٹ ویکھدے آں۔",
+    "doneBlocked": "شکریہ۔ اسیں ہر رپورٹ ویکھدے آں۔ تسیں {{name}} نوں بلاک وی کر دتا اے۔",
+    "close": "ہو گیا"
+  },
+  "keyChange": {
+    "notice": "{{name}} نال تہاڈا حفاظتی نمبر بدل گیا اے۔",
+    "verify": "تصدیق کرو",
+    "defaultName": "ایس رابطے"
+  },
+  "typing": {
+    "one": "{{name}} لکھ رہے نیں…",
+    "two": "{{first}} تے {{second}} لکھ رہے نیں…",
+    "several_one": "{{count}} بندہ لکھ رہیا اے…",
+    "several_other": "{{count}} لوک لکھ رہے نیں…"
+  }
+}

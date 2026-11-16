@@ -22,6 +22,21 @@ import ar_search from "../../frontend/src/i18n/locales/ar/search.json";
 import ar_settings from "../../frontend/src/i18n/locales/ar/settings.json";
 import ar_vault from "../../frontend/src/i18n/locales/ar/vault.json";
 import ar_voice from "../../frontend/src/i18n/locales/ar/voice.json";
+import bn_arcade from "../../frontend/src/i18n/locales/bn/arcade.json";
+import bn_auth from "../../frontend/src/i18n/locales/bn/auth.json";
+import bn_channels from "../../frontend/src/i18n/locales/bn/channels.json";
+import bn_chat from "../../frontend/src/i18n/locales/bn/chat.json";
+import bn_common from "../../frontend/src/i18n/locales/bn/common.json";
+import bn_dms from "../../frontend/src/i18n/locales/bn/dms.json";
+import bn_emoji from "../../frontend/src/i18n/locales/bn/emoji.json";
+import bn_errors from "../../frontend/src/i18n/locales/bn/errors.json";
+import bn_mobile from "../../frontend/src/i18n/locales/bn/mobile.json";
+import bn_nav from "../../frontend/src/i18n/locales/bn/nav.json";
+import bn_saved from "../../frontend/src/i18n/locales/bn/saved.json";
+import bn_search from "../../frontend/src/i18n/locales/bn/search.json";
+import bn_settings from "../../frontend/src/i18n/locales/bn/settings.json";
+import bn_vault from "../../frontend/src/i18n/locales/bn/vault.json";
+import bn_voice from "../../frontend/src/i18n/locales/bn/voice.json";
 import en_arcade from "../../frontend/src/i18n/locales/en/arcade.json";
 import en_auth from "../../frontend/src/i18n/locales/en/auth.json";
 import en_channels from "../../frontend/src/i18n/locales/en/channels.json";
@@ -67,6 +82,21 @@ import fr_search from "../../frontend/src/i18n/locales/fr/search.json";
 import fr_settings from "../../frontend/src/i18n/locales/fr/settings.json";
 import fr_vault from "../../frontend/src/i18n/locales/fr/vault.json";
 import fr_voice from "../../frontend/src/i18n/locales/fr/voice.json";
+import hi_arcade from "../../frontend/src/i18n/locales/hi/arcade.json";
+import hi_auth from "../../frontend/src/i18n/locales/hi/auth.json";
+import hi_channels from "../../frontend/src/i18n/locales/hi/channels.json";
+import hi_chat from "../../frontend/src/i18n/locales/hi/chat.json";
+import hi_common from "../../frontend/src/i18n/locales/hi/common.json";
+import hi_dms from "../../frontend/src/i18n/locales/hi/dms.json";
+import hi_emoji from "../../frontend/src/i18n/locales/hi/emoji.json";
+import hi_errors from "../../frontend/src/i18n/locales/hi/errors.json";
+import hi_mobile from "../../frontend/src/i18n/locales/hi/mobile.json";
+import hi_nav from "../../frontend/src/i18n/locales/hi/nav.json";
+import hi_saved from "../../frontend/src/i18n/locales/hi/saved.json";
+import hi_search from "../../frontend/src/i18n/locales/hi/search.json";
+import hi_settings from "../../frontend/src/i18n/locales/hi/settings.json";
+import hi_vault from "../../frontend/src/i18n/locales/hi/vault.json";
+import hi_voice from "../../frontend/src/i18n/locales/hi/voice.json";
 import ja_arcade from "../../frontend/src/i18n/locales/ja/arcade.json";
 import ja_auth from "../../frontend/src/i18n/locales/ja/auth.json";
 import ja_channels from "../../frontend/src/i18n/locales/ja/channels.json";
@@ -97,6 +127,66 @@ import ko_search from "../../frontend/src/i18n/locales/ko/search.json";
 import ko_settings from "../../frontend/src/i18n/locales/ko/settings.json";
 import ko_vault from "../../frontend/src/i18n/locales/ko/vault.json";
 import ko_voice from "../../frontend/src/i18n/locales/ko/voice.json";
+import mr_arcade from "../../frontend/src/i18n/locales/mr/arcade.json";
+import mr_auth from "../../frontend/src/i18n/locales/mr/auth.json";
+import mr_channels from "../../frontend/src/i18n/locales/mr/channels.json";
+import mr_chat from "../../frontend/src/i18n/locales/mr/chat.json";
+import mr_common from "../../frontend/src/i18n/locales/mr/common.json";
+import mr_dms from "../../frontend/src/i18n/locales/mr/dms.json";
+import mr_emoji from "../../frontend/src/i18n/locales/mr/emoji.json";
+import mr_errors from "../../frontend/src/i18n/locales/mr/errors.json";
+import mr_mobile from "../../frontend/src/i18n/locales/mr/mobile.json";
+import mr_nav from "../../frontend/src/i18n/locales/mr/nav.json";
+import mr_saved from "../../frontend/src/i18n/locales/mr/saved.json";
+import mr_search from "../../frontend/src/i18n/locales/mr/search.json";
+import mr_settings from "../../frontend/src/i18n/locales/mr/settings.json";
+import mr_vault from "../../frontend/src/i18n/locales/mr/vault.json";
+import mr_voice from "../../frontend/src/i18n/locales/mr/voice.json";
+import pa_Arab_arcade from "../../frontend/src/i18n/locales/pa-Arab/arcade.json";
+import pa_Arab_auth from "../../frontend/src/i18n/locales/pa-Arab/auth.json";
+import pa_Arab_channels from "../../frontend/src/i18n/locales/pa-Arab/channels.json";
+import pa_Arab_chat from "../../frontend/src/i18n/locales/pa-Arab/chat.json";
+import pa_Arab_common from "../../frontend/src/i18n/locales/pa-Arab/common.json";
+import pa_Arab_dms from "../../frontend/src/i18n/locales/pa-Arab/dms.json";
+import pa_Arab_emoji from "../../frontend/src/i18n/locales/pa-Arab/emoji.json";
+import pa_Arab_errors from "../../frontend/src/i18n/locales/pa-Arab/errors.json";
+import pa_Arab_mobile from "../../frontend/src/i18n/locales/pa-Arab/mobile.json";
+import pa_Arab_nav from "../../frontend/src/i18n/locales/pa-Arab/nav.json";
+import pa_Arab_saved from "../../frontend/src/i18n/locales/pa-Arab/saved.json";
+import pa_Arab_search from "../../frontend/src/i18n/locales/pa-Arab/search.json";
+import pa_Arab_settings from "../../frontend/src/i18n/locales/pa-Arab/settings.json";
+import pa_Arab_vault from "../../frontend/src/i18n/locales/pa-Arab/vault.json";
+import pa_Arab_voice from "../../frontend/src/i18n/locales/pa-Arab/voice.json";
+import pa_Guru_arcade from "../../frontend/src/i18n/locales/pa-Guru/arcade.json";
+import pa_Guru_auth from "../../frontend/src/i18n/locales/pa-Guru/auth.json";
+import pa_Guru_channels from "../../frontend/src/i18n/locales/pa-Guru/channels.json";
+import pa_Guru_chat from "../../frontend/src/i18n/locales/pa-Guru/chat.json";
+import pa_Guru_common from "../../frontend/src/i18n/locales/pa-Guru/common.json";
+import pa_Guru_dms from "../../frontend/src/i18n/locales/pa-Guru/dms.json";
+import pa_Guru_emoji from "../../frontend/src/i18n/locales/pa-Guru/emoji.json";
+import pa_Guru_errors from "../../frontend/src/i18n/locales/pa-Guru/errors.json";
+import pa_Guru_mobile from "../../frontend/src/i18n/locales/pa-Guru/mobile.json";
+import pa_Guru_nav from "../../frontend/src/i18n/locales/pa-Guru/nav.json";
+import pa_Guru_saved from "../../frontend/src/i18n/locales/pa-Guru/saved.json";
+import pa_Guru_search from "../../frontend/src/i18n/locales/pa-Guru/search.json";
+import pa_Guru_settings from "../../frontend/src/i18n/locales/pa-Guru/settings.json";
+import pa_Guru_vault from "../../frontend/src/i18n/locales/pa-Guru/vault.json";
+import pa_Guru_voice from "../../frontend/src/i18n/locales/pa-Guru/voice.json";
+import ps_arcade from "../../frontend/src/i18n/locales/ps/arcade.json";
+import ps_auth from "../../frontend/src/i18n/locales/ps/auth.json";
+import ps_channels from "../../frontend/src/i18n/locales/ps/channels.json";
+import ps_chat from "../../frontend/src/i18n/locales/ps/chat.json";
+import ps_common from "../../frontend/src/i18n/locales/ps/common.json";
+import ps_dms from "../../frontend/src/i18n/locales/ps/dms.json";
+import ps_emoji from "../../frontend/src/i18n/locales/ps/emoji.json";
+import ps_errors from "../../frontend/src/i18n/locales/ps/errors.json";
+import ps_mobile from "../../frontend/src/i18n/locales/ps/mobile.json";
+import ps_nav from "../../frontend/src/i18n/locales/ps/nav.json";
+import ps_saved from "../../frontend/src/i18n/locales/ps/saved.json";
+import ps_search from "../../frontend/src/i18n/locales/ps/search.json";
+import ps_settings from "../../frontend/src/i18n/locales/ps/settings.json";
+import ps_vault from "../../frontend/src/i18n/locales/ps/vault.json";
+import ps_voice from "../../frontend/src/i18n/locales/ps/voice.json";
 import ru_arcade from "../../frontend/src/i18n/locales/ru/arcade.json";
 import ru_auth from "../../frontend/src/i18n/locales/ru/auth.json";
 import ru_channels from "../../frontend/src/i18n/locales/ru/channels.json";
@@ -112,6 +202,36 @@ import ru_search from "../../frontend/src/i18n/locales/ru/search.json";
 import ru_settings from "../../frontend/src/i18n/locales/ru/settings.json";
 import ru_vault from "../../frontend/src/i18n/locales/ru/vault.json";
 import ru_voice from "../../frontend/src/i18n/locales/ru/voice.json";
+import ta_arcade from "../../frontend/src/i18n/locales/ta/arcade.json";
+import ta_auth from "../../frontend/src/i18n/locales/ta/auth.json";
+import ta_channels from "../../frontend/src/i18n/locales/ta/channels.json";
+import ta_chat from "../../frontend/src/i18n/locales/ta/chat.json";
+import ta_common from "../../frontend/src/i18n/locales/ta/common.json";
+import ta_dms from "../../frontend/src/i18n/locales/ta/dms.json";
+import ta_emoji from "../../frontend/src/i18n/locales/ta/emoji.json";
+import ta_errors from "../../frontend/src/i18n/locales/ta/errors.json";
+import ta_mobile from "../../frontend/src/i18n/locales/ta/mobile.json";
+import ta_nav from "../../frontend/src/i18n/locales/ta/nav.json";
+import ta_saved from "../../frontend/src/i18n/locales/ta/saved.json";
+import ta_search from "../../frontend/src/i18n/locales/ta/search.json";
+import ta_settings from "../../frontend/src/i18n/locales/ta/settings.json";
+import ta_vault from "../../frontend/src/i18n/locales/ta/vault.json";
+import ta_voice from "../../frontend/src/i18n/locales/ta/voice.json";
+import te_arcade from "../../frontend/src/i18n/locales/te/arcade.json";
+import te_auth from "../../frontend/src/i18n/locales/te/auth.json";
+import te_channels from "../../frontend/src/i18n/locales/te/channels.json";
+import te_chat from "../../frontend/src/i18n/locales/te/chat.json";
+import te_common from "../../frontend/src/i18n/locales/te/common.json";
+import te_dms from "../../frontend/src/i18n/locales/te/dms.json";
+import te_emoji from "../../frontend/src/i18n/locales/te/emoji.json";
+import te_errors from "../../frontend/src/i18n/locales/te/errors.json";
+import te_mobile from "../../frontend/src/i18n/locales/te/mobile.json";
+import te_nav from "../../frontend/src/i18n/locales/te/nav.json";
+import te_saved from "../../frontend/src/i18n/locales/te/saved.json";
+import te_search from "../../frontend/src/i18n/locales/te/search.json";
+import te_settings from "../../frontend/src/i18n/locales/te/settings.json";
+import te_vault from "../../frontend/src/i18n/locales/te/vault.json";
+import te_voice from "../../frontend/src/i18n/locales/te/voice.json";
 import uk_arcade from "../../frontend/src/i18n/locales/uk/arcade.json";
 import uk_auth from "../../frontend/src/i18n/locales/uk/auth.json";
 import uk_channels from "../../frontend/src/i18n/locales/uk/channels.json";
@@ -127,6 +247,21 @@ import uk_search from "../../frontend/src/i18n/locales/uk/search.json";
 import uk_settings from "../../frontend/src/i18n/locales/uk/settings.json";
 import uk_vault from "../../frontend/src/i18n/locales/uk/vault.json";
 import uk_voice from "../../frontend/src/i18n/locales/uk/voice.json";
+import ur_arcade from "../../frontend/src/i18n/locales/ur/arcade.json";
+import ur_auth from "../../frontend/src/i18n/locales/ur/auth.json";
+import ur_channels from "../../frontend/src/i18n/locales/ur/channels.json";
+import ur_chat from "../../frontend/src/i18n/locales/ur/chat.json";
+import ur_common from "../../frontend/src/i18n/locales/ur/common.json";
+import ur_dms from "../../frontend/src/i18n/locales/ur/dms.json";
+import ur_emoji from "../../frontend/src/i18n/locales/ur/emoji.json";
+import ur_errors from "../../frontend/src/i18n/locales/ur/errors.json";
+import ur_mobile from "../../frontend/src/i18n/locales/ur/mobile.json";
+import ur_nav from "../../frontend/src/i18n/locales/ur/nav.json";
+import ur_saved from "../../frontend/src/i18n/locales/ur/saved.json";
+import ur_search from "../../frontend/src/i18n/locales/ur/search.json";
+import ur_settings from "../../frontend/src/i18n/locales/ur/settings.json";
+import ur_vault from "../../frontend/src/i18n/locales/ur/vault.json";
+import ur_voice from "../../frontend/src/i18n/locales/ur/voice.json";
 import zh_arcade from "../../frontend/src/i18n/locales/zh/arcade.json";
 import zh_auth from "../../frontend/src/i18n/locales/zh/auth.json";
 import zh_channels from "../../frontend/src/i18n/locales/zh/channels.json";
@@ -162,6 +297,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ar_settings,
     "vault": ar_vault,
     "voice": ar_voice,
+  },
+  "bn": {
+    "arcade": bn_arcade,
+    "auth": bn_auth,
+    "channels": bn_channels,
+    "chat": bn_chat,
+    "common": bn_common,
+    "dms": bn_dms,
+    "emoji": bn_emoji,
+    "errors": bn_errors,
+    "mobile": bn_mobile,
+    "nav": bn_nav,
+    "saved": bn_saved,
+    "search": bn_search,
+    "settings": bn_settings,
+    "vault": bn_vault,
+    "voice": bn_voice,
   },
   "en": {
     "arcade": en_arcade,
@@ -214,6 +366,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "vault": fr_vault,
     "voice": fr_voice,
   },
+  "hi": {
+    "arcade": hi_arcade,
+    "auth": hi_auth,
+    "channels": hi_channels,
+    "chat": hi_chat,
+    "common": hi_common,
+    "dms": hi_dms,
+    "emoji": hi_emoji,
+    "errors": hi_errors,
+    "mobile": hi_mobile,
+    "nav": hi_nav,
+    "saved": hi_saved,
+    "search": hi_search,
+    "settings": hi_settings,
+    "vault": hi_vault,
+    "voice": hi_voice,
+  },
   "ja": {
     "arcade": ja_arcade,
     "auth": ja_auth,
@@ -248,6 +417,74 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "vault": ko_vault,
     "voice": ko_voice,
   },
+  "mr": {
+    "arcade": mr_arcade,
+    "auth": mr_auth,
+    "channels": mr_channels,
+    "chat": mr_chat,
+    "common": mr_common,
+    "dms": mr_dms,
+    "emoji": mr_emoji,
+    "errors": mr_errors,
+    "mobile": mr_mobile,
+    "nav": mr_nav,
+    "saved": mr_saved,
+    "search": mr_search,
+    "settings": mr_settings,
+    "vault": mr_vault,
+    "voice": mr_voice,
+  },
+  "pa-Arab": {
+    "arcade": pa_Arab_arcade,
+    "auth": pa_Arab_auth,
+    "channels": pa_Arab_channels,
+    "chat": pa_Arab_chat,
+    "common": pa_Arab_common,
+    "dms": pa_Arab_dms,
+    "emoji": pa_Arab_emoji,
+    "errors": pa_Arab_errors,
+    "mobile": pa_Arab_mobile,
+    "nav": pa_Arab_nav,
+    "saved": pa_Arab_saved,
+    "search": pa_Arab_search,
+    "settings": pa_Arab_settings,
+    "vault": pa_Arab_vault,
+    "voice": pa_Arab_voice,
+  },
+  "pa-Guru": {
+    "arcade": pa_Guru_arcade,
+    "auth": pa_Guru_auth,
+    "channels": pa_Guru_channels,
+    "chat": pa_Guru_chat,
+    "common": pa_Guru_common,
+    "dms": pa_Guru_dms,
+    "emoji": pa_Guru_emoji,
+    "errors": pa_Guru_errors,
+    "mobile": pa_Guru_mobile,
+    "nav": pa_Guru_nav,
+    "saved": pa_Guru_saved,
+    "search": pa_Guru_search,
+    "settings": pa_Guru_settings,
+    "vault": pa_Guru_vault,
+    "voice": pa_Guru_voice,
+  },
+  "ps": {
+    "arcade": ps_arcade,
+    "auth": ps_auth,
+    "channels": ps_channels,
+    "chat": ps_chat,
+    "common": ps_common,
+    "dms": ps_dms,
+    "emoji": ps_emoji,
+    "errors": ps_errors,
+    "mobile": ps_mobile,
+    "nav": ps_nav,
+    "saved": ps_saved,
+    "search": ps_search,
+    "settings": ps_settings,
+    "vault": ps_vault,
+    "voice": ps_voice,
+  },
   "ru": {
     "arcade": ru_arcade,
     "auth": ru_auth,
@@ -265,6 +502,40 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "vault": ru_vault,
     "voice": ru_voice,
   },
+  "ta": {
+    "arcade": ta_arcade,
+    "auth": ta_auth,
+    "channels": ta_channels,
+    "chat": ta_chat,
+    "common": ta_common,
+    "dms": ta_dms,
+    "emoji": ta_emoji,
+    "errors": ta_errors,
+    "mobile": ta_mobile,
+    "nav": ta_nav,
+    "saved": ta_saved,
+    "search": ta_search,
+    "settings": ta_settings,
+    "vault": ta_vault,
+    "voice": ta_voice,
+  },
+  "te": {
+    "arcade": te_arcade,
+    "auth": te_auth,
+    "channels": te_channels,
+    "chat": te_chat,
+    "common": te_common,
+    "dms": te_dms,
+    "emoji": te_emoji,
+    "errors": te_errors,
+    "mobile": te_mobile,
+    "nav": te_nav,
+    "saved": te_saved,
+    "search": te_search,
+    "settings": te_settings,
+    "vault": te_vault,
+    "voice": te_voice,
+  },
   "uk": {
     "arcade": uk_arcade,
     "auth": uk_auth,
@@ -281,6 +552,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": uk_settings,
     "vault": uk_vault,
     "voice": uk_voice,
+  },
+  "ur": {
+    "arcade": ur_arcade,
+    "auth": ur_auth,
+    "channels": ur_channels,
+    "chat": ur_chat,
+    "common": ur_common,
+    "dms": ur_dms,
+    "emoji": ur_emoji,
+    "errors": ur_errors,
+    "mobile": ur_mobile,
+    "nav": ur_nav,
+    "saved": ur_saved,
+    "search": ur_search,
+    "settings": ur_settings,
+    "vault": ur_vault,
+    "voice": ur_voice,
   },
   "zh": {
     "arcade": zh_arcade,

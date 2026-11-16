@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "آرکیڈ"
+  },
+  "hud": {
+    "score": "اسکور  {{score}}",
+    "time": "وقت   {{time}}",
+    "gameOver": "گیم ختم",
+    "final_one": "حتمی {{count}} پوائنٹ · {{time}}",
+    "final_other": "حتمی {{count}} پوائنٹس · {{time}}",
+    "restartHint": "دوبارہ شروع کرنے کے لیے R دبائیں · باہر نکلنے کے لیے Esc",
+    "controls": "WASD سے حرکت · ماؤس سے نشانہ · کلک/اسپیس سے فائر · Esc سے باہر"
+  }
+}

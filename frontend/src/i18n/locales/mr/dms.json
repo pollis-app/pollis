@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "नवीन मेसेज",
+    "requests": "विनंत्या",
+    "blocked": "ब्लॉक केलेले वापरकर्ते",
+    "avatarAlt": "{{name}} चा अवतार",
+    "settingsFor": "{{name}} साठी सेटिंग्ज",
+    "verified": "पडताळलेला संपर्क",
+    "keyChanged": "ओळख की बदलली — पुन्हा पडताळा"
+  },
+  "conversation": {
+    "fallbackTitle": "थेट मेसेज",
+    "viewProfile": "@{{name}} चे प्रोफाइल पहा",
+    "call": "@{{name}} ला कॉल करा",
+    "returnToCall": "@{{name}} सोबतच्या कॉलवर परत जा",
+    "pinsLabel": "पिन केलेले मेसेज"
+  },
+  "settings": {
+    "pageTitle": "संभाषण सेटिंग्ज",
+    "leave": "संभाषण सोडा",
+    "submitting": "सोडत आहे…",
+    "leaveFailed": "संभाषण सोडता आले नाही",
+    "cancel": "रद्द करा (Esc)"
+  },
+  "start": {
+    "pageTitle": "नवीन मेसेज",
+    "identifierLabel": "युझरनेम किंवा ईमेल",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "संभाषण सुरू करा",
+    "submitting": "सुरू करत आहे…",
+    "identifierRequired": "वापरकर्त्याची ओळख आवश्यक आहे",
+    "userNotFound": "वापरकर्ता सापडला नाही",
+    "startFailed": "संभाषण सुरू करता आले नाही"
+  },
+  "requests": {
+    "pageTitle": "मेसेज विनंत्या",
+    "empty": "कोणत्याही प्रलंबित विनंत्या नाहीत.",
+    "noMessageYet": "(अजून मेसेज नाही)",
+    "unknownSender": "अज्ञात",
+    "others_one": "(+{{count}} इतर)",
+    "others_other": "(+{{count}} इतर)",
+    "accept": "स्वीकारा",
+    "block": "ब्लॉक करा"
+  },
+  "blocked": {
+    "pageTitle": "ब्लॉक केलेले वापरकर्ते",
+    "empty": "कोणतेही ब्लॉक केलेले वापरकर्ते नाहीत.",
+    "unblock": "अनब्लॉक करा"
+  },
+  "profile": {
+    "fallbackName": "वापरकर्ता",
+    "fallbackTitle": "प्रोफाइल",
+    "notFound": "वापरकर्ता सापडला नाही",
+    "avatarAlt": "{{name}} चा अवतार",
+    "sendMessage": "मेसेज पाठवा",
+    "block": "ब्लॉक करा",
+    "safetyNumber": "सुरक्षा क्रमांक",
+    "statusVerified": "पडताळलेले",
+    "statusChanged": "बदलले — पुन्हा पडताळा",
+    "statusUnverified": "पडताळलेले नाही",
+    "keyChangedWarning": "तुम्ही शेवटचे पडताळल्यापासून या संपर्काची ओळख की बदलली आहे. यावर विश्वास ठेवण्यापूर्वी हा क्रमांक दुसऱ्या मार्गाने (प्रत्यक्ष किंवा कॉलवर) पुन्हा जुळवून पहा.",
+    "removeVerification": "पडताळणी काढा",
+    "markVerified": "पडताळलेले म्हणून चिन्हांकित करा",
+    "report": "तक्रार करा"
+  },
+  "safety": {
+    "title": "तुम्ही आणि {{name}}",
+    "verify": "सुरक्षा क्रमांक पडताळा",
+    "headingMany": "सुरक्षा क्रमांक",
+    "shared": "तुम्हाला आणि {{name}} यांना एकच क्रमांक दिसतो. मध्ये कोणीही नाही याची खात्री करण्यासाठी तो प्रत्यक्ष भेटून किंवा कॉलवर जुळवून पहा.",
+    "qrLabel": "तुम्ही {{name}} सोबत शेअर करत असलेल्या सुरक्षा क्रमांकाचा QR कोड",
+    "failed": "सुरक्षा क्रमांक लोड करता आला नाही."
+  },
+  "notify": {
+    "requestTitle": "नवीन संभाषण",
+    "requestBody": "{{name}} यांनी तुमच्याशी संभाषण सुरू केले"
+  }
+}

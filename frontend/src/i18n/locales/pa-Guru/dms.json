@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "ਨਵਾਂ ਸੁਨੇਹਾ",
+    "requests": "ਬੇਨਤੀਆਂ",
+    "blocked": "ਬਲੌਕ ਕੀਤੇ ਵਰਤੋਂਕਾਰ",
+    "avatarAlt": "{{name}} ਦਾ ਅਵਤਾਰ",
+    "settingsFor": "{{name}} ਲਈ ਸੈਟਿੰਗਾਂ",
+    "verified": "ਪੁਸ਼ਟੀ ਕੀਤਾ ਸੰਪਰਕ",
+    "keyChanged": "ਪਛਾਣ ਕੁੰਜੀ ਬਦਲ ਗਈ — ਦੁਬਾਰਾ ਪੁਸ਼ਟੀ ਕਰੋ"
+  },
+  "conversation": {
+    "fallbackTitle": "ਸਿੱਧਾ ਸੁਨੇਹਾ",
+    "viewProfile": "@{{name}} ਦੀ ਪ੍ਰੋਫਾਈਲ ਦੇਖੋ",
+    "call": "@{{name}} ਨੂੰ ਕਾਲ ਕਰੋ",
+    "returnToCall": "@{{name}} ਨਾਲ ਕਾਲ 'ਤੇ ਵਾਪਸ ਜਾਓ",
+    "pinsLabel": "ਪਿੰਨ ਕੀਤੇ ਸੁਨੇਹੇ"
+  },
+  "settings": {
+    "pageTitle": "ਗੱਲਬਾਤ ਸੈਟਿੰਗਾਂ",
+    "leave": "ਗੱਲਬਾਤ ਛੱਡੋ",
+    "submitting": "ਛੱਡੀ ਜਾ ਰਹੀ ਹੈ…",
+    "leaveFailed": "ਗੱਲਬਾਤ ਛੱਡੀ ਨਹੀਂ ਜਾ ਸਕੀ",
+    "cancel": "ਰੱਦ ਕਰੋ (Esc)"
+  },
+  "start": {
+    "pageTitle": "ਨਵਾਂ ਸੁਨੇਹਾ",
+    "identifierLabel": "ਵਰਤੋਂਕਾਰ ਨਾਮ ਜਾਂ ਈਮੇਲ",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਕਰੋ",
+    "submitting": "ਸ਼ੁਰੂ ਕੀਤੀ ਜਾ ਰਹੀ ਹੈ…",
+    "identifierRequired": "ਵਰਤੋਂਕਾਰ ਦੀ ਪਛਾਣ ਦੇਣੀ ਲਾਜ਼ਮੀ ਹੈ",
+    "userNotFound": "ਵਰਤੋਂਕਾਰ ਨਹੀਂ ਮਿਲਿਆ",
+    "startFailed": "ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਨਹੀਂ ਹੋ ਸਕੀ"
+  },
+  "requests": {
+    "pageTitle": "ਸੁਨੇਹਾ ਬੇਨਤੀਆਂ",
+    "empty": "ਕੋਈ ਬਕਾਇਆ ਬੇਨਤੀ ਨਹੀਂ।",
+    "noMessageYet": "(ਹਾਲੇ ਕੋਈ ਸੁਨੇਹਾ ਨਹੀਂ)",
+    "unknownSender": "ਅਣਜਾਣ",
+    "others_one": "(+{{count}} ਹੋਰ)",
+    "others_other": "(+{{count}} ਹੋਰ)",
+    "accept": "ਸਵੀਕਾਰ ਕਰੋ",
+    "block": "ਬਲੌਕ ਕਰੋ"
+  },
+  "blocked": {
+    "pageTitle": "ਬਲੌਕ ਕੀਤੇ ਵਰਤੋਂਕਾਰ",
+    "empty": "ਕੋਈ ਬਲੌਕ ਕੀਤਾ ਵਰਤੋਂਕਾਰ ਨਹੀਂ।",
+    "unblock": "ਅਨਬਲੌਕ ਕਰੋ"
+  },
+  "profile": {
+    "fallbackName": "ਵਰਤੋਂਕਾਰ",
+    "fallbackTitle": "ਪ੍ਰੋਫਾਈਲ",
+    "notFound": "ਵਰਤੋਂਕਾਰ ਨਹੀਂ ਮਿਲਿਆ",
+    "avatarAlt": "{{name}} ਦਾ ਅਵਤਾਰ",
+    "sendMessage": "ਸੁਨੇਹਾ ਭੇਜੋ",
+    "block": "ਬਲੌਕ ਕਰੋ",
+    "safetyNumber": "ਸੁਰੱਖਿਆ ਨੰਬਰ",
+    "statusVerified": "ਪੁਸ਼ਟੀ ਕੀਤੀ ਗਈ",
+    "statusChanged": "ਬਦਲ ਗਿਆ — ਦੁਬਾਰਾ ਪੁਸ਼ਟੀ ਕਰੋ",
+    "statusUnverified": "ਪੁਸ਼ਟੀ ਨਹੀਂ ਕੀਤੀ ਗਈ",
+    "keyChangedWarning": "ਤੁਹਾਡੇ ਵੱਲੋਂ ਪਿਛਲੀ ਵਾਰ ਪੁਸ਼ਟੀ ਕਰਨ ਤੋਂ ਬਾਅਦ ਇਸ ਸੰਪਰਕ ਦੀ ਪਛਾਣ ਕੁੰਜੀ ਬਦਲ ਗਈ ਹੈ। ਇਸ 'ਤੇ ਭਰੋਸਾ ਕਰਨ ਤੋਂ ਪਹਿਲਾਂ ਨੰਬਰ ਨੂੰ ਕਿਸੇ ਹੋਰ ਤਰੀਕੇ ਨਾਲ (ਆਹਮੋ-ਸਾਹਮਣੇ ਜਾਂ ਕਾਲ 'ਤੇ) ਦੁਬਾਰਾ ਮਿਲਾਓ।",
+    "removeVerification": "ਪੁਸ਼ਟੀ ਹਟਾਓ",
+    "markVerified": "ਪੁਸ਼ਟੀ ਕੀਤਾ ਮਾਰਕ ਕਰੋ",
+    "report": "ਰਿਪੋਰਟ ਕਰੋ"
+  },
+  "safety": {
+    "title": "ਤੁਸੀਂ ਅਤੇ {{name}}",
+    "verify": "ਸੁਰੱਖਿਆ ਨੰਬਰ ਦੀ ਪੁਸ਼ਟੀ ਕਰੋ",
+    "headingMany": "ਸੁਰੱਖਿਆ ਨੰਬਰ",
+    "shared": "ਤੁਹਾਨੂੰ ਅਤੇ {{name}} ਨੂੰ ਇੱਕੋ ਨੰਬਰ ਦਿਸਦਾ ਹੈ। ਇਹ ਪੱਕਾ ਕਰਨ ਲਈ ਕਿ ਵਿਚਕਾਰ ਕੋਈ ਨਹੀਂ ਹੈ, ਇਸਨੂੰ ਆਹਮੋ-ਸਾਹਮਣੇ ਜਾਂ ਕਾਲ 'ਤੇ ਮਿਲਾਓ।",
+    "qrLabel": "{{name}} ਨਾਲ ਸਾਂਝੇ ਸੁਰੱਖਿਆ ਨੰਬਰ ਦਾ QR ਕੋਡ",
+    "failed": "ਸੁਰੱਖਿਆ ਨੰਬਰ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ।"
+  },
+  "notify": {
+    "requestTitle": "ਨਵੀਂ ਗੱਲਬਾਤ",
+    "requestBody": "{{name}} ਨੇ ਤੁਹਾਡੇ ਨਾਲ ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਕੀਤੀ"
+  }
+}

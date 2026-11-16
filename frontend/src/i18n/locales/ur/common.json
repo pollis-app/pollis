@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "پیچھے",
+    "cancel": "منسوخ کریں",
+    "close": "بند کریں",
+    "copy": "کاپی کریں",
+    "copied": "کاپی ہو گیا",
+    "copyFailed": "کاپی نہیں ہو سکا",
+    "delete": "حذف کریں",
+    "forward": "فارورڈ کریں",
+    "goBack": "واپس جائیں",
+    "moreOptions": "مزید آپشنز",
+    "save": "محفوظ کریں"
+  },
+  "states": {
+    "buttonLoading": "لوڈ ہو رہا ہے...",
+    "loading": "لوڈ ہو رہا ہے…"
+  },
+  "time": {
+    "today": "آج",
+    "yesterday": "کل"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "اسپیس",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "موجودگی: {{status}}",
+    "offline": "آف لائن",
+    "online": "آن لائن"
+  },
+  "list": {
+    "empty": "کوئی آئٹم نہیں۔"
+  },
+  "grid": {
+    "empty": "ابھی یہاں کوئی نہیں ہے۔"
+  },
+  "menu": {
+    "escHint": "واپس جانے کے لیے Esc",
+    "navigationLabel": "نیویگیشن مینو",
+    "navigateHint": "نیویگیٹ کریں",
+    "selectHint": "منتخب کرنے کے لیے Enter"
+  },
+  "media": {
+    "mute": "میوٹ کریں",
+    "pause": "روکیں",
+    "play": "چلائیں",
+    "seek": "آڈیو میں آگے پیچھے جائیں",
+    "skipBackward": "10 سیکنڈ پیچھے جائیں",
+    "skipForward": "10 سیکنڈ آگے جائیں",
+    "unmute": "ان میوٹ کریں",
+    "volume": "والیوم"
+  },
+  "composer": {
+    "addAttachment": "اٹیچمنٹ شامل کریں",
+    "allMentionHint": "اس چینل میں سب کو مطلع کرتا ہے",
+    "filePickerTitle": "فائلیں شامل کریں",
+    "inputLabel": "پیغام کا ان پٹ",
+    "placeholder": "پیغام لکھیں…",
+    "previewAlt": "پیش منظر",
+    "removeAttachment": "{{name}} ہٹائیں",
+    "send": "پیغام بھیجیں",
+    "markSensitive": "{{name}} کو حساس نشان زد کریں",
+    "unmarkSensitive": "{{name}} سے حساس کا نشان ہٹائیں"
+  },
+  "mentions": {
+    "listLabel": "مینشن کی تجاویز",
+    "matching": "<hl>@{{query}}</hl> سے ملتے جلتے اراکین"
+  },
+  "emojiSuggest": {
+    "listLabel": "ایموجی کی تجاویز",
+    "matching": "<hl>:{{query}}</hl> سے ملتے جلتے ایموجی"
+  },
+  "a11y": {
+    "avatar": "اوتار",
+    "loading": "لوڈ ہو رہا ہے",
+    "otpDigit": "OTP کا ہندسہ {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} سیکنڈ",
+    "seconds_other": "{{count}} سیکنڈ",
+    "minutes_one": "{{count}} منٹ",
+    "minutes_other": "{{count}} منٹ",
+    "hours_one": "{{count}} گھنٹہ",
+    "hours_other": "{{count}} گھنٹے",
+    "days_one": "{{count}} دن",
+    "days_other": "{{count}} دن",
+    "weeks_one": "{{count}} ہفتہ",
+    "weeks_other": "{{count}} ہفتے",
+    "months_one": "{{count}} ماہ",
+    "months_other": "{{count}} ماہ",
+    "years_one": "{{count}} سال",
+    "years_other": "{{count}} سال"
+  },
+  "tray": {
+    "open": "Pollis کھولیں",
+    "muteMic": "مائیک میوٹ کریں",
+    "unmuteMic": "مائیک ان میوٹ کریں",
+    "muteMicIdle": "مائیک میوٹ کریں (کال میں نہیں)",
+    "version": "ورژن {{version}}",
+    "quit": "Pollis بند کریں",
+    "unread_one": "Pollis — {{count}} غیر پڑھا",
+    "unread_other": "Pollis — {{count}} غیر پڑھے"
+  }
+}
