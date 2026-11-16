@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { getCurrentWindow, Image, setTrayUnread, type PollisImage } from '../bridge';
+import { useTranslation } from 'react-i18next';
+import { getCurrentWindow, getVersion, Image, setTrayLabels, setTrayUnread, type PollisImage } from '../bridge';
 import { appStore } from '../stores/appStore';
 import { useObserver } from 'mobx-react-lite';
 import { useTauriReady } from './useTauriReady';
@@ -34,6 +35,8 @@ async function getWindowsNotifIcon(): Promise<PollisImage> {
 export function useBadge() {
   const { isReady } = useTauriReady();
   const total = useObserver(() => appStore.totalUnread);
+  const { t, i18n } = useTranslation('common');
+  const language = i18n.resolvedLanguage;
 
   useEffect(() => {
     if (!isReady) {
@@ -54,11 +57,39 @@ export function useBadge() {
     }
 
     if (!isMac) {
-      void setTrayUnread(total).catch((err) => {
+      void setTrayUnread(total, t('tray.unread', { count: total })).catch((err) => {
         console.warn('[tray] setTrayUnread failed:', err);
       });
     }
-  }, [isReady, total]);
+  }, [isReady, total, t, language]);
+
+  // The tray menu is drawn by the shell; hand it this language's copy on start and on every switch (#1724).
+  useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+    let cancelled = false;
+    void getVersion()
+      .then((version) => {
+        if (cancelled) {
+          return;
+        }
+        return setTrayLabels({
+          open: t('tray.open'),
+          muteMic: t('tray.muteMic'),
+          unmuteMic: t('tray.unmuteMic'),
+          muteMicIdle: t('tray.muteMicIdle'),
+          version: t('tray.version', { version }),
+          quit: t('tray.quit'),
+        });
+      })
+      .catch((err) => {
+        console.warn('[tray] setTrayLabels failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, t, language]);
 
   useEffect(() => {
     if (!isReady) {

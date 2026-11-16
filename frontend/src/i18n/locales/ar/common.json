@@ -115,5 +115,19 @@
     "years_few": "{{count}} سنوات",
     "years_many": "{{count}} سنةً",
     "years_other": "{{count}} سنة"
+  },
+  "tray": {
+    "open": "فتح Pollis",
+    "muteMic": "كتم الميكروفون",
+    "unmuteMic": "إلغاء كتم الميكروفون",
+    "muteMicIdle": "كتم الميكروفون (لست في مكالمة)",
+    "version": "الإصدار {{version}}",
+    "quit": "إنهاء Pollis",
+    "unread_zero": "Pollis — {{count}} غير مقروءة",
+    "unread_one": "Pollis — {{count}} غير مقروءة",
+    "unread_two": "Pollis — {{count}} غير مقروءتين",
+    "unread_few": "Pollis — {{count}} غير مقروءة",
+    "unread_many": "Pollis — {{count}} غير مقروءة",
+    "unread_other": "Pollis — {{count}} غير مقروءة"
   }
 }

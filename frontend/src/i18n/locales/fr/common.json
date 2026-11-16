@@ -87,5 +87,15 @@
     "months_other": "{{count}} mois",
     "years_one": "{{count}} an",
     "years_other": "{{count}} ans"
+  },
+  "tray": {
+    "open": "Ouvrir Pollis",
+    "muteMic": "Couper le micro",
+    "unmuteMic": "Réactiver le micro",
+    "muteMicIdle": "Couper le micro (hors appel)",
+    "version": "Version {{version}}",
+    "quit": "Quitter Pollis",
+    "unread_one": "Pollis — {{count}} non lu",
+    "unread_other": "Pollis — {{count}} non lus"
   }
 }

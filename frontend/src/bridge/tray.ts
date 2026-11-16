@@ -2,9 +2,23 @@
 
 import { invoke, listen } from "./invoke";
 
-/** Mirror the unread count into the tray icon + tooltip (Linux/Windows). */
-export async function setTrayUnread(count: number): Promise<void> {
-  await invoke("tray_set_unread", { count });
+/** Mirror the unread count into the tray icon + tooltip (Linux/Windows); `tooltip` is the translated text. */
+export async function setTrayUnread(count: number, tooltip?: string): Promise<void> {
+  await invoke("tray_set_unread", { count, tooltip });
+}
+
+/** The tray menu's copy in the user's language (#1724); the shell has no catalogues of its own. */
+export interface TrayLabels {
+  open: string;
+  muteMic: string;
+  unmuteMic: string;
+  muteMicIdle: string;
+  version: string;
+  quit: string;
+}
+
+export async function setTrayLabels(labels: TrayLabels): Promise<void> {
+  await invoke("tray_set_labels", { labels });
 }
 
 /** Toggle hide-to-tray-on-close (Linux/Windows). No-op on macOS. */
