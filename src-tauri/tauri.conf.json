@@ -71,6 +71,10 @@
           "libasound2",
           "libpulse0",
           "libdbus-1-3"
+        ],
+        "recommends": [
+          "fonts-noto-cjk",
+          "fonts-noto-core"
         ]
       },
       "rpm": {
@@ -78,6 +82,19 @@
           "libasound.so.2()(64bit)",
           "libpulse.so.0()(64bit)",
           "libdbus-1.so.3()(64bit)"
+        ],
+        "recommends": [
+          "font(:lang=ja)",
+          "font(:lang=ko)",
+          "font(:lang=zh-cn)",
+          "font(:lang=hi)",
+          "font(:lang=bn)",
+          "font(:lang=ta)",
+          "font(:lang=te)",
+          "font(:lang=pa)",
+          "font(:lang=ur)",
+          "font(:lang=ps)",
+          "font(:lang=am)"
         ]
       },
       "appimage": {

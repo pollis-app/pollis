@@ -48,8 +48,9 @@ export default {
         'msg-row': 'var(--msg-row-pad-y)',
       },
       fontFamily: {
-        mono: ['"DM Mono"', 'ui-monospace', 'monospace'],
-        sans: ['"Atkinson Hyperlegible Next"', 'system-ui', 'sans-serif'],
+        // The stacks live in index.css so the per-script fallback (#1725) and the skins apply.
+        mono: ['var(--font-mono)'],
+        sans: ['var(--font-sans)'],
       },
       lineHeight: {
         msg: 'var(--lh)',

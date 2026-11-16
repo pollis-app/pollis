@@ -1,4 +1,4 @@
-// Unit tests for #1724's i18n coverage checks: the hardcoded-copy lint and its ratchet
+// Unit tests for #1724's i18n coverage checks and #1725's glossary check: the hardcoded-copy lint and its ratchet
 // (scripts/i18n-hardcoded.mjs) and the surface registry (scripts/i18n-report.mjs).
 // Needs the `typescript` package (frontend/ or mobile/ installed); run in frontend-check.yml.
 // Run: node --test scripts/test-i18n-coverage.mjs
@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compare, scan, scanSource, tally } from "./i18n-hardcoded.mjs";
 import { REQUIRED, coverage, validateSurfaces } from "./i18n-report.mjs";
+import { compile as compileGlossary, misses as glossaryMisses } from "./i18n-glossary.mjs";
 
 const texts = (source) => scanSource(source).map((v) => `${v.kind}: ${v.text}`);
 
@@ -123,4 +124,45 @@ test("coverage counts a plural family once, and en is complete", () => {
   // zh has one plural form per family, uk four: the unit counts still line up with en's.
   assert.equal(cov.zh.errors.total, cov.uk.errors.total);
   assert.equal(cov.zh.errors.have, cov.uk.errors.have);
+});
+
+// Glossary check (#1725): scripts/i18n-glossary.mjs.
+
+const GLOSSARY = {
+  doNotTranslate: [{ term: "Pollis" }],
+  terms: [
+    { id: "device", en: "\\bdevices?\\b", flags: "i", ja: ["デバイス"] },
+    { id: "pin", en: "\\bPINs?\\b", flags: "", ja: ["PIN"], except: ["auth:skip"] },
+  ],
+};
+const BASE = {
+  "auth:link": "Link a new device",
+  "auth:placeholder": "Waiting for {{device}}",
+  "auth:skip": "PIN",
+  "auth:brand": "Open Pollis",
+  "auth:count_one": "{{count}} device",
+  "auth:count_other": "{{count}} devices",
+};
+
+test("glossary: a value that skips a term is a miss, one that renders it is not", () => {
+  const { rules, problems } = compileGlossary(GLOSSARY, BASE);
+  assert.deepEqual(problems, []);
+  const found = glossaryMisses(rules, BASE, { "auth:link": "新しい端末をリンク", "auth:brand": "ポリスを開く", "auth:count_other": "{{count}} 台のデバイス" }, "ja");
+  assert.deepEqual(found.map((m) => `${m.key}:${m.term}`), ["auth:link:device", "auth:brand:dnt:Pollis"]);
+});
+
+test("glossary: placeholders are not the word, and except keys are skipped", () => {
+  const { rules } = compileGlossary(GLOSSARY, BASE);
+  assert.deepEqual(glossaryMisses(rules, BASE, { "auth:placeholder": "{{device}} を待っています", "auth:skip": "暗証番号" }, "ja"), []);
+});
+
+test("glossary: a locale with no column is not checked, not even for do-not-translate words", () => {
+  const { rules } = compileGlossary(GLOSSARY, BASE);
+  assert.deepEqual(glossaryMisses(rules, BASE, { "auth:link": "Vincular", "auth:brand": "Abrir" }, "es"), []);
+});
+
+test("glossary: a bad regex, a stale except key and an empty glossary are problems", () => {
+  assert.match(compileGlossary({ terms: [{ id: "x", en: "(" }] }, BASE).problems.join(), /bad regex/);
+  assert.match(compileGlossary({ terms: [{ id: "x", en: "a", except: ["auth:gone"] }] }, BASE).problems.join(), /not in en/);
+  assert.match(compileGlossary({ terms: [] }, BASE).problems.join(), /no terms/);
 });

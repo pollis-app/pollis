@@ -15,6 +15,7 @@ import {
   resolveDeviceLanguage,
   supportedLanguageCodes,
 } from "../i18n/languages.ts";
+import { REGISTERED_CODE, SCRIPT_VARIANTS, matchLanguageTag } from "../i18n/languageTag.ts";
 import { NAMESPACES } from "../i18n/namespaces.ts";
 
 const ROOT = resolve(import.meta.dirname, "../..");
@@ -30,8 +31,10 @@ test("the language registry matches the shipped catalogue directories", () => {
   assert.deepEqual([...supportedLanguageCodes()].sort(), shippedLocales());
   assert.ok(SUPPORTED_LANGUAGES.some((l) => l.code === DEFAULT_LANGUAGE));
   for (const option of SUPPORTED_LANGUAGES) {
-    assert.equal(option.code, option.code.toLowerCase(), `${option.code} is a lowercase base tag`);
-    assert.ok(!option.code.includes("-"), `${option.code} carries no subtag`);
+    // A base tag, or `<base>-<Script>` for a language shipped per script (#1725).
+    assert.match(option.code, REGISTERED_CODE, option.code);
+    const [base, script] = option.code.split("-");
+    assert.ok(!script || SCRIPT_VARIANTS[base], `${option.code}: ${base} is not in SCRIPT_VARIANTS`);
   }
 });
 
@@ -56,6 +59,36 @@ test("normalizeLanguage reduces device tags to shipped base languages", () => {
   assert.equal(normalizeLanguage("pt-BR"), null);
   assert.equal(normalizeLanguage(""), null);
   assert.equal(normalizeLanguage(undefined), null);
+});
+
+test("languageTag.ts is a byte copy of the desktop one", () => {
+  assert.equal(
+    readFileSync(join(ROOT, "mobile/i18n/languageTag.ts"), "utf8"),
+    readFileSync(join(ROOT, "frontend/src/i18n/languageTag.ts"), "utf8"),
+  );
+});
+
+test("the mobile registry matches desktop's code, endonym and direction for every language", () => {
+  const desktop = readFileSync(join(ROOT, "frontend/src/i18n/languages.ts"), "utf8");
+  const rows = [...desktop.matchAll(/\{ code: "([^"]+)", label: "([^"]+)", dir: "(ltr|rtl)" \}/g)].map((m) => `${m[1]}|${m[2]}|${m[3]}`);
+  assert.deepEqual(SUPPORTED_LANGUAGES.map((l) => `${l.code}|${l.label}|${l.dir}`), rows);
+});
+
+test("script subtags: Punjabi follows its script, everything else its base tag, stored choices unchanged (#1725)", () => {
+  const codes = [...supportedLanguageCodes(), "pa-Arab", "pa-Guru"];
+  for (const [tag, want] of [
+    ["pa-PK", "pa-Arab"],
+    ["pa-Arab-IN", "pa-Arab"],
+    ["pa-IN", "pa-Guru"],
+    ["pa", "pa-Guru"],
+    ["zh-Hant-TW", "zh"],
+  ] as const) {
+    assert.equal(matchLanguageTag(tag, codes), want, tag);
+  }
+  assert.equal(matchLanguageTag("pa-PK", [...supportedLanguageCodes(), "pa-Guru"]), null);
+  for (const stored of ["en", "es", "uk", "fr", "ru", "zh", "ar"]) {
+    assert.equal(normalizeLanguage(stored), stored);
+  }
 });
 
 test("resolveDeviceLanguage takes the first shipped candidate, else English", () => {

@@ -5,8 +5,22 @@ const fs = require("fs");
 const path = require("path");
 
 const LOCALES_DIR = path.join(__dirname, "..", "..", "frontend", "src", "i18n", "locales");
-// Catalogue language → .lproj name. `zh` is Simplified Chinese (mobile/i18n/languages.ts).
-const LPROJ = { en: "en", es: "es", fr: "fr", ru: "ru", uk: "uk", zh: "zh-Hans", ar: "ar" };
+// .lproj names that differ from the catalogue code. `zh` is Simplified Chinese (mobile/i18n/languages.ts);
+// a script code (`pa-Arab`) is already a valid .lproj name, so it needs no entry.
+const LPROJ_OVERRIDES = { zh: "zh-Hans" };
+
+/** Catalogue language → .lproj name, for every catalogue directory, so a new locale needs no edit here (#1725). */
+function lprojTable(localesDir = LOCALES_DIR) {
+  const out = {};
+  for (const code of fs.readdirSync(localesDir).sort()) {
+    if (fs.statSync(path.join(localesDir, code)).isDirectory()) {
+      out[code] = LPROJ_OVERRIDES[code] ?? code;
+    }
+  }
+  return out;
+}
+
+const LPROJ = lprojTable();
 
 /** One section of a language's `mobile` catalogue (`push`, `permissions`), or `{}`. */
 function mobileSection(lng, section, localesDir = LOCALES_DIR) {
@@ -30,4 +44,4 @@ function addKnownRegions(project) {
   return project;
 }
 
-module.exports = { LOCALES_DIR, LPROJ, mobileSection, escapeStrings, addKnownRegions };
+module.exports = { LOCALES_DIR, LPROJ, lprojTable, mobileSection, escapeStrings, addKnownRegions };

@@ -1,7 +1,9 @@
 /** Mobile mirror of `frontend/src/i18n/languages.ts`; tests/i18n.test.ts fails if it drifts. Pure. */
 
+import { matchLanguageTag } from "./languageTag.ts";
+
 export interface LanguageOption {
-  /** BCP-47 base tag, lowercase, no region. */
+  /** Lowercase base tag (`ja`), or `<base>-<Script>` for a language in SCRIPT_VARIANTS (`pa-Arab`); see languageTag.ts. */
   code: string;
   /** The endonym, never the English name. */
   label: string;
@@ -36,23 +38,9 @@ export function languageDirection(code: string | null | undefined): "ltr" | "rtl
   return languageOption(code ?? "")?.dir ?? "ltr";
 }
 
-/** `pt-BR` → `pt` when we ship `pt`; `zh-Hans-CN` → `zh`; else null. */
+/** `pt-BR` → `pt` when we ship `pt`; `zh-Hans-CN` → `zh`; `pa-PK` → `pa-Arab`; else null. */
 export function normalizeLanguage(raw: string | null | undefined): string | null {
-  if (!raw) {
-    return null;
-  }
-  const tag = raw.trim().toLowerCase();
-  if (!tag) {
-    return null;
-  }
-  if (isSupportedLanguage(tag)) {
-    return tag;
-  }
-  const base = tag.split(/[-_]/)[0];
-  if (isSupportedLanguage(base)) {
-    return base;
-  }
-  return null;
+  return matchLanguageTag(raw, supportedLanguageCodes());
 }
 
 export function resolveDeviceLanguage(candidates: readonly string[] | undefined): string {

@@ -34,23 +34,30 @@ That one covers the design decisions; this one is the working checklist.
    is useless to the person reaching for this control. `dir` is `rtl` only for
    Arabic/Hebrew-script languages.
 
-   `code` is a **base tag only** — `zh`, never `zh-Hans`; `pt`, never `pt-BR`.
-   A subtagged code cannot work here from either end: `normalizeLanguage`
-   lowercases every tag it is handed, while i18next canonicalizes codes
-   through `Intl.getCanonicalLocales` before testing them against
-   `supportedLngs`, so `zh-hans` is rejected by i18next and `zh-Hans` is
-   rejected by `normalizeLanguage`. Either way the catalogue silently renders
-   English. Base tags are also what real OS locales degrade to — `zh-CN` and
-   `zh-Hans-CN` both reduce to `zh` — so the subtag would not have matched the
-   machines you are shipping for anyway. Script differences that matter (`zh`
-   Simplified vs Traditional) are one locale per catalogue, distinguished by
-   the endonym, and would need `normalizeLanguage` reworked to ship both.
+   `code` is a lowercase **base tag** (`ja`, `zh`; never `pt-BR`), unless the
+   language ships in more than one script: then it is `<base>-<Script>` in
+   canonical case (`pa-Arab`, `pa-Guru`) and the base needs a row in
+   `SCRIPT_VARIANTS` (`languageTag.ts`, mobile has a byte copy) saying which
+   script each region and the bare tag resolve to. Every other language keeps
+   the base-tag rule, so `zh-CN` and `zh-Hans-CN` both reduce to `zh`. See the
+   wiki's "Script subtags".
    Setting `dir: "rtl"` flips `<html dir>` **and** the component layout, which
    is written with logical properties throughout (#855). You are inheriting
    that work, not redoing it — but read the RTL section of the wiki article
    before writing any new UI, because the conventions there (logical utilities,
    `.rtl-mirror` / `.rtl-unmirror`, `<bdi>` vs `dir="ltr"`) are what keep it
    true, and `e2e/rtl.spec.ts` is what catches you if they slip.
+
+   **Glossary first.** Add the language's column to every term in
+   `glossary.json` (and read each term's note) before translating, and
+   translate with it: `node scripts/i18n-glossary.mjs --locale <code>` lists
+   every value that skips a term. Security-critical copy (PIN, safety
+   numbers, device linking, account deletion, export, report/block) gets a
+   back-translation review before merge.
+
+   **Fonts** need nothing for the scripts L5a–L5c ship: `index.css` already
+   names the platform fonts per `:lang()` and the Linux packages recommend
+   them (wiki → "Fonts"). A new script adds a `:root:lang(<code>)` row there.
 
 4. **Check the plural forms.** See below — this is the step that gets skipped
    and it is the one that cannot be fixed later without a re-translation.
@@ -80,8 +87,14 @@ That one covers the design decisions; this one is the working checklist.
    `scripts/i18n-check.mjs` and `mobile/tests/i18n.test.ts` fail until both
    are done.
 
-Nothing else needs editing. The selector, `supportedLngs`, the OS-locale probe
-and the resource loader all read from `SUPPORTED_LANGUAGES`.
+7. **Run the locale smoke** on the new code: `LOCALE_SMOKE=<code> pnpm
+   --filter @pollis/e2e e2e:ui locale-smoke.spec.ts` (desktop, both skins) and
+   `mobile/scripts/maestro-locale-smoke.sh <ios|ipad|android> <code>`
+   (device). Both read the catalogue directories, so they need no edit.
+
+Nothing else needs editing. The selector, `supportedLngs`, the OS-locale probe,
+the resource loader, the iOS `.lproj` list and the Android push strings all
+follow `SUPPORTED_LANGUAGES` or the catalogue directories.
 
 ## Key conventions
 

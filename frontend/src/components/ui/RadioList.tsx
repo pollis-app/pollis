@@ -6,6 +6,8 @@ export interface RadioOption {
   /** A second, quieter line under the label. */
   detail?: string;
   disabled?: boolean;
+  /** BCP-47 tag of the label's own language (an endonym), so it shapes and picks fonts as that language. */
+  lang?: string;
 }
 
 interface RadioListProps {
@@ -82,7 +84,7 @@ export const RadioList: React.FC<RadioListProps> = ({
               {selected && <span className="w-2 h-2 rounded-full bg-accent" />}
             </span>
             <span className="min-w-0 flex flex-col">
-              <span className="truncate text-sm">{option.label}</span>
+              <span className="truncate text-sm" lang={option.lang}>{option.label}</span>
               {option.detail && (
                 <span className={`text-xs ${selected ? "text-bg" : "text-dim"}`}>{option.detail}</span>
               )}

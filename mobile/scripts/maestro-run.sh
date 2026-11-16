@@ -70,6 +70,11 @@ if [ "$PLATFORM" = "ipad" ]; then
   ENV_ARGS+=(-e "IPAD=1")
 fi
 
+# locale-smoke (#1725) reads the locale under test; maestro-locale-smoke.sh sets it.
+if [ -n "${LOCALE:-}" ]; then
+  ENV_ARGS+=(-e "LOCALE=$LOCALE")
+fi
+
 # MAESTRO_EMAIL is deliberately NOT taken from .env as-is. Every flow opens with
 # `clearState` and then signs UP, so a fixed address only works on its very
 # first use ever: from the second flow onward the account already exists, auth
@@ -154,6 +159,11 @@ if [ "$FLOW" = "all" ]; then
     [ -e "$f" ] || continue
     # ipad-* flows assert the regular-width two-pane; a phone renders compact.
     if [ "$PLATFORM" != "ipad" ] && [[ "$(basename "$f")" == ipad-* ]]; then
+      continue
+    fi
+    # locale-smoke runs once per locale with the device language set first:
+    # scripts/maestro-locale-smoke.sh drives it (#1725).
+    if [ "$(basename "$f")" = "locale-smoke.yaml" ]; then
       continue
     fi
     # Two-client flows need a second device or a dev-DS peer, so on one device

@@ -2,31 +2,16 @@ import { useState } from "react";
 import { View, Text, type LayoutChangeEvent } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useObserver } from "mobx-react-lite";
-import { Chip, SectionTitle } from "./ui";
+import { Group, SectionTitle } from "./ui";
+import { RadioRow } from "./RadioRow";
 import { Icon } from "./icons";
-import { type as ty, semantic, space, fonts } from "../theme/tokens";
+import { type as ty, semantic, space } from "../theme/tokens";
 import { SUPPORTED_LANGUAGES } from "../i18n/languages";
 import { layoutRestartPending, setLanguage } from "../i18n";
 import { appStore } from "../stores/appStore";
 
-// Geist covers Latin and Cyrillic only; other scripts use the system font so they match their neighbours.
-const GEIST_SCRIPTS = /^[\u0000-\u024F\u0400-\u04FF\s]*$/;
-
-function ChipLabel({ label, selected }: { label: string; selected: boolean }) {
-  const geist = GEIST_SCRIPTS.test(label);
-  return (
-    <Text
-      numberOfLines={1}
-      style={[
-        { fontSize: 14, color: selected ? semantic.onAccent : semantic.accent },
-        geist ? { fontFamily: fonts.semibold } : { fontWeight: "600" },
-      ]}
-    >
-      {label}
-    </Text>
-  );
-}
-
+// A pick-one setting, so a vertical radio list (#1725): it grows with every locale, which a chip row cannot.
+// Endonyms outside Geist's Latin/Cyrillic fall back to the platform font for their script.
 export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent) => void }) {
   const { t, i18n } = useTranslation("settings");
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
@@ -41,35 +26,25 @@ export function LanguageSection({ onLayout }: { onLayout?: (e: LayoutChangeEvent
       >
         {t("language.heading")}
       </SectionTitle>
-      <View
-        style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}
-        accessibilityRole="radiogroup"
-        accessibilityLabel={t("language.ariaLabel")}
-      >
-        {SUPPORTED_LANGUAGES.map((option) => {
-          const selected = active === option.code;
-          return (
-            <Chip
+      <View accessibilityRole="radiogroup" accessibilityLabel={t("language.ariaLabel")}>
+        <Group>
+          {SUPPORTED_LANGUAGES.map((option) => (
+            <RadioRow
               key={option.code}
-              testID={`chip-language-${option.code}`}
-              accessibilityLabel={option.label}
-              selected={selected}
-              leading={
-                selected ? <Icon.check size={16} color={semantic.onAccent} /> : undefined
-              }
+              testID={`radio-language-${option.code}`}
+              label={option.label}
+              selected={active === option.code}
               onPress={() => {
-                if (selected) {
+                if (active === option.code) {
                   return;
                 }
                 void setLanguage(option.code, userId).then(() => {
                   setRestartPending(layoutRestartPending());
                 });
               }}
-            >
-              <ChipLabel label={option.label} selected={selected} />
-            </Chip>
-          );
-        })}
+            />
+          ))}
+        </Group>
       </View>
       {/* #1231: "left" is the start edge under RTL. */}
       <Text style={[ty.meta, { textAlign: "left" }]}>{t("language.description")}</Text>

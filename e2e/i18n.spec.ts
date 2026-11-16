@@ -241,11 +241,11 @@ for (const skin of SKINS) {
 
       // English is active by default, and the active option is the primary one.
       await expect(page.getByTestId("pref-language-en")).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "true",
       );
       await expect(page.getByTestId(`pref-language-${TEST_LANG}`)).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "false",
       );
     });
@@ -264,11 +264,11 @@ for (const skin of SKINS) {
 
       // Selection moved with it.
       await expect(page.getByTestId(`pref-language-${TEST_LANG}`)).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "true",
       );
       await expect(page.getByTestId("pref-language-en")).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "false",
       );
 
@@ -315,7 +315,7 @@ for (const skin of SKINS) {
       await gotoPreferences(page);
       await expect(page.getByTestId("pref-language-heading")).toHaveText(TEST_HEADING);
       await expect(page.getByTestId(`pref-language-${TEST_LANG}`)).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "true",
       );
     });

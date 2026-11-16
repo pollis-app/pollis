@@ -85,8 +85,20 @@
        where --c-bg would not. */
     --c-ink: hsl(0 0% 4%);
 
-    --font-mono: 'DM Mono', ui-monospace, monospace;
-    --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
+    /* Script fallback (#1725): the bundled Latin faces cover no CJK, Indic or
+       Ethiopic, so each non-Latin locale names its platform fonts here.
+       `:lang()` below swaps it with `<html lang>`. Naming the font per language
+       picks the right Han glyph forms (ja vs zh) instead of whatever the OS's
+       per-glyph fallback guesses. It goes AFTER the generic family: CJK fonts
+       carry full-width Latin and Cyrillic, so ahead of `monospace` they would
+       draw "Русский" letter-spaced in the terminal skin. For the same reason
+       the mono stack names a Latin/Cyrillic mono per platform before the
+       generic: Chromium resolves `monospace` per language, and under `ja` that
+       is a CJK mono with full-width Cyrillic. Nothing is bundled:
+       see .codesight/wiki/i18n.md → Fonts. */
+    --font-script: system-ui;
+    --font-mono: 'DM Mono', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace, var(--font-script);
+    --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif, var(--font-script);
 
     /* ── Corner radii ──────────────────────────────────────────────── */
     /* Terminal keeps corners tight; the refined skin softens them (brief §6:
@@ -145,7 +157,7 @@
        mono→sans inversion and the body both read `--font-sans`, so this one
        override reskins all human-facing text. Machine-facing `.font-machine`
        text stays on `--font-mono`. */
-    --font-sans: 'Geist Sans', system-ui, sans-serif;
+    --font-sans: 'Geist Sans', system-ui, sans-serif, var(--font-script);
 
     /* Softer corners. */
     --radius-chip: 6px;
@@ -159,6 +171,51 @@
     --msg-divider-gap: 1.75rem;
     --msg-group-gap: 0.35rem;
     --msg-row-pad-y: 0.3rem;
+  }
+
+  /* ── Per-script font stacks (#1725) ──────────────────────────────
+     macOS / iOS name first, then Windows, then the Noto / Source Han names
+     Linux fontconfig installs (the deb/rpm recommend them). Locales not yet
+     shipped are listed so a new catalogue needs no CSS; `:lang()` on an
+     unshipped code simply never matches. */
+  :root:lang(ja) {
+    --font-script: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Noto Sans CJK JP', 'Noto Sans JP', 'Source Han Sans JP', system-ui;
+  }
+  :root:lang(ko) {
+    --font-script: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', 'Noto Sans KR', 'Source Han Sans KR', system-ui;
+  }
+  :root:lang(zh) {
+    --font-script: 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', system-ui;
+  }
+  :root:lang(hi), :root:lang(mr), :root:lang(ne) {
+    --font-script: 'Kohinoor Devanagari', 'Devanagari Sangam MN', 'Nirmala UI', 'Noto Sans Devanagari', system-ui;
+  }
+  :root:lang(bn) {
+    --font-script: 'Kohinoor Bangla', 'Bangla Sangam MN', 'Nirmala UI', 'Noto Sans Bengali', system-ui;
+  }
+  :root:lang(ta) {
+    --font-script: 'Tamil Sangam MN', 'Nirmala UI', 'Noto Sans Tamil', system-ui;
+  }
+  :root:lang(te) {
+    --font-script: 'Kohinoor Telugu', 'Telugu Sangam MN', 'Nirmala UI', 'Noto Sans Telugu', system-ui;
+  }
+  :root:lang(pa-Guru) {
+    --font-script: 'Gurmukhi Sangam MN', 'Gurmukhi MN', 'Nirmala UI', 'Noto Sans Gurmukhi', system-ui;
+  }
+  /* Nastaliq (Urdu, Shahmukhi Punjabi) hangs far below and above the line:
+     it needs the roomier line-height in BOTH skins or descenders clip. */
+  :root:lang(ur), :root:lang(pa-Arab) {
+    --font-script: 'Noto Nastaliq Urdu', 'Urdu Typesetting', 'Geeza Pro', 'Segoe UI', 'Noto Sans Arabic', system-ui;
+    --lh: 2.2;
+  }
+  :root:lang(ur) body, :root:lang(pa-Arab) body {
+    line-height: var(--lh);
+  }
+  :root:lang(ps), :root:lang(fa) {
+    --font-script: 'Geeza Pro', 'Segoe UI', 'Noto Naskh Arabic', 'Noto Sans Arabic', system-ui;
+  }
+  :root:lang(am), :root:lang(ti) {
+    --font-script: 'Kefa', 'Ebrima', 'Nyala', 'Noto Sans Ethiopic', system-ui;
   }
 
   /* Refined body picks up the density line-height. */

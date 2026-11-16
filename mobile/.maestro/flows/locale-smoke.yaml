@@ -1,0 +1,86 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - locale-smoke
+---
+# LOCALE SMOKE (#1725) — the mobile counterpart of e2e/locale-smoke.spec.ts.
+# Runs once per shipped locale: `mobile/scripts/maestro-run.sh locale-smoke
+# <ios|ipad|android>` reads the catalogue directories, sets the DEVICE language
+# to each (so the app's first-run auto-detect is what picks it), and passes
+# LOCALE. A new locale is covered by adding its catalogue; nothing here changes.
+#
+# Screens: sign-in, chat list, a conversation, the composer, settings, PIN.
+# Every screen asserts no element's whole text is a raw catalogue key
+# (`section.item` or `ns:section.item`), which is what i18next renders for a
+# key with no entry in any language. Overflow and clipping are judged from the
+# screenshots (locale-<code>-NN-<screen>), which Maestro cannot measure.
+
+# --- Sign-in, in the device language, before any choice is stored ---
+# The stored language lives in expo-secure-store, which on iOS is the keychain
+# and survives clearState; an earlier flow's choice would win over the device
+# language (as it should for a user), so wipe it for a true first run.
+- clearKeychain
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 30000
+- assertNotVisible:
+    text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
+- takeScreenshot: locale-${LOCALE}-01-sign-in
+
+- runFlow: ../subflows/sign-in.yaml
+
+# --- Chat list ---
+- tapOn:
+    id: "tab-direct"
+- assertVisible:
+    id: "screen-direct"
+- assertNotVisible:
+    text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
+- takeScreenshot: locale-${LOCALE}-02-chat-list
+
+# --- A conversation (the Vault, which every account has) and its composer ---
+- tapOn:
+    id: "row-vault"
+- assertVisible:
+    id: "screen-vault"
+- assertNotVisible:
+    text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
+- takeScreenshot: locale-${LOCALE}-03-conversation
+- tapOn:
+    id: "input-composer"
+- inputText: "hello"
+- takeScreenshot: locale-${LOCALE}-04-composer
+# Back dismisses the keyboard with the screen (the composer exposes no dismiss action to hideKeyboard).
+- tapOn:
+    id: "btn-back"
+
+# --- Settings: the auto-detected language is the selected row ---
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- assertVisible:
+    id: "screen-self-preferences"
+- scrollUntilVisible:
+    element:
+      id: "radio-language-${LOCALE}"
+    direction: DOWN
+- assertVisible:
+    id: "radio-language-${LOCALE}"
+    checked: true
+- assertNotVisible:
+    text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
+- takeScreenshot: locale-${LOCALE}-05-settings
+
+# --- PIN, after a relaunch ---
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 30000
+- assertNotVisible:
+    text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
+- takeScreenshot: locale-${LOCALE}-06-pin

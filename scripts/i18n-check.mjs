@@ -10,6 +10,7 @@
  *      reads as a bug rather than as missing copy)
  *   5. every `t('ns:key')` call site in the renderer resolves in `en`
  *   8. no new hardcoded user-facing copy in either app (scripts/i18n-hardcoded.mjs, #1724)
+ *   9. glossary terms render as frontend/src/i18n/glossary.json says (scripts/i18n-glossary.mjs, #1725; WARN)
  *
  * Missing keys only WARN (fallbackLng renders English); anything WRONG rather than BEHIND fails.
  *
@@ -57,30 +58,10 @@ function warn(code, count, message) {
   untranslatedByLocale.set(code, (untranslatedByLocale.get(code) ?? 0) + count);
 }
 
-/** Flatten `{a:{b:"x"}}` to `{"a.b":"x"}`. */
-function flatten(object, prefix = "", out = {}) {
-  for (const [key, value] of Object.entries(object)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      flatten(value, path, out);
-    } else {
-      out[path] = value;
-    }
-  }
-  return out;
-}
-
+// One loader for the `ns:key` view of a catalogue, shared with the glossary check (#1725).
+const { loadCatalogue } = await import("./i18n-glossary.mjs");
 function loadLocale(code) {
-  const dir = join(LOCALES_DIR, code);
-  const catalogue = {};
-  for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
-    const ns = file.replace(/\.json$/, "");
-    const parsed = JSON.parse(readFileSync(join(dir, file), "utf8"));
-    for (const [key, value] of Object.entries(flatten(parsed))) {
-      catalogue[`${ns}:${key}`] = value;
-    }
-  }
-  return catalogue;
+  return loadCatalogue(join(LOCALES_DIR, code));
 }
 
 /**
@@ -379,6 +360,15 @@ try {
   check({ fail });
 } catch (error) {
   fail(`hardcoded-copy lint could not run: ${error.message}`);
+}
+
+// 9. Glossary terms in each locale with a glossary column (#1725). Misses WARN; a broken glossary fails.
+console.log("\nglossary:");
+try {
+  const { check } = await import("./i18n-glossary.mjs");
+  check({ fail });
+} catch (error) {
+  fail(`glossary check could not run: ${error.message}`);
 }
 
 // Untranslated coverage, as a standing report rather than a gate.

@@ -58,6 +58,13 @@ Checks that keep what we publish true to what the code does (epic #1720). Each s
 - **In CI, not a sweep:** the hardcoded-copy ratchet (`scripts/i18n-hardcoded.mjs` + `scripts/i18n-hardcoded.json`), which `i18n-check.mjs` runs in `frontend-check.yml` and `mobile-core-check.yml`. It is a lint on the apps' own code, so it gates merges like the rest of `i18n-check`. Details in [i18n.md](i18n.md#coverage-hardcoded-copy-surfaces-the-report-1724).
 - **Self-test:** `node --test scripts/test-i18n-coverage.mjs` (in `frontend-check.yml`): each lint rule fires and `t()` never does, the ratchet's new and stale entries, a hardcoded string in each app's tree, and each registry failure.
 
+## Locale infrastructure (#1725)
+
+- **Glossary:** `frontend/src/i18n/glossary.json` — product terms with each locale's rendering and a do-not-translate list. `scripts/i18n-glossary.mjs` runs as check 9 of `i18n-check.mjs` (so in CI): a value that skips a glossary term WARNs, a broken glossary fails. Details in [i18n.md](i18n.md#glossary-1725).
+- **Script subtags:** `languageTag.ts` maps OS tags onto `<base>-<Script>` codes for the languages in `SCRIPT_VARIANTS` (Punjabi), base tags for everything else; [i18n.md](i18n.md#script-subtags-1725).
+- **Fonts:** per-platform decision table in [i18n.md](i18n.md#fonts-1725); nothing bundled.
+- **Locale smoke:** `e2e/locale-smoke.spec.ts` and `mobile/.maestro/flows/locale-smoke.yaml` (`mobile/scripts/maestro-locale-smoke.sh`), parameterised over the catalogue directories. Device tier, run by hand before a release that adds or changes a locale.
+
 ## Reuse and clones (#1731)
 
 - **Boundaries:** `code-boundaries.md` says where code may be shared (inside `frontend/`, inside `mobile/`, along the Rust crate graph, through shared files in `website/`) and where it deliberately is not (frontend ↔ mobile parity twins, a new crate edge, a website build step).

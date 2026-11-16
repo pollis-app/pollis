@@ -35,7 +35,7 @@ tags:
 
 # Switch to Spanish: the heading re-renders in Spanish without a restart.
 - tapOn:
-    id: "chip-language-es"
+    id: "radio-language-es"
 - assertVisible:
     id: "pref-language-heading"
     text: "Idioma"
@@ -70,7 +70,7 @@ tags:
 # Arabic: copy flips immediately; the layout direction needs a relaunch, and
 # the screen says so.
 - tapOn:
-    id: "chip-language-ar"
+    id: "radio-language-ar"
 - assertVisible:
     id: "pref-language-restart"
 - takeScreenshot: i18n-04-arabic-restart-pending
@@ -102,7 +102,7 @@ tags:
 
 # Leave the device in English for the flows that follow.
 - tapOn:
-    id: "chip-language-en"
+    id: "radio-language-en"
 - assertVisible:
     id: "pref-language-heading"
     text: "Language"
