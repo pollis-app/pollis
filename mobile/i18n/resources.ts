@@ -187,6 +187,21 @@ import ps_search from "../../frontend/src/i18n/locales/ps/search.json";
 import ps_settings from "../../frontend/src/i18n/locales/ps/settings.json";
 import ps_vault from "../../frontend/src/i18n/locales/ps/vault.json";
 import ps_voice from "../../frontend/src/i18n/locales/ps/voice.json";
+import pt_arcade from "../../frontend/src/i18n/locales/pt/arcade.json";
+import pt_auth from "../../frontend/src/i18n/locales/pt/auth.json";
+import pt_channels from "../../frontend/src/i18n/locales/pt/channels.json";
+import pt_chat from "../../frontend/src/i18n/locales/pt/chat.json";
+import pt_common from "../../frontend/src/i18n/locales/pt/common.json";
+import pt_dms from "../../frontend/src/i18n/locales/pt/dms.json";
+import pt_emoji from "../../frontend/src/i18n/locales/pt/emoji.json";
+import pt_errors from "../../frontend/src/i18n/locales/pt/errors.json";
+import pt_mobile from "../../frontend/src/i18n/locales/pt/mobile.json";
+import pt_nav from "../../frontend/src/i18n/locales/pt/nav.json";
+import pt_saved from "../../frontend/src/i18n/locales/pt/saved.json";
+import pt_search from "../../frontend/src/i18n/locales/pt/search.json";
+import pt_settings from "../../frontend/src/i18n/locales/pt/settings.json";
+import pt_vault from "../../frontend/src/i18n/locales/pt/vault.json";
+import pt_voice from "../../frontend/src/i18n/locales/pt/voice.json";
 import ru_arcade from "../../frontend/src/i18n/locales/ru/arcade.json";
 import ru_auth from "../../frontend/src/i18n/locales/ru/auth.json";
 import ru_channels from "../../frontend/src/i18n/locales/ru/channels.json";
@@ -499,6 +514,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ps_settings,
     "vault": ps_vault,
     "voice": ps_voice,
+  },
+  "pt": {
+    "arcade": pt_arcade,
+    "auth": pt_auth,
+    "channels": pt_channels,
+    "chat": pt_chat,
+    "common": pt_common,
+    "dms": pt_dms,
+    "emoji": pt_emoji,
+    "errors": pt_errors,
+    "mobile": pt_mobile,
+    "nav": pt_nav,
+    "saved": pt_saved,
+    "search": pt_search,
+    "settings": pt_settings,
+    "vault": pt_vault,
+    "voice": pt_voice,
   },
   "ru": {
     "arcade": ru_arcade,

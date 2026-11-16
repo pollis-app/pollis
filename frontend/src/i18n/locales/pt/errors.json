@@ -1,0 +1,17 @@
+{
+  "boundary": {
+    "instruction": "Reinicie a aplicação.",
+    "message": "Ocorreu um erro inesperado.",
+    "restart": "Reiniciar",
+    "tag": "ERRO FATAL",
+    "title": "Algo correu mal"
+  },
+  "core": {
+    "pinIncorrect_one": "PIN errado. Resta {{count}} tentativa.",
+    "pinIncorrect_other": "PIN errado. Restam {{count}} tentativas.",
+    "pinLockedOut": "Demasiados PINs errados. Recupere a sua conta com a sua Chave Secreta.",
+    "pinNotSet": "Este dispositivo ainda não tem PIN. Inicie sessão novamente para definir um.",
+    "noActiveUser": "Não tem sessão iniciada neste dispositivo. Inicie sessão novamente.",
+    "unlockFirst": "Desbloqueie primeiro o Pollis."
+  }
+}

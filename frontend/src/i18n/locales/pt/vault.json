@@ -1,0 +1,44 @@
+{
+  "title": "Cofre",
+  "placeholder": "Notas, ligações ou ficheiros seguros",
+  "empty": "O seu cofre está vazio. As notas, ligações e ficheiros que colocar aqui são encriptados ponto a ponto e acompanham-no em todos os dispositivos.",
+  "searchPlaceholder": "Pesquisar no cofre…",
+  "searchEmpty": "Nada no seu cofre corresponde a isso.",
+  "clearSearch": "Limpar pesquisa",
+  "viewToggle": "Vista do cofre",
+  "viewChat": "Conversa",
+  "viewMedia": "Multimédia",
+  "saving": "A guardar…",
+  "saveFailed": "Não foi possível guardar no cofre. O seu rascunho voltou ao editor.",
+  "saveFailedOffline": "Não foi possível contactar o Pollis para guardar isto. O seu rascunho voltou ao editor — verifique a ligação e tente novamente.",
+  "saveFailedTooLarge": "Um ficheiro é demasiado grande para o cofre. O seu rascunho voltou ao editor — remova-o e envie novamente.",
+  "saveRetry": "Tentar novamente",
+  "entry": {
+    "pinned": "Afixada",
+    "edited": "(editada)",
+    "pin": "Afixar entrada",
+    "unpin": "Desafixar entrada",
+    "edit": "Editar entrada",
+    "delete": "Eliminar entrada"
+  },
+  "edit": {
+    "heading": "Editar entrada",
+    "cancel": "Cancelar edição",
+    "hint": "Enter para guardar · Shift+Enter para nova linha · Esc para cancelar"
+  },
+  "delete": {
+    "heading": "Eliminar entrada",
+    "body": "Eliminar esta entrada do cofre em todos os dispositivos? Esta ação não pode ser anulada.",
+    "cancel": "Cancelar eliminação",
+    "confirm": "Eliminar",
+    "deleting": "A eliminar…"
+  },
+  "media": {
+    "empty": "Ainda não há multimédia no cofre — arraste imagens ou ficheiros para a vista de conversa.",
+    "filesHeading": "Ficheiros",
+    "close": "Fechar visualizador",
+    "previous": "Anterior",
+    "next": "Seguinte",
+    "position": "{{index}} / {{total}}"
+  }
+}

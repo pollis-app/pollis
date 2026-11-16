@@ -35,6 +35,7 @@ const SHIPPED_LANGUAGES: readonly LanguageOption[] = [
   { code: "ta", label: "தமிழ்", dir: "ltr" },
   { code: "pa-Guru", label: "ਪੰਜਾਬੀ", dir: "ltr" },
   { code: "sw", label: "Kiswahili", dir: "ltr" },
+  { code: "pt", label: "Português", dir: "ltr" },
 ];
 
 /** The live registry; Playwright may add a synthetic locale (`registerTestLanguage`). */

@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "Nova mensagem",
+    "requests": "Pedidos",
+    "blocked": "Utilizadores bloqueados",
+    "avatarAlt": "Avatar de {{name}}",
+    "settingsFor": "Definições de {{name}}",
+    "verified": "Contacto verificado",
+    "keyChanged": "A chave de identidade mudou — verifique novamente"
+  },
+  "conversation": {
+    "fallbackTitle": "Mensagem direta",
+    "viewProfile": "Ver perfil de @{{name}}",
+    "call": "Ligar a @{{name}}",
+    "returnToCall": "Voltar à chamada com @{{name}}",
+    "pinsLabel": "Mensagens afixadas"
+  },
+  "settings": {
+    "pageTitle": "Definições da conversa",
+    "leave": "Sair da conversa",
+    "submitting": "A sair…",
+    "leaveFailed": "Não foi possível sair da conversa",
+    "cancel": "Cancelar (Esc)"
+  },
+  "start": {
+    "pageTitle": "Nova mensagem",
+    "identifierLabel": "Nome de utilizador ou email",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "Iniciar conversa",
+    "submitting": "A iniciar…",
+    "identifierRequired": "O identificador do utilizador é obrigatório",
+    "userNotFound": "Utilizador não encontrado",
+    "startFailed": "Não foi possível iniciar a conversa"
+  },
+  "requests": {
+    "pageTitle": "Pedidos de mensagem",
+    "empty": "Sem pedidos pendentes.",
+    "noMessageYet": "(ainda sem mensagens)",
+    "unknownSender": "Desconhecido",
+    "others_one": "(+{{count}} outro)",
+    "others_other": "(+{{count}} outros)",
+    "accept": "aceitar",
+    "block": "bloquear"
+  },
+  "blocked": {
+    "pageTitle": "Utilizadores bloqueados",
+    "empty": "Sem utilizadores bloqueados.",
+    "unblock": "desbloquear"
+  },
+  "profile": {
+    "fallbackName": "Utilizador",
+    "fallbackTitle": "Perfil",
+    "notFound": "Utilizador não encontrado",
+    "avatarAlt": "Avatar de {{name}}",
+    "sendMessage": "Enviar mensagem",
+    "block": "Bloquear",
+    "safetyNumber": "Número de segurança",
+    "statusVerified": "Verificado",
+    "statusChanged": "Mudou — verifique novamente",
+    "statusUnverified": "Não verificado",
+    "keyChangedWarning": "A chave de identidade deste contacto mudou desde a última vez que a verificou. Compare novamente o número por outro meio antes de confiar nele.",
+    "removeVerification": "Remover verificação",
+    "markVerified": "Marcar como verificado",
+    "report": "Denunciar"
+  },
+  "safety": {
+    "title": "Eu e {{name}}",
+    "verify": "Verificar número de segurança",
+    "headingMany": "Números de segurança",
+    "shared": "Vê o mesmo número que {{name}}. Compare-o pessoalmente ou numa chamada para garantir que ninguém está no meio.",
+    "qrLabel": "Código QR do número de segurança que partilha com {{name}}",
+    "failed": "Não foi possível carregar o número de segurança."
+  },
+  "notify": {
+    "requestTitle": "Nova conversa",
+    "requestBody": "{{name}} iniciou uma conversa consigo"
+  }
+}

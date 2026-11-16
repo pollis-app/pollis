@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "ARCADA"
+  },
+  "hud": {
+    "score": "PONTOS  {{score}}",
+    "time": "TEMPO  {{time}}",
+    "gameOver": "FIM DO JOGO",
+    "final_one": "final {{count}} pt · {{time}}",
+    "final_other": "final {{count}} pts · {{time}}",
+    "restartHint": "prima R para recomeçar · Esc para sair",
+    "controls": "WASD mover · rato apontar · clique/espaço disparar · Esc sair"
+  }
+}

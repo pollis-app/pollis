@@ -70,6 +70,10 @@
       "sw": [
         "hazina",
         "Hazina"
+      ],
+      "pt": [
+        "cofre",
+        "Cofre"
       ]
     },
     {
@@ -115,6 +119,10 @@
         "vifaa",
         "Kifaa",
         "Vifaa"
+      ],
+      "pt": [
+        "dispositivo",
+        "Dispositivo"
       ]
     },
     {
@@ -160,6 +168,12 @@
         "nambari za usalama",
         "Nambari ya usalama",
         "Nambari za usalama"
+      ],
+      "pt": [
+        "número de segurança",
+        "números de segurança",
+        "Número de segurança",
+        "Números de segurança"
       ]
     },
     {
@@ -205,6 +219,12 @@
         "funguo za utambulisho",
         "Ufunguo wa utambulisho",
         "Funguo za utambulisho"
+      ],
+      "pt": [
+        "chave de identidade",
+        "chaves de identidade",
+        "Chave de identidade",
+        "Chaves de identidade"
       ]
     },
     {
@@ -251,6 +271,12 @@
         "Thibitish",
         "uthibitisho",
         "Uthibitisho"
+      ],
+      "pt": [
+        "verific",
+        "Verific",
+        "verifiq",
+        "Verifiq"
       ]
     },
     {
@@ -292,6 +318,9 @@
         "PIN"
       ],
       "sw": [
+        "PIN"
+      ],
+      "pt": [
         "PIN"
       ]
     },
@@ -339,6 +368,10 @@
         "banwa",
         "banua",
         "Banua"
+      ],
+      "pt": [
+        "afixa",
+        "Afixa"
       ]
     },
     {
@@ -388,6 +421,11 @@
         "Kikundi",
         "Vikundi",
         "KIKUNDI"
+      ],
+      "pt": [
+        "grupo",
+        "Grupo",
+        "GRUPO"
       ]
     },
     {
@@ -434,6 +472,12 @@
       "sw": [
         "chaneli",
         "Chaneli"
+      ],
+      "pt": [
+        "canal",
+        "canais",
+        "Canal",
+        "Canais"
       ]
     },
     {
@@ -493,6 +537,13 @@
         "Ujumbe wa moja kwa moja",
         "Jumbe za moja kwa moja",
         "DM"
+      ],
+      "pt": [
+        "mensagem direta",
+        "mensagens diretas",
+        "Mensagem direta",
+        "Mensagens diretas",
+        "MD"
       ]
     },
     {
@@ -539,6 +590,12 @@
         "maombi ya ujumbe",
         "Ombi la ujumbe",
         "Maombi ya ujumbe"
+      ],
+      "pt": [
+        "pedido de mensagem",
+        "pedidos de mensagem",
+        "Pedido de mensagem",
+        "Pedidos de mensagem"
       ]
     },
     {
@@ -582,6 +639,10 @@
       "sw": [
         "kumbukumbu ya uwazi",
         "Kumbukumbu ya uwazi"
+      ],
+      "pt": [
+        "registo de transparência",
+        "Registo de transparência"
       ]
     },
     {
@@ -631,6 +692,12 @@
       "sw": [
         "ripoti",
         "Ripoti"
+      ],
+      "pt": [
+        "denunci",
+        "Denunci",
+        "denúncia",
+        "Denúncia"
       ]
     },
     {
@@ -677,6 +744,10 @@
       "sw": [
         "zui",
         "Zui"
+      ],
+      "pt": [
+        "bloque",
+        "Bloque"
       ]
     },
     {
@@ -720,6 +791,11 @@
       ],
       "sw": [
         "Ufunguo wa Siri"
+      ],
+      "pt": [
+        "Chave Secreta",
+        "chave secreta",
+        "CHAVE SECRETA"
       ]
     },
     {
@@ -763,6 +839,10 @@
       "sw": [
         "ufunguo wa urejeshaji",
         "Ufunguo wa urejeshaji"
+      ],
+      "pt": [
+        "chave de recuperação",
+        "Chave de recuperação"
       ]
     },
     {
@@ -807,6 +887,11 @@
       "sw": [
         "Kifurushi cha Dharura",
         "KIFURUSHI CHA DHARURA"
+      ],
+      "pt": [
+        "Kit de Emergência",
+        "kit de emergência",
+        "KIT DE EMERGÊNCIA"
       ]
     },
     {
@@ -856,6 +941,13 @@
         "Mwaliko",
         "Mialiko",
         "MWALIKO"
+      ],
+      "pt": [
+        "convite",
+        "Convite",
+        "convid",
+        "Convid",
+        "CONVITE"
       ]
     },
     {
@@ -900,6 +992,10 @@
         "wanachama",
         "Wanachama",
         "Mwanachama"
+      ],
+      "pt": [
+        "membro",
+        "Membro"
       ]
     },
     {
@@ -941,6 +1037,10 @@
       ],
       "sw": [
         "simamizi"
+      ],
+      "pt": [
+        "administrador",
+        "Administrador"
       ]
     },
     {
@@ -985,6 +1085,10 @@
         "Uzi",
         "nyuzi",
         "Nyuzi"
+      ],
+      "pt": [
+        "tópico",
+        "Tópico"
       ]
     },
     {
@@ -1027,6 +1131,14 @@
       "sw": [
         "itikio",
         "Itikio"
+      ],
+      "pt": [
+        "reação",
+        "reações",
+        "Reação",
+        "Reações",
+        "reagi",
+        "Reagi"
       ]
     },
     {
@@ -1069,6 +1181,14 @@
       "sw": [
         "taj",
         "Taj"
+      ],
+      "pt": [
+        "menção",
+        "menções",
+        "Menção",
+        "Menções",
+        "mencion",
+        "Mencion"
       ]
     },
     {
@@ -1111,6 +1231,16 @@
       "sw": [
         "shiriki skrini",
         "Shiriki skrini"
+      ],
+      "pt": [
+        "partilha de ecrã",
+        "Partilha de ecrã",
+        "partilhar o ecrã",
+        "Partilhar o ecrã",
+        "partilhar ecrã",
+        "Partilhar ecrã",
+        "partilham o ecrã",
+        "partilha o ecrã"
       ]
     },
     {
@@ -1157,6 +1287,20 @@
         "ingie",
         "ingiza",
         "Ingiza"
+      ],
+      "pt": [
+        "iniciar sessão",
+        "Iniciar sessão",
+        "inicie sessão",
+        "Inicie sessão",
+        "iniciou sessão",
+        "sessão iniciada",
+        "Sessão iniciada",
+        "inicia sessão",
+        "iniciaram sessão",
+        "iniciado sessão",
+        "início de sessão",
+        "Início de sessão"
       ]
     },
     {
@@ -1201,6 +1345,20 @@
         "ondoka",
         "Ondoka",
         "ondoke"
+      ],
+      "pt": [
+        "terminar sessão",
+        "Terminar sessão",
+        "termine sessão",
+        "Termine sessão",
+        "terminou sessão",
+        "sessão terminada",
+        "Sessão terminada",
+        "terminada a sessão",
+        "terminado sessão",
+        "A terminar sessão",
+        "sessão foi terminada",
+        "sessão será terminada"
       ]
     },
     {
@@ -1250,6 +1408,10 @@
         "funguliwa",
         "fungue",
         "Fungue"
+      ],
+      "pt": [
+        "desbloque",
+        "Desbloque"
       ]
     },
     {
@@ -1294,6 +1456,10 @@
       "sw": [
         "hamish",
         "Hamish"
+      ],
+      "pt": [
+        "export",
+        "Export"
       ]
     },
     {
@@ -1335,6 +1501,16 @@
       ],
       "sw": [
         "kutoka mwanzo hadi mwisho"
+      ],
+      "pt": [
+        "encriptação ponto a ponto",
+        "Encriptação ponto a ponto",
+        "encriptado ponto a ponto",
+        "encriptada ponto a ponto",
+        "encriptados ponto a ponto",
+        "encriptadas ponto a ponto",
+        "Encriptado ponto a ponto",
+        "Encriptada ponto a ponto"
       ]
     },
     {
@@ -1377,6 +1553,14 @@
       ],
       "sw": [
         "masikio"
+      ],
+      "pt": [
+        "desativar o áudio",
+        "Desativar o áudio",
+        "ativar o áudio",
+        "Ativar o áudio",
+        "áudio desativado",
+        "Áudio desativado"
       ]
     }
   ]

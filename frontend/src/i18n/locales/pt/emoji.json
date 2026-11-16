@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "Seletor de emojis",
+    "triggerLabel": "Emoji",
+    "searchLabel": "Pesquisar",
+    "searchPlaceholder": "Pesquisar emojis",
+    "resultsFor": "Resultados para \"{{query}}\"",
+    "recent": "Usados frequentemente",
+    "custom": "Personalizados",
+    "empty": "Nenhum emoji corresponde a isso.",
+    "previewHint": "Escolha um emoji",
+    "railLabel": "Categorias de emojis"
+  },
+  "categories": {
+    "people": "Pessoas",
+    "nature": "Natureza",
+    "food": "Comida",
+    "activity": "Atividades",
+    "travel": "Viagens",
+    "objects": "Objetos",
+    "symbols": "Símbolos",
+    "flags": "Bandeiras"
+  },
+  "skinTone": {
+    "groupLabel": "Tom de pele",
+    "default": "Tom de pele predefinido",
+    "numbered": "Tom de pele {{index}}"
+  },
+  "manage": {
+    "title": "Emojis personalizados",
+    "signInRequired": "Inicie sessão",
+    "dropPrompt": "Arraste uma imagem para aqui ou clique para procurar",
+    "dropNow": "Largue para usar esta imagem",
+    "dropHint": "{{formats}} · os GIFs animados mantêm a animação",
+    "replaceHint": "Largue outra imagem, ou clique, para a substituir",
+    "sourceSize": "Original de {{size}} · recodificado para menos de 48 KB ao carregar",
+    "reencodeNote": "Recodificado para menos de 48 KB ao carregar",
+    "fileTooLarge": "Essa imagem tem mais de {{size}} — escolha um ficheiro original mais pequeno",
+    "unsupportedFile": "{{name}} não é PNG, JPEG, GIF nem WebP",
+    "shortcodeLabel": "Código curto",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Escreve-se como :código: — a–z, 0–9 e _",
+    "shortcodeRequired": "Dê um nome a este emoji para o adicionar",
+    "shortcodeInvalid": "Use 2–32 caracteres: a–z, 0–9 e _",
+    "shortcodeTaken": ":{{shortcode}}: já está a ser usado neste grupo",
+    "samplePlaceholder": "Como vai ficar numa mensagem",
+    "add": "Adicionar emoji",
+    "shrinking": "A reduzir…",
+    "filePickerTitle": "Escolha uma imagem para o emoji",
+    "imageFilterName": "Imagens",
+    "addFailed": "Não foi possível adicionar esse emoji",
+    "removeFailed": "Não foi possível remover esse emoji",
+    "storageNote": "As imagens são recodificadas para menos de 48 KB antes de serem carregadas, por isso um ficheiro original grande não é problema. Imagens idênticas partilham uma única cópia guardada em todos os grupos que as usam. Não há limite para o número de emojis que este grupo pode ter.",
+    "stored_one": "{{count}} emoji · {{size}} guardados",
+    "stored_other": "{{count}} emojis · {{size}} guardados",
+    "empty": "Ainda não há emojis personalizados. Qualquer pessoa no grupo pode adicionar um.",
+    "sizeAnimated": "animado · {{size}}",
+    "remove": "Remover :{{shortcode}}:",
+    "removeAdminsOnly": "Só os administradores do grupo podem remover emojis."
+  }
+}
