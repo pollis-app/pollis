@@ -853,14 +853,32 @@ async fn a_dm_push_reads_in_one_request_and_posts_the_rest_after() {
     }
     assert!(paths.iter().any(|p| p == "/v1/watermarks/advance"), "the watermark still advances: {paths:?}");
 
-    // The delivered receipt the fetch deferred reached alice.
-    alice.fetch_dm_messages(&dm).await;
-    let delivered = (m.clone(), bob_p.id.clone(), "delivered".to_string());
-    assert!(receipts(&alice, &dm).await.contains(&delivered), "alice sees it delivered");
-
-    // And nothing is fetched twice: the watermark moved.
+    // Nothing is fetched twice: the watermark moved.
     let again = headless(&bob, Some(handle_for(&bob_p.id, &dm, "dm").await), Duration::from_secs(20)).await;
     assert!(items(&again).is_empty(), "{again:?}");
+    // (A headless fetch sends no delivered receipt: the device cannot compute a delete
+    // capability while locked, and the app's next ingest sends it. The in-app fetch can.)
+    let _ = m;
+
+    // In the app's own process (Android, app unlocked): the same single request, and the
+    // delivered receipt it deferred reaches alice once the host settles.
+    let second = alice.send_channel_message_id(&dm, "in the app").await;
+    let mark = ds_request_mark();
+    bob.activate();
+    let handle = handle_for(&bob_p.id, &dm, "dm").await;
+    let out = fetch::run_in_app(&bob.state, Some(&handle), Duration::from_secs(20))
+        .await
+        .expect("the app is unlocked in this process");
+    let bodies: Vec<String> = items(&out).into_iter().map(|i| i.body).collect();
+    assert_eq!(bodies, vec!["in the app".to_string()]);
+    assert!(settle(Duration::from_secs(30)).await, "the deferred posts finished");
+    let paths = ds_requests_since(mark, &bob_device);
+    assert_eq!(paths.first().map(String::as_str), Some("/v1/push/fetch"), "{paths:?}");
+    assert!(!paths.iter().any(|p| p == "/v1/push/resolve"), "{paths:?}");
+    assert!(paths.iter().any(|p| p == "/v1/messages/send"), "the receipt envelope was posted: {paths:?}");
+    alice.fetch_dm_messages(&dm).await;
+    let delivered = (second, bob_p.id.clone(), "delivered".to_string());
+    assert!(receipts(&alice, &dm).await.contains(&delivered), "alice sees it delivered");
 }
 
 /// #1804: a Delivery Service that predates `/v1/push/fetch` still gets the preview, through
