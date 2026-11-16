@@ -28,9 +28,17 @@ import com.pollisnative.R
  * only after about ten seconds (12+), so a normal fetch is over before anything appears.
  */
 class PushFetchService : Service(), PushFetchKeeper.Foreground {
+  /**
+   * The newest start delivered to this instance. [leave] stops only up to it: a plain `stopSelf()`
+   * racing a new push's `startForegroundService` would destroy the service before that start's
+   * `startForeground`, and Android ends the app for it.
+   */
+  @Volatile private var lastStartId = 0
+
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    lastStartId = startId
     PushFetchKeeper.onStarted(this)
     return START_NOT_STICKY
   }
@@ -67,7 +75,8 @@ class PushFetchService : Service(), PushFetchKeeper.Foreground {
     } catch (e: Exception) {
       Log.w(TAG, "stopForeground failed", e)
     }
-    stopSelf()
+    // False when a newer start is already on its way: its onStartCommand enters the foreground again.
+    stopSelfResult(lastStartId)
   }
 
   companion object {
