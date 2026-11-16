@@ -334,7 +334,9 @@
     "nameOnlyBody": "メッセージを送信しました",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "メッセージリクエスト",
-    "requestBody": "{{sender}} があなたにメッセージを送ろうとしています"
+    "requestBody": "{{sender}} があなたにメッセージを送ろうとしています",
+    "fetchingChannel": "メッセージの受信",
+    "fetchingBody": "新しいメッセージを確認しています"
   },
   "search": {
     "channels": "チャンネル",

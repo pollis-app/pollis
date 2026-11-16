@@ -342,7 +342,9 @@
     "nameOnlyBody": "Sent a message",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "Message request",
-    "requestBody": "{{sender}} wants to message you"
+    "requestBody": "{{sender}} wants to message you",
+    "fetchingChannel": "Message delivery",
+    "fetchingBody": "Checking for new messages"
   },
   "search": {
     "channels": "Channels",

@@ -1,5 +1,8 @@
 <!-- The manifest AGP >= 7.3 builds this library with (build.gradle `supportsNamespace`). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- #1804: PushFetchService, which gives a message push's fetch network under Data Saver. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
   <application>
     <!-- #1599: the app's only FCM service. It subclasses expo-notifications' service, whose own
          declaration plugins/withRichPush.js removes from the app manifest. -->
@@ -10,6 +13,11 @@
         <action android:name="com.google.firebase.MESSAGING_EVENT" />
       </intent-filter>
     </service>
+    <!-- #1804: held around a message push's fetch; does no work itself. -->
+    <service
+      android:name="com.pollisnative.push.PushFetchService"
+      android:exported="false"
+      android:foregroundServiceType="remoteMessaging" />
     <!-- #1614: the tap target of every notification the rich-push handler posts. Invisible and out
          of Recents; it hands the tap to expo-notifications and brings the app forward. -->
     <activity

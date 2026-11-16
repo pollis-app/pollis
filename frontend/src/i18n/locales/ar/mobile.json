@@ -365,7 +365,9 @@
     "nameOnlyBody": "أرسل رسالة",
     "groupTitle": "{{sender}} · {{conversation}}",
     "requestTitle": "طلب مراسلة",
-    "requestBody": "يريد {{sender}} مراسلتك"
+    "requestBody": "يريد {{sender}} مراسلتك",
+    "fetchingChannel": "توصيل الرسائل",
+    "fetchingBody": "جارٍ التحقق من الرسائل الجديدة"
   },
   "search": {
     "channels": "القنوات",

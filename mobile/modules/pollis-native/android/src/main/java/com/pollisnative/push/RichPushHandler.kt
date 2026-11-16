@@ -17,15 +17,28 @@ import java.util.concurrent.TimeoutException
  * process may be cut back, so the whole handler finishes inside [HANDLER_BUDGET_MS]. Fetches run one
  * at a time on [worker] (the core's state lock would refuse a second anyway); if one overruns, the
  * generic text goes up at the deadline and a late result replaces it in place (same tag, alert once).
+ *
+ * Network (#1804): unless the app is on screen, the handler holds [PushFetchService] from before
+ * the fetch until the core's deferred posts (watermark, delivered receipt) have settled, so Data
+ * Saver cannot block the fetch and the process lives long enough for a late result.
  */
 object RichPushHandler {
   private const val TAG = "PollisRichPush"
   const val HANDLER_BUDGET_MS = 8_500L
   /** Headroom between the core's own budget and the hard deadline: JNI, JSON, posting. */
   private const val MARGIN_MS = 700L
+  /** Longest the handler waits, after posting, for the core's deferred posts (#1804). */
+  const val SETTLE_MS = 20_000
+  /** Longest an overrun fetch may still upgrade its notification. */
+  private const val LATE_MS = 60_000L
 
   private val worker: ExecutorService = Executors.newSingleThreadExecutor { r ->
     Thread(r, "pollis-rich-push").apply { isDaemon = true }
+  }
+
+  /** Settling and releasing the service, off [worker] so the next push's fetch never queues behind it. */
+  private val tail: ExecutorService = Executors.newSingleThreadExecutor { r ->
+    Thread(r, "pollis-rich-push-tail").apply { isDaemon = true }
   }
 
   /** The directory the app's core runs in: Expo's `FileSystem.documentDirectory`, as `lib/native/bridge.ts` passes it. */
@@ -33,6 +46,7 @@ object RichPushHandler {
 
   /**
    * @param fetch the core call; tests and the debug hook substitute it.
+   * @param hold take [PushFetchService] for this push; false when it was not taken.
    */
   fun handle(
     context: Context,
@@ -42,8 +56,16 @@ object RichPushHandler {
     sentTime: Long,
     fetch: (dataDir: String, handle: String, budgetMs: Int) -> String = { dir, h, budget -> PollisNotify.fetch(dir, h, budget) },
     note: (line: String) -> Unit = { PollisNotify.note(it) },
+    hold: (Context) -> Boolean = { c -> !OpenConversation.isAppInForeground() && PushFetchKeeper.acquire(c) },
   ) {
     val app = context.applicationContext
+    // Before the fetch, so the network is open by the time it asks (#1804).
+    val held = try {
+      hold(app)
+    } catch (e: Exception) {
+      false
+    }
+    val done = { finish(held) }
     val notifier = RichPushNotifier(app)
     val start = SystemClock.elapsedRealtime()
     val deadline = start + HANDLER_BUDGET_MS
@@ -70,20 +92,49 @@ object RichPushHandler {
       note("android " + PushNetworkState.describe(app))
     }
     if (json != null) {
-      post(notifier, handle, json, data, messageId, sentTime)
+      try {
+        post(notifier, handle, json, data, messageId, sentTime)
+      } finally {
+        done()
+      }
       return
     }
     // Overran: never leave the push unshown. A late answer upgrades it if the process lives.
     Log.i(TAG, "fetch overran its budget; posting the generic notification")
-    notifier.post(handle, RichPush.Plan.Generic, data, messageId, sentTime)
-    worker.execute {
-      val late = try {
-        future.get()
-      } catch (e: Exception) {
-        null
+    try {
+      notifier.post(handle, RichPush.Plan.Generic, data, messageId, sentTime)
+    } catch (e: Exception) {
+      Log.w(TAG, "generic post failed", e)
+    }
+    tail.execute {
+      try {
+        val late = try {
+          future.get(LATE_MS, TimeUnit.MILLISECONDS)
+        } catch (e: Exception) {
+          null
+        }
+        if (late != null) {
+          post(notifier, handle, late, data, messageId, sentTime)
+        }
+      } finally {
+        done()
       }
-      if (late != null) {
-        post(notifier, handle, late, data, messageId, sentTime)
+    }
+  }
+
+  /**
+   * After the notification is up: let the core's deferred posts finish, then give the service
+   * back. On [tail], so neither the FCM thread nor the next fetch waits for it.
+   */
+  private fun finish(held: Boolean) {
+    if (!held) {
+      return
+    }
+    tail.execute {
+      try {
+        PollisNotify.settle(SETTLE_MS)
+      } finally {
+        PushFetchKeeper.release()
       }
     }
   }

@@ -28,6 +28,8 @@ export const KEYS = {
   groupTitle: "pollis_push_group_title",
   requestTitle: "pollis_push_request_title",
   requestBody: "pollis_push_request_body",
+  fetchingChannel: "pollis_push_fetching_channel",
+  fetchingBody: "pollis_push_fetching_body",
 };
 
 // i18next `{{name}}` placeholders -> positional Android format args, fixed per key so a
