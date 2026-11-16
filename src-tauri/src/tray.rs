@@ -241,34 +241,33 @@ pub fn tray_set_enabled(app: AppHandle, enabled: bool) {
     }
 }
 
+/// Swap in a menu built from the current voice state and labels, if the tray exists.
+fn rebuild_menu(app: &AppHandle) {
+    let state = app.state::<TrayState>();
+    let in_call = state.voice_in_call.load(Ordering::Relaxed);
+    let muted = state.voice_muted.load(Ordering::Relaxed);
+    let guard = state.tray.lock().unwrap();
+    if let Some(tray) = guard.as_ref() {
+        if let Ok(menu) = build_menu(app, in_call, muted) {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+}
+
 /// Rebuilds the menu only when something changed.
 #[tauri::command]
 pub fn tray_set_voice_state(app: AppHandle, in_call: bool, muted: bool) {
     let state = app.state::<TrayState>();
     let changed = state.voice_in_call.swap(in_call, Ordering::Relaxed) != in_call
         || state.voice_muted.swap(muted, Ordering::Relaxed) != muted;
-    if !changed {
-        return;
-    }
-    let guard = state.tray.lock().unwrap();
-    if let Some(tray) = guard.as_ref() {
-        if let Ok(menu) = build_menu(&app, in_call, muted) {
-            let _ = tray.set_menu(Some(menu));
-        }
+    if changed {
+        rebuild_menu(&app);
     }
 }
 
 /// The renderer's translation of the menu (#1724): stored, and the menu rebuilt if the tray exists.
 #[tauri::command]
 pub fn tray_set_labels(app: AppHandle, labels: TrayLabels) {
-    let state = app.state::<TrayState>();
-    *state.labels.lock().unwrap() = Some(labels);
-    let in_call = state.voice_in_call.load(Ordering::Relaxed);
-    let muted = state.voice_muted.load(Ordering::Relaxed);
-    let guard = state.tray.lock().unwrap();
-    if let Some(tray) = guard.as_ref() {
-        if let Ok(menu) = build_menu(&app, in_call, muted) {
-            let _ = tray.set_menu(Some(menu));
-        }
-    }
+    *app.state::<TrayState>().labels.lock().unwrap() = Some(labels);
+    rebuild_menu(&app);
 }
