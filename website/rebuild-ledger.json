@@ -1,11 +1,21 @@
 {
-  "generated_at": "2026-11-15T16:21:20Z",
+  "generated_at": "2026-11-16T22:39:07Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "8df524ba",
     "date": "2026-08-16"
   },
   "runs": [
+    {
+      "tag": "v1.19.14",
+      "conclusion": "success",
+      "created_at": "2026-11-16T22:15:13Z",
+      "event": "workflow_run",
+      "run_id": "43968231159",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/43968231159",
+      "classification": null,
+      "evidence": null
+    },
     {
       "tag": "v1.19.13",
       "conclusion": "success",
@@ -935,16 +945,6 @@
       "run_url": "https://github.com/pollis-app/pollis/actions/runs/31335833629",
       "classification": "false_red",
       "evidence": "Same parse failure as 31335810940, from the same push of 8cbce1e3 — this is the run created at 21:03:22, the same second as the tag-triggered desktop-release run for v1.8.4 (31335834158). Zero jobs, run name fell back to the workflow path, no log exists, no build or comparison ever happened. Fixed by #798 (5595d409); v1.8.4 was subsequently proven to reproduce byte-identically (run 31361471279, payload 1a4213a1…)."
-    },
-    {
-      "tag": "v1.8.4",
-      "conclusion": "failure",
-      "created_at": "2026-08-09T21:02:50Z",
-      "event": "push",
-      "run_id": "31335810940",
-      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31335810940",
-      "classification": "false_red",
-      "evidence": "No comparison was ever performed — no job even started. v1.8.4 tags 8cbce1e3, the very commit that introduced rebuild-verify.yml, and that first version of the file was unparseable by GitHub: the run has zero jobs (the Actions API reports total_count 0) and its name fell back to the raw workflow path .github/workflows/rebuild-verify.yml, which is also why gh run view finds no log. This run fired for the push of main at 21:02:50; a sibling (31335833629) fired 32 seconds later for the tag push. #798 (5595d409) repaired the unparseable workflow that night. Nothing was built and nothing was compared, so the red says nothing about the shipped bytes — and v1.8.4 in fact reproduces: run 31361471279 later rebuilt the Linux AppImage payload byte-for-byte (1a4213a1…) on the same runner image the release built on."
     }
   ]
 }
