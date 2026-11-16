@@ -53,6 +53,14 @@ export function usesNastaliq(language: string | null | undefined): boolean {
   return NASTALIQ_LANGUAGES.includes(language ?? "");
 }
 
+// Arabic-script and Indic languages, where Latin tracking breaks joins or pulls clusters apart (#1726).
+const UNTRACKED_LANGUAGES: readonly string[] = ["ar", "ur", "pa-Arab", "ps", "hi", "mr", "bn", "te", "ta", "pa-Guru"];
+
+/** True when type should drop its letter-spacing; the desktop twin is the `:lang()` rule in frontend/src/index.css. */
+export function dropsLetterSpacing(language: string | null | undefined): boolean {
+  return UNTRACKED_LANGUAGES.includes(language ?? "");
+}
+
 export function languageDirection(code: string | null | undefined): "ltr" | "rtl" {
   return languageOption(code ?? "")?.dir ?? "ltr";
 }

@@ -15,6 +15,7 @@ import {
   resolveDeviceLanguage,
   supportedLanguageCodes,
   usesNastaliq,
+  dropsLetterSpacing,
 } from "../i18n/languages.ts";
 import { REGISTERED_CODE, SCRIPT_VARIANTS, matchLanguageTag } from "../i18n/languageTag.ts";
 import { NAMESPACES } from "../i18n/namespaces.ts";
@@ -114,6 +115,15 @@ test("only the Nastaliq languages get the taller type line heights (#1726)", () 
   // Pashto and Arabic are Naskh, which fits the Latin-sized steps.
   for (const code of ["ps", "ar", "pa-Guru", "hi", "en", null]) {
     assert.equal(usesNastaliq(code), false, String(code));
+  }
+});
+
+test("Arabic-script and Indic languages drop Latin letter-spacing (#1726)", () => {
+  for (const code of ["ar", "ur", "pa-Arab", "ps", "hi", "mr", "bn", "te", "ta", "pa-Guru"]) {
+    assert.equal(dropsLetterSpacing(code), true, code);
+  }
+  for (const code of ["en", "es", "ru", "zh", "ja", "ko", null]) {
+    assert.equal(dropsLetterSpacing(code), false, String(code));
   }
 });
 

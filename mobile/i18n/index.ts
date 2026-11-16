@@ -15,9 +15,10 @@ import {
   resolveDeviceLanguage,
   supportedLanguageCodes,
   usesNastaliq,
+  dropsLetterSpacing,
 } from "./languages";
 import { loadDeviceLanguage, saveDeviceLanguage } from "./storage";
-import { setNastaliqLineHeights } from "../theme/tokens";
+import { setScriptMetrics } from "../theme/tokens";
 
 void i18n.use(initReactI18next).init({
   resources: RESOURCES,
@@ -37,11 +38,12 @@ void i18n.use(initReactI18next).init({
   },
 });
 
-// Nastaliq needs taller lines than the Latin-sized type steps (#1726).
-setNastaliqLineHeights(usesNastaliq(i18n.language));
-i18n.on("languageChanged", (language) => {
-  setNastaliqLineHeights(usesNastaliq(language));
-});
+// Nastaliq needs taller lines, and Arabic-script and Indic text no tracking (#1726).
+function applyScriptMetrics(language: string): void {
+  setScriptMetrics({ nastaliq: usesNastaliq(language), untracked: dropsLetterSpacing(language) });
+}
+applyScriptMetrics(i18n.language);
+i18n.on("languageChanged", applyScriptMetrics);
 
 /** The locale every `toLocale*` / `Intl.*` call must pass; `undefined` means the host locale. */
 export function activeLocale(): string {

@@ -41,19 +41,30 @@ export function currentTheme(): Theme {
   return _theme;
 }
 
-// Nastaliq (Urdu, Shahmukhi Punjabi) hangs far above and below the line, so
-// the Latin-sized `type.*` line heights clip it (#1726). i18n/index.ts sets
-// this per language; every step's lineHeight is read through it.
+// Script-dependent metrics (#1726), set by i18n/index.ts on every language
+// change and read through the getters in `type` below.
+// - Nastaliq (Urdu, Shahmukhi Punjabi) hangs far above and below the line, so
+//   the Latin-sized line heights clip it.
+// - Tracking is Latin typography: Android mis-measures tracked Arabic-script
+//   text (a one-word title truncated to "مستق…"), and in the Indic scripts it
+//   pulls clusters apart. The desktop drops it the same way (index.css).
 const NASTALIQ_LINE_HEIGHT = 2;
 let _nastaliq = false;
+let _untracked = false;
 
-export function setNastaliqLineHeights(on: boolean) {
-  _nastaliq = on;
+export function setScriptMetrics(metrics: { nastaliq: boolean; untracked: boolean }) {
+  _nastaliq = metrics.nastaliq;
+  _untracked = metrics.untracked;
 }
 
 /** A Latin-sized line height, raised to fit Nastaliq while that script is active. */
 export function scriptLineHeight(base: number, fontSize: number): number {
   return _nastaliq ? Math.max(base, Math.round(fontSize * NASTALIQ_LINE_HEIGHT)) : base;
+}
+
+/** A Latin letter-spacing, or none while an Arabic-script or Indic language is active. */
+export function scriptLetterSpacing(base: number): number {
+  return _untracked ? 0 : base;
 }
 
 export function hexToRgbTriplet(hex: string): string {
@@ -213,7 +224,7 @@ export const fonts = {
   sora700: "Geist_700Bold",
 };
 
-// Colours and line heights are getters so a flattened style tracks the live theme and script.
+// Colours, line heights and letter-spacing are getters so a flattened style tracks the live theme and script.
 export const type = {
   display: {
     fontFamily: fonts.bold,
@@ -221,7 +232,9 @@ export const type = {
     get lineHeight() {
       return scriptLineHeight(34, 28);
     },
-    letterSpacing: -0.56,
+    get letterSpacing() {
+      return scriptLetterSpacing(-0.56);
+    },
     get color() {
       return _theme.text;
     },
@@ -232,7 +245,9 @@ export const type = {
     get lineHeight() {
       return scriptLineHeight(26, 20);
     },
-    letterSpacing: -0.2,
+    get letterSpacing() {
+      return scriptLetterSpacing(-0.2);
+    },
     get color() {
       return _theme.text;
     },
@@ -294,7 +309,13 @@ export const type = {
   mono: { fontFamily: fonts.mono400, fontSize: 13 },
 
   /* ── Deprecated aliases — migrate to the names above ── */
-  h1: { fontFamily: fonts.bold, fontSize: 20, letterSpacing: -0.2 },
+  h1: {
+    fontFamily: fonts.bold,
+    fontSize: 20,
+    get letterSpacing() {
+      return scriptLetterSpacing(-0.2);
+    },
+  },
   h2: { fontFamily: fonts.bold, fontSize: 17 },
   rowN: { fontFamily: fonts.medium, fontSize: 16 },
   rowSub: {
