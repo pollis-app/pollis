@@ -205,5 +205,6 @@ test("a returning user signing in again is not asked", async ({ page }) => {
 
   await expect(page.getByTestId("app-ready")).toBeAttached();
   await expect(page.getByTestId("appearance-choice-screen")).toHaveCount(0);
-  expect(await htmlSkin(page)).toBe("terminal");
+  // No saved skin: the default, Modern.
+  expect(await htmlSkin(page)).toBe("modern");
 });
