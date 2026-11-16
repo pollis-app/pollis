@@ -17,7 +17,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - **Use pnpm 10.25.0 here, the version CI uses.** The root `packageManager: pnpm@10.25.0` does not apply under `--ignore-workspace`, so a bare `pnpm` in `mobile/` runs whatever is on `PATH` — Homebrew's is 12.x, which rewrites the lockfile differently from CI and makes `--frozen-lockfile` fail there. Install with `npx -y pnpm@10.25.0 install --ignore-workspace` (or a corepack-pinned pnpm).
 - If Expo complains about missing packages, first check that `node_modules` is inside `mobile/` and not at the repo root.
 - `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there are two: `decode-uri-component@0.2.2`, which backports 0.5.1's linear decoder (GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f) because every `pollis://` link runs through it and 0.5.x is ESM-only (#1296; `tests/deep-link-decode.test.ts`, which also diffs it against 0.5.1 itself, installed as the `decode-uri-component-upstream` devDependency). Drop both once expo-router stops pulling query-string 7. And `react-native-keyboard-controller@1.21.9`, which replays a keyboard hide the library never reported to JS — on Android one applied without an animation, on iOS one after the app returns to the foreground or a stray KVO "interactive" move (#1641, see "Keyboard" below; `tests/keyboard.test.ts`). It is native, so it reaches phones only with a store build, and a keyboard-controller bump must carry it forward or drop it once upstream does the same. `pnpm.overrides` raises vulnerable transitive build-time deps to a patched floor inside the parent's major (today `node-forge`, via the Expo CLI); drop an entry once the parent's own range excludes the bad versions. Make or change a patch with `pnpm patch <pkg>@<ver> --ignore-workspace`, then `pnpm patch-commit <dir> --ignore-workspace` and `pnpm install --ignore-workspace` (which writes the lockfile's `patchedDependencies` hash).
-- Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). The ONE shared directory is the translation catalogues, `frontend/src/i18n/locales/`, reached through a `watchFolders` entry in `metro.config.js` — see [Localization](#localization-i18n-1074). Do not widen that list.
+- Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). Two shared directories are reached through `watchFolders` in `metro.config.js`: the translation catalogues, `frontend/src/i18n/locales/` (see [Localization](#localization-i18n-1074)), and the colour source, the repo-root `design/` (see [Design tokens](#design-tokens); `.codesight/wiki/code-boundaries.md`). Do not widen that list.
 
 ## Stack
 
@@ -2009,13 +2009,15 @@ there, never here; the rules for using them are `docs/design/README.md`.
   < `high` (surfaces), `hair` / `hairSoft` (translucent separators), `edge`
   (opaque control border, ≥3:1 vs raised), `accent`, `accentFaint/Soft/Mid/Line`
   (opaque accent tints), `onAccent` (= bg, text on accent fills), `backdrop`,
-  `sheetBg` (= raised, opaque — #1193). `danger` = accent: there is no third
-  hue; destructive actions are told apart by label, icon and separation.
+  `sheetBg` (= raised, opaque — #1193), `danger` / `onDanger` (the one
+  destructive red, shared with desktop).
   Old names (`ink`, `ink2`, `mute`, `mute2`, `hairStrong`, `fieldBg`, `cardBg`)
   are deprecated aliases.
 - `tests/theme-contrast.test.ts` asserts WCAG AA for every preset: text tiers
-  and accent ≥4.5:1 on every surface, edge ≥3:1 vs raised, onAccent ≥4.5:1.
-  Tune `RECIPE` in `derive.ts` if a new preset fails — never special-case it.
+  accent and danger ≥4.5:1 on every surface, edge ≥3:1 vs raised, onAccent and
+  onDanger ≥4.5:1 (desktop's `frontend/tests/theme-contrast.test.ts` checks
+  the same recipe over both skins and every background preset). Tune `RECIPE`
+  in `design/theme.ts` if a new preset fails — never special-case it.
 - `type.*`: Display 28/700, Title 20/700, Heading 17/700, Body 16/400, Secondary
   14/400, Section 13/600, Meta 12/400, Tab 12. Sentence case, no tracked
   capitals, nothing below 12; all text follows system font scaling.
@@ -2079,7 +2081,7 @@ every scroll that starts on it (those rows keep `onPress`; a
 release at runtime); never on anything that sends, persists, notifies
 others, confirms or toggles; no haptic (it is navigation).
 
-UI rules: two base colours — use `semantic.*` / `type.*`, never a hex or
+UI rules: two base colours plus the one red — use `semantic.*` / `type.*`, never a hex or
 rgba in `app/` or `components/` (QrCode's black/white is the one deliberate
 exception, for scannability); icons/text on an accent fill use
 `semantic.onAccent`. 44pt targets (hitSlop/padding for small visuals); one
