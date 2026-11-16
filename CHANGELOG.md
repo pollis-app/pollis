@@ -23,6 +23,25 @@ tag date, UTC.
 
 ---
 
+## v1.19.14 — 2026-11-16
+
+- **Seventeen more languages.** Pollis now also comes in Korean, Japanese,
+  Urdu, Hindi, Punjabi (Shahmukhi and Gurmukhi), Pashto, Bengali, Marathi,
+  Telugu, Tamil, Swahili, Portuguese, Hausa, Amharic, Yoruba and Zulu, 24 in
+  all. Right-to-left languages lay out right to left.
+- **Language has its own page.** Preferences shows your current language on
+  one row; the full list opens on its own page instead of filling Preferences.
+- **Modern is now the default look** for a new install or an account that has
+  never picked one. Terminal is still a choice in Preferences.
+- Every destructive action (delete, leave, remove) uses the same red button.
+- Messages that can't be shown now say so in plain words: "Couldn't decrypt",
+  "Sent before you joined" for a quote from before you joined, and "Message
+  deleted", instead of bracketed tags.
+- The side panel follows what you are looking at: a group's online members,
+  the people in a DM, or otherwise your online contacts.
+- The sign-in code step now asks for the code rather than repeating your
+  email.
+
 ## v1.19.13 — 2026-11-15
 
 - **Choose your look on first sign-in.** A new account picks Terminal (the
