@@ -544,8 +544,7 @@ so the app, not the system, posts the notification.
   `state.lock` keeps the two from racing. Budget: the whole handler finishes in
   8.5 s (FCM allows ~10 s for a high-priority data message), the core gets that
   minus 0.7 s and minus any time queued behind the previous push (one fetch at a
-  time). Not WorkManager: an expedited job adds a dependency and quota, and
-  before Android 12 needs a foreground service, which the app blocks. If the
+  time). Not WorkManager: an expedited job adds a dependency and quota. If the
   fetch overruns, the generic text is posted at the deadline and a late result
   replaces it in place (same tag, `setOnlyAlertOnce`). A fetch that fails on the
   network is retried (250 ms, doubling to 1.5 s) until the deadline
@@ -558,6 +557,24 @@ so the app, not the system, posts the notification.
   the battery "Restricted" setting, the standby bucket, Doze and the process
   importance, written through `pollis_notify_note`. A fetch in a process the app
   never started in opens the same log (`diag::ensure_init`).
+- **Foreground service (#1804).** Data Saver blocks a backgrounded app's network
+  on a metered connection, and a high-priority FCM message lifts Doze and
+  standby limits but not that one: on mobile data every fetch failed with
+  `state=blocked data_saver=on` and showed the generic text. Unless the app is
+  on screen, `RichPushHandler` takes `PushFetchService` (`foregroundServiceType
+  remoteMessaging`, permissions `FOREGROUND_SERVICE` +
+  `FOREGROUND_SERVICE_REMOTE_MESSAGING`) before the fetch, which makes the
+  process foreground for network access; Android 12+ allows starting it from a
+  high-priority FCM message (Signal does the same). After posting, the
+  handler's tail thread calls `pollis_notify_settle` (≤ 20 s) and releases it;
+  an overrun waits ≤ 60 s for its late upgrade first. `PushFetchKeeper`
+  refcounts overlapping pushes and never stops the service before it has
+  called `startForeground` (Android would end the app). If Android refuses the
+  start (`ForegroundServiceStartNotAllowedException`, e.g. FCM downgraded the
+  message), the fetch runs as before. Its notification (channel
+  `pollis_push_fetch`, importance MIN, "Checking for new messages") is deferred
+  ~10 s by Android 12+, so a normal fetch ends before it appears. Only message
+  pushes use it. Tests: `PushFetchKeeperTest`, `tests/android-permissions.test.ts`.
 - **Post.** `RichPushNotifier`: `MessagingStyle` on channel `default`, **tag =
   `h`, id 0** (what FCM used), so all three #1508 paths keep finding it through
   the foreign identifier. One notification per conversation: a new one folds the
@@ -624,7 +641,7 @@ Android FCM handler both call one plain C function in `pollis-core`
 (`pollis-core/include/pollis_notify.h`, `src/notify/`):
 
 - `pollis_notify_fetch(data_dir, h, budget_ms)` → JSON. It resolves `h`
-  (`resolve_push_handle`), then runs the app's own
+  (`POST /v1/push/fetch`, below; `resolve_push_handle` against an older DS), then runs the app's own
   `ingest_dm_envelopes_inner` / `ingest_channel_envelopes_inner` on a headless
   `AppState`: no realtime, no LiveKit, no media server, the database opened
   with `LocalDb::open_existing_for_user_in`, which never creates, migrates or
@@ -648,6 +665,37 @@ Android FCM handler both call one plain C function in `pollis-core`
   the realtime wake-up that arrives with the push) used to wait seconds behind
   it. A locked app, or no app in the process, falls back to the headless path.
   Test: `rich_push::an_in_process_fetch_shares_the_apps_lock_instead_of_excluding_it`.
+- **One round trip (#1804).** `POST /v1/push/fetch` (`pollis_api::devices::PushFetchBody`,
+  `pollis-delivery/src/push.rs::push_fetch`) answers, for the verified signing device, what
+  `/v1/push/resolve`, `/v1/welcomes/fetch`, `/v1/conversations/catch-up` (envelopes, plus a DM's
+  members) and `/v1/read/account-keys` (the DM's peers) would, from the same shared handler
+  bodies (`reads::welcomes_answer`, `directory::catch_up_answer`,
+  `account_reads::account_key_rows`). It writes nothing: the client still acks Welcomes and
+  advances watermarks. The fetch runs the app's ingest unchanged inside a `notify::scope::Scope`;
+  `ds_reads::catch_up`, `mls::ds_reads::fetch_welcomes` and `ds_reads::account_keys` answer from
+  it instead of the network (the catch-up for the handle's conversation or its MLS group,
+  envelopes handed out once, then the network; never with a roster or membership version).
+  **A pending Welcome disables the prefetch:** it was read before the cross-process lock, and
+  applying a Welcome another drain already applied would replace a group with an older one, so
+  that case keeps the separate requests. A DS without the route (404, any non-network error)
+  gets the separate requests too. Read only by the push fetch; the app's own ingest is
+  untouched. Before it, a DM push made four requests one after another (resolve, Welcome drain,
+  catch-up, key check) before the preview could show. Tests:
+  `pollis-delivery/tests/push_fetch.rs` (equal to the separate answers, another user's handle
+  answers nothing, a DM request carries no envelopes, a body naming another user is 403),
+  `notify::scope::tests`, `rich_push::a_dm_push_reads_in_one_request_…`,
+  `…an_older_delivery_service_still_previews`, `…a_pending_welcome_is_drained_fresh_…`.
+- **The tail waits (#1804).** A notification needs the message stored, not the watermark
+  advanced or the delivered receipt sent (which costs its own catch-up, an MLS seal, an envelope
+  post and a LiveKit hint). Inside a push fetch, `catch_up_once` hands both to
+  `scope::defer_or_run`, which spawns them on the core runtime into the fetch's `TailSet`;
+  everywhere else they run inline as before. The in-app fetch registers them for
+  `pollis_notify_settle`; the headless fetch keeps `state.lock` and the open database until they
+  end (`scope::finish_after`), so the receipt still seals under the lock. **Not on iOS**
+  (`DEFER_HEADLESS`): the extension can be suspended as soon as it hands the notification over,
+  and a suspended process holding the App Group lock is killed (`0xdead10cc`); it has 30 s and
+  keeps the posts inside the fetch. `pollis_notify_settle(timeout_ms)` waits for every deferred
+  tail; the Android host calls it after posting, inside its foreground service.
 - **Setting.** `get_notification_content` / `set_notification_content {mode}`
   (`full|name|none`, `ui_state` key `notification_content`, default `full`),
   bridge arms only (mobile-only).
