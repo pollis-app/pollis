@@ -11,7 +11,7 @@ Start here. Navigate to the article you need.
 - [UI Components](./ui.md) — React component inventory
 - [Libraries](./libraries.md) — Frontend hooks, services, utilities
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
-- [Drift sweeps](./sweeps.md) — Checks that keep published docs, commands and facts true to the code (epic #1720): CLI invocations (#1721), the facts registry `scripts/facts.json` (#1722), the public-claims ledger `scripts/claims.json` + `/sweep-claims` (#1723), the surface registry `scripts/surfaces.json`, the `scripts/sweep.mjs` engine + ledger and the platform coverage matrix (#1728), the clone ratchet `scripts/check-clones.mjs` + `/reuse-check` (#1731)
+- [Drift sweeps](./sweeps.md) — Checks that keep published docs, commands and facts true to the code (epic #1720): CLI invocations (#1721), the facts registry `scripts/facts.json` (#1722), the public-claims ledger `scripts/claims.json` + `/sweep-claims` (#1723), the surface registry `scripts/surfaces.json`, the `scripts/sweep.mjs` engine + ledger and the platform coverage matrix (#1728), the clone ratchet `scripts/check-clones.mjs` + `/reuse-check` (#1731), i18n coverage: `scripts/i18n-surfaces.json` + `i18n-check.mjs --report` (#1724)
 - [Code boundaries](./code-boundaries.md) — Where code may be shared and where it deliberately is not: frontend/ vs mobile/ (features, not code; the sanctioned shared channels and parity twins), the Rust crate graph, the no-build website (#1731)
 - [Safety & Verification](./safety.md) — Signal-style safety numbers, TOFU pinning, group MITM defence (refs #277)
 - [Windows Signing](./windows-signing.md) — Azure Artifact Signing setup for Windows installer signing
@@ -24,7 +24,7 @@ Start here. Navigate to the article you need.
 - [Authorized-Secrets Broker](./secrets-broker.md) — Server-side LiveKit token minting + R2 SigV4 presign so API secrets never ship in the client bundle (#393)
 - [Media Permissions](./media-permissions.md) — OS camera/mic/screen access: live status, revoke-on-quit, manual revoke; honest per-OS behavior (#443)
 - [Message Search](./search.md) — On-device FTS5 index, ranking, Slack-style filters, and why server-side search is impossible (#850)
-- [Localization (i18n)](./i18n.md) — i18next setup, namespace/key conventions, device-local language preference, adding a locale (#855)
+- [Localization (i18n)](./i18n.md) — i18next setup, namespace/key conventions, device-local language preference, adding a locale (#855), hardcoded-copy ratchet, native strings and the coverage report (#1724)
 - [Terminal Client (pollis-tui)](./pollis-tui.md) — Headless ratatui/crossterm client on `pollis-core` (no Tauri/IPC): architecture, run headless, the auth-order gotcha
 - [Client Minimum Version](./client-policy.md) — Retiring old builds: the published policy, the launch check on every client, the blocked page, the DS 426 (#1611)
 - [Mobile OTA Updates](./ota-updates.md) — Signed over-the-air JS updates: app config, fingerprint runtime version, publish pipeline, update Worker, transparency leaves (#1250)

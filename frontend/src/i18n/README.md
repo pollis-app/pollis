@@ -174,6 +174,18 @@ catalogue as ASCII to match.
   that are words (Ctrl, Shift, Esc, Space…) live in `common:keys.*` and are
   translated; see `keyboard/keyCombo.ts`.
 
+## Hardcoded copy fails CI
+
+`node scripts/i18n-check.mjs` also parses every `.tsx` in both apps and fails
+on a user-facing literal that skips `t()` — JSX text, `placeholder` / `title`
+/ `aria-label` / `alt` / `accessibilityLabel` / `label`, error setters,
+`Alert.alert` (#1724). Put the string in a catalogue. A string that is the
+same in every language (a brand name, a format mask) goes in `allow` in
+`scripts/i18n-hardcoded.json` with its reason. Native strings outside the
+renderer (permission prompts, push text, the tray) and their decisions are in
+`scripts/i18n-surfaces.json`; `node scripts/i18n-check.mjs --report` shows
+coverage per locale and namespace.
+
 ## Fallback behaviour
 
 `fallbackLng: "en"` with `returnEmptyString: false`. A key missing from the
