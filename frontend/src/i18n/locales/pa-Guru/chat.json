@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "{{name}} ਦਾ ਸੁਨੇਹਾ",
+    "unknownAuthor": "ਅਣਜਾਣ",
+    "deleted": "[ਮਿਟਾਇਆ ਗਿਆ]",
+    "encrypted": "[ਇਨਕ੍ਰਿਪਟ ਕੀਤਾ]",
+    "redacted": "[ਹਟਾਇਆ ਗਿਆ]",
+    "edited": "(ਸੋਧਿਆ ਗਿਆ)",
+    "editUnsent": "(ਸੋਧ ਨਹੀਂ ਭੇਜੀ ਗਈ)",
+    "newMember": "ਨਵਾਂ",
+    "newMemberTitle": "ਪਿਛਲੇ 7 ਦਿਨਾਂ ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਇਆ",
+    "undecryptable": {
+      "tag": "ਡੀਕ੍ਰਿਪਟ ਨਹੀਂ ਹੋ ਸਕਦਾ",
+      "title": "ਡੀਕ੍ਰਿਪਟ ਨਹੀਂ ਹੋ ਸਕਿਆ",
+      "body_one": "{{count}} ਸੁਨੇਹਾ ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਡੀਕ੍ਰਿਪਟ ਨਹੀਂ ਹੋ ਸਕਿਆ।",
+      "body_other": "{{count}} ਸੁਨੇਹੇ ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਡੀਕ੍ਰਿਪਟ ਨਹੀਂ ਹੋ ਸਕੇ।",
+      "detail": "ਇੱਥੇ ਕੁਝ ਭੇਜਿਆ ਗਿਆ ਸੀ, ਪਰ ਇਹ ਡਿਵਾਈਸ ਇਸਨੂੰ ਪੜ੍ਹ ਨਹੀਂ ਸਕਿਆ। ਹੋ ਸਕਦਾ ਹੈ ਇਹ ਤੁਹਾਡੇ ਹੋਰ ਡਿਵਾਈਸਾਂ 'ਤੇ ਹਾਲੇ ਵੀ ਹੋਵੇ।",
+      "diagnostics": "ਡਾਇਗਨੌਸਟਿਕਸ ਦੇਖੋ"
+    }
+  },
+  "status": {
+    "pending": "ਬਕਾਇਆ",
+    "sending": "ਭੇਜਿਆ ਜਾ ਰਿਹਾ ਹੈ",
+    "sent": "ਭੇਜਿਆ ਗਿਆ",
+    "failed": "ਅਸਫਲ",
+    "cancelled": "ਰੱਦ ਕੀਤਾ"
+  },
+  "outbox": {
+    "retry": "ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ",
+    "discard": "ਰੱਦ ਕਰੋ",
+    "retryLabel": "ਇਹ ਸੁਨੇਹਾ ਦੁਬਾਰਾ ਭੇਜਣ ਦੀ ਕੋਸ਼ਿਸ਼ ਕਰੋ",
+    "discardLabel": "ਇਹ ਨਾ ਭੇਜਿਆ ਸੁਨੇਹਾ ਰੱਦ ਕਰੋ",
+    "notSent": "ਨਹੀਂ ਭੇਜਿਆ ਗਿਆ",
+    "willResend": "Pollis ਦੇ ਦੁਬਾਰਾ ਕਨੈਕਟ ਹੋਣ 'ਤੇ ਇਹ ਆਪਣੇ-ਆਪ ਭੇਜਿਆ ਜਾਵੇਗਾ।",
+    "notDelivered": "ਇਹ ਸੁਨੇਹਾ ਪਹੁੰਚਾਇਆ ਨਹੀਂ ਜਾ ਸਕਿਆ।"
+  },
+  "actions": {
+    "reply": "ਜਵਾਬ ਦਿਓ",
+    "replyInThread": "ਥ੍ਰੈਡ ਵਿੱਚ ਜਵਾਬ ਦਿਓ",
+    "save": "ਸੁਨੇਹਾ ਰੱਖਿਅਤ ਕਰੋ",
+    "removeBookmark": "ਬੁੱਕਮਾਰਕ ਹਟਾਓ",
+    "copyLink": "ਸੁਨੇਹੇ ਦਾ ਲਿੰਕ ਕਾਪੀ ਕਰੋ",
+    "copyLinkCopied": "ਲਿੰਕ ਕਾਪੀ ਹੋ ਗਿਆ",
+    "copyLinkFailed": "ਲਿੰਕ ਕਾਪੀ ਨਹੀਂ ਹੋ ਸਕਿਆ",
+    "edit": "ਸੁਨੇਹਾ ਸੋਧੋ",
+    "delete": "ਸੁਨੇਹਾ ਮਿਟਾਓ",
+    "deleteAsAdmin": "ਸੁਨੇਹਾ ਮਿਟਾਓ (ਐਡਮਿਨ)",
+    "more": "ਹੋਰ ਕਾਰਵਾਈਆਂ",
+    "pin": "ਸੁਨੇਹਾ ਪਿੰਨ ਕਰੋ",
+    "unpin": "ਸੁਨੇਹਾ ਅਨਪਿੰਨ ਕਰੋ",
+    "report": "ਰਿਪੋਰਟ ਕਰੋ"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} ਜਵਾਬ",
+    "replyCount_other": "{{count}} ਜਵਾਬ"
+  },
+  "receipts": {
+    "readByEveryone": "ਸਾਰਿਆਂ ਨੇ ਪੜ੍ਹਿਆ",
+    "readByCount_one": "{{total}} ਵਿੱਚੋਂ {{count}} ਨੇ ਪੜ੍ਹਿਆ",
+    "readByCount_other": "{{total}} ਵਿੱਚੋਂ {{count}} ਨੇ ਪੜ੍ਹਿਆ",
+    "deliveredCount_one": "{{total}} ਵਿੱਚੋਂ {{count}} ਨੂੰ ਪਹੁੰਚਿਆ",
+    "deliveredCount_other": "{{total}} ਵਿੱਚੋਂ {{count}} ਨੂੰ ਪਹੁੰਚਿਆ"
+  },
+  "list": {
+    "empty": "ਹਾਲੇ ਕੋਈ ਸੁਨੇਹਾ ਨਹੀਂ। ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਕਰੋ।",
+    "unknownAuthor": "ਅਣਜਾਣ",
+    "blockedAuthor": "ਬਲੌਕ ਕੀਤਾ ਵਰਤੋਂਕਾਰ",
+    "blockedBody": "[ਬਲੌਕ ਕੀਤਾ]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name> ਨੂੰ ਜਵਾਬ ਦੇ ਰਹੇ ਹੋ",
+    "scrollToMessage": "ਜਿਸ ਸੁਨੇਹੇ ਦਾ ਜਵਾਬ ਦਿੱਤਾ, ਉਸ 'ਤੇ ਜਾਓ",
+    "dismiss": "ਜਵਾਬ ਹਟਾਓ",
+    "encrypted": "[ਇਨਕ੍ਰਿਪਟ ਕੀਤਾ ਸੁਨੇਹਾ]"
+  },
+  "queue": {
+    "heading": "ਕਤਾਰ",
+    "pendingPlaceholder": "[ਬਕਾਇਆ ਸੁਨੇਹਾ]",
+    "cancel": "ਸੁਨੇਹਾ ਰੱਦ ਕਰੋ",
+    "retry": "ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ",
+    "failedCount_one": "ਅਸਫਲ ×{{count}}",
+    "failedCount_other": "ਅਸਫਲ ×{{count}}"
+  },
+  "reactions": {
+    "add": "ਪ੍ਰਤੀਕਿਰਿਆ ਜੋੜੋ",
+    "all": "ਸਾਰੀਆਂ",
+    "allTabLabel_one": "ਸਾਰੀਆਂ, {{count}} ਪ੍ਰਤੀਕਿਰਿਆ",
+    "allTabLabel_other": "ਸਾਰੀਆਂ, {{count}} ਪ੍ਰਤੀਕਿਰਿਆਵਾਂ",
+    "contextHint": "ਕਿਸਨੇ ਪ੍ਰਤੀਕਿਰਿਆ ਦਿੱਤੀ, ਇਹ ਦੇਖਣ ਲਈ ਸੱਜਾ-ਕਲਿੱਕ ਕਰੋ",
+    "hoverMore_one": "{{names}} ਅਤੇ {{count}} ਹੋਰ ਨੇ {{emoji}} ਨਾਲ ਪ੍ਰਤੀਕਿਰਿਆ ਦਿੱਤੀ",
+    "hoverMore_other": "{{names}} ਅਤੇ {{count}} ਹੋਰਾਂ ਨੇ {{emoji}} ਨਾਲ ਪ੍ਰਤੀਕਿਰਿਆ ਦਿੱਤੀ",
+    "hoverNames": "{{names}} ਨੇ {{emoji}} ਨਾਲ ਪ੍ਰਤੀਕਿਰਿਆ ਦਿੱਤੀ",
+    "pillLabel_one": "{{emoji}} {{count}} ਪ੍ਰਤੀਕਿਰਿਆ",
+    "pillLabel_other": "{{emoji}} {{count}} ਪ੍ਰਤੀਕਿਰਿਆਵਾਂ",
+    "rowLabel": "{{name}} ਨੇ {{emojis}} ਨਾਲ ਪ੍ਰਤੀਕਿਰਿਆ ਦਿੱਤੀ",
+    "selfName": "{{name}} (ਤੁਸੀਂ)",
+    "sheetTitle": "ਪ੍ਰਤੀਕਿਰਿਆਵਾਂ",
+    "tabLabel_one": "{{emoji}}, {{count}} ਪ੍ਰਤੀਕਿਰਿਆ",
+    "tabLabel_other": "{{emoji}}, {{count}} ਪ੍ਰਤੀਕਿਰਿਆਵਾਂ",
+    "unknownUser": "ਅਣਜਾਣ ਵਰਤੋਂਕਾਰ",
+    "viewWho": "ਪ੍ਰਤੀਕਿਰਿਆਵਾਂ ਦੇਖੋ",
+    "you": "ਤੁਸੀਂ"
+  },
+  "preview": {
+    "noMessages": "ਹਾਲੇ ਕੋਈ ਸੁਨੇਹਾ ਨਹੀਂ",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} ਅਟੈਚਮੈਂਟ]",
+    "attachments_other": "[{{count}} ਅਟੈਚਮੈਂਟਾਂ]",
+    "undecryptable": "ਇੱਕ ਸੁਨੇਹਾ ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਡੀਕ੍ਰਿਪਟ ਨਹੀਂ ਹੋ ਸਕਿਆ"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} ਦੇਖੋ",
+    "openLabel": "{{filename}} ਖੋਲ੍ਹੋ",
+    "downloadLabel": "{{filename}} ਡਾਊਨਲੋਡ ਕਰੋ",
+    "loading": "ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ…",
+    "error": "ਗੜਬੜ",
+    "failedToLoad": "ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ",
+    "failedToDownload": "ਡਾਊਨਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ",
+    "lightboxFetch": "ਲਿਆਓ",
+    "lightboxDone": "[ ਹੋ ਗਿਆ ]",
+    "lightboxDownload": "[ਡਾਊਨਲੋਡ]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "ਸੰਵੇਦਨਸ਼ੀਲ ਮੀਡੀਆ ਦਿਖਾਓ: {{filename}}",
+    "sensitiveHide": "{{filename}} ਲੁਕਾਓ"
+  },
+  "unfurl": {
+    "loadImage": "ਤਸਵੀਰ ਲੋਡ ਕਰੋ",
+    "loadVideo": "ਵੀਡੀਓ ਲੋਡ ਕਰੋ",
+    "loadTitle": "{{url}} ਤੋਂ ਮੀਡੀਆ ਲੋਡ ਕਰੋ — ਇਹ ਉਸ ਸਾਈਟ ਨਾਲ ਸਿੱਧਾ ਸੰਪਰਕ ਕਰਦਾ ਹੈ",
+    "loadDescription": "{{url}} ਤੋਂ ਮੀਡੀਆ ਲੋਡ ਕਰੋ। ਇਹ ਉਸ ਸਾਈਟ ਨਾਲ ਸਿੱਧਾ ਸੰਪਰਕ ਕਰਦਾ ਹੈ ਅਤੇ ਤੁਹਾਡਾ IP ਪਤਾ ਉਸਨੂੰ ਦੱਸ ਦਿੰਦਾ ਹੈ।",
+    "openLabel": "{{url}} ਖੋਲ੍ਹੋ"
+  },
+  "notify": {
+    "newMessageTitle": "ਨਵਾਂ ਸੁਨੇਹਾ",
+    "newMessageBody": "{{name}}: ਨਵਾਂ ਸੁਨੇਹਾ",
+    "mentionTitle": "ਨਵੀਂ ਮੈਨਸ਼ਨ",
+    "allMentionBody": "{{name}} ਨੇ @all ਨੂੰ ਮੈਨਸ਼ਨ ਕੀਤਾ",
+    "userMentionBody": "{{name}} ਨੇ ਤੁਹਾਨੂੰ ਮੈਨਸ਼ਨ ਕੀਤਾ"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "ਇਸ ਵਿਅਕਤੀ",
+    "titleMessage": "ਸੁਨੇਹੇ ਦੀ ਰਿਪੋਰਟ ਕਰੋ",
+    "titleUser": "{{name}} ਦੀ ਰਿਪੋਰਟ ਕਰੋ",
+    "intro": "Pollis ਨੂੰ ਖਾਤਾ ਅਤੇ ਕਾਰਨ ਮਿਲਦਾ ਹੈ। ਸੁਨੇਹੇ ਇਨਕ੍ਰਿਪਟ ਰਹਿੰਦੇ ਹਨ, ਇਸ ਲਈ ਅਸੀਂ ਕਦੇ ਨਹੀਂ ਦੇਖਦੇ ਕਿ ਕੀ ਕਿਹਾ ਗਿਆ ਸੀ।",
+    "reasonLabel": "ਕਾਰਨ",
+    "reason": {
+      "spam": "ਸਪੈਮ",
+      "harassment": "ਪਰੇਸ਼ਾਨੀ ਜਾਂ ਧਮਕੀਆਂ",
+      "illegal": "ਗੈਰ-ਕਾਨੂੰਨੀ ਸਮੱਗਰੀ",
+      "other": "ਕੁਝ ਹੋਰ"
+    },
+    "submit": "ਰਿਪੋਰਟ ਕਰੋ",
+    "submitAndBlock": "ਰਿਪੋਰਟ ਕਰੋ ਅਤੇ ਬਲੌਕ ਕਰੋ",
+    "failed": "ਰਿਪੋਰਟ ਭੇਜੀ ਨਹੀਂ ਜਾ ਸਕੀ। ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।",
+    "doneTitle": "ਰਿਪੋਰਟ ਭੇਜੀ ਗਈ",
+    "done": "ਧੰਨਵਾਦ। ਅਸੀਂ ਹਰ ਰਿਪੋਰਟ ਦੀ ਸਮੀਖਿਆ ਕਰਦੇ ਹਾਂ।",
+    "doneBlocked": "ਧੰਨਵਾਦ। ਅਸੀਂ ਹਰ ਰਿਪੋਰਟ ਦੀ ਸਮੀਖਿਆ ਕਰਦੇ ਹਾਂ। ਤੁਸੀਂ {{name}} ਨੂੰ ਬਲੌਕ ਵੀ ਕਰ ਦਿੱਤਾ ਹੈ।",
+    "close": "ਹੋ ਗਿਆ"
+  },
+  "keyChange": {
+    "notice": "{{name}} ਨਾਲ ਤੁਹਾਡਾ ਸੁਰੱਖਿਆ ਨੰਬਰ ਬਦਲ ਗਿਆ ਹੈ।",
+    "verify": "ਪੁਸ਼ਟੀ ਕਰੋ",
+    "defaultName": "ਇਸ ਸੰਪਰਕ"
+  },
+  "typing": {
+    "one": "{{name}} ਲਿਖ ਰਿਹਾ ਹੈ…",
+    "two": "{{first}} ਅਤੇ {{second}} ਲਿਖ ਰਹੇ ਹਨ…",
+    "several_one": "{{count}} ਵਿਅਕਤੀ ਲਿਖ ਰਿਹਾ ਹੈ…",
+    "several_other": "{{count}} ਲੋਕ ਲਿਖ ਰਹੇ ਹਨ…"
+  }
+}

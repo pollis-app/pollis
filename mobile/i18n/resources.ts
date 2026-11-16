@@ -157,6 +157,21 @@ import pa_Arab_search from "../../frontend/src/i18n/locales/pa-Arab/search.json"
 import pa_Arab_settings from "../../frontend/src/i18n/locales/pa-Arab/settings.json";
 import pa_Arab_vault from "../../frontend/src/i18n/locales/pa-Arab/vault.json";
 import pa_Arab_voice from "../../frontend/src/i18n/locales/pa-Arab/voice.json";
+import pa_Guru_arcade from "../../frontend/src/i18n/locales/pa-Guru/arcade.json";
+import pa_Guru_auth from "../../frontend/src/i18n/locales/pa-Guru/auth.json";
+import pa_Guru_channels from "../../frontend/src/i18n/locales/pa-Guru/channels.json";
+import pa_Guru_chat from "../../frontend/src/i18n/locales/pa-Guru/chat.json";
+import pa_Guru_common from "../../frontend/src/i18n/locales/pa-Guru/common.json";
+import pa_Guru_dms from "../../frontend/src/i18n/locales/pa-Guru/dms.json";
+import pa_Guru_emoji from "../../frontend/src/i18n/locales/pa-Guru/emoji.json";
+import pa_Guru_errors from "../../frontend/src/i18n/locales/pa-Guru/errors.json";
+import pa_Guru_mobile from "../../frontend/src/i18n/locales/pa-Guru/mobile.json";
+import pa_Guru_nav from "../../frontend/src/i18n/locales/pa-Guru/nav.json";
+import pa_Guru_saved from "../../frontend/src/i18n/locales/pa-Guru/saved.json";
+import pa_Guru_search from "../../frontend/src/i18n/locales/pa-Guru/search.json";
+import pa_Guru_settings from "../../frontend/src/i18n/locales/pa-Guru/settings.json";
+import pa_Guru_vault from "../../frontend/src/i18n/locales/pa-Guru/vault.json";
+import pa_Guru_voice from "../../frontend/src/i18n/locales/pa-Guru/voice.json";
 import ps_arcade from "../../frontend/src/i18n/locales/ps/arcade.json";
 import ps_auth from "../../frontend/src/i18n/locales/ps/auth.json";
 import ps_channels from "../../frontend/src/i18n/locales/ps/channels.json";
@@ -435,6 +450,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": pa_Arab_settings,
     "vault": pa_Arab_vault,
     "voice": pa_Arab_voice,
+  },
+  "pa-Guru": {
+    "arcade": pa_Guru_arcade,
+    "auth": pa_Guru_auth,
+    "channels": pa_Guru_channels,
+    "chat": pa_Guru_chat,
+    "common": pa_Guru_common,
+    "dms": pa_Guru_dms,
+    "emoji": pa_Guru_emoji,
+    "errors": pa_Guru_errors,
+    "mobile": pa_Guru_mobile,
+    "nav": pa_Guru_nav,
+    "saved": pa_Guru_saved,
+    "search": pa_Guru_search,
+    "settings": pa_Guru_settings,
+    "vault": pa_Guru_vault,
+    "voice": pa_Guru_voice,
   },
   "ps": {
     "arcade": ps_arcade,

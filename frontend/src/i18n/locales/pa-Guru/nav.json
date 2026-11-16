@@ -1,0 +1,212 @@
+{
+  "sidebar": {
+    "groups": "ਗਰੁੱਪ",
+    "dms": "DM",
+    "account": "ਖਾਤਾ",
+    "saved": "ਰੱਖਿਅਤ ਕੀਤੇ",
+    "preferences": "ਤਰਜੀਹਾਂ",
+    "userSettings": "ਵਰਤੋਂਕਾਰ ਸੈਟਿੰਗਾਂ",
+    "voiceAndVideo": "ਵੌਇਸ ਅਤੇ ਵੀਡੀਓ",
+    "security": "ਸੁਰੱਖਿਆ",
+    "keyBindings": "ਕੀਬੋਰਡ ਸ਼ਾਰਟਕੱਟ",
+    "softwareUpdate": "ਸੌਫਟਵੇਅਰ ਅੱਪਡੇਟ",
+    "expandGroup": "{{name}} ਫੈਲਾਓ",
+    "collapseGroup": "{{name}} ਸਮੇਟੋ",
+    "keyChanged": "ਪਛਾਣ ਕੁੰਜੀ ਬਦਲ ਗਈ — ਦੁਬਾਰਾ ਪੁਸ਼ਟੀ ਕਰੋ",
+    "verified": "ਪੁਸ਼ਟੀ ਕੀਤਾ ਸੰਪਰਕ",
+    "dmAvatarAlt": "{{name}} ਦਾ ਅਵਤਾਰ",
+    "close": "ਸਾਈਡਬਾਰ ਬੰਦ ਕਰੋ ({{shortcut}})",
+    "resize": "ਸਾਈਡਬਾਰ ਦਾ ਆਕਾਰ ਬਦਲੋ (ਖਿੱਚੋ; ਰੀਸੈੱਟ ਲਈ ਡਬਲ-ਕਲਿੱਕ)",
+    "searchMessages": "ਸੁਨੇਹੇ ਖੋਜੋ",
+    "vault": "ਵਾਲਟ",
+    "securityEvents": "ਸੁਰੱਖਿਆ ਘਟਨਾਵਾਂ",
+    "copyHistory": "ਇਤਿਹਾਸ ਕਾਪੀ ਕਰੋ"
+  },
+  "profile": {
+    "you": "ਤੁਸੀਂ",
+    "call": "ਕਾਲ",
+    "voice": "ਵੌਇਸ",
+    "settings": "ਸੈਟਿੰਗਾਂ",
+    "voiceConnected": "ਵੌਇਸ ਕਨੈਕਟ ਹੈ",
+    "stopScreenShare": "ਸਕ੍ਰੀਨ ਸ਼ੇਅਰ ਬੰਦ ਕਰੋ",
+    "shareScreen": "ਸਕ੍ਰੀਨ ਸ਼ੇਅਰ ਕਰੋ",
+    "disconnect": "ਡਿਸਕਨੈਕਟ ਕਰੋ"
+  },
+  "breadcrumb": {
+    "home": "ਹੋਮ",
+    "groups": "ਗਰੁੱਪ",
+    "createGroup": "ਗਰੁੱਪ ਬਣਾਓ",
+    "findGroup": "ਗਰੁੱਪ ਲੱਭੋ",
+    "newChannel": "ਨਵਾਂ ਚੈਨਲ",
+    "voice": "ਵੌਇਸ",
+    "joinRequests": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ",
+    "inviteMember": "ਮੈਂਬਰ ਨੂੰ ਸੱਦਾ ਦਿਓ",
+    "leaveGroup": "ਗਰੁੱਪ ਛੱਡੋ",
+    "members": "ਮੈਂਬਰ",
+    "removeMember": "ਮੈਂਬਰ ਹਟਾਓ",
+    "directMessages": "ਸਿੱਧੇ ਸੁਨੇਹੇ",
+    "newMessage": "ਨਵਾਂ ਸੁਨੇਹਾ",
+    "requests": "ਬੇਨਤੀਆਂ",
+    "blockedUsers": "ਬਲੌਕ ਕੀਤੇ ਵਰਤੋਂਕਾਰ",
+    "conversationSettings": "ਗੱਲਬਾਤ ਸੈਟਿੰਗਾਂ",
+    "account": "ਖਾਤਾ",
+    "preferences": "ਤਰਜੀਹਾਂ",
+    "userSettings": "ਵਰਤੋਂਕਾਰ ਸੈਟਿੰਗਾਂ",
+    "profile": "ਪ੍ਰੋਫਾਈਲ",
+    "security": "ਸੁਰੱਖਿਆ",
+    "voiceSettings": "ਵੌਇਸ",
+    "invites": "ਸੱਦੇ",
+    "joinAGroup": "ਗਰੁੱਪ ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਵੋ",
+    "search": "ਖੋਜ",
+    "searchButton": "ਖੋਜ ({{shortcut}})",
+    "settings": "ਸੈਟਿੰਗਾਂ",
+    "securityEvents": "ਸੁਰੱਖਿਆ ਘਟਨਾਵਾਂ",
+    "copyHistory": "ਸੁਨੇਹਾ ਇਤਿਹਾਸ ਕਾਪੀ ਕਰੋ",
+    "historyRequest": "ਇਤਿਹਾਸ ਬੇਨਤੀ"
+  },
+  "statusBar": {
+    "groupsUnread_one": "ਅਣਪੜ੍ਹੇ ਗਰੁੱਪ ਸੁਨੇਹੇ: {{count}}",
+    "groupsUnread_other": "ਅਣਪੜ੍ਹੇ ਗਰੁੱਪ ਸੁਨੇਹੇ: {{count}}",
+    "dmsUnread_one": "ਅਣਪੜ੍ਹੇ ਸਿੱਧੇ ਸੁਨੇਹੇ: {{count}}",
+    "dmsUnread_other": "ਅਣਪੜ੍ਹੇ ਸਿੱਧੇ ਸੁਨੇਹੇ: {{count}}",
+    "joinRequests_one": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬਕਾਇਆ ਬੇਨਤੀਆਂ: {{count}}",
+    "joinRequests_other": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬਕਾਇਆ ਬੇਨਤੀਆਂ: {{count}}",
+    "invites_one": "ਬਕਾਇਆ ਸੱਦੇ: {{count}}",
+    "invites_other": "ਬਕਾਇਆ ਸੱਦੇ: {{count}}",
+    "someone": "ਕੋਈ",
+    "updateAvailable": "ਅੱਪਡੇਟ ਉਪਲਬਧ ਹੈ",
+    "updateAvailableTitle": "ਅੱਪਡੇਟ ਉਪਲਬਧ ਹੈ: {{version}}",
+    "answerCall": "@{{username}} ਦੀ ਕਾਲ ਚੁੱਕੋ",
+    "declineCall": "ਕਾਲ ਅਸਵੀਕਾਰ ਕਰੋ",
+    "dismissVoiceError": "ਵੌਇਸ ਗੜਬੜ ਹਟਾਓ",
+    "dismissScreenShareError": "ਸਕ੍ਰੀਨ ਸ਼ੇਅਰ ਗੜਬੜ ਹਟਾਓ",
+    "dismissCameraError": "ਕੈਮਰਾ ਗੜਬੜ ਹਟਾਓ",
+    "syncing": "ਸਿੰਕ ਹੋ ਰਿਹਾ ਹੈ…"
+  },
+  "shell": {
+    "dropFiles": "ਭੇਜਣ ਲਈ ਫ਼ਾਈਲਾਂ ਇੱਥੇ ਛੱਡੋ",
+    "voiceChannelFallback": "ਵੌਇਸ",
+    "callChannel": "ਕਾਲ"
+  },
+  "panel": {
+    "thread": "ਥ੍ਰੈਡ",
+    "details": "ਵੇਰਵੇ",
+    "ariaLabel": "ਗੱਲਬਾਤ ਦੇ ਵੇਰਵੇ",
+    "closeThread": "ਥ੍ਰੈਡ ਪੈਨਲ ਬੰਦ ਕਰੋ ({{shortcut}})",
+    "closeDetails": "ਵੇਰਵੇ ਪੈਨਲ ਬੰਦ ਕਰੋ ({{shortcut}})",
+    "resize": "ਵੇਰਵੇ ਪੈਨਲ ਦਾ ਆਕਾਰ ਬਦਲੋ (ਖਿੱਚੋ; ਰੀਸੈੱਟ ਲਈ ਡਬਲ-ਕਲਿੱਕ)"
+  },
+  "members": {
+    "count_one": "ਮੈਂਬਰ — {{count}}",
+    "count_other": "ਮੈਂਬਰ — {{count}}",
+    "onlineCount_one": "ਔਨਲਾਈਨ — {{count}}",
+    "onlineCount_other": "ਔਨਲਾਈਨ — {{count}}",
+    "empty": "ਦਿਖਾਉਣ ਲਈ ਕੋਈ ਮੈਂਬਰ ਨਹੀਂ।",
+    "noneOnline": "ਕੋਈ ਔਨਲਾਈਨ ਨਹੀਂ।",
+    "you": "ਤੁਸੀਂ",
+    "admin": "ਐਡਮਿਨ"
+  },
+  "media": {
+    "heading": "ਮੀਡੀਆ",
+    "empty": "ਹਾਲੇ ਕੋਈ ਮੀਡੀਆ ਸਾਂਝਾ ਨਹੀਂ ਕੀਤਾ ਗਿਆ।"
+  },
+  "thread": {
+    "loading": "ਜਵਾਬ ਲੋਡ ਹੋ ਰਹੇ ਹਨ…",
+    "empty": "ਹਾਲੇ ਕੋਈ ਜਵਾਬ ਨਹੀਂ। ਹੇਠਾਂ ਥ੍ਰੈਡ ਸ਼ੁਰੂ ਕਰੋ।",
+    "placeholder": "ਥ੍ਰੈਡ ਵਿੱਚ ਜਵਾਬ ਦਿਓ…",
+    "messageDeleted": "ਸੁਨੇਹਾ ਮਿਟਾਇਆ ਗਿਆ",
+    "encrypted": "[ਇਨਕ੍ਰਿਪਟ ਕੀਤਾ]"
+  },
+  "chat": {
+    "noSelection": "ਸੁਨੇਹੇ ਭੇਜਣਾ ਸ਼ੁਰੂ ਕਰਨ ਲਈ ਕੋਈ ਚੈਨਲ ਚੁਣੋ"
+  },
+  "dmRequest": {
+    "heading": "ਸੁਨੇਹਾ ਬੇਨਤੀ",
+    "body": "<name>{{name}}</name> ਤੁਹਾਨੂੰ ਸੁਨੇਹੇ ਭੇਜਣਾ ਚਾਹੁੰਦਾ ਹੈ।",
+    "accept": "ਸਵੀਕਾਰ ਕਰੋ",
+    "accepting": "ਸਵੀਕਾਰ ਕੀਤਾ ਜਾ ਰਿਹਾ ਹੈ…",
+    "block": "ਬਲੌਕ ਕਰੋ",
+    "blocking": "ਬਲੌਕ ਕੀਤਾ ਜਾ ਰਿਹਾ ਹੈ…"
+  },
+  "editBar": {
+    "heading": "ਸੁਨੇਹਾ ਸੋਧਿਆ ਜਾ ਰਿਹਾ ਹੈ",
+    "cancel": "ਸੋਧ ਰੱਦ ਕਰੋ",
+    "hint": "ਰੱਖਿਅਤ ਕਰਨ ਲਈ Enter · ਨਵੀਂ ਲਾਈਨ ਲਈ Shift+Enter · ਰੱਦ ਕਰਨ ਲਈ Esc"
+  },
+  "deleteChannel": {
+    "heading": "ਚੈਨਲ ਮਿਟਾਓ",
+    "cancel": "ਮਿਟਾਉਣਾ ਰੱਦ ਕਰੋ",
+    "body": "ਇਹ ਚੈਨਲ ਅਤੇ ਇਸਦੇ ਸਾਰੇ ਸੁਨੇਹੇ ਹਮੇਸ਼ਾ ਲਈ ਮਿਟਾ ਦਿੱਤੇ ਜਾਣਗੇ। ਇਸਨੂੰ ਵਾਪਸ ਨਹੀਂ ਲਿਆ ਜਾ ਸਕਦਾ।",
+    "deleting": "ਮਿਟਾਇਆ ਜਾ ਰਿਹਾ ਹੈ…"
+  },
+  "deleteMessage": {
+    "heading": "ਸੁਨੇਹਾ ਮਿਟਾਓ",
+    "moderateHeading": "ਸੁਨੇਹਾ ਹਟਾਓ (ਐਡਮਿਨ)",
+    "body": "ਇਹ ਸੁਨੇਹਾ ਸਾਰਿਆਂ ਲਈ ਮਿਟਾ ਦਿੱਤਾ ਜਾਵੇਗਾ, ਉਹਨਾਂ ਲੋਕਾਂ ਲਈ ਵੀ ਜਿਨ੍ਹਾਂ ਨੂੰ ਇਹ ਪਹਿਲਾਂ ਹੀ ਮਿਲ ਚੁੱਕਾ ਹੈ।",
+    "moderateBody": "ਇਹ ਸੁਨੇਹਾ ਅਤੇ ਇਸਦੀਆਂ ਅਟੈਚਮੈਂਟਾਂ ਚੈਨਲ ਵਿੱਚ ਸਾਰਿਆਂ ਲਈ ਹਟਾ ਦਿੱਤੀਆਂ ਜਾਣਗੀਆਂ।",
+    "cancel": "ਮਿਟਾਉਣਾ ਰੱਦ ਕਰੋ",
+    "deleting": "ਮਿਟਾਇਆ ਜਾ ਰਿਹਾ ਹੈ…",
+    "remove": "ਹਟਾਓ"
+  },
+  "update": {
+    "preparing": "ਅੱਪਡੇਟ ਦੀ ਤਿਆਰੀ ਹੋ ਰਹੀ ਹੈ…",
+    "checking": "ਅੱਪਡੇਟਾਂ ਦੀ ਜਾਂਚ ਹੋ ਰਹੀ ਹੈ…",
+    "downloading": "ਅੱਪਡੇਟ ਡਾਊਨਲੋਡ ਹੋ ਰਿਹਾ ਹੈ…",
+    "downloadingProgress": "ਅੱਪਡੇਟ ਡਾਊਨਲੋਡ ਹੋ ਰਿਹਾ ਹੈ… {{progress}}%",
+    "installing": "ਅੱਪਡੇਟ ਇੰਸਟਾਲ ਹੋ ਰਿਹਾ ਹੈ…",
+    "relaunching": "ਮੁੜ-ਸ਼ੁਰੂ ਹੋ ਰਿਹਾ ਹੈ…",
+    "failed": "ਅੱਪਡੇਟ ਅਸਫਲ ਰਿਹਾ: {{error}}",
+    "tryAgain": "ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ",
+    "continueWithout": "ਅੱਪਡੇਟ ਕੀਤੇ ਬਿਨਾਂ ਜਾਰੀ ਰੱਖੋ",
+    "readOnlyDiskImage": "Pollis ਡਿਸਕ ਇਮੇਜ ਤੋਂ ਚੱਲ ਰਿਹਾ ਹੈ, ਜੋ ਸਿਰਫ਼-ਪੜ੍ਹਨਯੋਗ ਹੈ। Pollis ਬੰਦ ਕਰੋ, ਇਸਨੂੰ Applications ਵਿੱਚ ਖਿੱਚ ਕੇ ਲੈ ਜਾਓ, ਡਿਸਕ ਇਮੇਜ ਬਾਹਰ ਕੱਢੋ (eject), ਅਤੇ ਇਸਨੂੰ Applications ਵਿੱਚੋਂ ਖੋਲ੍ਹੋ।",
+    "readOnlyTranslocated": "macOS, Pollis ਨੂੰ ਇੱਕ ਆਰਜ਼ੀ ਸਿਰਫ਼-ਪੜ੍ਹਨਯੋਗ ਥਾਂ ਤੋਂ ਚਲਾ ਰਿਹਾ ਹੈ। Pollis ਬੰਦ ਕਰੋ, Finder ਨਾਲ ਇਸਨੂੰ Applications ਵਿੱਚੋਂ ਬਾਹਰ ਲਿਜਾ ਕੇ ਵਾਪਸ ਅੰਦਰ ਲਿਜਾਓ, ਫਿਰ ਇਸਨੂੰ ਦੁਬਾਰਾ ਖੋਲ੍ਹੋ।",
+    "readOnlyTranslocatedHealed": "macOS, Pollis ਨੂੰ ਪਿਛਲੇ ਅੱਪਡੇਟ ਵੱਲੋਂ ਛੱਡੀ ਇੱਕ ਆਰਜ਼ੀ ਸਿਰਫ਼-ਪੜ੍ਹਨਯੋਗ ਥਾਂ ਤੋਂ ਚਲਾ ਰਿਹਾ ਹੈ। ਇਹ ਠੀਕ ਕਰ ਦਿੱਤਾ ਗਿਆ ਹੈ। Pollis ਬੰਦ ਕਰੋ ਅਤੇ ਇਸਨੂੰ Applications ਵਿੱਚੋਂ ਦੁਬਾਰਾ ਖੋਲ੍ਹੋ।",
+    "readOnlyGeneric": "Pollis ਖੁਦ ਨੂੰ ਅੱਪਡੇਟ ਨਹੀਂ ਕਰ ਸਕਦਾ ਕਿਉਂਕਿ ਇਸਦੀ ਥਾਂ ਸਿਰਫ਼-ਪੜ੍ਹਨਯੋਗ ਹੈ। Pollis ਬੰਦ ਕਰੋ, ਪੱਕਾ ਕਰੋ ਕਿ ਇਹ ਤੁਹਾਡੇ Applications ਫੋਲਡਰ ਵਿੱਚ ਹੈ (Finder ਨਾਲ ਉੱਥੇ ਲਿਜਾਇਆ ਗਿਆ), ਅਤੇ ਇਸਨੂੰ ਦੁਬਾਰਾ ਖੋਲ੍ਹੋ।"
+  },
+  "clientBlocked": {
+    "title": "ਅੱਪਡੇਟ ਲੋੜੀਂਦਾ ਹੈ",
+    "body": "Pollis ਦਾ ਇਹ ਵਰਜਨ ਹੁਣ ਸਮਰਥਿਤ ਨਹੀਂ ਹੈ। ਇਸਨੂੰ ਵਰਤਦੇ ਰਹਿਣ ਲਈ ਅੱਪਡੇਟ ਕਰੋ। ਤੁਹਾਡੇ ਸੁਨੇਹੇ ਅਤੇ ਸੈਟਿੰਗਾਂ ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਹੀ ਰਹਿੰਦੇ ਹਨ।",
+    "versions": "ਇੰਸਟਾਲ ਕੀਤਾ {{version}} · ਲੋੜੀਂਦਾ {{minimum}} ਜਾਂ ਨਵਾਂ",
+    "installed": "ਇੰਸਟਾਲ ਕੀਤਾ {{version}}",
+    "updateNow": "ਹੁਣੇ ਅੱਪਡੇਟ ਕਰੋ",
+    "updating": "ਅੱਪਡੇਟ ਹੋ ਰਿਹਾ ਹੈ…",
+    "download": "ਨਵੀਨਤਮ ਵਰਜਨ ਡਾਊਨਲੋਡ ਕਰੋ",
+    "updateFailed": "ਅੱਪਡੇਟ ਪੂਰਾ ਨਹੀਂ ਹੋਇਆ। ਇਸਦੀ ਬਜਾਏ ਨਵੀਨਤਮ ਵਰਜਨ ਡਾਊਨਲੋਡ ਕਰੋ।",
+    "packageManager": "Pollis ਨੂੰ {{source}} ਨਾਲ ਇੰਸਟਾਲ ਕੀਤਾ ਗਿਆ ਸੀ। ਇਸਨੂੰ ਉੱਥੇ ਅੱਪਡੇਟ ਕਰੋ:",
+    "openAppStore": "App Store ਖੋਲ੍ਹੋ",
+    "openPlay": "Google Play ਖੋਲ੍ਹੋ",
+    "openTestflight": "TestFlight ਖੋਲ੍ਹੋ",
+    "openWebsite": "pollis.com ਖੋਲ੍ਹੋ",
+    "openFailed": "ਲਿੰਕ ਖੋਲ੍ਹਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ। {{url}} 'ਤੇ ਜਾਓ",
+    "retry": "ਦੁਬਾਰਾ ਜਾਂਚ ਕਰੋ",
+    "checking": "ਜਾਂਚ ਹੋ ਰਹੀ ਹੈ…"
+  },
+  "home": {
+    "groups": "ਗਰੁੱਪ",
+    "groupsDescription": "ਭਾਈਚਾਰੇ, ਸੰਸਥਾਵਾਂ, ਟੀਮਾਂ, ਅਤੇ ਹੱਦੋਂ ਵੱਧ ਉਤਸ਼ਾਹੀ ਗਰੁੱਪ ਚੈਟਾਂ",
+    "dms": "ਸਿੱਧੇ ਸੁਨੇਹੇ",
+    "dmsDescription": "ਵਿਅਕਤੀਆਂ ਨਾਲ ਨਿੱਜੀ, ਐਂਡ-ਟੂ-ਐਂਡ ਇਨਕ੍ਰਿਪਟ ਕੀਤੀਆਂ ਗੱਲਬਾਤਾਂ",
+    "invites": "ਸੱਦੇ",
+    "noPendingInvites": "ਕੋਈ ਬਕਾਇਆ ਸੱਦਾ ਨਹੀਂ",
+    "pending_one": "{{count}} ਬਕਾਇਆ",
+    "pending_other": "{{count}} ਬਕਾਇਆ",
+    "join": "ਗਰੁੱਪ ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਵੋ",
+    "joinDescription": "ਸੱਦਾ ਲਿੰਕ ਜਾਂ ਸ਼ਾਮਲ ਹੋਣ ਦਾ ਕੋਡ ਵਰਤੋ",
+    "joinRequests": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ",
+    "logout": "ਸਾਈਨ ਆਉਟ ਕਰੋ",
+    "exit": "ਬਾਹਰ ਜਾਓ"
+  },
+  "titleBar": {
+    "minimize": "ਛੋਟਾ ਕਰੋ",
+    "maximize": "ਵੱਡਾ ਕਰੋ"
+  },
+  "terminal": {
+    "shellFailed": "ਸ਼ੈੱਲ ਸ਼ੁਰੂ ਨਹੀਂ ਹੋ ਸਕਿਆ: {{error}}"
+  },
+  "pins": {
+    "heading": "ਪਿੰਨ ਕੀਤੇ",
+    "empty": "ਹਾਲੇ ਕੋਈ ਪਿੰਨ ਕੀਤਾ ਸੁਨੇਹਾ ਨਹੀਂ।",
+    "unavailable": "ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਪਿੰਨ ਹਾਲੇ ਉਪਲਬਧ ਨਹੀਂ ਹਨ — ਗੱਲਬਾਤ ਸਿੰਕ ਹੋਣ ਤੋਂ ਬਾਅਦ ਇਹ ਦਿਸਣਗੇ।",
+    "unpin": "ਅਨਪਿੰਨ ਕਰੋ"
+  }
+}

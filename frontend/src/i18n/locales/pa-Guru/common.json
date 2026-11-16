@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "ਪਿੱਛੇ",
+    "cancel": "ਰੱਦ ਕਰੋ",
+    "close": "ਬੰਦ ਕਰੋ",
+    "copy": "ਕਾਪੀ ਕਰੋ",
+    "copied": "ਕਾਪੀ ਹੋ ਗਿਆ",
+    "copyFailed": "ਕਾਪੀ ਨਹੀਂ ਹੋ ਸਕਿਆ",
+    "delete": "ਮਿਟਾਓ",
+    "forward": "ਅੱਗੇ ਭੇਜੋ",
+    "goBack": "ਵਾਪਸ ਜਾਓ",
+    "moreOptions": "ਹੋਰ ਵਿਕਲਪ",
+    "save": "ਰੱਖਿਅਤ ਕਰੋ"
+  },
+  "states": {
+    "buttonLoading": "ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ...",
+    "loading": "ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ…"
+  },
+  "time": {
+    "today": "ਅੱਜ",
+    "yesterday": "ਕੱਲ੍ਹ"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "ਸਪੇਸ",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "ਮੌਜੂਦਗੀ: {{status}}",
+    "offline": "ਆਫ਼ਲਾਈਨ",
+    "online": "ਔਨਲਾਈਨ"
+  },
+  "list": {
+    "empty": "ਕੋਈ ਆਈਟਮ ਨਹੀਂ।"
+  },
+  "grid": {
+    "empty": "ਹਾਲੇ ਇੱਥੇ ਕੋਈ ਨਹੀਂ।"
+  },
+  "menu": {
+    "escHint": "ਵਾਪਸ ਜਾਣ ਲਈ Esc",
+    "navigationLabel": "ਨੈਵੀਗੇਸ਼ਨ ਮੀਨੂ",
+    "navigateHint": "ਨੈਵੀਗੇਟ ਕਰੋ",
+    "selectHint": "ਚੁਣਨ ਲਈ Enter"
+  },
+  "media": {
+    "mute": "ਮਿਊਟ ਕਰੋ",
+    "pause": "ਰੋਕੋ",
+    "play": "ਚਲਾਓ",
+    "seek": "ਆਡੀਓ ਵਿੱਚ ਅੱਗੇ-ਪਿੱਛੇ ਜਾਓ",
+    "skipBackward": "10 ਸਕਿੰਟ ਪਿੱਛੇ ਜਾਓ",
+    "skipForward": "10 ਸਕਿੰਟ ਅੱਗੇ ਜਾਓ",
+    "unmute": "ਅਨਮਿਊਟ ਕਰੋ",
+    "volume": "ਆਵਾਜ਼"
+  },
+  "composer": {
+    "addAttachment": "ਅਟੈਚਮੈਂਟ ਜੋੜੋ",
+    "allMentionHint": "ਇਸ ਚੈਨਲ ਵਿੱਚ ਹਰ ਕਿਸੇ ਨੂੰ ਸੂਚਿਤ ਕਰਦਾ ਹੈ",
+    "filePickerTitle": "ਫ਼ਾਈਲਾਂ ਜੋੜੋ",
+    "inputLabel": "ਸੁਨੇਹਾ ਲਿਖਣ ਵਾਲੀ ਥਾਂ",
+    "placeholder": "ਸੁਨੇਹਾ ਲਿਖੋ…",
+    "previewAlt": "ਪੂਰਵ-ਝਲਕ",
+    "removeAttachment": "{{name}} ਹਟਾਓ",
+    "send": "ਸੁਨੇਹਾ ਭੇਜੋ",
+    "markSensitive": "{{name}} ਨੂੰ ਸੰਵੇਦਨਸ਼ੀਲ ਵਜੋਂ ਮਾਰਕ ਕਰੋ",
+    "unmarkSensitive": "{{name}} ਤੋਂ ਸੰਵੇਦਨਸ਼ੀਲ ਮਾਰਕ ਹਟਾਓ"
+  },
+  "mentions": {
+    "listLabel": "ਮੈਨਸ਼ਨ ਸੁਝਾਅ",
+    "matching": "<hl>@{{query}}</hl> ਨਾਲ ਮੇਲ ਖਾਂਦੇ ਮੈਂਬਰ"
+  },
+  "emojiSuggest": {
+    "listLabel": "ਇਮੋਜੀ ਸੁਝਾਅ",
+    "matching": "<hl>:{{query}}</hl> ਨਾਲ ਮੇਲ ਖਾਂਦੇ ਇਮੋਜੀ"
+  },
+  "a11y": {
+    "avatar": "ਅਵਤਾਰ",
+    "loading": "ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ",
+    "otpDigit": "OTP ਅੰਕ {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} ਸਕਿੰਟ",
+    "seconds_other": "{{count}} ਸਕਿੰਟ",
+    "minutes_one": "{{count}} ਮਿੰਟ",
+    "minutes_other": "{{count}} ਮਿੰਟ",
+    "hours_one": "{{count}} ਘੰਟਾ",
+    "hours_other": "{{count}} ਘੰਟੇ",
+    "days_one": "{{count}} ਦਿਨ",
+    "days_other": "{{count}} ਦਿਨ",
+    "weeks_one": "{{count}} ਹਫ਼ਤਾ",
+    "weeks_other": "{{count}} ਹਫ਼ਤੇ",
+    "months_one": "{{count}} ਮਹੀਨਾ",
+    "months_other": "{{count}} ਮਹੀਨੇ",
+    "years_one": "{{count}} ਸਾਲ",
+    "years_other": "{{count}} ਸਾਲ"
+  },
+  "tray": {
+    "open": "Pollis ਖੋਲ੍ਹੋ",
+    "muteMic": "ਮਾਈਕ ਮਿਊਟ ਕਰੋ",
+    "unmuteMic": "ਮਾਈਕ ਅਨਮਿਊਟ ਕਰੋ",
+    "muteMicIdle": "ਮਾਈਕ ਮਿਊਟ ਕਰੋ (ਕਾਲ ਵਿੱਚ ਨਹੀਂ)",
+    "version": "ਵਰਜਨ {{version}}",
+    "quit": "Pollis ਬੰਦ ਕਰੋ",
+    "unread_one": "Pollis — {{count}} ਅਣਪੜ੍ਹਿਆ",
+    "unread_other": "Pollis — {{count}} ਅਣਪੜ੍ਹੇ"
+  }
+}

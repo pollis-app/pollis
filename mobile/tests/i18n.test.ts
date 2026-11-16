@@ -137,4 +137,5 @@ test("South Asian locales are auto-detected from OS tags (#1726)", () => {
   assert.equal(resolveDeviceLanguage(["mr-IN"]), "mr");
   assert.equal(resolveDeviceLanguage(["te-IN"]), "te");
   assert.equal(resolveDeviceLanguage(["ta-LK"]), "ta");
+  assert.equal(resolveDeviceLanguage(["pa-IN"]), "pa-Guru");
 });

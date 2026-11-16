@@ -400,6 +400,7 @@ test.describe("shipped locales", () => {
       "mr",
       "te",
       "ta",
+      "pa-Guru",
     ]);
   });
 
