@@ -28,6 +28,7 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "ps", label: "پښتو", dir: "rtl" },
   { code: "bn", label: "বাংলা", dir: "ltr" },
   { code: "mr", label: "मराठी", dir: "ltr" },
+  { code: "te", label: "తెలుగు", dir: "ltr" },
 ];
 
 export function supportedLanguageCodes(): string[] {

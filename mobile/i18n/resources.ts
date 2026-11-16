@@ -187,6 +187,21 @@ import ru_search from "../../frontend/src/i18n/locales/ru/search.json";
 import ru_settings from "../../frontend/src/i18n/locales/ru/settings.json";
 import ru_vault from "../../frontend/src/i18n/locales/ru/vault.json";
 import ru_voice from "../../frontend/src/i18n/locales/ru/voice.json";
+import te_arcade from "../../frontend/src/i18n/locales/te/arcade.json";
+import te_auth from "../../frontend/src/i18n/locales/te/auth.json";
+import te_channels from "../../frontend/src/i18n/locales/te/channels.json";
+import te_chat from "../../frontend/src/i18n/locales/te/chat.json";
+import te_common from "../../frontend/src/i18n/locales/te/common.json";
+import te_dms from "../../frontend/src/i18n/locales/te/dms.json";
+import te_emoji from "../../frontend/src/i18n/locales/te/emoji.json";
+import te_errors from "../../frontend/src/i18n/locales/te/errors.json";
+import te_mobile from "../../frontend/src/i18n/locales/te/mobile.json";
+import te_nav from "../../frontend/src/i18n/locales/te/nav.json";
+import te_saved from "../../frontend/src/i18n/locales/te/saved.json";
+import te_search from "../../frontend/src/i18n/locales/te/search.json";
+import te_settings from "../../frontend/src/i18n/locales/te/settings.json";
+import te_vault from "../../frontend/src/i18n/locales/te/vault.json";
+import te_voice from "../../frontend/src/i18n/locales/te/voice.json";
 import uk_arcade from "../../frontend/src/i18n/locales/uk/arcade.json";
 import uk_auth from "../../frontend/src/i18n/locales/uk/auth.json";
 import uk_channels from "../../frontend/src/i18n/locales/uk/channels.json";
@@ -439,6 +454,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ru_settings,
     "vault": ru_vault,
     "voice": ru_voice,
+  },
+  "te": {
+    "arcade": te_arcade,
+    "auth": te_auth,
+    "channels": te_channels,
+    "chat": te_chat,
+    "common": te_common,
+    "dms": te_dms,
+    "emoji": te_emoji,
+    "errors": te_errors,
+    "mobile": te_mobile,
+    "nav": te_nav,
+    "saved": te_saved,
+    "search": te_search,
+    "settings": te_settings,
+    "vault": te_vault,
+    "voice": te_voice,
   },
   "uk": {
     "arcade": uk_arcade,

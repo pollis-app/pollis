@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "వెనుకకు",
+    "cancel": "రద్దు చేయి",
+    "close": "మూసివేయి",
+    "copy": "కాపీ చేయి",
+    "copied": "కాపీ అయింది",
+    "copyFailed": "కాపీ చేయడం సాధ్యపడలేదు",
+    "delete": "తొలగించు",
+    "forward": "ఫార్వర్డ్ చేయి",
+    "goBack": "వెనుకకు వెళ్లు",
+    "moreOptions": "మరిన్ని ఆప్షన్‌లు",
+    "save": "సేవ్ చేయి"
+  },
+  "states": {
+    "buttonLoading": "లోడ్ అవుతోంది...",
+    "loading": "లోడ్ అవుతోంది…"
+  },
+  "time": {
+    "today": "ఈరోజు",
+    "yesterday": "నిన్న"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "స్పేస్",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "స్థితి: {{status}}",
+    "offline": "ఆఫ్‌లైన్",
+    "online": "ఆన్‌లైన్"
+  },
+  "list": {
+    "empty": "అంశాలు ఏవీ లేవు."
+  },
+  "grid": {
+    "empty": "ఇక్కడ ఇంకా ఎవరూ లేరు."
+  },
+  "menu": {
+    "escHint": "వెనుకకు వెళ్లడానికి Esc",
+    "navigationLabel": "నావిగేషన్ మెనూ",
+    "navigateHint": "నావిగేట్ చేయండి",
+    "selectHint": "ఎంచుకోవడానికి Enter"
+  },
+  "media": {
+    "mute": "మ్యూట్ చేయి",
+    "pause": "పాజ్ చేయి",
+    "play": "ప్లే చేయి",
+    "seek": "ఆడియోలో ముందుకు/వెనుకకు వెళ్లు",
+    "skipBackward": "10 సెకన్లు వెనుకకు",
+    "skipForward": "10 సెకన్లు ముందుకు",
+    "unmute": "అన్‌మ్యూట్ చేయి",
+    "volume": "వాల్యూమ్"
+  },
+  "composer": {
+    "addAttachment": "అటాచ్‌మెంట్ జోడించు",
+    "allMentionHint": "ఈ ఛానెల్‌లోని అందరికీ తెలియజేస్తుంది",
+    "filePickerTitle": "ఫైల్‌లను జోడించు",
+    "inputLabel": "మెసేజ్ ఇన్‌పుట్",
+    "placeholder": "మెసేజ్ టైప్ చేయండి…",
+    "previewAlt": "ప్రివ్యూ",
+    "removeAttachment": "{{name}}ను తీసివేయి",
+    "send": "మెసేజ్ పంపు",
+    "markSensitive": "{{name}}ను సున్నితమైనదిగా గుర్తించు",
+    "unmarkSensitive": "{{name}}ను సున్నితమైనది కాదని గుర్తించు"
+  },
+  "mentions": {
+    "listLabel": "ప్రస్తావన సూచనలు",
+    "matching": "<hl>@{{query}}</hl>కు సరిపోలే సభ్యులు"
+  },
+  "emojiSuggest": {
+    "listLabel": "ఎమోజీ సూచనలు",
+    "matching": "<hl>:{{query}}</hl>కు సరిపోలే ఎమోజీలు"
+  },
+  "a11y": {
+    "avatar": "అవతార్",
+    "loading": "లోడ్ అవుతోంది",
+    "otpDigit": "OTP అంకె {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}}సె",
+    "seconds_other": "{{count}}సె",
+    "minutes_one": "{{count}}ని",
+    "minutes_other": "{{count}}ని",
+    "hours_one": "{{count}}గం",
+    "hours_other": "{{count}}గం",
+    "days_one": "{{count}}రో",
+    "days_other": "{{count}}రో",
+    "weeks_one": "{{count}}వా",
+    "weeks_other": "{{count}}వా",
+    "months_one": "{{count}}నె",
+    "months_other": "{{count}}నె",
+    "years_one": "{{count}}సం",
+    "years_other": "{{count}}సం"
+  },
+  "tray": {
+    "open": "Pollis తెరువు",
+    "muteMic": "మైక్ మ్యూట్ చేయి",
+    "unmuteMic": "మైక్ అన్‌మ్యూట్ చేయి",
+    "muteMicIdle": "మైక్ మ్యూట్ చేయి (కాల్‌లో లేరు)",
+    "version": "వెర్షన్ {{version}}",
+    "quit": "Pollis నుండి నిష్క్రమించు",
+    "unread_one": "Pollis — {{count}} చదవనిది",
+    "unread_other": "Pollis — {{count}} చదవనివి"
+  }
+}

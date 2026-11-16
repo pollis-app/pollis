@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "{{name}} నుండి మెసేజ్",
+    "unknownAuthor": "తెలియనివారు",
+    "deleted": "[తొలగించబడింది]",
+    "encrypted": "[ఎన్‌క్రిప్ట్ చేయబడింది]",
+    "redacted": "[తొలగించబడింది]",
+    "edited": "(ఎడిట్ చేయబడింది)",
+    "editUnsent": "(ఎడిట్ పంపబడలేదు)",
+    "newMember": "కొత్త",
+    "newMemberTitle": "గత 7 రోజుల్లో చేరారు",
+    "undecryptable": {
+      "tag": "డీక్రిప్ట్ కాలేదు",
+      "title": "డీక్రిప్ట్ చేయడం సాధ్యపడలేదు",
+      "body_one": "{{count}} మెసేజ్‌ను ఈ పరికరంలో డీక్రిప్ట్ చేయడం సాధ్యపడలేదు.",
+      "body_other": "{{count}} మెసేజ్‌లను ఈ పరికరంలో డీక్రిప్ట్ చేయడం సాధ్యపడలేదు.",
+      "detail": "ఇక్కడ ఏదో పంపబడింది, కానీ ఈ పరికరం దాన్ని చదవలేకపోయింది. మీ ఇతర పరికరాలలో అది ఇంకా ఉండవచ్చు.",
+      "diagnostics": "డయాగ్నస్టిక్స్ చూడండి"
+    }
+  },
+  "status": {
+    "pending": "పెండింగ్‌లో ఉంది",
+    "sending": "పంపుతోంది",
+    "sent": "పంపబడింది",
+    "failed": "విఫలమైంది",
+    "cancelled": "రద్దు చేయబడింది"
+  },
+  "outbox": {
+    "retry": "మళ్లీ ప్రయత్నించు",
+    "discard": "విస్మరించు",
+    "retryLabel": "ఈ మెసేజ్‌ను మళ్లీ పంపడానికి ప్రయత్నించు",
+    "discardLabel": "పంపని ఈ మెసేజ్‌ను విస్మరించు",
+    "notSent": "పంపబడలేదు",
+    "willResend": "Pollis మళ్లీ కనెక్ట్ అయినప్పుడు ఇది ఆటోమేటిక్‌గా పంపబడుతుంది.",
+    "notDelivered": "ఈ మెసేజ్‌ను డెలివర్ చేయడం సాధ్యపడలేదు."
+  },
+  "actions": {
+    "reply": "రిప్లై",
+    "replyInThread": "థ్రెడ్‌లో రిప్లై ఇవ్వు",
+    "save": "మెసేజ్‌ను సేవ్ చేయి",
+    "removeBookmark": "బుక్‌మార్క్ తీసివేయి",
+    "copyLink": "మెసేజ్ లింక్‌ను కాపీ చేయి",
+    "copyLinkCopied": "లింక్ కాపీ అయింది",
+    "copyLinkFailed": "లింక్‌ను కాపీ చేయడం సాధ్యపడలేదు",
+    "edit": "మెసేజ్‌ను ఎడిట్ చేయి",
+    "delete": "మెసేజ్‌ను తొలగించు",
+    "deleteAsAdmin": "మెసేజ్‌ను తొలగించు (అడ్మిన్)",
+    "more": "మరిన్ని చర్యలు",
+    "pin": "మెసేజ్‌ను పిన్ చేయి",
+    "unpin": "మెసేజ్‌ను అన్‌పిన్ చేయి",
+    "report": "రిపోర్ట్ చేయి"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} రిప్లై",
+    "replyCount_other": "{{count}} రిప్లైలు"
+  },
+  "receipts": {
+    "readByEveryone": "అందరూ చదివారు",
+    "readByCount_one": "{{total}}లో {{count}} మంది చదివారు",
+    "readByCount_other": "{{total}}లో {{count}} మంది చదివారు",
+    "deliveredCount_one": "{{total}}లో {{count}} మందికి డెలివర్ అయింది",
+    "deliveredCount_other": "{{total}}లో {{count}} మందికి డెలివర్ అయింది"
+  },
+  "list": {
+    "empty": "ఇంకా మెసేజ్‌లు లేవు. సంభాషణ ప్రారంభించండి.",
+    "unknownAuthor": "తెలియనివారు",
+    "blockedAuthor": "బ్లాక్ చేసిన యూజర్",
+    "blockedBody": "[బ్లాక్ చేయబడింది]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name>కు రిప్లై ఇస్తున్నారు",
+    "scrollToMessage": "రిప్లై ఇచ్చిన మెసేజ్‌కు స్క్రోల్ చేయి",
+    "dismiss": "రిప్లైని తీసివేయి",
+    "encrypted": "[ఎన్‌క్రిప్ట్ చేసిన మెసేజ్]"
+  },
+  "queue": {
+    "heading": "క్యూ",
+    "pendingPlaceholder": "[పెండింగ్ మెసేజ్]",
+    "cancel": "మెసేజ్‌ను రద్దు చేయి",
+    "retry": "మళ్లీ ప్రయత్నించు",
+    "failedCount_one": "విఫలమైంది ×{{count}}",
+    "failedCount_other": "విఫలమైంది ×{{count}}"
+  },
+  "reactions": {
+    "add": "ప్రతిస్పందన జోడించు",
+    "all": "అన్నీ",
+    "allTabLabel_one": "అన్నీ, {{count}} ప్రతిస్పందన",
+    "allTabLabel_other": "అన్నీ, {{count}} ప్రతిస్పందనలు",
+    "contextHint": "ఎవరు ప్రతిస్పందించారో చూడటానికి రైట్-క్లిక్ చేయండి",
+    "hoverMore_one": "{{names}}, మరో {{count}} మంది {{emoji}}తో ప్రతిస్పందించారు",
+    "hoverMore_other": "{{names}}, మరో {{count}} మంది {{emoji}}తో ప్రతిస్పందించారు",
+    "hoverNames": "{{names}} {{emoji}}తో ప్రతిస్పందించారు",
+    "pillLabel_one": "{{emoji}} {{count}} ప్రతిస్పందన",
+    "pillLabel_other": "{{emoji}} {{count}} ప్రతిస్పందనలు",
+    "rowLabel": "{{name}}, {{emojis}}తో ప్రతిస్పందించారు",
+    "selfName": "{{name}} (మీరు)",
+    "sheetTitle": "ప్రతిస్పందనలు",
+    "tabLabel_one": "{{emoji}}, {{count}} ప్రతిస్పందన",
+    "tabLabel_other": "{{emoji}}, {{count}} ప్రతిస్పందనలు",
+    "unknownUser": "తెలియని యూజర్",
+    "viewWho": "ప్రతిస్పందనలు చూడండి",
+    "you": "మీరు"
+  },
+  "preview": {
+    "noMessages": "ఇంకా మెసేజ్‌లు లేవు",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} అటాచ్‌మెంట్]",
+    "attachments_other": "[{{count}} అటాచ్‌మెంట్‌లు]",
+    "undecryptable": "ఒక మెసేజ్‌ను ఈ పరికరంలో డీక్రిప్ట్ చేయడం సాధ్యపడలేదు"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} చూడండి",
+    "openLabel": "{{filename}} తెరువు",
+    "downloadLabel": "{{filename}} డౌన్‌లోడ్ చేయి",
+    "loading": "లోడ్ అవుతోంది…",
+    "error": "ఎర్రర్",
+    "failedToLoad": "లోడ్ చేయడం విఫలమైంది",
+    "failedToDownload": "డౌన్‌లోడ్ విఫలమైంది",
+    "lightboxFetch": "తీసుకురా",
+    "lightboxDone": "[ పూర్తయింది ]",
+    "lightboxDownload": "[డౌన్‌లోడ్]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "సున్నితమైన మీడియాను చూపు: {{filename}}",
+    "sensitiveHide": "{{filename}} దాచు"
+  },
+  "unfurl": {
+    "loadImage": "చిత్రాన్ని లోడ్ చేయి",
+    "loadVideo": "వీడియోను లోడ్ చేయి",
+    "loadTitle": "{{url}} నుండి మీడియాను లోడ్ చేయి — ఇది ఆ సైట్‌ను నేరుగా సంప్రదిస్తుంది",
+    "loadDescription": "{{url}} నుండి మీడియాను లోడ్ చేయి. ఇది ఆ సైట్‌ను నేరుగా సంప్రదిస్తుంది, మీ IP చిరునామాను దానికి తెలియజేస్తుంది.",
+    "openLabel": "{{url}} తెరువు"
+  },
+  "notify": {
+    "newMessageTitle": "కొత్త మెసేజ్",
+    "newMessageBody": "{{name}}: కొత్త మెసేజ్",
+    "mentionTitle": "కొత్త ప్రస్తావన",
+    "allMentionBody": "{{name}} @allను ప్రస్తావించారు",
+    "userMentionBody": "{{name}} మిమ్మల్ని ప్రస్తావించారు"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "ఈ వ్యక్తి",
+    "titleMessage": "మెసేజ్‌ను రిపోర్ట్ చేయి",
+    "titleUser": "{{name}}ను రిపోర్ట్ చేయి",
+    "intro": "Pollisకు ఖాతా, కారణం అందుతాయి. మెసేజ్‌లు ఎన్‌క్రిప్ట్ చేయబడే ఉంటాయి, కాబట్టి ఏమి చెప్పారో మేము ఎప్పటికీ చూడలేము.",
+    "reasonLabel": "కారణం",
+    "reason": {
+      "spam": "స్పామ్",
+      "harassment": "వేధింపులు లేదా బెదిరింపులు",
+      "illegal": "చట్టవిరుద్ధమైన కంటెంట్",
+      "other": "ఇంకేదైనా"
+    },
+    "submit": "రిపోర్ట్ చేయి",
+    "submitAndBlock": "రిపోర్ట్ చేసి బ్లాక్ చేయి",
+    "failed": "రిపోర్ట్‌ను పంపడం సాధ్యపడలేదు. మళ్లీ ప్రయత్నించండి.",
+    "doneTitle": "రిపోర్ట్ పంపబడింది",
+    "done": "ధన్యవాదాలు. మేము ప్రతి రిపోర్ట్‌ను పరిశీలిస్తాము.",
+    "doneBlocked": "ధన్యవాదాలు. మేము ప్రతి రిపోర్ట్‌ను పరిశీలిస్తాము. మీరు {{name}}ను బ్లాక్ కూడా చేశారు.",
+    "close": "పూర్తయింది"
+  },
+  "keyChange": {
+    "notice": "{{name}}తో మీ భద్రతా సంఖ్య మారింది.",
+    "verify": "ధృవీకరించండి",
+    "defaultName": "ఈ కాంటాక్ట్"
+  },
+  "typing": {
+    "one": "{{name}} టైప్ చేస్తున్నారు…",
+    "two": "{{first}}, {{second}} టైప్ చేస్తున్నారు…",
+    "several_one": "{{count}} వ్యక్తి టైప్ చేస్తున్నారు…",
+    "several_other": "{{count}} మంది టైప్ చేస్తున్నారు…"
+  }
+}
