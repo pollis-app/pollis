@@ -45,17 +45,16 @@
   "accent": {
     "heading": "强调色",
     "pickTitle": "选择强调色",
-    "presetOrange": "橙色",
-    "presetGreen": "绿色",
-    "presetBlue": "蓝色",
-    "presetPurple": "紫色",
-    "presetRed": "红色",
-    "presetCyan": "青色"
+    "presetAmber": "琥珀",
+    "presetCitron": "柠檬黄",
+    "presetMint": "薄荷绿",
+    "presetGlass": "玻璃",
+    "presetLilac": "丁香紫",
+    "presetRust": "铁锈红"
   },
   "background": {
     "heading": "背景色",
     "pickTitle": "选择背景色",
-    "presetMatchAccent": "跟随强调色",
     "presetNeutral": "中性",
     "presetWarm": "暖色",
     "presetCool": "冷色",

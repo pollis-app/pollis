@@ -47,17 +47,16 @@
   "accent": {
     "heading": "강조 색상",
     "pickTitle": "강조 색상 선택",
-    "presetOrange": "주황",
-    "presetGreen": "초록",
-    "presetBlue": "파랑",
-    "presetPurple": "보라",
-    "presetRed": "빨강",
-    "presetCyan": "청록"
+    "presetAmber": "앰버",
+    "presetCitron": "시트론",
+    "presetMint": "민트",
+    "presetGlass": "글래스",
+    "presetLilac": "라일락",
+    "presetRust": "러스트"
   },
   "background": {
     "heading": "배경 색상",
     "pickTitle": "배경 색상 선택",
-    "presetMatchAccent": "강조 색상과 맞춤",
     "presetNeutral": "중립",
     "presetWarm": "따뜻한 톤",
     "presetCool": "차가운 톤",

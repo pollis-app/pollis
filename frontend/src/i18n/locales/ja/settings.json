@@ -47,17 +47,16 @@
   "accent": {
     "heading": "アクセントカラー",
     "pickTitle": "アクセントカラーを選択",
-    "presetOrange": "オレンジ",
-    "presetGreen": "グリーン",
-    "presetBlue": "ブルー",
-    "presetPurple": "パープル",
-    "presetRed": "レッド",
-    "presetCyan": "シアン"
+    "presetAmber": "アンバー",
+    "presetCitron": "シトロン",
+    "presetMint": "ミント",
+    "presetGlass": "グラス",
+    "presetLilac": "ライラック",
+    "presetRust": "ラスト"
   },
   "background": {
     "heading": "背景色",
     "pickTitle": "背景色を選択",
-    "presetMatchAccent": "アクセントに合わせる",
     "presetNeutral": "ニュートラル",
     "presetWarm": "ウォーム",
     "presetCool": "クール",

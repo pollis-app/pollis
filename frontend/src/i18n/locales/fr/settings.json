@@ -45,17 +45,16 @@
   "accent": {
     "heading": "Couleur d'accentuation",
     "pickTitle": "Choisir la couleur d'accentuation",
-    "presetOrange": "Orange",
-    "presetGreen": "Vert",
-    "presetBlue": "Bleu",
-    "presetPurple": "Violet",
-    "presetRed": "Rouge",
-    "presetCyan": "Cyan"
+    "presetAmber": "Ambre",
+    "presetCitron": "Citron",
+    "presetMint": "Menthe",
+    "presetGlass": "Verre",
+    "presetLilac": "Lilas",
+    "presetRust": "Rouille"
   },
   "background": {
     "heading": "Couleur de fond",
     "pickTitle": "Choisir la couleur de fond",
-    "presetMatchAccent": "Assortie à l'accentuation",
     "presetNeutral": "Neutre",
     "presetWarm": "Chaude",
     "presetCool": "Froide",

@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 
 // Background lightness as a tiny external store for `useBackgroundIsLight`.
 
-// Default from index.css (`--bg-l: 4%`).
+// Default until `colorUtils.paint` reports the real ground (it runs before the first render).
 let currentBgL = 4;
 let initialized = false;
 const listeners = new Set<() => void>();

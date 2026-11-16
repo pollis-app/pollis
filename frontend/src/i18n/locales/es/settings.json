@@ -45,17 +45,16 @@
   "accent": {
     "heading": "Color de acento",
     "pickTitle": "Elegir el color de acento",
-    "presetOrange": "Naranja",
-    "presetGreen": "Verde",
-    "presetBlue": "Azul",
-    "presetPurple": "Morado",
-    "presetRed": "Rojo",
-    "presetCyan": "Cian"
+    "presetAmber": "Ámbar",
+    "presetCitron": "Cidra",
+    "presetMint": "Menta",
+    "presetGlass": "Cristal",
+    "presetLilac": "Lila",
+    "presetRust": "Óxido"
   },
   "background": {
     "heading": "Color de fondo",
     "pickTitle": "Elegir el color de fondo",
-    "presetMatchAccent": "Igual que el acento",
     "presetNeutral": "Neutro",
     "presetWarm": "Cálido",
     "presetCool": "Frío",

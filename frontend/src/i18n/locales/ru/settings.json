@@ -45,17 +45,16 @@
   "accent": {
     "heading": "Акцентный цвет",
     "pickTitle": "Выбрать акцентный цвет",
-    "presetOrange": "Оранжевый",
-    "presetGreen": "Зелёный",
-    "presetBlue": "Синий",
-    "presetPurple": "Фиолетовый",
-    "presetRed": "Красный",
-    "presetCyan": "Голубой"
+    "presetAmber": "Янтарный",
+    "presetCitron": "Лимонный",
+    "presetMint": "Мятный",
+    "presetGlass": "Стекло",
+    "presetLilac": "Сиреневый",
+    "presetRust": "Терракотовый"
   },
   "background": {
     "heading": "Цвет фона",
     "pickTitle": "Выбрать цвет фона",
-    "presetMatchAccent": "Под акцентный",
     "presetNeutral": "Нейтральный",
     "presetWarm": "Тёплый",
     "presetCool": "Холодный",

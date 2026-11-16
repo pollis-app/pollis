@@ -40,6 +40,12 @@ import {
   type MergedSave,
   type PreferencesBlob,
 } from "../../utils/preferencesBlob";
+import {
+  DEFAULT_ACCENT_HEX,
+  DEFAULT_BACKGROUND_HEX,
+  accentFromPrefs,
+  backgroundFromPrefs,
+} from "../../../../design/theme";
 
 /**
  * Mirrors `voice_apm::NsLevel` in src-tauri.
@@ -60,7 +66,10 @@ function normalizeVoiceInputMode(v: string | undefined | null): VoiceInputMode {
 }
 
 export interface PreferencesData {
+  /** Shared with mobile (design/theme.ts). */
   accent_color?: string;
+  /** Legacy mobile accent key, read as a fallback; a save mirrors `accent_color` into it. */
+  accent_hex?: string;
   background_color?: string;
   /** UI skin, synced across devices (stored as `Modern` for Modern). Absent → Modern. */
   skin?: Skin;
@@ -317,6 +326,7 @@ export function usePreferences() {
       rawBlobs.set(currentUser.id, parsePreferencesBlob(json));
       return {
         accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
+        accent_hex: getPreference<string | undefined>(json, "accent_hex", undefined),
         background_color: getPreference<string | undefined>(json, "background_color", undefined),
         skin: normalizeSkin(getPreference<string | undefined>(json, "skin", undefined)),
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
@@ -430,12 +440,9 @@ export function useSendReadReceipts(): boolean {
 
 /** Apply synced visual prefs to CSS vars; font size is device-local (`applyDeviceFontSize`). */
 export function applyPreferences(prefs: PreferencesData): void {
-  if (prefs.accent_color) {
-    applyAccentColor(prefs.accent_color);
-  }
-  if (prefs.background_color) {
-    applyBackgroundColor(prefs.background_color);
-  }
+  // Shared keys (design/theme.ts); an account with none gets the defaults, not the last account's.
+  applyAccentColor(accentFromPrefs(prefs) ?? DEFAULT_ACCENT_HEX);
+  applyBackgroundColor(backgroundFromPrefs(prefs) ?? DEFAULT_BACKGROUND_HEX);
   applySkin(normalizeSkin(prefs.skin));
   setShortcutOverrides(
     (prefs.shortcut_overrides ?? {}) as Partial<Record<ShortcutCommandId, string>>,
@@ -474,7 +481,7 @@ export function useApplyPreferences(): void {
       applyPreferences(data);
       applyDeviceFontSize(currentUser?.id, data);
     }
-  }, [data?.accent_color, data?.background_color, data?.skin, data?.font_size, overridesKey, currentUser?.id]);
+  }, [data?.accent_color, data?.accent_hex, data?.background_color, data?.skin, data?.font_size, overridesKey, currentUser?.id]);
 
   // Pushed so the close handler picks hide-vs-quit synchronously.
   const closeToTray = data?.close_to_tray ?? true;

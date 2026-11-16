@@ -7,6 +7,10 @@ import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 
 export interface MobilePreferencesPatch {
+  /** The shared colour keys (design/theme.ts → `colorPreferencesPatch`). */
+  accent_color?: string;
+  background_color?: string;
+  /** Legacy mirror of `accent_color` for mobile builds that predate it. */
   accent_hex?: string;
   mobile_behavior?: Record<string, boolean>;
   /** Desktop-shared on purpose: the core's receipt chokepoints read exactly this key (default true). */

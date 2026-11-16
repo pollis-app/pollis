@@ -35,17 +35,25 @@ import { RelayServingSection } from "../components/Preferences/RelayServingSecti
 import { LanguageSection } from "../components/Preferences/LanguageSection";
 import { HexColorField } from "../components/Preferences/HexColorField";
 import {
-  hslToHex,
-  hexToHsl,
   applyAccentColor,
   applyBackgroundColor,
   applyFontSize,
   applySkin,
   normalizeSkin,
+  DEFAULT_SKIN,
   loadDeviceFontSize,
   saveDeviceFontSize,
   type Skin,
 } from "../utils/colorUtils";
+import {
+  ACCENT_PRESETS,
+  BACKGROUND_PRESETS,
+  DEFAULT_ACCENT_HEX,
+  DEFAULT_BACKGROUND_HEX,
+  accentFromPrefs,
+  backgroundFromPrefs,
+  colorPreferencesPatch,
+} from "../../../design/theme";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
@@ -79,12 +87,10 @@ export const PreferencesPage: React.FC = observer(() => {
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
   // Live panel state, which the switch below reports.
   const { isOpen: isRightPanelOpen, setPanel: setRightPanel } = useRightPanel();
-  const [skin, setSkin] = useState<Skin>("terminal");
-  const [hue, setHue] = useState<number>(38);
-  const [saturation, setSaturation] = useState<number>(90);
-  const [bgHue, setBgHue] = useState<number>(38);
-  const [bgSaturation, setBgSaturation] = useState<number>(20);
-  const [bgLightness, setBgLightness] = useState<number>(4);
+  const [skin, setSkin] = useState<Skin>(DEFAULT_SKIN);
+  // Hex, exactly as synced (design/theme.ts): no lightness is forced on a pick.
+  const [accentHex, setAccentHex] = useState<string>(DEFAULT_ACCENT_HEX);
+  const [bgHex, setBgHex] = useState<string>(DEFAULT_BACKGROUND_HEX);
   const [fontSize, setFontSize] = useState<number>(15);
   const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
   const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
@@ -104,8 +110,8 @@ export const PreferencesPage: React.FC = observer(() => {
   // "Be a relay" consent (#813 §10.2), separate from `overlayMode`.
   const [relayServing, setRelayServing] = useState<RelayServingConfig>(RELAY_SERVING_DEFAULTS);
   const [relayServingError, setRelayServingError] = useState<string | null>(null);
-  const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
-  const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
+  const [accentHexInput, setAccentHexInput] = useState<string>(DEFAULT_ACCENT_HEX);
+  const [bgHexInput, setBgHexInput] = useState<string>(DEFAULT_BACKGROUND_HEX);
 
   const { query, save: savePrefs } = usePreferences();
 
@@ -122,6 +128,12 @@ export const PreferencesPage: React.FC = observer(() => {
       applyPreferences(query.data);
       applyDeviceFontSize(currentUser?.id, query.data);
       setSkin(normalizeSkin(query.data.skin));
+      const accent = accentFromPrefs(query.data) ?? DEFAULT_ACCENT_HEX;
+      setAccentHex(accent);
+      setAccentHexInput(accent);
+      const background = backgroundFromPrefs(query.data) ?? DEFAULT_BACKGROUND_HEX;
+      setBgHex(background);
+      setBgHexInput(background);
       if (query.data.allow_desktop_notifications !== undefined) {
         setAllowDesktopNotifications(query.data.allow_desktop_notifications);
       }
@@ -151,18 +163,6 @@ export const PreferencesPage: React.FC = observer(() => {
   }, [query.data, currentUser?.id]);
 
   useEffect(() => {
-    const h = parseInt(getRootVar("--accent-h"));
-    const s = parseInt(getRootVar("--accent-s"));
-    const bh = parseInt(getRootVar("--bg-h"));
-    const bs = parseInt(getRootVar("--bg-s"));
-    const bl = parseInt(getRootVar("--bg-l"));
-    if (!isNaN(h)) { setHue(h); }
-    if (!isNaN(s)) { setSaturation(s); }
-    if (!isNaN(h) && !isNaN(s)) { setAccentHexInput(hslToHex(h, s, 62)); }
-    if (!isNaN(bh)) { setBgHue(bh); }
-    if (!isNaN(bs)) { setBgSaturation(bs); }
-    if (!isNaN(bl)) { setBgLightness(bl); }
-    if (!isNaN(bh) && !isNaN(bs) && !isNaN(bl)) { setBgHexInput(hslToHex(bh, bs, bl)); }
     // Device-local font size, else the CSS var's current value.
     const localFs = loadDeviceFontSize(currentUser?.id);
     if (localFs !== null) {
@@ -175,8 +175,8 @@ export const PreferencesPage: React.FC = observer(() => {
   }, [currentUser?.id]);
 
   const save = useCallback((opts: {
-    accentH?: number; accentS?: number;
-    bgH?: number; bgS?: number; bgL?: number;
+    accent?: string;
+    background?: string;
     skin?: Skin;
     notifications?: boolean; soundEffects?: boolean;
     incomingCallTakeover?: boolean;
@@ -188,11 +188,8 @@ export const PreferencesPage: React.FC = observer(() => {
     overlayMode?: OverlayMode;
     relayServing?: RelayServingConfig;
   }) => {
-    const ah = opts.accentH ?? hue;
-    const as_ = opts.accentS ?? saturation;
-    const bh = opts.bgH ?? bgHue;
-    const bs = opts.bgS ?? bgSaturation;
-    const bl = opts.bgL ?? bgLightness;
+    const accent = opts.accent ?? accentHex;
+    const background = opts.background ?? bgHex;
     const notif = opts.notifications ?? allowDesktopNotifications;
     const sfx = opts.soundEffects ?? allowSoundEffects;
     const takeover = opts.incomingCallTakeover ?? incomingCallTakeover;
@@ -204,14 +201,12 @@ export const PreferencesPage: React.FC = observer(() => {
     const overlay = opts.overlayMode ?? overlayMode;
     const relay = opts.relayServing ?? relayServing;
     const skinVal = opts.skin ?? skin;
-    const accentHex = hslToHex(ah, as_, 62);
-    const bgHex = hslToHex(bh, bs, bl);
     // `font_size` is device-local; delete the legacy synced field so saves don't overwrite it.
     savePrefs({
       ...query.data,
       font_size: undefined,
-      accent_color: accentHex,
-      background_color: bgHex,
+      // `accent_color` + `background_color`, and the legacy `accent_hex` older mobile builds read.
+      ...colorPreferencesPatch({ accent, background }),
       skin: skinVal,
       allow_desktop_notifications: notif,
       allow_sound_effects: sfx,
@@ -226,7 +221,7 @@ export const PreferencesPage: React.FC = observer(() => {
       relay_serving_wifi_only: relay.wifi_only,
       relay_serving_power_only: relay.power_only,
     });
-  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, incomingCallTakeover, sendReadReceipts, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode, relayServing]);
+  }, [savePrefs, query.data, accentHex, bgHex, skin, allowDesktopNotifications, allowSoundEffects, incomingCallTakeover, sendReadReceipts, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode, relayServing]);
 
   // Apply `val` live, never throwing: errors show inline and the control snaps to the real mode.
   const applyOverlayMode = useCallback(async (val: OverlayMode, persist: boolean) => {
@@ -335,23 +330,52 @@ export const PreferencesPage: React.FC = observer(() => {
   };
 
   const handleAccentColor = (hex: string) => {
-    const [h, s] = hexToHsl(hex);
-    setHue(h);
-    setSaturation(s);
-    const normalized = hslToHex(h, s, 62);
+    const normalized = hex.toLowerCase();
+    setAccentHex(normalized);
     setAccentHexInput(normalized);
     applyAccentColor(normalized);
-    save({ accentH: h, accentS: s });
+    save({ accent: normalized });
   };
 
   const handleBgColor = (hex: string) => {
-    const [h, s, l] = hexToHsl(hex);
-    setBgHue(h);
-    setBgSaturation(s);
-    setBgLightness(l);
-    setBgHexInput(hex);
-    applyBackgroundColor(hex);
-    save({ bgH: h, bgS: s, bgL: l });
+    const normalized = hex.toLowerCase();
+    setBgHex(normalized);
+    setBgHexInput(normalized);
+    applyBackgroundColor(normalized);
+    save({ background: normalized });
+  };
+
+  // One literal call per key, so the i18n check sees every one.
+  const accentPresetLabel = (n: (typeof ACCENT_PRESETS)[number]["n"]): string => {
+    switch (n) {
+      case "Amber":
+        return t("accent.presetAmber");
+      case "Citron":
+        return t("accent.presetCitron");
+      case "Mint":
+        return t("accent.presetMint");
+      case "Glass":
+        return t("accent.presetGlass");
+      case "Lilac":
+        return t("accent.presetLilac");
+      case "Rust":
+        return t("accent.presetRust");
+    }
+  };
+
+  const backgroundPresetLabel = (n: (typeof BACKGROUND_PRESETS)[number]["n"]): string => {
+    switch (n) {
+      case "Warm":
+        return t("background.presetWarm");
+      case "Neutral":
+        return t("background.presetNeutral");
+      case "Cool":
+        return t("background.presetCool");
+      case "Green":
+        return t("background.presetGreen");
+      case "Purple":
+        return t("background.presetPurple");
+    }
   };
 
   const handleSkin = (val: Skin) => {
@@ -485,7 +509,7 @@ export const PreferencesPage: React.FC = observer(() => {
               </h2>
 
               <HexColorField
-                color={hslToHex(hue, saturation, 62)}
+                color={accentHex}
                 hexInput={accentHexInput}
                 onHexInputChange={setAccentHexInput}
                 onColor={handleAccentColor}
@@ -493,35 +517,22 @@ export const PreferencesPage: React.FC = observer(() => {
                 swatchStyle={{ width: 40, height: 40, borderRadius: 8, padding: 0 }}
               />
 
-              {/* Quick presets */}
+              {/* Quick presets: the same list mobile offers (design/theme.ts). */}
               <div className="flex gap-2 flex-wrap">
-                {[
-                  { id: "orange", label: t("accent.presetOrange"), h: 38, s: 90 },
-                  { id: "green", label: t("accent.presetGreen"), h: 150, s: 62 },
-                  { id: "blue", label: t("accent.presetBlue"), h: 210, s: 80 },
-                  { id: "purple", label: t("accent.presetPurple"), h: 270, s: 70 },
-                  { id: "red", label: t("accent.presetRed"), h: 0, s: 85 },
-                  { id: "cyan", label: t("accent.presetCyan"), h: 185, s: 75 },
-                ].map((preset) => (
+                {ACCENT_PRESETS.map((preset) => (
                   <button
-                    key={preset.id}
-                    onClick={() => {
-                      setHue(preset.h);
-                      setSaturation(preset.s);
-                      const hex = hslToHex(preset.h, preset.s, 62);
-                      setAccentHexInput(hex);
-                      applyAccentColor(hex);
-                      save({ accentH: preset.h, accentS: preset.s });
-                    }}
-                    className="px-2 py-0.5 text-xs font-mono transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+                    key={preset.n}
+                    data-testid={`pref-accent-${preset.n.toLowerCase()}`}
+                    aria-pressed={accentHex === preset.c}
+                    onClick={() => handleAccentColor(preset.c)}
+                    className="px-2 py-0.5 text-xs font-mono rounded-chip border transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
                     style={{
-                      background: `hsl(${preset.h} ${preset.s}% 62% / 15%)`,
-                      border: `1px solid hsl(${preset.h} ${preset.s}% 62% / 40%)`,
-                      color: `hsl(${preset.h} ${preset.s}% 65%)`,
-                      borderRadius: 4,
+                      background: `${preset.c}26`,
+                      borderColor: accentHex === preset.c ? preset.c : `${preset.c}66`,
+                      color: preset.c,
                     }}
                   >
-                    {preset.label}
+                    {accentPresetLabel(preset.n)}
                   </button>
                 ))}
               </div>
@@ -536,7 +547,7 @@ export const PreferencesPage: React.FC = observer(() => {
               </h2>
 
               <HexColorField
-                color={hslToHex(bgHue, bgSaturation, bgLightness)}
+                color={bgHex}
                 hexInput={bgHexInput}
                 onHexInputChange={setBgHexInput}
                 onColor={handleBgColor}
@@ -544,36 +555,18 @@ export const PreferencesPage: React.FC = observer(() => {
                 swatchStyle={{ width: 40, height: 40, padding: 0, borderRadius: "0.5rem", outline: "2px solid var(--c-accent)", outlineOffset: "-1px" }}
               />
 
-              {/* Quick presets */}
+              {/* Quick presets (design/theme.ts); every one passes the contrast test. */}
               <div className="flex gap-2 flex-wrap">
-                {[
-                  { id: "match-accent", label: t("background.presetMatchAccent"), h: hue, s: 20 },
-                  { id: "neutral", label: t("background.presetNeutral"), h: 0, s: 0 },
-                  { id: "warm", label: t("background.presetWarm"), h: 30, s: 15 },
-                  { id: "cool", label: t("background.presetCool"), h: 220, s: 15 },
-                  { id: "green", label: t("background.presetGreen"), h: 150, s: 12 },
-                  { id: "purple", label: t("background.presetPurple"), h: 270, s: 12 },
-                ].map((preset) => (
+                {BACKGROUND_PRESETS.map((preset) => (
                   <button
-                    key={preset.id}
-                    onClick={() => {
-                      setBgHue(preset.h);
-                      setBgSaturation(preset.s);
-                      setBgLightness(7);
-                      const hex = hslToHex(preset.h, preset.s, 7);
-                      setBgHexInput(hex);
-                      applyBackgroundColor(hex);
-                      save({ bgH: preset.h, bgS: preset.s, bgL: 7 });
-                    }}
-                    className="px-2 py-0.5 text-xs font-mono transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
-                    style={{
-                      background: `hsl(${preset.h} ${preset.s}% 20% / 40%)`,
-                      border: `1px solid hsl(${preset.h} ${preset.s}% 40% / 40%)`,
-                      color: `hsl(${preset.h} ${Math.max(preset.s, 30)}% 65%)`,
-                      borderRadius: 4,
-                    }}
+                    key={preset.n}
+                    data-testid={`pref-background-${preset.n.toLowerCase()}`}
+                    aria-pressed={bgHex === preset.c}
+                    onClick={() => handleBgColor(preset.c)}
+                    className={`px-2 py-0.5 text-xs font-mono rounded-chip border text-fg transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black ${bgHex === preset.c ? "border-accent" : "border-line-strong"}`}
+                    style={{ background: preset.c }}
                   >
-                    {preset.label}
+                    {backgroundPresetLabel(preset.n)}
                   </button>
                 ))}
               </div>

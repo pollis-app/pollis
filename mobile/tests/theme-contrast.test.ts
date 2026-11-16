@@ -52,9 +52,15 @@ test("a different background re-derives the neutrals", () => {
   }
 });
 
-test("there is no third hue: danger is the accent", () => {
+test("danger is the one shared red, never the accent, and reads on every surface", () => {
   for (const preset of ACCENT_PRESETS) {
     const theme = deriveTheme(preset.c, DEFAULT_BACKGROUND_HEX);
-    assert.equal(theme.danger, theme.accent);
+    assert.equal(theme.danger, "#ff6b6b");
+    assert.notEqual(theme.danger, theme.accent);
+    for (const surface of SURFACES) {
+      const ratio = contrast(theme.danger, theme[surface]);
+      assert.ok(ratio >= 4.5, `danger on ${surface} is ${ratio.toFixed(2)}:1`);
+    }
+    assert.ok(contrast(theme.onDanger, theme.danger) >= 4.5, "onDanger on danger");
   }
 });

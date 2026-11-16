@@ -12,6 +12,10 @@ import { voiceSession } from "./voice";
 import { audioLevels } from "./voice/audioLevels";
 import { appHandlesPaste, readClipboardText } from "./bridge";
 import { installAppPaste } from "./utils/appPaste";
+import { initTheme } from "./utils/colorUtils";
+
+// Colour tokens and the default skin, painted before anything renders (design/theme.ts).
+initTheme();
 
 // Platform tag for CSS (e.g. macOS already rounds corners).
 const ua = navigator.userAgent;

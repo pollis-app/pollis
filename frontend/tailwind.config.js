@@ -6,7 +6,7 @@ export default {
   ],
   theme: {
     extend: {
-      // Semantic utilities over the CSS tokens in index.css; see CLAUDE.md → "Styling".
+      // Semantic utilities over the colour tokens (design/theme.ts, painted by utils/colorUtils.ts) and index.css; see docs/design/.
       colors: {
         bg: 'var(--c-bg)',
         surface: {
@@ -19,19 +19,27 @@ export default {
           bright:  'var(--c-accent-bright)',
           dim:     'var(--c-accent-dim)',
           muted:   'var(--c-accent-muted)',
+          faint:   'var(--c-accent-faint)',
+          soft:    'var(--c-accent-soft)',
+          mid:     'var(--c-accent-mid)',
         },
+        // Ink on an accent / danger fill.
+        'on-accent': 'var(--c-on-accent)',
+        'on-danger': 'var(--c-on-danger)',
         fg:    'var(--c-text)',
         dim:   'var(--c-text-dim)',
         muted: 'var(--c-text-muted)',
         line: {
           DEFAULT: 'var(--c-border)',
+          soft:    'var(--c-border-soft)',
+          // A control's edge: 3:1 against the surface it sits on.
           strong:  'var(--c-border-active)',
         },
         hover: 'var(--c-hover)',
         active: 'var(--c-active)',
         danger: 'var(--c-danger)',
         warning: 'var(--c-warning)',
-        // "In a voice room" green. Not re-skinned, like the accents.
+        // "In a voice room" green.
         connected: 'var(--c-voice-connected)',
         // Fixed dark text for a bright runtime fill (admin name chip) → `text-ink`.
         ink: 'var(--c-ink)',

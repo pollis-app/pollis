@@ -1,6 +1,6 @@
 @import "@fontsource/atkinson-hyperlegible-next";
 @import "@fontsource/dm-mono/500.css";
-/* Geist Sans — the Modern skin's UI sans (see the Modern token block). */
+/* Geist Sans — the Modern (base) UI sans; Terminal uses Atkinson (see :root). */
 @import "@fontsource/geist-sans/400.css";
 @import "@fontsource/geist-sans/500.css";
 @import "@fontsource/geist-sans/600.css";
@@ -10,19 +10,12 @@
 
 @layer base {
   :root {
-    /* ── Theme knobs — change these at runtime to retheme the app ── */
-    --accent-h: 38;
-    /* hue 0–360  */
-    --accent-s: 90%;
-    /* saturation */
-    --accent-l: 62%;
-    /* lightness  */
-    --bg-h: 38;
-    /* background hue */
-    --bg-s: 20%;
-    /* background saturation */
-    --bg-l: 4%;
-    /* background lightness */
+    /* ── Colour ──────────────────────────────────────────────────────
+       Every --c-* colour token is computed from the user's accent and
+       background by design/theme.ts (shared with mobile) and written onto
+       <html> by utils/colorUtils.ts before the first render. Nothing here
+       defines a colour: change the recipe there, not here. Rules for using
+       the tokens: docs/design/README.md. */
     --font-size-base: 15px;
     /* base font size — scales all rem units */
     --bar-h: 2.5rem;
@@ -40,45 +33,6 @@
        1px shorter than the composer they are supposed to line up with. Use
        `min-h-composer-flush` on any bar that borders itself;
        `min-h-composer` only where the border is on a separate ancestor. */
-
-    /* ── Surfaces (dark, hue-tinted) ──────────────────────────────── */
-    --c-bg: hsl(var(--bg-h) var(--bg-s) var(--bg-l));
-    --c-surface: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 3%));
-    --c-surface-raised: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 6%));
-    --c-surface-high: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 9%));
-
-    /* ── Accent scale ──────────────────────────────────────────────── */
-    --c-accent: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
-    --c-accent-bright: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 13%));
-    --c-accent-dim: hsl(var(--accent-h) 45% 45%);
-    --c-accent-muted: hsl(var(--accent-h) 35% 25%);
-
-    /* ── Borders ───────────────────────────────────────────────────── */
-    --c-border: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
-    --c-border-active: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 50%);
-
-    /* ── Text — explicit lightness (not opacity) for readable contrast */
-    --c-text: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
-    --c-text-dim: hsl(var(--accent-h) 28% 70%);
-    /* secondary text */
-    --c-text-muted: hsl(var(--accent-h) 18% 55%);
-    /* tertiary text  */
-
-    /* ── Hover overlays ────────────────────────────────────────────── */
-    --c-hover: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 8%);
-    --c-active: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 14%);
-
-    /* ── Focus ring (used by all input components) ──────────────── */
-    --c-focus-ring: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
-
-    /* ── Danger / error (validation errors, unverified states) ──── */
-    --c-danger: #ff6b6b;
-
-    /* ── Warning / degraded (fair connection, reconnecting) ──────── */
-    --c-warning: #f0c674;
-
-    /* ── Voice-connected label (fixed, hue-independent) ─────────── */
-    --c-voice-connected: hsl(150 55% 62%);
 
     /* ── Ink: dark text on a bright per-user fill (fixed, theme-independent).
        Another admin's name chip (#1488) — stays dark on light themes too,
@@ -98,79 +52,44 @@
        see .codesight/wiki/i18n.md → Fonts. */
     --font-script: system-ui;
     --font-mono: 'DM Mono', ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace, var(--font-script);
-    --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif, var(--font-script);
-
-    /* ── Corner radii ──────────────────────────────────────────────── */
-    /* Terminal keeps corners tight; the Modern skin softens them (brief §6:
-       6–10px). Primitives read these instead of hard-coding a radius so a
-       skin can retune them in one place. Terminal values match the current
-       look (chip = rounded-sm 2px, control = Button's 4px); panels are
-       already soft (10px rounded-panel) and unchanged. */
-    --radius-chip: 2px;
-    --radius-control: 4px;
-
-    /* ── Layout spacing ────────────────────────────────────────────── */
-    /* Sidebar width + Modern message rhythm. Terminal keeps its sidebar
-       width here; the Modern block widens it and the message-gap /
-       line-height tokens are consumed only by Modern surfaces. Sizes are in
-       rem so they track the font-size preference. */
-    --side-w: 14.667rem;
-    --lh: 1.5;
-    --msg-header-gap: 0.933rem;
-    --msg-divider-gap: 1.467rem;
-    --msg-group-gap: 0.133rem;
-    --msg-row-pad-y: 0.15rem;
-  }
-
-  /* ══ Modern skin ════════════════════════════════════════════════════
-     Friendlier, non-terminal alternate (issue #565). Overrides the same
-     `--c-*` tokens the whole app already routes through, so re-skinning the
-     colors is free — including the legacy inline `var(--c-…)` call sites.
-     Values still derive from the user's accent/bg knobs, so accent and
-     background stay independently configurable (brief §5). The signature
-     change: `--c-text` is no longer amber (in terminal it equals
-     `--c-accent`) — it becomes a warm near-white so the amber wash lifts and
-     the accent is used sparingly. */
-  :root[data-skin="modern"] {
-    /* Warm charcoal surfaces — lift the near-black floor for a softer dark.
-       Offsets ride on the bg-lightness knob so a custom background still
-       shifts the whole ramp together. */
-    --c-bg: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 9%));
-    --c-surface: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 12%));
-    --c-surface-raised: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 15%));
-    --c-surface-high: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 18%));
-
-    /* Neutral text (low chroma, tied to the bg hue) — kills the amber wash. */
-    --c-text: hsl(var(--bg-h) 8% 91%);
-    --c-text-dim: hsl(var(--bg-h) 8% 67%);
-    --c-text-muted: hsl(var(--bg-h) 6% 49%);
-
-    /* Neutral 1px separators instead of amber-tinted borders. */
-    --c-border: hsl(var(--bg-h) 8% 100% / 11%);
-    --c-border-active: hsl(var(--bg-h) 8% 100% / 22%);
-
-    /* Neutral hover; accent-tinted active row (brief's selected-nav formula). */
-    --c-hover: hsl(var(--bg-h) 8% 100% / 5%);
-    --c-active: color-mix(in srgb, var(--c-accent) 13%, transparent);
-
-    /* Modern UI sans is Geist (the terminal skin keeps Atkinson). The
-       mono→sans inversion and the body both read `--font-sans`, so this one
-       override reskins all human-facing text. Machine-facing `.font-machine`
-       text stays on `--font-mono`. */
+    /* Modern's UI sans is Geist. The mono→sans inversion and the body both
+       read `--font-sans`; machine-facing `.font-machine` text stays on
+       `--font-mono`. Terminal swaps in Atkinson below. */
     --font-sans: 'Geist Sans', system-ui, sans-serif, var(--font-script);
 
-    /* Softer corners. */
+    /* ── Corner radii ──────────────────────────────────────────────── */
+    /* Primitives read these instead of hard-coding a radius so a skin can
+       retune them in one place. Modern's soft corners (brief §6: 6–10px);
+       panels are 10px (rounded-panel) in both skins. */
     --radius-chip: 6px;
     --radius-control: 8px;
 
-    /* Roomier rhythm than terminal — wider sidebar, more line-height, and
-       breathing room between sender groups. */
+    /* ── Layout spacing ────────────────────────────────────────────── */
+    /* Sidebar width and message rhythm. Sizes are in rem so they track the
+       font-size preference. */
     --side-w: 17rem;
     --lh: 1.65;
     --msg-header-gap: 1.25rem;
     --msg-divider-gap: 1.75rem;
     --msg-group-gap: 0.35rem;
     --msg-row-pad-y: 0.3rem;
+  }
+
+  /* ══ Terminal skin ══════════════════════════════════════════════════
+     The opt-in IRC/ncurses variant of the Modern base (docs/design/). Its
+     colours come from the same recipe's terminal branch (design/theme.ts:
+     text in the accent, accent-tinted lines); here it only tightens corners,
+     narrows the sidebar, packs the log and swaps the UI sans for Atkinson. */
+  :root[data-skin="terminal"] {
+    --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif, var(--font-script);
+    --radius-chip: 2px;
+    --radius-control: 4px;
+    --side-w: 14.667rem;
+    --lh: 1.5;
+    --msg-header-gap: 0.933rem;
+    --msg-divider-gap: 1.467rem;
+    --msg-group-gap: 0.133rem;
+    --msg-row-pad-y: 0.15rem;
   }
 
   /* ── Per-script font stacks (#1725) ──────────────────────────────
@@ -307,7 +226,7 @@ input[type="range"]::-moz-range-thumb {
 
 /* Audio player slider — accent-colored track */
 .accent-slider {
-  background: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 20%);
+  background: var(--c-accent-mid);
 }
 
 .accent-slider::-webkit-slider-thumb {

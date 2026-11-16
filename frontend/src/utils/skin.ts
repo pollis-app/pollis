@@ -28,7 +28,7 @@ export function skinToWire(skin: Skin): string {
   return skin === "modern" ? MODERN_WIRE : "terminal";
 }
 
-/** Apply the UI skin by setting the `data-skin` attribute on <html>. */
-export function applySkin(skin: Skin): void {
+/** The `data-skin` attribute on <html>; `colorUtils.applySkin` also repaints the colours. */
+export function setSkinAttribute(skin: Skin): void {
   document.documentElement.dataset.skin = skin;
 }

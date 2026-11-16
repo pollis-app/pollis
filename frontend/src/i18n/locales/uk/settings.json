@@ -45,17 +45,16 @@
   "accent": {
     "heading": "Акцентний колір",
     "pickTitle": "Вибрати акцентний колір",
-    "presetOrange": "Помаранчевий",
-    "presetGreen": "Зелений",
-    "presetBlue": "Синій",
-    "presetPurple": "Фіолетовий",
-    "presetRed": "Червоний",
-    "presetCyan": "Бірюзовий"
+    "presetAmber": "Бурштин",
+    "presetCitron": "Цитрон",
+    "presetMint": "М'ята",
+    "presetGlass": "Скло",
+    "presetLilac": "Бузок",
+    "presetRust": "Іржа"
   },
   "background": {
     "heading": "Колір тла",
     "pickTitle": "Вибрати колір тла",
-    "presetMatchAccent": "Під акцент",
     "presetNeutral": "Нейтральний",
     "presetWarm": "Теплий",
     "presetCool": "Холодний",

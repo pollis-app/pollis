@@ -1,17 +1,16 @@
 import { Platform } from "react-native";
 import { deriveTheme, type Theme } from "./derive";
-import { DEFAULT_BACKGROUND_HEX } from "./accents";
-import { loadBootAccent } from "./accentStore";
+import { loadBootAccent, loadBootBackground } from "./accentStore";
 import { deviceAccentBackend } from "./deviceAccent";
 
 export { DEFAULT_ACCENT_HEX, DEFAULT_BACKGROUND_HEX, ACCENT_PRESETS } from "./accents";
 
 // Exactly TWO base colours, accent and background; everything else is derived (theme/derive.ts).
 
-// The accent this device last showed (#1447), read synchronously at load so a cold start never flashes amber.
+// The colours this device last showed (#1447), read synchronously at load so a cold start never flashes the defaults.
 const _bootAccentHex = loadBootAccent(deviceAccentBackend);
 let _accentRgb = hexToRgbTriplet(_bootAccentHex);
-let _bgRgb = hexToRgbTriplet(DEFAULT_BACKGROUND_HEX);
+let _bgRgb = hexToRgbTriplet(loadBootBackground(deviceAccentBackend));
 let _theme: Theme = deriveTheme(_accentRgb, _bgRgb);
 
 export function setAccentRgb(rgb: string) {
@@ -145,6 +144,10 @@ export const semantic = {
   // Destructive actions — the accent (no third hue; see derive.ts).
   get danger() {
     return _theme.danger;
+  },
+  // Text and icons on a danger fill.
+  get onDanger() {
+    return _theme.onDanger;
   },
   get backdrop() {
     return _theme.backdrop;

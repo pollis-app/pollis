@@ -8,14 +8,18 @@ import ts from "typescript";
 
 import {
   ACCENT_STORE_KEY,
+  BACKGROUND_STORE_KEY,
   accentFromPreferences,
   accentOnUserChange,
   loadBootAccent,
+  loadBootBackground,
+  persistBackground,
   normalizeAccentHex,
   persistAccent,
   type AccentBackend,
 } from "../theme/accentStore.ts";
-import { ACCENT_PRESETS, DEFAULT_ACCENT_HEX } from "../theme/accents.ts";
+import { ACCENT_PRESETS, DEFAULT_ACCENT_HEX, DEFAULT_BACKGROUND_HEX } from "../theme/accents.ts";
+import { colorPreferencesPatch } from "../../design/theme.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LILAC = ACCENT_PRESETS.find((p) => p.n === "Lilac")!.c;
@@ -104,6 +108,25 @@ test("the synced preference: a saved accent always wins once loaded", () => {
   assert.equal(accentFromPreferences({ accent_hex: "#BDA3E0" }, true), "#bda3e0");
 });
 
+test("the shared accent_color key wins over the legacy accent_hex", () => {
+  // Desktop and current mobile write accent_color; builds before the unification wrote only accent_hex.
+  assert.equal(accentFromPreferences({ accent_color: "#8AD6A7", accent_hex: "#bda3e0" }, true), "#8ad6a7");
+  assert.equal(accentFromPreferences({ accent_color: "nope", accent_hex: "#bda3e0" }, true), "#bda3e0");
+});
+
+test("a colour save writes the shared key and the legacy mirror", () => {
+  assert.deepEqual(colorPreferencesPatch({ accent: "#BDA3E0" }), { accent_color: "#bda3e0", accent_hex: "#bda3e0" });
+  assert.deepEqual(colorPreferencesPatch({ background: "#101820" }), { background_color: "#101820" });
+});
+
+test("a cold start paints the stored background, else the default", () => {
+  assert.equal(loadBootBackground(memoryStore().backend), DEFAULT_BACKGROUND_HEX);
+  const { data, backend } = memoryStore();
+  persistBackground(backend, "#101820");
+  assert.equal(data.get(BACKGROUND_STORE_KEY), "#101820");
+  assert.equal(loadBootBackground(backend), "#101820");
+});
+
 test("the pre-unlock {} never undoes the boot accent", () => {
   // Before the PIN the read fails and answers {}.
   assert.equal(accentFromPreferences({}, false), null);
@@ -129,6 +152,7 @@ test("theme/tokens.ts seeds the accent from the device store while it loads", ()
   const src = read("theme/tokens.ts");
   assert.match(src, /const _bootAccentHex = loadBootAccent\(deviceAccentBackend\);/);
   assert.match(src, /let _accentRgb = hexToRgbTriplet\(_bootAccentHex\);/);
+  assert.match(src, /let _bgRgb = hexToRgbTriplet\(loadBootBackground\(deviceAccentBackend\)\);/);
   const device = read("theme/deviceAccent.ts");
   assert.match(device, /SecureStore\.getItem\(/);
   assert.doesNotMatch(device, /getItemAsync/);
@@ -139,6 +163,8 @@ test("ThemeProvider starts from the live tokens and persists every change", () =
   assert.match(src, /useState\(currentAccentHex\)/);
   assert.doesNotMatch(src, /useState\(DEFAULT_ACCENT_HEX\)/);
   assert.match(src, /persistAccent\(deviceAccentBackend, hex\)/);
+  assert.match(src, /persistBackground\(deviceAccentBackend, hex\)/);
+  assert.match(src, /colorPreferencesPatch\(\{ accent: hex \}\)/);
   assert.match(src, /accentFromPreferences\(prefs, trusted\)/);
   assert.match(src, /if \(unlocked\) \{[\s\S]*?refetch\(\)/);
   assert.match(src, /accentOnUserChange\(/);

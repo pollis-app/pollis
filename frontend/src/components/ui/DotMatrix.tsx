@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from "react";
-import { hslToHex } from "../../utils/colorUtils";
+import { currentAccentHex } from "../../utils/colorUtils";
 
 // Algorithms are tagged objects run over typed arrays, so the hot loop never allocates.
 
@@ -36,12 +36,7 @@ const GOL_RESEED_EVERY = 30;
 const GOL_RESEED_CHANCE = 0.03;
 
 const parseAccentRgb = (): number => {
-  const cs = getComputedStyle(document.documentElement);
-  const rawH = parseFloat(cs.getPropertyValue("--accent-h"));
-  const rawS = parseFloat(cs.getPropertyValue("--accent-s"));
-  const h = Number.isNaN(rawH) ? 38 : rawH;
-  const s = Number.isNaN(rawS) ? 90 : rawS;
-  const hex = hslToHex(h, s, 62);
+  const hex = currentAccentHex();
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);

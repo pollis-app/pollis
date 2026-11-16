@@ -47,17 +47,16 @@
   "accent": {
     "heading": "Accent Color",
     "pickTitle": "Pick accent color",
-    "presetOrange": "Orange",
-    "presetGreen": "Green",
-    "presetBlue": "Blue",
-    "presetPurple": "Purple",
-    "presetRed": "Red",
-    "presetCyan": "Cyan"
+    "presetAmber": "Amber",
+    "presetCitron": "Citron",
+    "presetMint": "Mint",
+    "presetGlass": "Glass",
+    "presetLilac": "Lilac",
+    "presetRust": "Rust"
   },
   "background": {
     "heading": "Background Color",
     "pickTitle": "Pick background color",
-    "presetMatchAccent": "Match accent",
     "presetNeutral": "Neutral",
     "presetWarm": "Warm",
     "presetCool": "Cool",
