@@ -9,17 +9,17 @@ const TEXT_CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const VOICE_CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0VCH";
 const VOICE_CHANNEL_NAME = "standup";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
-/** Where each skin keeps the always-present controls (terminal VoiceBar, refined sidebar panel). */
+/** Where each skin keeps the always-present controls (terminal VoiceBar, Modern sidebar panel). */
 const STRIP = {
   terminal: {
     strip: "voice-bar",
     mic: "voice-bar-mute-button",
     deafen: "voice-bar-deafen-button",
   },
-  refined: {
+  modern: {
     strip: "sidebar-voice-strip",
     mic: "sidebar-voice-mute",
     deafen: "sidebar-voice-deafen",
@@ -179,7 +179,7 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await joinVoice(page, skin);
 
-      // #891: refined shipped the mic half only, so undeafening from the
+      // #891: Modern shipped the mic half only, so undeafening from the
       // always-present strip was impossible.
       await expect(page.getByTestId(ids.mic)).toBeVisible();
       await expect(page.getByTestId(ids.deafen)).toBeVisible();

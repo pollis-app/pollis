@@ -13,7 +13,7 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2XCB";
 const TOTAL = 400;
 /** Messages on the first of the two seeded days. */
 const FIRST_DAY = 200;
-/** Consecutive messages from one author, i.e. one refined sender group. */
+/** Consecutive messages from one author, i.e. one Modern sender group. */
 const RUN = 5;
 /** What the mock and the renderer agree a page is. */
 const PAGE = 50;
@@ -41,8 +41,8 @@ function messages() {
   return out;
 }
 
-type Skin = "terminal" | "refined";
-const SKINS: Skin[] = ["terminal", "refined"];
+type Skin = "terminal" | "modern";
+const SKINS: Skin[] = ["terminal", "modern"];
 
 function preloadState(skin: Skin) {
   return {

@@ -19,7 +19,7 @@ const TEST_HEADING = "IDIOMA-TEST";
 const EN_HEADING = "Language";
 const EN_DESCRIPTION_FRAGMENT = "Only changes this device";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadState(skin: Skin) {
@@ -736,7 +736,7 @@ test.describe("sidebar settings rows are located by testid, not by label", () =>
   test("the same testids work in English, so they are not a locale-only path", async ({
     page,
   }) => {
-    await boot(page, "refined", { osLanguages: ["en-US"], locale: NAV_LOCALE });
+    await boot(page, "modern", { osLanguages: ["en-US"], locale: NAV_LOCALE });
 
     for (const [rowId, pageTestId] of ROWS) {
       await page.getByTestId(`sidebar-row-${rowId}`).click();

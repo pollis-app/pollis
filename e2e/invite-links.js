@@ -19,7 +19,7 @@ const LINK_TIMEOUT_MS = 60_000;
 const JOIN_TIMEOUT_MS = 120_000;
 const GROUP_VISIBLE_TIMEOUT_MS = 90_000;
 
-const SKINS = ["terminal", "refined"];
+const SKINS = ["terminal", "modern"];
 
 function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   fs.rmSync(dataDir, { recursive: true, force: true });

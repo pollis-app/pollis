@@ -19,7 +19,7 @@ const MEDIA_ORIGIN = "https://media.test";
 // A real JPEG, as the core sends it in `pv`.
 const POSTER_B64 = fs.readFileSync(path.join(FIXTURES, "video-poster.jpg")).toString("base64");
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 const att = (key: string, extra: Record<string, unknown>) => ({

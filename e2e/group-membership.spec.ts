@@ -48,7 +48,7 @@ const INVITES = [
   },
 ];
 
-async function boot(page: Page, opts: { skin: "terminal" | "refined"; myRole: "admin" | "member" }) {
+async function boot(page: Page, opts: { skin: "terminal" | "modern"; myRole: "admin" | "member" }) {
   await page.addInitScript((data) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = data;
   }, {
@@ -98,7 +98,7 @@ const newTag = (page: Page, messageId: string) =>
   page.getByTestId(`message-${messageId}`).getByTestId("message-new-tag");
 
 test("new member tag: tags a member's messages for 7 days after joining, never the creator", async ({ page }) => {
-  await boot(page, { skin: "refined", myRole: "admin" });
+  await boot(page, { skin: "modern", myRole: "admin" });
   await openChannel(page, GENERAL, "m_zed");
 
   await expect(newTag(page, "m_dana")).toHaveText("new");
@@ -119,13 +119,13 @@ test("the terminal skin draws no new member tag, even for a new member", async (
 });
 
 test("the tag follows the member into every channel of the group", async ({ page }) => {
-  await boot(page, { skin: "refined", myRole: "admin" });
+  await boot(page, { skin: "modern", myRole: "admin" });
   await openChannel(page, RANDOM, "m_dana_random");
   await expect(newTag(page, "m_dana_random")).toHaveText("new");
 });
 
 test("a roster change never puts a membership line in the timeline", async ({ page }) => {
-  await boot(page, { skin: "refined", myRole: "admin" });
+  await boot(page, { skin: "modern", myRole: "admin" });
   await openChannel(page, GENERAL, "m_zed");
 
   // Even a payload in the old, id-carrying shape renders nothing.

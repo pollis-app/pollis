@@ -13,7 +13,7 @@ const CALL_ID = "call_1";
 const ROOM = `call-${CALL_ID}`;
 const DRAFT = "half-written thought";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadFor(skin: Skin, prefs: Record<string, unknown> = {}) {

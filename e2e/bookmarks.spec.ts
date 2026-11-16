@@ -21,7 +21,7 @@ const FOREIGN_PERMALINK =
 const CHANNEL_PERMALINK = `pollis://m/${CHANNEL_ID}/${CHANNEL_MESSAGE_ID}`;
 const DM_PERMALINK = `pollis://m/${DM_ID}/${DM_MESSAGE_ID}`;
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadState(skin: Skin, bookmarks: unknown[] = []) {

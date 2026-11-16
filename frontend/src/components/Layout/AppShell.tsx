@@ -525,12 +525,12 @@ export const AppShell: React.FC = observer(() => {
     return false;
   }, [pathname]);
 
-  // Refined bar is neutral; terminal fills it with the accent. `barInk` stays legible on `barBg`.
-  const refined = skin === "refined";
-  const barBg = refined
+  // Modern bar is neutral; terminal fills it with the accent. `barInk` stays legible on `barBg`.
+  const modern = skin === "modern";
+  const barBg = modern
     ? "var(--c-surface)"
     : isChatScreen ? "var(--c-bg)" : "var(--c-accent)";
-  const barInk = refined
+  const barInk = modern
     ? "var(--c-text-dim)"
     : isChatScreen ? "var(--c-accent)" : "var(--c-surface)";
 

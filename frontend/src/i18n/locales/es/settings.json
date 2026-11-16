@@ -29,7 +29,7 @@
     "ariaLabel": "Aspecto de la interfaz",
     "skinTerminal": "Terminal",
     "skinModern": "Moderno",
-    "description": "Terminal es el aspecto por defecto, tipo IRC y monoespaciado. Moderno es una disposición más amable, con tipografía proporcional, para quien prefiera una app de chat más convencional. Se sincroniza entre tus dispositivos.",
+    "description": "Moderno es el predeterminado: un diseño de chat convencional con tipografía proporcional. Terminal es un aspecto monoespaciado opcional al estilo IRC. Se sincroniza entre tus dispositivos.",
     "skinTerminalDetail": "Monoespaciado y compacto, como IRC en una terminal",
     "skinModernDetail": "Tipografía proporcional, avatares y filas más holgadas",
     "firstRun": {

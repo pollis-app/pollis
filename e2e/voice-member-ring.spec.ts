@@ -10,7 +10,7 @@ const VOICE_CHANNEL_ID = "c_lounge";
 const VOICE_CHANNEL_NAME = "lounge";
 const BOB_IDENTITY = "voice-u_bob";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 // 2x, so a half-pixel offset shows up as a whole one.

@@ -31,7 +31,7 @@ interface MessageItemProps {
   isAuthorNew?: boolean;
   /** Viewer is a group admin: may delete others' messages. */
   canModerate?: boolean;
-  /** Refined skin: row starts a sender group (avatar + header). Defaults to true. */
+  /** Modern skin: row starts a sender group (avatar + header). Defaults to true. */
   isGroupStart?: boolean;
   onReply?: (messageId: string) => void;
   onOpenThread?: (messageId: string) => void;
@@ -48,7 +48,7 @@ interface MessageItemProps {
   isSaved?: boolean;
   isPinned?: boolean;
   onScrollToReply?: (messageId: string) => void;
-  /** Receipts for this message only (#857); refined skin, DMs only. */
+  /** Receipts for this message only (#857); Modern skin, DMs only. */
   receipt?: MessageReceipts;
   peerCount?: number;
   isDm?: boolean;
@@ -100,7 +100,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
   const replyTo = replyToMessage ?? null;
 
-  // The "new" tag (#1506): refined skin only.
+  // The "new" tag (#1506): Modern skin only.
   const newTag = isAuthorNew ? (
     <span
       data-testid="message-new-tag"
@@ -167,7 +167,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     </>
   );
 
-  const actionsFor = (variant: "refined" | "terminal") =>
+  const actionsFor = (variant: "modern" | "terminal") =>
     !isDeleted && !isUnsent && (
       <MessageActions
         messageId={message.id}
@@ -188,7 +188,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       />
     );
 
-  if (skin === "refined") {
+  if (skin === "modern") {
     const nameClass = isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : "";
     const nameStyle: React.CSSProperties | undefined = isAuthorAdmin
       ? adminChipStyle
@@ -299,7 +299,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-1" />}
         </div>
 
-        {actionsFor("refined")}
+        {actionsFor("modern")}
       </div>
     );
   }

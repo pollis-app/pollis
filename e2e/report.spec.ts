@@ -15,7 +15,7 @@ async function boot(page: Page) {
   }, {
     session: ME,
     profile: { id: ME.id, username: ME.username },
-    preferences: JSON.stringify({ skin: "refined" }),
+    preferences: JSON.stringify({ skin: "modern" }),
     groups: [{ id: GROUP_ID, name: "Acme", owner_id: ME.id, created_at: new Date().toISOString() }],
     channels: { [GROUP_ID]: [{ id: CHANNEL_ID, group_id: GROUP_ID, name: "general" }] },
     dmChannels: [],

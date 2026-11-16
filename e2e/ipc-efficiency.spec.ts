@@ -30,7 +30,7 @@ const DM_IDS = [
   "01HQ7Z3K9M2P5R8T1V4W6Y0DM3",
 ];
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 type Counts = Record<string, number>;
@@ -43,7 +43,7 @@ function preloadState(skin: Skin) {
       {
         id: `m-${id}`,
         conversation_id: id,
-        // The signed-in user is the sender, so the refined skin asks for THEIR public profile.
+        // The signed-in user is the sender, so the Modern skin asks for THEIR public profile.
         sender_id: USER.id,
         content: `channel ${i} newest line`,
         sent_at: `2026-08-01T1${i}:00:00.000Z`,
@@ -330,8 +330,8 @@ test("a membership change in one group does not refetch the other group's roster
 });
 
 test("viewing your own messages cannot blank out your own settings", async ({ page }) => {
-  // Refined: MessageAvatar asks for the sender's (self's) public profile; it must not land on the private key.
-  await boot(page, "refined");
+  // Modern: MessageAvatar asks for the sender's (self's) public profile; it must not land on the private key.
+  await boot(page, "modern");
   await openGroupA(page);
   await page.getByTestId(`channel-option-${CHANNELS_A[0]}`).click();
   await expect(page.getByTestId("message-input")).toBeVisible();

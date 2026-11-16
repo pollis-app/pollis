@@ -8,7 +8,7 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const MESSAGE_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0MSG";
 const SECRET = "history that must not stay on a removed device";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadState(skin: Skin) {

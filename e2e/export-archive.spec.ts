@@ -11,7 +11,7 @@ const DM_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0DMX";
 const HASH = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const SAVE_PATH = "/Users/alice/Downloads/pollis-archive-2026-09-11.json";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadState(skin: Skin, exportSavePath: string | null = SAVE_PATH) {

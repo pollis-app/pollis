@@ -9,6 +9,7 @@ import {
   applyFontSize,
   applySkin,
   normalizeSkin,
+  skinToWire,
   loadDeviceFontSize,
   saveDeviceFontSize,
   type Skin,
@@ -61,7 +62,7 @@ function normalizeVoiceInputMode(v: string | undefined | null): VoiceInputMode {
 export interface PreferencesData {
   accent_color?: string;
   background_color?: string;
-  /** UI skin, synced across devices. Absent → terminal. */
+  /** UI skin, synced across devices (stored as `Modern` for Modern). Absent → Modern. */
   skin?: Skin;
   /** Legacy: read only to seed the device-local font size once; never written. */
   font_size?: string;
@@ -283,7 +284,9 @@ function scheduleSave(
   if (waiter) {
     waiters.push(waiter);
   }
-  const merged = mergePreferencesSave(rawBlobs.get(userId) ?? {}, { ...prefs }, carried);
+  // The wire keeps Modern as `Modern` (`skinToWire`).
+  const wire = prefs.skin ? { ...prefs, skin: skinToWire(prefs.skin) } : { ...prefs };
+  const merged = mergePreferencesSave(rawBlobs.get(userId) ?? {}, wire, carried);
   rawBlobs.set(userId, merged.blob);
   pendingSave = { userId, merged, waiters };
 

@@ -30,7 +30,7 @@ export const UndecryptableMessage: React.FC<UndecryptableMessageProps> = ({ mess
     </button>
   );
 
-  if (skin === "refined") {
+  if (skin === "modern") {
     return (
       <div
         data-testid={`message-${message.id}`}

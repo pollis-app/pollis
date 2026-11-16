@@ -21,8 +21,8 @@ type CopyLinkState = "idle" | "copied" | "failed";
 
 interface MessageActionsProps {
   messageId: string;
-  /** Toolbar chrome: floating panel (refined) or inline strip (terminal). */
-  variant: "refined" | "terminal";
+  /** Toolbar chrome: floating panel (Modern) or inline strip (terminal). */
+  variant: "modern" | "terminal";
   isOwn: boolean;
   canModerate: boolean;
   isSaved: boolean;
@@ -118,11 +118,11 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
     setMenuOpen((prev) => !prev);
   };
 
-  const iconSize = variant === "refined" ? 16 : 18;
+  const iconSize = variant === "modern" ? 16 : 18;
   // Plain `focus:` (not focus-visible): programmatic focus isn't focus-visible on WebKitGTK. One `text-*` per button.
   const barBtnFlipClass = "outline-none focus:bg-accent focus:text-bg";
   const barBtnBaseClass =
-    variant === "refined"
+    variant === "modern"
       ? `p-1 rounded-control ${barBtnFlipClass}`
       : `p-0.5 ${barBtnFlipClass}`;
   const barBtnClass = `${barBtnBaseClass} text-muted hover:text-accent`;
@@ -132,7 +132,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
     ? "opacity-100"
     : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto";
   const containerClass =
-    variant === "refined"
+    variant === "modern"
       ? `absolute end-4 top-0 -translate-y-1/2 flex items-center gap-1 rounded-control border border-line bg-surface-raised px-1 py-0.5 transition-opacity ${visibilityClass}`
       : `flex-shrink-0 ms-2 flex items-center gap-4 h-6 ${visibilityClass}`;
 

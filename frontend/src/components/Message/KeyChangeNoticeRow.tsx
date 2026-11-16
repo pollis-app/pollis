@@ -25,13 +25,13 @@ export const KeyChangeNoticeRow: React.FC<KeyChangeNoticeRowProps> = React.memo(
 }) => {
   const { t } = useTranslation("chat");
   const name = peerLabel ?? t("keyChange.defaultName");
-  const refined = skin === "refined";
+  const modern = skin === "modern";
   return (
     <div
       data-testid={`key-change-notice-${noticeId}`}
       data-peer-user-id={peerUserId}
       className={
-        refined
+        modern
           ? "flex items-center justify-center gap-2 px-4 py-2 text-xs text-muted"
           : "flex items-center justify-center gap-2 px-4 py-1 text-xs font-mono text-muted"
       }
@@ -51,7 +51,7 @@ export const KeyChangeNoticeRow: React.FC<KeyChangeNoticeRowProps> = React.memo(
       <bdi
         dir="ltr"
         title={formatFullTimestamp(at)}
-        className={refined ? "font-machine text-2xs tabular-nums" : "tabular-nums"}
+        className={modern ? "font-machine text-2xs tabular-nums" : "tabular-nums"}
       >
         {formatTimeOfDay(at)}
       </bdi>

@@ -13,7 +13,7 @@ const MID_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1MID";
 // The newest message is the viewer's own, so its bar carries reply+react+edit+more.
 const OWN_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1OWN";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadState(skin: Skin) {

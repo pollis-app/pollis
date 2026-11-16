@@ -55,8 +55,8 @@ const startOfLocalDay = (d: Date): number =>
 // Time gap (ms) beyond which a same-author message still starts a new group.
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
-const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ label, refined }) => {
-  if (refined) {
+const DayDivider: React.FC<{ label: string; modern: boolean }> = React.memo(({ label, modern }) => {
+  if (modern) {
     return (
       <div
         data-testid="day-divider"
@@ -700,7 +700,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           {showDivider && (
             <DayDivider
               label={formatDayDivider(item.ts)}
-              refined={skin === "refined"}
+              modern={skin === "modern"}
             />
           )}
           <KeyChangeNoticeRow
@@ -787,7 +787,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         {showDivider && (
           <DayDivider
             label={formatDayDivider(item.ts)}
-            refined={skin === "refined"}
+            modern={skin === "modern"}
           />
         )}
         {rendered}

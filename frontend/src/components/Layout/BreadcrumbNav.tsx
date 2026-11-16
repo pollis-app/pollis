@@ -213,7 +213,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
 
   const isOnSettingsHub = pathname === "/settings";
 
-  if (skin === "refined") {
+  if (skin === "modern") {
     return (
       <div
         data-testid="breadcrumb-nav"

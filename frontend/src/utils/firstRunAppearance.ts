@@ -6,17 +6,6 @@
  * that chose on another device inherits it; an existing install never takes the fresh-sign-in path.
  */
 
-import type { Skin } from "./colorUtils";
-
-/** Terminal is the default and the preselected answer. */
-export const DEFAULT_SKIN: Skin = "terminal";
-
-/**
- * The stored value of the skin users read as "Modern". It stays `"refined"` on the wire: older
- * desktop builds map any other value to terminal, which would flip a user's not-yet-updated devices.
- */
-export const MODERN_SKIN: Skin = "refined";
-
 /** What a sign-in result tells us; a subset of `api.AuthResult`. */
 export interface SignInShape {
   user: { id: string };

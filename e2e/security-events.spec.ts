@@ -5,7 +5,7 @@ import { skinAgnosticTest } from "./lib/skins";
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 const KINDS = [

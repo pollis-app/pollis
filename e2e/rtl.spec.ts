@@ -20,7 +20,7 @@ const ARABIC_TEXT = "ملاحظات الشحن لمكتب لندن";
 const RTL_LANG = "ar";
 const LTR_LANG = "en";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 interface Box {
@@ -382,7 +382,7 @@ for (const skin of SKINS) {
 
       await boot(page, skin, RTL_LANG);
       await gotoChannel(page);
-      if (skin === "refined") {
+      if (skin === "modern") {
         // Absolutely pinned to the inline end, which in RTL is the left.
         const rtlRow = await box(row(page));
         const rtlCluster = await box(cluster(page));
@@ -399,7 +399,7 @@ for (const skin of SKINS) {
 
       await boot(page, skin, LTR_LANG);
       await gotoChannel(page);
-      if (skin === "refined") {
+      if (skin === "modern") {
         const ltrRow = await box(row(page));
         const ltrCluster = await box(cluster(page));
         expect(ltrRow.right - ltrCluster.right).toBeLessThan(
@@ -431,7 +431,7 @@ for (const skin of SKINS) {
         expect(rtlPreview.right - rtlGlyph.right).toBeGreaterThan(INSET_FLOOR);
       }
       expect(isMirrored(await iconTransform(preview(page)))).toBe(
-        skin === "refined",
+        skin === "modern",
       );
 
       await boot(page, skin, LTR_LANG);

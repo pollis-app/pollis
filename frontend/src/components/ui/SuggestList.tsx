@@ -16,7 +16,7 @@ interface SuggestListProps<T> {
   onHover: (index: number) => void;
 }
 
-/** Refined skin's composer autocomplete shell, `absolute` inside the composer (no portal); ChatInput owns the keys. */
+/** Modern skin's composer autocomplete shell, `absolute` inside the composer (no portal); ChatInput owns the keys. */
 export function SuggestList<T>({
   items,
   activeIndex,

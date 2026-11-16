@@ -14,13 +14,13 @@ const VOICE_CHANNEL_NAME = "lounge";
 const LOCAL_IDENTITY = `voice-${ME.id}`;
 const BOB_IDENTITY = "voice-u_bob";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 /** Where each skin keeps its always-present voice strip. */
 const STRIP = {
   terminal: { reconnecting: "voice-bar-reconnecting", quality: "voice-bar-quality", mic: "voice-bar-mute-button" },
-  refined: { reconnecting: "sidebar-voice-reconnecting", quality: "sidebar-voice-quality", mic: "sidebar-voice-mute" },
+  modern: { reconnecting: "sidebar-voice-reconnecting", quality: "sidebar-voice-quality", mic: "sidebar-voice-mute" },
 } as const;
 
 type TestWindow = Window & {
@@ -283,7 +283,7 @@ for (const skin of SKINS) {
         "voice-bar-screenshare-button", "voice-bar-camera-button",
         "sidebar-voice-screenshare",
       ];
-      // Each skin draws a different subset (the refined skin has no VoiceBar).
+      // Each skin draws a different subset (the Modern skin has no VoiceBar).
       const ids: string[] = [];
       for (const id of candidates) {
         if (await page.getByTestId(id).count()) {

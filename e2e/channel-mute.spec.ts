@@ -8,7 +8,7 @@ const GROUP_ID = "g_mute";
 const GENERAL = "c_general";
 const RANDOM = "c_random";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadFor(skin: Skin, extra: Record<string, unknown> = {}) {

@@ -10,7 +10,7 @@ const CHANNEL_ID = "c_general";
 const PARROT_HASH = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
 const PARROT_TOKEN = `<:partyparrot:${PARROT_HASH}>`;
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadFor(skin: Skin) {
@@ -307,8 +307,8 @@ test("the vault empty state differs between skins", async ({ page }) => {
   await openVault(page, "terminal");
   const terminal = await styleOf(page, "vault-empty", "font-family");
 
-  await openVault(page, "refined");
-  const refined = await styleOf(page, "vault-empty", "font-family");
+  await openVault(page, "modern");
+  const modern = await styleOf(page, "vault-empty", "font-family");
 
-  expect(terminal).not.toBe(refined);
+  expect(terminal).not.toBe(modern);
 });

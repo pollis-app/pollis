@@ -31,7 +31,7 @@
     "ariaLabel": "UI 스킨",
     "skinTerminal": "터미널",
     "skinModern": "모던",
-    "description": "터미널은 기본 IRC/고정폭 스타일입니다. 모던은 더 익숙한 채팅 앱을 선호하는 분을 위한, 비례 산세리프 글꼴의 친근한 레이아웃입니다. 모든 기기에 동기화됩니다.",
+    "description": "모던이 기본값입니다. 비례 글꼴을 쓰는 일반적인 채팅 레이아웃입니다. 터미널은 선택해서 쓰는 IRC 스타일 고정폭 모양입니다. 기기 간에 동기화됩니다.",
     "skinTerminalDetail": "터미널 속 IRC처럼 고정폭 글꼴에 촘촘한 화면",
     "skinModernDetail": "비례 글꼴, 아바타, 여유 있는 행 간격",
     "firstRun": {

@@ -21,7 +21,7 @@ const DM_PEER = "dave";
 /** The Preferences row, by testid (#932): settings labels are translated. */
 const PREFERENCES_ROW = "sidebar-row-preferences";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 /** `app.toggleRightPanel` — `mod+shift+b`, and `mod` accepts Ctrl. */
@@ -208,7 +208,7 @@ for (const skin of SKINS) {
 
     test("a closed panel is still closed after navigating", async ({ page }) => {
       // The mirror image: an OPEN default, closed by hand. This is the half a
-      // `refined` user hit — the panel sprang back open on the next click.
+      // `Modern` user hit — the panel sprang back open on the next click.
       await boot(page, skin, { rightPanelOpenByDefault: true });
       await navigateTo(page, GENERAL);
       await expectOpen(page, "the preference asked for an open panel");
@@ -244,7 +244,7 @@ for (const skin of SKINS) {
 
     test("switching skin does not open or close the panel", async ({ page }) => {
       // No `right_panel_open_by_default`: the only configuration that could expose a skin dependency.
-      const other: Skin = skin === "terminal" ? "refined" : "terminal";
+      const other: Skin = skin === "terminal" ? "modern" : "terminal";
       await boot(page, skin);
       await navigateToRow(page, PREFERENCES_ROW);
       await expect(page.getByTestId(`pref-skin-${skin}`)).toBeVisible();

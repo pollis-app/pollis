@@ -6,12 +6,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  DEFAULT_SKIN,
-  MODERN_SKIN,
   hasStoredSkin,
   isFreshSignIn,
   needsAppearanceChoice,
 } from "../src/utils/firstRunAppearance.ts";
+import { DEFAULT_SKIN, normalizeSkin, skinToWire } from "../src/utils/skin.ts";
 
 const NEW_ACCOUNT = { user: { id: "u1" }, newSecretKey: "A3-KEY", enrollmentRequired: false };
 const ENROLLING = { user: { id: "u1" }, newSecretKey: null, enrollmentRequired: true };
@@ -20,8 +19,17 @@ const RETURNING = { user: { id: "u1" }, newSecretKey: null, enrollmentRequired: 
 test("Modern is stored as 'refined', which older desktop builds still read", () => {
   // Older builds' normalizeSkin maps anything but "refined" to terminal; renaming the wire value
   // would flip a user's not-yet-updated devices back to terminal.
-  assert.equal(MODERN_SKIN, "refined");
-  assert.equal(DEFAULT_SKIN, "terminal");
+  assert.equal(skinToWire("modern"), "refined");
+  assert.equal(skinToWire("terminal"), "terminal");
+  assert.equal(normalizeSkin("refined"), "modern");
+  assert.equal(normalizeSkin("modern"), "modern");
+  assert.equal(normalizeSkin("terminal"), "terminal");
+});
+
+test("Modern is the base look: an account with no saved skin gets it", () => {
+  assert.equal(DEFAULT_SKIN, "modern");
+  assert.equal(normalizeSkin(undefined), "modern");
+  assert.equal(normalizeSkin("something-else"), "modern");
 });
 
 test("a new account and a first enrollment on this install are fresh sign-ins", () => {

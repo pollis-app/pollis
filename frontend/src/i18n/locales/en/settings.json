@@ -31,7 +31,7 @@
     "ariaLabel": "UI skin",
     "skinTerminal": "Terminal",
     "skinModern": "Modern",
-    "description": "Terminal is the default IRC/monospace look. Modern is a friendlier, proportional-sans layout for people who prefer a more conventional chat app. Syncs across your devices.",
+    "description": "Modern is the default: a conventional chat layout in a proportional sans. Terminal is an opt-in IRC-style monospace look. Syncs across your devices.",
     "skinTerminalDetail": "Monospace and compact, like IRC in a terminal",
     "skinModernDetail": "Proportional type, avatars and roomier rows",
     "firstRun": {

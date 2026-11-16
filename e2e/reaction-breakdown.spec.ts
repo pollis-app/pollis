@@ -8,7 +8,7 @@ const CHANNEL_ID = "c_general";
 // Reacted, then left: no roster row, no profile — must read "Unknown user".
 const GONE = "u_gone_7f3a";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 const REACTIONS = {

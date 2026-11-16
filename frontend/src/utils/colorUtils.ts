@@ -55,18 +55,7 @@ export function applyFontSize(px: number): void {
   document.documentElement.style.setProperty("--font-size-base", `${px}px`);
 }
 
-/** UI skin; `refined` overrides the `--c-*` tokens in `index.css`. Synced, unlike font size. */
-export type Skin = "terminal" | "refined";
-
-/** Coerce an arbitrary stored value to a valid Skin, defaulting to terminal. */
-export function normalizeSkin(v: unknown): Skin {
-  return v === "refined" ? "refined" : "terminal";
-}
-
-/** Apply the UI skin by setting the `data-skin` attribute on <html>. */
-export function applySkin(skin: Skin): void {
-  document.documentElement.dataset.skin = skin;
-}
+export { DEFAULT_SKIN, normalizeSkin, skinToWire, applySkin, type Skin } from "./skin";
 
 /** Device-local font size, keyed by user id. */
 const FONT_SIZE_KEY_PREFIX = "pollis-font-size:";

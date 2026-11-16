@@ -6,7 +6,7 @@ const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_identity";
 const CHANNEL_ID = "c_general";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadFor(skin: Skin, role: "admin" | "member", description?: string) {

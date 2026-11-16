@@ -19,7 +19,7 @@ export function useRightPanel() {
   const userId = useObserver(() => appStore.currentUser?.id ?? null);
   const remembered = useObserver(() => rightPanelStore.remembered(userId));
 
-  const seed = query.data?.right_panel_open_by_default ?? skin === "refined";
+  const seed = query.data?.right_panel_open_by_default ?? skin === "modern";
   const isOpen = remembered ?? seed;
 
   // Seed once preferences land; never overwrites a real answer.

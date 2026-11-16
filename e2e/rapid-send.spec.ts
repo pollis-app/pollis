@@ -16,7 +16,7 @@ function preloadState(failSends: boolean) {
   return {
     session: USER,
     profile: { id: USER.id, username: USER.username },
-    preferences: JSON.stringify({ skin: "refined" }),
+    preferences: JSON.stringify({ skin: "modern" }),
     failSends,
     groups: [
       { id: GROUP_ID, name: "Acme", owner_id: USER.id, created_at: new Date().toISOString() },

@@ -10,7 +10,7 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 const MSG_BOB = "01HQ7Z3K9M2P5R8T1V4W6Y0BOB";
 const MSG_UNSENT = "01HQ7Z3K9M2P5R8T1V4W6Y0UNS";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadState(skin: Skin, unsent: "pending" | "failed", failSends: boolean) {
@@ -87,7 +87,7 @@ const sendState = (page: Page, id: string) =>
   );
 
 test("a message a killed process left unsent is delivered by the launch drain", async ({ page }) => {
-  await boot(page, preloadState("refined", "pending", false));
+  await boot(page, preloadState("modern", "pending", false));
   await openChannel(page);
   const row = page.getByTestId(`message-${MSG_UNSENT}`);
   await expect(row).toContainText("typed just before the app was killed");
@@ -130,7 +130,7 @@ for (const skin of SKINS) {
 }
 
 test("a send that fails now is kept as failed, and Retry sends it", async ({ page }) => {
-  await boot(page, preloadState("refined", "pending", false));
+  await boot(page, preloadState("modern", "pending", false));
   await openChannel(page);
   await page.evaluate(() => (window as any).__tauriFailSends(true));
 
@@ -152,7 +152,7 @@ test("a send that fails now is kept as failed, and Retry sends it", async ({ pag
 test("an attachment message whose upload never finished is shown, pending, with Retry", async ({ page }) => {
   // What the core stores before any network work for an attachment send: the
   // files without a `key` (nothing uploaded yet), and the caption.
-  const preload = preloadState("refined", "failed", true);
+  const preload = preloadState("modern", "failed", true);
   const unsent = preload.messages[CHANNEL_ID][1] as Record<string, unknown>;
   unsent.content = JSON.stringify({
     _att: [{ name: "shot.png", ct: "image/png", size: 1024 }],
@@ -178,7 +178,7 @@ test("an attachment message whose upload never finished is shown, pending, with 
 });
 
 test("a send with attachments hands them to the core un-uploaded", async ({ page }) => {
-  await boot(page, preloadState("refined", "pending", false));
+  await boot(page, preloadState("modern", "pending", false));
   await openChannel(page);
   const src = await page.evaluate(async () => {
     const mod = await import("/src/utils/attachmentEnvelope.ts");

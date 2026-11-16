@@ -6,7 +6,7 @@ const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_invites";
 const CHANNEL_ID = "c_general";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 // The full URL is `https://pollis.com/invite/<selector>.<secret>` — both halves

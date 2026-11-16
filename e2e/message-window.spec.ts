@@ -13,7 +13,7 @@ const TOTAL = 400;
 /** Messages on the first of the two seeded days. Kept a multiple of the
  *  sender run length so a day boundary never lands mid-group. */
 const FIRST_DAY = 200;
-/** Consecutive messages from one author, i.e. one refined sender group. */
+/** Consecutive messages from one author, i.e. one Modern sender group. */
 const RUN = 5;
 
 const idAt = (i: number) => `01HQ7Z3K9M2P5R8T1V4W6Y2${String(i).padStart(3, "0")}`;
@@ -58,8 +58,8 @@ function messages() {
   return messagesFor(CHANNEL_ID, idAt, true);
 }
 
-type Skin = "terminal" | "refined";
-const SKINS: Skin[] = ["terminal", "refined"];
+type Skin = "terminal" | "modern";
+const SKINS: Skin[] = ["terminal", "modern"];
 
 type BootOptions = {
   paginate?: boolean;
@@ -448,9 +448,9 @@ for (const skin of SKINS) {
   });
 }
 
-test.describe("windowed message log — refined grouping", () => {
+test.describe("windowed message log — Modern grouping", () => {
   test("sender grouping survives the window", async ({ page }) => {
-    await boot(page, "refined");
+    await boot(page, "modern");
     await gotoChannel(page);
 
     // Seeded in runs of five, so the last five rows are one sender group:
@@ -480,7 +480,7 @@ test.describe("windowed message log — refined grouping", () => {
   test("a row scrolled back into the window is grouped the same way", async ({
     page,
   }) => {
-    await boot(page, "refined");
+    await boot(page, "modern");
     await gotoChannel(page);
 
     // Index 200 opens the second day AND a sender run, so it must carry a

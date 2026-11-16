@@ -18,7 +18,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
   ({ message, isRoot = false }) => {
     const { t } = useTranslation("nav");
     const skin = useSkin();
-    const isTerminal = skin !== "refined";
+    const isTerminal = skin !== "modern";
     const author = message.sender_username ?? message.sender_id;
     // App language; `toMs` or seconds-precision timestamps render as 1970 (#874).
     const time = formatClockTime(toMs(message.created_at));

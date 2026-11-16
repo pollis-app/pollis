@@ -251,7 +251,7 @@ const StageTileImpl: React.FC<Props> = ({
       {/* e2e tells camera from screen by the `:cam`/`:screen` key, not this badge. */}
       {isVideo && !preview && statsLabel && (
         <div className="vs-br">
-          {/* Machine metric: `font-machine` keeps it mono in refined. */}
+          {/* Machine metric: `font-machine` keeps it mono in Modern. */}
           <span
             className="vs-tag res font-machine"
             data-testid={`voice-tile-stream-stats-${p.tileKey}`}

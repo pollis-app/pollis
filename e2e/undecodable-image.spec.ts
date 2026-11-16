@@ -9,7 +9,7 @@ const CHANNEL_ID = "c_general";
 const KEY = "media/photo.heic.enc";
 const MEDIA_ORIGIN = "https://media.test";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 
 const MESSAGES = [
   {

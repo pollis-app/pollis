@@ -18,7 +18,7 @@ const CLIP_BH = "LZJ8nt=9rp@DR;NGR+ShNfR7KObE";
 const FIXTURES = path.join(__dirname, "fixtures");
 const MEDIA_ORIGIN = "https://media.test";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 const att = (key: string, name: string, ct: string, bh: string, sens: boolean) => ({
