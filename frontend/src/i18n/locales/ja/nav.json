@@ -1,0 +1,205 @@
+{
+  "sidebar": {
+    "groups": "グループ",
+    "dms": "DM",
+    "account": "アカウント",
+    "saved": "保存済み",
+    "preferences": "環境設定",
+    "userSettings": "ユーザー設定",
+    "voiceAndVideo": "音声とビデオ",
+    "security": "セキュリティ",
+    "keyBindings": "キー割り当て",
+    "softwareUpdate": "ソフトウェア・アップデート",
+    "expandGroup": "{{name}}を展開",
+    "collapseGroup": "{{name}}を折りたたむ",
+    "keyChanged": "IDキーが変更されました — 再検証してください",
+    "verified": "検証済みの連絡先",
+    "dmAvatarAlt": "{{name}}のアバター",
+    "close": "サイドバーを閉じる（{{shortcut}}）",
+    "resize": "サイドバーのサイズを変更（ドラッグ、ダブルクリックでリセット）",
+    "searchMessages": "メッセージを検索",
+    "vault": "保管庫",
+    "securityEvents": "セキュリティイベント",
+    "copyHistory": "履歴をコピー"
+  },
+  "profile": {
+    "you": "自分",
+    "call": "通話",
+    "voice": "ボイス",
+    "settings": "設定",
+    "voiceConnected": "ボイス接続中",
+    "stopScreenShare": "画面共有を停止",
+    "shareScreen": "画面を共有",
+    "disconnect": "切断"
+  },
+  "breadcrumb": {
+    "home": "ホーム",
+    "groups": "グループ",
+    "createGroup": "グループを作成",
+    "findGroup": "グループを探す",
+    "newChannel": "新規チャンネル",
+    "voice": "ボイス",
+    "joinRequests": "参加リクエスト",
+    "inviteMember": "メンバーを招待",
+    "leaveGroup": "グループから退出",
+    "members": "メンバー",
+    "removeMember": "メンバーを削除",
+    "directMessages": "ダイレクトメッセージ",
+    "newMessage": "新規メッセージ",
+    "requests": "リクエスト",
+    "blockedUsers": "ブロック中のユーザー",
+    "conversationSettings": "会話の設定",
+    "account": "アカウント",
+    "preferences": "環境設定",
+    "userSettings": "ユーザー設定",
+    "profile": "プロフィール",
+    "security": "セキュリティ",
+    "voiceSettings": "ボイス",
+    "invites": "招待",
+    "joinAGroup": "グループに参加",
+    "search": "検索",
+    "searchButton": "検索（{{shortcut}}）",
+    "settings": "設定",
+    "securityEvents": "セキュリティイベント",
+    "copyHistory": "メッセージ履歴をコピー",
+    "historyRequest": "履歴リクエスト"
+  },
+  "statusBar": {
+    "groupsUnread_other": "グループの未読メッセージ: {{count}}",
+    "dmsUnread_other": "ダイレクトメッセージの未読: {{count}}",
+    "joinRequests_other": "保留中の参加リクエスト: {{count}}",
+    "invites_other": "保留中の招待: {{count}}",
+    "someone": "誰か",
+    "updateAvailable": "アップデートがあります",
+    "updateAvailableTitle": "アップデートがあります: {{version}}",
+    "answerCall": "@{{username}}からの通話に応答",
+    "declineCall": "通話を拒否",
+    "dismissVoiceError": "ボイスのエラーを閉じる",
+    "dismissScreenShareError": "画面共有のエラーを閉じる",
+    "dismissCameraError": "カメラのエラーを閉じる",
+    "syncing": "同期中…"
+  },
+  "shell": {
+    "dropFiles": "ドロップしてファイルを送信",
+    "voiceChannelFallback": "ボイス",
+    "callChannel": "通話"
+  },
+  "panel": {
+    "thread": "スレッド",
+    "details": "詳細",
+    "ariaLabel": "会話の詳細",
+    "closeThread": "スレッドパネルを閉じる（{{shortcut}}）",
+    "closeDetails": "詳細パネルを閉じる（{{shortcut}}）",
+    "resize": "詳細パネルのサイズを変更（ドラッグ、ダブルクリックでリセット）"
+  },
+  "members": {
+    "count_other": "メンバー — {{count}}",
+    "onlineCount_other": "オンライン — {{count}}",
+    "empty": "表示するメンバーはいません。",
+    "noneOnline": "オンラインのメンバーはいません。",
+    "you": "自分",
+    "admin": "管理者"
+  },
+  "media": {
+    "heading": "メディア",
+    "empty": "共有されたメディアはまだありません。"
+  },
+  "thread": {
+    "loading": "返信を読み込み中…",
+    "empty": "返信はまだありません。下からスレッドを始めましょう。",
+    "placeholder": "スレッドで返信…",
+    "messageDeleted": "メッセージは削除されました",
+    "encrypted": "[暗号化済み]"
+  },
+  "chat": {
+    "noSelection": "チャンネルを選択してメッセージを始めましょう"
+  },
+  "dmRequest": {
+    "heading": "メッセージリクエスト",
+    "body": "<name>{{name}}</name>さんがあなたにメッセージを送ろうとしています。",
+    "accept": "承認",
+    "accepting": "承認中…",
+    "block": "ブロック",
+    "blocking": "ブロック中…"
+  },
+  "editBar": {
+    "heading": "メッセージを編集中",
+    "cancel": "編集をキャンセル",
+    "hint": "Enterで保存 · Shift+Enterで改行 · Escでキャンセル"
+  },
+  "deleteChannel": {
+    "heading": "チャンネルを削除",
+    "cancel": "削除をキャンセル",
+    "body": "このチャンネルとそのすべてのメッセージは完全に削除されます。この操作は取り消せません。",
+    "deleting": "削除中…"
+  },
+  "deleteMessage": {
+    "heading": "メッセージを削除",
+    "moderateHeading": "メッセージを削除（管理者）",
+    "body": "このメッセージは、すでに受信した人も含め、全員の画面から削除されます。",
+    "moderateBody": "このメッセージとその添付ファイルは、チャンネルの全員の画面から削除されます。",
+    "cancel": "削除をキャンセル",
+    "deleting": "削除中…",
+    "remove": "削除"
+  },
+  "update": {
+    "preparing": "アップデートを準備中…",
+    "checking": "アップデートを確認中…",
+    "downloading": "アップデートをダウンロード中…",
+    "downloadingProgress": "アップデートをダウンロード中… {{progress}}%",
+    "installing": "アップデートをインストール中…",
+    "relaunching": "再起動中…",
+    "failed": "アップデートに失敗しました: {{error}}",
+    "tryAgain": "再試行",
+    "continueWithout": "アップデートせずに続行",
+    "readOnlyDiskImage": "Pollisは読み取り専用のディスクイメージから実行されています。Pollisを終了し、「アプリケーション」フォルダにドラッグしてディスクイメージを取り出してから、「アプリケーション」フォルダから開いてください。",
+    "readOnlyTranslocated": "macOSがPollisを一時的な読み取り専用の場所から実行しています。Pollisを終了し、Finderで「アプリケーション」フォルダの外に移動してから元に戻し、もう一度開いてください。",
+    "readOnlyTranslocatedHealed": "以前のアップデートで残された一時的な読み取り専用の場所から、macOSがPollisを実行していました。この問題は修正されました。Pollisを終了し、「アプリケーション」フォルダからもう一度開いてください。",
+    "readOnlyGeneric": "Pollisの場所が読み取り専用のため、自動でアップデートできません。Pollisを終了し、Finderで「アプリケーション」フォルダに移動されていることを確認してから、もう一度開いてください。"
+  },
+  "clientBlocked": {
+    "title": "アップデートが必要です",
+    "body": "このバージョンのPollisはサポートが終了しました。引き続き使用するにはアップデートしてください。メッセージと設定はこのデバイスに残ります。",
+    "versions": "インストール済み {{version}} · {{minimum}}以降が必要",
+    "installed": "インストール済み {{version}}",
+    "updateNow": "今すぐアップデート",
+    "updating": "アップデート中…",
+    "download": "最新バージョンをダウンロード",
+    "updateFailed": "アップデートが完了しませんでした。代わりに最新バージョンをダウンロードしてください。",
+    "packageManager": "Pollisは{{source}}でインストールされています。そちらでアップデートしてください:",
+    "openAppStore": "App Storeを開く",
+    "openPlay": "Google Playを開く",
+    "openTestflight": "TestFlightを開く",
+    "openWebsite": "pollis.comを開く",
+    "openFailed": "リンクを開けませんでした。{{url}}にアクセスしてください",
+    "retry": "再確認",
+    "checking": "確認中…"
+  },
+  "home": {
+    "groups": "グループ",
+    "groupsDescription": "コミュニティ、組織、チーム、そして気合いの入りすぎたグループチャット",
+    "dms": "ダイレクトメッセージ",
+    "dmsDescription": "個人とのプライベートなエンドツーエンド暗号化された会話",
+    "invites": "招待",
+    "noPendingInvites": "保留中の招待はありません",
+    "pending_other": "保留中 {{count}}件",
+    "join": "グループに参加",
+    "joinDescription": "招待リンクまたは参加コードを使用",
+    "joinRequests": "参加リクエスト",
+    "logout": "ログアウト",
+    "exit": "終了"
+  },
+  "titleBar": {
+    "minimize": "最小化",
+    "maximize": "最大化"
+  },
+  "terminal": {
+    "shellFailed": "シェルを起動できませんでした: {{error}}"
+  },
+  "pins": {
+    "heading": "ピン留め",
+    "empty": "ピン留めされたメッセージはまだありません。",
+    "unavailable": "このデバイスではまだピン留めを利用できません。会話が同期されると表示されます。",
+    "unpin": "ピン留めを解除"
+  }
+}

@@ -1,0 +1,405 @@
+{
+  "_comment": [
+    "Product glossary for translators (#1725). Every translation uses these renderings; scripts/i18n-check.mjs WARNs where an `en` value contains a term and the locale's value for that key does not contain the locale's rendering.",
+    "doNotTranslate: written exactly as in English (brand, protocol and platform names a locale never renders differently). Checked the same way, but only for locales that have a glossary column: `en` contains it, so the locale value must too. Apple's product names are not here: Apple itself localizes them in some languages (zh 面容 ID).",
+    "terms[].en: a JavaScript regex (source) matched against each `en` value; `flags` are its flags. terms[].<code>: the accepted renderings in that locale, any one of which satisfies the check. List more than one only where they are the same concept written two ways (a long and a short form), never two competing words for one concept.",
+    "terms[].except: catalogue keys (`ns:key`, plural families without the suffix) where the English word means something else, so the term does not apply.",
+    "A locale with no entry for a term is not checked for it. Adding a locale: add its column to every term (and read the notes), then run `node scripts/i18n-check.mjs`."
+  ],
+  "doNotTranslate": [
+    {
+      "term": "Pollis",
+      "reason": "Product name."
+    },
+    {
+      "term": "MLS",
+      "reason": "Protocol name (Messaging Layer Security, RFC 9420)."
+    },
+    {
+      "term": "PIN",
+      "reason": "The unlock PIN. Kept as Latin \"PIN\"; it is the common UI form in every shipped locale."
+    },
+    {
+      "term": "macOS",
+      "reason": "Platform name."
+    },
+    {
+      "term": "Linux",
+      "reason": "Platform name."
+    }
+  ],
+  "terms": [
+    {
+      "id": "vault",
+      "en": "\\bvaults?\\b",
+      "flags": "i",
+      "note": "The private notes-to-self space that syncs to every device.",
+      "ko": [
+        "보관함"
+      ],
+      "ja": [
+        "保管庫"
+      ]
+    },
+    {
+      "id": "device",
+      "en": "\\bdevices?\\b",
+      "flags": "i",
+      "note": "A phone or computer signed in to the account. Also in \"linked device\", \"new device\".",
+      "ko": [
+        "기기"
+      ],
+      "ja": [
+        "デバイス"
+      ]
+    },
+    {
+      "id": "safetyNumber",
+      "en": "\\bsafety numbers?\\b",
+      "flags": "i",
+      "note": "The number two people compare to confirm they are talking to each other.",
+      "ko": [
+        "안전 번호"
+      ],
+      "ja": [
+        "安全番号"
+      ]
+    },
+    {
+      "id": "identityKey",
+      "en": "\\bidentity keys?\\b",
+      "flags": "i",
+      "note": "The account's long-term signing key, published to the transparency log.",
+      "ko": [
+        "신원 키"
+      ],
+      "ja": [
+        "IDキー"
+      ]
+    },
+    {
+      "id": "verify",
+      "en": "\\bverif(y|ied|ies|ying|ication)\\b",
+      "flags": "i",
+      "note": "Confirming an identity, a safety number or a build. ko: 인증. ja: 検証 for identities, safety numbers and builds; 認証 for a code the user types or reads off a screen (認証コード).",
+      "ko": [
+        "인증"
+      ],
+      "ja": [
+        "検証",
+        "認証"
+      ]
+    },
+    {
+      "id": "pin",
+      "en": "\\bPINs?\\b",
+      "flags": "",
+      "note": "The unlock PIN (upper case in English). Never the verb \"pin\" (see pinMessage).",
+      "ko": [
+        "PIN"
+      ],
+      "ja": [
+        "PIN"
+      ]
+    },
+    {
+      "id": "pinMessage",
+      "en": "\\b(un)?pin(s|ned)?\\b",
+      "flags": "",
+      "note": "Pinning a message or an entry so it stays at the top (lower case in English). Not the unlock PIN.",
+      "ko": [
+        "고정"
+      ],
+      "ja": [
+        "ピン留め"
+      ]
+    },
+    {
+      "id": "group",
+      "en": "\\b(groups?|workspaces?)\\b",
+      "flags": "i",
+      "note": "A Pollis group (what other apps call a workspace or server): members plus channels.",
+      "ko": [
+        "그룹"
+      ],
+      "ja": [
+        "グループ"
+      ],
+      "except": [
+        "search:group.slugPlaceholder"
+      ]
+    },
+    {
+      "id": "channel",
+      "en": "\\bchannels?\\b",
+      "flags": "i",
+      "note": "A text or voice channel inside a group. Not the Android notification channel. search:view.filterHint shows filter syntax (`in:#channel`), which may stay literal.",
+      "ko": [
+        "채널"
+      ],
+      "ja": [
+        "チャンネル"
+      ],
+      "except": [
+        "search:view.filterHint"
+      ]
+    },
+    {
+      "id": "dm",
+      "en": "\\b(DMs?|direct messages?)\\b",
+      "flags": "i",
+      "note": "A one-to-one or small private conversation outside groups. Short form DM is fine where space is tight.",
+      "ko": [
+        "다이렉트 메시지",
+        "DM"
+      ],
+      "ja": [
+        "ダイレクトメッセージ",
+        "DM"
+      ]
+    },
+    {
+      "id": "messageRequest",
+      "en": "\\bmessage requests?\\b",
+      "flags": "i",
+      "note": "A DM from someone the user has not accepted yet.",
+      "ko": [
+        "메시지 요청"
+      ],
+      "ja": [
+        "メッセージリクエスト"
+      ]
+    },
+    {
+      "id": "transparencyLog",
+      "en": "\\btransparency log\\b",
+      "flags": "i",
+      "note": "The public append-only log of account keys and builds.",
+      "ko": [
+        "투명성 로그"
+      ],
+      "ja": [
+        "透明性ログ"
+      ]
+    },
+    {
+      "id": "report",
+      "en": "\\breport(s|ed)?\\b",
+      "flags": "i",
+      "note": "Reporting a person or message for abuse. Not \"a device reports\" (status) or a diagnostics report.",
+      "except": [
+        "search:pages.diagnosticsKeywords",
+        "settings:relayServing.wifiOnlyDescription",
+        "settings:relayServing.statusUnreportable",
+        "settings:relayServing.signals"
+      ],
+      "ko": [
+        "신고"
+      ],
+      "ja": [
+        "通報"
+      ]
+    },
+    {
+      "id": "block",
+      "en": "\\b(un)?block(s|ed|ing)?\\b",
+      "flags": "i",
+      "note": "Blocking a person so they cannot contact the user.",
+      "ko": [
+        "차단"
+      ],
+      "ja": [
+        "ブロック"
+      ]
+    },
+    {
+      "id": "secretKey",
+      "en": "\\bsecret key\\b",
+      "flags": "i",
+      "note": "The account recovery secret shown once at sign-up and stored in the Emergency Kit.",
+      "ko": [
+        "비밀 키"
+      ],
+      "ja": [
+        "シークレットキー"
+      ]
+    },
+    {
+      "id": "recoveryKey",
+      "en": "\\brecovery key\\b",
+      "flags": "i",
+      "note": "Same object as the Secret Key, in the copy that calls it by its purpose.",
+      "ko": [
+        "복구 키"
+      ],
+      "ja": [
+        "復元キー"
+      ]
+    },
+    {
+      "id": "emergencyKit",
+      "en": "\\bemergency kit\\b",
+      "flags": "i",
+      "note": "The printable document that holds the Secret Key.",
+      "ko": [
+        "비상 키트"
+      ],
+      "ja": [
+        "緊急キット"
+      ]
+    },
+    {
+      "id": "invite",
+      "en": "\\binvit(e|es|ed|ing|ation|ations)\\b",
+      "flags": "i",
+      "ko": [
+        "초대"
+      ],
+      "ja": [
+        "招待"
+      ],
+      "except": [
+        "channels:joinByInvite.tokenPlaceholder"
+      ]
+    },
+    {
+      "id": "member",
+      "en": "\\bmembers?\\b",
+      "flags": "i",
+      "ko": [
+        "멤버"
+      ],
+      "ja": [
+        "メンバー"
+      ]
+    },
+    {
+      "id": "admin",
+      "en": "\\badmins?\\b",
+      "flags": "i",
+      "ko": [
+        "관리자"
+      ],
+      "ja": [
+        "管理者"
+      ]
+    },
+    {
+      "id": "thread",
+      "en": "\\bthreads?\\b",
+      "flags": "i",
+      "ko": [
+        "스레드"
+      ],
+      "ja": [
+        "スレッド"
+      ]
+    },
+    {
+      "id": "reaction",
+      "en": "\\breactions?\\b",
+      "flags": "i",
+      "ko": [
+        "반응"
+      ],
+      "ja": [
+        "リアクション"
+      ]
+    },
+    {
+      "id": "mention",
+      "en": "\\bmentions?\\b",
+      "flags": "i",
+      "ko": [
+        "멘션"
+      ],
+      "ja": [
+        "メンション"
+      ]
+    },
+    {
+      "id": "screenShare",
+      "en": "\\bscreen ?shar(e|es|ing)\\b",
+      "flags": "i",
+      "ko": [
+        "화면 공유"
+      ],
+      "ja": [
+        "画面共有"
+      ]
+    },
+    {
+      "id": "signIn",
+      "en": "\\bsign(ed|ing)? in\\b",
+      "flags": "i",
+      "ko": [
+        "로그인"
+      ],
+      "ja": [
+        "ログイン"
+      ]
+    },
+    {
+      "id": "signOut",
+      "en": "\\bsign(ed|ing)? out\\b",
+      "flags": "i",
+      "ko": [
+        "로그아웃"
+      ],
+      "ja": [
+        "ログアウト"
+      ]
+    },
+    {
+      "id": "unlock",
+      "en": "\\bunlock(s|ed|ing)?\\b",
+      "flags": "i",
+      "ko": [
+        "잠금 해제"
+      ],
+      "ja": [
+        "ロック解除"
+      ],
+      "except": [
+        "mobile:biometric.methodAndroid"
+      ],
+      "note": "Unlocking the app (PIN, biometrics). mobile:biometric.methodAndroid names the Android method and is inserted into an \"unlock with …\" sentence, so it carries no second unlock."
+    },
+    {
+      "id": "export",
+      "en": "\\bexport(s|ed|ing)?\\b",
+      "flags": "i",
+      "ko": [
+        "내보내기",
+        "내보냅",
+        "내보낸"
+      ],
+      "ja": [
+        "エクスポート"
+      ]
+    },
+    {
+      "id": "encrypted",
+      "en": "\\bend-to-end encrypt(ed|ion)\\b",
+      "flags": "i",
+      "ko": [
+        "종단간 암호화"
+      ],
+      "ja": [
+        "エンドツーエンド暗号化"
+      ]
+    },
+    {
+      "id": "deafen",
+      "en": "\\b(un)?deafen(ed|s)?\\b",
+      "flags": "i",
+      "note": "Voice: stop hearing everyone (and mute the mic). Discord's wording in each language.",
+      "ko": [
+        "헤드셋 음소거"
+      ],
+      "ja": [
+        "スピーカーミュート"
+      ]
+    }
+  ]
+}

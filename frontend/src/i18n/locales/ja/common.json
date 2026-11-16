@@ -1,0 +1,108 @@
+{
+  "actions": {
+    "back": "戻る",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "copyFailed": "コピーできませんでした",
+    "delete": "削除",
+    "forward": "転送",
+    "goBack": "戻る",
+    "moreOptions": "その他のオプション",
+    "save": "保存"
+  },
+  "states": {
+    "buttonLoading": "読み込み中...",
+    "loading": "読み込み中…"
+  },
+  "time": {
+    "today": "今日",
+    "yesterday": "昨日"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "スペース",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "ステータス：{{status}}",
+    "offline": "オフライン",
+    "online": "オンライン"
+  },
+  "list": {
+    "empty": "項目はありません。"
+  },
+  "grid": {
+    "empty": "まだ誰もいません。"
+  },
+  "menu": {
+    "escHint": "Escで戻る",
+    "navigationLabel": "ナビゲーションメニュー",
+    "navigateHint": "移動",
+    "selectHint": "Enterで選択"
+  },
+  "media": {
+    "mute": "ミュート",
+    "pause": "一時停止",
+    "play": "再生",
+    "seek": "音声をシーク",
+    "skipBackward": "10秒戻る",
+    "skipForward": "10秒進む",
+    "unmute": "ミュート解除",
+    "volume": "音量"
+  },
+  "composer": {
+    "addAttachment": "添付ファイルを追加",
+    "allMentionHint": "このチャンネルの全員に通知します",
+    "filePickerTitle": "ファイルを追加",
+    "inputLabel": "メッセージ入力",
+    "placeholder": "メッセージを入力…",
+    "previewAlt": "プレビュー",
+    "removeAttachment": "{{name}}を削除",
+    "send": "メッセージを送信",
+    "markSensitive": "{{name}}をセンシティブとしてマーク",
+    "unmarkSensitive": "{{name}}のセンシティブ指定を解除"
+  },
+  "mentions": {
+    "listLabel": "メンションの候補",
+    "matching": "<hl>@{{query}}</hl>に一致するメンバー"
+  },
+  "emojiSuggest": {
+    "listLabel": "絵文字の候補",
+    "matching": "<hl>:{{query}}</hl>に一致する絵文字"
+  },
+  "a11y": {
+    "avatar": "アバター",
+    "loading": "読み込み中",
+    "otpDigit": "ワンタイムコードの{{index}}桁目"
+  },
+  "timeAgo": {
+    "seconds_other": "{{count}}秒",
+    "minutes_other": "{{count}}分",
+    "hours_other": "{{count}}時間",
+    "days_other": "{{count}}日",
+    "weeks_other": "{{count}}週",
+    "months_other": "{{count}}か月",
+    "years_other": "{{count}}年"
+  },
+  "tray": {
+    "open": "Pollisを開く",
+    "muteMic": "マイクをミュート",
+    "unmuteMic": "マイクのミュートを解除",
+    "muteMicIdle": "マイクをミュート（通話中ではありません）",
+    "version": "バージョン {{version}}",
+    "quit": "Pollisを終了",
+    "unread_other": "Pollis — 未読{{count}}件"
+  }
+}

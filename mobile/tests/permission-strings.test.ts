@@ -3,6 +3,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { supportedLanguageCodes } from "../i18n/languages.ts";
+
+// Every registered language, as its .lproj (zh ships Simplified Chinese), so a new locale needs no edit here.
+const SHIPPED_LPROJ = supportedLanguageCodes().map((c) => (c === "zh" ? "zh-Hans" : c)).sort();
 
 const require = createRequire(import.meta.url);
 const plugin = require("../plugins/withPermissionStrings.js");
@@ -23,7 +27,7 @@ test("the plugin is registered", () => {
 
 test("every shipped language gets every prompt, in its own words", () => {
   const tables = plugin.permissionStrings();
-  assert.deepEqual(Object.keys(tables).sort(), ["ar", "en", "es", "fr", "ru", "uk", "zh-Hans"]);
+  assert.deepEqual(Object.keys(tables).sort(), SHIPPED_LPROJ);
   for (const [lproj, strings] of Object.entries(tables) as [string, Record<string, string>][]) {
     assert.deepEqual(Object.keys(strings).sort(), Object.keys(plugin.KEYS).sort(), lproj);
     for (const [key, text] of Object.entries(strings)) {

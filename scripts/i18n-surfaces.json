@@ -11,9 +11,9 @@
       "title": "Desktop app UI (React renderer)",
       "decision": "localize",
       "status": "localized",
-      "reason": "The app's own screens, menus, toasts and errors, in all 7 locales from frontend/src/i18n/locales.",
+      "reason": "The app's own screens, menus, toasts and errors, in every shipped locale from frontend/src/i18n/locales.",
       "paths": ["frontend/src"],
-      "checked_by": "scripts/i18n-check.mjs (catalogue integrity, call sites, hardcoded-copy ratchet), e2e/i18n.spec.ts, e2e/rtl.spec.ts"
+      "checked_by": "scripts/i18n-check.mjs (catalogue integrity, call sites, hardcoded-copy ratchet), e2e/i18n.spec.ts, e2e/rtl.spec.ts, e2e/locale-smoke.spec.ts"
     },
     "mobile-app": {
       "title": "Mobile app UI (Expo)",
@@ -21,7 +21,7 @@
       "status": "localized",
       "reason": "Same catalogues as desktop (mobile namespace for mobile-only copy).",
       "paths": ["mobile/app", "mobile/components", "mobile/hooks", "mobile/i18n"],
-      "checked_by": "scripts/i18n-check.mjs, mobile/tests/i18n.test.ts, mobile/.maestro/flows/i18n.yaml"
+      "checked_by": "scripts/i18n-check.mjs (incl. the glossary), mobile/tests/i18n.test.ts, mobile/.maestro/flows/i18n.yaml, mobile/.maestro/flows/locale-smoke.yaml"
     },
     "ios-permission-strings": {
       "title": "iOS permission prompts (NS*UsageDescription)",

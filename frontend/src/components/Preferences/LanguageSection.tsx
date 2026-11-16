@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "../ui/Button";
+import { RadioList } from "../ui/RadioList";
 import { supportedLanguages } from "../../i18n/languages";
 import { setLanguage } from "../../i18n";
 
@@ -22,33 +22,19 @@ export const LanguageSection: React.FC<LanguageSectionProps> = ({ userId }) => {
       >
         {t("language.heading")}
       </h2>
-      <div
-        role="radiogroup"
+      {/* A pick-one setting, so a vertical radio list (#1725): it grows with every locale. */}
+      <RadioList
         aria-label={t("language.ariaLabel")}
-        className="flex gap-2 flex-wrap"
-      >
-        {supportedLanguages().map((option) => {
-          const selected = active === option.code;
-          return (
-            <Button
-              key={option.code}
-              variant={selected ? "primary" : "secondary"}
-              size="sm"
-              aria-pressed={selected}
-              aria-label={option.label}
-              data-testid={`pref-language-${option.code}`}
-              onClick={() => {
-                if (selected) {
-                  return;
-                }
-                void setLanguage(option.code, userId);
-              }}
-            >
-              {option.label}
-            </Button>
-          );
-        })}
-      </div>
+        data-testid="pref-language-list"
+        optionTestId={(option) => `pref-language-${option.value}`}
+        options={supportedLanguages().map((option) => ({ value: option.code, label: option.label, lang: option.code }))}
+        value={active}
+        onChange={(code) => {
+          if (code !== active) {
+            void setLanguage(code, userId);
+          }
+        }}
+      />
       <p className="text-xs font-mono text-muted">
         {t("language.description")}
       </p>

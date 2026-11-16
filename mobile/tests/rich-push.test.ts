@@ -3,7 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -105,13 +105,22 @@ test("ubrn regeneration keeps the hand-extended native files", () => {
 test("the Android notification strings match the shared catalogues", async () => {
   const mod = await import(join(ROOT, "scripts/mobile-android-push-strings.mjs"));
   const expected = mod.expectedFiles() as Record<string, string>;
-  assert.equal(Object.keys(expected).length, 7);
+  // One file per catalogue directory, so a new locale is covered without touching this test.
+  const locales = readdirSync(mod.LOCALES_DIR).filter((d: string) => statSync(join(mod.LOCALES_DIR, d)).isDirectory());
+  assert.equal(Object.keys(expected).length, locales.length);
   for (const [rel, contents] of Object.entries(expected)) {
     const actual = readFileSync(join(mod.RES_DIR, rel), "utf8");
     assert.equal(actual, contents, `${rel} is stale: run node scripts/mobile-android-push-strings.mjs`);
     assert.match(contents, /pollis_push_generic_title/);
     assert.match(contents, /pollis_push_generic_body/);
   }
+});
+
+test("a script-subtag locale gets Android's BCP-47 resource directory (#1725)", async () => {
+  const mod = await import(join(ROOT, "scripts/mobile-android-push-strings.mjs"));
+  assert.equal(mod.valuesDir("en"), "values");
+  assert.equal(mod.valuesDir("ja"), "values-ja");
+  assert.equal(mod.valuesDir("pa-Arab"), "values-b+pa+Arab");
 });
 
 test("android string escaping", async () => {

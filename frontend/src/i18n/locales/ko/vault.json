@@ -1,0 +1,44 @@
+{
+  "title": "보관함",
+  "placeholder": "안전한 메모, 링크 또는 파일",
+  "empty": "보관함이 비어 있습니다. 여기에 넣은 메모, 링크, 파일은 종단간 암호화되며 모든 기기에 함께 동기화됩니다.",
+  "searchPlaceholder": "보관함 검색…",
+  "searchEmpty": "보관함에 일치하는 항목이 없습니다.",
+  "clearSearch": "검색어 지우기",
+  "viewToggle": "보관함 보기",
+  "viewChat": "채팅",
+  "viewMedia": "미디어",
+  "saving": "저장 중…",
+  "saveFailed": "보관함에 저장할 수 없습니다. 작성 중인 내용은 입력창에 다시 넣어 두었습니다.",
+  "saveFailedOffline": "저장하기 위해 Pollis에 연결할 수 없습니다. 작성 중인 내용은 입력창에 다시 넣어 두었습니다 — 연결을 확인하고 다시 시도하세요.",
+  "saveFailedTooLarge": "파일이 너무 커서 보관함에 넣을 수 없습니다. 작성 중인 내용은 입력창에 다시 넣어 두었습니다 — 파일을 제거하고 다시 보내세요.",
+  "saveRetry": "다시 시도",
+  "entry": {
+    "pinned": "고정됨",
+    "edited": "(편집됨)",
+    "pin": "항목 고정",
+    "unpin": "항목 고정 해제",
+    "edit": "항목 편집",
+    "delete": "항목 삭제"
+  },
+  "edit": {
+    "heading": "항목 편집",
+    "cancel": "편집 취소",
+    "hint": "Enter로 저장 · Shift+Enter로 줄바꿈 · Esc로 취소"
+  },
+  "delete": {
+    "heading": "항목 삭제",
+    "body": "모든 기기의 보관함에서 이 항목을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "cancel": "삭제 취소",
+    "confirm": "삭제",
+    "deleting": "삭제 중…"
+  },
+  "media": {
+    "empty": "아직 보관함에 미디어가 없습니다 — 채팅 보기에 이미지나 파일을 넣으세요.",
+    "filesHeading": "파일",
+    "close": "뷰어 닫기",
+    "previous": "이전",
+    "next": "다음",
+    "position": "{{index}} / {{total}}"
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "message": {
+    "fromLabel": "{{name}}からのメッセージ",
+    "unknownAuthor": "不明",
+    "deleted": "[削除済み]",
+    "encrypted": "[暗号化済み]",
+    "redacted": "[非表示]",
+    "edited": "（編集済み）",
+    "editUnsent": "（編集は未送信）",
+    "newMember": "新規",
+    "newMemberTitle": "過去7日以内に参加",
+    "undecryptable": {
+      "tag": "復号不可",
+      "title": "復号できませんでした",
+      "body_other": "{{count}}件のメッセージをこのデバイスで復号できませんでした。",
+      "detail": "ここに何かが送信されましたが、このデバイスでは読み取れませんでした。ほかのデバイスには残っている可能性があります。",
+      "diagnostics": "診断情報を見る"
+    }
+  },
+  "status": {
+    "pending": "保留中",
+    "sending": "送信中",
+    "sent": "送信済み",
+    "failed": "失敗",
+    "cancelled": "キャンセル済み"
+  },
+  "outbox": {
+    "retry": "再試行",
+    "discard": "破棄",
+    "retryLabel": "このメッセージの送信を再試行",
+    "discardLabel": "この未送信メッセージを破棄",
+    "notSent": "未送信",
+    "willResend": "Pollisが再接続すると自動的に送信されます。",
+    "notDelivered": "このメッセージを配信できませんでした。"
+  },
+  "actions": {
+    "reply": "返信",
+    "replyInThread": "スレッドで返信",
+    "save": "メッセージを保存",
+    "removeBookmark": "ブックマークを削除",
+    "copyLink": "メッセージへのリンクをコピー",
+    "copyLinkCopied": "リンクをコピーしました",
+    "copyLinkFailed": "リンクをコピーできませんでした",
+    "edit": "メッセージを編集",
+    "delete": "メッセージを削除",
+    "deleteAsAdmin": "メッセージを削除（管理者）",
+    "more": "その他の操作",
+    "pin": "メッセージをピン留め",
+    "unpin": "メッセージのピン留めを解除",
+    "report": "通報"
+  },
+  "thread": {
+    "replyCount_other": "{{count}}件の返信"
+  },
+  "receipts": {
+    "readByEveryone": "全員が既読",
+    "readByCount_other": "{{total}}人中{{count}}人が既読",
+    "deliveredCount_other": "{{total}}人中{{count}}人に配信済み"
+  },
+  "list": {
+    "empty": "まだメッセージはありません。会話を始めましょう。",
+    "unknownAuthor": "不明",
+    "blockedAuthor": "ブロックしたユーザー",
+    "blockedBody": "[ブロック済み]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name>に返信中",
+    "scrollToMessage": "返信先のメッセージまでスクロール",
+    "dismiss": "返信をやめる",
+    "encrypted": "[暗号化されたメッセージ]"
+  },
+  "queue": {
+    "heading": "キュー",
+    "pendingPlaceholder": "[保留中のメッセージ]",
+    "cancel": "メッセージをキャンセル",
+    "retry": "再試行",
+    "failedCount_other": "失敗 ×{{count}}"
+  },
+  "reactions": {
+    "add": "リアクションを追加",
+    "all": "すべて",
+    "allTabLabel_other": "すべて、{{count}}件のリアクション",
+    "contextHint": "右クリックでリアクションした人を表示",
+    "hoverMore_other": "{{names}}と他{{count}}人が{{emoji}}でリアクションしました",
+    "hoverNames": "{{names}}が{{emoji}}でリアクションしました",
+    "pillLabel_other": "{{emoji}} {{count}}件のリアクション",
+    "rowLabel": "{{name}}、{{emojis}}でリアクション",
+    "selfName": "{{name}}（あなた）",
+    "sheetTitle": "リアクション",
+    "tabLabel_other": "{{emoji}}、{{count}}件のリアクション",
+    "unknownUser": "不明なユーザー",
+    "viewWho": "リアクションを表示",
+    "you": "あなた"
+  },
+  "preview": {
+    "noMessages": "まだメッセージはありません",
+    "withSender": "{{name}}：{{text}}",
+    "attachments_other": "[添付ファイル{{count}}件]",
+    "undecryptable": "このデバイスで復号できなかったメッセージがあります"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}}を表示",
+    "openLabel": "{{filename}}を開く",
+    "downloadLabel": "{{filename}}をダウンロード",
+    "loading": "読み込み中…",
+    "error": "エラー",
+    "failedToLoad": "読み込みに失敗しました",
+    "failedToDownload": "ダウンロードに失敗しました",
+    "lightboxFetch": "取得",
+    "lightboxDone": "[ 完了 ]",
+    "lightboxDownload": "[ダウンロード]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "センシティブなメディアを表示：{{filename}}",
+    "sensitiveHide": "{{filename}}を非表示"
+  },
+  "unfurl": {
+    "loadImage": "画像を読み込む",
+    "loadVideo": "動画を読み込む",
+    "loadTitle": "{{url}}からメディアを読み込む — このサイトに直接接続します",
+    "loadDescription": "{{url}}からメディアを読み込みます。このサイトに直接接続するため、あなたのIPアドレスがサイトに知られます。",
+    "openLabel": "{{url}}を開く"
+  },
+  "notify": {
+    "newMessageTitle": "新しいメッセージ",
+    "newMessageBody": "{{name}}：新しいメッセージ",
+    "mentionTitle": "新しいメンション",
+    "allMentionBody": "{{name}}が@allをメンションしました",
+    "userMentionBody": "{{name}}があなたをメンションしました"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "この人",
+    "titleMessage": "メッセージを通報",
+    "titleUser": "{{name}}を通報",
+    "intro": "Pollisが受け取るのはアカウントと理由です。メッセージは暗号化されたままなので、内容が私たちに見られることはありません。",
+    "reasonLabel": "理由",
+    "reason": {
+      "spam": "スパム",
+      "harassment": "嫌がらせや脅迫",
+      "illegal": "違法なコンテンツ",
+      "other": "その他"
+    },
+    "submit": "通報",
+    "submitAndBlock": "通報してブロック",
+    "failed": "通報を送信できませんでした。もう一度お試しください。",
+    "doneTitle": "通報を送信しました",
+    "done": "ありがとうございます。すべての通報を確認しています。",
+    "doneBlocked": "ありがとうございます。すべての通報を確認しています。{{name}}もブロックしました。",
+    "close": "完了"
+  },
+  "keyChange": {
+    "notice": "{{name}}との安全番号が変更されました。",
+    "verify": "検証する",
+    "defaultName": "この連絡先"
+  },
+  "typing": {
+    "one": "{{name}}が入力中…",
+    "two": "{{first}}と{{second}}が入力中…",
+    "several_other": "{{count}}人が入力中…"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "アーケード"
+  },
+  "hud": {
+    "score": "スコア  {{score}}",
+    "time": "タイム  {{time}}",
+    "gameOver": "ゲームオーバー",
+    "final_other": "最終 {{count}}点 · {{time}}",
+    "restartHint": "Rでリスタート · Escで終了",
+    "controls": "WASDで移動 · マウスで照準 · クリック/スペースで発射 · Escで終了"
+  }
+}

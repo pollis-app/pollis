@@ -241,11 +241,11 @@ for (const skin of SKINS) {
 
       // English is active by default, and the active option is the primary one.
       await expect(page.getByTestId("pref-language-en")).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "true",
       );
       await expect(page.getByTestId(`pref-language-${TEST_LANG}`)).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "false",
       );
     });
@@ -264,11 +264,11 @@ for (const skin of SKINS) {
 
       // Selection moved with it.
       await expect(page.getByTestId(`pref-language-${TEST_LANG}`)).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "true",
       );
       await expect(page.getByTestId("pref-language-en")).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "false",
       );
 
@@ -315,7 +315,7 @@ for (const skin of SKINS) {
       await gotoPreferences(page);
       await expect(page.getByTestId("pref-language-heading")).toHaveText(TEST_HEADING);
       await expect(page.getByTestId(`pref-language-${TEST_LANG}`)).toHaveAttribute(
-        "aria-pressed",
+        "aria-checked",
         "true",
       );
     });
@@ -360,7 +360,7 @@ const SHIPPED = JSON.parse(
 ) as Array<{ code: string; dir: "ltr" | "rtl" }>;
 
 test.describe("shipped locales", () => {
-  test("the registry is the seven we intend to ship", () => {
+  test("the registry is the nine we intend to ship", () => {
     expect(SHIPPED.map((l) => l.code)).toEqual([
       "en",
       "es",
@@ -369,6 +369,8 @@ test.describe("shipped locales", () => {
       "ru",
       "zh",
       "ar",
+      "ko",
+      "ja",
     ]);
   });
 

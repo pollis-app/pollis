@@ -111,6 +111,10 @@ depends=(
   'libpulse'
   'dbus'
 )
+optdepends=(
+  'noto-fonts-cjk: Japanese, Korean and Chinese text'
+  'noto-fonts: Indic, Arabic-script and Ethiopic text'
+)
 source=("https://cdn.pollis.com/releases/v\${pkgver}/pollis-v\${pkgver}-linux.deb")
 sha256sums=('${SHA256}')
 

@@ -782,16 +782,17 @@ def codepoint_key(char: str) -> str:
 
 
 def shipped_language_codes() -> list[str]:
-    """The `code: "xx"` entries of ``SHIPPED_LANGUAGES`` in languages.ts."""
+    """The `code: "xx"` / `"xx-Scrp"` entries of ``SHIPPED_LANGUAGES`` in languages.ts (#1725)."""
     source = LANGUAGES_TS.read_text(encoding="utf-8")
-    codes = re.findall(r'^\s*\{\s*code:\s*"([a-z]{2,3})"', source, flags=re.MULTILINE)
+    codes = re.findall(r'^\s*\{\s*code:\s*"([a-z]{2,3}(?:-[A-Z][a-z]{3})?)"', source, flags=re.MULTILINE)
     if not codes:
         raise SystemExit(f"no `code:` entries found in {LANGUAGES_TS}")
     return sorted(set(codes))
 
 
 def fetch_cldr_file(lang: str, kind: str) -> bytes:
-    url = f"{CLDR_RAW_BASE}/{kind}/{lang}.xml"
+    # CLDR names script variants with an underscore: `pa-Arab` is `pa_Arab.xml`.
+    url = f"{CLDR_RAW_BASE}/{kind}/{lang.replace('-', '_')}.xml"
     with urllib.request.urlopen(url, timeout=60) as response:
         return response.read()
 

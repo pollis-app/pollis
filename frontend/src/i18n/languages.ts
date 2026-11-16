@@ -1,7 +1,9 @@
 /** A shipped language; this registry drives the selector, OS probe and `supportedLngs` (see i18n/README.md). */
 
+import { matchLanguageTag } from "./languageTag.ts";
+
 export interface LanguageOption {
-  /** BCP-47 base tag, lowercase. Region subtags are stripped — see `normalizeLanguage`. */
+  /** Lowercase base tag (`ja`), or `<base>-<Script>` for a language in SCRIPT_VARIANTS (`pa-Arab`); see languageTag.ts. */
   code: string;
   /** The language's own name for itself (endonym). */
   label: string;
@@ -18,9 +20,11 @@ const SHIPPED_LANGUAGES: readonly LanguageOption[] = [
   { code: "uk", label: "Українська", dir: "ltr" },
   { code: "fr", label: "Français", dir: "ltr" },
   { code: "ru", label: "Русский", dir: "ltr" },
-  // `zh`, not `zh-Hans`: i18next and `normalizeLanguage` disagree on casing a script subtag.
+  // `zh`, not `zh-Hans`: one Chinese script ships, so it keeps the base tag (languageTag.ts).
   { code: "zh", label: "简体中文", dir: "ltr" },
   { code: "ar", label: "العربية", dir: "rtl" },
+  { code: "ko", label: "한국어", dir: "ltr" },
+  { code: "ja", label: "日本語", dir: "ltr" },
 ];
 
 /** The live registry; Playwright may add a synthetic locale (`registerTestLanguage`). */
@@ -65,23 +69,9 @@ export function localeUpperCase(value: string, language: string): string {
   return value.toLocaleUpperCase(language);
 }
 
-/** Reduce a BCP-47 tag to a supported code (`pt-BR` → `pt`), or null. */
+/** Reduce a BCP-47 tag to a supported code (`pt-BR` → `pt`, `pa-PK` → `pa-Arab`), or null. */
 export function normalizeLanguage(raw: string | null | undefined): string | null {
-  if (!raw) {
-    return null;
-  }
-  const tag = raw.trim().toLowerCase();
-  if (!tag) {
-    return null;
-  }
-  if (isSupportedLanguage(tag)) {
-    return tag;
-  }
-  const base = tag.split(/[-_]/)[0];
-  if (isSupportedLanguage(base)) {
-    return base;
-  }
-  return null;
+  return matchLanguageTag(raw, supportedLanguageCodes());
 }
 
 /** First supported language from the OS/browser list, else English. */

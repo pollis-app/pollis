@@ -67,6 +67,36 @@ import fr_search from "../../frontend/src/i18n/locales/fr/search.json";
 import fr_settings from "../../frontend/src/i18n/locales/fr/settings.json";
 import fr_vault from "../../frontend/src/i18n/locales/fr/vault.json";
 import fr_voice from "../../frontend/src/i18n/locales/fr/voice.json";
+import ja_arcade from "../../frontend/src/i18n/locales/ja/arcade.json";
+import ja_auth from "../../frontend/src/i18n/locales/ja/auth.json";
+import ja_channels from "../../frontend/src/i18n/locales/ja/channels.json";
+import ja_chat from "../../frontend/src/i18n/locales/ja/chat.json";
+import ja_common from "../../frontend/src/i18n/locales/ja/common.json";
+import ja_dms from "../../frontend/src/i18n/locales/ja/dms.json";
+import ja_emoji from "../../frontend/src/i18n/locales/ja/emoji.json";
+import ja_errors from "../../frontend/src/i18n/locales/ja/errors.json";
+import ja_mobile from "../../frontend/src/i18n/locales/ja/mobile.json";
+import ja_nav from "../../frontend/src/i18n/locales/ja/nav.json";
+import ja_saved from "../../frontend/src/i18n/locales/ja/saved.json";
+import ja_search from "../../frontend/src/i18n/locales/ja/search.json";
+import ja_settings from "../../frontend/src/i18n/locales/ja/settings.json";
+import ja_vault from "../../frontend/src/i18n/locales/ja/vault.json";
+import ja_voice from "../../frontend/src/i18n/locales/ja/voice.json";
+import ko_arcade from "../../frontend/src/i18n/locales/ko/arcade.json";
+import ko_auth from "../../frontend/src/i18n/locales/ko/auth.json";
+import ko_channels from "../../frontend/src/i18n/locales/ko/channels.json";
+import ko_chat from "../../frontend/src/i18n/locales/ko/chat.json";
+import ko_common from "../../frontend/src/i18n/locales/ko/common.json";
+import ko_dms from "../../frontend/src/i18n/locales/ko/dms.json";
+import ko_emoji from "../../frontend/src/i18n/locales/ko/emoji.json";
+import ko_errors from "../../frontend/src/i18n/locales/ko/errors.json";
+import ko_mobile from "../../frontend/src/i18n/locales/ko/mobile.json";
+import ko_nav from "../../frontend/src/i18n/locales/ko/nav.json";
+import ko_saved from "../../frontend/src/i18n/locales/ko/saved.json";
+import ko_search from "../../frontend/src/i18n/locales/ko/search.json";
+import ko_settings from "../../frontend/src/i18n/locales/ko/settings.json";
+import ko_vault from "../../frontend/src/i18n/locales/ko/vault.json";
+import ko_voice from "../../frontend/src/i18n/locales/ko/voice.json";
 import ru_arcade from "../../frontend/src/i18n/locales/ru/arcade.json";
 import ru_auth from "../../frontend/src/i18n/locales/ru/auth.json";
 import ru_channels from "../../frontend/src/i18n/locales/ru/channels.json";
@@ -183,6 +213,40 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": fr_settings,
     "vault": fr_vault,
     "voice": fr_voice,
+  },
+  "ja": {
+    "arcade": ja_arcade,
+    "auth": ja_auth,
+    "channels": ja_channels,
+    "chat": ja_chat,
+    "common": ja_common,
+    "dms": ja_dms,
+    "emoji": ja_emoji,
+    "errors": ja_errors,
+    "mobile": ja_mobile,
+    "nav": ja_nav,
+    "saved": ja_saved,
+    "search": ja_search,
+    "settings": ja_settings,
+    "vault": ja_vault,
+    "voice": ja_voice,
+  },
+  "ko": {
+    "arcade": ko_arcade,
+    "auth": ko_auth,
+    "channels": ko_channels,
+    "chat": ko_chat,
+    "common": ko_common,
+    "dms": ko_dms,
+    "emoji": ko_emoji,
+    "errors": ko_errors,
+    "mobile": ko_mobile,
+    "nav": ko_nav,
+    "saved": ko_saved,
+    "search": ko_search,
+    "settings": ko_settings,
+    "vault": ko_vault,
+    "voice": ko_voice,
   },
   "ru": {
     "arcade": ru_arcade,

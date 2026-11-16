@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "아케이드"
+  },
+  "hud": {
+    "score": "점수  {{score}}",
+    "time": "시간   {{time}}",
+    "gameOver": "게임 오버",
+    "final_other": "최종 {{count}}점 · {{time}}",
+    "restartHint": "R을 눌러 다시 시작 · esc를 눌러 나가기",
+    "controls": "WASD 이동 · 마우스 조준 · 클릭/스페이스 발사 · esc 나가기"
+  }
+}

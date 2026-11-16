@@ -150,7 +150,7 @@ builds carry the real `mobile/package.json` version.
   1 is a failure, 2 a bad argument). A block found in the background or by a 426 mid-session
   leaves the UI the same way.
 
-Copy is `nav:clientBlocked.*` in all seven locales. The manifest's `message`, when set, replaces the
+Copy is `nav:clientBlocked.*` in every shipped locale. The manifest's `message`, when set, replaces the
 body text (one language — use it only for something specific).
 
 ## The DS (`pollis-delivery/src/client_policy.rs`)

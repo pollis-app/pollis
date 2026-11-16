@@ -70,8 +70,12 @@ export function escapeAndroid(value) {
   return out;
 }
 
+/** `ja` → `values-ja`; a script code (`pa-Arab`) needs Android's BCP-47 form, `values-b+pa+Arab` (#1725). */
 export function valuesDir(code) {
-  return code === BASE ? "values" : `values-${code}`;
+  if (code === BASE) {
+    return "values";
+  }
+  return code.includes("-") ? `values-b+${code.replace(/-/g, "+")}` : `values-${code}`;
 }
 
 export function render(push) {

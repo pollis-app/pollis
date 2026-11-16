@@ -1,0 +1,44 @@
+{
+  "title": "保管庫",
+  "placeholder": "メモ、リンク、ファイルを安全に保存",
+  "empty": "保管庫は空です。ここに入れたメモ、リンク、ファイルはエンドツーエンド暗号化され、すべてのデバイスで利用できます。",
+  "searchPlaceholder": "保管庫を検索…",
+  "searchEmpty": "保管庫に一致する項目はありません。",
+  "clearSearch": "検索をクリア",
+  "viewToggle": "保管庫の表示",
+  "viewChat": "チャット",
+  "viewMedia": "メディア",
+  "saving": "保存中…",
+  "saveFailed": "保管庫に保存できませんでした。下書きは入力欄に戻されています。",
+  "saveFailedOffline": "Pollisに接続できず、保存できませんでした。下書きは入力欄に戻されています。接続を確認して、もう一度お試しください。",
+  "saveFailedTooLarge": "保管庫に保存するにはファイルが大きすぎます。下書きは入力欄に戻されています。そのファイルを外して、もう一度送信してください。",
+  "saveRetry": "再試行",
+  "entry": {
+    "pinned": "ピン留め済み",
+    "edited": "（編集済み）",
+    "pin": "項目をピン留め",
+    "unpin": "項目のピン留めを解除",
+    "edit": "項目を編集",
+    "delete": "項目を削除"
+  },
+  "edit": {
+    "heading": "項目を編集",
+    "cancel": "編集をキャンセル",
+    "hint": "Enterで保存 · Shift+Enterで改行 · Escでキャンセル"
+  },
+  "delete": {
+    "heading": "項目を削除",
+    "body": "この項目をすべてのデバイスの保管庫から削除しますか？この操作は取り消せません。",
+    "cancel": "削除をキャンセル",
+    "confirm": "削除",
+    "deleting": "削除中…"
+  },
+  "media": {
+    "empty": "保管庫にメディアはまだありません。チャット表示に画像やファイルをドロップしてください。",
+    "filesHeading": "ファイル",
+    "close": "ビューアーを閉じる",
+    "previous": "前へ",
+    "next": "次へ",
+    "position": "{{index}} / {{total}}"
+  }
+}

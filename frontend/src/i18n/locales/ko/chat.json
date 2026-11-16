@@ -1,0 +1,166 @@
+{
+  "message": {
+    "fromLabel": "{{name}} 님의 메시지",
+    "unknownAuthor": "알 수 없음",
+    "deleted": "[삭제됨]",
+    "encrypted": "[암호화됨]",
+    "redacted": "[가려짐]",
+    "edited": "(수정됨)",
+    "editUnsent": "(수정 내용 전송 안 됨)",
+    "newMember": "신규",
+    "newMemberTitle": "최근 7일 이내에 참여함",
+    "undecryptable": {
+      "tag": "복호화 불가",
+      "title": "복호화하지 못했습니다",
+      "body_other": "메시지 {{count}}개를 이 기기에서 복호화하지 못했습니다.",
+      "detail": "여기에 무언가 전송되었지만 이 기기에서 읽을 수 없었습니다. 다른 기기에는 남아 있을 수 있습니다.",
+      "diagnostics": "진단 보기"
+    }
+  },
+  "status": {
+    "pending": "대기 중",
+    "sending": "전송 중",
+    "sent": "전송됨",
+    "failed": "실패",
+    "cancelled": "취소됨"
+  },
+  "outbox": {
+    "retry": "다시 시도",
+    "discard": "삭제",
+    "retryLabel": "이 메시지 다시 보내기",
+    "discardLabel": "전송되지 않은 이 메시지 삭제",
+    "notSent": "전송 안 됨",
+    "willResend": "Pollis가 다시 연결되면 자동으로 전송됩니다.",
+    "notDelivered": "이 메시지를 전달하지 못했습니다."
+  },
+  "actions": {
+    "reply": "답장",
+    "replyInThread": "스레드에서 답장",
+    "save": "메시지 저장",
+    "removeBookmark": "북마크 삭제",
+    "copyLink": "메시지 링크 복사",
+    "copyLinkCopied": "링크를 복사했습니다",
+    "copyLinkFailed": "링크를 복사하지 못했습니다",
+    "edit": "메시지 수정",
+    "delete": "메시지 삭제",
+    "deleteAsAdmin": "메시지 삭제(관리자)",
+    "more": "기타 작업",
+    "pin": "메시지 고정",
+    "unpin": "메시지 고정 해제",
+    "report": "신고"
+  },
+  "thread": {
+    "replyCount_other": "답장 {{count}}개"
+  },
+  "receipts": {
+    "readByEveryone": "모두 읽음",
+    "readByCount_other": "{{total}}명 중 {{count}}명 읽음",
+    "deliveredCount_other": "{{total}}명 중 {{count}}명에게 전달됨"
+  },
+  "list": {
+    "empty": "아직 메시지가 없습니다. 대화를 시작해 보세요.",
+    "unknownAuthor": "알 수 없음",
+    "blockedAuthor": "차단한 사용자",
+    "blockedBody": "[차단됨]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name> 님에게 답장",
+    "scrollToMessage": "답장한 메시지로 스크롤",
+    "dismiss": "답장 취소",
+    "encrypted": "[암호화된 메시지]"
+  },
+  "queue": {
+    "heading": "대기열",
+    "pendingPlaceholder": "[대기 중인 메시지]",
+    "cancel": "메시지 취소",
+    "retry": "다시 시도",
+    "failedCount_other": "실패 ×{{count}}"
+  },
+  "reactions": {
+    "add": "반응 추가",
+    "all": "전체",
+    "allTabLabel_other": "전체, 반응 {{count}}개",
+    "contextHint": "마우스 오른쪽 버튼을 클릭하면 반응한 사람을 볼 수 있습니다",
+    "hoverMore_other": "{{names}} 님 외 {{count}}명이 {{emoji}}(으)로 반응했습니다",
+    "hoverNames": "{{names}} 님이 {{emoji}}(으)로 반응했습니다",
+    "pillLabel_other": "{{emoji}} 반응 {{count}}개",
+    "rowLabel": "{{name}}, {{emojis}}(으)로 반응함",
+    "selfName": "{{name}}(나)",
+    "sheetTitle": "반응",
+    "tabLabel_other": "{{emoji}}, 반응 {{count}}개",
+    "unknownUser": "알 수 없는 사용자",
+    "viewWho": "반응 보기",
+    "you": "나"
+  },
+  "preview": {
+    "noMessages": "아직 메시지가 없습니다",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_other": "[첨부 파일 {{count}}개]",
+    "undecryptable": "이 기기에서 복호화하지 못한 메시지가 있습니다"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} 보기",
+    "openLabel": "{{filename}} 열기",
+    "downloadLabel": "{{filename}} 다운로드",
+    "loading": "불러오는 중…",
+    "error": "오류",
+    "failedToLoad": "불러오지 못했습니다",
+    "failedToDownload": "다운로드하지 못했습니다",
+    "lightboxFetch": "가져오기",
+    "lightboxDone": "[ 완료 ]",
+    "lightboxDownload": "[다운로드]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "민감한 미디어 표시: {{filename}}",
+    "sensitiveHide": "{{filename}} 숨기기"
+  },
+  "unfurl": {
+    "loadImage": "이미지 불러오기",
+    "loadVideo": "동영상 불러오기",
+    "loadTitle": "{{url}}에서 미디어 불러오기 — 해당 사이트에 직접 연결합니다",
+    "loadDescription": "{{url}}에서 미디어를 불러옵니다. 해당 사이트에 직접 연결하므로 사이트에 IP 주소가 노출됩니다.",
+    "openLabel": "{{url}} 열기"
+  },
+  "notify": {
+    "newMessageTitle": "새 메시지",
+    "newMessageBody": "{{name}}: 새 메시지",
+    "mentionTitle": "새 멘션",
+    "allMentionBody": "{{name}} 님이 @all을 멘션했습니다",
+    "userMentionBody": "{{name}} 님이 나를 멘션했습니다"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "이 사람",
+    "titleMessage": "메시지 신고",
+    "titleUser": "{{name}} 신고",
+    "intro": "Pollis에는 계정과 신고 사유가 전달됩니다. 메시지는 암호화된 상태로 유지되므로 저희는 대화 내용을 절대 볼 수 없습니다.",
+    "reasonLabel": "사유",
+    "reason": {
+      "spam": "스팸",
+      "harassment": "괴롭힘 또는 협박",
+      "illegal": "불법 콘텐츠",
+      "other": "기타"
+    },
+    "submit": "신고",
+    "submitAndBlock": "신고 및 차단",
+    "failed": "신고를 보내지 못했습니다. 다시 시도하세요.",
+    "doneTitle": "신고 접수됨",
+    "done": "감사합니다. 모든 신고를 검토합니다.",
+    "doneBlocked": "감사합니다. 모든 신고를 검토합니다. {{name}} 님도 차단했습니다.",
+    "close": "완료"
+  },
+  "keyChange": {
+    "notice": "{{name}} 님과의 안전 번호가 변경되었습니다.",
+    "verify": "인증하기",
+    "defaultName": "이 연락처"
+  },
+  "typing": {
+    "one": "{{name}} 님이 입력 중…",
+    "two": "{{first}} 님과 {{second}} 님이 입력 중…",
+    "several_other": "{{count}}명이 입력 중…"
+  }
+}

@@ -6,6 +6,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pushCapsFor } from "../lib/push/caps.ts";
+import { supportedLanguageCodes } from "../i18n/languages.ts";
+
+// Every registered language, as its .lproj (zh ships Simplified Chinese), so a new locale needs no edit here.
+const SHIPPED_LPROJ = supportedLanguageCodes().map((c) => (c === "zh" ? "zh-Hans" : c)).sort();
 
 const require = createRequire(import.meta.url);
 const plugin = require("../plugins/withNotificationServiceExtension.js");
@@ -55,7 +59,7 @@ test("the extension's versions equal the app's (App Store Connect rejects a mism
 
 test("every locale gets every string, with positional placeholders", () => {
   const tables = plugin.localizableStrings();
-  assert.deepEqual(Object.keys(tables).sort(), ["ar", "en", "es", "fr", "ru", "uk", "zh-Hans"]);
+  assert.deepEqual(Object.keys(tables).sort(), SHIPPED_LPROJ);
   for (const [lproj, text] of Object.entries(tables) as [string, string][]) {
     for (const key of ["genericTitle", "genericBody", "nameOnlyBody", "groupTitle", "bodyAttachment", "bodyImage", "bodyVideo", "bodyVoice", "bodySensitive"]) {
       assert.match(text, new RegExp(`^"${key}" = ".+";$`, "m"), `${lproj} ${key}`);

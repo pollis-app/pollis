@@ -9,7 +9,13 @@ appId: ${MAESTRO_APP_ID}
 # the PIN keypad auto-advances at 4 digits and whether an emergency-kit screen
 # appears; adjust the `optional` steps if needed.
 
-- clearState
+# KEEP_STATE=true skips the wipe for a caller that prepared the app itself
+# (locale-smoke: Android's per-app language is cleared by clearState).
+- runFlow:
+    when:
+      true: ${typeof KEEP_STATE === 'undefined' || KEEP_STATE !== 'true'}
+    commands:
+      - clearState
 - launchApp
 
 # --- Email ---
