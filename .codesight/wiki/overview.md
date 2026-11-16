@@ -4,6 +4,8 @@
 
 **Tauri 2** desktop app: a React/TypeScript renderer running in the OS WebView (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows), with the Rust backend compiled into the Tauri host process. The renderer reaches the backend through the shell-agnostic bridge `frontend/src/bridge`, which routes to Tauri's `invoke`.
 
+On Windows the shell turns off WebView2's form autofill and password saving at start and clears what they hold (`src-tauri/src/webview_form_data.rs`), so text typed into the app is not kept by the WebView outside the encrypted local database. WebKit on macOS and Linux keeps no form history.
+
 - **One backend: the Delivery Service.** The Rust core (compiled into the Tauri host process) reaches remote data only through typed `POST /v1/...` calls to `pollis-delivery`; since #987 it holds no database credential and does not depend on `libsql`. All client logic runs in `pollis-core`; the renderer invokes commands via `invoke(cmd, args)` through the bridge.
 - **Media stays in Rust.** Voice and screenshare run inside `pollis-core` via the `livekit` + `libwebrtc` crates, not in the renderer. Two reasons: (a) cross-platform parity — the same Rust pipeline is consumed by mobile through uniffi bindings; (b) predictable allocation — multi-MB media buffers passed through a JS heap produce visible GC stutter, while Rust's manual allocation does not. This also sidesteps WebKitGTK's lack of WebRTC on Linux — the Rust path is the only one that works on every target. (That wall is why an Electron shell was once tried, then reverted by #386/#389; CEF/`cef-rs`, a native video-hole overlay, a forked WebKitGTK and moving voice to `livekit-client` were all evaluated and rejected at the time.)
 

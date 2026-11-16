@@ -239,6 +239,9 @@ objc = "0.2.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_System_IO"] }
+# The WebView2 bindings wry already uses, to turn off its form history (`webview_form_data.rs`).
+webview2-com = "0.39.1"
+windows-core = "0.62.2"
 
 # The flows harness's own rusqlite handle, split by target for the reason given
 # beside the [dev-dependencies] entry it replaced: these features are unioned

@@ -11,6 +11,8 @@ pub mod clipboard;
 pub mod tray;
 #[cfg(feature = "native-shell")]
 pub mod single_instance;
+#[cfg(all(feature = "native-shell", target_os = "windows"))]
+mod webview_form_data;
 
 #[cfg(feature = "test-harness")]
 pub mod test_harness;
@@ -396,7 +398,7 @@ pub fn run() {
 
             let tray_handle = app.handle().clone();
 
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             let main_window = app.get_webview_window("main");
 
             // Radius matches `border-radius: 10px` in index.css.
@@ -483,6 +485,16 @@ pub fn run() {
                             reroute_context_menu_paste(view, menu);
                             false
                         });
+                    }
+                });
+            }
+
+            // The app needs no browser form history: turn WebView2's off and clear it.
+            #[cfg(target_os = "windows")]
+            if let Some(window) = main_window {
+                let _ = window.with_webview(|webview| {
+                    if let Err(e) = webview_form_data::disable(&webview) {
+                        pollis_core::diag!("[webview] could not turn off form history: {e}");
                     }
                 });
             }
