@@ -115,9 +115,7 @@
   "thread": {
     "loading": "A carregar respostas…",
     "empty": "Ainda sem respostas. Comece o tópico abaixo.",
-    "placeholder": "Responder no tópico…",
-    "messageDeleted": "Mensagem eliminada",
-    "encrypted": "[encriptada]"
+    "placeholder": "Responder no tópico…"
   },
   "chat": {
     "noSelection": "Selecione um canal para começar a enviar mensagens"

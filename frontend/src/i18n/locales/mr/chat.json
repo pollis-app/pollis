@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "{{name}} कडून मेसेज",
     "unknownAuthor": "अज्ञात",
-    "deleted": "[हटवला]",
-    "encrypted": "[एन्क्रिप्ट केलेला]",
-    "redacted": "[लपवलेला]",
+    "deleted": "मेसेज हटवला",
+    "beforeJoin": "तुम्ही सामील होण्यापूर्वी पाठवलेला",
     "edited": "(संपादित)",
     "editUnsent": "(संपादन पाठवले नाही)",
     "newMember": "नवीन",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> यांना उत्तर देत आहे",
     "scrollToMessage": "उत्तर दिलेल्या मेसेजवर जा",
-    "dismiss": "उत्तर रद्द करा",
-    "encrypted": "[एन्क्रिप्ट केलेला मेसेज]"
+    "dismiss": "उत्तर रद्द करा"
   },
   "queue": {
     "heading": "रांग",

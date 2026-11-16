@@ -31,7 +31,7 @@
     "ariaLabel": "Mtindo wa kiolesura",
     "skinTerminal": "Terminal",
     "skinModern": "Kisasa",
-    "description": "Terminal ni mwonekano chaguomsingi wa IRC/monospace. Kisasa ni mpangilio wa kirafiki zaidi wenye fonti za kawaida kwa wanaopendelea programu ya gumzo ya kawaida zaidi. Husawazishwa kwenye vifaa vyako vyote.",
+    "description": "Kisasa ndio chaguo-msingi: mpangilio wa kawaida wa gumzo kwa fonti za kawaida. Terminal ni mwonekano wa hiari wa monospace wa mtindo wa IRC. Husawazishwa kwenye vifaa vyako vyote.",
     "skinTerminalDetail": "Monospace na mshikamano, kama IRC kwenye terminal",
     "skinModernDetail": "Fonti za kawaida, picha za wasifu na safu zenye nafasi zaidi",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "Rangi ya msisitizo",
     "pickTitle": "Chagua rangi ya msisitizo",
-    "presetOrange": "Chungwa",
-    "presetGreen": "Kijani",
-    "presetBlue": "Bluu",
-    "presetPurple": "Zambarau",
-    "presetRed": "Nyekundu",
-    "presetCyan": "Samawati"
+    "presetAmber": "Kaharabu",
+    "presetCitron": "Limau",
+    "presetMint": "Nanaa",
+    "presetGlass": "Kioo",
+    "presetLilac": "Lilaki",
+    "presetRust": "Kutu"
   },
   "background": {
     "heading": "Rangi ya mandharinyuma",
     "pickTitle": "Chagua rangi ya mandharinyuma",
-    "presetMatchAccent": "Lingana na msisitizo",
     "presetNeutral": "Isiyo na upande",
     "presetWarm": "Joto",
     "presetCool": "Baridi",

@@ -31,7 +31,7 @@
     "ariaLabel": "Ìrísí UI",
     "skinTerminal": "Tẹ́mínàlì",
     "skinModern": "Òde òní",
-    "description": "Tẹ́mínàlì ni ìrísí IRC/monospace àkọ́kọ́. Òde òní jẹ́ ìrísí tó rọrùn jù, pẹ̀lú lẹ́tà proportional-sans, fún àwọn tó fẹ́ áàpù ìjíròrò tó wọ́pọ̀ jù. Ó máa ń bá àwọn ẹ̀rọ rẹ mu.",
+    "description": "Òde òní ni ìrísí àkọ́kọ́: ìtò ìfọ̀rọ̀wérọ̀ tí a mọ̀ pẹ̀lú lẹ́tà proportional. Tẹ́mínàlì jẹ́ ìrísí monospace bíi IRC tí o lè yàn. Ó máa ń bá gbogbo ẹ̀rọ rẹ mu.",
     "skinTerminalDetail": "Monospace, ó sì kéré, bí IRC nínú tẹ́mínàlì",
     "skinModernDetail": "Lẹ́tà proportional, àwòrán profáìlì àti àwọn ìlà tó gbòòrò jù",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "Àwọ̀ àfihàn",
     "pickTitle": "Yan àwọ̀ àfihàn",
-    "presetOrange": "Ọsàn",
-    "presetGreen": "Ewé",
-    "presetBlue": "Búlúù",
-    "presetPurple": "Àlùkò",
-    "presetRed": "Pupa",
-    "presetCyan": "Sáyánì"
+    "presetAmber": "Àmbà",
+    "presetCitron": "Sítírọ̀nù",
+    "presetMint": "Mínìtì",
+    "presetGlass": "Gíláàsì",
+    "presetLilac": "Láílàkì",
+    "presetRust": "Ìpata"
   },
   "background": {
     "heading": "Àwọ̀ ẹ̀yìn",
     "pickTitle": "Yan àwọ̀ ẹ̀yìn",
-    "presetMatchAccent": "Bá àwọ̀ àfihàn mu",
     "presetNeutral": "Àárín",
     "presetWarm": "Lílọ́wọ́ọ́wọ́",
     "presetCool": "Títutù",

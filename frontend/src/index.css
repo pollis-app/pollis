@@ -151,10 +151,10 @@
      place it before system-ui: Helvetica Neue (macOS), Segoe UI (Windows), Noto Sans / DejaVu
      Sans (Linux). The mono stack already falls back to fonts that place it. */
   :root:lang(yo) {
-    --font-sans: 'Atkinson Hyperlegible Next', 'Helvetica Neue', 'Segoe UI', 'Noto Sans', 'DejaVu Sans', system-ui, sans-serif;
-  }
-  :root[data-skin="refined"]:lang(yo) {
     --font-sans: 'Geist Sans', 'Helvetica Neue', 'Segoe UI', 'Noto Sans', 'DejaVu Sans', system-ui, sans-serif;
+  }
+  :root[data-skin="terminal"]:lang(yo) {
+    --font-sans: 'Atkinson Hyperlegible Next', 'Helvetica Neue', 'Segoe UI', 'Noto Sans', 'DejaVu Sans', system-ui, sans-serif;
   }
 
   /* Modern body picks up the density line-height. */

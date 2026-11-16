@@ -31,7 +31,7 @@
     "ariaLabel": "UI اسکن",
     "skinTerminal": "ٹرمینل",
     "skinModern": "جدید",
-    "description": "ٹرمینل ڈیفالٹ IRC/مونو اسپیس انداز ہے۔ جدید ایک زیادہ دوستانہ، متناسب فونٹ والا انداز ہے ان لوگوں کے لیے جو روایتی چیٹ ایپ پسند کرتے ہیں۔ آپ کی تمام ڈیوائسز پر سنک ہوتا ہے۔",
+    "description": "جدید ڈیفالٹ ہے: متناسب فونٹ میں عام چیٹ ترتیب۔ ٹرمینل ایک اختیاری IRC طرز کا مونو اسپیس انداز ہے۔ آپ کی تمام ڈیوائسز پر سنک ہوتا ہے۔",
     "skinTerminalDetail": "مونو اسپیس اور مختصر، جیسے ٹرمینل میں IRC",
     "skinModernDetail": "متناسب فونٹ، اوتار اور کشادہ قطاریں",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "ایکسنٹ رنگ",
     "pickTitle": "ایکسنٹ رنگ منتخب کریں",
-    "presetOrange": "نارنجی",
-    "presetGreen": "سبز",
-    "presetBlue": "نیلا",
-    "presetPurple": "جامنی",
-    "presetRed": "سرخ",
-    "presetCyan": "فیروزی"
+    "presetAmber": "کہربا",
+    "presetCitron": "ترنج",
+    "presetMint": "پودینہ",
+    "presetGlass": "شیشہ",
+    "presetLilac": "لائلک",
+    "presetRust": "زنگ"
   },
   "background": {
     "heading": "پس منظر کا رنگ",
     "pickTitle": "پس منظر کا رنگ منتخب کریں",
-    "presetMatchAccent": "ایکسنٹ کے مطابق",
     "presetNeutral": "غیر جانبدار",
     "presetWarm": "گرم",
     "presetCool": "ٹھنڈا",

@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Ujumbe kutoka kwa {{name}}",
     "unknownAuthor": "haijulikani",
-    "deleted": "[ujumbe umefutwa]",
-    "encrypted": "[ujumbe umesimbwa kwa njia fiche]",
-    "redacted": "[ujumbe umefichwa]",
+    "deleted": "Ujumbe umefutwa",
+    "beforeJoin": "Ulitumwa kabla hujajiunga",
     "edited": "(umehaririwa)",
     "editUnsent": "(uhariri haujatumwa)",
     "newMember": "mpya",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "unamjibu <name>{{name}}</name>",
     "scrollToMessage": "Sogeza hadi ujumbe uliojibiwa",
-    "dismiss": "Ondoa jibu",
-    "encrypted": "[Ujumbe uliosimbwa kwa njia fiche]"
+    "dismiss": "Ondoa jibu"
   },
   "queue": {
     "heading": "Foleni",

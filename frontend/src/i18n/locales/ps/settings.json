@@ -31,7 +31,7 @@
     "ariaLabel": "د UI بڼه",
     "skinTerminal": "ټرمینل",
     "skinModern": "عصري",
-    "description": "ټرمینل د IRC/مونوسپېس ډیفالټ بڼه ده. عصري د هغو خلکو لپاره یوه دوستانه، تناسبي بڼه ده چې یو عادي چټ اپلیکېشن خوښوي. ستاسو په ټولو وسیلو کې همغږي کېږي.",
+    "description": "عصري ډیفالټ دی: په تناسبي لیک کې د خبرو اترو عادي ترتیب. ټرمینل یوه اختیاري د IRC په څېر مونوسپېس بڼه ده. ستاسو په ټولو وسیلو کې همغږي کېږي.",
     "skinTerminalDetail": "مونوسپېس او کمپیکټ، لکه په ټرمینل کې IRC",
     "skinModernDetail": "تناسبي لیک، انځورګوټي او پراخې کرښې",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "د تاکید رنګ",
     "pickTitle": "د تاکید رنګ وټاکئ",
-    "presetOrange": "نارنجي",
-    "presetGreen": "شین",
-    "presetBlue": "آبي",
-    "presetPurple": "بنفش",
-    "presetRed": "سور",
-    "presetCyan": "فیروزه‌یي"
+    "presetAmber": "کهربايي",
+    "presetCitron": "ترنج",
+    "presetMint": "پودینه",
+    "presetGlass": "شیشه",
+    "presetLilac": "لیلک",
+    "presetRust": "زنګ"
   },
   "background": {
     "heading": "د شالید رنګ",
     "pickTitle": "د شالید رنګ وټاکئ",
-    "presetMatchAccent": "د تاکید رنګ سره سم",
     "presetNeutral": "بې‌طرفه",
     "presetWarm": "تود",
     "presetCool": "سوړ",

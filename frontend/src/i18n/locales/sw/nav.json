@@ -115,9 +115,7 @@
   "thread": {
     "loading": "Inapakia majibu…",
     "empty": "Bado hakuna majibu. Anzisha uzi hapa chini.",
-    "placeholder": "Jibu kwenye uzi…",
-    "messageDeleted": "Ujumbe umefutwa",
-    "encrypted": "[ujumbe umesimbwa kwa njia fiche]"
+    "placeholder": "Jibu kwenye uzi…"
   },
   "chat": {
     "noSelection": "Chagua chaneli ili uanze kutuma ujumbe"

@@ -31,7 +31,7 @@
     "ariaLabel": "UI স্কিন",
     "skinTerminal": "টার্মিনাল",
     "skinModern": "মডার্ন",
-    "description": "টার্মিনাল হলো ডিফল্ট IRC/মনোস্পেস চেহারা। মডার্ন হলো প্রচলিত চ্যাট অ্যাপ পছন্দ করেন এমন মানুষদের জন্য আরও সহজ, প্রোপোরশনাল-সান্স লেআউট। আপনার সব ডিভাইসে সিঙ্ক হয়।",
+    "description": "মডার্ন ডিফল্ট: প্রোপোরশনাল ফন্টে চেনা চ্যাট লেআউট। টার্মিনাল হলো ঐচ্ছিক IRC-ধাঁচের মনোস্পেস চেহারা। আপনার সব ডিভাইসে সিঙ্ক হয়।",
     "skinTerminalDetail": "মনোস্পেস ও কমপ্যাক্ট, টার্মিনালে IRC-এর মতো",
     "skinModernDetail": "প্রোপোরশনাল ফন্ট, অবতার আর খোলামেলা সারি",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "অ্যাকসেন্ট রং",
     "pickTitle": "অ্যাকসেন্ট রং বেছে নিন",
-    "presetOrange": "কমলা",
-    "presetGreen": "সবুজ",
-    "presetBlue": "নীল",
-    "presetPurple": "বেগুনি",
-    "presetRed": "লাল",
-    "presetCyan": "সায়ান"
+    "presetAmber": "অ্যাম্বার",
+    "presetCitron": "সিট্রন",
+    "presetMint": "মিন্ট",
+    "presetGlass": "গ্লাস",
+    "presetLilac": "লাইল্যাক",
+    "presetRust": "রাস্ট"
   },
   "background": {
     "heading": "ব্যাকগ্রাউন্ডের রং",
     "pickTitle": "ব্যাকগ্রাউন্ডের রং বেছে নিন",
-    "presetMatchAccent": "অ্যাকসেন্টের সাথে মিলিয়ে",
     "presetNeutral": "নিরপেক্ষ",
     "presetWarm": "উষ্ণ",
     "presetCool": "শীতল",

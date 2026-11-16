@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "{{name}}-এর মেসেজ",
     "unknownAuthor": "অজানা",
-    "deleted": "[মুছে ফেলা হয়েছে]",
-    "encrypted": "[এনক্রিপ্টেড]",
-    "redacted": "[লুকানো]",
+    "deleted": "মেসেজ মুছে ফেলা হয়েছে",
+    "beforeJoin": "আপনি যোগ দেওয়ার আগে পাঠানো",
     "edited": "(এডিট করা)",
     "editUnsent": "(এডিট পাঠানো হয়নি)",
     "newMember": "নতুন",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "<name>{{name}}</name>-কে উত্তর দিচ্ছেন",
     "scrollToMessage": "যে মেসেজের উত্তর দেওয়া হয়েছে সেখানে যান",
-    "dismiss": "উত্তর বাতিল করুন",
-    "encrypted": "[এনক্রিপ্টেড মেসেজ]"
+    "dismiss": "উত্তর বাতিল করুন"
   },
   "queue": {
     "heading": "সারি",

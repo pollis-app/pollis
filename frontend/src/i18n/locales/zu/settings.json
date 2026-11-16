@@ -31,7 +31,7 @@
     "ariaLabel": "Isikhumba se-UI",
     "skinTerminal": "Itheminali",
     "skinModern": "Kwesimanje",
-    "description": "Itheminali ukubukeka okuzenzakalelayo kwe-IRC/monospace. Kwesimanje kungukwakheka okunobungane, okunefonti ye-sans elinganiselwe kwabantu abathanda uhlelo lwengxoxo olujwayelekile. Kuyavumelana kuwo wonke amadivayisi akho.",
+    "description": "Kwesimanje kuyinto ezenzakalelayo: ukwakheka okujwayelekile kwengxoxo ngombhalo olinganiselwe. Itheminali ingukubukeka kwe-monospace kwesitayela se-IRC ongakukhetha. Kuyavumelana kuwo wonke amadivayisi akho.",
     "skinTerminalDetail": "I-monospace futhi ihlangene, njenge-IRC etheminalini",
     "skinModernDetail": "Umbhalo olinganiselwe, izithombe nemigqa enendawo eyanele",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "Umbala Wokugqamisa",
     "pickTitle": "Khetha umbala wokugqamisa",
-    "presetOrange": "Owolintshi",
-    "presetGreen": "Oluhlaza",
-    "presetBlue": "Oluhlaza okwesibhakabhaka",
-    "presetPurple": "Onsomi",
-    "presetRed": "Obomvu",
-    "presetCyan": "I-Cyan"
+    "presetAmber": "I-Amber",
+    "presetCitron": "I-Citron",
+    "presetMint": "Iminti",
+    "presetGlass": "Ingilazi",
+    "presetLilac": "I-Lilac",
+    "presetRust": "Ukugqwala"
   },
   "background": {
     "heading": "Umbala Wangemuva",
     "pickTitle": "Khetha umbala wangemuva",
-    "presetMatchAccent": "Fanisa nokugqamisa",
     "presetNeutral": "Ongathathi hlangothi",
     "presetWarm": "Ofudumele",
     "presetCool": "Opholile",
