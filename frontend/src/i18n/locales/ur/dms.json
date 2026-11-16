@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "نیا پیغام",
+    "requests": "درخواستیں",
+    "blocked": "بلاک کردہ صارفین",
+    "avatarAlt": "{{name}} کا اوتار",
+    "settingsFor": "{{name}} کی ترتیبات",
+    "verified": "تصدیق شدہ رابطہ",
+    "keyChanged": "شناختی کلید تبدیل ہو گئی — دوبارہ تصدیق کریں"
+  },
+  "conversation": {
+    "fallbackTitle": "براہ راست پیغام",
+    "viewProfile": "‎@{{name}} کی پروفائل دیکھیں",
+    "call": "‎@{{name}} کو کال کریں",
+    "returnToCall": "‎@{{name}} کے ساتھ کال پر واپس جائیں",
+    "pinsLabel": "پن کیے گئے پیغامات"
+  },
+  "settings": {
+    "pageTitle": "گفتگو کی ترتیبات",
+    "leave": "گفتگو چھوڑیں",
+    "submitting": "چھوڑ رہے ہیں…",
+    "leaveFailed": "گفتگو چھوڑی نہیں جا سکی",
+    "cancel": "منسوخ کریں (Esc)"
+  },
+  "start": {
+    "pageTitle": "نیا پیغام",
+    "identifierLabel": "صارف نام یا ای میل",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "گفتگو شروع کریں",
+    "submitting": "شروع ہو رہی ہے…",
+    "identifierRequired": "صارف کی شناخت درکار ہے",
+    "userNotFound": "صارف نہیں ملا",
+    "startFailed": "گفتگو شروع نہیں ہو سکی"
+  },
+  "requests": {
+    "pageTitle": "پیغام کی درخواستیں",
+    "empty": "کوئی زیر التواء درخواست نہیں۔",
+    "noMessageYet": "(ابھی کوئی پیغام نہیں)",
+    "unknownSender": "نامعلوم",
+    "others_one": "(+{{count}} دیگر)",
+    "others_other": "(+{{count}} دیگر)",
+    "accept": "قبول کریں",
+    "block": "بلاک کریں"
+  },
+  "blocked": {
+    "pageTitle": "بلاک کردہ صارفین",
+    "empty": "کوئی بلاک کردہ صارف نہیں۔",
+    "unblock": "ان بلاک کریں"
+  },
+  "profile": {
+    "fallbackName": "صارف",
+    "fallbackTitle": "پروفائل",
+    "notFound": "صارف نہیں ملا",
+    "avatarAlt": "{{name}} کا اوتار",
+    "sendMessage": "پیغام بھیجیں",
+    "block": "بلاک کریں",
+    "safetyNumber": "حفاظتی نمبر",
+    "statusVerified": "تصدیق شدہ",
+    "statusChanged": "تبدیل ہو گیا — دوبارہ تصدیق کریں",
+    "statusUnverified": "تصدیق شدہ نہیں",
+    "keyChangedWarning": "آپ کی پچھلی تصدیق کے بعد اس رابطے کی شناختی کلید تبدیل ہو گئی ہے۔ اس پر بھروسہ کرنے سے پہلے نمبر کا دوبارہ کسی الگ ذریعے (مثلاً بالمشافہ یا کال پر) موازنہ کریں۔",
+    "removeVerification": "تصدیق ہٹائیں",
+    "markVerified": "تصدیق شدہ نشان زد کریں",
+    "report": "رپورٹ کریں"
+  },
+  "safety": {
+    "title": "آپ اور {{name}}",
+    "verify": "حفاظتی نمبر کی تصدیق کریں",
+    "headingMany": "حفاظتی نمبر",
+    "shared": "آپ اور {{name}} کو ایک ہی نمبر نظر آتا ہے۔ یہ یقینی بنانے کے لیے کہ درمیان میں کوئی نہیں ہے، اس کا بالمشافہ یا کال پر موازنہ کریں۔",
+    "qrLabel": "اس حفاظتی نمبر کا QR کوڈ جو آپ اور {{name}} کا مشترک ہے",
+    "failed": "حفاظتی نمبر لوڈ نہیں ہو سکا۔"
+  },
+  "notify": {
+    "requestTitle": "نئی گفتگو",
+    "requestBody": "{{name}} نے آپ کے ساتھ گفتگو شروع کی"
+  }
+}

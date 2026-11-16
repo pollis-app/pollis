@@ -392,6 +392,7 @@ test.describe("shipped locales", () => {
       "ar",
       "ko",
       "ja",
+      "ur",
     ]);
   });
 

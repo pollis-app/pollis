@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "ایموجی پکر",
+    "triggerLabel": "ایموجی",
+    "searchLabel": "تلاش کریں",
+    "searchPlaceholder": "ایموجی تلاش کریں",
+    "resultsFor": "\"{{query}}\" کے نتائج",
+    "recent": "اکثر استعمال شدہ",
+    "custom": "حسب ضرورت",
+    "empty": "اس سے ملتا جلتا کوئی ایموجی نہیں۔",
+    "previewHint": "ایک ایموجی منتخب کریں",
+    "railLabel": "ایموجی کے زمرے"
+  },
+  "categories": {
+    "people": "لوگ",
+    "nature": "فطرت",
+    "food": "کھانا",
+    "activity": "سرگرمیاں",
+    "travel": "سفر",
+    "objects": "اشیاء",
+    "symbols": "علامات",
+    "flags": "جھنڈے"
+  },
+  "skinTone": {
+    "groupLabel": "جلد کی رنگت",
+    "default": "ڈیفالٹ جلد کی رنگت",
+    "numbered": "جلد کی رنگت {{index}}"
+  },
+  "manage": {
+    "title": "حسب ضرورت ایموجی",
+    "signInRequired": "براہ کرم سائن ان کریں",
+    "dropPrompt": "کوئی تصویر یہاں گھسیٹیں، یا براؤز کرنے کے لیے کلک کریں",
+    "dropNow": "یہ تصویر استعمال کرنے کے لیے چھوڑیں",
+    "dropHint": "{{formats}} · اینیمیٹڈ GIF کی اینیمیشن برقرار رہتی ہے",
+    "replaceHint": "تبدیل کرنے کے لیے کوئی اور تصویر چھوڑیں یا کلک کریں",
+    "sourceSize": "اصل فائل {{size}} · اپ لوڈ پر 48 KB سے کم میں دوبارہ انکوڈ ہو گی",
+    "reencodeNote": "اپ لوڈ پر 48 KB سے کم میں دوبارہ انکوڈ ہو گی",
+    "fileTooLarge": "یہ تصویر {{size}} سے بڑی ہے — کوئی چھوٹی اصل فائل منتخب کریں",
+    "unsupportedFile": "‎{{name}}‎ فائل PNG، JPEG، GIF یا WebP نہیں ہے",
+    "shortcodeLabel": "شارٹ کوڈ",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "‎:shortcode:‎ کی صورت میں لکھا جاتا ہے — a–z، 0–9 اور _",
+    "shortcodeRequired": "شامل کرنے کے لیے اس ایموجی کا نام رکھیں",
+    "shortcodeInvalid": "2–32 حروف استعمال کریں: a–z، 0–9 اور _",
+    "shortcodeTaken": "‎:{{shortcode}}:‎ اس گروپ میں پہلے سے استعمال ہو رہا ہے",
+    "samplePlaceholder": "یہ پیغام میں کیسا نظر آئے گا",
+    "add": "ایموجی شامل کریں",
+    "shrinking": "چھوٹا کیا جا رہا ہے…",
+    "filePickerTitle": "ایموجی کی تصویر منتخب کریں",
+    "imageFilterName": "تصاویر",
+    "addFailed": "یہ ایموجی شامل نہیں ہو سکا",
+    "removeFailed": "یہ ایموجی ہٹایا نہیں جا سکا",
+    "storageNote": "اپ لوڈ سے پہلے تصاویر 48 KB سے کم میں دوبارہ انکوڈ کی جاتی ہیں، اس لیے بڑی اصل فائل سے کوئی مسئلہ نہیں۔ ایک جیسی تصاویر کی ان تمام گروپوں میں ایک ہی کاپی محفوظ ہوتی ہے جو انہیں استعمال کرتے ہیں۔ اس گروپ میں ایموجی کی تعداد کی کوئی حد نہیں۔",
+    "stored_one": "{{count}} ایموجی · {{size}} محفوظ",
+    "stored_other": "{{count}} ایموجی · {{size}} محفوظ",
+    "empty": "ابھی کوئی حسب ضرورت ایموجی نہیں۔ گروپ کا کوئی بھی رکن ایک شامل کر سکتا ہے۔",
+    "sizeAnimated": "اینیمیٹڈ · {{size}}",
+    "remove": "‎:{{shortcode}}:‎ ہٹائیں",
+    "removeAdminsOnly": "صرف گروپ ایڈمن ایموجی ہٹا سکتے ہیں۔"
+  }
+}

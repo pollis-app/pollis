@@ -87,3 +87,7 @@ test("registered codes have the shape i18next keeps, and script codes are declar
     }
   }
 });
+
+test("South Asian locales are auto-detected from OS tags (#1726)", () => {
+  assert.equal(normalizeLanguage("ur-PK"), "ur");
+});

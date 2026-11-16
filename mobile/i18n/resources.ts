@@ -127,6 +127,21 @@ import uk_search from "../../frontend/src/i18n/locales/uk/search.json";
 import uk_settings from "../../frontend/src/i18n/locales/uk/settings.json";
 import uk_vault from "../../frontend/src/i18n/locales/uk/vault.json";
 import uk_voice from "../../frontend/src/i18n/locales/uk/voice.json";
+import ur_arcade from "../../frontend/src/i18n/locales/ur/arcade.json";
+import ur_auth from "../../frontend/src/i18n/locales/ur/auth.json";
+import ur_channels from "../../frontend/src/i18n/locales/ur/channels.json";
+import ur_chat from "../../frontend/src/i18n/locales/ur/chat.json";
+import ur_common from "../../frontend/src/i18n/locales/ur/common.json";
+import ur_dms from "../../frontend/src/i18n/locales/ur/dms.json";
+import ur_emoji from "../../frontend/src/i18n/locales/ur/emoji.json";
+import ur_errors from "../../frontend/src/i18n/locales/ur/errors.json";
+import ur_mobile from "../../frontend/src/i18n/locales/ur/mobile.json";
+import ur_nav from "../../frontend/src/i18n/locales/ur/nav.json";
+import ur_saved from "../../frontend/src/i18n/locales/ur/saved.json";
+import ur_search from "../../frontend/src/i18n/locales/ur/search.json";
+import ur_settings from "../../frontend/src/i18n/locales/ur/settings.json";
+import ur_vault from "../../frontend/src/i18n/locales/ur/vault.json";
+import ur_voice from "../../frontend/src/i18n/locales/ur/voice.json";
 import zh_arcade from "../../frontend/src/i18n/locales/zh/arcade.json";
 import zh_auth from "../../frontend/src/i18n/locales/zh/auth.json";
 import zh_channels from "../../frontend/src/i18n/locales/zh/channels.json";
@@ -281,6 +296,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": uk_settings,
     "vault": uk_vault,
     "voice": uk_voice,
+  },
+  "ur": {
+    "arcade": ur_arcade,
+    "auth": ur_auth,
+    "channels": ur_channels,
+    "chat": ur_chat,
+    "common": ur_common,
+    "dms": ur_dms,
+    "emoji": ur_emoji,
+    "errors": ur_errors,
+    "mobile": ur_mobile,
+    "nav": ur_nav,
+    "saved": ur_saved,
+    "search": ur_search,
+    "settings": ur_settings,
+    "vault": ur_vault,
+    "voice": ur_voice,
   },
   "zh": {
     "arcade": zh_arcade,

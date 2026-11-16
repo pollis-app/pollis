@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "{{name}} کی طرف سے پیغام",
+    "unknownAuthor": "نامعلوم",
+    "deleted": "[حذف شدہ]",
+    "encrypted": "[انکرپٹڈ]",
+    "redacted": "[پوشیدہ]",
+    "edited": "(ترمیم شدہ)",
+    "editUnsent": "(ترمیم نہیں بھیجی گئی)",
+    "newMember": "نیا",
+    "newMemberTitle": "پچھلے 7 دنوں میں شامل ہوا",
+    "undecryptable": {
+      "tag": "ڈی کرپٹ نہیں ہو سکا",
+      "title": "ڈی کرپٹ نہیں ہو سکا",
+      "body_one": "{{count}} پیغام اس ڈیوائس پر ڈی کرپٹ نہیں ہو سکا۔",
+      "body_other": "{{count}} پیغامات اس ڈیوائس پر ڈی کرپٹ نہیں ہو سکے۔",
+      "detail": "یہاں کچھ بھیجا گیا تھا، لیکن یہ ڈیوائس اسے پڑھ نہیں سکی۔ ہو سکتا ہے آپ کی دوسری ڈیوائسز پر یہ موجود ہو۔",
+      "diagnostics": "تشخیص دیکھیں"
+    }
+  },
+  "status": {
+    "pending": "زیر التواء",
+    "sending": "بھیجا جا رہا ہے",
+    "sent": "بھیج دیا گیا",
+    "failed": "ناکام",
+    "cancelled": "منسوخ"
+  },
+  "outbox": {
+    "retry": "دوبارہ کوشش کریں",
+    "discard": "رد کریں",
+    "retryLabel": "یہ پیغام دوبارہ بھیجنے کی کوشش کریں",
+    "discardLabel": "یہ نہ بھیجا گیا پیغام رد کریں",
+    "notSent": "نہیں بھیجا گیا",
+    "willResend": "Pollis کے دوبارہ کنیکٹ ہونے پر یہ خود بخود بھیج دیا جائے گا۔",
+    "notDelivered": "یہ پیغام ڈیلیور نہیں ہو سکا۔"
+  },
+  "actions": {
+    "reply": "جواب دیں",
+    "replyInThread": "تھریڈ میں جواب دیں",
+    "save": "پیغام محفوظ کریں",
+    "removeBookmark": "بک مارک ہٹائیں",
+    "copyLink": "پیغام کا لنک کاپی کریں",
+    "copyLinkCopied": "لنک کاپی ہو گیا",
+    "copyLinkFailed": "لنک کاپی نہیں ہو سکا",
+    "edit": "پیغام میں ترمیم کریں",
+    "delete": "پیغام حذف کریں",
+    "deleteAsAdmin": "پیغام حذف کریں (ایڈمن)",
+    "more": "مزید کارروائیاں",
+    "pin": "پیغام پن کریں",
+    "unpin": "پیغام ان پن کریں",
+    "report": "رپورٹ کریں"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} جواب",
+    "replyCount_other": "{{count}} جوابات"
+  },
+  "receipts": {
+    "readByEveryone": "سب نے پڑھ لیا",
+    "readByCount_one": "{{total}} میں سے {{count}} نے پڑھا",
+    "readByCount_other": "{{total}} میں سے {{count}} نے پڑھا",
+    "deliveredCount_one": "{{total}} میں سے {{count}} کو ڈیلیور ہوا",
+    "deliveredCount_other": "{{total}} میں سے {{count}} کو ڈیلیور ہوا"
+  },
+  "list": {
+    "empty": "ابھی کوئی پیغام نہیں۔ گفتگو شروع کریں۔",
+    "unknownAuthor": "نامعلوم",
+    "blockedAuthor": "بلاک کردہ صارف",
+    "blockedBody": "[بلاک کردہ]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name> کو جواب",
+    "scrollToMessage": "جس پیغام کا جواب دیا گیا اس تک اسکرول کریں",
+    "dismiss": "جواب ختم کریں",
+    "encrypted": "[انکرپٹڈ پیغام]"
+  },
+  "queue": {
+    "heading": "قطار",
+    "pendingPlaceholder": "[زیر التواء پیغام]",
+    "cancel": "پیغام منسوخ کریں",
+    "retry": "دوبارہ کوشش کریں",
+    "failedCount_one": "ناکام ×{{count}}",
+    "failedCount_other": "ناکام ×{{count}}"
+  },
+  "reactions": {
+    "add": "ردعمل شامل کریں",
+    "all": "سب",
+    "allTabLabel_one": "سب، {{count}} ردعمل",
+    "allTabLabel_other": "سب، {{count}} ردعمل",
+    "contextHint": "کس نے ردعمل دیا یہ دیکھنے کے لیے رائٹ کلک کریں",
+    "hoverMore_one": "{{names}} اور {{count}} مزید نے {{emoji}} سے ردعمل دیا",
+    "hoverMore_other": "{{names}} اور {{count}} مزید نے {{emoji}} سے ردعمل دیا",
+    "hoverNames": "{{names}} نے {{emoji}} سے ردعمل دیا",
+    "pillLabel_one": "{{emoji}} {{count}} ردعمل",
+    "pillLabel_other": "{{emoji}} {{count}} ردعمل",
+    "rowLabel": "{{name}} نے {{emojis}} سے ردعمل دیا",
+    "selfName": "{{name}} (آپ)",
+    "sheetTitle": "ردعمل",
+    "tabLabel_one": "{{emoji}}، {{count}} ردعمل",
+    "tabLabel_other": "{{emoji}}، {{count}} ردعمل",
+    "unknownUser": "نامعلوم صارف",
+    "viewWho": "ردعمل دیکھیں",
+    "you": "آپ"
+  },
+  "preview": {
+    "noMessages": "ابھی کوئی پیغام نہیں",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} اٹیچمنٹ]",
+    "attachments_other": "[{{count}} اٹیچمنٹس]",
+    "undecryptable": "ایک پیغام اس ڈیوائس پر ڈی کرپٹ نہیں ہو سکا"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} دیکھیں",
+    "openLabel": "{{filename}} کھولیں",
+    "downloadLabel": "{{filename}} ڈاؤن لوڈ کریں",
+    "loading": "لوڈ ہو رہا ہے…",
+    "error": "خرابی",
+    "failedToLoad": "لوڈ نہیں ہو سکا",
+    "failedToDownload": "ڈاؤن لوڈ نہیں ہو سکا",
+    "lightboxFetch": "حاصل کریں",
+    "lightboxDone": "[ ہو گیا ]",
+    "lightboxDownload": "[ڈاؤن لوڈ]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "حساس میڈیا دکھائیں: {{filename}}",
+    "sensitiveHide": "{{filename}} چھپائیں"
+  },
+  "unfurl": {
+    "loadImage": "تصویر لوڈ کریں",
+    "loadVideo": "ویڈیو لوڈ کریں",
+    "loadTitle": "{{url}} سے میڈیا لوڈ کریں — اس سے اس سائٹ سے براہ راست رابطہ ہوتا ہے",
+    "loadDescription": "{{url}} سے میڈیا لوڈ کریں۔ اس سے اس سائٹ سے براہ راست رابطہ ہوتا ہے اور آپ کا IP ایڈریس اس پر ظاہر ہو جاتا ہے۔",
+    "openLabel": "{{url}} کھولیں"
+  },
+  "notify": {
+    "newMessageTitle": "نیا پیغام",
+    "newMessageBody": "{{name}}: نیا پیغام",
+    "mentionTitle": "نیا مینشن",
+    "allMentionBody": "{{name}} نے ‎@all‎ کو مینشن کیا",
+    "userMentionBody": "{{name}} نے آپ کو مینشن کیا"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "اس شخص",
+    "titleMessage": "پیغام رپورٹ کریں",
+    "titleUser": "{{name}} کو رپورٹ کریں",
+    "intro": "Pollis کو اکاؤنٹ اور وجہ ملتی ہے۔ پیغامات انکرپٹڈ رہتے ہیں، اس لیے ہم کبھی نہیں دیکھتے کہ کیا کہا گیا۔",
+    "reasonLabel": "وجہ",
+    "reason": {
+      "spam": "اسپام",
+      "harassment": "ہراسانی یا دھمکیاں",
+      "illegal": "غیر قانونی مواد",
+      "other": "کچھ اور"
+    },
+    "submit": "رپورٹ کریں",
+    "submitAndBlock": "رپورٹ اور بلاک کریں",
+    "failed": "رپورٹ نہیں بھیجی جا سکی۔ دوبارہ کوشش کریں۔",
+    "doneTitle": "رپورٹ بھیج دی گئی",
+    "done": "شکریہ۔ ہم ہر رپورٹ کا جائزہ لیتے ہیں۔",
+    "doneBlocked": "شکریہ۔ ہم ہر رپورٹ کا جائزہ لیتے ہیں۔ آپ نے {{name}} کو بلاک بھی کر دیا ہے۔",
+    "close": "ہو گیا"
+  },
+  "keyChange": {
+    "notice": "{{name}} کے ساتھ آپ کا حفاظتی نمبر تبدیل ہو گیا ہے۔",
+    "verify": "تصدیق کریں",
+    "defaultName": "اس رابطے"
+  },
+  "typing": {
+    "one": "{{name}} ٹائپ کر رہا ہے…",
+    "two": "{{first}} اور {{second}} ٹائپ کر رہے ہیں…",
+    "several_one": "{{count}} شخص ٹائپ کر رہا ہے…",
+    "several_other": "{{count}} لوگ ٹائپ کر رہے ہیں…"
+  }
+}

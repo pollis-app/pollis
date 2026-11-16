@@ -127,3 +127,7 @@ test("storage keys are SecureStore-safe and user-scoped", () => {
   assert.match(languageKey("user:with/odd chars"), /^pollis-language\.user\.[A-Za-z0-9._-]+$/);
   assert.notEqual(languageKey("a"), languageKey("b"));
 });
+
+test("South Asian locales are auto-detected from OS tags (#1726)", () => {
+  assert.equal(resolveDeviceLanguage(["ur-PK"]), "ur");
+});
