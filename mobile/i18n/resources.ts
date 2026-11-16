@@ -187,6 +187,21 @@ import ru_search from "../../frontend/src/i18n/locales/ru/search.json";
 import ru_settings from "../../frontend/src/i18n/locales/ru/settings.json";
 import ru_vault from "../../frontend/src/i18n/locales/ru/vault.json";
 import ru_voice from "../../frontend/src/i18n/locales/ru/voice.json";
+import ta_arcade from "../../frontend/src/i18n/locales/ta/arcade.json";
+import ta_auth from "../../frontend/src/i18n/locales/ta/auth.json";
+import ta_channels from "../../frontend/src/i18n/locales/ta/channels.json";
+import ta_chat from "../../frontend/src/i18n/locales/ta/chat.json";
+import ta_common from "../../frontend/src/i18n/locales/ta/common.json";
+import ta_dms from "../../frontend/src/i18n/locales/ta/dms.json";
+import ta_emoji from "../../frontend/src/i18n/locales/ta/emoji.json";
+import ta_errors from "../../frontend/src/i18n/locales/ta/errors.json";
+import ta_mobile from "../../frontend/src/i18n/locales/ta/mobile.json";
+import ta_nav from "../../frontend/src/i18n/locales/ta/nav.json";
+import ta_saved from "../../frontend/src/i18n/locales/ta/saved.json";
+import ta_search from "../../frontend/src/i18n/locales/ta/search.json";
+import ta_settings from "../../frontend/src/i18n/locales/ta/settings.json";
+import ta_vault from "../../frontend/src/i18n/locales/ta/vault.json";
+import ta_voice from "../../frontend/src/i18n/locales/ta/voice.json";
 import te_arcade from "../../frontend/src/i18n/locales/te/arcade.json";
 import te_auth from "../../frontend/src/i18n/locales/te/auth.json";
 import te_channels from "../../frontend/src/i18n/locales/te/channels.json";
@@ -454,6 +469,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ru_settings,
     "vault": ru_vault,
     "voice": ru_voice,
+  },
+  "ta": {
+    "arcade": ta_arcade,
+    "auth": ta_auth,
+    "channels": ta_channels,
+    "chat": ta_chat,
+    "common": ta_common,
+    "dms": ta_dms,
+    "emoji": ta_emoji,
+    "errors": ta_errors,
+    "mobile": ta_mobile,
+    "nav": ta_nav,
+    "saved": ta_saved,
+    "search": ta_search,
+    "settings": ta_settings,
+    "vault": ta_vault,
+    "voice": ta_voice,
   },
   "te": {
     "arcade": te_arcade,

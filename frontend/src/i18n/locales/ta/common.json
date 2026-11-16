@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "பின்செல்",
+    "cancel": "ரத்துசெய்",
+    "close": "மூடு",
+    "copy": "நகலெடு",
+    "copied": "நகலெடுக்கப்பட்டது",
+    "copyFailed": "நகலெடுக்க முடியவில்லை",
+    "delete": "நீக்கு",
+    "forward": "முன்னனுப்பு",
+    "goBack": "பின்செல்",
+    "moreOptions": "மேலும் விருப்பங்கள்",
+    "save": "சேமி"
+  },
+  "states": {
+    "buttonLoading": "ஏற்றுகிறது...",
+    "loading": "ஏற்றுகிறது…"
+  },
+  "time": {
+    "today": "இன்று",
+    "yesterday": "நேற்று"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "ஸ்பேஸ்",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "நிலை: {{status}}",
+    "offline": "ஆஃப்லைன்",
+    "online": "ஆன்லைன்"
+  },
+  "list": {
+    "empty": "உருப்படிகள் இல்லை."
+  },
+  "grid": {
+    "empty": "இங்கே இன்னும் யாரும் இல்லை."
+  },
+  "menu": {
+    "escHint": "பின்செல்ல Esc",
+    "navigationLabel": "வழிசெலுத்தல் மெனு",
+    "navigateHint": "நகர்த்து",
+    "selectHint": "தேர்ந்தெடுக்க Enter"
+  },
+  "media": {
+    "mute": "ஒலியடக்கு",
+    "pause": "இடைநிறுத்து",
+    "play": "இயக்கு",
+    "seek": "ஆடியோவில் நகர்த்து",
+    "skipBackward": "10 வினாடிகள் பின்னோக்கி",
+    "skipForward": "10 வினாடிகள் முன்னோக்கி",
+    "unmute": "ஒலியை இயக்கு",
+    "volume": "ஒலியளவு"
+  },
+  "composer": {
+    "addAttachment": "இணைப்பைச் சேர்",
+    "allMentionHint": "இந்தச் சேனலில் உள்ள அனைவருக்கும் அறிவிக்கும்",
+    "filePickerTitle": "கோப்புகளைச் சேர்",
+    "inputLabel": "செய்தி உள்ளீடு",
+    "placeholder": "செய்தியை உள்ளிடவும்…",
+    "previewAlt": "முன்னோட்டம்",
+    "removeAttachment": "{{name}}-ஐ அகற்று",
+    "send": "செய்தியை அனுப்பு",
+    "markSensitive": "{{name}}-ஐ உணர்திறன் மிக்கதாகக் குறி",
+    "unmarkSensitive": "{{name}}-இன் உணர்திறன் குறியை நீக்கு"
+  },
+  "mentions": {
+    "listLabel": "குறிப்பிடுவதற்கான பரிந்துரைகள்",
+    "matching": "<hl>@{{query}}</hl> உடன் பொருந்தும் உறுப்பினர்கள்"
+  },
+  "emojiSuggest": {
+    "listLabel": "ஈமோஜி பரிந்துரைகள்",
+    "matching": "<hl>:{{query}}</hl> உடன் பொருந்தும் ஈமோஜிகள்"
+  },
+  "a11y": {
+    "avatar": "அவதார்",
+    "loading": "ஏற்றுகிறது",
+    "otpDigit": "OTP இலக்கம் {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} வி",
+    "seconds_other": "{{count}} வி",
+    "minutes_one": "{{count}} நிமி",
+    "minutes_other": "{{count}} நிமி",
+    "hours_one": "{{count}} மணி",
+    "hours_other": "{{count}} மணி",
+    "days_one": "{{count}} நா",
+    "days_other": "{{count}} நா",
+    "weeks_one": "{{count}} வா",
+    "weeks_other": "{{count}} வா",
+    "months_one": "{{count}} மா",
+    "months_other": "{{count}} மா",
+    "years_one": "{{count}} ஆ",
+    "years_other": "{{count}} ஆ"
+  },
+  "tray": {
+    "open": "Pollis-ஐத் திற",
+    "muteMic": "மைக்கை ஒலியடக்கு",
+    "unmuteMic": "மைக்கை இயக்கு",
+    "muteMicIdle": "மைக்கை ஒலியடக்கு (அழைப்பில் இல்லை)",
+    "version": "பதிப்பு {{version}}",
+    "quit": "Pollis-இலிருந்து வெளியேறு",
+    "unread_one": "Pollis — {{count}} படிக்காதது",
+    "unread_other": "Pollis — {{count}} படிக்காதவை"
+  }
+}
