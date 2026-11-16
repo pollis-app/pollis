@@ -682,5 +682,11 @@
     "confirmBody": "Enter your PIN to turn on unlocking with {{method}}.",
     "useBiometric": "Use {{method}}",
     "changed": "Your {{method}} settings changed. Enter your PIN; biometric unlock turns back on after."
+  },
+  "permissions": {
+    "camera": "Pollis needs your camera to scan sign-in QR codes from your other devices and to take your profile photo.",
+    "photoLibrary": "Pollis needs access to your photo library so you can attach images to messages, choose your profile photo and upload custom group emoji.",
+    "photoLibraryAdd": "Pollis saves the photos and videos you choose to your photo library.",
+    "faceId": "Pollis uses Face ID to unlock the app instead of your PIN, only if you turn it on."
   }
 }

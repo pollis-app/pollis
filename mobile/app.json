@@ -119,6 +119,7 @@
       "./plugins/withReleaseSigning",
       "./plugins/withAbiSplits",
       "./plugins/withRichPush",
+      "./plugins/withPermissionStrings",
       [
         "expo-secure-store",
         {

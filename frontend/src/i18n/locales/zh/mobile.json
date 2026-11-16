@@ -551,5 +551,11 @@
     "confirmBody": "输入 PIN 以开启{{method}}解锁。",
     "useBiometric": "使用{{method}}",
     "changed": "{{method}}设置已更改。请输入 PIN，之后生物识别解锁会重新开启。"
+  },
+  "permissions": {
+    "camera": "Pollis 需要使用相机，以扫描你其他设备上的登录二维码，以及拍摄你的头像照片。",
+    "photoLibrary": "Pollis 需要访问你的照片，以便你在消息中附加图片、选择头像照片，以及为群组上传自定义表情。",
+    "photoLibraryAdd": "Pollis 会把你选择的照片和视频存储到你的相册。",
+    "faceId": "只有在你开启后，Pollis 才会使用面容 ID 代替 PIN 码解锁应用。"
   }
 }

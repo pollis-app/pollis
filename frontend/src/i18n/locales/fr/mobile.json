@@ -567,5 +567,11 @@
     "confirmBody": "Saisissez votre PIN pour activer le déverrouillage avec {{method}}.",
     "useBiometric": "Utiliser {{method}}",
     "changed": "Les réglages de {{method}} ont changé. Saisissez votre PIN ; le déverrouillage biométrique se réactive ensuite."
+  },
+  "permissions": {
+    "camera": "Pollis a besoin de l'appareil photo pour scanner les codes QR de connexion de vos autres appareils et prendre votre photo de profil.",
+    "photoLibrary": "Pollis a besoin d'accéder à vos photos pour que vous puissiez joindre des images à vos messages, choisir votre photo de profil et ajouter des emoji personnalisés à un groupe.",
+    "photoLibraryAdd": "Pollis enregistre dans vos photos les photos et vidéos que vous choisissez.",
+    "faceId": "Pollis utilise Face ID pour déverrouiller l'app à la place de votre code PIN, uniquement si vous l'activez."
   }
 }

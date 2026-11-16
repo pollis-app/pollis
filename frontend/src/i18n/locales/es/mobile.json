@@ -567,5 +567,11 @@
     "confirmBody": "Introduce tu PIN para activar el desbloqueo con {{method}}.",
     "useBiometric": "Usar {{method}}",
     "changed": "Los ajustes de {{method}} cambiaron. Introduce tu PIN; el desbloqueo biométrico se reactiva después."
+  },
+  "permissions": {
+    "camera": "Pollis necesita la cámara para escanear los códigos QR de inicio de sesión de tus otros dispositivos y para hacer tu foto de perfil.",
+    "photoLibrary": "Pollis necesita acceder a tu fototeca para que puedas adjuntar imágenes a los mensajes, elegir tu foto de perfil y subir emoji personalizados a un grupo.",
+    "photoLibraryAdd": "Pollis guarda en tu fototeca las fotos y los vídeos que elijas.",
+    "faceId": "Pollis usa Face ID para desbloquear la app en lugar de tu PIN, solo si lo activas."
   }
 }
