@@ -432,8 +432,9 @@ async fn fallbacks_and_modes() {
         assert_eq!(out, Outcome::Failed(Reason::LockBusy));
     }
 
-    // timeout: a budget too small for any network round trip, and nothing new stored.
-    let out = headless(&bob, Some(handle.clone()), Duration::from_millis(1)).await;
+    // timeout: a budget spent before the ingest would start, so nothing new is stored. (A 1 ms
+    // budget raced: against the in-process DS the one-request fetch could store before the timer won.)
+    let out = headless(&bob, Some(handle.clone()), Duration::ZERO).await;
     assert_eq!(out, Outcome::Failed(Reason::Timeout));
 
     // decrypt (a stale escrow): this harness links a plain sqlite, so a wrong key cannot fail

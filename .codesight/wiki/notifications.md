@@ -658,7 +658,10 @@ Android FCM handler both call one plain C function in `pollis-core`
   `muted` is a muted channel with no direct `@username` of this user
   (`mention`), the same rule `push_recipients` uses. Failures are reasons
   (`not_logged_in|lock_busy|timeout|network|decrypt|internal`); the host then
-  shows the generic text.
+  shows the generic text. A headless fetch whose budget is already spent when the
+  ingest would start reports `timeout` without starting it: `timeout_at` polls its
+  future before checking the deadline, on every wake, so a late start could still
+  run to the end on a fast link.
 - **In the app's own process (Android, #1610).** The FCM service runs inside
   the app's process. When the app has initialised there and is unlocked,
   `pollis_notify_fetch` runs `notify::fetch::run_in_app` instead: the same

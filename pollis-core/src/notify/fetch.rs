@@ -324,8 +324,15 @@ async fn run_locked(
 
     // 5. Fetch, decrypt and persist through the app's own path.
     let tail = DEFER_HEADLESS.then(|| Arc::new(TailSet::default()));
-    let ingest = ingest_for_handle(state, user_id, handle, tail.clone());
-    let result = tokio::time::timeout_at(deadline.into(), ingest).await;
+    // A spent budget starts nothing: `timeout_at` polls the ingest before it looks at the
+    // deadline, and on every wake after, so on a fast link an ingest begun late can still run
+    // to the end. `None` is the timeout.
+    let result = if Instant::now() < deadline {
+        let ingest = ingest_for_handle(state, user_id, handle, tail.clone());
+        tokio::time::timeout_at(deadline.into(), ingest).await.ok()
+    } else {
+        None
+    };
 
     // 6. The state is written; let the app have the lock back before any more round trips
     // (names, mutes), so a foreground app's own ingest is never stalled behind previews.
@@ -339,13 +346,13 @@ async fn run_locked(
     };
 
     let outcome = match result {
-        Ok(Ok(target)) => finish(state, user_id, mode, floor, target, deadline, None).await,
-        Ok(Err(reason)) => {
+        Some(Ok(target)) => finish(state, user_id, mode, floor, target, deadline, None).await,
+        Some(Err(reason)) => {
             // Whatever did persist is still shown; only an empty result fails.
             crate::diag!("[notify] ingest failed: {reason:?}");
             finish(state, user_id, mode, floor, None, deadline, Some(reason)).await
         }
-        Err(_) => {
+        None => {
             crate::diag!("[notify] ingest ran out of time");
             finish(state, user_id, mode, floor, None, deadline, Some(Reason::Timeout)).await
         }
