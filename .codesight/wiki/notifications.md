@@ -573,8 +573,12 @@ so the app, not the system, posts the notification.
   start (`ForegroundServiceStartNotAllowedException`, e.g. FCM downgraded the
   message), the fetch runs as before. Its notification (channel
   `pollis_push_fetch`, importance MIN, "Checking for new messages") is deferred
-  ~10 s by Android 12+, so a normal fetch ends before it appears. Only message
-  pushes use it. Tests: `PushFetchKeeperTest`, `tests/android-permissions.test.ts`.
+  ~10 s by Android 12+, but only for the first foreground service in each
+  two-minute window per app (the system's deferral exclusion time). A fetch that
+  starts the service within two minutes of a deferred one shows it at once for
+  as long as the service runs (usually under 100 ms; seen on API 36 as
+  `notification_enqueue` for id 1804 in `logcat -b events`). Silent, no
+  status-bar icon, so only an open shade shows it. Only message pushes use it. Tests: `PushFetchKeeperTest`, `tests/android-permissions.test.ts`.
 - **Post.** `RichPushNotifier`: `MessagingStyle` on channel `default`, **tag =
   `h`, id 0** (what FCM used), so all three #1508 paths keep finding it through
   the foreign identifier. One notification per conversation: a new one folds the
@@ -695,7 +699,13 @@ Android FCM handler both call one plain C function in `pollis-core`
   (`DEFER_HEADLESS`): the extension can be suspended as soon as it hands the notification over,
   and a suspended process holding the App Group lock is killed (`0xdead10cc`); it has 30 s and
   keeps the posts inside the fetch. `pollis_notify_settle(timeout_ms)` waits for every deferred
-  tail; the Android host calls it after posting, inside its foreground service.
+  tail; the Android host calls it after posting, inside its foreground service. The receipt's
+  LiveKit hint is a detached spawn (`livekit_stub::send_data_to_room`); spawned from a tail it
+  goes through `scope::spawn_in_tail`, so settle waits for it too. Each tail is bounded by
+  `scope::TAIL_BUDGET` (15 s): past it the work is dropped (cancelled at its next await, as the
+  fetch deadline did when it ran inline), so the headless fetch's lock and database are never
+  held longer. 15 s sits under the host's 20 s settle wait, so a tail always ends while the
+  foreground service still holds the network open, with room left for its hint.
 - **Setting.** `get_notification_content` / `set_notification_content {mode}`
   (`full|name|none`, `ui_state` key `notification_content`, default `full`),
   bridge arms only (mobile-only).

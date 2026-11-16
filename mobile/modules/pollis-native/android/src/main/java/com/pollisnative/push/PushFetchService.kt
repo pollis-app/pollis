@@ -24,8 +24,14 @@ import com.pollisnative.R
  * exactly when this runs. The same approach Signal takes.
  *
  * The service does no work itself; [RichPushHandler] fetches on its own thread and holds the
- * service around it through [PushFetchKeeper]. Android shows a foreground service's notification
- * only after about ten seconds (12+), so a normal fetch is over before anything appears.
+ * service around it through [PushFetchKeeper].
+ *
+ * Its notification: Android 12+ defers a foreground service's notification by about ten seconds,
+ * but only the first one in each two-minute window per app (the system's deferral exclusion
+ * time). A fetch that starts the service within two minutes of a deferred one shows "Checking for
+ * new messages" at once, for as long as the service runs: usually under 100 ms, longer when the
+ * deferred posts are slow. It is a silent MIN-importance notification with no status-bar icon,
+ * so it shows only in an open notification shade.
  */
 class PushFetchService : Service(), PushFetchKeeper.Foreground {
   /**
