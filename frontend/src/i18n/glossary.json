@@ -74,6 +74,10 @@
       "pt": [
         "cofre",
         "Cofre"
+      ],
+      "ha": [
+        "ma'ajiya",
+        "Ma'ajiya"
       ]
     },
     {
@@ -123,6 +127,12 @@
       "pt": [
         "dispositivo",
         "Dispositivo"
+      ],
+      "ha": [
+        "na'ura",
+        "Na'ura",
+        "na'urori",
+        "Na'urori"
       ]
     },
     {
@@ -174,6 +184,12 @@
         "números de segurança",
         "Número de segurança",
         "Números de segurança"
+      ],
+      "ha": [
+        "lambar tsaro",
+        "Lambar tsaro",
+        "lambobin tsaro",
+        "Lambobin tsaro"
       ]
     },
     {
@@ -225,6 +241,12 @@
         "chaves de identidade",
         "Chave de identidade",
         "Chaves de identidade"
+      ],
+      "ha": [
+        "maɓallin shaida",
+        "Maɓallin shaida",
+        "maɓallan shaida",
+        "Maɓallan shaida"
       ]
     },
     {
@@ -277,6 +299,10 @@
         "Verific",
         "verifiq",
         "Verifiq"
+      ],
+      "ha": [
+        "tantance",
+        "Tantance"
       ]
     },
     {
@@ -321,6 +347,9 @@
         "PIN"
       ],
       "pt": [
+        "PIN"
+      ],
+      "ha": [
         "PIN"
       ]
     },
@@ -372,6 +401,12 @@
       "pt": [
         "afixa",
         "Afixa"
+      ],
+      "ha": [
+        "maƙala",
+        "Maƙala",
+        "maƙale",
+        "Maƙale"
       ]
     },
     {
@@ -426,6 +461,13 @@
         "grupo",
         "Grupo",
         "GRUPO"
+      ],
+      "ha": [
+        "rukuni",
+        "Rukuni",
+        "rukunoni",
+        "Rukunoni",
+        "RUKUNI"
       ]
     },
     {
@@ -478,6 +520,12 @@
         "canais",
         "Canal",
         "Canais"
+      ],
+      "ha": [
+        "tasha",
+        "Tasha",
+        "tashoshi",
+        "Tashoshi"
       ]
     },
     {
@@ -544,6 +592,13 @@
         "Mensagem direta",
         "Mensagens diretas",
         "MD"
+      ],
+      "ha": [
+        "saƙon kai tsaye",
+        "Saƙon kai tsaye",
+        "saƙonnin kai tsaye",
+        "Saƙonnin kai tsaye",
+        "DM"
       ]
     },
     {
@@ -596,6 +651,12 @@
         "pedidos de mensagem",
         "Pedido de mensagem",
         "Pedidos de mensagem"
+      ],
+      "ha": [
+        "buƙatar saƙo",
+        "Buƙatar saƙo",
+        "buƙatun saƙo",
+        "Buƙatun saƙo"
       ]
     },
     {
@@ -643,6 +704,10 @@
       "pt": [
         "registo de transparência",
         "Registo de transparência"
+      ],
+      "ha": [
+        "rajistar bayyana gaskiya",
+        "Rajistar bayyana gaskiya"
       ]
     },
     {
@@ -698,6 +763,10 @@
         "Denunci",
         "denúncia",
         "Denúncia"
+      ],
+      "ha": [
+        "rahoto",
+        "Rahoto"
       ]
     },
     {
@@ -748,6 +817,10 @@
       "pt": [
         "bloque",
         "Bloque"
+      ],
+      "ha": [
+        "toshe",
+        "Toshe"
       ]
     },
     {
@@ -796,6 +869,9 @@
         "Chave Secreta",
         "chave secreta",
         "CHAVE SECRETA"
+      ],
+      "ha": [
+        "Maɓallin Sirri"
       ]
     },
     {
@@ -843,6 +919,10 @@
       "pt": [
         "chave de recuperação",
         "Chave de recuperação"
+      ],
+      "ha": [
+        "maɓallin maidowa",
+        "Maɓallin maidowa"
       ]
     },
     {
@@ -892,6 +972,10 @@
         "Kit de Emergência",
         "kit de emergência",
         "KIT DE EMERGÊNCIA"
+      ],
+      "ha": [
+        "Kayan Gaggawa",
+        "KAYAN GAGGAWA"
       ]
     },
     {
@@ -948,6 +1032,13 @@
         "convid",
         "Convid",
         "CONVITE"
+      ],
+      "ha": [
+        "gayyat",
+        "Gayyat",
+        "gayyac",
+        "Gayyac",
+        "GAYYAT"
       ]
     },
     {
@@ -996,6 +1087,12 @@
       "pt": [
         "membro",
         "Membro"
+      ],
+      "ha": [
+        "mamba",
+        "Mamba",
+        "mambobi",
+        "Mambobi"
       ]
     },
     {
@@ -1041,6 +1138,12 @@
       "pt": [
         "administrador",
         "Administrador"
+      ],
+      "ha": [
+        "mai gudanarwa",
+        "Mai gudanarwa",
+        "masu gudanarwa",
+        "Masu gudanarwa"
       ]
     },
     {
@@ -1089,6 +1192,12 @@
       "pt": [
         "tópico",
         "Tópico"
+      ],
+      "ha": [
+        "zare",
+        "Zare",
+        "zaruruwa",
+        "Zaruruwa"
       ]
     },
     {
@@ -1139,6 +1248,10 @@
         "Reações",
         "reagi",
         "Reagi"
+      ],
+      "ha": [
+        "martani",
+        "Martani"
       ]
     },
     {
@@ -1189,6 +1302,12 @@
         "Menções",
         "mencion",
         "Mencion"
+      ],
+      "ha": [
+        "ambat",
+        "Ambat",
+        "ambac",
+        "Ambac"
       ]
     },
     {
@@ -1241,6 +1360,12 @@
         "Partilhar ecrã",
         "partilham o ecrã",
         "partilha o ecrã"
+      ],
+      "ha": [
+        "raba allo",
+        "Raba allo",
+        "rabon allo",
+        "Rabon allo"
       ]
     },
     {
@@ -1301,6 +1426,10 @@
         "iniciado sessão",
         "início de sessão",
         "Início de sessão"
+      ],
+      "ha": [
+        "shiga",
+        "Shiga"
       ]
     },
     {
@@ -1359,6 +1488,10 @@
         "A terminar sessão",
         "sessão foi terminada",
         "sessão será terminada"
+      ],
+      "ha": [
+        "fita",
+        "Fita"
       ]
     },
     {
@@ -1412,6 +1545,10 @@
       "pt": [
         "desbloque",
         "Desbloque"
+      ],
+      "ha": [
+        "buɗe",
+        "Buɗe"
       ]
     },
     {
@@ -1460,6 +1597,12 @@
       "pt": [
         "export",
         "Export"
+      ],
+      "ha": [
+        "fitar da",
+        "Fitar da",
+        "fitarwa",
+        "Fitarwa"
       ]
     },
     {
@@ -1511,6 +1654,9 @@
         "encriptadas ponto a ponto",
         "Encriptado ponto a ponto",
         "Encriptada ponto a ponto"
+      ],
+      "ha": [
+        "daga ƙarshe zuwa ƙarshe"
       ]
     },
     {
@@ -1561,6 +1707,10 @@
         "Ativar o áudio",
         "áudio desativado",
         "Áudio desativado"
+      ],
+      "ha": [
+        "kunne",
+        "Kunne"
       ]
     }
   ]

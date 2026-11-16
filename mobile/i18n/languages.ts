@@ -33,6 +33,7 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "pa-Guru", label: "ਪੰਜਾਬੀ", dir: "ltr" },
   { code: "sw", label: "Kiswahili", dir: "ltr" },
   { code: "pt", label: "Português", dir: "ltr" },
+  { code: "ha", label: "Hausa", dir: "ltr" },
 ];
 
 export function supportedLanguageCodes(): string[] {

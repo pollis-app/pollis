@@ -1,0 +1,44 @@
+{
+  "title": "Ma'ajiya",
+  "placeholder": "Bayanai, mahaɗai, ko fayiloli masu tsaro",
+  "empty": "Ma'ajiya babu komai. Bayanai, mahaɗai da fayilolin da aka saka a nan an ɓoye su daga ƙarshe zuwa ƙarshe kuma suna bin mai su zuwa kowace na'ura.",
+  "searchPlaceholder": "Bincika ma'ajiya…",
+  "searchEmpty": "Babu abin da ya dace da wannan a ma'ajiya.",
+  "clearSearch": "Share bincike",
+  "viewToggle": "Kallon ma'ajiya",
+  "viewChat": "Hira",
+  "viewMedia": "Kafofi",
+  "saving": "Ana adanawa…",
+  "saveFailed": "Ba a iya adanawa a ma'ajiya ba. Daftarin ya koma wurin rubutu.",
+  "saveFailedOffline": "Ba a iya isa ga Pollis don adana wannan ba. Daftarin ya koma wurin rubutu — duba haɗin intanet sannan a sake gwadawa.",
+  "saveFailedTooLarge": "Wani fayil ya yi girma da yawa ga ma'ajiya. Daftarin ya koma wurin rubutu — cire fayil ɗin sannan a sake aikawa.",
+  "saveRetry": "Sake gwadawa",
+  "entry": {
+    "pinned": "An maƙala",
+    "edited": "(an gyara)",
+    "pin": "Maƙala shigarwa",
+    "unpin": "Cire maƙalawar shigarwa",
+    "edit": "Gyara shigarwa",
+    "delete": "Goge shigarwa"
+  },
+  "edit": {
+    "heading": "Gyara shigarwa",
+    "cancel": "Soke gyarawa",
+    "hint": "Enter don adanawa · Shift+Enter don sabon layi · Esc don sokewa"
+  },
+  "delete": {
+    "heading": "Goge shigarwa",
+    "body": "A goge wannan shigarwa daga ma'ajiya a kowace na'ura? Ba za a iya mayar da wannan ba.",
+    "cancel": "Soke gogewa",
+    "confirm": "Goge",
+    "deleting": "Ana gogewa…"
+  },
+  "media": {
+    "empty": "Babu kafofi a ma'ajiya tukuna — saka hotuna ko fayiloli a kallon hira.",
+    "filesHeading": "Fayiloli",
+    "close": "Rufe mai kallo",
+    "previous": "Na baya",
+    "next": "Na gaba",
+    "position": "{{index}} / {{total}}"
+  }
+}

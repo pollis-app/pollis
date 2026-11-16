@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "Sabon Saƙo",
+    "requests": "Buƙatu",
+    "blocked": "Masu amfani da aka toshe",
+    "avatarAlt": "Hoton {{name}}",
+    "settingsFor": "Saitunan {{name}}",
+    "verified": "Abokin hulɗa da aka tantance",
+    "keyChanged": "Maɓallin shaida ya canja — sake tantancewa"
+  },
+  "conversation": {
+    "fallbackTitle": "Saƙon kai tsaye",
+    "viewProfile": "Duba bayanan @{{name}}",
+    "call": "Kira @{{name}}",
+    "returnToCall": "Koma kiran da ake yi da @{{name}}",
+    "pinsLabel": "Saƙonnin da aka maƙala"
+  },
+  "settings": {
+    "pageTitle": "Saitunan Tattaunawa",
+    "leave": "Bar tattaunawa",
+    "submitting": "Ana barin…",
+    "leaveFailed": "Ba a iya barin tattaunawa ba",
+    "cancel": "Soke (Esc)"
+  },
+  "start": {
+    "pageTitle": "Sabon Saƙo",
+    "identifierLabel": "Sunan mai amfani ko Imel",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "Fara Tattaunawa",
+    "submitting": "Ana farawa…",
+    "identifierRequired": "Ana buƙatar sunan mai amfani ko imel",
+    "userNotFound": "Ba a sami mai amfani ba",
+    "startFailed": "Ba a iya fara tattaunawa ba"
+  },
+  "requests": {
+    "pageTitle": "Buƙatun saƙo",
+    "empty": "Babu buƙatun da ke jira.",
+    "noMessageYet": "(babu saƙo tukuna)",
+    "unknownSender": "Ba a sani ba",
+    "others_one": "(+{{count}} wani)",
+    "others_other": "(+{{count}} wasu)",
+    "accept": "karɓa",
+    "block": "toshe"
+  },
+  "blocked": {
+    "pageTitle": "Masu amfani da aka toshe",
+    "empty": "Babu masu amfani da aka toshe.",
+    "unblock": "cire toshewa"
+  },
+  "profile": {
+    "fallbackName": "Mai amfani",
+    "fallbackTitle": "Bayanan mutum",
+    "notFound": "Ba a sami mai amfani ba",
+    "avatarAlt": "Hoton {{name}}",
+    "sendMessage": "Aika Saƙo",
+    "block": "Toshe",
+    "safetyNumber": "Lambar tsaro",
+    "statusVerified": "An tantance",
+    "statusChanged": "Ya canja — sake tantancewa",
+    "statusUnverified": "Ba a tantance ba",
+    "keyChangedWarning": "Maɓallin shaida na wannan abokin hulɗa ya canja tun lokacin da aka tantance shi na ƙarshe. Sake kwatanta lambar ta wata hanya dabam kafin a amince da shi.",
+    "removeVerification": "Cire tantancewa",
+    "markVerified": "Yi alamar an tantance",
+    "report": "Kai rahoto"
+  },
+  "safety": {
+    "title": "Ku da {{name}}",
+    "verify": "Tantance lambar tsaro",
+    "headingMany": "Lambobin tsaro",
+    "shared": "Ku da {{name}} kuna ganin lamba iri ɗaya. Ku kwatanta ta ido da ido ko ta kira don tabbatar da cewa babu wani a tsakaninku.",
+    "qrLabel": "Lambar QR ta lambar tsaro da ke tsakaninku da {{name}}",
+    "failed": "Ba a iya loda lambar tsaro ba."
+  },
+  "notify": {
+    "requestTitle": "Sabuwar tattaunawa",
+    "requestBody": "Sabuwar tattaunawa daga {{name}}"
+  }
+}

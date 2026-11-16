@@ -82,6 +82,21 @@ import fr_search from "../../frontend/src/i18n/locales/fr/search.json";
 import fr_settings from "../../frontend/src/i18n/locales/fr/settings.json";
 import fr_vault from "../../frontend/src/i18n/locales/fr/vault.json";
 import fr_voice from "../../frontend/src/i18n/locales/fr/voice.json";
+import ha_arcade from "../../frontend/src/i18n/locales/ha/arcade.json";
+import ha_auth from "../../frontend/src/i18n/locales/ha/auth.json";
+import ha_channels from "../../frontend/src/i18n/locales/ha/channels.json";
+import ha_chat from "../../frontend/src/i18n/locales/ha/chat.json";
+import ha_common from "../../frontend/src/i18n/locales/ha/common.json";
+import ha_dms from "../../frontend/src/i18n/locales/ha/dms.json";
+import ha_emoji from "../../frontend/src/i18n/locales/ha/emoji.json";
+import ha_errors from "../../frontend/src/i18n/locales/ha/errors.json";
+import ha_mobile from "../../frontend/src/i18n/locales/ha/mobile.json";
+import ha_nav from "../../frontend/src/i18n/locales/ha/nav.json";
+import ha_saved from "../../frontend/src/i18n/locales/ha/saved.json";
+import ha_search from "../../frontend/src/i18n/locales/ha/search.json";
+import ha_settings from "../../frontend/src/i18n/locales/ha/settings.json";
+import ha_vault from "../../frontend/src/i18n/locales/ha/vault.json";
+import ha_voice from "../../frontend/src/i18n/locales/ha/voice.json";
 import hi_arcade from "../../frontend/src/i18n/locales/hi/arcade.json";
 import hi_auth from "../../frontend/src/i18n/locales/hi/auth.json";
 import hi_channels from "../../frontend/src/i18n/locales/hi/channels.json";
@@ -395,6 +410,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": fr_settings,
     "vault": fr_vault,
     "voice": fr_voice,
+  },
+  "ha": {
+    "arcade": ha_arcade,
+    "auth": ha_auth,
+    "channels": ha_channels,
+    "chat": ha_chat,
+    "common": ha_common,
+    "dms": ha_dms,
+    "emoji": ha_emoji,
+    "errors": ha_errors,
+    "mobile": ha_mobile,
+    "nav": ha_nav,
+    "saved": ha_saved,
+    "search": ha_search,
+    "settings": ha_settings,
+    "vault": ha_vault,
+    "voice": ha_voice,
   },
   "hi": {
     "arcade": hi_arcade,

@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "Mai zaɓin emoji",
+    "triggerLabel": "Emoji",
+    "searchLabel": "Bincike",
+    "searchPlaceholder": "Nemi emoji",
+    "resultsFor": "Sakamako na \"{{query}}\"",
+    "recent": "Waɗanda ake yawan amfani da su",
+    "custom": "Na musamman",
+    "empty": "Babu emoji da ya dace da wannan.",
+    "previewHint": "Zaɓi emoji",
+    "railLabel": "Rukunan emoji"
+  },
+  "categories": {
+    "people": "Mutane",
+    "nature": "Halitta",
+    "food": "Abinci",
+    "activity": "Ayyuka",
+    "travel": "Tafiye-tafiye",
+    "objects": "Abubuwa",
+    "symbols": "Alamomi",
+    "flags": "Tutoci"
+  },
+  "skinTone": {
+    "groupLabel": "Launin fata",
+    "default": "Launin fata na asali",
+    "numbered": "Launin fata {{index}}"
+  },
+  "manage": {
+    "title": "Emoji na Musamman",
+    "signInRequired": "Da fatan a shiga",
+    "dropPrompt": "Ja hoto zuwa nan, ko danna don lalubawa",
+    "dropNow": "Saki don amfani da wannan hoto",
+    "dropHint": "{{formats}} · GIF masu motsi suna ci gaba da motsi",
+    "replaceHint": "Saki wani hoto, ko danna, don maye gurbinsa",
+    "sourceSize": "Asali {{size}} · za a matse shi zuwa ƙasa da 48 KB yayin ɗorawa",
+    "reencodeNote": "Za a matse shi zuwa ƙasa da 48 KB yayin ɗorawa",
+    "fileTooLarge": "Wannan hoton ya wuce {{size}} — zaɓi ƙaramin fayil",
+    "unsupportedFile": "{{name}} ba PNG, JPEG, GIF ko WebP ba ne",
+    "shortcodeLabel": "Gajeren suna",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Ana rubuta shi kamar :shortcode: — a–z, 0–9 da _",
+    "shortcodeRequired": "Ba wannan emoji suna don ƙara shi",
+    "shortcodeInvalid": "Yi amfani da haruffa 2–32: a–z, 0–9 da _",
+    "shortcodeTaken": "An riga an yi amfani da :{{shortcode}}: a wannan rukuni",
+    "samplePlaceholder": "Yadda zai bayyana a cikin saƙo",
+    "add": "Ƙara emoji",
+    "shrinking": "Ana matsewa…",
+    "filePickerTitle": "Zaɓi hoton emoji",
+    "imageFilterName": "Hotuna",
+    "addFailed": "Ba a iya ƙara wannan emoji ba",
+    "removeFailed": "Ba a iya cire wannan emoji ba",
+    "storageNote": "Ana matse hotuna zuwa ƙasa da 48 KB kafin ɗorawa, don haka babban fayil ba matsala ba ne. Hotuna iri ɗaya suna amfani da kwafi ɗaya da aka adana a duk rukunonin da ke amfani da su. Babu iyaka kan yawan emoji da wannan rukuni zai iya samu.",
+    "stored_one": "emoji {{count}} · an adana {{size}}",
+    "stored_other": "emoji {{count}} · an adana {{size}}",
+    "empty": "Babu emoji na musamman tukuna. Kowa a cikin rukunin zai iya ƙara ɗaya.",
+    "sizeAnimated": "mai motsi · {{size}}",
+    "remove": "Cire :{{shortcode}}:",
+    "removeAdminsOnly": "Masu gudanarwa na rukuni ne kaɗai za su iya cire emoji."
+  }
+}

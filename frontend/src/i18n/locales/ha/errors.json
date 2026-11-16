@@ -1,0 +1,17 @@
+{
+  "boundary": {
+    "instruction": "Da fatan a sake buɗe manhajar.",
+    "message": "Wani kuskure da ba a zata ba ya faru.",
+    "restart": "Sake farawa",
+    "tag": "KUSKURE MAI TSANANI",
+    "title": "Wani abu ya lalace"
+  },
+  "core": {
+    "pinIncorrect_one": "PIN ba daidai ba ne. Saura ƙoƙari {{count}}.",
+    "pinIncorrect_other": "PIN ba daidai ba ne. Saura ƙoƙari {{count}}.",
+    "pinLockedOut": "An shigar da PIN mara kyau sau da yawa. Dawo da asusun da Maɓallin Sirri.",
+    "pinNotSet": "Wannan na'ura ba ta da PIN tukuna. Sake shiga don saita PIN.",
+    "noActiveUser": "Ba a shiga a wannan na'ura ba. Sake shiga.",
+    "unlockFirst": "Buɗe Pollis tukuna."
+  }
+}
