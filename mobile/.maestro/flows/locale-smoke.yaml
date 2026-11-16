@@ -15,11 +15,17 @@ tags:
 # screenshots (locale-<code>-NN-<screen>), which Maestro cannot measure.
 
 # --- Sign-in, in the device language, before any choice is stored ---
-# The stored language lives in expo-secure-store, which on iOS is the keychain
-# and survives clearState; an earlier flow's choice would win over the device
+# iOS: the stored language lives in expo-secure-store, i.e. the keychain, which
+# survives clearState; an earlier flow's choice would win over the device
 # language (as it should for a user), so wipe it for a true first run.
-- clearKeychain
-- clearState
+# Android: the runner already ran `pm clear` and set the app's language
+# (per-app locale, which clearState would wipe), so nothing is cleared here.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - clearKeychain
+      - clearState
 - launchApp
 - extendedWaitUntil:
     visible:
@@ -29,7 +35,10 @@ tags:
     text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
 - takeScreenshot: locale-${LOCALE}-01-sign-in
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      KEEP_STATE: "true"
 
 # --- Chat list ---
 - tapOn:
@@ -69,7 +78,7 @@ tags:
     direction: DOWN
 - assertVisible:
     id: "radio-language-${LOCALE}"
-    checked: true
+    selected: true
 - assertNotVisible:
     text: "([a-z]+:)?[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9_]+)+"
 - takeScreenshot: locale-${LOCALE}-05-settings

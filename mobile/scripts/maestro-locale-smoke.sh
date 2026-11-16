@@ -5,8 +5,10 @@
 #
 #   mobile/scripts/maestro-locale-smoke.sh <ios|ipad|android> [locale ...]
 #
-# Screenshots: .maestro/artifacts/<date>/<platform>/locale-<code>-NN-<screen>.png. The device is
-# put back to English (en-US) at the end, pass or fail.
+# iOS sets the simulator's system language (and reboots it); Android sets the app's own language,
+# which is what the app's process locale follows there. Screenshots:
+# .maestro/artifacts/<date>/<platform>/locale-<code>-NN-<screen>.png. The device (iOS) or the app
+# (Android) is put back to English at the end, pass or fail.
 set -euo pipefail
 
 PLATFORM="${1:?usage: maestro-locale-smoke.sh <ios|ipad|android> [locale ...]}"
@@ -15,6 +17,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 LOCALES_DIR="$HERE/../frontend/src/i18n/locales"
 IOS_DEVICE="${IOS_DEVICE:-iPhone 18 Pro}"
 IPAD_DEVICE="${IPAD_DEVICE:-iPad Pro 13-inch (M5)}"
+ANDROID_APP_ID="com.pollis.mobile"
 
 if [ $# -gt 0 ]; then
   LOCALES=("$@")
@@ -55,14 +58,16 @@ set_device_language() {
       xcrun simctl bootstatus "$udid" >/dev/null
       ;;
     android)
-      # pollis_e2e is a google_apis image, so adb can be root and set the system locale.
-      adb root >/dev/null
-      adb wait-for-device
-      adb shell setprop persist.sys.locale "$(android_tag "$code")"
-      adb shell setprop ctl.restart zygote
-      adb wait-for-device
-      sleep 5
-      adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 1; done'
+      # The emulator's system language cannot be switched from adb on API 36 without a reboot, so
+      # use the per-app language (Settings → Apps → Pollis → Language), which the app's process
+      # locale and Hermes' Intl follow. `pm clear` first: a stored choice would win, and clearing
+      # afterwards would wipe the per-app language (the flow therefore does not clearState here).
+      adb shell pm clear "$ANDROID_APP_ID" >/dev/null
+      if [ "$code" = "en-US" ]; then
+        adb shell cmd locale set-app-locales "$ANDROID_APP_ID"
+      else
+        adb shell cmd locale set-app-locales "$ANDROID_APP_ID" --locales "$(android_tag "$code")"
+      fi
       ;;
   esac
 }
