@@ -396,6 +396,7 @@ test.describe("shipped locales", () => {
       "hi",
       "pa-Arab",
       "ps",
+      "bn",
     ]);
   });
 

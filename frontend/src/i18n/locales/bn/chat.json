@@ -1,0 +1,177 @@
+{
+  "message": {
+    "fromLabel": "{{name}}-এর মেসেজ",
+    "unknownAuthor": "অজানা",
+    "deleted": "[মুছে ফেলা হয়েছে]",
+    "encrypted": "[এনক্রিপ্টেড]",
+    "redacted": "[লুকানো]",
+    "edited": "(এডিট করা)",
+    "editUnsent": "(এডিট পাঠানো হয়নি)",
+    "newMember": "নতুন",
+    "newMemberTitle": "গত 7 দিনের মধ্যে যোগ দিয়েছেন",
+    "undecryptable": {
+      "tag": "ডিক্রিপ্ট করা যায়নি",
+      "title": "ডিক্রিপ্ট করা যায়নি",
+      "body_one": "{{count}}টি মেসেজ এই ডিভাইসে ডিক্রিপ্ট করা যায়নি।",
+      "body_other": "{{count}}টি মেসেজ এই ডিভাইসে ডিক্রিপ্ট করা যায়নি।",
+      "detail": "এখানে কিছু পাঠানো হয়েছিল, কিন্তু এই ডিভাইস সেটি পড়তে পারেনি। আপনার অন্য ডিভাইসগুলিতে হয়তো এটি আছে।",
+      "diagnostics": "ডায়াগনস্টিক দেখুন"
+    }
+  },
+  "status": {
+    "pending": "অপেক্ষমাণ",
+    "sending": "পাঠানো হচ্ছে",
+    "sent": "পাঠানো হয়েছে",
+    "failed": "ব্যর্থ",
+    "cancelled": "বাতিল করা হয়েছে"
+  },
+  "outbox": {
+    "retry": "আবার চেষ্টা করুন",
+    "discard": "বাদ দিন",
+    "retryLabel": "এই মেসেজটি আবার পাঠানোর চেষ্টা করুন",
+    "discardLabel": "না-পাঠানো এই মেসেজটি বাদ দিন",
+    "notSent": "পাঠানো হয়নি",
+    "willResend": "Pollis আবার কানেক্ট হলে এটি নিজে থেকেই পাঠানো হবে।",
+    "notDelivered": "এই মেসেজটি পৌঁছে দেওয়া যায়নি।"
+  },
+  "actions": {
+    "reply": "উত্তর দিন",
+    "replyInThread": "থ্রেডে উত্তর দিন",
+    "save": "মেসেজ সেভ করুন",
+    "removeBookmark": "বুকমার্ক সরান",
+    "copyLink": "মেসেজের লিঙ্ক কপি করুন",
+    "copyLinkCopied": "লিঙ্ক কপি করা হয়েছে",
+    "copyLinkFailed": "লিঙ্ক কপি করা যায়নি",
+    "edit": "মেসেজ এডিট করুন",
+    "delete": "মেসেজ মুছুন",
+    "deleteAsAdmin": "মেসেজ মুছুন (অ্যাডমিন)",
+    "more": "আরও অ্যাকশন",
+    "pin": "মেসেজ পিন করুন",
+    "unpin": "মেসেজ আনপিন করুন",
+    "report": "রিপোর্ট করুন"
+  },
+  "thread": {
+    "replyCount_one": "{{count}}টি উত্তর",
+    "replyCount_other": "{{count}}টি উত্তর"
+  },
+  "receipts": {
+    "readByEveryone": "সবাই পড়েছেন",
+    "readByCount_one": "{{total}} জনের মধ্যে {{count}} জন পড়েছেন",
+    "readByCount_other": "{{total}} জনের মধ্যে {{count}} জন পড়েছেন",
+    "deliveredCount_one": "{{total}} জনের মধ্যে {{count}} জনের কাছে পৌঁছেছে",
+    "deliveredCount_other": "{{total}} জনের মধ্যে {{count}} জনের কাছে পৌঁছেছে"
+  },
+  "list": {
+    "empty": "এখনও কোনো মেসেজ নেই। কথোপকথন শুরু করুন।",
+    "unknownAuthor": "অজানা",
+    "blockedAuthor": "ব্লক করা ব্যবহারকারী",
+    "blockedBody": "[ব্লক করা]"
+  },
+  "replyBar": {
+    "replyingTo": "<name>{{name}}</name>-কে উত্তর দিচ্ছেন",
+    "scrollToMessage": "যে মেসেজের উত্তর দেওয়া হয়েছে সেখানে যান",
+    "dismiss": "উত্তর বাতিল করুন",
+    "encrypted": "[এনক্রিপ্টেড মেসেজ]"
+  },
+  "queue": {
+    "heading": "সারি",
+    "pendingPlaceholder": "[অপেক্ষমাণ মেসেজ]",
+    "cancel": "মেসেজ বাতিল করুন",
+    "retry": "আবার চেষ্টা করুন",
+    "failedCount_one": "ব্যর্থ ×{{count}}",
+    "failedCount_other": "ব্যর্থ ×{{count}}"
+  },
+  "reactions": {
+    "add": "প্রতিক্রিয়া যোগ করুন",
+    "all": "সব",
+    "allTabLabel_one": "সব, {{count}}টি প্রতিক্রিয়া",
+    "allTabLabel_other": "সব, {{count}}টি প্রতিক্রিয়া",
+    "contextHint": "কে কী প্রতিক্রিয়া দিয়েছেন দেখতে রাইট-ক্লিক করুন",
+    "hoverMore_one": "{{names}} এবং আরও {{count}} জন {{emoji}} দিয়ে প্রতিক্রিয়া জানিয়েছেন",
+    "hoverMore_other": "{{names}} এবং আরও {{count}} জন {{emoji}} দিয়ে প্রতিক্রিয়া জানিয়েছেন",
+    "hoverNames": "{{names}} {{emoji}} দিয়ে প্রতিক্রিয়া জানিয়েছেন",
+    "pillLabel_one": "{{emoji}} {{count}}টি প্রতিক্রিয়া",
+    "pillLabel_other": "{{emoji}} {{count}}টি প্রতিক্রিয়া",
+    "rowLabel": "{{name}}, {{emojis}} দিয়ে প্রতিক্রিয়া জানিয়েছেন",
+    "selfName": "{{name}} (আপনি)",
+    "sheetTitle": "প্রতিক্রিয়া",
+    "tabLabel_one": "{{emoji}}, {{count}}টি প্রতিক্রিয়া",
+    "tabLabel_other": "{{emoji}}, {{count}}টি প্রতিক্রিয়া",
+    "unknownUser": "অজানা ব্যবহারকারী",
+    "viewWho": "প্রতিক্রিয়া দেখুন",
+    "you": "আপনি"
+  },
+  "preview": {
+    "noMessages": "এখনও কোনো মেসেজ নেই",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}}টি অ্যাটাচমেন্ট]",
+    "attachments_other": "[{{count}}টি অ্যাটাচমেন্ট]",
+    "undecryptable": "একটি মেসেজ এই ডিভাইসে ডিক্রিপ্ট করা যায়নি"
+  },
+  "attachment": {
+    "viewLabel": "{{filename}} দেখুন",
+    "openLabel": "{{filename}} খুলুন",
+    "downloadLabel": "{{filename}} ডাউনলোড করুন",
+    "loading": "লোড হচ্ছে…",
+    "error": "ত্রুটি",
+    "failedToLoad": "লোড করা যায়নি",
+    "failedToDownload": "ডাউনলোড করা যায়নি",
+    "lightboxFetch": "আনুন",
+    "lightboxDone": "[ হয়ে গেছে ]",
+    "lightboxDownload": "[ডাউনলোড]",
+    "lightboxClose": "[esc]",
+    "sensitiveReveal": "সংবেদনশীল মিডিয়া দেখান: {{filename}}",
+    "sensitiveHide": "{{filename}} লুকান"
+  },
+  "unfurl": {
+    "loadImage": "ছবি লোড করুন",
+    "loadVideo": "ভিডিও লোড করুন",
+    "loadTitle": "{{url}} থেকে মিডিয়া লোড করুন — এতে ওই সাইটের সাথে সরাসরি যোগাযোগ হবে",
+    "loadDescription": "{{url}} থেকে মিডিয়া লোড করুন। এতে ওই সাইটের সাথে সরাসরি যোগাযোগ হবে এবং সাইটটি আপনার IP ঠিকানা জেনে যাবে।",
+    "openLabel": "{{url}} খুলুন"
+  },
+  "notify": {
+    "newMessageTitle": "নতুন মেসেজ",
+    "newMessageBody": "{{name}}: নতুন মেসেজ",
+    "mentionTitle": "নতুন মেনশন",
+    "allMentionBody": "{{name}} @all মেনশন করেছেন",
+    "userMentionBody": "{{name}} আপনাকে মেনশন করেছেন"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "এই ব্যক্তি",
+    "titleMessage": "মেসেজ রিপোর্ট করুন",
+    "titleUser": "{{name}}-কে রিপোর্ট করুন",
+    "intro": "Pollis অ্যাকাউন্ট আর কারণটি পায়। মেসেজ এনক্রিপ্টেড থাকে, তাই কী বলা হয়েছিল তা আমরা কখনও দেখি না।",
+    "reasonLabel": "কারণ",
+    "reason": {
+      "spam": "স্প্যাম",
+      "harassment": "হয়রানি বা হুমকি",
+      "illegal": "বেআইনি কনটেন্ট",
+      "other": "অন্য কিছু"
+    },
+    "submit": "রিপোর্ট করুন",
+    "submitAndBlock": "রিপোর্ট ও ব্লক করুন",
+    "failed": "রিপোর্ট পাঠানো যায়নি। আবার চেষ্টা করুন।",
+    "doneTitle": "রিপোর্ট পাঠানো হয়েছে",
+    "done": "ধন্যবাদ। আমরা প্রতিটি রিপোর্ট পর্যালোচনা করি।",
+    "doneBlocked": "ধন্যবাদ। আমরা প্রতিটি রিপোর্ট পর্যালোচনা করি। আপনি {{name}}-কে ব্লকও করেছেন।",
+    "close": "হয়ে গেছে"
+  },
+  "keyChange": {
+    "notice": "{{name}}-এর সাথে আপনার নিরাপত্তা নম্বর বদলে গেছে।",
+    "verify": "যাচাই করুন",
+    "defaultName": "এই পরিচিতি"
+  },
+  "typing": {
+    "one": "{{name}} টাইপ করছেন…",
+    "two": "{{first}} আর {{second}} টাইপ করছেন…",
+    "several_one": "{{count}} জন টাইপ করছেন…",
+    "several_other": "{{count}} জন টাইপ করছেন…"
+  }
+}

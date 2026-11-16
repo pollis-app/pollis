@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "ফিরে যান",
+    "cancel": "বাতিল করুন",
+    "close": "বন্ধ করুন",
+    "copy": "কপি করুন",
+    "copied": "কপি করা হয়েছে",
+    "copyFailed": "কপি করা যায়নি",
+    "delete": "মুছুন",
+    "forward": "ফরওয়ার্ড করুন",
+    "goBack": "ফিরে যান",
+    "moreOptions": "আরও বিকল্প",
+    "save": "সেভ করুন"
+  },
+  "states": {
+    "buttonLoading": "লোড হচ্ছে...",
+    "loading": "লোড হচ্ছে…"
+  },
+  "time": {
+    "today": "আজ",
+    "yesterday": "গতকাল"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "স্পেস",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "উপস্থিতি: {{status}}",
+    "offline": "অফলাইন",
+    "online": "অনলাইন"
+  },
+  "list": {
+    "empty": "কোনো আইটেম নেই।"
+  },
+  "grid": {
+    "empty": "এখানে এখনও কেউ নেই।"
+  },
+  "menu": {
+    "escHint": "ফিরে যেতে Esc",
+    "navigationLabel": "নেভিগেশন মেনু",
+    "navigateHint": "নেভিগেট করুন",
+    "selectHint": "বেছে নিতে Enter"
+  },
+  "media": {
+    "mute": "মিউট করুন",
+    "pause": "পজ করুন",
+    "play": "চালান",
+    "seek": "অডিওর অবস্থান বদলান",
+    "skipBackward": "10 সেকেন্ড পিছিয়ে যান",
+    "skipForward": "10 সেকেন্ড এগিয়ে যান",
+    "unmute": "আনমিউট করুন",
+    "volume": "ভলিউম"
+  },
+  "composer": {
+    "addAttachment": "অ্যাটাচমেন্ট যোগ করুন",
+    "allMentionHint": "এই চ্যানেলের সবাইকে বিজ্ঞপ্তি পাঠায়",
+    "filePickerTitle": "ফাইল যোগ করুন",
+    "inputLabel": "মেসেজ লেখার জায়গা",
+    "placeholder": "একটি মেসেজ লিখুন…",
+    "previewAlt": "প্রিভিউ",
+    "removeAttachment": "{{name}} সরান",
+    "send": "মেসেজ পাঠান",
+    "markSensitive": "{{name}}-কে সংবেদনশীল হিসেবে চিহ্নিত করুন",
+    "unmarkSensitive": "{{name}}-কে সংবেদনশীল চিহ্ন থেকে সরান"
+  },
+  "mentions": {
+    "listLabel": "মেনশন সাজেশন",
+    "matching": "<hl>@{{query}}</hl>-এর সাথে মেলে এমন সদস্য"
+  },
+  "emojiSuggest": {
+    "listLabel": "ইমোজি সাজেশন",
+    "matching": "<hl>:{{query}}</hl>-এর সাথে মেলে এমন ইমোজি"
+  },
+  "a11y": {
+    "avatar": "অবতার",
+    "loading": "লোড হচ্ছে",
+    "otpDigit": "OTP-র {{index}} নম্বর অঙ্ক"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} সে",
+    "seconds_other": "{{count}} সে",
+    "minutes_one": "{{count}} মি",
+    "minutes_other": "{{count}} মি",
+    "hours_one": "{{count}} ঘ",
+    "hours_other": "{{count}} ঘ",
+    "days_one": "{{count}} দিন",
+    "days_other": "{{count}} দিন",
+    "weeks_one": "{{count}} সপ্তাহ",
+    "weeks_other": "{{count}} সপ্তাহ",
+    "months_one": "{{count}} মাস",
+    "months_other": "{{count}} মাস",
+    "years_one": "{{count}} বছর",
+    "years_other": "{{count}} বছর"
+  },
+  "tray": {
+    "open": "Pollis খুলুন",
+    "muteMic": "মাইক মিউট করুন",
+    "unmuteMic": "মাইক আনমিউট করুন",
+    "muteMicIdle": "মাইক মিউট করুন (কলে নেই)",
+    "version": "ভার্সন {{version}}",
+    "quit": "Pollis বন্ধ করুন",
+    "unread_one": "Pollis — {{count}}টি অপঠিত",
+    "unread_other": "Pollis — {{count}}টি অপঠিত"
+  }
+}

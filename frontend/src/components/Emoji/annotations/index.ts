@@ -20,6 +20,7 @@ export type EmojiAnnotationRow = readonly [
 
 export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [
   "ar",
+  "bn",
   "en",
   "es",
   "fr",
@@ -41,6 +42,8 @@ export function loadEmojiAnnotationRows(
   switch (locale) {
     case "ar":
       return import("./ar").then((m) => m.default);
+    case "bn":
+      return import("./bn").then((m) => m.default);
     case "en":
       return import("./en").then((m) => m.default);
     case "es":

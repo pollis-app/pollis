@@ -96,4 +96,5 @@ test("South Asian locales are auto-detected from OS tags (#1726)", () => {
   assert.equal(normalizeLanguage("hi-IN"), "hi");
   assert.equal(normalizeLanguage("pa-PK"), "pa-Arab");
   assert.equal(normalizeLanguage("ps-AF"), "ps");
+  assert.equal(normalizeLanguage("bn-BD"), "bn");
 });

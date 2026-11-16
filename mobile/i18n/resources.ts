@@ -22,6 +22,21 @@ import ar_search from "../../frontend/src/i18n/locales/ar/search.json";
 import ar_settings from "../../frontend/src/i18n/locales/ar/settings.json";
 import ar_vault from "../../frontend/src/i18n/locales/ar/vault.json";
 import ar_voice from "../../frontend/src/i18n/locales/ar/voice.json";
+import bn_arcade from "../../frontend/src/i18n/locales/bn/arcade.json";
+import bn_auth from "../../frontend/src/i18n/locales/bn/auth.json";
+import bn_channels from "../../frontend/src/i18n/locales/bn/channels.json";
+import bn_chat from "../../frontend/src/i18n/locales/bn/chat.json";
+import bn_common from "../../frontend/src/i18n/locales/bn/common.json";
+import bn_dms from "../../frontend/src/i18n/locales/bn/dms.json";
+import bn_emoji from "../../frontend/src/i18n/locales/bn/emoji.json";
+import bn_errors from "../../frontend/src/i18n/locales/bn/errors.json";
+import bn_mobile from "../../frontend/src/i18n/locales/bn/mobile.json";
+import bn_nav from "../../frontend/src/i18n/locales/bn/nav.json";
+import bn_saved from "../../frontend/src/i18n/locales/bn/saved.json";
+import bn_search from "../../frontend/src/i18n/locales/bn/search.json";
+import bn_settings from "../../frontend/src/i18n/locales/bn/settings.json";
+import bn_vault from "../../frontend/src/i18n/locales/bn/vault.json";
+import bn_voice from "../../frontend/src/i18n/locales/bn/voice.json";
 import en_arcade from "../../frontend/src/i18n/locales/en/arcade.json";
 import en_auth from "../../frontend/src/i18n/locales/en/auth.json";
 import en_channels from "../../frontend/src/i18n/locales/en/channels.json";
@@ -222,6 +237,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": ar_settings,
     "vault": ar_vault,
     "voice": ar_voice,
+  },
+  "bn": {
+    "arcade": bn_arcade,
+    "auth": bn_auth,
+    "channels": bn_channels,
+    "chat": bn_chat,
+    "common": bn_common,
+    "dms": bn_dms,
+    "emoji": bn_emoji,
+    "errors": bn_errors,
+    "mobile": bn_mobile,
+    "nav": bn_nav,
+    "saved": bn_saved,
+    "search": bn_search,
+    "settings": bn_settings,
+    "vault": bn_vault,
+    "voice": bn_voice,
   },
   "en": {
     "arcade": en_arcade,
