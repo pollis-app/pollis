@@ -634,7 +634,7 @@ function platformMatrix() {
   };
 
   // The desktop renderer's default skin, and which native e2e scenarios switch to the other one.
-  const defaultSkin = /return v === "(\w+)" \? "\w+" : "(\w+)"/.exec(exists("frontend/src/utils/colorUtils.ts") ? read("frontend/src/utils/colorUtils.ts") : "")?.[2] ?? axes.skin[0];
+  const defaultSkin = /DEFAULT_SKIN: Skin = "(\w+)"/.exec(exists("frontend/src/utils/colorUtils.ts") ? read("frontend/src/utils/colorUtils.ts") : "")?.[1] ?? axes.skin[0];
   const scenarioSkins = (name) => {
     const f = `e2e/${name}.js`;
     const text = exists(f) ? read(f) : "";

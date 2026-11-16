@@ -72,7 +72,8 @@ function DeleteAccount() {
         <Button
           full
           testID="btn-delete-account"
-          icon={<Icon.trash size={20} color={semantic.text} />}
+          variant="danger"
+          icon={<Icon.trash size={20} color={semantic.onDanger} />}
           disabled={!armed || deleteAccount.isPending || !currentUser}
           onPress={onDelete}
         >

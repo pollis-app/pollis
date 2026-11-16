@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Ìfiránṣẹ́ láti ọ̀dọ̀ {{name}}",
     "unknownAuthor": "àìmọ̀",
-    "deleted": "[a ti pa á rẹ́]",
-    "encrypted": "[ó ní ìpàrokò]",
-    "redacted": "[a ti bò ó mọ́lẹ̀]",
+    "deleted": "A ti pa ìfiránṣẹ́ rẹ́",
+    "beforeJoin": "A fi ránṣẹ́ kí o tó darapọ̀",
     "edited": "(a ti ṣàtúnṣe)",
     "editUnsent": "(a kò fi àtúnṣe ránṣẹ́)",
     "newMember": "tuntun",
@@ -66,8 +65,7 @@
   "replyBar": {
     "replyingTo": "ò ń fèsì sí <name>{{name}}</name>",
     "scrollToMessage": "Lọ sí ìfiránṣẹ́ tí o fèsì sí",
-    "dismiss": "Fagilé ìfèsì",
-    "encrypted": "[Ìfiránṣẹ́ tó ní ìpàrokò]"
+    "dismiss": "Fagilé ìfèsì"
   },
   "queue": {
     "heading": "Ìlà ìdúró",

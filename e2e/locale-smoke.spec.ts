@@ -20,7 +20,7 @@ const ALL_LOCALES = fs
 const ONLY = (process.env.LOCALE_SMOKE ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const LOCALES = ONLY.length ? ALL_LOCALES.filter((l) => ONLY.includes(l)) : ALL_LOCALES;
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };

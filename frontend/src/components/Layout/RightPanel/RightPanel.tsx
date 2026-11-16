@@ -1,7 +1,7 @@
 import React, { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { appStore } from "../../../stores/appStore";
+import { useRouterState } from "@tanstack/react-router";
 import { useShortcutLabel } from "../../../keyboard";
 import { useRightPanel } from "./useRightPanel";
 import { MembersPanel } from "./MembersPanel";
@@ -11,6 +11,7 @@ import { useDMConversations } from "../../../hooks/queries/useMessages";
 import { ThreadPanel } from "./ThreadPanel";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePanelWidth } from "../usePanelWidth";
+import { panelContextFromPath } from "./panelContext";
 
 /** Right panel slot (#824): a flex sibling of `<Outlet />`, never an overlay. Open state is device-local (#904); see `useRightPanel`. */
 export const RightPanel: React.FC = observer(() => {
@@ -26,15 +27,14 @@ export const RightPanel: React.FC = observer(() => {
     closePanel,
   );
 
-  const groupId = appStore.selectedGroupId;
-  const channelId = appStore.selectedChannelId;
-  const conversationId = appStore.selectedConversationId;
-  // No conversation: `MembersPanel` shows only the online roster.
-  const hasContext = Boolean(channelId || conversationId || groupId);
-  // Threads and pins need a conversation; else the roster.
-  const shownThreadId = kind === "thread" && hasContext ? threadId : null;
-  const showPins =
-    kind === "pins" && hasContext && Boolean(channelId || conversationId);
+  // The page decides, never "last selected" store fields (`panelContext.ts`).
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { groupId, channelId, conversationId } = panelContextFromPath(pathname);
+  // No conversation: `MembersPanel` shows the online DM contacts.
+  // Threads and pins need a message log (a channel or a DM); else the people list.
+  const hasLog = Boolean(channelId || conversationId);
+  const shownThreadId = kind === "thread" && hasLog ? threadId : null;
+  const showPins = kind === "pins" && hasLog;
   // Safety (#1563) only inside a DM with that peer.
   const safetyPeer =
     kind === "safety" && conversationId && safetyPeerId

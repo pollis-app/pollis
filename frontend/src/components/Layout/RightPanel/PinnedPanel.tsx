@@ -18,7 +18,7 @@ interface PinnedPanelProps {
 export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
   ({ channelId, conversationId }) => {
     const { t } = useTranslation("nav");
-    const isTerminal = useSkin() !== "refined";
+    const isTerminal = useSkin() !== "modern";
     const activeConversationId = channelId ?? conversationId;
     const { data: pins = [], isLoading, isError } = usePinnedMessages(activeConversationId);
     const togglePin = useTogglePinnedMessage();

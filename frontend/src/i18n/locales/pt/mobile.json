@@ -115,7 +115,6 @@
     "ownPreview": "Eu: {{text}}",
     "noMatches": "Nenhuma conversa corresponde.",
     "emptyHint": "Inicie uma conversa com alguém através do nome de utilizador ou do email.",
-    "previewDeleted": "Mensagem eliminada",
     "previewAttachment": "Anexo"
   },
   "dm": {

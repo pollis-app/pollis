@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "{{name}} ਦਾ ਸੁਨੇਹਾ",
     "unknownAuthor": "ਅਣਜਾਣ",
-    "deleted": "[ਮਿਟਾਇਆ ਗਿਆ]",
-    "encrypted": "[ਇਨਕ੍ਰਿਪਟ ਕੀਤਾ]",
-    "redacted": "[ਹਟਾਇਆ ਗਿਆ]",
+    "deleted": "ਸੁਨੇਹਾ ਮਿਟਾਇਆ ਗਿਆ",
+    "beforeJoin": "ਤੁਹਾਡੇ ਸ਼ਾਮਲ ਹੋਣ ਤੋਂ ਪਹਿਲਾਂ ਭੇਜਿਆ ਗਿਆ",
     "edited": "(ਸੋਧਿਆ ਗਿਆ)",
     "editUnsent": "(ਸੋਧ ਨਹੀਂ ਭੇਜੀ ਗਈ)",
     "newMember": "ਨਵਾਂ",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> ਨੂੰ ਜਵਾਬ ਦੇ ਰਹੇ ਹੋ",
     "scrollToMessage": "ਜਿਸ ਸੁਨੇਹੇ ਦਾ ਜਵਾਬ ਦਿੱਤਾ, ਉਸ 'ਤੇ ਜਾਓ",
-    "dismiss": "ਜਵਾਬ ਹਟਾਓ",
-    "encrypted": "[ਇਨਕ੍ਰਿਪਟ ਕੀਤਾ ਸੁਨੇਹਾ]"
+    "dismiss": "ਜਵਾਬ ਹਟਾਓ"
   },
   "queue": {
     "heading": "ਕਤਾਰ",

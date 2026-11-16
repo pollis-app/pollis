@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Повідомлення від {{name}}",
     "unknownAuthor": "невідомо",
-    "deleted": "[видалено]",
-    "encrypted": "[зашифровано]",
-    "redacted": "[приховано]",
+    "deleted": "Повідомлення видалено",
+    "beforeJoin": "Надіслано до того, як ви приєдналися",
     "edited": "(змінено)",
     "editUnsent": "(зміну не надіслано)",
     "newMember": "новий",
@@ -68,8 +67,7 @@
   "replyBar": {
     "replyingTo": "відповідь для <name>{{name}}</name>",
     "scrollToMessage": "Перейти до повідомлення, на яке відповідаєте",
-    "dismiss": "Скасувати відповідь",
-    "encrypted": "[Зашифроване повідомлення]"
+    "dismiss": "Скасувати відповідь"
   },
   "queue": {
     "heading": "Черга",

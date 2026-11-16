@@ -8,7 +8,7 @@ interface MessageAvatarProps {
   size?: number;
 }
 
-// Refined-skin avatar; kept off the terminal path so its profile query only fires when shown.
+// Modern-skin avatar; kept off the terminal path so its profile query only fires when shown.
 export const MessageAvatar: React.FC<MessageAvatarProps> = ({
   userId,
   username,

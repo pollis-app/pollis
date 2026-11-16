@@ -41,13 +41,13 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   );
 
   // #1094: a deep link never redeems on arrival; joining discloses your identity, so it takes a press.
-  const isRefined = skin === "refined";
+  const isModern = skin === "modern";
 
   const body = (
     <>
       <TextInput
         label={
-          isRefined
+          isModern
             ? t("joinByInvite.tokenLabel")
             : t("joinByInvite.tokenLabelTerminal")
         }
@@ -72,13 +72,13 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
           disabled={!token.trim()}
           isLoading={redeemMutation.isPending}
           loadingText={
-            isRefined
+            isModern
               ? t("joinByInvite.submitting")
               : t("joinByInvite.submittingTerminal")
           }
           data-testid="redeem-invite-link"
         >
-          {isRefined ? t("joinByInvite.submit") : t("joinByInvite.submitTerminal")}
+          {isModern ? t("joinByInvite.submit") : t("joinByInvite.submitTerminal")}
         </Button>
       </div>
     </>
@@ -96,17 +96,17 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
             void handleRedeem(token);
           }}
           className={
-            isRefined
+            isModern
               ? "w-full max-w-[32rem] rounded-lg border border-line bg-surface p-6"
               : "w-full max-w-[32rem] border border-line bg-surface p-5"
           }
         >
           <h2
             className={
-              isRefined ? "text-base font-semibold text-fg" : "text-base text-accent"
+              isModern ? "text-base font-semibold text-fg" : "text-base text-accent"
             }
           >
-            {isRefined ? t("joinByInvite.heading") : t("joinByInvite.headingTerminal")}
+            {isModern ? t("joinByInvite.heading") : t("joinByInvite.headingTerminal")}
           </h2>
           <p className="mt-1 mb-4 text-xs text-dim">{t("joinByInvite.blurb")}</p>
           {body}

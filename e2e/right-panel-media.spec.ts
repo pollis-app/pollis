@@ -33,7 +33,7 @@ const MESSAGES = [
   },
 ];
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 async function openChannelWithPanel(page: Page, skin: Skin) {

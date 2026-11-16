@@ -9,7 +9,7 @@ const GROUP_ID = "g_voice";
 const TEXT_CHANNEL_ID = "c_general";
 const VOICE_CHANNEL_ID = "c_lounge";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 /** A snapshot in the shape `VoiceGateState` travels in. */

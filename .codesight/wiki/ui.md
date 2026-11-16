@@ -167,12 +167,14 @@ Maestro: `.maestro/flows/message-links.yaml`.
 ### Skins: Terminal and Modern (#565, #1924)
 
 Desktop has two skins, picked in Preferences → Appearance (`SkinPicker`, a vertical
-`RadioList`) and synced in the preferences blob under `skin`. Users read them as
-**Terminal** (default) and **Modern**. Modern's stored value, its `Skin` type member,
-the `data-skin` attribute and every `:root[data-skin="refined"]` selector stay
-`refined`: shipped desktop builds run `normalizeSkin`, which maps any other value to
-terminal, so writing `"modern"` would flip a user's not-yet-updated devices. The
-constant is `MODERN_SKIN` (`utils/firstRunAppearance.ts`), pinned by
+`RadioList`) and synced in the preferences blob under `skin`: **Modern**, the base look
+and the default, and **Terminal**, the opt-in IRC-style variant. The design language both
+follow (and mobile shares) is `docs/design/`. In code the skin is `"modern" | "terminal"`
+(`Skin`, `utils/colorUtils.ts`) and `<html data-skin>` carries the same word. Only the
+**stored** value differs: Modern goes out as `refined` (`skinToWire`), because shipped
+desktop builds run a `normalizeSkin` that maps anything but `refined` to terminal, so
+writing `"modern"` would flip a user's not-yet-updated devices. `normalizeSkin` reads
+`refined` and `modern` as Modern and an absent skin as the default; both are pinned by
 `frontend/tests/first-run-appearance.test.ts`. Mobile has no skins.
 
 **First-run choice (#1924).** A new user picks the skin once, after sign-in and
@@ -603,9 +605,9 @@ The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay 
 | Is the panel open? | `stores/rightPanelStore` → `localStorage` key `pollis-right-panel-open:<userId>` | **No.** Only the user toggling it moves it. |
 | Which shape, and whose data? | `?thread=<ULID>` for a thread; otherwise the members roster, scoped by `appStore` selection | **Yes.** That is what the panel is for. |
 
-Open/closed used to be a `?panel=` search param, which is what broke it: nothing in the app carries search params across a navigation (every `router.navigate({ to })` produces a bare URL), so the param was dropped on every sidebar click and the panel fell back to a SKIN default — shut in `terminal`, open in `refined`. One bug, two faces: a terminal panel that would not stay open, a Modern one that would not stay shut. It is now device-local and **keyed by user id**, the same scheme as the device-local language (`i18n/storage.ts`) and font size (`loadDeviceFontSize`), so a shared OS account never leaks one person's layout to the next.
+Open/closed used to be a `?panel=` search param, which is what broke it: nothing in the app carries search params across a navigation (every `router.navigate({ to })` produces a bare URL), so the param was dropped on every sidebar click and the panel fell back to a SKIN default — shut in `terminal`, open in `modern`. One bug, two faces: a terminal panel that would not stay open, a Modern one that would not stay shut. It is now device-local and **keyed by user id**, the same scheme as the device-local language (`i18n/storage.ts`) and font size (`loadDeviceFontSize`), so a shared OS account never leaks one person's layout to the next.
 
-**Seeding.** A device with nothing remembered falls back to the synced `right_panel_open_by_default` preference, else the skin's historical default — and then **writes that answer down**, once the preferences query has settled (the skin is read from that same query, so an earlier seed would record the loading placeholder). The write is what keeps the skin out of it: after seeding, the skin is never consulted again, so switching between `terminal` and `refined` cannot open or close the panel. The Preferences switch writes BOTH halves — device-local (so it actually moves the panel you are looking at) and synced (so the next new device seeds from it).
+**Seeding.** A device with nothing remembered falls back to the synced `right_panel_open_by_default` preference, else the skin's historical default — and then **writes that answer down**, once the preferences query has settled (the skin is read from that same query, so an earlier seed would record the loading placeholder). The write is what keeps the skin out of it: after seeding, the skin is never consulted again, so switching between `terminal` and `modern` cannot open or close the panel. The Preferences switch writes BOTH halves — device-local (so it actually moves the panel you are looking at) and synced (so the next new device seeds from it).
 
 `validatePanelSearch` (`frontend/src/types/panel.ts`) is declared on the **root** route, because the panel is AppShell's chrome rather than any one page's. It drops unrecognised values instead of throwing, so a stale or hand-edited link falls back to a plain conversation view rather than blanking the app. `useRightPanel` owns the only write path for both halves.
 
@@ -613,9 +615,9 @@ Open/closed used to be a `?panel=` search param, which is what broke it: nothing
 
 Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 
-**Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-composer border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, Modern (`refined`) re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; Modern keeps the airier avatar rows.
+**Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-composer border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, Modern re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; Modern keeps the airier avatar rows.
 
-**Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?thread=` on such a route falls back to the roster rather than rendering an empty thread.
+**Content is contextual, the column is not.** The panel's context comes from the route alone (`RightPanel/panelContext.ts`, pinned by `frontend/tests/panel-context.test.ts`), never from `appStore.selected*`: those outlive the page that set them, which once left a channel's group roster on every settings page. Any `/groups/<id>/…` page lists that group's **other members who are online**; a channel adds threads, pins and its media. `/dms/<id>` (and its settings) lists everyone in the conversation, you included, with safety numbers and media. Every other page (Preferences, Search, root, …) lists the **online people you have a DM open with**, named from the DM list, never a raw id. No media grid off a conversation, and a stale `?thread=` there falls back to the people list rather than rendering an empty thread. Presence is `presenceStore`; test builds expose it as `window.__pollisPresence` so specs can mark people online.
 
 **The media grid is the message log's thumbnails.** `MediaGrid` renders `AttachmentDisplay` in its `tile` mode (a square that fills the cell instead of the fixed 96×96 thumb) — the same blurhash placeholder while bytes resolve, the same `0.5rem` corners, no border, click-to-lightbox — so a picture looks identical in the panel and in the chat. It used to be a separate `MediaTile` with none of that; the search page's `ResultThumbnails` used the same tile and now renders the same component. The grid is pictures and videos only (`isVisualMedia` in `MembersPanel`, the split `MessageItem` makes); audio and files stay in the log. Coverage: `e2e/right-panel-media.spec.ts`.
 
@@ -975,7 +977,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **HexColorField** — props: color, hexInput, onHexInputChange, onColor, title, swatchStyle — `frontend/src/components/Preferences/HexColorField.tsx`. Swatch + hex box of the accent and background rows in `PreferencesPage` (#1731).
 - **LanguageSection** — `frontend/src/components/Preferences/LanguageSection.tsx`. Preferences' Language heading and one `NavRow` (`pref-language-row`) naming the current language by its endonym; opens `LanguagePage` (#1944).
 - **RelayServingSection** — props: config, status, applyError, onChange — `frontend/src/components/Preferences/RelayServingSection.tsx`
-- **SkinPicker** — props: value, onChange — `frontend/src/components/Preferences/SkinPicker.tsx`. The Terminal / Modern `RadioList`, shared by Preferences and the first-run step; row test ids carry the stored value (`pref-skin-refined` is Modern).
+- **SkinPicker** — props: value, onChange — `frontend/src/components/Preferences/SkinPicker.tsx`. The Terminal / Modern `RadioList`, shared by Preferences and the first-run step; row test ids carry the skin (`pref-skin-modern`, `pref-skin-terminal`), Modern first.
 
 ### `components/Saved` (1)
 

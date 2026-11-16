@@ -31,7 +31,7 @@
     "ariaLabel": "የበይነገጽ ገጽታ",
     "skinTerminal": "ተርሚናል",
     "skinModern": "ዘመናዊ",
-    "description": "ተርሚናል ነባሪው የIRC/monospace መልክ ነው። ዘመናዊ ይበልጥ የተለመደ የውይይት መተግበሪያ ለሚመርጡ ሰዎች ይበልጥ ምቹ፣ ተመጣጣኝ ስፋት ያለው ፊደል የሚጠቀም አቀማመጥ ነው። በመሣሪያዎችዎ ሁሉ ይመሳሰላል።",
+    "description": "ዘመናዊ ነባሪው ነው፦ ተመጣጣኝ ፊደል ያለው የተለመደ የውይይት አቀማመጥ። ተርሚናል በምርጫ የሚበራ የIRC አይነት monospace መልክ ነው። በመሣሪያዎችዎ ሁሉ ይመሳሰላል።",
     "skinTerminalDetail": "monospace እና የታመቀ፣ በተርሚናል ውስጥ እንዳለ IRC",
     "skinModernDetail": "ተመጣጣኝ ፊደል፣ አምሳያዎች እና ሰፋ ያሉ ረድፎች",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "የአጽንዖት ቀለም",
     "pickTitle": "የአጽንዖት ቀለም ይምረጡ",
-    "presetOrange": "ብርቱካናማ",
-    "presetGreen": "አረንጓዴ",
-    "presetBlue": "ሰማያዊ",
-    "presetPurple": "ወይን ጠጅ",
-    "presetRed": "ቀይ",
-    "presetCyan": "ሳያን"
+    "presetAmber": "አምበር",
+    "presetCitron": "ሲትሮን",
+    "presetMint": "ሚንት",
+    "presetGlass": "መስታወት",
+    "presetLilac": "ሊላክ",
+    "presetRust": "ዝገት"
   },
   "background": {
     "heading": "የጀርባ ቀለም",
     "pickTitle": "የጀርባ ቀለም ይምረጡ",
-    "presetMatchAccent": "ከአጽንዖቱ ጋር አዛምድ",
     "presetNeutral": "ገለልተኛ",
     "presetWarm": "ሞቃት",
     "presetCool": "ቀዝቃዛ",

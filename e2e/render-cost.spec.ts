@@ -12,7 +12,7 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1XCB";
 const ROW_COUNT = 12;
 const OWN_ID = "01HQ7Z3K9M2P5R8T1V4W6Y10011";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function messages() {
@@ -250,15 +250,15 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
 
-      // Refined rows are a two-column grid; the memoised row must not swallow a skin change.
+      // Modern rows are a two-column grid; the memoised row must not swallow a skin change.
       const rowDisplay = async () =>
         await page
           .getByTestId(`message-${OWN_ID}`)
           .evaluate((el) => getComputedStyle(el).display);
 
-      expect(await rowDisplay()).toBe(skin === "refined" ? "grid" : "block");
+      expect(await rowDisplay()).toBe(skin === "modern" ? "grid" : "block");
 
-      const other = skin === "terminal" ? "refined" : "terminal";
+      const other = skin === "terminal" ? "modern" : "terminal";
       // Navigate via the sidebar's testid (page.goto would re-serve the SPA root).
       await page.getByTestId("sidebar-row-preferences").click();
       await page.getByTestId(`pref-skin-${other}`).click();
@@ -266,7 +266,7 @@ for (const skin of SKINS) {
 
       await gotoChannel(page);
       await expect(page.locator("html")).toHaveAttribute("data-skin", other);
-      expect(await rowDisplay()).toBe(other === "refined" ? "grid" : "block");
+      expect(await rowDisplay()).toBe(other === "modern" ? "grid" : "block");
     });
 
     test("editing a message updates that row's text", async ({ page }) => {

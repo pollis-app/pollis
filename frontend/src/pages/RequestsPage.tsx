@@ -128,7 +128,7 @@ export const RequestsPage: React.FC = observer(() => {
               data-testid={`block-request-${c.id}`}
               onClick={() => handleBlock(c)}
               disabled={acceptMutation.isPending || blockMutation.isPending}
-              variant="secondary"
+              variant="danger"
             >
               {t("requests.block")}
             </Button>,

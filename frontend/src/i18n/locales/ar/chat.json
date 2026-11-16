@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "رسالة من {{name}}",
     "unknownAuthor": "غير معروف",
-    "deleted": "[محذوفة]",
-    "encrypted": "[مشفَّرة]",
-    "redacted": "[محجوبة]",
+    "deleted": "حُذفت الرسالة",
+    "beforeJoin": "أُرسلت قبل انضمامك",
     "edited": "(مُعدَّلة)",
     "editUnsent": "(لم يُرسَل التعديل)",
     "newMember": "جديد",
@@ -74,8 +73,7 @@
   "replyBar": {
     "replyingTo": "رد على <name>{{name}}</name>",
     "scrollToMessage": "التمرير إلى الرسالة المُردّ عليها",
-    "dismiss": "إلغاء الرد",
-    "encrypted": "[رسالة مشفَّرة]"
+    "dismiss": "إلغاء الرد"
   },
   "queue": {
     "heading": "قائمة الانتظار",

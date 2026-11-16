@@ -6,7 +6,7 @@
 import { test, expect, type Page } from "./lib/zero-loss";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 // Oldest activity to newest: bob (a message on 1 Jan), carol (a message on 2 Jan), dave (no

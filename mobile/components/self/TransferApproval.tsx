@@ -136,6 +136,7 @@ export function TransferApproval({
           </Button>
           <Button
             testID="btn-history-decline"
+            variant="danger"
             full
             disabled={approve.isPending}
             loading={decline.isPending}

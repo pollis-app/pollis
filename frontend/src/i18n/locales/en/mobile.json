@@ -115,7 +115,6 @@
     "ownPreview": "You: {{text}}",
     "noMatches": "No conversations match.",
     "emptyHint": "Start a conversation with someone by their username or email.",
-    "previewDeleted": "Message deleted",
     "previewAttachment": "Attachment"
   },
   "dm": {

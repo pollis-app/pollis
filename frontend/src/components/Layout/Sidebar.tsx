@@ -319,7 +319,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                 isActive={activeDmId === c.id}
                 onClick={() => router.navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } })}
                 leading={
-                  skin === "refined" ? (
+                  skin === "modern" ? (
                     <PresenceAvatar
                       userId={c.user2_id ?? null}
                       avatarKey={c.user2_avatar_url}
@@ -368,7 +368,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         ))}
       </div>
 
-      {skin === "refined" ? (
+      {skin === "modern" ? (
         <SidebarProfilePanel />
       ) : (
         <button

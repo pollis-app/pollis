@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Saƙo daga {{name}}",
     "unknownAuthor": "ba a sani ba",
-    "deleted": "[an goge]",
-    "encrypted": "[an ɓoye]",
-    "redacted": "[an ɓoye wani sashi]",
+    "deleted": "An goge saƙo",
+    "beforeJoin": "An aika kafin ka shiga",
     "edited": "(an gyara)",
     "editUnsent": "(ba a aika gyaran ba)",
     "newMember": "sabo",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "ana amsa wa <name>{{name}}</name>",
     "scrollToMessage": "Gungura zuwa saƙon da aka amsa",
-    "dismiss": "Soke amsa",
-    "encrypted": "[Ɓoyayyen saƙo]"
+    "dismiss": "Soke amsa"
   },
   "queue": {
     "heading": "Layin jira",

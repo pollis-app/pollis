@@ -2,12 +2,11 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { RadioList } from "../ui/RadioList";
 import { normalizeSkin, type Skin } from "../../utils/colorUtils";
-import { DEFAULT_SKIN, MODERN_SKIN } from "../../utils/firstRunAppearance";
 
 interface SkinPickerProps {
   value: Skin;
   onChange: (skin: Skin) => void;
-  /** Rows get `<data-testid>-<stored skin value>`, e.g. `pref-skin-refined` for Modern. */
+  /** Rows get `<data-testid>-<skin>`, e.g. `pref-skin-modern`. */
   "data-testid": string;
 }
 
@@ -21,8 +20,8 @@ export const SkinPicker: React.FC<SkinPickerProps> = ({ value, onChange, "data-t
       value={value}
       onChange={(next) => onChange(normalizeSkin(next))}
       options={[
-        { value: DEFAULT_SKIN, label: t("appearance.skinTerminal"), detail: t("appearance.skinTerminalDetail") },
-        { value: MODERN_SKIN, label: t("appearance.skinModern"), detail: t("appearance.skinModernDetail") },
+        { value: "modern", label: t("appearance.skinModern"), detail: t("appearance.skinModernDetail") },
+        { value: "terminal", label: t("appearance.skinTerminal"), detail: t("appearance.skinTerminalDetail") },
       ]}
     />
   );

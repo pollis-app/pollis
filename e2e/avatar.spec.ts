@@ -13,7 +13,7 @@ async function boot(page: Page, avatarUrl?: string) {
   const state = {
     session: USER,
     profile: { id: USER.id, username: USER.username, email: USER.email, avatar_url: avatarUrl },
-    preferences: JSON.stringify({ skin: "refined" }),
+    preferences: JSON.stringify({ skin: "modern" }),
     publicFileUrls: { [KEY]: PIXEL },
   };
   await page.addInitScript((preload) => {

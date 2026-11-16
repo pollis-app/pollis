@@ -33,7 +33,7 @@ function expectedColor(key: string, isLightBg: boolean): string {
   return `hsl(${(h >>> 0) % 360} 65% ${isLightBg ? 35 : 68}%)`;
 }
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 async function openChannel(page: Page, skin: Skin, background?: string) {

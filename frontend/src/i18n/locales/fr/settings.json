@@ -29,7 +29,7 @@
     "ariaLabel": "Habillage de l'interface",
     "skinTerminal": "Terminal",
     "skinModern": "Moderne",
-    "description": "Terminal est l'apparence IRC/monospace par défaut. Moderne est une mise en page plus accueillante, en police proportionnelle, pour celles et ceux qui préfèrent une application de messagerie plus conventionnelle. Se synchronise entre vos appareils.",
+    "description": "Moderne est l'apparence par défaut : une mise en page de messagerie classique en police proportionnelle. Terminal est un style IRC à chasse fixe, au choix. Synchronisé sur vos appareils.",
     "skinTerminalDetail": "Monospace et compact, comme IRC dans un terminal",
     "skinModernDetail": "Police proportionnelle, avatars et lignes plus aérées",
     "firstRun": {
@@ -45,17 +45,16 @@
   "accent": {
     "heading": "Couleur d'accentuation",
     "pickTitle": "Choisir la couleur d'accentuation",
-    "presetOrange": "Orange",
-    "presetGreen": "Vert",
-    "presetBlue": "Bleu",
-    "presetPurple": "Violet",
-    "presetRed": "Rouge",
-    "presetCyan": "Cyan"
+    "presetAmber": "Ambre",
+    "presetCitron": "Citron",
+    "presetMint": "Menthe",
+    "presetGlass": "Verre",
+    "presetLilac": "Lilas",
+    "presetRust": "Rouille"
   },
   "background": {
     "heading": "Couleur de fond",
     "pickTitle": "Choisir la couleur de fond",
-    "presetMatchAccent": "Assortie à l'accentuation",
     "presetNeutral": "Neutre",
     "presetWarm": "Chaude",
     "presetCool": "Froide",

@@ -33,7 +33,7 @@
     ],
     "skin": [
       "terminal",
-      "refined"
+      "modern"
     ],
     "skin_applies_to": [
       "macos",
@@ -821,6 +821,7 @@
     "docs/ds-operator-endpoints.md": "operator runbook",
     "docs/goal-a-deploy-runbook.md": "operator runbook",
     "docs/history-transfer-design.md": "internal design",
+    "docs/design/README.md": "the design language for contributors and agents (docs/design/), not user-facing content",
     "docs/metadata-minimization-design.md": "internal design",
     "docs/mls-reconcile-hardening.md": "internal design",
     "docs/mobile-compliance-answers.md": "owner's drafts for store questionnaires; the filed answers are store/listing",

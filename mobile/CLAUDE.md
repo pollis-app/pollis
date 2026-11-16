@@ -17,7 +17,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - **Use pnpm 10.25.0 here, the version CI uses.** The root `packageManager: pnpm@10.25.0` does not apply under `--ignore-workspace`, so a bare `pnpm` in `mobile/` runs whatever is on `PATH` — Homebrew's is 12.x, which rewrites the lockfile differently from CI and makes `--frozen-lockfile` fail there. Install with `npx -y pnpm@10.25.0 install --ignore-workspace` (or a corepack-pinned pnpm).
 - If Expo complains about missing packages, first check that `node_modules` is inside `mobile/` and not at the repo root.
 - `patches/` holds pnpm patches, registered in `package.json` → `pnpm.patchedDependencies` (not a `mobile/pnpm-workspace.yaml`, which would make `mobile/` look like a workspace root). Today there are two: `decode-uri-component@0.2.2`, which backports 0.5.1's linear decoder (GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f) because every `pollis://` link runs through it and 0.5.x is ESM-only (#1296; `tests/deep-link-decode.test.ts`, which also diffs it against 0.5.1 itself, installed as the `decode-uri-component-upstream` devDependency). Drop both once expo-router stops pulling query-string 7. And `react-native-keyboard-controller@1.21.9`, which replays a keyboard hide the library never reported to JS — on Android one applied without an animation, on iOS one after the app returns to the foreground or a stray KVO "interactive" move (#1641, see "Keyboard" below; `tests/keyboard.test.ts`). It is native, so it reaches phones only with a store build, and a keyboard-controller bump must carry it forward or drop it once upstream does the same. `pnpm.overrides` raises vulnerable transitive build-time deps to a patched floor inside the parent's major (today `node-forge`, via the Expo CLI); drop an entry once the parent's own range excludes the bad versions. Make or change a patch with `pnpm patch <pkg>@<ver> --ignore-workspace`, then `pnpm patch-commit <dir> --ignore-workspace` and `pnpm install --ignore-workspace` (which writes the lockfile's `patchedDependencies` hash).
-- Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). The ONE shared directory is the translation catalogues, `frontend/src/i18n/locales/`, reached through a `watchFolders` entry in `metro.config.js` — see [Localization](#localization-i18n-1074). Do not widen that list.
+- Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). Two shared directories are reached through `watchFolders` in `metro.config.js`: the translation catalogues, `frontend/src/i18n/locales/` (see [Localization](#localization-i18n-1074)), and the colour source, the repo-root `design/` (see [Design tokens](#design-tokens); `.codesight/wiki/code-boundaries.md`). Do not widen that list.
 
 ## Stack
 
@@ -1171,9 +1171,10 @@ truncates thread names and won't show them).
 
 ## App structure (expo-router)
 
-Dark, two-colour (accent + background) UI in Geist, re-skinned in 2026-10 to
-match the desktop Modern skin: titles and back at the top, grouped lists,
-bottom sheets, AA contrast throughout (see "Design tokens").
+Dark UI in Geist derived from two base colours (accent + background), on the
+same palette as the desktop Modern skin (`design/theme.ts`, rules in
+`docs/design/README.md`): titles and back at the top, grouped lists, bottom
+sheets, AA contrast throughout (see "Design tokens").
 
 ```
 app/
@@ -1955,25 +1956,42 @@ key.
 
 ## Design tokens
 
-Defined in `theme/tokens.ts`; the colour math lives in `theme/derive.ts` (pure,
-no react-native) and the accent presets in `theme/accents.ts`.
+Defined in `theme/tokens.ts`. The colour math, the defaults and the presets are
+NOT mobile's: they live in the repo-root `design/theme.ts`, shared with the
+desktop renderer (Metro watches `../design`). `theme/derive.ts` only maps the
+shared token names onto mobile's (`surface`→`panel`, `surfaceRaised`→`raised`,
+`surfaceHigh`→`high`, `border`→`hair`, `borderSoft`→`hairSoft`,
+`borderStrong`→`edge`, `textDim`→`dim`, `textMuted`→`muted`). Change a colour
+there, never here; the rules for using them are `docs/design/README.md`.
 
-- **Exactly two base colours: accent and background.** Every other colour is
-  derived by `deriveTheme(accent, bg)` — the background mixed toward white for
-  the neutrals, the accent mixed into them for tint, the accent at an alpha for
-  hairlines. No other hex may appear in UI code. Defaults: accent `#fabf5a`
-  (brand amber), background `#0a0907`. Both are runtime-configurable
-  (`setAccentRgb`, `setBackgroundRgb`; `<ThemeProvider>` holds them and
-  `useTheme()` re-renders subscribers). `semantic.*` and the
-  `type.*` colours are getters over the live derived theme.
-- **The saved accent paints the first frame (#1447).** The synced
-  `accent_hex` preference lands only after sign-in and a DS round trip, so
-  the device also keeps the last accent it showed in `expo-secure-store`
-  (`theme/accentStore.ts`, key `pollis.theme.accent`), and `theme/tokens.ts`
-  reads it with the SYNCHRONOUS `SecureStore.getItem` while the module loads —
-  before any render, PIN screen included. `ThemeProvider` starts from the live
-  tokens, refetches the synced blob the moment the app is unlocked, applies a
-  saved `accent_hex` and writes every change back. `get_preferences` answers
+- **Two base colours: accent and background.** Every neutral is derived by
+  `deriveTheme(accent, bg)` — the background mixed toward white, the accent
+  mixed into it for tint, the accent at an alpha for hairlines. The one fixed
+  hue besides them is `danger`, the shared destructive red (`#ff6b6b` on dark
+  grounds), with `onDanger` for ink on it: every destructive action (remove,
+  revoke, reject, decline, leave, delete) uses it — a `Button`/`Chip` with
+  `variant="danger"`, or a `ListRow` whose glyph and name are `semantic.danger`.
+  No other hex may appear in UI code. Defaults: accent `#fabf5a` (brand amber),
+  background `#0a0907`. Both are runtime-configurable (`setAccentRgb`,
+  `setBackgroundRgb`; `<ThemeProvider>` holds them and `useTheme()` re-renders
+  subscribers). `semantic.*` and the `type.*` colours are getters over the live
+  derived theme.
+- **Synced keys, shared with desktop.** The accent is `accent_color` and the
+  background `background_color` in the preferences blob; desktop picks the
+  background, mobile follows it. Builds before the unification read only
+  `accent_hex`, so every accent save also writes it
+  (`colorPreferencesPatch`) and reads fall back to it (`accentFromPrefs`);
+  drop the mirror once the oldest mobile build in the stores reads
+  `accent_color`.
+- **The saved colours paint the first frame (#1447).** The synced
+  preferences land only after sign-in and a DS round trip, so the device also
+  keeps the last accent and background it showed in `expo-secure-store`
+  (`theme/accentStore.ts`, keys `pollis.theme.accent` and
+  `pollis.theme.background`), and `theme/tokens.ts` reads them with the
+  SYNCHRONOUS `SecureStore.getItem` while the module loads — before any
+  render, PIN screen included. `ThemeProvider` starts from the live tokens,
+  refetches the synced blob the moment the app is unlocked, applies the saved
+  colours and writes every change back. `get_preferences` answers
   `{}` before the unlock (remote read fails, local cache locked), so a blob
   with no accent means the default only when read after the unlock; sign-out
   also resets to the default. Never read a token at module scope
@@ -1991,13 +2009,15 @@ no react-native) and the accent presets in `theme/accents.ts`.
   < `high` (surfaces), `hair` / `hairSoft` (translucent separators), `edge`
   (opaque control border, ≥3:1 vs raised), `accent`, `accentFaint/Soft/Mid/Line`
   (opaque accent tints), `onAccent` (= bg, text on accent fills), `backdrop`,
-  `sheetBg` (= raised, opaque — #1193). `danger` = accent: there is no third
-  hue; destructive actions are told apart by label, icon and separation.
+  `sheetBg` (= raised, opaque — #1193), `danger` / `onDanger` (the one
+  destructive red, shared with desktop).
   Old names (`ink`, `ink2`, `mute`, `mute2`, `hairStrong`, `fieldBg`, `cardBg`)
   are deprecated aliases.
 - `tests/theme-contrast.test.ts` asserts WCAG AA for every preset: text tiers
-  and accent ≥4.5:1 on every surface, edge ≥3:1 vs raised, onAccent ≥4.5:1.
-  Tune `RECIPE` in `derive.ts` if a new preset fails — never special-case it.
+  accent and danger ≥4.5:1 on every surface, edge ≥3:1 vs raised, onAccent and
+  onDanger ≥4.5:1 (desktop's `frontend/tests/theme-contrast.test.ts` checks
+  the same recipe over both skins and every background preset). Tune `RECIPE`
+  in `design/theme.ts` if a new preset fails — never special-case it.
 - `type.*`: Display 28/700, Title 20/700, Heading 17/700, Body 16/400, Secondary
   14/400, Section 13/600, Meta 12/400, Tab 12. Sentence case, no tracked
   capitals, nothing below 12; all text follows system font scaling.
@@ -2061,7 +2081,7 @@ every scroll that starts on it (those rows keep `onPress`; a
 release at runtime); never on anything that sends, persists, notifies
 others, confirms or toggles; no haptic (it is navigation).
 
-UI rules: two base colours — use `semantic.*` / `type.*`, never a hex or
+UI rules: two base colours plus the one red — use `semantic.*` / `type.*`, never a hex or
 rgba in `app/` or `components/` (QrCode's black/white is the one deliberate
 exception, for scannability); icons/text on an accent fill use
 `semantic.onAccent`. 44pt targets (hitSlop/padding for small visuals); one

@@ -31,7 +31,7 @@
     "ariaLabel": "UI स्किन",
     "skinTerminal": "टर्मिनल",
     "skinModern": "मॉडर्न",
-    "description": "टर्मिनल डिफ़ॉल्ट IRC/मोनोस्पेस लुक है। मॉडर्न उन लोगों के लिए आसान, प्रोपोर्शनल फ़ॉन्ट वाला लेआउट है जो आम चैट ऐप जैसा लुक पसंद करते हैं। आपके सभी डिवाइस पर सिंक होता है।",
+    "description": "मॉडर्न डिफ़ॉल्ट है: प्रोपोर्शनल फ़ॉन्ट में जाना-पहचाना चैट लेआउट। टर्मिनल एक वैकल्पिक IRC-जैसा मोनोस्पेस लुक है। आपके सभी डिवाइस पर सिंक होता है।",
     "skinTerminalDetail": "मोनोस्पेस और कॉम्पैक्ट, टर्मिनल में IRC जैसा",
     "skinModernDetail": "प्रोपोर्शनल फ़ॉन्ट, अवतार और खुली-खुली लाइनें",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "एक्सेंट रंग",
     "pickTitle": "एक्सेंट रंग चुनें",
-    "presetOrange": "नारंगी",
-    "presetGreen": "हरा",
-    "presetBlue": "नीला",
-    "presetPurple": "बैंगनी",
-    "presetRed": "लाल",
-    "presetCyan": "आसमानी"
+    "presetAmber": "एम्बर",
+    "presetCitron": "सिट्रॉन",
+    "presetMint": "मिंट",
+    "presetGlass": "ग्लास",
+    "presetLilac": "लाइलैक",
+    "presetRust": "रस्ट"
   },
   "background": {
     "heading": "बैकग्राउंड का रंग",
     "pickTitle": "बैकग्राउंड का रंग चुनें",
-    "presetMatchAccent": "एक्सेंट जैसा",
     "presetNeutral": "न्यूट्रल",
     "presetWarm": "गर्म",
     "presetCool": "ठंडा",

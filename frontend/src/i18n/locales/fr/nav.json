@@ -110,9 +110,7 @@
   "thread": {
     "loading": "Chargement des réponses…",
     "empty": "Aucune réponse pour l'instant. Lancez le fil ci-dessous.",
-    "placeholder": "Répondre dans le fil…",
-    "messageDeleted": "Message supprimé",
-    "encrypted": "[chiffré]"
+    "placeholder": "Répondre dans le fil…"
   },
   "chat": {
     "noSelection": "Sélectionnez un canal pour commencer à discuter"

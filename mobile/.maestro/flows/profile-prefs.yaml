@@ -23,6 +23,11 @@ tags:
 - tapOn:
     id: "chip-accent-mint"
 - takeScreenshot: prefs-03-accent-mint
+# Below the fold once the language section grew: scroll to it first.
+- scrollUntilVisible:
+    element:
+      id: "toggle-reduce-motion"
+    direction: DOWN
 - tapOn:
     id: "toggle-reduce-motion"
 - takeScreenshot: prefs-04-toggle

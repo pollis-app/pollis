@@ -491,6 +491,7 @@ export const SecurityPage: React.FC = observer(() => {
                 />
                 <div className="flex gap-2">
                   <Button
+          variant="danger"
                     data-testid="revoke-confirm-submit"
                     size="sm"
                     disabled={
@@ -538,7 +539,7 @@ export const SecurityPage: React.FC = observer(() => {
                         <Button
                           key="revoke"
                           data-testid={`revoke-${d.device_id}`}
-                          variant="secondary"
+                          variant="danger"
                           size="sm"
                           onClick={() => {
                             setConfirmingDevice(d);
@@ -675,7 +676,7 @@ export const SecurityPage: React.FC = observer(() => {
                   <span className="text-xs font-mono text-dim">
                     {t("security.revokeNowNote")}
                   </span>
-                  <Button variant="primary" size="sm" onClick={handleRevokeNow}>
+                  <Button variant="danger" size="sm" onClick={handleRevokeNow}>
                     {t("security.revokeNowConfirm")}
                   </Button>
                   <Button
@@ -688,7 +689,7 @@ export const SecurityPage: React.FC = observer(() => {
                 </div>
               ) : (
                 <Button
-                  variant="secondary"
+                  variant="danger"
                   size="sm"
                   disabled={revokeMedia.isPending}
                   onClick={() => setConfirmingRevoke(true)}
@@ -759,8 +760,7 @@ export const SecurityPage: React.FC = observer(() => {
               security page so it's the last thing a user can reach. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="settings-danger-zone">
             <h2
-              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-              style={{ color: "hsl(0 60% 55%)", borderColor: "hsl(0 60% 30% / 40%)" }}
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b border-danger text-danger"
             >
               {t("security.dangerZoneHeading")}
             </h2>

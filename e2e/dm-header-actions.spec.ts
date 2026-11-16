@@ -10,7 +10,7 @@ const DM_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0DMX";
 const DM_MSG = "01HQ7Z3K9M2P5R8T1V4W6Y0DM1";
 const CALL_ID = "call1640";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function member(userId: string, username: string) {

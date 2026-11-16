@@ -50,8 +50,9 @@ test("a Preferences page save keeps mobile's keys and drops only legacy font_siz
   await page.getByTestId("sidebar-row-preferences").click();
   await expect(page.getByTestId("preferences-page")).toBeVisible();
 
-  await page.getByTestId("pref-skin-refined").click();
+  await page.getByTestId("pref-skin-modern").click();
 
+  // Modern goes out under its wire name.
   await expect.poll(async () => (await storedPreferences(page)).skin).toBe("refined");
   const stored = await storedPreferences(page);
   expect(stored.accent_hex).toBe(MOBILE_KEYS.accent_hex);

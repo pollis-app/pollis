@@ -10,7 +10,7 @@ const GROUP_DM_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GDM";
 const GROUP_DM_MSG = "01HQ7Z3K9M2P5R8T1V4W6Y0GD1";
 const DIGITS = /^\d{5}( \d{5}){11}$/;
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function member(userId: string, username: string) {

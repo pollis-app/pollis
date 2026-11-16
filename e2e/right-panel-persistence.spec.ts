@@ -21,7 +21,7 @@ const DM_PEER = "dave";
 /** The Preferences row, by testid (#932): settings labels are translated. */
 const PREFERENCES_ROW = "sidebar-row-preferences";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 /** `app.toggleRightPanel` — `mod+shift+b`, and `mod` accepts Ctrl. */
@@ -153,6 +153,17 @@ async function boot(
 
 const panel = (page: Page) => page.getByTestId("right-panel");
 
+/** Mark people online, as a shared LiveKit room would. */
+async function setOnline(page: Page, userIds: string[]) {
+  await page.evaluate((ids) => {
+    const presence = (window as unknown as { __pollisPresence: { setPresent: (u: string, r: string, p: boolean) => void } })
+      .__pollisPresence;
+    for (const id of ids) {
+      presence.setPresent(id, "e2e-room", true);
+    }
+  }, userIds);
+}
+
 async function expectOpen(page: Page, because: string) {
   await expect(panel(page), because).toBeVisible();
 }
@@ -208,7 +219,7 @@ for (const skin of SKINS) {
 
     test("a closed panel is still closed after navigating", async ({ page }) => {
       // The mirror image: an OPEN default, closed by hand. This is the half a
-      // `refined` user hit — the panel sprang back open on the next click.
+      // `Modern` user hit — the panel sprang back open on the next click.
       await boot(page, skin, { rightPanelOpenByDefault: true });
       await navigateTo(page, GENERAL);
       await expectOpen(page, "the preference asked for an open panel");
@@ -244,7 +255,7 @@ for (const skin of SKINS) {
 
     test("switching skin does not open or close the panel", async ({ page }) => {
       // No `right_panel_open_by_default`: the only configuration that could expose a skin dependency.
-      const other: Skin = skin === "terminal" ? "refined" : "terminal";
+      const other: Skin = skin === "terminal" ? "modern" : "terminal";
       await boot(page, skin);
       await navigateToRow(page, PREFERENCES_ROW);
       await expect(page.getByTestId(`pref-skin-${skin}`)).toBeVisible();
@@ -310,23 +321,45 @@ for (const skin of SKINS) {
       // any difference here is a difference of CONTENT, which must stay
       // reactive. Without this a "fix" that froze the whole panel would pass.
       await boot(page, skin, { rightPanelOpenByDefault: true });
+      await setOnline(page, ["u-carol", "u-erin", "u-dave"]);
 
+      // A group's page lists its OTHER members who are online: carol, not bob (offline) or alice (you).
       await navigateTo(page, GENERAL);
       await expectOpen(page, "the preference asked for an open panel");
-      await expect(panel(page).getByRole("heading", { name: "Members — 3" })).toBeVisible();
+      await expect(panel(page).getByRole("heading", { name: "Online — 1" })).toBeVisible();
       await expect(panel(page).getByRole("button", { name: /carol$/ })).toBeVisible();
+      await expect(panel(page).getByRole("button", { name: /bob$/ })).toHaveCount(0);
 
       // A channel in the OTHER group: same panel, different roster.
       await navigateTo(page, OFFSITE);
       await expectOpen(page, "the panel is pinned open for this test");
-      await expect(panel(page).getByRole("heading", { name: "Members — 2" })).toBeVisible();
+      await expect(panel(page).getByRole("heading", { name: "Online — 1" })).toBeVisible();
       await expect(panel(page).getByRole("button", { name: /erin$/ })).toBeVisible();
       await expect(panel(page).getByRole("button", { name: /carol$/ })).toHaveCount(0);
 
+      // A page about no conversation: online DM contacts, never the last group's roster.
+      await page.getByTestId(PREFERENCES_ROW).click();
+      await expect(panel(page).getByRole("heading", { name: "Online — 1" })).toBeVisible();
+      await expect(panel(page).getByRole("button", { name: new RegExp(`${DM_PEER}$`) })).toBeVisible();
+      await expect(panel(page).getByRole("button", { name: /erin$/ })).toHaveCount(0);
+
       // And back, so the content is reactive rather than latched on first paint.
       await navigateTo(page, GENERAL);
-      await expect(panel(page).getByRole("heading", { name: "Members — 3" })).toBeVisible();
       await expect(panel(page).getByRole("button", { name: /carol$/ })).toBeVisible();
+      await expect(panel(page).getByRole("button", { name: new RegExp(`${DM_PEER}$`) })).toHaveCount(0);
+    });
+
+    test("someone going offline leaves the group's list", async ({ page }) => {
+      await boot(page, skin, { rightPanelOpenByDefault: true });
+      await setOnline(page, ["u-carol"]);
+      await navigateTo(page, GENERAL);
+      await expect(panel(page).getByRole("button", { name: /carol$/ })).toBeVisible();
+      await page.evaluate(() =>
+        (window as unknown as { __pollisPresence: { setPresent: (u: string, r: string, p: boolean) => void } })
+          .__pollisPresence.setPresent("u-carol", "e2e-room", false),
+      );
+      await expect(panel(page).getByRole("button", { name: /carol$/ })).toHaveCount(0);
+      await expect(panel(page).getByRole("heading", { name: "Online — 0" })).toBeVisible();
     });
 
     test("a DM's panel names its members instead of reporting none", async ({

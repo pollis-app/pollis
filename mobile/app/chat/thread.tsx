@@ -123,6 +123,7 @@ function ThreadScreen() {
           name={name}
           time={timeLabel(m.created_at)}
           text={m.content}
+          deleted={!!m.deleted_at}
           attachments={m.attachments}
           onOpenAttachment={openMedia}
           pending={m.pending}
@@ -165,6 +166,7 @@ function ThreadScreen() {
           name={rootName ?? t("chat:list.unknownAuthor")}
           time={timeLabel(root.created_at)}
           text={root.content}
+          deleted={!!root.deleted_at}
           attachments={root.attachments}
           onOpenAttachment={openMedia}
           edited={!!root.edited_at}

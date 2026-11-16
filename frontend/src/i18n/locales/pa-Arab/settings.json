@@ -31,7 +31,7 @@
     "ariaLabel": "UI دی سکن",
     "skinTerminal": "ٹرمینل",
     "skinModern": "ماڈرن",
-    "description": "ٹرمینل ڈیفالٹ IRC/مونوسپیس شکل اے۔ ماڈرن اوہناں لوکاں لئی سوکھا، پروپورشنل فونٹ والا لے آؤٹ اے جنہاں نوں عام چیٹ ایپ ورگی شکل پسند اے۔ تہاڈیاں ساریاں ڈیوائساں تے سنک ہوندی اے۔",
+    "description": "ماڈرن ڈیفالٹ اے: پروپورشنل فونٹ وچ جانی پچھانی چیٹ ترتیب۔ ٹرمینل اک اختیاری IRC ورگی مونوسپیس شکل اے۔ تہاڈیاں ساریاں ڈیوائساں تے سنک ہوندی اے۔",
     "skinTerminalDetail": "مونوسپیس تے سنگھڑی، ٹرمینل وچ IRC ورگی",
     "skinModernDetail": "پروپورشنل فونٹ، اوتار تے کھلیاں قطاراں",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "ایکسنٹ رنگ",
     "pickTitle": "ایکسنٹ رنگ چنو",
-    "presetOrange": "سنگتری",
-    "presetGreen": "ہرا",
-    "presetBlue": "نیلا",
-    "presetPurple": "جامنی",
-    "presetRed": "لال",
-    "presetCyan": "فیروزی"
+    "presetAmber": "امبر",
+    "presetCitron": "سٹرون",
+    "presetMint": "پودینہ",
+    "presetGlass": "شیشہ",
+    "presetLilac": "لائیلک",
+    "presetRust": "زنگ"
   },
   "background": {
     "heading": "بیک گراؤنڈ رنگ",
     "pickTitle": "بیک گراؤنڈ رنگ چنو",
-    "presetMatchAccent": "ایکسنٹ نال ملاؤ",
     "presetNeutral": "سادہ",
     "presetWarm": "نگھا",
     "presetCool": "ٹھنڈا",

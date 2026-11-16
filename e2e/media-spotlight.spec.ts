@@ -18,7 +18,7 @@ const LONE = "media/spot-lone.enc";
 const FIXTURES = path.join(__dirname, "fixtures");
 const MEDIA_ORIGIN = "https://media.test";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 const att = (key: string, name: string, ct: string) => ({

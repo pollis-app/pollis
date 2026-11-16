@@ -115,9 +115,7 @@
   "thread": {
     "loading": "መልሶችን በመጫን ላይ…",
     "empty": "እስካሁን መልሶች የሉም። ክሩን ከታች ይጀምሩ።",
-    "placeholder": "በክሩ ውስጥ ይመልሱ…",
-    "messageDeleted": "መልዕክቱ ተሰርዟል",
-    "encrypted": "[የተመሰጠረ]"
+    "placeholder": "በክሩ ውስጥ ይመልሱ…"
   },
   "chat": {
     "noSelection": "መልዕክት መላክ ለመጀመር ቻናል ይምረጡ"

@@ -7,7 +7,7 @@ const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0GRP";
 const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0XCB";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 /** Message text is attacker-controlled: only what opens what it shows is a link (#1682). */
@@ -154,7 +154,7 @@ for (const skin of SKINS) {
 
 test.describe("hostile links (#1682)", () => {
   test("only safe tokens link, IDN hosts point at their ASCII host", async ({ page }) => {
-    await boot(page, "refined", HOSTILE);
+    await boot(page, "modern", HOSTILE);
     const links = page.getByTestId("message-list").locator("a.message-link");
     // The punycode host and the Wikipedia URL; nothing from the first three bodies.
     await expect(links).toHaveCount(2);

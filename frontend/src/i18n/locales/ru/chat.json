@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Сообщение от {{name}}",
     "unknownAuthor": "неизвестно",
-    "deleted": "[удалено]",
-    "encrypted": "[зашифровано]",
-    "redacted": "[скрыто]",
+    "deleted": "Сообщение удалено",
+    "beforeJoin": "Отправлено до того, как вы присоединились",
     "edited": "(изменено)",
     "editUnsent": "(изменение не отправлено)",
     "newMember": "новый",
@@ -68,8 +67,7 @@
   "replyBar": {
     "replyingTo": "ответ для <name>{{name}}</name>",
     "scrollToMessage": "Перейти к сообщению, на которое отвечаете",
-    "dismiss": "Отменить ответ",
-    "encrypted": "[Зашифрованное сообщение]"
+    "dismiss": "Отменить ответ"
   },
   "queue": {
     "heading": "Очередь",

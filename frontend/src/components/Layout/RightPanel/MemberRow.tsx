@@ -13,7 +13,7 @@ interface MemberRowProps {
   isAdmin: boolean;
 }
 
-/** One member; opens their profile. Refined shows the avatar, terminal a bare dot. */
+/** One member; opens their profile. Modern shows the avatar, terminal a bare dot. */
 export const MemberRow: React.FC<MemberRowProps> = observer(
   ({ userId, label, avatarKey, isAdmin }) => {
     const { t } = useTranslation("nav");

@@ -520,7 +520,8 @@ export function Chip({
   pressIn,
 }: {
   children: React.ReactNode;
-  variant?: "default" | "on" | "solid" | "subtle" | "outline";
+  // `danger`: a destructive action (remove, revoke, reject), the one red filled.
+  variant?: "default" | "on" | "solid" | "subtle" | "outline" | "danger";
   // Touch-down (#1529): fixed chrome only, never inside a scroller.
   pressIn?: boolean;
   selected?: boolean;
@@ -536,9 +537,12 @@ export function Chip({
   const surface: ControlSurface = variant === "outline" ? "raised" : "base";
   const off = disabled ? controlDisabled(currentTheme(), surface) : null;
   const accentFill = v === "on" || v === "solid";
+  const dangerFill = v === "danger";
   const bg = off
     ? off.fill
-    : accentFill
+    : dangerFill
+      ? semantic.danger
+      : accentFill
       ? semantic.accent
       : v === "subtle"
         ? "transparent"
@@ -551,7 +555,9 @@ export function Chip({
     ? v === "on"
       ? semantic.accent
       : off.fg
-    : accentFill
+    : dangerFill
+      ? semantic.onDanger
+      : accentFill
       ? semantic.onAccent
       : v === "subtle"
         ? semantic.dim

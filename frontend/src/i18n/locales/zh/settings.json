@@ -29,7 +29,7 @@
     "ariaLabel": "界面皮肤",
     "skinTerminal": "终端",
     "skinModern": "现代",
-    "description": "「终端」是默认的 IRC 等宽字体风格。「现代」使用比例字体，布局更亲和，适合习惯常规聊天应用的人。此设置会在你的设备之间同步。",
+    "description": "现代是默认外观：使用比例字体的常规聊天布局。终端是可选的 IRC 风格等宽外观。在你的设备间同步。",
     "skinTerminalDetail": "等宽字体，布局紧凑，如同终端里的 IRC",
     "skinModernDetail": "比例字体、头像，行距更宽松",
     "firstRun": {
@@ -45,17 +45,16 @@
   "accent": {
     "heading": "强调色",
     "pickTitle": "选择强调色",
-    "presetOrange": "橙色",
-    "presetGreen": "绿色",
-    "presetBlue": "蓝色",
-    "presetPurple": "紫色",
-    "presetRed": "红色",
-    "presetCyan": "青色"
+    "presetAmber": "琥珀",
+    "presetCitron": "柠檬黄",
+    "presetMint": "薄荷绿",
+    "presetGlass": "玻璃",
+    "presetLilac": "丁香紫",
+    "presetRust": "铁锈红"
   },
   "background": {
     "heading": "背景色",
     "pickTitle": "选择背景色",
-    "presetMatchAccent": "跟随强调色",
     "presetNeutral": "中性",
     "presetWarm": "暖色",
     "presetCool": "冷色",

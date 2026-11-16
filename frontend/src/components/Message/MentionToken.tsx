@@ -3,7 +3,7 @@ import React from "react";
 interface MentionTokenProps {
   name: string;
   isSelf: boolean;
-  skin: "terminal" | "refined";
+  skin: "terminal" | "modern";
 }
 
 /** A resolved `@mention` (#843): a filled block for you, a quiet chip for others. */

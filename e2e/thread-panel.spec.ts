@@ -20,7 +20,7 @@ const ISO_REPLY = "01HQ7Z3K9M2P5R8T1V4W6Y0IRP";
 const SECONDS_REPLY = "01HQ7Z3K9M2P5R8T1V4W6Y0SRP";
 const SECONDS_REPLY_SENT_AT = 1786003600;
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function message(
@@ -130,7 +130,7 @@ async function expectedTimes(page: Page, seconds: number) {
   }, seconds);
 }
 
-/** Open the thread via the row's action menu (the "N replies" button is refined-only). */
+/** Open the thread via the row's action menu (the "N replies" button is Modern-only). */
 async function openThread(page: Page, rootId: string) {
   const row = page.getByTestId(`message-${rootId}`);
   await row.hover();

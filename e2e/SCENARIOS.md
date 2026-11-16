@@ -22,7 +22,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 | M-INV | Invite link (#847): A mints a link, copies it, B redeems and joins; A revokes, B's retry is refused. Run in BOTH skins | 5 | 2 | ✅ | invite-links.js. Asserts the clipboard really holds the token (it can never be shown again) and that the failure message does not disclose WHY. |
 | M-JR | Join-request path: B searches group by slug, requests, A approves, B becomes member | 4 | 2 | ⬜ | Alt to invite; relies on async realtime membership_changed → welcome poll. |
 | M-EDIT | Edit convergence: A edits a message, B sees new text + (edited) | 3 | 2 | ⬜ | |
-| M-DEL | Delete convergence: A deletes, B sees `[deleted]` | 3 | 2 | ✅ | two-client-delete.js (delete-for-everyone). Content tombstoned, row stays. |
+| M-DEL | Delete convergence: A deletes, B sees "Message deleted" | 3 | 2 | ✅ | two-client-delete.js (delete-for-everyone). Content tombstoned, row stays. |
 | M-ORD | Ordering: A sends 3 messages, B receives all 3 in order | 4 | 3 | ⬜ | |
 | M-PRES | Presence: A sees B come online / go offline | 3 | 2 | ⬜ | LiveKit realtime dependent. |
 | M-CALL | 1:1 call place + accept, both see each other | 5 | 3 | ✅ | two-client-call.js |
@@ -42,7 +42,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 | S-RESTART | Restart persistence: sign up, kill app, relaunch same data dir → data/session survives | 5 | 2 | ✅ | restart-persistence.js. "Same device keeps data" invariant. Reveals real cold-start behaviour. |
 | S-RELOGIN | Logout (keep data) → re-login (email+OTP+PIN) → app-ready | 4 | 3 | ⬜ | Confirmed: always re-auth, never PIN-only. |
 | S-EDIT | Send → edit own message (Enter to save) → shows (edited) | 3 | 3 | ⬜ | No submit testid; save via Enter keydown. |
-| S-DEL | Send → delete own message → `[deleted]` | 3 | 3 | ⬜ | |
+| S-DEL | Send → delete own message → "Message deleted" | 3 | 3 | ⬜ | |
 | S-GRP | Create a group | 3 | 3 | ⬜ | Covered as a step of M-CH. |
 | S-TXTCH | Create a text channel | 3 | 3 | ⬜ | Covered as a step of M-CH. |
 | S-VOXCH | Create a voice channel (toggle type switch) | 3 | 3 | ⬜ | Covered as a step of M-VC. |

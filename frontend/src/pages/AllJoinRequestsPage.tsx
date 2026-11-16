@@ -132,7 +132,7 @@ export const AllJoinRequestsPage: React.FC = () => {
                     data-testid={`reject-request-${req.id}`}
                     onClick={() => handleReject(req.id, req.group_id)}
                     disabled={approveMutation.isPending || rejectMutation.isPending}
-                    variant="secondary"
+                    variant="danger"
                   >
                     {t("joinRequests.reject")}
                   </Button>,

@@ -63,6 +63,10 @@ export function buttonColors(
   if (variant === "primary") {
     return { fill: theme.accent, pressedFill: theme.accent, label: theme.onAccent };
   }
+  // The one red (design/theme.ts), filled like primary: a destructive action never reads as the accent.
+  if (variant === "danger") {
+    return { fill: theme.danger, pressedFill: theme.danger, label: theme.onDanger };
+  }
   if (variant === "subtle") {
     return { fill: undefined, pressedFill: controlFill(theme, surface), label: theme.accent };
   }

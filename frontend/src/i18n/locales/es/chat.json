@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Mensaje de {{name}}",
     "unknownAuthor": "desconocido",
-    "deleted": "[eliminado]",
-    "encrypted": "[cifrado]",
-    "redacted": "[retirado]",
+    "deleted": "Mensaje eliminado",
+    "beforeJoin": "Enviado antes de que te unieras",
     "edited": "(editado)",
     "editUnsent": "(edición no enviada)",
     "newMember": "nuevo",
@@ -62,8 +61,7 @@
   "replyBar": {
     "replyingTo": "respondiendo a <name>{{name}}</name>",
     "scrollToMessage": "Ir al mensaje respondido",
-    "dismiss": "Descartar respuesta",
-    "encrypted": "[Mensaje cifrado]"
+    "dismiss": "Descartar respuesta"
   },
   "queue": {
     "heading": "Cola",

@@ -31,7 +31,7 @@ const MatchedCode: React.FC<{ shortcode: string; query: string }> = ({
   );
 };
 
-/** Refined skin's `:shortcode:` list, `absolute` inside the composer (no portal); ChatInput owns the keys. */
+/** Modern skin's `:shortcode:` list, `absolute` inside the composer (no portal); ChatInput owns the keys. */
 export const EmojiSuggestList: React.FC<EmojiSuggestListProps> = ({
   entries,
   activeIndex,

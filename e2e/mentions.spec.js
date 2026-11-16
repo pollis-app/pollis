@@ -140,9 +140,9 @@ test.describe("terminal skin", () => {
   });
 });
 
-test.describe("refined skin", () => {
+test.describe("Modern skin", () => {
   test("selects from the inline list with arrow keys and Enter", async ({ page }) => {
-    await openChannel(page, "refined");
+    await openChannel(page, "modern");
 
     await composer(page).click();
     await composer(page).pressSequentially("hey @da");
@@ -161,7 +161,7 @@ test.describe("refined skin", () => {
 
     await expect(page.getByTestId("mention-option-dana")).toHaveAttribute("data-active", "true");
 
-    await page.screenshot({ path: shot("mentions-refined-list.png") });
+    await page.screenshot({ path: shot("mentions-modern-list.png") });
 
     // Arrow down moves the highlight, Enter accepts it.
     await composer(page).press("ArrowDown");
@@ -173,7 +173,7 @@ test.describe("refined skin", () => {
   });
 
   test("Tab also accepts, and Escape dismisses without sending", async ({ page }) => {
-    await openChannel(page, "refined");
+    await openChannel(page, "modern");
 
     await composer(page).click();
     await composer(page).pressSequentially("hey @da");
@@ -191,19 +191,19 @@ test.describe("refined skin", () => {
   });
 
   test("renders your own mention stronger than someone else's", async ({ page }) => {
-    await openChannel(page, "refined");
+    await openChannel(page, "modern");
 
     await expect(page.locator('[data-testid="mention-self"][data-mention="mia"]')).toBeVisible();
     await expect(page.locator('[data-testid="mention-other"][data-mention="dave"]')).toBeVisible();
 
-    await page.screenshot({ path: shot("mentions-refined-tokens.png") });
+    await page.screenshot({ path: shot("mentions-modern-tokens.png") });
   });
 });
 
 // Nobody called "nobody" is in this channel, so nothing would be notified and
 // nothing should be offered — the suggestion never invents a user, which is
 // the composer-side half of "mentions must not leak".
-for (const skin of ["terminal", "refined"]) {
+for (const skin of ["terminal", "modern"]) {
   test(`an unresolvable @name offers nothing — ${skin}`, async ({ page }) => {
     await openChannel(page, skin);
     await composer(page).click();

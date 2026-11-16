@@ -4,7 +4,7 @@
  * Applied imperatively to the target message row so the flash needs no change
  * to `MessageItem` and no extra wrapper element in the message timeline.
  *
- * Token-backed, so it reads correctly in both the terminal and refined skins
+ * Token-backed, so it reads correctly in both the terminal and Modern skins
  * rather than hard-coding a colour that only suits one of them. The accent is
  * used at low alpha via colour-mix, which keeps it a flat tint — no glow.
  */

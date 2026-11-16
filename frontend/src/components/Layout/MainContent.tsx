@@ -808,7 +808,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
               </Button>
               <Button
                 data-testid="dm-request-block"
-                variant="secondary"
+                variant="danger"
                 onClick={handleBlockDmRequest}
                 isLoading={blockUserMutation.isPending}
                 loadingText={t("dmRequest.blocking")}

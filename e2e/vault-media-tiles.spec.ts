@@ -11,7 +11,7 @@ const PHOTO_BH = "LhLyBf;W{?KE,2XMSvV{[ibDJyJ#";
 const MEDIA_ORIGIN = "https://media.test";
 const FIXTURES = path.join(__dirname, "fixtures");
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 const ENTRY = {

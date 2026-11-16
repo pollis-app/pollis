@@ -110,9 +110,7 @@
   "thread": {
     "loading": "Cargando respuestas…",
     "empty": "Todavía no hay respuestas. Empieza el hilo abajo.",
-    "placeholder": "Responder en el hilo…",
-    "messageDeleted": "Mensaje eliminado",
-    "encrypted": "[cifrado]"
+    "placeholder": "Responder en el hilo…"
   },
   "chat": {
     "noSelection": "Selecciona un canal para empezar a enviar mensajes"

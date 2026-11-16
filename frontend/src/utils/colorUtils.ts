@@ -1,7 +1,15 @@
 import { setBackgroundLightness } from "./usernameColor";
+import {
+  DEFAULT_ACCENT_HEX,
+  DEFAULT_BACKGROUND_HEX,
+  deriveTokens,
+  normalizeHex,
+  type ThemeTokens,
+} from "../../../design/theme";
+import { DEFAULT_SKIN, setSkinAttribute, type Skin } from "./skin";
 
 /** Convert a hex color string to [h (0-360), s (0-100), l (0-100)] */
-export function hexToHsl(hex: string): [number, number, number] {
+function hexToHsl(hex: string): [number, number, number] {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
   const g = parseInt(hex.slice(3, 5), 16) / 255;
   const b = parseInt(hex.slice(5, 7), 16) / 255;
@@ -20,34 +28,89 @@ export function hexToHsl(hex: string): [number, number, number] {
   return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
 }
 
-/** Convert h (0-360), s (0-100), l (0-100) to a hex string */
-export function hslToHex(h: number, s: number, l: number): string {
-  const sl = s / 100;
-  const ll = l / 100;
-  const a = sl * Math.min(ll, 1 - ll);
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    const color = ll - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(255 * color).toString(16).padStart(2, "0");
-  };
-  return `#${f(0)}${f(8)}${f(4)}`;
+/** The colours and skin the page is painted with right now. */
+const current: { accent: string; background: string; skin: Skin } = {
+  accent: DEFAULT_ACCENT_HEX,
+  background: DEFAULT_BACKGROUND_HEX,
+  skin: DEFAULT_SKIN,
+};
+
+/** CSS variable → shared token (design/theme.ts). `--c-border-active` is the historical name of `borderStrong`. */
+const CSS_TOKENS: ReadonlyArray<[string, keyof ThemeTokens]> = [
+  ["--c-bg", "bg"],
+  ["--c-surface", "surface"],
+  ["--c-surface-raised", "surfaceRaised"],
+  ["--c-surface-high", "surfaceHigh"],
+  ["--c-text", "text"],
+  ["--c-text-dim", "textDim"],
+  ["--c-text-muted", "textMuted"],
+  ["--c-border", "border"],
+  ["--c-border-soft", "borderSoft"],
+  ["--c-border-active", "borderStrong"],
+  ["--c-accent", "accent"],
+  ["--c-accent-bright", "accentBright"],
+  ["--c-accent-dim", "accentDim"],
+  ["--c-accent-muted", "accentMuted"],
+  ["--c-accent-faint", "accentFaint"],
+  ["--c-accent-soft", "accentSoft"],
+  ["--c-accent-mid", "accentMid"],
+  ["--c-on-accent", "onAccent"],
+  ["--c-danger", "danger"],
+  ["--c-on-danger", "onDanger"],
+  ["--c-warning", "warning"],
+  ["--c-voice-connected", "success"],
+  ["--c-hover", "hover"],
+  ["--c-active", "active"],
+  ["--c-focus-ring", "focusRing"],
+];
+
+/** Recompute every colour token from the current accent, background and skin, and write them on <html>. */
+function paint(): void {
+  const tokens = deriveTokens(current.accent, current.background, current.skin);
+  const root = document.documentElement;
+  for (const [name, key] of CSS_TOKENS) {
+    root.style.setProperty(name, String(tokens[key]));
+  }
+  root.dataset.ground = tokens.isLight ? "light" : "dark";
+  setBackgroundLightness(hexToHsl(current.background)[2]);
 }
 
-/** Apply a hex accent color to the document CSS variables */
+/** Paint the defaults (Modern, default accent and background) before the first render. */
+export function initTheme(): void {
+  setSkinAttribute(current.skin);
+  paint();
+}
+
+/** The accent the page is painted with, as "#rrggbb". */
+export function currentAccentHex(): string {
+  return current.accent;
+}
+
+/** Apply a hex accent color; every token re-derives from it. */
 export function applyAccentColor(hex: string): void {
-  const [h, s, l] = hexToHsl(hex);
-  document.documentElement.style.setProperty("--accent-h", String(h));
-  document.documentElement.style.setProperty("--accent-s", `${s}%`);
-  document.documentElement.style.setProperty("--accent-l", `${l}%`);
+  const normalized = normalizeHex(hex);
+  if (!normalized) {
+    return;
+  }
+  current.accent = normalized;
+  paint();
 }
 
-/** Apply a hex background color to the document CSS variables */
+/** Apply a hex background color; every token re-derives from it. */
 export function applyBackgroundColor(hex: string): void {
-  const [h, s, l] = hexToHsl(hex);
-  document.documentElement.style.setProperty("--bg-h", String(h));
-  document.documentElement.style.setProperty("--bg-s", `${s}%`);
-  document.documentElement.style.setProperty("--bg-l", `${l}%`);
-  setBackgroundLightness(l);
+  const normalized = normalizeHex(hex);
+  if (!normalized) {
+    return;
+  }
+  current.background = normalized;
+  paint();
+}
+
+/** Apply the UI skin: the `data-skin` attribute for layout CSS, and the skin's colour branch. */
+export function applySkin(skin: Skin): void {
+  current.skin = skin;
+  setSkinAttribute(skin);
+  paint();
 }
 
 /** Apply a font size (in px) to the document CSS variable */
@@ -55,18 +118,7 @@ export function applyFontSize(px: number): void {
   document.documentElement.style.setProperty("--font-size-base", `${px}px`);
 }
 
-/** UI skin; `refined` overrides the `--c-*` tokens in `index.css`. Synced, unlike font size. */
-export type Skin = "terminal" | "refined";
-
-/** Coerce an arbitrary stored value to a valid Skin, defaulting to terminal. */
-export function normalizeSkin(v: unknown): Skin {
-  return v === "refined" ? "refined" : "terminal";
-}
-
-/** Apply the UI skin by setting the `data-skin` attribute on <html>. */
-export function applySkin(skin: Skin): void {
-  document.documentElement.dataset.skin = skin;
-}
+export { DEFAULT_SKIN, normalizeSkin, skinToWire, type Skin } from "./skin";
 
 /** Device-local font size, keyed by user id. */
 const FONT_SIZE_KEY_PREFIX = "pollis-font-size:";

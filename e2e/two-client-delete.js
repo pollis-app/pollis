@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Delete for everyone: B's already-delivered copy must flip to "[deleted]" (it must reach B first).
+// Delete for everyone: B's already-delivered copy must flip to "Message deleted" (it must reach B first).
 
 const fs = require("fs");
 const path = require("path");
@@ -11,7 +11,7 @@ const shot = h.makeShot(ARTIFACTS);
 const PIN = "1357";
 const REQUEST_TIMEOUT_MS = 120_000;
 const MESSAGE_TIMEOUT_MS = 180_000;
-const DELETED_MARKER = "[deleted]";
+const DELETED_MARKER = "Message deleted";
 
 function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   fs.rmSync(dataDir, { recursive: true, force: true });
@@ -142,7 +142,7 @@ async function deletedMarkerVisible(browser) {
   }, DELETED_MARKER);
 }
 
-// Poll until "[deleted]" renders and the token is gone, re-opening the DM to re-fire ingest.
+// Poll until "Message deleted" renders and the token is gone, re-opening the DM to re-fire ingest.
 async function waitForRedacted(browser, token, timeoutMs) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {

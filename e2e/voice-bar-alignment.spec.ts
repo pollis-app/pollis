@@ -10,7 +10,7 @@ const GROUP_ID = "g_voice";
 const VOICE_CHANNEL_ID = "c_lounge";
 const VOICE_CHANNEL_NAME = "lounge";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 const FONT_SIZES = ["13", "15", "18"] as const;
 

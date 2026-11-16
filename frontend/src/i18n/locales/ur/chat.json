@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "{{name}} کی طرف سے پیغام",
     "unknownAuthor": "نامعلوم",
-    "deleted": "[حذف شدہ]",
-    "encrypted": "[انکرپٹڈ]",
-    "redacted": "[پوشیدہ]",
+    "deleted": "پیغام حذف کر دیا گیا",
+    "beforeJoin": "آپ کے شامل ہونے سے پہلے بھیجا گیا",
     "edited": "(ترمیم شدہ)",
     "editUnsent": "(ترمیم نہیں بھیجی گئی)",
     "newMember": "نیا",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> کو جواب",
     "scrollToMessage": "جس پیغام کا جواب دیا گیا اس تک اسکرول کریں",
-    "dismiss": "جواب ختم کریں",
-    "encrypted": "[انکرپٹڈ پیغام]"
+    "dismiss": "جواب ختم کریں"
   },
   "queue": {
     "heading": "قطار",

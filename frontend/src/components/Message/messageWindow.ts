@@ -4,7 +4,7 @@ import type { Virtualizer } from "@tanstack/react-virtual";
 
 /** Row-height guesses in rem; only unmeasured rows use them. */
 const TERMINAL_ROW_REM = 2;
-const REFINED_ROW_REM = 3.25;
+const MODERN_ROW_REM = 3.25;
 
 /** Rows kept mounted beyond each edge, so one-step moves stay synchronous. */
 export const ROW_OVERSCAN = 10;
@@ -19,7 +19,7 @@ function rootFontSizePx(): number {
 }
 
 export function estimateRowPx(skin: string): number {
-  const rem = skin === "refined" ? REFINED_ROW_REM : TERMINAL_ROW_REM;
+  const rem = skin === "modern" ? MODERN_ROW_REM : TERMINAL_ROW_REM;
   return rem * rootFontSizePx();
 }
 

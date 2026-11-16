@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "{{name}} ولوں سنیہا",
     "unknownAuthor": "انجان",
-    "deleted": "[ڈیلیٹ ہو گیا]",
-    "encrypted": "[انکرپٹڈ]",
-    "redacted": "[لکایا گیا]",
+    "deleted": "سنیہا ڈیلیٹ ہو گیا",
+    "beforeJoin": "تہاڈے شامل ہون توں پہلاں گھلیا گیا",
     "edited": "(ایڈٹ کیتا)",
     "editUnsent": "(ایڈٹ نہیں گیا)",
     "newMember": "نواں",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> نوں جواب",
     "scrollToMessage": "جس سنیہے دا جواب اے اوتھے جاؤ",
-    "dismiss": "جواب ہٹاؤ",
-    "encrypted": "[انکرپٹڈ سنیہا]"
+    "dismiss": "جواب ہٹاؤ"
   },
   "queue": {
     "heading": "قطار",

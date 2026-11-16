@@ -470,7 +470,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     ? ghostTarget.username.slice(mentionQuery!.query.length)
     : "";
 
-  const showSuggestList = skin === "refined" && suggestions.length > 0;
+  const showSuggestList = skin === "modern" && suggestions.length > 0;
 
   // :shortcode: autocomplete. Mentions take precedence for Enter/Tab/Esc.
   const [emojiDismissed, setEmojiDismissed] = useState(false);
@@ -490,7 +490,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     ? `${emojiGhostTarget.shortcode.slice(emojiQuery!.query.length)}:`
     : "";
 
-  const showEmojiList = skin === "refined" && emojiSuggestions.length > 0;
+  const showEmojiList = skin === "modern" && emojiSuggestions.length > 0;
 
   const activeListLength = showSuggestList ? suggestions.length : emojiSuggestions.length;
 

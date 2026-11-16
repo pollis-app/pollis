@@ -108,7 +108,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
             />,
             <Button size="sm"
               data-testid={`member-kick-${m.user_id}`}
-              variant="primary"
+              variant="danger"
               onClick={() =>
                 navigate({
                   to: "/groups/$groupId/members/$userId/kick",
@@ -195,7 +195,7 @@ const InvitedSection: React.FC<{ groupId: string; isAdmin: boolean }> = observer
             return [
               <Button
                 size="sm"
-                variant="primary"
+                variant="danger"
                 data-testid={`invited-revoke-${invite.invitee_id}`}
                 aria-label={t("members.invited.revokeLabel", { name: inviteeName(invite) })}
                 disabled={revoke.isPending && !busy}

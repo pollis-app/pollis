@@ -14,7 +14,7 @@ import { shareOf, isMediaBusy } from "../../types/voice-state";
 import { PressButton } from "../ui/PressButton";
 import { IconSpinner } from "../ui/IconSpinner";
 
-/** Refined skin's identity panel at the sidebar bottom; while in voice it also carries the full voice controls (AppShell hides `VoiceBar` in refined). */
+/** Modern skin's identity panel at the sidebar bottom; while in voice it also carries the full voice controls (AppShell hides `VoiceBar` in Modern). */
 export const SidebarProfilePanel: React.FC = observer(() => {
   const { t } = useTranslation("nav");
   const { t: tVoice } = useTranslation("voice");

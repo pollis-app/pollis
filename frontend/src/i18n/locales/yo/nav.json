@@ -109,9 +109,7 @@
   "thread": {
     "loading": "Ó ń gbé àwọn ìfèsì wọlé…",
     "empty": "Kò sí ìfèsì síbẹ̀. Bẹ̀rẹ̀ okùn ìjíròrò nísàlẹ̀.",
-    "placeholder": "Fèsì nínú okùn ìjíròrò…",
-    "messageDeleted": "A ti pa ìfiránṣẹ́ rẹ́",
-    "encrypted": "[ó ní ìpàrokò]"
+    "placeholder": "Fèsì nínú okùn ìjíròrò…"
   },
   "chat": {
     "noSelection": "Yan ìkànnì kan láti bẹ̀rẹ̀ sí í fi ìfiránṣẹ́ ránṣẹ́"

@@ -31,7 +31,7 @@ const MatchedName: React.FC<{ username: string; query: string }> = ({
   );
 };
 
-/** Refined skin's mention list (#843), `absolute` inside the composer (no portal); ChatInput owns the keys. */
+/** Modern skin's mention list (#843), `absolute` inside the composer (no portal); ChatInput owns the keys. */
 export const MentionSuggestList: React.FC<MentionSuggestListProps> = ({
   candidates,
   activeIndex,

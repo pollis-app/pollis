@@ -13,11 +13,11 @@ const RING =
 test("TextInput / TextArea class: the border tracks error, then focus", () => {
   assert.equal(
     fieldControlClass("placeholder-leading-1", undefined, false),
-    `w-full py-2 placeholder-leading-1 ${RING} border-line`,
+    `w-full py-2 placeholder-leading-1 ${RING} border-line-strong`,
   );
   assert.equal(
     fieldControlClass("resize-none", undefined, true),
-    `w-full py-2 resize-none ${RING} border-line-strong`,
+    `w-full py-2 resize-none ${RING} border-accent`,
   );
   // An error wins over focus.
   assert.equal(

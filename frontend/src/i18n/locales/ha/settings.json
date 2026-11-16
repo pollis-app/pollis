@@ -31,7 +31,7 @@
     "ariaLabel": "Fatar manhaja",
     "skinTerminal": "Tasha-umarni",
     "skinModern": "Na zamani",
-    "description": "Tasha-umarni shi ne kamannin asali irin na IRC/monospace. Na zamani tsari ne mafi sauƙi da rubutu mai faɗi daban-daban ga masu son manhajar hira ta yau da kullum. Yana daidaita a duk na'urorinku.",
+    "description": "Na zamani shi ne tsoho: tsarin hira na yau da kullum da rubutu mai faɗi daban-daban. Tasha-umarni kamannin monospace ne irin na IRC da za a iya zaɓa. Yana daidaita a duk na'urorinku.",
     "skinTerminalDetail": "Monospace kuma matsattse, kamar IRC a tasha-umarni",
     "skinModernDetail": "Rubutu mai faɗi daban-daban, hotuna da layuka masu faɗi",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "Launin Ado",
     "pickTitle": "Zaɓi launin ado",
-    "presetOrange": "Lemu",
-    "presetGreen": "Kore",
-    "presetBlue": "Shuɗi",
-    "presetPurple": "Shunayya",
-    "presetRed": "Ja",
-    "presetCyan": "Shuɗi mai haske"
+    "presetAmber": "Amber",
+    "presetCitron": "Lemun tsami",
+    "presetMint": "Na'a-na'a",
+    "presetGlass": "Gilashi",
+    "presetLilac": "Lilac",
+    "presetRust": "Tsatsa"
   },
   "background": {
     "heading": "Launin Bango",
     "pickTitle": "Zaɓi launin bango",
-    "presetMatchAccent": "Daidai da launin ado",
     "presetNeutral": "Tsaka-tsaki",
     "presetWarm": "Mai ɗumi",
     "presetCool": "Mai sanyi",

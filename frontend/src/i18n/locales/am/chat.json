@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "ከ{{name}} የመጣ መልዕክት",
     "unknownAuthor": "ያልታወቀ",
-    "deleted": "[ተሰርዟል]",
-    "encrypted": "[የተመሰጠረ]",
-    "redacted": "[ተደብቋል]",
+    "deleted": "መልዕክቱ ተሰርዟል",
+    "beforeJoin": "ከመቀላቀልዎ በፊት የተላከ",
     "edited": "(ተስተካክሏል)",
     "editUnsent": "(ማስተካከያው አልተላከም)",
     "newMember": "አዲስ",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "ለ<name>{{name}}</name> በመመለስ ላይ",
     "scrollToMessage": "መልስ ወደተሰጠው መልዕክት ሸብልል",
-    "dismiss": "መልሱን ተው",
-    "encrypted": "[የተመሰጠረ መልዕክት]"
+    "dismiss": "መልሱን ተው"
   },
   "queue": {
     "heading": "ወረፋ",

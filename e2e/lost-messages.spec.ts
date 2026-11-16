@@ -16,7 +16,7 @@ const MSG_AFTER = "01HQ7Z3K9M2P5R8T1V4W6Y0AFT";
 const RUN = ["01HQ7Z3K9M2P5R8T1V4W6Y0RN1", "01HQ7Z3K9M2P5R8T1V4W6Y0RN2", "01HQ7Z3K9M2P5R8T1V4W6Y0RN3"];
 const MSG_LAST = "01HQ7Z3K9M2P5R8T1V4W6Y0LAS";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadState(skin: Skin) {
@@ -161,7 +161,7 @@ for (const skin of SKINS) {
 }
 
 test("the placeholder's link opens Diagnostics", async ({ page }) => {
-  await boot(page, "refined");
+  await boot(page, "modern");
   await openChannel(page);
   // Plain click, no force: the next row's hidden action bar overlaps this row.
   await page.getByTestId(`message-${MSG_LOST}`).getByTestId("undecryptable-diagnostics-link").click();

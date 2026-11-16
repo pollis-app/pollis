@@ -31,7 +31,7 @@
     "ariaLabel": "Tema da interface",
     "skinTerminal": "Terminal",
     "skinModern": "Moderno",
-    "description": "Terminal é o aspeto predefinido, de IRC em letra monoespaçada. Moderno é um esquema mais acessível, em letra proporcional sem serifa, para quem prefere uma aplicação de conversação mais convencional. Sincroniza entre os seus dispositivos.",
+    "description": "Moderno é o padrão: um aspeto de chat convencional com letra proporcional. Terminal é um aspeto monoespaçado opcional, ao estilo IRC. Sincroniza entre os seus dispositivos.",
     "skinTerminalDetail": "Monoespaçado e compacto, como IRC num terminal",
     "skinModernDetail": "Letra proporcional, avatares e linhas mais espaçosas",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "Cor de destaque",
     "pickTitle": "Escolher cor de destaque",
-    "presetOrange": "Laranja",
-    "presetGreen": "Verde",
-    "presetBlue": "Azul",
-    "presetPurple": "Roxo",
-    "presetRed": "Vermelho",
-    "presetCyan": "Ciano"
+    "presetAmber": "Âmbar",
+    "presetCitron": "Cidra",
+    "presetMint": "Menta",
+    "presetGlass": "Vidro",
+    "presetLilac": "Lilás",
+    "presetRust": "Ferrugem"
   },
   "background": {
     "heading": "Cor de fundo",
     "pickTitle": "Escolher cor de fundo",
-    "presetMatchAccent": "Igual ao destaque",
     "presetNeutral": "Neutro",
     "presetWarm": "Quente",
     "presetCool": "Frio",

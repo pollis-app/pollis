@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Umlayezo ovela ku-{{name}}",
     "unknownAuthor": "akaziwa",
-    "deleted": "[kususiwe]",
-    "encrypted": "[kubethelwe]",
-    "redacted": "[kufihliwe]",
+    "deleted": "Umlayezo ususiwe",
+    "beforeJoin": "Kuthunyelwe ngaphambi kokuthi ujoyine",
     "edited": "(kuhleliwe)",
     "editUnsent": "(ukuhlela akuthunyelwanga)",
     "newMember": "omusha",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "uphendula u-<name>{{name}}</name>",
     "scrollToMessage": "Skrolela kumlayezo ophendulwayo",
-    "dismiss": "Chitha impendulo",
-    "encrypted": "[Umlayezo obethelwe]"
+    "dismiss": "Chitha impendulo"
   },
   "queue": {
     "heading": "Ulayini",

@@ -2,7 +2,8 @@ import type { CSSProperties } from "react";
 
 /** Class list of the `TextInput` / `TextArea` control: focus ring, surface, and a border that tracks error and focus. */
 export function fieldControlClass(extra: string, error: string | undefined, isFocused: boolean): string {
-  const border = error ? "border-danger" : isFocused ? "border-line-strong" : "border-line";
+  // A control's edge is `line-strong` (3:1, design/theme.ts); `line` is for decorative separators only.
+  const border = error ? "border-danger" : isFocused ? "border-accent" : "border-line-strong";
   return `w-full py-2 ${extra} font-mono text-sm focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2 ${border}`;
 }
 

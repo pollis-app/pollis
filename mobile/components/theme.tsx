@@ -24,8 +24,10 @@ import {
   accentFromPreferences,
   accentOnUserChange,
   persistAccent,
+  persistBackground,
 } from "../theme/accentStore";
 import { deviceAccentBackend } from "../theme/deviceAccent";
+import { backgroundFromPrefs, colorPreferencesPatch } from "../../design/theme.ts";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import { saveThemeForExtension } from "../lib/push/extensionTheme";
 
@@ -33,7 +35,7 @@ type ThemeCtx = {
   accentHex: string;
   setAccent: (hex: string) => void;
   backgroundHex: string;
-  // Device-local: no synced key for it yet.
+  // Synced as `background_color`, shared with desktop.
   setBackground: (hex: string) => void;
 };
 
@@ -91,15 +93,32 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const setAccent = useCallback(
     (hex: string) => {
       applyAccent(hex);
-      update({ accent_hex: hex });
+      update(colorPreferencesPatch({ accent: hex }));
     },
     [applyAccent, update],
   );
 
-  const setBackground = useCallback((hex: string) => {
+  const applyBackground = useCallback((hex: string) => {
     setBackgroundRgb(hexToRgbTriplet(hex));
     setBackgroundHex(hex);
+    persistBackground(deviceAccentBackend, hex);
   }, []);
+
+  // The synced background (desktop picks it), else the default once a trusted read says there is none.
+  const remoteBackground = backgroundFromPrefs(prefs) ?? (trusted || !userId ? DEFAULT_BACKGROUND_HEX : null);
+  useEffect(() => {
+    if (remoteBackground && remoteBackground !== currentBackgroundHex()) {
+      applyBackground(remoteBackground);
+    }
+  }, [remoteBackground, applyBackground]);
+
+  const setBackground = useCallback(
+    (hex: string) => {
+      applyBackground(hex);
+      update(colorPreferencesPatch({ background: hex }));
+    },
+    [applyBackground, update],
+  );
 
   // #1599: the notification extension draws its avatars in the same colours (iOS).
   useEffect(() => {

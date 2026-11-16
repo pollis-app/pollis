@@ -31,7 +31,7 @@
     "ariaLabel": "UI ਸਕਿਨ",
     "skinTerminal": "ਟਰਮੀਨਲ",
     "skinModern": "ਆਧੁਨਿਕ",
-    "description": "ਟਰਮੀਨਲ ਪੂਰਵ-ਨਿਰਧਾਰਤ IRC/ਮੋਨੋਸਪੇਸ ਦਿੱਖ ਹੈ। ਆਧੁਨਿਕ ਉਹਨਾਂ ਲੋਕਾਂ ਲਈ ਇੱਕ ਵਧੇਰੇ ਦੋਸਤਾਨਾ, ਅਨੁਪਾਤਕ ਫੌਂਟ ਵਾਲਾ ਲੇਆਉਟ ਹੈ ਜੋ ਆਮ ਚੈਟ ਐਪ ਵਰਗਾ ਪਸੰਦ ਕਰਦੇ ਹਨ। ਤੁਹਾਡੇ ਸਾਰੇ ਡਿਵਾਈਸਾਂ 'ਤੇ ਸਿੰਕ ਹੁੰਦਾ ਹੈ।",
+    "description": "ਆਧੁਨਿਕ ਡਿਫੌਲਟ ਹੈ: ਅਨੁਪਾਤਕ ਫੌਂਟ ਵਿੱਚ ਜਾਣਿਆ-ਪਛਾਣਿਆ ਚੈਟ ਖਾਕਾ। ਟਰਮੀਨਲ ਇੱਕ ਚੋਣਵੀਂ IRC ਵਰਗੀ ਮੋਨੋਸਪੇਸ ਦਿੱਖ ਹੈ। ਤੁਹਾਡੇ ਸਾਰੇ ਡਿਵਾਈਸਾਂ 'ਤੇ ਸਿੰਕ ਹੁੰਦੀ ਹੈ।",
     "skinTerminalDetail": "ਮੋਨੋਸਪੇਸ ਅਤੇ ਸੰਖੇਪ, ਟਰਮੀਨਲ ਵਿੱਚ IRC ਵਾਂਗ",
     "skinModernDetail": "ਅਨੁਪਾਤਕ ਫੌਂਟ, ਅਵਤਾਰ ਅਤੇ ਖੁੱਲ੍ਹੀਆਂ ਕਤਾਰਾਂ",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "ਐਕਸੈਂਟ ਰੰਗ",
     "pickTitle": "ਐਕਸੈਂਟ ਰੰਗ ਚੁਣੋ",
-    "presetOrange": "ਸੰਤਰੀ",
-    "presetGreen": "ਹਰਾ",
-    "presetBlue": "ਨੀਲਾ",
-    "presetPurple": "ਜਾਮਨੀ",
-    "presetRed": "ਲਾਲ",
-    "presetCyan": "ਫਿਰੋਜ਼ੀ"
+    "presetAmber": "ਅੰਬਰ",
+    "presetCitron": "ਸਿਟਰੋਨ",
+    "presetMint": "ਪੁਦੀਨਾ",
+    "presetGlass": "ਸ਼ੀਸ਼ਾ",
+    "presetLilac": "ਲਾਈਲੈਕ",
+    "presetRust": "ਜੰਗਾਲ"
   },
   "background": {
     "heading": "ਪਿਛੋਕੜ ਦਾ ਰੰਗ",
     "pickTitle": "ਪਿਛੋਕੜ ਦਾ ਰੰਗ ਚੁਣੋ",
-    "presetMatchAccent": "ਐਕਸੈਂਟ ਨਾਲ ਮਿਲਾਓ",
     "presetNeutral": "ਨਿਰਪੱਖ",
     "presetWarm": "ਗਰਮ",
     "presetCool": "ਠੰਢਾ",

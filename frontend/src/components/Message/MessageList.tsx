@@ -55,8 +55,8 @@ const startOfLocalDay = (d: Date): number =>
 // Time gap (ms) beyond which a same-author message still starts a new group.
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
-const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ label, refined }) => {
-  if (refined) {
+const DayDivider: React.FC<{ label: string; modern: boolean }> = React.memo(({ label, modern }) => {
+  if (modern) {
     return (
       <div
         data-testid="day-divider"
@@ -211,6 +211,13 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     }
     return set;
   }, [mentionCandidates, selfName]);
+  // A quoted original from before this user joined never reaches them (`utils/replyQuote.ts`).
+  const viewerJoinedAtMs = useMemo(() => {
+    const me = groupMembers.find((m) => m.user_id === currentUser?.id);
+    const ms = me ? Date.parse(me.joined_at) : NaN;
+    return Number.isFinite(ms) ? ms : null;
+  }, [groupMembers, currentUser?.id]);
+
   const renderCtx = useMemo<MessageRenderContext>(
     () => ({
       skin,
@@ -218,8 +225,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       currentUserId: currentUser?.id,
       mentionNames,
       selfName,
+      viewerJoinedAtMs,
     }),
-    [skin, isLightBg, currentUser?.id, mentionNames, selfName],
+    [skin, isLightBg, currentUser?.id, mentionNames, selfName, viewerJoinedAtMs],
   );
 
   // One tick per DM (#1637), on the newest own message with a receipt. A window
@@ -700,7 +708,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           {showDivider && (
             <DayDivider
               label={formatDayDivider(item.ts)}
-              refined={skin === "refined"}
+              modern={skin === "modern"}
             />
           )}
           <KeyChangeNoticeRow
@@ -787,7 +795,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         {showDivider && (
           <DayDivider
             label={formatDayDivider(item.ts)}
-            refined={skin === "refined"}
+            modern={skin === "modern"}
           />
         )}
         {rendered}

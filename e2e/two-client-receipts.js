@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Delivery + read receipts (#857), refined skin: A's row shows delivered before B opens the DM, then read-all.
+// Delivery + read receipts (#857), Modern skin: A's row shows delivered before B opens the DM, then read-all.
 
 const fs = require("fs");
 const path = require("path");
@@ -51,7 +51,7 @@ async function signUp(browser, email, tag) {
   console.log(`[receipts] ${tag}: reached app-ready`);
 }
 
-/** Switch skin via Preferences; receipts render only in the refined skin. */
+/** Switch skin via Preferences; receipts render only in the Modern skin. */
 async function setSkin(browser, skin, tag) {
   console.log(`[receipts] ${tag}: switching to ${skin} skin`);
   await browser.execute(() => { window.history.pushState({}, "", "/preferences"); window.dispatchEvent(new PopStateEvent("popstate")); });
@@ -223,7 +223,7 @@ async function main() {
 
     await signUp(A.browser, emailA, "A");
     await signUp(B.browser, emailB, "B");
-    await setSkin(A.browser, "refined", "A");
+    await setSkin(A.browser, "modern", "A");
 
     console.log(`[receipts] A: starting DM to ${emailB}`);
     await startDmTo(A.browser, emailB);

@@ -1,4 +1,4 @@
-/** #1924: a new user picks Terminal or Modern once, after sign-in and before the app opens. */
+/** #1924: a new user picks Modern (preselected) or Terminal once, after sign-in and before the app opens. */
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
@@ -81,45 +81,45 @@ function htmlSkin(page: Page): Promise<string | undefined> {
   return page.evaluate(() => document.documentElement.dataset.skin);
 }
 
-test("a new account picks Modern before the app opens; it applies live and saves as 'refined'", async ({ page }) => {
+test("a new account is asked before the app opens, Modern preselected; Continue saves it as 'refined'", async ({ page }) => {
   await boot(page, signedOut({ newAccount: true }));
   await signUp(page);
 
   await expect(page.getByTestId("appearance-choice-screen")).toBeVisible();
   await expect(page.getByTestId("app-ready")).toHaveCount(0);
-  // Terminal is the default, preselected; the step is a vertical radio list, not a dialog.
+  // Modern is the base look, preselected; the step is a vertical radio list, not a dialog.
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByTestId("first-run-skin-terminal")).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByTestId("first-run-skin-refined")).toContainText("Modern");
-  await expect(page.getByTestId("appearance-choice-preview")).toHaveAttribute("data-skin-preview", "terminal");
-  await page.screenshot({ path: "artifacts/first-run-appearance-terminal.png" });
-
-  await page.getByTestId("first-run-skin-refined").click();
-  await expect(page.getByTestId("first-run-skin-refined")).toHaveAttribute("aria-checked", "true");
-  await expect.poll(() => htmlSkin(page)).toBe("refined");
-  await expect(page.getByTestId("appearance-choice-preview")).toHaveAttribute("data-skin-preview", "refined");
+  await expect(page.getByTestId("first-run-skin-modern")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("first-run-skin-modern")).toContainText("Modern");
+  await expect(page.getByTestId("appearance-choice-preview")).toHaveAttribute("data-skin-preview", "modern");
+  expect(await htmlSkin(page)).toBe("modern");
   await page.screenshot({ path: "artifacts/first-run-appearance-modern.png" });
-  // Nothing is saved until Continue.
-  expect((await storedPreferences(page)).skin).toBeUndefined();
 
   await page.getByTestId("appearance-choice-continue").click();
   await expect(page.getByTestId("app-ready")).toBeAttached();
   // The wire value stays "refined": older desktop builds read anything else as terminal.
   expect((await storedPreferences(page)).skin).toBe("refined");
-  expect(await htmlSkin(page)).toBe("refined");
+  expect(await htmlSkin(page)).toBe("modern");
 
-  // Preferences shows the same choice, named Modern.
+  // Preferences shows the same choice.
   await page.getByTestId("sidebar-row-preferences").click();
-  await expect(page.getByTestId("pref-skin-refined")).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByTestId("pref-skin-refined")).toContainText("Modern");
+  await expect(page.getByTestId("pref-skin-modern")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("pref-skin-modern")).toContainText("Modern");
 });
 
-test("Continue without touching anything keeps and saves Terminal", async ({ page }) => {
+test("picking Terminal applies it live, saves nothing until Continue, then saves 'terminal'", async ({ page }) => {
   await boot(page, signedOut({ newAccount: true }));
   await signUp(page);
 
   await expect(page.getByTestId("appearance-choice-screen")).toBeVisible();
-  expect(await htmlSkin(page)).toBe("terminal");
+  await page.getByTestId("first-run-skin-terminal").click();
+  await expect(page.getByTestId("first-run-skin-terminal")).toHaveAttribute("aria-checked", "true");
+  await expect.poll(() => htmlSkin(page)).toBe("terminal");
+  await expect(page.getByTestId("appearance-choice-preview")).toHaveAttribute("data-skin-preview", "terminal");
+  await page.screenshot({ path: "artifacts/first-run-appearance-terminal.png" });
+  // Nothing is saved until Continue.
+  expect((await storedPreferences(page)).skin).toBeUndefined();
+
   await page.getByTestId("appearance-choice-continue").click();
   await expect(page.getByTestId("app-ready")).toBeAttached();
   expect((await storedPreferences(page)).skin).toBe("terminal");
@@ -151,7 +151,7 @@ test("a failed save keeps the step, says why, and Continue tries again", async (
       "network unreachable",
     ),
   );
-  await page.getByTestId("first-run-skin-refined").click();
+  await page.getByTestId("first-run-skin-terminal").click();
   await page.getByTestId("appearance-choice-continue").click();
   await expect(page.getByTestId("appearance-choice-error")).toBeVisible();
   await expect(page.getByTestId("app-ready")).toHaveCount(0);
@@ -164,7 +164,7 @@ test("a failed save keeps the step, says why, and Continue tries again", async (
   );
   await page.getByTestId("appearance-choice-continue").click();
   await expect(page.getByTestId("app-ready")).toBeAttached();
-  expect((await storedPreferences(page)).skin).toBe("refined");
+  expect((await storedPreferences(page)).skin).toBe("terminal");
 });
 
 test("a newly linked device whose account already chose a skin inherits it and is not asked", async ({ page }) => {
@@ -173,7 +173,7 @@ test("a newly linked device whose account already chose a skin inherits it and i
 
   await expect(page.getByTestId("app-ready")).toBeAttached();
   await expect(page.getByTestId("appearance-choice-screen")).toHaveCount(0);
-  await expect.poll(() => htmlSkin(page)).toBe("refined");
+  await expect.poll(() => htmlSkin(page)).toBe("modern");
 });
 
 test("a newly linked device whose account never chose a skin is asked", async ({ page }) => {
@@ -205,5 +205,6 @@ test("a returning user signing in again is not asked", async ({ page }) => {
 
   await expect(page.getByTestId("app-ready")).toBeAttached();
   await expect(page.getByTestId("appearance-choice-screen")).toHaveCount(0);
-  expect(await htmlSkin(page)).toBe("terminal");
+  // No saved skin: the default, Modern.
+  expect(await htmlSkin(page)).toBe("modern");
 });

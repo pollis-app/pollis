@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Message de {{name}}",
     "unknownAuthor": "inconnu",
-    "deleted": "[supprimé]",
-    "encrypted": "[chiffré]",
-    "redacted": "[expurgé]",
+    "deleted": "Message supprimé",
+    "beforeJoin": "Envoyé avant votre arrivée",
     "edited": "(modifié)",
     "editUnsent": "(modification non envoyée)",
     "newMember": "nouveau",
@@ -62,8 +61,7 @@
   "replyBar": {
     "replyingTo": "en réponse à <name>{{name}}</name>",
     "scrollToMessage": "Aller au message d'origine",
-    "dismiss": "Annuler la réponse",
-    "encrypted": "[Message chiffré]"
+    "dismiss": "Annuler la réponse"
   },
   "queue": {
     "heading": "File d'attente",

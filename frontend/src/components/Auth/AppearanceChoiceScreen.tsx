@@ -6,8 +6,7 @@ import { Button } from "../ui/Button";
 import { Avatar } from "../ui/Avatar";
 import { SkinPicker } from "../Preferences/SkinPicker";
 import { usePreferences } from "../../hooks/queries/usePreferences";
-import { applySkin, type Skin } from "../../utils/colorUtils";
-import { DEFAULT_SKIN } from "../../utils/firstRunAppearance";
+import { applySkin, DEFAULT_SKIN, type Skin } from "../../utils/colorUtils";
 
 interface AppearanceChoiceScreenProps {
   onDone: () => void;
@@ -29,7 +28,7 @@ const SkinPreview: React.FC<{ skin: Skin }> = ({ skin }) => {
       className="rounded-panel bg-bg px-4 py-3 flex flex-col gap-2"
     >
       {lines.map((line) =>
-        skin === DEFAULT_SKIN ? (
+        skin === "terminal" ? (
           <p key={line.name} className="font-machine text-xs text-fg truncate">
             <span className="text-muted">{line.time} </span>
             <span className="text-accent">&lt;{line.name}&gt;</span> {line.text}

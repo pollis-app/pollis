@@ -115,7 +115,6 @@
     "ownPreview": "आप: {{text}}",
     "noMatches": "कोई बातचीत मेल नहीं खाती।",
     "emptyHint": "किसी के यूज़रनेम या ईमेल से उसके साथ बातचीत शुरू करें।",
-    "previewDeleted": "मैसेज मिटाया गया",
     "previewAttachment": "अटैचमेंट"
   },
   "dm": {

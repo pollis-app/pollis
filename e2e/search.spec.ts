@@ -16,7 +16,7 @@ const CHANNEL_NEWEST_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2NEW";
 const DM_HIT_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2DMM";
 const OLD_HIT_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2OLD";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadState(skin: Skin) {

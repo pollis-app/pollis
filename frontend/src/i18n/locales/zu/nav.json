@@ -115,9 +115,7 @@
   "thread": {
     "loading": "Ilayisha izimpendulo…",
     "empty": "Azikabikho izimpendulo. Qala uchungechunge ngezansi.",
-    "placeholder": "Phendula ochungechungeni…",
-    "messageDeleted": "Umlayezo ususiwe",
-    "encrypted": "[kubethelwe]"
+    "placeholder": "Phendula ochungechungeni…"
   },
   "chat": {
     "noSelection": "Khetha isiteshi ukuze uqale ukuthumela imilayezo"

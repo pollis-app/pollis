@@ -22,7 +22,7 @@ const MIC_TONE: Record<MicIndicator, string> = {
   deafened: "text-danger hover:text-danger",
 };
 
-/** Mic + deafen for refined's sidebar strip; labels and state shared with `VoiceBar`. */
+/** Mic + deafen for Modern's sidebar strip; labels and state shared with `VoiceBar`. */
 export const SidebarVoiceControls: React.FC = observer(() => {
   const { t } = useTranslation("voice");
   const { voiceState, voiceParticipants } = appStore;

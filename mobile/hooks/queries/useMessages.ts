@@ -735,8 +735,14 @@ export function useDeleteMessage(
       const key = messageQueryKeys.conversation(conversationId, kind);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<MessagesData>(key);
+      // The row stays and reads "Message deleted", as the stored row will once refetched (desktop too).
+      const deletedAt = Date.now();
       queryClient.setQueryData<MessagesData>(key, (cache) =>
-        mapPages(cache, (msgs) => msgs.filter((m) => m.id !== messageId)),
+        mapPages(cache, (msgs) =>
+          msgs.map((m) =>
+            m.id === messageId ? { ...m, content: "", attachments: [], deleted_at: deletedAt } : m,
+          ),
+        ),
       );
       return { previous, key };
     },
@@ -853,7 +859,7 @@ export function previewText(message: Message | undefined): string | null {
     return null;
   }
   if (message.deleted_at) {
-    return i18n.t("mobile:direct.previewDeleted");
+    return i18n.t("chat:message.deleted");
   }
   if (message.undecryptable) {
     return i18n.t("chat:preview.undecryptable");

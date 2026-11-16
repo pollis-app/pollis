@@ -112,7 +112,6 @@
     "ownPreview": "你：{{text}}",
     "noMatches": "没有匹配的对话。",
     "emptyHint": "通过用户名或邮箱与他人开始对话。",
-    "previewDeleted": "消息已删除",
     "previewAttachment": "附件"
   },
   "dm": {

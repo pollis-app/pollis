@@ -1,4 +1,4 @@
-// DM receipts (#857): delivered and read must render differently (geometry + colour); refined skin only.
+// DM receipts (#857): delivered and read must render differently (geometry + colour); Modern skin only.
 // #1637: one tick per DM, on the viewer's newest own message that has a receipt, never one per message.
 
 import { test, expect, type Page } from "./lib/zero-loss";
@@ -32,7 +32,7 @@ const MSG_EVERYONE = "01HQ7Z3K9M2P5R8T1V4W6Y0EVR";
 // here the DM-only rule is being enforced nowhere but in the query.
 const CHANNEL_MSG = "01HQ7Z3K9M2P5R8T1V4W6Y0CHM";
 
-type Skin = "terminal" | "refined";
+type Skin = "terminal" | "modern";
 
 const permalink = (conversationId: string, messageId: string) =>
   `pollis://m/${conversationId}/${messageId}`;
@@ -210,9 +210,9 @@ async function indicatorShape(page: Page, messageId: string) {
   }, messageId);
 }
 
-const skin: Skin = "refined";
+const skin: Skin = "modern";
 
-test.describe("DM receipts — refined skin", () => {
+test.describe("DM receipts — Modern skin", () => {
   test("a delivered-but-unread message shows a single muted tick", async ({ page }) => {
     await boot(page, skin);
     await gotoViaPermalink(page, DM_ID, MSG_DELIVERED);

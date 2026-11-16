@@ -18,6 +18,7 @@ import { probeRender } from "../../utils/renderProbe";
 import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
 import { PressButton } from "../ui/PressButton";
+import { sentBeforeJoin } from "../../utils/replyQuote";
 
 interface MessageItemProps {
   message: Message;
@@ -31,7 +32,7 @@ interface MessageItemProps {
   isAuthorNew?: boolean;
   /** Viewer is a group admin: may delete others' messages. */
   canModerate?: boolean;
-  /** Refined skin: row starts a sender group (avatar + header). Defaults to true. */
+  /** Modern skin: row starts a sender group (avatar + header). Defaults to true. */
   isGroupStart?: boolean;
   onReply?: (messageId: string) => void;
   onOpenThread?: (messageId: string) => void;
@@ -48,7 +49,7 @@ interface MessageItemProps {
   isSaved?: boolean;
   isPinned?: boolean;
   onScrollToReply?: (messageId: string) => void;
-  /** Receipts for this message only (#857); refined skin, DMs only. */
+  /** Receipts for this message only (#857); Modern skin, DMs only. */
   receipt?: MessageReceipts;
   peerCount?: number;
   isDm?: boolean;
@@ -100,7 +101,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
   const replyTo = replyToMessage ?? null;
 
-  // The "new" tag (#1506): refined skin only.
+  // The "new" tag (#1506): Modern skin only.
   const newTag = isAuthorNew ? (
     <span
       data-testid="message-new-tag"
@@ -118,11 +119,28 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     ? getUsernameColor(replyTo.sender_username ?? replyTo.sender_id, isLightBg)
     : null;
 
+  // Every message is encrypted, so a quote says what happened: the original was deleted, could
+  // not be decrypted here (or is not on this device), or predates this user joining. Mobile's
+  // MessageRow says the same.
+  const replyQuoteText = replyTo
+    ? replyTo.deleted_at
+      ? t("message.deleted")
+      : replyTo.content_decrypted == null
+        ? t("message.undecryptable.title")
+        : replyTo.content_decrypted.slice(0, 80) ||
+          replyTo.attachments?.[0]?.filename ||
+          t("message.undecryptable.title")
+    : "";
+  const missingQuoteText =
+    message.reply_to_message_id && sentBeforeJoin(message.reply_to_message_id, ctx.viewerJoinedAtMs)
+      ? t("message.beforeJoin")
+      : t("message.undecryptable.title");
+
   const isDeleted = !!message.deleted_at;
 
   const content = isDeleted
     ? t("message.deleted")
-    : (message.content_decrypted ?? t("message.encrypted"));
+    : (message.content_decrypted ?? t("message.undecryptable.body_one"));
 
   const isVisualMedia = (ct: string) =>
     ct.startsWith("image/") || ct.startsWith("video/");
@@ -167,7 +185,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     </>
   );
 
-  const actionsFor = (variant: "refined" | "terminal") =>
+  const actionsFor = (variant: "modern" | "terminal") =>
     !isDeleted && !isUnsent && (
       <MessageActions
         messageId={message.id}
@@ -188,7 +206,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       />
     );
 
-  if (skin === "refined") {
+  if (skin === "modern") {
     const nameClass = isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : "";
     const nameStyle: React.CSSProperties | undefined = isAuthorAdmin
       ? adminChipStyle
@@ -234,16 +252,16 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                   </bdi>
                 )}
                 <span className="truncate max-w-xs" dir="auto">
-                  {replyTo.content_decrypted?.slice(0, 80) || t("message.encrypted")}
+                  {replyQuoteText}
                 </span>
               </PressButton>
             ) : (
               <div
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
-                className="flex items-center gap-1 text-xs mb-0.5 text-dim"
+                className="flex items-center gap-1 text-xs mb-0.5 opacity-70 min-w-0 text-muted"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
-                <span>{t("message.redacted")}</span>
+                <span className="truncate max-w-xs">{missingQuoteText}</span>
               </div>
             )
           )}
@@ -272,7 +290,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <div
             data-testid="message-content"
             dir="auto"
-            className={`text-sm break-words leading-msg ${isDeleted ? "text-muted" : "text-fg"}`}
+            className={`text-sm break-words leading-msg ${isDeleted ? "italic text-muted" : "text-fg"}`}
             style={{
               whiteSpace: "pre-wrap",
             }}
@@ -299,7 +317,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-1" />}
         </div>
 
-        {actionsFor("refined")}
+        {actionsFor("modern")}
       </div>
     );
   }
@@ -328,16 +346,16 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               </bdi>
             )}
             <span className="truncate max-w-xs" dir="auto">
-              {replyTo.content_decrypted?.slice(0, 80) || t("message.encrypted")}
+              {replyQuoteText}
             </span>
           </PressButton>
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
-            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 text-dim"
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 text-muted"
           >
             <Reply size={10} className="rtl-unmirror" />
-            <span>{t("message.redacted")}</span>
+            <span className="truncate max-w-xs">{missingQuoteText}</span>
           </div>
         )
       )}
@@ -375,7 +393,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <span
             data-testid="message-content"
             dir="auto"
-            className={`block font-mono text-sm break-words ${isDeleted ? "text-muted" : "text-fg"}`}
+            className={`block font-mono text-sm break-words ${isDeleted ? "italic text-muted" : "text-fg"}`}
             style={{
               whiteSpace: "pre-wrap",
             }}

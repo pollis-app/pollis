@@ -541,7 +541,7 @@ export const SettingsPage: React.FC = observer(() => {
               {currentAvatarUrl && !selectedFile && (
                 <Button
                   data-testid="remove-avatar-button"
-                  variant="secondary"
+                  variant="danger"
                   onClick={handleAvatarRemove}
                   disabled={updateAvatarMutation.isPending}
                   isLoading={updateAvatarMutation.isPending}

@@ -29,7 +29,7 @@
     "ariaLabel": "مظهر الواجهة",
     "skinTerminal": "الطرفية",
     "skinModern": "العصري",
-    "description": "«الطرفية» هو المظهر الافتراضي بنمط IRC والخط أحادي المسافة. و«العصري» تخطيط أكثر ودًا بخط متناسب لمن يفضّل تطبيق محادثة تقليديًا. يُزامَن عبر أجهزتك.",
+    "description": "العصري هو الافتراضي: تخطيط دردشة مألوف بخط متناسب. الطرفية مظهر اختياري أحادي المسافة على طراز IRC. تتم مزامنته عبر أجهزتك.",
     "skinTerminalDetail": "خط أحادي المسافة وتخطيط مضغوط، مثل IRC في الطرفية",
     "skinModernDetail": "خط متناسب وصور رمزية وصفوف أرحب",
     "firstRun": {
@@ -45,17 +45,16 @@
   "accent": {
     "heading": "لون التمييز",
     "pickTitle": "اختر لون التمييز",
-    "presetOrange": "برتقالي",
-    "presetGreen": "أخضر",
-    "presetBlue": "أزرق",
-    "presetPurple": "بنفسجي",
-    "presetRed": "أحمر",
-    "presetCyan": "سماوي"
+    "presetAmber": "كهرماني",
+    "presetCitron": "ليموني",
+    "presetMint": "نعناعي",
+    "presetGlass": "زجاجي",
+    "presetLilac": "ليلكي",
+    "presetRust": "صدئي"
   },
   "background": {
     "heading": "لون الخلفية",
     "pickTitle": "اختر لون الخلفية",
-    "presetMatchAccent": "مطابق للون التمييز",
     "presetNeutral": "محايد",
     "presetWarm": "دافئ",
     "presetCool": "بارد",

@@ -76,7 +76,7 @@ const MESSAGES = [
   },
 ];
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 type SeededReaction = { emoji: string; user_ids: string[]; count: number };
@@ -450,7 +450,7 @@ for (const skin of SKINS) {
       await openChannel(page, skin);
       await typeAndWait(page, ":tad");
 
-      if (skin === "refined") {
+      if (skin === "modern") {
         // Custom outranks standard at equal tier, so it is the first row.
         const first = page.getByTestId("emoji-suggest-list").getByRole("option").first();
         await expect(first).toHaveAttribute("data-testid", "emoji-option-tada");
@@ -604,7 +604,7 @@ for (const skin of SKINS) {
       const pills = row.getByTestId("reaction-pill");
       await expect(pills).toHaveCount(3);
 
-      // Every pill shares a top edge (refined once stacked them in the avatar gutter).
+      // Every pill shares a top edge (Modern once stacked them in the avatar gutter).
       const boxes = await pills.evaluateAll((els) =>
         els.map((el) => {
           const r = el.getBoundingClientRect();
@@ -614,7 +614,7 @@ for (const skin of SKINS) {
       expect(new Set(boxes.map((b) => b.top)).size).toBe(1);
 
       // The first pill starts where the message text starts, in both skins:
-      // refined's name and body share a column, and terminal's pills sit in
+      // Modern's name and body share a column, and terminal's pills sit in
       // the body column after `name :` (#1489).
       const anchor = row.getByTestId("message-content");
       const anchorLeft = Math.round((await anchor.boundingBox())!.x);

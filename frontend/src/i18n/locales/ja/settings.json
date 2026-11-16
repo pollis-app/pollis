@@ -31,7 +31,7 @@
     "ariaLabel": "UIスキン",
     "skinTerminal": "ターミナル",
     "skinModern": "モダン",
-    "description": "ターミナルはデフォルトの、IRC風の等幅表示です。モダンは、一般的なチャットアプリに近い見た目を好む方向けの、親しみやすいプロポーショナルフォントのレイアウトです。設定はデバイス間で同期されます。",
+    "description": "モダンが既定です。プロポーショナルフォントの一般的なチャットレイアウトです。ターミナルは IRC 風の等幅表示で、任意で選べます。デバイス間で同期されます。",
     "skinTerminalDetail": "ターミナルのIRCのような、等幅でコンパクトな表示",
     "skinModernDetail": "プロポーショナルフォント、アバター、ゆとりのある行",
     "firstRun": {
@@ -47,17 +47,16 @@
   "accent": {
     "heading": "アクセントカラー",
     "pickTitle": "アクセントカラーを選択",
-    "presetOrange": "オレンジ",
-    "presetGreen": "グリーン",
-    "presetBlue": "ブルー",
-    "presetPurple": "パープル",
-    "presetRed": "レッド",
-    "presetCyan": "シアン"
+    "presetAmber": "アンバー",
+    "presetCitron": "シトロン",
+    "presetMint": "ミント",
+    "presetGlass": "グラス",
+    "presetLilac": "ライラック",
+    "presetRust": "ラスト"
   },
   "background": {
     "heading": "背景色",
     "pickTitle": "背景色を選択",
-    "presetMatchAccent": "アクセントに合わせる",
     "presetNeutral": "ニュートラル",
     "presetWarm": "ウォーム",
     "presetCool": "クール",

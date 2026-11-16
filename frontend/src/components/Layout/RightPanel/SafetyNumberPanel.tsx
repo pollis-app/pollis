@@ -21,7 +21,7 @@ interface SafetyNumberPanelProps {
 export const SafetyNumberPanel: React.FC<SafetyNumberPanelProps> = observer(
   ({ peerUserId, peerLabel, onBack }) => {
     const { t } = useTranslation("dms");
-    const isTerminal = useSkin() !== "refined";
+    const isTerminal = useSkin() !== "modern";
     const { data: safety, isLoading, isError } = useSafetyNumber(peerUserId);
     const setVerified = useSetContactVerified(peerUserId);
     const gutter = isTerminal ? "px-2.5" : "px-2";

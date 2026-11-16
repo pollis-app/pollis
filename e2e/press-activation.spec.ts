@@ -8,7 +8,7 @@ const GENERAL = "c_general";
 const RANDOM = "c_random";
 const MSG = "m_press_1";
 
-const SKINS = ["terminal", "refined"] as const;
+const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
 
 function preloadFor(skin: Skin) {

@@ -2,9 +2,8 @@
   "message": {
     "fromLabel": "Message from {{name}}",
     "unknownAuthor": "unknown",
-    "deleted": "[deleted]",
-    "encrypted": "[encrypted]",
-    "redacted": "[redacted]",
+    "deleted": "Message deleted",
+    "beforeJoin": "Sent before you joined",
     "edited": "(edited)",
     "editUnsent": "(edit not sent)",
     "newMember": "new",
@@ -70,8 +69,7 @@
   "replyBar": {
     "replyingTo": "replying to <name>{{name}}</name>",
     "scrollToMessage": "Scroll to replied message",
-    "dismiss": "Dismiss reply",
-    "encrypted": "[Encrypted message]"
+    "dismiss": "Dismiss reply"
   },
   "queue": {
     "heading": "Queue",

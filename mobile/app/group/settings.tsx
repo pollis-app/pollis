@@ -215,7 +215,7 @@ function GroupSettings() {
                   end={
                     iAmAdmin && channels.length > 1 ? (
                       <Chip
-                        variant="outline"
+                        variant="danger"
                         selected={armed}
                         testID={`btn-delete-channel-${c.id}`}
                         accessibilityLabel={
@@ -264,7 +264,7 @@ function GroupSettings() {
           <Group>
             <ListRow
               testID="btn-settings-leave-group"
-              glyph={<Icon.logOut size={20} color={semantic.accent} />}
+              glyph={<Icon.logOut size={20} color={semantic.danger} />}
               name={
                 leaveGroup.isPending
                   ? t("mobile:group.panel.leaving")
@@ -272,7 +272,7 @@ function GroupSettings() {
                     ? t("mobile:group.panel.leaveConfirm", { name: groupName })
                     : t("mobile:group.panel.leave")
               }
-              nameStyle={{ color: semantic.accent }}
+              nameStyle={{ color: semantic.danger }}
               sub={t("mobile:group.panel.leaveHint")}
               disabled={leaveGroup.isPending || !id}
               onPress={onLeaveGroup}
@@ -280,7 +280,7 @@ function GroupSettings() {
             {iAmAdmin ? (
               <ListRow
                 testID="btn-delete-group"
-                glyph={<Icon.trash size={20} color={semantic.accent} />}
+                glyph={<Icon.trash size={20} color={semantic.danger} />}
                 name={
                   deleteGroup.isPending
                     ? t("mobile:group.settings.deleting")
@@ -288,7 +288,7 @@ function GroupSettings() {
                       ? t("mobile:group.settings.tapAgainToConfirm")
                       : t("mobile:group.settings.deleteGroup")
                 }
-                nameStyle={{ color: semantic.accent }}
+                nameStyle={{ color: semantic.danger }}
                 disabled={deleteGroup.isPending}
                 onPress={onDeleteGroup}
               />
