@@ -18,6 +18,8 @@
     "settingsKeywords": "পছন্দসমূহ ব্যবহারকারী নিরাপত্তা preferences user security",
     "preferencesName": "পছন্দসমূহ",
     "preferencesKeywords": "থিম রং ফন্ট বিজ্ঞপ্তি চেহারা theme color font notifications appearance",
+    "languageName": "ভাষা",
+    "languageKeywords": "ভাষা ইন্টারফেসের ভাষা অনুবাদ বাংলা language",
     "voiceName": "ভয়েস ও ভিডিও",
     "voiceKeywords": "মাইক্রোফোন স্পিকার অডিও মাইক নয়েজ কমানো ইকো বাতিল অটো গেইন অটো যোগদান ক্যামেরা ওয়েবক্যাম ভিডিও প্রিভিউ অনুমতি microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "নিরাপত্তা",

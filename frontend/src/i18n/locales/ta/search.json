@@ -18,6 +18,8 @@
     "settingsKeywords": "விருப்பங்கள் பயனர் பாதுகாப்பு preferences user security",
     "preferencesName": "விருப்பங்கள்",
     "preferencesKeywords": "தீம் நிறம் எழுத்துரு அறிவிப்புகள் தோற்றம் theme color font notifications appearance",
+    "languageName": "மொழி",
+    "languageKeywords": "மொழி இடைமுக மொழி மொழிபெயர்ப்பு தமிழ் language",
     "voiceName": "குரல் & வீடியோ",
     "voiceKeywords": "மைக்ரோஃபோன் ஸ்பீக்கர் ஆடியோ மைக் இரைச்சல் குறைப்பு எதிரொலி நீக்கம் தானியங்கு ஒலியளவு தானாகச் சேர் கேமரா வெப்கேம் வீடியோ முன்னோட்டம் அனுமதிகள் microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions",
     "securityName": "பாதுகாப்பு",
