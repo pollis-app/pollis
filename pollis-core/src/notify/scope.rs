@@ -27,7 +27,22 @@ use pollis_api::reads::FetchWelcomesResponse;
 
 tokio::task_local! {
     static SCOPE: Arc<Scope>;
+    /// Set while deferred work runs, so what it spawns can be waited for too ([`spawn_in_tail`]).
+    static IN_TAIL: ();
 }
+
+/// Longest one fetch's deferred work may run (#1804). Past it the work is dropped, which cancels
+/// it at its next await, as the fetch's own deadline did when this work ran inline. On Android
+/// the headless fetch holds the exclusive state lock and the open database until its tail ends,
+/// so this also bounds how long an app launch can wait behind it. It stays under the host's
+/// settle wait (`RichPushHandler.SETTLE_MS`, 20 s), so the tail always ends while the push
+/// foreground service still holds the network open, with room left for its LiveKit hint.
+/// (Unit tests shorten it so the overrun test runs in real time.)
+pub(crate) const TAIL_BUDGET: Duration = if cfg!(test) {
+    Duration::from_millis(200)
+} else {
+    Duration::from_secs(15)
+};
 
 /// What one push fetch read up front, and whether its follow-up work may wait.
 pub(crate) struct Scope {
@@ -169,11 +184,31 @@ where
 {
     match current().and_then(|s| s.tail.clone()) {
         Some(set) => {
-            let handle = tokio::spawn(work);
+            let handle = tokio::spawn(IN_TAIL.scope((), async move {
+                if tokio::time::timeout(TAIL_BUDGET, work).await.is_err() {
+                    crate::diag!("[notify] deferred posts ran past {TAIL_BUDGET:?}; dropped");
+                }
+            }));
             set.0.lock().unwrap_or_else(|e| e.into_inner()).push(handle);
         }
         None => work.await,
     }
+}
+
+/// Spawn fire-and-forget work (a LiveKit wake hint). Spawned from deferred work, it is kept for
+/// [`settle`], so the push foreground service is not released while it is still in flight.
+/// True when it was kept. Only the mobile LiveKit stub sends hints this way.
+#[cfg_attr(feature = "media", allow(dead_code))]
+pub(crate) fn spawn_in_tail<F>(work: F) -> bool
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let in_tail = IN_TAIL.try_with(|_| ()).is_ok();
+    let handle = tokio::spawn(work);
+    if in_tail {
+        track(handle);
+    }
+    in_tail
 }
 
 /// Wait for `pending`, then run `after` (e.g. close the database and release the lock), as
@@ -318,8 +353,12 @@ mod tests {
         .await;
     }
 
+    /// `settle` drains one process-wide list, so the tests that call it take turns.
+    static SETTLE_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test]
     async fn a_deferring_scope_runs_the_tail_after_and_settle_waits_for_it() {
+        let _turn = SETTLE_TESTS.lock().await;
         let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = Arc::clone(&done);
         let set = Arc::new(TailSet::default());
@@ -351,4 +390,54 @@ mod tests {
         .await;
         assert!(done.load(std::sync::atomic::Ordering::SeqCst));
     }
+    #[tokio::test]
+    async fn a_deferred_tail_past_its_budget_is_dropped() {
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&done);
+        let set = Arc::new(TailSet::default());
+        run(Scope::new(None, Some(Arc::clone(&set))), async move {
+            defer_or_run(async move {
+                tokio::time::sleep(TAIL_BUDGET * 4).await;
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+            .await;
+        })
+        .await;
+        let started = tokio::time::Instant::now();
+        for handle in set.take() {
+            handle.await.expect("the tail task ends on its own");
+        }
+        assert!(started.elapsed() < TAIL_BUDGET * 3, "bounded by the budget");
+        assert!(!done.load(std::sync::atomic::Ordering::SeqCst), "the overrunning work was dropped");
+    }
+
+    #[tokio::test]
+    async fn a_hint_spawned_by_deferred_work_is_settled() {
+        let _turn = SETTLE_TESTS.lock().await;
+        let sent = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let tracked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s, t) = (Arc::clone(&sent), Arc::clone(&tracked));
+        let set = Arc::new(TailSet::default());
+        run(Scope::new(None, Some(Arc::clone(&set))), async move {
+            defer_or_run(async move {
+                let kept = spawn_in_tail(async move {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    s.store(true, std::sync::atomic::Ordering::SeqCst);
+                });
+                t.store(kept, std::sync::atomic::Ordering::SeqCst);
+            })
+            .await;
+        })
+        .await;
+        finish_after(set.take(), async {});
+        assert!(settle(Duration::from_secs(5)).await);
+        assert!(tracked.load(std::sync::atomic::Ordering::SeqCst), "kept for settle");
+        assert!(sent.load(std::sync::atomic::Ordering::SeqCst), "settle waited for the hint");
+    }
+
+    #[tokio::test]
+    async fn a_hint_outside_deferred_work_is_not_kept() {
+        assert!(!spawn_in_tail(async {}));
+    }
+
 }
