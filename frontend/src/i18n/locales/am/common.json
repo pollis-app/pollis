@@ -1,0 +1,116 @@
+{
+  "actions": {
+    "back": "ተመለስ",
+    "cancel": "ይቅር",
+    "close": "ዝጋ",
+    "copy": "ቅዳ",
+    "copied": "ተቀድቷል",
+    "copyFailed": "መቅዳት አልተቻለም",
+    "delete": "ሰርዝ",
+    "forward": "አስተላልፍ",
+    "goBack": "ወደ ኋላ ተመለስ",
+    "moreOptions": "ተጨማሪ አማራጮች",
+    "save": "አስቀምጥ"
+  },
+  "states": {
+    "buttonLoading": "በመጫን ላይ...",
+    "loading": "በመጫን ላይ…"
+  },
+  "time": {
+    "today": "ዛሬ",
+    "yesterday": "ትናንት"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "Space",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "ሁኔታ፦ {{status}}",
+    "offline": "ከመስመር ውጭ",
+    "online": "በመስመር ላይ"
+  },
+  "list": {
+    "empty": "ምንም ንጥሎች የሉም።"
+  },
+  "grid": {
+    "empty": "እስካሁን እዚህ ማንም የለም።"
+  },
+  "menu": {
+    "escHint": "ለመመለስ Esc",
+    "navigationLabel": "የአሰሳ ምናሌ",
+    "navigateHint": "አስስ",
+    "selectHint": "ለመምረጥ Enter"
+  },
+  "media": {
+    "mute": "ድምፅ አጥፋ",
+    "pause": "ለአፍታ አቁም",
+    "play": "አጫውት",
+    "seek": "ድምፁን አጠንጥን",
+    "skipBackward": "10 ሰከንድ ወደ ኋላ",
+    "skipForward": "10 ሰከንድ ወደ ፊት",
+    "unmute": "ድምፅ አብራ",
+    "volume": "የድምፅ መጠን"
+  },
+  "composer": {
+    "addAttachment": "አባሪ አክል",
+    "allMentionHint": "በዚህ ቻናል ውስጥ ያሉትን ሁሉ ያሳውቃል",
+    "filePickerTitle": "ፋይሎችን አክል",
+    "inputLabel": "የመልዕክት ማስገቢያ",
+    "placeholder": "መልዕክት ይጻፉ…",
+    "previewAlt": "ቅድመ እይታ",
+    "removeAttachment": "{{name}}ን አስወግድ",
+    "send": "መልዕክት ላክ",
+    "markSensitive": "{{name}}ን እንደ ስሱ ምልክት አድርግ",
+    "unmarkSensitive": "የ{{name}}ን ስሱ ምልክት አንሳ"
+  },
+  "mentions": {
+    "listLabel": "የጥቀሳ አስተያየቶች",
+    "matching": "ከ<hl>@{{query}}</hl> ጋር የሚዛመዱ አባላት"
+  },
+  "emojiSuggest": {
+    "listLabel": "የኢሞጂ አስተያየቶች",
+    "matching": "ከ<hl>:{{query}}</hl> ጋር የሚዛመዱ ኢሞጂዎች"
+  },
+  "a11y": {
+    "avatar": "አምሳያ",
+    "loading": "በመጫን ላይ",
+    "otpDigit": "የOTP አሃዝ {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} ሰከንድ",
+    "seconds_other": "{{count}} ሰከንድ",
+    "minutes_one": "{{count}} ደቂቃ",
+    "minutes_other": "{{count}} ደቂቃ",
+    "hours_one": "{{count}} ሰዓት",
+    "hours_other": "{{count}} ሰዓት",
+    "days_one": "{{count}} ቀን",
+    "days_other": "{{count}} ቀን",
+    "weeks_one": "{{count}} ሳምንት",
+    "weeks_other": "{{count}} ሳምንት",
+    "months_one": "{{count}} ወር",
+    "months_other": "{{count}} ወር",
+    "years_one": "{{count}} ዓመት",
+    "years_other": "{{count}} ዓመት"
+  },
+  "tray": {
+    "open": "Pollisን ክፈት",
+    "muteMic": "ማይክሮፎን አጥፋ",
+    "unmuteMic": "ማይክሮፎን አብራ",
+    "muteMicIdle": "ማይክሮፎን አጥፋ (በጥሪ ላይ አይደሉም)",
+    "version": "ስሪት {{version}}",
+    "quit": "ከPollis ውጣ",
+    "unread_one": "Pollis — {{count}} ያልተነበበ",
+    "unread_other": "Pollis — {{count}} ያልተነበቡ"
+  }
+}

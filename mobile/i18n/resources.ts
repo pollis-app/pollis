@@ -7,6 +7,21 @@
 //     node scripts/mobile-i18n-resources.mjs
 //
 
+import am_arcade from "../../frontend/src/i18n/locales/am/arcade.json";
+import am_auth from "../../frontend/src/i18n/locales/am/auth.json";
+import am_channels from "../../frontend/src/i18n/locales/am/channels.json";
+import am_chat from "../../frontend/src/i18n/locales/am/chat.json";
+import am_common from "../../frontend/src/i18n/locales/am/common.json";
+import am_dms from "../../frontend/src/i18n/locales/am/dms.json";
+import am_emoji from "../../frontend/src/i18n/locales/am/emoji.json";
+import am_errors from "../../frontend/src/i18n/locales/am/errors.json";
+import am_mobile from "../../frontend/src/i18n/locales/am/mobile.json";
+import am_nav from "../../frontend/src/i18n/locales/am/nav.json";
+import am_saved from "../../frontend/src/i18n/locales/am/saved.json";
+import am_search from "../../frontend/src/i18n/locales/am/search.json";
+import am_settings from "../../frontend/src/i18n/locales/am/settings.json";
+import am_vault from "../../frontend/src/i18n/locales/am/vault.json";
+import am_voice from "../../frontend/src/i18n/locales/am/voice.json";
 import ar_arcade from "../../frontend/src/i18n/locales/ar/arcade.json";
 import ar_auth from "../../frontend/src/i18n/locales/ar/auth.json";
 import ar_channels from "../../frontend/src/i18n/locales/ar/channels.json";
@@ -326,6 +341,23 @@ import zh_voice from "../../frontend/src/i18n/locales/zh/voice.json";
 type Catalogue = Record<string, unknown>;
 
 export const RESOURCES: Record<string, Record<string, Catalogue>> = {
+  "am": {
+    "arcade": am_arcade,
+    "auth": am_auth,
+    "channels": am_channels,
+    "chat": am_chat,
+    "common": am_common,
+    "dms": am_dms,
+    "emoji": am_emoji,
+    "errors": am_errors,
+    "mobile": am_mobile,
+    "nav": am_nav,
+    "saved": am_saved,
+    "search": am_search,
+    "settings": am_settings,
+    "vault": am_vault,
+    "voice": am_voice,
+  },
   "ar": {
     "arcade": ar_arcade,
     "auth": ar_auth,

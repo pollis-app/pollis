@@ -1,0 +1,78 @@
+{
+  "list": {
+    "newMessage": "አዲስ መልዕክት",
+    "requests": "ጥያቄዎች",
+    "blocked": "የታገዱ ተጠቃሚዎች",
+    "avatarAlt": "የ{{name}} አምሳያ",
+    "settingsFor": "የ{{name}} ቅንብሮች",
+    "verified": "የተረጋገጠ እውቂያ",
+    "keyChanged": "የማንነት ቁልፉ ተቀይሯል — እንደገና ያረጋግጡ"
+  },
+  "conversation": {
+    "fallbackTitle": "ቀጥታ መልዕክት",
+    "viewProfile": "የ@{{name}}ን መገለጫ ይመልከቱ",
+    "call": "ወደ @{{name}} ደውል",
+    "returnToCall": "ከ@{{name}} ጋር ወዳለው ጥሪ ተመለስ",
+    "pinsLabel": "የተሰኩ መልዕክቶች"
+  },
+  "settings": {
+    "pageTitle": "የውይይት ቅንብሮች",
+    "leave": "ውይይቱን ልቀቅ",
+    "submitting": "በመልቀቅ ላይ…",
+    "leaveFailed": "ውይይቱን መልቀቅ አልተሳካም",
+    "cancel": "ይቅር (Esc)"
+  },
+  "start": {
+    "pageTitle": "አዲስ መልዕክት",
+    "identifierLabel": "የተጠቃሚ ስም ወይም ኢሜይል",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "ውይይት ጀምር",
+    "submitting": "በመጀመር ላይ…",
+    "identifierRequired": "የተጠቃሚ መለያ ያስፈልጋል",
+    "userNotFound": "ተጠቃሚው አልተገኘም",
+    "startFailed": "ውይይቱን መጀመር አልተሳካም"
+  },
+  "requests": {
+    "pageTitle": "የመልዕክት ጥያቄዎች",
+    "empty": "በመጠባበቅ ላይ ያሉ ጥያቄዎች የሉም።",
+    "noMessageYet": "(እስካሁን መልዕክት የለም)",
+    "unknownSender": "ያልታወቀ",
+    "others_one": "(+{{count}} ሌላ)",
+    "others_other": "(+{{count}} ሌሎች)",
+    "accept": "ተቀበል",
+    "block": "አግድ"
+  },
+  "blocked": {
+    "pageTitle": "የታገዱ ተጠቃሚዎች",
+    "empty": "የታገዱ ተጠቃሚዎች የሉም።",
+    "unblock": "እገዳ አንሳ"
+  },
+  "profile": {
+    "fallbackName": "ተጠቃሚ",
+    "fallbackTitle": "መገለጫ",
+    "notFound": "ተጠቃሚው አልተገኘም",
+    "avatarAlt": "የ{{name}} አምሳያ",
+    "sendMessage": "መልዕክት ላክ",
+    "block": "አግድ",
+    "safetyNumber": "የደህንነት ቁጥር",
+    "statusVerified": "ተረጋግጧል",
+    "statusChanged": "ተቀይሯል — እንደገና ያረጋግጡ",
+    "statusUnverified": "አልተረጋገጠም",
+    "keyChangedWarning": "ለመጨረሻ ጊዜ ካረጋገጡት በኋላ የዚህ እውቂያ የማንነት ቁልፍ ተቀይሯል። ከማመንዎ በፊት ቁጥሩን በሌላ መንገድ እንደገና ያነጻጽሩ።",
+    "removeVerification": "ማረጋገጫውን አስወግድ",
+    "markVerified": "እንደተረጋገጠ ምልክት አድርግ",
+    "report": "ሪፖርት አድርግ"
+  },
+  "safety": {
+    "title": "እርስዎ እና {{name}}",
+    "verify": "የደህንነት ቁጥሩን አረጋግጥ",
+    "headingMany": "የደህንነት ቁጥሮች",
+    "shared": "እርስዎ እና {{name}} ተመሳሳይ ቁጥር ታያላችሁ። በመካከላችሁ ማንም አለመኖሩን ለማረጋገጥ በአካል ወይም በጥሪ ያነጻጽሩት።",
+    "qrLabel": "ከ{{name}} ጋር የሚጋሩት የደህንነት ቁጥር QR ኮድ",
+    "failed": "የደህንነት ቁጥሩን መጫን አልተቻለም።"
+  },
+  "notify": {
+    "requestTitle": "አዲስ ውይይት",
+    "requestBody": "{{name}} ከእርስዎ ጋር ውይይት ጀምሯል"
+  }
+}

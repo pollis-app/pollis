@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "የመጫወቻ አዳራሽ"
+  },
+  "hud": {
+    "score": "ነጥብ  {{score}}",
+    "time": "ጊዜ   {{time}}",
+    "gameOver": "ጨዋታው አበቃ",
+    "final_one": "የመጨረሻ {{count}} ነጥብ · {{time}}",
+    "final_other": "የመጨረሻ {{count}} ነጥቦች · {{time}}",
+    "restartHint": "እንደገና ለመጀመር R ይጫኑ · ለመውጣት Esc",
+    "controls": "WASD መንቀሳቀሻ · አይጥ ማነጣጠሪያ · ጠቅ/Space መተኮሻ · Esc መውጫ"
+  }
+}

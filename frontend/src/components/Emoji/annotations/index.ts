@@ -19,6 +19,7 @@ export type EmojiAnnotationRow = readonly [
 ];
 
 export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [
+  "am",
   "ar",
   "bn",
   "en",
@@ -47,6 +48,8 @@ export function loadEmojiAnnotationRows(
   locale: string,
 ): Promise<readonly EmojiAnnotationRow[]> | null {
   switch (locale) {
+    case "am":
+      return import("./am").then((m) => m.default);
     case "ar":
       return import("./ar").then((m) => m.default);
     case "bn":

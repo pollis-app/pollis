@@ -1,0 +1,214 @@
+{
+  "sidebar": {
+    "groups": "ቡድኖች",
+    "dms": "ቀጥታ መልዕክቶች",
+    "account": "መለያ",
+    "saved": "የተቀመጡ",
+    "preferences": "ምርጫዎች",
+    "language": "ቋንቋ",
+    "userSettings": "የተጠቃሚ ቅንብሮች",
+    "voiceAndVideo": "ድምፅ እና ቪዲዮ",
+    "security": "ደህንነት",
+    "keyBindings": "የቁልፍ ማያያዣዎች",
+    "softwareUpdate": "የሶፍትዌር ዝማኔ",
+    "expandGroup": "{{name}}ን ዘርጋ",
+    "collapseGroup": "{{name}}ን ሰብስብ",
+    "keyChanged": "የማንነት ቁልፉ ተቀይሯል — እንደገና ያረጋግጡ",
+    "verified": "የተረጋገጠ እውቂያ",
+    "dmAvatarAlt": "የ{{name}} አምሳያ",
+    "close": "የጎን አሞሌውን ዝጋ ({{shortcut}})",
+    "resize": "የጎን አሞሌውን መጠን ቀይር (ይጎትቱ፤ ዳግም ለማስጀመር ሁለቴ ጠቅ ያድርጉ)",
+    "searchMessages": "መልዕክቶችን ፈልግ",
+    "vault": "ካዝና",
+    "securityEvents": "የደህንነት ክስተቶች",
+    "copyHistory": "ታሪክ ቅዳ"
+  },
+  "profile": {
+    "you": "እርስዎ",
+    "call": "ጥሪ",
+    "voice": "ድምፅ",
+    "settings": "ቅንብሮች",
+    "voiceConnected": "ድምፅ ተገናኝቷል",
+    "stopScreenShare": "ስክሪን ማጋራትን አቁም",
+    "shareScreen": "ስክሪን አጋራ",
+    "disconnect": "ግንኙነት አቋርጥ"
+  },
+  "breadcrumb": {
+    "home": "መነሻ",
+    "groups": "ቡድኖች",
+    "createGroup": "ቡድን ፍጠር",
+    "findGroup": "ቡድን ፈልግ",
+    "newChannel": "አዲስ ቻናል",
+    "voice": "ድምፅ",
+    "joinRequests": "የመቀላቀል ጥያቄዎች",
+    "inviteMember": "አባል ጋብዝ",
+    "leaveGroup": "ቡድኑን ልቀቅ",
+    "members": "አባላት",
+    "removeMember": "አባል አስወግድ",
+    "directMessages": "ቀጥታ መልዕክቶች",
+    "newMessage": "አዲስ መልዕክት",
+    "requests": "ጥያቄዎች",
+    "blockedUsers": "የታገዱ ተጠቃሚዎች",
+    "conversationSettings": "የውይይት ቅንብሮች",
+    "account": "መለያ",
+    "preferences": "ምርጫዎች",
+    "language": "ቋንቋ",
+    "userSettings": "የተጠቃሚ ቅንብሮች",
+    "profile": "መገለጫ",
+    "security": "ደህንነት",
+    "voiceSettings": "ድምፅ",
+    "invites": "ግብዣዎች",
+    "joinAGroup": "ቡድን ይቀላቀሉ",
+    "search": "ፍለጋ",
+    "searchButton": "ፍለጋ ({{shortcut}})",
+    "settings": "ቅንብሮች",
+    "securityEvents": "የደህንነት ክስተቶች",
+    "copyHistory": "የመልዕክት ታሪክ ቅዳ",
+    "historyRequest": "የታሪክ ጥያቄ"
+  },
+  "statusBar": {
+    "groupsUnread_one": "ያልተነበቡ የቡድን መልዕክቶች፦ {{count}}",
+    "groupsUnread_other": "ያልተነበቡ የቡድን መልዕክቶች፦ {{count}}",
+    "dmsUnread_one": "ያልተነበቡ ቀጥታ መልዕክቶች፦ {{count}}",
+    "dmsUnread_other": "ያልተነበቡ ቀጥታ መልዕክቶች፦ {{count}}",
+    "joinRequests_one": "በመጠባበቅ ላይ ያሉ የመቀላቀል ጥያቄዎች፦ {{count}}",
+    "joinRequests_other": "በመጠባበቅ ላይ ያሉ የመቀላቀል ጥያቄዎች፦ {{count}}",
+    "invites_one": "በመጠባበቅ ላይ ያሉ ግብዣዎች፦ {{count}}",
+    "invites_other": "በመጠባበቅ ላይ ያሉ ግብዣዎች፦ {{count}}",
+    "someone": "አንድ ሰው",
+    "updateAvailable": "ዝማኔ አለ",
+    "updateAvailableTitle": "ዝማኔ አለ፦ {{version}}",
+    "answerCall": "ከ@{{username}} የመጣውን ጥሪ መልስ",
+    "declineCall": "ጥሪውን አትቀበል",
+    "dismissVoiceError": "የድምፅ ስህተቱን አሰናብት",
+    "dismissScreenShareError": "የስክሪን ማጋራት ስህተቱን አሰናብት",
+    "dismissCameraError": "የካሜራ ስህተቱን አሰናብት",
+    "syncing": "በማመሳሰል ላይ…"
+  },
+  "shell": {
+    "dropFiles": "ለመላክ ፋይሎችን እዚህ ይጣሉ",
+    "voiceChannelFallback": "ድምፅ",
+    "callChannel": "ጥሪ"
+  },
+  "panel": {
+    "thread": "ክር",
+    "details": "ዝርዝሮች",
+    "ariaLabel": "የውይይት ዝርዝሮች",
+    "closeThread": "የክር ፓነሉን ዝጋ ({{shortcut}})",
+    "closeDetails": "የዝርዝሮች ፓነሉን ዝጋ ({{shortcut}})",
+    "resize": "የዝርዝሮች ፓነሉን መጠን ቀይር (ይጎትቱ፤ ዳግም ለማስጀመር ሁለቴ ጠቅ ያድርጉ)"
+  },
+  "members": {
+    "count_one": "አባላት — {{count}}",
+    "count_other": "አባላት — {{count}}",
+    "onlineCount_one": "በመስመር ላይ — {{count}}",
+    "onlineCount_other": "በመስመር ላይ — {{count}}",
+    "empty": "የሚታዩ አባላት የሉም።",
+    "noneOnline": "በመስመር ላይ ማንም የለም።",
+    "you": "እርስዎ",
+    "admin": "አስተዳዳሪ"
+  },
+  "media": {
+    "heading": "ሚዲያ",
+    "empty": "እስካሁን የተጋራ ሚዲያ የለም።"
+  },
+  "thread": {
+    "loading": "መልሶችን በመጫን ላይ…",
+    "empty": "እስካሁን መልሶች የሉም። ክሩን ከታች ይጀምሩ።",
+    "placeholder": "በክሩ ውስጥ ይመልሱ…",
+    "messageDeleted": "መልዕክቱ ተሰርዟል",
+    "encrypted": "[የተመሰጠረ]"
+  },
+  "chat": {
+    "noSelection": "መልዕክት መላክ ለመጀመር ቻናል ይምረጡ"
+  },
+  "dmRequest": {
+    "heading": "የመልዕክት ጥያቄ",
+    "body": "<name>{{name}}</name> መልዕክቶችን ሊልክልዎ ይፈልጋል።",
+    "accept": "ተቀበል",
+    "accepting": "በመቀበል ላይ…",
+    "block": "አግድ",
+    "blocking": "በማገድ ላይ…"
+  },
+  "editBar": {
+    "heading": "መልዕክት በማርትዕ ላይ",
+    "cancel": "ማርትዕን ተው",
+    "hint": "ለማስቀመጥ Enter · ለአዲስ መስመር Shift+Enter · ለመተው Esc"
+  },
+  "deleteChannel": {
+    "heading": "ቻናል ሰርዝ",
+    "cancel": "መሰረዙን ተው",
+    "body": "ይህ ቻናል እና ሁሉም መልዕክቶቹ እስከመጨረሻው ይሰረዛሉ። ይህ ሊቀለበስ አይችልም።",
+    "deleting": "በመሰረዝ ላይ…"
+  },
+  "deleteMessage": {
+    "heading": "መልዕክት ሰርዝ",
+    "moderateHeading": "መልዕክት አስወግድ (አስተዳዳሪ)",
+    "body": "ይህ መልዕክት አስቀድመው የተቀበሉትን ሰዎች ጨምሮ ለሁሉም ይሰረዛል።",
+    "moderateBody": "ይህ መልዕክት እና አባሪዎቹ በቻናሉ ውስጥ ላሉ ሁሉ ይወገዳሉ።",
+    "cancel": "መሰረዙን ተው",
+    "deleting": "በመሰረዝ ላይ…",
+    "remove": "አስወግድ"
+  },
+  "update": {
+    "preparing": "ለማዘመን በመዘጋጀት ላይ…",
+    "checking": "ዝማኔዎችን በመፈተሽ ላይ…",
+    "downloading": "ዝማኔን በማውረድ ላይ…",
+    "downloadingProgress": "ዝማኔን በማውረድ ላይ… {{progress}}%",
+    "installing": "ዝማኔን በመጫን ላይ…",
+    "relaunching": "እንደገና በማስጀመር ላይ…",
+    "failed": "ዝማኔው አልተሳካም፦ {{error}}",
+    "tryAgain": "እንደገና ሞክር",
+    "continueWithout": "ሳያዘምኑ ይቀጥሉ",
+    "readOnlyDiskImage": "Pollis እየሰራ ያለው ለንባብ ብቻ ከሆነው የዲስክ ምስል ነው። ከPollis ይውጡ፣ ወደ Applications ይጎትቱት፣ የዲስክ ምስሉን ያስወጡ እና ከApplications ይክፈቱት።",
+    "readOnlyTranslocated": "macOS Pollisን እያስኬደ ያለው ለንባብ ብቻ ከሆነ ጊዜያዊ ቦታ ነው። ከPollis ይውጡ፣ በFinder ተጠቅመው ከApplications አውጥተው መልሰው ያስገቡት፣ ከዚያ እንደገና ይክፈቱት።",
+    "readOnlyTranslocatedHealed": "macOS Pollisን እያስኬደ ያለው ቀደም ሲል በነበረ ዝማኔ ከቀረ ለንባብ ብቻ ጊዜያዊ ቦታ ነው። ይህ ተስተካክሏል። ከPollis ይውጡ እና ከApplications እንደገና ይክፈቱት።",
+    "readOnlyGeneric": "Pollis ያለበት ቦታ ለንባብ ብቻ ስለሆነ ራሱን ማዘመን አይችልም። ከPollis ይውጡ፣ በApplications አቃፊዎ ውስጥ (በFinder የተዛወረ) መሆኑን ያረጋግጡ እና እንደገና ይክፈቱት።"
+  },
+  "clientBlocked": {
+    "title": "ዝማኔ ያስፈልጋል",
+    "body": "ይህ የPollis ስሪት ከአሁን በኋላ አይደገፍም። መጠቀምዎን ለመቀጠል ያዘምኑ። መልዕክቶችዎ እና ቅንብሮችዎ በዚህ መሣሪያ ላይ ይቆያሉ።",
+    "versions": "የተጫነ {{version}} · የሚያስፈልገው {{minimum}} ወይም ከዚያ በኋላ",
+    "installed": "የተጫነ {{version}}",
+    "updateNow": "አሁን አዘምን",
+    "updating": "በማዘመን ላይ…",
+    "download": "የቅርብ ጊዜውን ስሪት አውርድ",
+    "updateFailed": "ዝማኔው አልተጠናቀቀም። በምትኩ የቅርብ ጊዜውን ስሪት ያውርዱ።",
+    "packageManager": "Pollis የተጫነው በ{{source}} ነው። እዚያው ያዘምኑት፦",
+    "openAppStore": "App Storeን ክፈት",
+    "openPlay": "Google Playን ክፈት",
+    "openTestflight": "TestFlightን ክፈት",
+    "openWebsite": "pollis.comን ክፈት",
+    "openFailed": "አገናኙን መክፈት አልተቻለም። ወደ {{url}} ይሂዱ",
+    "retry": "እንደገና ፈትሽ",
+    "checking": "በመፈተሽ ላይ…"
+  },
+  "home": {
+    "groups": "ቡድኖች",
+    "groupsDescription": "ማህበረሰቦች፣ ድርጅቶች፣ ቡድኖች እና ከመጠን በላይ ትልቅ ህልም ያላቸው የቡድን ውይይቶች",
+    "dms": "ቀጥታ መልዕክቶች",
+    "dmsDescription": "ከግለሰቦች ጋር የሚደረጉ የግል፣ ከጫፍ እስከ ጫፍ የተመሰጠሩ ውይይቶች",
+    "invites": "ግብዣዎች",
+    "noPendingInvites": "በመጠባበቅ ላይ ያሉ ግብዣዎች የሉም",
+    "pending_one": "{{count}} በመጠባበቅ ላይ",
+    "pending_other": "{{count}} በመጠባበቅ ላይ",
+    "join": "ቡድን ይቀላቀሉ",
+    "joinDescription": "የግብዣ አገናኝ ወይም የመቀላቀያ ኮድ ይጠቀሙ",
+    "joinRequests": "የመቀላቀል ጥያቄዎች",
+    "logout": "ውጣ",
+    "exit": "መውጫ"
+  },
+  "titleBar": {
+    "minimize": "አሳንስ",
+    "maximize": "አስፋ"
+  },
+  "terminal": {
+    "shellFailed": "shell መጀመር አልተሳካም፦ {{error}}"
+  },
+  "pins": {
+    "heading": "የተሰኩ",
+    "empty": "እስካሁን የተሰኩ መልዕክቶች የሉም።",
+    "unavailable": "የተሰኩ መልዕክቶች በዚህ መሣሪያ ላይ እስካሁን አይገኙም — ውይይቱ ከተመሳሰለ በኋላ ይታያሉ።",
+    "unpin": "መሰካት አንሳ"
+  }
+}
