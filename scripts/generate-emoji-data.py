@@ -790,9 +790,20 @@ def shipped_language_codes() -> list[str]:
     return sorted(set(codes))
 
 
+# A shipped code whose CLDR file has another name: CLDR files a language's
+# default script under the bare tag, so Gurmukhi Punjabi is `pa.xml` (#1726).
+CLDR_FILE_OVERRIDES = {"pa-Guru": "pa"}
+
+# Where CLDR has no name for an emoji in a locale: Shahmukhi Punjabi (about a
+# third missing in release 48) takes the Urdu name, which its readers read in
+# the same script; Marathi takes the Hindi one (Devanagari).
+CLDR_GAP_FALLBACKS = {"pa-Arab": "ur", "mr": "hi"}
+
+
 def fetch_cldr_file(lang: str, kind: str) -> bytes:
     # CLDR names script variants with an underscore: `pa-Arab` is `pa_Arab.xml`.
-    url = f"{CLDR_RAW_BASE}/{kind}/{lang.replace('-', '_')}.xml"
+    name = CLDR_FILE_OVERRIDES.get(lang, lang).replace("-", "_")
+    url = f"{CLDR_RAW_BASE}/{kind}/{name}.xml"
     with urllib.request.urlopen(url, timeout=60) as response:
         return response.read()
 
@@ -856,6 +867,16 @@ def refresh_annotations(entries: list[dict[str, object]]) -> None:
             table[key] = [name] + [k for k in keywords if k != name]
         locales[lang] = table
         print(f"annotations {lang}: {len(table)}/{len(entries)} entries", file=sys.stderr)
+
+    # CLDR leaves some locales short; fill each gap from a shipped language in
+    # the same script that the readers also read, never from English (#1726).
+    for lang, fallback in CLDR_GAP_FALLBACKS.items():
+        if lang not in locales or fallback not in locales:
+            continue
+        gaps = {key: values for key, values in locales[fallback].items() if key not in locales[lang]}
+        if gaps:
+            locales[lang] = dict(sorted({**locales[lang], **gaps}.items()))
+            print(f"annotations {lang}: {len(gaps)} gaps filled from {fallback}", file=sys.stderr)
 
     doc = {
         "_source": "https://github.com/unicode-org/cldr — common/annotations/<lang>.xml + common/annotationsDerived/<lang>.xml (flags)",

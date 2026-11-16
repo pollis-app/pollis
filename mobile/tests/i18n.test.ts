@@ -14,6 +14,7 @@ import {
   normalizeLanguage,
   resolveDeviceLanguage,
   supportedLanguageCodes,
+  usesNastaliq,
 } from "../i18n/languages.ts";
 import { REGISTERED_CODE, SCRIPT_VARIANTS, matchLanguageTag } from "../i18n/languageTag.ts";
 import { NAMESPACES } from "../i18n/namespaces.ts";
@@ -105,6 +106,15 @@ test("direction is rtl only for the Arabic-script locale", () => {
   assert.equal(languageDirection("ar"), "rtl");
   assert.equal(languageDirection("en"), "ltr");
   assert.equal(languageDirection("nope"), "ltr");
+});
+
+test("only the Nastaliq languages get the taller type line heights (#1726)", () => {
+  assert.equal(usesNastaliq("ur"), true);
+  assert.equal(usesNastaliq("pa-Arab"), true);
+  // Pashto and Arabic are Naskh, which fits the Latin-sized steps.
+  for (const code of ["ps", "ar", "pa-Guru", "hi", "en", null]) {
+    assert.equal(usesNastaliq(code), false, String(code));
+  }
 });
 
 test("localeUpperCase uses the language's own casing", () => {

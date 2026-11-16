@@ -1,5 +1,5 @@
 import { Text, View } from "react-native";
-import { semantic, type as ty, space } from "../../theme/tokens";
+import { semantic, type as ty, space, scriptLineHeight } from "../../theme/tokens";
 import { Icon } from "../icons";
 
 export function LabeledField({
@@ -26,7 +26,7 @@ export function LabeledField({
 }
 
 export function Hint({ children }: { children: React.ReactNode }) {
-  return <Text style={[ty.secondary, { lineHeight: 20 }]}>{children}</Text>;
+  return <Text style={[ty.secondary, { lineHeight: scriptLineHeight(20, ty.secondary.fontSize) }]}>{children}</Text>;
 }
 
 // Told apart by the alert icon and wording, not a hue.

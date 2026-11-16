@@ -14,8 +14,10 @@ import {
   normalizeLanguage,
   resolveDeviceLanguage,
   supportedLanguageCodes,
+  usesNastaliq,
 } from "./languages";
 import { loadDeviceLanguage, saveDeviceLanguage } from "./storage";
+import { setNastaliqLineHeights } from "../theme/tokens";
 
 void i18n.use(initReactI18next).init({
   resources: RESOURCES,
@@ -33,6 +35,12 @@ void i18n.use(initReactI18next).init({
   react: {
     useSuspense: false,
   },
+});
+
+// Nastaliq needs taller lines than the Latin-sized type steps (#1726).
+setNastaliqLineHeights(usesNastaliq(i18n.language));
+i18n.on("languageChanged", (language) => {
+  setNastaliqLineHeights(usesNastaliq(language));
 });
 
 /** The locale every `toLocale*` / `Intl.*` call must pass; `undefined` means the host locale. */

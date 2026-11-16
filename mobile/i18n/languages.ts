@@ -36,6 +36,14 @@ function isSupportedLanguage(code: string | null | undefined): boolean {
   return !!code && SUPPORTED_LANGUAGES.some((l) => l.code === code);
 }
 
+// Languages written in Nastaliq, whose lines need far more height than Latin (#1726).
+const NASTALIQ_LANGUAGES: readonly string[] = ["ur", "pa-Arab"];
+
+/** True for a Nastaliq language; the desktop twin is `:lang(ur)` / `:lang(pa-Arab)` in frontend/src/index.css. */
+export function usesNastaliq(language: string | null | undefined): boolean {
+  return NASTALIQ_LANGUAGES.includes(language ?? "");
+}
+
 export function languageDirection(code: string | null | undefined): "ltr" | "rtl" {
   return languageOption(code ?? "")?.dir ?? "ltr";
 }

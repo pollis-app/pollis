@@ -41,6 +41,21 @@ export function currentTheme(): Theme {
   return _theme;
 }
 
+// Nastaliq (Urdu, Shahmukhi Punjabi) hangs far above and below the line, so
+// the Latin-sized `type.*` line heights clip it (#1726). i18n/index.ts sets
+// this per language; every step's lineHeight is read through it.
+const NASTALIQ_LINE_HEIGHT = 2;
+let _nastaliq = false;
+
+export function setNastaliqLineHeights(on: boolean) {
+  _nastaliq = on;
+}
+
+/** A Latin-sized line height, raised to fit Nastaliq while that script is active. */
+export function scriptLineHeight(base: number, fontSize: number): number {
+  return _nastaliq ? Math.max(base, Math.round(fontSize * NASTALIQ_LINE_HEIGHT)) : base;
+}
+
 export function hexToRgbTriplet(hex: string): string {
   const h = hex.replace("#", "");
   const r = parseInt(h.slice(0, 2), 16);
@@ -198,12 +213,14 @@ export const fonts = {
   sora700: "Geist_700Bold",
 };
 
-// Colours are getters so a flattened style tracks the live theme.
+// Colours and line heights are getters so a flattened style tracks the live theme and script.
 export const type = {
   display: {
     fontFamily: fonts.bold,
     fontSize: 28,
-    lineHeight: 34,
+    get lineHeight() {
+      return scriptLineHeight(34, 28);
+    },
     letterSpacing: -0.56,
     get color() {
       return _theme.text;
@@ -212,7 +229,9 @@ export const type = {
   title: {
     fontFamily: fonts.bold,
     fontSize: 20,
-    lineHeight: 26,
+    get lineHeight() {
+      return scriptLineHeight(26, 20);
+    },
     letterSpacing: -0.2,
     get color() {
       return _theme.text;
@@ -221,7 +240,9 @@ export const type = {
   heading: {
     fontFamily: fonts.bold,
     fontSize: 17,
-    lineHeight: 22,
+    get lineHeight() {
+      return scriptLineHeight(22, 17);
+    },
     get color() {
       return _theme.text;
     },
@@ -229,7 +250,9 @@ export const type = {
   body: {
     fontFamily: fonts.regular,
     fontSize: 16,
-    lineHeight: 23,
+    get lineHeight() {
+      return scriptLineHeight(23, 16);
+    },
     get color() {
       return _theme.text;
     },
@@ -237,7 +260,9 @@ export const type = {
   secondary: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    lineHeight: 19,
+    get lineHeight() {
+      return scriptLineHeight(19, 14);
+    },
     get color() {
       return _theme.dim;
     },
@@ -245,7 +270,9 @@ export const type = {
   section: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    lineHeight: 18,
+    get lineHeight() {
+      return scriptLineHeight(18, 13);
+    },
     get color() {
       return _theme.dim;
     },
@@ -253,7 +280,9 @@ export const type = {
   meta: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    lineHeight: 16,
+    get lineHeight() {
+      return scriptLineHeight(16, 12);
+    },
     get color() {
       return _theme.muted;
     },
