@@ -219,6 +219,8 @@ ANNOTATIONS_DIRS = (
 LANGUAGES_TS = REPO_ROOT / "frontend" / "src" / "i18n" / "languages.ts"
 
 CLDR_RELEASE = "release-48"
+# The Unicode version the committed tables were built from; an older Python refuses to run (main).
+MIN_UNICODE_VERSION = (16, 0, 0)
 CLDR_RAW_BASE = f"https://raw.githubusercontent.com/unicode-org/cldr/{CLDR_RELEASE}/common"
 CLDR_ANNOTATION_FILES = ("annotations", "annotationsDerived")
 CLDR_SKIPPED_DRAFTS = {"provisional", "unconfirmed"}
@@ -1144,6 +1146,17 @@ def main() -> None:
         help="re-download the CLDR annotations for every shipped locale (network)",
     )
     args = parser.parse_args()
+
+    # The emoji set comes from this Python's `unicodedata`: an older Python
+    # (macOS's /usr/bin/python3 is 3.9, Unicode 13) silently drops every newer
+    # emoji from every table, so refuse rather than shrink them (#1726).
+    have = tuple(int(part) for part in unicodedata.unidata_version.split("."))
+    if have < MIN_UNICODE_VERSION:
+        want = ".".join(str(part) for part in MIN_UNICODE_VERSION)
+        raise SystemExit(
+            f"this Python has Unicode {unicodedata.unidata_version} data; the tables need {want}+ "
+            "(run it with Python 3.14 or newer)"
+        )
 
     entries, counts, source, shortcode_version = build_entries()
     if args.refresh_annotations:

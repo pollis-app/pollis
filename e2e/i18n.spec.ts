@@ -381,7 +381,7 @@ const SHIPPED = JSON.parse(
 ) as Array<{ code: string; dir: "ltr" | "rtl" }>;
 
 test.describe("shipped locales", () => {
-  test("the registry is the nine we intend to ship", () => {
+  test("the registry is the set we intend to ship", () => {
     expect(SHIPPED.map((l) => l.code)).toEqual([
       "en",
       "es",
@@ -427,7 +427,7 @@ test.describe("shipped locales", () => {
 
       await expect(page.getByTestId("language-page-heading")).toHaveText(heading);
       await expect(page.locator("html")).toHaveAttribute("lang", code);
-      // Direction travels with the language; Arabic is the only rtl entry.
+      // Direction travels with the language (rtl: Arabic, Urdu, Shahmukhi Punjabi, Pashto).
       await expect(page.locator("html")).toHaveAttribute("dir", dir);
       // A locale that silently half-loaded would leak raw keys somewhere.
       expect(await rawKeyLeaks(page)).toEqual([]);
