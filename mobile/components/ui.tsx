@@ -603,8 +603,13 @@ export function Chip({
       >
         {loading ? (
           <ActivityIndicator testID={testID ? `${testID}-busy` : undefined} size="small" color={fg} />
-        ) : (
+        ) : off ? (
           disabledGlyph(leading, disabled)
+        ) : dangerFill || accentFill ? (
+          // On a fill the glyph is ink, the label's colour, as on Button.
+          tintGlyph(leading, fg)
+        ) : (
+          leading
         )}
         {label !== undefined ? (
           <Text
