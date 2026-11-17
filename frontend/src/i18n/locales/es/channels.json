@@ -161,6 +161,8 @@
     "pageTitle": "Unirse a un grupo",
     "heading": "Unirse a un grupo",
     "headingTerminal": "> UNIRSE A UN GRUPO",
+    "headingNamed": "¿Unirte a {{name}}?",
+    "headingNamedTerminal": "> UNIRSE A {{name}}",
     "blurb": "Los enlaces de invitación te dejan entrar sin que un administrador tenga que buscarte antes.",
     "tokenLabel": "Enlace o código de invitación",
     "tokenLabelTerminal": "ENLACE O CÓDIGO DE INVITACIÓN",

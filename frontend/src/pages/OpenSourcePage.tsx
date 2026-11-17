@@ -35,7 +35,9 @@ export const OpenSourcePage: React.FC = () => {
                 {t("openSource.intro")}
               </p>
               <p data-testid="open-source-count" className="text-dim">
-                {t("openSource.count", { count: packages.length })}
+                {visible.length === packages.length
+                  ? t("openSource.count", { count: packages.length })
+                  : t("openSource.countFiltered", { shown: visible.length, count: packages.length })}
               </p>
             </>
           )}

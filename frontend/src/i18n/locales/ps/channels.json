@@ -165,6 +165,8 @@
     "pageTitle": "په ګروپ کې ګډون وکړئ",
     "heading": "په ګروپ کې ګډون وکړئ",
     "headingTerminal": "> په ګروپ کې ګډون",
+    "headingNamed": "په {{name}} کې ګډون کوئ؟",
+    "headingNamedTerminal": "> په {{name}} کې ګډون",
     "blurb": "د بلنې لینکونه تاسو ته اجازه درکوي چې پرته له دې چې اډمین لومړی تاسو ولټوي ورګډ شئ.",
     "tokenLabel": "د بلنې لینک یا کوډ",
     "tokenLabelTerminal": "د بلنې لینک یا کوډ",

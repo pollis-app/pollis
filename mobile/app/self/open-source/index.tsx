@@ -41,7 +41,9 @@ export default function OpenSource() {
       <Text style={ty.secondary}>{t("openSource.intro")}</Text>
       {notices ? (
         <Text testID="text-open-source-count" style={[ty.secondary, { color: semantic.dim }]}>
-          {t("openSource.count", { count: notices.packages.length })}
+          {visible.length === notices.packages.length
+            ? t("openSource.count", { count: notices.packages.length })
+            : t("openSource.countFiltered", { shown: visible.length, count: notices.packages.length })}
         </Text>
       ) : null}
       <Field

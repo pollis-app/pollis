@@ -275,6 +275,7 @@
     "checking": "A verificar o seu convite…",
     "confirm": "Ao aderir, partilha o seu nome de utilizador e a identidade do dispositivo com todos neste grupo. Adira apenas através de uma ligação em que confie.",
     "confirmTitle": "Aderir a este grupo?",
+    "confirmTitleNamed": "Aderir a {{name}}?",
     "join": "Aderir ao grupo",
     "joining": "A aderir…",
     "failed": "Esta ligação de convite já não funciona. Peça uma nova.",
@@ -349,6 +350,8 @@
     "filtersLabel": "Filtros",
     "messages": "Mensagens",
     "placeholder": "Pesquisar tudo…",
+    "scope": "Em {{name}}",
+    "scopeClear": "Pesquisar em todo o lado, não só em {{name}}",
     "resultCount_one": "{{count}} resultado",
     "resultCount_other": "{{count}} resultados",
     "typePrompt": "Escreva…"

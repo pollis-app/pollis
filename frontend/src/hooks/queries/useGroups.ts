@@ -870,6 +870,29 @@ export function useRevokeGroupInviteLink() {
   });
 }
 
+/** Mirrors `InvitePreview`. */
+export type InvitePreview = {
+  group_name?: string | null;
+};
+
+/** The group an invite link names, before joining (#1972). Never retried: a failure spends the redeem budget. */
+export function useInviteLinkPreview(token: string) {
+  const currentUser = useObserver(() => appStore.currentUser);
+  const trimmed = token.trim();
+  return useQuery({
+    queryKey: ['invite-link-preview', trimmed, currentUser?.id ?? null] as const,
+    queryFn: () =>
+      invoke<InvitePreview>('preview_group_invite_link', {
+        token: trimmed,
+        userId: currentUser!.id,
+      }),
+    enabled: !!currentUser && trimmed.length > 0,
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useRedeemGroupInviteLink() {
   const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();

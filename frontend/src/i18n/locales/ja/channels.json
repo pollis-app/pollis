@@ -163,6 +163,8 @@
     "pageTitle": "グループに参加",
     "heading": "グループに参加",
     "headingTerminal": "> グループに参加",
+    "headingNamed": "{{name}}に参加しますか？",
+    "headingNamedTerminal": "> {{name}}に参加",
     "blurb": "招待リンクを使えば、管理者に探してもらわなくても参加できます。",
     "tokenLabel": "招待リンクまたはコード",
     "tokenLabelTerminal": "招待リンクまたはコード",

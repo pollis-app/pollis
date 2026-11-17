@@ -164,7 +164,12 @@ function GroupPanelImpl({
           testID="btn-search-group"
           accessibilityRole="button"
           accessibilityLabel={t("group.panel.search", { name: groupName })}
-          onPress={() => rootRouter.navigate({ pathname: "/(tabs)/self", params: { search: "1" } })}
+          onPress={() =>
+            rootRouter.navigate({
+              pathname: "/(tabs)/self",
+              params: { search: "1", searchGroup: groupId },
+            })
+          }
           style={{
             minHeight: layout.touchMin,
             borderRadius: r.sm,

@@ -161,6 +161,8 @@
     "pageTitle": "Rejoindre un groupe",
     "heading": "Rejoindre un groupe",
     "headingTerminal": "> REJOINDRE UN GROUPE",
+    "headingNamed": "Rejoindre {{name}} ?",
+    "headingNamedTerminal": "> REJOINDRE {{name}}",
     "blurb": "Les liens d'invitation vous permettent de rejoindre un groupe sans qu'un administrateur ait à vous rechercher au préalable.",
     "tokenLabel": "Lien ou code d'invitation",
     "tokenLabelTerminal": "LIEN OU CODE D'INVITATION",

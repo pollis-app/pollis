@@ -5,7 +5,8 @@ import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { useSkin } from "../hooks/queries/usePreferences";
 import { errorMessage } from "../utils/errorMessage";
-import { useRedeemGroupInviteLink } from "../hooks/queries/useGroups";
+import { completeInviteToken } from "../utils/inviteToken";
+import { useInviteLinkPreview, useRedeemGroupInviteLink } from "../hooks/queries/useGroups";
 
 interface JoinByInviteProps {
   /** Prefilled when arriving from an /invite/$token deep link. */
@@ -22,6 +23,11 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   const [token, setToken] = useState(initialToken);
   const [error, setError] = useState<string | null>(null);
   const redeemMutation = useRedeemGroupInviteLink();
+  // #1972: a whole link or code names its group before the press; a partial one is never sent.
+  const complete = completeInviteToken(token);
+  const preview = useInviteLinkPreview(complete ?? "");
+  const groupName = complete ? preview.data?.group_name ?? null : null;
+  const showPreviewError = !!complete && preview.isError && !error;
 
   const handleRedeem = React.useCallback(
     async (value: string) => {
@@ -60,9 +66,9 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
         autoFocus
       />
 
-      {error && (
+      {(error || showPreviewError) && (
         <p data-testid="invite-redeem-error" className="mt-3 text-body text-danger">
-          {error}
+          {error ?? errorMessage(preview.error)}
         </p>
       )}
 
@@ -102,11 +108,18 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
           }
         >
           <h2
+            data-testid="join-by-invite-heading"
             className={
               isModern ? "text-row font-semibold text-fg" : "text-row text-accent"
             }
           >
-            {isModern ? t("joinByInvite.heading") : t("joinByInvite.headingTerminal")}
+            {groupName
+              ? isModern
+                ? t("joinByInvite.headingNamed", { name: groupName })
+                : t("joinByInvite.headingNamedTerminal", { name: groupName })
+              : isModern
+                ? t("joinByInvite.heading")
+                : t("joinByInvite.headingTerminal")}
           </h2>
           <p className="mt-1 mb-4 text-secondary text-dim">{t("joinByInvite.blurb")}</p>
           {body}

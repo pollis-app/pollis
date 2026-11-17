@@ -283,6 +283,8 @@ pub fn match_expression(parsed: &ParsedQuery) -> Option<String> {
 struct ResolvedFilters {
     sender_id: Option<String>,
     conversation_id: Option<String>,
+    /// Every conversation of one group, through `conversation_cache` (#1972).
+    group_id: Option<String>,
     /// A `from:`/`in:` that matched nothing. The correct answer is then zero
     /// results, NOT "ignore the filter and show everything".
     unresolved: bool,
@@ -367,9 +369,11 @@ struct RawHit {
 
 /// Search this device's decrypted message history.
 /// `conversation_id` scopes the search and flips the default ordering to recency.
+/// `group_id` scopes it to one group's channels (#1972) and keeps relevance.
 pub async fn search_messages(
     query: String,
     conversation_id: Option<String>,
+    group_id: Option<String>,
     sort: Option<SearchSort>,
     limit: Option<i64>,
     cursor: Option<SearchCursor>,
@@ -400,6 +404,7 @@ pub async fn search_messages(
     // Filters first: an unresolvable `from:`/`in:` means zero results without querying.
     let mut filters = ResolvedFilters {
         conversation_id: conversation_id.clone(),
+        group_id,
         ..Default::default()
     };
     if let Some(username) = parsed.from.as_deref() {
@@ -523,6 +528,12 @@ fn run_query(
     }
     if let Some(id) = &filters.conversation_id {
         wheres.push("m.conversation_id = ?".to_string());
+        params.push(Box::new(id.clone()));
+    }
+    if let Some(id) = &filters.group_id {
+        wheres.push(
+            "m.conversation_id IN (SELECT id FROM conversation_cache WHERE group_id = ?)".to_string(),
+        );
         params.push(Box::new(id.clone()));
     }
     // ISO-8601 sorts lexicographically, so a date compare is a string compare.
@@ -1200,6 +1211,24 @@ mod tests {
             search(&conn, "budget before:2026-08-03", ResolvedFilters::default(), SearchSort::Recent).0,
             vec!["m1"]
         );
+
+        // #1972: a group scope keeps that group's channels and nothing else.
+        conn.execute_batch(
+            "INSERT INTO conversation_cache (id, kind, name, group_id, group_name, updated_at) VALUES \
+               ('c1', 'channel', 'general', 'g1', 'One', '2026-08-01'), \
+               ('c2', 'channel', 'general', 'g2', 'Two', '2026-08-01');",
+        )
+        .expect("cache");
+        let by_group = ResolvedFilters {
+            group_id: Some("g2".into()),
+            ..Default::default()
+        };
+        assert_eq!(search(&conn, "budget", by_group, SearchSort::Recent).0, vec!["m2"]);
+        let unknown_group = ResolvedFilters {
+            group_id: Some("g-none".into()),
+            ..Default::default()
+        };
+        assert!(search(&conn, "budget", unknown_group, SearchSort::Recent).0.is_empty());
         assert_eq!(
             search(&conn, "budget after:2026-08-01", ResolvedFilters::default(), SearchSort::Recent).0,
             vec!["m2"]

@@ -264,3 +264,45 @@ for (const skin of SKINS) {
     });
   });
 }
+
+// #1972: the join page names the group a whole link points at, before the press.
+const LIVE_TOKEN = `${"A".repeat(16)}.${"b".repeat(43)}`;
+const DEAD_TOKEN = `${"C".repeat(16)}.${"d".repeat(43)}`;
+
+for (const skin of SKINS) {
+  test.describe(`join by invite — ${skin} skin`, () => {
+    test("a whole link names its group before joining; a dead one says so", async ({ page }) => {
+      await page.addInitScript((data) => {
+        (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = data;
+      }, preloadFor(skin, [], { invitePreviews: { [LIVE_TOKEN]: "Design team" } }));
+      await page.goto("/");
+      await expect(page.getByTestId("app-ready")).toBeAttached();
+      await page.getByTestId("menu-item-join").click();
+      await expect(page.getByTestId("join-by-invite-page")).toBeVisible();
+
+      const heading = page.getByTestId("join-by-invite-heading");
+      const input = page.getByTestId("invite-token-input");
+      const generic = (await heading.innerText()).trim();
+
+      // A partial code is never previewed: the heading stays generic, no error.
+      await input.fill(LIVE_TOKEN.slice(0, 30));
+      await expect(heading).toHaveText(generic);
+      await expect(page.getByTestId("invite-redeem-error")).toHaveCount(0);
+
+      await input.fill(`https://pollis.com/invite/${LIVE_TOKEN}`);
+      await expect(heading).toHaveText(
+        skin === "modern" ? "Join Design team?" : "> JOIN Design team",
+      );
+      await expect(page.getByTestId("invite-redeem-error")).toHaveCount(0);
+
+      // A dead link fails like a redeem would, with the one opaque message.
+      await input.fill(DEAD_TOKEN);
+      await expect(page.getByTestId("invite-redeem-error")).toHaveText(
+        "this invite link is not valid",
+      );
+      await expect(heading).toHaveText(generic);
+
+      await page.screenshot({ path: `artifacts/join-by-invite-named-${skin}.png` });
+    });
+  });
+}

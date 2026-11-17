@@ -165,6 +165,8 @@
     "pageTitle": "Shiga Rukuni",
     "heading": "Shiga rukuni",
     "headingTerminal": "> SHIGA RUKUNI",
+    "headingNamed": "A shiga {{name}}?",
+    "headingNamedTerminal": "> SHIGA {{name}}",
     "blurb": "Mahaɗan gayyata suna ba da damar shiga ba tare da mai gudanarwa ya fara neman mutum ba.",
     "tokenLabel": "Mahaɗin gayyata ko lamba",
     "tokenLabelTerminal": "MAHAƊIN GAYYATA KO LAMBA",

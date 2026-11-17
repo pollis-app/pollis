@@ -80,6 +80,12 @@ import {
   MessageSquare,
   History,
   Laptop,
+  Clock,
+  Sprout,
+  Pizza,
+  Gamepad2,
+  Plane,
+  Lightbulb,
   type LucideIcon,
 } from "lucide-react-native";
 import { I18nManager, View } from "react-native";
@@ -210,6 +216,14 @@ export const Icon = {
   // The arrows encode time, not reading direction: not mirrored.
   seekBack: wrap(RotateCcw),
   seekForward: wrap(RotateCw),
+
+  /* ── Emoji picker categories (desktop's EmojiCategoryRail set, #1972) ── */
+  clock: wrap(Clock),
+  sprout: wrap(Sprout),
+  pizza: wrap(Pizza),
+  gamepad: wrap(Gamepad2),
+  plane: wrap(Plane),
+  lightbulb: wrap(Lightbulb),
 
   /* ── State ── */
   check: wrap(Check, 12),

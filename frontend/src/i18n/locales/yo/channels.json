@@ -163,6 +163,8 @@
     "pageTitle": "Darapọ̀ mọ́ Ẹgbẹ́",
     "heading": "Darapọ̀ mọ́ ẹgbẹ́ kan",
     "headingTerminal": "> DARAPỌ̀ MỌ́ ẸGBẸ́",
+    "headingNamed": "Ṣé o fẹ́ darapọ̀ mọ́ {{name}}?",
+    "headingNamedTerminal": "> DARAPỌ̀ MỌ́ {{name}}",
     "blurb": "Líǹkì ìkésíni ń jẹ́ kí o darapọ̀ láìjẹ́ pé alábòójútó kan kọ́kọ́ wá ọ.",
     "tokenLabel": "Líǹkì tàbí kóòdù ìkésíni",
     "tokenLabelTerminal": "LÍǸKÌ TÀBÍ KÓÒDÙ ÌKÉSÍNI",

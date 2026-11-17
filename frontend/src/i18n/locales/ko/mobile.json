@@ -267,6 +267,7 @@
     "checking": "초대를 확인하는 중…",
     "confirm": "참여하면 이 그룹의 모든 사람에게 내 사용자 이름과 기기 신원 정보가 공유됩니다. 신뢰할 수 있는 링크로만 참여하세요.",
     "confirmTitle": "이 그룹에 참여할까요?",
+    "confirmTitleNamed": "{{name}}에 참여할까요?",
     "join": "그룹 참여",
     "joining": "참여하는 중…",
     "failed": "이 초대 링크는 더 이상 작동하지 않습니다. 새 링크를 요청하세요.",
@@ -341,6 +342,8 @@
     "filtersLabel": "필터",
     "messages": "메시지",
     "placeholder": "모두 검색…",
+    "scope": "{{name}}에서",
+    "scopeClear": "{{name}}뿐 아니라 전체에서 검색",
     "resultCount_other": "결과 {{count}}개",
     "typePrompt": "입력…"
   },

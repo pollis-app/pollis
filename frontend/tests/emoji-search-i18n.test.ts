@@ -43,12 +43,13 @@ test("English keeps working for a Ukrainian user", () => {
 });
 
 test("a Spanish query with an accent finds the emoji", () => {
-  assert.equal(search("corazón", [es, en])[0], "❤");
+  // ❤ "corazón rojo" and 💔 "corazón roto" tie; CLDR order (#1972) lists 💔 first.
+  assert.ok(search("corazón", [es, en]).slice(0, 2).includes("❤"));
   assert.equal(search("cara llorando de risa", [es, en])[0], "😂");
 });
 
 test("an unaccented query matches the accented name — phones rarely have dead keys", () => {
-  assert.equal(search("corazon", [es, en])[0], "❤");
+  assert.ok(search("corazon", [es, en]).slice(0, 2).includes("❤"));
   assert.equal(search("corazon rojo", [es, en])[0], "❤");
   assert.ok(search("cafe", [fr, en]).includes("☕"));
   assert.ok(search("patisserie", [fr, en]).length > 0);

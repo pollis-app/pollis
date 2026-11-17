@@ -278,7 +278,9 @@
     "locked": "Desbloquea Pollis primero y luego vuelve a abrir el enlace de invitación.",
     "openPollis": "Abrir Pollis",
     "signedOut": "Inicia sesión en Pollis primero y luego vuelve a abrir el enlace de invitación.",
-    "title": "Invitación"
+    "title": "Invitación",
+    "confirmTitle": "¿Unirte a este grupo?",
+    "confirmTitleNamed": "¿Unirte a {{name}}?"
   },
   "language": {
     "restartRequired": "Reinicia Pollis para cambiar la dirección de la interfaz."
@@ -340,6 +342,8 @@
     "filtersLabel": "Filtros",
     "messages": "Mensajes",
     "placeholder": "Buscar en todo…",
+    "scope": "En {{name}}",
+    "scopeClear": "Buscar en todas partes, no solo en {{name}}",
     "resultCount_one": "{{count}} resultado",
     "resultCount_other": "{{count}} resultados",
     "typePrompt": "Escribe…"

@@ -106,6 +106,13 @@ pub struct RedeemedInvite {
     pub group_name: Option<String>,
 }
 
+/// What an invite link would admit the caller to, before they choose to join (#1972).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InvitePreview {
+    /// `None` when the group has no row any more, or the DS predates the preview.
+    pub group_name: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JoinRequest {
     pub id: String,

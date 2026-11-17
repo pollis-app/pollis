@@ -159,6 +159,11 @@ pub async fn revoke_group_invite_link(link_id: String, user_id: String, state: S
 }
 
 #[tauri::command]
+pub async fn preview_group_invite_link(token: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<InvitePreview> {
+    pollis_core::commands::groups::preview_group_invite_link(token, user_id, &state).await
+}
+
+#[tauri::command]
 pub async fn redeem_group_invite_link(token: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<RedeemedInvite> {
     pollis_core::commands::groups::redeem_group_invite_link(token, user_id, &state).await
 }

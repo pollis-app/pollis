@@ -73,8 +73,11 @@ test("the filter matches a package name or a licence", async ({ page }) => {
   await page.locator('[data-testid="search-panel-result-item"][data-item-id="page-open-source"]').click();
   await expect(page.getByTestId("open-source-page")).toBeVisible();
 
+  await expect(page.getByTestId("open-source-count")).toHaveText("Packages in this build: 3");
   await page.getByTestId("open-source-filter").fill("mpl");
   await expect(page.getByTestId("open-source-row-uniffi")).toBeVisible();
+  // #1972: the count follows the filter.
+  await expect(page.getByTestId("open-source-count")).toHaveText("Packages shown: 1 of 3");
   await expect(page.getByTestId("open-source-row-react")).toHaveCount(0);
   await expect(page.getByTestId("open-source-row-serde")).toHaveCount(0);
 

@@ -92,8 +92,8 @@ pub async fn ingest_dm_envelopes(user_id: String, dm_channel_id: String, state: 
 }
 
 #[tauri::command]
-pub async fn search_messages(query: String, conversation_id: Option<String>, sort: Option<SearchSort>, limit: Option<i64>, cursor: Option<SearchCursor>, state: State<'_, Arc<AppState>>) -> Result<SearchPage> {
-    pollis_core::commands::messages::search_messages(query, conversation_id, sort, limit, cursor, &state).await
+pub async fn search_messages(query: String, conversation_id: Option<String>, group_id: Option<String>, sort: Option<SearchSort>, limit: Option<i64>, cursor: Option<SearchCursor>, state: State<'_, Arc<AppState>>) -> Result<SearchPage> {
+    pollis_core::commands::messages::search_messages(query, conversation_id, group_id, sort, limit, cursor, &state).await
 }
 
 #[tauri::command]

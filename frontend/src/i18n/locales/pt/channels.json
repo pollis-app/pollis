@@ -165,6 +165,8 @@
     "pageTitle": "Aderir a um grupo",
     "heading": "Aderir a um grupo",
     "headingTerminal": "> ADERIR A UM GRUPO",
+    "headingNamed": "Aderir a {{name}}?",
+    "headingNamedTerminal": "> ADERIR A {{name}}",
     "blurb": "As ligações de convite permitem aderir sem que um administrador tenha de o procurar primeiro.",
     "tokenLabel": "Ligação ou código de convite",
     "tokenLabelTerminal": "LIGAÇÃO OU CÓDIGO DE CONVITE",

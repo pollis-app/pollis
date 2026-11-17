@@ -153,6 +153,11 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   chat input bar or is its own page.
 - **Same-frame feedback.** Anything that can take time shows an optimistic result or a busy,
   un-repeatable control on the same frame, on every platform.
+- **Name what an action acts on.** A confirmation names its object ("Join Design team?", not
+  "Join this group?") whenever the app can know it; a scoped search shows its scope as a
+  removable chip ("In Design team"); a count over a filtered list counts what is shown
+  ("Packages shown: 4 of 312"). A screen opened with nothing to act on says so in one plain
+  sentence, never a sentence with a blank where the object should be.
 - **People in rows** (members, message requests, conversation lists): the display name when the
   person set one, else the handle. A name stays on one line and never wraps mid-word: mobile
   truncates a handle in the middle (`ListRow`'s `nameIsHandle`, so both ends stay readable) and a

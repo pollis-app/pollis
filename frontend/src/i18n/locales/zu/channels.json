@@ -165,6 +165,8 @@
     "pageTitle": "Joyina Iqembu",
     "heading": "Joyina iqembu",
     "headingTerminal": "> JOYINA IQEMBU",
+    "headingNamed": "Joyina i-{{name}}?",
+    "headingNamedTerminal": "> JOYINA I-{{name}}",
     "blurb": "Izixhumanisi zesimemo zikuvumela ukuthi ujoyine ngaphandle kokuthi umphathi akufune kuqala.",
     "tokenLabel": "Isixhumanisi sesimemo noma ikhodi",
     "tokenLabelTerminal": "ISIXHUMANISI SESIMEMO NOMA IKHODI",
