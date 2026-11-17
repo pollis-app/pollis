@@ -11,6 +11,8 @@ import { useRequestGroupAccess, useMyJoinRequest, useUserGroupsWithChannels, gro
 import { deriveSlug } from "../utils/urlRouting";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormActions } from "../components/ui/FormActions";
 import { Card } from "../components/ui/Card";
 
 export const SearchGroupPage: React.FC = observer(() => {
@@ -60,109 +62,103 @@ export const SearchGroupPage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("group.title")}>
-      <div
-        data-testid="search-group-page"
-        className="flex-1 flex flex-col overflow-auto bg-bg"
-      >
-        <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
-          <div className="w-full max-w-md flex flex-col gap-6">
+      <PageColumn spacing="sections" paneTestId="search-group-page">
+        <form onSubmit={handleSearch} className="flex flex-col gap-5">
+          <TextInput
+            label={t("group.slugLabel")}
+            value={slug}
+            onChange={setSlug}
+            placeholder={t("group.slugPlaceholder")}
+            disabled={isSearching}
+            id="search-group-slug"
+          />
+          <input data-testid="search-group-slug-input" type="hidden" value={slug} readOnly />
 
-            <form onSubmit={handleSearch} className="flex flex-col gap-3">
-              <TextInput
-                label={t("group.slugLabel")}
-                value={slug}
-                onChange={setSlug}
-                placeholder={t("group.slugPlaceholder")}
-                disabled={isSearching}
-                id="search-group-slug"
-              />
-              <input data-testid="search-group-slug-input" type="hidden" value={slug} readOnly />
+          <FormActions>
+            <Button
+              data-testid="search-group-button"
+              type="submit"
+              disabled={!slug.trim() || isSearching}
+              isLoading={isSearching}
+              loadingText={t("group.searching")}
+            >
+              {t("group.submit")}
+            </Button>
+          </FormActions>
+        </form>
 
-              <Button
-                data-testid="search-group-button"
-                type="submit"
-                disabled={!slug.trim() || isSearching}
-                isLoading={isSearching}
-                loadingText={t("group.searching")}
-              >
-                {t("group.submit")}
-              </Button>
-            </form>
-
-            {foundGroup && (
-              <Card
-                data-testid="search-group-result"
-                className="flex flex-col gap-3"
-                padding="sm"
-              >
-                <div className="flex flex-col gap-0.5">
-                  <h2 className="text-body font-mono font-medium text-accent">
-                    {foundGroup.name}
-                  </h2>
-                  <p className="text-secondary font-mono text-muted">
-                    /g/{deriveSlug(foundGroup.name)}
-                  </p>
-                  {foundGroup.description && (
-                    <p className="text-secondary font-mono mt-1 text-dim">
-                      {foundGroup.description}
-                    </p>
-                  )}
-                </div>
-                {isMember ? (
-                  <Button
-                    data-testid="go-to-group-button"
-                    activateOn="press"
-                    onClick={() => navigate({ to: "/groups/$groupId", params: { groupId: foundGroup.id } })}
-                  >
-                    {t("group.goToGroup")}
-                  </Button>
-                ) : myJoinRequest?.status === "pending" ? (
-                  <p
-                    data-testid="request-pending-indicator"
-                    className="text-secondary font-mono text-muted"
-                  >
-                    {t("group.requestPending")}
-                  </p>
-                ) : myJoinRequest?.status === "rejected" ? (
-                  <div className="flex flex-col gap-2">
-                    <p
-                      data-testid="request-rejected-indicator"
-                      className="text-secondary font-mono text-danger"
-                    >
-                      {t("group.requestRejected")}
-                    </p>
-                    <Button
-                      data-testid="try-again-button"
-                      onClick={handleRequestAccess}
-                      disabled={requestAccessMutation.isPending}
-                      isLoading={requestAccessMutation.isPending}
-                      loadingText={t("group.sendingRequest")}
-                    >
-                      {t("group.tryAgain")}
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    data-testid="request-access-button"
-                    onClick={handleRequestAccess}
-                    disabled={requestAccessMutation.isPending}
-                    isLoading={requestAccessMutation.isPending}
-                    loadingText={t("group.sendingRequest")}
-                  >
-                    {t("group.requestAccess")}
-                  </Button>
-                )}
-              </Card>
-            )}
-
-            {searchError && (
-              <p data-testid="search-group-error" className="text-secondary font-mono text-danger">
-                {searchError}
+        {foundGroup && (
+          <Card
+            data-testid="search-group-result"
+            className="flex flex-col gap-3"
+            padding="sm"
+          >
+            <div className="flex flex-col gap-0.5">
+              <h2 className="text-body font-mono font-medium text-accent">
+                {foundGroup.name}
+              </h2>
+              <p className="text-secondary font-mono text-muted">
+                /g/{deriveSlug(foundGroup.name)}
               </p>
+              {foundGroup.description && (
+                <p className="text-secondary font-mono mt-1 text-dim">
+                  {foundGroup.description}
+                </p>
+              )}
+            </div>
+            {isMember ? (
+              <Button
+                data-testid="go-to-group-button"
+                activateOn="press"
+                onClick={() => navigate({ to: "/groups/$groupId", params: { groupId: foundGroup.id } })}
+              >
+                {t("group.goToGroup")}
+              </Button>
+            ) : myJoinRequest?.status === "pending" ? (
+              <p
+                data-testid="request-pending-indicator"
+                className="text-secondary font-mono text-muted"
+              >
+                {t("group.requestPending")}
+              </p>
+            ) : myJoinRequest?.status === "rejected" ? (
+              <div className="flex flex-col gap-2">
+                <p
+                  data-testid="request-rejected-indicator"
+                  className="text-secondary font-mono text-danger"
+                >
+                  {t("group.requestRejected")}
+                </p>
+                <Button
+                  data-testid="try-again-button"
+                  onClick={handleRequestAccess}
+                  disabled={requestAccessMutation.isPending}
+                  isLoading={requestAccessMutation.isPending}
+                  loadingText={t("group.sendingRequest")}
+                >
+                  {t("group.tryAgain")}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                data-testid="request-access-button"
+                onClick={handleRequestAccess}
+                disabled={requestAccessMutation.isPending}
+                isLoading={requestAccessMutation.isPending}
+                loadingText={t("group.sendingRequest")}
+              >
+                {t("group.requestAccess")}
+              </Button>
             )}
-          </div>
-        </div>
-      </div>
+          </Card>
+        )}
+
+        {searchError && (
+          <p data-testid="search-group-error" className="text-secondary font-mono text-danger">
+            {searchError}
+          </p>
+        )}
+      </PageColumn>
     </PageShell>
   );
 });

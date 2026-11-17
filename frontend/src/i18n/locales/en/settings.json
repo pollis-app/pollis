@@ -283,6 +283,7 @@
     "mediaScreenShare": "Screen share",
     "revokeMediaOnExitLabel": "Revoke system permissions when Pollis quits",
     "revokeMediaOnExitDescription": "When on, Pollis clears its saved camera / microphone / screen permissions as it quits, so the OS asks again next time.",
+    "revokeNowQuestion": "Revoke camera, microphone and screen access now?",
     "revokeNowNote": "This clears Pollis's saved permissions.",
     "revokeNowConfirm": "Confirm",
     "revokeNowButton": "Revoke now",

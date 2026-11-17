@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
-import { IconButton } from "./IconButton";
+import { ComposerBarHeader } from "./ComposerBarHeader";
 
 interface EditMessageBarProps {
   heading: string;
@@ -45,19 +44,12 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
 
   return (
     <div data-testid={testId}>
-      <div className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface">
-        <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
-          {heading}
-        </span>
-        <IconButton
-          data-testid={cancelTestId}
-          onClick={onCancel}
-          aria-label={cancelLabel}
-          className="flex-shrink-0"
-        >
-          <X size={20} aria-hidden="true" />
-        </IconButton>
-      </div>
+      <ComposerBarHeader
+        heading={heading}
+        onCancel={onCancel}
+        cancelLabel={cancelLabel}
+        cancelTestId={cancelTestId}
+      />
       <div className="px-4 pb-3 pt-1 bg-surface">
         <textarea
           ref={textareaRef}

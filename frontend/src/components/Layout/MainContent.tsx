@@ -1,6 +1,5 @@
 import React, { useCallback, useRef, useMemo, useState, useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { X } from "lucide-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { observer } from "mobx-react-lite";
@@ -14,6 +13,8 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { EditMessageBar } from "../ui/EditMessageBar";
+import { ConfirmBar } from "../ui/ConfirmBar";
+import { ComposerBarHeader } from "../ui/ComposerBarHeader";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
 import { transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
 import { useRightPanel } from "./RightPanel/useRightPanel";
@@ -777,13 +778,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
       {pendingDmRequest ? (
         <div data-testid="dm-request-bar">
-          <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
-          >
-            <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
-              {t("dmRequest.heading")}
-            </span>
-          </div>
+          <ComposerBarHeader heading={t("dmRequest.heading")} />
           <div
             className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
           >
@@ -836,84 +831,36 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           isSaving={editMessageMutation.isPending}
         />
       ) : isDeletingThisChannel ? (
-        <div data-testid="delete-channel-bar">
-          <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
-          >
-            <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
-              {t("deleteChannel.heading")}
-            </span>
-            <IconButton
-              data-testid="delete-channel-cancel"
-              onClick={() => setPendingDeleteChannelId(null)}
-              aria-label={t("deleteChannel.cancel")}
-              className="flex-shrink-0"
-            >
-              <X size={20} aria-hidden="true" />
-            </IconButton>
-          </div>
-          <div
-            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
-          >
-            <p className="text-secondary font-mono text-dim">
-              {t("deleteChannel.body")}
-            </p>
-            <Button
-              data-testid="delete-channel-confirm"
-              variant="danger"
-              onClick={handleConfirmDeleteChannel}
-              isLoading={deleteChannelMutation.isPending}
-              loadingText={t("deleteChannel.deleting")}
-              autoFocus
-            >
-              {t("common:actions.delete")}
-            </Button>
-          </div>
-        </div>
+        <ConfirmBar
+          testId="delete-channel-bar"
+          heading={t("deleteChannel.heading")}
+          body={t("deleteChannel.body")}
+          cancelLabel={t("deleteChannel.cancel")}
+          cancelTestId="delete-channel-cancel"
+          onCancel={() => setPendingDeleteChannelId(null)}
+          confirmLabel={t("common:actions.delete")}
+          confirmTestId="delete-channel-confirm"
+          onConfirm={handleConfirmDeleteChannel}
+          isPending={deleteChannelMutation.isPending}
+          pendingLabel={t("deleteChannel.deleting")}
+        />
       ) : pendingDeleteId ? (() => {
         const target = allMessages.find((m) => m.id === pendingDeleteId);
         const isModerating = !!target && !!currentUser && target.sender_id !== currentUser.id;
-        const heading = isModerating
-          ? t("deleteMessage.moderateHeading")
-          : t("deleteMessage.heading");
-        const body = isModerating
-          ? t("deleteMessage.moderateBody")
-          : t("deleteMessage.body");
         return (
-          <div data-testid="delete-message-bar">
-            <div
-              className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
-            >
-              <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
-                {heading}
-              </span>
-              <IconButton
-                data-testid="delete-message-cancel"
-                onClick={() => setPendingDeleteId(null)}
-                aria-label={t("deleteMessage.cancel")}
-                className="flex-shrink-0"
-              >
-                <X size={20} aria-hidden="true" />
-              </IconButton>
-            </div>
-            <div
-              className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
-            >
-              <p className="text-secondary font-mono text-dim">
-                {body}
-              </p>
-              <Button
-                data-testid="delete-message-confirm"
-                variant="danger"
-                onClick={handleConfirmDelete}
-                isLoading={deleteMessageMutation.isPending}
-                loadingText={t("deleteMessage.deleting")}
-                autoFocus
-              >
-                {isModerating ? t("deleteMessage.remove") : t("common:actions.delete")}
-              </Button>
-            </div>
-          </div>
+          <ConfirmBar
+            testId="delete-message-bar"
+            heading={isModerating ? t("deleteMessage.moderateHeading") : t("deleteMessage.heading")}
+            body={isModerating ? t("deleteMessage.moderateBody") : t("deleteMessage.body")}
+            cancelLabel={t("deleteMessage.cancel")}
+            cancelTestId="delete-message-cancel"
+            onCancel={() => setPendingDeleteId(null)}
+            confirmLabel={isModerating ? t("deleteMessage.remove") : t("common:actions.delete")}
+            confirmTestId="delete-message-confirm"
+            onConfirm={handleConfirmDelete}
+            isPending={deleteMessageMutation.isPending}
+            pendingLabel={t("deleteMessage.deleting")}
+          />
         );
       })() : (
         <div data-testid="message-form">

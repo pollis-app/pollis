@@ -6,14 +6,13 @@
   ],
   "boundaries": {
     "frontend": {
-      "count": 8,
+      "count": 7,
       "fingerprints": {
         "05e966f53ce2d7d7": 1,
         "674a709ebde7673e": 1,
         "7af232f0c6b3fd66": 1,
         "831bf1c4c97fd5f2": 1,
         "92838b81f131f97e": 1,
-        "aec39f0ec868f1ff": 1,
         "cb868717f2b00039": 1,
         "fa154e07ccee3e69": 1
       },
@@ -21,11 +20,10 @@
         "frontend/src/components/Emoji/emojiTokens.ts:25-36 ≡ frontend/src/components/ui/richInputModel.ts:12-19",
         "frontend/src/hooks/queries/useGroups.ts:183-193 ≡ frontend/src/hooks/queries/useGroups.ts:367-376",
         "frontend/src/pages/Channel.tsx:39-44 ≡ frontend/src/pages/RenameChannelPage.tsx:11-15",
-        "frontend/src/pages/Channel.tsx:39-44 ≡ frontend/src/pages/VoiceChannel.tsx:28-33",
+        "frontend/src/pages/Channel.tsx:39-44 ≡ frontend/src/pages/VoiceChannel.tsx:29-34",
         "frontend/src/pages/CreateChannel.tsx:1-8 ≡ frontend/src/pages/CreateGroup.tsx:1-8",
-        "frontend/src/pages/CreateChannel.tsx:32-42 ≡ frontend/src/pages/CreateGroup.tsx:30-40",
-        "frontend/src/pages/InviteMemberPage.tsx:10-20 ≡ frontend/src/pages/JoinRequestsPage.tsx:10-20",
-        "frontend/src/pages/InviteMemberPage.tsx:10-20 ≡ frontend/src/pages/LeaveGroup.tsx:16-26"
+        "frontend/src/pages/CreateChannel.tsx:34-44 ≡ frontend/src/pages/CreateGroup.tsx:32-42",
+        "frontend/src/pages/InviteMemberPage.tsx:10-20 ≡ frontend/src/pages/JoinRequestsPage.tsx:10-20"
       ]
     },
     "mobile": {

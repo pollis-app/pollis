@@ -4,6 +4,8 @@ import { Trans, useTranslation } from "react-i18next";
 import { useSendGroupInvite } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormActions } from "../components/ui/FormActions";
 import { InviteLinkManager } from "../components/Invites/InviteLinkManager";
 
 interface InviteMemberProps {
@@ -33,63 +35,53 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
   };
 
   return (
-    <div
-      data-testid="invite-member-page"
-      className="flex-1 flex flex-col overflow-auto bg-bg"
-    >
-      <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
-        <div className="w-full max-w-md flex flex-col gap-8">
-        <form
-          onSubmit={handleInvite}
-          className="flex flex-col gap-6"
-        >
-          <p className="text-secondary font-mono text-dim">
-            <Trans
-              i18nKey="channels:inviteMember.intro"
-              values={{ name: groupName }}
-              components={{ accent: <span className="text-accent" /> }}
-            />
+    <PageColumn spacing="sections" paneTestId="invite-member-page">
+      <form onSubmit={handleInvite} className="flex flex-col gap-5">
+        <p className="text-secondary font-mono text-dim">
+          <Trans
+            i18nKey="channels:inviteMember.intro"
+            values={{ name: groupName }}
+            components={{ accent: <span className="text-accent" /> }}
+          />
+        </p>
+
+        <TextInput
+          label={t("inviteMember.identifierLabel")}
+          value={username}
+          onChange={setUsername}
+          placeholder={t("inviteMember.identifierPlaceholder")}
+          disabled={inviteMutation.isPending}
+          id="invite-username"
+        />
+
+        <FormActions>
+          <Button
+            data-testid="send-invite-button"
+            type="submit"
+            disabled={!username.trim() || inviteMutation.isPending}
+            isLoading={inviteMutation.isPending}
+            loadingText={t("inviteMember.submitting")}
+          >
+            {t("inviteMember.submit")}
+          </Button>
+        </FormActions>
+
+        {success && (
+          <p data-testid="invite-sent-confirmation" className="text-secondary font-mono text-accent-dim">
+            {t("inviteMember.sent")}
           </p>
+        )}
 
-          <div className="flex flex-col gap-3">
-            <TextInput
-              label={t("inviteMember.identifierLabel")}
-              value={username}
-              onChange={setUsername}
-              placeholder={t("inviteMember.identifierPlaceholder")}
-              disabled={inviteMutation.isPending}
-              id="invite-username"
-            />
+        {inviteMutation.error && (
+          <p data-testid="invite-error" className="text-secondary font-mono text-danger">
+            {errorMessage(inviteMutation.error, t("inviteMember.sendFailed"))}
+          </p>
+        )}
+      </form>
 
-            <Button
-              data-testid="send-invite-button"
-              type="submit"
-              disabled={!username.trim() || inviteMutation.isPending}
-              isLoading={inviteMutation.isPending}
-              loadingText={t("inviteMember.submitting")}
-            >
-              {t("inviteMember.submit")}
-            </Button>
-          </div>
-
-          {success && (
-            <p data-testid="invite-sent-confirmation" className="text-secondary font-mono text-accent-dim">
-              {t("inviteMember.sent")}
-            </p>
-          )}
-
-          {inviteMutation.error && (
-            <p data-testid="invite-error" className="text-secondary font-mono text-danger">
-              {errorMessage(inviteMutation.error, t("inviteMember.sendFailed"))}
-            </p>
-          )}
-        </form>
-
-        <div className="border-t border-line pt-6">
-          <InviteLinkManager groupId={groupId} />
-        </div>
-        </div>
+      <div className="border-t border-line pt-6">
+        <InviteLinkManager groupId={groupId} />
       </div>
-    </div>
+    </PageColumn>
   );
 };

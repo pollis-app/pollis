@@ -14,6 +14,8 @@ import { Button } from "../components/ui/Button";
 import { Switch } from "../components/ui/Switch";
 import type { Channel } from "../types";
 import { EmptyState } from "../components/ui/EmptyState";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormActions } from "../components/ui/FormActions";
 
 interface CreateChannelProps {
   onSuccess?: (channelId: string, channelType: "text" | "voice") => void;
@@ -119,76 +121,71 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
   }
 
   return (
-    <div
-      data-testid="create-channel-page"
-      className="flex-1 flex flex-col overflow-auto bg-bg"
+    <PageColumn
+      as="form"
+      paneTestId="create-channel-page"
+      data-testid="create-channel-form"
+      onSubmit={handleSubmit}
     >
-      <div data-testid="create-channel-content" className="flex-1 flex justify-center overflow-auto px-6 py-8">
-        <form
-          data-testid="create-channel-form"
-          onSubmit={handleSubmit}
-          className="w-full max-w-md flex flex-col gap-5"
+      <TextInput
+        label={t("createChannel.nameLabel")}
+        value={name}
+        onChange={onNameChange}
+        placeholder={t("createChannel.namePlaceholder")}
+        disabled={isLoading}
+        id="create-channel-name"
+        required
+      />
+      <input data-testid="create-channel-name-input" type="hidden" value={name} readOnly />
+
+      <TextInput
+        label={t("createChannel.slugLabel")}
+        value={slug}
+        onChange={onSlugChange}
+        placeholder={t("createChannel.slugPlaceholder")}
+        disabled={isLoading}
+        id="create-channel-slug"
+        required
+      />
+      <input data-testid="create-channel-slug-input" type="hidden" value={slug} readOnly />
+
+      <TextArea
+        label={t("createChannel.descriptionLabel")}
+        value={description}
+        onChange={setDescription}
+        placeholder={t("createChannel.descriptionPlaceholder")}
+        disabled={isLoading}
+        rows={2}
+        id="create-channel-description"
+      />
+      <input data-testid="create-channel-description-input" type="hidden" value={description} readOnly />
+
+      <Switch
+        label={t("createChannel.voiceLabel")}
+        checked={channelType === "voice"}
+        onChange={(checked) => setChannelType(checked ? "voice" : "text")}
+        disabled={isLoading}
+        id="create-channel-type"
+        description={t("createChannel.voiceDescription")}
+      />
+      <input data-testid="create-channel-type-input" type="hidden" value={channelType} readOnly />
+
+      {error && (
+        <p data-testid="create-channel-error" className="text-secondary font-mono text-danger">
+          {error}
+        </p>
+      )}
+
+      <FormActions>
+        <Button
+          data-testid="create-channel-submit-button"
+          type="submit"
+          isLoading={isLoading}
+          loadingText={t("createChannel.submitting")}
         >
-          <TextInput
-            label={t("createChannel.nameLabel")}
-            value={name}
-            onChange={onNameChange}
-            placeholder={t("createChannel.namePlaceholder")}
-            disabled={isLoading}
-            id="create-channel-name"
-            required
-          />
-          <input data-testid="create-channel-name-input" type="hidden" value={name} readOnly />
-
-          <TextInput
-            label={t("createChannel.slugLabel")}
-            value={slug}
-            onChange={onSlugChange}
-            placeholder={t("createChannel.slugPlaceholder")}
-            disabled={isLoading}
-            id="create-channel-slug"
-            required
-          />
-          <input data-testid="create-channel-slug-input" type="hidden" value={slug} readOnly />
-
-          <TextArea
-            label={t("createChannel.descriptionLabel")}
-            value={description}
-            onChange={setDescription}
-            placeholder={t("createChannel.descriptionPlaceholder")}
-            disabled={isLoading}
-            rows={2}
-            id="create-channel-description"
-          />
-          <input data-testid="create-channel-description-input" type="hidden" value={description} readOnly />
-
-          <Switch
-            label={t("createChannel.voiceLabel")}
-            checked={channelType === "voice"}
-            onChange={(checked) => setChannelType(checked ? "voice" : "text")}
-            disabled={isLoading}
-            id="create-channel-type"
-            description={t("createChannel.voiceDescription")}
-          />
-          <input data-testid="create-channel-type-input" type="hidden" value={channelType} readOnly />
-
-          {error && (
-            <p data-testid="create-channel-error" className="text-secondary font-mono text-danger">
-              {error}
-            </p>
-          )}
-
-          <Button
-            data-testid="create-channel-submit-button"
-            type="submit"
-            isLoading={isLoading}
-            loadingText={t("createChannel.submitting")}
-            className="w-full"
-          >
-            {t("createChannel.submit")}
-          </Button>
-        </form>
-      </div>
-    </div>
+          {t("createChannel.submit")}
+        </Button>
+      </FormActions>
+    </PageColumn>
   );
 });

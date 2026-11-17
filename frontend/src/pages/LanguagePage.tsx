@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
 import { RadioList } from "../components/ui/RadioList";
 import { supportedLanguages } from "../i18n/languages";
 import { setLanguage } from "../i18n";
@@ -15,8 +16,8 @@ export const LanguagePage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("language.heading")} scrollable>
-      <div data-testid="language-page" className="flex justify-center px-6 py-8">
-        <section className="w-full max-w-md flex flex-col gap-4">
+      <PageColumn paneTestId="language-page">
+        <section className="flex flex-col gap-4">
           <h2
             data-testid="language-page-heading"
             className="text-secondary font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg"
@@ -40,7 +41,7 @@ export const LanguagePage: React.FC = observer(() => {
             {t("language.description")}
           </p>
         </section>
-      </div>
+      </PageColumn>
     </PageShell>
   );
 });

@@ -7,6 +7,7 @@ import {
   invoke,
 } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
 import { Button } from "../components/ui/Button";
 import { CodeSnippet } from "../components/ui/CodeSnippet";
 import { ReleaseNotesText } from "../components/ReleaseNotesText";
@@ -101,105 +102,98 @@ export const UpdatePage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("update.title")} scrollable>
-      <div
-        data-testid="update-page"
-        className="flex-1 flex flex-col overflow-auto bg-bg"
-      >
-        <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
-          <div className="w-full max-w-md flex flex-col gap-8">
-            <section className="flex flex-col gap-4">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
-              >
-                {t("update.heading")}
-              </h2>
+      <PageColumn spacing="sections" paneTestId="update-page">
+        <section className="flex flex-col gap-4">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
+          >
+            {t("update.heading")}
+          </h2>
 
-              <div className="flex flex-col gap-2">
-                <p className="text-secondary font-mono text-muted">
-                  <Trans
-                    t={t}
-                    i18nKey="update.currentVersion"
-                    values={{ version: appVersion || t("update.versionLoading") }}
-                    components={{ val: <span className="text-fg" /> }}
-                  />
-                </p>
+          <div className="flex flex-col gap-2">
+            <p className="text-secondary font-mono text-muted">
+              <Trans
+                t={t}
+                i18nKey="update.currentVersion"
+                values={{ version: appVersion || t("update.versionLoading") }}
+                components={{ val: <span className="text-fg" /> }}
+              />
+            </p>
 
-                {status === "checking" && (
-                  <p className="text-secondary font-mono text-muted">
-                    {t("update.checking")}
-                  </p>
-                )}
+            {status === "checking" && (
+              <p className="text-secondary font-mono text-muted">
+                {t("update.checking")}
+              </p>
+            )}
 
-                {status === "available" && (
+            {status === "available" && (
+              <p className="text-secondary font-mono text-accent">
+                {t("update.available", { version })}
+              </p>
+            )}
+
+            {status === "none" && (
+              <p className="text-secondary font-mono text-accent-dim">
+                {t("update.upToDate")}
+              </p>
+            )}
+
+            {status === "error" && (
+              <p className="text-secondary font-mono text-danger">
+                {errorMessage}
+              </p>
+            )}
+
+            {status === "managed" && managed && (
+              <>
+                {version && (
                   <p className="text-secondary font-mono text-accent">
                     {t("update.available", { version })}
                   </p>
                 )}
-
-                {status === "none" && (
-                  <p className="text-secondary font-mono text-accent-dim">
-                    {t("update.upToDate")}
-                  </p>
-                )}
-
-                {status === "error" && (
-                  <p className="text-secondary font-mono text-danger">
-                    {errorMessage}
-                  </p>
-                )}
-
-                {status === "managed" && managed && (
-                  <>
-                    {version && (
-                      <p className="text-secondary font-mono text-accent">
-                        {t("update.available", { version })}
-                      </p>
-                    )}
-                    <p
-                      className="text-secondary font-mono text-muted"
-                      style={{ lineHeight: 1.5 }}
-                    >
-                      {t("update.managedNote", { manager: managed.display_name })}
-                    </p>
-                    {managed.update_command && (
-                      <div className="mt-2">
-                        <CodeSnippet
-                          value={managed.update_command}
-                          data-testid="update-page-managed-command"
-                          copyTestId="update-page-managed-copy"
-                        />
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {status === "available" && (
-                <Button
-                  onClick={handleInstall}
-                  disabled={isInstalling}
-                  isLoading={isInstalling}
-                  loadingText={t("update.installing")}
-                  variant="primary"
+                <p
+                  className="text-secondary font-mono text-muted"
+                  style={{ lineHeight: 1.5 }}
                 >
-                  {t("update.installButton")}
-                </Button>
-              )}
-            </section>
-
-            {releaseNotes && (
-              <section className="flex flex-col gap-4" data-testid="update-release-notes">
-                <h2
-                  className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
-                >
-                  {t("update.whatsNew", { version: releaseNotes.version })}
-                </h2>
-                <ReleaseNotesText notes={releaseNotes.notes} data-testid="update-release-notes-text" />
-              </section>
+                  {t("update.managedNote", { manager: managed.display_name })}
+                </p>
+                {managed.update_command && (
+                  <div className="mt-2">
+                    <CodeSnippet
+                      value={managed.update_command}
+                      data-testid="update-page-managed-command"
+                      copyTestId="update-page-managed-copy"
+                    />
+                  </div>
+                )}
+              </>
             )}
           </div>
-        </div>
-      </div>
+
+          {status === "available" && (
+            <Button
+              onClick={handleInstall}
+              disabled={isInstalling}
+              isLoading={isInstalling}
+              loadingText={t("update.installing")}
+              variant="primary"
+            >
+              {t("update.installButton")}
+            </Button>
+          )}
+        </section>
+
+        {releaseNotes && (
+          <section className="flex flex-col gap-4" data-testid="update-release-notes">
+            <h2
+              className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
+            >
+              {t("update.whatsNew", { version: releaseNotes.version })}
+            </h2>
+            <ReleaseNotesText notes={releaseNotes.notes} data-testid="update-release-notes-text" />
+          </section>
+        )}
+      </PageColumn>
     </PageShell>
   );
 });
