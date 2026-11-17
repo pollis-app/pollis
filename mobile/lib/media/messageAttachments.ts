@@ -14,7 +14,7 @@ export interface MessageAttachmentLayout {
   files: MessageAttachment[];
 }
 
-export const GRID_COLUMNS = 2;
+const GRID_COLUMNS = 2;
 
 export function messageAttachmentLayout(
   attachments: readonly MessageAttachment[],
