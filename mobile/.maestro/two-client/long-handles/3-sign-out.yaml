@@ -1,0 +1,58 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# LONG HANDLES (#1971), part 3 of 3. Sign-out asks in the app's own bottom
+# sheet (`sheet-sign-out`), not a stock platform dialog: Close keeps the
+# session, the red "Sign out" row ends it and lands on sign-in.
+
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-self"
+    timeout: 30000
+- tapOn:
+    id: "tab-self"
+- scrollUntilVisible:
+    element:
+      id: "btn-sign-out"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "btn-sign-out"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-sign-out"
+    timeout: 10000
+- assertVisible:
+    id: "btn-confirm-sign-out"
+- takeScreenshot: long-handles-06-sign-out-sheet
+# Close cancels: the sheet goes and the session stays.
+- tapOn:
+    id: "btn-sheet-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "sheet-sign-out"
+    timeout: 10000
+- assertVisible:
+    id: "screen-self"
+- tapOn:
+    id: "btn-sign-out"
+- extendedWaitUntil:
+    visible:
+      id: "btn-confirm-sign-out"
+    timeout: 10000
+- tapOn:
+    id: "btn-confirm-sign-out"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 30000
+- takeScreenshot: long-handles-07-signed-out

@@ -18,7 +18,7 @@ import { Icon } from "../../components/icons";
 import { ErrorText, Note } from "../../components/self/SettingsField";
 import { ChoiceGrid } from "../../components/self/ChoiceGrid";
 import { ChoiceChip } from "../../components/self/ChoiceChip";
-import { confirmSignOut } from "../../components/self/confirmSignOut";
+import { useSignOutSheet } from "../../components/self/SignOutSheet";
 import { useSectionScroll } from "../../components/self/useSectionScroll";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
 import {
@@ -107,13 +107,12 @@ export default function Security() {
     });
   };
 
+  const signOutSheet = useSignOutSheet(() => logout.mutate());
   const onSignOut = () => {
     if (logout.isPending) {
       return;
     }
-    confirmSignOut(() => {
-      logout.mutate();
-    });
+    signOutSheet.open();
   };
 
   const sectionGap = { gap: space.md };
@@ -425,6 +424,7 @@ export default function Security() {
           </Group>
         </View>
       </ScrollView>
+      {signOutSheet.sheet}
     </Screen>
   );
 }

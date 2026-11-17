@@ -26,7 +26,9 @@ import {
   previewText,
   markConversationRead,
   usePrefetchConversation,
+  useUserProfiles,
 } from "../../hooks/queries";
+import { personName } from "../../lib/personName";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
@@ -68,6 +70,25 @@ function Direct() {
   const dmIds = useMemo(() => dms.map((d) => d.id), [dms]);
   const { data: lastMessages = {} } = useLastMessages(dmIds);
 
+  // Display names (#1971): one batched read for every row.
+  const peerIds = useMemo(
+    () => dms.flatMap((d) => (d.user2_id ? [d.user2_id] : [])),
+    [dms],
+  );
+  const { data: profiles } = useUserProfiles(peerIds);
+  const rowName = useCallback(
+    (d: (typeof dms)[number]) =>
+      personName(
+        {
+          username: d.user2_identifier,
+          preferred_name: d.user2_id ? profiles?.get(d.user2_id)?.preferred_name : undefined,
+        },
+        t("dms:profile.fallbackName"),
+        { at: false },
+      ),
+    [profiles, t],
+  );
+
   // Warm every row's picture before it scrolls into view.
   usePrefetchAvatars(
     dms.flatMap((d) => (d.user2_id ? [{ userId: d.user2_id, key: d.user2_avatar_url }] : [])),
@@ -82,10 +103,11 @@ function Direct() {
       const preview = previewText(lastMessages[d.id]) ?? "";
       return (
         d.user2_identifier.toLowerCase().includes(needle) ||
+        rowName(d).name.toLowerCase().includes(needle) ||
         preview.toLowerCase().includes(needle)
       );
     });
-  }, [dms, lastMessages, needle]);
+  }, [dms, lastMessages, needle, rowName]);
 
   // On compact, this list means nothing is open: clear the selection so realtime counts unread again.
   useFocusEffect(
@@ -207,6 +229,7 @@ function Direct() {
         ) : null}
         {shown.map((d) => {
           const handle = d.user2_identifier || t("dms:profile.fallbackName");
+          const label = rowName(d);
           const last = lastMessages[d.id];
           const preview = previewText(last);
           const unread = unreadCounts[d.id] ?? 0;
@@ -215,8 +238,9 @@ function Direct() {
               key={d.id}
               testID={`row-dm-${d.id}`}
               unreadTestID={`unread-${d.id}`}
-              name={handle}
-              avatars={[{ label: handle, userId: d.user2_id, avatarKey: d.user2_avatar_url }]}
+              name={label.name}
+              nameIsHandle={label.isHandle}
+              avatars={[{ label: label.name, userId: d.user2_id, avatarKey: d.user2_avatar_url }]}
               preview={preview}
               own={
                 !!last && !!currentUserId && last.sender_id === currentUserId

@@ -2106,7 +2106,10 @@ weight, a dot or a count); sentence case; no "end-to-end encrypted" copy.
 Titles and back live at the TOP (`<Header>`). Bottom sheets are
 `SheetOverlay` (Modal, full-screen backdrop, title + 44×44 Close —
 `btn-sheet-close`, or the sheet's `closeTestID` — no drag handle, no extra
-Cancel button): rows in `Group surface="high"`.
+Cancel button): rows in `Group surface="high"`. A confirmation is one too, never a
+stock `Alert.alert` (its platform dialog ignores the theme): the question as the
+title, the action as a row, Close cancels — `components/self/SignOutSheet.tsx`
+(#1971) is the model.
 The entrance (#1249) runs on Reanimated on the UI thread: one shared value
 drives backdrop opacity and the card's translateY, starting from the window
 height on the Modal's `onShow` (no layout measurement), with a 600 ms

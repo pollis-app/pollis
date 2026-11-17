@@ -9,6 +9,9 @@
 //!   `$POLLIS_GROUP_NAMES` (comma separated, each with #General), invite the
 //!   phone by email to every one and print `PEER_INVITED`.
 //!
+//! `$POLLIS_PEER_USERNAME` / `$POLLIS_PEER_DISPLAY_NAME`, when set, rename the peer right after
+//! sign-up (#1971's long-handle flow, `mobile/scripts/maestro-long-handles.sh`).
+//!
 //! `mobile/scripts/maestro-pending-badges.sh` drives it. Not a shipping
 //! binary: examples build against pollis-tui's dev-dependencies.
 //!
@@ -40,7 +43,14 @@ async fn sign_up(email: &str) -> Result<(Arc<AppState>, String)> {
     pollis_tui::auth::request_otp(&state, email).await?;
     let me = pollis_tui::auth::verify_otp(&state, email, &otp).await?;
     pollis_tui::auth::set_pin_and_init(&state, &me.id, "0000").await?;
-    println!("PEER_HANDLE={}", me.username);
+    let username = std::env::var("POLLIS_PEER_USERNAME").ok().filter(|s| !s.is_empty());
+    let display = std::env::var("POLLIS_PEER_DISPLAY_NAME").ok().filter(|s| !s.is_empty());
+    if username.is_some() || display.is_some() {
+        user::update_user_profile(me.id.clone(), username.clone(), display, None, None, &state)
+            .await
+            .context("rename the peer")?;
+    }
+    println!("PEER_HANDLE={}", username.unwrap_or(me.username));
     Ok((state, me.id))
 }
 
