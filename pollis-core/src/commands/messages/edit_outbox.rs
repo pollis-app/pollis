@@ -25,6 +25,8 @@ pub(super) struct QueuedEdit {
     pub conversation_id: String,
     pub sender_id: String,
     pub content: String,
+    /// The edit's link preview (#1987), `LinkPreview` JSON; `None` = the edited message has none.
+    pub link_preview: Option<String>,
 }
 
 fn not_signed_in() -> Error {
@@ -40,6 +42,21 @@ pub(super) fn enqueue_edit_on(
     sender_id: &str,
     content: &str,
 ) -> Result<QueuedEdit> {
+    enqueue_edit_with_preview_on(conn, conversation_id, target_message_id, sender_id, content, None)
+}
+
+/// [`enqueue_edit_on`] with the edit's link preview (#1987) and its thumbnail,
+/// stored as the target's `outbox_attachment` row flagged `link_preview` until
+/// `post_edit` uploads it. An edit without one removes any earlier thumbnail.
+pub(super) fn enqueue_edit_with_preview_on(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    target_message_id: &str,
+    sender_id: &str,
+    content: &str,
+    preview: Option<&crate::commands::link_preview::Outgoing>,
+) -> Result<QueuedEdit> {
+    let link_preview = preview.map(|o| crate::commands::link_preview::wire::to_stored(&o.preview));
     let target: Option<(String, String, Option<String>, Option<String>)> = conn
         .query_row(
             "SELECT conversation_id, sender_id, deleted_at, send_state FROM message WHERE id = ?1",
@@ -59,25 +76,35 @@ pub(super) fn enqueue_edit_on(
     }
     let existing = load_edit_on(conn, target_message_id)?;
     let envelope_id = match existing {
-        Some((e, _)) if e.content == content => e.envelope_id,
+        Some((e, _)) if e.content == content && e.link_preview == link_preview => e.envelope_id,
         _ => Ulid::new().to_string(),
     };
-    conn.execute(
-        "INSERT INTO outbox_edit (target_message_id, envelope_id, conversation_id, sender_id, content, send_state)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO outbox_edit (target_message_id, envelope_id, conversation_id, sender_id, content, send_state, link_preview)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(target_message_id) DO UPDATE SET
            envelope_id = excluded.envelope_id,
            content = excluded.content,
            send_state = excluded.send_state,
+           link_preview = excluded.link_preview,
            created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-        rusqlite::params![target_message_id, envelope_id, conversation_id, sender_id, content, PENDING],
+        rusqlite::params![target_message_id, envelope_id, conversation_id, sender_id, content, PENDING, link_preview],
     )?;
+    // A delivered target holds no outbox bytes of its own, so its only flagged row is an edit's thumbnail.
+    super::outbox::store_preview_thumbnail_on(
+        &tx,
+        target_message_id,
+        preview.and_then(|o| o.thumbnail.as_ref()),
+    )?;
+    tx.commit()?;
     Ok(QueuedEdit {
         target_message_id: target_message_id.to_string(),
         envelope_id,
         conversation_id: conversation_id.to_string(),
         sender_id: sender_id.to_string(),
         content: content.to_string(),
+        link_preview,
     })
 }
 
@@ -130,7 +157,7 @@ pub(super) fn load_edit_on(
 ) -> Result<Option<(QueuedEdit, String)>> {
     Ok(conn
         .query_row(
-            "SELECT target_message_id, envelope_id, conversation_id, sender_id, content, send_state
+            "SELECT target_message_id, envelope_id, conversation_id, sender_id, content, send_state, link_preview
              FROM outbox_edit WHERE target_message_id = ?1",
             rusqlite::params![target],
             |row| {
@@ -141,6 +168,7 @@ pub(super) fn load_edit_on(
                         conversation_id: row.get(2)?,
                         sender_id: row.get(3)?,
                         content: row.get(4)?,
+                        link_preview: row.get(6)?,
                     },
                     row.get(5)?,
                 ))
@@ -149,28 +177,51 @@ pub(super) fn load_edit_on(
         .optional()?)
 }
 
-/// Drop the outbox entry and write the text in one transaction; a newer edit stays queued.
+/// Drop the outbox entry and write the text and preview in one transaction; a
+/// newer edit stays queued. Returns the preview thumbnail this edit replaced
+/// (#1987), which no longer belongs to the message, for the caller to release.
 pub(super) fn confirm_edit_on(
     conn: &rusqlite::Connection,
     edit: &QueuedEdit,
     edited_at: &str,
-) -> Result<()> {
+) -> Result<Option<crate::commands::link_preview::PreviewImage>> {
     let tx = conn.unchecked_transaction()?;
     let ours = tx.execute(
         "DELETE FROM outbox_edit WHERE target_message_id = ?1 AND envelope_id = ?2",
         rusqlite::params![edit.target_message_id, edit.envelope_id],
     )?;
+    let mut replaced = None;
     // Superseded by a newer edit while it was in flight: that one's text is
     // what the row will hold, once it is confirmed in turn.
     if ours > 0 {
-        tx.execute(
-            "UPDATE message SET content = ?1, edited_at = ?2
+        let before: Option<Option<String>> = tx
+            .query_row(
+                "SELECT link_preview FROM message WHERE id = ?1",
+                rusqlite::params![edit.target_message_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let old_image = before
+            .flatten()
+            .and_then(|j| serde_json::from_str::<crate::commands::link_preview::LinkPreview>(&j).ok())
+            .and_then(|p| p.image);
+        let new_hash = edit
+            .link_preview
+            .as_deref()
+            .and_then(|j| serde_json::from_str::<crate::commands::link_preview::LinkPreview>(j).ok())
+            .and_then(|p| p.image)
+            .map(|i| i.hash);
+        let written = tx.execute(
+            "UPDATE message SET content = ?1, edited_at = ?2, link_preview = ?5
              WHERE id = ?3 AND sender_id = ?4 AND deleted_at IS NULL",
-            rusqlite::params![edit.content, edited_at, edit.target_message_id, edit.sender_id],
+            rusqlite::params![edit.content, edited_at, edit.target_message_id, edit.sender_id, edit.link_preview],
         )?;
+        if written > 0 {
+            replaced = old_image.filter(|old| Some(&old.hash) != new_hash.as_ref());
+        }
     }
     tx.commit()?;
-    Ok(())
+    Ok(replaced)
 }
 
 /// Record a failed attempt at the edit `envelope_id` (not at a newer one).
@@ -187,12 +238,13 @@ pub(super) fn mark_edit_state_on(
     Ok(())
 }
 
-/// Forget the pending edit of a deleted `target`.
+/// Forget the pending edit of a deleted `target`, with any thumbnail it still held.
 pub(crate) fn drop_edit_on(conn: &rusqlite::Connection, target: &str) -> Result<()> {
     conn.execute(
         "DELETE FROM outbox_edit WHERE target_message_id = ?1",
         rusqlite::params![target],
     )?;
+    super::outbox::store_preview_thumbnail_on(conn, target, None)?;
     Ok(())
 }
 
@@ -217,10 +269,14 @@ pub(crate) fn overlay_pending_edits(
     if messages.is_empty() {
         return Ok(());
     }
-    let mut stmt =
-        conn.prepare("SELECT target_message_id, content, send_state, created_at FROM outbox_edit")?;
-    let pending: std::collections::HashMap<String, (String, String, String)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?, row.get(3)?))))?
+    let mut stmt = conn.prepare(
+        "SELECT target_message_id, content, send_state, created_at, link_preview FROM outbox_edit",
+    )?;
+    type Pending = (String, String, String, Option<String>);
+    let pending: std::collections::HashMap<String, Pending> = stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, (row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))
+        })?
         .collect::<std::result::Result<_, _>>()?;
     if pending.is_empty() {
         return Ok(());
@@ -229,10 +285,13 @@ pub(crate) fn overlay_pending_edits(
         if m.deleted_at.is_some() || m.undecryptable {
             continue;
         }
-        if let Some((content, state, at)) = pending.get(&m.id) {
+        if let Some((content, state, at, link_preview)) = pending.get(&m.id) {
             m.content = Some(content.clone());
             m.edited_at = Some(at.clone());
             m.edit_state = Some(state.clone());
+            m.link_preview = link_preview
+                .as_deref()
+                .and_then(|j| crate::commands::link_preview::wire::from_stored(j, content));
         }
     }
     Ok(())
@@ -350,6 +409,7 @@ mod tests {
             undecryptable: false,
             send_state: None,
             edit_state: None,
+            link_preview: None,
         }
     }
 

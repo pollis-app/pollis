@@ -1095,24 +1095,29 @@ fn open_and_persist(
                     }
                 }
                 // Text: strip padding (no-op for legacy/attachments); `thread_id` (#825) comes only from the ciphertext.
-                super::framing::Frame::Text { text, thread_id } => {
+                super::framing::Frame::Text { text, thread_id, link_preview } => {
                     if let Ok(text) = String::from_utf8(text) {
+                        // #1987: only a well-formed preview of a link in this text is kept.
+                        let link_preview = link_preview
+                            .and_then(|bytes| crate::commands::link_preview::wire::decode(&bytes, &text))
+                            .map(|p| crate::commands::link_preview::wire::to_stored(&p));
                         // Replaces a placeholder for the same id (#1312), never
                         // a real row.
                         // A placeholder's tombstone (an admin delete that reached it) is
                         // kept: the healed row stays deleted (#1735).
                         let inserted = conn.execute(
                             "INSERT INTO message
-                             (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                             (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at, link_preview)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                              ON CONFLICT(id) DO UPDATE SET
                                sender_id = excluded.sender_id, ciphertext = excluded.ciphertext,
                                content = CASE WHEN message.deleted_at IS NULL THEN excluded.content ELSE NULL END,
                                reply_to_id = excluded.reply_to_id,
                                thread_id = excluded.thread_id, sent_at = excluded.sent_at,
-                               undecryptable = NULL
+                               undecryptable = NULL,
+                               link_preview = CASE WHEN message.deleted_at IS NULL THEN excluded.link_preview ELSE NULL END
                              WHERE message.undecryptable IS NOT NULL",
-                            rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, thread_id, sent_at],
+                            rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, thread_id, sent_at, link_preview],
                         );
                         // The key is spent either way; a row that won't store is a loss to record (#1524).
                         let inserted = match inserted {
@@ -1200,11 +1205,15 @@ fn open_and_persist(
                 }
                 // Strip size padding (§4.1); no-op for legacy/unpadded edits.
                 if let Ok(text) = String::from_utf8(super::framing::strip(&plain)) {
+                    // #1987: an edit rebuilds the message, preview included; none means none.
+                    let link_preview = super::framing::link_preview_of(&plain)
+                        .and_then(|bytes| crate::commands::link_preview::wire::decode(bytes, &text))
+                        .map(|p| crate::commands::link_preview::wire::to_stored(&p));
                     let now = chrono::Utc::now().to_rfc3339();
                     let _ = conn.execute(
-                        "UPDATE message SET content = ?1, edited_at = ?2
+                        "UPDATE message SET content = ?1, edited_at = ?2, link_preview = ?4
                          WHERE id = ?3 AND deleted_at IS NULL",
-                        rusqlite::params![text, now, tid],
+                        rusqlite::params![text, now, tid, link_preview],
                     );
                 }
             }
