@@ -16,6 +16,7 @@
 //!   no cookies, a generic user agent.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::time::Instant;
@@ -128,7 +129,6 @@ pub(crate) async fn fetch(
     let mut current = start.clone();
     for _ in 0..=MAX_REDIRECTS {
         let addr = checked_address(&current, reach, deadline).await?;
-        let host = current.host_str().ok_or(Refused::BadUrl)?.to_string();
         let remaining = deadline
             .checked_duration_since(Instant::now())
             .filter(|d| !d.is_zero())
@@ -137,7 +137,7 @@ pub(crate) async fn fetch(
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .https_only(!reach.allow_loopback_http)
-            .resolve(&host, addr)
+            .dns_resolver(Arc::new(Pinned(addr)))
             .timeout(remaining)
             .user_agent(USER_AGENT)
             .build()
@@ -173,6 +173,17 @@ pub(crate) async fn fetch(
         return Ok(Fetched { url: current, body });
     }
     Err(Refused::TooManyRedirects)
+}
+
+/// The client's only resolver: every name answers with the one address
+/// [`checked_address`] approved for this hop, so nothing reaches system DNS.
+struct Pinned(SocketAddr);
+
+impl reqwest::dns::Resolve for Pinned {
+    fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let addr = self.0;
+        Box::pin(async move { Ok(Box::new(std::iter::once(addr)) as reqwest::dns::Addrs) })
+    }
 }
 
 async fn read_capped(mut response: reqwest::Response, want: Want) -> Result<Vec<u8>, Refused> {
@@ -280,20 +291,17 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
         let o = ip.octets();
         return is_public_v4(Ipv4Addr::new(o[2], o[3], o[4], o[5]));
     }
-    !(ip.is_unspecified()
-        || ip.is_loopback()
-        // IPv4-compatible ::/96 (deprecated) and the discard prefix 100::/64.
-        || seg[..6].iter().all(|s| *s == 0)
-        || (seg[0] == 0x100 && seg[1..4].iter().all(|s| *s == 0))
-        // Multicast ff00::/8.
-        || seg[0] & 0xff00 == 0xff00
-        // Unique local fc00::/7.
-        || seg[0] & 0xfe00 == 0xfc00
-        // Link-local fe80::/10 and the old site-local fec0::/10.
-        || seg[0] & 0xffc0 == 0xfe80
-        || seg[0] & 0xffc0 == 0xfec0
-        // Teredo 2001::/32, ORCHID 2001:10::/28 and 2001:20::/28, documentation 2001:db8::/32.
-        || (seg[0] == 0x2001 && (seg[1] == 0 || seg[1] & 0xffe0 == 0x0010 || seg[1] == 0x0db8 || seg[1] & 0xfff0 == 0x0020)))
+    // Only global unicast 2000::/3 is public. Everything outside it is special-purpose:
+    // unspecified, loopback, IPv4-compatible and -translated forms, local-use NAT64
+    // 64:ff9b:1::/48, discard, ULA, link- and site-local, multicast.
+    if seg[0] & 0xe000 != 0x2000 {
+        return false;
+    }
+    // Inside 2000::/3: IETF protocol assignments 2001::/23 (Teredo, benchmarking, ORCHID and
+    // the rest), documentation 2001:db8::/32 and 3fff::/20.
+    !((seg[0] == 0x2001 && seg[1] < 0x0200)
+        || (seg[0] == 0x2001 && seg[1] == 0x0db8)
+        || seg[0] & 0xfff0 == 0x3ff0)
 }
 
 #[cfg(test)]
@@ -309,7 +317,9 @@ mod tests {
             "198.51.100.7", "203.0.113.9", "224.0.0.1", "255.255.255.255", "240.0.0.1",
             "::", "::1", "::ffff:127.0.0.1", "::ffff:192.168.0.1", "64:ff9b::a00:1", "2002:c0a8:101::1",
             "fc00::1", "fd12:3456::1", "fe80::1", "fec0::1", "ff02::1", "2001:db8::1", "2001::1",
-            "100::1", "::127.0.0.1",
+            "100::1", "::127.0.0.1", "::ffff:0:a00:1", "::ffff:0:808:808", "64:ff9b:1::a00:1",
+            "2001:2::1", "2001:10::1", "2001:1f::1", "2001:20::1", "3fff::1", "3fff:fff::1", "5f00::1",
+            "4000::1",
         ] {
             assert!(!is_public(IpAddr::from_str(ip).unwrap()), "{ip} must not be public");
         }
@@ -320,6 +330,7 @@ mod tests {
         for ip in [
             "1.1.1.1", "8.8.8.8", "93.184.216.34", "172.32.0.1", "100.128.0.1", "2606:4700::1111",
             "2a00:1450:4001::200e", "::ffff:8.8.8.8", "64:ff9b::808:808",
+            "2001:200::1", "2001:4860:4860::8888", "2002:808:808::1",
         ] {
             assert!(is_public(IpAddr::from_str(ip).unwrap()), "{ip} must be public");
         }
