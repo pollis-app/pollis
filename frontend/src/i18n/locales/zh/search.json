@@ -8,7 +8,8 @@
     "permalinkResolving": "正在打开消息…",
     "noMatches": "没有找到匹配项",
     "emptyHint": "跳转到频道、语音频道、私信、用户或设置页面",
-    "live": "[直播中]"
+    "live": "直播中",
+    "liveTerminal": "[直播中]"
   },
   "pages": {
     "userName": "用户",

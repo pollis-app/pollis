@@ -8,7 +8,8 @@
     "permalinkResolving": "Opening message…",
     "noMatches": "No matches found",
     "emptyHint": "Jump to a channel, voice channel, DM, user, or settings page",
-    "live": "[live]",
+    "live": "Live",
+    "liveTerminal": "[live]",
     "searchMessagesFor": "Search messages for \"{{query}}\""
   },
   "pages": {

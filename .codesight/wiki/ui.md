@@ -879,7 +879,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**214 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**215 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -979,12 +979,13 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SensitiveCover** — `frontend/src/components/Media/SensitiveCover.tsx`
 - **SensitiveHideButton** — `frontend/src/components/Media/SensitiveHideButton.tsx`
 
-### `components/Message` (22)
+### `components/Message` (23)
 
 - **AttachmentDisplay** — props: attachment, tile, testId, roll — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **DownloadStatusIcon** — props: status — `frontend/src/components/Message/DownloadStatusIcon.tsx`. Download / spinner / check glyph of `AttachmentDisplay`'s download buttons (#1731).
 - **KeyChangeNoticeRow** — props: noticeId, peerUserId, peerLabel, at, skin, onVerify — `frontend/src/components/Message/KeyChangeNoticeRow.tsx`
 - **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
+- **LightboxDownloadLabel** — `frontend/src/components/Message/LightboxDownloadLabel.tsx`
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`. Inline previews for image/video URLs found in message text. **Every host is click-to-load, with no allowlist.** Painting `<img src>` from message text makes merely opening a message fetch from a host the SENDER chose — a read receipt and an IP disclosure in one, from any message including an unaccepted DM request. There was an exception for `cdn.pollis.com`; it is gone, because the hostname comes out of the message (so the sender picks what the check is run against, and the path was never checked at all) and because a webview image request is the renderer's own, not `http_client`'s, so it cannot ride the relay overlay. The reveal is per-URL and deliberately not remembered.
 - **MediaSpotlight** — props: items, startIndex, openedUrl, onClose — `frontend/src/components/Message/MediaSpotlight.tsx`. The image/video lightbox `AttachmentDisplay` opens (#1788). A card given `roll` (the message's attachments, passed by `MessageItem`, `ThreadMessageRow` and `PinnedPanel`) steps through that message's images and videos: prev/next buttons, ← / → (direction-aware, `horizontalArrowStep`) and an `n / total` position, wrapping at both ends. The roll is `spotlightRoll` in `utils/mediaRoll.ts`, mobile's `collectViewerItems` scoped to one message — same kinds (audio and files open alone), same attachment order, same wrap; `frontend/tests/media-roll.test.ts` runs both on the same message. The arrow listener exists only while a spotlight with more than one item is open, on the window's capture phase, so the log's arrow navigation never also moves. Each item mounts fresh (keyed by id): its URL resolves on arrival, and a still-covered sensitive neighbour shows its cover, revealed by a click. One difference is deliberate: mobile's roll carries on across the whole conversation, while desktop's stops at the message, as #1788 asks. The root carries `data-window-viewer` (as do the audio viewer in `AttachmentDisplay` and the Vault's `MediaGalleryView` viewer): while one is in the document, `index.css` makes every scrollbar transparent, because the Linux webview draws thin overlay scrollbars in a last pass above every stacking order and the chat's would otherwise show over the viewer (#1915). Any new full-window viewer needs the attribute. Coverage: `e2e/media-spotlight.spec.ts`.
 - **MentionToken** — props: name, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`

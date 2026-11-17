@@ -139,7 +139,7 @@
     "acceptFailed": "Impossible d'accepter l'invitation. Réessayez."
   },
   "inviteMember": {
-    "pageTitle": "Inviter un membre :: {{group}}",
+    "pageTitle": "Inviter un membre — {{group}}",
     "intro": "Inviter quelqu'un dans <accent>{{name}}</accent>",
     "identifierLabel": "Nom d'utilisateur ou e-mail",
     "identifierPlaceholder": "ami@pollis.com",
@@ -149,7 +149,7 @@
     "sendFailed": "Échec de l'envoi de l'invitation"
   },
   "joinRequests": {
-    "pageTitle": "Demandes d'adhésion :: {{group}}",
+    "pageTitle": "Demandes d'adhésion — {{group}}",
     "allPageTitle": "Demandes d'adhésion",
     "pendingFor": "Demandes en attente pour rejoindre <accent>{{name}}</accent>",
     "empty": "Aucune demande en attente.",

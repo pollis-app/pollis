@@ -8,7 +8,8 @@
     "permalinkResolving": "پیغام کھل رہا ہے…",
     "noMatches": "کوئی نتیجہ نہیں ملا",
     "emptyHint": "کسی چینل، وائس چینل، DM، صارف یا ترتیبات کے صفحے پر جائیں",
-    "live": "[لائیو]",
+    "live": "لائیو",
+    "liveTerminal": "[لائیو]",
     "searchMessagesFor": "\"{{query}}\" کے لیے پیغامات میں تلاش کریں"
   },
   "pages": {

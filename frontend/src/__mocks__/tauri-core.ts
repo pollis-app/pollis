@@ -1050,9 +1050,12 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_group_join_requests':
     case 'list_devices':
     case 'list_user_devices':
-    case 'list_blocked_users':
     case 'get_pinned_messages':
       return [];
+
+    // Seeded by a spec that shows a blocked author's message (#1965); none by default.
+    case 'list_blocked_users':
+      return (preload.blockedUsers ?? []) as unknown[];
 
     case 'list_security_events':
       return securityEventsPage(

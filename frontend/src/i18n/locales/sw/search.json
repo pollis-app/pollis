@@ -8,7 +8,8 @@
     "permalinkResolving": "Inafungua ujumbe…",
     "noMatches": "Hakuna kinacholingana",
     "emptyHint": "Nenda kwenye chaneli, chaneli ya sauti, DM, mtumiaji au ukurasa wa mipangilio",
-    "live": "[moja kwa moja]",
+    "live": "Moja kwa moja",
+    "liveTerminal": "[moja kwa moja]",
     "searchMessagesFor": "Tafuta ujumbe wenye \"{{query}}\""
   },
   "pages": {

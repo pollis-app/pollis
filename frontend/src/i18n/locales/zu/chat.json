@@ -64,7 +64,8 @@
     "empty": "Ayikabikho imilayezo. Qala ingxoxo.",
     "unknownAuthor": "Akaziwa",
     "blockedAuthor": "umsebenzisi ovinjiwe",
-    "blockedBody": "[kuvinjiwe]"
+    "blockedBody": "Kuvinjiwe",
+    "blockedBodyTerminal": "[kuvinjiwe]"
   },
   "replyBar": {
     "replyingTo": "uphendula u-<name>{{name}}</name>",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "Ulayini",
-    "pendingPlaceholder": "[Umlayezo olindile]",
+    "pendingPlaceholder": "Umlayezo olindile",
+    "pendingPlaceholderTerminal": "[Umlayezo olindile]",
     "cancel": "Khansela umlayezo",
     "retry": "zama futhi",
     "failedCount_one": "kwehlulekile ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "Ayikabikho imilayezo",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[okunamathiselwe okungu-{{count}}]",
-    "attachments_other": "[okunamathiselwe okungu-{{count}}]",
+    "attachments_one": "Okunamathiselwe okungu-{{count}}",
+    "attachments_other": "Okunamathiselwe okungu-{{count}}",
+    "attachmentsTerminal_one": "[okunamathiselwe okungu-{{count}}]",
+    "attachmentsTerminal_other": "[okunamathiselwe okungu-{{count}}]",
     "undecryptable": "Umlayezo othile awukwazanga ukususwa ukubethela kule divayisi"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "Yehlulekile ukulayisha",
     "failedToDownload": "Yehlulekile ukulanda",
     "lightboxFetch": "landa",
-    "lightboxDone": "[ kuqediwe ]",
-    "lightboxDownload": "[landa]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "Kuqediwe",
+    "lightboxDoneTerminal": "[ kuqediwe ]",
+    "lightboxDownload": "Landa",
+    "lightboxDownloadTerminal": "[landa]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Khombisa imidiya ezwelayo: {{filename}}",
     "sensitiveHide": "Fihla {{filename}}"
   },

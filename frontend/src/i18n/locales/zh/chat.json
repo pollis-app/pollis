@@ -53,7 +53,8 @@
     "empty": "还没有消息。开始对话吧。",
     "unknownAuthor": "未知",
     "blockedAuthor": "已屏蔽的用户",
-    "blockedBody": "[已屏蔽]"
+    "blockedBody": "已屏蔽",
+    "blockedBodyTerminal": "[已屏蔽]"
   },
   "replyBar": {
     "replyingTo": "正在回复 <name>{{name}}</name>",
@@ -62,7 +63,8 @@
   },
   "queue": {
     "heading": "队列",
-    "pendingPlaceholder": "[待发送的消息]",
+    "pendingPlaceholder": "待发送的消息",
+    "pendingPlaceholderTerminal": "[待发送的消息]",
     "cancel": "取消发送",
     "retry": "重试",
     "failedCount_other": "失败 ×{{count}}"
@@ -86,7 +88,8 @@
   "preview": {
     "noMessages": "还没有消息",
     "withSender": "{{name}}：{{text}}",
-    "attachments_other": "[{{count}} 个附件]"
+    "attachments_other": "{{count}} 个附件",
+    "attachmentsTerminal_other": "[{{count}} 个附件]"
   },
   "attachment": {
     "viewLabel": "查看 {{filename}}",
@@ -97,9 +100,11 @@
     "failedToLoad": "加载失败",
     "failedToDownload": "下载失败",
     "lightboxFetch": "获取",
-    "lightboxDone": "[ 完成 ]",
-    "lightboxDownload": "[  下载  ]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "完成",
+    "lightboxDoneTerminal": "[ 完成 ]",
+    "lightboxDownload": "下载",
+    "lightboxDownloadTerminal": "[  下载  ]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "显示敏感内容：{{filename}}",
     "sensitiveHide": "隐藏 {{filename}}"
   },

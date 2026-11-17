@@ -28,6 +28,8 @@ import { SensitiveCover } from "../Media/SensitiveCover";
 import { SensitiveHideButton } from "../Media/SensitiveHideButton";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { FOCUS_RING } from "../ui/focusRing";
+import { useSkin } from "../../hooks/queries/usePreferences";
+import { LightboxDownloadLabel } from "./LightboxDownloadLabel";
 
 const lightboxBtnStyle: React.CSSProperties = {
   border: "2px solid transparent",
@@ -73,6 +75,8 @@ export const AttachmentDisplay = observer(({
   roll,
 }: AttachmentDisplayProps) => {
   const { t } = useTranslation("chat");
+  // Bracketed labels are Terminal's (#1965); Modern's read as plain words.
+  const isTerminal = useSkin() === "terminal";
   // Sensitive media (#1568): the reveal is shared across surfaces.
   const sensitivity = useSensitiveReveal(attachment);
   const isImage = attachment.content_type.startsWith("image/");
@@ -313,20 +317,14 @@ export const AttachmentDisplay = observer(({
         className={`text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black flex items-center gap-1 ${FOCUS_RING}`}
         style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
       >
-        {downloadStatus === "downloading" ? (
-          <>[ {t("attachment.lightboxFetch")} <LoadingSpinner size="sm" /> ]</>
-        ) : downloadStatus === "done" ? (
-          t("attachment.lightboxDone")
-        ) : (
-          t("attachment.lightboxDownload")
-        )}
+        <LightboxDownloadLabel status={downloadStatus} />
       </button>
       <button
         onClick={() => setViewerOpen(false)}
         className={`text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black ${FOCUS_RING}`}
         style={lightboxBtnStyle}
       >
-        {t("attachment.lightboxClose")}
+        {isTerminal ? t("attachment.lightboxCloseTerminal") : t("common:actions.close")}
       </button>
     </div>
   );

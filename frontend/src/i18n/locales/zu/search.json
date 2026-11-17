@@ -8,7 +8,8 @@
     "permalinkResolving": "Ivula umlayezo…",
     "noMatches": "Akutholakalanga okufanayo",
     "emptyHint": "Yeqela esiteshini, esiteshini sezwi, ku-DM, kumsebenzisi, noma ekhasini lezilungiselelo",
-    "live": "[bukhoma]",
+    "live": "Bukhoma",
+    "liveTerminal": "[bukhoma]",
     "searchMessagesFor": "Sesha imilayezo ethi \"{{query}}\""
   },
   "pages": {
