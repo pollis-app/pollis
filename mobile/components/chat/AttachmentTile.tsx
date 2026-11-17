@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from "react";
 import { observer } from "mobx-react-lite";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View, type DimensionValue } from "react-native";
 import { Text } from "../Text";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
@@ -24,8 +24,13 @@ import { videoPosterPlan } from "../../lib/media/videoPoster";
 import { posterUri } from "../../lib/messageContent";
 
 
+type Box = { width: DimensionValue; height: DimensionValue };
+
 const IMAGE_MAX_W = 220;
-function imageSize(att: MessageAttachment): { width: number; height: number } {
+// A grid cell (#1970): the tile takes its parent's whole frame.
+const FILL_BOX: Box = { width: "100%", height: "100%" };
+
+function imageSize(att: MessageAttachment): Box {
   if (att.width && att.height) {
     const height = Math.min(
       Math.max(Math.round((IMAGE_MAX_W * att.height) / att.width), 80),
@@ -41,6 +46,7 @@ export const AttachmentTile = observer(function AttachmentTile({
   onOpen,
   onLongPress,
   box: boxOverride,
+  fill = false,
   testID: testIDOverride,
 }: {
   attachment: MessageAttachment;
@@ -50,6 +56,8 @@ export const AttachmentTile = observer(function AttachmentTile({
   onLongPress?: () => void;
   // A fixed frame for a picture or video (the Vault's grid); else sized from the attachment.
   box?: { width: number; height: number };
+  // Fill the parent's frame (a message's media grid); pictures and videos only.
+  fill?: boolean;
   testID?: string;
 }) {
   useThemeRerender();
@@ -59,7 +67,7 @@ export const AttachmentTile = observer(function AttachmentTile({
   const openable =
     !!onOpen && (!!attachment.object_key || !!attachment.localPreviewUri);
   const testID = testIDOverride ?? `btn-attachment-${attachment.id}`;
-  const visualBox = boxOverride ?? imageSize(attachment);
+  const visualBox = fill ? FILL_BOX : boxOverride ?? imageSize(attachment);
 
   const press = {
     testID,
@@ -117,7 +125,7 @@ export const AttachmentTile = observer(function AttachmentTile({
   // The hide button is a sibling, so hiding never opens the viewer.
   const withHide = (tile: ReactNode) =>
     sensitivity.sensitive ? (
-      <View style={{ alignSelf: "flex-start" }}>
+      <View style={fill ? FILL_BOX : { alignSelf: "flex-start" }}>
         {tile}
         <SensitiveHideButton
           filename={attachment.filename}
@@ -134,6 +142,7 @@ export const AttachmentTile = observer(function AttachmentTile({
       <Pressable
         {...press}
         accessibilityLabel={t("attachment.viewLabel", { filename: attachment.filename })}
+        style={fill ? FILL_BOX : undefined}
       >
         <MediaImage
           attachment={attachment}

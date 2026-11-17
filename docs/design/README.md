@@ -132,6 +132,12 @@ background the ramp flips toward black.
   un-repeatable control on the same frame, on every platform.
 - **Empty states** use `EmptyState` (desktop): one plain sentence, and the action that fills the
   space when there is one.
+- **Message rows** (desktop `MessageItem`, mobile `MessageRow`): the first message of a run has one
+  header line, the sender's name in `text` then the time in `textMuted`, never wrapping (a long
+  name truncates); a quoted reply sits above it and changes nothing in it. Pictures and videos come
+  before files: one keeps its own shape, several sit in equal squares (desktop's wrapping thumbs,
+  mobile's 2-up grid, `MessageAttachments`); files and audio follow as a list. A failed send's
+  reason and Retry / Discard go under the whole message, after its attachments.
 
 ## Components: reuse first
 
