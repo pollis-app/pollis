@@ -106,6 +106,7 @@ pub async fn approve_join_request(
     state: &Arc<AppState>,
 ) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
+    let started = std::time::Instant::now();
 
     // Take the group and requester from the response; reading the row first raced (#987).
     let body = pollis_api::groups::ApproveJoinRequestBody {
@@ -118,6 +119,7 @@ pub async fn approve_join_request(
         requester_id,
     } = crate::commands::mls::ds_post_json(state, &body).await?;
     let requester_id = requester_id.unwrap_or_default();
+    let approved = started.elapsed();
 
     // Reconcile adds the requester's devices to the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
@@ -125,6 +127,12 @@ pub async fn approve_join_request(
     ).await {
         crate::diag!("[mls] approve_join_request: reconcile for group {group_id}: {e}");
     }
+    // The admin waits on all of this (#1937).
+    crate::diag!(
+        "[groups] approve_join_request for {group_id}: approved in {}ms, added to the tree by {}ms",
+        approved.as_millis(),
+        started.elapsed().as_millis()
+    );
 
     // Notify requester their join request was approved so they see the group immediately.
     // `kind: "approval"` keeps it silent; they initiated the request.

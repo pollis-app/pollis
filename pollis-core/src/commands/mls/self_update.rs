@@ -172,11 +172,9 @@ pub async fn self_update_group(
                 "[mls] self-update: rotated own leaf in {conversation_id} at epoch {epoch_before} → {}",
                 epoch_before + 1
             );
-            // Move voice frames to the new exporter key.
-            crate::commands::voice_e2ee::on_mls_epoch_changed(state, conversation_id).await;
-            // And the pin key's wrap moves to the new exporter too (#99).
-            crate::commands::pinned_messages::maybe_rewrap_pin_key(state, conversation_id).await;
-            crate::commands::file_keys::maybe_rewrap_file_keys(state, conversation_id).await;
+            // Merged and recorded: release the group before the key follow-ups (#1937).
+            drop(mls_guard);
+            super::reconcile::after_epoch_advanced(state, conversation_id).await;
             Ok(true)
         }
         PublishOutcome::LostRace => {

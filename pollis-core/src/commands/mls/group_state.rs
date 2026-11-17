@@ -48,12 +48,14 @@ pub mod rendezvous {
         ExternalJoinAfterLostRace,
         /// An attachment send's bytes are stored and its outbox row is not yet written (#1636).
         OutboxBeforeRow,
+        /// A commit this device landed is merged; its key follow-ups have not run (#1937).
+        AfterEpochAdvanced,
     }
 
-    const POINTS: usize = 6;
+    const POINTS: usize = 7;
 
     static ARMED: Mutex<[Option<mpsc::UnboundedSender<Release>>; POINTS]> =
-        Mutex::new([None, None, None, None, None, None]);
+        Mutex::new([None, None, None, None, None, None, None]);
 
     /// Arm `point`: clients reaching it park and send a [`Release`] on the returned receiver.
     pub fn arm(point: Point) -> mpsc::UnboundedReceiver<Release> {
@@ -953,6 +955,10 @@ pub async fn init_mls_group(
             // Every new group is born on the one suite this build ships (#669).
             current_suite(),
         )?;
+        // The founder's leaf is fresh by construction (#666), as in a migration's successor:
+        // without this, its first sweep commits a needless self-update at epoch 0 and holds
+        // the group's MLS lock through it, ahead of the founder's own first action (#1937).
+        super::self_update::record_self_update(db.conn(), conversation_id, 0);
     }
 
     // Publish the epoch-0 GroupInfo for future external joins.

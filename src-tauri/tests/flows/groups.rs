@@ -679,3 +679,76 @@ async fn a_group_created_on_one_device_wakes_the_users_other_devices() {
     drop(d1);
     drop(d2);
 }
+
+/// #1937: a group's founder owes no self-update. Its leaf is fresh by construction, so the first
+/// backstop pass must not commit a rotation (and hold the group's MLS lock through it) ahead of
+/// the founder's own first action, such as approving a join request.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_new_groups_founder_owes_no_self_update() {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let group_id = alice.create_group("Fresh Group").await;
+
+    let report = pollis_core::commands::mls::reconcile_backstop_all(&alice.state, alice.user_id())
+        .await
+        .expect("backstop");
+    assert_eq!(report.checked, 1, "got {report:?}");
+    assert_eq!(
+        report.self_updated, 0,
+        "the founder of {group_id} rotated a leaf it created moments ago: got {report:?}"
+    );
+
+    drop(alice);
+}
+
+/// #1937: an approval's commit releases the group's MLS lock once it is merged. The key
+/// follow-ups (voice, pin key and attachment key re-wraps) are DS round trips that change no
+/// MLS state, so another MLS step must not queue behind them.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_approval_releases_the_mls_lock_before_its_key_follow_ups() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+    let group_id = alice.create_group("Lock Group").await;
+    carol.request_group_access(&group_id).await;
+    let request_id = alice.list_join_requests(&group_id).await[0]["id"]
+        .as_str()
+        .expect("request id")
+        .to_string();
+
+    let mut follow_ups = rendezvous::arm(Point::AfterEpochAdvanced);
+    let approve = {
+        let state = alice.state.clone();
+        let approver = alice.user_id().to_string();
+        tokio::spawn(async move {
+            pollis_core::commands::groups::approve_join_request(request_id, approver, &state).await
+        })
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), follow_ups.recv())
+        .await
+        .expect("the approval's commit never reached its follow-ups")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::AfterEpochAdvanced);
+
+    let lock = tokio::time::timeout(Duration::from_secs(5), alice.state.mls_group_lock(&group_id))
+        .await
+        .expect("the MLS lock is still held while the approval's key follow-ups run")
+        .expect("lock");
+    drop(lock);
+
+    let _ = release.send(());
+    approve.await.expect("join").expect("approve");
+    let ids = alice.group_member_ids(&group_id).await;
+    assert!(ids.contains(&carol_profile.id), "carol should have joined");
+
+    drop(alice);
+    drop(carol);
+}

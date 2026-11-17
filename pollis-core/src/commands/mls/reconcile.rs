@@ -942,34 +942,32 @@ async fn reconcile_pass(
             .into_iter()
             .collect();
 
-    // 1b. TOFU-pin peers' account keys before using server-reported keys; non-fatal.
-    {
-        let peers: Vec<String> = roster_user_ids
-            .iter()
-            .filter(|id| id.as_str() != actor_user_id.as_str())
-            .cloned()
-            .collect();
-        if let Err(e) = crate::commands::safety::batch_check_and_pin_account_keys(
-            state, &peers,
-        )
-        .await
-        {
-            crate::diag!("[reconcile] batch_check_and_pin_account_keys failed: {e}");
-        }
-    }
-
     let ids: Vec<String> = roster_user_ids.iter().cloned().collect();
+    let peers: Vec<String> = roster_user_ids
+        .iter()
+        .filter(|id| id.as_str() != actor_user_id.as_str())
+        .cloned()
+        .collect();
 
-    // 2. Find devices with unclaimed KPs for all roster users.
+    // 1b, 2 and 2b are independent reads, so they go out together (#1937): each is a DS round
+    // trip, and this pass sits on the path of an admin waiting on Approve.
     //
-    // A revoked device keeps its KeyPackages, so filter `revoked_at IS NULL` here too and never burn one.
-    //
-    // One request, and an ERROR rather than a short list: a truncated answer silently leaves devices out.
-    let device_pairs: Vec<(String, String)> =
-        crate::commands::ds_reads::claimable_devices(state, &ids, None).await?;
-
+    // 1b. TOFU-pin peers' account keys before using server-reported keys (2c reads the pins);
+    //     non-fatal.
+    // 2.  Devices with unclaimed KPs for all roster users. A revoked device keeps its
+    //     KeyPackages, so filter `revoked_at IS NULL` here too and never burn one. One request,
+    //     and an ERROR rather than a short list: a truncated answer silently leaves devices out.
     // 2b. Still-registered devices, to evict revoked leaves of roster members.
-    let valid_devices = crate::commands::ds_reads::registered_devices(state, &ids).await?;
+    let (pinned, device_pairs, valid_devices) = tokio::join!(
+        crate::commands::safety::batch_check_and_pin_account_keys(state, &peers),
+        crate::commands::ds_reads::claimable_devices(state, &ids, None),
+        crate::commands::ds_reads::registered_devices(state, &ids),
+    );
+    if let Err(e) = pinned {
+        crate::diag!("[reconcile] batch_check_and_pin_account_keys failed: {e}");
+    }
+    let device_pairs: Vec<(String, String)> = device_pairs?;
+    let valid_devices = valid_devices?;
 
     // 2c. Pinned cross-signing material; an error, never partial, since it decides admission.
     let identities = load_pinned_identities(state, &ids, &actor_user_id).await?;
@@ -1052,22 +1050,25 @@ async fn reconcile_pass(
     // Claim in the GROUP's suite, so a device lacking one is skipped, never downgraded in.
     //
     // A FAILED claim skips just that device (#1571); aborting would burn the packages already claimed.
+    //
+    // The claims are independent, so they go out together (#1937), answers kept in device order.
+    let claims = futures_util::future::join_all(devices_to_claim.iter().map(|(uid, did)| {
+        crate::commands::mls::ds_claim_key_package(state, uid, Some(did), group_suite)
+    }))
+    .await;
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
-    for (uid, did) in &devices_to_claim {
-        let claimed: Option<Vec<u8>> =
-            match crate::commands::mls::ds_claim_key_package(state, uid, Some(did), group_suite)
-                .await
-            {
-                Ok(claimed) => claimed,
-                Err(e) => {
-                    crate::diag!(
-                        "[mls] reconcile: {conversation_id}: claiming a KeyPackage for \
-                         {uid}:{did} failed ({e}) — skipping that device, not the pass (#1571)"
-                    );
-                    skipped_no_suite_kp.push((uid.clone(), did.clone()));
-                    continue;
-                }
-            };
+    for ((uid, did), claim) in devices_to_claim.iter().zip(claims) {
+        let claimed: Option<Vec<u8>> = match claim {
+            Ok(claimed) => claimed,
+            Err(e) => {
+                crate::diag!(
+                    "[mls] reconcile: {conversation_id}: claiming a KeyPackage for \
+                     {uid}:{did} failed ({e}) — skipping that device, not the pass (#1571)"
+                );
+                skipped_no_suite_kp.push((uid.clone(), did.clone()));
+                continue;
+            }
+        };
         match claimed {
             Some(kp) => kp_tuples.push((uid.clone(), did.clone(), kp)),
             None => {
@@ -1196,12 +1197,12 @@ async fn reconcile_pass(
         }
     }
 
-    // Voice E2EE: the committer must rotate too, or it keeps sending under the old epoch's key.
+    // The commit is merged (or there was none): release the group before the follow-ups, which
+    // change no MLS state and are DS round trips of their own (#1937).
+    drop(_mls_guard);
+
     if outcome.epoch_after > outcome.epoch_before {
-        crate::commands::voice_e2ee::on_mls_epoch_changed(state, &conversation_id).await;
-        // Pin key too (#99), so a member added by this commit can unwrap at once.
-        crate::commands::pinned_messages::maybe_rewrap_pin_key(state, &conversation_id).await;
-        crate::commands::file_keys::maybe_rewrap_file_keys(state, &conversation_id).await;
+        after_epoch_advanced(state, &conversation_id).await;
         // #1382: a removal commit rotates the attachment key ring, so the
         // removed member cannot open files posted from this epoch on. The
         // owed-rotation mark it leaves survives a crash before the DS write.
@@ -1243,6 +1244,27 @@ async fn reconcile_pass(
     }
 
     Ok(PassEnd::Done(outcome))
+}
+
+/// What a commit this device landed owes once it is merged, run with the group's MLS lock
+/// released (#1937): none of it changes MLS state, each step re-derives from the current epoch,
+/// and the key-state writes are monotone on the DS, so an epoch that moves on meanwhile only
+/// makes them redundant.
+///
+/// The voice key moves to the new exporter (the committer must rotate too, or it keeps sending
+/// under the old epoch's key); the pin key (#99) and the attachment key ring are re-wrapped, so a
+/// member this commit added can unwrap them at once. The two re-wraps are independent DS writes
+/// and go out together.
+pub(super) async fn after_epoch_advanced(state: &Arc<AppState>, conversation_id: &str) {
+    // Test-harness park point (#1937).
+    #[cfg(feature = "test-harness")]
+    super::group_state::rendezvous::park(super::group_state::rendezvous::Point::AfterEpochAdvanced)
+        .await;
+    crate::commands::voice_e2ee::on_mls_epoch_changed(state, conversation_id).await;
+    tokio::join!(
+        crate::commands::pinned_messages::maybe_rewrap_pin_key(state, conversation_id),
+        crate::commands::file_keys::maybe_rewrap_file_keys(state, conversation_id),
+    );
 }
 
 /// Registered devices of roster members that hold no leaf and have no package

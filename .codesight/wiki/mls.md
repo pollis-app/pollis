@@ -828,6 +828,23 @@ resume ingest pass (#1880), single-flight in `mobile/lib/mlsBackstop.ts`. Launch
 timer — consistent with the no-periodic-polling rule; a group whose members are all
 offline does not heal until one of them opens the app.
 
+A group's founder starts with its rotation recorded (`init_mls_group`, as a migration's
+successor does): its leaf is fresh by construction, so its first sweep owes nothing. Before
+#1937 it committed a pointless epoch-0 rotation on the first launch after creating a group,
+holding the group's MLS lock through that whole commit, and an admin approving a join request
+right after unlocking queued behind it.
+
+**Lock scope of a landed commit (#1937).** Reconcile and self-update hold the group's MLS lock
+only until their commit is merged. The follow-ups (`reconcile::after_epoch_advanced`: voice
+re-key, then the pin-key and attachment-key-ring re-wraps, which go out together) change no MLS
+state and are DS round trips, so they run with the lock released; each re-derives from the
+current epoch and the DS key-state writes are monotone, so a later epoch only makes them
+redundant. The independent reads at the top of a reconcile pass (account-key pinning, claimable
+devices, registered devices) and its KeyPackage claims also go out concurrently. Flows tests:
+`groups::a_new_groups_founder_owes_no_self_update`,
+`groups::an_approval_releases_the_mls_lock_before_its_key_follow_ups`. A wait of a second or more
+for the lock is written to the diagnostics log (`[mls] waited …ms for the MLS lock`).
+
 Two things depend on it. **PCS**: without it, a compromised leaf stays readable
 until membership happens to change. **Commit size**: unmerged leaves dominate a
 `CS_PQ` UpdatePath (`kem_output` is 1120 B under X-Wing vs 32 B under the retired
