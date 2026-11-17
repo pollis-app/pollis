@@ -160,6 +160,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # by default at runtime — an unset `POLLIS_OVERLAY` builds a proxy-less client, so
 # enabling the feature changes nothing until the overlay is turned on.
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "socks"], default-features = false }
+# Parses and resolves link-preview URLs (#1987); already in the graph through reqwest.
+url = "2"
 anyhow = "1"
 # Closed-overlay relay transport (design `docs/relay-overlay-design.md` §14).
 # Depended on UNCONDITIONALLY — the overlay is compiled into every consumer but
@@ -451,7 +453,6 @@ tempfile = "3"
 # (whose `livekit::proto` keeps the protocol types private).
 livekit-protocol = "0.8"
 prost = "0.14"
-url = "2"
 
 # Picks up `[workspace.lints]` from the root Cargo.toml, which declares the
 # `kani` cfg the proof harnesses in this crate are gated on.

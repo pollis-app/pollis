@@ -216,22 +216,13 @@ pub(crate) fn thumbnail(bytes: &[u8]) -> Option<OutgoingThumbnail> {
     // JPEG has no alpha; flatten onto RGB.
     let small = image::DynamicImage::ImageRgb8(bounded.to_rgb8());
     let blurhash = crate::commands::r2::blurhash_of(&small).ok();
-    for quality in JPEG_QUALITIES {
-        let mut out = Vec::new();
-        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
-        if small.write_with_encoder(encoder).is_err() {
-            return None;
-        }
-        if out.len() <= MAX_THUMBNAIL_BYTES {
-            return Some(OutgoingThumbnail {
-                jpeg: out,
-                width: small.width(),
-                height: small.height(),
-                blurhash,
-            });
-        }
-    }
-    None
+    let jpeg = crate::commands::poster::jpeg_within(&small, &JPEG_QUALITIES, MAX_THUMBNAIL_BYTES).ok()??;
+    Some(OutgoingThumbnail {
+        jpeg,
+        width: small.width(),
+        height: small.height(),
+        blurhash,
+    })
 }
 
 /// Turn a draft from the renderer into what the send path stores, or `None`

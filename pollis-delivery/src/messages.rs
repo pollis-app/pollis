@@ -1915,12 +1915,18 @@ pub async fn delete_attachment(
     // The client asks for the collect right after its delete released the
     // file, so finish that file now: blob, then row (#1881). A failure leaves
     // it for the envelope-GC tick, and the request still succeeds.
+    reclaim_now(&state, &conn, &parsed.content_hash).await;
+    outcome_response::<AttachmentDeleteBody>(outcome)
+}
+
+/// Finish `hash` now if nothing references it (#1881); a failure leaves it
+/// for the envelope-GC tick, and the request still succeeds.
+async fn reclaim_now(state: &AppState, conn: &Connection, hash: &str) {
     if state.broker.r2_ready().is_some() {
-        if let Err(e) = reclaim_released_attachment(&conn, &state.broker, &parsed.content_hash).await {
+        if let Err(e) = reclaim_released_attachment(conn, &state.broker, hash).await {
             tracing::warn!("attachment reclaim failed: {e}");
         }
     }
-    outcome_response::<AttachmentDeleteBody>(outcome)
 }
 
 pub async fn release_attachment(
@@ -1934,11 +1940,7 @@ pub async fn release_attachment(
     let conn = state.db.conn().await?;
     let outcome = apply_release_attachment(&conn, authed.as_deref(), &parsed).await?;
     // Finish the file now if that was its last reference; otherwise the GC tick does.
-    if state.broker.r2_ready().is_some() {
-        if let Err(e) = reclaim_released_attachment(&conn, &state.broker, &parsed.content_hash).await {
-            tracing::warn!("attachment reclaim failed: {e}");
-        }
-    }
+    reclaim_now(&state, &conn, &parsed.content_hash).await;
     outcome_response::<AttachmentReleaseBody>(outcome)
 }
 
