@@ -83,7 +83,7 @@ export const CopyHistoryPage: React.FC = () => {
     body = (
       <>
         <div className="flex flex-col gap-3">
-          <h1 className="text-title text-fg">{t("historyTransfer.pickTitle")}</h1>
+          <h2 className="text-title text-fg">{t("historyTransfer.pickTitle")}</h2>
           <p className="text-body text-muted leading-relaxed">{t("historyTransfer.pickSubtitle")}</p>
         </div>
         {sources.isError && (

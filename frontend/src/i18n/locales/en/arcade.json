@@ -1,6 +1,6 @@
 {
   "page": {
-    "title": "ARCADE"
+    "title": "Arcade"
   },
   "hud": {
     "score": "SCORE  {{score}}",

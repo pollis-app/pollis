@@ -8,7 +8,8 @@
     "permalinkResolving": "メッセージを開いています…",
     "noMatches": "一致する項目はありません",
     "emptyHint": "チャンネル、ボイスチャンネル、DM、ユーザー、設定ページへ移動",
-    "live": "[ライブ]",
+    "live": "ライブ",
+    "liveTerminal": "[ライブ]",
     "searchMessagesFor": "「{{query}}」でメッセージを検索"
   },
   "pages": {

@@ -1,6 +1,7 @@
 import React from "react";
 import { ChevronRight } from "lucide-react";
 import { usePressActivation } from "../../hooks/usePressActivation";
+import { FOCUS_RING } from "./focusRing";
 
 interface NavRowProps {
   /** The row's visible text, e.g. a setting's current value. */
@@ -31,7 +32,7 @@ export const NavRow: React.FC<NavRowProps> = ({
       {...press}
       data-testid={testId}
       aria-labelledby={labelledBy}
-      className="flex items-center gap-3 w-full text-start rounded-lg px-4 py-3 border-0 font-mono bg-surface-raised text-fg hover:bg-hover cursor-pointer focus:outline-none focus-visible:ring-4 focus-visible:ring-accent"
+      className={`flex items-center gap-3 w-full text-start rounded-control px-4 py-3 border-0 font-mono bg-surface-raised text-fg hover:bg-hover cursor-pointer ${FOCUS_RING}`}
     >
       <span id={textId} className="flex-1 min-w-0 truncate text-body" lang={lang}>
         {children}

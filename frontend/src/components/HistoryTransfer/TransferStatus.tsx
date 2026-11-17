@@ -144,7 +144,7 @@ export const TransferStatus: React.FC<TransferStatusProps> = observer(({ transfe
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
-          className="w-full h-1 rounded-sm overflow-hidden bg-line"
+          className="w-full h-1 rounded-full overflow-hidden bg-line"
         >
           <div className="h-full bg-accent transition-[width] duration-200" style={{ width: `${percent}%` }} />
         </div>

@@ -9,6 +9,7 @@ import { ResultThumbnails } from "./ResultThumbnails";
 import { shellOpen } from "../../bridge";
 import type { SearchCorpus, SearchResult, SearchSnippet, SearchSort } from "../../types";
 import { PressButton } from "../ui/PressButton";
+import { LinkButton } from "../ui/LinkButton";
 import { EmptyState } from "../ui/EmptyState";
 
 /** Why search is on-device: the server holds only ciphertext. */
@@ -39,7 +40,7 @@ const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snippet }) =
     <span>
       {parts.map((part, i) =>
         part.mark ? (
-          <mark key={i} data-testid="search-highlight" className="bg-accent-muted text-accent-bright rounded-sm px-0.5">
+          <mark key={i} data-testid="search-highlight" className="bg-accent-muted text-accent-bright rounded-chip px-0.5">
             <EmojiText text={part.text} />
           </mark>
         ) : (
@@ -280,7 +281,7 @@ const CorpusFooter: React.FC<{
   return (
     <div
       data-testid="search-corpus-footer"
-      className="px-4 py-2 flex-shrink-0 border-t border-line text-[10px] font-mono text-muted flex flex-wrap items-center gap-x-2 gap-y-1"
+      className="px-4 py-2 flex-shrink-0 border-t border-line text-meta font-mono text-muted flex flex-wrap items-center gap-x-2 gap-y-1"
     >
       <span>
         {earliest
@@ -289,22 +290,13 @@ const CorpusFooter: React.FC<{
       </span>
       {corpus.indexing && <span data-testid="search-indexing">{t("view.indexing")}</span>}
       {corpus.retention_days > 0 && onOpenRetentionSettings && (
-        <button
-          type="button"
-          onClick={onOpenRetentionSettings}
-          className="underline bg-transparent text-accent"
-        >
+        <LinkButton onClick={onOpenRetentionSettings}>
           {t("view.retentionLink", { days: corpus.retention_days })}
-        </button>
+        </LinkButton>
       )}
-      <button
-        type="button"
-        data-testid="search-learn-link"
-        onClick={() => void shellOpen(LEARN_ON_DEVICE_SEARCH_URL)}
-        className="underline bg-transparent text-accent"
-      >
+      <LinkButton data-testid="search-learn-link" onClick={() => void shellOpen(LEARN_ON_DEVICE_SEARCH_URL)}>
         {t("view.whyOnDevice")}
-      </button>
+      </LinkButton>
     </div>
   );
 };

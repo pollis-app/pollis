@@ -113,7 +113,7 @@
       "member": "mwanachama"
     },
     "adminToggle": "msimamizi",
-    "kick": "ondoa",
+    "kick": "Ondoa",
     "verified": "Mwasiliani aliyethibitishwa",
     "keyChanged": "Ufunguo wa utambulisho umebadilika — thibitisha tena",
     "invited": {
@@ -138,12 +138,12 @@
     "pageTitle": "Mialiko",
     "empty": "Hakuna mialiko inayosubiri.",
     "invitedBy": "Umealikwa na {{name}}",
-    "accept": "kubali",
-    "decline": "kataa",
+    "accept": "Kubali",
+    "decline": "Kataa",
     "acceptFailed": "Imeshindwa kukubali mwaliko. Jaribu tena."
   },
   "inviteMember": {
-    "pageTitle": "Alika mwanachama :: {{group}}",
+    "pageTitle": "Alika mwanachama — {{group}}",
     "intro": "Alika mtu kwenye <accent>{{name}}</accent>",
     "identifierLabel": "Jina la mtumiaji au barua pepe",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,13 +153,13 @@
     "sendFailed": "Imeshindwa kutuma mwaliko"
   },
   "joinRequests": {
-    "pageTitle": "Maombi ya kujiunga :: {{group}}",
+    "pageTitle": "Maombi ya kujiunga — {{group}}",
     "allPageTitle": "Maombi ya kujiunga",
     "pendingFor": "Maombi yanayosubiri ya kujiunga na <accent>{{name}}</accent>",
     "empty": "Hakuna maombi yanayosubiri.",
     "allEmpty": "Hakuna maombi ya kujiunga yanayosubiri.",
-    "approve": "idhinisha",
-    "reject": "kataa"
+    "approve": "Idhinisha",
+    "reject": "Kataa"
   },
   "joinByInvite": {
     "pageTitle": "Jiunge na kikundi",

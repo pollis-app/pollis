@@ -64,7 +64,8 @@
     "empty": "अजून कोणतेही मेसेज नाहीत. संभाषण सुरू करा.",
     "unknownAuthor": "अज्ञात",
     "blockedAuthor": "ब्लॉक केलेला वापरकर्ता",
-    "blockedBody": "[ब्लॉक केलेले]"
+    "blockedBody": "ब्लॉक केलेले",
+    "blockedBodyTerminal": "[ब्लॉक केलेले]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> यांना उत्तर देत आहे",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "रांग",
-    "pendingPlaceholder": "[प्रलंबित मेसेज]",
+    "pendingPlaceholder": "प्रलंबित मेसेज",
+    "pendingPlaceholderTerminal": "[प्रलंबित मेसेज]",
     "cancel": "मेसेज रद्द करा",
     "retry": "पुन्हा प्रयत्न करा",
     "failedCount_one": "अयशस्वी ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "अजून कोणतेही मेसेज नाहीत",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} अटॅचमेंट]",
-    "attachments_other": "[{{count}} अटॅचमेंट]",
+    "attachments_one": "{{count}} अटॅचमेंट",
+    "attachments_other": "{{count}} अटॅचमेंट",
+    "attachmentsTerminal_one": "[{{count}} अटॅचमेंट]",
+    "attachmentsTerminal_other": "[{{count}} अटॅचमेंट]",
     "undecryptable": "एक मेसेज या डिव्हाइसवर डिक्रिप्ट करता आला नाही"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "लोड करता आले नाही",
     "failedToDownload": "डाउनलोड करता आले नाही",
     "lightboxFetch": "मिळवा",
-    "lightboxDone": "[ पूर्ण झाले ]",
-    "lightboxDownload": "[डाउनलोड]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "पूर्ण झाले",
+    "lightboxDoneTerminal": "[ पूर्ण झाले ]",
+    "lightboxDownload": "डाउनलोड",
+    "lightboxDownloadTerminal": "[डाउनलोड]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "संवेदनशील मीडिया दाखवा: {{filename}}",
     "sensitiveHide": "{{filename}} लपवा"
   },

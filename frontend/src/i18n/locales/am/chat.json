@@ -64,7 +64,8 @@
     "empty": "እስካሁን መልዕክቶች የሉም። ውይይቱን ይጀምሩ።",
     "unknownAuthor": "ያልታወቀ",
     "blockedAuthor": "የታገደ ተጠቃሚ",
-    "blockedBody": "[ታግዷል]"
+    "blockedBody": "ታግዷል",
+    "blockedBodyTerminal": "[ታግዷል]"
   },
   "replyBar": {
     "replyingTo": "ለ<name>{{name}}</name> በመመለስ ላይ",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "ወረፋ",
-    "pendingPlaceholder": "[በመጠባበቅ ላይ ያለ መልዕክት]",
+    "pendingPlaceholder": "በመጠባበቅ ላይ ያለ መልዕክት",
+    "pendingPlaceholderTerminal": "[በመጠባበቅ ላይ ያለ መልዕክት]",
     "cancel": "መልዕክቱን ተው",
     "retry": "እንደገና ሞክር",
     "failedCount_one": "አልተሳካም ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "እስካሁን መልዕክቶች የሉም",
     "withSender": "{{name}}፦ {{text}}",
-    "attachments_one": "[{{count}} አባሪ]",
-    "attachments_other": "[{{count}} አባሪዎች]",
+    "attachments_one": "{{count}} አባሪ",
+    "attachments_other": "{{count}} አባሪዎች",
+    "attachmentsTerminal_one": "[{{count}} አባሪ]",
+    "attachmentsTerminal_other": "[{{count}} አባሪዎች]",
     "undecryptable": "አንድ መልዕክት በዚህ መሣሪያ ላይ ሊፈታ አልቻለም"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "መጫን አልተሳካም",
     "failedToDownload": "ማውረድ አልተሳካም",
     "lightboxFetch": "አምጣ",
-    "lightboxDone": "[ ተከናውኗል ]",
-    "lightboxDownload": "[አውርድ]",
-    "lightboxClose": "[Esc]",
+    "lightboxDone": "ተከናውኗል",
+    "lightboxDoneTerminal": "[ ተከናውኗል ]",
+    "lightboxDownload": "አውርድ",
+    "lightboxDownloadTerminal": "[አውርድ]",
+    "lightboxCloseTerminal": "[Esc]",
     "sensitiveReveal": "ስሱ ሚዲያ አሳይ፦ {{filename}}",
     "sensitiveHide": "{{filename}}ን ደብቅ"
   },

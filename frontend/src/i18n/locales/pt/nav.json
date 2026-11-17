@@ -1,8 +1,8 @@
 {
   "sidebar": {
-    "groups": "grupos",
-    "dms": "mensagens diretas",
-    "account": "conta",
+    "groups": "Grupos",
+    "dms": "Mensagens diretas",
+    "account": "Conta",
     "saved": "Guardadas",
     "preferences": "Preferências",
     "language": "Idioma",

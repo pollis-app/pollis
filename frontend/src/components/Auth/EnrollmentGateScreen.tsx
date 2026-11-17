@@ -325,9 +325,8 @@ const AwaitingApprovalPane: React.FC<{
       </p>
       <div
         data-testid="verification-code-display"
-        className="font-mono text-code font-bold text-center select-all bg-surface border-2 border-accent text-accent"
+        className="font-mono text-code font-bold text-center select-all rounded-panel bg-surface border-2 border-accent text-accent"
         style={{
-          borderRadius: "0.5rem",
           padding: "1.5rem",
           letterSpacing: "0.4em",
         }}

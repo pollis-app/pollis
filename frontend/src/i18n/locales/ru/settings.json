@@ -378,7 +378,7 @@
     "capturing": "Нажмите клавиши…",
     "rebindLabel": "Переназначить: {{name}}",
     "resetLabel": "Сбросить «{{name}}» к значению по умолчанию",
-    "resetButton": "сброс",
+    "resetButton": "Сброс",
     "appToggleSidebar": "Боковая панель",
     "appToggleRightPanel": "Панель деталей",
     "appToggleTerminal": "Терминал",

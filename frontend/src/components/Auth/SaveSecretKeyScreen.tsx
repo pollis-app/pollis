@@ -163,9 +163,8 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
 
               <div
                 data-testid="secret-key-display"
-                className="font-mono text-body select-all bg-surface border-2 border-accent text-accent"
+                className="font-mono text-body select-all rounded-panel bg-surface border-2 border-accent text-accent"
                 style={{
-                  borderRadius: "0.5rem",
                   padding: "0.5rem",
                   wordBreak: "break-all",
                   textAlign: "center",

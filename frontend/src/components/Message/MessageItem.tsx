@@ -373,7 +373,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
         <bdi
           data-testid="message-author"
-          className={`flex-shrink-0 font-mono text-body font-semibold me-1 ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-sm` : ""}`}
+          className={`flex-shrink-0 font-mono text-body font-semibold me-1 ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : ""}`}
           style={isAuthorAdmin ? adminChipStyle : {
             color: isOwn ? "var(--c-accent)" : authorColor,
           }}

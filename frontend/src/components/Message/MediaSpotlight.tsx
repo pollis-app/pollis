@@ -19,19 +19,12 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { PressButton } from "../ui/PressButton";
 import { SensitiveCover } from "../Media/SensitiveCover";
 import type { MessageAttachment } from "../../types";
-
-const lightboxBtnStyle: React.CSSProperties = {
-  border: "2px solid transparent",
-  borderRadius: 4,
-  cursor: "pointer",
-  padding: "2px 8px",
-};
+import { LightboxActions } from "./LightboxActions";
 
 const mediaBox: React.CSSProperties = {
   maxWidth: "90vw",
   maxHeight: "85vh",
   cursor: "default",
-  borderRadius: "1rem",
 };
 
 interface MediaSpotlightProps {
@@ -229,8 +222,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
           sensitivity.reveal();
         }}
         aria-label={t("attachment.sensitiveReveal", { filename: attachment.filename })}
-        className="relative block h-[60vh] w-[60vh] max-w-[90vw] overflow-hidden border-0 p-0"
-        style={{ borderRadius: "1rem", cursor: "pointer" }}
+        className="relative block h-[60vh] w-[60vh] max-w-[90vw] overflow-hidden border-0 p-0 rounded-panel cursor-pointer"
       >
         <SensitiveCover blurhash={attachment.blurhash} />
       </PressButton>
@@ -242,6 +234,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         autoFocus
         src={url}
         controls
+        className="rounded-panel"
         style={mediaBox}
         onClick={stopClick}
         onLoadedData={announceLoaded}
@@ -253,6 +246,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         data-testid="media-spotlight-media"
         src={url}
         alt={attachment.filename}
+        className="rounded-panel"
         style={{ ...mediaBox, objectFit: "contain" }}
         onClick={stopClick}
         onLoad={announceLoaded}
@@ -292,27 +286,12 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
           </span>
         )}
         {saveError && <span className="text-secondary font-mono text-muted">{saveError}</span>}
-        <button
-          onClick={handleDownload}
-          disabled={downloadStatus !== "idle" || !attachment.object_key}
-          className="text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
-          style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
-        >
-          {downloadStatus === "downloading" ? (
-            <>[ {t("attachment.lightboxFetch")} <LoadingSpinner size="sm" /> ]</>
-          ) : downloadStatus === "done" ? (
-            t("attachment.lightboxDone")
-          ) : (
-            t("attachment.lightboxDownload")
-          )}
-        </button>
-        <button
-          onClick={onClose}
-          className="text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
-          style={lightboxBtnStyle}
-        >
-          {t("attachment.lightboxClose")}
-        </button>
+        <LightboxActions
+          status={downloadStatus}
+          downloadDisabled={!attachment.object_key}
+          onDownload={() => void handleDownload()}
+          onClose={onClose}
+        />
       </div>
     </>
   );

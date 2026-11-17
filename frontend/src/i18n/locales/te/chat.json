@@ -64,7 +64,8 @@
     "empty": "ఇంకా మెసేజ్‌లు లేవు. సంభాషణ ప్రారంభించండి.",
     "unknownAuthor": "తెలియనివారు",
     "blockedAuthor": "బ్లాక్ చేసిన యూజర్",
-    "blockedBody": "[బ్లాక్ చేయబడింది]"
+    "blockedBody": "బ్లాక్ చేయబడింది",
+    "blockedBodyTerminal": "[బ్లాక్ చేయబడింది]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name>కు రిప్లై ఇస్తున్నారు",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "క్యూ",
-    "pendingPlaceholder": "[పెండింగ్ మెసేజ్]",
+    "pendingPlaceholder": "పెండింగ్ మెసేజ్",
+    "pendingPlaceholderTerminal": "[పెండింగ్ మెసేజ్]",
     "cancel": "మెసేజ్‌ను రద్దు చేయి",
     "retry": "మళ్లీ ప్రయత్నించు",
     "failedCount_one": "విఫలమైంది ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "ఇంకా మెసేజ్‌లు లేవు",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} అటాచ్‌మెంట్]",
-    "attachments_other": "[{{count}} అటాచ్‌మెంట్‌లు]",
+    "attachments_one": "{{count}} అటాచ్‌మెంట్",
+    "attachments_other": "{{count}} అటాచ్‌మెంట్‌లు",
+    "attachmentsTerminal_one": "[{{count}} అటాచ్‌మెంట్]",
+    "attachmentsTerminal_other": "[{{count}} అటాచ్‌మెంట్‌లు]",
     "undecryptable": "ఒక మెసేజ్‌ను ఈ పరికరంలో డీక్రిప్ట్ చేయడం సాధ్యపడలేదు"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "లోడ్ చేయడం విఫలమైంది",
     "failedToDownload": "డౌన్‌లోడ్ విఫలమైంది",
     "lightboxFetch": "తీసుకురా",
-    "lightboxDone": "[ పూర్తయింది ]",
-    "lightboxDownload": "[డౌన్‌లోడ్]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "పూర్తయింది",
+    "lightboxDoneTerminal": "[ పూర్తయింది ]",
+    "lightboxDownload": "డౌన్‌లోడ్",
+    "lightboxDownloadTerminal": "[డౌన్‌లోడ్]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "సున్నితమైన మీడియాను చూపు: {{filename}}",
     "sensitiveHide": "{{filename}} దాచు"
   },

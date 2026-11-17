@@ -4,6 +4,7 @@ import { ShieldCheck, Clock, AlertTriangle, ShieldQuestion } from "lucide-react"
 import { shellOpen } from "../../bridge";
 import type { BuildVerifyStatus } from "../../types";
 import { SecurityStatusLine } from "./SecurityStatusLine";
+import { LinkButton } from "../ui/LinkButton";
 
 interface BuildVerifyLineProps {
   status: BuildVerifyStatus;
@@ -64,17 +65,16 @@ export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
     >
       {/* The verify-guide link, under the reason. */}
       {showReason && (
-        <button
-          type="button"
+        <LinkButton
           data-testid={`${testId}-learn-more`}
-          className="text-meta font-mono underline self-start"
-          style={{ color }}
+          size="meta"
+          color={color}
           onClick={() => {
             void shellOpen(VERIFY_DOCS_URL);
           }}
         >
           {t("security.buildVerifyGuideLink")}
-        </button>
+        </LinkButton>
       )}
     </SecurityStatusLine>
   );

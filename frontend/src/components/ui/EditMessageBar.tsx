@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { IconButton } from "./IconButton";
 
 interface EditMessageBarProps {
   heading: string;
@@ -48,14 +49,14 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
         <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
           {heading}
         </span>
-        <button
+        <IconButton
           data-testid={cancelTestId}
           onClick={onCancel}
           aria-label={cancelLabel}
-          className="icon-btn-sm flex-shrink-0"
+          className="flex-shrink-0"
         >
           <X size={20} aria-hidden="true" />
-        </button>
+        </IconButton>
       </div>
       <div className="px-4 pb-3 pt-1 bg-surface">
         <textarea
@@ -74,7 +75,7 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
           disabled={isSaving}
           rows={2}
           className={`chat-input-textarea w-full font-mono text-body resize-none transition-colors rounded-control border-0 outline-none px-2 py-1 disabled:opacity-50 ${
-            focused ? "is-focused bg-accent text-bg" : "bg-hover text-fg"
+            focused ? "is-focused bg-active text-fg" : "bg-hover text-fg"
           }`}
         />
         <p className="text-meta font-mono mt-1 text-muted">{hint}</p>

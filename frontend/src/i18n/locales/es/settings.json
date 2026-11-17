@@ -354,7 +354,7 @@
     "capturing": "Pulsa las teclas…",
     "rebindLabel": "Reasignar {{name}}",
     "resetLabel": "Restaurar {{name}} al valor por defecto",
-    "resetButton": "restaurar",
+    "resetButton": "Restaurar",
     "appToggleSidebar": "Alternar la barra lateral",
     "appToggleRightPanel": "Alternar el panel de detalles",
     "appToggleTerminal": "Alternar el terminal",

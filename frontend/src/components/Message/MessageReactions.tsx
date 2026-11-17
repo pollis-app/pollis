@@ -16,6 +16,8 @@ import {
 import { type Placement, panelHeightPx, resolvePlacement } from "../Emoji/pickerPlacement";
 import { ReactionEmoji, spokenEmoji } from "./ReactionEmoji";
 import { ReactionBreakdownPanel } from "./ReactionBreakdownPanel";
+import { PressButton } from "../ui/PressButton";
+import { FOCUS_RING } from "../ui/focusRing";
 
 interface MessageReactionsProps {
   messageId: string;
@@ -130,8 +132,9 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
           : false;
 
         return (
-          <button
+          <PressButton
             key={reaction.emoji}
+            activateOn="click"
             data-testid="reaction-pill"
             onClick={() => toggleReaction(reaction.emoji)}
             onFocus={() => setHovered(true)}
@@ -140,11 +143,9 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
               openPanel(reaction.emoji);
             }}
             title={tooltip(reaction.emoji, reaction.count)}
-            className="panel-raised flex items-center gap-1 px-1.5 py-0.5 text-secondary font-mono transition-colors duration-75 hover:opacity-90"
-            style={{
-              color: reacted ? "var(--c-accent)" : "var(--c-text-muted)",
-              borderColor: reacted ? "var(--c-border-active)" : undefined,
-            }}
+            className={`panel-raised flex items-center gap-1 px-1.5 py-0.5 text-secondary font-mono transition-colors duration-75 hover:opacity-90 ${FOCUS_RING} ${
+              reacted ? "text-accent border-line-strong" : "text-muted"
+            }`}
             aria-label={t("reactions.pillLabel", {
               emoji: spokenEmoji(reaction.emoji),
               count: reaction.count,
@@ -155,7 +156,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
           >
             <ReactionEmoji emoji={reaction.emoji} />
             <span>{reaction.count}</span>
-          </button>
+          </PressButton>
         );
       })}
       {openEmoji !== null && tabs.length > 0 ? (

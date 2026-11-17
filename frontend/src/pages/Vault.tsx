@@ -31,6 +31,7 @@ import { vaultSaveFailure, type VaultSaveFailure } from "../utils/vaultSaveFailu
 import { formatClockTime, formatDayDivider } from "../utils/format";
 import type { MessageAttachment } from "../types";
 import { PressButton } from "../components/ui/PressButton";
+import { IconButton } from "../components/ui/IconButton";
 import { EmptyState } from "../components/ui/EmptyState";
 
 type VaultView = "chat" | "media";
@@ -199,8 +200,8 @@ export const VaultPage: React.FC = observer(() => {
         aria-selected={view === "chat"}
         data-testid="vault-view-chat"
         onClick={() => setView("chat")}
-        className={`flex items-center gap-1 rounded border border-line px-2 py-0.5 text-meta uppercase tracking-widest ${
-          view === "chat" ? "bg-accent text-bg" : "text-muted hover:text-fg"
+        className={`flex items-center gap-1 rounded-chip border px-2 py-0.5 text-meta uppercase tracking-widest ${
+          view === "chat" ? "border-accent bg-active text-fg" : "border-line text-muted hover:text-fg"
         }`}
       >
         <MessageSquare size={12} aria-hidden />
@@ -212,8 +213,8 @@ export const VaultPage: React.FC = observer(() => {
         aria-selected={view === "media"}
         data-testid="vault-view-media"
         onClick={() => setView("media")}
-        className={`flex items-center gap-1 rounded border border-line px-2 py-0.5 text-meta uppercase tracking-widest ${
-          view === "media" ? "bg-accent text-bg" : "text-muted hover:text-fg"
+        className={`flex items-center gap-1 rounded-chip border px-2 py-0.5 text-meta uppercase tracking-widest ${
+          view === "media" ? "border-accent bg-active text-fg" : "border-line text-muted hover:text-fg"
         }`}
       >
         <ImageIcon size={12} aria-hidden />
@@ -255,14 +256,14 @@ export const VaultPage: React.FC = observer(() => {
               className="flex-1 border-0 bg-transparent font-mono text-body text-fg outline-none placeholder:text-muted"
             />
             {searchQuery && (
-              <PressButton
-                type="button"
+              <IconButton
+                activateOn="press"
                 onClick={() => setSearchQuery("")}
                 aria-label={t("clearSearch")}
-                className="icon-btn-sm flex-shrink-0"
+                className="flex-shrink-0"
               >
                 <X size={16} aria-hidden />
-              </PressButton>
+              </IconButton>
             )}
           </div>
 
@@ -317,14 +318,14 @@ export const VaultPage: React.FC = observer(() => {
                 <span className="flex-1 font-mono text-meta uppercase tracking-widest text-muted">
                   {t("delete.heading")}
                 </span>
-                <button
+                <IconButton
                   data-testid="vault-delete-cancel"
                   onClick={() => setPendingDeleteId(null)}
                   aria-label={t("delete.cancel")}
-                  className="icon-btn-sm flex-shrink-0"
+                  className="flex-shrink-0"
                 >
                   <X size={20} aria-hidden="true" />
-                </button>
+                </IconButton>
               </div>
               <div className="flex items-center justify-between gap-4 bg-surface px-4 pb-3 pt-2">
                 <p className="font-mono text-secondary text-dim">{t("delete.body")}</p>
@@ -414,7 +415,7 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
           <div className="h-px flex-1 bg-line" />
         </div>
       )}
-      <div className="group flex gap-3 rounded px-1 py-1 hover:bg-hover">
+      <div className="group flex gap-3 rounded-control px-1 py-1 hover:bg-hover">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-meta text-muted">
@@ -434,7 +435,7 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
             )}
           </div>
           {parsed.text && (
-            <p className="whitespace-pre-wrap break-words text-body text-fg">
+            <p className="whitespace-pre-wrap break-words font-mono text-body text-fg">
               <LinkifiedText text={parsed.text} />
             </p>
           )}
@@ -447,38 +448,33 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
           )}
         </div>
         <div className="flex h-6 flex-shrink-0 items-center gap-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          <button
-            type="button"
+          <IconButton
             data-testid="vault-entry-pin"
             onClick={() => onTogglePin(entry)}
             aria-label={entry.pinned ? t("entry.unpin") : t("entry.pin")}
             title={entry.pinned ? t("entry.unpin") : t("entry.pin")}
-            className={`p-0.5 outline-none hover:text-accent focus:bg-accent focus:text-bg ${
-              entry.pinned ? "text-accent" : "text-muted"
-            }`}
+            className={entry.pinned ? "text-accent" : ""}
           >
             <Pin size={16} aria-hidden fill={entry.pinned ? "currentColor" : "none"} />
-          </button>
-          <button
-            type="button"
+          </IconButton>
+          <IconButton
             data-testid="vault-entry-edit"
             onClick={() => onEdit(entry)}
             aria-label={t("entry.edit")}
             title={t("entry.edit")}
-            className="p-0.5 text-muted outline-none hover:text-accent focus:bg-accent focus:text-bg"
           >
             <Pencil size={16} aria-hidden />
-          </button>
-          <button
-            type="button"
+          </IconButton>
+          <IconButton
+            destructive
             data-testid="vault-entry-delete"
             onClick={() => onDelete(entry.id)}
             aria-label={t("entry.delete")}
             title={t("entry.delete")}
-            className="p-0.5 text-muted outline-none hover:text-danger focus:bg-danger focus:text-bg"
+            className="hover:text-danger"
           >
             <Trash2 size={16} aria-hidden />
-          </button>
+          </IconButton>
         </div>
       </div>
     </li>

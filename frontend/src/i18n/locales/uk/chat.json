@@ -62,7 +62,8 @@
     "empty": "Повідомлень ще немає. Почніть розмову.",
     "unknownAuthor": "Невідомо",
     "blockedAuthor": "заблокований користувач",
-    "blockedBody": "[заблоковано]"
+    "blockedBody": "Заблоковано",
+    "blockedBodyTerminal": "[заблоковано]"
   },
   "replyBar": {
     "replyingTo": "відповідь для <name>{{name}}</name>",
@@ -71,7 +72,8 @@
   },
   "queue": {
     "heading": "Черга",
-    "pendingPlaceholder": "[Повідомлення в очікуванні]",
+    "pendingPlaceholder": "Повідомлення в очікуванні",
+    "pendingPlaceholderTerminal": "[Повідомлення в очікуванні]",
     "cancel": "Скасувати повідомлення",
     "retry": "повторити",
     "failedCount_one": "помилок ×{{count}}",
@@ -110,10 +112,14 @@
   "preview": {
     "noMessages": "Повідомлень ще немає",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} вкладення]",
-    "attachments_few": "[{{count}} вкладення]",
-    "attachments_many": "[{{count}} вкладень]",
-    "attachments_other": "[{{count}} вкладення]"
+    "attachments_one": "{{count}} вкладення",
+    "attachments_few": "{{count}} вкладення",
+    "attachments_many": "{{count}} вкладень",
+    "attachments_other": "{{count}} вкладення",
+    "attachmentsTerminal_one": "[{{count}} вкладення]",
+    "attachmentsTerminal_few": "[{{count}} вкладення]",
+    "attachmentsTerminal_many": "[{{count}} вкладень]",
+    "attachmentsTerminal_other": "[{{count}} вкладення]"
   },
   "attachment": {
     "viewLabel": "Переглянути {{filename}}",
@@ -124,9 +130,11 @@
     "failedToLoad": "Не вдалося завантажити",
     "failedToDownload": "Не вдалося завантажити файл",
     "lightboxFetch": "отримати",
-    "lightboxDone": "[ готово ]",
-    "lightboxDownload": "[завантажити]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "Готово",
+    "lightboxDoneTerminal": "[ готово ]",
+    "lightboxDownload": "Завантажити",
+    "lightboxDownloadTerminal": "[завантажити]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Показати делікатний вміст: {{filename}}",
     "sensitiveHide": "Приховати {{filename}}"
   },

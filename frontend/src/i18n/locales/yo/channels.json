@@ -111,7 +111,7 @@
       "member": "ọmọ ẹgbẹ́"
     },
     "adminToggle": "alábòójútó",
-    "kick": "lé jáde",
+    "kick": "Lé jáde",
     "verified": "Olùbásọ̀rọ̀ tí a ti jẹ́rìísí",
     "keyChanged": "Kọ́kọ́rọ́ ìdánimọ̀ ti yí padà — tún jẹ́rìísí",
     "invited": {
@@ -136,12 +136,12 @@
     "pageTitle": "Ìkésíni",
     "empty": "Kò sí ìkésíni tó ń dúró.",
     "invitedBy": "{{name}} ló ké sí ọ",
-    "accept": "gbà",
-    "decline": "kọ̀",
+    "accept": "Gbà",
+    "decline": "Kọ̀",
     "acceptFailed": "Kò ṣeé ṣe láti gba ìkésíni náà. Tún gbìyànjú."
   },
   "inviteMember": {
-    "pageTitle": "Ké sí Ọmọ ẹgbẹ́ :: {{group}}",
+    "pageTitle": "Ké sí Ọmọ ẹgbẹ́ — {{group}}",
     "intro": "Ké sí ẹnìkan wá sí <accent>{{name}}</accent>",
     "identifierLabel": "Orúkọ olùmúlò tàbí Ímeèlì",
     "identifierPlaceholder": "friend@pollis.com",
@@ -151,13 +151,13 @@
     "sendFailed": "Kò ṣeé ṣe láti fi ìkésíni ránṣẹ́"
   },
   "joinRequests": {
-    "pageTitle": "Ìbéèrè Ìdarapọ̀ :: {{group}}",
+    "pageTitle": "Ìbéèrè Ìdarapọ̀ — {{group}}",
     "allPageTitle": "Ìbéèrè Ìdarapọ̀",
     "pendingFor": "Ìbéèrè tó ń dúró láti darapọ̀ mọ́ <accent>{{name}}</accent>",
     "empty": "Kò sí ìbéèrè tó ń dúró.",
     "allEmpty": "Kò sí ìbéèrè ìdarapọ̀ tó ń dúró.",
-    "approve": "fọwọ́ sí i",
-    "reject": "kọ̀ ọ́"
+    "approve": "Fọwọ́ sí i",
+    "reject": "Kọ̀ ọ́"
   },
   "joinByInvite": {
     "pageTitle": "Darapọ̀ mọ́ Ẹgbẹ́",

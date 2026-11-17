@@ -129,18 +129,9 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
           </Button>
 
           {onCancel && (
-            <button
-              data-testid="pin-create-cancel"
-              onClick={onCancel}
-              className="text-secondary font-mono self-center text-muted border-0"
-              style={{
-                background: "none",
-                cursor: "pointer",
-                padding: "0.25rem 0",
-              }}
-            >
+            <Button variant="ghost" data-testid="pin-create-cancel" onClick={onCancel} className="self-center">
               {t("common:actions.cancel")}
-            </button>
+            </Button>
           )}
         </div>
       </AuthCard>

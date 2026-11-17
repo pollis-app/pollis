@@ -65,6 +65,7 @@ import { isMac } from "../utils/platform";
 import { useShortcutLabel } from "../keyboard";
 import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 import { SkinPicker } from "../components/Preferences/SkinPicker";
+import { Chip } from "../components/ui/Chip";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -514,18 +515,18 @@ export const PreferencesPage: React.FC = observer(() => {
                 onHexInputChange={setAccentHexInput}
                 onColor={handleAccentColor}
                 title={t("accent.pickTitle")}
-                swatchStyle={{ width: 40, height: 40, borderRadius: 8, padding: 0 }}
               />
 
               {/* Quick presets: the same list mobile offers (design/theme.ts). */}
               <div className="flex gap-2 flex-wrap">
                 {ACCENT_PRESETS.map((preset) => (
-                  <button
+                  <Chip
                     key={preset.n}
                     data-testid={`pref-accent-${preset.n.toLowerCase()}`}
+                    selected={accentHex === preset.c}
                     aria-pressed={accentHex === preset.c}
                     onClick={() => handleAccentColor(preset.c)}
-                    className="px-2 py-0.5 text-secondary font-mono rounded-chip border transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+                    // Each preset previews its own colour, a runtime value.
                     style={{
                       background: `${preset.c}26`,
                       borderColor: accentHex === preset.c ? preset.c : `${preset.c}66`,
@@ -533,7 +534,7 @@ export const PreferencesPage: React.FC = observer(() => {
                     }}
                   >
                     {accentPresetLabel(preset.n)}
-                  </button>
+                  </Chip>
                 ))}
               </div>
             </section>
@@ -552,22 +553,23 @@ export const PreferencesPage: React.FC = observer(() => {
                 onHexInputChange={setBgHexInput}
                 onColor={handleBgColor}
                 title={t("background.pickTitle")}
-                swatchStyle={{ width: 40, height: 40, padding: 0, borderRadius: "0.5rem", outline: "2px solid var(--c-accent)", outlineOffset: "-1px" }}
+                outlined
               />
 
               {/* Quick presets (design/theme.ts); every one passes the contrast test. */}
               <div className="flex gap-2 flex-wrap">
                 {BACKGROUND_PRESETS.map((preset) => (
-                  <button
+                  <Chip
                     key={preset.n}
                     data-testid={`pref-background-${preset.n.toLowerCase()}`}
+                    selected={bgHex === preset.c}
                     aria-pressed={bgHex === preset.c}
                     onClick={() => handleBgColor(preset.c)}
-                    className={`px-2 py-0.5 text-secondary font-mono rounded-chip border text-fg transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black ${bgHex === preset.c ? "border-accent" : "border-line-strong"}`}
+                    // Each preset previews its own colour, a runtime value.
                     style={{ background: preset.c }}
                   >
                     {backgroundPresetLabel(preset.n)}
-                  </button>
+                  </Chip>
                 ))}
               </div>
             </section>

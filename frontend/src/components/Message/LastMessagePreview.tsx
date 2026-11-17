@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { ScrambleText } from "../ui/ScrambleText";
 import type { Message } from "../../types";
+import { useSkin } from "../../hooks/queries/usePreferences";
 
 interface LastMessagePreviewProps {
   // Handed down: the list batches every row's preview in one call (#874).
@@ -11,6 +12,8 @@ interface LastMessagePreviewProps {
 
 export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, isLoading }) => {
   const { t } = useTranslation("chat");
+  // Bracketed forms are Terminal's (#1965).
+  const isTerminal = useSkin() === "terminal";
 
   const text = message?.content_decrypted
     ? (message.sender_username
@@ -26,7 +29,7 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message,
     if (message.undecryptable) { return t("preview.undecryptable"); }
     const attCount = message.attachments?.length ?? 0;
     if (attCount > 0) {
-      const summary = t("preview.attachments", { count: attCount });
+      const summary = t(isTerminal ? "preview.attachmentsTerminal" : "preview.attachments", { count: attCount });
       return message.sender_username
         ? t("preview.withSender", { name: message.sender_username, text: summary })
         : summary;

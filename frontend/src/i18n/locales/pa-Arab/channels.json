@@ -143,7 +143,7 @@
     "acceptFailed": "دعوت منظور نہیں ہو سکی۔ فیر کوشش کرو۔"
   },
   "inviteMember": {
-    "pageTitle": "ممبر نوں دعوت دیو :: {{group}}",
+    "pageTitle": "ممبر نوں دعوت دیو — {{group}}",
     "intro": "کسے نوں <accent>{{name}}</accent> وچ دعوت دیو",
     "identifierLabel": "یوزر نیم یا ای میل",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +153,7 @@
     "sendFailed": "دعوت نہیں جا سکی"
   },
   "joinRequests": {
-    "pageTitle": "شامل ہون دیاں درخواستاں :: {{group}}",
+    "pageTitle": "شامل ہون دیاں درخواستاں — {{group}}",
     "allPageTitle": "شامل ہون دیاں درخواستاں",
     "pendingFor": "<accent>{{name}}</accent> وچ شامل ہون دیاں باقی درخواستاں",
     "empty": "کوئی درخواست باقی نہیں۔",

@@ -90,19 +90,6 @@
    border-bottom: 1px solid var(--vs-line);
 }
 
-.vs-focus-close {
-   display: inline-flex;
-   align-items: center;
-   padding: 0;
-   background: none;
-   border: 0;
-   color: var(--vs-ink-dim);
-}
-
-.vs-focus-close:hover {
-   color: var(--c-accent);
-}
-
 .vs-focus-main {
    flex: 1 1 auto;
    min-height: 0;
@@ -218,7 +205,7 @@
    display: none;
    margin-top: 0.5rem;
    padding: 0.1875rem 0.5rem;
-   border-radius: 6px;
+   border-radius: var(--radius-chip);
    font-size: 0.6875rem;
    letter-spacing: .04em;
    color: var(--c-warning);
@@ -321,7 +308,7 @@
    gap: 0.375rem;
    background: var(--vs-panel-2);
    border: 1px solid var(--vs-line);
-   border-radius: 6px;
+   border-radius: var(--radius-chip);
    padding: 0.1875rem 0.5rem;
    font-size: 0.75rem;
    color: var(--vs-ink);
@@ -362,7 +349,7 @@
    gap: 0.3125rem;
    background: var(--c-surface-raised);
    border: 1px solid var(--c-border);
-   border-radius: 6px;
+   border-radius: var(--radius-chip);
    padding: 0.1875rem 0.4375rem;
    font-size: 0.6875rem;
    color: var(--c-text-dim);
@@ -455,10 +442,11 @@
    border-color: var(--c-accent);
 }
 
-.vs-hbtn {
+/* Drawn through `IconButton` (#1967); `button.` outranks its `.icon-btn-sm` look. */
+button.vs-hbtn {
    width: 2.375rem;
    height: 2.375rem;
-   border-radius: 8px;
+   border-radius: var(--radius-control);
    display: grid;
    place-items: center;
    background: var(--vs-panel-2);
@@ -466,7 +454,8 @@
    color: var(--vs-ink);
 }
 
-.vs-hbtn:hover {
+button.vs-hbtn:hover {
+   background: var(--vs-panel-2);
    border-color: var(--vs-border);
    color: var(--c-accent);
 }
@@ -485,7 +474,7 @@
    gap: 0.5rem;
    background: var(--vs-panel-2);
    border: 1px solid var(--vs-line);
-   border-radius: 7px;
+   border-radius: var(--radius-control);
    padding: 0.375rem 0.5625rem;
 }
 
@@ -529,10 +518,11 @@
    gap: 0.375rem;
 }
 
-.vs-tray-btn {
+/* Drawn through `IconButton` (#1967); `button.` outranks its `.icon-btn-sm` look. */
+button.vs-tray-btn {
    width: 1.75rem;
    height: 1.75rem;
-   border-radius: 6px;
+   border-radius: var(--radius-control);
    display: grid;
    place-items: center;
    background: var(--vs-panel);
@@ -540,27 +530,28 @@
    color: var(--vs-ink);
 }
 
-.vs-tray-btn:hover {
+button.vs-tray-btn:hover {
+   background: var(--vs-panel);
    border-color: var(--vs-border);
    color: var(--c-accent);
 }
 
 /* While connecting the gate has no room to act on; Leave stays live. */
-.vs-tray-btn:disabled {
+button.vs-tray-btn:disabled {
    opacity: 0.5;
    cursor: default;
    pointer-events: none;
 }
 
-.vs-tray-btn.on {
+button.vs-tray-btn.on {
    background: var(--c-accent);
-   color: var(--c-bg);
+   color: var(--c-on-accent);
    border-color: var(--c-accent);
 }
 
-.vs-tray-btn.danger.on {
+button.vs-tray-btn.danger.on {
    background: var(--vs-red);
-   color: var(--c-bg);
+   color: var(--c-on-danger);
    border-color: var(--vs-red);
 }
 
@@ -568,34 +559,14 @@
    muted (red `on`): the mic is ready and nothing is wrong, it is just
    waiting for the key. Dimmed rather than coloured, with a dashed border
    to read as "standing by" at a glance. */
-.vs-tray-btn.armed {
+button.vs-tray-btn.armed {
    color: var(--c-text-dim);
    border-style: dashed;
    border-color: var(--c-border-active);
 }
 
-.vs-tray-btn.armed:hover {
+button.vs-tray-btn.armed:hover {
    color: var(--c-accent);
-}
-
-.vs-tray-leave {
-   display: inline-flex;
-   align-items: center;
-   gap: 0.375rem;
-   height: 1.75rem;
-   padding: 0 0.625rem;
-   border-radius: 6px;
-   background: var(--vs-panel);
-   border: 1px solid var(--vs-red-dim);
-   color: var(--vs-red);
-   font-size: 0.75rem;
-   font-weight: 600;
-   letter-spacing: .04em;
-}
-
-.vs-tray-leave:hover {
-   background: color-mix(in srgb, var(--c-danger) 12%, transparent);
-   border-color: var(--vs-red);
 }
 
 .vs-tray-sep {

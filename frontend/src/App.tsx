@@ -37,6 +37,7 @@ import { clearAllDrafts } from "./utils/drafts";
 import { AUTO_LOCK_EVENT } from "./utils/autoLock";
 import { clearsQueryCache } from "./utils/queryCacheLifecycle";
 import { adoptUserLanguage } from "./i18n";
+import { forgetBootLook } from "./utils/colorUtils";
 
 type AppState =
   | "initializing"
@@ -505,6 +506,9 @@ function MainApp() {
       await api.logout(deleteData);
     } catch (error) {
       console.error("Failed to logout:", error);
+    }
+    if (deleteData) {
+      forgetBootLook();
     }
     appStore.logout();
     try {

@@ -8,7 +8,8 @@
     "permalinkResolving": "A abrir a mensagem…",
     "noMatches": "Sem resultados",
     "emptyHint": "Ir para um canal, canal de voz, mensagem direta, utilizador ou página de definições",
-    "live": "[em direto]",
+    "live": "Em direto",
+    "liveTerminal": "[em direto]",
     "searchMessagesFor": "Pesquisar mensagens por \"{{query}}\""
   },
   "pages": {

@@ -147,7 +147,7 @@
     "acceptFailed": "تعذّر قبول الدعوة. حاول مرة أخرى."
   },
   "inviteMember": {
-    "pageTitle": "دعوة عضو :: {{group}}",
+    "pageTitle": "دعوة عضو — {{group}}",
     "intro": "ادعُ شخصًا إلى <accent>{{name}}</accent>",
     "identifierLabel": "اسم المستخدم أو البريد الإلكتروني",
     "identifierPlaceholder": "friend@pollis.com",
@@ -157,7 +157,7 @@
     "sendFailed": "تعذّر إرسال الدعوة"
   },
   "joinRequests": {
-    "pageTitle": "طلبات الانضمام :: {{group}}",
+    "pageTitle": "طلبات الانضمام — {{group}}",
     "allPageTitle": "طلبات الانضمام",
     "pendingFor": "طلبات الانضمام المعلّقة إلى <accent>{{name}}</accent>",
     "empty": "لا توجد طلبات قيد الانتظار.",

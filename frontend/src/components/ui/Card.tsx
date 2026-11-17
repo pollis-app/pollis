@@ -24,9 +24,8 @@ export const Card: React.FC<CardProps> = ({
 }) => (
   <div
     data-testid={testId}
-    className={`bg-surface border-2 border-line ${className}`}
+    className={`bg-surface border-2 border-line rounded-panel ${className}`}
     style={{
-      borderRadius: "6px",
       padding: paddingMap[padding],
       ...style,
     }}

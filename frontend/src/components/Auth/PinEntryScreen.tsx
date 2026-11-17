@@ -117,31 +117,13 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
           </Button>
 
           <div className="flex flex-col gap-1 items-center">
-            <button
-              data-testid="pin-forgot-button"
-              onClick={onForgotPin}
-              className="text-secondary font-mono text-muted border-0"
-              style={{
-                background: "none",
-                cursor: "pointer",
-                padding: "0.25rem 0",
-              }}
-            >
+            <Button variant="ghost" data-testid="pin-forgot-button" onClick={onForgotPin}>
               {t("pinEntry.forgot")}
-            </button>
+            </Button>
             {onSwitchAccount && (
-              <button
-                data-testid="pin-switch-account-button"
-                onClick={onSwitchAccount}
-                className="text-secondary font-mono text-muted border-0"
-                style={{
-                  background: "none",
-                  cursor: "pointer",
-                  padding: "0.25rem 0",
-                }}
-              >
+              <Button variant="ghost" data-testid="pin-switch-account-button" onClick={onSwitchAccount}>
                 {t("pinEntry.switchAccount")}
-              </button>
+              </Button>
             )}
           </div>
         </div>

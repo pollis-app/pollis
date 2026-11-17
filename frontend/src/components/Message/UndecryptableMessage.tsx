@@ -5,6 +5,7 @@ import { LockKeyhole } from "lucide-react";
 import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
 import type { Message } from "../../types";
 import type { Skin } from "../../utils/colorUtils";
+import { LinkButton } from "../ui/LinkButton";
 
 interface UndecryptableMessageProps {
   message: Message;
@@ -20,14 +21,9 @@ export const UndecryptableMessage: React.FC<UndecryptableMessageProps> = ({ mess
   const body = t("message.undecryptable.body", { count });
   const detail = t("message.undecryptable.detail");
   const diagnosticsLink = (
-    <button
-      type="button"
-      data-testid="undecryptable-diagnostics-link"
-      className="underline bg-transparent text-accent"
-      onClick={() => void navigate({ to: "/diagnostics" })}
-    >
+    <LinkButton data-testid="undecryptable-diagnostics-link" onClick={() => void navigate({ to: "/diagnostics" })}>
       {t("message.undecryptable.diagnostics")}
-    </button>
+    </LinkButton>
   );
 
   if (skin === "modern") {

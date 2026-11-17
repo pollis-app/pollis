@@ -64,7 +64,8 @@
     "empty": "Ainda sem mensagens. Comece a conversa.",
     "unknownAuthor": "Desconhecido",
     "blockedAuthor": "utilizador bloqueado",
-    "blockedBody": "[bloqueado]"
+    "blockedBody": "Bloqueado",
+    "blockedBodyTerminal": "[bloqueado]"
   },
   "replyBar": {
     "replyingTo": "a responder a <name>{{name}}</name>",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "Fila",
-    "pendingPlaceholder": "[Mensagem pendente]",
+    "pendingPlaceholder": "Mensagem pendente",
+    "pendingPlaceholderTerminal": "[Mensagem pendente]",
     "cancel": "Cancelar mensagem",
     "retry": "tentar novamente",
     "failedCount_one": "falhou ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "Ainda sem mensagens",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} anexo]",
-    "attachments_other": "[{{count}} anexos]",
+    "attachments_one": "{{count}} anexo",
+    "attachments_other": "{{count}} anexos",
+    "attachmentsTerminal_one": "[{{count}} anexo]",
+    "attachmentsTerminal_other": "[{{count}} anexos]",
     "undecryptable": "Não foi possível desencriptar uma mensagem neste dispositivo"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "Não foi possível carregar",
     "failedToDownload": "Não foi possível transferir",
     "lightboxFetch": "obter",
-    "lightboxDone": "[ concluído ]",
-    "lightboxDownload": "[transferir]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "Concluído",
+    "lightboxDoneTerminal": "[ concluído ]",
+    "lightboxDownload": "Transferir",
+    "lightboxDownloadTerminal": "[transferir]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Mostrar multimédia sensível: {{filename}}",
     "sensitiveHide": "Ocultar {{filename}}"
   },

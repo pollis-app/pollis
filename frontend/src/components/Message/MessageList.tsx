@@ -743,7 +743,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           <span
             className="font-mono text-body text-muted"
           >
-            {t("list.blockedBody")}
+            {t(skin === "terminal" ? "list.blockedBodyTerminal" : "list.blockedBody")}
           </span>
         </div>
       </div>

@@ -8,7 +8,8 @@
     "permalinkResolving": "መልዕክቱን በመክፈት ላይ…",
     "noMatches": "ምንም የሚዛመድ አልተገኘም",
     "emptyHint": "ወደ ቻናል፣ የድምፅ ቻናል፣ ቀጥታ መልዕክት፣ ተጠቃሚ ወይም የቅንብሮች ገጽ ይሂዱ",
-    "live": "[ቀጥታ]",
+    "live": "ቀጥታ",
+    "liveTerminal": "[ቀጥታ]",
     "searchMessagesFor": "\"{{query}}\"ን በመልዕክቶች ውስጥ ፈልግ"
   },
   "pages": {

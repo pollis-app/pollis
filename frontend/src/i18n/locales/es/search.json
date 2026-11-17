@@ -8,7 +8,8 @@
     "permalinkResolving": "Abriendo el mensaje…",
     "noMatches": "No se han encontrado coincidencias",
     "emptyHint": "Ve a un canal, canal de voz, MD, usuario o página de ajustes",
-    "live": "[directo]"
+    "live": "Directo",
+    "liveTerminal": "[directo]"
   },
   "pages": {
     "userName": "Usuario",

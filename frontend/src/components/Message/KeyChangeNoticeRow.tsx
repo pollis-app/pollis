@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
 import { formatFullTimestamp, formatTimeOfDay } from "../../utils/format";
 import type { Skin } from "../../utils/colorUtils";
+import { LinkButton } from "../ui/LinkButton";
 
 interface KeyChangeNoticeRowProps {
   noticeId: number;
@@ -39,14 +40,9 @@ export const KeyChangeNoticeRow: React.FC<KeyChangeNoticeRowProps> = React.memo(
       <ShieldAlert size={14} aria-hidden="true" className="flex-shrink-0 text-accent" />
       <span data-testid="key-change-notice-text">
         {t("keyChange.notice", { name })}{" "}
-        <button
-          type="button"
-          data-testid="key-change-notice-verify"
-          className="underline bg-transparent text-accent"
-          onClick={() => onVerify(peerUserId)}
-        >
+        <LinkButton data-testid="key-change-notice-verify" onClick={() => onVerify(peerUserId)}>
           {t("keyChange.verify")}
-        </button>
+        </LinkButton>
       </span>
       <bdi
         dir="ltr"

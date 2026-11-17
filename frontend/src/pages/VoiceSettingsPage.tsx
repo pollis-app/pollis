@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
+import { Select } from "../components/ui/Select";
 import { VoiceInputModeSelect } from "../components/Voice/VoiceInputModeSelect";
 import { ResolutionSelect } from "../components/Voice/ResolutionSelect";
 import { useOutgoingResolution } from "../hooks/useOutgoingResolution";
@@ -47,29 +47,18 @@ interface DeviceSelectProps {
   testId?: string;
 }
 
+// A device picker. Audio offers the OS default first; with nothing listed, the default is the one option.
 const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onChange, fallbackLabel, offerDefault, testId }) => (
-  <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
-    <span className="text-muted">{label}</span>
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        data-testid={testId}
-        {...selectSkin}
-      >
-        {offerDefault || devices.length === 0 ? <option value="default">{fallbackLabel}</option> : null}
-        {devices.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.name}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        size={14}
-        className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted"
-      />
-    </div>
-  </div>
+  <Select
+    label={label}
+    value={value}
+    onChange={onChange}
+    data-testid={testId}
+    options={[
+      ...(offerDefault || devices.length === 0 ? [{ value: "default", label: fallbackLabel }] : []),
+      ...devices.map((d) => ({ value: d.id, label: d.name })),
+    ]}
+  />
 );
 
 interface NoiseSuppressionSelectProps {
@@ -90,29 +79,12 @@ const NOISE_SUPPRESSION_LEVELS: NoiseSuppressionLevel[] = ["off", "low", "modera
 const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, onChange }) => {
   const { t } = useTranslation("voice");
   return (
-    <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
-      <span className="text-muted">{t("settings.noiseSuppression")}</span>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value as NoiseSuppressionLevel)}
-          {...selectSkin}
-        >
-          {NOISE_SUPPRESSION_LEVELS.map((level) => (
-            <option key={level} value={level}>
-              {t(NOISE_SUPPRESSION_LABEL_KEY[level])}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          size={14}
-          className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted"
-        />
-      </div>
-      <span className="text-secondary font-mono text-muted">
-        {t("settings.noiseSuppressionHint")}
-      </span>
-    </div>
+    <Select<NoiseSuppressionLevel>
+      label={t("settings.noiseSuppression")}
+      value={value}
+      onChange={onChange}
+      options={NOISE_SUPPRESSION_LEVELS.map((level) => ({ value: level, label: t(NOISE_SUPPRESSION_LABEL_KEY[level]) }))}
+    />
   );
 };
 
@@ -186,32 +158,6 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
       )}
     </div>
   );
-};
-
-// Token-backed `<select>` skin; `selectStyle` holds the rest.
-const selectClass = "bg-surface text-fg border-2 border-line";
-
-const selectStyle: React.CSSProperties = {
-  appearance: "none",
-  WebkitAppearance: "none",
-  // Trailing padding for the caret, which flips under `dir=rtl`.
-  paddingBlock: "6px",
-  paddingInlineStart: "8px",
-  paddingInlineEnd: "28px",
-  fontFamily: "var(--font-mono)",
-  fontSize: "inherit",
-  outline: "none",
-  cursor: "pointer",
-  borderRadius: "0.5rem",
-  width: "100%",
-};
-
-// Both selects' skin, plus the border that marks focus.
-const selectSkin = {
-  className: selectClass,
-  style: selectStyle,
-  onFocus: (e: React.FocusEvent<HTMLSelectElement>) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; },
-  onBlur: (e: React.FocusEvent<HTMLSelectElement>) => { e.currentTarget.style.borderColor = "var(--c-border)"; },
 };
 
 /** Push the live APM config; a no-op outside a call. */
@@ -437,7 +383,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                   letterbox; RemoteVideoTile contains + auto-mirrors the key. */}
               <div
                 data-testid="voice-camera-preview"
-                className="flex items-center justify-center overflow-hidden rounded border border-line"
+                className="flex items-center justify-center overflow-hidden rounded-panel border border-line"
                 style={{
                   width: "100%",
                   maxWidth: 320,

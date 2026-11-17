@@ -141,7 +141,7 @@
     "acceptFailed": "초대를 수락하지 못했습니다. 다시 시도하세요."
   },
   "inviteMember": {
-    "pageTitle": "멤버 초대 :: {{group}}",
+    "pageTitle": "멤버 초대 — {{group}}",
     "intro": "<accent>{{name}}</accent>에 초대하기",
     "identifierLabel": "사용자 이름 또는 이메일",
     "identifierPlaceholder": "friend@pollis.com",
@@ -151,7 +151,7 @@
     "sendFailed": "초대를 보내지 못했습니다"
   },
   "joinRequests": {
-    "pageTitle": "가입 요청 :: {{group}}",
+    "pageTitle": "가입 요청 — {{group}}",
     "allPageTitle": "가입 요청",
     "pendingFor": "<accent>{{name}}</accent>에 대한 대기 중인 가입 요청",
     "empty": "대기 중인 요청이 없습니다.",
