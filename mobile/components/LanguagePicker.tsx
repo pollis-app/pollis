@@ -21,6 +21,23 @@ export function LanguagePicker() {
 
   return (
     <View testID="pref-language" style={{ gap: space.sm }}>
+      {/* #1949: above the list, so it is on screen when it appears; under it, 24 rows pushed it off the page. */}
+      {restartPending ? (
+        <View
+          style={{ flexDirection: "row", alignItems: "flex-start", gap: space.xs }}
+        >
+          <View style={{ paddingTop: 1 }}>
+            <Icon.info size={16} color={semantic.accent} />
+          </View>
+          <Text
+            testID="pref-language-restart"
+            accessibilityRole="alert"
+            style={[ty.secondary, { flex: 1, color: semantic.text }]}
+          >
+            {t("mobile:language.restartRequired")}
+          </Text>
+        </View>
+      ) : null}
       <View accessibilityRole="radiogroup" accessibilityLabel={t("language.ariaLabel")}>
         <Group>
           {SUPPORTED_LANGUAGES.map((option) => (
@@ -45,22 +62,6 @@ export function LanguagePicker() {
       <Text testID="pref-language-note" style={[ty.meta, { textAlign: "left" }]}>
         {t("language.description")}
       </Text>
-      {restartPending ? (
-        <View
-          style={{ flexDirection: "row", alignItems: "flex-start", gap: space.xs }}
-        >
-          <View style={{ paddingTop: 1 }}>
-            <Icon.info size={16} color={semantic.accent} />
-          </View>
-          <Text
-            testID="pref-language-restart"
-            accessibilityRole="alert"
-            style={[ty.secondary, { flex: 1, color: semantic.text }]}
-          >
-            {t("mobile:language.restartRequired")}
-          </Text>
-        </View>
-      ) : null}
     </View>
   );
 }

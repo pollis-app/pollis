@@ -1,6 +1,14 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+# A run that stops in Arabic or Spanish would leave the device in it (#1949).
+onFlowComplete:
+  - runFlow:
+      when:
+        notVisible:
+          id: "pref-language-heading"
+          text: "Language"
+      file: ../subflows/restore-english.yaml
 ---
 # LANGUAGE (#1074) — the mobile counterpart of e2e/i18n.spec.ts: switching
 # language changes rendered copy, the choice survives a relaunch, and picking
@@ -80,7 +88,7 @@ tags:
 - takeScreenshot: i18n-03-spanish-persisted
 
 # Arabic: copy flips immediately; the layout direction needs a relaunch, and
-# the screen says so.
+# the screen says so, above the list so the note is on screen (#1949).
 - tapOn:
     id: "radio-language-ar"
 - assertVisible:
