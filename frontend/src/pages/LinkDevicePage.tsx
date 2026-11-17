@@ -23,7 +23,7 @@ type Step =
 
 const Heading: React.FC<{ title: string; subtitle?: string; testId?: string }> = ({ title, subtitle, testId }) => (
   <div className="flex flex-col gap-3" data-testid={testId}>
-    <h1 className="text-title text-fg">{title}</h1>
+    <h2 className="text-title text-fg">{title}</h2>
     {subtitle && <p className="text-body text-muted leading-relaxed">{subtitle}</p>}
   </div>
 );

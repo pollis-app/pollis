@@ -36,7 +36,7 @@
     "muteDescription": "Muted channels don't notify you, except when someone mentions you by name."
   },
   "createChannel": {
-    "pageTitle": "New Channel",
+    "pageTitle": "New channel",
     "nameLabel": "Channel Name",
     "namePlaceholder": "general",
     "slugLabel": "Slug",
@@ -55,7 +55,7 @@
     "createFailed": "Failed to create channel"
   },
   "renameChannel": {
-    "pageTitle": "Rename Channel",
+    "pageTitle": "Rename channel",
     "nameLabel": "Channel Name",
     "namePlaceholder": "general",
     "descriptionLabel": "Description",
@@ -67,7 +67,7 @@
     "notAdmin": "You don't have admin permissions for this group."
   },
   "createGroup": {
-    "pageTitle": "Create Group",
+    "pageTitle": "Create group",
     "nameLabel": "Group Name",
     "namePlaceholder": "Engineering",
     "slugLabel": "Slug",
@@ -85,7 +85,7 @@
     "createFailed": "Failed to create group"
   },
   "renameGroup": {
-    "pageTitle": "Rename Group",
+    "pageTitle": "Rename group",
     "nameLabel": "Group Name",
     "namePlaceholder": "My Group",
     "descriptionLabel": "Description",
@@ -97,7 +97,7 @@
     "notAdmin": "You don't have admin permissions for this group."
   },
   "leaveGroup": {
-    "pageTitle": "Leave Group",
+    "pageTitle": "Leave group",
     "confirm": "Are you sure you want to leave <strong>{{name}}</strong>?",
     "rejoinNotice": "You will need a new invite to rejoin.",
     "confirmButton": "Yes, Leave",
@@ -127,7 +127,7 @@
     }
   },
   "kickMember": {
-    "pageTitle": "Remove Member",
+    "pageTitle": "Remove member",
     "confirm": "Remove <strong>{{name}}</strong> from this group?",
     "rejoinNotice": "They will need a new invite to rejoin.",
     "confirmButton": "Yes, Remove",
@@ -143,7 +143,7 @@
     "acceptFailed": "Couldn't accept the invite. Try again."
   },
   "inviteMember": {
-    "pageTitle": "Invite Member — {{group}}",
+    "pageTitle": "Invite member — {{group}}",
     "intro": "Invite someone to <accent>{{name}}</accent>",
     "identifierLabel": "Username or Email",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,8 +153,8 @@
     "sendFailed": "Failed to send invite"
   },
   "joinRequests": {
-    "pageTitle": "Join Requests — {{group}}",
-    "allPageTitle": "Join Requests",
+    "pageTitle": "Join requests — {{group}}",
+    "allPageTitle": "Join requests",
     "pendingFor": "Pending requests to join <accent>{{name}}</accent>",
     "empty": "No pending requests.",
     "allEmpty": "No pending join requests.",
@@ -162,7 +162,7 @@
     "reject": "Reject"
   },
   "joinByInvite": {
-    "pageTitle": "Join a Group",
+    "pageTitle": "Join a group",
     "heading": "Join a group",
     "headingTerminal": "> JOIN A GROUP",
     "headingNamed": "Join {{name}}?",

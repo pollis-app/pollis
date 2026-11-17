@@ -16,11 +16,8 @@ import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { breadcrumbTrail, type Segment } from "../../utils/breadcrumbTrail";
 
-interface Segment {
-  label: string;
-  to: string;
-}
 
 /** Breadcrumb trail from the pathname; call from an `observer()` (reads `appStore.channels`). */
 function useBreadcrumbTrail(): Segment[] {
@@ -30,133 +27,10 @@ function useBreadcrumbTrail(): Segment[] {
   const { data: dmConversations = [] } = useDMConversations();
   const channels = appStore.channels;
 
-  return useMemo<Segment[]>(() => {
-    const out: Segment[] = [{ label: t("breadcrumb.home"), to: "/" }];
-
-    if (pathname === "/") {
-      return out;
-    }
-
-    if (pathname.startsWith("/groups")) {
-      out.push({ label: t("breadcrumb.groups"), to: "/groups" });
-
-      const groupIdMatch = pathname.match(/^\/groups\/([^/]+)/);
-      const groupId = groupIdMatch?.[1];
-
-      if (groupId === "new") {
-        out.push({ label: t("breadcrumb.createGroup"), to: "/groups/new" });
-      } else if (groupId === "search") {
-        out.push({ label: t("breadcrumb.findGroup"), to: "/groups/search" });
-      } else if (groupId) {
-        const group = groupsWithChannels?.find((g) => g.id === groupId);
-        if (group) {
-          out.push({ label: group.name, to: `/groups/${groupId}` });
-        }
-
-        if (pathname.includes("/channels/")) {
-          const channelIdMatch = pathname.match(/\/channels\/([^/]+)/);
-          const channelId = channelIdMatch?.[1];
-          if (channelId === "new") {
-            out.push({ label: t("breadcrumb.newChannel"), to: `/groups/${groupId}/channels/new` });
-          } else if (channelId) {
-            const groupChannels = channels[groupId] ?? [];
-            const ch = groupChannels.find((c) => c.id === channelId);
-            if (ch) {
-              out.push({ label: ch.name, to: `/groups/${groupId}/channels/${channelId}` });
-            }
-          }
-        } else if (pathname.includes("/voice/")) {
-          const channelIdMatch = pathname.match(/\/voice\/([^/]+)/);
-          const channelId = channelIdMatch?.[1];
-          const ch = group?.channels.find((c) => c.id === channelId);
-          out.push({
-            label: ch?.name ?? t("breadcrumb.voice"),
-            to: `/groups/${groupId}/voice/${channelId}`,
-          });
-        } else if (pathname.endsWith("/join-requests")) {
-          out.push({ label: t("breadcrumb.joinRequests"), to: `/groups/${groupId}/join-requests` });
-        } else if (pathname.endsWith("/invite")) {
-          out.push({ label: t("breadcrumb.inviteMember"), to: `/groups/${groupId}/invite` });
-        } else if (pathname.endsWith("/leave")) {
-          out.push({ label: t("breadcrumb.leaveGroup"), to: `/groups/${groupId}/leave` });
-        } else if (pathname.endsWith("/members")) {
-          out.push({ label: t("breadcrumb.members"), to: `/groups/${groupId}/members` });
-        } else if (pathname.includes("/members/") && pathname.endsWith("/kick")) {
-          out.push({ label: t("breadcrumb.members"), to: `/groups/${groupId}/members` });
-          out.push({ label: t("breadcrumb.removeMember"), to: pathname });
-        }
-      }
-    } else if (pathname.startsWith("/dms")) {
-      out.push({ label: t("breadcrumb.directMessages"), to: "/dms" });
-
-      const convIdMatch = pathname.match(/^\/dms\/([^/]+)/);
-      const conversationId = convIdMatch?.[1];
-
-      if (conversationId === "new") {
-        out.push({ label: t("breadcrumb.newMessage"), to: "/dms/new" });
-      } else if (conversationId === "requests") {
-        out.push({ label: t("breadcrumb.requests"), to: "/dms/requests" });
-      } else if (conversationId === "blocked") {
-        out.push({ label: t("breadcrumb.blockedUsers"), to: "/dms/blocked" });
-      } else if (conversationId) {
-        const conv = dmConversations.find((c) => c.id === conversationId);
-        if (conv) {
-          out.push({
-            label: `@${conv.user2_identifier}`,
-            to: `/dms/${conversationId}`,
-          });
-        }
-        if (pathname.endsWith("/settings")) {
-          out.push({
-            label: t("breadcrumb.conversationSettings"),
-            to: `/dms/${conversationId}/settings`,
-          });
-        }
-      }
-    } else if (pathname === "/settings") {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-    } else if (pathname === "/preferences") {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-      out.push({ label: t("breadcrumb.preferences"), to: "/preferences" });
-    } else if (pathname === "/preferences/language") {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-      out.push({ label: t("breadcrumb.preferences"), to: "/preferences" });
-      out.push({ label: t("breadcrumb.language"), to: "/preferences/language" });
-    } else if (pathname === "/user") {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-      out.push({ label: t("breadcrumb.userSettings"), to: "/user" });
-    } else if (pathname.startsWith("/user/")) {
-      out.push({ label: t("breadcrumb.profile"), to: pathname });
-    } else if (pathname === "/security") {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-      out.push({ label: t("breadcrumb.security"), to: "/security" });
-    } else if (pathname === "/security/events") {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-      out.push({ label: t("breadcrumb.security"), to: "/security" });
-      out.push({ label: t("breadcrumb.securityEvents"), to: "/security/events" });
-    } else if (pathname === "/security/copy-history") {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-      out.push({ label: t("breadcrumb.security"), to: "/security" });
-      out.push({ label: t("breadcrumb.copyHistory"), to: "/security/copy-history" });
-    } else if (pathname.startsWith("/security/history-transfer/")) {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-      out.push({ label: t("breadcrumb.security"), to: "/security" });
-      out.push({ label: t("breadcrumb.historyRequest"), to: pathname });
-    } else if (pathname === "/voice-settings") {
-      out.push({ label: t("breadcrumb.account"), to: "/settings" });
-      out.push({ label: t("breadcrumb.voiceSettings"), to: "/voice-settings" });
-    } else if (pathname === "/invites") {
-      out.push({ label: t("breadcrumb.invites"), to: "/invites" });
-    } else if (pathname === "/join" || pathname.startsWith("/invite/")) {
-      out.push({ label: t("breadcrumb.joinAGroup"), to: "/join" });
-    } else if (pathname === "/join-requests") {
-      out.push({ label: t("breadcrumb.joinRequests"), to: "/join-requests" });
-    } else if (pathname === "/search") {
-      out.push({ label: t("breadcrumb.search"), to: "/search" });
-    }
-
-    return out;
-  }, [pathname, groupsWithChannels, dmConversations, channels, t]);
+  return useMemo<Segment[]>(
+    () => breadcrumbTrail(pathname, { groups: groupsWithChannels, channels, dms: dmConversations }, t),
+    [pathname, groupsWithChannels, dmConversations, channels, t],
+  );
 }
 
 interface HistoryNavProps {
@@ -217,7 +91,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
     return (
       <div
         data-testid="breadcrumb-nav"
-        className="h-[2.75rem] flex-shrink-0 flex items-center gap-3 border-b border-line bg-surface px-3"
+        className="h-bar flex-shrink-0 flex items-center gap-3 border-b border-line bg-surface px-3"
       >
         <HistoryNav iconSize={18} />
         <nav
@@ -279,16 +153,8 @@ export const BreadcrumbNav: React.FC = observer(() => {
   return (
     <div
       data-testid="breadcrumb-nav"
-      className="border-b border-line bg-surface"
-      style={{
-        height: 28,
-        flexShrink: 0,
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        paddingInlineStart: 8,
-        paddingInlineEnd: 12,
-      }}
+      // `h-bar` in both skins (#1966), the height every chrome bar shares.
+      className="h-bar flex-shrink-0 flex items-center gap-2 border-b border-line bg-surface ps-2 pe-3"
     >
       <HistoryNav iconSize={14} />
       <span

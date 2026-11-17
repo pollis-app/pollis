@@ -104,7 +104,7 @@ for (const skin of SKINS) {
 
     test("Voice & video picks devices with Select: the skin's UI face, its own label", async ({ page }) => {
       await boot(page, skin);
-      await openPage(page, "Voice & Video", "voice-settings-page");
+      await openPage(page, "Voice & video", "voice-settings-page");
       const selects = page.getByTestId("voice-settings-page").locator("select");
       await expect(selects.first()).toBeVisible();
       // Every select is named by a <label>, so it has an accessible name.

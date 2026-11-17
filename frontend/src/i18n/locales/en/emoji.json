@@ -27,7 +27,7 @@
     "numbered": "Skin tone {{index}}"
   },
   "manage": {
-    "title": "Custom Emoji",
+    "title": "Custom emoji",
     "signInRequired": "Please sign in",
     "dropPrompt": "Drag an image here, or click to browse",
     "dropNow": "Drop to use this image",
