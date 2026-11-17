@@ -23,6 +23,18 @@ tag date, UTC.
 
 ---
 
+## v1.19.15 — 2026-11-17
+
+- **Adding a Windows computer to your account works.** Signing in on a new
+  Windows device, by approval from another device or with your Secret Key, now
+  finishes instead of failing at the last step.
+- Privacy hardening for the Windows app.
+- When the server turns a request down, you now see what to do about it (for
+  example, check your device's date and time) instead of a raw error line.
+- Korean text wraps between words rather than in the middle of one.
+- Approving a request to join a group no longer waits on unrelated work, and
+  shows that it is busy while it runs.
+
 ## v1.19.14 — 2026-11-16
 
 - **Seventeen more languages.** Pollis now also comes in Korean, Japanese,
