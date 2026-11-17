@@ -5,7 +5,7 @@ import { KeyboardController } from "react-native-keyboard-controller";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { MessageBodyInline } from "../chat/MessageBody";
-import { AttachmentTile } from "../chat/AttachmentTile";
+import { MessageAttachments } from "../chat/MessageAttachments";
 import { haptic } from "../../lib/haptics";
 import { linkA11yActions, runLinkA11yAction } from "../../lib/openLink";
 import { LONG_PRESS_MS } from "../../lib/pressFeedback";
@@ -127,16 +127,11 @@ export function VaultEntryRow({
         </Text>
       ) : null}
       {attachments.length > 0 ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingTop: 2 }}>
-          {attachments.map((attachment) => (
-            <AttachmentTile
-              key={attachment.id}
-              attachment={attachment}
-              onOpen={onOpenAttachment}
-              onLongPress={onLongPressTouch}
-            />
-          ))}
-        </View>
+        <MessageAttachments
+          attachments={attachments}
+          onOpen={onOpenAttachment}
+          onLongPress={onLongPressTouch}
+        />
       ) : null}
     </Pressable>
   );

@@ -16,7 +16,7 @@ import { fonts, r, semantic, type as ty } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator, receiptLabel } from "./ReceiptIndicator";
-import { AttachmentTile } from "./AttachmentTile";
+import { MessageAttachments } from "./MessageAttachments";
 import { SwipeToReply } from "./SwipeToReply";
 import { UnsentActions } from "./UnsentActions";
 import { findMentions } from "../../lib/mentions";
@@ -331,12 +331,14 @@ export function MessageRow({
           )}
           <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
             {showHeader ? (
+              // One line, desktop's: the name (in the text colour; the accent is rare) then the time.
+              // Never wraps, so a long name truncates instead of pushing the time under it.
               <View
                 style={{
                   flexDirection: "row",
                   alignItems: "baseline",
-                  flexWrap: "wrap",
                   columnGap: 8,
+                  minWidth: 0,
                 }}
               >
                 <Text
@@ -344,7 +346,7 @@ export function MessageRow({
                   style={{
                     fontFamily: fonts.bold,
                     fontSize: 16,
-                    color: semantic.accent,
+                    color: semantic.text,
                     flexShrink: 1,
                   }}
                 >
@@ -357,6 +359,7 @@ export function MessageRow({
                     accessibilityElementsHidden
                     style={{
                       alignSelf: "center",
+                      flexShrink: 0,
                       backgroundColor: semantic.accentFaint,
                       borderRadius: r.pill,
                       paddingHorizontal: 6,
@@ -369,8 +372,10 @@ export function MessageRow({
                 ) : null}
                 {/* A pending row looks sent: only a failure is labelled, as on desktop. */}
                 <Text
+                  numberOfLines={1}
                   style={[
                     ty.meta,
+                    { flexShrink: 0 },
                     failed ? { fontFamily: fonts.semibold, color: semantic.danger } : null,
                   ]}
                 >
@@ -401,7 +406,14 @@ export function MessageRow({
                 ) : null}
               </Text>
             ) : null}
-            {/* Collapsed rows show their status line under the body. */}
+            {attachments && attachments.length > 0 ? (
+              <MessageAttachments
+                attachments={attachments}
+                onOpen={onOpenAttachment}
+                onLongPress={onLongPressTouch}
+              />
+            ) : null}
+            {/* Collapsed rows show their status line under the whole message, attachments included. */}
             {!showHeader && (failed || (showReceipt && receipt)) ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 {failed ? (
@@ -421,6 +433,7 @@ export function MessageRow({
                 />
               </View>
             ) : null}
+            {/* A failed send's way out goes under the whole message, never between caption and media. */}
             {failed ? (
               <UnsentActions
                 messageId={messageId ?? ""}
@@ -428,25 +441,6 @@ export function MessageRow({
                 onRetry={onRetry}
                 onDiscard={onDiscard}
               />
-            ) : null}
-            {attachments && attachments.length > 0 ? (
-              <View
-                style={{
-                  flexDirection: "row",
-                  flexWrap: "wrap",
-                  gap: 6,
-                  marginTop: 4,
-                }}
-              >
-                {attachments.map((att) => (
-                  <AttachmentTile
-                    key={att.id}
-                    attachment={att}
-                    onOpen={onOpenAttachment}
-                    onLongPress={onLongPressTouch}
-                  />
-                ))}
-              </View>
             ) : null}
             {reactions && reactions.length > 0 && onToggleReaction ? (
               <ReactionPills
