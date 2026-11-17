@@ -39,7 +39,7 @@ export const EmojiCell: React.FC<EmojiCellProps> = ({
       onMouseEnter={() => onPreview(item)}
       onFocus={() => onPreview(item)}
       onMouseLeave={() => onPreview(null)}
-      className="flex items-center justify-center w-8 h-8 text-xl leading-none
+      className="flex items-center justify-center w-8 h-8 text-glyph leading-none
  hover:bg-hover focus:bg-active
                  focus:outline-none rounded-chip"
     >

@@ -45,7 +45,7 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
   return (
     <div data-testid={testId}>
       <div className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface">
-        <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
+        <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
           {heading}
         </span>
         <button
@@ -73,11 +73,11 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
           }}
           disabled={isSaving}
           rows={2}
-          className={`chat-input-textarea w-full font-mono text-sm resize-none transition-colors rounded-control border-0 outline-none px-2 py-1 disabled:opacity-50 ${
+          className={`chat-input-textarea w-full font-mono text-body resize-none transition-colors rounded-control border-0 outline-none px-2 py-1 disabled:opacity-50 ${
             focused ? "is-focused bg-accent text-bg" : "bg-hover text-fg"
           }`}
         />
-        <p className="text-2xs font-mono mt-1 text-muted">{hint}</p>
+        <p className="text-meta font-mono mt-1 text-muted">{hint}</p>
       </div>
     </div>
   );

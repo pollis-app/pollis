@@ -152,7 +152,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
                 onClick={() => setCapturingId(r.id)}
                 aria-label={t("shortcuts.rebindLabel", { name: r.title })}
                 data-testid={`shortcut-${r.id}-edit`}
-                className={`font-mono text-xs bg-bg border ${
+                className={`font-mono text-secondary bg-bg border ${
                   isCapturing ? "border-accent" : "border-line"
                 }`}
                 style={{

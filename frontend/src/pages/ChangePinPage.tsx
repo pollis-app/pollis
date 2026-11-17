@@ -87,7 +87,7 @@ export const ChangePinPage: React.FC = () => {
       >
         {done ? (
           <div className="flex flex-col gap-4">
-            <p className="text-xs text-accent">
+            <p className="text-secondary text-accent">
               {t("changePin.updated")}
             </p>
             <Button
@@ -100,11 +100,11 @@ export const ChangePinPage: React.FC = () => {
         ) : (
           <div className="flex flex-col gap-5">
             <div>
-              <h2 className="text-sm font-bold text-accent">
+              <h2 className="text-body font-bold text-accent">
                 {heading}
               </h2>
               <p
-                className="text-xs mt-1 text-muted"
+                className="text-secondary mt-1 text-muted"
                 style={{ lineHeight: 1.5 }}
               >
                 {step === "old"
@@ -118,7 +118,7 @@ export const ChangePinPage: React.FC = () => {
             {error && (
               <p
                 data-testid="change-pin-error"
-                className="text-xs text-danger"
+                className="text-secondary text-danger"
               >
                 {error}
               </p>

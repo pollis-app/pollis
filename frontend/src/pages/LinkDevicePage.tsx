@@ -23,8 +23,8 @@ type Step =
 
 const Heading: React.FC<{ title: string; subtitle?: string; testId?: string }> = ({ title, subtitle, testId }) => (
   <div className="flex flex-col gap-3" data-testid={testId}>
-    <h1 className="text-xl text-fg">{title}</h1>
-    {subtitle && <p className="text-sm text-muted leading-relaxed">{subtitle}</p>}
+    <h1 className="text-title text-fg">{title}</h1>
+    {subtitle && <p className="text-body text-muted leading-relaxed">{subtitle}</p>}
   </div>
 );
 
@@ -136,7 +136,7 @@ export const LinkDevicePage: React.FC = observer(() => {
             mask
             autoFocus
           />
-          {pinError && <p className="text-sm text-danger" data-testid="link-device-pin-error">{pinError}</p>}
+          {pinError && <p className="text-body text-danger" data-testid="link-device-pin-error">{pinError}</p>}
         </div>
         <div>
           <Button variant="ghost" onClick={() => navigate({ to: "/security" })}>
@@ -279,15 +279,15 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
           onClick={copy}
           className="text-start flex flex-col gap-3 p-5 rounded-lg border border-accent bg-surface hover:bg-hover"
         >
-          <code className="font-mono text-base text-fg break-all leading-relaxed" data-testid="link-device-payload">
+          <code className="font-mono text-row text-fg break-all leading-relaxed" data-testid="link-device-payload">
             {handle.qr_payload}
           </code>
-          <span className={copied ? "text-xs font-mono text-accent" : "text-xs font-mono text-muted"}>
+          <span className={copied ? "text-secondary font-mono text-accent" : "text-secondary font-mono text-muted"}>
             {copied ? t("linkDevice.copied") : t("linkDevice.clickToCopy")}
           </span>
         </button>
       )}
-      <p className="text-sm text-muted" data-testid="link-device-status">
+      <p className="text-body text-muted" data-testid="link-device-status">
         {secondsLeft > 0 ? t("linkDevice.expiresIn", { time: `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}` }) : t("linkDevice.expiredTitle")}
       </p>
       <div>

@@ -39,7 +39,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
       className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
     >
       <div className="flex-1 min-w-0">
-        <span className="text-2xs font-mono uppercase tracking-widest text-muted">
+        <span className="text-meta font-mono uppercase tracking-widest text-muted">
           <Trans
             t={t}
             i18nKey="replyBar.replyingTo"
@@ -57,7 +57,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
           aria-label={t('replyBar.scrollToMessage')}
           className="block w-full text-start"
         >
-          <p className="text-xs font-mono truncate text-accent-dim">{snippet}</p>
+          <p className="text-secondary font-mono truncate text-accent-dim">{snippet}</p>
         </PressButton>
       </div>
       <button

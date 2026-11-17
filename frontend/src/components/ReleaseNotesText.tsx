@@ -40,12 +40,12 @@ export const ReleaseNotesText: React.FC<ReleaseNotesTextProps> = ({ notes, "data
       lang="en"
       dir="ltr"
       data-testid={testId}
-      className="flex flex-col gap-3 text-xs font-mono text-muted break-words"
+      className="flex flex-col gap-3 text-secondary font-mono text-muted break-words"
     >
       {blocks.map((block, i) => {
         if (block.kind === "heading") {
           return (
-            <h3 key={i} className="text-xs font-mono font-medium text-dim">
+            <h3 key={i} className="text-secondary font-mono font-medium text-dim">
               <Spans spans={block.spans} />
             </h3>
           );

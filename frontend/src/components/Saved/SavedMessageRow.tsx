@@ -20,11 +20,11 @@ export const SavedMessageRow: React.FC<SavedMessageRowProps> = ({
   const isTerminal = useSkin() === "terminal";
 
   const metaClass = isTerminal
-    ? "text-2xs font-mono text-muted"
-    : "text-xs text-muted";
+    ? "text-meta font-mono text-muted"
+    : "text-secondary text-muted";
   const bodyClass = isTerminal
-    ? "text-xs font-mono text-fg truncate"
-    : "text-sm text-fg truncate";
+    ? "text-secondary font-mono text-fg truncate"
+    : "text-body text-fg truncate";
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">

@@ -67,7 +67,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
       />
 
       {(error || showPreviewError) && (
-        <p data-testid="invite-redeem-error" className="mt-3 text-sm text-danger">
+        <p data-testid="invite-redeem-error" className="mt-3 text-body text-danger">
           {error ?? errorMessage(preview.error)}
         </p>
       )}
@@ -110,7 +110,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
           <h2
             data-testid="join-by-invite-heading"
             className={
-              isModern ? "text-base font-semibold text-fg" : "text-base text-accent"
+              isModern ? "text-row font-semibold text-fg" : "text-row text-accent"
             }
           >
             {groupName
@@ -121,7 +121,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
                 ? t("joinByInvite.heading")
                 : t("joinByInvite.headingTerminal")}
           </h2>
-          <p className="mt-1 mb-4 text-xs text-dim">{t("joinByInvite.blurb")}</p>
+          <p className="mt-1 mb-4 text-secondary text-dim">{t("joinByInvite.blurb")}</p>
           {body}
         </form>
       </div>

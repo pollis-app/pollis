@@ -254,12 +254,12 @@ export const SettingsPage: React.FC = observer(() => {
 
             {/* Account */}
             <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
+              <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.accountHeading")}
               </h2>
 
               {isLoading ? (
-                <span data-testid="settings-loading" className="text-xs font-mono text-muted">
+                <span data-testid="settings-loading" className="text-secondary font-mono text-muted">
                   {t("common:states.loading")}
                 </span>
               ) : (
@@ -289,7 +289,7 @@ export const SettingsPage: React.FC = observer(() => {
               )}
 
               {updateProfileMutation.error && (
-                <p data-testid="settings-save-error" className="text-xs font-mono text-danger">
+                <p data-testid="settings-save-error" className="text-secondary font-mono text-danger">
                   {updateProfileMutation.error instanceof Error
                     ? updateProfileMutation.error.message
                     : t("user.saveFailed")}
@@ -297,7 +297,7 @@ export const SettingsPage: React.FC = observer(() => {
               )}
 
               {saveSuccess && (
-                <p data-testid="settings-save-success" className="text-xs font-mono text-accent-dim">
+                <p data-testid="settings-save-success" className="text-secondary font-mono text-accent-dim">
                   {t("user.saved")}
                 </p>
               )}
@@ -317,12 +317,12 @@ export const SettingsPage: React.FC = observer(() => {
                 something the "Save Changes" button covers — email only mutates
                 via the OTP-verified flow below. */}
             <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
+              <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.emailHeading")}
               </h2>
 
               {isLoading ? (
-                <span className="text-xs font-mono text-muted">
+                <span className="text-secondary font-mono text-muted">
                   {t("common:states.loading")}
                 </span>
               ) : emailChangeStep === "idle" ? (
@@ -366,7 +366,7 @@ export const SettingsPage: React.FC = observer(() => {
                   />
                   <input data-testid="settings-email-new-input" type="hidden" value={pendingNewEmail} readOnly />
                   {emailChangeError && (
-                    <p data-testid="settings-email-change-error" className="text-xs font-mono text-danger">
+                    <p data-testid="settings-email-change-error" className="text-secondary font-mono text-danger">
                       {emailChangeError}
                     </p>
                   )}
@@ -393,7 +393,7 @@ export const SettingsPage: React.FC = observer(() => {
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs font-mono text-muted">
+                  <p className="text-secondary font-mono text-muted">
                     <Trans
                       t={t}
                       i18nKey="user.codeSent"
@@ -410,7 +410,7 @@ export const SettingsPage: React.FC = observer(() => {
                     disabled={emailChangePending}
                   />
                   <input data-testid="settings-email-otp-input" type="hidden" value={emailOtpCode} readOnly />
-                  <p className="text-xs font-mono text-muted mt-2">
+                  <p className="text-secondary font-mono text-muted mt-2">
                     <Trans
                       t={t}
                       i18nKey="user.currentCodeSent"
@@ -433,7 +433,7 @@ export const SettingsPage: React.FC = observer(() => {
                     readOnly
                   />
                   {emailChangeError && (
-                    <p data-testid="settings-email-change-error" className="text-xs font-mono text-danger">
+                    <p data-testid="settings-email-change-error" className="text-secondary font-mono text-danger">
                       {emailChangeError}
                     </p>
                   )}
@@ -468,7 +468,7 @@ export const SettingsPage: React.FC = observer(() => {
 
             {/* Avatar */}
             <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
+              <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.avatarHeading")}
               </h2>
 
@@ -497,7 +497,7 @@ export const SettingsPage: React.FC = observer(() => {
                 <div className="flex flex-col gap-2">
                   <label
                     htmlFor="settings-avatar-input"
-                    className="inline-flex items-center gap-1.5 text-xs font-mono cursor-pointer transition-colors text-accent"
+                    className="inline-flex items-center gap-1.5 text-secondary font-mono cursor-pointer transition-colors text-accent"
                   >
                     <Upload size={14} aria-hidden="true" />
                     {t("user.chooseImage")}
@@ -514,26 +514,26 @@ export const SettingsPage: React.FC = observer(() => {
                     aria-label={t("user.avatarInputLabel")}
                     className="sr-only"
                   />
-                  <p className="text-xs font-mono text-muted">
+                  <p className="text-secondary font-mono text-muted">
                     {t("user.avatarHint")}
                   </p>
                 </div>
               </div>
 
               {uploadError && (
-                <p data-testid="avatar-upload-error" className="text-xs font-mono text-danger">
+                <p data-testid="avatar-upload-error" className="text-secondary font-mono text-danger">
                   {uploadError}
                 </p>
               )}
 
               {saveSuccess && !selectedFile && (
-                <p data-testid="avatar-upload-success" className="text-xs font-mono text-accent-dim">
+                <p data-testid="avatar-upload-success" className="text-secondary font-mono text-accent-dim">
                   {t("user.avatarUpdated")}
                 </p>
               )}
 
               {avatarRemoved && !currentAvatarUrl && !selectedFile && (
-                <p data-testid="avatar-remove-success" className="text-xs font-mono text-accent-dim">
+                <p data-testid="avatar-remove-success" className="text-secondary font-mono text-accent-dim">
                   {t("user.avatarRemoved")}
                 </p>
               )}

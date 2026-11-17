@@ -55,7 +55,7 @@ export const EmojiSuggestList: React.FC<EmojiSuggestListProps> = ({
       onHover={onHover}
       renderItem={(entry) => (
         <>
-          <span className="w-6 flex-shrink-0 text-center text-base leading-none">
+          <span className="w-6 flex-shrink-0 text-center text-row leading-none">
             {entry.custom && entry.contentHash ? (
               <CustomEmojiImage
                 contentHash={entry.contentHash}
@@ -69,7 +69,7 @@ export const EmojiSuggestList: React.FC<EmojiSuggestListProps> = ({
           <span className="truncate font-mono text-fg">
             <MatchedCode shortcode={entry.shortcode} query={query} />
           </span>
-          <span className="truncate text-xs text-muted">{entry.label}</span>
+          <span className="truncate text-secondary text-muted">{entry.label}</span>
         </>
       )}
     />

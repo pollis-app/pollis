@@ -16,7 +16,7 @@ export const SecurityEventRow: React.FC<{ event: SecurityEvent }> = ({ event }) 
     <div
       data-testid={`security-event-${event.id}`}
       data-kind={event.kind}
-      className="flex min-w-0 flex-col px-4 py-2 text-xs font-mono"
+      className="flex min-w-0 flex-col px-4 py-2 text-secondary font-mono"
     >
       <span className="text-fg">{heading}</span>
       {detail && <span className="text-muted">{detail}</span>}

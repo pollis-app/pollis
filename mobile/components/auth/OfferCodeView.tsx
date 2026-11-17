@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../ui";
 import { QrCode } from "../QrCode";
 import { AuthError } from "./AuthError";
-import { semantic, type as ty, fonts, space } from "../../theme/tokens";
+import { semantic, type as ty, space } from "../../theme/tokens";
 import { awaitDeviceOffer, cancelDeviceOffer, createDeviceOffer, type DeviceOfferHandle } from "../../hooks/queries";
 
 /// Codes shown in a row before asking (two minutes each).
@@ -98,7 +98,7 @@ export function OfferCodeView({ deviceName, onSignedIn }: { deviceName: string; 
       <Text
         testID="link-offer-payload"
         selectable
-        style={{ fontFamily: fonts.mono400, fontSize: 13, lineHeight: 20, color: semantic.dim }}
+        style={[ty.mono, { lineHeight: 20, color: semantic.dim }]}
       >
         {breakAnywhere(handle.qr_payload)}
       </Text>

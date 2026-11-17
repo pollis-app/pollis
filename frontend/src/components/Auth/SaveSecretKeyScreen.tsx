@@ -99,11 +99,11 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
           <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 480 }}>
             <div className="flex flex-col gap-5">
               <div>
-                <h1 className="text-base font-mono font-bold mb-8 text-danger">
+                <h1 className="text-row font-mono font-bold mb-8 text-danger">
                   {t("secretKey.warnTitle")}
                 </h1>
                 <p
-                  className="text-xs mt-2 font-mono text-fg"
+                  className="text-secondary mt-2 font-mono text-fg"
                   style={{ lineHeight: 1.6 }}
                 >
                   <Trans
@@ -113,7 +113,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                   />
                 </p>
                 <p
-                  className="text-xs mt-4 font-mono text-dim"
+                  className="text-secondary mt-4 font-mono text-dim"
                   style={{ lineHeight: 1.6 }}
                 >
                   <Trans
@@ -123,7 +123,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                   />
                 </p>
                 <p
-                  className="text-xs mt-3 mb-4 font-mono text-fg"
+                  className="text-secondary mt-3 mb-4 font-mono text-fg"
                   style={{ lineHeight: 1.6 }}
                 >
                   {t("secretKey.warnPrepare")}
@@ -153,17 +153,17 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
           <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 480 }}>
             <div className="flex flex-col gap-5">
               <div>
-                <h1 className="text-base font-mono font-bold mb-4 text-accent">
+                <h1 className="text-row font-mono font-bold mb-4 text-accent">
                   {t("secretKey.showTitle")}
                 </h1>
-                <p className="text-xs mt-1 font-mono text-dim">
+                <p className="text-secondary mt-1 font-mono text-dim">
                   {t("secretKey.showSubtitle")}
                 </p>
               </div>
 
               <div
                 data-testid="secret-key-display"
-                className="font-mono text-sm select-all bg-surface border-2 border-accent text-accent"
+                className="font-mono text-body select-all bg-surface border-2 border-accent text-accent"
                 style={{
                   borderRadius: "0.5rem",
                   padding: "0.5rem",
@@ -234,11 +234,11 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
         <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 480 }}>
           <div className="flex flex-col gap-5">
             <div>
-              <h1 className="text-base font-mono font-bold text-fg">
+              <h1 className="text-row font-mono font-bold text-fg">
                 {t("secretKey.confirmTitle")}
               </h1>
               <p
-                className="text-xs mt-1 font-mono text-muted"
+                className="text-secondary mt-1 font-mono text-muted"
                 style={{ lineHeight: 1.6 }}
               >
                 {t("secretKey.confirmSubtitle")}

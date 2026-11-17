@@ -83,11 +83,11 @@ export const CopyHistoryPage: React.FC = () => {
     body = (
       <>
         <div className="flex flex-col gap-3">
-          <h1 className="text-xl text-fg">{t("historyTransfer.pickTitle")}</h1>
-          <p className="text-sm text-muted leading-relaxed">{t("historyTransfer.pickSubtitle")}</p>
+          <h1 className="text-title text-fg">{t("historyTransfer.pickTitle")}</h1>
+          <p className="text-body text-muted leading-relaxed">{t("historyTransfer.pickSubtitle")}</p>
         </div>
         {sources.isError && (
-          <p className="text-sm text-danger" data-testid="history-sources-error">
+          <p className="text-body text-danger" data-testid="history-sources-error">
             {errorMessage(sources.error, t("historyTransfer.sourcesFailed"))}
           </p>
         )}
@@ -98,7 +98,7 @@ export const CopyHistoryPage: React.FC = () => {
         )}
         {list.length > 0 && <SourcePicker sources={list} value={picked} onChange={setPicked} />}
         {requestError && (
-          <p className="text-sm text-danger" data-testid="history-request-error">
+          <p className="text-body text-danger" data-testid="history-request-error">
             {requestError}
           </p>
         )}

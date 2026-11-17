@@ -99,10 +99,10 @@ export const EmojiDropZone: React.FC<EmojiDropZoneProps> = ({
       {children ?? (
         <>
           <ImagePlus className="size-6 text-muted" aria-hidden="true" />
-          <span className="text-sm font-mono text-fg">
+          <span className="text-body font-mono text-fg">
             {isDragOver ? t("manage.dropNow") : t("manage.dropPrompt")}
           </span>
-          <span className="text-xs font-mono text-muted">
+          <span className="text-secondary font-mono text-muted">
             {t("manage.dropHint", {
               formats: EMOJI_IMAGE_EXTENSIONS.join(", "),
             })}

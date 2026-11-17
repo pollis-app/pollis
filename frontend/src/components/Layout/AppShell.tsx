@@ -637,7 +637,7 @@ export const AppShell: React.FC = observer(() => {
               padding: "28px 56px",
             }}
           >
-            <span className="text-sm font-mono text-accent">
+            <span className="text-body font-mono text-accent">
               {t("shell.dropFiles")}
             </span>
           </div>
@@ -660,7 +660,7 @@ export const AppShell: React.FC = observer(() => {
         {availableUpdateVersion && (
           <PressButton
             data-testid="status-bar-update-available"
-            className="text-xs font-mono flex items-center gap-1 cursor-pointer border-0"
+            className="text-secondary font-mono flex items-center gap-1 cursor-pointer border-0"
             style={{
               color: barInk,
               background: "none",
@@ -685,7 +685,7 @@ export const AppShell: React.FC = observer(() => {
           >
             <button
               data-testid="status-bar-incoming-call-accept"
-              className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
+              className="text-secondary font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
               style={{ color: "inherit", background: "none", padding: 0 }}
               onClick={() => acceptIncomingCall(router, incomingCall)}
               aria-label={t("statusBar.answerCall", { username: incomingCall.callerUsername })}
@@ -708,7 +708,7 @@ export const AppShell: React.FC = observer(() => {
             className="flex items-center gap-2"
             style={{ color: barInk }}
           >
-            <span className="text-xs font-mono flex items-center gap-1">
+            <span className="text-secondary font-mono flex items-center gap-1">
               <AlertTriangle className="w-4 h-4" />
               {voiceError}
             </span>
@@ -729,7 +729,7 @@ export const AppShell: React.FC = observer(() => {
             style={{ color: barInk }}
           >
             <span
-              className="text-xs font-mono flex items-center gap-1 min-w-0 truncate"
+              className="text-secondary font-mono flex items-center gap-1 min-w-0 truncate"
               title={screenShareError}
             >
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -752,7 +752,7 @@ export const AppShell: React.FC = observer(() => {
             style={{ color: barInk }}
           >
             <span
-              className="text-xs font-mono flex items-center gap-1 min-w-0 truncate"
+              className="text-secondary font-mono flex items-center gap-1 min-w-0 truncate"
               title={cameraError}
             >
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -771,7 +771,7 @@ export const AppShell: React.FC = observer(() => {
         ) : statusBarAlert ? (
           <button
             data-testid="status-bar-alert"
-            className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
+            className="text-secondary font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
             style={{ color: barInk, background: "none", padding: 0 }}
             onClick={() => {
               router.navigate({ to: "/dms/$conversationId", params: { conversationId: statusBarAlert.roomId } });
@@ -783,7 +783,7 @@ export const AppShell: React.FC = observer(() => {
         ) : isSyncing ? (
           <div
             data-testid="status-bar-syncing"
-            className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
+            className="flex items-center gap-1.5 text-secondary font-mono pointer-events-none"
             style={{ color: barInk }}
           >
             <span>{t("statusBar.syncing")}</span>

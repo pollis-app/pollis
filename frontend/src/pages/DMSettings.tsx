@@ -20,7 +20,7 @@ export const DMSettingsPage: React.FC = observer(() => {
     <PageShell title={t("settings.pageTitle")}>
       <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
         {leaveDMMutation.isError && (
-          <p className="text-xs font-mono text-danger">
+          <p className="text-secondary font-mono text-danger">
             {errorMessage(leaveDMMutation.error, t("settings.leaveFailed"))}
           </p>
         )}

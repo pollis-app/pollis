@@ -17,7 +17,7 @@ import {
 import { UserAvatar } from "../../components/UserAvatar";
 import { ExportArchive } from "../../components/ExportArchive";
 import { SafetyNumberRows } from "../../components/direct/SafetyNumberRows";
-import { fonts, semantic, space, type as ty } from "../../theme/tokens";
+import { fonts, semantic, space, type as ty, typeSize } from "../../theme/tokens";
 import {
   useDMChannel,
   useGroupMembers,
@@ -166,7 +166,7 @@ function ConversationInfo() {
                       ellipsizeMode="middle"
                       style={{
                         fontFamily: fonts.medium,
-                        fontSize: 16,
+                        fontSize: typeSize.rowTitle,
                         color: semantic.text,
                       }}
                     >

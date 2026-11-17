@@ -40,13 +40,13 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
       >
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
           <span
-            className="font-mono text-xs text-accent"
+            className="font-mono text-secondary text-accent"
             style={{ letterSpacing: "0.15em" }}
           >
             {t("boundary.tag")}
           </span>
           <h1
-            className="font-mono text-base text-fg"
+            className="font-mono text-row text-fg"
             style={{ margin: 0 }}
           >
             {t("boundary.title")}
@@ -54,7 +54,7 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
         </div>
 
         <p
-          className="font-mono text-xs text-center text-muted"
+          className="font-mono text-secondary text-center text-muted"
           style={{ margin: 0, lineHeight: 1.6 }}
         >
           {t("boundary.message")}

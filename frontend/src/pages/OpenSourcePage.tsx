@@ -28,7 +28,7 @@ export const OpenSourcePage: React.FC = () => {
   return (
     <PageShell title={t("openSource.title")} scrollable>
       <div data-testid="open-source-page" className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex flex-col gap-3 px-6 pt-6 pb-3 font-mono text-xs">
+        <div className="flex flex-col gap-3 px-6 pt-6 pb-3 font-mono text-secondary">
           {state.status === "ready" && (
             <>
               <p data-testid="open-source-intro" className="text-fg">

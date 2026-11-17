@@ -1,7 +1,7 @@
 import { View, Pressable } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
-import { fonts, semantic, type as ty, r } from "../../theme/tokens";
+import { fonts, semantic, type as ty, r, typeSize } from "../../theme/tokens";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import { splitEmojiSegments } from "../emoji/emojiTokens";
 import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
@@ -117,7 +117,7 @@ export function ReactionPills({
                 ty.meta,
                 {
                   fontFamily: reacted ? fonts.bold : fonts.medium,
-                  fontSize: 13,
+                  fontSize: typeSize.section,
                   color: semantic.accent,
                 },
               ]}

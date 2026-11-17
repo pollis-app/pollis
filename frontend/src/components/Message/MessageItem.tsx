@@ -106,7 +106,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     <span
       data-testid="message-new-tag"
       title={t("message.newMemberTitle")}
-      className="flex-shrink-0 self-center px-1.5 rounded-chip bg-surface-high text-accent text-2xs font-medium select-none"
+      className="flex-shrink-0 self-center px-1.5 rounded-chip bg-surface-high text-accent text-meta font-medium select-none"
     >
       {t("message.newMember")}
     </span>
@@ -172,7 +172,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     <>
       {message.edited_at && !isDeleted && (
         <span
-          className="ms-1 text-xs text-muted"
+          className="ms-1 text-secondary text-muted"
           data-testid={message.edit_unsent ? "message-edit-unsent" : undefined}
         >
           {message.edit_unsent ? t("message.editUnsent") : t("message.edited")}
@@ -227,7 +227,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             <bdi
               dir="ltr"
               title={formatFullTimestamp(toMs(message.created_at))}
-              className="font-machine text-2xs tabular-nums whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity text-muted"
+              className="font-machine text-meta tabular-nums whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity text-muted"
             >
               {formatTimeOfDay(toMs(message.created_at))}
             </bdi>
@@ -240,7 +240,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               <PressButton
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
                 onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-                className="flex items-center gap-1 text-xs mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0 text-muted"
+                className="flex items-center gap-1 text-secondary mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0 text-muted"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
                 {replyToAuthor && (
@@ -258,7 +258,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             ) : (
               <div
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
-                className="flex items-center gap-1 text-xs mb-0.5 opacity-70 min-w-0 text-muted"
+                className="flex items-center gap-1 text-secondary mb-0.5 opacity-70 min-w-0 text-muted"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
                 <span className="truncate max-w-xs">{missingQuoteText}</span>
@@ -270,7 +270,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             <div className="flex items-baseline gap-2 min-w-0">
               <bdi
                 data-testid="message-author"
-                className={`text-sm font-semibold flex-shrink-0 ${nameClass}`}
+                className={`text-body font-semibold flex-shrink-0 ${nameClass}`}
                 style={nameStyle}
               >
                 {displayName}
@@ -280,7 +280,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 data-testid="message-timestamp"
                 dir="ltr"
                 title={formatFullTimestamp(toMs(message.created_at))}
-                className="font-machine text-2xs tabular-nums select-none flex-shrink-0 text-muted"
+                className="font-machine text-meta tabular-nums select-none flex-shrink-0 text-muted"
               >
                 {formatTimeOfDay(toMs(message.created_at))}
               </bdi>
@@ -290,7 +290,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <div
             data-testid="message-content"
             dir="auto"
-            className={`text-sm break-words leading-msg ${isDeleted ? "italic text-muted" : "text-fg"}`}
+            className={`text-body break-words leading-msg ${isDeleted ? "italic text-muted" : "text-fg"}`}
             style={{
               whiteSpace: "pre-wrap",
             }}
@@ -334,7 +334,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <PressButton
             data-testid={`reply-preview-${message.reply_to_message_id}`}
             onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity text-muted"
+            className="flex items-center gap-1 text-secondary font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity text-muted"
           >
             <Reply size={10} className="rtl-unmirror" />
             {replyToAuthor && (
@@ -352,7 +352,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
-            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 text-muted"
+            className="flex items-center gap-1 text-secondary font-mono mb-1.5 ps-14 opacity-60 text-muted"
           >
             <Reply size={10} className="rtl-unmirror" />
             <span className="truncate max-w-xs">{missingQuoteText}</span>
@@ -365,7 +365,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           data-testid="message-timestamp"
           dir="ltr"
           title={formatFullTimestamp(toMs(message.created_at))}
-          className="flex-shrink-0 text-xs font-mono tabular-nums select-none w-20 text-muted"
+          className="flex-shrink-0 text-secondary font-mono tabular-nums select-none w-20 text-muted"
           style={{ lineHeight: "1.5rem" }}
         >
           {formatTimeOfDay(toMs(message.created_at))}
@@ -373,7 +373,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
         <bdi
           data-testid="message-author"
-          className={`flex-shrink-0 font-mono text-sm font-semibold me-1 ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-sm` : ""}`}
+          className={`flex-shrink-0 font-mono text-body font-semibold me-1 ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-sm` : ""}`}
           style={isAuthorAdmin ? adminChipStyle : {
             color: isOwn ? "var(--c-accent)" : authorColor,
           }}
@@ -382,7 +382,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         </bdi>
 
         <span
-          className="font-mono text-sm select-none me-1 flex-shrink-0 text-muted"
+          className="font-mono text-body select-none me-1 flex-shrink-0 text-muted"
           aria-hidden="true"
         >
           {":"}
@@ -393,7 +393,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <span
             data-testid="message-content"
             dir="auto"
-            className={`block font-mono text-sm break-words ${isDeleted ? "italic text-muted" : "text-fg"}`}
+            className={`block font-mono text-body break-words ${isDeleted ? "italic text-muted" : "text-fg"}`}
             style={{
               whiteSpace: "pre-wrap",
             }}

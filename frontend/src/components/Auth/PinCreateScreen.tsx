@@ -84,11 +84,11 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
       <AuthCard>
         <div className="flex flex-col gap-5">
           <div>
-            <h2 className="text-sm font-mono font-semibold text-fg">
+            <h2 className="text-body font-mono font-semibold text-fg">
               {step === "confirm" ? t("pinCreate.confirmHeadline") : headline}
             </h2>
             <p
-              className="text-xs mt-1 font-mono text-muted"
+              className="text-secondary mt-1 font-mono text-muted"
               style={{ lineHeight: 1.5 }}
             >
               {step === "confirm" ? t("pinCreate.confirmSubline") : subline}
@@ -98,7 +98,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
           {error && (
             <p
               data-testid="pin-create-error"
-              className="text-xs font-mono text-danger"
+              className="text-secondary font-mono text-danger"
             >
               {error}
             </p>
@@ -132,7 +132,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
             <button
               data-testid="pin-create-cancel"
               onClick={onCancel}
-              className="text-xs font-mono self-center text-muted border-0"
+              className="text-secondary font-mono self-center text-muted border-0"
               style={{
                 background: "none",
                 cursor: "pointer",

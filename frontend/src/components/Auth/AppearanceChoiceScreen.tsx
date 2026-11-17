@@ -29,7 +29,7 @@ const SkinPreview: React.FC<{ skin: Skin }> = ({ skin }) => {
     >
       {lines.map((line) =>
         skin === "terminal" ? (
-          <p key={line.name} className="font-machine text-xs text-fg truncate">
+          <p key={line.name} className="font-machine text-secondary text-fg truncate">
             <span className="text-muted">{line.time} </span>
             <span className="text-accent">&lt;{line.name}&gt;</span> {line.text}
           </p>
@@ -37,11 +37,11 @@ const SkinPreview: React.FC<{ skin: Skin }> = ({ skin }) => {
           <div key={line.name} className="flex items-start gap-3">
             <Avatar size={28} />
             <div className="min-w-0 flex flex-col">
-              <span className="text-sm text-fg">
+              <span className="text-body text-fg">
                 <span className="font-semibold">{line.name}</span>
-                <span className="font-machine text-xs text-muted ms-2">{line.time}</span>
+                <span className="font-machine text-secondary text-muted ms-2">{line.time}</span>
               </span>
-              <span className="text-sm text-dim truncate">{line.text}</span>
+              <span className="text-body text-dim truncate">{line.text}</span>
             </div>
           </div>
         ),
@@ -89,15 +89,15 @@ export const AppearanceChoiceScreen: React.FC<AppearanceChoiceScreenProps> = ({ 
         <Card padding="lg" className="my-auto w-full max-w-md">
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
-              <h2 className="text-lg text-fg" data-testid="appearance-choice-title">
+              <h2 className="text-heading text-fg" data-testid="appearance-choice-title">
                 {t("appearance.firstRun.title")}
               </h2>
-              <p className="text-sm text-muted leading-relaxed">{t("appearance.firstRun.subtitle")}</p>
+              <p className="text-body text-muted leading-relaxed">{t("appearance.firstRun.subtitle")}</p>
             </div>
             <SkinPicker data-testid="first-run-skin" value={skin} onChange={setSkin} />
             <SkinPreview skin={skin} />
             {failed && (
-              <p className="text-sm text-danger" role="alert" data-testid="appearance-choice-error">
+              <p className="text-body text-danger" role="alert" data-testid="appearance-choice-error">
                 {t("appearance.firstRun.saveFailed")}
               </p>
             )}

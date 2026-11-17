@@ -55,9 +55,9 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
 }) => {
   const { t } = useTranslation("common");
   const sizeClasses = {
-    sm: "text-xs",
-    base: "text-2xl",
-    lg: "text-5xl",
+    sm: "text-secondary",
+    base: "text-display",
+    lg: "text-glyph-lg",
   };
 
   return (

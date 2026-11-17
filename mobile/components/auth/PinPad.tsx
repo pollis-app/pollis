@@ -1,7 +1,7 @@
 import { ActivityIndicator, View, Pressable } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
-import { semantic, fonts, layout, currentTheme, type as ty } from "../../theme/tokens";
+import { semantic, fonts, layout, currentTheme, type as ty, typeSize } from "../../theme/tokens";
 import { controlDisabled } from "../../theme/button";
 import { Icon } from "../icons";
 import { haptic } from "../../lib/haptics";
@@ -150,7 +150,7 @@ export function PinKeypad({
                     maxFontSizeMultiplier={1.4}
                     style={{
                       fontFamily: fonts.medium,
-                      fontSize: 28,
+                      fontSize: typeSize.display,
                       color: disabled ? semantic.dim : semantic.text,
                     }}
                   >

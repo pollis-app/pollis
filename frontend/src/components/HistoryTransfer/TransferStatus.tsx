@@ -125,11 +125,11 @@ export const TransferStatus: React.FC<TransferStatusProps> = observer(({ transfe
       data-phase={phase}
     >
       <div className="flex flex-col gap-2">
-        <h2 className={`text-lg ${tone === "danger" ? "text-danger" : "text-fg"}`} data-testid="history-transfer-title">
+        <h2 className={`text-heading ${tone === "danger" ? "text-danger" : "text-fg"}`} data-testid="history-transfer-title">
           {title}
         </h2>
         {body && (
-          <p className="text-sm text-muted leading-relaxed" data-testid="history-transfer-body">
+          <p className="text-body text-muted leading-relaxed" data-testid="history-transfer-body">
             {body}
           </p>
         )}
@@ -151,7 +151,7 @@ export const TransferStatus: React.FC<TransferStatusProps> = observer(({ transfe
       )}
 
       {showCounts && (
-        <p className="text-sm font-mono text-dim" data-testid="history-transfer-counts">
+        <p className="text-body font-mono text-dim" data-testid="history-transfer-counts">
           {receiving
             ? t("historyTransfer.rowsCopied", { count: transfer.rows_done })
             : t("historyTransfer.rowsSent", { count: transfer.rows_done })}
@@ -161,7 +161,7 @@ export const TransferStatus: React.FC<TransferStatusProps> = observer(({ transfe
       )}
 
       {actionError && (
-        <p className="text-sm text-danger" data-testid="history-transfer-action-error">
+        <p className="text-body text-danger" data-testid="history-transfer-action-error">
           {actionError}
         </p>
       )}

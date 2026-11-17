@@ -105,8 +105,28 @@ background the ramp flips toward black.
 |---|---|---|---|
 | UI face | Geist Sans | DM Mono (UI) + Atkinson Hyperlegible Next | Geist |
 | Machine text (ids, keys, codes) | DM Mono via `font-machine` | DM Mono | `fonts.mono400` |
-| Scale | rem at a 15px root: `2xs` 11, `xs` 13, `sm`/`base` 15 | same | `ty.meta` 12 · `section` 13 · `secondary` 14 · `body` 16 · `heading` 17 · `title` 20 · `display` 28 |
 
+The scale is named by role, the same names on both platforms; each keeps its own sizes (mobile
+body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px root, shown in px.
+
+| Role | Desktop (`text-*`) | Mobile (`typeSize.*`, `ty.*`) | Used for |
+|---|---|---|---|
+| Meta | `text-meta` 11 | `meta` 12 | timestamps, counts, hints |
+| Section | — | `section` 13 | section titles, small labels |
+| Secondary | `text-secondary` 13 | `secondary` 14 | previews, subtitles, chips |
+| Button | — | `button` 15 (`ty.button`) | inline button labels, dense rows |
+| Body | `text-body` 15 | `body` 16 | running text, fields |
+| Row title | `text-row` 15 (taller line) | `rowTitle` 16 (`ty.rowTitle`, semibold) | a list row's name; a full-width button's label |
+| Heading | `text-heading` 16.9 | `heading` 17 | page and card headings |
+| Title | `text-title` 18.75 | `title` 20 | page titles |
+| Display | `text-display` 22.5 | `display` 28 | large titles, PIN and code digits |
+
+- Desktop's fontSize theme holds only these roles (plus `glyph` / `glyph-lg` for emoji and the
+  spinner, `code` for the enrollment code), so a Tailwind t-shirt size (`text-xs`) draws nothing;
+  `frontend/tests/type-scale.test.ts` fails on one.
+- A mobile component's `fontSize` reads `typeSize` or spreads a `ty.*` step, never a number.
+  `mobile/tests/type-scale.test.ts` lists the deliberate exceptions: emoji and initials sized to
+  their box, the enrollment code, and the 11pt count badges.
 - Desktop sizes are `rem` so the font-size preference scales them. Never a `px` font size.
 - Sentence case everywhere in Modern and Mobile: titles, buttons, section headers. Terminal may use
   its uppercase spaced labels.

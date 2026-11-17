@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Screen, Header, Body, Chip, Group, EmptyState } from "../../components/ui";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty, fonts, space } from "../../theme/tokens";
+import { semantic, type as ty, fonts, space, typeSize } from "../../theme/tokens";
 import {
   useUserGroupsWithChannels,
   useGroupInviteLinks,
@@ -107,7 +107,7 @@ export default function GroupInviteLinks() {
                       <Text
                         style={{
                           fontFamily: link.is_live ? fonts.semibold : fonts.medium,
-                          fontSize: 16,
+                          fontSize: typeSize.rowTitle,
                           color: link.is_live ? semantic.text : semantic.dim,
                         }}
                       >

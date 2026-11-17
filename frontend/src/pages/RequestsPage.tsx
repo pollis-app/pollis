@@ -90,13 +90,13 @@ export const RequestsPage: React.FC = observer(() => {
             return (
               <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                 <span
-                  className="text-sm font-mono font-medium truncate"
+                  className="text-body font-mono font-medium truncate"
                   style={{ color: "var(--c-text)" }}
                 >
                   {name}
                   {groupSize > 2 && (
                     <span
-                      className="ms-2 text-xs"
+                      className="ms-2 text-secondary"
                       style={{ color: "var(--c-text-muted)" }}
                     >
                       {t("requests.others", { count: groupSize - 2 })}
@@ -104,7 +104,7 @@ export const RequestsPage: React.FC = observer(() => {
                   )}
                 </span>
                 <span
-                  className="text-xs font-mono truncate"
+                  className="text-secondary font-mono truncate"
                   style={{ color: "var(--c-text-muted)" }}
                 >
                   <RequestPreview

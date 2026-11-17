@@ -58,7 +58,7 @@ export const CameraPicker: React.FC = observer(() => {
   return (
     <div
       data-testid="camera-picker"
-      className="flex-1 flex flex-col font-mono text-xs min-h-0 border-t border-b border-line bg-bg"
+      className="flex-1 flex flex-col font-mono text-secondary min-h-0 border-t border-b border-line bg-bg"
     >
       <header
         className="flex items-center justify-between px-3 py-2 border-b border-line text-fg"
@@ -88,7 +88,7 @@ export const CameraPicker: React.FC = observer(() => {
               onClick={() => handlePick(c)}
               disabled={busy}
               data-testid={`camera-picker-device-${c.id}`}
-              className="min-h-[6.25rem] text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
+              className="min-h-[6.25rem] text-start font-mono text-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
             >
               <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
                 <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted aspect-[16/10]">

@@ -79,12 +79,12 @@ export const TitleBar: React.FC = () => {
       ) : (
         <div className="flex items-center gap-2">
           <PollisLogo size={14} color="var(--c-accent)" />
-          <span className="text-xs font-mono text-muted">Pollis</span>
+          <span className="text-secondary font-mono text-muted">Pollis</span>
         </div>
       )}
 
       <span
-        className="absolute left-1/2 -translate-x-1/2 text-xs font-mono pointer-events-none text-muted"
+        className="absolute left-1/2 -translate-x-1/2 text-secondary font-mono pointer-events-none text-muted"
       >
         {isMac && "Pollis"}
       </span>

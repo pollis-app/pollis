@@ -1,6 +1,6 @@
 import { Pressable, View } from "react-native";
 import { Text } from "../Text";
-import { semantic, fonts, r, space, layout } from "../../theme/tokens";
+import { semantic, fonts, r, space, layout, typeSize } from "../../theme/tokens";
 import { Badge, Dot } from "../ui";
 import { Icon } from "../icons";
 
@@ -71,7 +71,7 @@ export function ChannelRow({
         style={{
           flex: 1,
           fontFamily: selected ? fonts.semibold : unread && !muted ? fonts.bold : fonts.medium,
-          fontSize: 16,
+          fontSize: typeSize.rowTitle,
           color,
         }}
       >
@@ -83,7 +83,7 @@ export function ChannelRow({
         </View>
       ) : null}
       {value !== undefined ? (
-        <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: semantic.muted }}>
+        <Text style={{ fontFamily: fonts.regular, fontSize: typeSize.secondary, color: semantic.muted }}>
           {value}
         </Text>
       ) : null}

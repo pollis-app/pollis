@@ -64,7 +64,7 @@ export const IncomingCallPage: React.FC = observer(() => {
 
   return (
     <div data-testid="incoming-call-takeover" className="flex flex-col h-full bg-bg">
-      <div className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted">
+      <div className="flex items-center px-4 flex-shrink-0 text-secondary font-mono h-bar border-b border-line text-muted">
         <span className="text-accent flex-1">{t("takeover.title")}</span>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6 py-8 overflow-auto">
@@ -77,11 +77,11 @@ export const IncomingCallPage: React.FC = observer(() => {
         <div className="flex flex-col items-center gap-1 text-center min-w-0 max-w-full">
           <h1
             data-testid="incoming-call-caller"
-            className="text-2xl font-mono font-medium text-fg truncate max-w-full"
+            className="text-display font-mono font-medium text-fg truncate max-w-full"
           >
             <bdi>{displayName}</bdi>
           </h1>
-          <p className="text-sm font-mono text-dim flex items-center gap-2">
+          <p className="text-body font-mono text-dim flex items-center gap-2">
             <Phone className="w-4 h-4 text-accent status-bar-blink" aria-hidden />
             {profile?.preferred_name ? (
               <span>

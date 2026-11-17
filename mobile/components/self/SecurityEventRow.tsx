@@ -3,7 +3,7 @@ import { Text } from "../Text";
 import i18n from "../../i18n";
 import type { SecurityEvent } from "../../lib/securityEvents";
 import { formatRelative } from "../../lib/relativeTime";
-import { semantic, type as ty, fonts, space } from "../../theme/tokens";
+import { semantic, type as ty, fonts, space, typeSize } from "../../theme/tokens";
 
 function shortId(id: string): string {
   if (id.length <= 10) {
@@ -157,7 +157,7 @@ export function SecurityEventRow({ event }: { event: SecurityEvent }) {
             flex: 1,
             minWidth: 0,
             fontFamily: fonts.medium,
-            fontSize: 16,
+            fontSize: typeSize.rowTitle,
             color: semantic.text,
           }}
         >

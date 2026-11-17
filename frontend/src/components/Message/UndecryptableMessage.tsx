@@ -46,22 +46,22 @@ export const UndecryptableMessage: React.FC<UndecryptableMessageProps> = ({ mess
         </div>
         <div className="min-w-0">
           <div className="flex items-baseline gap-2 min-w-0">
-            <span className="text-sm font-semibold text-dim">
+            <span className="text-body font-semibold text-dim">
               {t("message.undecryptable.title")}
             </span>
             <bdi
               data-testid="message-timestamp"
               dir="ltr"
               title={formatFullTimestamp(at)}
-              className="font-machine text-2xs tabular-nums select-none flex-shrink-0 text-muted"
+              className="font-machine text-meta tabular-nums select-none flex-shrink-0 text-muted"
             >
               {formatTimeOfDay(at)}
             </bdi>
           </div>
-          <div data-testid="message-content" className="text-sm leading-msg text-muted">
+          <div data-testid="message-content" className="text-body leading-msg text-muted">
             {body}
           </div>
-          <div className="text-xs text-muted">
+          <div className="text-secondary text-muted">
             {detail} {diagnosticsLink}
           </div>
         </div>
@@ -83,14 +83,14 @@ export const UndecryptableMessage: React.FC<UndecryptableMessageProps> = ({ mess
           data-testid="message-timestamp"
           dir="ltr"
           title={formatFullTimestamp(at)}
-          className="flex-shrink-0 text-xs font-mono tabular-nums select-none w-20 text-muted"
+          className="flex-shrink-0 text-secondary font-mono tabular-nums select-none w-20 text-muted"
           style={{ lineHeight: "1.5rem" }}
         >
           {formatTimeOfDay(at)}
         </bdi>
         <span
           data-testid="message-content"
-          className="font-mono text-sm break-words flex-1 min-w-0 text-muted"
+          className="font-mono text-body break-words flex-1 min-w-0 text-muted"
         >
           <span className="text-fg">[{t("message.undecryptable.tag")}]</span> {body}{" "}
           {diagnosticsLink}

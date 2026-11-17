@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { KeyboardController } from "react-native-keyboard-controller";
 import { UserAvatar } from "../UserAvatar";
 import { Icon } from "../icons";
-import { fonts, r, semantic, type as ty } from "../../theme/tokens";
+import { fonts, r, semantic, type as ty, typeSize } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator, receiptLabel } from "./ReceiptIndicator";
@@ -345,7 +345,7 @@ export function MessageRow({
                   numberOfLines={1}
                   style={{
                     fontFamily: fonts.bold,
-                    fontSize: 16,
+                    fontSize: typeSize.rowTitle,
                     color: semantic.text,
                     flexShrink: 1,
                   }}

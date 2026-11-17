@@ -35,7 +35,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           <p
             data-testid="auth-session-notice"
             role="status"
-            className="text-xs font-mono text-fg mb-4"
+            className="text-secondary font-mono text-fg mb-4"
             style={{ lineHeight: 1.5 }}
           >
             {notice}
@@ -44,11 +44,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         {view === "wipe" ? (
           <div data-testid="wipe-confirm-section" className="flex flex-col gap-5">
             <div>
-              <h2 className="text-sm font-mono font-semibold text-fg">
+              <h2 className="text-body font-mono font-semibold text-fg">
                 {t("wipe.title")}
               </h2>
               <p
-                className="text-xs mt-2 font-mono text-danger"
+                className="text-secondary mt-2 font-mono text-danger"
                 style={{ lineHeight: 1.5 }}
               >
                 {t("wipe.warning")}
@@ -91,14 +91,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           <div className="flex flex-col gap-5">
             <div>
 
-              <p className="text-xs mt-1 font-mono text-accent" data-testid="login-prompt">
+              <p className="text-secondary mt-1 font-mono text-accent" data-testid="login-prompt">
                 {authStep === "otp" ? t("login.otpPrompt") : t("login.prompt")}
               </p>
             </div>
 
             {knownAccounts.length > 0 && authStep === "email" && (
               <div className="flex flex-col gap-1">
-                <p className="text-xs font-mono text-muted">
+                <p className="text-secondary font-mono text-muted">
                   {t("login.previousAccounts")}
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -116,7 +116,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                           }
                         }}
                         disabled={!account.email}
-                        className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors border-2 border-line text-dim enabled:cursor-pointer enabled:hover:border-accent enabled:hover:text-fg bg-surface"
+                        className="flex items-center gap-1 px-2 py-1 font-mono text-secondary transition-colors border-2 border-line text-dim enabled:cursor-pointer enabled:hover:border-accent enabled:hover:text-fg bg-surface"
                         style={{
                           borderRadius: "0.5rem",
                         }}
@@ -139,7 +139,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               <button
                 data-testid="wipe-local-data-button"
                 onClick={() => setView("wipe")}
-                className="text-xs font-mono self-center transition-colors text-muted hover:text-danger border-0"
+                className="text-secondary font-mono self-center transition-colors text-muted hover:text-danger border-0"
                 style={{
                   background: "none",
                   cursor: "pointer",

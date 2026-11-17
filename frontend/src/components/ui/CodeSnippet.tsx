@@ -63,7 +63,7 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
       <code
         dir="ltr"
         data-testid={testId}
-        className="min-w-0 flex-1 break-all font-mono text-xs text-fg"
+        className="min-w-0 flex-1 break-all font-mono text-secondary text-fg"
       >
         {value}
       </code>

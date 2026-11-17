@@ -47,7 +47,7 @@ export function SuggestList<T>({
       aria-label={label}
       className="absolute bottom-full left-0 right-0 z-20 mb-1 mx-2 overflow-hidden rounded-panel border border-line bg-surface-raised"
     >
-      <div className="px-3 py-1.5 border-b border-line text-2xs text-muted select-none">
+      <div className="px-3 py-1.5 border-b border-line text-meta text-muted select-none">
         {/* `Trans`, so a translator can move the highlighted query. */}
         <Trans
           i18nKey={matchingKey}
@@ -74,7 +74,7 @@ export function SuggestList<T>({
                 onSelect(item);
               }}
               onMouseEnter={() => onHover(i)}
-              className={`w-full flex items-center gap-2 px-3 py-1.5 text-start text-sm hover:bg-hover ${
+              className={`w-full flex items-center gap-2 px-3 py-1.5 text-start text-body hover:bg-hover ${
                 isActive ? "bg-active" : ""
               }`}
             >

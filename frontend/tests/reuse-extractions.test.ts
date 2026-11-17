@@ -8,7 +8,7 @@ import { deriveSlug, resolveSlug } from "../src/utils/urlRouting.ts";
 import { detachChannel } from "../src/utils/detachChannel.ts";
 
 const RING =
-  "font-mono text-sm focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2";
+  "font-mono text-body focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2";
 
 test("TextInput / TextArea class: the border tracks error, then focus", () => {
   assert.equal(

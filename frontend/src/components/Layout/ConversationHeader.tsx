@@ -10,7 +10,7 @@ interface ConversationHeaderProps {
 export const ConversationHeader: React.FC<ConversationHeaderProps> = ({ title, children }) => (
   <div
     data-testid="conversation-header"
-    className="flex items-center gap-4 px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
+    className="flex items-center gap-4 px-4 flex-shrink-0 text-secondary font-mono h-bar border-b border-line text-muted"
   >
     <div className="flex-1 min-w-0 truncate">{title}</div>
     {children && (
