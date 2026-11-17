@@ -21,7 +21,7 @@ export const LinkPreviewsSection: React.FC<LinkPreviewsSectionProps> = ({ overla
 
   return (
     <section className="flex flex-col gap-4 mb-12" data-testid="pref-link-previews">
-      <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line">
+      <h2 className="text-secondary font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg">
         {t("linkPreviews.heading")}
       </h2>
       <Switch
@@ -34,7 +34,7 @@ export const LinkPreviewsSection: React.FC<LinkPreviewsSectionProps> = ({ overla
         onChange={(next) => setEnabled.mutate(next)}
       />
       {strict ? (
-        <p data-testid="pref-link-previews-strict" className="text-xs font-mono text-muted">
+        <p data-testid="pref-link-previews-strict" className="text-secondary font-mono text-muted">
           {t("linkPreviews.strictNote")}
         </p>
       ) : null}

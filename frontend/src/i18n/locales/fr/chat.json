@@ -128,6 +128,10 @@
     "loadDescription": "Charger le média depuis {{url}}. Cela contacte directement ce site et lui révèle votre adresse IP.",
     "openLabel": "Ouvrir {{url}}"
   },
+  "linkPreview": {
+    "loading": "Chargement de l'aperçu…",
+    "remove": "Retirer l'aperçu du lien"
+  },
   "notify": {
     "newMessageTitle": "Nouveau message",
     "newMessageBody": "{{name}} : nouveau message",

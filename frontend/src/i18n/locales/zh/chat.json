@@ -115,6 +115,10 @@
     "loadDescription": "从 {{url}} 加载媒体。这会直接连接该网站，并向其暴露你的 IP 地址。",
     "openLabel": "打开 {{url}}"
   },
+  "linkPreview": {
+    "loading": "正在加载预览…",
+    "remove": "移除链接预览"
+  },
   "notify": {
     "newMessageTitle": "新消息",
     "newMessageBody": "{{name}}：新消息",

@@ -5,6 +5,7 @@ import { Image } from "expo-image";
 import { LinkPreviewCard } from "./LinkPreviewCard";
 import { parseLink } from "../../lib/links";
 import type { LinkPreviewState } from "../../lib/linkPreview";
+import { space } from "../../theme/tokens";
 
 export function ComposerLinkPreview({
   state,
@@ -18,7 +19,7 @@ export function ComposerLinkPreview({
   }
   const image = state.status === "ready" ? state.draft.image : null;
   return (
-    <View testID="composer-link-preview" style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+    <View testID="composer-link-preview" style={{ paddingHorizontal: space.lg, paddingTop: space.sm }}>
       <LinkPreviewCard
         host={parseLink(state.url)?.host ?? ""}
         loading={state.status === "loading"}

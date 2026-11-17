@@ -117,6 +117,12 @@
     "itemStrict": "<mode>Strict</mode> — Ne se connecter qu'à travers le relais. Si aucun relais n'est joignable, l'envoi est suspendu plutôt que de révéler votre IP.",
     "applyError": "Impossible d'appliquer le mode relais : {{error}} — actuellement {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Aperçus de liens",
+    "label": "Générer des aperçus de liens",
+    "description": "Quand vous envoyez un lien, Pollis récupère la page depuis cet appareil pour créer un aperçu. Le site voit votre adresse IP, comme si vous l'aviez ouvert. Les personnes à qui vous l'envoyez ne contactent jamais le site.",
+    "strictNote": "La confidentialité réseau stricte désactive les aperçus de liens."
+  },
   "relayServing": {
     "heading": "Faire tourner un relais pour les autres",
     "intro": "Un choix distinct du réglage ci-dessus. Ce dernier décide si <dim>votre</dim> trafic passe par un relais. Celui-ci décide si le trafic <dim>d'autres personnes</dim> passe par <dim>votre appareil</dim>. Activer l'un n'active jamais l'autre.",

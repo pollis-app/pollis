@@ -119,6 +119,12 @@
     "itemStrict": "<mode>Okuqinile</mode> — Xhuma nge-relay kuphela. Uma ingekho i-relay efinyelelekayo, ukuthumela kuyamiswa kunokuba kuvezwe i-IP yakho.",
     "applyError": "Ayikwazanga ukusebenzisa imodi ye-relay: {{error}} — okwamanje {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Ukubuka kuqala kwezixhumanisi",
+    "label": "Dala ukubuka kuqala kwezixhumanisi",
+    "description": "Uma uthumela isixhumanisi, i-Pollis ilanda ikhasi isuka kule divayisi ukuze idale ukubuka kuqala. Isayithi ibona ikheli lakho le-IP, njengokungathi ulivule wena. Abantu obathumelayo abaxhumani nesayithi neze.",
+    "strictNote": "Ubumfihlo benethiwekhi obuqinile buvala ukubuka kuqala kwezixhumanisi."
+  },
   "relayServing": {
     "heading": "Qhuba i-relay yokusiza abanye",
     "intro": "Lokhu kuwukukhetha okuhlukile kwesilungiselelo esingenhla. Leso sinquma ukuthi ithrafikhi <dim>yakho</dim> idlula nge-relay yini. Lesi sinquma ukuthi ithrafikhi <dim>yabanye abantu</dim> idlula <dim>kudivayisi yakho</dim> yini. Ukuvula noma yisiphi akulokothi kuvule esinye.",

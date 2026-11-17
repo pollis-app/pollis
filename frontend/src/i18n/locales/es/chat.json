@@ -128,6 +128,10 @@
     "loadDescription": "Cargar contenido de {{url}}. Esto contacta directamente con ese sitio y le revela tu dirección IP.",
     "openLabel": "Abrir {{url}}"
   },
+  "linkPreview": {
+    "loading": "Cargando vista previa…",
+    "remove": "Quitar la vista previa del enlace"
+  },
   "notify": {
     "newMessageTitle": "Mensaje nuevo",
     "newMessageBody": "{{name}}: mensaje nuevo",

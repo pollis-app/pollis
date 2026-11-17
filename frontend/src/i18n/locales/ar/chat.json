@@ -165,6 +165,10 @@
     "loadDescription": "تحميل الوسائط من {{url}}. سيتصل هذا بالموقع مباشرة ويكشف له عنوان IP الخاص بك.",
     "openLabel": "فتح {{url}}"
   },
+  "linkPreview": {
+    "loading": "جارٍ تحميل المعاينة…",
+    "remove": "إزالة معاينة الرابط"
+  },
   "notify": {
     "newMessageTitle": "رسالة جديدة",
     "newMessageBody": "{{name}}: رسالة جديدة",

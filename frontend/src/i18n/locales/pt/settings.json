@@ -119,6 +119,12 @@
     "itemStrict": "<mode>Estrito</mode> — Liga apenas através do relay. Se nenhum relay estiver acessível, o envio fica em pausa em vez de revelar o seu IP.",
     "applyError": "Não foi possível aplicar o modo de relay: {{error}} — atualmente {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Pré-visualizações de ligações",
+    "label": "Gerar pré-visualizações de ligações",
+    "description": "Quando envias uma ligação, o Pollis obtém a página a partir deste dispositivo para criar uma pré-visualização. O site vê o teu endereço IP, como se a tivesses aberto. As pessoas a quem a envias nunca contactam o site.",
+    "strictNote": "A privacidade de rede estrita desativa as pré-visualizações de ligações."
+  },
   "relayServing": {
     "heading": "Ser relay para outras pessoas",
     "intro": "Uma escolha separada da definição acima. Essa decide se o <dim>seu</dim> tráfego passa por um relay. Esta decide se o tráfego de <dim>outras pessoas</dim> passa pelo <dim>seu dispositivo</dim>. Ativar uma nunca ativa a outra.",

@@ -117,6 +117,12 @@
     "itemStrict": "<mode>Estricto</mode>: conéctate solo a través del retransmisor. Si no hay ninguno accesible, el envío se pausa en lugar de revelar tu IP.",
     "applyError": "No se pudo aplicar el modo de retransmisor: {{error}} — actualmente {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Vistas previas de enlaces",
+    "label": "Generar vistas previas de enlaces",
+    "description": "Cuando envías un enlace, Pollis descarga la página desde este dispositivo para crear una vista previa. El sitio ve tu dirección IP, como si lo hubieras abierto tú. Las personas a las que se lo envías nunca contactan con el sitio.",
+    "strictNote": "La privacidad de red estricta desactiva las vistas previas de enlaces."
+  },
   "relayServing": {
     "heading": "Ejecutar un retransmisor para otros",
     "intro": "Es una decisión distinta de la del ajuste anterior. Aquel decide si <dim>tu</dim> tráfico pasa por un retransmisor. Este decide si el tráfico <dim>de otras personas</dim> pasa por <dim>tu dispositivo</dim>. Activar uno nunca activa el otro.",

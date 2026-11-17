@@ -119,6 +119,12 @@
     "itemStrict": "<mode>Madhubuti</mode> — Unganisha kupitia relay pekee. Ikiwa hakuna relay inayofikika, utumaji husitishwa badala ya kufichua IP yako.",
     "applyError": "Imeshindwa kutumia hali ya relay: {{error}} — kwa sasa ni {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Maonyesho ya kukagua viungo",
+    "label": "Tengeneza maonyesho ya kukagua viungo",
+    "description": "Unapotuma kiungo, Pollis huleta ukurasa kutoka kifaa hiki ili kutengeneza onyesho la kukagua. Tovuti huona anwani yako ya IP, kana kwamba umeifungua mwenyewe. Watu unaowatumia hawawasiliani kamwe na tovuti.",
+    "strictNote": "Faragha madhubuti ya mtandao huzima maonyesho ya kukagua viungo."
+  },
   "relayServing": {
     "heading": "Endesha relay kwa ajili ya wengine",
     "intro": "Hili ni chaguo tofauti na mpangilio ulio hapo juu. Ule huamua iwapo trafiki <dim>yako</dim> inapita kupitia relay. Huu huamua iwapo trafiki ya <dim>watu wengine</dim> inapita kupitia <dim>kifaa chako</dim>. Kuwasha kimoja hakuwashi kingine kamwe.",

@@ -134,6 +134,10 @@
     "loadDescription": "له {{url}} څخه رسنۍ بار کړئ. دا مستقیم له هغې ویبپاڼې سره اړیکه نیسي او ستاسو IP پته هغې ته ښکاره کوي.",
     "openLabel": "{{url}} پرانیزئ"
   },
+  "linkPreview": {
+    "loading": "مخکتنه بارېږي…",
+    "remove": "د لینک مخکتنه لرې کړئ"
+  },
   "notify": {
     "newMessageTitle": "نوی پیغام",
     "newMessageBody": "{{name}}: نوی پیغام",
