@@ -6,7 +6,7 @@ tags:
 # message of three pictures. The header is one line (name, then time) for a
 # plain message and a reply alike; three pictures sit in a 2-up grid
 # (`message-media-grid`: two squares, then one) under their caption, not
-# stacked full-width. Shots 01 and 02 are the review gallery for the layout.
+# stacked full-width. Shot 01 is the review gallery for the layout.
 # Self-contained: a fresh disposable account, no peer.
 
 - runFlow: ../subflows/sign-in.yaml
@@ -77,7 +77,14 @@ tags:
 - hideKeyboard
 - runFlow: ../subflows/message-settled.yaml
 
-# Three pictures with a caption.
+# Three pictures with a caption. The caption goes in first and the keyboard
+# comes down while only text rows are on screen: iOS's hideKeyboard gesture
+# lands mid-screen, which later is a composer card or a sent tile, and either
+# opens the viewer.
+- tapOn:
+    id: "input-composer"
+- inputText: "Photos from this morning"
+- hideKeyboard
 - addMedia:
     - "../fixtures/vault-swipe-01.png"
     - "../fixtures/vault-swipe-02.png"
@@ -158,9 +165,6 @@ tags:
     visible:
       id: "composer-attachment-2"
     timeout: 10000
-- tapOn:
-    id: "input-composer"
-- inputText: "Photos from this morning"
 # Keep pressing Send until the strip clears (sensitive-media.yaml).
 - repeat:
     while:
@@ -177,13 +181,14 @@ tags:
           optional: true
 - assertNotVisible:
     id: "strip-attachments"
-- hideKeyboard
 
 # The grid: three tiles in it, not stacked one per line.
 - extendedWaitUntil:
     visible:
       id: "message-media-grid"
     timeout: 30000
+- assertNotVisible:
+    id: "screen-media-viewer"
 - extendedWaitUntil:
     visible:
       id: "btn-attachment-.*"
@@ -193,11 +198,3 @@ tags:
 - waitForAnimationToEnd:
     timeout: 5000
 - takeScreenshot: message-media-grid-01-channel
-# The newest message, scrolled into the middle for a close look.
-- scrollUntilVisible:
-    element:
-      text: ".*: Thanks, on it\\., .*"
-    direction: UP
-    timeout: 10000
-    optional: true
-- takeScreenshot: message-media-grid-02-busy-channel
