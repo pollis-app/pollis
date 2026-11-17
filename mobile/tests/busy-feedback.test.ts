@@ -14,6 +14,7 @@ const LOCKED = [
   "app/(auth)/pin.tsx",
   "app/(auth)/enrollment.tsx",
   "app/approve-device.tsx",
+  "app/group/requests.tsx",
 ];
 
 test("slow submits claim a synchronous submit lock", () => {
@@ -53,4 +54,30 @@ test("a loading Button is disabled and announced busy", () => {
   assert.match(ui, /const off = !!disabled \|\| !!loading;/);
   assert.match(ui, /usePressIn\(off \? undefined : onPress, pressIn\)/);
   assert.match(ui, /busy: !!loading/);
+});
+
+test("a loading Chip keeps its colours, spins, and takes no press", () => {
+  const ui = read("components/ui.tsx");
+  const chip = ui.slice(ui.indexOf("export function Chip("), ui.indexOf("export function Button("));
+  assert.match(chip, /const inert = !!disabled \|\| !!loading;/);
+  assert.match(chip, /usePressIn\(inert \? undefined : onPress, pressIn\)/);
+  assert.match(chip, /disabled=\{inert \|\| !onPress\}/);
+  assert.match(chip, /busy: !!loading/);
+  assert.match(chip, /<ActivityIndicator testID=\{testID \? `\$\{testID\}-busy`/);
+  // Colours follow `disabled` only, so the chip being worked on still reads as itself.
+  assert.match(chip, /const off = disabled \? controlDisabled/);
+});
+
+test("join-request decisions are busy from the tap until they land (#1937)", () => {
+  const src = read("app/group/requests.tsx");
+  // The chip that was tapped spins; every other decision is disabled meanwhile.
+  assert.match(src, /testID=\{`btn-approve-\$\{r\.id\}`\}[\s\S]*?loading=\{approve\.isPending && approve\.variables === r\.id\}/);
+  assert.match(src, /testID=\{`btn-reject-\$\{r\.id\}`\}[\s\S]*?loading=\{reject\.isPending && reject\.variables === r\.id\}/);
+  assert.equal((src.match(/disabled=\{submit\.busy && /g) ?? []).length, 2);
+  assert.match(src, /mutation\.mutate\(requestId, \{ onSettled: submit\.end \}\)/);
+  assert.doesNotMatch(src, /"…"/, "the busy state is the spinner, not a swapped label");
+  // The decided row leaves the cached list in the render that ends the busy state.
+  const hooks = read("hooks/queries/useGroupInvites.ts");
+  assert.equal((hooks.match(/dropDecidedRequest\(queryClient, groupId, requestId\)/g) ?? []).length, 2);
+  assert.match(hooks, /setQueryData<JoinRequest\[\]>\(key, \(list\) =>\s*list \? withoutInvite\(list, requestId\) : list/);
 });
