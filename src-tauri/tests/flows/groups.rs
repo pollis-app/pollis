@@ -746,7 +746,7 @@ async fn an_approval_releases_the_mls_lock_before_its_key_follow_ups() {
 
     let _ = release.send(());
     approve.await.expect("join").expect("approve");
-    pollis_core::commands::groups::settle_approvals(&alice.state).await;
+    alice.state.settle_background().await;
     let ids = alice.group_member_ids(&group_id).await;
     assert!(ids.contains(&carol_profile.id), "carol should have joined");
 
@@ -797,7 +797,7 @@ async fn an_approval_returns_before_the_requesters_mls_add() {
         .expect("rendezvous closed");
     rendezvous::disarm(Point::AfterEpochAdvanced);
     let _ = release.send(());
-    pollis_core::commands::groups::settle_approvals(&alice.state).await;
+    alice.state.settle_background().await;
 
     carol.poll().await;
     alice.send_channel_message(&channel_id, "welcome in").await;
@@ -870,4 +870,68 @@ async fn an_invite_link_names_its_group_before_joining() {
 
     drop(alice);
     drop(bob);
+}
+
+/// #1959: the unlock's `initialize_identity` returns once a pending Welcome is applied; the
+/// post-join self-update runs on behind it, so the screen after the unlock never waits on it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_unlock_returns_before_the_post_join_self_update() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+    let group_id = alice.create_group("Unlock Group").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    carol.request_group_access(&group_id).await;
+    let request_id = alice.list_join_requests(&group_id).await[0]["id"]
+        .as_str()
+        .expect("request id")
+        .to_string();
+    alice.approve_join_request(&request_id).await;
+
+    // Hold the post-join self-update before it submits; an unlock that waited on it would hang.
+    let mut rotation = rendezvous::arm(Point::SelfUpdateBeforeSubmit);
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        carol.invoke_try(
+            "initialize_identity",
+            json!({ "userId": carol_profile.id }),
+        ),
+    )
+    .await
+    .expect("the unlock waited on the post-join self-update")
+    .expect("initialize_identity");
+    assert!(
+        carol
+            .state
+            .local_db
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|db| pollis_lib::commands::mls::has_local_group(db.conn(), &group_id)),
+        "the Welcome is applied by the time the unlock returns"
+    );
+
+    let release = tokio::time::timeout(Duration::from_secs(30), rotation.recv())
+        .await
+        .expect("the post-join self-update never ran")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::SelfUpdateBeforeSubmit);
+    let _ = release.send(());
+    carol.state.settle_background().await;
+
+    alice.send_channel_message(&channel_id, "after the rotation").await;
+    let msgs = carol.fetch_channel_messages(&channel_id).await;
+    assert!(
+        msgs.iter().any(|m| m["content"] == "after the rotation"),
+        "carol reads the group once her rotation lands: {msgs:#?}"
+    );
+
+    drop(alice);
+    drop(carol);
 }

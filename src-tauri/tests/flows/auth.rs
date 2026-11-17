@@ -1408,6 +1408,7 @@ async fn reset_identity_and_recover_from_a_fresh_device() {
     )
     .await
     .expect("initialize_identity after the reset");
+    fresh.state.settle_background().await;
 
     // The reset left exactly this device, and dropped the old memberships.
     let fresh_device_id = fresh.state.device_id.lock().await.clone().expect("device_id");

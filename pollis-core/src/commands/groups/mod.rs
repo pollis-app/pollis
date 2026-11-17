@@ -41,7 +41,7 @@ pub use invites::{
 
 pub use join_requests::{
     approve_join_request, get_group_join_requests, get_my_join_request, reject_join_request,
-    request_group_access, settle_approvals,
+    request_group_access,
 };
 
 #[cfg(test)]

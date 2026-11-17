@@ -848,12 +848,14 @@ for the lock is written to the diagnostics log (`[mls] waited …ms for the MLS 
 **An approve returns once the DS records it (#1960).** `approve_join_request` answers the admin
 as soon as `POST` approve lands (the requester is on the roster then, ~1 s); the reconcile that
 adds their devices to the tree, and the `membership_changed` notices to the requester and the
-group room, run on in a spawned task kept in `AppState::approvals_in_flight`. The requester is
+group room, run on in a task started with `AppState::spawn_background`. The requester is
 told only after the add, so the group they open has their Welcome. A failed or interrupted add
 (the admin's app closes) heals on the next reconcile by any member, as a failed add always did;
-mail sealed before it is the first acceptable loss. `groups::settle_approvals` waits for the
+mail sealed before it is the first acceptable loss. `AppState::settle_background` waits for the
 tasks; the flows harness's `approve_join_request` calls it. Flows test:
 `groups::an_approval_returns_before_the_requesters_mls_add`.
+
+The requester's side has the same shape (#1959): the unlock's `initialize_identity` waits for its Welcomes to be applied, acknowledged and their keys adopted (`mls::poll_mls_welcomes_deferring`), and the post-join self-update, KeyPackage top-up and re-joins follow in the background under the cross-process lock again. Flows test: `groups::the_unlock_returns_before_the_post_join_self_update`.
 
 Two things depend on it. **PCS**: without it, a compromised leaf stays readable
 until membership happens to change. **Commit size**: unmerged leaves dominate a

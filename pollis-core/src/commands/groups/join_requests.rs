@@ -127,15 +127,9 @@ pub async fn approve_join_request(
     );
 
     let task_state = Arc::clone(state);
-    let handle = tokio::spawn(async move {
+    state.spawn_background(async move {
         add_approved_member(&task_state, &group_id, &approver_id, &requester_id, started).await;
     });
-    let mut in_flight = state
-        .approvals_in_flight
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    in_flight.retain(|h| !h.is_finished());
-    in_flight.push(handle);
     Ok(())
 }
 
@@ -172,26 +166,6 @@ async fn add_approved_member(
     }
     if let Err(e) = room {
         crate::diag!("[realtime] approve_join_request: notify group {group_id}: {e}");
-    }
-}
-
-/// Wait for every approval's background MLS add on this state to finish (#1960). For tests and
-/// shutdown; the UI never waits on it.
-pub async fn settle_approvals(state: &AppState) {
-    loop {
-        let pending: Vec<_> = {
-            let mut in_flight = state
-                .approvals_in_flight
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            std::mem::take(&mut *in_flight)
-        };
-        if pending.is_empty() {
-            return;
-        }
-        for handle in pending {
-            let _ = handle.await;
-        }
     }
 }
 

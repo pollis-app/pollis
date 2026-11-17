@@ -19,7 +19,7 @@ import { Icon } from "../../components/icons";
 import { ProfileCard } from "../../components/self/ProfileCard";
 import { accentDisplayName } from "../../components/self/accentName";
 import { useNotificationPermission } from "../../components/self/useNotificationPermission";
-import { confirmSignOut } from "../../components/self/confirmSignOut";
+import { useSignOutSheet } from "../../components/self/SignOutSheet";
 import { VersionRow, UpdateRow } from "../../components/self/BuildRows";
 import { useTheme } from "../../components/theme";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
@@ -102,13 +102,12 @@ function Self() {
     ? t("mobile:self.hub.deviceCount", { count: devices.length })
     : undefined;
 
+  const signOutSheet = useSignOutSheet(() => logout.mutate());
   const onSignOut = () => {
     if (logout.isPending) {
       return;
     }
-    confirmSignOut(() => {
-      logout.mutate();
-    });
+    signOutSheet.open();
   };
 
   const appearanceName = t("mobile:self.hub.appearance");
@@ -315,6 +314,7 @@ function Self() {
           </Group>
         </Body>
       )}
+      {signOutSheet.sheet}
     </Screen>
   );
 }

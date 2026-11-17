@@ -1283,6 +1283,8 @@ impl TestClient {
         )
         .await
         .unwrap_or_else(|e| panic!("initialize_identity: {e}"));
+        // Its Welcome follow-ups run on behind it (#1959); tests start from where they land.
+        self.state.settle_background().await;
 
         self.profile = Some(profile.clone());
         profile
@@ -1555,7 +1557,7 @@ impl TestClient {
             json!({ "requestId": request_id, "approverId": self.user_id() }),
         )
         .await;
-        pollis_core::commands::groups::settle_approvals(&self.state).await;
+        self.state.settle_background().await;
     }
 
     pub(crate) async fn reject_join_request(&self, request_id: &str) {
@@ -1976,6 +1978,7 @@ pub(crate) async fn enroll_another_device(primary: &TestClient, email: &str, exp
     )
     .await
     .unwrap_or_else(|e| panic!("initialize_identity on enrolled device: {e}"));
+    new_client.state.settle_background().await;
 
     let devices: serde_json::Value = new_client
         .invoke_json(

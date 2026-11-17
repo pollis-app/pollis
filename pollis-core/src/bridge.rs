@@ -453,7 +453,38 @@ fn ok<T: serde::Serialize>(v: T) -> Result<String, BridgeError> {
 /// + the static screens. Add commands here as the mobile UI needs them.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeError> {
-    run_on_worker(invoke_inner(cmd, args_json)).await
+    let asked = std::time::Instant::now();
+    run_on_worker(async move {
+        let queued = asked.elapsed();
+        let name = cmd.clone();
+        let result = invoke_inner(cmd, args_json).await;
+        note_slow_command(&name, queued, asked.elapsed() - queued);
+        result
+    })
+    .await
+}
+
+/// A command that waited this long for a bridge worker, or ran this long, is written to the
+/// diagnostics log (#1959), so a screen stuck loading says which of the two it was.
+const SLOW_COMMAND: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Commands that park on purpose until something happens; how long they ran says nothing.
+const PARKING_COMMANDS: &[&str] = &[
+    "wait_persisted",
+    "await_enrollment_approval",
+    "await_history_transfer",
+    "await_device_offer",
+];
+
+fn note_slow_command(name: &str, queued: std::time::Duration, ran: std::time::Duration) {
+    let ran_long = ran >= SLOW_COMMAND && !PARKING_COMMANDS.contains(&name);
+    if queued >= SLOW_COMMAND || ran_long {
+        crate::diag!(
+            "[bridge] {name}: waited {}ms for a worker, ran {}ms",
+            queued.as_millis(),
+            ran.as_millis()
+        );
+    }
 }
 
 async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeError> {
