@@ -150,7 +150,7 @@ The `pollis-api` crate is dependency-light (serde only) on purpose, mirroring
 on `pollis-core`.
 
 ## auth (`commands/auth.rs`)
-- `initialize_identity(user_id)` — ensure MLS credentials + KPs, poll welcomes. Requires the local DB to be open (post-`set_pin` / `unlock`).
+- `initialize_identity(user_id)` — ensure MLS credentials + KPs, poll welcomes. Requires the local DB to be open (post-`set_pin` / `unlock`). Returns once pending Welcomes are applied, acknowledged and their pin/file keys adopted; the post-join self-updates, the KeyPackage top-up and re-joins of failed Welcomes run on in `AppState::spawn_background` (#1959: on a phone they were most of a 25 s unlock). Every other welcome poll (`poll_mls_welcomes`, the send/ingest paths) still runs them inline.
 - `request_otp(email)` — send OTP code to email
 - `verify_otp(email, code)` → `AuthResult` — verify OTP, register the device. Does **not** open the local DB; `set_pin` (signup) or `unlock` (resume) does.
   - **The device id it sends is the one the OTP session gets bound to**, and it has to be chosen before the DS has said anything, so it is picked locally: a fresh ULID normally, or — for a returning device that is not yet enrolled — its existing stable id, looked up from the typed address by `auth::stable_device_id_for_reenrollment` (an unenrolled device cannot restart its enrollment otherwise; the enrollment-request write is session-gated).

@@ -146,10 +146,19 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
 - **Desktop:** title bar, breadcrumb bar, sidebar, main column, optional right panel, status bar.
   Settings-type pages are a single column, at most 420px wide, inside the main pane.
 - **Mobile:** tabs plus stacks, native sheets for menus and confirmations, master–detail on tablets.
+  A confirmation is a `SheetOverlay` (the question as its title, the action as a row in
+  `Group surface="high"`, red when destructive; Close cancels), never a stock `Alert`, whose
+  platform dialog ignores the theme.
 - **No modals on desktop.** The Cmd+K palette is the only overlay. A confirmation replaces the
   chat input bar or is its own page.
 - **Same-frame feedback.** Anything that can take time shows an optimistic result or a busy,
   un-repeatable control on the same frame, on every platform.
+- **People in rows** (members, message requests, conversation lists): the display name when the
+  person set one, else the handle. A name stays on one line and never wraps mid-word: mobile
+  truncates a handle in the middle (`ListRow`'s `nameIsHandle`, so both ends stay readable) and a
+  display name at the end; desktop truncates at the end. Row actions (Accept / Block, a role,
+  Remove) never squeeze the name: on a narrow row they go on their own line under it, past the
+  avatar (mobile `stackRowActions`, desktop's row controls keep their width and the name shrinks).
 - **Empty states:** every list that can be empty uses `EmptyState`, on desktop
   (`frontend/src/components/ui/EmptyState.tsx`, also what `NavigableList` / `NavigableGrid` draw
   for `emptyLabel`) and on mobile (`EmptyState` in `mobile/components/ui.tsx`). One plain sentence,

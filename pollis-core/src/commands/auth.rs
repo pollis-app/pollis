@@ -45,8 +45,9 @@ pub async fn initialize_identity(
         Err(e) => crate::diag!("[identity] MLS key package error (non-fatal): {e}"),
     }
 
-    // Re-process pending Welcomes: recovers membership after a local DB wipe.
-    match crate::commands::mls::poll_mls_welcomes_inner(state, &user_id, &device_id).await {
+    // Re-process pending Welcomes: recovers membership after a local DB wipe. The unlock waits
+    // for the joins only; their self-updates and the KeyPackage top-up run on behind it (#1959).
+    match crate::commands::mls::poll_mls_welcomes_deferring(state, &user_id, &device_id).await {
         Ok(()) => {}
         Err(e) => crate::diag!("[identity] poll_mls_welcomes (non-fatal): {e}"),
     }

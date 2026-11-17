@@ -16,6 +16,7 @@ import {
 /** One conversation in the Direct list; unread is said three ways, never colour alone. One control. */
 export function ConversationRow({
   name,
+  nameIsHandle,
   avatars,
   preview,
   own,
@@ -28,6 +29,8 @@ export function ConversationRow({
   unreadTestID,
 }: {
   name: string;
+  // A handle is truncated in the middle, a display name at the end (#1971).
+  nameIsHandle?: boolean;
   // Two or more draws the overlapped group avatar.
   avatars: ConversationAvatarPerson[];
   preview?: string | null;
@@ -91,6 +94,7 @@ export function ConversationRow({
         >
           <Text
             numberOfLines={1}
+            ellipsizeMode={nameIsHandle ? "middle" : "tail"}
             style={{
               flex: 1,
               fontFamily: isUnread ? fonts.bold : fonts.semibold,

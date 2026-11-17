@@ -28,6 +28,12 @@
 - **No modals.** Confirmation and input flows replace the chat input bar (the
   edit/delete bar pattern in `MainContent`) or navigate to a page. The sole exception
   is the Cmd+K search menu.
+- **People in rows (#1971):** the display name when set, else the handle; one line, never
+  wrapped mid-word. Desktop rows truncate the name at the end and keep their controls at full
+  width (`e2e/long-handles.spec.ts`); mobile truncates a handle in the middle
+  (`ListRow` / `ConversationRow` `nameIsHandle`, names from `mobile/lib/personName.ts` over one
+  `get_user_profiles` read) and puts a narrow row's actions under the name
+  (`stackRowActions`). Rule: `docs/design/README.md` → "People in rows".
 - Components read MobX stores inside `observer()` wrappers; remote data comes from
   React Query hooks in `frontend/src/hooks/queries/`.
 
