@@ -2241,8 +2241,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'list_voice_participants':
     case 'list_voice_room_counts':
-    case 'list_audio_devices':
       return [];
+
+    // cpal device ids and server descriptions, as the PulseAudio host lists them (#1989).
+    case 'list_audio_devices':
+      return [
+        { id: 'pulseaudio:alsa_input.pci-0000_00_1f.3.analog-stereo', name: 'Built-in Audio Analog Stereo', kind: 'input' },
+        { id: 'pulseaudio:alsa_input.usb-Blue_Microphones_Yeti-00.analog-stereo', name: 'Yeti Stereo Microphone', kind: 'input' },
+        { id: 'pulseaudio:alsa_output.pci-0000_00_1f.3.analog-stereo', name: 'Built-in Audio Analog Stereo', kind: 'output' },
+        { id: 'pulseaudio:bluez_output.AA_BB_CC_DD_EE_FF.1', name: 'AirPods Pro', kind: 'output' },
+      ];
 
     // Session lifecycle: a join succeeds instantly, so a spec can drive `VoiceSessionManager` itself.
     case 'join_voice_channel':

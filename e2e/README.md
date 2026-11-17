@@ -322,22 +322,24 @@ down by `stop-backend.sh`:
 
 - **`start-audio.sh`** — on a PulseAudio host (the CI runner): a headless
   PulseAudio daemon with a null sink (fake speaker) + a virtual source (fake
-  mic), and an `/etc/asound.conf` that points ALSA's default PCM at PulseAudio
-  so **cpal** (the Linux ALSA host) opens the virtual devices. Without it
-  `join_voice_channel` fails opening the mic. It exports `PULSE_SERVER` /
+  mic), made the server defaults. **cpal**'s PulseAudio host (#1989) reaches it
+  through `PULSE_SERVER` and opens them; an `/etc/asound.conf` also points
+  ALSA's default PCM at it for cpal's ALSA fallback host. Without it
+  `join_voice_channel` has no mic to open. It exports `PULSE_SERVER` /
   `PULSE_SINK` / `PULSE_SOURCE`. Needs `pulseaudio`, `pulseaudio-utils`,
   `libasound2-plugins` (in `install-system-deps.sh`).
-  On a **PipeWire host** (a developer box) those variables would be ignored:
-  cpal prefers ALSA's `pipewire` PCM over `pulse`, so a test client would open
-  the host's *real* mic and speaker (and flip a Bluetooth headset into its
-  headset profile). There the script instead loads virtual nodes on the host
-  PipeWire (`pollis_vspk_a/b`, `pollis_vmic_a/b` + `_src` remaps), writes a
-  per-client `$XDG_CONFIG_HOME/alsa/asoundrc` pinning the `pipewire` PCM to
-  them, and exports `POLLIS_E2E_XDG_A` / `POLLIS_E2E_XDG_B`; `startClient` in
-  `lib/harness.js` gives client 0 / 1 that `XDG_CONFIG_HOME`. Host defaults are
-  never changed. While clients run, `pactl list source-outputs` must show no
-  stream on a `bluez_input*` / `alsa_input*` source. `stop-backend.sh` unloads
-  the nodes.
+  On a **PipeWire host** (a developer box) a test client must not open the
+  host's *real* mic and speaker (that also flips a Bluetooth headset into its
+  headset profile). There the script loads virtual nodes on the host PipeWire
+  (`pollis_vspk_a/b`, `pollis_vmic_a/b` + `_src` remaps) and pins each client
+  to its own: `POLLIS_E2E_PULSE_SINK_A/B` / `POLLIS_E2E_PULSE_SOURCE_A/B`
+  (cpal's PulseAudio host honours `PULSE_SINK` / `PULSE_SOURCE` as the client's
+  defaults, like libpulse) and a per-client `$XDG_CONFIG_HOME/alsa/asoundrc`
+  pinning the `pipewire` PCM for the ALSA fallback (`POLLIS_E2E_XDG_A/B`).
+  `startClient` in `lib/harness.js` gives client 0 / 1 the `_A` / `_B` values.
+  Host defaults are never changed. While clients run, `pactl list
+  source-outputs` must show no stream on a `bluez_input*` / `alsa_input*`
+  source. `stop-backend.sh` unloads the nodes.
 - **`start-livekit.sh`** — an ephemeral `livekit/livekit-server:v1.13.9` in
   `--dev` mode (dev key `devkey` / secret `secret`) on loopback under Docker
   `--network host`. It exports `LIVEKIT_URL` (the app dials it —
