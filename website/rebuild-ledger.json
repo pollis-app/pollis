@@ -1,11 +1,21 @@
 {
-  "generated_at": "2026-11-17T07:20:29Z",
+  "generated_at": "2026-11-17T21:37:42Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "8df524ba",
     "date": "2026-08-16"
   },
   "runs": [
+    {
+      "tag": "v1.19.16",
+      "conclusion": "success",
+      "created_at": "2026-11-17T21:13:20Z",
+      "event": "workflow_run",
+      "run_id": "44177513608",
+      "run_url": "https://github.com/pollis-app/pollis/actions/runs/44177513608",
+      "classification": null,
+      "evidence": null
+    },
     {
       "tag": "v1.19.15",
       "conclusion": "success",
@@ -935,16 +945,6 @@
       "run_url": "https://github.com/pollis-app/pollis/actions/runs/31361471279",
       "classification": null,
       "evidence": null
-    },
-    {
-      "tag": "v1.8.4",
-      "conclusion": "failure",
-      "created_at": "2026-08-10T04:54:00Z",
-      "event": "workflow_dispatch",
-      "run_id": "31356925574",
-      "run_url": "https://github.com/pollis-app/pollis/actions/runs/31356925574",
-      "classification": "environment_drift",
-      "evidence": "Recipe drift, not image drift — and not a finding against the shipped binary. The comparison was real: logged AppImage payload 1a4213a1…, rebuilt a5ee8d5e…, and the release (31335834158 build-linux) and this rebuild both ran on ubuntu22@20260720.234.2, so the runner image is ruled out. What differed is the build recipe: the log records LOG_DB_TOKEN empty in the build env, while the release baked that token into usr/bin/pollis — cause (5) of the v1.8.4 diagnosis in docs/reproducible-builds-residuals.md, whose recipe vars were being stood up that very morning. The diff matches exactly: the only differing file in the unpacked AppImage was usr/bin/pollis itself, with .text 64 bytes (0x40) smaller and every later section shifted — the documented signature of one absent baked constant (the 105,674,021 differing bytes are compression smear across the squashfs). Proven, not merely argued: run 31361471279, 84 minutes later — same tag, same workflow commit 5595d409, same ubuntu22@20260720.234.2 image, recipe var now populated — reproduced 1a4213a1… byte-for-byte. The source was never in question; the rebuild ran with an incomplete build environment. #987 has since removed LOG_DB_TOKEN from the client entirely."
     }
   ]
 }
