@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal,
-  Text,
   View,
   AccessibilityInfo,
   Platform,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "../Text";
 import Animated, {
   Easing,
   cancelAnimation,

@@ -1,4 +1,4 @@
-import { Text } from "react-native";
+import { Text } from "../Text";
 import { semantic } from "../../theme/tokens";
 import { longPressLink, tapLink } from "../../lib/openLink";
 

@@ -1,6 +1,7 @@
 // "Your data" (#856): export, optionally complete attachments, hand the zip to the share sheet. Desktop's copy keys.
 import { useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from "./Text";
 import { useTranslation } from "react-i18next";
 import { Group, ListRow, Button, SectionTitle } from "./ui";
 import { Icon } from "./icons";

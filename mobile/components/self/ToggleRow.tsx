@@ -1,4 +1,5 @@
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "../Text";
 import { Toggle } from "../ui";
 import { semantic, type as ty, fonts, space, layout } from "../../theme/tokens";
 import { haptic } from "../../lib/haptics";

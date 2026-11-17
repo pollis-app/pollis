@@ -1,7 +1,8 @@
 // The whole security-event log (#1548), keyset-paged and filterable; desktop's SecurityEventsPage twin.
 
 import { useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, View } from "react-native";
+import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Chip } from "../../components/ui";
 import { ErrorText, Note } from "../../components/self/SettingsField";

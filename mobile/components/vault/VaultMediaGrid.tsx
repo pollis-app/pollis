@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { FlatList, Text, View } from "react-native";
+import { FlatList, View } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { AttachmentTile } from "../chat/AttachmentTile";
 import { isRollMedia, mediaKind } from "../../lib/media/viewer";

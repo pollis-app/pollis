@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ActivityIndicator, Linking, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, View } from "react-native";
+import { Text } from "../Text";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useTranslation } from "react-i18next";

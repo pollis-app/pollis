@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, View } from "react-native";
+import { Text } from "../Text";
 import { useRouter } from "expo-router";
 import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";

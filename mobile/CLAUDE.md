@@ -95,6 +95,12 @@ Rules that are easy to get wrong here:
   redesign. Where an uppercase string is genuinely needed (an acronym), use
   `upper(t(...))`, never `.toUpperCase()` on translated text
   (locale-invariant casing is wrong in Turkish and a no-op in Arabic).
+- **`Text` comes from `components/Text.tsx`, never from `react-native`**
+  (#1941). It sets `lineBreakStrategyIOS="hangul-word"`, without which iOS
+  breaks Korean lines between syllables inside a word; it only changes how
+  Hangul wraps, so it is on in every UI language (Korean in messages too).
+  Android already keeps words together. `tests/text-line-break.test.ts`
+  fails on a direct import.
 - **RTL is `I18nManager`.** `setLanguage` calls `forceRTL` for the language's
   `dir`, which React Native applies on the **next launch**; the Language page
   (`app/self/language.tsx`, body `components/LanguagePicker.tsx`, #1944)

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, View } from "react-native";
+import { Text } from "../components/Text";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
 import { Screen, Header, Button, Field, BottomAction } from "../components/ui";

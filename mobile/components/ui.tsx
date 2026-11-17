@@ -2,7 +2,6 @@ import React from "react";
 import {
   ActivityIndicator,
   View,
-  Text,
   TextInput,
   Pressable,
   ScrollView,
@@ -14,6 +13,7 @@ import {
   AccessibilityRole,
   useWindowDimensions,
 } from "react-native";
+import { Text } from "./Text";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useRouter } from "expo-router";

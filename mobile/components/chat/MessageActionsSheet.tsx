@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, ScrollView, useWindowDimensions } from "react-native";
+import { View, Pressable, ScrollView, useWindowDimensions } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Group, ListRow } from "../ui";

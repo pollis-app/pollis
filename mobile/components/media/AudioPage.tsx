@@ -1,7 +1,8 @@
 // The audio page of the media viewer (#1248), autoplaying on expo-audio from the named copy.
 
 import { useEffect, useRef, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useNamedMediaUri } from "../../hooks/useNamedMediaUri";

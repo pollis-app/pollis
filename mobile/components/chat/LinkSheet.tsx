@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "../Text";
 import * as Clipboard from "expo-clipboard";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";

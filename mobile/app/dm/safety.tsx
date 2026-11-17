@@ -1,4 +1,5 @@
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from "../../components/Text";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";

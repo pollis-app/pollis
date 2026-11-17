@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BackHandler, View, Text, type TextInput } from "react-native";
+import { BackHandler, View, type TextInput } from "react-native";
+import { Text } from "../../components/Text";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";

@@ -1,5 +1,6 @@
 import React from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "../Text";
 import { semantic, type as ty } from "../../theme/tokens";
 
 /** The title + explanation every auth-style screen opens with, so the spacing matches. */

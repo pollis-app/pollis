@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import { View, FlatList, Pressable } from "react-native";
+import { Text } from "../../components/Text";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Chip } from "../../components/ui";

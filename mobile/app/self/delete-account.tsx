@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Screen, Header, Body, Card, Field, Button, BottomAction } from "../../components/ui";

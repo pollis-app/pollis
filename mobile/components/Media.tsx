@@ -1,7 +1,8 @@
 // Media renderers for message attachments (#346): every attachment renders through this seam.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from "./Text";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import type { ImageStyle, StyleProp } from "react-native";

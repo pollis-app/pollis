@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, FlatList } from "react-native";
+import { View, FlatList } from "react-native";
+import { Text } from "../../components/Text";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { Screen, Header } from "../../components/ui";

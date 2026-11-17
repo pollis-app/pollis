@@ -1,4 +1,5 @@
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "../Text";
 import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { Badge, Chip, Group, ListRow } from "../ui";

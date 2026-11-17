@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui";
 import { QrCode } from "../QrCode";

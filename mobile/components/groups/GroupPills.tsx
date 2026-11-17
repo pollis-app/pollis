@@ -1,4 +1,5 @@
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Dot, IconButton } from "../ui";
 import { Icon } from "../icons";

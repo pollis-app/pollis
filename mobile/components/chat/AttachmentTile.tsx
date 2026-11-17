@@ -2,7 +2,8 @@
 
 import { useMemo, type ReactNode } from "react";
 import { observer } from "mobx-react-lite";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Text } from "../Text";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { MediaImage } from "../Media";

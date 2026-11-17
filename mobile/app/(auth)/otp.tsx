@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { View, Text, TextInput, Pressable } from "react-native";
+import { View, TextInput, Pressable } from "react-native";
+import { Text } from "../../components/Text";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { KeyboardController } from "react-native-keyboard-controller";
 import { Trans, useTranslation } from "react-i18next";

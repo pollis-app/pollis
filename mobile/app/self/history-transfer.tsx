@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, View } from "react-native";
+import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Group, ListRow, Dot } from "../../components/ui";
 import { Icon } from "../../components/icons";

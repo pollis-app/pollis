@@ -1,7 +1,8 @@
 // Every third-party package this build ships, with its licence (#1832); desktop's OpenSourcePage twin.
 
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, InteractionManager, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, InteractionManager, View } from "react-native";
+import { Text } from "../../../components/Text";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Field, ListRow } from "../../../components/ui";

@@ -102,6 +102,8 @@
   }
   :root:lang(ko) {
     --font-script: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', 'Noto Sans KR', 'Source Han Sans KR', system-ui;
+    /* Korean wraps at spaces, never between the syllables of a word (#1941). */
+    word-break: keep-all;
   }
   :root:lang(zh) {
     --font-script: 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', system-ui;

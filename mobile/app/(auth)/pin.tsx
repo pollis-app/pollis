@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Platform, Text, View } from "react-native";
+import { Platform, View } from "react-native";
+import { Text } from "../../components/Text";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Body, Button } from "../../components/ui";

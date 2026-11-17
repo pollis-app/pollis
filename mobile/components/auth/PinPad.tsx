@@ -1,4 +1,5 @@
-import { ActivityIndicator, View, Text, Pressable } from "react-native";
+import { ActivityIndicator, View, Pressable } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { semantic, fonts, layout, currentTheme, type as ty } from "../../theme/tokens";
 import { controlDisabled } from "../../theme/button";

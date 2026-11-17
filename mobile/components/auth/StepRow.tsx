@@ -1,4 +1,5 @@
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "../Text";
 import { Icon } from "../icons";
 import { semantic, type as ty } from "../../theme/tokens";
 

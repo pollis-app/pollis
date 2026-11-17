@@ -1,7 +1,8 @@
 // One package's licence notice (#1832); desktop's OpenSourceLicensePage twin.
 
 import { useEffect, useState } from "react";
-import { ActivityIndicator, InteractionManager, Text, View } from "react-native";
+import { ActivityIndicator, InteractionManager, View } from "react-native";
+import { Text } from "../../../components/Text";
 import { useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Body } from "../../../components/ui";

@@ -1,7 +1,8 @@
 // One pending attachment card in the composer (#1585); a marked sensitive card (#1568) shows its blurhash and opens nothing.
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "../Text";
 import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";

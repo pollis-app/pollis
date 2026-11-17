@@ -1,4 +1,5 @@
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from "../../components/Text";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { Trans, useTranslation } from "react-i18next";
