@@ -116,10 +116,29 @@ pub async fn head_epoch_in(
     Ok(head_epoch_of(max_epoch) as i64)
 }
 
+/// The group's head `(generation, epoch)`: [`head_generation`], then [`head_epoch_in`] that
+/// generation, in ONE statement (#1960), so the pair is one round trip and one snapshot.
+pub async fn head(conn: &Connection, conversation_id: &str) -> Result<(i64, i64)> {
+    let mut rows = conn
+        .query(
+            "SELECT h.gen, \
+                    (SELECT MAX(epoch) FROM mls_commit_log \
+                      WHERE conversation_id = ?1 AND generation = h.gen) \
+             FROM (SELECT COALESCE(MAX(generation), 0) AS gen \
+                     FROM mls_commit_log WHERE conversation_id = ?1) h",
+            libsql::params![conversation_id],
+        )
+        .await?;
+    let row = rows.next().await?.ok_or_else(|| anyhow!("no head row"))?;
+    let generation = row.get::<i64>(0)?;
+    // Epochs are non-negative, so `i64 -> u64` is exact.
+    let max_epoch: Option<u64> = row.get::<Option<i64>>(1)?.map(|m| m as u64);
+    Ok((generation, head_epoch_of(max_epoch) as i64))
+}
+
 /// The group's head epoch, in its CURRENT lineage.
 pub async fn head_epoch(conn: &Connection, conversation_id: &str) -> Result<i64> {
-    let gen = head_generation(conn, conversation_id).await?;
-    head_epoch_in(conn, conversation_id, gen).await
+    Ok(head(conn, conversation_id).await?.1)
 }
 
 /// Commits in `generation` with `epoch >= since`, contiguous, in apply order.
@@ -244,9 +263,13 @@ pub async fn submit_commit_with(
 
     // Gate 4, before any write (#1851).
     if check == crate::leaf_cert::LeafCheck::Enforce {
+        // One memo for the whole submit (#1960): the copies of a Welcome and the GroupInfo's
+        // new leaves are checked once each.
+        let mut memo = crate::leaf_cert::CheckMemo::default();
         for (w, welcome) in &welcomes {
-            if let Err(why) = crate::leaf_cert::check_welcome(
+            if let Err(why) = crate::leaf_cert::check_welcome_memo(
                 main_conn,
+                &mut memo,
                 &w.recipient_id,
                 &w.recipient_device_id,
                 welcome,
@@ -259,7 +282,8 @@ pub async fn submit_commit_with(
         if let Some(gi) = &group_info {
             let stored = crate::leaf_cert::stored_group_info(conn, &body.conversation_id).await?;
             if let Err(why) =
-                crate::leaf_cert::check_group_info(main_conn, stored.as_deref(), gi).await?
+                crate::leaf_cert::check_group_info_memo(main_conn, &mut memo, stored.as_deref(), gi)
+                    .await?
             {
                 return Ok(SubmitVerdict::Invalid(why));
             }
@@ -688,8 +712,7 @@ pub async fn prune_commit_log(
     log: &Connection,
     conversation_id: &str,
 ) -> Result<PruneReport> {
-    let generation = head_generation(log, conversation_id).await?;
-    let head = head_epoch_in(log, conversation_id, generation).await?;
+    let (generation, head) = head(log, conversation_id).await?;
     let members = current_member_devices(main, conversation_id).await?;
     let recorded = recorded_since(log, conversation_id).await?;
     let departed = departed_devices(main, &members, &recorded).await?;

@@ -643,14 +643,22 @@ async fn submit(State(state): State<AppState>, req: RawRequest) -> Result<Respon
             commit::SubmitVerdict::Invalid(why) => return Ok(writes::bad_request(why)),
         };
 
-    // Retention floor (#539, I4): an event-driven prune, best-effort.
+    // Retention floor (#539, I4): an event-driven prune, best-effort, and off the response path
+    // (#1960): it deletes only below the floor, never at the head this commit just wrote, and
+    // the committer is waiting on its answer.
     if matches!(outcome, SubmitResponse::Accepted { .. }) {
-        if let Ok(main_conn) = state.db.conn().await {
-            if let Err(e) = commit::prune_commit_log(&main_conn, &conn, &parsed.conversation_id).await
-            {
-                tracing::warn!(error = %e, conversation_id = %parsed.conversation_id, "commit-log prune (on submit) failed");
+        drop(conn);
+        drop(main_conn);
+        let state = state.clone();
+        let conversation_id = parsed.conversation_id.clone();
+        tokio::spawn(async move {
+            let (Ok(main_conn), Ok(log_conn)) = (state.db.conn().await, state.log_db.conn().await) else {
+                return;
+            };
+            if let Err(e) = commit::prune_commit_log(&main_conn, &log_conn, &conversation_id).await {
+                tracing::warn!(error = %e, conversation_id = %conversation_id, "commit-log prune (on submit) failed");
             }
-        }
+        });
     }
 
     let code = match &outcome {

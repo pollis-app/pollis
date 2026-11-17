@@ -1547,12 +1547,15 @@ impl TestClient {
         reqs.as_array().expect("requests array").clone()
     }
 
+    /// Approves, then waits for the requester's MLS add, which runs on after the approve
+    /// returns (#1960), so the next step meets the group as the requester will.
     pub(crate) async fn approve_join_request(&self, request_id: &str) {
         self.invoke_json(
             "approve_join_request",
             json!({ "requestId": request_id, "approverId": self.user_id() }),
         )
         .await;
+        pollis_core::commands::groups::settle_approvals(&self.state).await;
     }
 
     pub(crate) async fn reject_join_request(&self, request_id: &str) {

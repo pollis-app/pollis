@@ -98,8 +98,7 @@ pub(crate) async fn catch_up_answer(
     // The log head is read BEFORE the envelopes (#1041), so the client bounds its replay to `head`.
     let (head, envelopes) = if parsed.want_envelopes {
         let log = state.log_db.conn().await?;
-        let generation = crate::commit::head_generation(&log, &mls_group_id).await?;
-        let epoch = crate::commit::head_epoch_in(&log, &mls_group_id, generation).await?;
+        let (generation, epoch) = crate::commit::head(&log, &mls_group_id).await?;
         let head = LogHead { generation, epoch };
         let envelopes = fetch_envelopes(&conn, &conversation_ids, &who, &device_id).await?;
         (Some(head), envelopes)
@@ -261,35 +260,25 @@ pub async fn resolve_conversation(
     conn: &Connection,
     id: &str,
 ) -> anyhow::Result<Option<(String, ConversationKind)>> {
+    // One round trip (#1960); the precedence is unchanged: channel, then DM, then group.
     let mut rows = conn
         .query(
-            "SELECT group_id FROM channels WHERE id = ?1",
+            "SELECT (SELECT group_id FROM channels WHERE id = ?1), \
+                    EXISTS (SELECT 1 FROM dm_channel WHERE id = ?1), \
+                    EXISTS (SELECT 1 FROM groups WHERE id = ?1)",
             libsql::params![id.to_string()],
         )
         .await?;
-    if let Some(row) = rows.next().await? {
-        return Ok(Some((row.get::<String>(0)?, ConversationKind::Channel)));
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    if let Some(group_id) = row.get::<Option<String>>(0)? {
+        return Ok(Some((group_id, ConversationKind::Channel)));
     }
-    drop(rows);
-
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM dm_channel WHERE id = ?1 LIMIT 1",
-            libsql::params![id.to_string()],
-        )
-        .await?;
-    if rows.next().await?.is_some() {
+    if row.get::<i64>(1)? != 0 {
         return Ok(Some((id.to_string(), ConversationKind::Dm)));
     }
-    drop(rows);
-
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM groups WHERE id = ?1 LIMIT 1",
-            libsql::params![id.to_string()],
-        )
-        .await?;
-    if rows.next().await?.is_some() {
+    if row.get::<i64>(2)? != 0 {
         return Ok(Some((id.to_string(), ConversationKind::Group)));
     }
     Ok(None)

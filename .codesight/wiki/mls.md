@@ -845,6 +845,16 @@ devices, registered devices) and its KeyPackage claims also go out concurrently.
 `groups::an_approval_releases_the_mls_lock_before_its_key_follow_ups`. A wait of a second or more
 for the lock is written to the diagnostics log (`[mls] waited …ms for the MLS lock`).
 
+**An approve returns once the DS records it (#1960).** `approve_join_request` answers the admin
+as soon as `POST` approve lands (the requester is on the roster then, ~1 s); the reconcile that
+adds their devices to the tree, and the `membership_changed` notices to the requester and the
+group room, run on in a spawned task kept in `AppState::approvals_in_flight`. The requester is
+told only after the add, so the group they open has their Welcome. A failed or interrupted add
+(the admin's app closes) heals on the next reconcile by any member, as a failed add always did;
+mail sealed before it is the first acceptable loss. `groups::settle_approvals` waits for the
+tasks; the flows harness's `approve_join_request` calls it. Flows test:
+`groups::an_approval_returns_before_the_requesters_mls_add`.
+
 Two things depend on it. **PCS**: without it, a compromised leaf stays readable
 until membership happens to change. **Commit size**: unmerged leaves dominate a
 `CS_PQ` UpdatePath (`kem_output` is 1120 B under X-Wing vs 32 B under the retired
