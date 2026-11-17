@@ -810,3 +810,64 @@ async fn an_approval_returns_before_the_requesters_mls_add() {
     drop(alice);
     drop(carol);
 }
+
+/// #1972: an invite link names its group before the join, through the real DS route, and
+/// only a live token does. Previewing joins nothing; the redeem afterwards still works.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_invite_link_names_its_group_before_joining() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let mut bob = TestClient::new().await;
+    bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Preview Group").await;
+    let created: serde_json::Value = alice
+        .invoke_json(
+            "create_group_invite_link",
+            json!({ "groupId": group_id, "creatorId": alice.user_id(),
+                    "expiresInHours": null, "maxUses": 1 }),
+        )
+        .await;
+    let url = created["url"].as_str().expect("link url").to_string();
+
+    let preview: serde_json::Value = bob
+        .invoke_json(
+            "preview_group_invite_link",
+            json!({ "token": url, "userId": bob.user_id() }),
+        )
+        .await;
+    assert_eq!(preview["group_name"], "Preview Group");
+    assert_eq!(
+        alice.group_member_ids(&group_id).await.len(),
+        1,
+        "a preview must not join"
+    );
+
+    let forged = format!("{}.{}", "A".repeat(16), "B".repeat(43));
+    let err = bob
+        .invoke_try(
+            "preview_group_invite_link",
+            json!({ "token": forged, "userId": bob.user_id() }),
+        )
+        .await
+        .expect_err("a token that is not live must not name anything");
+    assert!(
+        err.contains("this invite link is not valid"),
+        "a dead link fails like a redeem, got: {err}"
+    );
+
+    // The one use is still there after the preview.
+    let redeemed: serde_json::Value = bob
+        .invoke_json(
+            "redeem_group_invite_link",
+            json!({ "token": url, "userId": bob.user_id() }),
+        )
+        .await;
+    assert_eq!(redeemed["group_id"], group_id.as_str());
+
+    drop(alice);
+    drop(bob);
+}
