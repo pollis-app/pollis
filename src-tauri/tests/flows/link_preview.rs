@@ -177,3 +177,20 @@ async fn deleting_a_message_takes_its_preview_and_thumbnail() {
     drop(alice);
     drop(bob);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_same_link_and_thumbnail_can_be_sent_again() {
+    let (alice, bob, channel_id) = pair().await;
+    let _stub = StubbedUploads::on();
+    let first = send(&alice, &channel_id, "look https://example.com/a", draft("https://example.com/a", "A", true)).await;
+    edit(&alice, &channel_id, &first, "no link here", serde_json::Value::Null).await;
+    let second = send(&alice, &channel_id, "again https://example.com/a", draft("https://example.com/a", "A", true)).await;
+    let got = row(&bob, &channel_id, &second).await;
+    assert_eq!(got["content"], "again https://example.com/a");
+    assert_eq!(got["link_preview"]["title"], "A");
+    let third = send(&alice, &channel_id, "and once more https://example.com/a", draft("https://example.com/a", "A", true)).await;
+    assert_eq!(row(&bob, &channel_id, &third).await["link_preview"]["title"], "A");
+    drop(alice);
+    drop(bob);
+}

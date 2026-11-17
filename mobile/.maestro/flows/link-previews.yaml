@@ -120,6 +120,15 @@ tags:
     timeout: 15000
 - assertNotVisible:
     id: "message-link-preview"
+# The edit bar stays until the core has stored the edit; the composer is back after.
+- extendedWaitUntil:
+    notVisible:
+      id: "input-edit-composer"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 10000
 
 # Last, so nothing has to come back from the browser: a tap on a card opens
 # its link and Pollis leaves the foreground.
