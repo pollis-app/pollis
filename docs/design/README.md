@@ -130,8 +130,14 @@ background the ramp flips toward black.
   chat input bar or is its own page.
 - **Same-frame feedback.** Anything that can take time shows an optimistic result or a busy,
   un-repeatable control on the same frame, on every platform.
-- **Empty states** use `EmptyState` (desktop): one plain sentence, and the action that fills the
-  space when there is one.
+- **Empty states:** every list that can be empty uses `EmptyState`, on desktop
+  (`frontend/src/components/ui/EmptyState.tsx`, also what `NavigableList` / `NavigableGrid` draw
+  for `emptyLabel`) and on mobile (`EmptyState` in `mobile/components/ui.tsx`). One plain sentence,
+  centred, in `textMuted`, and the action that fills the space under it when there is one (Create /
+  Find on an empty Groups tab, New message on an empty Direct tab, Join on an empty voice room).
+  Mobile may add an icon above the sentence, only where the empty list is the whole screen; never
+  in a section of a longer page. Not for loading or errors. Where desktop and mobile show the same
+  list, they use the same copy key.
 - **Message rows** (desktop `MessageItem`, mobile `MessageRow`): the first message of a run has one
   header line, the sender's name in `text` then the time in `textMuted`, never wrapping (a long
   name truncates); a quoted reply sits above it and changes nothing in it. Pictures and videos come
@@ -150,7 +156,7 @@ primitive cannot do what a screen needs, extend it in its own file and use it ev
   `NavigableList`, `NavigableGrid`, `TerminalMenu` (Terminal hub pages), `LoaderSpinner`,
   `IconSpinner`, `ChatInput`, `EditMessageBar`, `SuggestList`.
 - **Mobile** (`mobile/components/ui.tsx`): `Screen`, `Header`, `Body`, `BottomAction`, `Txt`,
-  `SectionTitle`, `Group`, `ListRow`, `ActionRow`, `CheckRow`, `Field`, `Toggle`, `Button`
+  `SectionTitle`, `Group`, `ListRow`, `ActionRow`, `CheckRow`, `Field`, `Toggle`, `EmptyState`, `Button`
   (`primary`, `secondary`, `subtle`, `danger`, `default`), `Chip` (`default`, `solid`, `subtle`,
   `outline`, `danger`), `IconButton`, `Badge`, `Avatar`, `Card`, `Divider`, `Dot`.
 

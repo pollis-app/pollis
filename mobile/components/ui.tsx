@@ -1060,6 +1060,49 @@ export function Card({
   );
 }
 
+/**
+ * The one "nothing here" treatment for every empty list (#1969): one plain sentence, centred,
+ * an optional icon, and the action that fills the space when there is one. Not a loading or
+ * error state. Desktop's twin is `frontend/src/components/ui/EmptyState.tsx`; the copy keys
+ * are shared where the screens match.
+ */
+export function EmptyState({
+  children,
+  icon,
+  action,
+  testID,
+  style,
+}: {
+  children: React.ReactNode;
+  /** Only where the empty list is the whole screen; never inside a section of a longer one. */
+  icon?: keyof typeof Icon;
+  action?: React.ReactNode;
+  testID?: string;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const Glyph = icon ? Icon[icon] : null;
+  return (
+    <View
+      testID={testID}
+      style={[
+        {
+          alignItems: "center",
+          gap: space.lg,
+          paddingHorizontal: space.xxl,
+          paddingVertical: space.xxxl * 2,
+        },
+        style,
+      ]}
+    >
+      {Glyph ? <Glyph size={28} color={semantic.dim} /> : null}
+      <Txt variant="secondary" style={{ color: semantic.muted, textAlign: "center" }}>
+        {children}
+      </Txt>
+      {action ? <View style={{ gap: space.md, alignSelf: "stretch", alignItems: "center" }}>{action}</View> : null}
+    </View>
+  );
+}
+
 // Borderless filled text input. `ref` reaches the TextInput (React 19 plain prop).
 export function Field({
   ref,

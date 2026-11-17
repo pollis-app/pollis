@@ -13,6 +13,7 @@ import {
   Field,
   Button,
   Chip,
+  EmptyState,
 } from "../../components/ui";
 import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
@@ -125,7 +126,7 @@ function GroupEmoji() {
         {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}
         {loadFailed ? <ErrorText>{t("mobile:group.emoji.loadFailed")}</ErrorText> : null}
         {!isLoading && !loadFailed && emoji.length === 0 ? (
-          <Hint>{t("mobile:group.emoji.empty")}</Hint>
+          <EmptyState testID="group-emoji-empty">{t("manage.empty")}</EmptyState>
         ) : null}
         {emoji.length > 0 ? (
           <Group>

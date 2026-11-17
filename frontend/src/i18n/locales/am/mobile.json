@@ -114,7 +114,6 @@
     "requestsWaiting_other": "የመልዕክት ጥያቄዎች፣ {{count}} በመጠባበቅ ላይ",
     "ownPreview": "እርስዎ፦ {{text}}",
     "noMatches": "የሚዛመዱ ውይይቶች የሉም።",
-    "emptyHint": "በተጠቃሚ ስማቸው ወይም በኢሜይላቸው ከአንድ ሰው ጋር ውይይት ይጀምሩ።",
     "previewAttachment": "አባሪ"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "የዚህን ቡድን ኢሞጂ መጫን አልተቻለም።",
-      "empty": "እስካሁን ብጁ ኢሞጂ የለም።",
       "pickAndUpload": "ምስል ምረጥ እና ስቀል",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "ቡድን ፈልግ",
     "findSub": "በመለያ ስሙ ቡድንን ለመቀላቀል ይጠይቁ",
     "emptyTitle": "እስካሁን ቡድኖች የሉም",
-    "emptyBody": "ለሰዎችዎ ቡድን ይፍጠሩ፣ ወይም የተነገረዎትን ቡድን ይፈልጉ።",
     "pillSelected": "{{name}}፣ ተመርጧል",
     "pillUnread": "{{name}}፣ ያልተነበቡ መልዕክቶች",
     "pillSelectedUnread": "{{name}}፣ ተመርጧል፣ ያልተነበቡ መልዕክቶች",
@@ -468,7 +465,6 @@
       "deleteAccountSub": "መለያዎን እስከመጨረሻው ይሰርዙ እና ይህን መሣሪያ ያጽዱ",
       "deviceSub": "የተጣመረው {{paired}} · ለመጨረሻ ጊዜ የታየው {{lastSeen}}",
       "enrollmentFailed": "የምዝገባ ጥያቄውን ማስኬድ አልተቻለም።",
-      "eventsEmpty": "እስካሁን የደህንነት ክስተቶች የሉም።",
       "hoursAgo_one": "ከ{{count}} ሰዓት በፊት",
       "hoursAgo_other": "ከ{{count}} ሰዓታት በፊት",
       "justNow": "አሁን",
@@ -590,7 +586,6 @@
       "lastActive": "ንቁ የነበረው {{when}}",
       "neverActive": "በቅርቡ አልታየም",
       "unsupported": "በዚህ መሣሪያ ላይ Pollisን ያዘምኑ",
-      "empty": "የሚቀዱበት ሌላ መሣሪያ የለዎትም።",
       "loadFailed": "መሣሪያዎችዎን መጫን አልተቻለም።",
       "requestFailed": "ጥያቄውን መላክ አልተቻለም። እንደገና ይሞክሩ።",
       "requesting": "{{device}}ን በመጠየቅ ላይ…",

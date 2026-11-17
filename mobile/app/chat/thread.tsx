@@ -3,7 +3,7 @@ import { View, FlatList } from "react-native";
 import { Text } from "../../components/Text";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import { Screen, Header } from "../../components/ui";
+import { Screen, Header, EmptyState } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { GROUP_WINDOW_MS, timeLabel } from "../../components/chat/dates";
@@ -203,14 +203,7 @@ function ThreadScreen() {
         </Text>
       ) : null}
       {!isLoading && replies.length === 0 ? (
-        <Text
-          style={[
-            ty.secondary,
-            { color: semantic.muted, paddingHorizontal: 16, paddingTop: 4 },
-          ]}
-        >
-          {t("thread.empty")}
-        </Text>
+        <EmptyState testID="thread-empty">{t("thread.empty")}</EmptyState>
       ) : null}
     </View>
   );

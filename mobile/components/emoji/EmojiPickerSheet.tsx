@@ -4,7 +4,7 @@ import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { layout, semantic, type as ty } from "../../theme/tokens";
-import { Field } from "../ui";
+import { Field, EmptyState } from "../ui";
 import { Icon } from "../icons";
 import { SheetOverlay } from "../chat/SheetOverlay";
 import {
@@ -310,9 +310,7 @@ export function EmojiPickerSheet({
             );
           }}
           ListEmptyComponent={
-            <Text style={[ty.secondary, { color: semantic.muted, paddingTop: 16 }]}>
-              {t("picker.empty")}
-            </Text>
+            <EmptyState testID="emoji-picker-empty">{t("picker.empty")}</EmptyState>
           }
         />
       </View>

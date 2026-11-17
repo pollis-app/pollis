@@ -35,7 +35,11 @@ export const PageShell: React.FC<PageShellProps> = ({ title, children, scrollabl
       >
         <span className="text-accent" style={{ flex: 1 }}>{title}</span>
       </div>
-      <div ref={contentRef} className={`flex-1 ${scrollable ? "overflow-auto" : "overflow-hidden"}`}>
+      {/* A flex column, so a page's `flex-1` body (and an `EmptyState` in it) fills the pane. */}
+      <div
+        ref={contentRef}
+        className={`flex min-h-0 flex-1 flex-col ${scrollable ? "overflow-auto" : "overflow-hidden"}`}
+      >
         {children}
       </div>
     </div>

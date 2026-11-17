@@ -114,7 +114,6 @@
     "requestsWaiting_other": "Pedidos de mensagem, {{count}} a aguardar",
     "ownPreview": "Eu: {{text}}",
     "noMatches": "Nenhuma conversa corresponde.",
-    "emptyHint": "Inicie uma conversa com alguém através do nome de utilizador ou do email.",
     "previewAttachment": "Anexo"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "Não foi possível carregar os emojis deste grupo.",
-      "empty": "Ainda não há emojis personalizados.",
       "pickAndUpload": "Escolher imagem e carregar",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "Encontrar grupo",
     "findSub": "Peça para aderir a um grupo pelo identificador",
     "emptyTitle": "Ainda sem grupos",
-    "emptyBody": "Crie um grupo para as suas pessoas ou encontre um de que lhe falaram.",
     "pillSelected": "{{name}}, selecionado",
     "pillUnread": "{{name}}, mensagens não lidas",
     "pillSelectedUnread": "{{name}}, selecionado, mensagens não lidas",
@@ -468,7 +465,6 @@
       "deleteAccountSub": "Eliminar permanentemente a conta e apagar este dispositivo",
       "deviceSub": "Emparelhado {{paired}} · visto pela última vez {{lastSeen}}",
       "enrollmentFailed": "Não foi possível processar o pedido de registo.",
-      "eventsEmpty": "Ainda sem eventos de segurança.",
       "hoursAgo_one": "há {{count}} h",
       "hoursAgo_other": "há {{count}} h",
       "justNow": "agora mesmo",
@@ -590,7 +586,6 @@
       "lastActive": "Ativo {{when}}",
       "neverActive": "Não visto recentemente",
       "unsupported": "Atualize o Pollis neste dispositivo",
-      "empty": "Não tem outros dispositivos de onde copiar.",
       "loadFailed": "Não foi possível carregar os seus dispositivos.",
       "requestFailed": "Não foi possível enviar o pedido. Tente novamente.",
       "requesting": "A pedir a {{device}}…",

@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, View } from "react-native";
 import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Chip } from "../../components/ui";
-import { ErrorText, Note } from "../../components/self/SettingsField";
+import { Screen, Header, Chip, EmptyState } from "../../components/ui";
+import { ErrorText } from "../../components/self/SettingsField";
 import { SecurityEventRow } from "../../components/self/SecurityEventRow";
 import { useSecurityEventPages } from "../../hooks/queries";
 import {
@@ -68,13 +68,9 @@ export default function SecurityEvents() {
   const empty = isPending ? (
     <ActivityIndicator color={semantic.dim} />
   ) : isError || isPlaceholderData ? null : (
-    <View testID="security-events-empty">
-      <Note>
-        {filter === "all"
-          ? t("mobile:self.security.eventsEmpty")
-          : t("security.eventsEmptyFiltered")}
-      </Note>
-    </View>
+    <EmptyState testID="security-events-empty" icon="shield">
+      {filter === "all" ? t("security.eventsEmpty") : t("security.eventsEmptyFiltered")}
+    </EmptyState>
   );
 
   const last = events.length - 1;

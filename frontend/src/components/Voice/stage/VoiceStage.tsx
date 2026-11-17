@@ -35,6 +35,7 @@ import { StageTile, type StageTileModel } from "./StageTile";
 import { ResolutionPanel } from "./ResolutionPanel";
 import { probeRender } from "../../../utils/renderProbe";
 import "./voice-stage.css";
+import { EmptyState } from "../../ui/EmptyState";
 
 /** True when two models would draw identically, so the previous reference can be reused (`React.memo`). */
 function sameTileModel(a: StageTileModel, b: StageTileModel): boolean {
@@ -379,12 +380,17 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           ) : previewState ? (
             <div className="vs-preview" data-testid="voice-channel-observers">
               {previewPeople.length === 0 ? (
-                <div className="vs-preview-empty">
-                  <span className="vs-preview-empty-label">{t("stage.emptyRoster")}</span>
-                  <Button data-testid="voice-join-cta" variant="primary" onClick={onJoin}>
-                    {t("stage.joinVoice")}
-                  </Button>
-                </div>
+                <EmptyState
+                  background={false}
+                  testId="voice-empty-roster"
+                  actions={
+                    <Button data-testid="voice-join-cta" variant="primary" onClick={onJoin}>
+                      {t("stage.joinVoice")}
+                    </Button>
+                  }
+                >
+                  {t("stage.emptyRoster")}
+                </EmptyState>
               ) : (
                 <>
                   <NavigableGrid<StageTileModel>

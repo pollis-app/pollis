@@ -114,7 +114,6 @@
     "requestsWaiting_other": "Message requests, {{count}} waiting",
     "ownPreview": "You: {{text}}",
     "noMatches": "No conversations match.",
-    "emptyHint": "Start a conversation with someone by their username or email.",
     "previewAttachment": "Attachment"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "Couldn't load this group's emoji.",
-      "empty": "No custom emoji yet.",
       "pickAndUpload": "Pick image & upload",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "Find group",
     "findSub": "Ask to join a group by its slug",
     "emptyTitle": "No groups yet",
-    "emptyBody": "Create a group for your people, or find one you've been told about.",
     "pillSelected": "{{name}}, selected",
     "pillUnread": "{{name}}, unread messages",
     "pillSelectedUnread": "{{name}}, selected, unread messages",
@@ -468,7 +465,6 @@
       "deleteAccountSub": "Permanently delete your account and wipe this device",
       "deviceSub": "Paired {{paired}} · last seen {{lastSeen}}",
       "enrollmentFailed": "Couldn't process the enrollment request.",
-      "eventsEmpty": "No security events yet.",
       "hoursAgo_one": "{{count}}h ago",
       "hoursAgo_other": "{{count}}h ago",
       "justNow": "just now",
@@ -590,7 +586,6 @@
       "lastActive": "Active {{when}}",
       "neverActive": "Not seen recently",
       "unsupported": "Update Pollis on this device",
-      "empty": "You have no other devices to copy from.",
       "loadFailed": "Couldn't load your devices.",
       "requestFailed": "Couldn't send the request. Try again.",
       "requesting": "Asking {{device}}…",

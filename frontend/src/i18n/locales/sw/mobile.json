@@ -114,7 +114,6 @@
     "requestsWaiting_other": "Maombi ya ujumbe, {{count}} yanasubiri",
     "ownPreview": "Wewe: {{text}}",
     "noMatches": "Hakuna mazungumzo yanayolingana.",
-    "emptyHint": "Anzisha mazungumzo na mtu kwa jina lake la mtumiaji au barua pepe.",
     "previewAttachment": "Kiambatisho"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "Imeshindwa kupakia emoji za kikundi hiki.",
-      "empty": "Bado hakuna emoji maalum.",
       "pickAndUpload": "Chagua picha na upakie",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "Tafuta kikundi",
     "findSub": "Omba kujiunga na kikundi kwa kitambulisho chake cha URL",
     "emptyTitle": "Bado hakuna vikundi",
-    "emptyBody": "Unda kikundi kwa ajili ya watu wako, au tafuta kile ulichoambiwa kukihusu.",
     "pillSelected": "{{name}}, kimechaguliwa",
     "pillUnread": "{{name}}, ujumbe ambao haujasomwa",
     "pillSelectedUnread": "{{name}}, kimechaguliwa, ujumbe ambao haujasomwa",
@@ -468,7 +465,6 @@
       "deleteAccountSub": "Futa kabisa akaunti yako na ufute data ya kifaa hiki",
       "deviceSub": "Kiliunganishwa {{paired}} · kilionekana mara ya mwisho {{lastSeen}}",
       "enrollmentFailed": "Imeshindwa kushughulikia ombi la usajili.",
-      "eventsEmpty": "Bado hakuna matukio ya usalama.",
       "hoursAgo_one": "saa {{count}} iliyopita",
       "hoursAgo_other": "saa {{count}} zilizopita",
       "justNow": "sasa hivi",
@@ -590,7 +586,6 @@
       "lastActive": "Kilitumika {{when}}",
       "neverActive": "Hakijaonekana hivi karibuni",
       "unsupported": "Sasisha Pollis kwenye kifaa hiki",
-      "empty": "Huna vifaa vingine vya kunakili kutoka.",
       "loadFailed": "Imeshindwa kupakia vifaa vyako.",
       "requestFailed": "Imeshindwa kutuma ombi. Jaribu tena.",
       "requesting": "Inaomba {{device}}…",
