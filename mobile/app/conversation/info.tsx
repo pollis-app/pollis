@@ -12,6 +12,7 @@ import {
   SectionTitle,
   ListRow,
   Group,
+  EmptyState,
 } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
 import { ExportArchive } from "../../components/ExportArchive";
@@ -202,14 +203,7 @@ function ConversationInfo() {
 
         <SectionTitle>{t("nav:media.heading")}</SectionTitle>
         {attachments.length === 0 ? (
-          <Text
-            style={[
-              ty.secondary,
-              { color: semantic.muted, paddingHorizontal: 20, paddingVertical: 8 },
-            ]}
-          >
-            {t("nav:media.empty")}
-          </Text>
+          <EmptyState testID="info-media-empty">{t("nav:media.empty")}</EmptyState>
         ) : (
           <View
             style={{

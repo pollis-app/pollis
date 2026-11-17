@@ -34,6 +34,15 @@ if [ "$FLOW" = "all" ]; then
 else
   TARGET="$MAE/flows/${FLOW%.yaml}.yaml"
   [ -f "$TARGET" ] || { echo "no such flow: $TARGET" >&2; exit 1; }
+  # A two-client flow needs the peer its script signs up (#1950); run alone it
+  # can only fail, so stop and name the script instead.
+  if sed -n '/^---/q;p' "$TARGET" | grep -q -- '- two-client'; then
+    rel="${TARGET#"$HERE"/}"
+    runners="$(grep -l -- "$rel\|flows/$(basename "$TARGET")" "$HERE"/scripts/maestro-*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | tr '\n' ' ')"
+    echo "$(basename "$TARGET" .yaml) is a two-client flow: it needs a second device and a fresh peer." >&2
+    echo "Run it with: ${runners:-a two-client script (see .maestro/README.md, \"Two-client flows\")}" >&2
+    exit 2
+  fi
 fi
 
 # Load -e env args from .maestro/.env (KEY=VALUE lines).

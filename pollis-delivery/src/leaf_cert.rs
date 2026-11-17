@@ -29,7 +29,7 @@
 //!
 //! Parsing only: the DS keeps no MLS group state and holds no MLS key.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use libsql::Connection;
 use openmls::prelude::tls_codec::Deserialize as _;
@@ -247,12 +247,85 @@ pub async fn all_certified<'a>(
     main_conn: &Connection,
     leaves: impl IntoIterator<Item = &'a Leaf>,
 ) -> anyhow::Result<Result<(), Refusal>> {
+    all_certified_memo(main_conn, &mut CheckMemo::default(), leaves).await
+}
+
+async fn all_certified_memo<'a>(
+    main_conn: &Connection,
+    memo: &mut CheckMemo,
+    leaves: impl IntoIterator<Item = &'a Leaf>,
+) -> anyhow::Result<Result<(), Refusal>> {
     for leaf in leaves {
-        if let Err(why) = leaf_verdict(main_conn, leaf).await? {
+        if let Err(why) = memo.verdict(main_conn, leaf).await? {
             return Ok(Err(why));
         }
     }
     Ok(Ok(()))
+}
+
+/// What one request's checks have already worked out (#1960). A commit adding a user's D
+/// devices carries the same Welcome D times, and its GroupInfo the same new leaves, so each
+/// Welcome is read and each leaf verified once instead of once per copy. It lives for one
+/// request, so a verdict is never older than the request that uses it.
+#[derive(Default)]
+pub struct CheckMemo {
+    verdicts: HashMap<Leaf, Result<(), Refusal>>,
+    admitted: HashMap<Vec<u8>, Result<Vec<Leaf>, Refusal>>,
+}
+
+impl CheckMemo {
+    async fn verdict(&mut self, main_conn: &Connection, leaf: &Leaf) -> anyhow::Result<Result<(), Refusal>> {
+        if let Some(known) = self.verdicts.get(leaf) {
+            return Ok(*known);
+        }
+        let verdict = leaf_verdict(main_conn, leaf).await?;
+        self.verdicts.insert(leaf.clone(), verdict);
+        Ok(verdict)
+    }
+
+    /// The leaves `welcome` admits, each a certified device's stored KeyPackage.
+    async fn admitted(&mut self, main_conn: &Connection, welcome: &[u8]) -> anyhow::Result<Result<Vec<Leaf>, Refusal>> {
+        if let Some(known) = self.admitted.get(welcome) {
+            return Ok(known.clone());
+        }
+        let answer = self.read_admitted(main_conn, welcome).await?;
+        self.admitted.insert(welcome.to_vec(), answer.clone());
+        Ok(answer)
+    }
+
+    async fn read_admitted(&mut self, main_conn: &Connection, welcome: &[u8]) -> anyhow::Result<Result<Vec<Leaf>, Refusal>> {
+        let refs = match welcome_new_members(welcome) {
+            Ok(refs) => refs,
+            Err(why) => return Ok(Err(why)),
+        };
+        let mut leaves = Vec::with_capacity(refs.len());
+        for ref_hash in refs {
+            let mut rows = main_conn
+                .query(
+                    "SELECT user_id, device_id, key_package FROM mls_key_package WHERE ref_hash = ?1",
+                    libsql::params![ref_hash.to_ascii_lowercase()],
+                )
+                .await?;
+            let Some(row) = rows.next().await? else {
+                return Ok(Err("welcome admits a key package the DS never accepted"));
+            };
+            let user_id: String = row.get(0)?;
+            let device_id: Option<String> = row.get(1)?;
+            let bytes: Vec<u8> = row.get(2)?;
+            drop(rows);
+            let Some(leaf) = stored_key_package_leaf(&bytes) else {
+                return Ok(Err("welcome admits a key package the DS cannot read"));
+            };
+            if leaf.user_id != user_id || device_id.as_deref() != Some(leaf.device_id.as_str()) {
+                return Ok(Err("welcome admits a key package filed under another device"));
+            }
+            if let Err(why) = self.verdict(main_conn, &leaf).await? {
+                return Ok(Err(why));
+            }
+            leaves.push(leaf);
+        }
+        Ok(Ok(leaves))
+    }
 }
 
 /// A KeyPackage the actor publishes for `device_id` ([`inspect_key_package`]
@@ -286,39 +359,25 @@ pub async fn check_welcome(
     recipient_device_id: &str,
     welcome: &[u8],
 ) -> anyhow::Result<Result<(), Refusal>> {
-    let refs = match welcome_new_members(welcome) {
-        Ok(refs) => refs,
+    check_welcome_memo(main_conn, &mut CheckMemo::default(), recipient_id, recipient_device_id, welcome).await
+}
+
+/// [`check_welcome`], sharing what `memo` already knows from the same request.
+pub async fn check_welcome_memo(
+    main_conn: &Connection,
+    memo: &mut CheckMemo,
+    recipient_id: &str,
+    recipient_device_id: &str,
+    welcome: &[u8],
+) -> anyhow::Result<Result<(), Refusal>> {
+    let leaves = match memo.admitted(main_conn, welcome).await? {
+        Ok(leaves) => leaves,
         Err(why) => return Ok(Err(why)),
     };
-    let mut recipient_admitted = false;
-    for ref_hash in refs {
-        let mut rows = main_conn
-            .query(
-                "SELECT user_id, device_id, key_package FROM mls_key_package WHERE ref_hash = ?1",
-                libsql::params![ref_hash.to_ascii_lowercase()],
-            )
-            .await?;
-        let Some(row) = rows.next().await? else {
-            return Ok(Err("welcome admits a key package the DS never accepted"));
-        };
-        let user_id: String = row.get(0)?;
-        let device_id: Option<String> = row.get(1)?;
-        let bytes: Vec<u8> = row.get(2)?;
-        drop(rows);
-        let Some(leaf) = stored_key_package_leaf(&bytes) else {
-            return Ok(Err("welcome admits a key package the DS cannot read"));
-        };
-        if leaf.user_id != user_id || device_id.as_deref() != Some(leaf.device_id.as_str()) {
-            return Ok(Err("welcome admits a key package filed under another device"));
-        }
-        if let Err(why) = leaf_verdict(main_conn, &leaf).await? {
-            return Ok(Err(why));
-        }
-        if leaf.user_id == recipient_id && leaf.device_id == recipient_device_id {
-            recipient_admitted = true;
-        }
-    }
-    if !recipient_admitted {
+    if !leaves
+        .iter()
+        .any(|l| l.user_id == recipient_id && l.device_id == recipient_device_id)
+    {
         return Ok(Err("welcome does not admit its recipient device"));
     }
     Ok(Ok(()))
@@ -338,6 +397,16 @@ pub async fn check_group_info(
     stored: Option<&[u8]>,
     group_info: &[u8],
 ) -> anyhow::Result<Result<(), Refusal>> {
+    check_group_info_memo(main_conn, &mut CheckMemo::default(), stored, group_info).await
+}
+
+/// [`check_group_info`], sharing what `memo` already knows from the same request.
+pub async fn check_group_info_memo(
+    main_conn: &Connection,
+    memo: &mut CheckMemo,
+    stored: Option<&[u8]>,
+    group_info: &[u8],
+) -> anyhow::Result<Result<(), Refusal>> {
     let leaves = match group_info_leaves(group_info) {
         Ok(leaves) => leaves,
         Err(why) => return Ok(Err(why)),
@@ -349,7 +418,7 @@ pub async fn check_group_info(
             Err(_) => return Ok(Ok(())),
         },
     };
-    all_certified(main_conn, leaves.difference(&before)).await
+    all_certified_memo(main_conn, memo, leaves.difference(&before)).await
 }
 
 /// The conversation's stored GroupInfo blob, the baseline [`check_group_info`]

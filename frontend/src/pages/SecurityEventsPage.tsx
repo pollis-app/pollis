@@ -9,6 +9,7 @@ import {
 } from "../components/Security/securityEvents";
 import { useSecurityEventPages } from "../hooks/queries/useSecurityEvents";
 import { errorMessage } from "../utils/errorMessage";
+import { EmptyState } from "../components/ui/EmptyState";
 
 const FILTER_LABEL_KEYS: Record<SecurityEventFilter, string> = {
   all: "security.eventsFilterAll",
@@ -92,9 +93,9 @@ export const SecurityEventsPage: React.FC = () => {
           {isPending ? (
             <p className="text-xs font-mono text-muted">{t("common:states.loading")}</p>
           ) : events.length === 0 && !isPlaceholderData ? (
-            <p data-testid="security-events-empty" className="text-xs font-mono text-dim">
+            <EmptyState background={false} testId="security-events-empty">
               {filter === "all" ? t("security.eventsEmpty") : t("security.eventsEmptyFiltered")}
-            </p>
+            </EmptyState>
           ) : (
             // Previous rows stay dimmed until the new filter's first page lands.
             <div

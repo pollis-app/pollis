@@ -7,7 +7,7 @@ import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import * as ImagePicker from "expo-image-picker";
 import { observer } from "mobx-react-lite";
-import { Screen, Header, Field, Chip, Button } from "../components/ui";
+import { Screen, Header, Field, Chip, Button, EmptyState } from "../components/ui";
 import { Icon } from "../components/icons";
 import { Composer } from "../components/chat/Composer";
 import { EditBar } from "../components/chat/EditBar";
@@ -292,15 +292,9 @@ function VaultScreen() {
             </Text>
           ) : null}
           {!isLoading && !isError && items.length === 0 ? (
-            <Text
-              testID="vault-empty"
-              style={[
-                ty.secondary,
-                { textAlign: "center", paddingHorizontal: space.xxl, paddingTop: space.xxl },
-              ]}
-            >
+            <EmptyState testID="vault-empty" icon={query.trim() ? undefined : "vault"}>
               {query.trim() ? t("searchEmpty") : t("empty")}
-            </Text>
+            </EmptyState>
           ) : null}
           <FlatList
             testID="list-vault"

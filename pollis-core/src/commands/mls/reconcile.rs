@@ -958,10 +958,13 @@ async fn reconcile_pass(
     //     KeyPackages, so filter `revoked_at IS NULL` here too and never burn one. One request,
     //     and an ERROR rather than a short list: a truncated answer silently leaves devices out.
     // 2b. Still-registered devices, to evict revoked leaves of roster members.
-    let (pinned, device_pairs, valid_devices) = tokio::join!(
+    // 2c. The roster's cross-signing rows (#1960: fetched alongside; the local pins 1b writes
+    //     are applied to them below, after 1b has landed).
+    let (pinned, device_pairs, valid_devices, identity_rows) = tokio::join!(
         crate::commands::safety::batch_check_and_pin_account_keys(state, &peers),
         crate::commands::ds_reads::claimable_devices(state, &ids, None),
         crate::commands::ds_reads::registered_devices(state, &ids),
+        crate::commands::ds_reads::roster_identities(state, &ids),
     );
     if let Err(e) = pinned {
         crate::diag!("[reconcile] batch_check_and_pin_account_keys failed: {e}");
@@ -970,7 +973,8 @@ async fn reconcile_pass(
     let valid_devices = valid_devices?;
 
     // 2c. Pinned cross-signing material; an error, never partial, since it decides admission.
-    let identities = load_pinned_identities(state, &ids, &actor_user_id).await?;
+    let identities =
+        pin_identities(state, IdentityDirectory::new(identity_rows?), &actor_user_id).await?;
 
     let actor_device_id = state
         .device_id

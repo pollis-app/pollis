@@ -11,6 +11,7 @@ import {
   Button,
   Group,
   Txt,
+  EmptyState,
 } from "../ui";
 import { SearchResultRow } from "./SearchResultRow";
 import { UserAvatar } from "../UserAvatar";
@@ -274,34 +275,28 @@ export function GlobalSearchResults({
         </View>
       ) : null}
       {showEmpty ? (
-        <Txt
-          variant="body"
-          style={{ paddingTop: space.lg }}
+        <EmptyState
+          testID="search-no-matches"
+          style={{ paddingHorizontal: 0 }}
+          action={
+            <View testID="search-no-results-why" style={{ alignSelf: "stretch", gap: space.xs }}>
+              <Txt variant="secondary">{ts("view.noResultsWhy")}</Txt>
+              {[
+                "view.reasonNotIngested",
+                "view.reasonBeforeJoin",
+                "view.reasonNewDevice",
+                "view.reasonRetention",
+                "view.reasonDeleted",
+              ].map((k) => (
+                <Txt key={k} variant="secondary">
+                  {`· ${ts(k)}`}
+                </Txt>
+              ))}
+            </View>
+          }
         >
           {t("search:panel.noMatches")}
-        </Txt>
-      ) : null}
-      {showEmpty ? (
-        <View
-          testID="search-no-results-why"
-          style={{
-            paddingTop: space.sm,
-            gap: space.xs,
-          }}
-        >
-          <Txt variant="secondary">{ts("view.noResultsWhy")}</Txt>
-          {[
-            "view.reasonNotIngested",
-            "view.reasonBeforeJoin",
-            "view.reasonNewDevice",
-            "view.reasonRetention",
-            "view.reasonDeleted",
-          ].map((k) => (
-            <Txt key={k} variant="secondary">
-              {`· ${ts(k)}`}
-            </Txt>
-          ))}
-        </View>
+        </EmptyState>
       ) : null}
 
       {pages.length > 0 ? (

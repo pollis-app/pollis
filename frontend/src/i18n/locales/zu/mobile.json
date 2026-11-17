@@ -114,7 +114,6 @@
     "requestsWaiting_other": "Izicelo zemilayezo, ezingu-{{count}} zilindile",
     "ownPreview": "Wena: {{text}}",
     "noMatches": "Azikho izingxoxo ezifanayo.",
-    "emptyHint": "Qala ingxoxo nomuntu ngegama lakhe lomsebenzisi noma nge-imeyili.",
     "previewAttachment": "Okunamathiselwe"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "Ayikwazanga ukulayisha ama-emoji aleli qembu.",
-      "empty": "Awakabikho ama-emoji enziwe ngokwezifiso.",
       "pickAndUpload": "Khetha isithombe bese ulayisha",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "Thola iqembu",
     "findSub": "Cela ukujoyina iqembu nge-slug yalo",
     "emptyTitle": "Awakabikho amaqembu",
-    "emptyBody": "Dala iqembu labantu bakho, noma uthole elithile otshelwe ngalo.",
     "pillSelected": "{{name}}, kukhethiwe",
     "pillUnread": "{{name}}, imilayezo engafundiwe",
     "pillSelectedUnread": "{{name}}, kukhethiwe, imilayezo engafundiwe",
@@ -471,7 +468,6 @@
       "deleteAccountSub": "Susa unomphela i-akhawunti yakho futhi usule le divayisi",
       "deviceSub": "Ibhangqwe {{paired}} · igcine ukubonwa {{lastSeen}}",
       "enrollmentFailed": "Ayikwazanga ukucubungula isicelo sokubhalisa.",
-      "eventsEmpty": "Azikabikho izehlakalo zokuphepha.",
       "hoursAgo_one": "ihora elingu-{{count}} eledlule",
       "hoursAgo_other": "amahora angu-{{count}} adlule",
       "justNow": "manje nje",
@@ -593,7 +589,6 @@
       "lastActive": "Isebenze {{when}}",
       "neverActive": "Ayibonwanga muva nje",
       "unsupported": "Buyekeza i-Pollis kule divayisi",
-      "empty": "Awunawo amanye amadivayisi ongakopisha kusuka kuwo.",
       "loadFailed": "Ayikwazanga ukulayisha amadivayisi akho.",
       "requestFailed": "Ayikwazanga ukuthumela isicelo. Zama futhi.",
       "requesting": "Icela ku-{{device}}…",

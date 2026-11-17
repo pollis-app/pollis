@@ -7,6 +7,7 @@
 //!
 //! POST with signed bodies, never GET: signing excludes the query string (#681).
 
+use std::collections::HashMap;
 use axum::{
     extract::State,
     response::{IntoResponse, Response},
@@ -428,46 +429,59 @@ pub async fn roster_identities(
     main: &Connection,
     user_ids: &[String],
 ) -> Result<Vec<AddedIdentity>, AppError> {
-    let mut out = Vec::with_capacity(user_ids.len());
-    for user_id in user_ids {
-        let account_id_pub = account_id_pub(main, user_id).await?.as_deref().map(b64);
-        let devices = all_device_cert_rows(main, user_id).await?;
-        out.push(AddedIdentity {
-            user_id: user_id.clone(),
-            account_id_pub,
-            devices,
-        });
+    // Two queries per chunk of users, not two per user (#1960): this read sits on an admin's
+    // approve path, one round trip after another.
+    let mut account_keys: HashMap<String, Option<Vec<u8>>> = HashMap::new();
+    let mut devices: HashMap<String, Vec<DeviceCertRow>> = HashMap::new();
+    for chunk in user_ids.chunks(BIND_CHUNK) {
+        let params = || chunk.iter().map(|u| libsql::Value::from(u.as_str())).collect::<Vec<_>>();
+        let placeholders = placeholders(chunk.len(), 1);
+        let mut rows = main
+            .query(
+                &format!("SELECT id, account_id_pub FROM users WHERE id IN ({placeholders})"),
+                params(),
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            account_keys.insert(row.get::<String>(0)?, row.get::<Option<Vec<u8>>>(1)?);
+        }
+        drop(rows);
+        let mut rows = main
+            .query(
+                &format!(
+                    "SELECT device_id, device_cert, cert_issued_at, cert_identity_version, \
+                            mls_signature_pub, revoked_at, mls_signature_pub_pq, user_id \
+                     FROM user_device WHERE user_id IN ({placeholders})"
+                ),
+                params(),
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            let user_id = row.get::<String>(7)?;
+            devices.entry(user_id).or_default().push(device_cert_row(&row)?);
+        }
     }
-    Ok(out)
+    Ok(user_ids
+        .iter()
+        .map(|user_id| AddedIdentity {
+            user_id: user_id.clone(),
+            account_id_pub: account_keys.get(user_id).cloned().flatten().as_deref().map(b64),
+            devices: devices.get(user_id).cloned().unwrap_or_default(),
+        })
+        .collect())
 }
 
-/// Every `user_device` row of one user, revoked included, as cross-signing
-/// columns. The un-narrowed sibling of [`device_cert_rows`].
-async fn all_device_cert_rows(
-    main: &Connection,
-    user_id: &str,
-) -> anyhow::Result<Vec<DeviceCertRow>> {
-    let mut rows = main
-        .query(
-            "SELECT device_id, device_cert, cert_issued_at, cert_identity_version, \
-                    mls_signature_pub, revoked_at, mls_signature_pub_pq \
-             FROM user_device WHERE user_id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(DeviceCertRow {
-            device_id: row.get(0)?,
-            device_cert: row.get::<Option<Vec<u8>>>(1)?.as_deref().map(b64),
-            cert_issued_at: row.get::<Option<String>>(2)?,
-            cert_identity_version: row.get::<Option<i64>>(3)?,
-            mls_signature_pub: row.get::<Option<Vec<u8>>>(4)?.as_deref().map(b64),
-            revoked_at: row.get::<Option<String>>(5)?,
-            mls_signature_pub_pq: row.get::<Option<Vec<u8>>>(6)?.as_deref().map(b64),
-        });
-    }
-    Ok(out)
+/// One `user_device` row's cross-signing columns, selected in [`device_cert_rows`]' order.
+fn device_cert_row(row: &libsql::Row) -> anyhow::Result<DeviceCertRow> {
+    Ok(DeviceCertRow {
+        device_id: row.get(0)?,
+        device_cert: row.get::<Option<Vec<u8>>>(1)?.as_deref().map(b64),
+        cert_issued_at: row.get::<Option<String>>(2)?,
+        cert_identity_version: row.get::<Option<i64>>(3)?,
+        mls_signature_pub: row.get::<Option<Vec<u8>>>(4)?.as_deref().map(b64),
+        revoked_at: row.get::<Option<String>>(5)?,
+        mls_signature_pub_pq: row.get::<Option<Vec<u8>>>(6)?.as_deref().map(b64),
+    })
 }
 
 /// A user's cross-signing root. `None` covers both "no such user" and "the
@@ -514,15 +528,7 @@ pub async fn device_cert_rows(
             )
             .await?;
         while let Some(row) = rows.next().await? {
-            out.push(DeviceCertRow {
-                device_id: row.get(0)?,
-                device_cert: row.get::<Option<Vec<u8>>>(1)?.as_deref().map(b64),
-                cert_issued_at: row.get::<Option<String>>(2)?,
-                cert_identity_version: row.get::<Option<i64>>(3)?,
-                mls_signature_pub: row.get::<Option<Vec<u8>>>(4)?.as_deref().map(b64),
-                revoked_at: row.get::<Option<String>>(5)?,
-                mls_signature_pub_pq: row.get::<Option<Vec<u8>>>(6)?.as_deref().map(b64),
-            });
+            out.push(device_cert_row(&row)?);
         }
     }
     Ok(out)

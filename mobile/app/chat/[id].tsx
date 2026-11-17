@@ -3,7 +3,7 @@ import { View, FlatList } from "react-native";
 import { Text } from "../../components/Text";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, IconButton } from "../../components/ui";
+import { Screen, Header, IconButton, EmptyState } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import {
@@ -935,14 +935,9 @@ function TextChat(props: ChatViewProps = {}) {
         </Text>
       ) : null}
       {!isLoading && !isError && items.length === 0 ? (
-        <Text
-          style={[
-            ty.secondary,
-            { color: semantic.muted, paddingHorizontal: 16, paddingTop: 12 },
-          ]}
-        >
+        <EmptyState testID="chat-empty" icon="messageCircle">
           {t("chat:list.empty")}
-        </Text>
+        </EmptyState>
       ) : null}
       <FlatList
         ref={listRef}

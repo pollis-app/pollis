@@ -111,7 +111,6 @@
     "requestsWaiting_other": "Àwọn ìbéèrè ìfiránṣẹ́, {{count}} ń dúró",
     "ownPreview": "Ìwọ: {{text}}",
     "noMatches": "Kò sí ìjíròrò tó bá a mu.",
-    "emptyHint": "Bẹ̀rẹ̀ ìjíròrò pẹ̀lú ẹnìkan nípa orúkọ olùmúlò tàbí ímeèlì rẹ̀.",
     "previewAttachment": "Àsomọ́"
   },
   "dm": {
@@ -157,7 +156,6 @@
     },
     "emoji": {
       "loadFailed": "A kò lè gbé èmójì ẹgbẹ́ yìí wọlé.",
-      "empty": "Kò sí èmójì àkànṣe kankan síbẹ̀.",
       "pickAndUpload": "Yan àwòrán kí o sì gbé e sókè",
       "sizeKb_other": "{{count}} KB",
       "uploading": "Ó ń gbé e sókè…"
@@ -257,7 +255,6 @@
     "find": "Wá ẹgbẹ́",
     "findSub": "Béèrè láti darapọ̀ mọ́ ẹgbẹ́ kan nípa orúkọ àdírẹ́sì rẹ̀",
     "emptyTitle": "Kò sí ẹgbẹ́ kankan síbẹ̀",
-    "emptyBody": "Ṣẹ̀dá ẹgbẹ́ fún àwọn ènìyàn rẹ, tàbí wá èyí tí wọ́n ti sọ fún ọ nípa rẹ̀.",
     "pillSelected": "{{name}}, ti yàn án",
     "pillUnread": "{{name}}, àwọn ìfiránṣẹ́ tí a kò kà",
     "pillSelectedUnread": "{{name}}, ti yàn án, àwọn ìfiránṣẹ́ tí a kò kà",
@@ -460,7 +457,6 @@
       "deleteAccountSub": "Pa àkáǹtì rẹ rẹ́ títí láé kí o sì nu ẹ̀rọ yìí mọ́",
       "deviceSub": "A so pọ̀ ní {{paired}} · a rí i kẹ́yìn {{lastSeen}}",
       "enrollmentFailed": "A kò lè ṣe ìbéèrè ìforúkọsílẹ̀ náà.",
-      "eventsEmpty": "Kò sí ìṣẹ̀lẹ̀ ààbò kankan síbẹ̀.",
       "hoursAgo_other": "wákàtí {{count}} sẹ́yìn",
       "justNow": "ní báyìí",
       "lockNow": "Tì í báyìí",
@@ -577,7 +573,6 @@
       "lastActive": "Ó ṣiṣẹ́ {{when}}",
       "neverActive": "A kò rí i láìpẹ́",
       "unsupported": "Ṣe ìmúdójúìwọ̀n Pollis lórí ẹ̀rọ yìí",
-      "empty": "O kò ní ẹ̀rọ míì tí o lè ṣe àdàkọ láti ibẹ̀.",
       "loadFailed": "A kò lè gbé àwọn ẹ̀rọ rẹ wọlé.",
       "requestFailed": "A kò lè fi ìbéèrè náà ránṣẹ́. Tún gbìyànjú.",
       "requesting": "Ó ń béèrè lọ́wọ́ {{device}}…",

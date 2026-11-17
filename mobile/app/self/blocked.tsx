@@ -1,6 +1,6 @@
 import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Body, Group, Chip, ActionRow } from "../../components/ui";
+import { Screen, Header, Body, Group, Chip, ActionRow, EmptyState } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
 import { ErrorText } from "../../components/self/SettingsField";
 import { type as ty, space } from "../../theme/tokens";
@@ -24,7 +24,9 @@ export default function Blocked() {
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.lg }}>
         {isLoading ? <Text style={ty.secondary}>{t("common:states.loading")}</Text> : null}
         {!isLoading && blocked.length === 0 ? (
-          <Text style={ty.secondary}>{t("blocked.empty")}</Text>
+          <EmptyState testID="blocked-empty" icon="ban">
+            {t("blocked.empty")}
+          </EmptyState>
         ) : null}
         {blocked.length > 0 ? (
           <Group>

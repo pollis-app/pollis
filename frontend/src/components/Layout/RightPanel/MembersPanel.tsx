@@ -11,6 +11,7 @@ import { MediaGrid } from "./MediaGrid";
 import { useRightPanel } from "./useRightPanel";
 import { ShieldCheck } from "lucide-react";
 import type { MessageAttachment } from "../../../types";
+import { EmptyState } from "../../ui/EmptyState";
 
 /** Caps per-tile media fetches when the panel opens. */
 const MEDIA_LIMIT = 30;
@@ -158,7 +159,6 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const rootClass = isTerminal
       ? "flex h-full flex-col overflow-y-auto"
       : "flex h-full flex-col gap-4 overflow-y-auto py-3";
-    const emptyClass = isTerminal ? "px-2.5 py-1 text-xs text-muted" : "px-2 text-xs text-muted";
 
     return (
       <div className={rootClass}>
@@ -172,9 +172,9 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
             isTerminal={isTerminal}
           />
           {people.length === 0 ? (
-            <p className={emptyClass}>
+            <EmptyState background={false} testId="right-panel-members-empty">
               {listsEveryone ? t("members.empty") : t("members.noneOnline")}
-            </p>
+            </EmptyState>
           ) : (
             people.map((person) => (
               <MemberRow

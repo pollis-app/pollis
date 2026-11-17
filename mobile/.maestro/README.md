@@ -107,6 +107,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `theme-startup` | #1447 pick lilac, then a cold restart: the first screen (PIN unlock or tabs) carries `theme-boot-accent-bda3e0` and no amber probe before any tap, and the tabs stay lilac after unlock; a fresh account settles on amber even with lilac left in the device store | no |
 | `search` | #1202 desktop parity: a seeded message hit with highlighted snippet + "About N results", sort toggle, corpus footer, opening a hit, settings-page quick-jump, and the "why no results" explanation | no |
 | `security` | device list + blocked-list entry | no |
+| `empty-states` | #1969 one empty-state treatment: a fresh account's Groups (sentence + Create / Find), Direct (sentence + New message), Saved and Blocked, then a new group's empty #General and its empty Custom emoji, each a centred `EmptyState` sentence | no |
 | `open-source` | #1832 Self → Open source licenses lists the build's generated package list (count shown), the filter narrows it to `uniffi` and the count follows it (#1972), and the row opens its MPL-2.0 licence text: the Rust half of the list reached the bundle | no |
 | `copy-state` | #1972 approve-device with no request says so (no "(id )"); "Search <group>" opens Self's search with an "In <group>" chip and finds the group's message, clearing the chip widens it; the first emoji sheet has its category tabs and a tab jumps; an invite link's landing names the group before Join (strict with `-e INVITE_PREVIEW=1`, once the DS has `/v1/invite-links/preview`) | no |
 | `security-events` | #1548 Security shows the newest three events + "View all"; the Security events screen loads its next keyset page on scroll and the All / Devices / Identity & keys / Account chips narrow it (`recovery_blob_fetched` has its own copy); #1547 no Recovery card, `?section=data` lands on "Your data". The paging half needs a log longer than a page: against a local DS set `MAESTRO_SQLD_URL` (its sqld) and `scripts/seed-security-events.js` writes 40 rows; without it those steps are skipped | no |
@@ -118,7 +119,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `vault` | #1316 Direct → Vault: empty state, save two entries, pin, edit (pin survives), search filters, media view, a best-effort image entry opening the viewer from the grid, delete asks first (cancel keeps it, confirm removes it), re-open re-syncs from the DS | no |
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
-| `dms` | start a DM with the seeded peer (initiator side) | yes |
+| `dms` | start a DM with a freshly signed-up peer (initiator side; run by `scripts/maestro-report.sh`) | yes |
 | `custom-emoji` | #1562 add a static and an animated custom emoji, see both as images (never the `:shortcode:` text) in the group's list, the composer's suggestions, a sent message and again after a cold restart | no |
 | `deep-link` | #1223 a `pollis://` link routes both warm (scene `openURLContexts`) and cold (scene `connectionOptions` → `Linking.getInitialURL`) under the UIScene life cycle | no |
 | `i18n` | Preferences shows one Language row; the Language page (from that row and from the Self hub) switches language (copy re-renders), the choice persists across relaunch, Arabic mirrors the layout after relaunch (#1074, #1944) | no |
@@ -505,14 +506,10 @@ the new device is backgrounded **and offline** (Android: airplane mode for
 resume catch-up alone (`launchApp: stopApp: false`, no relaunch). On the
 pre-#1291 build step 10 fails exactly there.
 
-Run a second simulator/emulator with the peer account and drive it with a
-parallel Maestro invocation, reusing `subflows/sign-in.yaml` with the peer env:
-```bash
-maestro --device <peer-udid> test -e MAESTRO_EMAIL=$MAESTRO_PEER_EMAIL \
-  -e MAESTRO_OTP=$MAESTRO_OTP -e MAESTRO_PIN=$MAESTRO_PIN \
-  .maestro/subflows/sign-in.yaml
-```
-Then assert convergence on both devices (peer sends → primary sees it live).
+Every two-client script signs its peer up fresh on the second device (a new
+address per run) and reads the handle off its screen; there is no pre-made peer
+account on the dev DS (#1950). A two-client flow run by name through
+`maestro-run.sh` stops and names the script that runs it.
 
 ## Selecting by text, and the 2026-10 redesign
 

@@ -493,8 +493,7 @@ async fn behind_head(
     let Some(asserted) = asserted else {
         return Ok(None);
     };
-    let head_generation = crate::commit::head_generation(log, mls_group_id).await?;
-    let head_epoch = crate::commit::head_epoch_in(log, mls_group_id, head_generation).await?;
+    let (head_generation, head_epoch) = crate::commit::head(log, mls_group_id).await?;
     if asserted == (head_generation, head_epoch) {
         return Ok(None);
     }

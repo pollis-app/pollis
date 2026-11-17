@@ -114,7 +114,6 @@
     "requestsWaiting_other": "Demandes de message, {{count}} en attente",
     "ownPreview": "Vous : {{text}}",
     "noMatches": "Aucune conversation ne correspond.",
-    "emptyHint": "Démarrez une conversation avec quelqu'un via son nom d'utilisateur ou son e-mail.",
     "previewAttachment": "Pièce jointe"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "Impossible de charger les emoji de ce groupe.",
-      "empty": "Aucun émoji personnalisé pour l'instant.",
       "pickAndUpload": "Choisir une image et l'envoyer",
       "sizeKb_one": "{{count}} Ko",
       "sizeKb_other": "{{count}} Ko",
@@ -265,7 +263,6 @@
     "find": "Trouver un groupe",
     "findSub": "Demandez à rejoindre un groupe grâce à son identifiant",
     "emptyTitle": "Aucun groupe pour l'instant",
-    "emptyBody": "Créez un groupe pour vos proches, ou trouvez-en un dont on vous a parlé.",
     "pillSelected": "{{name}}, sélectionné",
     "pillUnread": "{{name}}, messages non lus",
     "pillSelectedUnread": "{{name}}, sélectionné, messages non lus",
@@ -461,7 +458,6 @@
       "deleteAccountSub": "Supprimer définitivement votre compte et effacer cet appareil",
       "deviceSub": "Associé {{paired}} · vu {{lastSeen}}",
       "enrollmentFailed": "Impossible de traiter la demande d'enrôlement.",
-      "eventsEmpty": "Aucun événement de sécurité pour l'instant.",
       "hoursAgo_one": "il y a {{count}} h",
       "hoursAgo_other": "il y a {{count}} h",
       "justNow": "à l'instant",

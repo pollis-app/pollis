@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { Divider, IconButton, PressInPressable } from "../ui";
+import { Divider, IconButton, PressInPressable, EmptyState } from "../ui";
 import { Icon } from "../icons";
 import { semantic, type as ty, fonts, r, space, layout } from "../../theme/tokens";
 import {
@@ -227,9 +227,7 @@ function GroupPanelImpl({
           </Text>
         ) : null}
         {!channelsQuery.isLoading && channels.length === 0 ? (
-          <Text style={[ty.secondary, { paddingStart: space.md, paddingVertical: space.sm }]}>
-            {t("group.common.noChannels")}
-          </Text>
+          <EmptyState testID="group-panel-no-channels">{t("group.common.noChannels")}</EmptyState>
         ) : null}
         {channels.map((c) => {
           const unread = unreadCounts[c.id] ?? 0;

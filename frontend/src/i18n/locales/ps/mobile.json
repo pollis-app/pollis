@@ -114,7 +114,6 @@
     "requestsWaiting_other": "د پیغام غوښتنې، {{count}} په تمه",
     "ownPreview": "تاسو: {{text}}",
     "noMatches": "هېڅ خبرې اترې سمون نه خوري.",
-    "emptyHint": "له یو چا سره د هغه د کارن نوم یا برېښنالیک په مرسته خبرې اترې پیل کړئ.",
     "previewAttachment": "ضمیمه"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "د دې ګروپ ایموجي بار نه شول.",
-      "empty": "لا ځانګړي ایموجي نشته.",
       "pickAndUpload": "انځور وټاکئ او اپلوډ یې کړئ",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "ګروپ ومومئ",
     "findSub": "د یوه ګروپ د پتې (slug) په مرسته د ګډون غوښتنه وکړئ",
     "emptyTitle": "لا هېڅ ګروپ نشته",
-    "emptyBody": "د خپلو خلکو لپاره یو ګروپ جوړ کړئ، یا هغه ومومئ چې درته ویل شوي.",
     "pillSelected": "{{name}}، ټاکل شوی",
     "pillUnread": "{{name}}، نالوستي پیغامونه",
     "pillSelectedUnread": "{{name}}، ټاکل شوی، نالوستي پیغامونه",
@@ -471,7 +468,6 @@
       "deleteAccountSub": "خپل حساب د تل لپاره ړنګ کړئ او دا وسیله پاکه کړئ",
       "deviceSub": "تړل شوې {{paired}} · وروستی ځل لیدل شوې {{lastSeen}}",
       "enrollmentFailed": "د ثبتولو غوښتنه پروسس نه شوه.",
-      "eventsEmpty": "لا هېڅ امنیتي پېښه نشته.",
       "hoursAgo_one": "{{count}} ساعت مخکې",
       "hoursAgo_other": "{{count}} ساعته مخکې",
       "justNow": "همدا اوس",
@@ -593,7 +589,6 @@
       "lastActive": "فعاله {{when}}",
       "neverActive": "په دې وروستیو کې نه ده لیدل شوې",
       "unsupported": "په دې وسیله کې Pollis تازه کړئ",
-      "empty": "تاسو بله وسیله نه لرئ چې ترې کاپي کړئ.",
       "loadFailed": "ستاسو وسیلې بار نه شوې.",
       "requestFailed": "غوښتنه ونه لېږل شوه. بیا هڅه وکړئ.",
       "requesting": "له {{device}} څخه پوښتنه کېږي…",

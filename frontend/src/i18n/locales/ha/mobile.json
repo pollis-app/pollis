@@ -114,7 +114,6 @@
     "requestsWaiting_other": "Buƙatun saƙo, {{count}} na jira",
     "ownPreview": "Ku: {{text}}",
     "noMatches": "Babu tattaunawar da ta dace.",
-    "emptyHint": "Fara tattaunawa da wani ta sunan mai amfani ko imel ɗinsa.",
     "previewAttachment": "Abin haɗawa"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "Ba a iya loda emoji na wannan rukuni ba.",
-      "empty": "Babu emoji na musamman tukuna.",
       "pickAndUpload": "Zaɓi hoto kuma a ɗora",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "Nemi rukuni",
     "findSub": "Nemi shiga rukuni ta gajeren adireshinsa",
     "emptyTitle": "Babu rukunoni tukuna",
-    "emptyBody": "Ƙirƙiri rukuni don mutanenku, ko nemi wanda aka gaya muku game da shi.",
     "pillSelected": "{{name}}, an zaɓa",
     "pillUnread": "{{name}}, saƙonnin da ba a karanta ba",
     "pillSelectedUnread": "{{name}}, an zaɓa, saƙonnin da ba a karanta ba",
@@ -471,7 +468,6 @@
       "deleteAccountSub": "Goge asusunku har abada kuma a share wannan na'ura",
       "deviceSub": "An haɗa {{paired}} · an gani na ƙarshe {{lastSeen}}",
       "enrollmentFailed": "Ba a iya aiwatar da buƙatar rajista ba.",
-      "eventsEmpty": "Babu abubuwan tsaro tukuna.",
       "hoursAgo_one": "awa {{count}} da ta wuce",
       "hoursAgo_other": "awanni {{count}} da suka wuce",
       "justNow": "yanzu-yanzu",
@@ -593,7 +589,6 @@
       "lastActive": "Aiki {{when}}",
       "neverActive": "Ba a gani kwanan nan ba",
       "unsupported": "Sabunta Pollis a wannan na'ura",
-      "empty": "Babu wasu na'urori da za a kwafa daga gare su.",
       "loadFailed": "Ba a iya loda na'urorinku ba.",
       "requestFailed": "Ba a iya aika buƙatar ba. Sake gwadawa.",
       "requesting": "Ana tambayar {{device}}…",

@@ -111,7 +111,6 @@
     "requestsWaiting_other": "消息请求，{{count}} 条待处理",
     "ownPreview": "你：{{text}}",
     "noMatches": "没有匹配的对话。",
-    "emptyHint": "通过用户名或邮箱与他人开始对话。",
     "previewAttachment": "附件"
   },
   "dm": {
@@ -157,7 +156,6 @@
     },
     "emoji": {
       "loadFailed": "无法加载此群组的表情。",
-      "empty": "还没有自定义表情。",
       "pickAndUpload": "选择图片并上传",
       "sizeKb_other": "{{count}} KB",
       "uploading": "正在上传…"
@@ -257,7 +255,6 @@
     "find": "查找群组",
     "findSub": "通过标识申请加入群组",
     "emptyTitle": "还没有群组",
-    "emptyBody": "为你的伙伴创建一个群组，或查找别人告诉你的群组。",
     "pillSelected": "{{name}}，已选中",
     "pillUnread": "{{name}}，有未读消息",
     "pillSelectedUnread": "{{name}}，已选中，有未读消息",
@@ -450,7 +447,6 @@
       "deleteAccountSub": "永久删除你的账户并清除此设备",
       "deviceSub": "配对于 {{paired}} · 最近活跃 {{lastSeen}}",
       "enrollmentFailed": "无法处理该设备注册请求。",
-      "eventsEmpty": "暂无安全事件。",
       "hoursAgo_other": "{{count}} 小时前",
       "justNow": "刚刚",
       "lockNow": "立即锁定",

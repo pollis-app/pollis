@@ -114,7 +114,6 @@
     "requestsWaiting_other": "سنیہے دیاں درخواستاں، {{count}} اڈیک وچ",
     "ownPreview": "تسیں: {{text}}",
     "noMatches": "کوئی گل بات نہیں ملدی۔",
-    "emptyHint": "کسے دے یوزر نیم یا ای میل نال اوہدے نال گل بات شروع کرو۔",
     "previewAttachment": "اٹیچمنٹ"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "ایس گروپ دے ایموجی لوڈ نہیں ہو سکے۔",
-      "empty": "حالے کوئی اپنا ایموجی نہیں۔",
       "pickAndUpload": "تصویر چنو تے اپلوڈ کرو",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "گروپ لبھو",
     "findSub": "سلگ نال کسے گروپ وچ شامل ہون دی درخواست کرو",
     "emptyTitle": "حالے کوئی گروپ نہیں",
-    "emptyBody": "اپنے لوکاں لئی گروپ بناؤ، یا اوہ گروپ لبھو جیہدے بارے تہانوں دسیا گیا اے۔",
     "pillSelected": "{{name}}، چنیا ہویا",
     "pillUnread": "{{name}}، ان پڑھے سنیہے",
     "pillSelectedUnread": "{{name}}، چنیا ہویا، ان پڑھے سنیہے",
@@ -471,7 +468,6 @@
       "deleteAccountSub": "اپنا اکاؤنٹ ہمیشہ لئی ڈیلیٹ کرو تے ایہہ ڈیوائس صاف کرو",
       "deviceSub": "{{paired}} جڑی · آخری واری {{lastSeen}} ویکھی",
       "enrollmentFailed": "ڈیوائس جوڑن دی درخواست تے کارروائی نہیں ہو سکی۔",
-      "eventsEmpty": "حالے کوئی سکیورٹی واقعہ نہیں۔",
       "hoursAgo_one": "{{count}} گھنٹہ پہلاں",
       "hoursAgo_other": "{{count}} گھنٹے پہلاں",
       "justNow": "ہنے",
@@ -593,7 +589,6 @@
       "lastActive": "{{when}} چالو سی",
       "neverActive": "حال وچ نہیں ویکھی گئی",
       "unsupported": "ایس ڈیوائس تے Pollis اپڈیٹ کرو",
-      "empty": "تہاڈے کول کاپی کرن لئی کوئی ہور ڈیوائس نہیں۔",
       "loadFailed": "تہاڈیاں ڈیوائساں لوڈ نہیں ہو سکیاں۔",
       "requestFailed": "درخواست نہیں جا سکی۔ فیر کوشش کرو۔",
       "requesting": "{{device}} نوں پچھیا جا رہیا اے…",
