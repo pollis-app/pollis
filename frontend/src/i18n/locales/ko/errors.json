@@ -11,6 +11,10 @@
     "pinLockedOut": "PIN을 너무 많이 틀렸습니다. 비밀 키로 계정을 복구하세요.",
     "pinNotSet": "이 기기에는 아직 PIN이 없습니다. 다시 로그인하여 설정하세요.",
     "noActiveUser": "이 기기에 로그인되어 있지 않습니다. 다시 로그인하세요.",
-    "unlockFirst": "먼저 Pollis를 잠금 해제하세요."
+    "unlockFirst": "먼저 Pollis를 잠금 해제하세요.",
+    "serverUnverified": "서버에서 이 기기를 확인하지 못했습니다. 날짜와 시간이 자동으로 설정되어 있는지 확인한 후 다시 시도하세요.",
+    "serverRateLimited": "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
+    "serverUnavailable": "지금은 Pollis 서버를 사용할 수 없습니다. 잠시 후 다시 시도하세요.",
+    "serverRefused": "서버가 해당 요청을 받아들이지 않았습니다. 다시 시도하세요."
   }
 }

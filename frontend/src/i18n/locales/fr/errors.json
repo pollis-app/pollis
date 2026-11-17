@@ -12,6 +12,10 @@
     "pinLockedOut": "Trop de codes PIN incorrects. Récupérez votre compte avec votre Clé secrète.",
     "pinNotSet": "Aucun code PIN n'est encore défini sur cet appareil. Reconnectez-vous pour en créer un.",
     "noActiveUser": "Vous n'êtes pas connecté sur cet appareil. Reconnectez-vous.",
-    "unlockFirst": "Déverrouillez d'abord Pollis."
+    "unlockFirst": "Déverrouillez d'abord Pollis.",
+    "serverUnverified": "Le serveur n'a pas pu vérifier cet appareil. Vérifiez que la date et l'heure sont réglées automatiquement, puis réessayez.",
+    "serverRateLimited": "Trop de requêtes. Patientez un instant, puis réessayez.",
+    "serverUnavailable": "Le serveur Pollis n'est pas disponible pour le moment. Réessayez dans un instant.",
+    "serverRefused": "Le serveur n'a pas accepté cette requête. Réessayez."
   }
 }

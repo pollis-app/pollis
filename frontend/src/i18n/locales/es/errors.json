@@ -12,6 +12,10 @@
     "pinLockedOut": "Demasiados intentos fallidos. Recupera tu cuenta con tu clave secreta.",
     "pinNotSet": "Este dispositivo aún no tiene PIN. Vuelve a iniciar sesión para crear uno.",
     "noActiveUser": "No has iniciado sesión en este dispositivo. Vuelve a iniciar sesión.",
-    "unlockFirst": "Primero desbloquea Pollis."
+    "unlockFirst": "Primero desbloquea Pollis.",
+    "serverUnverified": "El servidor no pudo verificar este dispositivo. Asegúrate de que la fecha y la hora se ajusten automáticamente y vuelve a intentarlo.",
+    "serverRateLimited": "Demasiadas solicitudes. Espera un momento y vuelve a intentarlo.",
+    "serverUnavailable": "El servidor de Pollis no está disponible ahora mismo. Inténtalo de nuevo en un momento.",
+    "serverRefused": "El servidor no aceptó esa solicitud. Inténtalo de nuevo."
   }
 }

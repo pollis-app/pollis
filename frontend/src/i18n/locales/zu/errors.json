@@ -12,6 +12,10 @@
     "pinLockedOut": "Ufake i-PIN engalungile kaningi kakhulu. Buyisa i-akhawunti yakho ngoKhiye Oyimfihlo wakho.",
     "pinNotSet": "Le divayisi ayikabi nayo i-PIN. Ngena futhi ukuze uyisethe.",
     "noActiveUser": "Awungenile kule divayisi. Ngena futhi.",
-    "unlockFirst": "Vula i-Pollis kuqala."
+    "unlockFirst": "Vula i-Pollis kuqala.",
+    "serverUnverified": "Iseva ayikwazanga ukuqinisekisa le divayisi. Qinisekisa ukuthi idethi nesikhathi kusethwa ngokuzenzakalelayo, bese uzama futhi.",
+    "serverRateLimited": "Izicelo ziningi kakhulu. Linda kancane, bese uzama futhi.",
+    "serverUnavailable": "Iseva ye-Pollis ayitholakali njengamanje. Zama futhi emva kwesikhashana.",
+    "serverRefused": "Iseva ayisamukelanga leso sicelo. Zama futhi."
   }
 }
