@@ -141,7 +141,7 @@ const AttachmentPreview: React.FC<{
         {sensitive ? (
           <SensitiveCover blurhash={attachment.blurhash} />
         ) : attachment.loading ? (
-          <span className="text-sm font-mono text-muted" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>…</span>
+          <span className="text-body font-mono text-muted" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>…</span>
         ) : attachment.preview ? (
           <img src={attachment.preview} alt={attachment.name} className="w-full h-full object-cover" style={{ borderRadius: 8 }} />
         ) : attachment.type === "video" ? (
@@ -154,7 +154,7 @@ const AttachmentPreview: React.FC<{
         })()}
       </div>
       <div
-        className="mt-0.5 text-xs font-mono truncate text-muted"
+        className="mt-0.5 text-secondary font-mono truncate text-muted"
         style={{ maxWidth: PREVIEW_SIZE }}
         title={attachment.name}
       >
@@ -758,7 +758,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           everyone. Not a modal: an inline row in the composer. */}
       {willNotifyEveryone && (
         <div
-          className="px-3 py-1 flex items-center gap-1.5 text-xs font-mono text-accent border-b border-line"
+          className="px-3 py-1 flex items-center gap-1.5 text-secondary font-mono text-accent border-b border-line"
         >
           <span style={{ fontWeight: 600 }}>@all</span>
           <span className="text-muted">
@@ -834,7 +834,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             ghost={ghostText || emojiGhostText}
             ghostTestId={ghostText ? "mention-ghost" : "emoji-ghost"}
             ghostClassName={isFocused ? "text-bg opacity-60" : "text-muted"}
-            className={`chat-input-textarea w-full px-2 py-1 font-mono text-sm transition-colors border-0 whitespace-pre-wrap break-words overflow-y-auto${isFocused ? " is-focused" : ""}`}
+            className={`chat-input-textarea w-full px-2 py-1 font-mono text-body transition-colors border-0 whitespace-pre-wrap break-words overflow-y-auto${isFocused ? " is-focused" : ""}`}
             style={{
               lineHeight: "1.5rem",
               minHeight: "1.5rem",
@@ -896,7 +896,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           )}
           <button
             onClick={() => setExpandedPreview(null)}
-            className="mt-3 text-xs font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
+            className="mt-3 text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
             style={{ border: "1px solid transparent", borderRadius: 4, cursor: "pointer" }}
           >
             [{t("keys.escape")}]

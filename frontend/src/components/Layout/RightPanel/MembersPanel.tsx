@@ -158,7 +158,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const rootClass = isTerminal
       ? "flex h-full flex-col overflow-y-auto"
       : "flex h-full flex-col gap-4 overflow-y-auto py-3";
-    const emptyClass = isTerminal ? "px-2.5 py-1 text-xs text-muted" : "px-2 text-xs text-muted";
+    const emptyClass = isTerminal ? "px-2.5 py-1 text-secondary text-muted" : "px-2 text-secondary text-muted";
 
     return (
       <div className={rootClass}>
@@ -209,8 +209,8 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
                 onClick={() => setSafety(p.userId)}
                 className={
                   isTerminal
-                    ? "flex w-full items-center gap-1.5 px-2.5 py-0.5 text-start text-base text-fg hover:bg-hover"
-                    : "flex w-full items-center gap-2 rounded px-2 py-1 text-start text-sm text-fg hover:bg-hover"
+                    ? "flex w-full items-center gap-1.5 px-2.5 py-0.5 text-start text-row text-fg hover:bg-hover"
+                    : "flex w-full items-center gap-2 rounded px-2 py-1 text-start text-body text-fg hover:bg-hover"
                 }
                 data-testid={`right-panel-verify-safety-${p.userId}`}
               >
@@ -253,7 +253,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
 }) => {
   if (!isTerminal) {
     return (
-      <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
+      <h2 className="px-2 text-secondary font-medium uppercase tracking-widest text-muted">
         {label}
       </h2>
     );

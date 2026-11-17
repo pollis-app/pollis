@@ -187,7 +187,7 @@ export function NavigableList<T>({
   if (items.length === 0) {
     return (
       <div className="flex-1" style={{ paddingTop: "1rem", paddingInline: "1rem" }}>
-        <p className="text-xs font-mono text-start text-dim">
+        <p className="text-secondary font-mono text-start text-dim">
           {resolvedEmptyLabel}
         </p>
       </div>
@@ -222,7 +222,7 @@ export function NavigableList<T>({
             key={key}
             data-nav-row-key={key}
             data-testid={rowTestId?.(item)}
-            className={`flex items-center px-4 py-2 gap-3 text-xs font-mono select-none border-s-2 ${isRowFocused ? "bg-active border-accent" : "border-transparent"}`}
+            className={`flex items-center px-4 py-2 gap-3 text-secondary font-mono select-none border-s-2 ${isRowFocused ? "bg-active border-accent" : "border-transparent"}`}
           >
             <span className="w-3 flex-shrink-0 text-center text-accent">
               {isRowFocused && nav.colIndex === 0 ? ">" : " "}
@@ -247,7 +247,7 @@ export function NavigableList<T>({
             )}
 
             {trailing && (
-              <div className="flex-shrink-0 text-xs font-mono text-muted">
+              <div className="flex-shrink-0 text-secondary font-mono text-muted">
                 {trailing(item)}
               </div>
             )}

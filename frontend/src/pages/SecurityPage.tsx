@@ -68,7 +68,7 @@ function permissionPill(
 }
 
 const sectionHeaderClass =
-  "text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line";
+  "text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line";
 
 // Not translated: the label interpolates it, so every locale types the word the check accepts.
 const DELETE_CONFIRM_WORD = "DELETE";
@@ -276,7 +276,7 @@ export const SecurityPage: React.FC = observer(() => {
             <h2 className={sectionHeaderClass}>
               {t("security.accountKeyHeading")}
             </h2>
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.accountKeyDescription")}
             </p>
             {selfAudit && (
@@ -295,7 +295,7 @@ export const SecurityPage: React.FC = observer(() => {
             <h2 className={sectionHeaderClass}>
               {t("security.thisBuildHeading")}
             </h2>
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.thisBuildDescription")}
             </p>
 
@@ -306,7 +306,7 @@ export const SecurityPage: React.FC = observer(() => {
             <button
               type="button"
               data-testid="build-verify-learn-link"
-              className="text-2xs font-mono underline self-start text-muted"
+              className="text-meta font-mono underline self-start text-muted"
               onClick={() => {
                 void shellOpen(LEARN_DASHBOARDS_URL);
               }}
@@ -317,7 +317,7 @@ export const SecurityPage: React.FC = observer(() => {
             {/* Version + commit of the running build. Commit is only shown once
                 the check has run (it's baked into the report), and only if this
                 build actually baked one in. */}
-            <div className="flex flex-col gap-0.5 text-xs text-dim">
+            <div className="flex flex-col gap-0.5 text-secondary text-dim">
               <span data-testid="build-version">
                 {t("security.buildVersion", {
                   version: buildVerify.data?.version ?? appVersion ?? "—",
@@ -341,7 +341,7 @@ export const SecurityPage: React.FC = observer(() => {
             {buildVerify.isError && (
               <p
                 data-testid="build-verify-error"
-                className="text-xs text-danger"
+                className="text-secondary text-danger"
               >
                 {t("security.buildVerifyError")}
               </p>
@@ -365,7 +365,7 @@ export const SecurityPage: React.FC = observer(() => {
             <h2 className={sectionHeaderClass}>
               {t("security.pinHeading")}
             </h2>
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.pinDescription")}
             </p>
             <div className="self-start">
@@ -387,7 +387,7 @@ export const SecurityPage: React.FC = observer(() => {
             <h2 className={sectionHeaderClass}>
               {t("security.autoLockHeading")}
             </h2>
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.autoLockDescription", { shortcut: lockLabel })}
             </p>
             {/* A group of toggle buttons rather than the `role="radiogroup"`
@@ -424,7 +424,7 @@ export const SecurityPage: React.FC = observer(() => {
                 );
               })}
             </div>
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.autoLockNote")}
             </p>
           </section>
@@ -433,7 +433,7 @@ export const SecurityPage: React.FC = observer(() => {
           {currentUser && (
             <section className="flex flex-col gap-4 mb-12">
               <h2 className={sectionHeaderClass}>{t("linkDevice.heading")}</h2>
-              <p className="text-sm text-muted">{t("linkDevice.rowSub")}</p>
+              <p className="text-body text-muted">{t("linkDevice.rowSub")}</p>
               <div>
                 <Button data-testid="link-device-button" variant="secondary" activateOn="press" onClick={() => navigate({ to: "/security/link-device" })}>
                   {t("linkDevice.heading")}
@@ -450,14 +450,14 @@ export const SecurityPage: React.FC = observer(() => {
             <h2 className={sectionHeaderClass}>
               {t("security.devicesHeading")}
             </h2>
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.devicesDescription")}
             </p>
 
             {devicesError && (
               <p
                 data-testid="devices-error"
-                className="text-xs text-danger"
+                className="text-secondary text-danger"
               >
                 {devicesError}
               </p>
@@ -472,7 +472,7 @@ export const SecurityPage: React.FC = observer(() => {
                   padding: "0.75rem",
                 }}
               >
-                <p className="text-xs text-fg">
+                <p className="text-secondary text-fg">
                   <Trans
                     t={t}
                     i18nKey="security.revokeConfirmPrompt"
@@ -560,14 +560,14 @@ export const SecurityPage: React.FC = observer(() => {
             <h2 className={sectionHeaderClass}>
               {t("security.eventsHeading")}
             </h2>
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.eventsDescription")}
             </p>
 
             {eventsFailed && (
               <p
                 data-testid="security-events-error"
-                className="text-xs text-danger"
+                className="text-secondary text-danger"
               >
                 {errorMessage(eventsError, t("security.eventsLoadFailed"))}
               </p>
@@ -583,10 +583,10 @@ export const SecurityPage: React.FC = observer(() => {
                 focus to steal. */}
             {events === undefined ? (
               !eventsFailed && (
-                <p className="text-xs font-mono text-muted">{t("common:states.loading")}</p>
+                <p className="text-secondary font-mono text-muted">{t("common:states.loading")}</p>
               )
             ) : events.length === 0 ? (
-              <p className="text-xs font-mono text-dim">
+              <p className="text-secondary font-mono text-dim">
                 {t("security.eventsEmpty")}
               </p>
             ) : (
@@ -642,11 +642,11 @@ export const SecurityPage: React.FC = observer(() => {
                 const pill = permissionPill(t, row.state);
                 return (
                   <div key={row.key} className="flex items-center justify-between">
-                    <span className="text-sm text-fg">
+                    <span className="text-body text-fg">
                       {row.label}
                     </span>
                     <span
-                      className="text-xs font-mono px-2 py-0.5 rounded"
+                      className="text-secondary font-mono px-2 py-0.5 rounded"
                       style={{ color: pill.color, border: `1px solid ${pill.color}` }}
                     >
                       {pill.label}
@@ -663,7 +663,7 @@ export const SecurityPage: React.FC = observer(() => {
                 checked={revokeMediaOnExit}
                 onChange={handleRevokeMediaOnExit}
               />
-              <p className="text-xs font-mono text-muted">
+              <p className="text-secondary font-mono text-muted">
                 {t("security.revokeMediaOnExitDescription")}
               </p>
             </div>
@@ -673,7 +673,7 @@ export const SecurityPage: React.FC = observer(() => {
             <div className="self-start">
               {confirmingRevoke ? (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-mono text-dim">
+                  <span className="text-secondary font-mono text-dim">
                     {t("security.revokeNowNote")}
                   </span>
                   <Button variant="danger" size="sm" onClick={handleRevokeNow}>
@@ -701,13 +701,13 @@ export const SecurityPage: React.FC = observer(() => {
 
             {/* Result note from the last revoke, when the platform has one. */}
             {revokeMedia.data?.note && (
-              <p className="text-xs font-mono text-muted">
+              <p className="text-secondary font-mono text-muted">
                 {revokeMedia.data.note}
               </p>
             )}
 
             {/* Honest, per-OS explanation of what "Revoke now" does. */}
-            <p className="text-xs font-mono text-muted">
+            <p className="text-secondary font-mono text-muted">
               {isMac && t("security.mediaNoteMac")}
               {isLinux && t("security.mediaNoteLinux")}
               {isWindows && t("security.mediaNoteWindows")}
@@ -730,7 +730,7 @@ export const SecurityPage: React.FC = observer(() => {
                 checked={terminalEnabled}
                 onChange={handleTerminalEnabled}
               />
-              <p className="text-xs font-mono text-muted">
+              <p className="text-secondary font-mono text-muted">
                 {t("security.terminalEnabledDescription")}
               </p>
             </div>
@@ -744,10 +744,10 @@ export const SecurityPage: React.FC = observer(() => {
             <h2 className={sectionHeaderClass}>
               {t("security.exportHeading")}
             </h2>
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.exportDescription")}
             </p>
-            <p className="text-xs font-mono text-dim" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary font-mono text-dim" style={{ lineHeight: 1.5 }}>
               {t("security.exportNote")}
             </p>
             <ExportArchiveButton
@@ -760,12 +760,12 @@ export const SecurityPage: React.FC = observer(() => {
               security page so it's the last thing a user can reach. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="settings-danger-zone">
             <h2
-              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b border-danger text-danger"
+              className="text-secondary font-mono font-medium uppercase tracking-widest pb-1 border-b border-danger text-danger"
             >
               {t("security.dangerZoneHeading")}
             </h2>
 
-            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+            <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.dangerZoneDescription")}
             </p>
 

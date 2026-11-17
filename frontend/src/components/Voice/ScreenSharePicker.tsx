@@ -99,7 +99,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
   return (
     <div
       data-testid="screen-share-picker"
-      className="flex-1 flex flex-col font-mono text-xs min-h-0 border-t border-b border-line bg-bg"
+      className="flex-1 flex flex-col font-mono text-secondary min-h-0 border-t border-b border-line bg-bg"
     >
       <header
         className="flex items-center justify-between px-3 py-2 border-b border-line text-fg"
@@ -216,7 +216,7 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
     onClick={onPick}
     disabled={disabled}
     data-testid={testId}
-    className="min-h-[6.25rem] text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
+    className="min-h-[6.25rem] text-start font-mono text-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
   >
     <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
       {/* Fixed 16:10 (the requested thumbnail size) keeps the grid even. */}
@@ -238,7 +238,7 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
           {title}
         </div>
         {subtitle ? (
-          <div className="truncate text-muted text-2xs">
+          <div className="truncate text-muted text-meta">
             {subtitle}
           </div>
         ) : null}

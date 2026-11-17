@@ -60,7 +60,7 @@ export const MentionSuggestList: React.FC<MentionSuggestListProps> = ({
             <MatchedName username={c.username} query={query} />
           </span>
           {c.displayName && c.displayName !== c.username && (
-            <span className="truncate text-xs text-muted">{c.displayName}</span>
+            <span className="truncate text-secondary text-muted">{c.displayName}</span>
           )}
         </>
       )}

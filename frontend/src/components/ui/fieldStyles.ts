@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 export function fieldControlClass(extra: string, error: string | undefined, isFocused: boolean): string {
   // A control's edge is `line-strong` (3:1, design/theme.ts); `line` is for decorative separators only.
   const border = error ? "border-danger" : isFocused ? "border-accent" : "border-line-strong";
-  return `w-full py-2 ${extra} font-mono text-sm focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2 ${border}`;
+  return `w-full py-2 ${extra} font-mono text-body focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2 ${border}`;
 }
 
 /** Runtime style of the same control: the focus chevron takes the start padding; disabled dims it. */

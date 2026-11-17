@@ -67,7 +67,7 @@ export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
         <button
           type="button"
           data-testid={`${testId}-learn-more`}
-          className="text-2xs font-mono underline self-start"
+          className="text-meta font-mono underline self-start"
           style={{ color }}
           onClick={() => {
             void shellOpen(VERIFY_DOCS_URL);

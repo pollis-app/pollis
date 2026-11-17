@@ -89,7 +89,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
       {title && (
         <div className="mb-3">
-          <h3 className="font-mono font-medium text-sm truncate text-accent">
+          <h3 className="font-mono font-medium text-body truncate text-accent">
             {title}
           </h3>
         </div>
@@ -106,7 +106,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           disabled={!duration}
           aria-label={t("media.seek")}
         />
-        <div className="flex justify-between text-xs font-mono mt-1 text-dim">
+        <div className="flex justify-between text-secondary font-mono mt-1 text-dim">
           <span>{formatDuration(currentTime)}</span>
           <span>{formatDuration(duration)}</span>
         </div>

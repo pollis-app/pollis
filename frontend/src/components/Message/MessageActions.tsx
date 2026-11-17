@@ -137,7 +137,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
       : `flex-shrink-0 ms-2 flex items-center gap-4 h-6 ${visibilityClass}`;
 
   const menuRowClass =
-    "flex w-full items-center gap-2 px-2.5 py-1.5 text-sm text-start whitespace-nowrap hover:bg-hover outline-none";
+    "flex w-full items-center gap-2 px-2.5 py-1.5 text-body text-start whitespace-nowrap hover:bg-hover outline-none";
   // Appended per row: two `focus:bg-*` on one element resolve by stylesheet order.
   const menuRowFocusClass = "focus:bg-accent focus:text-bg";
   const menuRowFocusDangerClass = "focus:bg-danger focus:text-bg";

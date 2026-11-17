@@ -61,7 +61,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
       />
 
       {error && (
-        <p data-testid="invite-redeem-error" className="mt-3 text-sm text-danger">
+        <p data-testid="invite-redeem-error" className="mt-3 text-body text-danger">
           {error}
         </p>
       )}
@@ -103,12 +103,12 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
         >
           <h2
             className={
-              isModern ? "text-base font-semibold text-fg" : "text-base text-accent"
+              isModern ? "text-row font-semibold text-fg" : "text-row text-accent"
             }
           >
             {isModern ? t("joinByInvite.heading") : t("joinByInvite.headingTerminal")}
           </h2>
-          <p className="mt-1 mb-4 text-xs text-dim">{t("joinByInvite.blurb")}</p>
+          <p className="mt-1 mb-4 text-secondary text-dim">{t("joinByInvite.blurb")}</p>
           {body}
         </form>
       </div>

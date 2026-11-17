@@ -28,7 +28,7 @@ const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color
       data-testid={testId}
       aria-label={label}
       onClick={() => router.navigate({ to })}
-      className={`bg-transparent flex items-center gap-1 font-mono text-xs hover:opacity-50`}
+      className={`bg-transparent flex items-center gap-1 font-mono text-secondary hover:opacity-50`}
       style={{
         color,
       }}

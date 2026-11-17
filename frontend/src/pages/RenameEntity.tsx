@@ -151,15 +151,15 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
             data-testid={`${testId}-readonly`}
             className="w-full max-w-md flex flex-col gap-5"
           >
-            <p className="text-sm text-dim">{copy.notAdmin}</p>
+            <p className="text-body text-dim">{copy.notAdmin}</p>
             {nameMode === "read" && (
               <div>
-                <p className="text-xs font-sans font-medium mb-1.5 text-fg">
+                <p className="text-secondary font-sans font-medium mb-1.5 text-fg">
                   {copy.nameLabel}
                 </p>
                 <p
                   data-testid={`${testId}-name-value`}
-                  className="text-sm text-fg break-words"
+                  className="text-body text-fg break-words"
                 >
                   {entity.name}
                 </p>
@@ -167,12 +167,12 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
             )}
             {descriptionMode === "read" && (
               <div>
-                <p className="text-xs font-sans font-medium mb-1.5 text-fg">
+                <p className="text-secondary font-sans font-medium mb-1.5 text-fg">
                   {copy.descriptionLabel}
                 </p>
                 <p
                   data-testid={`${testId}-description-value`}
-                  className="text-sm text-fg whitespace-pre-wrap break-words"
+                  className="text-body text-fg whitespace-pre-wrap break-words"
                 >
                   {entity.description}
                 </p>
@@ -233,7 +233,7 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
           {error && (
             <p
               data-testid={`${testId}-error`}
-              className="text-xs font-mono text-danger"
+              className="text-secondary font-mono text-danger"
             >
               {error}
             </p>

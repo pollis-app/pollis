@@ -334,7 +334,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     );
 
     return (
-      <div className="vs-stage font-mono text-xs" data-focus={focusView ? "true" : undefined}>
+      <div className="vs-stage font-mono text-secondary" data-focus={focusView ? "true" : undefined}>
         {/* Focus mode hides the header: the stream gets the whole body, the tray stays. */}
         {!focusView && (
           <div
@@ -567,7 +567,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 </Button>
               )}
               <button
-                className="flex items-center gap-2 text-xs transition-colors text-muted hover:text-fg"
+                className="flex items-center gap-2 text-secondary transition-colors text-muted hover:text-fg"
                 data-testid="voice-settings-link"
                 onClick={onOpenSettings}
               >

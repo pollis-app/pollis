@@ -34,13 +34,13 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
       );
     } else if (isError) {
       body = (
-        <p className={`${gutter} py-2 text-xs text-muted`} data-testid="pinned-panel-unavailable">
+        <p className={`${gutter} py-2 text-secondary text-muted`} data-testid="pinned-panel-unavailable">
           {t("pins.unavailable")}
         </p>
       );
     } else if (pins.length === 0) {
       body = (
-        <p className={`${gutter} py-2 text-xs text-muted`} data-testid="pinned-panel-empty">
+        <p className={`${gutter} py-2 text-secondary text-muted`} data-testid="pinned-panel-empty">
           {t("pins.empty")}
         </p>
       );
@@ -59,12 +59,12 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
                 <div className="flex items-baseline gap-2">
                   <span
                     className={`min-w-0 flex-1 truncate font-medium text-fg ${
-                      isTerminal ? "text-sm" : "text-xs"
+                      isTerminal ? "text-body" : "text-secondary"
                     }`}
                   >
                     {author}
                   </span>
-                  <span className="shrink-0 text-2xs text-muted">
+                  <span className="shrink-0 text-meta text-muted">
                     {formatClockTime(new Date(pin.sent_at).getTime())}
                   </span>
                   <button
@@ -87,7 +87,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
                 {parsed.text ? (
                   <p
                     className={`mt-0.5 whitespace-pre-wrap break-words text-fg ${
-                      isTerminal ? "text-base" : "text-sm"
+                      isTerminal ? "text-row" : "text-body"
                     }`}
                   >
                     {parsed.text}
@@ -113,7 +113,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
           className={
             isTerminal
               ? "sticky top-0 z-[1] flex h-bar w-full items-center gap-2 border-b border-line bg-surface px-2.5 text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none"
-              : "flex items-center gap-2 px-2 pt-3 pb-1 text-xs font-medium uppercase tracking-widest text-muted"
+              : "flex items-center gap-2 px-2 pt-3 pb-1 text-secondary font-medium uppercase tracking-widest text-muted"
           }
         >
           <Pin size={12} aria-hidden="true" />

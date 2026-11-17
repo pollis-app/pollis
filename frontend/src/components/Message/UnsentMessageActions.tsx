@@ -20,8 +20,8 @@ export const UnsentMessageActions: React.FC<UnsentMessageActionsProps> = ({ mess
 
   return (
     <span className="ms-1 inline-flex flex-wrap items-center gap-1 align-middle">
-      <span className="text-xs font-machine text-muted">[{t("outbox.notSent")}]</span>
-      <span className="text-xs text-muted" data-testid={`message-unsent-reason-${message.id}`}>
+      <span className="text-secondary font-machine text-muted">[{t("outbox.notSent")}]</span>
+      <span className="text-secondary text-muted" data-testid={`message-unsent-reason-${message.id}`}>
         {reason === "willResend" ? t("outbox.willResend") : t("outbox.notDelivered")}
       </span>
       {retryId && (

@@ -54,7 +54,7 @@ export const Switch: React.FC<SwitchProps> = ({
 
         <label
           htmlFor={inputId}
-          className="text-sm font-mono text-dim"
+          className="text-body font-mono text-dim"
           style={{
             cursor: disabled ? "not-allowed" : "pointer",
           }}
@@ -66,7 +66,7 @@ export const Switch: React.FC<SwitchProps> = ({
       {description && (
         <p
           id={descriptionId}
-          className="text-xs font-mono ms-12 text-muted"
+          className="text-secondary font-mono ms-12 text-muted"
         >
           {description}
         </p>

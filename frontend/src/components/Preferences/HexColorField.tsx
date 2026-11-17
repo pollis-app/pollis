@@ -58,7 +58,7 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
       }}
       maxLength={7}
       spellCheck={false}
-      className={`text-xs font-mono font-machine px-2 py-1 bg-surface border border-line ${isValidHex(hexInput) ? "text-fg" : "text-danger"} focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black`}
+      className={`text-secondary font-mono font-machine px-2 py-1 bg-surface border border-line ${isValidHex(hexInput) ? "text-fg" : "text-danger"} focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black`}
       style={{
         width: 90,
         borderRadius: 6,

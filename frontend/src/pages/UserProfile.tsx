@@ -102,11 +102,11 @@ export const UserProfilePage: React.FC = observer(() => {
       <div data-testid="user-profile-page" className="flex justify-center px-6 py-10">
         <div className="w-full max-w-md flex flex-col gap-6">
           {isLoading ? (
-            <span className="text-xs font-mono self-center text-muted">
+            <span className="text-secondary font-mono self-center text-muted">
               {t("common:states.loading")}
             </span>
           ) : !profile ? (
-            <span className="text-xs font-mono self-center text-muted">
+            <span className="text-secondary font-mono self-center text-muted">
               {t("profile.notFound")}
             </span>
           ) : (
@@ -119,14 +119,14 @@ export const UserProfilePage: React.FC = observer(() => {
                 <div className="flex flex-col min-w-0">
                   <div
                     data-testid="user-profile-headline"
-                    className="font-mono text-2xl truncate text-accent"
+                    className="font-mono text-display truncate text-accent"
                   >
                     {headlineName}
                   </div>
                   {profile.preferred_name && profile.username && (
                     <div
                       data-testid="user-profile-username"
-                      className="font-mono text-xs truncate text-muted"
+                      className="font-mono text-secondary truncate text-muted"
                     >
                       <bdi>@{profile.username}</bdi>
                     </div>

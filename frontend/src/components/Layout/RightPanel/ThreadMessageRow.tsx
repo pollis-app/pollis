@@ -25,7 +25,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     const testid = isRoot ? "thread-root" : "thread-reply";
 
     const body = message.deleted_at ? (
-      <p className={`italic text-muted ${isTerminal ? "text-base" : "text-sm"}`}>
+      <p className={`italic text-muted ${isTerminal ? "text-row" : "text-body"}`}>
         {t("chat:message.deleted")}
       </p>
     ) : (
@@ -33,7 +33,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
         {message.content_decrypted ? (
           <p
             className={`whitespace-pre-wrap break-words text-fg ${
-              isTerminal ? "text-base" : "text-sm"
+              isTerminal ? "text-row" : "text-body"
             }`}
           >
             {message.content_decrypted}
@@ -43,7 +43,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
         ) : message.content_decrypted == null ? (
           // No text on this device: it could not be decrypted (every message is encrypted).
           <p
-            className={`italic text-muted ${isTerminal ? "text-base" : "text-sm"}`}
+            className={`italic text-muted ${isTerminal ? "text-row" : "text-body"}`}
           >
             {t("chat:message.undecryptable.body_one")}
           </p>
@@ -60,8 +60,8 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
       return (
         <div className="px-1 py-0.5" data-testid={testid}>
           <div className="flex items-baseline gap-1.5">
-            <span className="shrink-0 text-2xs text-muted">{time}</span>
-            <span className="truncate text-base text-dim">{author}</span>
+            <span className="shrink-0 text-meta text-muted">{time}</span>
+            <span className="truncate text-row text-dim">{author}</span>
           </div>
           {body}
         </div>
@@ -78,10 +78,10 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="truncate text-xs font-medium text-fg">
+            <span className="truncate text-secondary font-medium text-fg">
               {author}
             </span>
-            <span className="shrink-0 text-xs text-muted">{time}</span>
+            <span className="shrink-0 text-secondary text-muted">{time}</span>
           </div>
           {body}
         </div>

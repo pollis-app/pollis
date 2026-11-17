@@ -60,7 +60,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
       </button>
 
       {title && (
-        <span className="font-mono text-xs truncate min-w-0 text-accent">
+        <span className="font-mono text-secondary truncate min-w-0 text-accent">
           {title}
         </span>
       )}
@@ -77,7 +77,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         aria-label={t("media.seek")}
       />
 
-      <span className="font-mono text-xs whitespace-nowrap text-dim">
+      <span className="font-mono text-secondary whitespace-nowrap text-dim">
         {formatDuration(currentTime)} / {formatDuration(duration)}
       </span>
     </div>

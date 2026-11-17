@@ -157,7 +157,7 @@ function NavigableGridImpl<T>({
   if (items.length === 0) {
     return (
       <div
-        className="flex-1 flex items-center justify-center font-mono text-xs text-dim"
+        className="flex-1 flex items-center justify-center font-mono text-secondary text-dim"
         data-testid={testId}
       >
         {resolvedEmptyLabel}

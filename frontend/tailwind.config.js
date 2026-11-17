@@ -5,6 +5,23 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
+    // The type scale by role, the same names as mobile's `type.*` (docs/design/README.md → Type).
+    // It replaces Tailwind's t-shirt sizes, so a stray `text-xs` draws nothing instead of a stock size.
+    // rem at a 15px root, so the font-size preference scales every step.
+    fontSize: {
+      'secondary': ['0.867rem', { lineHeight: '1.3rem'  }],
+      'body':      ['1rem',     { lineHeight: '1.5rem'  }],
+      'row':       ['1rem',     { lineHeight: '1.6rem'  }],
+      'heading':   ['1.125rem', { lineHeight: '1.75rem' }],
+      'title':     ['1.25rem',  { lineHeight: '1.75rem' }],
+      // Not text roles: emoji cells, the enrollment code and the large spinner.
+      'glyph':     ['1.25rem',  { lineHeight: '1.75rem' }],
+      'display':   ['1.5rem',   { lineHeight: '2rem'    }],
+      'code':      ['1.875rem', { lineHeight: '2.25rem' }],
+      'glyph-lg':  ['3rem',     { lineHeight: '1'       }],
+      // Last, as `2xs` was: it wins over another step on the same element.
+      'meta':      ['0.733rem', { lineHeight: '1.1rem'  }],
+    },
     extend: {
       // Semantic utilities over the colour tokens (design/theme.ts, painted by utils/colorUtils.ts) and index.css; see docs/design/.
       colors: {
@@ -68,12 +85,6 @@ export default {
         // Per-skin radii from index.css.
         chip: 'var(--radius-chip)',
         control: 'var(--radius-control)',
-      },
-      fontSize: {
-        '2xs': ['0.733rem', { lineHeight: '1.1rem'  }],
-        'xs':  ['0.867rem', { lineHeight: '1.3rem'  }],
-        'sm':  ['1rem',     { lineHeight: '1.5rem'  }],
-        'base':['1rem',     { lineHeight: '1.6rem'  }],
       },
     },
   },

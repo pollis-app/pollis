@@ -195,17 +195,17 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
                 ) : (
                   <span className="size-16 bg-surface-high" aria-hidden="true" />
                 )}
-                <span className="max-w-full truncate text-sm font-mono text-fg">
+                <span className="max-w-full truncate text-body font-mono text-fg">
                   {picked.name}
                 </span>
-                <span className="text-xs font-mono text-muted">
+                <span className="text-secondary font-mono text-muted">
                   {picked.sizeBytes === null
                     ? t("manage.reencodeNote")
                     : t("manage.sourceSize", {
                         size: formatBytes(picked.sizeBytes),
                       })}
                 </span>
-                <span className="text-xs font-mono text-dim">
+                <span className="text-secondary font-mono text-dim">
                   {t("manage.replaceHint")}
                 </span>
               </span>
@@ -239,7 +239,7 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
                   className="size-[1.375rem] shrink-0 object-contain"
                 />
               )}
-              <span className="truncate text-xs font-mono text-muted">
+              <span className="truncate text-secondary font-mono text-muted">
                 {trimmed.length > 0 ? `:${trimmed}:` : t("manage.samplePlaceholder")}
               </span>
             </span>
@@ -255,12 +255,12 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
           </div>
 
           {error && (
-            <p data-testid="group-emoji-error" className="text-xs font-mono text-danger" role="alert">
+            <p data-testid="group-emoji-error" className="text-secondary font-mono text-danger" role="alert">
               {error}
             </p>
           )}
 
-          <p className="text-xs font-mono text-muted">
+          <p className="text-secondary font-mono text-muted">
             {t("manage.storageNote")}
           </p>
 
@@ -274,19 +274,19 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
           </div>
 
           {isLoading && (
-            <p data-testid="group-emoji-loading" className="text-xs font-mono text-muted">
+            <p data-testid="group-emoji-loading" className="text-secondary font-mono text-muted">
               {t("common:states.loading")}
             </p>
           )}
 
           {!isLoading && emoji.length === 0 && (
-            <p data-testid="group-emoji-empty" className="text-xs font-mono text-muted">
+            <p data-testid="group-emoji-empty" className="text-secondary font-mono text-muted">
               {t("manage.empty")}
             </p>
           )}
 
           {!isAdmin && emoji.length > 0 && (
-            <p data-testid="group-emoji-admins-remove" className="text-xs font-mono text-muted">
+            <p data-testid="group-emoji-admins-remove" className="text-secondary font-mono text-muted">
               {t("manage.removeAdminsOnly")}
             </p>
           )}
@@ -305,10 +305,10 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
                     shortcode={item.shortcode}
                     sizeRem={2}
                   />
-                  <span className="flex-1 min-w-0 truncate text-sm font-mono text-fg">
+                  <span className="flex-1 min-w-0 truncate text-body font-mono text-fg">
                     :{item.shortcode}:
                   </span>
-                  <span className="text-xs font-mono text-muted shrink-0">
+                  <span className="text-secondary font-mono text-muted shrink-0">
                     {item.animated
                       ? t("manage.sizeAnimated", { size: formatBytes(item.size_bytes) })
                       : formatBytes(item.size_bytes)}

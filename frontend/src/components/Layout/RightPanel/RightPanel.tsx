@@ -97,12 +97,12 @@ export const RightPanel: React.FC = observer(() => {
         onClick={() => setPanel("none")}
         aria-label={closeLabel}
         title={closeLabel}
-        className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-line px-2.5 min-h-composer-flush text-start text-xs text-muted transition-colors hover:text-fg"
+        className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-line px-2.5 min-h-composer-flush text-start text-secondary text-muted transition-colors hover:text-fg"
       >
         <span className="flex-1">{label}</span>
         <kbd
           aria-hidden="true"
-          className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-2xs leading-[1.2]"
+          className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-meta leading-[1.2]"
         >
           {toggleRightPanelLabel}
         </kbd>

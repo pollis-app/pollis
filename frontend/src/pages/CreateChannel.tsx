@@ -107,7 +107,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <button
             data-testid="create-channel-go-home-button"
             onClick={() => onSuccess?.("", "text")}
-            className="text-xs font-mono transition-colors text-muted hover:text-accent"
+            className="text-secondary font-mono transition-colors text-muted hover:text-accent"
           >
             {t("createChannel.goHome")}
           </button>
@@ -173,7 +173,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <input data-testid="create-channel-type-input" type="hidden" value={channelType} readOnly />
 
           {error && (
-            <p data-testid="create-channel-error" className="text-xs font-mono text-danger">
+            <p data-testid="create-channel-error" className="text-secondary font-mono text-danger">
               {error}
             </p>
           )}

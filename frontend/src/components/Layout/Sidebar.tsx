@@ -377,12 +377,12 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
           {...closePress}
           aria-label={t("sidebar.close", { shortcut: toggleSidebarLabel })}
           title={t("sidebar.close", { shortcut: toggleSidebarLabel })}
-          className="flex shrink-0 items-center gap-2 px-2.5 min-h-composer-flush border-t border-line text-xs text-start cursor-pointer transition-colors text-muted hover:text-fg"
+          className="flex shrink-0 items-center gap-2 px-2.5 min-h-composer-flush border-t border-line text-secondary text-start cursor-pointer transition-colors text-muted hover:text-fg"
         >
           <span className="flex-1">{t("common:actions.close")}</span>
           <kbd
             aria-hidden="true"
-            className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-2xs leading-[1.2]"
+            className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-meta leading-[1.2]"
           >
             {toggleSidebarLabel}
           </kbd>
@@ -500,7 +500,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
         type="button"
         {...press}
         data-testid={testId ? `sidebar-row-${testId}` : undefined}
-        className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pe-2.5 text-base text-start cursor-pointer text-inherit ${
+        className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pe-2.5 text-row text-start cursor-pointer text-inherit ${
           chevron ? "ps-[0.4rem]" : indentPadClass(indent)
         }`}
       >
@@ -516,7 +516,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
 
 const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
   <span
-    className={`shrink-0 rounded px-1.5 py-0.5 text-2xs leading-none text-bg ${
+    className={`shrink-0 rounded px-1.5 py-0.5 text-meta leading-none text-bg ${
       muted ? "bg-muted" : "bg-accent"
     }`}
   >

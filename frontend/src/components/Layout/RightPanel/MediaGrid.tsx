@@ -15,7 +15,7 @@ export const MediaGrid: React.FC<MediaGridProps> = ({ attachments }) => {
   const gutter = isTerminal ? "px-2.5" : "px-2";
 
   if (attachments.length === 0) {
-    return <p className={`${gutter} text-xs text-muted`}>{t("media.empty")}</p>;
+    return <p className={`${gutter} text-secondary text-muted`}>{t("media.empty")}</p>;
   }
 
   return (

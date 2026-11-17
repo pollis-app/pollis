@@ -108,7 +108,7 @@ const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, 
           className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted"
         />
       </div>
-      <span className="text-xs font-mono text-muted">
+      <span className="text-secondary font-mono text-muted">
         {t("settings.noiseSuppressionHint")}
       </span>
     </div>
@@ -145,7 +145,7 @@ const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onCh
           </Button>
         ))}
       </div>
-      <span className="text-xs font-mono text-muted">
+      <span className="text-secondary font-mono text-muted">
         {t("settings.fpsHint", {
           hint: t(SCREEN_SHARE_FPS_HINT_KEYS[value] ?? "settings.fpsHintStandard"),
         })}
@@ -174,7 +174,7 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
     <div className="flex items-center justify-between gap-3" style={{ maxWidth: 320 }}>
       <div className="flex flex-col">
         <span className="text-fg">{label}</span>
-        <span className="text-xs font-mono text-muted">
+        <span className="text-secondary font-mono text-muted">
           {t(PERMISSION_LABEL_KEY[state])}
         </span>
       </div>
@@ -370,7 +370,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.devicesHeading")}
           </h2>
@@ -392,7 +392,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12" data-testid="voice-camera-section">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.cameraHeading")}
           </h2>
@@ -424,7 +424,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                 {cam.kind === "live" ? (
                   <RemoteVideoTile trackKey={LOCAL_CAMERA_PREVIEW_KEY} />
                 ) : (
-                  <span className="px-3 text-center text-sm text-muted">
+                  <span className="px-3 text-center text-body text-muted">
                     {cam.kind === "failed"
                       ? cam.error
                       : cam.kind === "starting"
@@ -460,7 +460,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
         {permissions.data && (
           <section className="flex flex-col gap-4 mb-12" data-testid="voice-permissions-section">
             <h2
-              className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+              className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
             >
               {t("settings.permissionsHeading")}
             </h2>
@@ -479,7 +479,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-5 mb-12" data-testid="voice-test-section">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.testHeading")}
           </h2>
@@ -588,7 +588,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
           {test.error && (
             <p
               data-testid="voice-test-error"
-              className="text-xs font-mono text-danger"
+              className="text-secondary font-mono text-danger"
             >
               {test.error}
             </p>
@@ -597,7 +597,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-7 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.audioProcessingHeading")}
           </h2>
@@ -660,7 +660,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.screenShareHeading")}
           </h2>
@@ -681,7 +681,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.behaviorHeading")}
           </h2>

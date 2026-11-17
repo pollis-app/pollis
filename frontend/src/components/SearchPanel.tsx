@@ -498,14 +498,14 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            className="flex-1 font-mono text-sm text-fg border-0"
+            className="flex-1 font-mono text-body text-fg border-0"
             style={{
               background: "transparent",
               outline: "none",
             }}
           />
           <kbd
-            className="font-mono font-machine text-xs text-muted bg-bg border border-line"
+            className="font-mono font-machine text-secondary text-muted bg-bg border border-line"
             style={{
               padding: "2px 6px",
               borderRadius: "4px",
@@ -516,7 +516,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         </div>
 
         <div
-          className="flex items-center gap-1 px-4 py-1.5 text-xs font-mono flex-shrink-0 border-b border-line text-muted"
+          className="flex items-center gap-1 px-4 py-1.5 text-secondary font-mono flex-shrink-0 border-b border-line text-muted"
         >
           <ArrowUp className="w-3 h-3" />
           <ArrowDown className="w-3 h-3" />
@@ -544,7 +544,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
             // Missing must not hint at whether the message exists.
             <div
               data-testid="search-panel-permalink"
-              className="flex items-center gap-3 px-4 py-3 font-mono text-xs text-muted"
+              className="flex items-center gap-3 px-4 py-3 font-mono text-secondary text-muted"
             >
               <LinkIcon size={14} className="flex-shrink-0" />
               {permalinkStatus === "missing" ? (
@@ -558,7 +558,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
           ) : filteredItems.length === 0 ? (
             <div
               data-testid="search-panel-empty"
-              className="text-center py-8 font-mono text-xs text-muted"
+              className="text-center py-8 font-mono text-secondary text-muted"
             >
               {query.trim()
                 ? t("panel.noMatches")
@@ -606,15 +606,15 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
 
                   <div className="flex-1 min-w-0">
                     <div
-                      className={`font-sans text-sm truncate flex items-center gap-2 ${isSelected ? "text-accent" : "text-fg"}`}
+                      className={`font-sans text-body truncate flex items-center gap-2 ${isSelected ? "text-accent" : "text-fg"}`}
                     >
                       <span>{item.name}</span>
                       {item.type === "voice" && item.channelId === activeVoiceChannelId && (
-                        <span className="font-mono text-xs text-accent">{t("panel.live")}</span>
+                        <span className="font-mono text-secondary text-accent">{t("panel.live")}</span>
                       )}
                     </div>
                     <div
-                      className="font-mono text-xs truncate text-muted"
+                      className="font-mono text-secondary truncate text-muted"
                     >
                       {item.breadcrumb}
                     </div>

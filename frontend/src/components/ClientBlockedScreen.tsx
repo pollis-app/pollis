@@ -144,17 +144,17 @@ export const ClientBlockedScreen: React.FC<Props> = ({ status, onUnblocked }) =>
       <div className="flex-1 flex justify-center overflow-y-auto p-4">
         <Card padding="lg" className="w-full max-w-md my-auto">
           <div className="flex flex-col gap-4">
-            <h1 className="text-base font-mono font-bold text-fg">{t("clientBlocked.title")}</h1>
-            <p data-testid="client-blocked-message" className="text-sm text-dim leading-relaxed">
+            <h1 className="text-row font-mono font-bold text-fg">{t("clientBlocked.title")}</h1>
+            <p data-testid="client-blocked-message" className="text-body text-dim leading-relaxed">
               {current.message ?? t("clientBlocked.body")}
             </p>
-            <p data-testid="client-blocked-versions" className="text-xs font-mono text-muted">
+            <p data-testid="client-blocked-versions" className="text-secondary font-mono text-muted">
               {versions}
             </p>
 
             {managed && (
               <div className="flex flex-col gap-2">
-                <p className="text-sm text-dim">
+                <p className="text-body text-dim">
                   {t("clientBlocked.packageManager", { source: managed.display_name })}
                 </p>
                 {managed.update_command && (
@@ -165,8 +165,8 @@ export const ClientBlockedScreen: React.FC<Props> = ({ status, onUnblocked }) =>
 
             {failed && (
               <div data-testid="client-blocked-update-failed" role="alert" className="flex flex-col gap-1">
-                <p className="text-sm text-fg">{t("clientBlocked.updateFailed")}</p>
-                {phase.detail && <p className="text-xs font-mono text-muted break-words">{phase.detail}</p>}
+                <p className="text-body text-fg">{t("clientBlocked.updateFailed")}</p>
+                {phase.detail && <p className="text-secondary font-mono text-muted break-words">{phase.detail}</p>}
               </div>
             )}
 

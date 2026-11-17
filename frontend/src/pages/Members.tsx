@@ -163,7 +163,7 @@ const InvitedSection: React.FC<{ groupId: string; isAdmin: boolean }> = observer
 
     return (
       <section data-testid="invited-section" className="flex-none flex flex-col pt-4">
-        <h2 className="px-4 pb-2 text-xs font-mono font-medium text-dim">
+        <h2 className="px-4 pb-2 text-secondary font-mono font-medium text-dim">
           {t("members.invited.heading")}
         </h2>
         <NavigableList
@@ -209,7 +209,7 @@ const InvitedSection: React.FC<{ groupId: string; isAdmin: boolean }> = observer
           }}
         />
         {revoke.isError && (
-          <p data-testid="invited-revoke-error" className="px-4 pt-2 text-xs font-mono text-dim">
+          <p data-testid="invited-revoke-error" className="px-4 pt-2 text-secondary font-mono text-dim">
             {t("members.invited.revokeFailed")}
           </p>
         )}

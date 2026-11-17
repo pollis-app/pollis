@@ -263,13 +263,13 @@ input[type="range"]::-moz-range-thumb {
 
   /* Section label — ncurses / htop style ──────────────────────── */
   .section-label {
-    @apply text-xs font-mono tracking-widest uppercase select-none px-2;
+    @apply text-secondary font-mono tracking-widest uppercase select-none px-2;
     color: var(--c-text-muted);
   }
 
   /* Sidebar nav item ───────────────────────────────────────────── */
   .sidebar-item {
-    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-start text-xs cursor-pointer select-none;
+    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-start text-secondary cursor-pointer select-none;
     border-radius: var(--radius-chip);
     color: var(--c-text-dim);
   }
@@ -311,7 +311,7 @@ input[type="range"]::-moz-range-thumb {
 
   /* Input / textarea ───────────────────────────────────────────── */
   .pollis-input {
-    @apply w-full rounded-panel px-3 py-2 text-sm outline-none transition-colors duration-150;
+    @apply w-full rounded-panel px-3 py-2 text-body outline-none transition-colors duration-150;
     background: var(--c-surface-high);
     border: 2px solid var(--c-border);
     color: var(--c-text);
@@ -373,7 +373,7 @@ input[type="range"]::-moz-range-thumb {
 
   /* Buttons ────────────────────────────────────────────────────── */
   .btn-primary {
-    @apply px-4 py-2 text-sm font-mono rounded-panel cursor-pointer font-medium;
+    @apply px-4 py-2 text-body font-mono rounded-panel cursor-pointer font-medium;
     background: var(--c-accent);
     color: var(--c-bg);
   }
@@ -388,7 +388,7 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .btn-ghost {
-    @apply px-3 py-2 text-sm rounded-panel cursor-pointer;
+    @apply px-3 py-2 text-body rounded-panel cursor-pointer;
     color: var(--c-text-dim);
     border: 2px solid var(--c-border);
   }

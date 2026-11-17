@@ -198,7 +198,7 @@ export const VaultPage: React.FC = observer(() => {
         aria-selected={view === "chat"}
         data-testid="vault-view-chat"
         onClick={() => setView("chat")}
-        className={`flex items-center gap-1 rounded border border-line px-2 py-0.5 text-2xs uppercase tracking-widest ${
+        className={`flex items-center gap-1 rounded border border-line px-2 py-0.5 text-meta uppercase tracking-widest ${
           view === "chat" ? "bg-accent text-bg" : "text-muted hover:text-fg"
         }`}
       >
@@ -211,7 +211,7 @@ export const VaultPage: React.FC = observer(() => {
         aria-selected={view === "media"}
         data-testid="vault-view-media"
         onClick={() => setView("media")}
-        className={`flex items-center gap-1 rounded border border-line px-2 py-0.5 text-2xs uppercase tracking-widest ${
+        className={`flex items-center gap-1 rounded border border-line px-2 py-0.5 text-meta uppercase tracking-widest ${
           view === "media" ? "bg-accent text-bg" : "text-muted hover:text-fg"
         }`}
       >
@@ -223,7 +223,7 @@ export const VaultPage: React.FC = observer(() => {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-bar flex-shrink-0 items-center gap-3 border-b border-line px-4 font-mono text-xs text-muted">
+      <div className="flex h-bar flex-shrink-0 items-center gap-3 border-b border-line px-4 font-mono text-secondary text-muted">
         <VaultIcon size={14} aria-hidden />
         <span className="flex-1">{t("title")}</span>
         {viewToggle}
@@ -251,7 +251,7 @@ export const VaultPage: React.FC = observer(() => {
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
-              className="flex-1 border-0 bg-transparent font-mono text-sm text-fg outline-none placeholder:text-muted"
+              className="flex-1 border-0 bg-transparent font-mono text-body text-fg outline-none placeholder:text-muted"
             />
             {searchQuery && (
               <PressButton
@@ -267,7 +267,7 @@ export const VaultPage: React.FC = observer(() => {
 
           <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
             {isLoading ? null : visibleEntries.length === 0 ? (
-              <p className="py-8 text-center font-mono text-sm text-muted" data-testid="vault-empty">
+              <p className="py-8 text-center font-mono text-body text-muted" data-testid="vault-empty">
                 {searchQuery ? t("searchEmpty") : t("empty")}
               </p>
             ) : (
@@ -313,7 +313,7 @@ export const VaultPage: React.FC = observer(() => {
           ) : pendingDeleteId ? (
             <div data-testid="vault-delete-bar">
               <div className="flex flex-shrink-0 items-center gap-2 border-t border-line bg-surface px-4 py-1.5">
-                <span className="flex-1 font-mono text-2xs uppercase tracking-widest text-muted">
+                <span className="flex-1 font-mono text-meta uppercase tracking-widest text-muted">
                   {t("delete.heading")}
                 </span>
                 <button
@@ -326,7 +326,7 @@ export const VaultPage: React.FC = observer(() => {
                 </button>
               </div>
               <div className="flex items-center justify-between gap-4 bg-surface px-4 pb-3 pt-2">
-                <p className="font-mono text-xs text-dim">{t("delete.body")}</p>
+                <p className="font-mono text-secondary text-dim">{t("delete.body")}</p>
                 <Button
                   data-testid="vault-delete-confirm"
                   variant="danger"
@@ -343,7 +343,7 @@ export const VaultPage: React.FC = observer(() => {
             <div className="flex-shrink-0" data-testid="vault-composer">
               {saving ? (
                 <p
-                  className="px-4 pt-2 font-mono text-xs text-muted"
+                  className="px-4 pt-2 font-mono text-secondary text-muted"
                   role="status"
                   data-testid="vault-saving"
                 >
@@ -355,7 +355,7 @@ export const VaultPage: React.FC = observer(() => {
                   className="flex items-center gap-3 px-4 pt-2"
                   data-testid="vault-save-failed"
                 >
-                  <p className="flex-1 font-mono text-xs text-danger" role="alert">
+                  <p className="flex-1 font-mono text-secondary text-danger" role="alert">
                     {t(SAVE_FAILED_COPY[saveFailure])}
                   </p>
                   <Button
@@ -407,7 +407,7 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
       {showDayDivider && (
         <div className="flex items-center gap-3 py-2">
           <div className="h-px flex-1 bg-line" />
-          <span className="font-mono text-2xs uppercase tracking-widest text-muted">
+          <span className="font-mono text-meta uppercase tracking-widest text-muted">
             {formatDayDivider(createdMs)}
           </span>
           <div className="h-px flex-1 bg-line" />
@@ -416,12 +416,12 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
       <div className="group flex gap-3 rounded px-1 py-1 hover:bg-hover">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="font-mono text-2xs text-muted">
+            <span className="font-mono text-meta text-muted">
               {formatClockTime(createdMs)}
             </span>
             {entry.pinned && (
               <span
-                className="flex items-center gap-1 font-mono text-2xs uppercase tracking-widest text-accent"
+                className="flex items-center gap-1 font-mono text-meta uppercase tracking-widest text-accent"
                 data-testid="vault-entry-pinned"
               >
                 <Pin size={10} aria-hidden />
@@ -429,11 +429,11 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
               </span>
             )}
             {entry.updated_at !== entry.created_at && (
-              <span className="font-mono text-2xs text-muted">{t("entry.edited")}</span>
+              <span className="font-mono text-meta text-muted">{t("entry.edited")}</span>
             )}
           </div>
           {parsed.text && (
-            <p className="whitespace-pre-wrap break-words text-sm text-fg">
+            <p className="whitespace-pre-wrap break-words text-body text-fg">
               <LinkifiedText text={parsed.text} />
             </p>
           )}

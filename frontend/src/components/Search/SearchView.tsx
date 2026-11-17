@@ -115,7 +115,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
       return (
         <p
           data-testid="search-empty-hint"
-          className="text-xs font-mono text-center text-muted pt-8"
+          className="text-secondary font-mono text-center text-muted pt-8"
         >
           {t("view.emptyHint")}
         </p>
@@ -124,7 +124,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
     if (isFetching) {
       return (
-        <p className="text-xs font-mono text-center text-muted pt-8">
+        <p className="text-secondary font-mono text-center text-muted pt-8">
           {t("view.searching")}
         </p>
       );
@@ -134,7 +134,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
     return (
       <div
         data-testid="search-no-results"
-        className="px-6 pt-8 flex flex-col gap-3 text-xs font-mono text-muted"
+        className="px-6 pt-8 flex flex-col gap-3 text-secondary font-mono text-muted"
       >
         <p className="text-dim">{t("view.noResults")}</p>
         <p>{t("view.noResultsWhy")}</p>
@@ -163,14 +163,14 @@ export const SearchView: React.FC<SearchViewProps> = ({
           autoFocus
         />
         {inputValue.trim().length > 0 && inputValue.trim().length < 2 && (
-          <p className="text-xs font-mono mt-1 text-muted">{t("view.minLength")}</p>
+          <p className="text-secondary font-mono mt-1 text-muted">{t("view.minLength")}</p>
         )}
         <p className="text-[10px] font-mono mt-1 text-muted">{t("view.filterHint")}</p>
       </div>
 
       {hasResults && (
         <div className="px-4 py-2 flex-shrink-0 flex items-center justify-between gap-2 border-b border-line">
-          <span data-testid="search-total" className="text-xs font-mono text-muted">
+          <span data-testid="search-total" className="text-secondary font-mono text-muted">
             {t("view.aboutResults", { count: total })}
           </span>
           <div className="flex items-center gap-1">
@@ -211,25 +211,25 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     <div className="flex items-baseline justify-between gap-2 mb-1">
                       <span
                         data-testid="search-result-sender"
-                        className="text-xs font-mono font-medium truncate text-accent"
+                        className="text-secondary font-mono font-medium truncate text-accent"
                       >
                         {result.sender_username ?? result.sender_id}
                       </span>
-                      <span className="text-xs font-mono flex-shrink-0 text-muted">
+                      <span className="text-secondary font-mono flex-shrink-0 text-muted">
                         {formatShortDateTime(result.sent_at)}
                       </span>
                     </div>
 
                     <div
                       data-testid="search-result-conversation"
-                      className="text-xs font-mono mb-1 truncate text-muted"
+                      className="text-secondary font-mono mb-1 truncate text-muted"
                     >
                       {conversationLabel(result)}
                       {result.thread_id ? ` · ${t("view.inThread")}` : ""}
                       {result.has_attachment ? ` · ${t("view.hasAttachment")}` : ""}
                     </div>
 
-                    <div className="text-xs font-mono text-dim" data-testid="search-result-snippet">
+                    <div className="text-secondary font-mono text-dim" data-testid="search-result-snippet">
                       <HighlightedSnippet snippet={result.snippet} />
                     </div>
 

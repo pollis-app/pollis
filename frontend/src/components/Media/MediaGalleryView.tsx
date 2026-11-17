@@ -78,7 +78,7 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
 
   if (attachments.length === 0) {
     return (
-      <p className="px-4 py-6 text-sm text-muted" data-testid="media-gallery-empty">
+      <p className="px-4 py-6 text-body text-muted" data-testid="media-gallery-empty">
         {emptyLabel}
       </p>
     );
@@ -100,7 +100,7 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
 
       {files.length > 0 && (
         <div className="mt-4 flex flex-col gap-2">
-          <h2 className="text-xs font-medium uppercase tracking-widest text-muted">
+          <h2 className="text-secondary font-medium uppercase tracking-widest text-muted">
             {t("media.filesHeading")}
           </h2>
           {files.map((attachment) => (
@@ -276,7 +276,7 @@ const GalleryViewer = observer(({
         justifyContent: "center",
       }}
     >
-      <div className="absolute start-4 top-3 text-xs text-white/70">
+      <div className="absolute start-4 top-3 text-secondary text-white/70">
         <span className="me-3">{position}</span>
         <span>{attachment.filename}</span>
       </div>
@@ -330,7 +330,7 @@ const GalleryViewer = observer(({
             style={{ maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain" }}
           />
         ) : (
-          <div className="p-8 text-sm text-white/70">{attachment.filename}</div>
+          <div className="p-8 text-body text-white/70">{attachment.filename}</div>
         )}
       </div>
 

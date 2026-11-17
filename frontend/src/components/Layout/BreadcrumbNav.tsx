@@ -222,7 +222,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
         <HistoryNav iconSize={18} />
         <nav
           data-testid="breadcrumb-trail"
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-sm"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-body"
         >
           {segments.map((seg, i) => {
             const isLast = i === segments.length - 1;
@@ -258,7 +258,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
             <SearchIcon size={16} />
             <kbd
               aria-hidden="true"
-              className="font-mono font-machine rounded-control border border-line bg-bg px-1.5 py-0.5 text-xs leading-none text-muted"
+              className="font-mono font-machine rounded-control border border-line bg-bg px-1.5 py-0.5 text-secondary leading-none text-muted"
             >
               {searchLabel}
             </kbd>
@@ -293,7 +293,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
       <HistoryNav iconSize={14} />
       <span
         data-testid="breadcrumb-trail"
-        className="text-xs font-mono truncate text-muted"
+        className="text-secondary font-mono truncate text-muted"
         style={{ flex: 1 }}
       >
         {segments.map((seg, i) => (
@@ -334,7 +334,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
         <SearchIcon size={16} />
         <kbd
           aria-hidden="true"
-          className="font-mono font-machine text-xs bg-bg border border-line"
+          className="font-mono font-machine text-secondary bg-bg border border-line"
           style={{
             color: "inherit",
             padding: "1px 5px",
