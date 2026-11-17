@@ -6,7 +6,7 @@ import { Screen, Header, Body } from "../../components/ui";
 import { CopyDiagnosticsButton } from "../../components/self/CopyDiagnosticsButton";
 import { SaveDiagnosticsButton } from "../../components/self/SaveDiagnosticsButton";
 import { ErrorText } from "../../components/self/SettingsField";
-import { semantic, type as ty, space, r } from "../../theme/tokens";
+import { semantic, type as ty, space, r, typeSize } from "../../theme/tokens";
 import { getDiagnostics } from "../../lib/diagnostics";
 import { recentReport, type RecentReport } from "../../lib/diagnosticsReport";
 import { useThemeRerender } from "../../components/theme";
@@ -63,7 +63,7 @@ export default function Diagnostics() {
             padding: space.lg,
           }}
         >
-          <Text testID="text-diagnostics-preview" selectable style={[ty.mono, { color: semantic.dim, fontSize: 12 }]}>
+          <Text testID="text-diagnostics-preview" selectable style={[ty.mono, { color: semantic.dim, fontSize: typeSize.meta }]}>
             {report?.text ?? t("common:states.loading")}
           </Text>
         </View>

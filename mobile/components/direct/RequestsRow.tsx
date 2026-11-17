@@ -3,7 +3,7 @@ import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Badge } from "../ui";
 import { Icon } from "../icons";
-import { semantic, fonts, r, space, layout } from "../../theme/tokens";
+import { semantic, fonts, r, space, layout, typeSize } from "../../theme/tokens";
 
 /** "Message requests" entry at the top of the Direct list, shown only when there are any. */
 export function RequestsRow({
@@ -42,7 +42,7 @@ export function RequestsRow({
         style={{
           flex: 1,
           fontFamily: fonts.semibold,
-          fontSize: 15,
+          fontSize: typeSize.button,
           color: semantic.text,
         }}
       >

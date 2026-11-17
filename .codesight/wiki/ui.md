@@ -212,6 +212,12 @@ this sweep.
 | `--radius-chip` / `--radius-control` | `rounded-chip`, `rounded-control` |
 | `--msg-header-gap` / `-group-gap` / `-divider-gap` / `--msg-row-pad-y` | `pt-msg-header`, `pt-msg-group`, `mt-msg-divider`, `pb-msg-row` |
 | `--lh` | `leading-msg` |
+| type scale (#1973) | `text-meta`, `text-secondary`, `text-body`, `text-row`, `text-heading`, `text-title`, `text-display`; not text: `text-glyph`, `text-glyph-lg`, `text-code` |
+
+The type scale is named by role, the same names as mobile's `typeSize` / `type.*`
+(`docs/design/README.md` → Type, which has both platforms' sizes). It **replaces**
+Tailwind's t-shirt sizes rather than extending them, so a `text-xs` draws nothing;
+`frontend/tests/type-scale.test.ts` fails on one and checks every step is rem.
 
 ### Bottom bars align with the composer, and border-box is the trap
 
@@ -245,8 +251,8 @@ had been `calc(var(--bar-h) - 1px)`, 2px shorter than the right panel's Details
 row beside it at every font size (#1790). The same test pins the token, and
 `e2e/voice-bar-alignment.spec.ts` checks the two top borders in the pixels.
 
-**If a utility is missing, add it to the theme** — that is what the bottom seven rows
-above are: tokens that had no utility, so every call site spelled them inline.
+**If a utility is missing, add it to the theme** — that is what the seven rows
+above the type scale are: tokens that had no utility, so every call site spelled them inline.
 
 **Never put two utilities of the same property on one element** — `text-muted` and
 `text-dim` in one class string, or two `focus:bg-*`. Tailwind emits its own

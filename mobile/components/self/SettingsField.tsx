@@ -1,7 +1,7 @@
 import { View } from "react-native";
 import { Text } from "../Text";
 import { Icon } from "../icons";
-import { semantic, type as ty, space, fonts, r, layout } from "../../theme/tokens";
+import { semantic, type as ty, space, fonts, r, layout, typeSize } from "../../theme/tokens";
 
 /** The error leads with an alert icon, so it is never told from the hint by colour alone. */
 export function SettingsField({
@@ -95,7 +95,7 @@ export function ReadOnlyField({
       <Text
         numberOfLines={multiline ? undefined : 1}
         ellipsizeMode="tail"
-        style={{ flex: 1, fontFamily: fonts.regular, fontSize: 16, color: semantic.text }}
+        style={{ flex: 1, fontFamily: fonts.regular, fontSize: typeSize.body, color: semantic.text }}
       >
         {value}
       </Text>

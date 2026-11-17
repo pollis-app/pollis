@@ -2,7 +2,7 @@ import { Pressable, View } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { UserAvatar } from "../UserAvatar";
-import { semantic, type as ty, fonts, space } from "../../theme/tokens";
+import { semantic, type as ty, fonts, space, typeSize } from "../../theme/tokens";
 import { activeLocale } from "../../i18n";
 import type { SearchMessageResult } from "../../hooks/queries/useSearch";
 import { HighlightedSnippet } from "./HighlightedSnippet";
@@ -71,7 +71,7 @@ export function SearchResultRow({
             style={{
               flex: 1,
               fontFamily: fonts.bold,
-              fontSize: 16,
+              fontSize: typeSize.rowTitle,
               color: semantic.accent,
             }}
           >

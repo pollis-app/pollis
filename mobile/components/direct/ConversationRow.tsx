@@ -10,6 +10,7 @@ import {
   r,
   space,
   layout,
+  typeSize,
 } from "../../theme/tokens";
 
 /** One conversation in the Direct list; unread is said three ways, never colour alone. One control. */
@@ -93,7 +94,7 @@ export function ConversationRow({
             style={{
               flex: 1,
               fontFamily: isUnread ? fonts.bold : fonts.semibold,
-              fontSize: 16,
+              fontSize: typeSize.rowTitle,
               color: selected ? semantic.accent : semantic.text,
             }}
           >

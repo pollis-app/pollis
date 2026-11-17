@@ -18,7 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { semantic, type as ty, fonts, r, space, layout, currentTheme } from "../theme/tokens";
+import { semantic, type as ty, fonts, r, space, layout, currentTheme, typeSize } from "../theme/tokens";
 import { buttonColors, checkboxColors, controlDisabled, type ControlSurface } from "../theme/button";
 import { useTheme } from "./theme";
 import { ThemeProbe } from "./ThemeProbe";
@@ -391,7 +391,7 @@ export function Header({
         <Text
           testID={subtitleTestID}
           numberOfLines={1}
-          style={[ty.meta, { fontSize: 13, color: semantic.muted }]}
+          style={[ty.meta, { fontSize: typeSize.section, color: semantic.muted }]}
         >
           {subtitle}
         </Text>
@@ -608,7 +608,7 @@ export function Chip({
             numberOfLines={1}
             style={{
               fontFamily: v === "subtle" ? fonts.medium : fonts.semibold,
-              fontSize: 14,
+              fontSize: typeSize.secondary,
               color: fg,
             }}
           >
@@ -687,8 +687,7 @@ export function Button({
       )}
       <Text
         style={{
-          fontFamily: fonts.semibold,
-          fontSize: full ? 16 : 15,
+          ...(full ? ty.rowTitle : ty.button),
           color: c.label,
         }}
       >
@@ -795,7 +794,7 @@ export function Badge({
         maxFontSizeMultiplier={1.2}
         style={{
           fontFamily: fonts.bold,
-          fontSize: size === "sm" ? 11 : 12,
+          fontSize: size === "sm" ? 11 : typeSize.meta,
           color: tone === "accent" ? semantic.onAccent : semantic.text,
         }}
       >
@@ -899,7 +898,7 @@ export function ListRow({
             style={[
               {
                 fontFamily: unread || selected ? fonts.bold : fonts.medium,
-                fontSize: 16,
+                fontSize: typeSize.rowTitle,
                 color: selected ? semantic.accent : semantic.text,
               },
               nameStyle,
@@ -975,7 +974,7 @@ export function ActionRow({
         accessibilityLabel={accessibilityLabel ?? (sub ? `${name}, ${sub}` : name)}
         style={{ flex: 1, minWidth: 0, gap: 2 }}
       >
-        <Text numberOfLines={2} style={{ fontFamily: fonts.medium, fontSize: 16, color: semantic.text }}>
+        <Text numberOfLines={2} style={{ fontFamily: fonts.medium, fontSize: typeSize.rowTitle, color: semantic.text }}>
           {name}
         </Text>
         {sub ? <Text style={ty.secondary}>{sub}</Text> : null}
@@ -1161,7 +1160,7 @@ export function Field({
             flex: 1,
             minHeight: layout.touchMin,
             fontFamily: fonts.regular,
-            fontSize: 16,
+            fontSize: typeSize.body,
             color: semantic.text,
             paddingVertical: 0,
             paddingHorizontal: 0,

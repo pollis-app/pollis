@@ -11,7 +11,7 @@ import {
   EmptyState,
 } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
-import { semantic, fonts, space, layout } from "../../theme/tokens";
+import { semantic, type as ty, space, layout } from "../../theme/tokens";
 import {
   useDMRequests,
   useAcceptDMRequest,
@@ -75,14 +75,7 @@ export default function DMRequests() {
                       size={layout.touchMin}
                     />
                     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                      <Text
-                        numberOfLines={1}
-                        style={{
-                          fontFamily: fonts.semibold,
-                          fontSize: 16,
-                          color: semantic.text,
-                        }}
-                      >
+                      <Text numberOfLines={1} style={ty.rowTitle}>
                         @{handle}
                       </Text>
                       <Txt variant="secondary" numberOfLines={2}>
