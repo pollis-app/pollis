@@ -5,6 +5,7 @@ import { useAllPendingJoinRequests, useApproveJoinRequest, useRejectJoinRequest 
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
+import { errorMessage } from "../utils/errorMessage";
 
 export const AllJoinRequestsPage: React.FC = () => {
   const { t } = useTranslation("channels");
@@ -12,6 +13,7 @@ export const AllJoinRequestsPage: React.FC = () => {
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const approveMutation = useApproveJoinRequest();
   const rejectMutation = useRejectJoinRequest();
+  const decisionError = approveMutation.error ?? rejectMutation.error;
 
   // Build a map of groupId → group name for display
   const groupNameById = useMemo(() => {
@@ -124,6 +126,7 @@ export const AllJoinRequestsPage: React.FC = () => {
                     data-testid={`approve-request-${req.id}`}
                     onClick={() => handleApprove(req.id, req.group_id)}
                     disabled={approveMutation.isPending || rejectMutation.isPending}
+                    isLoading={approveMutation.isPending && approveMutation.variables?.requestId === req.id}
                     variant="primary"
                   >
                     {t("joinRequests.approve")}
@@ -132,6 +135,7 @@ export const AllJoinRequestsPage: React.FC = () => {
                     data-testid={`reject-request-${req.id}`}
                     onClick={() => handleReject(req.id, req.group_id)}
                     disabled={approveMutation.isPending || rejectMutation.isPending}
+                    isLoading={rejectMutation.isPending && rejectMutation.variables?.requestId === req.id}
                     variant="danger"
                   >
                     {t("joinRequests.reject")}
@@ -141,6 +145,11 @@ export const AllJoinRequestsPage: React.FC = () => {
             </div>
           );
         })}
+        {decisionError && (
+          <p data-testid="join-request-error" className="px-4 py-2 text-xs font-mono text-danger" role="alert">
+            {errorMessage(decisionError)}
+          </p>
+        )}
       </div>
     </PageShell>
   );
