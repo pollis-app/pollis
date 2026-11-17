@@ -13,8 +13,10 @@ import {
   useRemoveMember,
   useSetMemberRole,
   useUserGroupsWithChannels,
+  useUserProfiles,
   sortMembersByRole,
 } from "../../hooks/queries";
+import { personName } from "../../lib/personName";
 import { activeLocale } from "../../i18n";
 import { parseServerTimestamp } from "../../lib/newMember";
 import { appStore } from "../../stores/appStore";
@@ -46,6 +48,12 @@ function Members() {
 
   // Role then alphabetical (no presence source on mobile).
   const sortedMembers = useMemo(() => sortMembersByRole(members), [members]);
+  // Display names (#1971): one batched read; rows show the handle until it lands.
+  const personIds = useMemo(
+    () => [...members.map((m) => m.user_id), ...invites.map((inv) => inv.invitee_id)],
+    [members, invites],
+  );
+  const { data: profiles } = useUserProfiles(personIds);
 
   const myRole = useMemo(
     () => members.find((m) => m.user_id === currentUser?.id)?.role,
@@ -92,7 +100,11 @@ function Members() {
               const isOwner = m.role === "owner";
               const isAdmin = m.role === "admin";
               const armed = confirmRemove === m.user_id;
-              const handle = `@${m.username ?? m.user_id.slice(0, 8)}`;
+              const label = personName(
+                { username: m.username, preferred_name: profiles?.get(m.user_id)?.preferred_name },
+                m.user_id.slice(0, 8),
+              );
+              const handle = label.name;
               const name = isMe ? `${handle} ${t("members.self")}` : handle;
               const role = isOwner
                 ? t("mobile:group.members.roleOwner")
@@ -116,6 +128,7 @@ function Members() {
                       />
                     }
                     name={name}
+                    nameIsHandle={label.isHandle}
                     sub={role}
                     chevron={!isMe}
                     onPress={
@@ -188,7 +201,14 @@ function Members() {
             </SectionTitle>
             <Group>
               {invites.map((inv) => {
-                const handle = `@${inv.invitee_username ?? inv.invitee_id.slice(0, 8)}`;
+                const label = personName(
+                  {
+                    username: inv.invitee_username,
+                    preferred_name: profiles?.get(inv.invitee_id)?.preferred_name,
+                  },
+                  inv.invitee_id.slice(0, 8),
+                );
+                const handle = label.name;
                 const mayRevoke = iAmAdmin || inv.inviter_id === currentUser?.id;
                 const busy = revokingId === inv.id;
                 const when = invitedWhen(inv.created_at);
@@ -199,6 +219,7 @@ function Members() {
                       minHeight={64}
                       glyph={<UserAvatar userId={inv.invitee_id} label={inv.invitee_username || inv.invitee_id} />}
                       name={handle}
+                      nameIsHandle={label.isHandle}
                       sub={
                         inv.inviter_username
                           ? t("members.invited.by", { name: `@${inv.inviter_username}`, date: when })

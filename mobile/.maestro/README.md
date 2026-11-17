@@ -463,6 +463,22 @@ and the request is accepted (`3-tap-opens-requests.yaml`). Stranger B's request
 is then accepted from the request list without tapping its notification, and
 the tray must empty (`4-accept-clears.yaml`).
 
+**Long handles and the sign-out sheet (automated, #1971):** `mobile/scripts/maestro-long-handles.sh <device>`
+— the pending-badges peer (`pending_badge_peer`), renamed through
+`POLLIS_PEER_USERNAME` / `POLLIS_PEER_DISPLAY_NAME`. The device signs up with
+a long address, so the DS's first handle (local part + `_` + four characters,
+capped) is already 32 characters, the longest it allows (`1-signup.yaml`
+checks it in Account details); stranger A (handle only) and
+stranger B (32-character handle plus the display name "Ada Lovelace") ask to
+message it, and an owner invites it to a group. `2-lists.yaml`: Message
+requests lists B by its display name and A by its handle, Block / Accept under
+each name; A is accepted and its Direct row shows; the invite is accepted and
+Members lists the owner's and the device's own long handles. `3-sign-out.yaml`:
+Sign out opens `sheet-sign-out`, Close keeps the session, the sheet's row ends
+it. The screenshots (`long-handles-0N-*`, kept with `SHOTS_DIR=<dir>`) are the
+evidence for the one-line, middle-truncated handles. `CARGO_TARGET_DIR` picks
+where the peer builds.
+
 **Store-listing screenshots:** `mobile/scripts/maestro-store-shots.sh <device> [out-dir]`
 — `pollis-tui`'s `store_shots_peer` example plays the second person (dev DS
 only). The device shoots sign-in, signs up, makes "Design Team" with #General,
@@ -561,9 +577,9 @@ Layout changes that flows depend on (see `SELECTORS.md` for the ids):
   `.maestro/.env` overrides them.
 - **Direct tab:** DM requests are accepted on `dm/requests`, via
   `row-dm-requests`.
-- **Sign out** asks first, in a native Alert with no testID: after
-  `btn-sign-out`, tap the label `"Sign out"` (`auth:shell.signOutTitle`; es
-  `"Cerrar sesión"`). No flow signs out today.
+- **Sign out** asks first, in a bottom sheet (#1971): after `btn-sign-out`,
+  `sheet-sign-out` holds `btn-confirm-sign-out`; `btn-sheet-close` cancels.
+  `two-client/long-handles/3-sign-out.yaml` signs out.
 - **Search** puts its field at the top with the hits right under it, so a
   point tap to dismiss the keyboard can open a hit; `hideKeyboard` works there
   (normal keyboard with a return key). The number pad (OTP / change-email

@@ -824,6 +824,7 @@ export function ListRow({
   onPress,
   onLongPress,
   nameStyle,
+  nameIsHandle,
   testID,
   accessibilityLabel,
   accessibilityHint,
@@ -842,6 +843,8 @@ export function ListRow({
   minHeight?: number;
   onPress?: () => void;
   nameStyle?: StyleProp<TextStyle>;
+  // A handle never wraps mid-word: one line, truncated in the middle (#1971).
+  nameIsHandle?: boolean;
   testID?: string;
   accessibilityLabel?: string;
   accessibilityHint?: string;
@@ -895,7 +898,8 @@ export function ListRow({
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         {typeof name === "string" ? (
           <Text
-            numberOfLines={2}
+            numberOfLines={nameIsHandle ? 1 : 2}
+            ellipsizeMode={nameIsHandle ? "middle" : "tail"}
             style={[
               {
                 fontFamily: unread || selected ? fonts.bold : fonts.medium,

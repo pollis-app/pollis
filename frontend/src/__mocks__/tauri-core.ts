@@ -221,6 +221,8 @@ interface MockStore {
   threadMessages: Record<string, MockMessage[]>;
   threadSummaries: Record<string, MockThreadSummary[]>;
   dmChannels: MockDmChannel[];
+  // Pending message requests (#1971); `list_dm_requests` returns them.
+  dmRequests: MockDmChannel[];
   groupMembers: Record<string, MockGroupMember[]>;
   bookmarks: MockBookmark[];
   vaultMessages: MockVaultMessage[];
@@ -380,6 +382,7 @@ const store: MockStore = {
   threadMessages: preload.threadMessages ?? {},
   threadSummaries: preload.threadSummaries ?? {},
   dmChannels: preload.dmChannels ?? [],
+  dmRequests: preload.dmRequests ?? [],
   groupMembers: preload.groupMembers ?? {},
   bookmarks: preload.bookmarks ?? [],
   vaultMessages: preload.vaultMessages ?? [],
@@ -1038,8 +1041,10 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     // `= []` defaults don't cover `null`, so return lists.
-    case 'list_pending_invites':
     case 'list_dm_requests':
+      return store.dmRequests;
+
+    case 'list_pending_invites':
     case 'list_join_requests':
     case 'get_join_requests':
     case 'get_group_join_requests':
