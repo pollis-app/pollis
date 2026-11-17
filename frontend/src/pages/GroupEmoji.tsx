@@ -280,9 +280,9 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
           )}
 
           {!isLoading && emoji.length === 0 && (
-            <p data-testid="group-emoji-empty" className="text-xs font-mono text-muted">
+            <EmptyState background={false} testId="group-emoji-empty">
               {t("manage.empty")}
-            </p>
+            </EmptyState>
           )}
 
           {!isAdmin && emoji.length > 0 && (

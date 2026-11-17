@@ -13,6 +13,7 @@ import {
   Button,
   Field,
   ActionRow,
+  EmptyState,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { ErrorText, Note } from "../../components/self/SettingsField";
@@ -305,7 +306,9 @@ export default function Security() {
           </Group>
           {eventsError ? <ErrorText>{t("security.eventsLoadFailed")}</ErrorText> : null}
           {!eventsError && !eventsLoading && events.length === 0 ? (
-            <Note>{t("mobile:self.security.eventsEmpty")}</Note>
+            <EmptyState testID="security-events-section-empty">
+              {t("security.eventsEmpty")}
+            </EmptyState>
           ) : null}
         </View>
 

@@ -186,11 +186,9 @@ export function NavigableList<T>({
 
   if (items.length === 0) {
     return (
-      <div className="flex-1" style={{ paddingTop: "1rem", paddingInline: "1rem" }}>
-        <p className="text-xs font-mono text-start text-dim">
-          {resolvedEmptyLabel}
-        </p>
-      </div>
+      <EmptyState background={false} testId={testId ? `${testId}-empty` : undefined}>
+        {resolvedEmptyLabel}
+      </EmptyState>
     );
   }
 

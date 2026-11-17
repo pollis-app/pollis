@@ -5,8 +5,7 @@ import { ActivityIndicator, FlatList, InteractionManager, View } from "react-nat
 import { Text } from "../../../components/Text";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Field, ListRow } from "../../../components/ui";
-import { Note } from "../../../components/self/SettingsField";
+import { Screen, Header, Field, ListRow, EmptyState } from "../../../components/ui";
 import { Icon } from "../../../components/icons";
 import { ossNotices, ossPackageId } from "../../../lib/ossNotices";
 import type { OssNotices, OssNoticePackage } from "../../../types/ossNotices";
@@ -89,7 +88,7 @@ export default function OpenSource() {
         ListHeaderComponent={header}
         ListEmptyComponent={
           notices ? (
-            <Note testID="open-source-empty">{t("openSource.empty")}</Note>
+            <EmptyState testID="open-source-empty">{t("openSource.empty")}</EmptyState>
           ) : (
             <ActivityIndicator testID="open-source-loading" color={semantic.dim} />
           )

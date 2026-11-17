@@ -1,7 +1,7 @@
 import { View } from "react-native";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Body, ListRow, Group, Chip, SectionTitle } from "../../components/ui";
+import { Screen, Header, Body, ListRow, Group, Chip, SectionTitle, EmptyState } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { space } from "../../theme/tokens";
@@ -44,7 +44,9 @@ export default function JoinRequests() {
           {t("mobile:group.requests.pendingSection")}
         </SectionTitle>
         {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}
-        {!isLoading && requests.length === 0 ? <Hint>{t("joinRequests.empty")}</Hint> : null}
+        {!isLoading && requests.length === 0 ? (
+          <EmptyState testID="group-requests-empty">{t("joinRequests.empty")}</EmptyState>
+        ) : null}
         {requests.length > 0 ? (
           <Group>
             {requests.map((r) => {

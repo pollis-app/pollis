@@ -8,6 +8,7 @@ import { useSkin } from "../../../hooks/queries/usePreferences";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { formatClockTime } from "../../../utils/format";
+import { EmptyState } from "../../ui/EmptyState";
 
 interface PinnedPanelProps {
   channelId: string | null;
@@ -34,15 +35,15 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
       );
     } else if (isError) {
       body = (
-        <p className={`${gutter} py-2 text-xs text-muted`} data-testid="pinned-panel-unavailable">
+        <EmptyState background={false} testId="pinned-panel-unavailable">
           {t("pins.unavailable")}
-        </p>
+        </EmptyState>
       );
     } else if (pins.length === 0) {
       body = (
-        <p className={`${gutter} py-2 text-xs text-muted`} data-testid="pinned-panel-empty">
+        <EmptyState background={false} testId="pinned-panel-empty">
           {t("pins.empty")}
-        </p>
+        </EmptyState>
       );
     } else {
       body = (

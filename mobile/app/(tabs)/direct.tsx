@@ -11,6 +11,7 @@ import {
   Button,
   Divider,
   Txt,
+  EmptyState,
 } from "../../components/ui";
 import { ConversationRow } from "../../components/direct/ConversationRow";
 import { RequestsRow } from "../../components/direct/RequestsRow";
@@ -189,35 +190,22 @@ function Direct() {
           </Txt>
         ) : null}
         {!isLoading && !isError && dms.length === 0 ? (
-          <View
+          <EmptyState
             testID="direct-empty"
-            style={{
-              alignItems: "center",
-              gap: space.lg,
-              paddingHorizontal: space.xxxl,
-              paddingTop: 48,
-            }}
+            icon="messageCircle"
+            action={
+              <Button
+                testID="btn-new-dm-empty"
+                variant="primary"
+                icon={<Icon.pencil size={18} color={semantic.onAccent} />}
+                onPress={openNew}
+              >
+                {t("direct.newMessage")}
+              </Button>
+            }
           >
-            <Icon.messageCircle size={32} color={semantic.dim} />
-            <Txt
-              variant="heading"
-              accessibilityRole="header"
-              style={{ textAlign: "center" }}
-            >
-              {t("direct.empty")}
-            </Txt>
-            <Txt variant="secondary" style={{ textAlign: "center" }}>
-              {t("direct.emptyHint")}
-            </Txt>
-            <Button
-              testID="btn-new-dm-empty"
-              variant="primary"
-              icon={<Icon.pencil size={18} color={semantic.onAccent} />}
-              onPress={openNew}
-            >
-              {t("direct.newMessage")}
-            </Button>
-          </View>
+            {t("direct.empty")}
+          </EmptyState>
         ) : null}
         {needle && dms.length > 0 && shown.length === 0 ? (
           <Txt

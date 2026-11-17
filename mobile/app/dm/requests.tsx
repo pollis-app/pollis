@@ -9,6 +9,7 @@ import {
   Chip,
   Group,
   Txt,
+  EmptyState,
 } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
 import { semantic, fonts, space, layout } from "../../theme/tokens";
@@ -45,9 +46,9 @@ export default function DMRequests() {
       <Header title={t("direct.requests")} backTo={t("tabs.direct")} />
       <Body contentContainerStyle={{ padding: space.xxl }}>
         {!isLoading && requests.length === 0 ? (
-          <Txt variant="secondary">
+          <EmptyState testID="dm-requests-empty" icon="inbox">
             {t("dms:requests.empty")}
-          </Txt>
+          </EmptyState>
         ) : null}
         {requests.length > 0 ? (
           <View onLayout={(e) => setListWidth(e.nativeEvent.layout.width)}>

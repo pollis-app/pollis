@@ -4,7 +4,7 @@ import { Text } from "../../components/Text";
 import { useFocusEffect, useIsFocused, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { Screen, Header, Body, Button } from "../../components/ui";
+import { Screen, Header, Body, Button, EmptyState } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import {
@@ -164,6 +164,27 @@ function Groups() {
       </View>
     );
   } else {
+    const groupActions = (
+      <>
+        <Button
+          testID="btn-create-group"
+          variant="primary"
+          full
+          icon={<Icon.plus size={18} color={semantic.onAccent} />}
+          onPress={() => router.push("/group/new")}
+        >
+          {t("groups.create")}
+        </Button>
+        <Button
+          testID="btn-join-group"
+          full
+          icon={<Icon.search size={18} color={semantic.text} />}
+          onPress={() => router.push("/group/discover")}
+        >
+          {t("groups.find")}
+        </Button>
+      </>
+    );
     column = (
       <>
         <Header variant="large" title={t("groups.title")} />
@@ -178,34 +199,11 @@ function Groups() {
           ) : null}
           {pending}
           {!isLoading && !isError ? (
-            <View style={{ gap: space.sm }}>
-              <Text accessibilityRole="header" style={ty.title}>
-                {t("groups.emptyTitle")}
-              </Text>
-              <Text style={ty.secondary}>{t("groups.emptyBody")}</Text>
-            </View>
+            <EmptyState testID="groups-empty" icon="users" action={groupActions}>
+              {t("groups.emptyTitle")}
+            </EmptyState>
           ) : null}
-          {isLoading ? null : (
-            <View style={{ gap: space.md }}>
-              <Button
-                testID="btn-create-group"
-                variant="primary"
-                full
-                icon={<Icon.plus size={18} color={semantic.onAccent} />}
-                onPress={() => router.push("/group/new")}
-              >
-                {t("groups.create")}
-              </Button>
-              <Button
-                testID="btn-join-group"
-                full
-                icon={<Icon.search size={18} color={semantic.text} />}
-                onPress={() => router.push("/group/discover")}
-              >
-                {t("groups.find")}
-              </Button>
-            </View>
-          )}
+          {isError ? <View style={{ gap: space.md }}>{groupActions}</View> : null}
         </Body>
       </>
     );

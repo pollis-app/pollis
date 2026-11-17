@@ -24,6 +24,7 @@ import { EmojiSection, EMOJI_COLUMNS } from "./EmojiSection";
 import { EmojiCategoryRail, type RailEntry } from "./EmojiCategoryRail";
 import { SkinTonePicker } from "./SkinTonePicker";
 import { CustomEmojiImage } from "./CustomEmojiImage";
+import { EmptyState } from "../ui/EmptyState";
 
 interface EmojiPickerProps {
   onSelect: (text: string) => void;
@@ -265,12 +266,9 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
               />
             ))}
             {flatCount === 0 && (
-              <p
-                data-testid="emoji-picker-empty"
-                className="text-xs font-mono text-muted p-3 text-center"
-              >
+              <EmptyState background={false} testId="emoji-picker-empty">
                 {t("picker.empty")}
-              </p>
+              </EmptyState>
             )}
           </div>
         </div>

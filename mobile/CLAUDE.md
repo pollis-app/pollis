@@ -1201,7 +1201,8 @@ app/
 components/
   ui.tsx               primitives: Txt, Screen, Header, IconButton, SectionTitle,
                        ListRow, ActionRow, Group, Card, Field, Avatar, Chip,
-                       Badge, Button, Toggle, Dot, Divider, BottomAction, Body
+                       Badge, Button, Toggle, Dot, Divider, BottomAction, Body,
+                       EmptyState (every empty list, #1969)
   chat/SheetOverlay.tsx the one bottom sheet (every *Sheet is built on it)
   icons.tsx            lucide wrapper (Icon.*, stroke 1.75)
   TabBar.tsx           custom bottom tab bar (accent active, unread badges, shield → self/link-device)

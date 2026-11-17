@@ -13,6 +13,7 @@ import {
   Button,
   BottomAction,
   Chip,
+  EmptyState,
 } from "../../components/ui";
 import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { ReadOnlyField } from "../../components/self/SettingsField";
@@ -200,7 +201,9 @@ function GroupSettings() {
           {t("mobile:group.settings.channelsSection")}
         </SectionTitle>
         {channels.length === 0 ? (
-          <Hint>{t("mobile:group.common.noChannels")}</Hint>
+          <EmptyState testID="group-settings-no-channels">
+            {t("mobile:group.common.noChannels")}
+          </EmptyState>
         ) : (
           <Group>
             {channels.map((c) => {
