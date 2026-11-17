@@ -8,6 +8,7 @@ import { Button } from "../components/ui/Button";
 import { TextInput } from "../components/ui/TextInput";
 import { Switch } from "../components/ui/Switch";
 import { NavigableList } from "../components/ui/NavigableList";
+import { EmptyState } from "../components/ui/EmptyState";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import type { RouterContext } from "../types/router";
@@ -586,9 +587,9 @@ export const SecurityPage: React.FC = observer(() => {
                 <p className="text-xs font-mono text-muted">{t("common:states.loading")}</p>
               )
             ) : events.length === 0 ? (
-              <p className="text-xs font-mono text-dim">
+              <EmptyState background={false} testId="security-page-events-empty">
                 {t("security.eventsEmpty")}
-              </p>
+              </EmptyState>
             ) : (
               <div data-testid="security-events-list" className="flex flex-col">
                 {/* Only the newest few (#1548): the DS is asked for exactly
