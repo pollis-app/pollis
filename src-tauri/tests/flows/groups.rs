@@ -746,8 +746,66 @@ async fn an_approval_releases_the_mls_lock_before_its_key_follow_ups() {
 
     let _ = release.send(());
     approve.await.expect("join").expect("approve");
+    pollis_core::commands::groups::settle_approvals(&alice.state).await;
     let ids = alice.group_member_ids(&group_id).await;
     assert!(ids.contains(&carol_profile.id), "carol should have joined");
+
+    drop(alice);
+    drop(carol);
+}
+
+/// #1960: an approve returns once the DS has recorded it, without waiting for the requester's
+/// MLS add; the add runs on behind it, and the requester then reads what the group posts.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_approval_returns_before_the_requesters_mls_add() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+    let group_id = alice.create_group("Quick Approve").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    carol.request_group_access(&group_id).await;
+    let request_id = alice.list_join_requests(&group_id).await[0]["id"]
+        .as_str()
+        .expect("request id")
+        .to_string();
+
+    // Hold the MLS add at its commit; an approve that waited on it would never return.
+    let mut add = rendezvous::arm(Point::AfterEpochAdvanced);
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        pollis_core::commands::groups::approve_join_request(
+            request_id,
+            alice.user_id().to_string(),
+            &alice.state,
+        ),
+    )
+    .await
+    .expect("the approve waited on the requester's MLS add")
+    .expect("approve");
+    let ids = alice.group_member_ids(&group_id).await;
+    assert!(ids.contains(&carol_profile.id), "carol is on the roster once approved");
+
+    let release = tokio::time::timeout(Duration::from_secs(30), add.recv())
+        .await
+        .expect("the MLS add never ran")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::AfterEpochAdvanced);
+    let _ = release.send(());
+    pollis_core::commands::groups::settle_approvals(&alice.state).await;
+
+    carol.poll().await;
+    alice.send_channel_message(&channel_id, "welcome in").await;
+    let msgs = carol.fetch_channel_messages(&channel_id).await;
+    assert!(
+        msgs.iter().any(|m| m["content"] == "welcome in"),
+        "carol must read the group once the add lands: {msgs:#?}"
+    );
 
     drop(alice);
     drop(carol);

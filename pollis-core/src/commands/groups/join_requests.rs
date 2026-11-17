@@ -99,7 +99,9 @@ pub async fn get_my_join_request(
         .map(join_request_from_wire))
 }
 
-/// Approve a join request. Approver must be a group member. Adds the requester to the group.
+/// Approve a join request. Approver must be a group member. Returns once the DS has recorded
+/// the approval (#1960): the requester is on the roster then, and adding their devices to the
+/// MLS tree, which takes several more DS round trips, runs on in the background.
 pub async fn approve_join_request(
     request_id: String,
     approver_id: String,
@@ -119,40 +121,78 @@ pub async fn approve_join_request(
         requester_id,
     } = crate::commands::mls::ds_post_json(state, &body).await?;
     let requester_id = requester_id.unwrap_or_default();
-    let approved = started.elapsed();
-
-    // Reconcile adds the requester's devices to the MLS tree.
-    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
-        state, &group_id, &approver_id,
-    ).await {
-        crate::diag!("[mls] approve_join_request: reconcile for group {group_id}: {e}");
-    }
-    // The admin waits on all of this (#1937).
     crate::diag!(
-        "[groups] approve_join_request for {group_id}: approved in {}ms, added to the tree by {}ms",
-        approved.as_millis(),
+        "[groups] approve_join_request for {group_id}: approved in {}ms",
         started.elapsed().as_millis()
     );
 
-    // Notify requester their join request was approved so they see the group immediately.
-    // `kind: "approval"` keeps it silent; they initiated the request.
-    if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
-        state,
-        &requester_id,
-        serde_json::json!({"type": "membership_changed", "group_id": group_id, "kind": "approval"}),
-    ).await {
+    let task_state = Arc::clone(state);
+    let handle = tokio::spawn(async move {
+        add_approved_member(&task_state, &group_id, &approver_id, &requester_id, started).await;
+    });
+    let mut in_flight = state
+        .approvals_in_flight
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    in_flight.retain(|h| !h.is_finished());
+    in_flight.push(handle);
+    Ok(())
+}
+
+/// The rest of an approval: add the requester's devices to the MLS tree, then tell them and the
+/// group. The requester is told only once the add has landed, so the group they open has their
+/// Welcome waiting. A failed add is left to the next reconcile by any member, as before (#1960).
+async fn add_approved_member(
+    state: &Arc<AppState>,
+    group_id: &str,
+    approver_id: &str,
+    requester_id: &str,
+    started: std::time::Instant,
+) {
+    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(state, group_id, approver_id).await {
+        crate::diag!("[mls] approve_join_request: reconcile for group {group_id}: {e}");
+    }
+    crate::diag!(
+        "[groups] approve_join_request for {group_id}: added to the tree by {}ms",
+        started.elapsed().as_millis()
+    );
+
+    // The requester, so they see the group (`kind: "approval"` keeps it silent: they asked), and
+    // the group's room, so members refetch the roster. Independent, so sent together.
+    let (inbox, room) = tokio::join!(
+        crate::commands::livekit::publish_to_user_inbox(
+            state,
+            requester_id,
+            serde_json::json!({"type": "membership_changed", "group_id": group_id, "kind": "approval"}),
+        ),
+        crate::commands::livekit::publish_membership_changed_to_room(state, group_id),
+    );
+    if let Err(e) = inbox {
         crate::diag!("[inbox] approve_join_request: notify {requester_id} failed: {e}");
     }
-
-    // Notify existing group members so they refetch the member list.
-    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-        state,
-        &group_id,
-    ).await {
+    if let Err(e) = room {
         crate::diag!("[realtime] approve_join_request: notify group {group_id}: {e}");
     }
+}
 
-    Ok(())
+/// Wait for every approval's background MLS add on this state to finish (#1960). For tests and
+/// shutdown; the UI never waits on it.
+pub async fn settle_approvals(state: &AppState) {
+    loop {
+        let pending: Vec<_> = {
+            let mut in_flight = state
+                .approvals_in_flight
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *in_flight)
+        };
+        if pending.is_empty() {
+            return;
+        }
+        for handle in pending {
+            let _ = handle.await;
+        }
+    }
 }
 
 /// Reject a join request. Approver must be a group member.

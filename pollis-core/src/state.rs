@@ -118,6 +118,9 @@ pub struct AppState {
     pub outbox_enqueuing: Arc<crate::commands::messages::Enqueuing>,
     /// Unsent messages whose last attempt stopped on the file key (#1636); later sends pass them.
     pub outbox_awaiting_key: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Approvals whose MLS add is still running after the approve returned (#1960);
+    /// [`settle_approvals`](crate::commands::groups::settle_approvals) waits for them.
+    pub approvals_in_flight: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     /// Held during a KeyPackage top-up (#1412); `try_lock` so a drain never publishes a second batch.
     pub key_package_refill: Arc<Mutex<()>>,
     /// Last pre-seal missing-device check per conversation (#1571), so a burst of sends checks once,
@@ -194,6 +197,7 @@ impl AppState {
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_enqueuing: Arc::default(),
             outbox_awaiting_key: Arc::default(),
+            approvals_in_flight: Arc::default(),
             key_package_refill: Arc::new(Mutex::new(())),
             pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),
             outbox_drain: Arc::new(Mutex::new(None)),
