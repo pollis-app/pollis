@@ -10,7 +10,7 @@
 import { findUrls, parseLink } from "./links.ts";
 
 /** A staged thumbnail of a draft; `dataUrl` is for the composer card only. */
-export interface LinkPreviewDraftImage {
+interface LinkPreviewDraftImage {
   stagedId: string;
   width: number;
   height: number;
@@ -26,7 +26,7 @@ export interface LinkPreviewDraft {
 }
 
 /** The thumbnail reference inside a received preview: the field names of an `_att` entry. */
-export interface LinkPreviewImageWire {
+interface LinkPreviewImageWire {
   key: string;
   url?: string;
   hash: string;
@@ -51,7 +51,7 @@ export interface LinkPreviewWire {
 export const PREVIEW_DEBOUNCE_MS = 600;
 
 /** The destination of every link in `text`, in order, as `parseLink` normalizes it. */
-export function linkTargets(text: string): { href: string; host: string }[] {
+function linkTargets(text: string): { href: string; host: string }[] {
   const out: { href: string; host: string }[] = [];
   for (const { url } of findUrls(text) ?? []) {
     const target = parseLink(url);

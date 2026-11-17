@@ -78,8 +78,6 @@ export interface MessageAttachment {
 /** Wire shapes of a link preview (#1987), shared with desktop through `lib/linkPreview.ts`. */
 export type {
   LinkPreviewDraft,
-  LinkPreviewDraftImage,
-  LinkPreviewImageWire,
   LinkPreviewWire,
 } from "../lib/linkPreview";
 

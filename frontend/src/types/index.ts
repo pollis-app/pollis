@@ -174,8 +174,6 @@ export type ContentOrigin = { conversationId: string } | "vault";
 /** Wire shapes of a link preview (#1987), shared with mobile through `utils/linkPreview.ts`. */
 export type {
   LinkPreviewDraft,
-  LinkPreviewDraftImage,
-  LinkPreviewImageWire,
   LinkPreviewWire,
 } from "../utils/linkPreview";
 

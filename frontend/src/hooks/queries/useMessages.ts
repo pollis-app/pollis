@@ -182,7 +182,7 @@ function attachmentFromWire(
 }
 
 /** A row's `link_preview` (#1987); its thumbnail uses the `_att` field names, so it loads like an image attachment. */
-export function linkPreviewFromWire(
+function linkPreviewFromWire(
   wire: LinkPreviewWire | null | undefined,
   origin: ContentOrigin,
 ): MessageLinkPreview | null {
