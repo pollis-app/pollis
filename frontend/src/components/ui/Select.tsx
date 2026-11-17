@@ -2,7 +2,7 @@ import React, { useId } from "react";
 import { ChevronDown } from "lucide-react";
 import { FOCUS_RING } from "./focusRing";
 
-export interface SelectOption<T extends string> {
+interface SelectOption<T extends string> {
   value: T;
   label: string;
 }
