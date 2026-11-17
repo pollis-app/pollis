@@ -103,7 +103,8 @@ tags:
 - extendedWaitUntil:
     visible: "@${OWNER_HANDLE}, .*"
     timeout: 30000
-- assertVisible: "@${PHONE_HANDLE} .*"
+# The device's own row: its 32-character handle, then "(you)".
+- assertVisible: "@[a-z0-9_.-]{32} \\(you\\), .*"
 - takeScreenshot: long-handles-05-members
 - tapOn:
     id: "btn-back"

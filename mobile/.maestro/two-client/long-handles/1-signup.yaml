@@ -3,9 +3,11 @@ tags:
   - two-client
 ---
 # LONG HANDLES (#1971), part 1 of 3 — driven by scripts/maestro-long-handles.sh.
-# Sign up a fresh account and give it a 32-character handle (the DS's longest),
-# ${PHONE_HANDLE}. The peers, also long-handled, then send it message requests
-# and a group invite.
+# Sign up a fresh account. The DS starts a new account on its email's local
+# part plus a four-character suffix, capped at 32, and the script's address is
+# long, so the handle is already the longest the DS allows: Account details
+# shows it, 32 characters. The peers, also long-handled, then send it message
+# requests and a group invite.
 
 - runFlow: ../../subflows/sign-in.yaml
 - tapOn:
@@ -16,22 +18,12 @@ tags:
     visible:
       id: "screen-self-user-settings"
     timeout: 15000
-- tapOn:
-    id: "input-handle"
-- eraseText: 40
-- inputText: "${PHONE_HANDLE}"
-- hideKeyboard
-- assertNotVisible:
-    id: "text-handle-invalid"
-- tapOn:
-    id: "btn-save"
-# Saved: nothing is dirty any more, so Save is off again.
 - extendedWaitUntil:
     visible:
-      id: "btn-save"
-      enabled: false
+      id: "input-handle"
+      text: "[a-z0-9_.-]{32}"
     timeout: 30000
-- takeScreenshot: long-handles-01-handle-saved
+- takeScreenshot: long-handles-01-handle
 - tapOn:
     id: "btn-back"
 - extendedWaitUntil:

@@ -465,8 +465,10 @@ the tray must empty (`4-accept-clears.yaml`).
 
 **Long handles and the sign-out sheet (automated, #1971):** `mobile/scripts/maestro-long-handles.sh <device>`
 — the pending-badges peer (`pending_badge_peer`), renamed through
-`POLLIS_PEER_USERNAME` / `POLLIS_PEER_DISPLAY_NAME`. The device signs up and
-takes a 32-character handle (`1-signup.yaml`); stranger A (handle only) and
+`POLLIS_PEER_USERNAME` / `POLLIS_PEER_DISPLAY_NAME`. The device signs up with
+a long address, so the DS's first handle (local part + `_` + four characters,
+capped) is already 32 characters, the longest it allows (`1-signup.yaml`
+checks it in Account details); stranger A (handle only) and
 stranger B (32-character handle plus the display name "Ada Lovelace") ask to
 message it, and an owner invites it to a group. `2-lists.yaml`: Message
 requests lists B by its display name and A by its handle, Block / Accept under

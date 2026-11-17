@@ -4,8 +4,8 @@
 #
 #   mobile/scripts/maestro-long-handles.sh <device-id>
 #
-# The device signs up and takes a 32-character handle (the DS's longest). The
-# peers are `pollis-tui`'s `pending_badge_peer` example (a test-harness build
+# The device signs up with a long email, so the DS gives it a 32-character
+# handle (the longest it allows). The peers are `pollis-tui`'s `pending_badge_peer` example (a test-harness build
 # that never ships), renamed to long handles: stranger A (handle only) and
 # stranger B (handle plus a display name) ask to message the device, and an
 # owner creates a group and invites it. The device then checks Message
@@ -39,7 +39,6 @@ PRIMARY_EMAIL="${BASE%@*}-longh-$STAMP@${BASE#*@}"
 REQ_A_EMAIL="${BASE%@*}-longha-$STAMP@${BASE#*@}"
 REQ_B_EMAIL="${BASE%@*}-longhb-$STAMP@${BASE#*@}"
 OWNER_EMAIL="${BASE%@*}-longho-$STAMP@${BASE#*@}"
-PHONE_HANDLE="longhandle-tests-phon-$SHORT"
 REQ_A_HANDLE="longhandle-tests-reqa-$SHORT"
 REQ_B_HANDLE="longhandle-tests-reqb-$SHORT"
 OWNER_HANDLE="longhandle-tests-ownr-$SHORT"
@@ -84,10 +83,10 @@ if [ -n "${SHOTS_DIR:-}" ]; then
   mkdir -p "$SHOTS_DIR"
   DEBUG_ARGS=(--test-output-dir "$SHOTS_DIR")
 fi
-FLOW_ENV=(-e PHONE_HANDLE="$PHONE_HANDLE" -e REQ_A_HANDLE="$REQ_A_HANDLE"
+FLOW_ENV=(-e REQ_A_HANDLE="$REQ_A_HANDLE"
   -e REQ_B_NAME="$REQ_B_NAME" -e OWNER_HANDLE="$OWNER_HANDLE" -e GROUP_NAME="$GROUP_NAME")
 
-echo "==> 1/3 device signs up as @$PHONE_HANDLE"
+echo "==> 1/3 device signs up with a 32-character handle"
 maestro --device "$DEVICE" test "${DEBUG_ARGS[@]}" "${ENV_ARGS[@]}" \
   -e MAESTRO_EMAIL="$PRIMARY_EMAIL" "${FLOW_ENV[@]}" "$FLOWS/1-signup.yaml"
 
