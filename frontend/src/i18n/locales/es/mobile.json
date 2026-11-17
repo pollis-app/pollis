@@ -114,7 +114,6 @@
     "requestsWaiting_other": "Solicitudes de mensajes, {{count}} pendientes",
     "ownPreview": "Tú: {{text}}",
     "noMatches": "Ninguna conversación coincide.",
-    "emptyHint": "Empieza una conversación con alguien por su nombre de usuario o correo.",
     "previewAttachment": "Adjunto"
   },
   "dm": {
@@ -163,7 +162,6 @@
     },
     "emoji": {
       "loadFailed": "No se pudieron cargar los emoji de este grupo.",
-      "empty": "Todavía no hay emoji personalizados.",
       "pickAndUpload": "Elegir imagen y subir",
       "sizeKb_one": "{{count}} KB",
       "sizeKb_other": "{{count}} KB",
@@ -265,7 +263,6 @@
     "find": "Buscar grupo",
     "findSub": "Pide unirte a un grupo por su identificador",
     "emptyTitle": "Todavía no hay grupos",
-    "emptyBody": "Crea un grupo para tu gente o busca uno del que te hayan hablado.",
     "pillSelected": "{{name}}, seleccionado",
     "pillUnread": "{{name}}, mensajes sin leer",
     "pillSelectedUnread": "{{name}}, seleccionado, mensajes sin leer",
@@ -457,7 +454,6 @@
       "deleteAccountSub": "Elimina tu cuenta de forma permanente y borra este dispositivo",
       "deviceSub": "Vinculado {{paired}} · visto por última vez {{lastSeen}}",
       "enrollmentFailed": "No se pudo procesar la solicitud de registro.",
-      "eventsEmpty": "Aún no hay eventos de seguridad.",
       "hoursAgo_one": "hace {{count}} h",
       "hoursAgo_other": "hace {{count}} h",
       "justNow": "ahora mismo",

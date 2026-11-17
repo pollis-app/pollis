@@ -10,6 +10,7 @@ import {
 import { ChatInput, type Attachment } from "../../ui/ChatInput";
 import { outgoingAttachments, releaseStaged, type OutgoingAttachment } from "../../../utils/attachmentEnvelope";
 import { ThreadMessageRow } from "./ThreadMessageRow";
+import { EmptyState } from "../../ui/EmptyState";
 
 interface ThreadPanelProps {
   threadId: string;
@@ -69,9 +70,9 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
           {isLoading ? (
             <p className="px-1 text-secondary text-muted">{t("thread.loading")}</p>
           ) : replies.length === 0 ? (
-            <p className="px-1 text-secondary text-muted">
+            <EmptyState background={false} testId="thread-panel-empty">
               {t("thread.empty")}
-            </p>
+            </EmptyState>
           ) : (
             <div className="flex flex-col gap-2">
               {replies.map((reply) => (

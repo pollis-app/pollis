@@ -13,6 +13,7 @@ import { parseMessagePermalink } from "../utils/urlRouting";
 import { useMessagePermalink } from "../hooks/useMessagePermalink";
 import { useGlobalShortcut, useShortcutLabel } from "../keyboard";
 import { usePressActivator } from "../hooks/usePressActivation";
+import { EmptyState } from "./ui/EmptyState";
 
 type SearchResultItem =
   | {
@@ -556,14 +557,11 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
               )}
             </div>
           ) : filteredItems.length === 0 ? (
-            <div
-              data-testid="search-panel-empty"
-              className="text-center py-8 font-mono text-secondary text-muted"
-            >
+            <EmptyState background={false} testId="search-panel-empty">
               {query.trim()
                 ? t("panel.noMatches")
                 : t("panel.emptyHint")}
-            </div>
+            </EmptyState>
           ) : (
             filteredItems.map((item, index) => {
               const isSelected = index === selectedIndex;

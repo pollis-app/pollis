@@ -624,22 +624,6 @@
    flex-direction: column;
 }
 
-/* Empty state: "No one in this channel" + Join Voice centered together. */
-.vs-preview-empty {
-   flex: 1 1 auto;
-   min-height: 0;
-   display: flex;
-   flex-direction: column;
-   align-items: center;
-   justify-content: center;
-   gap: 1rem;
-}
-
-.vs-preview-empty-label {
-   font-size: 0.75rem;
-   color: var(--vs-ink-dim);
-}
-
 .vs-preview-cta {
    flex: 0 0 auto;
    display: flex;

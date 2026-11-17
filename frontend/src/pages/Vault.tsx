@@ -31,6 +31,7 @@ import { vaultSaveFailure, type VaultSaveFailure } from "../utils/vaultSaveFailu
 import { formatClockTime, formatDayDivider } from "../utils/format";
 import type { MessageAttachment } from "../types";
 import { PressButton } from "../components/ui/PressButton";
+import { EmptyState } from "../components/ui/EmptyState";
 
 type VaultView = "chat" | "media";
 
@@ -267,9 +268,9 @@ export const VaultPage: React.FC = observer(() => {
 
           <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
             {isLoading ? null : visibleEntries.length === 0 ? (
-              <p className="py-8 text-center font-mono text-body text-muted" data-testid="vault-empty">
+              <EmptyState background={false} messageTestId="vault-empty">
                 {searchQuery ? t("searchEmpty") : t("empty")}
-              </p>
+              </EmptyState>
             ) : (
               <ul className="flex flex-col">
                 {visibleEntries.map((entry, index) => (

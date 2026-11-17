@@ -13,6 +13,7 @@ import {
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Switch } from "../ui/Switch";
+import { EmptyState } from "../ui/EmptyState";
 
 /** Inline screen-share source picker replacing the participant grid (no modal). */
 export const ScreenSharePicker: React.FC = observer(() => {
@@ -162,9 +163,9 @@ export const ScreenSharePicker: React.FC = observer(() => {
 
       <div className="flex-1 overflow-auto p-3">
         {items.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-muted">
+          <EmptyState background={false} testId="screenshare-picker-empty">
             {tab === "displays" ? t("share.noDisplays") : t("share.noWindows")}
-          </div>
+          </EmptyState>
         ) : (
           <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(11.25rem,1fr))]">
             {tab === "displays"

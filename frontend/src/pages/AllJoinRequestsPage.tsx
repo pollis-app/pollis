@@ -6,6 +6,7 @@ import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
 import { errorMessage } from "../utils/errorMessage";
+import { EmptyState } from "../components/ui/EmptyState";
 
 export const AllJoinRequestsPage: React.FC = () => {
   const { t } = useTranslation("channels");
@@ -78,11 +79,9 @@ export const AllJoinRequestsPage: React.FC = () => {
           data-testid="all-join-requests-page"
           className="flex-1 flex flex-col overflow-auto bg-bg"
         >
-          <div className="flex-1" style={{ paddingTop: "1rem", paddingInline: "1rem" }}>
-            <p className="text-secondary font-mono text-start text-dim">
-              {t("joinRequests.allEmpty")}
-            </p>
-          </div>
+          <EmptyState background={false} testId="all-join-requests-empty">
+            {t("joinRequests.allEmpty")}
+          </EmptyState>
         </div>
       </PageShell>
     );

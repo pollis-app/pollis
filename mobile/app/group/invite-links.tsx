@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { Text } from "../../components/Text";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Body, Chip, Group } from "../../components/ui";
+import { Screen, Header, Body, Chip, Group, EmptyState } from "../../components/ui";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";
@@ -143,7 +143,11 @@ export default function GroupInviteLinks() {
           </Group>
         ) : null}
 
-        {!isLoading && links.length === 0 ? <Hint>{t("mobile:group.inviteLinks.empty")}</Hint> : null}
+        {!isLoading && links.length === 0 ? (
+          <EmptyState testID="invite-links-empty" icon="link">
+            {t("mobile:group.inviteLinks.empty")}
+          </EmptyState>
+        ) : null}
 
         {revokeLink.isError ? (
           <ErrorText>

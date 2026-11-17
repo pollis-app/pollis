@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import type { MessageAttachment } from "../../../types";
+import { EmptyState } from "../../ui/EmptyState";
 
 interface MediaGridProps {
   attachments: MessageAttachment[];
@@ -15,7 +16,11 @@ export const MediaGrid: React.FC<MediaGridProps> = ({ attachments }) => {
   const gutter = isTerminal ? "px-2.5" : "px-2";
 
   if (attachments.length === 0) {
-    return <p className={`${gutter} text-secondary text-muted`}>{t("media.empty")}</p>;
+    return (
+      <EmptyState background={false} testId="right-panel-media-empty">
+        {t("media.empty")}
+      </EmptyState>
+    );
   }
 
   return (

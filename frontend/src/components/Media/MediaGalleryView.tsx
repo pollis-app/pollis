@@ -11,6 +11,7 @@ import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { SensitiveCover } from "./SensitiveCover";
 import { BlurhashCanvas } from "./BlurhashCanvas";
 import { SensitiveHideButton } from "./SensitiveHideButton";
+import { EmptyState } from "../ui/EmptyState";
 
 interface MediaGalleryViewProps {
   /** Newest first; the caller orders. */
@@ -78,9 +79,9 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
 
   if (attachments.length === 0) {
     return (
-      <p className="px-4 py-6 text-body text-muted" data-testid="media-gallery-empty">
+      <EmptyState background={false} testId="media-gallery-empty">
         {emptyLabel}
-      </p>
+      </EmptyState>
     );
   }
 

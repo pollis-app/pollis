@@ -14,6 +14,7 @@ import {
 } from "../hooks/queries/useHistoryTransfers";
 import { currentReceiverTransfer, isSupported } from "../utils/historyTransfer";
 import { errorMessage } from "../utils/errorMessage";
+import { EmptyState } from "../components/ui/EmptyState";
 
 /** #1735: copy message history to this device from another of the account's devices, which must approve it. */
 export const CopyHistoryPage: React.FC = () => {
@@ -91,9 +92,9 @@ export const CopyHistoryPage: React.FC = () => {
           </p>
         )}
         {!sources.isError && list.length === 0 && (
-          <p className="text-body text-dim" data-testid="history-sources-empty">
+          <EmptyState background={false} testId="history-sources-empty">
             {t("historyTransfer.noSources")}
-          </p>
+          </EmptyState>
         )}
         {list.length > 0 && <SourcePicker sources={list} value={picked} onChange={setPicked} />}
         {requestError && (

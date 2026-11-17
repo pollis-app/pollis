@@ -9,6 +9,7 @@ import { ResultThumbnails } from "./ResultThumbnails";
 import { shellOpen } from "../../bridge";
 import type { SearchCorpus, SearchResult, SearchSnippet, SearchSort } from "../../types";
 import { PressButton } from "../ui/PressButton";
+import { EmptyState } from "../ui/EmptyState";
 
 /** Why search is on-device: the server holds only ciphertext. */
 const LEARN_ON_DEVICE_SEARCH_URL = "https://pollis.com/learn#on-device-search";
@@ -113,12 +114,9 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const renderEmptyState = () => {
     if (!debouncedQuery.trim() || !hasMinLength) {
       return (
-        <p
-          data-testid="search-empty-hint"
-          className="text-secondary font-mono text-center text-muted pt-8"
-        >
+        <EmptyState background={false} testId="search-empty-hint">
           {t("view.emptyHint")}
-        </p>
+        </EmptyState>
       );
     }
 
@@ -132,20 +130,24 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
     // Not "No results": E2EE has several reasons a message may be missing (#850 §6).
     return (
-      <div
-        data-testid="search-no-results"
-        className="px-6 pt-8 flex flex-col gap-3 text-secondary font-mono text-muted"
+      <EmptyState
+        background={false}
+        testId="search-no-results"
+        actions={
+          <div className="flex max-w-prose flex-col gap-3 text-start text-secondary font-mono text-muted">
+            <p>{t("view.noResultsWhy")}</p>
+            <ul className="flex flex-col gap-1 ps-4 list-disc">
+              <li>{t("view.reasonNotIngested")}</li>
+              <li>{t("view.reasonBeforeJoin")}</li>
+              <li>{t("view.reasonNewDevice")}</li>
+              <li>{t("view.reasonRetention")}</li>
+              <li>{t("view.reasonDeleted")}</li>
+            </ul>
+          </div>
+        }
       >
-        <p className="text-dim">{t("view.noResults")}</p>
-        <p>{t("view.noResultsWhy")}</p>
-        <ul className="flex flex-col gap-1 ps-4 list-disc">
-          <li>{t("view.reasonNotIngested")}</li>
-          <li>{t("view.reasonBeforeJoin")}</li>
-          <li>{t("view.reasonNewDevice")}</li>
-          <li>{t("view.reasonRetention")}</li>
-          <li>{t("view.reasonDeleted")}</li>
-        </ul>
-      </div>
+        {t("view.noResults")}
+      </EmptyState>
     );
   };
 

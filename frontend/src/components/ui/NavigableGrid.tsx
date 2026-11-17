@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { horizontalArrowStep } from "../../utils/direction";
 import { probeRender } from "../../utils/renderProbe";
+import { EmptyState } from "./EmptyState";
 
 // Arrow-key-navigable 2D grid; cells keep an aspect ratio and scroll past `minCellWidth`. Left/right resolve against the computed direction (RTL).
 
@@ -156,12 +157,9 @@ function NavigableGridImpl<T>({
 
   if (items.length === 0) {
     return (
-      <div
-        className="flex-1 flex items-center justify-center font-mono text-secondary text-dim"
-        data-testid={testId}
-      >
+      <EmptyState background={false} testId={testId}>
         {resolvedEmptyLabel}
-      </div>
+      </EmptyState>
     );
   }
 

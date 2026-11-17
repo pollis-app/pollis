@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { FlatList, View } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
+import { EmptyState } from "../ui";
 import { AttachmentTile } from "../chat/AttachmentTile";
 import { isRollMedia, mediaKind } from "../../lib/media/viewer";
 import { semantic, type as ty, space, r } from "../../theme/tokens";
@@ -34,9 +35,9 @@ export function VaultMediaGrid({
 
   if (attachments.length === 0) {
     return (
-      <View testID="vault-media-empty" style={{ padding: space.xxl }}>
-        <Text style={[ty.secondary, { textAlign: "center" }]}>{t("media.empty")}</Text>
-      </View>
+      <EmptyState testID="vault-media-empty" icon="images">
+        {t("media.empty")}
+      </EmptyState>
     );
   }
 

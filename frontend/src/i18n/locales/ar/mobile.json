@@ -126,7 +126,6 @@
     "requestsWaiting_other": "طلبات المراسلة، {{count}} طلب بالانتظار",
     "ownPreview": "أنت: {{text}}",
     "noMatches": "لا توجد محادثات مطابقة.",
-    "emptyHint": "ابدأ محادثة مع شخص باستخدام اسم المستخدم أو البريد الإلكتروني.",
     "previewAttachment": "مرفق"
   },
   "dm": {
@@ -187,7 +186,6 @@
     },
     "emoji": {
       "loadFailed": "تعذّر تحميل رموز هذه المجموعة التعبيرية.",
-      "empty": "لا توجد رموز تعبيرية مخصصة بعد.",
       "pickAndUpload": "اختيار صورة ورفعها",
       "sizeKb_zero": "{{count}} ك.ب",
       "sizeKb_one": "{{count}} ك.ب",
@@ -297,7 +295,6 @@
     "find": "البحث عن مجموعة",
     "findSub": "اطلب الانضمام إلى مجموعة باستخدام معرّفها",
     "emptyTitle": "لا توجد مجموعات بعد",
-    "emptyBody": "أنشئ مجموعة لأصحابك، أو ابحث عن مجموعة أُخبرت عنها.",
     "pillSelected": "{{name}}، محددة",
     "pillUnread": "{{name}}، رسائل غير مقروءة",
     "pillSelectedUnread": "{{name}}، محددة، رسائل غير مقروءة",
@@ -501,7 +498,6 @@
       "deleteAccountSub": "حذف حسابك نهائيًا ومسح هذا الجهاز",
       "deviceSub": "أُقرن {{paired}} · آخر ظهور {{lastSeen}}",
       "enrollmentFailed": "تعذّرت معالجة طلب التسجيل.",
-      "eventsEmpty": "لا توجد أحداث أمنية بعد.",
       "hoursAgo_zero": "قبل {{count}} ساعة",
       "hoursAgo_one": "قبل ساعة",
       "hoursAgo_two": "قبل ساعتين",

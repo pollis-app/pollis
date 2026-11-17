@@ -1,0 +1,132 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# EMPTY STATES (#1969) — desktop parity with e2e/empty-states.spec.ts: every
+# empty list is the one `EmptyState` (components/ui.tsx), one centred sentence
+# with the action that fills the space under it. A fresh account has nothing,
+# so each screen below is empty by construction: Groups, Direct, Saved,
+# Blocked, then a new group's #General and its custom emoji.
+
+- runFlow: ../subflows/sign-in.yaml
+
+# --- Groups: the sentence, then Create / Find under it ---
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "groups-empty"
+    timeout: 15000
+- assertVisible: "No groups yet"
+- assertVisible:
+    id: "btn-create-group"
+- assertVisible:
+    id: "btn-join-group"
+- takeScreenshot: empty-states-01-groups
+
+# --- Direct: the sentence and New message ---
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "direct-empty"
+    timeout: 15000
+- assertVisible: "No direct messages yet"
+- assertVisible:
+    id: "btn-new-dm-empty"
+- takeScreenshot: empty-states-02-direct
+
+# --- Saved ---
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-saved"
+- extendedWaitUntil:
+    visible:
+      id: "saved-empty"
+    timeout: 15000
+- assertVisible: "No saved messages yet. Long-press a message to save it."
+- takeScreenshot: empty-states-03-saved
+- tapOn:
+    id: "btn-back"
+
+# --- Blocked (Security → Blocked users) ---
+- tapOn:
+    id: "row-self-security"
+- assertVisible:
+    id: "screen-self-security"
+- scrollUntilVisible:
+    element:
+      id: "row-blocked-users"
+    direction: DOWN
+- tapOn:
+    id: "row-blocked-users"
+- extendedWaitUntil:
+    visible:
+      id: "blocked-empty"
+    timeout: 15000
+- assertVisible: "No blocked users."
+- takeScreenshot: empty-states-04-blocked
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "btn-back"
+
+# --- A new group: #General has no messages, and no custom emoji ---
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Empty Group"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Empty Group"
+- tapOn:
+    text: "General"
+- extendedWaitUntil:
+    visible:
+      id: "chat-empty"
+    timeout: 15000
+- assertVisible: "No messages yet. Start the conversation."
+- takeScreenshot: empty-states-05-channel
+- tapOn:
+    id: "btn-back"
+    optional: true
+
+- tapOn:
+    id: "btn-group-menu"
+- tapOn:
+    id: "btn-menu-group-settings"
+- extendedWaitUntil:
+    visible:
+      id: "row-group-emoji"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: "row-group-emoji"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-emoji"
+    timeout: 5000
+    optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "screen-group-emoji"
+    commands:
+      - tapOn:
+          id: "row-group-emoji"
+- extendedWaitUntil:
+    visible:
+      id: "group-emoji-empty"
+    timeout: 15000
+- assertVisible: "No custom emoji yet. Anyone in the group can add one."
+- takeScreenshot: empty-states-06-custom-emoji
