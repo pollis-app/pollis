@@ -179,6 +179,7 @@ impl Client {
         me.invoke::<serde_json::Value>("initialize_identity", json!({ "userId": me.user_id }))
             .await
             .expect("initialize_identity");
+        me.state.settle_background().await;
         me
     }
 

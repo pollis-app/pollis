@@ -61,7 +61,7 @@ pub use key_packages::{ensure_mls_key_package, validate_key_package};
 pub use key_packages::forge_key_package_for;
 
 pub use welcomes::{
-    apply_welcome, poll_mls_welcomes, poll_mls_welcomes_inner, reset_welcome_delivery,
+    apply_welcome, poll_mls_welcomes, poll_mls_welcomes_deferring, poll_mls_welcomes_inner, reset_welcome_delivery,
 };
 
 pub use group_state::{

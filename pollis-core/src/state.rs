@@ -118,9 +118,10 @@ pub struct AppState {
     pub outbox_enqueuing: Arc<crate::commands::messages::Enqueuing>,
     /// Unsent messages whose last attempt stopped on the file key (#1636); later sends pass them.
     pub outbox_awaiting_key: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    /// Approvals whose MLS add is still running after the approve returned (#1960);
-    /// [`settle_approvals`](crate::commands::groups::settle_approvals) waits for them.
-    pub approvals_in_flight: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    /// Follow-up work a command started and returned without waiting for: an approval's MLS add
+    /// (#1960), the unlock's post-join self-update (#1959). [`AppState::settle_background`]
+    /// waits for it.
+    pub background_work: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     /// Held during a KeyPackage top-up (#1412); `try_lock` so a drain never publishes a second batch.
     pub key_package_refill: Arc<Mutex<()>>,
     /// Last pre-seal missing-device check per conversation (#1571), so a burst of sends checks once,
@@ -197,7 +198,7 @@ impl AppState {
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_enqueuing: Arc::default(),
             outbox_awaiting_key: Arc::default(),
-            approvals_in_flight: Arc::default(),
+            background_work: Arc::default(),
             key_package_refill: Arc::new(Mutex::new(())),
             pre_seal_checked: Arc::new(Mutex::new(HashMap::new())),
             outbox_drain: Arc::new(Mutex::new(None)),
@@ -249,6 +250,34 @@ impl AppState {
 
     /// A share of the cross-process state lock (#1599) for an MLS-mutating step that has no
     /// per-conversation lock (welcome processing, KeyPackage generation).
+    /// Run `work` in the background, kept for [`settle_background`](Self::settle_background).
+    pub fn spawn_background<F>(&self, work: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let handle = tokio::spawn(work);
+        let mut tasks = self.background_work.lock().unwrap_or_else(|e| e.into_inner());
+        tasks.retain(|h| !h.is_finished());
+        tasks.push(handle);
+    }
+
+    /// Wait for every [`spawn_background`](Self::spawn_background) task, including any they
+    /// start. For tests and shutdown; the UI never waits on it.
+    pub async fn settle_background(&self) {
+        loop {
+            let pending: Vec<_> = {
+                let mut tasks = self.background_work.lock().unwrap_or_else(|e| e.into_inner());
+                std::mem::take(&mut *tasks)
+            };
+            if pending.is_empty() {
+                return;
+            }
+            for handle in pending {
+                let _ = handle.await;
+            }
+        }
+    }
+
     pub async fn cross_process_lock(
         &self,
     ) -> crate::error::Result<crate::notify::lock::SharedStateGuard> {

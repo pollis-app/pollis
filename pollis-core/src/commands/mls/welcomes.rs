@@ -272,6 +272,74 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // Fetch-to-ack under the cross-process lock (#1599): a second process draining the same
     // Welcome would join the group a second time over the first's state.
     let _cross_process = state.cross_process_lock().await?;
+    let follow_up = drain_welcomes(state, user_id, device_id).await?;
+    follow_up.run(state, user_id, device_id).await;
+    Ok(())
+}
+
+/// [`poll_mls_welcomes_inner`] for the unlock (#1959): returns once every Welcome is applied,
+/// acknowledged and its keys adopted, and runs the follow-ups (the post-join self-update, the
+/// KeyPackage top-up, re-joins) in the background. The screen after the unlock needs the groups,
+/// not those, and on a phone they took most of 25 s.
+pub async fn poll_mls_welcomes_deferring(
+    state: &Arc<AppState>,
+    user_id: &str,
+    device_id: &str,
+) -> Result<()> {
+    let follow_up = {
+        let _cross_process = state.cross_process_lock().await?;
+        drain_welcomes(state, user_id, device_id).await?
+    };
+    if follow_up.is_empty() {
+        return Ok(());
+    }
+    let task_state = Arc::clone(state);
+    let (user_id, device_id) = (user_id.to_string(), device_id.to_string());
+    state.spawn_background(async move {
+        // Under the cross-process lock again, as when they ran inline.
+        let _cross_process = match task_state.cross_process_lock().await {
+            Ok(guard) => guard,
+            Err(e) => {
+                crate::diag!("[mls] poll_mls_welcomes: follow-ups skipped, no state lock: {e}");
+                return;
+            }
+        };
+        follow_up.run(&task_state, &user_id, &device_id).await;
+    });
+    Ok(())
+}
+
+/// What a drain leaves to do once its Welcomes are applied and acknowledged.
+struct WelcomeFollowUp {
+    refill: bool,
+    joined: Vec<(String, i64)>,
+    failed: Vec<String>,
+}
+
+impl WelcomeFollowUp {
+    fn is_empty(&self) -> bool {
+        !self.refill && self.joined.is_empty() && self.failed.is_empty()
+    }
+
+    async fn run(self, state: &Arc<AppState>, user_id: &str, device_id: &str) {
+        // Top the pool up when low (#1412); the drain carries the pool size.
+        if self.refill {
+            if let Err(e) = replenish_key_packages(state, user_id, device_id).await {
+                crate::diag!("[mls] KP replenishment failed (non-fatal): {e}");
+            }
+        }
+        self_update_joined_groups(state, user_id, &self.joined).await;
+        rejoin_after_failed_welcomes(state, user_id, &self.failed, &self.joined).await;
+    }
+}
+
+/// Fetch, apply and acknowledge this device's Welcomes, and adopt the joined groups' keys.
+/// The caller holds the cross-process lock (#1599).
+async fn drain_welcomes(
+    state: &Arc<AppState>,
+    user_id: &str,
+    device_id: &str,
+) -> Result<WelcomeFollowUp> {
     // The DS scopes the drain to the verified signing device (#987).
     let super::ds_reads::FetchedWelcomes {
         items,
@@ -405,16 +473,11 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         }
     }
 
-    // Top the pool up when low (#1412); the drain carries the pool size.
-    if super::key_packages::drain_wants_refill(
+    let refill = super::key_packages::drain_wants_refill(
         had_welcomes,
         unclaimed_key_packages,
         has_last_resort_key_package,
-    ) {
-        if let Err(e) = replenish_key_packages(state, user_id, device_id).await {
-            crate::diag!("[mls] KP replenishment failed (non-fatal): {e}");
-        }
-    }
+    );
 
     adopt_undrainable_joins(state, &joined).await;
 
@@ -424,11 +487,7 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         crate::commands::file_keys::try_adopt_file_keys(state, conversation_id).await;
     }
 
-    self_update_joined_groups(state, user_id, &joined).await;
-
-    rejoin_after_failed_welcomes(state, user_id, &failed, &joined).await;
-
-    Ok(())
+    Ok(WelcomeFollowUp { refill, joined, failed })
 }
 
 /// Re-join each conversation whose Welcome this pass could not apply (#1571).
