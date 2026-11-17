@@ -226,7 +226,7 @@ function GroupSettings() {
                             ? t("mobile:group.settings.tapAgainToConfirm")
                             : t("mobile:group.settings.deleteChannel", { name: c.name })
                         }
-                        leading={<Icon.trash size={14} color={armed ? semantic.accent : semantic.text} />}
+                        leading={<Icon.trash size={14} />}
                         onPress={() => onDeleteChannel(c.id)}
                       >
                         {deleteChannel.isPending && armed
