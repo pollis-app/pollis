@@ -173,6 +173,18 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("menu-item-leave-group")).toBeVisible();
     });
 
+    test("Delete channel: the bar replaces the composer and focuses its X, never Delete", async ({ page }) => {
+      await boot(page, skin);
+      await openGroup(page);
+      await page.getByTestId(`channel-option-${CHANNEL_ID}`).click();
+      await page.getByTestId("delete-channel-trigger").click();
+      await expect(page.getByTestId("delete-channel-bar")).toBeVisible();
+      // Enter must not delete by accident: the safe choice holds focus.
+      await expect(page.getByTestId("delete-channel-cancel")).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("delete-channel-bar")).toHaveCount(0);
+    });
+
     test("Remove member: the confirmation pattern; Cancel returns to Members", async ({ page }) => {
       await boot(page, skin);
       await openGroup(page);

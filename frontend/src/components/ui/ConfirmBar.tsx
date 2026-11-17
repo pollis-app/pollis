@@ -18,9 +18,9 @@ interface ConfirmBarProps {
 }
 
 /**
- * The one confirmation inside a conversation (#1968): it replaces the chat input bar. The user has
- * just picked the action on that message, so the action holds focus (Enter confirms) and Escape,
- * handled by the caller, or the X cancels. Elsewhere a confirmation is `ConfirmBlock`.
+ * The one confirmation inside a conversation (#1968): it replaces the chat input bar. As on every
+ * confirmation, the safe choice holds focus (the X), never the destructive action, so Enter can't
+ * delete by accident; Escape, handled by the caller, also cancels. Elsewhere it is `ConfirmBlock`.
  */
 export const ConfirmBar: React.FC<ConfirmBarProps> = ({
   testId,
@@ -41,6 +41,7 @@ export const ConfirmBar: React.FC<ConfirmBarProps> = ({
       onCancel={onCancel}
       cancelLabel={cancelLabel}
       cancelTestId={cancelTestId}
+      focusCancel
     />
     <div className="flex items-center justify-between gap-4 bg-surface px-4 pb-3 pt-2">
       <p className="font-mono text-secondary text-dim">{body}</p>
@@ -50,7 +51,6 @@ export const ConfirmBar: React.FC<ConfirmBarProps> = ({
         onClick={onConfirm}
         isLoading={isPending}
         loadingText={pendingLabel}
-        autoFocus
       >
         {confirmLabel}
       </Button>
