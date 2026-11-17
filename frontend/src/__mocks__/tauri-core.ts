@@ -36,6 +36,8 @@ interface MockMessage {
   send_state?: 'pending' | 'failed';
   /** The edit outbox (#1555): our edit, not confirmed yet; `content` holds it. */
   edit_state?: 'pending' | 'failed';
+  /** The sender's link preview (#1987), as the core reads it from the trailer. */
+  link_preview?: Record<string, unknown> | null;
 }
 
 /** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
@@ -1760,6 +1762,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
           thread_id: threadId ?? undefined,
           sent_at: nowIso(),
           send_state: 'pending',
+          link_preview: mockWirePreview(args.linkPreview),
         };
         if (!store.messages[conversationId]) {
           store.messages[conversationId] = [];
@@ -1836,6 +1839,8 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message) {
         message.content = newContent;
         message.edited_at = nowIso();
+        // An edit rebuilds the message, preview included (#1987).
+        message.link_preview = mockWirePreview(args.linkPreview);
         // A failed post keeps the edit for the drain (#1555).
         if (store.failSends) {
           message.edit_state = 'failed';
@@ -2390,9 +2395,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'discard_staged_attachment':
       return true;
 
-    // Link previews (#1987): the mock never fetches a page, so a draft gets no card.
-    case 'fetch_link_preview':
-      return null;
+    // Link previews (#1987): `linkPreviews` maps a URL to the draft the core would build, after
+    // `linkPreviewDelayMs`; any other URL has none. Every call lands in `window.__linkPreviewFetches`.
+    case 'fetch_link_preview': {
+      const url = args.url as string;
+      const w = window as unknown as { __linkPreviewFetches?: string[] };
+      w.__linkPreviewFetches = [...(w.__linkPreviewFetches ?? []), url];
+      const draft = ((preload.linkPreviews ?? {}) as Record<string, unknown>)[url] ?? null;
+      const delay = (preload.linkPreviewDelayMs as number | undefined) ?? 0;
+      return delay > 0 ? new Promise((resolve) => setTimeout(() => resolve(draft), delay)) : draft;
+    }
 
     case 'get_link_previews_enabled':
       return linkPreviewsEnabled;
@@ -2438,6 +2450,15 @@ function unreadIn(conversationId: string): MockMessage[] {
 }
 
 let stagedAttachmentCount = 0;
+
+/** A sent draft as the core stores it (#1987): the thumbnail is not uploaded in the mock, so none. */
+function mockWirePreview(draft: unknown): Record<string, unknown> | null {
+  if (!draft || typeof draft !== 'object') {
+    return null;
+  }
+  const { url, title, description } = draft as { url: string; title: string; description?: string | null };
+  return { url, title, description: description ?? null, image: null };
+}
 // "Generate link previews" (#1987), per device; on by default.
 let linkPreviewsEnabled = true;
 
