@@ -263,9 +263,12 @@ export function EmojiPickerSheet({
   const listRef = useRef<FlatList<PickerListItem>>(null);
   const [active, setActive] = useState<string | null>(null);
   const viewability = useRef({ itemVisiblePercentThreshold: 10 }).current;
+  // A tapped tab stays selected until the user scrolls: a short last section
+  // (Flags) cannot reach the top, so the first visible row is still the one before.
+  const heldTab = useRef<string | null>(null);
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const first = viewableItems[0]?.item as PickerListItem | undefined;
-    if (first) {
+    if (first && heldTab.current === null) {
       setActive(first.section);
     }
   }).current;
@@ -275,6 +278,7 @@ export function EmojiPickerSheet({
       if (index < 0) {
         return;
       }
+      heldTab.current = section;
       setActive(section);
       listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
     },
@@ -366,6 +370,9 @@ export function EmojiPickerSheet({
           testID="list-emoji"
           data={items}
           onViewableItemsChanged={onViewable}
+          onScrollBeginDrag={() => {
+            heldTab.current = null;
+          }}
           viewabilityConfig={viewability}
           // Rows past the rendered window have no layout yet: land near, then exact.
           onScrollToIndexFailed={(info) => {

@@ -93,7 +93,7 @@ tags:
 - extendedWaitUntil:
     visible:
       id: "chip-search-scope"
-      text: ".*In E2E Scope Group.*"
+      text: ".*E2E Scope Group.*"
     timeout: 5000
 - inputText: "heron"
 - extendedWaitUntil:
