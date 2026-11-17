@@ -7,7 +7,7 @@ import { useTheme } from "../theme";
 import { semantic, fonts } from "../../theme/tokens";
 
 /** Sign out asks first, in the app's own sheet (#1971): Close cancels, the one row signs out. */
-export function SignOutSheet({
+function SignOutSheet({
   onConfirm,
   onClose,
 }: {
