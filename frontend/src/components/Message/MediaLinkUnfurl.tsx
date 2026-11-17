@@ -36,7 +36,7 @@ function classify(href: string): MediaKind | null {
   return null;
 }
 
-function extractMediaLinks(text: string): MediaLink[] {
+function extractMediaLinks(text: string, exceptHref: string | null): MediaLink[] {
   const out: MediaLink[] = [];
   const seen = new Set<string>();
   for (const { url } of findUrls(text) ?? []) {
@@ -45,7 +45,7 @@ function extractMediaLinks(text: string): MediaLink[] {
     }
     seen.add(url);
     const target = parseLink(url);
-    if (!target) {
+    if (!target || target.href === exceptHref) {
       continue;
     }
     const kind = classify(target.href);
@@ -58,11 +58,13 @@ function extractMediaLinks(text: string): MediaLink[] {
 
 interface MediaLinkUnfurlProps {
   text: string;
+  /** A link the sender's preview card already shows (#1987): no second tile for it. */
+  exceptHref?: string | null;
 }
 
-export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
+export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text, exceptHref = null }) => {
   const { t } = useTranslation("chat");
-  const links = useMemo(() => extractMediaLinks(text), [text]);
+  const links = useMemo(() => extractMediaLinks(text, exceptHref), [text, exceptHref]);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   // Remote media loads only on a per-URL click, every host: an automatic fetch leaks the reader's IP to a sender-chosen host.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());

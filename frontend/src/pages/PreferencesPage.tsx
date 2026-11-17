@@ -33,6 +33,7 @@ import {
 } from "../hooks/queries/useRelayServing";
 import { RelayServingSection } from "../components/Preferences/RelayServingSection";
 import { LanguageSection } from "../components/Preferences/LanguageSection";
+import { LinkPreviewsSection } from "../components/Preferences/LinkPreviewsSection";
 import { HexColorField } from "../components/Preferences/HexColorField";
 import {
   applyAccentColor,
@@ -865,6 +866,10 @@ export const PreferencesPage: React.FC = observer(() => {
                 </p>
               )}
             </section>
+
+            {/* Link previews (#1987), this device only: right after network
+                privacy, since strict mode turns them off. */}
+            <LinkPreviewsSection overlayMode={overlayMode} />
 
             {/* Run a relay for others (#813 §10.2) — a SEPARATE consent from
                 the mode control above. Never implied by turning the overlay

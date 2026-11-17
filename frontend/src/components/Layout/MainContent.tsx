@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { observer } from "mobx-react-lite";
-import { invoke } from "../../bridge";
+import { discardStagedAttachment, invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { MessageList } from "../Message/MessageList";
 import { ReplyPreview } from "../Message/ReplyPreview";
@@ -14,7 +14,12 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
 import { EditMessageBar } from "../ui/EditMessageBar";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
-import { transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
+import { optimisticLinkPreview, transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
+import { useSkin } from "../../hooks/queries/usePreferences";
+import { useLinkPreviewsEnabled } from "../../hooks/queries/useLinkPreviews";
+import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
+import { ComposerLinkPreview } from "../ui/ComposerLinkPreview";
+import type { LinkPreviewDraft } from "../../utils/linkPreview";
 import { useRightPanel } from "./RightPanel/useRightPanel";
 import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
@@ -160,6 +165,14 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editDraftValue, setEditDraftValue] = useState('');
+  // An edit rebuilds the message (#1987): the edit bar previews its text like the composer does.
+  const skin = useSkin();
+  const linkPreviewsEnabled = useLinkPreviewsEnabled();
+  const editLinkPreview = useLinkPreviewDraft(
+    editingMessage ? editDraftValue : "",
+    !!editingMessage && skin === "modern" && linkPreviewsEnabled,
+    editingMessage?.id ?? null,
+  );
 
   const logKey = `${selectedChannelId ?? ""}|${selectedConversationId ?? ""}`;
 
@@ -574,12 +587,14 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     if (!conversationId) {
       return;
     }
+    const linkPreview = editLinkPreview.takeForSend(trimmed);
     try {
       await editMessageMutation.mutateAsync({
         conversationId,
         channelId: selectedChannelId ?? undefined,
         messageId: editingMessage.id,
         newContent: trimmed,
+        linkPreview,
       });
       setEditingMessage(null);
     } catch (error) {
@@ -611,7 +626,11 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     }
   };
 
-  const handleSend = async (text: string, attachments: Attachment[]) => {
+  const handleSend = async (
+    text: string,
+    attachments: Attachment[],
+    linkPreview: LinkPreviewDraft | null = null,
+  ) => {
     if (!text.trim() && attachments.length === 0) {
       return;
     }
@@ -662,6 +681,14 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       delivered: false,
       status: 'sending',
       reply_to_message_id: replyToMessageId ?? undefined,
+      link_preview: optimisticLinkPreview(linkPreview),
+    };
+
+    // A thumbnail the core never took is released with the attachments.
+    const releasePreview = () => {
+      if (linkPreview?.image) {
+        void discardStagedAttachment(linkPreview.image.stagedId).catch(() => undefined);
+      }
     };
 
     queryClient.setQueryData<MessagesQueryData>(queryKey, (old) => {
@@ -693,6 +720,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       outgoing = await outgoingAttachments(attachments);
     } catch (error) {
       await releaseStaged(attachments);
+      releasePreview();
       patchStub({ status: 'failed', retryable: false });
       console.error("Failed to send message:", error);
       return;
@@ -705,11 +733,13 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         content: contentText,
         attachments: outgoing,
         replyToMessageId: replyToMessageId ?? undefined,
+        linkPreview,
         optimisticId,
         messageId,
       });
     } catch (error) {
       await releaseStaged(attachments);
+      releasePreview();
       // The core marked it failed; the refetched row offers Retry.
       patchStub({ status: 'failed' });
       console.error("Failed to send message:", error);
@@ -759,6 +789,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             onLoadNewer={loadNewer}
             windowEpoch={windowEpoch}
             focusComposer={focusComposer}
+            linkPreviews={!pendingDmRequest}
           />
         )}
       </div>
@@ -833,6 +864,12 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           onSave={handleSaveEdit}
           onCancel={handleCancelEdit}
           isSaving={editMessageMutation.isPending}
+          preview={
+            <ComposerLinkPreview
+              state={editLinkPreview.state}
+              onRemove={editLinkPreview.remove}
+            />
+          }
         />
       ) : isDeletingThisChannel ? (
         <div data-testid="delete-channel-bar">
@@ -924,6 +961,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             ref={chatInputRef}
             onSend={handleSend}
             onValueChange={typing.notify}
+            linkPreviews
             autoFocus
             onHistoryUp={() => {
               messageNavStore.dispatch({ type: "enter" });

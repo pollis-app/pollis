@@ -17,6 +17,7 @@ import {
   useRetryMessage,
   useDiscardUnsent,
   useThreadMessages,
+  useLinkPreviewsEnabled,
   flattenPages,
   type ConversationKind,
   type Message,
@@ -28,6 +29,8 @@ import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useTheme } from "../../components/theme";
 import { useDraft } from "../../hooks/useDraft";
+import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
+import { ComposerLinkPreview } from "../../components/chat/ComposerLinkPreview";
 
 /** Slack-style thread screen (#831); state is isolated per thread (#837). */
 function ThreadScreen() {
@@ -48,6 +51,9 @@ function ThreadScreen() {
     typeof params.name === "string" ? params.name : t("panel.thread");
 
   const [draft, setDraft] = useDraft(threadId ? `thread:${threadId}` : null);
+  // Link previews (#1987), as in the conversation's composer.
+  const { enabled: linkPreviewsEnabled } = useLinkPreviewsEnabled();
+  const linkPreview = useLinkPreviewDraft(draft, linkPreviewsEnabled, threadId);
   const listRef = useRef<FlatList<Message>>(null);
   const currentUser = appStore.currentUser;
 
@@ -88,8 +94,10 @@ function ThreadScreen() {
     if (!text || !threadId) {
       return;
     }
+    // Never waits for a fetch still running: the reply goes without it.
+    const preview = linkPreview.takeForSend(text);
     setDraft("");
-    sendMessage.mutate({ content: text, threadId });
+    sendMessage.mutate({ content: text, threadId, linkPreview: preview });
   };
 
   const newestId = replies[replies.length - 1]?.id;
@@ -126,6 +134,7 @@ function ThreadScreen() {
           text={m.content}
           deleted={!!m.deleted_at}
           attachments={m.attachments}
+          linkPreview={m.link_preview}
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
@@ -169,6 +178,7 @@ function ThreadScreen() {
           text={root.content}
           deleted={!!root.deleted_at}
           attachments={root.attachments}
+          linkPreview={root.link_preview}
           onOpenAttachment={openMedia}
           edited={!!root.edited_at}
           editUnsent={root.edit_unsent}
@@ -236,6 +246,9 @@ function ThreadScreen() {
         onSend={onSend}
         editable={!!threadId && !!conversationId && !!kind}
         mentionCandidates={mentionCandidates}
+        linkPreview={
+          <ComposerLinkPreview state={linkPreview.state} onRemove={linkPreview.remove} />
+        }
       />
     </Screen>
   );

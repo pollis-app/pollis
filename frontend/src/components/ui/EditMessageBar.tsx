@@ -14,6 +14,8 @@ interface EditMessageBarProps {
   testId: string;
   inputTestId: string;
   cancelTestId: string;
+  /** Above the field: the edited text's link preview (#1987). */
+  preview?: React.ReactNode;
 }
 
 /** Replaces the composer while editing; key it by message id. */
@@ -29,6 +31,7 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
   testId,
   inputTestId,
   cancelTestId,
+  preview,
 }) => {
   const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -57,6 +60,7 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
           <X size={20} aria-hidden="true" />
         </button>
       </div>
+      {preview ? <div className="bg-surface">{preview}</div> : null}
       <div className="px-4 pb-3 pt-1 bg-surface">
         <textarea
           ref={textareaRef}

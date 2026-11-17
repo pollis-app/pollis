@@ -54,6 +54,8 @@ import {
   useUserGroupsWithChannels,
   useGroupMembers,
   useDMChannel,
+  useDMRequests,
+  useLinkPreviewsEnabled,
   useKeyChangeNotices,
   usePeerVerifications,
   type KeyChangeNotice,
@@ -88,6 +90,8 @@ import { nextJumpStep } from "../../lib/messageJump";
 import { useTheme, useThemeRerender } from "../../components/theme";
 import { COMPATIBLE_PICK } from "../../lib/pickerOptions";
 import { conversationDraftKey, useDraft } from "../../hooks/useDraft";
+import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
+import { ComposerLinkPreview } from "../../components/chat/ComposerLinkPreview";
 
 // Props embed this screen in the iPad right pane; route usage passes none.
 type ChatViewProps = {
@@ -216,6 +220,22 @@ function TextChat(props: ChatViewProps = {}) {
     },
     [dmPeers],
   );
+  // Link previews (#1987): never drawn in a request not yet accepted; generated per the device setting.
+  const { data: dmRequests } = useDMRequests();
+  const isPendingRequest =
+    isDm && !!conversationId && (dmRequests ?? []).some((d) => d.id === conversationId);
+  const { enabled: linkPreviewsEnabled } = useLinkPreviewsEnabled();
+  const draftKey = conversationDraftKey(kind, conversationId);
+  const composerPreview = useLinkPreviewDraft(
+    draft,
+    linkPreviewsEnabled && !isPendingRequest,
+    draftKey,
+  );
+  const editPreview = useLinkPreviewDraft(
+    editTarget ? editDraft : "",
+    linkPreviewsEnabled && !!editTarget,
+    editTarget?.id ?? null,
+  );
   const sendMessage = useSendMessage(conversationId, kind);
   const retryMessage = useRetryMessage(conversationId, kind);
   const discardUnsent = useDiscardUnsent(conversationId, kind);
@@ -310,6 +330,8 @@ function TextChat(props: ChatViewProps = {}) {
     if (!text && pendingAttachments.length === 0) {
       return;
     }
+    // Never waits for a fetch still running: the message goes without it.
+    const linkPreview = composerPreview.takeForSend(text);
     setDraft("");
     typing.stop();
     setPendingAttachments([]);
@@ -318,6 +340,7 @@ function TextChat(props: ChatViewProps = {}) {
       content: text,
       attachments: pendingAttachments,
       replyToId: replyTarget?.id,
+      linkPreview,
     });
   };
 
@@ -341,7 +364,7 @@ function TextChat(props: ChatViewProps = {}) {
       return;
     }
     editMessage.mutate(
-      { messageId: editTarget.id, newContent: text },
+      { messageId: editTarget.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
       {
         onSuccess: () => {
           setEditTarget(null);
@@ -748,6 +771,7 @@ function TextChat(props: ChatViewProps = {}) {
           text={m.content}
           deleted={!!m.deleted_at}
           attachments={m.attachments}
+          linkPreview={isPendingRequest ? null : m.link_preview}
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
@@ -822,6 +846,7 @@ function TextChat(props: ChatViewProps = {}) {
       viewerJoinedAtMs,
       peerLabel,
       avatarKeyById,
+      isPendingRequest,
       t,
     ],
   );
@@ -985,6 +1010,9 @@ function TextChat(props: ChatViewProps = {}) {
           }}
           onSave={onSaveEdit}
           savePending={editMessage.isPending}
+          linkPreview={
+            <ComposerLinkPreview state={editPreview.state} onRemove={editPreview.remove} />
+          }
         />
       ) : (
         <>
@@ -1020,6 +1048,12 @@ function TextChat(props: ChatViewProps = {}) {
               setPendingAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)))
             }
             canSendEmptyText={pendingAttachments.length > 0}
+            linkPreview={
+              <ComposerLinkPreview
+                state={composerPreview.state}
+                onRemove={composerPreview.remove}
+              />
+            }
           />
         </>
       )}

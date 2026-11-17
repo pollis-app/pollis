@@ -11,6 +11,8 @@ import { ChatInput, type Attachment } from "../../ui/ChatInput";
 import { outgoingAttachments, releaseStaged, type OutgoingAttachment } from "../../../utils/attachmentEnvelope";
 import { ThreadMessageRow } from "./ThreadMessageRow";
 import { EmptyState } from "../../ui/EmptyState";
+import { discardStagedAttachment } from "../../../bridge";
+import type { LinkPreviewDraft } from "../../../utils/linkPreview";
 
 interface ThreadPanelProps {
   threadId: string;
@@ -32,9 +34,20 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
       [messages, threadId],
     );
 
-    const submit = async (text: string, attachments: Attachment[]) => {
+    const submit = async (
+      text: string,
+      attachments: Attachment[],
+      linkPreview: LinkPreviewDraft | null,
+    ) => {
       const contentText = text.trim();
+      // A thumbnail the core never took is released with the attachments.
+      const releasePreview = () => {
+        if (linkPreview?.image) {
+          void discardStagedAttachment(linkPreview.image.stagedId).catch(() => undefined);
+        }
+      };
       if ((!contentText && attachments.length === 0) || !currentUser) {
+        releasePreview();
         return;
       }
       // Same outbox hand-off as the channel composer (#1335).
@@ -43,6 +56,7 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
         outgoing = await outgoingAttachments(attachments);
       } catch (error) {
         await releaseStaged(attachments);
+        releasePreview();
         console.error("Failed to send thread reply:", error);
         return;
       }
@@ -53,8 +67,14 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
           content: contentText,
           attachments: outgoing,
           threadId,
+          linkPreview,
         },
-        { onError: () => void releaseStaged(attachments) },
+        {
+          onError: () => {
+            void releaseStaged(attachments);
+            releasePreview();
+          },
+        },
       );
     };
 
@@ -88,6 +108,7 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
             onSend={submit}
             placeholder={t("thread.placeholder")}
             draftKey={`thread:${threadId}`}
+            linkPreviews
           />
         </div>
       </div>

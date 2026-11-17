@@ -2369,6 +2369,17 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'discard_staged_attachment':
       return true;
 
+    // Link previews (#1987): the mock never fetches a page, so a draft gets no card.
+    case 'fetch_link_preview':
+      return null;
+
+    case 'get_link_previews_enabled':
+      return linkPreviewsEnabled;
+
+    case 'set_link_previews_enabled':
+      linkPreviewsEnabled = args.enabled !== false;
+      return null;
+
     // The OS clipboard the paste fallback reads (#1794); `window.__setOsClipboard` fills it.
     case 'read_clipboard_files':
       return [...osClipboard.files];
@@ -2406,6 +2417,8 @@ function unreadIn(conversationId: string): MockMessage[] {
 }
 
 let stagedAttachmentCount = 0;
+// "Generate link previews" (#1987), per device; on by default.
+let linkPreviewsEnabled = true;
 
 const verifiedPeers = new Set<string>((preload.verifiedPeers as string[] | undefined) ?? []);
 
