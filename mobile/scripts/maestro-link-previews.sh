@@ -40,10 +40,11 @@ if [ -z "${POLLIS_DEV_ACCESS_KEY:-}" ] && command -v doppler >/dev/null; then
 fi
 export POLLIS_DEV_ACCESS_KEY="${POLLIS_DEV_ACCESS_KEY:-}"
 export POLLIS_DELIVERY_URL="${POLLIS_DELIVERY_URL:-https://api-dev.pollis.com}"
-# The peer uploads its thumbnail: the dev R2 endpoints (no secret; uploads are presigned by the DS).
-if [ -z "${R2_S3_ENDPOINT:-}" ] && [ -f "$REPO/.env.development" ]; then
-  R2_S3_ENDPOINT="$(sed -n 's/^R2_S3_ENDPOINT=//p' "$REPO/.env.development" | head -1)"
-  R2_PUBLIC_URL="$(sed -n 's/^R2_PUBLIC_URL=//p' "$REPO/.env.development" | head -1)"
+# The peer uploads its thumbnail: the dev R2 origin the app is built with (mobile/.env;
+# no secret, uploads are presigned by the DS, which refuses any other origin).
+if [ -z "${R2_S3_ENDPOINT:-}" ] && [ -f "$HERE/.env" ]; then
+  R2_S3_ENDPOINT="$(sed -n 's/^EXPO_PUBLIC_R2_ENDPOINT=//p' "$HERE/.env" | head -1)"
+  R2_PUBLIC_URL="$(sed -n 's/^EXPO_PUBLIC_R2_PUBLIC_URL=//p' "$HERE/.env" | head -1)"
 fi
 export R2_S3_ENDPOINT="${R2_S3_ENDPOINT:?R2_S3_ENDPOINT (dev) is required}"
 export R2_PUBLIC_URL="${R2_PUBLIC_URL:?R2_PUBLIC_URL (dev) is required}"
