@@ -717,9 +717,14 @@ function useJoinRequestDecision(command: 'approve_join_request' | 'reject_join_r
       await invoke(command, { requestId, approverId: currentUser.id });
       return groupId;
     },
-    onSuccess: (groupId) => {
-      // This key also feeds the cross-group aggregate (#874).
-      queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
+    // The decided row leaves the list in the render that ends the busy state (#1937); the
+    // refetch then confirms it. This key also feeds the cross-group aggregate (#874).
+    onSuccess: (groupId, { requestId }) => {
+      const key = groupQueryKeys.joinRequests(groupId);
+      queryClient.setQueryData<JoinRequest[]>(key, (list) =>
+        list ? list.filter((r) => r.id !== requestId) : list,
+      );
+      void queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }

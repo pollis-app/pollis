@@ -3,6 +3,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { useGroupJoinRequests, useApproveJoinRequest, useRejectJoinRequest } from "../hooks/queries";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
+import { errorMessage } from "../utils/errorMessage";
 
 interface JoinRequestsProps {
   groupId: string;
@@ -14,6 +15,7 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
   const { data: requests = [], isLoading } = useGroupJoinRequests(groupId);
   const approveMutation = useApproveJoinRequest();
   const rejectMutation = useRejectJoinRequest();
+  const decisionError = approveMutation.error ?? rejectMutation.error;
 
   const handleApprove = async (requestId: string) => {
     try {
@@ -64,6 +66,7 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
             data-testid={`approve-request-${req.id}`}
             onClick={() => handleApprove(req.id)}
             disabled={approveMutation.isPending || rejectMutation.isPending}
+            isLoading={approveMutation.isPending && approveMutation.variables?.requestId === req.id}
             variant="primary"
           >
             {t("joinRequests.approve")}
@@ -72,12 +75,18 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
             data-testid={`reject-request-${req.id}`}
             onClick={() => handleReject(req.id)}
             disabled={approveMutation.isPending || rejectMutation.isPending}
+            isLoading={rejectMutation.isPending && rejectMutation.variables?.requestId === req.id}
             variant="danger"
           >
             {t("joinRequests.reject")}
           </Button>,
         ]}
       />
+      {decisionError && (
+        <p data-testid="join-request-error" className="px-4 py-2 text-xs font-mono text-danger" role="alert">
+          {errorMessage(decisionError)}
+        </p>
+      )}
     </div>
   );
 };

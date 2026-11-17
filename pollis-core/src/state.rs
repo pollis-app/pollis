@@ -226,8 +226,17 @@ impl AppState {
                 .or_insert_with(|| Arc::new(Mutex::new(())))
                 .clone()
         };
+        let asked = std::time::Instant::now();
         let mutex = entry.lock_owned().await;
         let cross_process = self.cross_process_lock().await?;
+        // A long wait here is a user's action queued behind another MLS step (#1937).
+        let waited = asked.elapsed();
+        if waited >= MLS_LOCK_SLOW_WAIT {
+            crate::diag!(
+                "[mls] waited {}ms for the MLS lock on {conversation_id}",
+                waited.as_millis()
+            );
+        }
         Ok(MlsGroupGuard {
             _mutex: mutex,
             _cross_process: cross_process,
@@ -390,6 +399,9 @@ impl<'a> MlsLockHeld<'a> {
         Self { _guard: guard }
     }
 }
+
+/// A wait for [`AppState::mls_group_lock`] at least this long is written to the diagnostics log.
+const MLS_LOCK_SLOW_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The per-conversation MLS mutex together with this process's share of the cross-process
 /// state lock (#1599). Both release on drop.

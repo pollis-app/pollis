@@ -505,7 +505,8 @@ export function Divider({ inset = 0, style }: { inset?: number; style?: StylePro
   );
 }
 
-// Rounded pill with a ≥44×44 hit area. Never a border.
+// Rounded pill with a ≥44×44 hit area. Never a border. `loading` keeps its colours, shows a
+// spinner and takes no press, so a slow action cannot be submitted twice.
 export function Chip({
   children,
   variant = "default",
@@ -515,6 +516,7 @@ export function Chip({
   testID,
   accessibilityLabel,
   disabled,
+  loading,
   leading,
   trailing,
   pressIn,
@@ -530,9 +532,11 @@ export function Chip({
   testID?: string;
   accessibilityLabel?: string;
   disabled?: boolean;
+  loading?: boolean;
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
 }) {
+  const inert = !!disabled || !!loading;
   const v = selected ? "on" : variant;
   const surface: ControlSurface = variant === "outline" ? "raised" : "base";
   const off = disabled ? controlDisabled(currentTheme(), surface) : null;
@@ -563,15 +567,15 @@ export function Chip({
         ? semantic.dim
         : semantic.accent;
   const label = typeof children === "string" ? children : undefined;
-  const press = usePressIn(disabled ? undefined : onPress, pressIn);
+  const press = usePressIn(inert ? undefined : onPress, pressIn);
   return (
     <Pressable
       {...press}
-      disabled={disabled || !onPress}
+      disabled={inert || !onPress}
       testID={testID}
       accessibilityRole={onPress ? "button" : undefined}
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: !!disabled, selected: v === "on" }}
+      accessibilityState={{ disabled: inert, busy: !!loading, selected: v === "on" }}
       style={[
         {
           // 44×44 hit area in both dimensions (review6 #7).
@@ -594,7 +598,11 @@ export function Chip({
           backgroundColor: bg,
         }}
       >
-        {disabledGlyph(leading, disabled)}
+        {loading ? (
+          <ActivityIndicator testID={testID ? `${testID}-busy` : undefined} size="small" color={fg} />
+        ) : (
+          disabledGlyph(leading, disabled)
+        )}
         {label !== undefined ? (
           <Text
             numberOfLines={1}

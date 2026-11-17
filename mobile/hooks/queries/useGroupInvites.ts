@@ -7,6 +7,7 @@ import type { Group } from "../../types";
 import {
   applyAcceptedInvite,
   rollbackAcceptedInvite,
+  withoutInvite,
   type AcceptSnapshot,
   type InviteLike,
 } from "./inviteAcceptOptimistic";
@@ -531,11 +532,11 @@ export function useApproveJoinRequest(groupId: string | null) {
         approverId: currentUser.id,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: joinRequestQueryKeys.byGroup(groupId),
-      });
-      queryClient.invalidateQueries({
+    // The decided row leaves the list in the render that ends the busy state (#1937); the
+    // refetch then confirms it.
+    onSuccess: (_data, requestId) => {
+      dropDecidedRequest(queryClient, groupId, requestId);
+      void queryClient.invalidateQueries({
         queryKey: groupInviteQueryKeys.members(groupId),
       });
     },
@@ -557,12 +558,24 @@ export function useRejectJoinRequest(groupId: string | null) {
         approverId: currentUser.id,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: joinRequestQueryKeys.byGroup(groupId),
-      });
+    // As for approve (#1937).
+    onSuccess: (_data, requestId) => {
+      dropDecidedRequest(queryClient, groupId, requestId);
     },
   });
+}
+
+/** Take a decided request out of the cached list at once, then refetch to confirm (#1937). */
+function dropDecidedRequest(
+  queryClient: ReturnType<typeof useQueryClient>,
+  groupId: string | null,
+  requestId: string,
+) {
+  const key = joinRequestQueryKeys.byGroup(groupId);
+  queryClient.setQueryData<JoinRequest[]>(key, (list) =>
+    list ? withoutInvite(list, requestId) : list,
+  );
+  void queryClient.invalidateQueries({ queryKey: key });
 }
 
 export function useGroupBySlug(slug: string | null) {

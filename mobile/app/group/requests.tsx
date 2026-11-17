@@ -13,6 +13,7 @@ import {
 } from "../../hooks/queries";
 import { activeLocale } from "../../i18n";
 import { useThemeRerender } from "../../components/theme";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 
 export default function JoinRequests() {
   useThemeRerender();
@@ -25,6 +26,15 @@ export default function JoinRequests() {
   const { data: requests = [], isLoading } = useGroupJoinRequests(id);
   const approve = useApproveJoinRequest(id);
   const reject = useRejectJoinRequest(id);
+  // One decision at a time (#1937): claimed on the tap itself, held until it lands or fails.
+  const submit = useSubmitLock();
+  const decide = (mutation: typeof approve | typeof reject, requestId: string) => {
+    if (!submit.begin()) {
+      return;
+    }
+    mutation.reset();
+    mutation.mutate(requestId, { onSettled: submit.end });
+  };
 
   return (
     <Screen testID="screen-group-requests" aboveTabBar={router.inPane}>
@@ -63,15 +73,19 @@ export default function JoinRequests() {
                       selected
                       testID={`btn-approve-${r.id}`}
                       accessibilityLabel={`${t("mobile:group.requests.approveLabel")}, ${handle}`}
-                      onPress={() => approve.mutate(r.id)}
+                      loading={approve.isPending && approve.variables === r.id}
+                      disabled={submit.busy && !(approve.isPending && approve.variables === r.id)}
+                      onPress={() => decide(approve, r.id)}
                     >
-                      {approve.isPending ? "…" : t("mobile:group.requests.approve")}
+                      {t("mobile:group.requests.approve")}
                     </Chip>
                     <Chip
                       variant="danger"
                       testID={`btn-reject-${r.id}`}
                       accessibilityLabel={`${t("mobile:group.requests.declineLabel")}, ${handle}`}
-                      onPress={() => reject.mutate(r.id)}
+                      loading={reject.isPending && reject.variables === r.id}
+                      disabled={submit.busy && !(reject.isPending && reject.variables === r.id)}
+                      onPress={() => decide(reject, r.id)}
                     >
                       {t("mobile:group.requests.decline")}
                     </Chip>
