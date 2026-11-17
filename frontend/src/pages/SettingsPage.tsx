@@ -4,6 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Upload, User } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { uploadAvatar } from "../services/r2-upload";
@@ -245,327 +246,318 @@ export const SettingsPage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("user.title")} scrollable>
-      <div
-        data-testid="settings-page"
-        className="flex-1 flex flex-col overflow-auto bg-bg"
-      >
-        <div data-testid="settings-content" className="flex-1 flex justify-center overflow-auto px-6 py-8">
-          <div className="w-full max-w-md flex flex-col gap-8">
+      <PageColumn spacing="sections" paneTestId="settings-page" data-testid="settings-content">
+        {/* Account */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
+            {t("user.accountHeading")}
+          </h2>
 
-            {/* Account */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
-                {t("user.accountHeading")}
-              </h2>
+          {isLoading ? (
+            <span data-testid="settings-loading" className="text-secondary font-mono text-muted">
+              {t("common:states.loading")}
+            </span>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <TextInput
+                label={t("user.usernameLabel")}
+                value={username}
+                onChange={(value) => {
+                  setUsername(value);
+                  setUsernameError(null);
+                }}
+                placeholder={t("user.usernamePlaceholder")}
+                error={usernameError ?? undefined}
+                id="settings-username"
+              />
+              <input data-testid="settings-username-input" type="hidden" value={username} readOnly />
 
-              {isLoading ? (
-                <span data-testid="settings-loading" className="text-secondary font-mono text-muted">
-                  {t("common:states.loading")}
-                </span>
-              ) : (
-                <div className="flex flex-col gap-4">
-                  <TextInput
-                    label={t("user.usernameLabel")}
-                    value={username}
-                    onChange={(value) => {
-                      setUsername(value);
-                      setUsernameError(null);
-                    }}
-                    placeholder={t("user.usernamePlaceholder")}
-                    error={usernameError ?? undefined}
-                    id="settings-username"
-                  />
-                  <input data-testid="settings-username-input" type="hidden" value={username} readOnly />
+              <TextInput
+                label={t("user.preferredNameLabel")}
+                value={preferredName}
+                onChange={setPreferredName}
+                placeholder={t("user.preferredNamePlaceholder")}
+                id="settings-preferred-name"
+              />
+              <input data-testid="settings-preferred-name-input" type="hidden" value={preferredName} readOnly />
+            </div>
+          )}
 
-                  <TextInput
-                    label={t("user.preferredNameLabel")}
-                    value={preferredName}
-                    onChange={setPreferredName}
-                    placeholder={t("user.preferredNamePlaceholder")}
-                    id="settings-preferred-name"
-                  />
-                  <input data-testid="settings-preferred-name-input" type="hidden" value={preferredName} readOnly />
-                </div>
-              )}
+          {updateProfileMutation.error && (
+            <p data-testid="settings-save-error" className="text-secondary font-mono text-danger">
+              {updateProfileMutation.error instanceof Error
+                ? updateProfileMutation.error.message
+                : t("user.saveFailed")}
+            </p>
+          )}
 
-              {updateProfileMutation.error && (
-                <p data-testid="settings-save-error" className="text-secondary font-mono text-danger">
-                  {updateProfileMutation.error instanceof Error
-                    ? updateProfileMutation.error.message
-                    : t("user.saveFailed")}
-                </p>
-              )}
+          {saveSuccess && (
+            <p data-testid="settings-save-success" className="text-secondary font-mono text-accent-dim">
+              {t("user.saved")}
+            </p>
+          )}
 
-              {saveSuccess && (
-                <p data-testid="settings-save-success" className="text-secondary font-mono text-accent-dim">
-                  {t("user.saved")}
-                </p>
-              )}
+          <Button
+            data-testid="settings-save-button"
+            onClick={handleSave}
+            disabled={updateProfileMutation.isPending}
+            isLoading={updateProfileMutation.isPending}
+            loadingText={t("user.saving")}
+          >
+            {t("user.saveButton")}
+          </Button>
+        </section>
 
+        {/* Email is its own section so the user doesn't mistake it for
+            something the "Save Changes" button covers — email only mutates
+            via the OTP-verified flow below. */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
+            {t("user.emailHeading")}
+          </h2>
+
+          {isLoading ? (
+            <span className="text-secondary font-mono text-muted">
+              {t("common:states.loading")}
+            </span>
+          ) : emailChangeStep === "idle" ? (
+            <div className="flex flex-col gap-1.5">
+              <TextInput
+                label={t("user.emailLabel")}
+                value={email}
+                onChange={() => { /* read-only — change via the button below */ }}
+                type="email"
+                placeholder={t("user.emailPlaceholder")}
+                id="settings-email"
+                disabled
+              />
+              <input data-testid="settings-email-input" type="hidden" value={email} readOnly />
               <Button
-                data-testid="settings-save-button"
-                onClick={handleSave}
-                disabled={updateProfileMutation.isPending}
-                isLoading={updateProfileMutation.isPending}
-                loadingText={t("user.saving")}
+                data-testid="settings-email-change-button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setPendingNewEmail("");
+                  setEmailOtpCode("");
+                  setCurrentEmailOtpCode("");
+                  setEmailChangeError(null);
+                  setEmailChangeStep("request");
+                }}
+                className="self-start mt-3"
               >
-                {t("user.saveButton")}
+                {t("user.changeEmailButton")}
               </Button>
-            </section>
-
-            {/* Email is its own section so the user doesn't mistake it for
-                something the "Save Changes" button covers — email only mutates
-                via the OTP-verified flow below. */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
-                {t("user.emailHeading")}
-              </h2>
-
-              {isLoading ? (
-                <span className="text-secondary font-mono text-muted">
-                  {t("common:states.loading")}
-                </span>
-              ) : emailChangeStep === "idle" ? (
-                <div className="flex flex-col gap-1.5">
-                  <TextInput
-                    label={t("user.emailLabel")}
-                    value={email}
-                    onChange={() => { /* read-only — change via the button below */ }}
-                    type="email"
-                    placeholder={t("user.emailPlaceholder")}
-                    id="settings-email"
-                    disabled
-                  />
-                  <input data-testid="settings-email-input" type="hidden" value={email} readOnly />
-                  <Button
-                    data-testid="settings-email-change-button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setPendingNewEmail("");
-                      setEmailOtpCode("");
-                      setCurrentEmailOtpCode("");
-                      setEmailChangeError(null);
-                      setEmailChangeStep("request");
-                    }}
-                    className="self-start mt-3"
-                  >
-                    {t("user.changeEmailButton")}
-                  </Button>
-                </div>
-              ) : emailChangeStep === "request" ? (
-                <div className="flex flex-col gap-2">
-                  <TextInput
-                    label={t("user.newEmailLabel")}
-                    value={pendingNewEmail}
-                    onChange={setPendingNewEmail}
-                    type="email"
-                    placeholder={t("user.emailPlaceholder")}
-                    id="settings-email-new"
-                    disabled={emailChangePending}
-                  />
-                  <input data-testid="settings-email-new-input" type="hidden" value={pendingNewEmail} readOnly />
-                  {emailChangeError && (
-                    <p data-testid="settings-email-change-error" className="text-secondary font-mono text-danger">
-                      {emailChangeError}
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      data-testid="settings-email-send-code"
-                      size="sm"
-                      onClick={handleSendEmailChangeOtp}
-                      isLoading={emailChangePending}
-                      loadingText={t("user.sending")}
-                    >
-                      {t("user.sendCodeButton")}
-                    </Button>
-                    <Button
-                      data-testid="settings-email-cancel"
-                      variant="ghost"
-                      size="sm"
-                      onClick={cancelEmailChange}
-                      disabled={emailChangePending}
-                    >
-                      {t("common:actions.cancel")}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <p className="text-secondary font-mono text-muted">
-                    <Trans
-                      t={t}
-                      i18nKey="user.codeSent"
-                      values={{ email: pendingNewEmail }}
-                      components={{ addr: <span className="text-fg" /> }}
-                    />
-                  </p>
-                  <TextInput
-                    label={t("user.verificationCodeLabel")}
-                    value={emailOtpCode}
-                    onChange={setEmailOtpCode}
-                    placeholder="000000"
-                    id="settings-email-otp"
-                    disabled={emailChangePending}
-                  />
-                  <input data-testid="settings-email-otp-input" type="hidden" value={emailOtpCode} readOnly />
-                  <p className="text-secondary font-mono text-muted mt-2">
-                    <Trans
-                      t={t}
-                      i18nKey="user.currentCodeSent"
-                      values={{ email }}
-                      components={{ addr: <span className="text-fg" /> }}
-                    />
-                  </p>
-                  <TextInput
-                    label={t("user.currentCodeLabel")}
-                    value={currentEmailOtpCode}
-                    onChange={setCurrentEmailOtpCode}
-                    placeholder="000000"
-                    id="settings-email-current-otp"
-                    disabled={emailChangePending}
-                  />
-                  <input
-                    data-testid="settings-email-current-otp-input"
-                    type="hidden"
-                    value={currentEmailOtpCode}
-                    readOnly
-                  />
-                  {emailChangeError && (
-                    <p data-testid="settings-email-change-error" className="text-secondary font-mono text-danger">
-                      {emailChangeError}
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      data-testid="settings-email-verify"
-                      size="sm"
-                      onClick={handleVerifyEmailChange}
-                      isLoading={emailChangePending}
-                      loadingText={t("user.verifying")}
-                    >
-                      {t("user.verifyButton")}
-                    </Button>
-                    <Button
-                      data-testid="settings-email-back"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEmailOtpCode("");
-                        setCurrentEmailOtpCode("");
-                        setEmailChangeError(null);
-                        setEmailChangeStep("request");
-                      }}
-                      disabled={emailChangePending}
-                    >
-                      {t("common:actions.back")}
-                    </Button>
-                  </div>
-                </div>
+            </div>
+          ) : emailChangeStep === "request" ? (
+            <div className="flex flex-col gap-2">
+              <TextInput
+                label={t("user.newEmailLabel")}
+                value={pendingNewEmail}
+                onChange={setPendingNewEmail}
+                type="email"
+                placeholder={t("user.emailPlaceholder")}
+                id="settings-email-new"
+                disabled={emailChangePending}
+              />
+              <input data-testid="settings-email-new-input" type="hidden" value={pendingNewEmail} readOnly />
+              {emailChangeError && (
+                <p data-testid="settings-email-change-error" className="text-secondary font-mono text-danger">
+                  {emailChangeError}
+                </p>
               )}
-            </section>
-
-            {/* Avatar */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
-                {t("user.avatarHeading")}
-              </h2>
-
-              <div className="flex items-center gap-4">
-                <div
-                  data-testid="avatar-preview-container"
-                  className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer rounded-panel border-2 border-line bg-surface-high"
-                  onClick={() => fileInputRef.current?.click()}
-                  title={t("user.avatarPickTitle")}
+              <div className="flex gap-2">
+                <Button
+                  data-testid="settings-email-send-code"
+                  size="sm"
+                  onClick={handleSendEmailChangeOtp}
+                  isLoading={emailChangePending}
+                  loadingText={t("user.sending")}
                 >
-                  {preview ? (
-                    <img data-testid="avatar-new-preview" src={preview} alt={t("user.avatarPreviewAlt")} className="w-full h-full object-cover" />
-                  ) : currentAvatarUrl ? (
-                    <img
-                      data-testid="avatar-current"
-                      src={currentAvatarUrl}
-                      alt={t("user.avatarAlt")}
-                      className="w-full h-full object-cover"
-                      onError={() => setCurrentAvatarUrl(null)}
-                    />
-                  ) : (
-                    <User data-testid="avatar-placeholder" size={22} aria-hidden="true" className="text-muted" />
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <label
-                    htmlFor="settings-avatar-input"
-                    className="inline-flex items-center gap-1.5 text-secondary font-mono cursor-pointer transition-colors text-accent"
-                  >
-                    <Upload size={14} aria-hidden="true" />
-                    {t("user.chooseImage")}
-                  </label>
-                  <input
-                    key={fileInputKey}
-                    ref={fileInputRef}
-                    id="settings-avatar-input"
-                    data-testid="settings-avatar-input"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    disabled={updateAvatarMutation.isPending}
-                    aria-label={t("user.avatarInputLabel")}
-                    className="sr-only"
-                  />
-                  <p className="text-secondary font-mono text-muted">
-                    {t("user.avatarHint")}
-                  </p>
-                </div>
+                  {t("user.sendCodeButton")}
+                </Button>
+                <Button
+                  data-testid="settings-email-cancel"
+                  variant="ghost"
+                  size="sm"
+                  onClick={cancelEmailChange}
+                  disabled={emailChangePending}
+                >
+                  {t("common:actions.cancel")}
+                </Button>
               </div>
-
-              {uploadError && (
-                <p data-testid="avatar-upload-error" className="text-secondary font-mono text-danger">
-                  {uploadError}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-secondary font-mono text-muted">
+                <Trans
+                  t={t}
+                  i18nKey="user.codeSent"
+                  values={{ email: pendingNewEmail }}
+                  components={{ addr: <span className="text-fg" /> }}
+                />
+              </p>
+              <TextInput
+                label={t("user.verificationCodeLabel")}
+                value={emailOtpCode}
+                onChange={setEmailOtpCode}
+                placeholder="000000"
+                id="settings-email-otp"
+                disabled={emailChangePending}
+              />
+              <input data-testid="settings-email-otp-input" type="hidden" value={emailOtpCode} readOnly />
+              <p className="text-secondary font-mono text-muted mt-2">
+                <Trans
+                  t={t}
+                  i18nKey="user.currentCodeSent"
+                  values={{ email }}
+                  components={{ addr: <span className="text-fg" /> }}
+                />
+              </p>
+              <TextInput
+                label={t("user.currentCodeLabel")}
+                value={currentEmailOtpCode}
+                onChange={setCurrentEmailOtpCode}
+                placeholder="000000"
+                id="settings-email-current-otp"
+                disabled={emailChangePending}
+              />
+              <input
+                data-testid="settings-email-current-otp-input"
+                type="hidden"
+                value={currentEmailOtpCode}
+                readOnly
+              />
+              {emailChangeError && (
+                <p data-testid="settings-email-change-error" className="text-secondary font-mono text-danger">
+                  {emailChangeError}
                 </p>
               )}
-
-              {saveSuccess && !selectedFile && (
-                <p data-testid="avatar-upload-success" className="text-secondary font-mono text-accent-dim">
-                  {t("user.avatarUpdated")}
-                </p>
-              )}
-
-              {avatarRemoved && !currentAvatarUrl && !selectedFile && (
-                <p data-testid="avatar-remove-success" className="text-secondary font-mono text-accent-dim">
-                  {t("user.avatarRemoved")}
-                </p>
-              )}
-
-              {currentAvatarUrl && !selectedFile && (
+              <div className="flex gap-2">
                 <Button
-                  data-testid="remove-avatar-button"
-                  variant="danger"
-                  onClick={handleAvatarRemove}
-                  disabled={updateAvatarMutation.isPending}
-                  isLoading={updateAvatarMutation.isPending}
+                  data-testid="settings-email-verify"
+                  size="sm"
+                  onClick={handleVerifyEmailChange}
+                  isLoading={emailChangePending}
+                  loadingText={t("user.verifying")}
                 >
-                  {t("user.removeAvatarButton")}
+                  {t("user.verifyButton")}
                 </Button>
-              )}
-
-              {selectedFile && (
                 <Button
-                  data-testid="upload-avatar-button"
-                  onClick={handleAvatarUpload}
-                  disabled={updateAvatarMutation.isPending}
-                  isLoading={updateAvatarMutation.isPending}
-                  loadingText={t("user.uploading")}
+                  data-testid="settings-email-back"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEmailOtpCode("");
+                    setCurrentEmailOtpCode("");
+                    setEmailChangeError(null);
+                    setEmailChangeStep("request");
+                  }}
+                  disabled={emailChangePending}
                 >
-                  {t("user.uploadAvatarButton")}
+                  {t("common:actions.back")}
                 </Button>
-              )}
-            </section>
+              </div>
+            </div>
+          )}
+        </section>
 
+        {/* Avatar */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
+            {t("user.avatarHeading")}
+          </h2>
+
+          <div className="flex items-center gap-4">
+            <div
+              data-testid="avatar-preview-container"
+              className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer rounded-panel border-2 border-line bg-surface-high"
+              onClick={() => fileInputRef.current?.click()}
+              title={t("user.avatarPickTitle")}
+            >
+              {preview ? (
+                <img data-testid="avatar-new-preview" src={preview} alt={t("user.avatarPreviewAlt")} className="w-full h-full object-cover" />
+              ) : currentAvatarUrl ? (
+                <img
+                  data-testid="avatar-current"
+                  src={currentAvatarUrl}
+                  alt={t("user.avatarAlt")}
+                  className="w-full h-full object-cover"
+                  onError={() => setCurrentAvatarUrl(null)}
+                />
+              ) : (
+                <User data-testid="avatar-placeholder" size={22} aria-hidden="true" className="text-muted" />
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label
+                htmlFor="settings-avatar-input"
+                className="inline-flex items-center gap-1.5 text-secondary font-mono cursor-pointer transition-colors text-accent"
+              >
+                <Upload size={14} aria-hidden="true" />
+                {t("user.chooseImage")}
+              </label>
+              <input
+                key={fileInputKey}
+                ref={fileInputRef}
+                id="settings-avatar-input"
+                data-testid="settings-avatar-input"
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                disabled={updateAvatarMutation.isPending}
+                aria-label={t("user.avatarInputLabel")}
+                className="sr-only"
+              />
+              <p className="text-secondary font-mono text-muted">
+                {t("user.avatarHint")}
+              </p>
+            </div>
           </div>
-        </div>
-      </div>
+
+          {uploadError && (
+            <p data-testid="avatar-upload-error" className="text-secondary font-mono text-danger">
+              {uploadError}
+            </p>
+          )}
+
+          {saveSuccess && !selectedFile && (
+            <p data-testid="avatar-upload-success" className="text-secondary font-mono text-accent-dim">
+              {t("user.avatarUpdated")}
+            </p>
+          )}
+
+          {avatarRemoved && !currentAvatarUrl && !selectedFile && (
+            <p data-testid="avatar-remove-success" className="text-secondary font-mono text-accent-dim">
+              {t("user.avatarRemoved")}
+            </p>
+          )}
+
+          {currentAvatarUrl && !selectedFile && (
+            <Button
+              data-testid="remove-avatar-button"
+              variant="danger"
+              onClick={handleAvatarRemove}
+              disabled={updateAvatarMutation.isPending}
+              isLoading={updateAvatarMutation.isPending}
+            >
+              {t("user.removeAvatarButton")}
+            </Button>
+          )}
+
+          {selectedFile && (
+            <Button
+              data-testid="upload-avatar-button"
+              onClick={handleAvatarUpload}
+              disabled={updateAvatarMutation.isPending}
+              isLoading={updateAvatarMutation.isPending}
+              loadingText={t("user.uploading")}
+            >
+              {t("user.uploadAvatarButton")}
+            </Button>
+          )}
+        </section>
+      </PageColumn>
     </PageShell>
   );
 });

@@ -100,7 +100,7 @@
     "pageTitle": "Leave group",
     "confirm": "Are you sure you want to leave <strong>{{name}}</strong>?",
     "rejoinNotice": "You will need a new invite to rejoin.",
-    "confirmButton": "Yes, Leave",
+    "confirmButton": "Yes, leave",
     "submitting": "Leaving…",
     "leaveFailed": "Failed to leave group"
   },
@@ -130,7 +130,7 @@
     "pageTitle": "Remove member",
     "confirm": "Remove <strong>{{name}}</strong> from this group?",
     "rejoinNotice": "They will need a new invite to rejoin.",
-    "confirmButton": "Yes, Remove",
+    "confirmButton": "Yes, remove",
     "submitting": "Removing…",
     "removeFailed": "Failed to remove member"
   },

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../ui/Button";
+import { FormActions } from "../ui/FormActions";
 import { InputOtp } from "../ui/InputOtp";
 import * as api from "../../services/api";
 import { errorMessage } from "../../utils/errorMessage";
@@ -110,7 +111,7 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
         </p>
       )}
 
-      <div className="flex gap-2">
+      <FormActions>
         <Button
           data-testid="history-approval-approve"
           isLoading={busy === "approve"}
@@ -128,7 +129,7 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
         >
           {t("historyTransfer.decline")}
         </Button>
-      </div>
+      </FormActions>
     </div>
   );
 };

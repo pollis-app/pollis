@@ -18,6 +18,9 @@
   "settings": {
     "pageTitle": "Conversation settings",
     "leave": "Leave conversation",
+    "leaveQuestion": "Leave your conversation with <strong>{{name}}</strong>?",
+    "leaveQuestionUnnamed": "Leave this conversation?",
+    "leaveConsequence": "You will stop receiving its new messages.",
     "submitting": "Leaving…",
     "leaveFailed": "Failed to leave conversation",
     "cancel": "Cancel (Esc)"

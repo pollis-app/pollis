@@ -34,9 +34,15 @@
   from `voice-stage.css`. Corners are `rounded-chip` / `rounded-control` / `rounded-panel` /
   `rounded-full` by role, never an inline `borderRadius` (rule: `docs/design/README.md` →
   "Space, radius, size"; `e2e/buttons-radii.spec.ts` checks both skins).
-- **No modals.** Confirmation and input flows replace the chat input bar (the
-  edit/delete bar pattern in `MainContent`) or navigate to a page. The sole exception
-  is the Cmd+K search menu.
+- **No modals.** Confirmation and input flows replace the chat input bar or navigate to a page.
+  The sole exception is the Cmd+K search menu.
+- **One confirmation, one form (#1968).** In a conversation a confirmation is a `ConfirmBar`
+  (replaces the composer); everywhere else it is a `ConfirmBlock` in the page column, as its own
+  page (`ConfirmPage`) or in place of the control it confirms on a settings page. Every form,
+  settings and confirmation page is one `PageColumn` (top-aligned, at most 420px, no card), a
+  `FormLead` when a step needs a heading, and one `FormActions` row (action first, ghost Cancel
+  last). Rule: `docs/design/README.md` → "Confirmations and forms"; both skins checked by
+  `e2e/confirm-form-patterns.spec.ts`.
 - **People in rows (#1971):** the display name when set, else the handle; one line, never
   wrapped mid-word. Desktop rows truncate the name at the end and keep their controls at full
   width (`e2e/long-handles.spec.ts`); mobile truncates a handle in the middle
@@ -888,7 +894,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**223 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**230 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -956,10 +962,11 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **InviteLinkManager** — props: groupId — `frontend/src/components/Invites/InviteLinkManager.tsx`
 - **InviteLinkRow** — props: link, onRevoke, isRevoking — `frontend/src/components/Invites/InviteLinkRow.tsx`
 
-### `components/Layout` (12)
+### `components/Layout` (13)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`. The bar under the TitleBar: a back/forward chevron pair, then the clickable trail, then search + settings. The chevrons walk **router history**, one entry per click, the way a browser (and Slack, and Discord) does — there is no hierarchical "up one level" navigation any more; the trail's own segments are what jump up the tree. **Both are always rendered**, root included: a control that vanishes at the root shifts everything beside it sideways on the way home. When a direction has nowhere to go it is greyed out and truly `disabled` (a `ui/Button` `variant="ghost"`), so assistive tech is told what the grey says. Enablement comes from `stores/historyNavStore`, which subscribes to `router.history` (event-driven, never polled) and keeps a cursor plus a ceiling — `canGoBack` is `index > 0`, `canGoForward` is `index < maxIndex`, and a PUSH resets the ceiling to the new entry because it discards whatever was ahead. That arithmetic is pure in `utils/historyNav.ts` and pinned by `frontend/tests/history-nav.test.ts`; it exists because no browser API answers "can I go forward?" — `history.length` counts a session, not a direction, and never shrinks on a truncating push. The `nav.back` shortcut (Escape, handled in `AppShell`) routes through the same `historyNavStore.goBack()`, so the key and the chevron cannot land in different places.
+- **ConfirmPage** — props: title, paneTestId — `frontend/src/components/Layout/ConfirmPage.tsx`. A confirmation that is its own page (#1968): `PageShell` + `PageColumn` + `ConfirmBlock`. Leave group and Remove member; `e2e/confirm-form-patterns.spec.ts`.
 - **ConversationHeader** — props: title, children — `frontend/src/components/Layout/ConversationHeader.tsx`. The `h-bar` top bar of the channel and DM pages (#1640): title on the start side, every action in one `flex items-center gap-2` row on the end side. Spacing and vertical centring live here only — actions carry no `me-*` margins and nothing is absolutely positioned (the DM call button used to be, and sat on top of the pin). In the DM header the call slot becomes a "Return to call" `PillButton` (same target as the voice bar's channel pill, via `activeCallIdOf` in `types/voice-state.ts`) while any 1:1 call is joining or joined. Pinned by `frontend/tests/conversation-header.test.ts` and `e2e/dm-header-actions.spec.ts`.
 - **MainContent** — props: pendingDmRequest — `frontend/src/components/Layout/MainContent.tsx`
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
@@ -1040,7 +1047,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 - **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
-### `components/ui` (43)
+### `components/ui` (49)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
@@ -1051,10 +1058,15 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **Checkbox** — props: label, checked, onChange, disabled, className — `frontend/src/components/ui/Checkbox.tsx`
 - **Chip** — props: children, onClick, selected, disabled, title, machine, style — `frontend/src/components/ui/Chip.tsx`
 - **CodeSnippet** — props: value, labels, ariaLabels, copyTestId — `frontend/src/components/ui/CodeSnippet.tsx`. A read-only value (shell command, link) with a copy `Button` beside it; the value wraps instead of scrolling. Copies through the clipboard bridge with the idle/copied/failed `data-copy-state` (#898). Used by the Software Update page's managed-install command and the created invite-link card.
+- **ComposerBarHeader** — props: heading, onCancel, cancelLabel, cancelTestId, focusCancel — `frontend/src/components/ui/ComposerBarHeader.tsx`. The heading row (and optional cancel `X`) of every bar that replaces the chat input: `EditMessageBar`, `ConfirmBar`, the DM-request bar.
+- **ConfirmBar** — props: testId, heading, body, cancelLabel, cancelTestId, onCancel, confirmLabel, confirmTestId, onConfirm, isPending, pendingLabel — `frontend/src/components/ui/ConfirmBar.tsx`. The one confirmation inside a conversation (#1968): replaces the chat input with the consequence and a `danger` action that holds focus (Enter confirms; Escape, handled by the caller, or the `X` cancels). Delete message / channel in `MainContent`, delete in the Vault.
+- **ConfirmBlock** — props: question, consequence, children, error, errorTestId, confirmLabel, onConfirm, isPending, pendingLabel, confirmDisabled, confirmTestId, cancel, testId — `frontend/src/components/ui/ConfirmBlock.tsx`. The one confirmation in a page column (#1968): the question naming its object, the consequence, an optional field (a typed name), the error, then the page's only `danger` button and a ghost Cancel, which is the default focus unless a field takes it. Used by `ConfirmPage`, Conversation settings, and the Security page's in-place revokes.
 - **DotMatrix** — props: algorithm, dotSize, spacing, speed, className, style — `frontend/src/components/ui/DotMatrix.tsx`
 - **EditMessageBar** — props: heading, cancelLabel, hint, value, onChange, onSave, onCancel, isSaving, testId, inputTestId, cancelTestId — `frontend/src/components/ui/EditMessageBar.tsx`. The bar that replaces the composer while a message is being edited: heading row with a cancel `X`, a textarea that inverts to accent-on-focus like the composer (`is-focused`), and the Enter/Shift+Enter/Esc hint. The channel/DM log (`MainContent`) and the Vault both render it — they used to carry two divergent inline copies (the Vault's had a Save button and no focus inversion). Enter saves; Escape is the caller's, handled at page level in capture phase. Mounting focuses with the caret at the end, so callers `key` it by the edited message id.
 - **EmojiSuggestList** — props: entries, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/EmojiSuggestList.tsx`
 - **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The one "nothing here" treatment for every empty list (#874, #1969): one centred sentence in `text-muted`, and the action that fills the space under it when there is one (Join on an empty voice room; the reasons under search's no-results). Not a loading or error state. `NavigableList`/`NavigableGrid` render it for their `emptyLabel`, so every list page gets it, and `PageShell`'s body is a flex column so a page's `flex-1` list (and the sentence) fills and centres in the pane. Sets `data-empty-state` (`e2e/empty-states.spec.ts`). Mobile twin: `EmptyState` in `mobile/components/ui.tsx` (one sentence, an optional `icon` only where the list is the whole screen, an `action`); the copy key is the same wherever the screens match (`dms:blocked.empty`, `nav:pins.empty`, `nav:thread.empty`, `settings:security.eventsEmpty`, `emoji:manage.empty`, `settings:historyTransfer.noSources`, …). Maestro: `flows/empty-states.yaml`.
+- **FormActions** — props: children, cancel — `frontend/src/components/ui/FormActions.tsx`. The one actions row (#1968): left-aligned, natural-width buttons, the action first, an optional ghost Cancel (`cancel` prop) last.
+- **FormLead** — props: title, children, testId, titleTestId — `frontend/src/components/ui/FormLead.tsx`. A form step's heading (`<h2>`, `text-title`) and its sentence (#1968); never a second page title. Join a group, Change PIN, Report, Copy history, Link device.
 - **IconButton** — props: size, activateOn, destructive — `frontend/src/components/ui/IconButton.tsx`
 - **IconSpinner** — `frontend/src/components/ui/IconSpinner.tsx`
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick, activateOn — `frontend/src/components/ui/InlineAudioPlayer.tsx`
@@ -1067,6 +1079,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **NavigableGrid** — props: items, getKey, renderCell, onActivate, minCellWidth, maxCellWidth, aspect, gap, autoFocus, emptyLabel, testId — `frontend/src/components/ui/NavigableGrid.tsx`
 - **NavigableList** — props: items, getKey, renderRow, controls, trailing, onEnterRow, onClickRow, activateRowOn, isLoading, loadingLabel, emptyLabel, rowTestId, testId, autoFocus, cursorOnlyWhenFocused — `frontend/src/components/ui/NavigableList.tsx`
 - **NavRow** — props: children, onClick, lang, textId — `frontend/src/components/ui/NavRow.tsx`. A filled, unbordered row with a trailing chevron (mirrored under RTL) that opens another page; acts on press (#1529). Styled as an unselected `RadioList` row so a setting's row and its page's list read as one family.
+- **PageColumn** — props: children, as, spacing, paneTestId, onSubmit, className — `frontend/src/components/ui/PageColumn.tsx`. The one page column (#1968): a scrolling pane with a top-aligned column at most 420px (`max-w-md`), centred, no card. `as="form"` when the column is the form; `spacing` `fields` (gap-5) or `sections` (gap-8). Every form, settings and confirmation page.
 - **PanelCloseRow** — props: label, shortcut, ariaLabel, onClick, activateOn — `frontend/src/components/ui/PanelCloseRow.tsx`
 - **PillButton** — props: accent, onClick, title, square, children — `frontend/src/components/ui/PillButton.tsx`
 - **PollisLogo** — props: size, color — `frontend/src/components/ui/PollisLogo.tsx`

@@ -14,6 +14,7 @@ import {
 import { ChatInput, type ChatInputHandle, type Attachment } from "../components/ui/ChatInput";
 import { Button } from "../components/ui/Button";
 import { EditMessageBar } from "../components/ui/EditMessageBar";
+import { ConfirmBar } from "../components/ui/ConfirmBar";
 import { LinkifiedText } from "../components/ui/LinkifiedText";
 import { AttachmentDisplay } from "../components/Message/AttachmentDisplay";
 import { MediaGalleryView } from "../components/Media/MediaGalleryView";
@@ -313,34 +314,19 @@ export const VaultPage: React.FC = observer(() => {
               isSaving={editMutation.isPending}
             />
           ) : pendingDeleteId ? (
-            <div data-testid="vault-delete-bar">
-              <div className="flex flex-shrink-0 items-center gap-2 border-t border-line bg-surface px-4 py-1.5">
-                <span className="flex-1 font-mono text-meta uppercase tracking-widest text-muted">
-                  {t("delete.heading")}
-                </span>
-                <IconButton
-                  data-testid="vault-delete-cancel"
-                  onClick={() => setPendingDeleteId(null)}
-                  aria-label={t("delete.cancel")}
-                  className="flex-shrink-0"
-                >
-                  <X size={20} aria-hidden="true" />
-                </IconButton>
-              </div>
-              <div className="flex items-center justify-between gap-4 bg-surface px-4 pb-3 pt-2">
-                <p className="font-mono text-secondary text-dim">{t("delete.body")}</p>
-                <Button
-                  data-testid="vault-delete-confirm"
-                  variant="danger"
-                  onClick={confirmDelete}
-                  isLoading={deleteMutation.isPending}
-                  loadingText={t("delete.deleting")}
-                  autoFocus
-                >
-                  {t("delete.confirm")}
-                </Button>
-              </div>
-            </div>
+            <ConfirmBar
+              testId="vault-delete-bar"
+              heading={t("delete.heading")}
+              body={t("delete.body")}
+              cancelLabel={t("delete.cancel")}
+              cancelTestId="vault-delete-cancel"
+              onCancel={() => setPendingDeleteId(null)}
+              confirmLabel={t("delete.confirm")}
+              confirmTestId="vault-delete-confirm"
+              onConfirm={confirmDelete}
+              isPending={deleteMutation.isPending}
+              pendingLabel={t("delete.deleting")}
+            />
           ) : (
             <div className="flex-shrink-0" data-testid="vault-composer">
               {saving ? (

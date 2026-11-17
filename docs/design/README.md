@@ -194,7 +194,31 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   `Group surface="high"`, red when destructive; Close cancels), never a stock `Alert`, whose
   platform dialog ignores the theme.
 - **No modals on desktop.** The Cmd+K palette is the only overlay. A confirmation replaces the
-  chat input bar or is its own page.
+  chat input bar or sits in the page column (see "Confirmations and forms").
+- **Confirmations and forms (desktop, #1968).** One pattern each.
+  - **The form pattern.** A form, settings or confirmation page is `PageShell` (the title) over one
+    `PageColumn`: a single column at most 420px, top-aligned and centred in the main pane, with no
+    card, border or fill around it. Fields stack in it (`spacing="fields"`), a settings page's
+    sections are spaced wider (`spacing="sections"`). A step that needs a heading under the page
+    title uses `FormLead` (a question or step name and one sentence), never a second page title.
+    Errors sit under the fields in `danger`. The actions are one `FormActions` row under them:
+    left-aligned, every button at its natural width, the action first (`primary`, or `danger` when
+    it destroys) and Cancel last as a `ghost` button. No full-width submit, no button stack.
+  - **The confirmation pattern.** A question that names its object ("Leave Studio?"), the
+    consequence in one plain sentence ("You will need a new invite to rejoin."), then the
+    destructive action (`danger`, and on a confirmation page the only one) and Cancel. Cancel,
+    never the action, is the default focus; Escape goes back as on every page. On a page this is a `ConfirmBlock` in the
+    `PageColumn`: as its own page (`ConfirmPage`: Leave group, Remove member), as a section of a
+    settings page (Conversation settings' Leave), or in place of the control it confirms (the
+    Security page's Revoke device and Revoke now). Inside a conversation it is a `ConfirmBar`, which
+    replaces the chat input (delete a message, delete a channel, delete in the Vault): there the
+    user has just picked the action on that very message, so the action holds focus and Enter
+    confirms, while Escape or the bar's X cancels.
+  - Kept apart, on purpose: sign-out and "wipe this device" confirm on the sign-in card, because
+    they run outside the app shell where there is no main pane; Custom emoji keeps a wider column
+    for its grid; the Settings hub and a user's profile keep their profile header layout.
+  - Mobile keeps its native patterns (a `SheetOverlay`, a tap-again row or button, grouped lists);
+    the copy is shared, and the destructive row or button is the only red one.
 - **Same-frame feedback.** Anything that can take time shows an optimistic result or a busy,
   un-repeatable control on the same frame, on every platform.
 - **Name what an action acts on.** A confirmation names its object ("Join Design team?", not
@@ -230,7 +254,8 @@ primitive cannot do what a screen needs, extend it in its own file and use it ev
 
 - **Desktop** (`frontend/src/components/ui/`): `Button` (`primary`, `secondary`, `ghost`,
   `danger`), `IconButton`, `LinkButton`, `Chip`, `Kbd`, `PanelCloseRow`, `TextInput`, `TextArea`,
-  `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`,
+  `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`, `PageColumn`, `FormLead`,
+  `FormActions`, `ConfirmBlock` (and `Layout/ConfirmPage`), `ConfirmBar`, `ComposerBarHeader`,
   `Select` (a pick-one dropdown with its label), `SectionHeader` (a panel section's title),
   `Card`, `EmptyState`, `Avatar`, `PresenceAvatar`, `PresenceDot`, `PillButton`, `PressButton`,
   `NavigableList`, `NavigableGrid`, `TerminalMenu` (Terminal hub pages), `LoaderSpinner`,

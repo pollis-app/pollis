@@ -4,6 +4,9 @@ import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormLead } from "../components/ui/FormLead";
+import { FormActions } from "../components/ui/FormActions";
 import { Button } from "../components/ui/Button";
 import * as api from "../services/api";
 
@@ -80,40 +83,30 @@ export const ChangePinPage: React.FC = () => {
 
   return (
     <PageShell title={t("changePin.title")} scrollable>
-      <div className="flex justify-center px-6 py-8">
-      <div
-        className="flex flex-col gap-4 w-full max-w-md font-mono text-fg"
-        data-testid="change-pin-page"
-      >
+      <PageColumn data-testid="change-pin-page" className="font-mono text-fg">
         {done ? (
-          <div className="flex flex-col gap-4">
+          <>
             <p className="text-secondary text-accent">
               {t("changePin.updated")}
             </p>
-            <Button
-              data-testid="change-pin-done-button"
-              onClick={() => navigate({ to: "/security" })}
-            >
-              {t("changePin.doneButton")}
-            </Button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-5">
-            <div>
-              <h2 className="text-body font-bold text-accent">
-                {heading}
-              </h2>
-              <p
-                className="text-secondary mt-1 text-muted"
-                style={{ lineHeight: 1.5 }}
+            <FormActions>
+              <Button
+                data-testid="change-pin-done-button"
+                onClick={() => navigate({ to: "/security" })}
               >
-                {step === "old"
-                  ? t("changePin.hintOld")
-                  : step === "new"
-                  ? t("changePin.hintNew")
-                  : t("changePin.hintConfirm")}
-              </p>
-            </div>
+                {t("changePin.doneButton")}
+              </Button>
+            </FormActions>
+          </>
+        ) : (
+          <>
+            <FormLead title={heading}>
+              {step === "old"
+                ? t("changePin.hintOld")
+                : step === "new"
+                ? t("changePin.hintNew")
+                : t("changePin.hintConfirm")}
+            </FormLead>
 
             {error && (
               <p
@@ -134,17 +127,15 @@ export const ChangePinPage: React.FC = () => {
               data-testid="change-pin-input"
             />
 
-            <Button
-              data-testid="change-pin-cancel-button"
-              variant="ghost"
-              onClick={() => navigate({ to: "/security" })}
-            >
-              {t("common:actions.cancel")}
-            </Button>
-          </div>
+            <FormActions
+              cancel={{
+                testId: "change-pin-cancel-button",
+                onClick: () => navigate({ to: "/security" }),
+              }}
+            />
+          </>
         )}
-      </div>
-      </div>
+      </PageColumn>
     </PageShell>
   );
 };

@@ -4,7 +4,9 @@ import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
 import { Button } from "../components/ui/Button";
+import { ConfirmBlock } from "../components/ui/ConfirmBlock";
 import { LinkButton } from "../components/ui/LinkButton";
 import { TextInput } from "../components/ui/TextInput";
 import { Switch } from "../components/ui/Switch";
@@ -267,11 +269,7 @@ export const SecurityPage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("security.title")} scrollable>
-      <div className="flex justify-center px-6 py-8">
-        <div
-          className="flex flex-col gap-8 w-full max-w-md font-mono"
-          data-testid="security-page"
-        >
+      <PageColumn spacing="sections" className="font-mono" data-testid="security-page">
           {/* Account key — advisory self-audit of your published identity key
               against the public transparency log (#330). */}
           <section className="flex flex-col gap-4 mb-12" data-testid="account-key-section">
@@ -466,18 +464,24 @@ export const SecurityPage: React.FC = observer(() => {
             )}
 
             {confirmingDevice ? (
-              <div
-                className="flex flex-col gap-3 p-3 rounded-panel bg-surface border-2 border-line"
-                data-testid="revoke-confirm"
-              >
-                <p className="text-secondary text-fg">
+              <ConfirmBlock
+                testId="revoke-confirm"
+                question={
                   <Trans
                     t={t}
                     i18nKey="security.revokeConfirmPrompt"
                     values={{ device: deviceDisplayName(confirmingDevice) }}
                     components={{ name: <strong /> }}
                   />
-                </p>
+                }
+                confirmTestId="revoke-confirm-submit"
+                confirmLabel={t("security.revokeConfirmSubmit")}
+                pendingLabel={t("security.revoking")}
+                isPending={revoking}
+                confirmDisabled={confirmInput !== deviceDisplayName(confirmingDevice)}
+                onConfirm={revoke}
+                cancel={{ disabled: revoking, onClick: cancelConfirm }}
+              >
                 <TextInput
                   label={t("security.revokeConfirmInputLabel", {
                     device: deviceDisplayName(confirmingDevice),
@@ -487,28 +491,7 @@ export const SecurityPage: React.FC = observer(() => {
                   autoFocus
                   data-testid="revoke-confirm-input"
                 />
-                <div className="flex gap-2">
-                  <Button
-          variant="danger"
-                    data-testid="revoke-confirm-submit"
-                    size="sm"
-                    disabled={
-                      confirmInput !== deviceDisplayName(confirmingDevice) || revoking
-                    }
-                    onClick={revoke}
-                  >
-                    {revoking ? t("security.revoking") : t("security.revokeConfirmSubmit")}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={revoking}
-                    onClick={cancelConfirm}
-                  >
-                    {t("common:actions.cancel")}
-                  </Button>
-                </div>
-              </div>
+              </ConfirmBlock>
             ) : (
               <NavigableList<api.DeviceInfo>
                 testId="devices-list"
@@ -666,25 +649,17 @@ export const SecurityPage: React.FC = observer(() => {
               </p>
             </div>
 
-            {/* Inline confirm (NO modal) — clicking "Revoke now" swaps the
-                button for a Confirm/Cancel row in place. */}
+            {/* "Revoke now" swaps itself for the one confirmation in place (#1968; no modal). */}
             <div className="self-start">
               {confirmingRevoke ? (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-secondary font-mono text-dim">
-                    {t("security.revokeNowNote")}
-                  </span>
-                  <Button variant="danger" size="sm" onClick={handleRevokeNow}>
-                    {t("security.revokeNowConfirm")}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setConfirmingRevoke(false)}
-                  >
-                    {t("common:actions.cancel")}
-                  </Button>
-                </div>
+                <ConfirmBlock
+                  testId="revoke-media-confirm"
+                  question={t("security.revokeNowQuestion")}
+                  consequence={t("security.revokeNowNote")}
+                  confirmLabel={t("security.revokeNowButton")}
+                  onConfirm={handleRevokeNow}
+                  cancel={{ onClick: () => setConfirmingRevoke(false) }}
+                />
               ) : (
                 <Button
                   variant="danger"
@@ -790,8 +765,7 @@ export const SecurityPage: React.FC = observer(() => {
               {t("security.deleteAccountButton")}
             </Button>
           </section>
-        </div>
-      </div>
+      </PageColumn>
     </PageShell>
   );
 });

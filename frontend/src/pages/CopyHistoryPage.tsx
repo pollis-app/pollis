@@ -4,6 +4,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormLead } from "../components/ui/FormLead";
+import { FormActions } from "../components/ui/FormActions";
 import { LoadingSpinner } from "../components/ui/LoaderSpinner";
 import { SourcePicker, defaultSource } from "../components/HistoryTransfer/SourcePicker";
 import { TransferStatus } from "../components/HistoryTransfer/TransferStatus";
@@ -82,10 +85,7 @@ export const CopyHistoryPage: React.FC = () => {
     const list = sources.data ?? [];
     body = (
       <>
-        <div className="flex flex-col gap-3">
-          <h2 className="text-title text-fg">{t("historyTransfer.pickTitle")}</h2>
-          <p className="text-body text-muted leading-relaxed">{t("historyTransfer.pickSubtitle")}</p>
-        </div>
+        <FormLead title={t("historyTransfer.pickTitle")}>{t("historyTransfer.pickSubtitle")}</FormLead>
         {sources.isError && (
           <p className="text-body text-danger" data-testid="history-sources-error">
             {errorMessage(sources.error, t("historyTransfer.sourcesFailed"))}
@@ -102,7 +102,7 @@ export const CopyHistoryPage: React.FC = () => {
             {requestError}
           </p>
         )}
-        <div className="flex gap-2">
+        <FormActions cancel={{ onClick: () => navigate({ to: "/security" }) }}>
           <Button
             data-testid="history-request-start"
             isLoading={requesting}
@@ -111,21 +111,16 @@ export const CopyHistoryPage: React.FC = () => {
           >
             {t("historyTransfer.start")}
           </Button>
-          <Button variant="ghost" onClick={() => navigate({ to: "/security" })}>
-            {t("common:actions.cancel")}
-          </Button>
-        </div>
+        </FormActions>
       </>
     );
   }
 
   return (
     <PageShell title={t("historyTransfer.pageTitle")} scrollable>
-      <div className="flex justify-center px-6 py-12">
-        <div className="flex flex-col gap-8 w-full max-w-md" data-testid="copy-history-page">
-          {body}
-        </div>
-      </div>
+      <PageColumn spacing="sections" data-testid="copy-history-page">
+        {body}
+      </PageColumn>
     </PageShell>
   );
 };

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
 import { Select } from "../components/ui/Select";
@@ -309,9 +310,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("settings.title")} scrollable>
-      <div data-testid="voice-settings-page" className="flex justify-center px-6 py-8">
-      <div className="flex flex-col gap-8 w-full max-w-md">
-
+      <PageColumn spacing="sections" paneTestId="voice-settings-page">
         <section className="flex flex-col gap-4 mb-12">
           <h2
             className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
@@ -636,9 +635,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             description={t("settings.autoJoinVoiceDescription")}
           />
         </section>
-
-      </div>
-      </div>
+      </PageColumn>
     </PageShell>
   );
 });

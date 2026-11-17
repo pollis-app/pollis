@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormActions } from "../components/ui/FormActions";
 import { LoadingSpinner } from "../components/ui/LoaderSpinner";
 import { HistoryApprovalCard } from "../components/HistoryTransfer/HistoryApprovalCard";
 import { TransferStatus } from "../components/HistoryTransfer/TransferStatus";
@@ -31,9 +33,9 @@ export const HistoryTransferApprovalPage: React.FC = () => {
         <p className="text-heading text-fg" data-testid="history-approval-declined">
           {t("historyTransfer.youDeclined")}
         </p>
-        <div>
+        <FormActions>
           <Button onClick={leave}>{t("historyTransfer.done")}</Button>
-        </div>
+        </FormActions>
       </>
     );
   } else if (request) {
@@ -54,20 +56,18 @@ export const HistoryTransferApprovalPage: React.FC = () => {
         <p className="text-heading text-fg" data-testid="history-approval-gone">
           {t("historyTransfer.notOpen")}
         </p>
-        <div>
+        <FormActions>
           <Button onClick={leave}>{t("historyTransfer.back")}</Button>
-        </div>
+        </FormActions>
       </>
     );
   }
 
   return (
     <PageShell title={t("historyTransfer.heading")} scrollable>
-      <div className="flex justify-center px-6 py-12">
-        <div className="flex flex-col gap-8 w-full max-w-md" data-testid="history-approval-page">
-          {body}
-        </div>
-      </div>
+      <PageColumn spacing="sections" data-testid="history-approval-page">
+        {body}
+      </PageColumn>
     </PageShell>
   );
 };
