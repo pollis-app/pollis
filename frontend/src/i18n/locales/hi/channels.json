@@ -165,6 +165,8 @@
     "pageTitle": "ग्रुप में शामिल हों",
     "heading": "ग्रुप में शामिल हों",
     "headingTerminal": "> ग्रुप में शामिल हों",
+    "headingNamed": "{{name}} में शामिल हों?",
+    "headingNamedTerminal": "> {{name}} में शामिल हों",
     "blurb": "आमंत्रण लिंक से आप किसी एडमिन के आपको ढूंढे बिना ही शामिल हो सकते हैं।",
     "tokenLabel": "आमंत्रण लिंक या कोड",
     "tokenLabelTerminal": "आमंत्रण लिंक या कोड",

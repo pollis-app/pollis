@@ -278,6 +278,7 @@
     "checking": "Ana duba gayyatar…",
     "confirm": "Shiga yana raba sunan mai amfani da shaidar na'urarku da kowa a wannan rukuni. Shiga ta mahaɗin da kuka amince da shi kawai.",
     "confirmTitle": "A shiga wannan rukuni?",
+    "confirmTitleNamed": "A shiga {{name}}?",
     "join": "Shiga rukuni",
     "joining": "Ana shiga…",
     "failed": "Wannan mahaɗin gayyata ba ya aiki kuma. Nemi sabo.",
@@ -352,6 +353,8 @@
     "filtersLabel": "Matattara",
     "messages": "Saƙonni",
     "placeholder": "Bincika komai…",
+    "scope": "A cikin {{name}}",
+    "scopeClear": "Nema ko'ina, ba a {{name}} kaɗai ba",
     "resultCount_one": "sakamako {{count}}",
     "resultCount_other": "sakamako {{count}}",
     "typePrompt": "Rubuta…"

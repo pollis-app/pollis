@@ -4,7 +4,10 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::types::{CreatedInviteLink, GroupInvite, InviteLinkSummary, PendingInvite, RedeemedInvite};
+use super::types::{
+    CreatedInviteLink, GroupInvite, InviteLinkSummary, InvitePreview, PendingInvite,
+    RedeemedInvite,
+};
 use super::authz;
 
 /// Invite a user (by username) to a group. Inviter must be a current member.
@@ -317,6 +320,52 @@ pub async fn revoke_group_invite_link(
 /// One string for every failure mode, so the client cannot reveal what the DS hides.
 pub const INVITE_LINK_ERR: &str = "this invite link is not valid";
 
+/// The token as sent to the DS: even an unparseable one is sent, so "malformed"
+/// is indistinguishable from "wrong" and rate-limited.
+fn presented_token(token: &str) -> String {
+    super::invite_token::extract(token)
+        .map(|(selector, secret)| format!("{selector}.{secret}"))
+        .unwrap_or_else(|| token.trim().to_string())
+}
+
+/// The error for a refused redeem or preview. 429 is the one distinguishable
+/// failure, and only because it describes the caller rather than the token.
+fn invite_link_failure(status: reqwest::StatusCode) -> Error {
+    if status.as_u16() == 429 {
+        return Error::Other(anyhow::anyhow!(
+            "too many attempts — wait a few minutes and try again"
+        ));
+    }
+    Error::Other(anyhow::anyhow!(INVITE_LINK_ERR))
+}
+
+/// Name the group an invite link would admit the caller to, without joining (#1972).
+/// Fails like a redeem; a DS without the preview route answers 404, which reads as
+/// "no name" so the landing still asks before joining.
+pub async fn preview_group_invite_link(
+    token: String,
+    user_id: String,
+    state: &Arc<AppState>,
+) -> Result<InvitePreview> {
+    let body = pollis_api::groups::PreviewInviteLinkBody {
+        token: presented_token(&token),
+        user_id: Some(user_id),
+        attempt_id: Ulid::new().to_string(),
+    };
+    let resp = crate::commands::mls::ds_post(state, &body).await?;
+    let status = resp.status();
+    if status.as_u16() == 404 {
+        return Ok(InvitePreview { group_name: None });
+    }
+    if !status.is_success() {
+        return Err(invite_link_failure(status));
+    }
+    let pollis_api::groups::PreviewInviteLinkResponse::Ok { group_name } =
+        crate::commands::mls::decode_response::<pollis_api::groups::PreviewInviteLinkBody>(resp)
+            .await?;
+    Ok(InvitePreview { group_name })
+}
+
 /// Redeem an invite link and join the group.
 /// Self-heals into the MLS tree via external commit (nobody grafts a link redeemer), then tells members.
 pub async fn redeem_group_invite_link(
@@ -324,13 +373,8 @@ pub async fn redeem_group_invite_link(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<RedeemedInvite> {
-    // Send even an unparseable token, so "malformed" is indistinguishable from "wrong" and rate-limited.
-    let presented = super::invite_token::extract(&token)
-        .map(|(selector, secret)| format!("{selector}.{secret}"))
-        .unwrap_or_else(|| token.trim().to_string());
-
     let body = pollis_api::groups::RedeemInviteLinkBody {
-        token: presented,
+        token: presented_token(&token),
         user_id: Some(user_id.clone()),
         attempt_id: Ulid::new().to_string(),
         now: chrono::Utc::now().to_rfc3339(),
@@ -339,14 +383,7 @@ pub async fn redeem_group_invite_link(
     let resp = crate::commands::mls::ds_post(state, &body).await?;
     let status = resp.status();
     if !status.is_success() {
-        // 429 is the one distinguishable failure, and only because it describes
-        // the caller rather than the token.
-        if status.as_u16() == 429 {
-            return Err(Error::Other(anyhow::anyhow!(
-                "too many attempts — wait a few minutes and try again"
-            )));
-        }
-        return Err(Error::Other(anyhow::anyhow!(INVITE_LINK_ERR)));
+        return Err(invite_link_failure(status));
     }
 
     let pollis_api::groups::RedeemInviteLinkResponse::Ok {

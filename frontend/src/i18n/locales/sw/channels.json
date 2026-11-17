@@ -165,6 +165,8 @@
     "pageTitle": "Jiunge na kikundi",
     "heading": "Jiunge na kikundi",
     "headingTerminal": "> JIUNGE NA KIKUNDI",
+    "headingNamed": "Ungependa kujiunga na {{name}}?",
+    "headingNamedTerminal": "> JIUNGE NA {{name}}",
     "blurb": "Viungo vya mwaliko vinakuwezesha kujiunga bila msimamizi kukutafuta kwanza.",
     "tokenLabel": "Kiungo au msimbo wa mwaliko",
     "tokenLabelTerminal": "KIUNGO AU MSIMBO WA MWALIKO",

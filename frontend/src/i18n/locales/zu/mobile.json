@@ -278,6 +278,7 @@
     "checking": "Ihlola isimemo sakho…",
     "confirm": "Ukujoyina kwabelana ngegama lakho lomsebenzisi nomazisi wedivayisi yakho nawo wonke umuntu oseqenjini. Joyina kuphela isixhumanisi osethembayo.",
     "confirmTitle": "Joyina leli qembu?",
+    "confirmTitleNamed": "Joyina i-{{name}}?",
     "join": "Joyina iqembu",
     "joining": "Iyajoyina…",
     "failed": "Lesi sixhumanisi sesimemo asisasebenzi. Cela esisha.",
@@ -352,6 +353,8 @@
     "filtersLabel": "Izihlungi",
     "messages": "Imilayezo",
     "placeholder": "Sesha konke…",
+    "scope": "Ku-{{name}}",
+    "scopeClear": "Sesha yonke indawo, hhayi ku-{{name}} kuphela",
     "resultCount_one": "umphumela ongu-{{count}}",
     "resultCount_other": "imiphumela engu-{{count}}",
     "typePrompt": "Bhala…"

@@ -313,7 +313,9 @@
     "locked": "ألغِ قفل Pollis أولًا، ثم افتح رابط الدعوة مرة أخرى.",
     "openPollis": "فتح Pollis",
     "signedOut": "سجّل الدخول إلى Pollis أولًا، ثم افتح رابط الدعوة مرة أخرى.",
-    "title": "دعوة"
+    "title": "دعوة",
+    "confirmTitle": "الانضمام إلى هذه المجموعة؟",
+    "confirmTitleNamed": "الانضمام إلى {{name}}؟"
   },
   "language": {
     "restartRequired": "أعد تشغيل Pollis لتبديل اتجاه الواجهة."
@@ -375,6 +377,8 @@
     "filtersLabel": "عوامل التصفية",
     "messages": "الرسائل",
     "placeholder": "ابحث في كل شيء…",
+    "scope": "في {{name}}",
+    "scopeClear": "البحث في كل مكان، وليس في {{name}} فقط",
     "resultCount_zero": "{{count}} نتيجة",
     "resultCount_one": "{{count}} نتيجة",
     "resultCount_two": "{{count}} نتيجتان",

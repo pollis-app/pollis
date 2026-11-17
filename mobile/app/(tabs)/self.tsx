@@ -44,18 +44,21 @@ function Self() {
   const lockNow = useLockNow();
 
   // Global search at the top of Self (#1550): the menu swaps for results in place.
-  const params = useLocalSearchParams<{ search?: string }>();
+  // `searchGroup` (#1972): "Search <group>" scopes the search to that group.
+  const params = useLocalSearchParams<{ search?: string; searchGroup?: string }>();
   const searchRef = useRef<TextInput>(null);
   const [q, setQ] = useState("");
   const [userQuery, setUserQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
-  const searching = searchFocused || q.length > 0;
+  const [scopeGroupId, setScopeGroupId] = useState<string | null>(null);
+  const searching = searchFocused || q.length > 0 || scopeGroupId !== null;
   const trimmed = q.trim();
 
   const endSearch = () => {
     setQ("");
     setUserQuery("");
     setSearchFocused(false);
+    setScopeGroupId(null);
     searchRef.current?.blur();
   };
 
@@ -77,10 +80,11 @@ function Self() {
 
   useEffect(() => {
     if (params.search) {
+      setScopeGroupId(params.searchGroup ?? null);
       searchRef.current?.focus();
-      router.setParams({ search: undefined });
+      router.setParams({ search: undefined, searchGroup: undefined });
     }
-  }, [params.search, router]);
+  }, [params.search, params.searchGroup, router]);
 
   const handle =
     profile?.username ?? currentUser?.username ?? t("mobile:user.fallbackHandle");
@@ -159,7 +163,13 @@ function Self() {
         ) : null}
       </View>
       {searching ? (
-        <GlobalSearchResults q={q} setQ={setQ} userQuery={userQuery} />
+        <GlobalSearchResults
+          q={q}
+          setQ={setQ}
+          userQuery={userQuery}
+          scopeGroupId={scopeGroupId}
+          onClearScope={() => setScopeGroupId(null)}
+        />
       ) : (
         <Body
           contentContainerStyle={{

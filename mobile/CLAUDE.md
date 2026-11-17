@@ -1233,7 +1233,7 @@ under the large title, Settings-style — focusing the field or typing swaps
 the Self menu for `GlobalSearchResults` in place (no navigation); Cancel, the
 clear button, a second tap on the Self tab or Android back restore the menu.
 The state survives opening a hit and coming back. A group's "Search <group>"
-field navigates to `/(tabs)/self?search=1`, which focuses it.
+field navigates to `/(tabs)/self?search=1&searchGroup=<id>`, which focuses it scoped to that group (an "In <group>" chip, #1972).
 
 iPad (regular width, `hooks/useLayoutClass`): Groups and Direct are a
 two-pane (`components/MasterDetail.tsx`) — list left, conversation right, tab

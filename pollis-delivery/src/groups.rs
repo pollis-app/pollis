@@ -1395,19 +1395,22 @@ fn redeem_rate_limited() -> Response {
         .into_response()
 }
 
-/// Redeem an invite link.
-///
-/// Every time comparison uses the SERVER clock; `body.now` is accepted but ignored (H3).
-pub async fn apply_redeem_invite_link(
-    conn: &Connection,
-    authed: Option<&str>,
-    body: &RedeemInviteLinkBody,
-) -> anyhow::Result<RedeemOutcome> {
-    let user = match resolve_actor(authed, body.user_id.as_deref()) {
-        Ok(u) => u,
-        Err(_) => return Ok(RedeemOutcome::Rejected),
-    };
+/// What a presented token turned out to be, after the rate limit and every predicate.
+enum LinkCheck {
+    Live { link_id: String, group_id: String },
+    Rejected,
+    RateLimited,
+}
 
+/// The shared front half of redeem and preview (#1972): rate limit, parse, look up,
+/// evaluate every predicate. A failure is recorded against the caller's budget here,
+/// so a preview is no cheaper an oracle than a redeem.
+async fn check_link(
+    conn: &Connection,
+    user: &str,
+    attempt_id: &str,
+    token: &str,
+) -> anyhow::Result<LinkCheck> {
     // Counted from the audit table so restarts and other instances share the budget.
     let mut rows = conn
         .query(
@@ -1415,7 +1418,7 @@ pub async fn apply_redeem_invite_link(
              WHERE user_id = ?1 AND succeeded = 0 \
                AND datetime(attempted_at) > datetime('now', ?2)",
             libsql::params![
-                user.clone(),
+                user.to_string(),
                 format!("-{REDEEM_FAILURE_WINDOW_SECS} seconds"),
             ],
         )
@@ -1426,13 +1429,13 @@ pub async fn apply_redeem_invite_link(
     };
     drop(rows);
     if recent_failures >= REDEEM_FAILURE_MAX {
-        return Ok(RedeemOutcome::RateLimited);
+        return Ok(LinkCheck::RateLimited);
     }
 
     // A malformed token is recorded and rejected exactly like a wrong one.
-    let Some((selector, secret)) = crate::invite_token::parse(&body.token) else {
-        record_redemption(conn, &body.attempt_id, None, &user, false).await?;
-        return Ok(RedeemOutcome::Rejected);
+    let Some((selector, secret)) = crate::invite_token::parse(token) else {
+        record_redemption(conn, attempt_id, None, user, false).await?;
+        return Ok(LinkCheck::Rejected);
     };
 
     let mut rows = conn
@@ -1464,8 +1467,8 @@ pub async fn apply_redeem_invite_link(
         ),
         None => {
             drop(rows);
-            record_redemption(conn, &body.attempt_id, None, &user, false).await?;
-            return Ok(RedeemOutcome::Rejected);
+            record_redemption(conn, attempt_id, None, user, false).await?;
+            return Ok(LinkCheck::Rejected);
         }
     };
     drop(rows);
@@ -1488,9 +1491,30 @@ pub async fn apply_redeem_invite_link(
     if !(secret_ok && not_revoked && not_expired && uses_left) {
         // Link id only when the secret matched, so admins see a live link being probed.
         let probed = if secret_ok { Some(link_id.as_str()) } else { None };
-        record_redemption(conn, &body.attempt_id, probed, &user, false).await?;
-        return Ok(RedeemOutcome::Rejected);
+        record_redemption(conn, attempt_id, probed, user, false).await?;
+        return Ok(LinkCheck::Rejected);
     }
+    Ok(LinkCheck::Live { link_id, group_id })
+}
+
+/// Redeem an invite link.
+///
+/// Every time comparison uses the SERVER clock; `body.now` is accepted but ignored (H3).
+pub async fn apply_redeem_invite_link(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &RedeemInviteLinkBody,
+) -> anyhow::Result<RedeemOutcome> {
+    let user = match resolve_actor(authed, body.user_id.as_deref()) {
+        Ok(u) => u,
+        Err(_) => return Ok(RedeemOutcome::Rejected),
+    };
+
+    let (link_id, group_id) = match check_link(conn, &user, &body.attempt_id, &body.token).await? {
+        LinkCheck::Live { link_id, group_id } => (link_id, group_id),
+        LinkCheck::Rejected => return Ok(RedeemOutcome::Rejected),
+        LinkCheck::RateLimited => return Ok(RedeemOutcome::RateLimited),
+    };
 
     // Already a member: idempotent success, no use burned.
     if is_member(conn, &group_id, &user).await? {
@@ -1534,6 +1558,60 @@ pub async fn apply_redeem_invite_link(
         group_id,
         group_name,
     })
+}
+
+/// What a preview found (#1972). `Rejected` and `RateLimited` mirror redeem's.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PreviewOutcome {
+    /// The token is live; this is the group it would admit the caller to.
+    Live { group_name: Option<String> },
+    /// Indistinguishable from redeem's rejection, by construction.
+    Rejected,
+    RateLimited,
+}
+
+pub async fn preview_invite_link(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let (authed, parsed) = match gate_and_parse::<PreviewInviteLinkBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    let conn = state.db.conn().await?;
+    Ok(
+        match apply_preview_invite_link(&conn, authed.as_deref(), &parsed).await? {
+            PreviewOutcome::Live { group_name } => {
+                crate::writes::ok_response::<PreviewInviteLinkBody>(
+                    PreviewInviteLinkResponse::Ok { group_name },
+                )
+            }
+            PreviewOutcome::Rejected => redeem_rejected(),
+            PreviewOutcome::RateLimited => redeem_rate_limited(),
+        },
+    )
+}
+
+/// Name the group a live token would admit the caller to, without joining it (#1972).
+///
+/// Anyone holding a live token can join and read the name, so naming it first
+/// discloses nothing new; it joins nothing, burns no use and records no success.
+pub async fn apply_preview_invite_link(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &PreviewInviteLinkBody,
+) -> anyhow::Result<PreviewOutcome> {
+    let user = match resolve_actor(authed, body.user_id.as_deref()) {
+        Ok(u) => u,
+        Err(_) => return Ok(PreviewOutcome::Rejected),
+    };
+    match check_link(conn, &user, &body.attempt_id, &body.token).await? {
+        LinkCheck::Live { group_id, .. } => Ok(PreviewOutcome::Live {
+            group_name: group_name(conn, &group_id).await?,
+        }),
+        LinkCheck::Rejected => Ok(PreviewOutcome::Rejected),
+        LinkCheck::RateLimited => Ok(PreviewOutcome::RateLimited),
+    }
 }
 
 /// A group's display name, for the redeem confirmation. `None` if the row is

@@ -2106,6 +2106,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         }));
     }
 
+    // #1972: `invitePreviews` maps a token to the group it names; anything else fails like the DS.
+    case 'preview_group_invite_link': {
+      const { token } = args as { token: string };
+      const previews = (preload.invitePreviews ?? {}) as Record<string, string>;
+      if (!(token in previews)) {
+        throw new Error('this invite link is not valid');
+      }
+      return { group_name: previews[token] };
+    }
+
     case 'get_pending_invites':
       return store.pendingInvites.map(({ channels: _c, ...rest }) => rest);
 

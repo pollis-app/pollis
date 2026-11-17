@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import { View, Pressable, FlatList, useWindowDimensions } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  View,
+  Pressable,
+  FlatList,
+  ScrollView,
+  useWindowDimensions,
+  type ViewToken,
+} from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { layout, semantic, type as ty } from "../../theme/tokens";
-import { Field } from "../ui";
+import { Field, IconButton } from "../ui";
 import { Icon } from "../icons";
 import { SheetOverlay } from "../chat/SheetOverlay";
 import {
@@ -33,6 +40,7 @@ import { useUsableEmoji, type CustomEmoji } from "../../hooks/queries/useEmoji";
 import { CustomEmojiImage } from "./CustomEmojiImage";
 import { emojiDisplayName, type EmojiAnnotationStack } from "./emojiAnnotations";
 import { useEmojiAnnotations } from "./useEmojiAnnotations";
+import { pickerTabs, sectionStartIndex } from "./pickerTabs";
 
 // Cells are at least this wide (≥44pt targets); the column count follows the
 // sheet width, so a narrow phone gets 7 and a wide one more.
@@ -45,8 +53,34 @@ const SHEET_INSET = 32;
 const TONE_BASE = "\u{270B}";
 
 type PickerListItem =
-  | { type: "header"; key: string; label: string }
-  | { type: "row"; key: string; items: PickerEmoji[] };
+  | { type: "header"; key: string; section: string; label: string }
+  | { type: "row"; key: string; section: string; items: PickerEmoji[] };
+
+// Desktop's EmojiCategoryRail glyphs, so the two pickers read the same.
+function tabIcon(id: string, color: string) {
+  switch (id) {
+    case "recent":
+      return <Icon.clock size={20} color={color} />;
+    case "people":
+      return <Icon.smile size={20} color={color} />;
+    case "nature":
+      return <Icon.sprout size={20} color={color} />;
+    case "food":
+      return <Icon.pizza size={20} color={color} />;
+    case "activity":
+      return <Icon.gamepad size={20} color={color} />;
+    case "travel":
+      return <Icon.plane size={20} color={color} />;
+    case "objects":
+      return <Icon.lightbulb size={20} color={color} />;
+    case "symbols":
+      return <Icon.hash size={20} color={color} />;
+    case "flags":
+      return <Icon.flag size={20} color={color} />;
+    default:
+      return <Icon.smilePlus size={20} color={color} />;
+  }
+}
 
 // One literal call per category so the catalogue check can see every key.
 function categoryLabel(t: TFunction, id: EmojiCategoryId): string {
@@ -74,12 +108,14 @@ function chunkRows(
   items: PickerEmoji[],
   keyPrefix: string,
   columns: number,
+  section: string = keyPrefix,
 ): PickerListItem[] {
   const rows: PickerListItem[] = [];
   for (let i = 0; i < items.length; i += columns) {
     rows.push({
       type: "row",
       key: `${keyPrefix}-${i}`,
+      section,
       items: items.slice(i, i + columns),
     });
   }
@@ -179,9 +215,10 @@ export function EmojiPickerSheet({
       out.push({
         type: "header",
         key: "h-recents",
+        section: "recent",
         label: t("picker.recent"),
       });
-      out.push(...chunkRows(recents.slice(0, columns * 2), "recents", columns));
+      out.push(...chunkRows(recents.slice(0, columns * 2), "recents", columns, "recent"));
     }
     // Custom emoji, one section per owning group.
     const byGroup = new Map<string, CustomEmoji[]>();
@@ -194,6 +231,7 @@ export function EmojiPickerSheet({
       out.push({
         type: "header",
         key: `h-${groupId}`,
+        section: `custom-${groupId}`,
         label: list[0]?.group_name || t("mobile:emoji.groupFallback"),
       });
       out.push(
@@ -201,6 +239,7 @@ export function EmojiPickerSheet({
           list.map((emoji) => ({ kind: "custom" as const, emoji })),
           `g-${groupId}`,
           columns,
+          `custom-${groupId}`,
         ),
       );
     }
@@ -208,6 +247,7 @@ export function EmojiPickerSheet({
       out.push({
         type: "header",
         key: `h-${category.id}`,
+        section: category.id,
         label: categoryLabel(t, category.id as EmojiCategoryId),
       });
       const inCategory = STANDARD_EMOJI.filter(
@@ -217,6 +257,29 @@ export function EmojiPickerSheet({
     }
     return out;
   }, [query, customEmoji, recentIds, annotations, t, columns]);
+
+  // #1972: the category tabs, on the first sheet as on every later one; a search has none.
+  const tabs = useMemo(() => pickerTabs(items), [items]);
+  const listRef = useRef<FlatList<PickerListItem>>(null);
+  const [active, setActive] = useState<string | null>(null);
+  const viewability = useRef({ itemVisiblePercentThreshold: 10 }).current;
+  const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const first = viewableItems[0]?.item as PickerListItem | undefined;
+    if (first) {
+      setActive(first.section);
+    }
+  }).current;
+  const jumpTo = useCallback(
+    (section: string) => {
+      const index = sectionStartIndex(items, section);
+      if (index < 0) {
+        return;
+      }
+      setActive(section);
+      listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+    },
+    [items],
+  );
 
   const onPick = (item: PickerEmoji) => {
     const text = pickerEmojiInsertText(item, toneIndex);
@@ -272,9 +335,48 @@ export function EmojiPickerSheet({
             </Pressable>
           ))}
         </View>
+        {tabs.length > 0 ? (
+          <ScrollView
+            horizontal
+            testID="emoji-category-tabs"
+            accessibilityLabel={t("picker.railLabel")}
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ gap: 2 }}
+            style={{ flexGrow: 0 }}
+          >
+            {tabs.map((tab) => {
+              const selected = (active ?? tabs[0]?.id) === tab.id;
+              return (
+                <IconButton
+                  key={tab.id}
+                  testID={`emoji-category-${tab.id}`}
+                  accessibilityLabel={tab.label}
+                  selected={selected}
+                  tone="inherit"
+                  icon={tabIcon(tab.id, selected ? semantic.accent : semantic.dim)}
+                  onPress={() => jumpTo(tab.id)}
+                />
+              );
+            })}
+          </ScrollView>
+        ) : null}
         <FlatList
+          ref={listRef}
           testID="list-emoji"
           data={items}
+          onViewableItemsChanged={onViewable}
+          viewabilityConfig={viewability}
+          // Rows past the rendered window have no layout yet: land near, then exact.
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({
+              offset: info.averageItemLength * info.index,
+              animated: false,
+            });
+            requestAnimationFrame(() =>
+              listRef.current?.scrollToIndex({ index: info.index, animated: false, viewPosition: 0 }),
+            );
+          }}
           keyExtractor={(item) => item.key}
           initialNumToRender={16}
           windowSize={7}

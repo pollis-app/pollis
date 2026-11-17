@@ -255,6 +255,32 @@ pub enum RedeemInviteLinkResponse {
     },
 }
 
+/// `POST /v1/invite-links/preview` (#1972): the name of the group a live token
+/// would admit the caller to, so the landing can ask "Join <name>?" before the
+/// press. Joins nothing and burns no use; fails exactly like a redeem, and a
+/// failure counts against the same per-user budget.
+#[derive(Serialize, Deserialize)]
+pub struct PreviewInviteLinkBody {
+    /// The full `<selector>.<secret>` token as presented by the user.
+    pub token: String,
+    /// The caller; bound to the authenticated user when signed.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// Client-generated id, used for the audit row if the preview fails.
+    pub attempt_id: String,
+}
+
+/// `POST /v1/invite-links/preview` — the success case only, like redeem.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum PreviewInviteLinkResponse {
+    Ok {
+        /// `None` only if the group row is gone.
+        #[serde(default)]
+        group_name: Option<String>,
+    },
+}
+
 /// `POST /v1/groups/update` — the row as it now stands (#987).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]

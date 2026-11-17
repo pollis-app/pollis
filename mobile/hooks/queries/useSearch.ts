@@ -52,23 +52,28 @@ export interface SearchPage {
 
 export const searchQueryKeys = {
   all: ["search"] as const,
-  messages: (q: string, sort: SearchSort | null) =>
-    ["search", "messages", q, sort] as const,
+  messages: (q: string, sort: SearchSort | null, groupId: string | null = null) =>
+    ["search", "messages", q, sort, groupId] as const,
 };
 
 /** The backend caps a page at 200. */
 const PAGE_SIZE = 25;
 
-/** On-device message search, paginated (#1202). Query filters are parsed in the core. */
-export function useSearchMessages(query: string, sort: SearchSort | null = null) {
+/** On-device message search, paginated (#1202). Query filters are parsed in the core; `groupId` scopes it to one group (#1972). */
+export function useSearchMessages(
+  query: string,
+  sort: SearchSort | null = null,
+  groupId: string | null = null,
+) {
   const trimmed = query.trim();
   return useInfiniteQuery({
-    queryKey: searchQueryKeys.messages(trimmed, sort),
+    queryKey: searchQueryKeys.messages(trimmed, sort, groupId),
     initialPageParam: null as SearchCursor | null,
     queryFn: async ({ pageParam }): Promise<SearchPage> => {
       return await invoke<SearchPage>("search_messages", {
         query: trimmed,
         conversationId: null,
+        groupId,
         sort,
         limit: PAGE_SIZE,
         cursor: pageParam,

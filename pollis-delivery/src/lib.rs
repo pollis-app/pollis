@@ -337,6 +337,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<groups::CreateInviteLinkBody as DsRequest>::PATH, post(groups::create_invite_link))
         .route(<groups::RevokeInviteLinkBody as DsRequest>::PATH, post(groups::revoke_invite_link))
         .route(<groups::RedeemInviteLinkBody as DsRequest>::PATH, post(groups::redeem_invite_link))
+        .route(<groups::PreviewInviteLinkBody as DsRequest>::PATH, post(groups::preview_invite_link))
         .route(<groups::CreateJoinRequestBody as DsRequest>::PATH, post(groups::create_join_request))
         .route(<groups::ApproveJoinRequestBody as DsRequest>::PATH, post(groups::approve_join_request))
         .route(<groups::RejectJoinRequestBody as DsRequest>::PATH, post(groups::reject_join_request))

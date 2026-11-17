@@ -271,11 +271,14 @@ export function IconButton({
   tone = "accent",
   style,
   pressIn,
+  selected,
 }: {
   icon: React.ReactNode;
   onPress?: () => void;
   // Act on touch-down (#1529); see usePressIn.
   pressIn?: boolean;
+  // A tab-like button (#1972): announced as selected; the look is the caller's.
+  selected?: boolean;
   accessibilityLabel: string;
   testID?: string;
   filled?: boolean;
@@ -296,7 +299,7 @@ export function IconButton({
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled: !!disabled }}
+      accessibilityState={{ disabled: !!disabled, selected }}
       style={({ pressed }) => [
         {
           width: layout.touchMin,

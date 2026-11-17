@@ -46,10 +46,15 @@ export function GlobalSearchResults({
   q,
   setQ,
   userQuery,
+  scopeGroupId = null,
+  onClearScope,
 }: {
   q: string;
   setQ: React.Dispatch<React.SetStateAction<string>>;
   userQuery: string;
+  /** #1972: "Search <group>" scopes messages and channels to that group until cleared. */
+  scopeGroupId?: string | null;
+  onClearScope?: () => void;
 }) {
   useThemeRerender();
   const router = useRouter();
@@ -59,7 +64,7 @@ export function GlobalSearchResults({
   const { t: ts } = useTranslation("search");
   // null = let Rust choose; the page reports what it applied.
   const [sort, setSort] = useState<SearchSort | null>(null);
-  const messages = useSearchMessages(trimmed, sort);
+  const messages = useSearchMessages(trimmed, sort, scopeGroupId);
   const firstPage = messages.data?.pages[0];
   const messageResults = useMemo(
     () => messages.data?.pages.flatMap((p) => p.results) ?? [],
@@ -71,6 +76,9 @@ export function GlobalSearchResults({
   const userShown = !!user.data && userQuery === trimmed;
   const { data: groups = [] } = useUserGroupsWithChannels();
   const { data: dms = [] } = useDMChannels();
+  const scopeGroup = scopeGroupId
+    ? groups.find((g) => g.id === scopeGroupId) ?? null
+    : null;
 
   // `search_messages` rows lack a kind: resolve it against the cached lists.
   const conversationKinds = useMemo(() => {
@@ -103,16 +111,19 @@ export function GlobalSearchResults({
       };
     }
     const lower = trimmed.toLowerCase();
-    const matchingGroups = groups.filter((g) =>
-      g.name.toLowerCase().includes(lower),
-    );
+    const inScope = scopeGroupId
+      ? groups.filter((g) => g.id === scopeGroupId)
+      : groups;
+    const matchingGroups = scopeGroupId
+      ? []
+      : groups.filter((g) => g.name.toLowerCase().includes(lower));
     const matchingChannels: {
       id: string;
       name: string;
       groupName: string;
       groupId: string;
     }[] = [];
-    for (const g of groups) {
+    for (const g of inScope) {
       for (const c of g.channels) {
         if (c.name.toLowerCase().includes(lower)) {
           matchingChannels.push({
@@ -125,11 +136,11 @@ export function GlobalSearchResults({
       }
     }
     return { groups: matchingGroups, channels: matchingChannels };
-  }, [groups, trimmed]);
+  }, [groups, trimmed, scopeGroupId]);
 
   // Quick-jump to settings pages (desktop's PAGE_RESULTS).
   const pages = useMemo(() => {
-    if (trimmed.length < 2) {
+    if (trimmed.length < 2 || scopeGroupId) {
       return [];
     }
     const lower = trimmed.toLowerCase();
@@ -185,7 +196,7 @@ export function GlobalSearchResults({
         p.s.toLowerCase().includes(lower) ||
         (p.k ?? "").toLowerCase().includes(lower),
     );
-  }, [trimmed, t, i18n.language]);
+  }, [trimmed, scopeGroupId, t, i18n.language]);
 
   const totalResults =
     (userShown ? 1 : 0) +
@@ -212,6 +223,23 @@ export function GlobalSearchResults({
       testID="search-results"
       contentContainerStyle={{ paddingHorizontal: space.xxl, gap: space.xs }}
     >
+      {scopeGroupId ? (
+        <View style={{ flexDirection: "row", paddingTop: space.sm }}>
+          <Chip
+            testID="chip-search-scope"
+            variant="solid"
+            accessibilityLabel={t("search.scopeClear", {
+              name: scopeGroup?.name ?? t("group.invite.thisGroup"),
+            })}
+            trailing={<Icon.x size={14} color={semantic.onAccent} />}
+            onPress={onClearScope}
+          >
+            {t("search.scope", {
+              name: scopeGroup?.name ?? t("group.invite.thisGroup"),
+            })}
+          </Chip>
+        </View>
+      ) : null}
       {trimmed.length < 2 ? (
         <Txt
           variant="secondary"

@@ -130,6 +130,11 @@ background the ramp flips toward black.
   chat input bar or is its own page.
 - **Same-frame feedback.** Anything that can take time shows an optimistic result or a busy,
   un-repeatable control on the same frame, on every platform.
+- **Name what an action acts on.** A confirmation names its object ("Join Design team?", not
+  "Join this group?") whenever the app can know it; a scoped search shows its scope as a
+  removable chip ("In Design team"); a count over a filtered list counts what is shown
+  ("Packages shown: 4 of 312"). A screen opened with nothing to act on says so in one plain
+  sentence, never a sentence with a blank where the object should be.
 - **Empty states** use `EmptyState` (desktop): one plain sentence, and the action that fills the
   space when there is one.
 - **Message rows** (desktop `MessageItem`, mobile `MessageRow`): the first message of a run has one

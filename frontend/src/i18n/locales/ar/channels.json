@@ -169,6 +169,8 @@
     "pageTitle": "الانضمام إلى مجموعة",
     "heading": "الانضمام إلى مجموعة",
     "headingTerminal": "> الانضمام إلى مجموعة",
+    "headingNamed": "الانضمام إلى {{name}}؟",
+    "headingNamedTerminal": "> الانضمام إلى {{name}}",
     "blurb": "روابط الدعوة تتيح لك الانضمام دون أن يبحث عنك مشرف أولًا.",
     "tokenLabel": "رابط الدعوة أو الرمز",
     "tokenLabelTerminal": "رابط الدعوة أو الرمز",

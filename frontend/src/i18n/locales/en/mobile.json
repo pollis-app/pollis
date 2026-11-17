@@ -278,6 +278,7 @@
     "checking": "Checking your invite…",
     "confirm": "Joining shares your username and device identity with everyone in this group. Only join a link you trust.",
     "confirmTitle": "Join this group?",
+    "confirmTitleNamed": "Join {{name}}?",
     "join": "Join group",
     "joining": "Joining…",
     "failed": "This invite link doesn't work anymore. Ask for a new one.",
@@ -352,6 +353,8 @@
     "filtersLabel": "Filters",
     "messages": "Messages",
     "placeholder": "Search everything…",
+    "scope": "In {{name}}",
+    "scopeClear": "Search everywhere, not only {{name}}",
     "resultCount_one": "{{count}} result",
     "resultCount_other": "{{count}} results",
     "typePrompt": "Type…"

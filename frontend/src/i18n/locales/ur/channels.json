@@ -165,6 +165,8 @@
     "pageTitle": "گروپ میں شامل ہوں",
     "heading": "گروپ میں شامل ہوں",
     "headingTerminal": "> گروپ میں شامل ہوں",
+    "headingNamed": "{{name}} میں شامل ہوں؟",
+    "headingNamedTerminal": "> {{name}} میں شامل ہوں",
     "blurb": "دعوتی لنکس کے ذریعے آپ اس کے بغیر شامل ہو سکتے ہیں کہ پہلے کوئی ایڈمن آپ کو تلاش کرے۔",
     "tokenLabel": "دعوتی لنک یا کوڈ",
     "tokenLabelTerminal": "دعوتی لنک یا کوڈ",

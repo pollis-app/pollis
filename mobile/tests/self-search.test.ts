@@ -30,15 +30,16 @@ test("the tab bar's third cell is the shield shortcut to link-device", () => {
 
 test("Self swaps its menu for the search results in place", () => {
   const self = read("app/(tabs)/self.tsx");
-  assert.match(self, /const searching = searchFocused \|\| q\.length > 0;/);
-  assert.match(self, /\{searching \? \(\s*<GlobalSearchResults q=\{q\} setQ=\{setQ\} userQuery=\{userQuery\} \/>\s*\) : \(\s*<Body/);
+  // #1972: a group scope also keeps the results up.
+  assert.match(self, /const searching = searchFocused \|\| q\.length > 0 \|\| scopeGroupId !== null;/);
+  assert.match(self, /\{searching \? \(\s*<GlobalSearchResults\s+q=\{q\}\s+setQ=\{setQ\}\s+userQuery=\{userQuery\}[\s\S]*?\/>\s*\) : \(\s*<Body/);
   assert.match(self, /testID="input-search"/);
   assert.match(self, /testID="btn-search-cancel"/);
   assert.match(self, /testID="btn-search-clear"/);
   assert.match(self, /onSubmitEditing=\{\(\) => \{\s*if \(trimmed\.length >= 2\) \{\s*setUserQuery\(trimmed\);/);
   assert.match(
     read("components/groups/GroupPanel.tsx"),
-    /rootRouter\.navigate\(\{ pathname: "\/\(tabs\)\/self", params: \{ search: "1" \} \}\)/,
+    /rootRouter\.navigate\(\{\s*pathname: "\/\(tabs\)\/self",\s*params: \{ search: "1", searchGroup: groupId \},\s*\}\)/,
   );
 });
 

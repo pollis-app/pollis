@@ -270,6 +270,7 @@
     "checking": "招待を確認しています…",
     "confirm": "参加すると、あなたのユーザー名とデバイスの ID がこのグループの全員に共有されます。信頼できるリンクからのみ参加してください。",
     "confirmTitle": "このグループに参加しますか？",
+    "confirmTitleNamed": "{{name}}に参加しますか？",
     "join": "グループに参加",
     "joining": "参加しています…",
     "failed": "この招待リンクは使用できなくなりました。新しいリンクを依頼してください。",
@@ -344,6 +345,8 @@
     "filtersLabel": "フィルター",
     "messages": "メッセージ",
     "placeholder": "すべてを検索…",
+    "scope": "{{name}}内",
+    "scopeClear": "{{name}}だけでなく、すべてを検索",
     "resultCount_other": "{{count}} 件の結果",
     "typePrompt": "入力…"
   },

@@ -1041,6 +1041,11 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             groups::revoke_group_invite_link(link_id, user_id, &state()?).await?;
             ok(())
         }
+        "preview_group_invite_link" => {
+            let token: String = arg(&args, "token")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(groups::preview_group_invite_link(token, user_id, &state()?).await?)
+        }
         "redeem_group_invite_link" => {
             let token: String = arg(&args, "token")?;
             let user_id: String = arg(&args, "userId")?;
@@ -1307,10 +1312,11 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "search_messages" => {
             let q: String = arg(&args, "query")?;
             let conversation_id: Option<String> = arg_opt(&args, "conversationId")?;
+            let group_id: Option<String> = arg_opt(&args, "groupId")?;
             let sort: Option<messages::SearchSort> = arg_opt(&args, "sort")?;
             let limit: Option<i64> = arg_opt(&args, "limit")?;
             let cursor: Option<messages::SearchCursor> = arg_opt(&args, "cursor")?;
-            ok(messages::search_messages(q, conversation_id, sort, limit, cursor, &state()?).await?)
+            ok(messages::search_messages(q, conversation_id, group_id, sort, limit, cursor, &state()?).await?)
         }
         "rebuild_search_index" => {
             messages::rebuild_search_index(&state()?).await?;
@@ -1577,6 +1583,8 @@ mod tests {
             "set_client_policy_override",
             "revoke_group_invite_link",
             "redeem_group_invite_link",
+            // #1972
+            "preview_group_invite_link",
             "list_saved_messages",
             "toggle_saved_message",
             "unsave_message",

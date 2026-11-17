@@ -408,6 +408,7 @@
     "title": "Licences open source",
     "intro": "Pollis repose sur des logiciels open source. Chaque paquet tiers de cette version est listé avec sa licence ; sélectionnez-en un pour lire le texte de la licence.",
     "count": "Paquets dans cette version : {{count}}",
+    "countFiltered": "Paquets affichés : {{shown}} sur {{count}}",
     "unavailable": "La liste des licences est générée à la compilation de l’app, et cette version de développement n’en a pas.",
     "filterLabel": "Filtrer les paquets",
     "filterPlaceholder": "Filtrer par nom ou licence",

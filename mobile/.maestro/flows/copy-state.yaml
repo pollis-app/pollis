@@ -1,0 +1,145 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# COPY AND STATE FIXES (#1972), on a real build against the dev DS:
+#  1. approve-device opened with no request says so (never "(id )");
+#  2. "Search <group>" opens Self's search scoped to that group (a removable
+#     "In <group>" chip; a message in the group is found);
+#  3. the emoji sheet has its category tabs the first time it opens;
+#  4. an invite link's landing names the group before the Join press.
+# The open-source count following the filter is in open-source.yaml.
+#
+# Step 4 needs a DS with POST /v1/invite-links/preview. Against one without it
+# the core falls back to the generic "Join this group?", so the strict check
+# runs only with INVITE_PREVIEW=1 (pass `-e INVITE_PREVIEW=1` once the dev DS
+# carries #1972).
+
+- runFlow: ../subflows/sign-in.yaml
+
+# --- 1. approve-device with nothing to approve ---
+- openLink: "pollis://approve-device"
+- extendedWaitUntil:
+    visible:
+      id: "text-approve-device-none"
+    timeout: 10000
+- assertNotVisible: ".*\\(id \\).*"
+- takeScreenshot: copy-state-01-approve-device-none
+- tapOn:
+    id: "btn-approve-device-back"
+
+# --- seed a group with one message ---
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Scope Group"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Scope Group"
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "input-composer"
+- inputText: "heron scoped note"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*heron scoped note.*"
+    timeout: 15000
+
+# --- 3. the first emoji sheet has its category tabs ---
+- tapOn:
+    id: "btn-composer-emoji"
+- extendedWaitUntil:
+    visible:
+      id: "emoji-category-tabs"
+    timeout: 5000
+- assertVisible:
+    id: "emoji-category-people"
+- takeScreenshot: copy-state-02-emoji-tabs
+- tapOn:
+    id: "emoji-category-flags"
+- assertVisible:
+    id: "emoji-category-flags"
+    selected: true
+- takeScreenshot: copy-state-03-emoji-flags
+- tapOn:
+    id: "btn-sheet-close"
+- tapOn:
+    id: "btn-back"
+    optional: true
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - hideKeyboard
+
+# --- 2. "Search <group>" carries the group as the scope ---
+- tapOn:
+    id: "btn-search-group"
+- extendedWaitUntil:
+    visible:
+      id: "chip-search-scope"
+      text: ".*In E2E Scope Group.*"
+    timeout: 5000
+- inputText: "heron"
+- extendedWaitUntil:
+    visible: ".*heron scoped note.*"
+    timeout: 15000
+- takeScreenshot: copy-state-04-group-scope
+# Clearing the chip widens the search to everything; the query stays.
+- tapOn:
+    id: "chip-search-scope"
+- assertNotVisible:
+    id: "chip-search-scope"
+- assertVisible: ".*heron scoped note.*"
+- tapOn:
+    id: "btn-search-cancel"
+
+# --- 4. the invite landing names the group ---
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "row-group-invite"
+- assertVisible:
+    id: "screen-group-invite"
+- scrollUntilVisible:
+    element:
+      id: "btn-create-invite-link"
+    direction: DOWN
+    centerElement: true
+- tapOn:
+    id: "btn-create-invite-link"
+- extendedWaitUntil:
+    visible:
+      id: "created-invite-link-url"
+    timeout: 20000
+- copyTextFrom:
+    id: "created-invite-link-url"
+- openLink: "${'pollis://invite/' + maestro.copiedText.split('/invite/')[1]}"
+- extendedWaitUntil:
+    visible:
+      id: "invite-confirm-title"
+      text: "Join .+\\?"
+    timeout: 20000
+- runFlow:
+    when:
+      true: ${INVITE_PREVIEW == "1"}
+    commands:
+      - assertVisible:
+          id: "invite-confirm-title"
+          text: "Join E2E Scope Group\\?"
+- takeScreenshot: copy-state-05-invite-named

@@ -759,6 +759,26 @@ itself imports nothing but a type, which is also what makes it unit-testable und
 **Skin-tone variants (`:wave::skin-tone-3:`) are out of scope.** Completions use the
 tone already stored by the picker; there is no tone syntax in the composer.
 
+### Picker order and category tabs (#1972)
+
+Within a category the table follows the CLDR emoji order (Unicode's
+`emoji-test.txt`), vendored as `scripts/emoji-order.json` and refreshed with
+`python3 scripts/generate-emoji-data.py --refresh-order` (network; a plain run
+stays offline). Before #1972 it was codepoint order, which led People with the
+old BMP symbols (☝ ☹ ☺ … ❣ ❤) instead of 😀. Emoji the file does not list sort
+after the listed ones. One generator run writes desktop's and mobile's tables;
+`frontend/tests/emoji-order.test.ts` pins the order and that both copies match.
+Search ties (same tier, same name length) fall to table order, so `corazón` in
+Spanish now lists 💔 "corazón roto" just ahead of ❤ "corazón rojo".
+
+Mobile's `EmojiPickerSheet` has desktop's category rail as a row of tabs above the
+list (`emoji-category-tabs`, one `emoji-category-<section>` per header: recent,
+each custom group, the eight categories), on the first sheet as on every later
+one. A tab jumps (`scrollToIndex`, with a near-then-exact fallback for rows not
+yet laid out); the tab of the section at the top of the list is selected (accent
+glyph, `accessibilityState.selected`). A search shows no tabs. Rules:
+`mobile/components/emoji/pickerTabs.ts`.
+
 ### Picker search and labels are localized (#901)
 
 `emojiData.ts` carries only the English Unicode name, so until #901 a Spanish

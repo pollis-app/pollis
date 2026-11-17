@@ -381,7 +381,8 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
             Some(("otp_verify", cfg.verify_otp_max, cfg.verify_otp_window_secs))
         }
         // #847: sheds volume; the durable per-USER bound is `groups::apply_redeem_invite_link`.
-        "/v1/invite-links/redeem" => Some((
+        // #1972: a preview checks the same token, so it shares the tier.
+        "/v1/invite-links/redeem" | "/v1/invite-links/preview" => Some((
             "invite_redeem",
             cfg.invite_redeem_max,
             cfg.invite_redeem_window_secs,

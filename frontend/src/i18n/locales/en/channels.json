@@ -165,6 +165,8 @@
     "pageTitle": "Join a Group",
     "heading": "Join a group",
     "headingTerminal": "> JOIN A GROUP",
+    "headingNamed": "Join {{name}}?",
+    "headingNamedTerminal": "> JOIN {{name}}",
     "blurb": "Invite links let you join without an admin looking you up first.",
     "tokenLabel": "Invite link or code",
     "tokenLabelTerminal": "INVITE LINK OR CODE",

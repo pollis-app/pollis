@@ -452,6 +452,7 @@
     "title": "Amalayisensi omthombo ovulekile",
     "intro": "I-Pollis yakhelwe phezu kwesofthiwe yomthombo ovulekile. Yonke iphakheji yezinkampani zangaphandle kule nguqulo ibhalwe nelayisensi yayo; khetha eyodwa ukuze ufunde umbhalo welayisensi.",
     "count": "Amaphakheji kule nguqulo: {{count}}",
+    "countFiltered": "Amaphakheji aboniswayo: {{shown}} kwangu-{{count}}",
     "unavailable": "Uhlu lwamalayisensi lwenziwa uma uhlelo lokusebenza lwakhiwa, futhi le nguqulo yokuthuthukisa ayinalo.",
     "filterLabel": "Hlunga amaphakheji",
     "filterPlaceholder": "Hlunga ngegama noma ngelayisensi",

@@ -452,6 +452,7 @@
     "title": "Lasisin buɗaɗɗen tushe",
     "intro": "An gina Pollis a kan manhajojin buɗaɗɗen tushe. An jera kowane fakitin wasu kamfanoni da ke cikin wannan ginin tare da lasisinsa; zaɓi ɗaya don karanta rubutun lasisin.",
     "count": "Fakitoci a cikin wannan ginin: {{count}}",
+    "countFiltered": "Fakitocin da aka nuna: {{shown}} daga {{count}}",
     "unavailable": "Ana samar da jerin lasisi lokacin da aka gina manhajar, kuma wannan ginin na gwaji ba shi da shi.",
     "filterLabel": "Tace fakitoci",
     "filterPlaceholder": "Tace da suna ko lasisi",

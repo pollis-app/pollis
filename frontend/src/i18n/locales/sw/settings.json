@@ -452,6 +452,7 @@
     "title": "Leseni za programu huria",
     "intro": "Pollis imejengwa juu ya programu huria. Kila kifurushi cha wahusika wengine kwenye toleo hili kimeorodheshwa pamoja na leseni yake; chagua kimoja ili kusoma maandishi ya leseni.",
     "count": "Vifurushi kwenye toleo hili: {{count}}",
+    "countFiltered": "Vifurushi vinavyoonyeshwa: {{shown}} kati ya {{count}}",
     "unavailable": "Orodha ya leseni hutengenezwa programu inapojengwa, na toleo hili la usanidi halina orodha hiyo.",
     "filterLabel": "Chuja vifurushi",
     "filterPlaceholder": "Chuja kwa jina au leseni",

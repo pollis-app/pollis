@@ -452,6 +452,7 @@
     "title": "Open source licenses",
     "intro": "Pollis is built on open-source software. Every third-party package in this build is listed with its license; select one to read the license text.",
     "count": "Packages in this build: {{count}}",
+    "countFiltered": "Packages shown: {{shown}} of {{count}}",
     "unavailable": "The license list is generated when the app is built, and this development build doesn't have one.",
     "filterLabel": "Filter packages",
     "filterPlaceholder": "Filter by name or license",

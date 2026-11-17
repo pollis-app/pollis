@@ -278,6 +278,7 @@
     "checking": "ግብዣዎን በመፈተሽ ላይ…",
     "confirm": "መቀላቀል የተጠቃሚ ስምዎን እና የመሣሪያ ማንነትዎን በዚህ ቡድን ውስጥ ላሉ ሁሉ ያጋራል። የሚያምኑትን አገናኝ ብቻ ይቀላቀሉ።",
     "confirmTitle": "ይህን ቡድን ይቀላቀሉ?",
+    "confirmTitleNamed": "{{name}}ን ይቀላቀሉ?",
     "join": "ቡድኑን ተቀላቀል",
     "joining": "በመቀላቀል ላይ…",
     "failed": "ይህ የግብዣ አገናኝ ከአሁን በኋላ አይሰራም። አዲስ ይጠይቁ።",
@@ -352,6 +353,8 @@
     "filtersLabel": "ማጣሪያዎች",
     "messages": "መልዕክቶች",
     "placeholder": "ሁሉንም ይፈልጉ…",
+    "scope": "በ{{name}} ውስጥ",
+    "scopeClear": "በ{{name}} ብቻ ሳይሆን በሁሉም ቦታ ይፈልጉ",
     "resultCount_one": "{{count}} ውጤት",
     "resultCount_other": "{{count}} ውጤቶች",
     "typePrompt": "ይጻፉ…"

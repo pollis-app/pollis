@@ -67,6 +67,29 @@ export default function ApproveDevice() {
     });
   };
 
+  // #1972: opened with no request (a stale link, a request already handled): say so, never "(id )".
+  if (!requestId) {
+    return (
+      <Screen testID="screen-approve-device">
+        <Header title={t("approval.title")} />
+        <View style={{ flex: 1, paddingHorizontal: space.xxl, paddingTop: space.xxl }}>
+          <Text testID="text-approve-device-none" style={ty.body}>
+            {t("approval.none")}
+          </Text>
+        </View>
+        <BottomAction>
+          <Button
+            full
+            testID="btn-approve-device-back"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))}
+          >
+            {t("common:actions.back")}
+          </Button>
+        </BottomAction>
+      </Screen>
+    );
+  }
+
   return (
     <Screen testID="screen-approve-device">
       <Header title={t("approval.title")} />
@@ -80,13 +103,17 @@ export default function ApproveDevice() {
           gap: space.lg,
         }}
       >
-        <Text style={ty.body}>
-          <Trans
-            t={t}
-            i18nKey="approval.body"
-            values={{ deviceId: shortDeviceId }}
-            components={{ code: <Text style={{ fontFamily: fonts.mono400, color: semantic.text }} /> }}
-          />
+        <Text testID="text-approve-device-body" style={ty.body}>
+          {shortDeviceId ? (
+            <Trans
+              t={t}
+              i18nKey="approval.body"
+              values={{ deviceId: shortDeviceId }}
+              components={{ code: <Text style={{ fontFamily: fonts.mono400, color: semantic.text }} /> }}
+            />
+          ) : (
+            t("approval.bodyNoId")
+          )}
         </Text>
         <Text style={ty.secondary}>{t("approval.instruction")}</Text>
         <View style={{ gap: space.xs }}>
