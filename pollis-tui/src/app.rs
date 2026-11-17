@@ -1745,6 +1745,8 @@ impl App {
             let handle = sync_loop.cancel();
             let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
         }
+        // Let an unlock's post-join self-update or an approval's MLS add finish (#1959, #1960).
+        let _ = tokio::time::timeout(Duration::from_secs(10), self.state.settle_background()).await;
     }
 
     /// established, so a missing profile is a programming error.
