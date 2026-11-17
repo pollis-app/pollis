@@ -8,6 +8,8 @@ import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useAllPendingJoinRequests, usePendingInvites } from "../../hooks/queries/useGroups";
 import { useDMRequests } from "../../hooks/queries/useBlocks";
+import { PressButton } from "../ui/PressButton";
+import { FOCUS_RING } from "../ui/focusRing";
 
 interface SummaryItemProps {
   icon: React.ReactNode;
@@ -24,11 +26,12 @@ const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color
   const display = count <= 0 ? "" : count > 99 ? "99" : String(count);
 
   return (
-    <button
+    <PressButton
       data-testid={testId}
+      activateOn="click"
       aria-label={label}
       onClick={() => router.navigate({ to })}
-      className={`bg-transparent flex items-center gap-1 font-mono text-secondary hover:opacity-50`}
+      className={`bg-transparent flex items-center gap-1 font-mono text-secondary hover:opacity-50 rounded-chip ${FOCUS_RING}`}
       style={{
         color,
       }}
@@ -46,7 +49,7 @@ const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color
       >
         {display}
       </span>
-    </button>
+    </PressButton>
   );
 };
 

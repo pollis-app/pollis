@@ -7,6 +7,8 @@ import { Button } from "../components/ui/Button";
 import { InputOtp } from "../components/ui/InputOtp";
 import { LoadingSpinner } from "../components/ui/LoaderSpinner";
 import { ThemedQr } from "../components/ui/ThemedQr";
+import { PressButton } from "../components/ui/PressButton";
+import { FOCUS_RING } from "../components/ui/focusRing";
 import { LinkedHistoryRequest } from "../components/HistoryTransfer/LinkedHistoryRequest";
 import { writeClipboardText } from "../bridge";
 import { appStore } from "../stores/appStore";
@@ -273,11 +275,11 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
           <ThemedQr data-testid="link-device-qr" value={handle.qr_payload} size={208} />
         </div>
       ) : (
-        <button
-          type="button"
+        <PressButton
           data-testid="link-device-copy"
+          activateOn="click"
           onClick={copy}
-          className="text-start flex flex-col gap-3 p-5 rounded-lg border border-accent bg-surface hover:bg-hover"
+          className={`text-start flex flex-col gap-3 p-5 rounded-panel border border-accent bg-surface hover:bg-hover ${FOCUS_RING}`}
         >
           <code className="font-mono text-row text-fg break-all leading-relaxed" data-testid="link-device-payload">
             {handle.qr_payload}
@@ -285,7 +287,7 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
           <span className={copied ? "text-secondary font-mono text-accent" : "text-secondary font-mono text-muted"}>
             {copied ? t("linkDevice.copied") : t("linkDevice.clickToCopy")}
           </span>
-        </button>
+        </PressButton>
       )}
       <p className="text-body text-muted" data-testid="link-device-status">
         {secondsLeft > 0 ? t("linkDevice.expiresIn", { time: `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}` }) : t("linkDevice.expiredTitle")}

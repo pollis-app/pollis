@@ -5,6 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { isMac, isLinux, isWindows } from '../../utils/platform';
 import * as api from '../../services/api';
 import { Button } from '../ui/Button';
+import { LinkButton } from '../ui/LinkButton';
 import { InputOtp } from '../ui/InputOtp';
 import { AuthError } from './AuthError';
 import { TextInput } from '../ui/TextInput';
@@ -174,13 +175,13 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
             {t('otp.verify')}
           </Button>
         </form>
-        <button
+        <Button
+          variant="ghost"
           data-testid="back-to-email-button"
           onClick={() => { setStep('email'); setOtp(''); setError(null); }}
-          className="inline-flex items-center gap-1 leading-none text-secondary font-mono text-muted"
         >
           <ArrowLeft size={14} className="rtl-mirror" /> {t('common:actions.back')}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -264,10 +265,10 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
           i18nKey="legal.agree"
           components={{
             terms: (
-              <button type="button" className="underline bg-transparent text-accent" onClick={() => void shellOpen('https://pollis.com/terms')} />
+              <LinkButton onClick={() => void shellOpen('https://pollis.com/terms')} />
             ),
             privacy: (
-              <button type="button" className="underline bg-transparent text-accent" onClick={() => void shellOpen('https://pollis.com/privacy')} />
+              <LinkButton onClick={() => void shellOpen('https://pollis.com/privacy')} />
             ),
           }}
         />

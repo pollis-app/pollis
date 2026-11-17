@@ -13,6 +13,7 @@ import { ShieldCheck } from "lucide-react";
 import type { MessageAttachment } from "../../../types";
 import { EmptyState } from "../../ui/EmptyState";
 import { SectionHeader } from "../../ui/SectionHeader";
+import { PressButton } from "../../ui/PressButton";
 
 /** Caps per-tile media fetches when the panel opens. */
 const MEDIA_LIMIT = 30;
@@ -197,14 +198,14 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
                   : tDms("safety.headingMany")
               }</SectionHeader>
             {dmPeers.map((p) => (
-              <button
+              <PressButton
                 key={p.userId}
-                type="button"
+                activateOn="click"
                 onClick={() => setSafety(p.userId)}
                 className={
                   isTerminal
                     ? "flex w-full items-center gap-1.5 px-2.5 py-0.5 text-start text-row text-fg hover:bg-hover"
-                    : "flex w-full items-center gap-2 rounded px-2 py-1 text-start text-body text-fg hover:bg-hover"
+                    : "flex w-full items-center gap-2 rounded-control px-2 py-1 text-start text-body text-fg hover:bg-hover"
                 }
                 data-testid={`right-panel-verify-safety-${p.userId}`}
               >
@@ -214,7 +215,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
                     ? tDms("safety.verify")
                     : tDms("safety.title", { name: `@${p.label}` })}
                 </bdi>
-              </button>
+              </PressButton>
             ))}
           </section>
         )}

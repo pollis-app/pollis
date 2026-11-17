@@ -13,7 +13,7 @@ import {
   Star,
 } from "lucide-react";
 import type { EmojiCategoryId } from "./emojiData";
-import { PressButton } from "../ui/PressButton";
+import { IconButton } from "../ui/IconButton";
 
 export interface RailEntry {
   id: string;
@@ -60,22 +60,18 @@ export const EmojiCategoryRail: React.FC<EmojiCategoryRailProps> = ({
       {entries.map((entry) => {
         const isActive = entry.id === activeId;
         return (
-          <PressButton
+          <IconButton
             key={entry.id}
-            type="button"
+            activateOn="press"
             data-testid={`emoji-category-${entry.id}`}
             aria-label={entry.label}
             aria-current={isActive ? "true" : undefined}
             title={entry.label}
             onClick={() => onJump(entry.id)}
-            className="icon-btn-sm"
-            style={{
-              color: isActive ? "var(--c-accent)" : undefined,
-              background: isActive ? "var(--c-active)" : undefined,
-            }}
+            className={isActive ? "text-accent bg-active hover:text-accent hover:bg-active" : ""}
           >
             {iconFor(entry.id)}
-          </PressButton>
+          </IconButton>
         );
       })}
     </nav>

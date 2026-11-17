@@ -103,7 +103,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
           }}
           className={
             isModern
-              ? "w-full max-w-[32rem] rounded-lg border border-line bg-surface p-6"
+              ? "w-full max-w-[32rem] rounded-panel border border-line bg-surface p-6"
               : "w-full max-w-[32rem] border border-line bg-surface p-5"
           }
         >

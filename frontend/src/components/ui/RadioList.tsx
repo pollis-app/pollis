@@ -77,7 +77,7 @@ export const RadioList: React.FC<RadioListProps> = ({
                 move(e.currentTarget, option.value, -1);
               }
             }}
-            className={`flex items-center gap-3 w-full text-start rounded-lg px-4 py-3 border-0 font-mono ${rowClass} ${FOCUS_RING}`}
+            className={`flex items-center gap-3 w-full text-start rounded-control px-4 py-3 border-0 font-mono ${rowClass} ${FOCUS_RING}`}
           >
             <span
               aria-hidden

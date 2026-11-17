@@ -11,10 +11,9 @@ import {
   type WindowSource,
 } from "../../screenshare/screenShareSession";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
 import { Switch } from "../ui/Switch";
 import { EmptyState } from "../ui/EmptyState";
-import { FOCUS_RING } from "../ui/focusRing";
+import { SourceCard } from "./SourceCard";
 
 /** Inline screen-share source picker replacing the participant grid (no modal). */
 export const ScreenSharePicker: React.FC = observer(() => {
@@ -193,68 +192,12 @@ export const ScreenSharePicker: React.FC = observer(() => {
   );
 });
 
-interface SourceCardProps {
-  disabled: boolean;
-  onPick: () => void;
-  testId: string;
-  title: string;
-  subtitle?: string;
-  /** PNG data URL; the capture-helper path has none, so `icon` shows. */
-  thumbnail?: string;
-  icon: React.ReactNode;
-}
-
-const SourceCardShell: React.FC<SourceCardProps> = ({
-  disabled,
-  onPick,
-  testId,
-  title,
-  subtitle,
-  thumbnail,
-  icon,
-}) => (
-  <button
-    type="button"
-    onClick={onPick}
-    disabled={disabled}
-    data-testid={testId}
-    className={`min-h-[6.25rem] text-start font-mono text-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer rounded-md ${FOCUS_RING}`}
-  >
-    <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
-      {/* Fixed 16:10 (the requested thumbnail size) keeps the grid even. */}
-      <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted aspect-[16/10]">
-        {thumbnail ? (
-          // alt="": the title labels it. object-contain avoids cropping.
-          <img
-            src={thumbnail}
-            alt=""
-            className="w-full h-full object-contain"
-            draggable={false}
-          />
-        ) : (
-          icon
-        )}
-      </div>
-      <div className="p-2">
-        <div className="truncate text-fg">
-          {title}
-        </div>
-        {subtitle ? (
-          <div className="truncate text-muted text-meta">
-            {subtitle}
-          </div>
-        ) : null}
-      </div>
-    </Card>
-  </button>
-);
-
 const DisplayCard: React.FC<{
   display: DisplaySource;
   disabled: boolean;
   onPick: () => void;
 }> = ({ display, disabled, onPick }) => (
-  <SourceCardShell
+  <SourceCard
     disabled={disabled}
     onPick={onPick}
     testId={`screen-share-source-display-${display.id}`}
@@ -283,7 +226,7 @@ const WindowCard: React.FC<{
       ? window.app_name
       : undefined;
   return (
-    <SourceCardShell
+    <SourceCard
       disabled={disabled}
       onPick={onPick}
       testId={`screen-share-source-window-${window.id}`}

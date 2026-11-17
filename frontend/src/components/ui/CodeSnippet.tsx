@@ -59,7 +59,7 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({
     copyState === "copied" ? "secondary" : copyState === "failed" ? "danger" : "primary";
 
   return (
-    <div className="flex items-center gap-3 rounded-md border border-line bg-bg px-3 py-2">
+    <div className="flex items-center gap-3 rounded-control border border-line bg-bg px-3 py-2">
       <code
         dir="ltr"
         data-testid={testId}

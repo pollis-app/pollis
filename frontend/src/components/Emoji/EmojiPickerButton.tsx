@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Smile, type LucideIcon } from "lucide-react";
 import { type Placement, panelHeightPx, resolvePlacement } from "./pickerPlacement";
 import { PressButton } from "../ui/PressButton";
+import { IconButton } from "../ui/IconButton";
 
 // Lazy: the picker pulls in the largest module (`emojiData.ts`) (#874).
 const EmojiPicker = lazy(() =>
@@ -21,6 +22,7 @@ interface EmojiPickerButtonProps {
   className?: string;
   "data-testid"?: string;
   ariaLabel?: string;
+  /** A host's own trigger look (the message action bar); omitted, the trigger is an `IconButton`. */
   buttonClassName?: string;
   icon?: LucideIcon;
   iconSize?: number;
@@ -41,7 +43,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
   className = "",
   "data-testid": testId = "emoji-picker-button",
   ariaLabel,
-  buttonClassName = "icon-btn-sm",
+  buttonClassName,
   icon: Icon = Smile,
   iconSize = 16,
   iconClassName = "size-4 shrink-0",
@@ -109,6 +111,9 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
 
   const label = ariaLabel ?? t("picker.triggerLabel");
 
+  // The host's own look on a bare PressButton, else the shared icon button.
+  const Trigger = buttonClassName ? PressButton : IconButton;
+
   const positionClass = [
     resolved.placement === "up" ? "bottom-full mb-1" : "top-full mt-1",
     // Logical edges: the facing edge swaps under RTL.
@@ -117,9 +122,9 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
 
   return (
     <div ref={wrapperRef} className={`relative ${className}`}>
-      <PressButton
+      <Trigger
         ref={triggerRef}
-        type="button"
+        activateOn="press"
         data-testid={testId}
         aria-label={label}
         aria-expanded={open}
@@ -131,7 +136,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
         style={{ color: open ? "var(--c-accent)" : undefined }}
       >
         <Icon size={iconSize} className={iconClassName} />
-      </PressButton>
+      </Trigger>
 
       {open && (
         <div

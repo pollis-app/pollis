@@ -40,10 +40,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
       >
         {label}
         <span
-          className="inline-block ms-2 px-1.5 py-0.5 font-mono font-bold text-secondary bg-active border border-line-strong text-accent"
-          style={{
-            borderRadius: 4,
-          }}
+          className="inline-block ms-2 px-1.5 py-0.5 font-mono font-bold text-secondary bg-active border border-line-strong text-accent rounded-chip"
         >
           {value}
         </span>
@@ -66,7 +63,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
         disabled={disabled}
         aria-describedby={descriptionId}
         className={`
-          w-full h-2 rounded-md appearance-none cursor-pointer
+          w-full h-2 rounded-full appearance-none cursor-pointer
           ${FOCUS_RING}
           disabled:opacity-50 disabled:cursor-not-allowed
           [&::-webkit-slider-thumb]:appearance-none

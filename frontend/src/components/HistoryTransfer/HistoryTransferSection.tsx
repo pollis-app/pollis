@@ -30,7 +30,7 @@ export const HistoryTransferSection: React.FC = () => {
       {(pending.data ?? []).map((request) => (
         <div
           key={request.transfer_id}
-          className="flex items-center justify-between gap-3 rounded-lg bg-surface-raised px-4 py-3"
+          className="flex items-center justify-between gap-3 rounded-control bg-surface-raised px-4 py-3"
           data-testid={`history-pending-${request.transfer_id}`}
         >
           <span className="min-w-0 text-secondary text-fg">
@@ -50,7 +50,7 @@ export const HistoryTransferSection: React.FC = () => {
       {active.map((tr) => (
         <div
           key={tr.transfer_id}
-          className="flex items-center justify-between gap-3 rounded-lg bg-surface-raised px-4 py-3"
+          className="flex items-center justify-between gap-3 rounded-control bg-surface-raised px-4 py-3"
           data-testid={`history-active-${tr.transfer_id}`}
         >
           <span className="min-w-0 flex flex-col text-secondary">

@@ -24,7 +24,7 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
       <DotMatrix algorithm={gameOfLifeAlgorithm} speed={0.6} />
 
       <div
-        className="bg-surface border border-line"
+        className="bg-surface border border-line rounded-panel"
         style={{
           position: "relative",
           zIndex: 1,
@@ -33,7 +33,6 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
           alignItems: "center",
           gap: "1.5rem",
           padding: "2.5rem",
-          borderRadius: "0.5rem",
           maxWidth: 360,
           width: "100%",
         }}

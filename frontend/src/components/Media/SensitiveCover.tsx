@@ -13,7 +13,7 @@ export const SensitiveCover: React.FC<{ blurhash?: string }> = ({ blurhash }) =>
         <BlurhashCanvas hash={blurhash} />
       </div>
     )}
-    <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white">
+    <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-surface-high text-fg">
       <EyeOff size={16} aria-hidden="true" />
     </span>
   </div>

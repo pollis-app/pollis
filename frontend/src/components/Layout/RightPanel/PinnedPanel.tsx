@@ -10,6 +10,7 @@ import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { formatClockTime } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
 import { SectionHeader } from "../../ui/SectionHeader";
+import { IconButton } from "../../ui/IconButton";
 
 interface PinnedPanelProps {
   channelId: string | null;
@@ -69,9 +70,8 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
                   <span className="shrink-0 text-meta text-muted">
                     {formatClockTime(new Date(pin.sent_at).getTime())}
                   </span>
-                  <button
-                    type="button"
-                    className="icon-btn-sm shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                  <IconButton
+                    className="shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
                     aria-label={t("pins.unpin")}
                     title={t("pins.unpin")}
                     data-testid="pinned-panel-unpin"
@@ -84,7 +84,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
                     }
                   >
                     <PinOff size={14} aria-hidden="true" />
-                  </button>
+                  </IconButton>
                 </div>
                 {parsed.text ? (
                   <p

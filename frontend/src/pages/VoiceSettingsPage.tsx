@@ -357,7 +357,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                   letterbox; RemoteVideoTile contains + auto-mirrors the key. */}
               <div
                 data-testid="voice-camera-preview"
-                className="flex items-center justify-center overflow-hidden rounded border border-line"
+                className="flex items-center justify-center overflow-hidden rounded-panel border border-line"
                 style={{
                   width: "100%",
                   maxWidth: 320,

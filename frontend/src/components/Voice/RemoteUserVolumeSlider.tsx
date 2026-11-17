@@ -93,7 +93,7 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
         aria-label={t("tile.volumeFor", { name: participantName })}
         data-testid={`voice-volume-slider-${userId}`}
         className={`
-          w-20 h-1 rounded-md appearance-none cursor-pointer
+          w-20 h-1 rounded-full appearance-none cursor-pointer
           ${FOCUS_RING}
           [&::-webkit-slider-thumb]:appearance-none
           [&::-webkit-slider-thumb]:w-3
