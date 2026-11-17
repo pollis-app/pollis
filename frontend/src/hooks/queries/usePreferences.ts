@@ -8,6 +8,7 @@ import {
   applyBackgroundColor,
   applyFontSize,
   applySkin,
+  rememberBootLook,
   normalizeSkin,
   skinToWire,
   loadDeviceFontSize,
@@ -444,6 +445,8 @@ export function applyPreferences(prefs: PreferencesData): void {
   applyAccentColor(accentFromPrefs(prefs) ?? DEFAULT_ACCENT_HEX);
   applyBackgroundColor(backgroundFromPrefs(prefs) ?? DEFAULT_BACKGROUND_HEX);
   applySkin(normalizeSkin(prefs.skin));
+  // The look sign-in paints on the next launch (#1966).
+  rememberBootLook();
   setShortcutOverrides(
     (prefs.shortcut_overrides ?? {}) as Partial<Record<ShortcutCommandId, string>>,
   );

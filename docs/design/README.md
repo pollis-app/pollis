@@ -167,7 +167,15 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
 ## Layout and behaviour
 
 - **Desktop:** title bar, breadcrumb bar, sidebar, main column, optional right panel, status bar.
-  Settings-type pages are a single column, at most 420px wide, inside the main pane.
+  Settings-type pages are a single column, at most 420px wide, inside the main pane. Every page's
+  title is `PageShell`'s `<h1>` (#1966): a sentence-case heading in `text-fg` in Modern, Terminal's
+  small accent strip; a page draws no second title of its own. Every route has a full breadcrumb
+  (`utils/breadcrumbTrail.ts`, walked for every route by `tests/breadcrumb-trail.test.ts`), and the
+  breadcrumb, page title and status bars share `h-bar`.
+- **Sign-in looks like the app.** The device remembers the last account's skin, accent and
+  background (`colorUtils.rememberBootLook`), so sign-in, the code step and the PIN paint in them
+  rather than the defaults; signing out with "delete data" forgets it. Mobile does the same with
+  its boot accent (#1447).
 - **Mobile:** tabs plus stacks, native sheets for menus and confirmations, master–detail on tablets.
   A confirmation is a `SheetOverlay` (the question as its title, the action as a row in
   `Group surface="high"`, red when destructive; Close cancels), never a stock `Alert`, whose

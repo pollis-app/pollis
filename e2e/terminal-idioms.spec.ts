@@ -140,7 +140,7 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("invite-link-manager")).toBeVisible();
       const seen = await idioms(page);
       expect(seen.doubleColon).toBe(false);
-      await expect(page.getByText("Invite Member — Acme")).toBeVisible();
+      await expect(page.getByText("Invite member — Acme")).toBeVisible();
       if (skin === "modern") {
         expect(seen.brackets).toEqual([]);
         expect(seen.spacedCaps).toEqual([]);
@@ -152,7 +152,7 @@ for (const skin of SKINS) {
       await boot(page, skin);
       const fill = await accent(page);
       // Preferences first: Voice & video puts keyboard focus on its first select.
-      for (const [query, id] of [["appearance", "preferences-page"], ["Voice & Video", "voice-settings-page"]] as const) {
+      for (const [query, id] of [["appearance", "preferences-page"], ["Voice & video", "voice-settings-page"]] as const) {
         await openPage(page, query, id);
         const seen = await idioms(page);
         if (skin === "modern") {

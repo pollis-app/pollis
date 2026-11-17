@@ -60,7 +60,7 @@ export const ReportPage: React.FC = observer(() => {
           {done ? (
             <>
               <div className="flex flex-col gap-3" data-testid="report-done">
-                <h1 className="text-title text-fg">{t("report.doneTitle")}</h1>
+                <h2 className="text-title text-fg">{t("report.doneTitle")}</h2>
                 <p className="text-body text-muted leading-relaxed">
                   {done.blocked ? t("report.doneBlocked", { name }) : t("report.done")}
                 </p>
@@ -74,7 +74,7 @@ export const ReportPage: React.FC = observer(() => {
           ) : (
             <>
               <div className="flex flex-col gap-3">
-                <h1 className="text-title text-fg">{aboutMessage ? t("report.titleMessage") : t("report.titleUser", { name })}</h1>
+                <h2 className="text-title text-fg">{aboutMessage ? t("report.titleMessage") : t("report.titleUser", { name })}</h2>
                 <p className="text-body text-muted leading-relaxed">{t("report.intro")}</p>
               </div>
               <div className="flex flex-col gap-3" role="group" aria-label={t("report.reasonLabel")}>

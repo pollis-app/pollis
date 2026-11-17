@@ -16,14 +16,14 @@
     "pinsLabel": "Pinned messages"
   },
   "settings": {
-    "pageTitle": "Conversation Settings",
+    "pageTitle": "Conversation settings",
     "leave": "Leave conversation",
     "submitting": "Leaving…",
     "leaveFailed": "Failed to leave conversation",
     "cancel": "Cancel (Esc)"
   },
   "start": {
-    "pageTitle": "New Message",
+    "pageTitle": "New message",
     "identifierLabel": "Username or Email",
     "identifierPlaceholder": "friend@pollis.com",
     "submit": "Start Conversation",
@@ -33,7 +33,7 @@
     "startFailed": "Failed to start conversation"
   },
   "requests": {
-    "pageTitle": "Message Requests",
+    "pageTitle": "Message requests",
     "empty": "No pending requests.",
     "noMessageYet": "(no message yet)",
     "unknownSender": "Unknown",
@@ -43,7 +43,7 @@
     "block": "Block"
   },
   "blocked": {
-    "pageTitle": "Blocked Users",
+    "pageTitle": "Blocked users",
     "empty": "No blocked users.",
     "unblock": "Unblock"
   },

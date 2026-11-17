@@ -159,7 +159,7 @@
     "openButton": "Voice & Video"
   },
   "user": {
-    "title": "User Settings",
+    "title": "User settings",
     "signInPrompt": "Please sign in",
     "accountHeading": "Account",
     "usernameLabel": "Username",
@@ -355,7 +355,7 @@
     "doneButton": "Done"
   },
   "update": {
-    "title": "Software Update",
+    "title": "Software update",
     "heading": "Software Update",
     "currentVersion": "Current version: <val>{{version}}</val>",
     "versionLoading": "Loading...",
@@ -370,7 +370,7 @@
     "whatsNew": "What's new in {{version}}"
   },
   "shortcuts": {
-    "title": "Key Bindings",
+    "title": "Key bindings",
     "empty": "No shortcuts.",
     "capturing": "Press keys…",
     "rebindLabel": "Rebind {{name}}",
