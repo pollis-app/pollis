@@ -1702,15 +1702,199 @@ mod file_backend {
     }
 }
 
+/// Values too big for one keychain entry, split across several.
+///
+/// Windows Credential Manager caps a secret at 2560 bytes of UTF-16, i.e. 1280 characters, and the
+/// account's ML-DSA-44 public key is 1312 bytes, 1752 in base64: one entry refused it, so a Windows
+/// device could not record the account's identity key and every new-device enrollment failed.
+/// A value over the limit is written as numbered parts plus a header entry naming the count.
+/// The header can never be mistaken for a value: base64 has no `:`.
+mod entry_parts {
+    const HEADER_PREFIX: &str = "pollis-parts:";
+
+    /// The header stored under the main key for a value written as `count` parts.
+    pub fn header(count: usize) -> String {
+        format!("{HEADER_PREFIX}{count}")
+    }
+
+    /// The part count if `stored` is a header, `None` if it is a plain value.
+    pub fn parse_header(stored: &str) -> Option<usize> {
+        stored
+            .strip_prefix(HEADER_PREFIX)
+            .and_then(|n| n.parse::<usize>().ok())
+            .filter(|n| *n > 1)
+    }
+
+    /// The key of part `index` (1-based) of `key`.
+    pub fn part_key(key: &str, index: usize) -> String {
+        format!("{key}#part{index}")
+    }
+
+    /// `encoded` cut into pieces of at most `max` characters; one piece when it fits.
+    ///
+    /// Splits on character boundaries; base64 is ASCII, so that is also bytes.
+    pub fn split(encoded: &str, max: usize) -> Vec<&str> {
+        assert!(max > 0, "entry size limit must be positive");
+        if encoded.len() <= max {
+            return vec![encoded];
+        }
+        let mut out = Vec::new();
+        let mut rest = encoded;
+        while !rest.is_empty() {
+            let mut cut = rest.len().min(max);
+            while !rest.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            let (piece, tail) = rest.split_at(cut);
+            out.push(piece);
+            rest = tail;
+        }
+        out
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_value_that_fits_is_one_piece_and_never_a_header() {
+            assert_eq!(split("abc", 1024), vec!["abc"]);
+            assert_eq!(parse_header("abc"), None);
+            assert_eq!(parse_header(""), None);
+        }
+
+        #[test]
+        fn a_large_value_splits_and_rejoins_exactly() {
+            let value = "QUJD".repeat(800);
+            let parts = split(&value, 1024);
+            assert_eq!(parts.len(), 4);
+            assert!(parts.iter().all(|p| p.len() <= 1024));
+            assert_eq!(parts.concat(), value);
+        }
+
+        #[test]
+        fn the_header_round_trips_and_base64_can_never_look_like_one() {
+            assert_eq!(parse_header(&header(3)), Some(3));
+            assert_eq!(parse_header("pollis-parts:1"), None);
+            assert_eq!(parse_header("pollis-parts:x"), None);
+            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0xffu8; 64]);
+            assert!(!b64.contains(':'));
+            assert_eq!(parse_header(&b64), None);
+        }
+
+        #[test]
+        fn an_ml_dsa_44_public_key_needs_parts_on_windows() {
+            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [7u8; 1312]);
+            assert!(encoded.len() > 1280, "fits one Credential Manager entry; the split is moot");
+            assert!(split(&encoded, 1024).len() > 1);
+        }
+    }
+}
+
 // OS keychain backend (`os-keystore`); whether it is used is decided at runtime by `backend::kind()`.
 
 #[cfg(feature = "os-keystore")]
 mod keychain_backend {
-    use super::namespaced;
+    use super::{entry_parts, namespaced};
     use crate::error::{Error, Result};
     use keyring::Entry;
 
     const SERVICE: &str = "pollis";
+
+    /// The most characters one entry may hold; larger values are written in parts ([`entry_parts`]).
+    ///
+    /// Windows' limit is 1280 characters of UTF-16 (see [`entry_parts`]); the other keychains take
+    /// far more, so they keep one entry per value and their stored layout does not change.
+    #[cfg(target_os = "windows")]
+    const MAX_ENTRY_CHARS: usize = 1024;
+    #[cfg(not(target_os = "windows"))]
+    const MAX_ENTRY_CHARS: usize = usize::MAX;
+
+    fn entry(key: &str) -> Result<Entry> {
+        Entry::new(SERVICE, key).map_err(|e| Error::Keystore(e.to_string()))
+    }
+
+    fn get(key: &str) -> Result<Option<String>> {
+        match entry(key)?.get_password() {
+            Ok(v) => Ok(Some(v)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(Error::Keystore(e.to_string())),
+        }
+    }
+
+    fn set(key: &str, value: &str) -> Result<()> {
+        entry(key)?
+            .set_password(value)
+            .map_err(|e| Error::Keystore(e.to_string()))
+    }
+
+    /// Delete `key`; a missing entry is fine.
+    fn remove_if_present(key: &str) -> Result<()> {
+        match entry(key)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(Error::Keystore(e.to_string())),
+        }
+    }
+
+    /// How many parts the value under `key` is stored in now (0 when it is a single entry or absent).
+    fn stored_part_count(key: &str) -> Result<usize> {
+        Ok(get(key)?
+            .as_deref()
+            .and_then(entry_parts::parse_header)
+            .unwrap_or(0))
+    }
+
+    /// Write `encoded` under `key`, in parts when it is over `max` characters.
+    ///
+    /// Parts first, header last, so a reader never finds a header whose parts are not there yet.
+    /// Parts left over from a longer earlier value are removed afterwards.
+    fn write(key: &str, encoded: &str, max: usize) -> Result<()> {
+        let before = stored_part_count(key)?;
+        let pieces = entry_parts::split(encoded, max);
+        let now = if pieces.len() == 1 {
+            set(key, encoded)?;
+            0
+        } else {
+            for (i, piece) in pieces.iter().enumerate() {
+                set(&entry_parts::part_key(key, i + 1), piece)?;
+            }
+            set(key, &entry_parts::header(pieces.len()))?;
+            pieces.len()
+        };
+        for i in (now + 1)..=before {
+            remove_if_present(&entry_parts::part_key(key, i))?;
+        }
+        Ok(())
+    }
+
+    /// The value under `key`, joined from its parts when it was written in parts.
+    fn read(key: &str) -> Result<Option<String>> {
+        let Some(stored) = get(key)? else {
+            return Ok(None);
+        };
+        let Some(count) = entry_parts::parse_header(&stored) else {
+            return Ok(Some(stored));
+        };
+        let mut joined = String::new();
+        for i in 1..=count {
+            let part = get(&entry_parts::part_key(key, i))?.ok_or_else(|| {
+                Error::Keystore(format!("keychain value is missing part {i} of {count}"))
+            })?;
+            joined.push_str(&part);
+        }
+        Ok(Some(joined))
+    }
+
+    /// Delete `key` and any parts; errors on a missing main entry, as before parts existed.
+    fn erase(key: &str) -> Result<()> {
+        let count = stored_part_count(key)?;
+        for i in 1..=count {
+            remove_if_present(&entry_parts::part_key(key, i))?;
+        }
+        entry(key)?
+            .delete_credential()
+            .map_err(|e| Error::Keystore(e.to_string()))
+    }
 
     /// Read-only probe for "is there a usable credential store on this host".
     ///
@@ -1734,33 +1918,20 @@ mod keychain_backend {
     pub async fn store(key: &str, value: &[u8]) -> Result<()> {
         let key = namespaced(key);
         let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, value);
-        tokio::task::spawn_blocking(move || {
-            let entry = Entry::new(SERVICE, &key)
-                .map_err(|e| Error::Keystore(e.to_string()))?;
-            entry.set_password(&encoded)
-                .map_err(|e| Error::Keystore(e.to_string()))
-        })
-        .await
-        .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
+        tokio::task::spawn_blocking(move || write(&key, &encoded, MAX_ENTRY_CHARS))
+            .await
+            .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
     }
 
     pub async fn load(key: &str) -> Result<Option<Vec<u8>>> {
         let key = namespaced(key);
         tokio::task::spawn_blocking(move || {
-            let entry = Entry::new(SERVICE, &key)
-                .map_err(|e| Error::Keystore(e.to_string()))?;
-            match entry.get_password() {
-                Ok(encoded) => {
-                    let bytes = base64::Engine::decode(
-                        &base64::engine::general_purpose::STANDARD,
-                        encoded,
-                    )
-                    .map_err(|e| Error::Keystore(format!("base64 decode: {e}")))?;
-                    Ok(Some(bytes))
-                }
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(e) => Err(Error::Keystore(e.to_string())),
-            }
+            let Some(encoded) = read(&key)? else {
+                return Ok(None);
+            };
+            let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+                .map_err(|e| Error::Keystore(format!("base64 decode: {e}")))?;
+            Ok(Some(bytes))
         })
         .await
         .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
@@ -1768,14 +1939,48 @@ mod keychain_backend {
 
     pub async fn delete(key: &str) -> Result<()> {
         let key = namespaced(key);
-        tokio::task::spawn_blocking(move || {
-            let entry = Entry::new(SERVICE, &key)
-                .map_err(|e| Error::Keystore(e.to_string()))?;
-            entry.delete_credential()
-                .map_err(|e| Error::Keystore(e.to_string()))
-        })
-        .await
-        .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
+        tokio::task::spawn_blocking(move || erase(&key))
+            .await
+            .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
+    }
+
+    /// Against the real Windows Credential Manager (run natively by `windows-link.yml`).
+    #[cfg(all(test, target_os = "windows"))]
+    mod windows_tests {
+        use super::*;
+
+        fn unique(name: &str) -> String {
+            format!("TEST:{name}:{}", std::process::id())
+        }
+
+        #[test]
+        fn credential_manager_holds_a_value_over_its_entry_limit() {
+            let key = unique("large");
+            let value = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [9u8; 1312]);
+            // The bug: one entry refuses it.
+            assert!(set(&key, &value).is_err(), "one entry took 1752 chars; the limit moved");
+            write(&key, &value, MAX_ENTRY_CHARS).expect("write in parts");
+            assert_eq!(read(&key).expect("read").as_deref(), Some(value.as_str()));
+            // Shrinking to one entry removes the old parts.
+            write(&key, "c21hbGw=", MAX_ENTRY_CHARS).expect("rewrite small");
+            assert_eq!(read(&key).expect("read small").as_deref(), Some("c21hbGw="));
+            assert_eq!(get(&entry_parts::part_key(&key, 1)).expect("probe part"), None);
+            erase(&key).expect("erase");
+            assert_eq!(read(&key).expect("read erased"), None);
+        }
+
+        #[test]
+        fn erasing_a_value_in_parts_removes_every_part() {
+            let key = unique("erase");
+            let value = "QUJD".repeat(700);
+            write(&key, &value, MAX_ENTRY_CHARS).expect("write");
+            let parts = stored_part_count(&key).expect("count");
+            assert!(parts > 1);
+            erase(&key).expect("erase");
+            for i in 1..=parts {
+                assert_eq!(get(&entry_parts::part_key(&key, i)).expect("probe"), None);
+            }
+        }
     }
 }
 
