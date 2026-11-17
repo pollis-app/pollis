@@ -374,6 +374,15 @@ sheet does not), lists both accounts there — the device's own row marked
 "(you)" — only the peer under 🎉, and both on All. The peer exits once it sees
 the device's 👍. `SHOTS_DIR=<dir>` keeps the screenshots.
 
+**Link previews across platforms (automated, #1987):** `mobile/scripts/maestro-link-previews.sh <device>`
+— the same shape with `pollis-tui`'s `link_preview_peer` example, which runs the
+desktop app's `pollis-core`: the device opens a DM with a fresh peer
+(`two-client/link-previews/1-open-dm.yaml`), the peer builds a preview of
+github.com itself (a real fetch from the Mac) and sends it, the device must draw
+that card from the message, then send its own (`2-cards.yaml`); the script
+passes only when the peer has read the device's preview back. The one-device
+half is `flows/link-previews.yaml`.
+
 **Pins across members (automated, #1315):** `mobile/scripts/maestro-pins.sh <device>`
 — the lost-message shape with `pollis-tui`'s `pins_peer` example: the device
 opens a DM with a fresh peer (`two-client/pins/1-open-dm.yaml`), the peer sends

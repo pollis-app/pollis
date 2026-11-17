@@ -1,0 +1,38 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# LINK PREVIEWS (#1987), part 2 of 2 — driven by scripts/maestro-link-previews.sh.
+# The peer (the desktop's pollis-core, run by the script) sent a message whose
+# preview it built itself: the phone draws the card from the message alone and
+# opens nothing. Then the phone sends its own preview, which the peer must
+# read back from the ciphertext.
+
+- extendedWaitUntil:
+    visible: ".*from the desktop core.*"
+    timeout: 120000
+- extendedWaitUntil:
+    visible:
+      id: "message-link-preview"
+    timeout: 30000
+- takeScreenshot: link-previews-peer-01-received
+- tapOn:
+    id: "input-composer"
+- inputText: "from the phone https://github.com/"
+- extendedWaitUntil:
+    visible:
+      id: "composer-link-preview"
+    timeout: 5000
+- extendedWaitUntil:
+    visible: ".*GitHub.*Change.*"
+    timeout: 15000
+    optional: true
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
+- tapOn:
+    id: "btn-send"
+- runFlow: ../../subflows/message-settled.yaml
+- takeScreenshot: link-previews-peer-02-sent
