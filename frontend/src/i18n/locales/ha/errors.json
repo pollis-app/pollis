@@ -12,6 +12,10 @@
     "pinLockedOut": "An shigar da PIN mara kyau sau da yawa. Dawo da asusun da Maɓallin Sirri.",
     "pinNotSet": "Wannan na'ura ba ta da PIN tukuna. Sake shiga don saita PIN.",
     "noActiveUser": "Ba a shiga a wannan na'ura ba. Sake shiga.",
-    "unlockFirst": "Buɗe Pollis tukuna."
+    "unlockFirst": "Buɗe Pollis tukuna.",
+    "serverUnverified": "Sabar ba ta iya tantance wannan na'ura ba. Tabbatar an saita kwanan wata da lokaci ta atomatik, sannan a sake gwadawa.",
+    "serverRateLimited": "Buƙatu sun yi yawa. Jira ɗan lokaci, sannan a sake gwadawa.",
+    "serverUnavailable": "Sabar Pollis ba ta samuwa yanzu. Sake gwadawa nan ba da jimawa ba.",
+    "serverRefused": "Sabar ba ta karɓi wannan buƙata ba. Sake gwadawa."
   }
 }

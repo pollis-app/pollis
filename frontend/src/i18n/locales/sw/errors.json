@@ -12,6 +12,10 @@
     "pinLockedOut": "PIN zisizo sahihi zimekuwa nyingi mno. Rejesha akaunti yako kwa Ufunguo wa Siri wako.",
     "pinNotSet": "Kifaa hiki bado hakina PIN. Ingia tena ili uweke PIN.",
     "noActiveUser": "Hujaingia kwenye kifaa hiki. Ingia tena.",
-    "unlockFirst": "Fungua Pollis kwanza."
+    "unlockFirst": "Fungua Pollis kwanza.",
+    "serverUnverified": "Seva haikuweza kuthibitisha kifaa hiki. Hakikisha tarehe na saa zimewekwa kiotomatiki, kisha ujaribu tena.",
+    "serverRateLimited": "Maombi ni mengi mno. Subiri kidogo, kisha ujaribu tena.",
+    "serverUnavailable": "Seva ya Pollis haipatikani kwa sasa. Jaribu tena baada ya muda mfupi.",
+    "serverRefused": "Seva haikukubali ombi hilo. Jaribu tena."
   }
 }

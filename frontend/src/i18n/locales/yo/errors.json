@@ -11,6 +11,10 @@
     "pinLockedOut": "PIN tí kò tọ́ ti pọ̀ jù. Gba àkáǹtì rẹ padà pẹ̀lú Kọ́kọ́rọ́ Àṣírí rẹ.",
     "pinNotSet": "Ẹ̀rọ yìí kò tíì ní PIN. Tún wọlé láti ṣètò ọ̀kan.",
     "noActiveUser": "O kò tíì wọlé lórí ẹ̀rọ yìí. Tún wọlé.",
-    "unlockFirst": "Kọ́kọ́ ṣí Pollis sílẹ̀."
+    "unlockFirst": "Kọ́kọ́ ṣí Pollis sílẹ̀.",
+    "serverUnverified": "Olupin kò lè fìdí ẹ̀rọ yìí múlẹ̀. Rí i dájú pé ọjọ́ àti àkókò ń ṣètò ara wọn fúnra wọn, lẹ́yìn náà gbìyànjú lẹ́ẹ̀kan sí i.",
+    "serverRateLimited": "Ìbéèrè ti pọ̀ jù. Dúró díẹ̀, lẹ́yìn náà gbìyànjú lẹ́ẹ̀kan sí i.",
+    "serverUnavailable": "Olupin Pollis kò sí lárọ̀ọ́wọ́tó báyìí. Gbìyànjú lẹ́ẹ̀kan sí i láìpẹ́.",
+    "serverRefused": "Olupin kò gba ìbéèrè yẹn. Gbìyànjú lẹ́ẹ̀kan sí i."
   }
 }

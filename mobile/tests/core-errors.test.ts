@@ -67,3 +67,57 @@ test("anything else passes through untouched", () => {
   assert.equal((mapped as Error).message, "Unlock Pollis first.");
   assert.equal(localizeCoreFailure("no active user"), "You're not signed in on this device. Sign in again.");
 });
+
+test("the DS refusal format it parses is still the one the core writes", () => {
+  const ds = readFileSync(join(here, "../../pollis-core/src/commands/mls/ds_client.rs"), "utf8");
+  assert.ok(ds.includes('write!(f, "{} {} {}: {}", self.label, self.path, self.status, self.body)'));
+});
+
+test("a raw DS refusal becomes a sentence, by status", async () => {
+  await i18n.changeLanguage("en");
+  assert.equal(
+    localizeCoreError('ds_post /v1/groups/create 401 Unauthorized: {"error":"unauthorized"}'),
+    "The server couldn't verify this device. Make sure your date and time are set automatically, then try again.",
+  );
+  assert.equal(
+    localizeCoreError('ds /v1/read/groups 403 Forbidden: {"error":"forbidden"}'),
+    localizeCoreError('ds_post /v1/groups/create 401 Unauthorized: {"error":"unauthorized"}'),
+  );
+  assert.equal(
+    localizeCoreError('ds_post /v1/otp/request 429 Too Many Requests: {"error":"too many requests"}'),
+    "Too many requests. Wait a moment, then try again.",
+  );
+  assert.equal(
+    localizeCoreError('ds_post_session /v1/auth/establish-identity 500 Internal Server Error: {"error":"internal error"}'),
+    "The Pollis server isn't available right now. Try again in a moment.",
+  );
+  assert.equal(localizeCoreError("ds_post /v1/messages/send 503 Service Unavailable: "), "The Pollis server isn't available right now. Try again in a moment.");
+  // A prefix the core added in front is dropped with the rest.
+  assert.equal(
+    localizeCoreError('create group: ds_post /v1/groups/create 502 Bad Gateway: <html>'),
+    "The Pollis server isn't available right now. Try again in a moment.",
+  );
+  await i18n.changeLanguage("ru");
+  assert.equal(
+    localizeCoreError('ds_post /v1/groups/create 401 Unauthorized: {"error":"unauthorized"}'),
+    "Сервер не смог проверить это устройство. Убедитесь, что дата и время устанавливаются автоматически, и повторите попытку.",
+  );
+  await i18n.changeLanguage("en");
+});
+
+test("another refusal keeps the DS's own sentence, and never shows a bare code or the path", () => {
+  assert.equal(
+    localizeCoreError('ds_post /v1/account/email 409 Conflict: {"error": "email already in use"}'),
+    "Email already in use.",
+  );
+  const generic = "The server didn't accept that request. Try again.";
+  assert.equal(localizeCoreError('ds_post /v1/groups/join 400 Bad Request: {"error":"invite_invalid"}'), generic);
+  assert.equal(localizeCoreError("ds_post /v1/groups/join 404 Not Found: not json"), generic);
+  assert.equal(localizeCoreError("ds_post /v1/groups/join 404 Not Found: null"), generic);
+});
+
+test("a DS failure that is not a refusal passes through", () => {
+  const sendFailed = "ds_post /v1/vault/save: error sending request for url (https://api.pollis.test/v1/vault/save): connection closed";
+  assert.equal(localizeCoreError(sendFailed), sendFailed);
+  assert.equal(localizeCoreError("upgrade_required"), "upgrade_required");
+});

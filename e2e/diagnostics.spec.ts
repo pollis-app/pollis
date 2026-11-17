@@ -60,8 +60,9 @@ test("a failure after the code was accepted is not reported as an invalid code",
   await enterCode(page, POST_VERIFY_FAILURE_CODE);
 
   const error = page.getByTestId("auth-error");
-  await expect(error).toContainText("establish-identity");
-  await expect(error).not.toHaveText("Invalid code");
+  // The DS's 500 reads as a sentence, never the raw request line.
+  await expect(error).toHaveText("The Pollis server isn't available right now. Try again in a moment.");
+  await expect(error).not.toContainText("establish-identity");
 });
 
 test("a wrong code still says so, in the core's own words", async ({ page }) => {

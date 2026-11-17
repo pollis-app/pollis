@@ -1,6 +1,8 @@
 // pollis-core reports PIN and lock failures as English text (pollis-core/src/commands/pin.rs,
 // device_unlock.rs), and screens show a failure's message as-is. This maps those messages onto
-// `errors:core.*` (#1724); anything it does not recognise is returned unchanged. Applied once, at
+// `errors:core.*` (#1724), and so does a refusal from the Delivery Service, which the core reports
+// as `<label> <path> <status>: <body>` (`DsRefused` in pollis-core/src/commands/mls/ds_client.rs).
+// Anything it does not recognise is returned unchanged. Applied once, at
 // the bridge (frontend/src/bridge/invoke.ts, mobile/lib/native/bridge.ts), after the
 // device_revoked / upgrade_required checks have seen the raw text.
 // mobile/i18n/coreErrors.ts is a copy; mobile/tests/core-errors.test.ts keeps the two identical
@@ -30,7 +32,44 @@ export function localizeCoreError(message: string): string {
   if (message === "unlock Pollis first") {
     return i18n.t("errors:core.unlockFirst");
   }
+  const refused = SERVER_REFUSAL.exec(message);
+  if (refused) {
+    return localizeServerRefusal(Number(refused[1]), refused[2]);
+  }
   return message;
+}
+
+// `ds_post /v1/groups/create 401 Unauthorized: {"error":"unauthorized"}`, possibly after a prefix.
+const SERVER_REFUSAL = /(?:^|: )ds(?:_[a-z_]+)? \/v1\/\S+ (\d{3})[^:]*: ?([\s\S]*)$/;
+
+function localizeServerRefusal(status: number, body: string): string {
+  // Signed requests are refused when the device's clock is far off, the usual cause on a desktop.
+  if (status === 401 || status === 403) {
+    return i18n.t("errors:core.serverUnverified");
+  }
+  if (status === 429) {
+    return i18n.t("errors:core.serverRateLimited");
+  }
+  if (status >= 500) {
+    return i18n.t("errors:core.serverUnavailable");
+  }
+  return serverSentence(body) ?? i18n.t("errors:core.serverRefused");
+}
+
+// The DS's own `{"error": "…"}` when it is a sentence ("email already in use"), not a code.
+function serverSentence(body: string): string | null {
+  let text: unknown;
+  try {
+    text = (JSON.parse(body) as { error?: unknown } | null)?.error;
+  } catch {
+    return null;
+  }
+  if (typeof text !== "string" || !text.trim().includes(" ")) {
+    return null;
+  }
+  const sentence = text.trim();
+  const capitalised = sentence.charAt(0).toUpperCase() + sentence.slice(1);
+  return /[.!?]$/.test(capitalised) ? capitalised : `${capitalised}.`;
 }
 
 /**
