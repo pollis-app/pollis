@@ -226,6 +226,66 @@ test.describe("link previews — Modern", () => {
   });
 });
 
+test("strict network privacy shows the switch off and disabled, with the note", async ({ page }) => {
+  await boot(page);
+  await page.getByTestId("sidebar-row-preferences").click();
+  const toggle = page.getByTestId("pref-link-previews-enabled");
+  await expect(toggle).toBeEnabled();
+  await expect(page.getByTestId("pref-link-previews-strict")).toHaveCount(0);
+  await page.getByTestId("pref-overlay-mode-strict").click();
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("pref-link-previews-strict")).toBeVisible();
+  await page.getByTestId("pref-link-previews").scrollIntoViewIfNeeded();
+  await shot(page, "desktop-preferences-strict");
+});
+
+test("a DM request shows only the bare link until it is accepted, then the card", async ({ page }) => {
+  const dm = {
+    id: "dm_req",
+    created_by: "u_dana",
+    created_at: "2026-11-17T08:00:00Z",
+    members: [
+      { user_id: ME.id, username: ME.username, added_by: "u_dana", added_at: "2026-11-17T08:00:00Z" },
+      { user_id: "u_dana", username: "dana", added_by: "u_dana", added_at: "2026-11-17T08:00:00Z" },
+    ],
+  };
+  await page.route(`${MEDIA_ORIGIN}/**`, (route) =>
+    route.fulfill({ body: fs.readFileSync(path.join(FIXTURES, "sensitive-photo.jpg")), contentType: "image/jpeg" }),
+  );
+  await page.addInitScript((data) => {
+    (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = data;
+  }, {
+    session: ME,
+    profile: { id: ME.id, username: ME.username },
+    groups: [],
+    dmChannels: [dm],
+    dmRequests: [dm],
+    messages: { dm_req: [{ ...RECEIVED, conversation_id: "dm_req" }] },
+    mediaUrls: { [THUMB_KEY]: `${MEDIA_ORIGIN}/thumb.jpg` },
+    preferences: { skin: "modern" },
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("app-ready")).toBeAttached();
+  await page.getByTestId("sidebar-row-dms").click();
+  await page.getByTestId("dm-option-dm_req").click();
+  await expect(page.getByTestId("dm-request-bar")).toBeVisible();
+  await expect(page.getByTestId("message-m_dana")).toContainText(GITHUB);
+  await expect(page.getByTestId("message-link-preview")).toHaveCount(0);
+  await page.getByTestId("dm-request-accept").click();
+  await expect(page.getByTestId("dm-request-bar")).toHaveCount(0);
+  await expect(page.getByTestId("message-link-preview")).toHaveCount(1);
+});
+
+test("an image link keeps its click-to-load unfurl and gets no card", async ({ page }) => {
+  const IMAGE = `${MEDIA_ORIGIN}/photo.jpg`;
+  await boot(page, {
+    messages: [{ ...RECEIVED, id: "m_img", content: `pic ${IMAGE}`, link_preview: null }],
+  });
+  await expect(page.getByTestId("message-m_img").getByTestId("media-link-unfurl")).toBeVisible();
+  await expect(page.getByTestId("message-link-preview")).toHaveCount(0);
+});
+
 test("Terminal look: no card on messages and no fetch in the composer", async ({ page }) => {
   await boot(page, { skin: "terminal", messages: [RECEIVED] });
   await expect(page.getByTestId("message-m_dana")).toContainText(GITHUB);

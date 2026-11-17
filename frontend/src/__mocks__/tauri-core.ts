@@ -1046,6 +1046,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_dm_requests':
       return store.dmRequests;
 
+    // Accepting a request makes it an ordinary DM (#1987's card then draws).
+    case 'accept_dm_request': {
+      const { dmChannelId } = args as { dmChannelId: string };
+      store.dmRequests = store.dmRequests.filter((r) => r.id !== dmChannelId);
+      return null;
+    }
+
     case 'list_pending_invites':
     case 'list_join_requests':
     case 'get_join_requests':
