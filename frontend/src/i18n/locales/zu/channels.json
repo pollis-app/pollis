@@ -113,7 +113,7 @@
       "member": "ilungu"
     },
     "adminToggle": "umphathi",
-    "kick": "susa",
+    "kick": "Susa",
     "verified": "Oxhumana naye oqinisekisiwe",
     "keyChanged": "Ukhiye womazisi ushintshile — qinisekisa futhi",
     "invited": {
@@ -138,8 +138,8 @@
     "pageTitle": "Izimemo",
     "empty": "Azikho izimemo ezilindile.",
     "invitedBy": "Umenywe ngu-{{name}}",
-    "accept": "yamukela",
-    "decline": "yenqaba",
+    "accept": "Yamukela",
+    "decline": "Yenqaba",
     "acceptFailed": "Ayikwazanga ukwamukela isimemo. Zama futhi."
   },
   "inviteMember": {
@@ -158,8 +158,8 @@
     "pendingFor": "Izicelo ezilindile zokujoyina <accent>{{name}}</accent>",
     "empty": "Azikho izicelo ezilindile.",
     "allEmpty": "Azikho izicelo zokujoyina ezilindile.",
-    "approve": "vuma",
-    "reject": "yenqaba"
+    "approve": "Vuma",
+    "reject": "Yenqaba"
   },
   "joinByInvite": {
     "pageTitle": "Joyina Iqembu",

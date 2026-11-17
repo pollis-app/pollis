@@ -9,6 +9,7 @@ import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { formatClockTime } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
+import { SectionHeader } from "../../ui/SectionHeader";
 
 interface PinnedPanelProps {
   channelId: string | null;
@@ -110,16 +111,10 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
 
     return (
       <div className="h-full overflow-y-auto" data-testid="pinned-panel">
-        <div
-          className={
-            isTerminal
-              ? "sticky top-0 z-[1] flex h-bar w-full items-center gap-2 border-b border-line bg-surface px-2.5 text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none"
-              : "flex items-center gap-2 px-2 pt-3 pb-1 text-secondary font-medium uppercase tracking-widest text-muted"
-          }
-        >
+        <SectionHeader>
           <Pin size={12} aria-hidden="true" />
           {t("pins.heading")}
-        </div>
+        </SectionHeader>
         {body}
       </div>
     );

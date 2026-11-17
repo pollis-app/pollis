@@ -11,6 +11,7 @@ import {
   type PreferencesData,
 } from "../../hooks/queries/usePreferences";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
+import { FOCUS_RING } from "../ui/focusRing";
 
 interface RemoteUserVolumeSliderProps {
   identity: string;
@@ -91,9 +92,9 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
         onBlur={commit}
         aria-label={t("tile.volumeFor", { name: participantName })}
         data-testid={`voice-volume-slider-${userId}`}
-        className="
+        className={`
           w-20 h-1 rounded-md appearance-none cursor-pointer
-          focus:outline-none focus:ring-2 focus:ring-accent
+          ${FOCUS_RING}
           [&::-webkit-slider-thumb]:appearance-none
           [&::-webkit-slider-thumb]:w-3
           [&::-webkit-slider-thumb]:h-3
@@ -104,7 +105,7 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
           [&::-moz-range-thumb]:rounded-full
           [&::-moz-range-thumb]:border-none
           [&::-moz-range-thumb]:cursor-pointer
-        "
+        `}
         style={{
           background: `linear-gradient(to right, var(--c-accent) 0%, var(--c-accent) ${pct}%, var(--c-border-active) ${pct}%, var(--c-border-active) 100%)`,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

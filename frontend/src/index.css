@@ -1,9 +1,15 @@
-@import "@fontsource/atkinson-hyperlegible-next";
+/* Every weight the UI asks for is a real face, never a synthesized bold (#1964): regular,
+   medium, semibold, bold. DM Mono stops at 500, the weight mono text is set in (below). */
+@import "@fontsource/atkinson-hyperlegible-next/400.css";
+@import "@fontsource/atkinson-hyperlegible-next/500.css";
+@import "@fontsource/atkinson-hyperlegible-next/600.css";
+@import "@fontsource/atkinson-hyperlegible-next/700.css";
 @import "@fontsource/dm-mono/500.css";
 /* Geist Sans — the Modern (base) UI sans; Terminal uses Atkinson (see :root). */
 @import "@fontsource/geist-sans/400.css";
 @import "@fontsource/geist-sans/500.css";
 @import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-sans/700.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

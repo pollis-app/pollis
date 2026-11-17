@@ -434,7 +434,7 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
             )}
           </div>
           {parsed.text && (
-            <p className="whitespace-pre-wrap break-words text-body text-fg">
+            <p className="whitespace-pre-wrap break-words font-mono text-body text-fg">
               <LinkifiedText text={parsed.text} />
             </p>
           )}

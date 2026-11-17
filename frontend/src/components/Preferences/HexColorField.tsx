@@ -1,4 +1,5 @@
 import React from "react";
+import { FOCUS_RING, FOCUS_WITHIN_RING } from "../ui/focusRing";
 
 function isValidHex(val: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(val);
@@ -29,7 +30,7 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
 }) => (
   <div className="flex items-center gap-2">
     <label
-      className="flex-shrink-0 cursor-pointer overflow-hidden focus-within:ring-4 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-black"
+      className={`flex-shrink-0 cursor-pointer overflow-hidden ${FOCUS_WITHIN_RING}`}
       style={swatchStyle}
       title={title}
     >
@@ -58,7 +59,7 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
       }}
       maxLength={7}
       spellCheck={false}
-      className={`text-secondary font-mono font-machine px-2 py-1 bg-surface border border-line ${isValidHex(hexInput) ? "text-fg" : "text-danger"} focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black`}
+      className={`text-secondary font-mono font-machine px-2 py-1 bg-surface border border-line ${isValidHex(hexInput) ? "text-fg" : "text-danger"} ${FOCUS_RING}`}
       style={{
         width: 90,
         borderRadius: 6,

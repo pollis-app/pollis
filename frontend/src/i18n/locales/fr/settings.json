@@ -354,7 +354,7 @@
     "capturing": "Appuyez sur des touches…",
     "rebindLabel": "Réassigner {{name}}",
     "resetLabel": "Rétablir {{name}} par défaut",
-    "resetButton": "rétablir",
+    "resetButton": "Rétablir",
     "appToggleSidebar": "Afficher/masquer la barre latérale",
     "appToggleRightPanel": "Afficher/masquer le panneau de détails",
     "appToggleTerminal": "Afficher/masquer le terminal",

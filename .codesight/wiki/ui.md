@@ -879,7 +879,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**212 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**214 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1028,7 +1028,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 - **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
-### `components/ui` (36)
+### `components/ui` (38)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
@@ -1060,6 +1060,8 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
 - **RichTextInput** — props: value, onChange, onSelectionChange, onKeyDown, onPaste, onFocus, onBlur, placeholder, disabled, autoFocus, className, style, ariaLabel, testId, ghost, ghostTestId, ghostClassName — `frontend/src/components/ui/RichTextInput.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
+- **SectionHeader** — props: children, bordered — `frontend/src/components/ui/SectionHeader.tsx`. A panel section's title (#1964): Terminal's sticky sidebar-style bar in spaced capitals, Modern a sentence-case `text-muted` label. Members, Pinned.
+- **Select** — props: value, onChange, options, label, disabled — `frontend/src/components/ui/Select.tsx`. A pick-one dropdown with its `<label>` (#1964), drawn like `TextInput`: the UI face, `border-line-strong`, `rounded-control`, the shared focus ring (`ui/focusRing.ts`).
 - **SuggestList** — props: items, activeIndex, query, testId, label, matchingKey, itemKey, optionTestId, renderItem, onSelect, onHover — `frontend/src/components/ui/SuggestList.tsx`. Generic composer autocomplete shell behind `EmojiSuggestList` and `MentionSuggestList` (#1731).
 - **Switch** — props: label, checked, onChange, disabled, className, id, description — `frontend/src/components/ui/Switch.tsx`
 - **TerminalMenu** — props: items, onEsc, className, autoFocus — `frontend/src/components/ui/TerminalMenu.tsx`

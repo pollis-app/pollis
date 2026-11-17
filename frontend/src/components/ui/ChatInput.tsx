@@ -41,6 +41,7 @@ import { MentionSuggestList } from "./MentionSuggestList";
 import { EmojiSuggestList } from "./EmojiSuggestList";
 import { probeRender } from "../../utils/renderProbe";
 import { usePressActivation } from "../../hooks/usePressActivation";
+import { FOCUS_RING } from "./focusRing";
 
 /** Where a queued attachment's bytes are: a user's own file (never delete) or bytes staged in backend memory (no temp file). */
 type AttachmentSource =
@@ -103,7 +104,7 @@ function typeFromMime(mime: string): Attachment["type"] {
 const PREVIEW_SIZE = 120;
 
 const TOOLBAR_BUTTON =
-  "flex h-6 w-6 items-center justify-center rounded bg-black/60 text-white hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+  `flex h-6 w-6 items-center justify-center rounded bg-black/60 text-white hover:bg-black/80 ${FOCUS_RING}`;
 
 const AttachmentPreview: React.FC<{
   attachment: Attachment;
@@ -896,7 +897,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           )}
           <button
             onClick={() => setExpandedPreview(null)}
-            className="mt-3 text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
+            className={`mt-3 text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black px-2 py-0.5 ${FOCUS_RING}`}
             style={{ border: "1px solid transparent", borderRadius: 4, cursor: "pointer" }}
           >
             [{t("keys.escape")}]

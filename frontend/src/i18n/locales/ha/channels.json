@@ -113,7 +113,7 @@
       "member": "mamba"
     },
     "adminToggle": "mai gudanarwa",
-    "kick": "kora",
+    "kick": "Kora",
     "verified": "Abokin hulɗa da aka tantance",
     "keyChanged": "Maɓallin shaida ya canja — sake tantancewa",
     "invited": {
@@ -138,8 +138,8 @@
     "pageTitle": "Gayyatoci",
     "empty": "Babu gayyatocin da ke jira.",
     "invitedBy": "Gayyata daga {{name}}",
-    "accept": "karɓa",
-    "decline": "ƙi",
+    "accept": "Karɓa",
+    "decline": "Ƙi",
     "acceptFailed": "Ba a iya karɓar gayyatar ba. Sake gwadawa."
   },
   "inviteMember": {
@@ -158,8 +158,8 @@
     "pendingFor": "Buƙatun shiga <accent>{{name}}</accent> da ke jira",
     "empty": "Babu buƙatun da ke jira.",
     "allEmpty": "Babu buƙatun shiga da ke jira.",
-    "approve": "amince",
-    "reject": "ƙi"
+    "approve": "Amince",
+    "reject": "Ƙi"
   },
   "joinByInvite": {
     "pageTitle": "Shiga Rukuni",

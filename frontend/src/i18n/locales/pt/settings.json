@@ -375,7 +375,7 @@
     "capturing": "Prima as teclas…",
     "rebindLabel": "Alterar atalho de {{name}}",
     "resetLabel": "Repor {{name}} para a predefinição",
-    "resetButton": "repor",
+    "resetButton": "Repor",
     "appToggleSidebar": "Mostrar/ocultar barra lateral",
     "appToggleRightPanel": "Mostrar/ocultar painel de detalhes",
     "appToggleTerminal": "Mostrar/ocultar terminal",

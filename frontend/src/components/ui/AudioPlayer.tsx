@@ -10,6 +10,7 @@ import {
   SkipBack,
   SkipForward,
 } from "lucide-react";
+import { FOCUS_RING } from "./focusRing";
 
 interface AudioPlayerProps {
   src: string;
@@ -102,7 +103,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           max={duration || 0}
           value={currentTime}
           onChange={handleSeek}
-          className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+          className={`w-full h-2 rounded-lg appearance-none cursor-pointer accent-slider ${FOCUS_RING}`}
           disabled={!duration}
           aria-label={t("media.seek")}
         />
@@ -116,7 +117,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={skipBackward}
-            className="p-2 rounded transition-colors duration-200 text-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+            className={`p-2 rounded transition-colors duration-200 text-accent ${FOCUS_RING}`}
             aria-label={t("media.skipBackward")}
           >
             <SkipBack className="w-4 h-4" />
@@ -124,7 +125,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
           <button
             onClick={togglePlay}
-            className="p-3 rounded transition-colors duration-200 text-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+            className={`p-3 rounded transition-colors duration-200 text-accent ${FOCUS_RING}`}
             aria-label={isPlaying ? t("media.pause") : t("media.play")}
           >
             {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
@@ -132,7 +133,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
           <button
             onClick={skipForward}
-            className="p-2 rounded transition-colors duration-200 text-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+            className={`p-2 rounded transition-colors duration-200 text-accent ${FOCUS_RING}`}
             aria-label={t("media.skipForward")}
           >
             <SkipForward className="w-4 h-4" />
@@ -142,7 +143,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={toggleMute}
-            className="p-2 rounded transition-colors duration-200 text-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+            className={`p-2 rounded transition-colors duration-200 text-accent ${FOCUS_RING}`}
             aria-label={isMuted ? t("media.unmute") : t("media.mute")}
           >
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
@@ -155,7 +156,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             step={0.1}
             value={isMuted ? 0 : volume}
             onChange={handleVolumeChange}
-            className="w-20 h-2 rounded-lg appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+            className={`w-20 h-2 rounded-lg appearance-none cursor-pointer accent-slider ${FOCUS_RING}`}
             aria-label={t("media.volume")}
           />
         </div>

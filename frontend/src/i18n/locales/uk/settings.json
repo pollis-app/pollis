@@ -378,7 +378,7 @@
     "capturing": "Натисніть клавіші…",
     "rebindLabel": "Перепризначити «{{name}}»",
     "resetLabel": "Скинути «{{name}}» до типової",
-    "resetButton": "скинути",
+    "resetButton": "Скинути",
     "appToggleSidebar": "Перемкнути бічну панель",
     "appToggleRightPanel": "Перемкнути панель подробиць",
     "appToggleTerminal": "Перемкнути термінал",

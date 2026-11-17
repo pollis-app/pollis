@@ -27,6 +27,7 @@ import { BlurhashCanvas } from "../Media/BlurhashCanvas";
 import { SensitiveCover } from "../Media/SensitiveCover";
 import { SensitiveHideButton } from "../Media/SensitiveHideButton";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
+import { FOCUS_RING } from "../ui/focusRing";
 
 const lightboxBtnStyle: React.CSSProperties = {
   border: "2px solid transparent",
@@ -309,7 +310,7 @@ export const AttachmentDisplay = observer(({
       <button
         onClick={handleDownload}
         disabled={downloadStatus !== "idle"}
-        className="text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
+        className={`text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black flex items-center gap-1 ${FOCUS_RING}`}
         style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
       >
         {downloadStatus === "downloading" ? (
@@ -322,7 +323,7 @@ export const AttachmentDisplay = observer(({
       </button>
       <button
         onClick={() => setViewerOpen(false)}
-        className="text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
+        className={`text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black ${FOCUS_RING}`}
         style={lightboxBtnStyle}
       >
         {t("attachment.lightboxClose")}

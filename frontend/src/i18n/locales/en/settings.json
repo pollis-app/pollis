@@ -375,7 +375,7 @@
     "capturing": "Press keys…",
     "rebindLabel": "Rebind {{name}}",
     "resetLabel": "Reset {{name}} to default",
-    "resetButton": "reset",
+    "resetButton": "Reset",
     "appToggleSidebar": "Toggle sidebar",
     "appToggleRightPanel": "Toggle details panel",
     "appToggleTerminal": "Toggle terminal",
