@@ -60,7 +60,8 @@
     "empty": "아직 메시지가 없습니다. 대화를 시작해 보세요.",
     "unknownAuthor": "알 수 없음",
     "blockedAuthor": "차단한 사용자",
-    "blockedBody": "[차단됨]"
+    "blockedBody": "차단됨",
+    "blockedBodyTerminal": "[차단됨]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> 님에게 답장",
@@ -69,7 +70,8 @@
   },
   "queue": {
     "heading": "대기열",
-    "pendingPlaceholder": "[대기 중인 메시지]",
+    "pendingPlaceholder": "대기 중인 메시지",
+    "pendingPlaceholderTerminal": "[대기 중인 메시지]",
     "cancel": "메시지 취소",
     "retry": "다시 시도",
     "failedCount_other": "실패 ×{{count}}"
@@ -93,7 +95,8 @@
   "preview": {
     "noMessages": "아직 메시지가 없습니다",
     "withSender": "{{name}}: {{text}}",
-    "attachments_other": "[첨부 파일 {{count}}개]",
+    "attachments_other": "첨부 파일 {{count}}개",
+    "attachmentsTerminal_other": "[첨부 파일 {{count}}개]",
     "undecryptable": "이 기기에서 복호화하지 못한 메시지가 있습니다"
   },
   "attachment": {
@@ -105,9 +108,11 @@
     "failedToLoad": "불러오지 못했습니다",
     "failedToDownload": "다운로드하지 못했습니다",
     "lightboxFetch": "가져오기",
-    "lightboxDone": "[ 완료 ]",
-    "lightboxDownload": "[다운로드]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "완료",
+    "lightboxDoneTerminal": "[ 완료 ]",
+    "lightboxDownload": "다운로드",
+    "lightboxDownloadTerminal": "[다운로드]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "민감한 미디어 표시: {{filename}}",
     "sensitiveHide": "{{filename}} 숨기기"
   },

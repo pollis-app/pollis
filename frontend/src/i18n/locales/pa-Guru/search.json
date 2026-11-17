@@ -8,7 +8,8 @@
     "permalinkResolving": "ਸੁਨੇਹਾ ਖੋਲ੍ਹਿਆ ਜਾ ਰਿਹਾ ਹੈ…",
     "noMatches": "ਕੋਈ ਮੇਲ ਨਹੀਂ ਮਿਲਿਆ",
     "emptyHint": "ਕਿਸੇ ਚੈਨਲ, ਵੌਇਸ ਚੈਨਲ, DM, ਵਰਤੋਂਕਾਰ ਜਾਂ ਸੈਟਿੰਗਾਂ ਪੰਨੇ 'ਤੇ ਜਾਓ",
-    "live": "[ਲਾਈਵ]",
+    "live": "ਲਾਈਵ",
+    "liveTerminal": "[ਲਾਈਵ]",
     "searchMessagesFor": "\"{{query}}\" ਲਈ ਸੁਨੇਹੇ ਖੋਜੋ"
   },
   "pages": {

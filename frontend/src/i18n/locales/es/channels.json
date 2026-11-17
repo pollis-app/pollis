@@ -139,7 +139,7 @@
     "acceptFailed": "No se pudo aceptar la invitación. Inténtalo de nuevo."
   },
   "inviteMember": {
-    "pageTitle": "Invitar miembro :: {{group}}",
+    "pageTitle": "Invitar miembro — {{group}}",
     "intro": "Invita a alguien a <accent>{{name}}</accent>",
     "identifierLabel": "Nombre de usuario o correo",
     "identifierPlaceholder": "amigo@pollis.com",
@@ -149,7 +149,7 @@
     "sendFailed": "No se pudo enviar la invitación"
   },
   "joinRequests": {
-    "pageTitle": "Solicitudes de acceso :: {{group}}",
+    "pageTitle": "Solicitudes de acceso — {{group}}",
     "allPageTitle": "Solicitudes de acceso",
     "pendingFor": "Solicitudes pendientes para entrar en <accent>{{name}}</accent>",
     "empty": "No hay solicitudes pendientes.",

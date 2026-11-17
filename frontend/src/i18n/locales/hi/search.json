@@ -8,7 +8,8 @@
     "permalinkResolving": "मैसेज खुल रहा है…",
     "noMatches": "कुछ नहीं मिला",
     "emptyHint": "किसी चैनल, वॉइस चैनल, DM, यूज़र या सेटिंग पेज पर जाएं",
-    "live": "[लाइव]",
+    "live": "लाइव",
+    "liveTerminal": "[लाइव]",
     "searchMessagesFor": "\"{{query}}\" के लिए मैसेज खोजें"
   },
   "pages": {

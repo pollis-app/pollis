@@ -513,26 +513,11 @@ export const AppShell: React.FC = observer(() => {
     }
   }, [pathname, statusBarAlert, setStatusBarAlert]);
 
-  const isChatScreen = useMemo(() => {
-    const channelMatch = pathname.match(/^\/groups\/[^/]+\/channels\/([^/]+)/);
-    if (channelMatch && channelMatch[1] !== "new") {
-      return true;
-    }
-    const dmMatch = pathname.match(/^\/dms\/([^/]+)/);
-    if (dmMatch && dmMatch[1] !== "new") {
-      return true;
-    }
-    return false;
-  }, [pathname]);
-
-  // Modern bar is neutral; terminal fills it with the accent. `barInk` stays legible on `barBg`.
+  // The bar is chrome, never a solid accent fill (#1965): Modern's is neutral, Terminal's the
+  // ground with accent ink, on every screen.
   const modern = skin === "modern";
-  const barBg = modern
-    ? "var(--c-surface)"
-    : isChatScreen ? "var(--c-bg)" : "var(--c-accent)";
-  const barInk = modern
-    ? "var(--c-text-dim)"
-    : isChatScreen ? "var(--c-accent)" : "var(--c-surface)";
+  const barBg = modern ? "var(--c-surface)" : "var(--c-bg)";
+  const barInk = modern ? "var(--c-text-dim)" : "var(--c-accent)";
 
   const voiceChannelName = useMemo(() => {
     if (!activeVoiceChannelId) {
@@ -646,6 +631,7 @@ export const AppShell: React.FC = observer(() => {
 
       <div
         className="border-t border-line"
+        data-testid="status-bar"
         style={{
           flexShrink: 0,
           background: barBg,

@@ -4,9 +4,12 @@ import { X, Clock, Send, AlertCircle } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { appStore } from '../../stores/appStore';
 import { Button } from '../ui/Button';
+import { useSkin } from "../../hooks/queries/usePreferences";
 
 export const MessageQueue: React.FC = observer(() => {
   const { t } = useTranslation('chat');
+  // Bracketed forms are Terminal's (#1965).
+  const isTerminal = useSkin() === 'terminal';
   const {
     messageQueue,
     removeFromMessageQueue,
@@ -24,7 +27,7 @@ export const MessageQueue: React.FC = observer(() => {
   }
 
   const getMessageContent = (_messageId: string): string => {
-    return t('queue.pendingPlaceholder');
+    return t(isTerminal ? 'queue.pendingPlaceholderTerminal' : 'queue.pendingPlaceholder');
   };
 
   const snippetFor = (messageId: string): string => {

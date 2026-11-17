@@ -143,7 +143,7 @@
     "acceptFailed": "ਸੱਦਾ ਸਵੀਕਾਰ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
   },
   "inviteMember": {
-    "pageTitle": "ਮੈਂਬਰ ਨੂੰ ਸੱਦਾ ਦਿਓ :: {{group}}",
+    "pageTitle": "ਮੈਂਬਰ ਨੂੰ ਸੱਦਾ ਦਿਓ — {{group}}",
     "intro": "ਕਿਸੇ ਨੂੰ <accent>{{name}}</accent> ਵਿੱਚ ਸੱਦਾ ਦਿਓ",
     "identifierLabel": "ਵਰਤੋਂਕਾਰ ਨਾਮ ਜਾਂ ਈਮੇਲ",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +153,7 @@
     "sendFailed": "ਸੱਦਾ ਭੇਜਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ"
   },
   "joinRequests": {
-    "pageTitle": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ :: {{group}}",
+    "pageTitle": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ — {{group}}",
     "allPageTitle": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ",
     "pendingFor": "<accent>{{name}}</accent> ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬਕਾਇਆ ਬੇਨਤੀਆਂ",
     "empty": "ਕੋਈ ਬਕਾਇਆ ਬੇਨਤੀ ਨਹੀਂ।",

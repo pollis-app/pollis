@@ -141,7 +141,7 @@
     "acceptFailed": "招待を承諾できませんでした。もう一度お試しください。"
   },
   "inviteMember": {
-    "pageTitle": "メンバーを招待 :: {{group}}",
+    "pageTitle": "メンバーを招待 — {{group}}",
     "intro": "<accent>{{name}}</accent>に招待する",
     "identifierLabel": "ユーザー名またはメールアドレス",
     "identifierPlaceholder": "friend@pollis.com",
@@ -151,7 +151,7 @@
     "sendFailed": "招待を送信できませんでした"
   },
   "joinRequests": {
-    "pageTitle": "参加リクエスト :: {{group}}",
+    "pageTitle": "参加リクエスト — {{group}}",
     "allPageTitle": "参加リクエスト",
     "pendingFor": "<accent>{{name}}</accent>への保留中の参加リクエスト",
     "empty": "保留中のリクエストはありません。",

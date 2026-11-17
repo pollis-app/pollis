@@ -20,6 +20,8 @@ import { PressButton } from "../ui/PressButton";
 import { SensitiveCover } from "../Media/SensitiveCover";
 import type { MessageAttachment } from "../../types";
 import { FOCUS_RING } from "../ui/focusRing";
+import { useSkin } from "../../hooks/queries/usePreferences";
+import { LightboxDownloadLabel } from "./LightboxDownloadLabel";
 
 const lightboxBtnStyle: React.CSSProperties = {
   border: "2px solid transparent",
@@ -166,6 +168,8 @@ interface SpotlightStageProps {
 /** One item: keyed by id, so its URL, failure and save state start fresh on every step. */
 const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: SpotlightStageProps) => {
   const { t } = useTranslation("chat");
+  // Bracketed labels are Terminal's (#1965); Modern's read as plain words.
+  const isTerminal = useSkin() === "terminal";
   // Sensitive media (#1568): a neighbour still covered shows its cover; a click reveals it.
   const sensitivity = useSensitiveReveal(attachment);
   const isVideo = attachment.content_type.startsWith("video/");
@@ -299,20 +303,14 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
           className={`text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black flex items-center gap-1 ${FOCUS_RING}`}
           style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
         >
-          {downloadStatus === "downloading" ? (
-            <>[ {t("attachment.lightboxFetch")} <LoadingSpinner size="sm" /> ]</>
-          ) : downloadStatus === "done" ? (
-            t("attachment.lightboxDone")
-          ) : (
-            t("attachment.lightboxDownload")
-          )}
+          <LightboxDownloadLabel status={downloadStatus} />
         </button>
         <button
           onClick={onClose}
           className={`text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black ${FOCUS_RING}`}
           style={lightboxBtnStyle}
         >
-          {t("attachment.lightboxClose")}
+          {isTerminal ? t("attachment.lightboxCloseTerminal") : t("common:actions.close")}
         </button>
       </div>
     </>

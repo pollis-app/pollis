@@ -64,7 +64,8 @@
     "empty": "حالے کوئی سنیہا نہیں۔ گل بات شروع کرو۔",
     "unknownAuthor": "انجان",
     "blockedAuthor": "بلاک کیتا یوزر",
-    "blockedBody": "[بلاک]"
+    "blockedBody": "بلاک",
+    "blockedBodyTerminal": "[بلاک]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> نوں جواب",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "قطار",
-    "pendingPlaceholder": "[باقی سنیہا]",
+    "pendingPlaceholder": "باقی سنیہا",
+    "pendingPlaceholderTerminal": "[باقی سنیہا]",
     "cancel": "سنیہا کینسل کرو",
     "retry": "فیر کوشش",
     "failedCount_one": "ناکام ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "حالے کوئی سنیہا نہیں",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} اٹیچمنٹ]",
-    "attachments_other": "[{{count}} اٹیچمنٹاں]",
+    "attachments_one": "{{count}} اٹیچمنٹ",
+    "attachments_other": "{{count}} اٹیچمنٹاں",
+    "attachmentsTerminal_one": "[{{count}} اٹیچمنٹ]",
+    "attachmentsTerminal_other": "[{{count}} اٹیچمنٹاں]",
     "undecryptable": "اک سنیہا ایس ڈیوائس تے ڈیکرپٹ نہیں ہو سکیا"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "لوڈ نہیں ہو سکیا",
     "failedToDownload": "ڈاؤن لوڈ نہیں ہو سکیا",
     "lightboxFetch": "لیاؤ",
-    "lightboxDone": "[ ہو گیا ]",
-    "lightboxDownload": "[ڈاؤن لوڈ]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "ہو گیا",
+    "lightboxDoneTerminal": "[ ہو گیا ]",
+    "lightboxDownload": "ڈاؤن لوڈ",
+    "lightboxDownloadTerminal": "[ڈاؤن لوڈ]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "حساس میڈیا وکھاؤ: {{filename}}",
     "sensitiveHide": "{{filename}} لکاؤ"
   },

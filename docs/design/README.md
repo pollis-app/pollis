@@ -36,7 +36,16 @@ Pollis is end-to-end encrypted, and the UI never performs that. No hacker theatr
 - No emoji as icons or ornament. Emoji are user content and reactions only.
 - Terminal idioms (brackets around words, `> prompt`, `↑↓ navigate`, UPPERCASE spaced labels, the
   braille spinner) belong to the Terminal skin only, behind a skin check or a terminal-only string.
-  Modern and Mobile use plain sentences.
+  Modern and Mobile use plain sentences. How desktop keeps them there (#1965):
+  - A bracketed string is a `…Terminal` sibling key (`list.blockedBodyTerminal: "[blocked]"`
+    beside `list.blockedBody: "Blocked"`), picked by `useSkin()` at the call site, in every locale.
+  - The braille `LoadingSpinner` draws a plain ring in Modern (`.loader-spinner` in `index.css`),
+    so no call site checks the skin.
+  - An `uppercase` label with a tracking utility, or `.section-label`, reads as written in Modern
+    (`index.css` undoes the transform and spacing), so its string must be sentence case.
+  - No `::` separators in titles; an em dash joins a page and its group ("Invite Member — Acme").
+  - `e2e/terminal-idioms.spec.ts` holds all of this over a channel, a group page and two settings
+    pages.
 
 ## Colour
 
@@ -85,7 +94,9 @@ background the ramp flips toward black.
   background preset (`frontend/tests/theme-contrast.test.ts`, `mobile/tests/theme-contrast.test.ts`).
   A recipe change that breaks it does not merge.
 - **The accent is rare.** In Modern and Mobile, it marks the one primary action on a screen, the
-  current selection, unread counts and focus. It is not a text colour for names, headings or
+  current selection, unread counts and focus. A selection is the `active` tint plus a marker (the
+  radio dot, the sidebar's edge), never a solid accent fill, in every look: not a selected radio
+  row, not a focused composer, not the status bar (#1965). It is not a text colour for names, headings or
   links in running text. (Terminal is the exception: its text is the accent by design.)
 - **One red.** Every destructive action uses `danger`: remove, kick, revoke, reject, decline,
   block, leave, delete, discard, wipe. Desktop `<Button variant="danger">`; mobile

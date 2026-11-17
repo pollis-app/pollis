@@ -8,7 +8,8 @@
     "permalinkResolving": "سنیہا کھل رہیا اے…",
     "noMatches": "کجھ نہیں لبھیا",
     "emptyHint": "کسے چینل، آواز والے چینل، DM، یوزر یا سیٹنگز دے صفحے تے جاؤ",
-    "live": "[لائیو]",
+    "live": "لائیو",
+    "liveTerminal": "[لائیو]",
     "searchMessagesFor": "\"{{query}}\" لئی سنیہے سرچ کرو"
   },
   "pages": {

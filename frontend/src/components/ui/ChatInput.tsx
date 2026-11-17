@@ -841,8 +841,9 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
               minHeight: "1.5rem",
               maxHeight: "9rem",
               borderRadius: "4px",
-              background: isFocused ? "var(--c-accent)" : "var(--c-hover)",
-              color: isFocused ? "var(--c-bg)" : "var(--c-text)",
+              // Focus is the `active` tint, never a solid accent fill (#1965).
+              background: isFocused ? "var(--c-active)" : "var(--c-hover)",
+              color: "var(--c-text)",
               outline: "none",
               opacity: disabled ? 0.5 : 1,
             }}

@@ -74,7 +74,7 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
           disabled={isSaving}
           rows={2}
           className={`chat-input-textarea w-full font-mono text-body resize-none transition-colors rounded-control border-0 outline-none px-2 py-1 disabled:opacity-50 ${
-            focused ? "is-focused bg-accent text-bg" : "bg-hover text-fg"
+            focused ? "is-focused bg-active text-fg" : "bg-hover text-fg"
           }`}
         />
         <p className="text-meta font-mono mt-1 text-muted">{hint}</p>

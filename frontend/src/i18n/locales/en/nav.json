@@ -1,8 +1,8 @@
 {
   "sidebar": {
-    "groups": "groups",
-    "dms": "dms",
-    "account": "account",
+    "groups": "Groups",
+    "dms": "DMs",
+    "account": "Account",
     "saved": "Saved",
     "preferences": "Preferences",
     "language": "Language",

@@ -14,6 +14,7 @@ import { useMessagePermalink } from "../hooks/useMessagePermalink";
 import { useGlobalShortcut, useShortcutLabel } from "../keyboard";
 import { usePressActivator } from "../hooks/usePressActivation";
 import { EmptyState } from "./ui/EmptyState";
+import { useSkin } from "../hooks/queries/usePreferences";
 
 type SearchResultItem =
   | {
@@ -209,6 +210,8 @@ function filterResults(
 
 export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClose }) => {
   const { t } = useTranslation("search");
+  // Bracketed forms are Terminal's (#1965).
+  const isTerminal = useSkin() === "terminal";
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const press = usePressActivator();
@@ -608,7 +611,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                     >
                       <span>{item.name}</span>
                       {item.type === "voice" && item.channelId === activeVoiceChannelId && (
-                        <span className="font-mono text-secondary text-accent">{t("panel.live")}</span>
+                        <span className="font-mono text-secondary text-accent">{t(isTerminal ? "panel.liveTerminal" : "panel.live")}</span>
                       )}
                     </div>
                     <div

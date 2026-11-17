@@ -141,7 +141,7 @@
     "acceptFailed": "Kò ṣeé ṣe láti gba ìkésíni náà. Tún gbìyànjú."
   },
   "inviteMember": {
-    "pageTitle": "Ké sí Ọmọ ẹgbẹ́ :: {{group}}",
+    "pageTitle": "Ké sí Ọmọ ẹgbẹ́ — {{group}}",
     "intro": "Ké sí ẹnìkan wá sí <accent>{{name}}</accent>",
     "identifierLabel": "Orúkọ olùmúlò tàbí Ímeèlì",
     "identifierPlaceholder": "friend@pollis.com",
@@ -151,7 +151,7 @@
     "sendFailed": "Kò ṣeé ṣe láti fi ìkésíni ránṣẹ́"
   },
   "joinRequests": {
-    "pageTitle": "Ìbéèrè Ìdarapọ̀ :: {{group}}",
+    "pageTitle": "Ìbéèrè Ìdarapọ̀ — {{group}}",
     "allPageTitle": "Ìbéèrè Ìdarapọ̀",
     "pendingFor": "Ìbéèrè tó ń dúró láti darapọ̀ mọ́ <accent>{{name}}</accent>",
     "empty": "Kò sí ìbéèrè tó ń dúró.",
