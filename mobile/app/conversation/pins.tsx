@@ -6,7 +6,7 @@ import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
-import { Screen, Header, Chip } from "../../components/ui";
+import { Screen, Header, Chip, EmptyState } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
 import { EmojiText } from "../../components/emoji/EmojiText";
@@ -138,12 +138,6 @@ function PinnedMessagesScreen() {
     );
   };
 
-  const emptyCopy = isLoading
-    ? t("common:states.loading")
-    : isError
-      ? t("pins.unavailable")
-      : t("pins.empty");
-
   return (
     <Screen testID="screen-pins">
       <Header
@@ -165,12 +159,15 @@ function PinnedMessagesScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: space.xxl, paddingBottom: space.xxxl }}
         ListEmptyComponent={
-          <Text
-            testID={isError ? "pins-unavailable" : isLoading ? "pins-loading" : "pins-empty"}
-            style={[ty.secondary, { paddingHorizontal: space.xxl }]}
-          >
-            {emptyCopy}
-          </Text>
+          isLoading ? (
+            <Text testID="pins-loading" style={[ty.secondary, { paddingHorizontal: space.xxl }]}>
+              {t("common:states.loading")}
+            </Text>
+          ) : (
+            <EmptyState testID={isError ? "pins-unavailable" : "pins-empty"} icon="pin">
+              {isError ? t("pins.unavailable") : t("pins.empty")}
+            </EmptyState>
+          )
         }
       />
     </Screen>

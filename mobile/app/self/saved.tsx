@@ -3,7 +3,7 @@ import { View, FlatList, Pressable } from "react-native";
 import { Text } from "../../components/Text";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Chip } from "../../components/ui";
+import { Screen, Header, Chip, EmptyState } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r, space } from "../../theme/tokens";
@@ -154,11 +154,15 @@ export default function SavedScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: space.xxl, paddingBottom: space.xxxl }}
         ListEmptyComponent={
-          <Text style={[ty.secondary, { paddingHorizontal: space.xxl }]}>
-            {isLoading
-              ? t("common:states.loading")
-              : t("mobile:self.saved.empty")}
-          </Text>
+          isLoading ? (
+            <Text style={[ty.secondary, { paddingHorizontal: space.xxl }]}>
+              {t("common:states.loading")}
+            </Text>
+          ) : (
+            <EmptyState testID="saved-empty" icon="bookmark">
+              {t("mobile:self.saved.empty")}
+            </EmptyState>
+          )
         }
       />
     </Screen>

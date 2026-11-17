@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
 import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
-import { Screen, Header, Group, ListRow, Dot } from "../../components/ui";
+import { Screen, Header, Group, ListRow, Dot, EmptyState } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { ErrorText, Note } from "../../components/self/SettingsField";
 import { HistoryTransferStatus } from "../../components/self/HistoryTransferStatus";
@@ -134,7 +134,9 @@ export default function CopyMessageHistory() {
             {sources.isPending ? <Note>{t("historyTransfer.offer.loading")}</Note> : null}
             {sources.isError ? <ErrorText>{t("historyTransfer.picker.loadFailed")}</ErrorText> : null}
             {!sources.isPending && !sources.isError && list.length === 0 ? (
-              <Note testID="history-transfer-empty">{t("historyTransfer.picker.empty")}</Note>
+              <EmptyState testID="history-transfer-empty">
+                {t("settings:historyTransfer.noSources")}
+              </EmptyState>
             ) : null}
             {error ? <ErrorText testID="history-transfer-request-error">{error}</ErrorText> : null}
           </View>

@@ -111,7 +111,6 @@
     "requestsWaiting_other": "メッセージリクエスト、{{count}} 件待機中",
     "ownPreview": "あなた: {{text}}",
     "noMatches": "一致する会話はありません。",
-    "emptyHint": "ユーザー名またはメールアドレスで相手を指定して会話を始めましょう。",
     "previewAttachment": "添付ファイル"
   },
   "dm": {
@@ -157,7 +156,6 @@
     },
     "emoji": {
       "loadFailed": "このグループの絵文字を読み込めませんでした。",
-      "empty": "カスタム絵文字はまだありません。",
       "pickAndUpload": "画像を選んでアップロード",
       "sizeKb_other": "{{count}} KB",
       "uploading": "アップロードしています…"
@@ -257,7 +255,6 @@
     "find": "グループを探す",
     "findSub": "スラッグを指定してグループへの参加をリクエスト",
     "emptyTitle": "グループはまだありません",
-    "emptyBody": "仲間のためにグループを作成するか、教えてもらったグループを探しましょう。",
     "pillSelected": "{{name}}、選択中",
     "pillUnread": "{{name}}、未読メッセージあり",
     "pillSelectedUnread": "{{name}}、選択中、未読メッセージあり",
@@ -457,7 +454,6 @@
       "deleteAccountSub": "アカウントを完全に削除し、このデバイスのデータを消去",
       "deviceSub": "{{paired}} にペアリング · 最終確認 {{lastSeen}}",
       "enrollmentFailed": "登録リクエストを処理できませんでした。",
-      "eventsEmpty": "セキュリティイベントはまだありません。",
       "hoursAgo_other": "{{count}}時間前",
       "justNow": "たった今",
       "lockNow": "今すぐロック",
@@ -574,7 +570,6 @@
       "lastActive": "{{when}}にアクティブ",
       "neverActive": "最近は確認されていません",
       "unsupported": "このデバイスの Pollis をアップデートしてください",
-      "empty": "コピー元にできるほかのデバイスがありません。",
       "loadFailed": "デバイスを読み込めませんでした。",
       "requestFailed": "リクエストを送信できませんでした。もう一度お試しください。",
       "requesting": "{{device}} に依頼しています…",
