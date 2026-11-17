@@ -118,7 +118,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `vault` | #1316 Direct → Vault: empty state, save two entries, pin, edit (pin survives), search filters, media view, a best-effort image entry opening the viewer from the grid, delete asks first (cancel keeps it, confirm removes it), re-open re-syncs from the DS | no |
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
-| `dms` | start a DM with the seeded peer (initiator side) | yes |
+| `dms` | start a DM with a freshly signed-up peer (initiator side; run by `scripts/maestro-report.sh`) | yes |
 | `custom-emoji` | #1562 add a static and an animated custom emoji, see both as images (never the `:shortcode:` text) in the group's list, the composer's suggestions, a sent message and again after a cold restart | no |
 | `deep-link` | #1223 a `pollis://` link routes both warm (scene `openURLContexts`) and cold (scene `connectionOptions` → `Linking.getInitialURL`) under the UIScene life cycle | no |
 | `i18n` | Preferences shows one Language row; the Language page (from that row and from the Self hub) switches language (copy re-renders), the choice persists across relaunch, Arabic mirrors the layout after relaunch (#1074, #1944) | no |
@@ -505,14 +505,10 @@ the new device is backgrounded **and offline** (Android: airplane mode for
 resume catch-up alone (`launchApp: stopApp: false`, no relaunch). On the
 pre-#1291 build step 10 fails exactly there.
 
-Run a second simulator/emulator with the peer account and drive it with a
-parallel Maestro invocation, reusing `subflows/sign-in.yaml` with the peer env:
-```bash
-maestro --device <peer-udid> test -e MAESTRO_EMAIL=$MAESTRO_PEER_EMAIL \
-  -e MAESTRO_OTP=$MAESTRO_OTP -e MAESTRO_PIN=$MAESTRO_PIN \
-  .maestro/subflows/sign-in.yaml
-```
-Then assert convergence on both devices (peer sends → primary sees it live).
+Every two-client script signs its peer up fresh on the second device (a new
+address per run) and reads the handle off its screen; there is no pre-made peer
+account on the dev DS (#1950). A two-client flow run by name through
+`maestro-run.sh` stops and names the script that runs it.
 
 ## Selecting by text, and the 2026-10 redesign
 

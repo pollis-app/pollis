@@ -5,9 +5,9 @@ here rather than fully authored, because this box can't run Maestro to shake the
 out. They need the **two-device harness** (README "Two-client flows") or platform
 state a simulator can't easily fake. Author/verify these on the Mac:
 
-- **dms.yaml** — the initiator side IS authored; the peer runs `subflows/sign-in.yaml`
-  (with `-e MAESTRO_EMAIL=$MAESTRO_PEER_EMAIL`) on a second simulator, accepts the
-  DM request, and replies. Assert convergence on both. Requests are no longer
+- **dms.yaml** — the initiator side IS authored and runs in `scripts/maestro-report.sh`,
+  which signs up a fresh peer on a second device and passes its handle. The peer's
+  half is still to write: accept the DM request, and reply. Assert convergence on both. Requests are no longer
   inline on the Direct tab: `tab-direct` → `row-dm-requests` (shown only while
   there is at least one pending request; it carries the count) →
   `screen-dm-requests` → `btn-accept-request-<id>` (or
