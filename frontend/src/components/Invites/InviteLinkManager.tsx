@@ -84,13 +84,13 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
   return (
     <div data-testid="invite-link-manager" className="flex flex-col gap-4">
       <div>
-        <h3 className="text-sm font-semibold text-fg">{t("inviteLinks.heading")}</h3>
-        <p className="mt-1 text-xs text-dim">{t("inviteLinks.blurb")}</p>
+        <h3 className="text-body font-semibold text-fg">{t("inviteLinks.heading")}</h3>
+        <p className="mt-1 text-secondary text-dim">{t("inviteLinks.blurb")}</p>
       </div>
 
       <div className="flex flex-col gap-3">
         <div>
-          <p className="mb-1.5 text-xs text-muted">{t("inviteLinks.expiresAfter")}</p>
+          <p className="mb-1.5 text-secondary text-muted">{t("inviteLinks.expiresAfter")}</p>
           <div
             role="radiogroup"
             aria-label={t("inviteLinks.expiresAfter")}
@@ -117,7 +117,7 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
         </div>
 
         <div>
-          <p className="mb-1.5 text-xs text-muted">{t("inviteLinks.maximumUses")}</p>
+          <p className="mb-1.5 text-secondary text-muted">{t("inviteLinks.maximumUses")}</p>
           <div
             role="radiogroup"
             aria-label={t("inviteLinks.maximumUses")}
@@ -156,7 +156,7 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
       </div>
 
       {error && (
-        <p data-testid="invite-link-error" className="text-xs text-danger">
+        <p data-testid="invite-link-error" className="text-secondary text-danger">
           {error}
         </p>
       )}
@@ -165,7 +165,7 @@ export const InviteLinkManager: React.FC<InviteLinkManagerProps> = ({ groupId })
 
       {links.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-xs text-muted">{t("inviteLinks.existing")}</p>
+          <p className="text-secondary text-muted">{t("inviteLinks.existing")}</p>
           {links.map((link) => (
             <InviteLinkRow
               key={link.id}

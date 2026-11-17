@@ -69,7 +69,7 @@ export const ExportArchiveButton: React.FC<Props> = ({
     }
   };
   const fetchStatus = fetched ? (
-    <span data-testid={`${testId}-fetched`} className="text-xs font-mono text-muted">
+    <span data-testid={`${testId}-fetched`} className="text-secondary font-mono text-muted">
       {[
         t("security.exportFetched", { count: fetched.fetched }),
         fetched.failed.length > 0 ? t("security.exportFetchFailed", { count: fetched.failed.length }) : null,
@@ -78,14 +78,14 @@ export const ExportArchiveButton: React.FC<Props> = ({
         .join(" · ")}
     </span>
   ) : fetchError ? (
-    <span data-testid={`${testId}-fetch-error`} className="text-xs font-mono text-danger">
+    <span data-testid={`${testId}-fetch-error`} className="text-secondary font-mono text-danger">
       {fetchError}
     </span>
   ) : null;
   const fetchOffer =
     summary && missing.length > 0 && !fetched ? (
       <div className="flex flex-col gap-2">
-        <p className="text-xs font-mono text-dim">{t("security.exportFetchNote")}</p>
+        <p className="text-secondary font-mono text-dim">{t("security.exportFetchNote")}</p>
         <Button
           data-testid={`${testId}-fetch`}
           onClick={runFetch}
@@ -124,7 +124,7 @@ export const ExportArchiveButton: React.FC<Props> = ({
     <span
       data-testid={`${testId}-done`}
       title={compact ? [done, files].filter(Boolean).join("\n") : undefined}
-      className={`flex flex-col text-xs font-mono text-muted ${compact ? "truncate max-w-64" : "break-all"}`}
+      className={`flex flex-col text-secondary font-mono text-muted ${compact ? "truncate max-w-64" : "break-all"}`}
     >
       <span className={compact ? "truncate" : undefined}>{done}</span>
       {files && <span className={compact ? "truncate" : undefined}>{files}</span>}
@@ -133,7 +133,7 @@ export const ExportArchiveButton: React.FC<Props> = ({
     <span
       data-testid={`${testId}-error`}
       title={compact ? error : undefined}
-      className={`text-xs font-mono text-danger ${compact ? "truncate max-w-64" : ""}`}
+      className={`text-secondary font-mono text-danger ${compact ? "truncate max-w-64" : ""}`}
     >
       {error}
     </span>

@@ -41,7 +41,7 @@ export const VoiceInputModeSelect: React.FC<VoiceInputModeSelectProps> = ({
           </Button>
         ))}
       </div>
-      <span className="text-xs font-mono text-muted">
+      <span className="text-secondary font-mono text-muted">
         {value === "push_to_talk" ? (
           <Trans
             t={t}

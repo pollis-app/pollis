@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
 import { Card, Button } from "./ui";
 import { Icon } from "./icons";
-import { semantic, type as ty, fonts, r, space, scriptLineHeight } from "../theme/tokens";
+import { semantic, type as ty, r, space, scriptLineHeight } from "../theme/tokens";
 import { activeLocale } from "../i18n";
 import type { CreatedInviteLink } from "../hooks/queries";
 import { haptic } from "../lib/haptics";
@@ -64,7 +64,7 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
         <Icon.check size={16} color={semantic.accent} />
         <Text
           accessibilityRole="header"
-          style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 16, color: semantic.text }}
+          style={[ty.rowTitle, { flex: 1 }]}
         >
           {t("mobile:group.invite.linkCreated")}
         </Text>
@@ -81,11 +81,7 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
         <Text
           testID="created-invite-link-url"
           selectable
-          style={{
-            fontFamily: ty.mono.fontFamily,
-            fontSize: 13,
-            color: semantic.text,
-          }}
+          style={[ty.mono, { color: semantic.text }]}
         >
           {link.url}
         </Text>

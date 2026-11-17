@@ -12,7 +12,7 @@ import {
   EmptyState,
 } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
-import { semantic, fonts, space, layout } from "../../theme/tokens";
+import { semantic, type as ty, space, layout } from "../../theme/tokens";
 import {
   useDMRequests,
   useAcceptDMRequest,
@@ -99,11 +99,7 @@ export default function DMRequests() {
                           testID={`text-request-name-${d.id}`}
                           numberOfLines={1}
                           ellipsizeMode={label.isHandle ? "middle" : "tail"}
-                          style={{
-                            fontFamily: fonts.semibold,
-                            fontSize: 16,
-                            color: semantic.text,
-                          }}
+                          style={ty.rowTitle}
                         >
                           {label.name}
                         </Text>

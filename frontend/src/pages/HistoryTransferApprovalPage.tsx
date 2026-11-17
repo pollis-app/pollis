@@ -28,7 +28,7 @@ export const HistoryTransferApprovalPage: React.FC = () => {
   if (declined) {
     body = (
       <>
-        <p className="text-lg text-fg" data-testid="history-approval-declined">
+        <p className="text-heading text-fg" data-testid="history-approval-declined">
           {t("historyTransfer.youDeclined")}
         </p>
         <div>
@@ -51,7 +51,7 @@ export const HistoryTransferApprovalPage: React.FC = () => {
   } else {
     body = (
       <>
-        <p className="text-lg text-fg" data-testid="history-approval-gone">
+        <p className="text-heading text-fg" data-testid="history-approval-gone">
           {t("historyTransfer.notOpen")}
         </p>
         <div>

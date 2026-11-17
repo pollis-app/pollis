@@ -1,7 +1,7 @@
 import { Pressable, View } from "react-native";
 import { Text } from "../Text";
 import { Icon } from "../icons";
-import { semantic, fonts, layout, space } from "../../theme/tokens";
+import { semantic, fonts, layout, space, typeSize } from "../../theme/tokens";
 
 const CHOICE_MIN_HEIGHT = layout.touchMin + 4;
 
@@ -54,7 +54,7 @@ export function ChoiceChip({
             flexShrink: 1,
             textAlign: "center",
             fontFamily: fonts.semibold,
-            fontSize: 14,
+            fontSize: typeSize.secondary,
             color: selected ? semantic.onAccent : semantic.accent,
           }}
         >

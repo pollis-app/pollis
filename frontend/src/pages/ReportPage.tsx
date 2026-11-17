@@ -60,8 +60,8 @@ export const ReportPage: React.FC = observer(() => {
           {done ? (
             <>
               <div className="flex flex-col gap-3" data-testid="report-done">
-                <h1 className="text-xl text-fg">{t("report.doneTitle")}</h1>
-                <p className="text-sm text-muted leading-relaxed">
+                <h1 className="text-title text-fg">{t("report.doneTitle")}</h1>
+                <p className="text-body text-muted leading-relaxed">
                   {done.blocked ? t("report.doneBlocked", { name }) : t("report.done")}
                 </p>
               </div>
@@ -74,11 +74,11 @@ export const ReportPage: React.FC = observer(() => {
           ) : (
             <>
               <div className="flex flex-col gap-3">
-                <h1 className="text-xl text-fg">{aboutMessage ? t("report.titleMessage") : t("report.titleUser", { name })}</h1>
-                <p className="text-sm text-muted leading-relaxed">{t("report.intro")}</p>
+                <h1 className="text-title text-fg">{aboutMessage ? t("report.titleMessage") : t("report.titleUser", { name })}</h1>
+                <p className="text-body text-muted leading-relaxed">{t("report.intro")}</p>
               </div>
               <div className="flex flex-col gap-3" role="group" aria-label={t("report.reasonLabel")}>
-                <span className="text-xs font-mono uppercase tracking-wide text-muted">{t("report.reasonLabel")}</span>
+                <span className="text-secondary font-mono uppercase tracking-wide text-muted">{t("report.reasonLabel")}</span>
                 <div className="flex flex-col gap-2">
                   {REASONS.map((r) => (
                     <Button
@@ -95,7 +95,7 @@ export const ReportPage: React.FC = observer(() => {
                 </div>
               </div>
               {report.isError && (
-                <p className="text-sm text-danger" data-testid="report-error">
+                <p className="text-body text-danger" data-testid="report-error">
                   {errorMessage(report.error) || t("report.failed")}
                 </p>
               )}

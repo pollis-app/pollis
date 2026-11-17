@@ -26,7 +26,7 @@ export const LinkedHistoryRequest: React.FC<LinkedHistoryRequestProps> = ({ devi
 
   if (declined) {
     return (
-      <p className="text-sm text-muted" data-testid="linked-history-declined">
+      <p className="text-body text-muted" data-testid="linked-history-declined">
         {t("historyTransfer.youDeclined")}
       </p>
     );

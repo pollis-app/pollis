@@ -4,7 +4,7 @@ import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useRouter, type Href } from "expo-router";
 import type { TFunction } from "i18next";
-import { semantic, fonts, layout } from "../theme/tokens";
+import { semantic, fonts, layout, typeSize } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { Icon } from "./icons";
 import { useBottomInset, PressInPressable } from "./ui";
@@ -168,7 +168,7 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
               maxFontSizeMultiplier={1.3}
               style={{
                 fontFamily: focused ? fonts.semibold : fonts.medium,
-                fontSize: 12,
+                fontSize: typeSize.meta,
                 color,
               }}
             >

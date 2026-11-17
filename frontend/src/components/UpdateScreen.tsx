@@ -189,7 +189,7 @@ export const UpdateScreen: React.FC<Props> = ({ onContinue }) => {
           <span
             data-testid="update-status"
             role={phase === "error" ? "alert" : undefined}
-            className={`text-xs font-mono break-words ${phase === "error" ? "text-danger" : "text-fg"}`}
+            className={`text-secondary font-mono break-words ${phase === "error" ? "text-danger" : "text-fg"}`}
           >
             {label}
           </span>

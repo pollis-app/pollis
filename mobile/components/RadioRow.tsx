@@ -1,7 +1,7 @@
 import { Pressable, View } from "react-native";
 import { Text } from "./Text";
 import { Icon } from "./icons";
-import { semantic, type as ty, fonts, space } from "../theme/tokens";
+import { semantic, type as ty, fonts, space, typeSize } from "../theme/tokens";
 
 /**
  * One full-width single-select row, for a radio list inside a `Group` (wrap the list in an
@@ -47,7 +47,7 @@ export function RadioRow({
         <Text
           style={{
             fontFamily: selected ? fonts.bold : fonts.medium,
-            fontSize: 16,
+            fontSize: typeSize.rowTitle,
             color: selected ? semantic.accent : semantic.text,
           }}
         >

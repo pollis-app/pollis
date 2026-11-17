@@ -123,7 +123,7 @@ export const VoiceChannelPage: React.FC = observer(() => {
       <div
         className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
       >
-        <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
+        <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
           {t("channel.deleteHeading")}
         </span>
         <button
@@ -138,7 +138,7 @@ export const VoiceChannelPage: React.FC = observer(() => {
       <div
         className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
       >
-        <p className="text-xs font-mono text-dim">
+        <p className="text-secondary font-mono text-dim">
           {t("channel.deleteWarning")}
         </p>
         <Button

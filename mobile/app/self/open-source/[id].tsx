@@ -9,7 +9,7 @@ import { Screen, Header, Body } from "../../../components/ui";
 import { Note } from "../../../components/self/SettingsField";
 import { ossNotices, ossPackageId } from "../../../lib/ossNotices";
 import type { OssNotices } from "../../../types/ossNotices";
-import { semantic, type as ty, r, space } from "../../../theme/tokens";
+import { semantic, type as ty, r, space, typeSize } from "../../../theme/tokens";
 import { useThemeRerender } from "../../../components/theme";
 
 export default function OpenSourceLicense() {
@@ -52,7 +52,7 @@ export default function OpenSourceLicense() {
             </View>
             {pkg.texts.map((i) => (
               <View key={i} style={{ backgroundColor: semantic.raised, borderRadius: r.md, padding: space.lg }}>
-                <Text testID="text-open-source-text" selectable style={[ty.mono, { color: semantic.dim, fontSize: 12 }]}>
+                <Text testID="text-open-source-text" selectable style={[ty.mono, { color: semantic.dim, fontSize: typeSize.meta }]}>
                   {notices.texts[i]}
                 </Text>
               </View>

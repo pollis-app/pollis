@@ -37,7 +37,7 @@ export const TextArea: React.FC<TextAreaProps> = ({
     <div className={`relative w-full ${className}`}>
       <label
         htmlFor={inputId}
-        className="block text-xs font-mono font-medium mb-1.5 text-dim"
+        className="block text-secondary font-mono font-medium mb-1.5 text-dim"
       >
         {label}
       </label>
@@ -67,12 +67,12 @@ export const TextArea: React.FC<TextAreaProps> = ({
         />
       </div>
       {description && !error && (
-        <p className="mt-1 text-xs font-mono text-muted">
+        <p className="mt-1 text-secondary font-mono text-muted">
           {description}
         </p>
       )}
       {error && (
-        <p className="mt-1 text-xs font-mono text-danger" role="alert">
+        <p className="mt-1 text-secondary font-mono text-danger" role="alert">
           {error}
         </p>
       )}

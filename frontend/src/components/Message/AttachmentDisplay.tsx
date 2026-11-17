@@ -298,18 +298,18 @@ export const AttachmentDisplay = observer(({
       style={{ cursor: "default" }}
       onClick={(e) => e.stopPropagation()}
     >
-      <span className="text-xs font-mono text-muted">
+      <span className="text-secondary font-mono text-muted">
         {attachment.filename}
       </span>
       {attachment.file_size > 0 && (
-        <span className="text-xs font-mono text-muted">
+        <span className="text-secondary font-mono text-muted">
           {formatFileSize(attachment.file_size)}
         </span>
       )}
       <button
         onClick={handleDownload}
         disabled={downloadStatus !== "idle"}
-        className="text-xs font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
+        className="text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
         style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
       >
         {downloadStatus === "downloading" ? (
@@ -322,7 +322,7 @@ export const AttachmentDisplay = observer(({
       </button>
       <button
         onClick={() => setViewerOpen(false)}
-        className="text-xs font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
+        className="text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
         style={lightboxBtnStyle}
       >
         {t("attachment.lightboxClose")}
@@ -347,13 +347,13 @@ export const AttachmentDisplay = observer(({
       className="flex items-center gap-2 px-2 py-1"
     >
       <span
-        className="flex-1 min-w-0 text-xs font-mono truncate text-accent-dim"
+        className="flex-1 min-w-0 text-secondary font-mono truncate text-accent-dim"
       >
         {attachment.filename}
       </span>
       {extra}
       {attachment.file_size > 0 && (
-        <span className="text-xs font-mono flex-shrink-0 text-muted">
+        <span className="text-secondary font-mono flex-shrink-0 text-muted">
           {formatFileSize(attachment.file_size)}
         </span>
       )}
@@ -423,7 +423,7 @@ export const AttachmentDisplay = observer(({
               <BlurhashCanvas hash={attachment.blurhash} />
             </div>
           ) : (
-            <span className="text-xs font-mono text-muted">
+            <span className="text-secondary font-mono text-muted">
               {error ? t("attachment.error") : "…"}
             </span>
           )}
@@ -461,7 +461,7 @@ export const AttachmentDisplay = observer(({
                 borderRadius: 8,
               }}
             >
-              <span className="text-xs font-mono text-muted">
+              <span className="text-secondary font-mono text-muted">
                 {isLoading ? t("attachment.loading") : error ? error : "…"}
               </span>
             </div>
@@ -619,7 +619,7 @@ export const AttachmentDisplay = observer(({
         const tail = hasExt ? attachment.filename.slice(lastDot) : "";
         return (
           <span
-            className="text-sm font-mono flex-1 min-w-0 flex text-accent-dim"
+            className="text-body font-mono flex-1 min-w-0 flex text-accent-dim"
             title={attachment.filename}
           >
             <span className="truncate">{head}</span>
@@ -628,14 +628,14 @@ export const AttachmentDisplay = observer(({
         );
       })()}
       {attachment.file_size > 0 && (
-        <span className="text-sm font-mono flex-shrink-0 text-muted">
+        <span className="text-body font-mono flex-shrink-0 text-muted">
           {formatFileSize(attachment.file_size)}
         </span>
       )}
       {error ? (
-        <span className="text-sm font-mono flex-shrink-0 text-muted">{t("attachment.error")}</span>
+        <span className="text-body font-mono flex-shrink-0 text-muted">{t("attachment.error")}</span>
       ) : isPending ? (
-        <span className="text-sm font-mono flex-shrink-0 text-muted">…</span>
+        <span className="text-body font-mono flex-shrink-0 text-muted">…</span>
       ) : (
         <button
           onClick={handleDownload}

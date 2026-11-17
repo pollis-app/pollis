@@ -96,14 +96,14 @@ export const SearchGroupPage: React.FC = observer(() => {
                 padding="sm"
               >
                 <div className="flex flex-col gap-0.5">
-                  <h2 className="text-sm font-mono font-medium text-accent">
+                  <h2 className="text-body font-mono font-medium text-accent">
                     {foundGroup.name}
                   </h2>
-                  <p className="text-xs font-mono text-muted">
+                  <p className="text-secondary font-mono text-muted">
                     /g/{deriveSlug(foundGroup.name)}
                   </p>
                   {foundGroup.description && (
-                    <p className="text-xs font-mono mt-1 text-dim">
+                    <p className="text-secondary font-mono mt-1 text-dim">
                       {foundGroup.description}
                     </p>
                   )}
@@ -119,7 +119,7 @@ export const SearchGroupPage: React.FC = observer(() => {
                 ) : myJoinRequest?.status === "pending" ? (
                   <p
                     data-testid="request-pending-indicator"
-                    className="text-xs font-mono text-muted"
+                    className="text-secondary font-mono text-muted"
                   >
                     {t("group.requestPending")}
                   </p>
@@ -127,7 +127,7 @@ export const SearchGroupPage: React.FC = observer(() => {
                   <div className="flex flex-col gap-2">
                     <p
                       data-testid="request-rejected-indicator"
-                      className="text-xs font-mono text-danger"
+                      className="text-secondary font-mono text-danger"
                     >
                       {t("group.requestRejected")}
                     </p>
@@ -156,7 +156,7 @@ export const SearchGroupPage: React.FC = observer(() => {
             )}
 
             {searchError && (
-              <p data-testid="search-group-error" className="text-xs font-mono text-danger">
+              <p data-testid="search-group-error" className="text-secondary font-mono text-danger">
                 {searchError}
               </p>
             )}

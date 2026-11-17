@@ -15,7 +15,7 @@ export const LanguageSection: React.FC = () => {
       <h2
         id="pref-language-heading"
         data-testid="pref-language-heading"
-        className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg"
+        className="text-secondary font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg"
       >
         {t("language.heading")}
       </h2>

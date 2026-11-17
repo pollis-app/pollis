@@ -19,7 +19,7 @@ export const LanguagePage: React.FC = observer(() => {
         <section className="w-full max-w-md flex flex-col gap-4">
           <h2
             data-testid="language-page-heading"
-            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg"
+            className="text-secondary font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg"
           >
             {t("language.heading")}
           </h2>
@@ -36,7 +36,7 @@ export const LanguagePage: React.FC = observer(() => {
               }
             }}
           />
-          <p data-testid="language-page-note" className="text-xs font-mono text-muted">
+          <p data-testid="language-page-note" className="text-secondary font-mono text-muted">
             {t("language.description")}
           </p>
         </section>

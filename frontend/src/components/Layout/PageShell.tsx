@@ -31,7 +31,7 @@ export const PageShell: React.FC<PageShellProps> = ({ title, children, scrollabl
   return (
     <div className="flex flex-col h-full">
       <div
-        className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
+        className="flex items-center px-4 flex-shrink-0 text-secondary font-mono h-bar border-b border-line text-muted"
       >
         <span className="text-accent" style={{ flex: 1 }}>{title}</span>
       </div>

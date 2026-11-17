@@ -146,7 +146,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           />
 
           {error && (
-            <p data-testid="create-group-error" className="text-xs font-mono text-danger">
+            <p data-testid="create-group-error" className="text-secondary font-mono text-danger">
               {error}
             </p>
           )}

@@ -48,7 +48,7 @@ export function ReceiptIndicator({ receipts, peerCount, visible }: ReceiptIndica
         <Check className="h-3.5 w-3.5" aria-hidden="true" />
       )}
       {peerCount > 1 && (
-        <span className="font-machine text-xs">
+        <span className="font-machine text-secondary">
           {anyRead ? readCount : deliveredCount}/{peerCount}
         </span>
       )}

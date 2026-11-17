@@ -56,8 +56,8 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
       className="flex items-center justify-between gap-3"
     >
       <div className="min-w-0">
-        <p className={`text-sm font-medium ${statusClass}`}>{status}</p>
-        <p className="truncate text-xs text-dim">{detail}</p>
+        <p className={`text-body font-medium ${statusClass}`}>{status}</p>
+        <p className="truncate text-secondary text-dim">{detail}</p>
       </div>
       {link.is_live && (
         <Button

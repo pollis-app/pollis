@@ -19,7 +19,7 @@ export const Checkbox: React.FC<CheckboxProps> = ({
 }) => {
   return (
     <label
-      className={`flex items-start gap-3 font-mono text-xs text-dim ${className}`}
+      className={`flex items-start gap-3 font-mono text-secondary text-dim ${className}`}
       style={{
         cursor: disabled ? "not-allowed" : "pointer",
         lineHeight: 1.6,

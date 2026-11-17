@@ -98,16 +98,16 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
           <div className="flex flex-col gap-5">
             <div>
               <p
-                className="text-xs font-mono uppercase tracking-wider text-danger"
+                className="text-secondary font-mono uppercase tracking-wider text-danger"
                 style={{ letterSpacing: "0.15em" }}
               >
                 {t("approval.badge")}
               </p>
-              <h1 className="text-base font-mono font-bold mt-1 text-fg">
+              <h1 className="text-row font-mono font-bold mt-1 text-fg">
                 {t("approval.title")}
               </h1>
               <p
-                className="text-xs mt-2 font-mono text-fg"
+                className="text-secondary mt-2 font-mono text-fg"
                 style={{ lineHeight: 1.6 }}
               >
                 <Trans
@@ -118,7 +118,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
                 />
               </p>
               <p
-                className="text-xs mt-2 font-mono text-muted"
+                className="text-secondary mt-2 font-mono text-muted"
                 style={{ lineHeight: 1.6 }}
               >
                 {t("approval.instruction")}
@@ -144,7 +144,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
             {error && (
               <p
                 data-testid="approval-error"
-                className="text-xs font-mono text-danger"
+                className="text-secondary font-mono text-danger"
               >
                 {error}
               </p>

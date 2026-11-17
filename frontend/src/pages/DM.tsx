@@ -154,7 +154,7 @@ export const DMPage: React.FC = observer(() => {
     <PressButton
       data-testid="dm-header-username"
       onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
-      className="font-mono transition-colors text-inherit hover:text-accent border-0 bg-transparent p-0 cursor-pointer text-xs"
+      className="font-mono transition-colors text-inherit hover:text-accent border-0 bg-transparent p-0 cursor-pointer text-secondary"
       aria-label={t("conversation.viewProfile", { name: username })}
     >
       <bdi>@{username}</bdi>

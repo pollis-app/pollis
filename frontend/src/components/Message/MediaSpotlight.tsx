@@ -263,7 +263,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
     media = (
       <div
         data-testid="media-spotlight-placeholder"
-        className="flex items-center justify-center p-8 text-sm font-mono text-muted"
+        className="flex items-center justify-center p-8 text-body font-mono text-muted"
         style={{ cursor: "default" }}
         onClick={stopClick}
       >
@@ -281,21 +281,21 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         onClick={stopClick}
       >
         {position && (
-          <span data-testid="media-spotlight-position" className="text-xs font-mono text-fg">
+          <span data-testid="media-spotlight-position" className="text-secondary font-mono text-fg">
             {position}
           </span>
         )}
-        <span className="text-xs font-mono text-muted">{attachment.filename}</span>
+        <span className="text-secondary font-mono text-muted">{attachment.filename}</span>
         {attachment.file_size > 0 && (
-          <span className="text-xs font-mono text-muted">
+          <span className="text-secondary font-mono text-muted">
             {formatFileSize(attachment.file_size)}
           </span>
         )}
-        {saveError && <span className="text-xs font-mono text-muted">{saveError}</span>}
+        {saveError && <span className="text-secondary font-mono text-muted">{saveError}</span>}
         <button
           onClick={handleDownload}
           disabled={downloadStatus !== "idle" || !attachment.object_key}
-          className="text-xs font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
+          className="text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
           style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
         >
           {downloadStatus === "downloading" ? (
@@ -308,7 +308,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         </button>
         <button
           onClick={onClose}
-          className="text-xs font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
+          className="text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
           style={lightboxBtnStyle}
         >
           {t("attachment.lightboxClose")}

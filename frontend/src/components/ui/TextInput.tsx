@@ -46,7 +46,7 @@ export const TextInput: React.FC<TextInputProps> = ({
       {label && (
         <label
           htmlFor={inputId}
-          className="block text-xs font-sans font-medium mb-1.5 text-fg"
+          className="block text-secondary font-sans font-medium mb-1.5 text-fg"
           style={{ letterSpacing: "0.5px" }}
         >
           {label}
@@ -84,12 +84,12 @@ export const TextInput: React.FC<TextInputProps> = ({
       </div>
 
       {description && !error && (
-        <p className="mt-1 text-xs font-sans text-muted">
+        <p className="mt-1 text-secondary font-sans text-muted">
           {description}
         </p>
       )}
       {error && (
-        <p className="mt-1 text-xs font-sans text-danger" role="alert">
+        <p className="mt-1 text-secondary font-sans text-danger" role="alert">
           {error}
         </p>
       )}

@@ -76,7 +76,7 @@ export const OfferCode: React.FC<OfferCodeProps> = ({ deviceName, onSignedIn }) 
 
   return (
     <div data-testid="link-offer" className="flex flex-col gap-4">
-      <p className="text-sm text-muted leading-relaxed">{t("link.qrIntro")}</p>
+      <p className="text-body text-muted leading-relaxed">{t("link.qrIntro")}</p>
       {error && <AuthError message={error} />}
       {stopped || error ? (
         <div>
@@ -101,11 +101,11 @@ export const OfferCode: React.FC<OfferCodeProps> = ({ deviceName, onSignedIn }) 
           {/* For reading by hand. */}
           <code
             data-testid="link-offer-payload"
-            className="font-mono text-xs text-dim break-all select-all leading-relaxed"
+            className="font-mono text-secondary text-dim break-all select-all leading-relaxed"
           >
             {handle.qr_payload}
           </code>
-          <p data-testid="link-offer-status" className="flex items-center gap-2 text-xs font-mono text-muted">
+          <p data-testid="link-offer-status" className="flex items-center gap-2 text-secondary font-mono text-muted">
             <LoadingSpinner size="sm" />
             {signingIn ? t("link.signingIn") : t("link.qrWaiting")}
           </p>

@@ -101,7 +101,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
               }
               title={t("unfurl.loadTitle", { url: href })}
               aria-label={t("unfurl.loadDescription", { url: href })}
-              className="flex h-24 w-24 shrink-0 items-center justify-center rounded-control border border-line bg-surface-raised px-2 text-center text-2xs text-muted hover:bg-hover hover:text-fg"
+              className="flex h-24 w-24 shrink-0 items-center justify-center rounded-control border border-line bg-surface-raised px-2 text-center text-meta text-muted hover:bg-hover hover:text-fg"
             >
               {link.kind === "image"
                 ? t("unfurl.loadImage")

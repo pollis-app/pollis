@@ -15,7 +15,7 @@ export const OpenSourceLicensePage: React.FC = () => {
   return (
     <PageShell title={pkg ? pkg.name : t("openSource.title")} scrollable>
       <div data-testid="open-source-license-page" className="flex justify-center px-6 py-10">
-        <div className="w-full max-w-2xl flex flex-col gap-4 font-mono text-xs">
+        <div className="w-full max-w-2xl flex flex-col gap-4 font-mono text-secondary">
           {state.status === "loading" && <p className="text-dim">{t("common:states.loading")}</p>}
           {state.status !== "loading" && !pkg && (
             <p data-testid="open-source-not-found" className="text-dim">

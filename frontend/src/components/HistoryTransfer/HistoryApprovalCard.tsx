@@ -86,26 +86,26 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
   return (
     <div className="flex flex-col gap-5" data-testid="history-approval-card">
       <div className="flex flex-col gap-2">
-        <h2 className="text-lg text-fg" data-testid="history-approval-title">
+        <h2 className="text-heading text-fg" data-testid="history-approval-title">
           {t("historyTransfer.approveTitle", { device })}
         </h2>
         {request.requester_added_at && (
-          <p className="text-xs font-mono text-dim" data-testid="history-approval-added">
+          <p className="text-secondary font-mono text-dim" data-testid="history-approval-added">
             {t("historyTransfer.approveAdded", { time: formatDateTime(request.requester_added_at) })}
           </p>
         )}
-        <p className="text-sm text-muted leading-relaxed">{t("historyTransfer.approveWarning")}</p>
+        <p className="text-body text-muted leading-relaxed">{t("historyTransfer.approveWarning")}</p>
       </div>
 
       {needPin && (
         <div className="flex flex-col gap-3" data-testid="history-approval-pin">
-          <p className="text-sm text-fg">{t("historyTransfer.approvePin")}</p>
+          <p className="text-body text-fg">{t("historyTransfer.approvePin")}</p>
           <InputOtp length={4} value={pin} onChange={setPin} disabled={busy !== null} mask autoFocus />
         </div>
       )}
 
       {error && (
-        <p className="text-sm text-danger" data-testid="history-approval-error">
+        <p className="text-body text-danger" data-testid="history-approval-error">
           {error}
         </p>
       )}

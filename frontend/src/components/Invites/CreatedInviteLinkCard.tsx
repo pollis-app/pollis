@@ -30,8 +30,8 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
   return (
     <Card padding="sm" data-testid="created-invite-link" className="flex flex-col gap-3">
       <div>
-        <p className="text-sm font-semibold text-fg">{t("inviteLinks.created")}</p>
-        <p className="mt-1 text-xs text-dim">{t("inviteLinks.copyNotice")}</p>
+        <p className="text-body font-semibold text-fg">{t("inviteLinks.created")}</p>
+        <p className="mt-1 text-secondary text-dim">{t("inviteLinks.copyNotice")}</p>
       </div>
       {/* A failed copy shows as failed (#898). */}
       <CodeSnippet
@@ -49,7 +49,7 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
           failed: t("inviteLinks.copyFailedLabel"),
         }}
       />
-      <p className="text-xs text-muted">{boundsLabel}</p>
+      <p className="text-secondary text-muted">{boundsLabel}</p>
     </Card>
   );
 };

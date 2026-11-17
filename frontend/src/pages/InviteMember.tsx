@@ -43,7 +43,7 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
           onSubmit={handleInvite}
           className="flex flex-col gap-6"
         >
-          <p className="text-xs font-mono text-dim">
+          <p className="text-secondary font-mono text-dim">
             <Trans
               i18nKey="channels:inviteMember.intro"
               values={{ name: groupName }}
@@ -73,13 +73,13 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
           </div>
 
           {success && (
-            <p data-testid="invite-sent-confirmation" className="text-xs font-mono text-accent-dim">
+            <p data-testid="invite-sent-confirmation" className="text-secondary font-mono text-accent-dim">
               {t("inviteMember.sent")}
             </p>
           )}
 
           {inviteMutation.error && (
-            <p data-testid="invite-error" className="text-xs font-mono text-danger">
+            <p data-testid="invite-error" className="text-secondary font-mono text-danger">
               {errorMessage(inviteMutation.error, t("inviteMember.sendFailed"))}
             </p>
           )}

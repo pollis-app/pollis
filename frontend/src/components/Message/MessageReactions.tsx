@@ -140,7 +140,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
               openPanel(reaction.emoji);
             }}
             title={tooltip(reaction.emoji, reaction.count)}
-            className="panel-raised flex items-center gap-1 px-1.5 py-0.5 text-xs font-mono transition-colors duration-75 hover:opacity-90"
+            className="panel-raised flex items-center gap-1 px-1.5 py-0.5 text-secondary font-mono transition-colors duration-75 hover:opacity-90"
             style={{
               color: reacted ? "var(--c-accent)" : "var(--c-text-muted)",
               borderColor: reacted ? "var(--c-border-active)" : undefined,

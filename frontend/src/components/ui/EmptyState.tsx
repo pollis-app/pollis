@@ -38,7 +38,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     <div data-testid={testId} data-empty-state="" className={wrapper}>
       <p
         data-testid={messageTestId}
-        className={`text-xs font-mono ${tone === "dim" ? "text-dim" : "text-muted"}`}
+        className={`text-secondary font-mono ${tone === "dim" ? "text-dim" : "text-muted"}`}
       >
         {children}
       </p>

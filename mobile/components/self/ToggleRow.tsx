@@ -1,7 +1,7 @@
 import { Pressable, View } from "react-native";
 import { Text } from "../Text";
 import { Toggle } from "../ui";
-import { semantic, type as ty, fonts, space, layout } from "../../theme/tokens";
+import { semantic, type as ty, fonts, space, layout, typeSize } from "../../theme/tokens";
 import { haptic } from "../../lib/haptics";
 
 /** A settings row that IS a switch: one control for screen readers, `toggle-<name>` on the row. */
@@ -52,7 +52,7 @@ export function ToggleRow({
         <Text
           style={{
             fontFamily: fonts.medium,
-            fontSize: 16,
+            fontSize: typeSize.rowTitle,
             color: disabled ? semantic.dim : semantic.text,
           }}
         >

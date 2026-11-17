@@ -35,11 +35,11 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
     <div className={`relative w-full ${className}`}>
       <label
         htmlFor={inputId}
-        className="block text-xs font-mono mb-2 text-dim"
+        className="block text-secondary font-mono mb-2 text-dim"
       >
         {label}
         <span
-          className="inline-block ms-2 px-1.5 py-0.5 font-mono font-bold text-xs bg-active border border-line-strong text-accent"
+          className="inline-block ms-2 px-1.5 py-0.5 font-mono font-bold text-secondary bg-active border border-line-strong text-accent"
           style={{
             borderRadius: 4,
           }}
@@ -49,7 +49,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
       </label>
 
       {sublabel && (
-        <p className="mb-2 text-xs font-mono text-muted">
+        <p className="mb-2 text-secondary font-mono text-muted">
           {sublabel}
         </p>
       )}
@@ -90,7 +90,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
       {description && (
         <p
           id={descriptionId}
-          className="mt-1 text-xs font-mono text-muted"
+          className="mt-1 text-secondary font-mono text-muted"
         >
           {description}
         </p>

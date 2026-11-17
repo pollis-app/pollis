@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Field, PressInPressable } from "../ui";
 import { UserAvatar } from "../UserAvatar";
-import { fonts, layout, semantic, type as ty, r } from "../../theme/tokens";
+import { fonts, layout, semantic, type as ty, r, typeSize } from "../../theme/tokens";
 import {
   applyMention,
   mentionQueryAt,
@@ -367,7 +367,7 @@ export function Composer({
                 ellipsizeMode="tail"
                 style={{
                   fontFamily: fonts.regular,
-                  fontSize: 16,
+                  fontSize: typeSize.body,
                   color: semantic.muted,
                 }}
               >

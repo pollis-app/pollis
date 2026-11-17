@@ -80,11 +80,11 @@ export const SidebarProfilePanel: React.FC = observer(() => {
           testId="sidebar-profile-avatar"
         />
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="truncate text-sm font-semibold text-fg">
+          <span className="truncate text-body font-semibold text-fg">
             {displayName}
           </span>
           {handle && (
-            <bdi className="truncate text-2xs text-muted">{handle}</bdi>
+            <bdi className="truncate text-meta text-muted">{handle}</bdi>
           )}
         </div>
         <PressButton
@@ -119,18 +119,18 @@ export const SidebarProfilePanel: React.FC = observer(() => {
           >
             {reconnecting ? (
               <span
-                className="text-2xs font-semibold text-warning"
+                className="text-meta font-semibold text-warning"
                 data-testid="sidebar-voice-reconnecting"
                 role="status"
               >
                 {tVoice("bar.reconnecting")}
               </span>
             ) : (
-              <span className="text-2xs font-semibold text-connected">
+              <span className="text-meta font-semibold text-connected">
                 {t("profile.voiceConnected")}
               </span>
             )}
-            <span className="truncate text-2xs text-muted transition-colors group-hover:text-fg group-hover:underline">
+            <span className="truncate text-meta text-muted transition-colors group-hover:text-fg group-hover:underline">
               {voiceChannelName}
             </span>
           </PressButton>

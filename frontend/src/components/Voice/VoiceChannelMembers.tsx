@@ -81,7 +81,7 @@ export const VoiceChannelMembers: React.FC<VoiceChannelMembersProps> = observer(
           data-testid={`sidebar-voice-member-${channelId}-${m.userId}`}
           data-speaking={m.speaking ? "true" : undefined}
           data-muted={m.muted ? "true" : undefined}
-          className={`flex items-center gap-1.5 text-sm leading-tight ${m.speaking ? "text-accent" : "text-dim"}`}
+          className={`flex items-center gap-1.5 text-body leading-tight ${m.speaking ? "text-accent" : "text-dim"}`}
         >
           {/* A flex box, so it is exactly the avatar: as a block it took the row's line height and the ring stretched (#1789). */}
           <span className={`flex shrink-0 rounded-full ${m.speaking ? "ring-2 ring-accent" : ""}`}>

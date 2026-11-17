@@ -4,7 +4,7 @@ import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Group, ListRow } from "../ui";
-import { fonts, layout, semantic, type as ty, r } from "../../theme/tokens";
+import { fonts, layout, semantic, type as ty, r, typeSize } from "../../theme/tokens";
 import { SheetOverlay } from "./SheetOverlay";
 import { MessageBodyInline } from "./MessageBody";
 import type { Message } from "../../hooks/queries";
@@ -134,7 +134,7 @@ export function MessageActionsSheet({
               numberOfLines={3}
               style={{
                 fontFamily: fonts.regular,
-                fontSize: 15,
+                fontSize: typeSize.button,
                 lineHeight: 21,
                 color: semantic.text,
               }}

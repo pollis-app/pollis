@@ -278,7 +278,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
             {preview ? (
               <>
                 {preview.kind === "standard" ? (
-                  <span className="text-xl leading-none">
+                  <span className="text-glyph leading-none">
                     {emojiDisplayChar(preview.emoji, toneIndex)}
                   </span>
                 ) : (
@@ -288,14 +288,14 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
                     sizeRem={1.25}
                   />
                 )}
-                <span className="text-xs font-mono text-dim truncate">
+                <span className="text-secondary font-mono text-dim truncate">
                   {preview.kind === "standard"
                     ? emojiDisplayName(preview.emoji, annotations)
                     : `:${preview.emoji.shortcode}:`}
                 </span>
               </>
             ) : (
-              <span className="text-xs font-mono text-muted truncate">{t("picker.previewHint")}</span>
+              <span className="text-secondary font-mono text-muted truncate">{t("picker.previewHint")}</span>
             )}
           </div>
           <SkinTonePicker toneIndex={toneIndex} onChange={handleToneChange} />

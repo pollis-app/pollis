@@ -482,7 +482,7 @@ export const PreferencesPage: React.FC = observer(() => {
             {/* Appearance — UI skin (synced across devices) */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("appearance.heading")}
               </h2>
@@ -495,7 +495,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   }
                 }}
               />
-              <p className="text-xs font-mono text-muted">
+              <p className="text-secondary font-mono text-muted">
                 {t("appearance.description")}
               </p>
             </section>
@@ -503,7 +503,7 @@ export const PreferencesPage: React.FC = observer(() => {
             {/* Accent Color */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("accent.heading")}
               </h2>
@@ -525,7 +525,7 @@ export const PreferencesPage: React.FC = observer(() => {
                     data-testid={`pref-accent-${preset.n.toLowerCase()}`}
                     aria-pressed={accentHex === preset.c}
                     onClick={() => handleAccentColor(preset.c)}
-                    className="px-2 py-0.5 text-xs font-mono rounded-chip border transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+                    className="px-2 py-0.5 text-secondary font-mono rounded-chip border transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
                     style={{
                       background: `${preset.c}26`,
                       borderColor: accentHex === preset.c ? preset.c : `${preset.c}66`,
@@ -541,7 +541,7 @@ export const PreferencesPage: React.FC = observer(() => {
             {/* Background Color */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("background.heading")}
               </h2>
@@ -563,7 +563,7 @@ export const PreferencesPage: React.FC = observer(() => {
                     data-testid={`pref-background-${preset.n.toLowerCase()}`}
                     aria-pressed={bgHex === preset.c}
                     onClick={() => handleBgColor(preset.c)}
-                    className={`px-2 py-0.5 text-xs font-mono rounded-chip border text-fg transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black ${bgHex === preset.c ? "border-accent" : "border-line-strong"}`}
+                    className={`px-2 py-0.5 text-secondary font-mono rounded-chip border text-fg transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black ${bgHex === preset.c ? "border-accent" : "border-line-strong"}`}
                     style={{ background: preset.c }}
                   >
                     {backgroundPresetLabel(preset.n)}
@@ -578,7 +578,7 @@ export const PreferencesPage: React.FC = observer(() => {
                 should slot in here. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("display.heading")}
               </h2>
@@ -592,12 +592,12 @@ export const PreferencesPage: React.FC = observer(() => {
                   step={1}
                   onChange={handleFontSize}
                 />
-                <div className="flex justify-between text-xs font-mono text-muted">
+                <div className="flex justify-between text-secondary font-mono text-muted">
                   <span>{t("display.fontSizeSmall")}</span>
                   <span>{t("display.fontSizeNormal")}</span>
                   <span>{t("display.fontSizeLarge")}</span>
                 </div>
-                <p className="text-xs font-mono mt-1 text-muted">
+                <p className="text-secondary font-mono mt-1 text-muted">
                   {t("display.fontSizeNote")}
                 </p>
               </div>
@@ -614,7 +614,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   checked={allowCallRingtone}
                   onChange={handleAllowCallRingtone}
                 />
-                <p className="text-xs font-mono text-muted">
+                <p className="text-secondary font-mono text-muted">
                   {t("display.callRingtoneDescription")}
                 </p>
               </div>
@@ -623,7 +623,7 @@ export const PreferencesPage: React.FC = observer(() => {
             {/* Layout */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("layout.heading")}
               </h2>
@@ -634,7 +634,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   checked={sidebarOpenByDefault}
                   onChange={handleSidebarOpenByDefault}
                 />
-                <p className="text-xs font-mono text-muted">
+                <p className="text-secondary font-mono text-muted">
                   {t("layout.sidebarDescription", { shortcut: toggleSidebarLabel })}
                 </p>
               </div>
@@ -645,7 +645,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   checked={isRightPanelOpen}
                   onChange={handleRightPanelOpenByDefault}
                 />
-                <p className="text-xs font-mono text-muted">
+                <p className="text-secondary font-mono text-muted">
                   {t("layout.rightPanelDescription", { shortcut: toggleRightPanelLabel })}
                 </p>
               </div>
@@ -657,7 +657,7 @@ export const PreferencesPage: React.FC = observer(() => {
                     checked={closeToTray}
                     onChange={handleCloseToTray}
                   />
-                  <p className="text-xs font-mono text-muted">
+                  <p className="text-secondary font-mono text-muted">
                     {t("layout.closeToTrayDescription")}
                   </p>
                 </div>
@@ -670,7 +670,7 @@ export const PreferencesPage: React.FC = observer(() => {
                     checked={menubarIcon}
                     onChange={handleMenubarIcon}
                   />
-                  <p className="text-xs font-mono text-muted">
+                  <p className="text-secondary font-mono text-muted">
                     {t("layout.menubarIconDescription")}
                   </p>
                 </div>
@@ -680,7 +680,7 @@ export const PreferencesPage: React.FC = observer(() => {
             {/* Notifications */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("notifications.heading")}
               </h2>
@@ -703,7 +703,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   checked={incomingCallTakeover}
                   onChange={handleIncomingCallTakeover}
                 />
-                <p className="text-xs font-mono text-muted">
+                <p className="text-secondary font-mono text-muted">
                   {t("notifications.callTakeoverDescription")}
                 </p>
               </div>
@@ -712,7 +712,7 @@ export const PreferencesPage: React.FC = observer(() => {
             {/* Read receipts (#857) — DMs only. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("readReceipts.heading")}
               </h2>
@@ -722,7 +722,7 @@ export const PreferencesPage: React.FC = observer(() => {
                 checked={sendReadReceipts}
                 onChange={handleSendReadReceipts}
               />
-              <p className="text-xs font-mono text-muted">
+              <p className="text-secondary font-mono text-muted">
                 <Trans
                   t={t}
                   i18nKey="readReceipts.description"
@@ -735,7 +735,7 @@ export const PreferencesPage: React.FC = observer(() => {
                 window stored in the local DB, not synced across the account. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("retention.heading")}
               </h2>
@@ -766,7 +766,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   );
                 })}
               </div>
-              <p className="text-xs font-mono text-muted">
+              <p className="text-secondary font-mono text-muted">
                 {t("retention.description")}
               </p>
             </section>
@@ -778,7 +778,7 @@ export const PreferencesPage: React.FC = observer(() => {
                 it, so nobody should ever need this. It exists for when the
                 automatic repair is the thing that is wrong. */}
             <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line">
+              <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line">
                 {t("searchIndex.heading")}
               </h2>
               <div>
@@ -794,7 +794,7 @@ export const PreferencesPage: React.FC = observer(() => {
                     : t("searchIndex.rebuild")}
                 </Button>
               </div>
-              <p className="text-xs font-mono text-muted">
+              <p className="text-secondary font-mono text-muted">
                 {rebuildSearchIndex.isSuccess
                   ? t("searchIndex.rebuilt")
                   : t("searchIndex.description")}
@@ -805,7 +805,7 @@ export const PreferencesPage: React.FC = observer(() => {
                 applied live via set_overlay_mode. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("overlay.heading")}
               </h2>
@@ -827,10 +827,10 @@ export const PreferencesPage: React.FC = observer(() => {
                   </Button>
                 ))}
               </div>
-              <p className="text-xs font-mono text-muted">
+              <p className="text-secondary font-mono text-muted">
                 {t("overlay.description")}
               </p>
-              <ul className="flex flex-col gap-1 text-xs font-mono text-muted">
+              <ul className="flex flex-col gap-1 text-secondary font-mono text-muted">
                 <li>
                   <Trans
                     t={t}
@@ -856,7 +856,7 @@ export const PreferencesPage: React.FC = observer(() => {
               {overlayStatus !== null && (
                 <p
                   data-testid="pref-overlay-status"
-                  className="text-xs font-mono text-danger"
+                  className="text-secondary font-mono text-danger"
                 >
                   {t("overlay.applyError", {
                     error: overlayStatus,
@@ -879,7 +879,7 @@ export const PreferencesPage: React.FC = observer(() => {
             {/* Voice */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
                 {t("voice.heading")}
               </h2>

@@ -109,13 +109,13 @@ export const UpdatePage: React.FC = observer(() => {
           <div className="w-full max-w-md flex flex-col gap-8">
             <section className="flex flex-col gap-4">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
+                className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
               >
                 {t("update.heading")}
               </h2>
 
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-mono text-muted">
+                <p className="text-secondary font-mono text-muted">
                   <Trans
                     t={t}
                     i18nKey="update.currentVersion"
@@ -125,25 +125,25 @@ export const UpdatePage: React.FC = observer(() => {
                 </p>
 
                 {status === "checking" && (
-                  <p className="text-xs font-mono text-muted">
+                  <p className="text-secondary font-mono text-muted">
                     {t("update.checking")}
                   </p>
                 )}
 
                 {status === "available" && (
-                  <p className="text-xs font-mono text-accent">
+                  <p className="text-secondary font-mono text-accent">
                     {t("update.available", { version })}
                   </p>
                 )}
 
                 {status === "none" && (
-                  <p className="text-xs font-mono text-accent-dim">
+                  <p className="text-secondary font-mono text-accent-dim">
                     {t("update.upToDate")}
                   </p>
                 )}
 
                 {status === "error" && (
-                  <p className="text-xs font-mono text-danger">
+                  <p className="text-secondary font-mono text-danger">
                     {errorMessage}
                   </p>
                 )}
@@ -151,12 +151,12 @@ export const UpdatePage: React.FC = observer(() => {
                 {status === "managed" && managed && (
                   <>
                     {version && (
-                      <p className="text-xs font-mono text-accent">
+                      <p className="text-secondary font-mono text-accent">
                         {t("update.available", { version })}
                       </p>
                     )}
                     <p
-                      className="text-xs font-mono text-muted"
+                      className="text-secondary font-mono text-muted"
                       style={{ lineHeight: 1.5 }}
                     >
                       {t("update.managedNote", { manager: managed.display_name })}
@@ -190,7 +190,7 @@ export const UpdatePage: React.FC = observer(() => {
             {releaseNotes && (
               <section className="flex flex-col gap-4" data-testid="update-release-notes">
                 <h2
-                  className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
+                  className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
                 >
                   {t("update.whatsNew", { version: releaseNotes.version })}
                 </h2>

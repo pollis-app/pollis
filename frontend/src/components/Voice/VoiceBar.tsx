@@ -100,7 +100,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   return (
     <div
       data-testid="voice-bar"
-      className="flex items-center ps-1 pe-3 gap-2 font-mono text-xs flex-shrink-0 min-h-composer-flush border-t border-line bg-surface text-muted"
+      className="flex items-center ps-1 pe-3 gap-2 font-mono text-secondary flex-shrink-0 min-h-composer-flush border-t border-line bg-surface text-muted"
     >
       <PillButton
         data-testid="voice-bar-channel-name"

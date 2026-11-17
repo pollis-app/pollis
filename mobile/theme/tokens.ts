@@ -227,13 +227,28 @@ export const fonts = {
   sora700: "Geist_700Bold",
 };
 
+// The type scale by role (#1973), the same names as desktop's `text-*` utilities; each platform
+// keeps its own sizes (docs/design/README.md → Type). A `fontSize` in a component reads one of these.
+export const typeSize = {
+  meta: 12,
+  section: 13,
+  secondary: 14,
+  // Button labels, and the denser rows sized like them.
+  button: 15,
+  body: 16,
+  rowTitle: 16,
+  heading: 17,
+  title: 20,
+  display: 28,
+};
+
 // Colours, line heights and letter-spacing are getters so a flattened style tracks the live theme and script.
 export const type = {
   display: {
     fontFamily: fonts.bold,
-    fontSize: 28,
+    fontSize: typeSize.display,
     get lineHeight() {
-      return scriptLineHeight(34, 28);
+      return scriptLineHeight(34, typeSize.display);
     },
     get letterSpacing() {
       return scriptLetterSpacing(-0.56);
@@ -244,9 +259,9 @@ export const type = {
   },
   title: {
     fontFamily: fonts.bold,
-    fontSize: 20,
+    fontSize: typeSize.title,
     get lineHeight() {
-      return scriptLineHeight(26, 20);
+      return scriptLineHeight(26, typeSize.title);
     },
     get letterSpacing() {
       return scriptLetterSpacing(-0.2);
@@ -257,9 +272,9 @@ export const type = {
   },
   heading: {
     fontFamily: fonts.bold,
-    fontSize: 17,
+    fontSize: typeSize.heading,
     get lineHeight() {
-      return scriptLineHeight(22, 17);
+      return scriptLineHeight(22, typeSize.heading);
     },
     get color() {
       return _theme.text;
@@ -267,9 +282,9 @@ export const type = {
   },
   body: {
     fontFamily: fonts.regular,
-    fontSize: 16,
+    fontSize: typeSize.body,
     get lineHeight() {
-      return scriptLineHeight(23, 16);
+      return scriptLineHeight(23, typeSize.body);
     },
     get color() {
       return _theme.text;
@@ -277,9 +292,9 @@ export const type = {
   },
   secondary: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: typeSize.secondary,
     get lineHeight() {
-      return scriptLineHeight(19, 14);
+      return scriptLineHeight(19, typeSize.secondary);
     },
     get color() {
       return _theme.dim;
@@ -287,9 +302,9 @@ export const type = {
   },
   section: {
     fontFamily: fonts.semibold,
-    fontSize: 13,
+    fontSize: typeSize.section,
     get lineHeight() {
-      return scriptLineHeight(18, 13);
+      return scriptLineHeight(18, typeSize.section);
     },
     get color() {
       return _theme.dim;
@@ -297,17 +312,30 @@ export const type = {
   },
   meta: {
     fontFamily: fonts.regular,
-    fontSize: 12,
+    fontSize: typeSize.meta,
     get lineHeight() {
-      return scriptLineHeight(16, 12);
+      return scriptLineHeight(16, typeSize.meta);
     },
     get color() {
       return _theme.muted;
     },
   },
+  // A list row's name: no line height of its own, so a row keeps the face's natural one.
+  rowTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: typeSize.rowTitle,
+    get color() {
+      return _theme.text;
+    },
+  },
+  // An inline button's label; a full-width button's is `rowTitle`.
+  button: {
+    fontFamily: fonts.semibold,
+    fontSize: typeSize.button,
+  },
   tab: {
     fontFamily: fonts.medium,
-    fontSize: 12,
+    fontSize: typeSize.meta,
   },
   mono: { fontFamily: fonts.mono400, fontSize: 13 },
 

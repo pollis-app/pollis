@@ -3,7 +3,7 @@ import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Dot, IconButton } from "../ui";
 import { Icon } from "../icons";
-import { semantic, fonts, space, layout } from "../../theme/tokens";
+import { semantic, fonts, space, layout, typeSize } from "../../theme/tokens";
 import { useTheme } from "../theme";
 
 export interface GroupPill {
@@ -82,7 +82,7 @@ export function GroupPills({
                     numberOfLines={1}
                     style={{
                       fontFamily: selected || g.unread ? fonts.semibold : fonts.medium,
-                      fontSize: 14,
+                      fontSize: typeSize.secondary,
                       color: fg,
                     }}
                   >
