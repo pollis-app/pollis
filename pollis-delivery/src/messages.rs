@@ -1923,6 +1923,58 @@ pub async fn delete_attachment(
     outcome_response::<AttachmentDeleteBody>(outcome)
 }
 
+pub async fn release_attachment(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let (authed, parsed) = match gate_and_parse::<AttachmentReleaseBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    let conn = state.db.conn().await?;
+    let outcome = apply_release_attachment(&conn, authed.as_deref(), &parsed).await?;
+    // Finish the file now if that was its last reference; otherwise the GC tick does.
+    if state.broker.r2_ready().is_some() {
+        if let Err(e) = reclaim_released_attachment(&conn, &state.broker, &parsed.content_hash).await {
+            tracing::warn!("attachment reclaim failed: {e}");
+        }
+    }
+    outcome_response::<AttachmentReleaseBody>(outcome)
+}
+
+/// Release ONE reference — `content_hash` held by `message_id` — for the
+/// message's author, leaving the message and its other references alone
+/// (#1987: an edit replaced the link-preview thumbnail).
+///
+/// Authz is the deletion capability alone: the reference must carry the hash
+/// copied from the message's envelope at registration, and the token must hash
+/// to it. That holds after envelope GC, and nobody without the token can name a
+/// reference that releases. A reference with no hash (pre-#1086) pins its file.
+/// Releasing what is already gone is `Ok`, so a retry is harmless.
+pub async fn apply_release_attachment(
+    conn: &Connection,
+    _authed: Option<&str>,
+    body: &AttachmentReleaseBody,
+) -> anyhow::Result<WriteOutcome> {
+    if body.delete_token.is_empty() {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    let proof = capability_digest(&body.delete_token);
+    let tx = crate::db::write_tx(conn).await?;
+    let released = tx
+        .execute(
+            "DELETE FROM attachment_ref
+             WHERE content_hash = ?1 AND message_id = ?2 AND delete_token_hash = ?3",
+            libsql::params![body.content_hash.clone(), body.message_id.clone(), proof],
+        )
+        .await?;
+    if released > 0 {
+        mark_released_objects(&tx, std::slice::from_ref(&body.content_hash)).await?;
+    }
+    tx.commit().await?;
+    Ok(WriteOutcome::Ok)
+}
+
 /// Register an attachment object row (`content_hash → r2_key`) and, when a
 /// `message_id` is supplied, a `(content_hash, message_id)` REFERENCE
 /// declaration (#690). `content_hash` is the object's random file id since

@@ -173,6 +173,7 @@ endpoints! {
     Operator messages::EnvelopeGcBody           => "/v1/envelopes/gc",                   StatusOk;
     Client   messages::AttachmentRegisterBody   => "/v1/attachments/register",           StatusOk, idempotent;
     Client   messages::AttachmentDeleteBody     => "/v1/attachments/delete",             StatusOk;
+    Client   messages::AttachmentReleaseBody    => "/v1/attachments/release",            StatusOk, idempotent;
 
     Client   groups::CreateGroupBody            => "/v1/groups/create",                  StatusOk;
     Client   groups::UpdateGroupBody            => "/v1/groups/update",                  groups::UpdatedGroup;
