@@ -19,22 +19,12 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { PressButton } from "../ui/PressButton";
 import { SensitiveCover } from "../Media/SensitiveCover";
 import type { MessageAttachment } from "../../types";
-import { FOCUS_RING } from "../ui/focusRing";
-import { useSkin } from "../../hooks/queries/usePreferences";
-import { LightboxDownloadLabel } from "./LightboxDownloadLabel";
-
-const lightboxBtnStyle: React.CSSProperties = {
-  border: "2px solid transparent",
-  borderRadius: 4,
-  cursor: "pointer",
-  padding: "2px 8px",
-};
+import { LightboxActions } from "./LightboxActions";
 
 const mediaBox: React.CSSProperties = {
   maxWidth: "90vw",
   maxHeight: "85vh",
   cursor: "default",
-  borderRadius: "1rem",
 };
 
 interface MediaSpotlightProps {
@@ -168,8 +158,6 @@ interface SpotlightStageProps {
 /** One item: keyed by id, so its URL, failure and save state start fresh on every step. */
 const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: SpotlightStageProps) => {
   const { t } = useTranslation("chat");
-  // Bracketed labels are Terminal's (#1965); Modern's read as plain words.
-  const isTerminal = useSkin() === "terminal";
   // Sensitive media (#1568): a neighbour still covered shows its cover; a click reveals it.
   const sensitivity = useSensitiveReveal(attachment);
   const isVideo = attachment.content_type.startsWith("video/");
@@ -234,8 +222,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
           sensitivity.reveal();
         }}
         aria-label={t("attachment.sensitiveReveal", { filename: attachment.filename })}
-        className="relative block h-[60vh] w-[60vh] max-w-[90vw] overflow-hidden border-0 p-0"
-        style={{ borderRadius: "1rem", cursor: "pointer" }}
+        className="relative block h-[60vh] w-[60vh] max-w-[90vw] overflow-hidden border-0 p-0 rounded-panel cursor-pointer"
       >
         <SensitiveCover blurhash={attachment.blurhash} />
       </PressButton>
@@ -247,6 +234,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         autoFocus
         src={url}
         controls
+        className="rounded-panel"
         style={mediaBox}
         onClick={stopClick}
         onLoadedData={announceLoaded}
@@ -258,6 +246,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         data-testid="media-spotlight-media"
         src={url}
         alt={attachment.filename}
+        className="rounded-panel"
         style={{ ...mediaBox, objectFit: "contain" }}
         onClick={stopClick}
         onLoad={announceLoaded}
@@ -297,21 +286,12 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
           </span>
         )}
         {saveError && <span className="text-secondary font-mono text-muted">{saveError}</span>}
-        <button
-          onClick={handleDownload}
-          disabled={downloadStatus !== "idle" || !attachment.object_key}
-          className={`text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black flex items-center gap-1 ${FOCUS_RING}`}
-          style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
-        >
-          <LightboxDownloadLabel status={downloadStatus} />
-        </button>
-        <button
-          onClick={onClose}
-          className={`text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black ${FOCUS_RING}`}
-          style={lightboxBtnStyle}
-        >
-          {isTerminal ? t("attachment.lightboxCloseTerminal") : t("common:actions.close")}
-        </button>
+        <LightboxActions
+          status={downloadStatus}
+          downloadDisabled={!attachment.object_key}
+          onDownload={() => void handleDownload()}
+          onClose={onClose}
+        />
       </div>
     </>
   );

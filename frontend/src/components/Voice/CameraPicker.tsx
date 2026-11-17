@@ -7,8 +7,7 @@ import { appStore } from "../../stores/appStore";
 import { cameraSession, friendlyCameraError } from "../../camera/cameraSession";
 import type { CameraSource } from "../../camera/types";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
-import { FOCUS_RING } from "../ui/focusRing";
+import { SourceCard } from "./SourceCard";
 
 /** Inline webcam picker replacing the participant grid (no modal); only with more than one camera. */
 export const CameraPicker: React.FC = observer(() => {
@@ -83,25 +82,14 @@ export const CameraPicker: React.FC = observer(() => {
       <div className="flex-1 overflow-auto p-3">
         <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(11.25rem,1fr))]">
           {cameras.map((c) => (
-            <button
+            <SourceCard
               key={c.id}
-              type="button"
-              onClick={() => handlePick(c)}
+              onPick={() => handlePick(c)}
               disabled={busy}
-              data-testid={`camera-picker-device-${c.id}`}
-              className={`min-h-[6.25rem] text-start font-mono text-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer rounded-md ${FOCUS_RING}`}
-            >
-              <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
-                <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted aspect-[16/10]">
-                  <Video size={32} />
-                </div>
-                <div className="p-2">
-                  <div className="truncate text-fg" title={c.name}>
-                    {c.name}
-                  </div>
-                </div>
-              </Card>
-            </button>
+              testId={`camera-picker-device-${c.id}`}
+              title={c.name}
+              icon={<Video size={32} />}
+            />
           ))}
         </div>
       </div>

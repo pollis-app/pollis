@@ -10,7 +10,10 @@ import {
 import { observer } from "mobx-react-lite";
 import { useShortcutLabel } from "../../keyboard";
 import { Button } from "../ui/Button";
-import { usePressActivator } from "../../hooks/usePressActivation";
+import { PressButton } from "../ui/PressButton";
+import { IconButton } from "../ui/IconButton";
+import { Kbd } from "../ui/Kbd";
+import { FOCUS_RING } from "../ui/focusRing";
 import { appStore } from "../../stores/appStore";
 import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
@@ -81,8 +84,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
   const openSearch = () => {
     window.dispatchEvent(new CustomEvent("pollis:open-search"));
   };
-  // Everything here is free to undo, so pointer-down (#1529).
-  const press = usePressActivator();
+  // Everything here is free to undo, so every control acts on pointer-down (#1529).
   const goSettings = () => router.navigate({ to: "/settings" });
 
   const isOnSettingsHub = pathname === "/settings";
@@ -110,41 +112,37 @@ export const BreadcrumbNav: React.FC = observer(() => {
                 {isLast ? (
                   <bdi className="truncate font-semibold text-accent">{seg.label}</bdi>
                 ) : (
-                  <button
-                    {...press(() => router.navigate({ to: seg.to }), "press")}
-                    className="truncate text-dim transition-colors hover:text-accent"
+                  <PressButton
+                    onClick={() => router.navigate({ to: seg.to })}
+                    className={`truncate rounded-chip text-dim transition-colors hover:text-accent ${FOCUS_RING}`}
                   >
                     {seg.label}
-                  </button>
+                  </PressButton>
                 )}
               </React.Fragment>
             );
           })}
         </nav>
         <div className="flex items-center gap-3">
-          <button
+          <PressButton
             data-testid="breadcrumb-search-button"
-            {...press(openSearch, "press")}
+            onClick={openSearch}
             aria-label={t("breadcrumb.searchButton", { shortcut: searchLabel })}
             title={t("breadcrumb.searchButton", { shortcut: searchLabel })}
-            className="flex items-center gap-1.5 text-dim transition-colors hover:text-accent"
+            className={`flex items-center gap-1.5 rounded-control text-dim transition-colors hover:text-accent ${FOCUS_RING}`}
           >
             <SearchIcon size={16} />
-            <kbd
-              aria-hidden="true"
-              className="font-mono font-machine rounded-control border border-line bg-bg px-1.5 py-0.5 text-secondary leading-none text-muted"
-            >
-              {searchLabel}
-            </kbd>
-          </button>
-          <button
+            <Kbd>{searchLabel}</Kbd>
+          </PressButton>
+          <IconButton
             data-testid="breadcrumb-settings-button"
-            {...press(goSettings, "press")}
+            activateOn="press"
+            onClick={goSettings}
             aria-label={t("breadcrumb.settings")}
-            className={`flex items-center justify-center rounded-control p-1 hover:bg-hover hover:text-accent ${isOnSettingsHub ? "text-accent" : "text-dim"}`}
+            className={isOnSettingsHub ? "text-accent" : "text-dim"}
           >
             <SettingsIcon size={18} />
-          </button>
+          </IconButton>
         </div>
       </div>
     );
@@ -168,64 +166,35 @@ export const BreadcrumbNav: React.FC = observer(() => {
             {i === segments.length - 1 ? (
               <bdi className="text-fg">{seg.label}</bdi>
             ) : (
-              <button
-                {...press(() => router.navigate({ to: seg.to }), "press")}
-                className="font-mono transition-colors text-inherit hover:text-accent border-0"
-                style={{
-                  background: "none",
-                  padding: 0,
-                  cursor: "pointer",
-                  fontSize: "inherit",
-                }}
+              <PressButton
+                onClick={() => router.navigate({ to: seg.to })}
+                className={`font-mono rounded-chip transition-colors text-inherit hover:text-accent ${FOCUS_RING}`}
               >
                 {seg.label}
-              </button>
+              </PressButton>
             )}
           </React.Fragment>
         ))}
       </span>
-      <button
+      <PressButton
         data-testid="breadcrumb-search-button"
-        {...press(openSearch, "press")}
+        onClick={openSearch}
         aria-label={t("breadcrumb.searchButton", { shortcut: searchLabel })}
         title={t("breadcrumb.searchButton", { shortcut: searchLabel })}
-        className="flex items-center gap-1.5 transition-colors text-fg hover:text-accent border-0"
-        style={{
-          height: 20,
-          background: "none",
-          padding: "0 6px",
-          cursor: "pointer",
-        }}
+        className={`flex h-5 items-center gap-1.5 rounded-control px-1.5 transition-colors text-fg hover:text-accent ${FOCUS_RING}`}
       >
         <SearchIcon size={16} />
-        <kbd
-          aria-hidden="true"
-          className="font-mono font-machine text-secondary bg-bg border border-line"
-          style={{
-            color: "inherit",
-            padding: "1px 5px",
-            borderRadius: 3,
-            lineHeight: 1.2,
-          }}
-        >
-          {searchLabel}
-        </kbd>
-      </button>
-      <button
+        <Kbd>{searchLabel}</Kbd>
+      </PressButton>
+      <IconButton
         data-testid="breadcrumb-settings-button"
-        {...press(goSettings, "press")}
+        activateOn="press"
+        onClick={goSettings}
         aria-label={t("breadcrumb.settings")}
-        className={`flex items-center justify-center bg-transparent hover:bg-hover hover:text-accent border-0 ${isOnSettingsHub ? "text-accent" : "text-fg"}`}
-        style={{
-          width: 24,
-          height: 24,
-          padding: 0,
-          borderRadius: 4,
-          cursor: "pointer",
-        }}
+        className={isOnSettingsHub ? "text-accent" : "text-fg"}
       >
         <SettingsIcon size={16} />
-      </button>
+      </IconButton>
     </div>
   );
 });

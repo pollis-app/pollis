@@ -4,6 +4,7 @@ import { EmailOTPAuth } from "./EmailOTPAuth";
 import { BackdropScreen } from "./BackdropScreen";
 import { AuthCard } from "./AuthCard";
 import { Button } from "../ui/Button";
+import { Chip } from "../ui/Chip";
 import type { AccountInfo } from "../../types";
 import * as api from "../../services/api";
 
@@ -106,7 +107,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     .sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))
                     .slice(0, 3)
                     .map((account) => (
-                      <button
+                      <Chip
                         key={account.user_id}
                         data-testid={`known-account-chip-${account.user_id}`}
                         onClick={() => {
@@ -116,13 +117,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                           }
                         }}
                         disabled={!account.email}
-                        className="flex items-center gap-1 px-2 py-1 font-mono text-secondary transition-colors border-2 border-line text-dim enabled:cursor-pointer enabled:hover:border-accent enabled:hover:text-fg bg-surface"
-                        style={{
-                          borderRadius: "0.5rem",
-                        }}
                       >
                         <span>{account.username}</span>
-                      </button>
+                      </Chip>
                     ))}
                 </div>
               </div>
@@ -136,19 +133,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             />
 
             {authStep === "email" && (
-              <button
+              <Button
+                variant="ghost"
                 data-testid="wipe-local-data-button"
                 onClick={() => setView("wipe")}
-                className="text-secondary font-mono self-center transition-colors text-muted hover:text-danger border-0"
-                style={{
-                  background: "none",
-                  cursor: "pointer",
-                  padding: "0.25rem 0",
-                  marginTop: "1rem",
-                }}
+                className="self-center mt-4"
               >
                 {t("wipe.open")}
-              </button>
+              </Button>
             )}
           </div>
         )}

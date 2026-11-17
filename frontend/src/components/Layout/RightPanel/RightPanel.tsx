@@ -12,6 +12,7 @@ import { ThreadPanel } from "./ThreadPanel";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePanelWidth } from "../usePanelWidth";
 import { panelContextFromPath } from "./panelContext";
+import { PanelCloseRow } from "../../ui/PanelCloseRow";
 
 /** Right panel slot (#824): a flex sibling of `<Outlet />`, never an overlay. Open state is device-local (#904); see `useRightPanel`. */
 export const RightPanel: React.FC = observer(() => {
@@ -91,22 +92,14 @@ export const RightPanel: React.FC = observer(() => {
       </div>
 
       {/* Footer toggle, mirroring the left sidebar's. */}
-      <button
-        type="button"
+      <PanelCloseRow
         data-testid="right-panel-close"
+        activateOn="click"
         onClick={() => setPanel("none")}
-        aria-label={closeLabel}
-        title={closeLabel}
-        className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-line px-2.5 min-h-composer-flush text-start text-secondary text-muted transition-colors hover:text-fg"
-      >
-        <span className="flex-1">{label}</span>
-        <kbd
-          aria-hidden="true"
-          className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-meta leading-[1.2]"
-        >
-          {toggleRightPanelLabel}
-        </kbd>
-      </button>
+        label={label}
+        shortcut={toggleRightPanelLabel}
+        ariaLabel={closeLabel}
+      />
 
       <ResizeHandle edge="start" label={t("panel.resize")} {...handleProps} />
     </aside>

@@ -1,6 +1,8 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { SKIN_TONES } from "./emojiData";
+import { PressButton } from "../ui/PressButton";
+import { FOCUS_RING } from "../ui/focusRing";
 
 interface SkinTonePickerProps {
   toneIndex: number;
@@ -24,9 +26,9 @@ export const SkinTonePicker: React.FC<SkinTonePickerProps> = ({ toneIndex, onCha
       {SKIN_TONES.map((tone, index) => {
         const selected = index === toneIndex;
         return (
-          <button
+          <PressButton
             key={index}
-            type="button"
+            activateOn="click"
             role="radio"
             aria-checked={selected}
             aria-label={
@@ -36,14 +38,13 @@ export const SkinTonePicker: React.FC<SkinTonePickerProps> = ({ toneIndex, onCha
             }
             data-testid={`emoji-skin-tone-${index}`}
             onClick={() => onChange(index)}
-            className="flex items-center justify-center w-5 h-5 text-body leading-none hover:bg-hover rounded-chip"
-            style={{
-              background: selected ? "var(--c-active)" : undefined,
-            }}
+            className={`flex items-center justify-center w-5 h-5 text-body leading-none rounded-chip ${FOCUS_RING} ${
+              selected ? "bg-active" : "hover:bg-hover"
+            }`}
           >
             {/* One text node: the shaper won't join a modifier across nodes. */}
             {SWATCH_BASE + tone}
-          </button>
+          </PressButton>
         );
       })}
     </div>

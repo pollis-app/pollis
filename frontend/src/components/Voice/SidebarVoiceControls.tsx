@@ -7,6 +7,7 @@ import { voiceSession } from "../../voice";
 import { gateOf, micIndicatorOf, type MicIndicator } from "../../types/voice-state";
 import { SignalBars } from "./SignalBars";
 import { useShortcutLabel } from "../../keyboard";
+import { IconButton } from "../ui/IconButton";
 import {
   micControlTitleKey,
   micControlAriaLabelKey,
@@ -14,7 +15,7 @@ import {
   deafenControlAriaLabelKey,
 } from "./voiceControlLabels";
 
-/** Each mic state gets its own shape and colour; colours are restated under `hover:` since `.icon-btn-sm:hover` paints accent. */
+/** Each mic state gets its own shape and colour; colours are restated under `hover:` since `IconButton`'s hover paints accent. */
 const MIC_TONE: Record<MicIndicator, string> = {
   live: "bg-active text-accent hover:text-accent",
   "ptt-idle": "border border-dashed border-line-strong text-dim hover:text-dim",
@@ -38,53 +39,50 @@ export const SidebarVoiceControls: React.FC = observer(() => {
     <>
       <SignalBars quality={localQuality} testId="sidebar-voice-quality" />
       {micAvailable ? (
-        <button
-          type="button"
+        <IconButton
           data-testid="sidebar-voice-mute"
           data-mic-state={micIndicator}
           onClick={() => voiceSession.toggleMute()}
           aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
           aria-pressed={micIndicator === "muted" || micIndicator === "deafened"}
           title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
-          className={`icon-btn-sm ${MIC_TONE[micIndicator]}`}
+          className={MIC_TONE[micIndicator]}
         >
           {micIndicator === "live" || micIndicator === "ptt-idle" ? (
             <Mic size={15} className="size-[0.933rem] shrink-0" />
           ) : (
             <MicOff size={15} className="size-[0.933rem] shrink-0" />
           )}
-        </button>
+        </IconButton>
       ) : (
-        <button
-          type="button"
+        <IconButton
           data-testid="sidebar-voice-listen-only"
           data-mic-state="listen-only"
           aria-label={t("controls.listenOnly")}
           title={t("controls.listenOnly")}
-          className="icon-btn-sm text-dim hover:text-dim disabled:cursor-default"
+          className="text-dim hover:text-dim disabled:cursor-default"
           disabled
         >
           <MicOff size={15} className="size-[0.933rem] shrink-0" />
-        </button>
+        </IconButton>
       )}
 
       {/* Deafen, shown even listen-only. */}
-      <button
-        type="button"
+      <IconButton
         data-testid="sidebar-voice-deafen"
         data-deafened={gate.deafened}
         onClick={() => voiceSession.toggleDeafen()}
         aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
         aria-pressed={gate.deafened}
         title={t(deafenControlTitleKey(gate.deafened))}
-        className={`icon-btn-sm ${gate.deafened ? "text-danger hover:text-danger" : ""}`}
+        className={gate.deafened ? "text-danger hover:text-danger" : ""}
       >
         {gate.deafened ? (
           <VolumeX size={15} className="size-[0.933rem] shrink-0" />
         ) : (
           <Volume2 size={15} className="size-[0.933rem] shrink-0" />
         )}
-      </button>
+      </IconButton>
     </>
   );
 });

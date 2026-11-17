@@ -223,7 +223,8 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                 </PressButton>
               )}
               {onToggleSave && (
-                <button
+                <PressButton
+                  activateOn="click"
                   role="menuitem"
                   data-testid="save-button"
                   onClick={closeAnd(() => onToggleSave(messageId))}
@@ -231,10 +232,11 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                 >
                   <Bookmark size={16} className="shrink-0" fill={isSaved ? "currentColor" : "none"} />
                   {isSaved ? t("actions.removeBookmark") : t("actions.save")}
-                </button>
+                </PressButton>
               )}
               {onTogglePin && (
-                <button
+                <PressButton
+                  activateOn="click"
                   role="menuitem"
                   data-testid="pin-button"
                   onClick={closeAnd(() => onTogglePin(messageId))}
@@ -246,10 +248,11 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                     <Pin size={16} className="shrink-0" />
                   )}
                   {isPinned ? t("actions.unpin") : t("actions.pin")}
-                </button>
+                </PressButton>
               )}
               {onCopyLink && (
-                <button
+                <PressButton
+                  activateOn="click"
                   role="menuitem"
                   data-testid="copy-link-button"
                   data-copy-state={copyLinkState}
@@ -258,10 +261,11 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                 >
                   {React.createElement(copyLinkIcon, { size: 16, className: "shrink-0" })}
                   {copyLinkLabel}
-                </button>
+                </PressButton>
               )}
               {canReport && onReport && (
-                <button
+                <PressButton
+                  activateOn="click"
                   role="menuitem"
                   data-testid="report-button"
                   onClick={closeAnd(() => onReport(messageId))}
@@ -269,10 +273,11 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                 >
                   <Flag size={16} className="shrink-0" />
                   {t("actions.report")}
-                </button>
+                </PressButton>
               )}
               {canDelete && onDelete && (
-                <button
+                <PressButton
+                  activateOn="click"
                   role="menuitem"
                   data-testid={isOwn ? "delete-button" : "admin-delete-button"}
                   onClick={closeAnd(() => onDelete(messageId))}
@@ -280,7 +285,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                 >
                   <Trash2 size={16} className="shrink-0" />
                   {isOwn ? t("actions.delete") : t("actions.deleteAsAdmin")}
-                </button>
+                </PressButton>
               )}
             </div>
           )}

@@ -152,6 +152,12 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
 - Corners: Modern `rounded-chip` 6px, `rounded-control` 8px, panels 10px; Terminal 2 / 4 / 10;
   Mobile 12 for fields and full-width buttons, pills for inline buttons. An input and a button on
   the same form share a radius.
+- Every desktop corner is one of those tokens, picked by role (#1967): `rounded-chip` for
+  chip-sized things (a key chip, a preset, a badge, a small thumbnail), `rounded-control` for
+  controls (buttons, inputs, menus, icon buttons), `rounded-panel` for cards, panels and media
+  frames, `rounded-full` for a circle or a pill. No inline `borderRadius` and no stock
+  `rounded`, `rounded-sm/md/lg` or `rounded-[…]`; a corner the token set cannot draw (an avatar
+  circle, a radius the OS draws for the window) says why in a comment above it.
 - Desktop chrome bars use `h-bar`; mobile tap targets are at least 44pt.
 - Desktop `Button` has three sizes, all on the type scale so they follow the font-size
   preference: `xs` (a row's inline action) and `sm` (a compact button beside content) in
@@ -159,6 +165,13 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   apart. A call site never sets a button's text size, letter-spacing or casing. Labels are
   sentence case ("Approve", not "approve") in every look. `secondary` is a neutral outline; the
   accent belongs to `primary`.
+- **No hand-rolled `<button>` outside `components/ui/`** (#1967). A text action is a `Button`; an
+  icon-only one is an `IconButton` (`aria-label` required, `sm` for a header or row action, `md`
+  for window chrome); a link-styled action in a sentence or under a status is a `LinkButton`; a
+  preset, a remembered account or a key combo to rebind is a `Chip` (`selected` is the accent edge
+  on the `active` tint); a shortcut beside an action is a `Kbd`. A whole row, a grid cell or a
+  tile whose look is its own is a `PressButton` (`activateOn="click"` when it sends, saves,
+  toggles or destroys), so press activation stays one implementation.
 - **Focus** is one ring on every control, desktop: 2px, offset by `bg`, keyboard focus only
   (`ui/focusRing.ts`: `FOCUS_RING`; `FOCUS_RING_DANGER` on a destructive control, which never
   wears the accent; `FOCUS_WITHIN_RING` for a field drawn around a native input). No other
@@ -216,7 +229,8 @@ Use the existing primitives. Do not hand-roll a styled `<button>`, input, toggle
 primitive cannot do what a screen needs, extend it in its own file and use it everywhere.
 
 - **Desktop** (`frontend/src/components/ui/`): `Button` (`primary`, `secondary`, `ghost`,
-  `danger`), `TextInput`, `TextArea`, `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`,
+  `danger`), `IconButton`, `LinkButton`, `Chip`, `Kbd`, `PanelCloseRow`, `TextInput`, `TextArea`,
+  `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`,
   `Select` (a pick-one dropdown with its label), `SectionHeader` (a panel section's title),
   `Card`, `EmptyState`, `Avatar`, `PresenceAvatar`, `PresenceDot`, `PillButton`, `PressButton`,
   `NavigableList`, `NavigableGrid`, `TerminalMenu` (Terminal hub pages), `LoaderSpinner`,

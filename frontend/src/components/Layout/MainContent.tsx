@@ -12,6 +12,7 @@ import { MessageQueue } from "../Message/MessageQueue";
 import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInput";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
+import { IconButton } from "../ui/IconButton";
 import { EditMessageBar } from "../ui/EditMessageBar";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
 import { transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
@@ -842,14 +843,14 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
               {t("deleteChannel.heading")}
             </span>
-            <button
+            <IconButton
               data-testid="delete-channel-cancel"
               onClick={() => setPendingDeleteChannelId(null)}
               aria-label={t("deleteChannel.cancel")}
-              className="icon-btn-sm flex-shrink-0"
+              className="flex-shrink-0"
             >
               <X size={20} aria-hidden="true" />
-            </button>
+            </IconButton>
           </div>
           <div
             className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
@@ -886,14 +887,14 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
               <span className="flex-1 text-meta font-mono uppercase tracking-widest text-muted">
                 {heading}
               </span>
-              <button
+              <IconButton
                 data-testid="delete-message-cancel"
                 onClick={() => setPendingDeleteId(null)}
                 aria-label={t("deleteMessage.cancel")}
-                className="icon-btn-sm flex-shrink-0"
+                className="flex-shrink-0"
               >
                 <X size={20} aria-hidden="true" />
-              </button>
+              </IconButton>
             </div>
             <div
               className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"

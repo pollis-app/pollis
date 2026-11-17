@@ -4,6 +4,8 @@ import { ImagePlus } from "lucide-react";
 import { dialogOpen } from "../../bridge";
 import { dropTargetStore } from "../../stores/dropTargetStore";
 import { EMOJI_IMAGE_EXTENSIONS, isSupportedEmojiFile } from "./emojiShortcode";
+import { PressButton } from "../ui/PressButton";
+import { FOCUS_RING } from "../ui/focusRing";
 
 interface EmojiDropZoneProps {
   onPick: (path: string) => void;
@@ -88,13 +90,13 @@ export const EmojiDropZone: React.FC<EmojiDropZoneProps> = ({
       : "border-line bg-surface cursor-pointer hover:border-line-strong hover:bg-hover";
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
+    <PressButton
+      activateOn="click"
+      onClick={() => void handleClick()}
       disabled={disabled}
       data-testid="group-emoji-dropzone"
       data-dragover={isDragOver ? "true" : "false"}
-      className={`w-full flex flex-col items-center justify-center gap-2 px-4 py-6 border-2 border-dashed rounded-panel transition-colors ${stateClass}`}
+      className={`w-full flex flex-col items-center justify-center gap-2 px-4 py-6 border-2 border-dashed rounded-panel transition-colors ${FOCUS_RING} ${stateClass}`}
     >
       {children ?? (
         <>
@@ -109,6 +111,6 @@ export const EmojiDropZone: React.FC<EmojiDropZoneProps> = ({
           </span>
         </>
       )}
-    </button>
+    </PressButton>
   );
 };

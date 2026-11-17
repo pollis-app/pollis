@@ -104,13 +104,13 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
       <EmptyState
         testId="create-channel-no-group"
         actions={
-          <button
+          <Button
+            variant="ghost"
             data-testid="create-channel-go-home-button"
             onClick={() => onSuccess?.("", "text")}
-            className="text-secondary font-mono transition-colors text-muted hover:text-accent"
           >
             {t("createChannel.goHome")}
-          </button>
+          </Button>
         }
       >
         {t("createChannel.selectGroupFirst")}

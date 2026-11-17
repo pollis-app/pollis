@@ -293,6 +293,8 @@ input[type="range"]::-moz-range-thumb {
   }
 
   /* Icon buttons ───────────────────────────────────────────────── */
+  /* `ui/IconButton`'s look (#1967): use the component, not the class. A component class, so a
+     utility a call site passes (a state colour) wins over it. */
   .icon-btn {
     @apply flex items-center justify-center w-8 h-8 cursor-pointer;
     border-radius: var(--radius-control);

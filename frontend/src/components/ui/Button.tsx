@@ -25,6 +25,8 @@ interface ButtonProps {
   onPointerEnter?: (e: React.PointerEvent<HTMLButtonElement>) => void;
   onFocus?: (e: React.FocusEvent<HTMLButtonElement>) => void;
   autoFocus?: boolean;
+  /** Tooltip, e.g. what Leave does beyond its one word. */
+  title?: string;
   "aria-label"?: string;
   /** Toggle-button selected state; otherwise only colour distinguishes it. */
   "aria-pressed"?: boolean;
@@ -49,6 +51,7 @@ export const Button: React.FC<ButtonProps> = ({
   onPointerEnter,
   onFocus,
   autoFocus,
+  title,
   "aria-label": ariaLabel,
   "aria-pressed": ariaPressed,
   "data-testid": testId,
@@ -90,6 +93,7 @@ export const Button: React.FC<ButtonProps> = ({
       onPointerEnter={onPointerEnter}
       onFocus={onFocus}
       autoFocus={autoFocus}
+      title={title}
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
       data-testid={testId}

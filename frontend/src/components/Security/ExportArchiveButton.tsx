@@ -6,6 +6,7 @@ import { dialogSave } from "../../bridge";
 import * as api from "../../services/api";
 import { errorMessage } from "../../utils/errorMessage";
 import { formatFileSize } from "../../utils/format";
+import { IconButton } from "../ui/IconButton";
 
 interface Props {
   conversationId?: string;
@@ -143,16 +144,16 @@ export const ExportArchiveButton: React.FC<Props> = ({
     return (
       <div className="flex items-center gap-2 min-w-0">
         {status}
-        <button
+        <IconButton
           data-testid={testId}
           onClick={run}
           disabled={busy}
           aria-label={t("security.exportConversationLabel")}
           title={t("security.exportConversationLabel")}
-          className="icon-btn-sm flex-shrink-0 padding-0"
+          className="flex-shrink-0"
         >
           <Download size={14} aria-hidden="true" />
-        </button>
+        </IconButton>
       </div>
     );
   }

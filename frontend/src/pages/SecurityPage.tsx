@@ -5,6 +5,7 @@ import type { TFunction } from "i18next";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
+import { LinkButton } from "../components/ui/LinkButton";
 import { TextInput } from "../components/ui/TextInput";
 import { Switch } from "../components/ui/Switch";
 import { NavigableList } from "../components/ui/NavigableList";
@@ -304,16 +305,16 @@ export const SecurityPage: React.FC = observer(() => {
                 (epic #589, topic 12). The four verdicts below are easy to
                 misread — "unavailable" is not an accusation — so the legend has
                 to be reachable from the surface itself. */}
-            <button
-              type="button"
+            <LinkButton
               data-testid="build-verify-learn-link"
-              className="text-meta font-mono underline self-start text-muted"
+              tone="muted"
+              size="meta"
               onClick={() => {
                 void shellOpen(LEARN_DASHBOARDS_URL);
               }}
             >
               {t("security.verdictsLink")}
-            </button>
+            </LinkButton>
 
             {/* Version + commit of the running build. Commit is only shown once
                 the check has run (it's baked into the report), and only if this
@@ -466,12 +467,8 @@ export const SecurityPage: React.FC = observer(() => {
 
             {confirmingDevice ? (
               <div
-                className="flex flex-col gap-3 bg-surface border-2 border-line"
+                className="flex flex-col gap-3 p-3 rounded-panel bg-surface border-2 border-line"
                 data-testid="revoke-confirm"
-                style={{
-                  borderRadius: "0.5rem",
-                  padding: "0.75rem",
-                }}
               >
                 <p className="text-secondary text-fg">
                   <Trans
@@ -647,7 +644,7 @@ export const SecurityPage: React.FC = observer(() => {
                       {row.label}
                     </span>
                     <span
-                      className="text-secondary font-mono px-2 py-0.5 rounded"
+                      className="text-secondary font-mono px-2 py-0.5 rounded-chip"
                       style={{ color: pill.color, border: `1px solid ${pill.color}` }}
                     >
                       {pill.label}

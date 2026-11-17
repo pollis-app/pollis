@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { useScreenShareStats } from "../../screenshare/useScreenShareStats";
 import { StageTile, type StageTileModel } from "./stage/StageTile";
+import { IconButton } from "../ui/IconButton";
 
 interface ScreenShareViewerProps {
   /** The stream tile to fill the body with; the stage renders nothing else for its track. */
@@ -32,15 +33,15 @@ export const ScreenShareViewer: React.FC<ScreenShareViewerProps> = ({ tile, onCl
           {resLabel ? ` — ${resLabel}` : ""}
           {fpsLabel ? ` · ${fpsLabel}` : ""}
         </span>
-        <button
+        <IconButton
           data-testid="screenshare-viewer-close"
           onClick={onClose}
           aria-label={t("viewer.closeLabel")}
           title={t("viewer.closeTitle")}
-          className="vs-focus-close"
+          className="text-dim"
         >
           <X size={14} />
-        </button>
+        </IconButton>
       </div>
       {/* Double-click anywhere on the stream leaves focus mode (single clicks stay free for the tile). */}
       <div className="vs-focus-main" onDoubleClick={onClose}>

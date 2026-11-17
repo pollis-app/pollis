@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { Avatar } from "../ui/Avatar";
+import { PressButton } from "../ui/PressButton";
 import { ReactionEmoji, spokenEmoji } from "./ReactionEmoji";
 import {
   selectTab,
@@ -82,8 +83,9 @@ export const ReactionBreakdownPanel: React.FC<ReactionBreakdownPanelProps> = ({
         {tabs.map((x) => {
           const on = x.key === tab?.key;
           return (
-            <button
+            <PressButton
               key={x.key}
+              activateOn="click"
               ref={(el) => {
                 if (el) {
                   tabRefs.current.set(x.key, el);
@@ -108,7 +110,7 @@ export const ReactionBreakdownPanel: React.FC<ReactionBreakdownPanelProps> = ({
             >
               {x.emoji === null ? <span>{t("reactions.all")}</span> : <ReactionEmoji emoji={x.emoji} />}
               <span>{x.count}</span>
-            </button>
+            </PressButton>
           );
         })}
       </div>
@@ -179,9 +181,9 @@ const ReactorRow: React.FC<{
   return (
     <li data-testid="reaction-breakdown-row" data-user-id={person.userId}>
       {onOpen ? (
-        <button type="button" onClick={onOpen} aria-label={label} className={`${rowClass} hover:bg-hover`}>
+        <PressButton activateOn="click" onClick={onOpen} aria-label={label} className={`${rowClass} hover:bg-hover`}>
           {body}
-        </button>
+        </PressButton>
       ) : (
         <div aria-label={label} className={rowClass}>
           {body}

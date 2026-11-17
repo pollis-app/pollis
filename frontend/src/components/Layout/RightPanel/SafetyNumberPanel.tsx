@@ -8,6 +8,7 @@ import {
 } from "../../../hooks/queries/useUserProfile";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { Button } from "../../ui/Button";
+import { IconButton } from "../../ui/IconButton";
 import { ThemedQr } from "../../ui/ThemedQr";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 
@@ -112,16 +113,15 @@ export const SafetyNumberPanel: React.FC<SafetyNumberPanelProps> = observer(
               : "flex items-center gap-2 px-2 pt-3 pb-1 text-secondary font-medium text-muted"
           }
         >
-          <button
-            type="button"
-            className="icon-btn-sm shrink-0"
+          <IconButton
+            className="shrink-0"
             aria-label={t("common:actions.goBack")}
             title={t("common:actions.goBack")}
             data-testid="safety-panel-back"
             onClick={onBack}
           >
             <ArrowLeft size={14} className="rtl-mirror" aria-hidden="true" />
-          </button>
+          </IconButton>
           <ShieldCheck size={12} aria-hidden="true" />
           <bdi className="min-w-0 flex-1 truncate" data-testid="safety-panel-title">
             {title}

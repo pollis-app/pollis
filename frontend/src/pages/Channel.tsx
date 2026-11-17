@@ -9,7 +9,7 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useMarkConversationRead } from "../hooks/queries/useUnread";
 import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
-import { PressButton } from "../components/ui/PressButton";
+import { IconButton } from "../components/ui/IconButton";
 import { ConversationHeader } from "../components/Layout/ConversationHeader";
 
 export const ChannelPage: React.FC = observer(() => {
@@ -62,7 +62,7 @@ export const ChannelPage: React.FC = observer(() => {
         {/* Per-channel mute (#1431): silences this channel's pushes and
             notifications on every device of the account, except a direct
             @mention. Optimistic, and disabled while the write is in flight. */}
-        <button
+        <IconButton
           data-testid="channel-mute-toggle"
           data-muted={isMuted ? "true" : "false"}
           onClick={() => setChannelMuted.mutate({ channelId, muted: !isMuted })}
@@ -70,37 +70,40 @@ export const ChannelPage: React.FC = observer(() => {
           aria-pressed={isMuted}
           aria-label={muteLabel}
           title={`${muteLabel}. ${t("channel.muteDescription")}`}
-          className="icon-btn-sm flex-shrink-0"
+          className="flex-shrink-0"
         >
           {isMuted ? <BellOff size={14} aria-hidden="true" /> : <Bell size={14} aria-hidden="true" />}
-        </button>
-        <PressButton
+        </IconButton>
+        <IconButton
           data-testid="channel-pins-trigger"
+          activateOn="press"
           onClick={togglePins}
           aria-label={t("channel.pinsLabel")}
           title={t("channel.pinsLabel")}
-          className="icon-btn-sm flex-shrink-0"
+          className="flex-shrink-0"
         >
           <Pin size={14} aria-hidden="true" />
-        </PressButton>
+        </IconButton>
         {isAdmin && channel && pendingDeleteChannelId !== channelId && (
           <>
-            <PressButton
+            <IconButton
               data-testid="rename-channel-trigger"
+              activateOn="press"
               onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
               aria-label={t("channel.renameLabel")}
-              className="icon-btn-sm flex-shrink-0"
+              className="flex-shrink-0"
             >
               <Pencil size={14} aria-hidden="true" />
-            </PressButton>
-            <button
+            </IconButton>
+            <IconButton
+              destructive
               data-testid="delete-channel-trigger"
               onClick={() => setPendingDeleteChannelId(channelId)}
               aria-label={t("channel.deleteLabel")}
-              className="icon-btn-sm flex-shrink-0"
+              className="flex-shrink-0"
             >
               <Trash2 size={14} aria-hidden="true" />
-            </button>
+            </IconButton>
           </>
         )}
       </ConversationHeader>

@@ -38,7 +38,9 @@ import { SidebarProfilePanel } from "./SidebarProfilePanel";
 import { VoiceChannelMembers } from "../Voice/VoiceChannelMembers";
 import { ResizeHandle } from "./ResizeHandle";
 import { usePanelWidth } from "./usePanelWidth";
-import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivation";
+import type { ActivateOn } from "../../hooks/usePressActivation";
+import { PressButton } from "../ui/PressButton";
+import { PanelCloseRow } from "../ui/PanelCloseRow";
 
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
 
@@ -70,7 +72,6 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
     onToggle,
   );
 
-  const closePress = usePressActivation(onToggle, "press");
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: mutedChannels } = useMutedChannels();
@@ -371,22 +372,13 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
       {skin === "modern" ? (
         <SidebarProfilePanel />
       ) : (
-        <button
-          type="button"
+        <PanelCloseRow
           data-testid="sidebar-close"
-          {...closePress}
-          aria-label={t("sidebar.close", { shortcut: toggleSidebarLabel })}
-          title={t("sidebar.close", { shortcut: toggleSidebarLabel })}
-          className="flex shrink-0 items-center gap-2 px-2.5 min-h-composer-flush border-t border-line text-secondary text-start cursor-pointer transition-colors text-muted hover:text-fg"
-        >
-          <span className="flex-1">{t("common:actions.close")}</span>
-          <kbd
-            aria-hidden="true"
-            className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-meta leading-[1.2]"
-          >
-            {toggleSidebarLabel}
-          </kbd>
-        </button>
+          onClick={onToggle}
+          label={t("common:actions.close")}
+          shortcut={toggleSidebarLabel}
+          ariaLabel={t("sidebar.close", { shortcut: toggleSidebarLabel })}
+        />
       )}
 
       <ResizeHandle edge="end" label={t("sidebar.resize")} {...handleProps} />
@@ -408,7 +400,6 @@ interface SectionHeaderProps {
 }
 
 const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isActive, onClick, badge, bordered, borderedBottom, activateOn }) => {
-  const press = usePressActivation(onClick, activateOn);
   const cls = [
     "sticky top-0 z-[1] flex w-full h-bar items-center gap-1.5 px-2.5",
     "uppercase tracking-[0.08em] text-start cursor-pointer",
@@ -420,16 +411,16 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isAc
     .filter(Boolean)
     .join(" ");
   return (
-    <button
-      type="button"
-      {...press}
+    <PressButton
+      activateOn={activateOn ?? "click"}
+      onClick={onClick}
       className={cls}
       data-testid={`sidebar-row-${testId}`}
     >
       {icon}
       <span className="flex-1 leading-[100%] text-[0.8rem]">{label}</span>
       {badge != null && <UnreadBadge count={badge} muted />}
-    </button>
+    </PressButton>
   );
 };
 
@@ -459,16 +450,6 @@ interface RowProps {
 }
 
 const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed, activateOn, onIntent }) => {
-  const press = usePressActivation(onClick, activateOn);
-  const chevronPress = usePressActivation(
-    chevron
-      ? (e: React.MouseEvent<HTMLButtonElement>) => {
-          e.stopPropagation();
-          chevron.onToggle();
-        }
-      : undefined,
-    activateOn,
-  );
   return (
     <div
       data-active={isActive ? "true" : "false"}
@@ -482,10 +463,13 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
       }`}
     >
       {chevron && (
-        <button
-          type="button"
+        <PressButton
           tabIndex={-1}
-          {...chevronPress}
+          activateOn={activateOn ?? "click"}
+          onClick={(e) => {
+            e.stopPropagation();
+            chevron.onToggle();
+          }}
           aria-label={chevron.ariaLabel}
           className={`inline-flex items-center pe-0 cursor-pointer text-inherit ${indentPadClass(indent)}`}
         >
@@ -494,11 +478,11 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
           ) : (
             <ChevronDown {...iconProps} />
           )}
-        </button>
+        </PressButton>
       )}
-      <button
-        type="button"
-        {...press}
+      <PressButton
+        activateOn={activateOn ?? "click"}
+        onClick={onClick}
         data-testid={testId ? `sidebar-row-${testId}` : undefined}
         className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pe-2.5 text-row text-start cursor-pointer text-inherit ${
           chevron ? "ps-[0.4rem]" : indentPadClass(indent)
@@ -509,14 +493,14 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
         <bdi className="flex-1 truncate">{label}</bdi>
         {trailing}
         {badge != null && <UnreadBadge count={badge} muted={dimmed} />}
-      </button>
+      </PressButton>
     </div>
   );
 };
 
 const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
   <span
-    className={`shrink-0 rounded px-1.5 py-0.5 text-meta leading-none text-bg ${
+    className={`shrink-0 rounded-chip px-1.5 py-0.5 text-meta leading-none text-bg ${
       muted ? "bg-muted" : "bg-accent"
     }`}
   >

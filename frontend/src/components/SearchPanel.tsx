@@ -14,6 +14,7 @@ import { useMessagePermalink } from "../hooks/useMessagePermalink";
 import { useGlobalShortcut, useShortcutLabel } from "../keyboard";
 import { usePressActivator } from "../hooks/usePressActivation";
 import { EmptyState } from "./ui/EmptyState";
+import { Kbd } from "./ui/Kbd";
 import { useSkin } from "../hooks/queries/usePreferences";
 
 type SearchResultItem =
@@ -454,6 +455,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         flexDirection: "column",
         alignItems: "center",
         paddingTop: "10vh",
+        // The window's own corner (`#root` in index.css), so the backdrop never paints past it.
         borderRadius: "10px",
         overflow: "hidden",
       }}
@@ -465,14 +467,13 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     >
       <div
         data-testid="search-panel"
-        className="bg-surface border border-line"
+        className="bg-surface border border-line rounded-panel"
         style={{
           width: "100%",
           maxWidth: 560,
           maxHeight: "70vh",
           display: "flex",
           flexDirection: "column",
-          borderRadius: "0.75rem",
           overflow: "hidden",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
         }}
@@ -508,15 +509,9 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
               outline: "none",
             }}
           />
-          <kbd
-            className="font-mono font-machine text-secondary text-muted bg-bg border border-line"
-            style={{
-              padding: "2px 6px",
-              borderRadius: "4px",
-            }}
-          >
-            {t("common:keys.escape")}
-          </kbd>
+          <span className="text-muted">
+            <Kbd>{t("common:keys.escape")}</Kbd>
+          </span>
         </div>
 
         <div
