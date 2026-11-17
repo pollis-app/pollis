@@ -10,7 +10,7 @@ import { LONG_PRESS_MS } from "../../lib/pressFeedback";
 import { fonts, r, semantic, space, type as ty } from "../../theme/tokens";
 
 // The thumbnail's fixed square, so a picture arriving late never moves the message under it.
-export const LINK_PREVIEW_THUMB = 64;
+const LINK_PREVIEW_THUMB = 64;
 
 /**
  * Plain text only: title and description are never parsed. `host` is the BODY link's host,
