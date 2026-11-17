@@ -1,10 +1,11 @@
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::sync_channel;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::mpsc::{channel, sync_channel, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rodio::{OutputStream, OutputStreamHandle};
+use rodio::mixer::Mixer;
+use rodio::{DeviceSinkBuilder, Player};
 
 static PING: &[u8] = include_bytes!("../../../assets/sfx/ping_fx.wav");
 static JOIN: &[u8] = include_bytes!("../../../assets/sfx/join_fx.wav");
@@ -17,37 +18,65 @@ static UNMUTE: &[u8] = include_bytes!("../../../assets/sfx/unmute_fx.wav");
 static DEAFEN: &[u8] = include_bytes!("../../../assets/sfx/deafen_fx.wav");
 static UNDEAFEN: &[u8] = include_bytes!("../../../assets/sfx/undeafen_fx.wav");
 
-// One process-wide output on a parked thread (`OutputStream` is `!Send`):
-// cold opens can take seconds after idle. `None` = no audio, silent no-op.
-static AUDIO_HANDLE: OnceLock<Option<OutputStreamHandle>> = OnceLock::new();
+/// The open output: the mixer sounds play into, and the handle whose drop
+/// releases the device on the thread that owns it.
+struct Output {
+    mixer: Mixer,
+    _release: Sender<()>,
+}
 
-fn ensure_audio() -> Option<&'static OutputStreamHandle> {
-    AUDIO_HANDLE
-        .get_or_init(|| {
-            let (tx, rx) = sync_channel::<Option<OutputStreamHandle>>(1);
-            let spawn_result = std::thread::Builder::new()
-                .name("pollis-audio".into())
-                .spawn(move || match OutputStream::try_default() {
-                    Ok((stream, handle)) => {
-                        let _ = tx.send(Some(handle));
-                        // `stream` is !Send and must outlive every Sink; park forever.
-                        let _keep_alive = stream;
-                        loop {
-                            std::thread::park();
-                        }
-                    }
-                    Err(e) => {
-                        crate::diag!("[sfx] OutputStream::try_default failed: {e}");
-                        let _ = tx.send(None);
-                    }
-                });
-            if let Err(e) = spawn_result {
-                crate::diag!("[sfx] failed to spawn audio thread: {e}");
-                return None;
+// One process-wide output on its own parked thread (the cpal stream inside is
+// `!Send` on WASAPI): cold opens can take seconds after idle. Opened on first
+// use; `reset_output` closes it when the default output changes (#1989), and
+// the next sound reopens it on the new default.
+static OUTPUT: Mutex<Option<Output>> = Mutex::new(None);
+
+fn ensure_audio() -> Option<Mixer> {
+    let mut slot = OUTPUT.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(out) = slot.as_ref() {
+        return Some(out.mixer.clone());
+    }
+    let (tx, rx) = sync_channel::<Option<Mixer>>(1);
+    let (release, released) = channel::<()>();
+    let spawn_result = std::thread::Builder::new()
+        .name("pollis-audio".into())
+        .spawn(move || {
+            // The default output, as the voice speaker resolves it (honours PULSE_SINK).
+            let opened = crate::commands::voice::open_device(None, false, |dev| {
+                DeviceSinkBuilder::from_device(dev.clone())
+                    .and_then(|b| b.open_stream())
+                    .map_err(|e| anyhow::anyhow!("{e}").into())
+            });
+            match opened {
+                Ok(opened) => {
+                    let mut sink = opened.value;
+                    sink.log_on_drop(false);
+                    let _ = tx.send(Some(sink.mixer().clone()));
+                    // Holds the device until `reset_output` drops the sender.
+                    let _ = released.recv();
+                    drop(sink);
+                }
+                Err(e) => {
+                    crate::diag!("[sfx] opening the default output failed: {e}");
+                    let _ = tx.send(None);
+                }
             }
-            rx.recv().ok().flatten()
-        })
-        .as_ref()
+        });
+    if let Err(e) = spawn_result {
+        crate::diag!("[sfx] failed to spawn audio thread: {e}");
+        return None;
+    }
+    let mixer = rx.recv().ok().flatten()?;
+    *slot = Some(Output { mixer: mixer.clone(), _release: release });
+    Some(mixer)
+}
+
+/// Close the output so the next sound opens the current default.
+pub(crate) fn reset_output() {
+    let closed = OUTPUT.lock().unwrap_or_else(|p| p.into_inner()).take();
+    if closed.is_some() {
+        crate::diag!("[sfx] default output changed; reopening on the next sound");
+    }
 }
 
 /// Prewarm audio so the first ringtone skips the cold open. Idempotent.
@@ -70,15 +99,8 @@ pub fn play_sfx(sound: &str) {
         _ => return,
     };
 
-    let Some(handle) = ensure_audio() else {
+    let Some(mixer) = ensure_audio() else {
         return;
-    };
-    let sink = match rodio::Sink::try_new(handle) {
-        Ok(s) => s,
-        Err(e) => {
-            crate::diag!("[sfx] play_sfx Sink::try_new failed for {sound}: {e}");
-            return;
-        }
     };
     let source = match rodio::Decoder::new(Cursor::new(bytes)) {
         Ok(s) => s,
@@ -87,8 +109,9 @@ pub fn play_sfx(sound: &str) {
             return;
         }
     };
-    sink.append(source);
-    sink.detach();
+    let player = Player::connect_new(&mixer);
+    player.append(source);
+    player.detach();
 }
 
 /// A clip played on a loop until stopped. Each wav carries its own silence, so
@@ -122,21 +145,14 @@ impl LoopingTone {
 
     /// Start looping. Idempotent: a second start while playing is a no-op.
     fn start(&'static self) {
-        let Some(handle) = ensure_audio() else {
+        let Some(mixer) = ensure_audio() else {
             return;
         };
         let Some(stop) = self.arm() else {
             return;
         };
-        let handle = handle.clone();
         std::thread::spawn(move || {
-            let sink = match rodio::Sink::try_new(&handle) {
-                Ok(s) => s,
-                Err(e) => {
-                    crate::diag!("[sfx] {} Sink::try_new failed: {e}", self.name);
-                    return;
-                }
-            };
+            let sink = Player::connect_new(&mixer);
             while !stop.load(Ordering::Acquire) {
                 let source = match rodio::Decoder::new(Cursor::new(self.clip)) {
                     Ok(s) => s,
@@ -230,6 +246,6 @@ mod tests {
     #[test]
     fn the_ringback_clip_decodes() {
         let source = rodio::Decoder::new(Cursor::new(RINGBACK_CLIP)).expect("ringback.wav decodes");
-        assert_eq!(rodio::Source::channels(&source), 1);
+        assert_eq!(rodio::Source::channels(&source).get(), 1);
     }
 }

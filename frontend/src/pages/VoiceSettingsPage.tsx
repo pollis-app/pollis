@@ -26,7 +26,7 @@ import {
   type PreferencesData,
 } from "../hooks/queries/usePreferences";
 import { useVoiceTest } from "../hooks/useVoiceTest";
-import { voiceSession, readDevicePrefs } from "../voice";
+import { voiceSession, readDevicePrefs, persistDevicePref, resolveSavedDevice, shownDevice } from "../voice";
 import type { AudioDevice } from "../types";
 import { observer } from "mobx-react-lite";
 import { cameraSession, LOCAL_CAMERA_PREVIEW_KEY, friendlyCameraError } from "../camera/cameraSession";
@@ -43,19 +43,22 @@ interface DeviceSelectProps {
   value: string;
   onChange: (id: string) => void;
   fallbackLabel: string;
+  // Audio: the OS default (value "default", labelled `fallbackLabel`) is always the first entry, not only when nothing is listed.
+  offerDefault?: boolean;
+  testId?: string;
 }
 
-// A device picker; with no devices listed, the system default is the one option.
-const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onChange, fallbackLabel }) => (
+// A device picker. Audio offers the OS default first; with nothing listed, the default is the one option.
+const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onChange, fallbackLabel, offerDefault, testId }) => (
   <Select
     label={label}
     value={value}
     onChange={onChange}
-    options={
-      devices.length === 0
-        ? [{ value: "default", label: fallbackLabel }]
-        : devices.map((d) => ({ value: d.id, label: d.name }))
-    }
+    data-testid={testId}
+    options={[
+      ...(offerDefault || devices.length === 0 ? [{ value: "default", label: fallbackLabel }] : []),
+      ...devices.map((d) => ({ value: d.id, label: d.name })),
+    ]}
   />
 );
 
@@ -182,23 +185,42 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     () => readDevicePrefs().output ?? "default",
   );
 
+  // Listed on open, on window focus, and whenever Rust reports a device change (plug/unplug, default moved; #1989).
   useEffect(() => {
-    invoke<AudioDevice[]>("list_audio_devices").then((devices) => {
-      const ins = devices.filter((d) => d.kind === "input");
-      const outs = devices.filter((d) => d.kind === "output");
-      setInputs(ins);
-      setOutputs(outs);
-      // Clear a saved device id that is no longer enumerated.
-      if (selectedInput !== "default" && !ins.some((d) => d.id === selectedInput)) {
-        setSelectedInputState("default");
-        void voiceSession.setInputDevice("default");
-      }
-      if (selectedOutput !== "default" && !outs.some((d) => d.id === selectedOutput)) {
-        setSelectedOutputState("default");
-        void voiceSession.setOutputDevice("default");
-      }
-    }).catch((e) => console.warn("list_audio_devices failed", e));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    const refresh = () => {
+      invoke<AudioDevice[]>("list_audio_devices").then((devices) => {
+        if (cancelled) {
+          return;
+        }
+        const ins = devices.filter((d) => d.kind === "input");
+        const outs = devices.filter((d) => d.kind === "output");
+        setInputs(ins);
+        setOutputs(outs);
+        // A value saved by an older release becomes what it names now; Rust already opens it that way, so storage only.
+        const saved = readDevicePrefs();
+        const savedInput = saved.input ?? "default";
+        const savedOutput = saved.output ?? "default";
+        const input = resolveSavedDevice(savedInput, ins);
+        const output = resolveSavedDevice(savedOutput, outs);
+        if (input !== savedInput) {
+          persistDevicePref("input", input);
+        }
+        if (output !== savedOutput) {
+          persistDevicePref("output", output);
+        }
+        setSelectedInputState(input);
+        setSelectedOutputState(output);
+      }).catch((e) => console.warn("list_audio_devices failed", e));
+    };
+    refresh();
+    const offChanged = voiceSession.on("audioDevicesChanged", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      offChanged();
+      window.removeEventListener("focus", refresh);
+    };
   }, []);
 
   const setInput = (id: string) => {
@@ -320,16 +342,20 @@ export const VoiceSettingsPage: React.FC = observer(() => {
           <DeviceSelect
             label={t("settings.microphone")}
             devices={inputs}
-            value={selectedInput}
+            value={shownDevice(selectedInput, inputs)}
             onChange={setInput}
             fallbackLabel={t("settings.defaultMicrophone")}
+            offerDefault
+            testId="voice-input-select"
           />
           <DeviceSelect
             label={t("settings.speaker")}
             devices={outputs}
-            value={selectedOutput}
+            value={shownDevice(selectedOutput, outputs)}
             onChange={setOutput}
             fallbackLabel={t("settings.defaultSpeaker")}
+            offerDefault
+            testId="voice-output-select"
           />
         </section>
 

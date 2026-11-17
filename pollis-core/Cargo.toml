@@ -57,6 +57,7 @@ media = [
     "dep:rtrb",
     "dep:rodio",
     "dep:webrtc-audio-processing",
+    "dep:pulseaudio",
 ]
 
 [dependencies]
@@ -285,11 +286,16 @@ livekit = { version = "0.9", features = ["rustls-tls-webpki-roots"], optional = 
 # rejected token (401/403) from an unreachable SFU. Already in the lockfile via livekit.
 livekit-signaling = { version = "0.1", optional = true }
 libwebrtc = { version = "0.3", optional = true }
-cpal = { version = "0.15", optional = true }
+# `pulseaudio` (#1989): on Linux the device list and every stream go through
+# cpal's PulseAudio host, which speaks the native protocol in pure Rust (no
+# libpulse) and so reaches PipeWire via pipewire-pulse too; cpal falls back to
+# ALSA when no server socket exists. Inert on macOS/Windows. Patched to an
+# upstream fix, see patches/cpal/Cargo.toml.
+cpal = { version = "0.18", features = ["pulseaudio"], optional = true }
 # Lock-free SPSC rings between the audio threads and the voice DSP (already
 # in the tree via libwebrtc).
 rtrb = { version = "0.3", optional = true }
-rodio = { version = "0.19", default-features = false, features = ["wav"], optional = true }
+rodio = { version = "0.23", default-features = false, features = ["playback", "wav"], optional = true }
 
 # Vendor the WebRTC AudioProcessing module so AGC/NS/AEC are owned by us
 # end-to-end and tunable from Rust. The system pkg-config build branch wants
@@ -305,6 +311,12 @@ rodio = { version = "0.19", default-features = false, features = ["wav"], option
 # feature is inert on these excluded targets.
 [target.'cfg(not(any(target_os = "windows", target_os = "ios", target_os = "android")))'.dependencies]
 webrtc-audio-processing = { version = "2", features = ["bundled"], optional = true }
+
+# Linux only (#1989): the audio-server event subscription behind device hot-plug
+# (`voice/device_watch.rs`). The same pure-Rust protocol crate cpal's PulseAudio
+# host already uses, so it adds no system library and no new crate to the graph.
+[target.'cfg(target_os = "linux")'.dependencies]
+pulseaudio = { version = "0.3", optional = true }
 
 # See the note above the [dependencies] table — mobile vendors OpenSSL,
 # desktop links the system one.

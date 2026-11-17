@@ -1,6 +1,7 @@
 //! Voice commands; re-exports keep `pollis_core::commands::voice::*` stable.
 
 mod capture;
+mod device_watch;
 mod devices;
 // #1850: test-only E2EE observation for the desktop e2e; never in a release app.
 #[cfg(feature = "test-harness")]
@@ -31,7 +32,7 @@ pub use join::{JoinCancel, VoiceJoinError, VOICE_JOIN_DEADLINE, VOICE_RECONNECT_
 
 pub(crate) use streams::{start_mic_stream, start_speaker_stream};
 
-pub(crate) use devices::get_device;
+pub(crate) use devices::{open_device, DEFAULT_DEVICE};
 pub use devices::list_audio_devices;
 
 pub use lifecycle::{

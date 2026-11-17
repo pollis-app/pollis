@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 // Two-client voice channel join/leave (#570): both see 2 participants, then 1 after A leaves.
+// Audio devices (#1989): A first joins with a mic choice an older Linux release saved (an ALSA plugin name), which must
+// still open a mic; at the end A's picker lists the virtual devices by description, and a join on one picked
+// explicitly opens it.
 
 const path = require("path");
 const h = require("./lib/harness");
@@ -69,9 +72,12 @@ async function main() {
     console.log("[voice-channel] B: accepting invite…");
     await v.acceptInvite(B.browser, INVITE_TIMEOUT_MS, "B", TAG);
 
-    console.log("[voice-channel] A: opening + joining the voice channel");
+    console.log("[voice-channel] A: opening + joining the voice channel with a pre-#1989 saved mic (\"pulse\")");
+    await v.saveDevicePrefs(A.browser, { input: "pulse", output: "pulse" });
     await v.openVoiceChannel(A.browser, groupName, channelName, GROUP_VISIBLE_TIMEOUT_MS, TAG);
+    const firstJoinAt = Date.now();
     await v.joinVoice(A.browser, JOIN_TIMEOUT_MS, "A", TAG);
+    await v.expectJoinedWithMic(A.browser, firstJoinAt, JOIN_TIMEOUT_MS, "A", TAG);
     await shot(A.browser, "voice-channel-A-joined.png");
 
     console.log("[voice-channel] B: opening + joining the voice channel");
@@ -103,7 +109,35 @@ async function main() {
     await h.clickTestId(A.browser, "voice-tray-leave");
     await h.waitTestId(A.browser, "voice-join-cta", 30000);
     await v.waitForParticipantCount(B.browser, 1, CONVERGE_TIMEOUT_MS, "B", TAG);
-    console.log("[voice-channel] SUCCESS: A's immediate rejoin converged on both sides, then left again");
+    console.log("[voice-channel] A's immediate rejoin converged on both sides, then left again");
+
+    // The picker: the audio server's devices by description, no plugin names, no monitors.
+    const mic = process.env.POLLIS_E2E_PULSE_SOURCE_A || "Pollis_Virtual_Mic";
+    const { inputs, outputs } = await v.readAudioPickers(A.browser);
+    console.log(`[voice-channel] A: microphones ${JSON.stringify(inputs.map((o) => o[1]))}`);
+    console.log(`[voice-channel] A: speakers ${JSON.stringify(outputs.map((o) => o[1]))}`);
+    const labels = [...inputs, ...outputs].map((o) => o[1]);
+    if (!inputs.some((o) => o[1] === mic)) {
+      throw new Error(`microphone picker lacks the virtual mic "${mic}"`);
+    }
+    const plugin = labels.find((l) => ["PulseAudio", "PipeWire", "JACK", "System Default"].includes(l) || l.startsWith("Monitor of"));
+    if (plugin) {
+      throw new Error(`picker lists a plugin or monitor: "${plugin}"`);
+    }
+    const chosen = await v.chooseAudioDevice(A.browser, "voice-input-select", mic);
+    if (!String(chosen).startsWith("pulseaudio:")) {
+      throw new Error(`picking "${mic}" saved "${chosen}", not a device id`);
+    }
+
+    console.log(`[voice-channel] A: joining on the explicitly chosen mic (${chosen})`);
+    await v.openVoiceChannel(A.browser, groupName, channelName, GROUP_VISIBLE_TIMEOUT_MS, TAG);
+    const chosenJoinAt = Date.now();
+    await v.joinVoice(A.browser, JOIN_TIMEOUT_MS, "A", TAG);
+    await v.expectJoinedWithMic(A.browser, chosenJoinAt, JOIN_TIMEOUT_MS, "A", TAG);
+    await v.waitForParticipantCount(B.browser, 2, CONVERGE_TIMEOUT_MS, "B", TAG);
+    await h.clickTestId(A.browser, "voice-tray-leave");
+    await h.waitTestId(A.browser, "voice-join-cta", 30000);
+    console.log("[voice-channel] SUCCESS: legacy and explicit device choices both joined with a mic");
     code = 0;
   } catch (err) {
     console.error("[voice-channel] FAILED:", err.message);

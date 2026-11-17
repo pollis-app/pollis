@@ -262,8 +262,10 @@ async function main() {
     await h.clickTestId(A.browser, "voice-input-mode-push_to_talk");
 
     // 8. The tray shows PTT armed-and-idle.
-    // Back to the channel; the session is still joined, so the tray is live.
-    await h.clickTestId(A.browser, "voice-bar-channel-name");
+    // Back to the channel; the session is still joined, so the tray is live. The sidebar's voice
+    // strip, in either skin: the bottom VoiceBar is Terminal-only since Modern became the default
+    // (#1951), and this script runs in the default skin.
+    await h.clickTestId(A.browser, "sidebar-voice-return");
     await h.waitTestId(A.browser, "voice-tray-mute", 20000);
     await expectMic(A.browser, "ptt-idle");
     await expectDeafened(A.browser, false);

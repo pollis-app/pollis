@@ -4,12 +4,12 @@
 #
 # A real 1:1 call join publishes a microphone track: `join_voice_channel`
 # (pollis-core/src/commands/voice/lifecycle.rs) opens a cpal INPUT stream and,
-# for playback, a cpal OUTPUT stream — and it FAILS THE JOIN if either device
-# can't open (`mic_res...??` at the tokio::join!). On a headless CI runner there
-# is no sound card, so we stand up a software one: a PulseAudio daemon with a
-# null sink (a fake speaker) and a virtual source (a fake mic), and point ALSA's
-# default PCM at PulseAudio so cpal — which uses the ALSA host on Linux — opens
-# the virtual devices instead of failing on "no such device".
+# for playback, a cpal OUTPUT stream. On a headless CI runner there is no sound
+# card, so we stand up a software one: a PulseAudio daemon with a null sink (a
+# fake speaker) and a virtual source (a fake mic). cpal's PulseAudio host
+# (#1989) reaches it through PULSE_SERVER and opens the server defaults, which
+# are the virtual devices; ALSA's default PCM also points at it for cpal's ALSA
+# fallback host.
 #
 # It emits the env the app needs (PULSE_SERVER / PULSE_SINK / PULSE_SOURCE) to
 # $GITHUB_ENV in CI and as `export ...` lines on stdout locally
@@ -44,13 +44,14 @@ emit() {
 }
 
 # --- PipeWire host (a developer box) ------------------------------------------
-# cpal prefers ALSA's `pipewire` PCM over `pulse` (pollis-core voice/devices.rs
-# `preferred`), so on a PipeWire desktop PULSE_SINK/PULSE_SOURCE are ignored and
-# a test client would open the HOST default devices — the developer's real
-# headset. Instead: virtual nodes on the host PipeWire, plus a per-client
-# `$XDG_CONFIG_HOME/alsa/asoundrc` that pins the `pipewire` PCM to them. The
-# harness hands client A `POLLIS_E2E_XDG_A` and client B `POLLIS_E2E_XDG_B`
-# (e2e/lib/harness.js `startClient`). Host defaults are never touched.
+# A test client must never open the HOST default devices (the developer's real
+# headset). Virtual nodes go on the host PipeWire, and each client is pinned to
+# its own: cpal's PulseAudio host (through pipewire-pulse) treats PULSE_SINK /
+# PULSE_SOURCE as that client's defaults (pollis-core voice/devices.rs
+# `default_device`), and a per-client `$XDG_CONFIG_HOME/alsa/asoundrc` pins the
+# `pipewire` PCM for cpal's ALSA fallback host. The harness hands client A the
+# `POLLIS_E2E_*_A` values and client B the `_B` ones (e2e/lib/harness.js
+# `startClient`). Host defaults are never touched.
 if pactl info 2>/dev/null | grep -q "on PipeWire"; then
   log "PipeWire host: pinning per-client virtual devices (host defaults untouched)"
   mkdir -p "$PULSE_DIR"
@@ -77,6 +78,10 @@ EOF
   log "pw modules: $(tr '\n' ' ' < "$PULSE_DIR/pw-modules.txt")"
   emit POLLIS_E2E_XDG_A "$PULSE_DIR/xdg-a"
   emit POLLIS_E2E_XDG_B "$PULSE_DIR/xdg-b"
+  emit POLLIS_E2E_PULSE_SINK_A pollis_vspk_a
+  emit POLLIS_E2E_PULSE_SINK_B pollis_vspk_b
+  emit POLLIS_E2E_PULSE_SOURCE_A pollis_vmic_a_src
+  emit POLLIS_E2E_PULSE_SOURCE_B pollis_vmic_b_src
   log "virtual audio ready (PipeWire)"
   exit 0
 fi
@@ -133,8 +138,8 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
-# Make the virtual devices the defaults so cpal's default_input/output_device
-# (the app passes input_device: None) resolves to them.
+# Make the virtual devices the server defaults, which is what cpal's PulseAudio
+# host opens for a client on "Default" (the app passes input_device: None).
 pactl --server "$PULSE_SERVER_ADDR" set-default-sink "$SINK_NAME" >&2
 pactl --server "$PULSE_SERVER_ADDR" set-default-source "$SOURCE_NAME" >&2
 
@@ -155,10 +160,11 @@ if ! pactl --server "$PULSE_SERVER_ADDR" list short sources | grep -q "$SOURCE_N
 fi
 log "virtual sink '$SINK_NAME' + source '$SOURCE_NAME' up"
 
-# Route ALSA's default PCM/CTL at PulseAudio so cpal (Linux = ALSA host) opens
-# our virtual devices via the ALSA→Pulse plugin (libasound2-plugins). System-
-# wide so it's unambiguous regardless of which HOME the app runs under. Needs
-# sudo on the runner (passwordless); no-op-safe if already correct.
+# Route ALSA's default PCM/CTL at PulseAudio so cpal's ALSA fallback host (used
+# only when the PulseAudio host can't connect) still reaches the virtual devices
+# via the ALSA→Pulse plugin (libasound2-plugins). System-wide so it's
+# unambiguous regardless of which HOME the app runs under. Needs sudo on the
+# runner (passwordless); no-op-safe if already correct.
 ASOUND_CONF="/etc/asound.conf"
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
@@ -179,8 +185,9 @@ EOF
 
 # --- emit the env the app consumes ------------------------------------------
 # PULSE_SERVER: explicit socket (survives the app's separate dbus session).
-# PULSE_SINK / PULSE_SOURCE: per-client default overrides (belt-and-suspenders
-# alongside the pactl set-default above and the ALSA default route).
+# PULSE_SINK / PULSE_SOURCE: per-client default overrides, honoured by cpal's
+# PulseAudio host here as by libpulse (belt-and-suspenders alongside the pactl
+# set-default above).
 emit PULSE_SERVER "$PULSE_SERVER_ADDR"
 emit PULSE_RUNTIME_PATH "$PULSE_DIR"
 emit PULSE_SINK "$SINK_NAME"
