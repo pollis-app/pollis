@@ -48,16 +48,24 @@ async fn main() -> Result<()> {
 
     let started = Instant::now();
     let dm_id = loop {
-        if let Some(req) = dm::list_dm_requests(me.id.clone(), &state).await?.into_iter().next() {
-            dm::accept_dm_request(req.id.clone(), me.id.clone(), &state).await?;
-            break req.id;
+        // A dropped connection to the dev DS is retried on the next poll, not fatal.
+        match dm::list_dm_requests(me.id.clone(), &state).await {
+            Ok(reqs) => {
+                if let Some(req) = reqs.into_iter().next() {
+                    dm::accept_dm_request(req.id.clone(), me.id.clone(), &state).await?;
+                    break req.id;
+                }
+            }
+            Err(e) => eprintln!("list_dm_requests: {e}"),
         }
         if started.elapsed() > WAIT {
             bail!("no DM request arrived within {WAIT:?}");
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     };
-    pollis_tui::data::dm_messages(&state, &me.id, &dm_id, None).await?;
+    if let Err(e) = pollis_tui::data::dm_messages(&state, &me.id, &dm_id, None).await {
+        eprintln!("dm_messages: {e}");
+    }
 
     let draft = link_preview::fetch_link_preview(LINK.to_string(), &state)
         .await

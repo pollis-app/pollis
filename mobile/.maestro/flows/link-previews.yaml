@@ -11,6 +11,35 @@ tags:
 # from the device to github.com (the preview is a real fetch).
 
 - runFlow: ../subflows/sign-in.yaml
+
+# Self -> Preferences -> Link previews: on by default, and the switch turns it
+# off and on again (this device only).
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- assertVisible:
+    id: "screen-self-preferences"
+- scrollUntilVisible:
+    element:
+      id: "toggle-link-previews"
+    direction: DOWN
+- assertVisible:
+    id: "toggle-link-previews"
+    checked: true
+- takeScreenshot: link-previews-00-setting
+- tapOn:
+    id: "toggle-link-previews"
+- assertVisible:
+    id: "toggle-link-previews"
+    checked: false
+- tapOn:
+    id: "toggle-link-previews"
+- assertVisible:
+    id: "toggle-link-previews"
+    checked: true
+- tapOn:
+    id: "btn-back"
 - tapOn:
     id: "tab-groups"
 - assertVisible:
