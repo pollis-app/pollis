@@ -8,6 +8,7 @@ import { cameraSession, friendlyCameraError } from "../../camera/cameraSession";
 import type { CameraSource } from "../../camera/types";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
+import { FOCUS_RING } from "../ui/focusRing";
 
 /** Inline webcam picker replacing the participant grid (no modal); only with more than one camera. */
 export const CameraPicker: React.FC = observer(() => {
@@ -88,7 +89,7 @@ export const CameraPicker: React.FC = observer(() => {
               onClick={() => handlePick(c)}
               disabled={busy}
               data-testid={`camera-picker-device-${c.id}`}
-              className="min-h-[6.25rem] text-start font-mono text-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
+              className={`min-h-[6.25rem] text-start font-mono text-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer rounded-md ${FOCUS_RING}`}
             >
               <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
                 <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted aspect-[16/10]">

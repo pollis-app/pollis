@@ -3,7 +3,7 @@
     "title": "Enregistrés",
     "unresolved": "Vous n'avez pas ce message sur cet appareil.",
     "empty": "Aucun message enregistré. Utilisez l'action signet sur un message pour l'enregistrer.",
-    "unsave": "retirer"
+    "unsave": "Retirer"
   },
   "row": {
     "conversationFallback": "conversation",

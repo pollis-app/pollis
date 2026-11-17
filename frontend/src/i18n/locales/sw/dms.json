@@ -39,13 +39,13 @@
     "unknownSender": "Haijulikani",
     "others_one": "(+{{count}} mwingine)",
     "others_other": "(+{{count}} wengine)",
-    "accept": "kubali",
-    "block": "zuia"
+    "accept": "Kubali",
+    "block": "Zuia"
   },
   "blocked": {
     "pageTitle": "Watumiaji waliozuiwa",
     "empty": "Hakuna watumiaji waliozuiwa.",
-    "unblock": "ondoa kizuizi"
+    "unblock": "Ondoa kizuizi"
   },
   "profile": {
     "fallbackName": "Mtumiaji",

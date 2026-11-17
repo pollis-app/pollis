@@ -113,7 +113,7 @@
       "member": "membro"
     },
     "adminToggle": "administrador",
-    "kick": "expulsar",
+    "kick": "Expulsar",
     "verified": "Contacto verificado",
     "keyChanged": "A chave de identidade mudou — verifique novamente",
     "invited": {
@@ -138,8 +138,8 @@
     "pageTitle": "Convites",
     "empty": "Sem convites pendentes.",
     "invitedBy": "Convidado por {{name}}",
-    "accept": "aceitar",
-    "decline": "recusar",
+    "accept": "Aceitar",
+    "decline": "Recusar",
     "acceptFailed": "Não foi possível aceitar o convite. Tente novamente."
   },
   "inviteMember": {
@@ -158,8 +158,8 @@
     "pendingFor": "Pedidos pendentes para aderir a <accent>{{name}}</accent>",
     "empty": "Sem pedidos pendentes.",
     "allEmpty": "Sem pedidos de adesão pendentes.",
-    "approve": "aprovar",
-    "reject": "rejeitar"
+    "approve": "Aprovar",
+    "reject": "Rejeitar"
   },
   "joinByInvite": {
     "pageTitle": "Aderir a um grupo",

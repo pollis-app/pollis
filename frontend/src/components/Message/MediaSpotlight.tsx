@@ -19,6 +19,7 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { PressButton } from "../ui/PressButton";
 import { SensitiveCover } from "../Media/SensitiveCover";
 import type { MessageAttachment } from "../../types";
+import { FOCUS_RING } from "../ui/focusRing";
 
 const lightboxBtnStyle: React.CSSProperties = {
   border: "2px solid transparent",
@@ -295,7 +296,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         <button
           onClick={handleDownload}
           disabled={downloadStatus !== "idle" || !attachment.object_key}
-          className="text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
+          className={`text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black flex items-center gap-1 ${FOCUS_RING}`}
           style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
         >
           {downloadStatus === "downloading" ? (
@@ -308,7 +309,7 @@ const SpotlightStage = observer(({ attachment, initialUrl, position, onClose }: 
         </button>
         <button
           onClick={onClose}
-          className="text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
+          className={`text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black ${FOCUS_RING}`}
           style={lightboxBtnStyle}
         >
           {t("attachment.lightboxClose")}

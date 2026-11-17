@@ -14,6 +14,7 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Switch } from "../ui/Switch";
 import { EmptyState } from "../ui/EmptyState";
+import { FOCUS_RING } from "../ui/focusRing";
 
 /** Inline screen-share source picker replacing the participant grid (no modal). */
 export const ScreenSharePicker: React.FC = observer(() => {
@@ -217,7 +218,7 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
     onClick={onPick}
     disabled={disabled}
     data-testid={testId}
-    className="min-h-[6.25rem] text-start font-mono text-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
+    className={`min-h-[6.25rem] text-start font-mono text-secondary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer rounded-md ${FOCUS_RING}`}
   >
     <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
       {/* Fixed 16:10 (the requested thumbnail size) keeps the grid even. */}

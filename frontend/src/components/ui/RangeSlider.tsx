@@ -1,4 +1,5 @@
 import React from "react";
+import { FOCUS_RING } from "./focusRing";
 
 interface RangeSliderProps {
   label: string;
@@ -64,9 +65,9 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
         onChange={(e) => onChange(Number(e.target.value))}
         disabled={disabled}
         aria-describedby={descriptionId}
-        className="
+        className={`
           w-full h-2 rounded-md appearance-none cursor-pointer
-          focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black
+          ${FOCUS_RING}
           disabled:opacity-50 disabled:cursor-not-allowed
           [&::-webkit-slider-thumb]:appearance-none
           [&::-webkit-slider-thumb]:w-3.5
@@ -78,7 +79,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
           [&::-moz-range-thumb]:rounded-full
           [&::-moz-range-thumb]:border-none
           [&::-moz-range-thumb]:cursor-pointer
-        "
+        `}
         style={{
           background: `linear-gradient(to right, var(--c-accent) 0%, var(--c-accent) ${pct}%, var(--c-border-active) ${pct}%, var(--c-border-active) 100%)`,
           // Thumb color via CSS custom property (pseudo-elements can't use inline styles)

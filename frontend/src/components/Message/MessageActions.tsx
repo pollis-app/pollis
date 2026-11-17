@@ -136,8 +136,9 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
       ? `absolute end-4 top-0 -translate-y-1/2 flex items-center gap-1 rounded-control border border-line bg-surface-raised px-1 py-0.5 transition-opacity ${visibilityClass}`
       : `flex-shrink-0 ms-2 flex items-center gap-4 h-6 ${visibilityClass}`;
 
+  // `font-mono`: Terminal's UI face; Modern swaps it back to sans (#1964).
   const menuRowClass =
-    "flex w-full items-center gap-2 px-2.5 py-1.5 text-body text-start whitespace-nowrap hover:bg-hover outline-none";
+    "flex w-full items-center gap-2 px-2.5 py-1.5 font-mono text-body text-start whitespace-nowrap hover:bg-hover outline-none";
   // Appended per row: two `focus:bg-*` on one element resolve by stylesheet order.
   const menuRowFocusClass = "focus:bg-accent focus:text-bg";
   const menuRowFocusDangerClass = "focus:bg-danger focus:text-bg";

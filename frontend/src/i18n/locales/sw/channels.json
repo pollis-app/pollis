@@ -113,7 +113,7 @@
       "member": "mwanachama"
     },
     "adminToggle": "msimamizi",
-    "kick": "ondoa",
+    "kick": "Ondoa",
     "verified": "Mwasiliani aliyethibitishwa",
     "keyChanged": "Ufunguo wa utambulisho umebadilika — thibitisha tena",
     "invited": {
@@ -138,8 +138,8 @@
     "pageTitle": "Mialiko",
     "empty": "Hakuna mialiko inayosubiri.",
     "invitedBy": "Umealikwa na {{name}}",
-    "accept": "kubali",
-    "decline": "kataa",
+    "accept": "Kubali",
+    "decline": "Kataa",
     "acceptFailed": "Imeshindwa kukubali mwaliko. Jaribu tena."
   },
   "inviteMember": {
@@ -158,8 +158,8 @@
     "pendingFor": "Maombi yanayosubiri ya kujiunga na <accent>{{name}}</accent>",
     "empty": "Hakuna maombi yanayosubiri.",
     "allEmpty": "Hakuna maombi ya kujiunga yanayosubiri.",
-    "approve": "idhinisha",
-    "reject": "kataa"
+    "approve": "Idhinisha",
+    "reject": "Kataa"
   },
   "joinByInvite": {
     "pageTitle": "Jiunge na kikundi",

@@ -113,7 +113,7 @@
       "member": "member"
     },
     "adminToggle": "admin",
-    "kick": "kick",
+    "kick": "Kick",
     "verified": "Verified contact",
     "keyChanged": "Identity key changed — re-verify",
     "invited": {
@@ -138,8 +138,8 @@
     "pageTitle": "Invites",
     "empty": "No pending invites.",
     "invitedBy": "Invited by {{name}}",
-    "accept": "accept",
-    "decline": "decline",
+    "accept": "Accept",
+    "decline": "Decline",
     "acceptFailed": "Couldn't accept the invite. Try again."
   },
   "inviteMember": {
@@ -158,8 +158,8 @@
     "pendingFor": "Pending requests to join <accent>{{name}}</accent>",
     "empty": "No pending requests.",
     "allEmpty": "No pending join requests.",
-    "approve": "approve",
-    "reject": "reject"
+    "approve": "Approve",
+    "reject": "Reject"
   },
   "joinByInvite": {
     "pageTitle": "Join a Group",

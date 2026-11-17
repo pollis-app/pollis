@@ -12,6 +12,7 @@ import { useRightPanel } from "./useRightPanel";
 import { ShieldCheck } from "lucide-react";
 import type { MessageAttachment } from "../../../types";
 import { EmptyState } from "../../ui/EmptyState";
+import { SectionHeader } from "../../ui/SectionHeader";
 
 /** Caps per-tile media fetches when the panel opens. */
 const MEDIA_LIMIT = 30;
@@ -163,14 +164,11 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     return (
       <div className={rootClass}>
         <section className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}>
-          <SectionHeader
-            label={
+          <SectionHeader>{
               listsEveryone
                 ? t("members.count", { count: people.length })
                 : t("members.onlineCount", { count: people.length })
-            }
-            isTerminal={isTerminal}
-          />
+            }</SectionHeader>
           {people.length === 0 ? (
             <EmptyState background={false} testId="right-panel-members-empty">
               {listsEveryone ? t("members.empty") : t("members.noneOnline")}
@@ -193,15 +191,11 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
             className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}
             data-testid="right-panel-safety"
           >
-            <SectionHeader
-              label={
+            <SectionHeader bordered>{
                 dmPeers.length === 1
                   ? tDms("profile.safetyNumber")
                   : tDms("safety.headingMany")
-              }
-              isTerminal={isTerminal}
-              bordered
-            />
+              }</SectionHeader>
             {dmPeers.map((p) => (
               <button
                 key={p.userId}
@@ -229,7 +223,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           <section
             className={isTerminal ? "flex flex-col gap-1 pb-2" : "flex flex-col gap-2"}
           >
-            <SectionHeader label={t("media.heading")} isTerminal={isTerminal} bordered />
+            <SectionHeader bordered>{t("media.heading")}</SectionHeader>
             <MediaGrid attachments={attachments} />
           </section>
         )}
@@ -238,32 +232,3 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
   },
 );
 
-interface SectionHeaderProps {
-  label: string;
-  isTerminal: boolean;
-  /** Hairline above the header too, for every section after the first. */
-  bordered?: boolean;
-}
-
-/** Terminal borrows the left sidebar's `SectionHeader` chrome. */
-const SectionHeader: React.FC<SectionHeaderProps> = ({
-  label,
-  isTerminal,
-  bordered,
-}) => {
-  if (!isTerminal) {
-    return (
-      <h2 className="px-2 text-secondary font-medium uppercase tracking-widest text-muted">
-        {label}
-      </h2>
-    );
-  }
-  const cls = [
-    "sticky top-0 z-[1] flex h-bar w-full items-center border-b border-line",
-    "bg-surface px-2.5 text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none",
-    bordered ? "mt-1 border-t" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return <h2 className={cls}>{label}</h2>;
-};

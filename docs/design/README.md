@@ -131,6 +131,8 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
 - Sentence case everywhere in Modern and Mobile: titles, buttons, section headers. Terminal may use
   its uppercase spaced labels.
 - Mono is for machine text, never for decoration.
+- Every weight in use is a loaded face (`frontend/src/index.css`): Geist and Atkinson 400–700,
+  DM Mono 500. A synthesized bold is a missing import.
 
 ## Space, radius, size
 
@@ -140,6 +142,16 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   Mobile 12 for fields and full-width buttons, pills for inline buttons. An input and a button on
   the same form share a radius.
 - Desktop chrome bars use `h-bar`; mobile tap targets are at least 44pt.
+- Desktop `Button` has three sizes, all on the type scale so they follow the font-size
+  preference: `xs` (a row's inline action) and `sm` (a compact button beside content) in
+  `text-meta`, `md` (a form's own action, the default) in `text-secondary`; padding tells them
+  apart. A call site never sets a button's text size, letter-spacing or casing. Labels are
+  sentence case ("Approve", not "approve") in every look. `secondary` is a neutral outline; the
+  accent belongs to `primary`.
+- **Focus** is one ring on every control, desktop: 2px, offset by `bg`, keyboard focus only
+  (`ui/focusRing.ts`: `FOCUS_RING`; `FOCUS_RING_DANGER` on a destructive control, which never
+  wears the accent; `FOCUS_WITHIN_RING` for a field drawn around a native input). No other
+  ring width, no black offset band.
 
 ## Layout and behaviour
 
@@ -186,6 +198,7 @@ primitive cannot do what a screen needs, extend it in its own file and use it ev
 
 - **Desktop** (`frontend/src/components/ui/`): `Button` (`primary`, `secondary`, `ghost`,
   `danger`), `TextInput`, `TextArea`, `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`,
+  `Select` (a pick-one dropdown with its label), `SectionHeader` (a panel section's title),
   `Card`, `EmptyState`, `Avatar`, `PresenceAvatar`, `PresenceDot`, `PillButton`, `PressButton`,
   `NavigableList`, `NavigableGrid`, `TerminalMenu` (Terminal hub pages), `LoaderSpinner`,
   `IconSpinner`, `ChatInput`, `EditMessageBar`, `SuggestList`.

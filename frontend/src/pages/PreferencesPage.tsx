@@ -65,6 +65,7 @@ import { isMac } from "../utils/platform";
 import { useShortcutLabel } from "../keyboard";
 import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 import { SkinPicker } from "../components/Preferences/SkinPicker";
+import { FOCUS_RING } from "../components/ui/focusRing";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -525,7 +526,7 @@ export const PreferencesPage: React.FC = observer(() => {
                     data-testid={`pref-accent-${preset.n.toLowerCase()}`}
                     aria-pressed={accentHex === preset.c}
                     onClick={() => handleAccentColor(preset.c)}
-                    className="px-2 py-0.5 text-secondary font-mono rounded-chip border transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+                    className={`px-2 py-0.5 text-secondary font-mono rounded-chip border transition-colors ${FOCUS_RING}`}
                     style={{
                       background: `${preset.c}26`,
                       borderColor: accentHex === preset.c ? preset.c : `${preset.c}66`,
@@ -563,7 +564,7 @@ export const PreferencesPage: React.FC = observer(() => {
                     data-testid={`pref-background-${preset.n.toLowerCase()}`}
                     aria-pressed={bgHex === preset.c}
                     onClick={() => handleBgColor(preset.c)}
-                    className={`px-2 py-0.5 text-secondary font-mono rounded-chip border text-fg transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black ${bgHex === preset.c ? "border-accent" : "border-line-strong"}`}
+                    className={`px-2 py-0.5 text-secondary font-mono rounded-chip border text-fg transition-colors ${bgHex === preset.c ? "border-accent" : "border-line-strong"} ${FOCUS_RING}`}
                     style={{ background: preset.c }}
                   >
                     {backgroundPresetLabel(preset.n)}
