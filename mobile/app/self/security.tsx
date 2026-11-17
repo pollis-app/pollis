@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ScrollView, View, Text, useWindowDimensions } from "react-native";
+import { ScrollView, View, useWindowDimensions } from "react-native";
+import { Text } from "../../components/Text";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {

@@ -1,4 +1,4 @@
-import { Text } from "react-native";
+import { Text } from "../Text";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { semantic, type as ty } from "../../theme/tokens";

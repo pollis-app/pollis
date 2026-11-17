@@ -1,7 +1,8 @@
 // #847: the only view of a fresh invite link (the server keeps only `sha256(secret)`). Copy is VERIFIED (#897), never read back.
 
 import { useEffect, useRef, useState } from "react";
-import { View, Text, Share } from "react-native";
+import { View, Share } from "react-native";
+import { Text } from "./Text";
 import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
 import { Card, Button } from "./ui";

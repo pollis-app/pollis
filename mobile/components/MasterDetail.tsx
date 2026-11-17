@@ -1,5 +1,6 @@
 import { useEffect, type ComponentType, type ReactNode } from "react";
-import { BackHandler, View, Text } from "react-native";
+import { BackHandler, View } from "react-native";
+import { Text } from "./Text";
 import { useTranslation } from "react-i18next";
 import { semantic, type as ty, layout } from "../theme/tokens";
 import {

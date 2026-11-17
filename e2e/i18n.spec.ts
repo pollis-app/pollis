@@ -439,6 +439,22 @@ test.describe("shipped locales", () => {
       expect(await rawKeyLeaks(page)).toEqual([]);
     });
   }
+
+  // #1941: Korean wraps at word boundaries, not between syllables. keep-all only
+  // under ko: Chinese and Japanese have no spaces, so it would stop them wrapping.
+  test("Korean keeps words whole; other CJK still wraps between characters", async ({ page }) => {
+    await boot(page, "terminal");
+    await gotoLanguage(page);
+    const wordBreak = () => page.evaluate(() => getComputedStyle(document.body).wordBreak);
+
+    await page.getByTestId("pref-language-ko").click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ko");
+    expect(await wordBreak()).toBe("keep-all");
+
+    await page.getByTestId("pref-language-ja").click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ja");
+    expect(await wordBreak()).toBe("normal");
+  });
 });
 
 // #902: four surfaces #855 left speaking the wrong language.

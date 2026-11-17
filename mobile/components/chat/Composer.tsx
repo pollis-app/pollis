@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Pressable, Platform, ScrollView, type TextInput } from "react-native";
+import { View, Pressable, Platform, ScrollView, type TextInput } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Field, PressInPressable } from "../ui";

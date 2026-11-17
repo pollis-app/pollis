@@ -1,7 +1,8 @@
 // The Vault (#1316): a chat with yourself, synced to every enrolled device; port of desktop's Vault.tsx.
 
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, Text, View } from "react-native";
+import { FlatList, View } from "react-native";
+import { Text } from "../components/Text";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import * as ImagePicker from "expo-image-picker";

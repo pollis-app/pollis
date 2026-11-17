@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Text } from "react-native";
+import { Text } from "../../components/Text";
 import { useLocalSearchParams } from "expo-router";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";

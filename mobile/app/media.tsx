@@ -1,7 +1,8 @@
 // Full-screen media viewer (#1248, #1492): a pushed page, virtualised pager (on-screen page ± 1), only locally decrypted files.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo, FlatList, Linking, Text, View } from "react-native";
+import { AccessibilityInfo, FlatList, Linking, View } from "react-native";
+import { Text } from "../components/Text";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";

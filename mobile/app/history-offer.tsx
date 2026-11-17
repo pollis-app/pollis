@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
+import { Text } from "../components/Text";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Body, Button, BottomAction, Group } from "../components/ui";

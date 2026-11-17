@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Body } from "../../components/ui";
 import { CopyDiagnosticsButton } from "../../components/self/CopyDiagnosticsButton";

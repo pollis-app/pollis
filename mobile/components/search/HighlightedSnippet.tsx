@@ -1,4 +1,4 @@
-import { Text } from "react-native";
+import { Text } from "../Text";
 import { semantic, type as ty, fonts } from "../../theme/tokens";
 import type { SearchSnippet } from "../../hooks/queries/useSearch";
 import { splitSnippet } from "../../lib/searchSnippet";

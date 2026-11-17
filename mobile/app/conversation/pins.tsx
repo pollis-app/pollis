@@ -1,7 +1,8 @@
 // Pinned messages (#1315): the conversation's pins, newest first; a row jumps back to the message.
 
 import { useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import { View, FlatList, Pressable } from "react-native";
+import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";

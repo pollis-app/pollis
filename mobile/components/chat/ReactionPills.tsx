@@ -1,4 +1,5 @@
-import { View, Text, Pressable } from "react-native";
+import { View, Pressable } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { fonts, semantic, type as ty, r } from "../../theme/tokens";
 import type { Reaction } from "../../hooks/queries/useReactions";

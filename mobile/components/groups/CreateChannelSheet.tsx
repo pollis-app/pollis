@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Text } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { SheetOverlay, afterSheetClose } from "../chat/SheetOverlay";
 import { Button, Field } from "../ui";

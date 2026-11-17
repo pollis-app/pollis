@@ -1,7 +1,8 @@
 // Conversation info (#826): member roster + shared media for a channel or DM.
 
 import { useMemo } from "react";
-import { View, Text, Pressable, useWindowDimensions } from "react-native";
+import { View, Pressable, useWindowDimensions } from "react-native";
+import { Text } from "../../components/Text";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import {

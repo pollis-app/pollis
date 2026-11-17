@@ -1,4 +1,5 @@
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "../Text";
 import { semantic, fonts, r, space, layout } from "../../theme/tokens";
 import { Badge, Dot } from "../ui";
 import { Icon } from "../icons";

@@ -1,4 +1,5 @@
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from "../Text";
 import i18n from "../../i18n";
 import type { SecurityEvent } from "../../lib/securityEvents";
 import { formatRelative } from "../../lib/relativeTime";

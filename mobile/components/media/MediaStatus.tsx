@@ -1,6 +1,7 @@
 // A viewer page's decrypting / failed placeholder.
 
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { semantic, type as ty, space } from "../../theme/tokens";
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Pressable, View, Text } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "../../components/Text";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from "./Text";
 import { useTranslation } from "react-i18next";
 import { useObserver } from "mobx-react-lite";
 import { Group } from "./ui";

@@ -1,6 +1,7 @@
 // The viewer page for other files (#1248): name, size, and Share.
 
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { formatBytes } from "../../lib/exportArchive";

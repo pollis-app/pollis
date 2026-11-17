@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { AppState, Image, Text, View } from "react-native";
+import { AppState, Image, View } from "react-native";
+import { Text } from "../Text";
 import { semantic, fonts } from "../../theme/tokens";
 import { forgetEmojiUri, resolveEmojiUri } from "../../lib/emojiCache";
 import { emojiRetryDelay, retryOnForeground } from "../../lib/emojiRetry";

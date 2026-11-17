@@ -1,4 +1,5 @@
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "../ui";
 import { UserAvatar } from "../UserAvatar";

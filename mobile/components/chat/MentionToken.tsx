@@ -1,4 +1,4 @@
-import { Text } from "react-native";
+import { Text } from "../Text";
 import { fonts, semantic } from "../../theme/tokens";
 
 /** One resolved `@username` in a message body; self-mentions take the stronger tint. */

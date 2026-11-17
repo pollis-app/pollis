@@ -1,4 +1,5 @@
-import { View, Text, Platform } from "react-native";
+import { View, Platform } from "react-native";
+import { Text } from "./Text";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { useRouter, type Href } from "expo-router";

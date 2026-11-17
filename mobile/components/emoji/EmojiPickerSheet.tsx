@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, FlatList, useWindowDimensions } from "react-native";
+import { View, Pressable, FlatList, useWindowDimensions } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { layout, semantic, type as ty } from "../../theme/tokens";

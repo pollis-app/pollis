@@ -1,4 +1,5 @@
-import { View, Text } from "react-native";
+import { View } from "react-native";
+import { Text } from "../Text";
 import { semantic, type as ty } from "../../theme/tokens";
 
 export function DaySeparator({ label }: { label: string }) {

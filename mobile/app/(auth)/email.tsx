@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
-import { Linking, View, Text } from "react-native";
+import { Linking, View } from "react-native";
+import { Text } from "../../components/Text";
 import { useRouter } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
 import { Screen, Body, Field, Button, BottomAction } from "../../components/ui";

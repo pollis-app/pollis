@@ -1,4 +1,5 @@
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { UserAvatar } from "../UserAvatar";
 import { semantic, type as ty, fonts, space } from "../../theme/tokens";

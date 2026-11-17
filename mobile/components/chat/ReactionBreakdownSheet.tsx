@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, ScrollView, FlatList, useWindowDimensions } from "react-native";
+import { View, Pressable, ScrollView, FlatList, useWindowDimensions } from "react-native";
+import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";

@@ -1,4 +1,4 @@
-import { Text } from "react-native";
+import { Text } from "../Text";
 import { EmojiText, renderEmojiSegments } from "../emoji/EmojiText";
 import { MentionToken } from "./MentionToken";
 import { MessageLink } from "./MessageLink";
