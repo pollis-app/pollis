@@ -64,7 +64,7 @@ const DayDivider: React.FC<{ label: string; modern: boolean }> = React.memo(({ l
       >
         <div className="flex-1 border-t border-line" />
         <span
-          className="font-machine text-2xs tabular-nums text-muted"
+          className="font-machine text-meta tabular-nums text-muted"
         >
           {label}
         </span>
@@ -79,7 +79,7 @@ const DayDivider: React.FC<{ label: string; modern: boolean }> = React.memo(({ l
     >
       <div className="flex-1 h-px bg-line" />
       <span
-        className="text-xs font-mono text-muted"
+        className="text-secondary font-mono text-muted"
       >
         {label}
       </span>
@@ -740,14 +740,14 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       <div data-testid={`message-blocked-${message.id}`} className="px-4 py-1">
         <div className="flex items-start gap-2 min-w-0">
           <span
-            className="flex-shrink-0 font-mono text-sm text-dim"
+            className="flex-shrink-0 font-mono text-body text-dim"
           >
             {t("list.blockedAuthor")}
           </span>
           <span
-            className="font-mono text-sm text-muted"
+            className="font-mono text-body text-muted"
           >
-            {t("list.blockedBody")}
+            {t(skin === "terminal" ? "list.blockedBodyTerminal" : "list.blockedBody")}
           </span>
         </div>
       </div>
@@ -826,7 +826,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       {isFetchingMore && (
         <p
           data-testid="message-loading-older"
-          className="text-xs font-mono text-center py-2 text-muted"
+          className="text-secondary font-mono text-center py-2 text-muted"
         >
           {t("common:states.loading")}
         </p>
@@ -856,7 +856,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       {isFetchingNewer && (
         <p
           data-testid="message-loading-newer"
-          className="text-xs font-mono text-center py-2 text-muted"
+          className="text-secondary font-mono text-center py-2 text-muted"
         >
           {t("common:states.loading")}
         </p>

@@ -109,7 +109,7 @@
     "empty": "Aucun membre.",
     "self": "(vous)",
     "adminToggle": "admin",
-    "kick": "exclure",
+    "kick": "Exclure",
     "verified": "Contact vérifié",
     "keyChanged": "Clé d'identité modifiée — à revérifier",
     "invited": {
@@ -134,12 +134,12 @@
     "pageTitle": "Invitations",
     "empty": "Aucune invitation en attente.",
     "invitedBy": "Invité par {{name}}",
-    "accept": "accepter",
-    "decline": "refuser",
+    "accept": "Accepter",
+    "decline": "Refuser",
     "acceptFailed": "Impossible d'accepter l'invitation. Réessayez."
   },
   "inviteMember": {
-    "pageTitle": "Inviter un membre :: {{group}}",
+    "pageTitle": "Inviter un membre — {{group}}",
     "intro": "Inviter quelqu'un dans <accent>{{name}}</accent>",
     "identifierLabel": "Nom d'utilisateur ou e-mail",
     "identifierPlaceholder": "ami@pollis.com",
@@ -149,18 +149,20 @@
     "sendFailed": "Échec de l'envoi de l'invitation"
   },
   "joinRequests": {
-    "pageTitle": "Demandes d'adhésion :: {{group}}",
+    "pageTitle": "Demandes d'adhésion — {{group}}",
     "allPageTitle": "Demandes d'adhésion",
     "pendingFor": "Demandes en attente pour rejoindre <accent>{{name}}</accent>",
     "empty": "Aucune demande en attente.",
     "allEmpty": "Aucune demande d'adhésion en attente.",
-    "approve": "approuver",
-    "reject": "refuser"
+    "approve": "Approuver",
+    "reject": "Refuser"
   },
   "joinByInvite": {
     "pageTitle": "Rejoindre un groupe",
     "heading": "Rejoindre un groupe",
     "headingTerminal": "> REJOINDRE UN GROUPE",
+    "headingNamed": "Rejoindre {{name}} ?",
+    "headingNamedTerminal": "> REJOINDRE {{name}}",
     "blurb": "Les liens d'invitation vous permettent de rejoindre un groupe sans qu'un administrateur ait à vous rechercher au préalable.",
     "tokenLabel": "Lien ou code d'invitation",
     "tokenLabelTerminal": "LIEN OU CODE D'INVITATION",

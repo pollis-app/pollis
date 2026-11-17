@@ -137,7 +137,7 @@
     "acceptFailed": "无法接受邀请，请重试。"
   },
   "inviteMember": {
-    "pageTitle": "邀请成员 :: {{group}}",
+    "pageTitle": "邀请成员 — {{group}}",
     "intro": "邀请他人加入 <accent>{{name}}</accent>",
     "identifierLabel": "用户名或邮箱",
     "identifierPlaceholder": "friend@pollis.com",
@@ -147,7 +147,7 @@
     "sendFailed": "发送邀请失败"
   },
   "joinRequests": {
-    "pageTitle": "加入申请 :: {{group}}",
+    "pageTitle": "加入申请 — {{group}}",
     "allPageTitle": "加入申请",
     "pendingFor": "加入 <accent>{{name}}</accent> 的待处理申请",
     "empty": "没有待处理的申请。",
@@ -159,6 +159,8 @@
     "pageTitle": "加入群组",
     "heading": "加入群组",
     "headingTerminal": "> 加入群组",
+    "headingNamed": "加入 {{name}}？",
+    "headingNamedTerminal": "> 加入 {{name}}",
     "blurb": "有了邀请链接，你无需管理员先查找你就能加入。",
     "tokenLabel": "邀请链接或邀请码",
     "tokenLabelTerminal": "邀请链接或邀请码",

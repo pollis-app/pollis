@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
 import { Button } from "../components/ui/Button";
 import { SecurityEventRow } from "../components/Security/SecurityEventRow";
 import {
@@ -56,12 +57,8 @@ export const SecurityEventsPage: React.FC = () => {
 
   return (
     <PageShell title={t("security.eventsHeading")} scrollable>
-      <div className="flex justify-center px-6 py-8">
-        <div
-          className="flex flex-col gap-4 w-full max-w-md font-mono"
-          data-testid="security-events-page"
-        >
-          <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+      <PageColumn className="font-mono" data-testid="security-events-page">
+          <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
             {t("security.eventsDescription")}
           </p>
 
@@ -85,13 +82,13 @@ export const SecurityEventsPage: React.FC = () => {
           </div>
 
           {isError && (
-            <p data-testid="security-events-error" className="text-xs text-danger">
+            <p data-testid="security-events-error" className="text-secondary text-danger">
               {errorMessage(error, t("security.eventsLoadFailed"))}
             </p>
           )}
 
           {isPending ? (
-            <p className="text-xs font-mono text-muted">{t("common:states.loading")}</p>
+            <p className="text-secondary font-mono text-muted">{t("common:states.loading")}</p>
           ) : events.length === 0 && !isPlaceholderData ? (
             <EmptyState background={false} testId="security-events-empty">
               {filter === "all" ? t("security.eventsEmpty") : t("security.eventsEmptyFiltered")}
@@ -126,8 +123,7 @@ export const SecurityEventsPage: React.FC = () => {
               </Button>
             </div>
           )}
-        </div>
-      </div>
+      </PageColumn>
     </PageShell>
   );
 };

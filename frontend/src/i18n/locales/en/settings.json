@@ -165,7 +165,7 @@
     "openButton": "Voice & Video"
   },
   "user": {
-    "title": "User Settings",
+    "title": "User settings",
     "signInPrompt": "Please sign in",
     "accountHeading": "Account",
     "usernameLabel": "Username",
@@ -289,6 +289,7 @@
     "mediaScreenShare": "Screen share",
     "revokeMediaOnExitLabel": "Revoke system permissions when Pollis quits",
     "revokeMediaOnExitDescription": "When on, Pollis clears its saved camera / microphone / screen permissions as it quits, so the OS asks again next time.",
+    "revokeNowQuestion": "Revoke camera, microphone and screen access now?",
     "revokeNowNote": "This clears Pollis's saved permissions.",
     "revokeNowConfirm": "Confirm",
     "revokeNowButton": "Revoke now",
@@ -361,7 +362,7 @@
     "doneButton": "Done"
   },
   "update": {
-    "title": "Software Update",
+    "title": "Software update",
     "heading": "Software Update",
     "currentVersion": "Current version: <val>{{version}}</val>",
     "versionLoading": "Loading...",
@@ -376,12 +377,12 @@
     "whatsNew": "What's new in {{version}}"
   },
   "shortcuts": {
-    "title": "Key Bindings",
+    "title": "Key bindings",
     "empty": "No shortcuts.",
     "capturing": "Press keys…",
     "rebindLabel": "Rebind {{name}}",
     "resetLabel": "Reset {{name}} to default",
-    "resetButton": "reset",
+    "resetButton": "Reset",
     "appToggleSidebar": "Toggle sidebar",
     "appToggleRightPanel": "Toggle details panel",
     "appToggleTerminal": "Toggle terminal",
@@ -458,6 +459,7 @@
     "title": "Open source licenses",
     "intro": "Pollis is built on open-source software. Every third-party package in this build is listed with its license; select one to read the license text.",
     "count": "Packages in this build: {{count}}",
+    "countFiltered": "Packages shown: {{shown}} of {{count}}",
     "unavailable": "The license list is generated when the app is built, and this development build doesn't have one.",
     "filterLabel": "Filter packages",
     "filterPlaceholder": "Filter by name or license",

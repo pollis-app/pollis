@@ -7,7 +7,7 @@ import { appStore } from "../../stores/appStore";
 import { cameraSession, friendlyCameraError } from "../../camera/cameraSession";
 import type { CameraSource } from "../../camera/types";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
+import { SourceCard } from "./SourceCard";
 
 /** Inline webcam picker replacing the participant grid (no modal); only with more than one camera. */
 export const CameraPicker: React.FC = observer(() => {
@@ -58,7 +58,7 @@ export const CameraPicker: React.FC = observer(() => {
   return (
     <div
       data-testid="camera-picker"
-      className="flex-1 flex flex-col font-mono text-xs min-h-0 border-t border-b border-line bg-bg"
+      className="flex-1 flex flex-col font-mono text-secondary min-h-0 border-t border-b border-line bg-bg"
     >
       <header
         className="flex items-center justify-between px-3 py-2 border-b border-line text-fg"
@@ -82,25 +82,14 @@ export const CameraPicker: React.FC = observer(() => {
       <div className="flex-1 overflow-auto p-3">
         <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(11.25rem,1fr))]">
           {cameras.map((c) => (
-            <button
+            <SourceCard
               key={c.id}
-              type="button"
-              onClick={() => handlePick(c)}
+              onPick={() => handlePick(c)}
               disabled={busy}
-              data-testid={`camera-picker-device-${c.id}`}
-              className="min-h-[6.25rem] text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
-            >
-              <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
-                <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted aspect-[16/10]">
-                  <Video size={32} />
-                </div>
-                <div className="p-2">
-                  <div className="truncate text-fg" title={c.name}>
-                    {c.name}
-                  </div>
-                </div>
-              </Card>
-            </button>
+              testId={`camera-picker-device-${c.id}`}
+              title={c.name}
+              icon={<Video size={32} />}
+            />
           ))}
         </div>
       </div>

@@ -24,6 +24,7 @@ import { disambiguateVoiceNames } from "../../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity, voiceUserKey } from "../../../voice/identity";
 import { voiceSession } from "../../../voice";
 import { Button } from "../../ui/Button";
+import { IconButton } from "../../ui/IconButton";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { IconSpinner } from "../../ui/IconSpinner";
 import { NavigableGrid } from "../../ui/NavigableGrid";
@@ -317,8 +318,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
     // Shared by the tray and the connecting footer, so a call can always end.
     const leaveButton = (
-      <button
-        className="vs-tray-leave"
+      <Button
+        variant="danger"
+        size="sm"
         data-testid={callMode ? "call-hang-up" : "voice-tray-leave"}
         title={callMode ? t("stage.hangUp") : t("stage.leaveTitle")}
         aria-label={callMode ? t("stage.hangUp") : t("controls.leaveChannel")}
@@ -331,23 +333,23 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           <LogOut size={14} className="rtl-unmirror" />
         )}
         {callMode ? t("stage.hangUp") : t("stage.leave")}
-      </button>
+      </Button>
     );
 
     return (
-      <div className="vs-stage font-mono text-xs" data-focus={focusView ? "true" : undefined}>
+      <div className="vs-stage font-mono text-secondary" data-focus={focusView ? "true" : undefined}>
         {/* Focus mode hides the header: the stream gets the whole body, the tray stays. */}
         {!focusView && (
           <div
             className="flex items-center px-4 flex-shrink-0 h-bar border-b border-line text-muted"
           >
-            <button
+            <IconButton
               onClick={onBack}
               aria-label={t("common:actions.back")}
-              className="me-3 inline-flex items-center gap-1 leading-none transition-colors text-muted hover:text-accent"
+              className="me-3 transition-colors"
             >
               <ArrowLeft size={12} className="rtl-mirror" />
-            </button>
+            </IconButton>
             <span style={{ flex: 1 }} className="flex items-center gap-1.5 text-accent">
               {callMode ? <Phone size={12} /> : <Volume2 size={12} />}
               {channelName}
@@ -468,7 +470,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               {isInCall || callMode ? (
                 <div className="vs-tray">
                   {micAvailable ? (
-                    <button
+                    <IconButton
                       // `armed` (PTT idle) is not the red `on` state.
                       className={
                         "vs-tray-btn danger" +
@@ -487,9 +489,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                       ) : (
                         <MicOff size={15} />
                       )}
-                    </button>
+                    </IconButton>
                   ) : (
-                    <button
+                    <IconButton
                       className="vs-tray-btn on"
                       data-testid="voice-tray-listen-only"
                       title={t("controls.listenOnly")}
@@ -497,10 +499,10 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                       disabled
                     >
                       <MicOff size={15} />
-                    </button>
+                    </IconButton>
                   )}
                   {/* Deafen, shown even listen-only. */}
-                  <button
+                  <IconButton
                     className={"vs-tray-btn danger" + (gate.deafened ? " on" : "")}
                     data-testid="voice-tray-deafen"
                     data-deafened={gate.deafened}
@@ -510,8 +512,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     onClick={() => voiceSession.toggleDeafen()}
                   >
                     {gate.deafened ? <VolumeX size={15} /> : <Volume2 size={15} />}
-                  </button>
-                  <button
+                  </IconButton>
+                  <IconButton
                     className={"vs-tray-btn" + (shareActive ? " on" : "")}
                     data-testid="voice-tray-screenshare"
                     data-busy={shareBusy || undefined}
@@ -522,8 +524,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     onClick={() => toggleScreenShare(share)}
                   >
                     {shareBusy ? <IconSpinner size={15} /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
-                  </button>
-                  <button
+                  </IconButton>
+                  <IconButton
                     className={"vs-tray-btn" + (cameraActive ? " on" : "")}
                     data-testid="voice-tray-camera"
                     data-busy={cameraBusy || undefined}
@@ -534,7 +536,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     onClick={() => toggleCamera(camera)}
                   >
                     {cameraBusy ? <IconSpinner size={15} /> : cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
-                  </button>
+                  </IconButton>
                   <div className="vs-tray-sep" />
                   {leaveButton}
                 </div>
@@ -547,7 +549,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
             <div className="vs-foot-side right">
               {/* Grid ↔ spotlight only matters while someone streams. */}
               {stageLive && streamers.length > 0 && !focusView && (
-                <button
+                <IconButton
                   className={"vs-tray-btn" + (layout === "grid" ? " on" : "")}
                   data-testid="voice-layout-toggle"
                   data-layout={layout === "grid" ? "grid" : "spotlight"}
@@ -557,7 +559,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   onClick={() => setLayout(layout === "grid" ? "auto" : "grid")}
                 >
                   {layout === "grid" ? <Focus size={15} /> : <LayoutGrid size={15} />}
-                </button>
+                </IconButton>
               )}
               {sending && (isInCall || callMode) && (
                 <Button
@@ -572,13 +574,14 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   <Ratio size={15} /> {t("stage.resolution")}
                 </Button>
               )}
-              <button
-                className="flex items-center gap-2 text-xs transition-colors text-muted hover:text-fg"
+              <Button
+                variant="ghost"
+                size="md"
                 data-testid="voice-settings-link"
                 onClick={onOpenSettings}
               >
                 <SlidersHorizontal size={15} /> {t("stage.settingsLink")}
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}

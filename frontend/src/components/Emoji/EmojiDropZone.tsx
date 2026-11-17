@@ -4,6 +4,8 @@ import { ImagePlus } from "lucide-react";
 import { dialogOpen } from "../../bridge";
 import { dropTargetStore } from "../../stores/dropTargetStore";
 import { EMOJI_IMAGE_EXTENSIONS, isSupportedEmojiFile } from "./emojiShortcode";
+import { PressButton } from "../ui/PressButton";
+import { FOCUS_RING } from "../ui/focusRing";
 
 interface EmojiDropZoneProps {
   onPick: (path: string) => void;
@@ -88,27 +90,27 @@ export const EmojiDropZone: React.FC<EmojiDropZoneProps> = ({
       : "border-line bg-surface cursor-pointer hover:border-line-strong hover:bg-hover";
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
+    <PressButton
+      activateOn="click"
+      onClick={() => void handleClick()}
       disabled={disabled}
       data-testid="group-emoji-dropzone"
       data-dragover={isDragOver ? "true" : "false"}
-      className={`w-full flex flex-col items-center justify-center gap-2 px-4 py-6 border-2 border-dashed rounded-panel transition-colors ${stateClass}`}
+      className={`w-full flex flex-col items-center justify-center gap-2 px-4 py-6 border-2 border-dashed rounded-panel transition-colors ${FOCUS_RING} ${stateClass}`}
     >
       {children ?? (
         <>
           <ImagePlus className="size-6 text-muted" aria-hidden="true" />
-          <span className="text-sm font-mono text-fg">
+          <span className="text-body font-mono text-fg">
             {isDragOver ? t("manage.dropNow") : t("manage.dropPrompt")}
           </span>
-          <span className="text-xs font-mono text-muted">
+          <span className="text-secondary font-mono text-muted">
             {t("manage.dropHint", {
               formats: EMOJI_IMAGE_EXTENSIONS.join(", "),
             })}
           </span>
         </>
       )}
-    </button>
+    </PressButton>
   );
 };

@@ -1,8 +1,8 @@
 {
   "sidebar": {
-    "groups": "группы",
-    "dms": "лс",
-    "account": "аккаунт",
+    "groups": "Группы",
+    "dms": "ЛС",
+    "account": "Аккаунт",
     "saved": "Сохранённое",
     "preferences": "Параметры",
     "language": "Язык",

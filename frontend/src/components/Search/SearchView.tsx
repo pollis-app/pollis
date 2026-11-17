@@ -9,6 +9,7 @@ import { ResultThumbnails } from "./ResultThumbnails";
 import { shellOpen } from "../../bridge";
 import type { SearchCorpus, SearchResult, SearchSnippet, SearchSort } from "../../types";
 import { PressButton } from "../ui/PressButton";
+import { LinkButton } from "../ui/LinkButton";
 import { EmptyState } from "../ui/EmptyState";
 
 /** Why search is on-device: the server holds only ciphertext. */
@@ -39,7 +40,7 @@ const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snippet }) =
     <span>
       {parts.map((part, i) =>
         part.mark ? (
-          <mark key={i} data-testid="search-highlight" className="bg-accent-muted text-accent-bright rounded-sm px-0.5">
+          <mark key={i} data-testid="search-highlight" className="bg-accent-muted text-accent-bright rounded-chip px-0.5">
             <EmojiText text={part.text} />
           </mark>
         ) : (
@@ -122,7 +123,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
     if (isFetching) {
       return (
-        <p className="text-xs font-mono text-center text-muted pt-8">
+        <p className="text-secondary font-mono text-center text-muted pt-8">
           {t("view.searching")}
         </p>
       );
@@ -134,7 +135,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
         background={false}
         testId="search-no-results"
         actions={
-          <div className="flex max-w-prose flex-col gap-3 text-start text-xs font-mono text-muted">
+          <div className="flex max-w-prose flex-col gap-3 text-start text-secondary font-mono text-muted">
             <p>{t("view.noResultsWhy")}</p>
             <ul className="flex flex-col gap-1 ps-4 list-disc">
               <li>{t("view.reasonNotIngested")}</li>
@@ -165,14 +166,14 @@ export const SearchView: React.FC<SearchViewProps> = ({
           autoFocus
         />
         {inputValue.trim().length > 0 && inputValue.trim().length < 2 && (
-          <p className="text-xs font-mono mt-1 text-muted">{t("view.minLength")}</p>
+          <p className="text-secondary font-mono mt-1 text-muted">{t("view.minLength")}</p>
         )}
         <p className="text-[10px] font-mono mt-1 text-muted">{t("view.filterHint")}</p>
       </div>
 
       {hasResults && (
         <div className="px-4 py-2 flex-shrink-0 flex items-center justify-between gap-2 border-b border-line">
-          <span data-testid="search-total" className="text-xs font-mono text-muted">
+          <span data-testid="search-total" className="text-secondary font-mono text-muted">
             {t("view.aboutResults", { count: total })}
           </span>
           <div className="flex items-center gap-1">
@@ -213,25 +214,25 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     <div className="flex items-baseline justify-between gap-2 mb-1">
                       <span
                         data-testid="search-result-sender"
-                        className="text-xs font-mono font-medium truncate text-accent"
+                        className="text-secondary font-mono font-medium truncate text-accent"
                       >
                         {result.sender_username ?? result.sender_id}
                       </span>
-                      <span className="text-xs font-mono flex-shrink-0 text-muted">
+                      <span className="text-secondary font-mono flex-shrink-0 text-muted">
                         {formatShortDateTime(result.sent_at)}
                       </span>
                     </div>
 
                     <div
                       data-testid="search-result-conversation"
-                      className="text-xs font-mono mb-1 truncate text-muted"
+                      className="text-secondary font-mono mb-1 truncate text-muted"
                     >
                       {conversationLabel(result)}
                       {result.thread_id ? ` · ${t("view.inThread")}` : ""}
                       {result.has_attachment ? ` · ${t("view.hasAttachment")}` : ""}
                     </div>
 
-                    <div className="text-xs font-mono text-dim" data-testid="search-result-snippet">
+                    <div className="text-secondary font-mono text-dim" data-testid="search-result-snippet">
                       <HighlightedSnippet snippet={result.snippet} />
                     </div>
 
@@ -280,7 +281,7 @@ const CorpusFooter: React.FC<{
   return (
     <div
       data-testid="search-corpus-footer"
-      className="px-4 py-2 flex-shrink-0 border-t border-line text-[10px] font-mono text-muted flex flex-wrap items-center gap-x-2 gap-y-1"
+      className="px-4 py-2 flex-shrink-0 border-t border-line text-meta font-mono text-muted flex flex-wrap items-center gap-x-2 gap-y-1"
     >
       <span>
         {earliest
@@ -289,22 +290,13 @@ const CorpusFooter: React.FC<{
       </span>
       {corpus.indexing && <span data-testid="search-indexing">{t("view.indexing")}</span>}
       {corpus.retention_days > 0 && onOpenRetentionSettings && (
-        <button
-          type="button"
-          onClick={onOpenRetentionSettings}
-          className="underline bg-transparent text-accent"
-        >
+        <LinkButton onClick={onOpenRetentionSettings}>
           {t("view.retentionLink", { days: corpus.retention_days })}
-        </button>
+        </LinkButton>
       )}
-      <button
-        type="button"
-        data-testid="search-learn-link"
-        onClick={() => void shellOpen(LEARN_ON_DEVICE_SEARCH_URL)}
-        className="underline bg-transparent text-accent"
-      >
+      <LinkButton data-testid="search-learn-link" onClick={() => void shellOpen(LEARN_ON_DEVICE_SEARCH_URL)}>
         {t("view.whyOnDevice")}
-      </button>
+      </LinkButton>
     </div>
   );
 };

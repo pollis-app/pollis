@@ -140,12 +140,12 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
           <div className="flex flex-col gap-5">
             <div className="border-b border-line">
               <p
-                className="text-sm font-mono uppercase tracking-wider mb-8 text-accent"
+                className="text-body font-mono uppercase tracking-wider mb-8 text-accent"
                 style={{ letterSpacing: "0.15em" }}
               >
                 {t("enroll.badge")}
               </p>
-              <h1 className="text-base font-mono font-bold mt-1 mb-8 text-fg">
+              <h1 className="text-row font-mono font-bold mt-1 mb-8 text-fg">
                 {t("enroll.title")}
               </h1>
             </div>
@@ -250,7 +250,7 @@ const ChoosePane: React.FC<{
       >
         {t("enroll.approveFromDevice")}
       </Button>
-      <p className="text-xs font-mono mb-4 text-muted">
+      <p className="text-secondary font-mono mb-4 text-muted">
         {t("enroll.approveHint")}
       </p>
 
@@ -268,7 +268,7 @@ const ChoosePane: React.FC<{
         >
           {t("enroll.useSecretKey")}
         </Button>
-        <p className="text-xs font-mono mt-4 text-muted">
+        <p className="text-secondary font-mono mt-4 text-muted">
           {t("enroll.useSecretKeyHint")}
         </p>
       </div>
@@ -291,8 +291,8 @@ const LinkedAwaitingPane: React.FC<{ onCancel: () => void }> = ({ onCancel }) =>
   const { t } = useTranslation("auth");
   return (
     <div className="flex flex-col gap-4" data-testid="linked-awaiting-approval">
-      <p className="text-sm font-mono text-fg">{t("link.awaitingTitle")}</p>
-      <p className="text-xs font-mono text-muted">{t("link.awaitingIntro")}</p>
+      <p className="text-body font-mono text-fg">{t("link.awaitingTitle")}</p>
+      <p className="text-secondary font-mono text-muted">{t("link.awaitingIntro")}</p>
       <div className="flex items-center gap-2 justify-center">
         <LoadingSpinner size="sm" />
       </div>
@@ -320,14 +320,13 @@ const AwaitingApprovalPane: React.FC<{
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-xs font-mono text-fg">
+      <p className="text-secondary font-mono text-fg">
         {t("enroll.awaitingIntro")}
       </p>
       <div
         data-testid="verification-code-display"
-        className="font-mono text-3xl font-bold text-center select-all bg-surface border-2 border-accent text-accent"
+        className="font-mono text-code font-bold text-center select-all rounded-panel bg-surface border-2 border-accent text-accent"
         style={{
-          borderRadius: "0.5rem",
           padding: "1.5rem",
           letterSpacing: "0.4em",
         }}
@@ -336,7 +335,7 @@ const AwaitingApprovalPane: React.FC<{
       </div>
       <div className="flex items-center gap-2 justify-center">
         <LoadingSpinner size="sm" />
-        <span className="text-xs font-mono text-muted">
+        <span className="text-secondary font-mono text-muted">
           {secondsLeft > 0
             ? t("enroll.awaitingCountdown", { time: formatCountdown(secondsLeft) })
             : t("enroll.awaitingExpired")}
@@ -386,13 +385,13 @@ const SecretKeyFallbackPane: React.FC<{
   return (
     <div className="flex flex-col gap-3">
       <p
-        className="text-xs font-mono text-fg"
+        className="text-secondary font-mono text-fg"
         style={{ lineHeight: 1.6 }}
       >
         {t("recover.intro")}
       </p>
       <p
-        className="text-xs font-mono mb-2 text-muted"
+        className="text-secondary font-mono mb-2 text-muted"
         style={{ lineHeight: 1.6 }}
       >
         {t("recover.hint")}
@@ -440,7 +439,7 @@ const SecretKeyFallbackPane: React.FC<{
           variant="danger"
           onClick={onWantReset}
           disabled={isLoading}
-          className="text-xs font-mono"
+          className="text-secondary font-mono"
         >
           {t("recover.wantReset")}
         </Button>
@@ -485,17 +484,17 @@ const ResetConfirmPane: React.FC<{
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-sm font-mono font-bold text-danger">
+        <h2 className="text-body font-mono font-bold text-danger">
           {t("reset.title")}
         </h2>
         <p
-          className="text-xs mt-2 font-mono text-fg"
+          className="text-secondary mt-2 font-mono text-fg"
           style={{ lineHeight: 1.6 }}
         >
           {t("reset.body")}
         </p>
         <p
-          className="text-xs mt-2 font-mono mb-4 text-muted"
+          className="text-secondary mt-2 font-mono mb-4 text-muted"
           style={{ lineHeight: 1.6 }}
         >
           {t("reset.keepNote")}
@@ -561,12 +560,12 @@ const ResultPane: React.FC<{
     <div className="flex flex-col gap-4">
       <div>
         <h2
-          className={`text-sm font-mono font-bold ${tone === "error" ? "text-danger" : "text-fg"}`}
+          className={`text-body font-mono font-bold ${tone === "error" ? "text-danger" : "text-fg"}`}
         >
           {heading}
         </h2>
         <p
-          className="text-xs mt-2 font-mono text-muted"
+          className="text-secondary mt-2 font-mono text-muted"
           style={{ lineHeight: 1.6 }}
         >
           {body}

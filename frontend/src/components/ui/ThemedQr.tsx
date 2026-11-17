@@ -13,7 +13,7 @@ interface ThemedQrProps {
  * Dark modules on the light accent keep normal polarity, which every camera decoder reads.
  */
 export const ThemedQr: React.FC<ThemedQrProps> = ({ value, size, title, "data-testid": testId }) => (
-  <div className="p-3 rounded-lg bg-accent">
+  <div className="p-3 rounded-panel bg-accent">
     <QRCodeSVG
       data-testid={testId}
       value={value}

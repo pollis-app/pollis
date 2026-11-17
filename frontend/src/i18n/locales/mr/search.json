@@ -8,7 +8,8 @@
     "permalinkResolving": "मेसेज उघडत आहे…",
     "noMatches": "काहीही जुळले नाही",
     "emptyHint": "चॅनेल, व्हॉइस चॅनेल, DM, वापरकर्ता किंवा सेटिंग्ज पेजवर जा",
-    "live": "[लाइव्ह]",
+    "live": "लाइव्ह",
+    "liveTerminal": "[लाइव्ह]",
     "searchMessagesFor": "\"{{query}}\" साठी मेसेजमध्ये शोधा"
   },
   "pages": {

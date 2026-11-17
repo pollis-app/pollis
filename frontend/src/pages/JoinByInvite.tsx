@@ -3,9 +3,13 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormLead } from "../components/ui/FormLead";
+import { FormActions } from "../components/ui/FormActions";
 import { useSkin } from "../hooks/queries/usePreferences";
 import { errorMessage } from "../utils/errorMessage";
-import { useRedeemGroupInviteLink } from "../hooks/queries/useGroups";
+import { completeInviteToken } from "../utils/inviteToken";
+import { useInviteLinkPreview, useRedeemGroupInviteLink } from "../hooks/queries/useGroups";
 
 interface JoinByInviteProps {
   /** Prefilled when arriving from an /invite/$token deep link. */
@@ -22,6 +26,11 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   const [token, setToken] = useState(initialToken);
   const [error, setError] = useState<string | null>(null);
   const redeemMutation = useRedeemGroupInviteLink();
+  // #1972: a whole link or code names its group before the press; a partial one is never sent.
+  const complete = completeInviteToken(token);
+  const preview = useInviteLinkPreview(complete ?? "");
+  const groupName = complete ? preview.data?.group_name ?? null : null;
+  const showPreviewError = !!complete && preview.isError && !error;
 
   const handleRedeem = React.useCallback(
     async (value: string) => {
@@ -43,8 +52,26 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   // #1094: a deep link never redeems on arrival; joining discloses your identity, so it takes a press.
   const isModern = skin === "modern";
 
-  const body = (
-    <>
+  const heading = groupName
+    ? isModern
+      ? t("joinByInvite.headingNamed", { name: groupName })
+      : t("joinByInvite.headingNamedTerminal", { name: groupName })
+    : isModern
+      ? t("joinByInvite.heading")
+      : t("joinByInvite.headingTerminal");
+
+  return (
+    <PageColumn
+      as="form"
+      paneTestId="join-by-invite-page"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void handleRedeem(token);
+      }}
+    >
+      <FormLead titleTestId="join-by-invite-heading" title={heading}>
+        {t("joinByInvite.blurb")}
+      </FormLead>
       <TextInput
         label={
           isModern
@@ -60,13 +87,13 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
         autoFocus
       />
 
-      {error && (
-        <p data-testid="invite-redeem-error" className="mt-3 text-sm text-danger">
-          {error}
+      {(error || showPreviewError) && (
+        <p data-testid="invite-redeem-error" className="text-body text-danger">
+          {error ?? errorMessage(preview.error)}
         </p>
       )}
 
-      <div className="mt-4">
+      <FormActions>
         <Button
           type="submit"
           disabled={!token.trim()}
@@ -80,38 +107,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
         >
           {isModern ? t("joinByInvite.submit") : t("joinByInvite.submitTerminal")}
         </Button>
-      </div>
-    </>
-  );
-
-  return (
-    <div
-      data-testid="join-by-invite-page"
-      className="flex flex-1 flex-col overflow-auto bg-bg"
-    >
-      <div className="flex flex-1 justify-center overflow-auto px-6 py-8">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void handleRedeem(token);
-          }}
-          className={
-            isModern
-              ? "w-full max-w-[32rem] rounded-lg border border-line bg-surface p-6"
-              : "w-full max-w-[32rem] border border-line bg-surface p-5"
-          }
-        >
-          <h2
-            className={
-              isModern ? "text-base font-semibold text-fg" : "text-base text-accent"
-            }
-          >
-            {isModern ? t("joinByInvite.heading") : t("joinByInvite.headingTerminal")}
-          </h2>
-          <p className="mt-1 mb-4 text-xs text-dim">{t("joinByInvite.blurb")}</p>
-          {body}
-        </form>
-      </div>
-    </div>
+      </FormActions>
+    </PageColumn>
   );
 };

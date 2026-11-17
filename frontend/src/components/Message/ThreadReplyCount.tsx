@@ -23,7 +23,7 @@ export const ThreadReplyCount: React.FC<ThreadReplyCountProps> = ({
       type="button"
       onClick={onOpen}
       data-testid="thread-reply-count"
-      className="mt-1 flex items-center gap-1 rounded px-1 py-0.5 text-xs text-accent hover:bg-hover"
+      className="mt-1 flex items-center gap-1 rounded-chip px-1 py-0.5 text-secondary text-accent hover:bg-hover"
     >
       <MessagesSquare size={12} aria-hidden />
       {t("thread.replyCount", { count })}

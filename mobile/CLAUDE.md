@@ -1234,7 +1234,7 @@ under the large title, Settings-style — focusing the field or typing swaps
 the Self menu for `GlobalSearchResults` in place (no navigation); Cancel, the
 clear button, a second tap on the Self tab or Android back restore the menu.
 The state survives opening a hit and coming back. A group's "Search <group>"
-field navigates to `/(tabs)/self?search=1`, which focuses it.
+field navigates to `/(tabs)/self?search=1&searchGroup=<id>`, which focuses it scoped to that group (an "In <group>" chip, #1972).
 
 iPad (regular width, `hooks/useLayoutClass`): Groups and Direct are a
 two-pane (`components/MasterDetail.tsx`) — list left, conversation right, tab
@@ -2031,8 +2031,14 @@ there, never here; the rules for using them are `docs/design/README.md`.
   the same recipe over both skins and every background preset). Tune `RECIPE`
   in `design/theme.ts` if a new preset fails — never special-case it.
 - `type.*`: Display 28/700, Title 20/700, Heading 17/700, Body 16/400, Secondary
-  14/400, Section 13/600, Meta 12/400, Tab 12. Sentence case, no tracked
-  capitals, nothing below 12; all text follows system font scaling.
+  14/400, Section 13/600, Meta 12/400, Tab 12, plus Row title 16/600 and Button
+  15/600 (no line height of their own). Their sizes are `typeSize.*`, by role,
+  the same names as desktop's `text-*` (#1973; table in `docs/design/README.md`
+  → Type). A component's `fontSize` reads `typeSize` or spreads a `type.*` step,
+  never a number; `tests/type-scale.test.ts` holds the few deliberate exceptions
+  (emoji and initials sized to their box, the enrollment code, the 11pt count
+  badges). Sentence case, no tracked capitals, nothing below 12 but those
+  badges; all text follows system font scaling.
 - `r` radii 4/10/12/14/16/20(sheet); `layout.touchMin` 44.
 - Font: Geist via `fonts.regular/medium/semibold/bold` (one family per
   weight, never with `fontWeight`); spread a `type.*` step rather than

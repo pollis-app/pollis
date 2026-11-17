@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import type { Message } from '../../types';
 import { getUsernameColor, useBackgroundIsLight } from '../../utils/usernameColor';
 import { PressButton } from "../ui/PressButton";
+import { IconButton } from "../ui/IconButton";
 
 interface ReplyPreviewProps {
   messageId: string;
@@ -39,7 +40,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
       className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
     >
       <div className="flex-1 min-w-0">
-        <span className="text-2xs font-mono uppercase tracking-widest text-muted">
+        <span className="text-meta font-mono uppercase tracking-widest text-muted">
           <Trans
             t={t}
             i18nKey="replyBar.replyingTo"
@@ -57,17 +58,17 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
           aria-label={t('replyBar.scrollToMessage')}
           className="block w-full text-start"
         >
-          <p className="text-xs font-mono truncate text-accent-dim">{snippet}</p>
+          <p className="text-secondary font-mono truncate text-accent-dim">{snippet}</p>
         </PressButton>
       </div>
-      <button
+      <IconButton
         data-testid="dismiss-reply-button"
         onClick={onDismiss}
         aria-label={t('replyBar.dismiss')}
-        className="icon-btn-sm flex-shrink-0"
+        className="flex-shrink-0"
       >
         <X size={17} aria-hidden="true" />
-      </button>
+      </IconButton>
     </div>
   );
 };

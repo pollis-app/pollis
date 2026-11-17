@@ -8,7 +8,8 @@
     "permalinkResolving": "Ó ń ṣí ìfiránṣẹ́…",
     "noMatches": "A kò rí nǹkan tó bá a mu",
     "emptyHint": "Lọ sí ìkànnì, ìkànnì ohùn, ìfiránṣẹ́ àdáni, olùmúlò, tàbí ojú ìwé ètò",
-    "live": "[láàyè]",
+    "live": "Láàyè",
+    "liveTerminal": "[láàyè]",
     "searchMessagesFor": "Wá \"{{query}}\" nínú àwọn ìfiránṣẹ́"
   },
   "pages": {

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { useSkin } from "../../hooks/queries/usePreferences";
 
 interface PageShellProps {
   title: string;
@@ -12,6 +13,7 @@ const FOCUSABLE_SELECTOR =
 /** Title + body for routed pages; focuses the first control on mount unless focus is already inside. */
 export const PageShell: React.FC<PageShellProps> = ({ title, children, scrollable = false }) => {
   const contentRef = useRef<HTMLDivElement>(null);
+  const isTerminal = useSkin() === "terminal";
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -30,10 +32,15 @@ export const PageShell: React.FC<PageShellProps> = ({ title, children, scrollabl
 
   return (
     <div className="flex flex-col h-full">
-      <div
-        className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
-      >
-        <span className="text-accent" style={{ flex: 1 }}>{title}</span>
+      {/* One title style (#1966): Modern a sentence-case heading in `text-fg`; Terminal its small
+          accent strip. Both are the page's <h1>, in the same `h-bar` row. */}
+      <div className="flex items-center px-4 flex-shrink-0 h-bar border-b border-line">
+        <h1
+          data-testid="page-title"
+          className={`flex-1 truncate ${isTerminal ? "text-secondary font-mono text-accent" : "text-heading font-semibold text-fg"}`}
+        >
+          {title}
+        </h1>
       </div>
       {/* A flex column, so a page's `flex-1` body (and an `EmptyState` in it) fills the pane. */}
       <div

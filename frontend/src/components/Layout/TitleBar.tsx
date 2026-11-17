@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "../../bridge";
 import { PollisLogo } from "../ui/PollisLogo";
+import { IconButton } from "../ui/IconButton";
 import { isMac } from "../../utils/platform";
 
 const win = () => getCurrentWindow();
@@ -25,30 +26,32 @@ export const TitleBar: React.FC = () => {
 
   const winControls = (
     <div className="flex items-center flex-shrink-0">
-      <button
+      <IconButton
         data-testid="title-bar-minimize"
+        size="md"
         onClick={handleMinimize}
         aria-label={t("titleBar.minimize")}
-        className="icon-btn"
       >
         <Minus size={12} aria-hidden="true" />
-      </button>
-      <button
+      </IconButton>
+      <IconButton
         data-testid="title-bar-maximize"
+        size="md"
         onClick={handleMaximize}
         aria-label={t("titleBar.maximize")}
-        className="icon-btn"
       >
         <Square size={11} aria-hidden="true" />
-      </button>
-      <button
+      </IconButton>
+      {/* Kept off-token: Windows' own square close button and its red hover, copied from the OS (docs/design/README.md → One red). */}
+      <IconButton
         data-testid="title-bar-close"
+        size="md"
         onClick={handleClose}
         aria-label={t("common:actions.close")}
-        className="flex items-center justify-center w-8 h-8 transition-colors text-muted hover:bg-[#c42b1c] hover:text-white"
+        className="rounded-none hover:bg-[#c42b1c] hover:text-white"
       >
         <X size={12} aria-hidden="true" />
-      </button>
+      </IconButton>
     </div>
   );
 
@@ -79,12 +82,12 @@ export const TitleBar: React.FC = () => {
       ) : (
         <div className="flex items-center gap-2">
           <PollisLogo size={14} color="var(--c-accent)" />
-          <span className="text-xs font-mono text-muted">Pollis</span>
+          <span className="text-secondary font-mono text-muted">Pollis</span>
         </div>
       )}
 
       <span
-        className="absolute left-1/2 -translate-x-1/2 text-xs font-mono pointer-events-none text-muted"
+        className="absolute left-1/2 -translate-x-1/2 text-secondary font-mono pointer-events-none text-muted"
       >
         {isMac && "Pollis"}
       </span>

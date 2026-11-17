@@ -122,9 +122,13 @@ for (const skin of SKINS) {
     // Crop well past the ring, so a ring larger than the avatar is caught whole; on the
     // trailing side stop short of the name, which a speaking row also draws in the accent.
     const pad = 8;
+    // The crop's corner on a whole device pixel: a screenshot snaps a fractional clip, and the
+    // avatar is then measured from where the crop really starts, not from `pad` (#1966: a row
+    // that centres a 16px avatar in an 18.75px line sits on a fractional pixel).
+    const snap = (v: number) => Math.floor(v * DPR) / DPR;
     const clip = {
-      x: geometry.avatar.left - pad,
-      y: geometry.avatar.top - pad,
+      x: snap(geometry.avatar.left - pad),
+      y: snap(geometry.avatar.top - pad),
       width: geometry.avatar.right - geometry.avatar.left + pad + 4,
       height: geometry.avatar.bottom - geometry.avatar.top + 2 * pad,
     };
@@ -140,10 +144,10 @@ for (const skin of SKINS) {
 
     // Ring and avatar in the same frame: CSS px from the crop's corner.
     const avatar = {
-      left: pad,
-      top: pad,
-      right: pad + geometry.avatar.right - geometry.avatar.left,
-      bottom: pad + geometry.avatar.bottom - geometry.avatar.top,
+      left: geometry.avatar.left - clip.x,
+      top: geometry.avatar.top - clip.y,
+      right: geometry.avatar.right - clip.x,
+      bottom: geometry.avatar.bottom - clip.y,
     };
     const inset = {
       left: avatar.left - ring!.left,

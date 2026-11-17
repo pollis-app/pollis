@@ -625,6 +625,11 @@ export interface RedeemedInvite {
   group_name?: string | null;
 }
 
+/** Mirrors `InvitePreview` (#1972): the group a link names, before joining. */
+export interface InvitePreview {
+  group_name?: string | null;
+}
+
 export const inviteLinkQueryKeys = {
   byGroup: (groupId: string | null) =>
     ["group-invite-links", groupId] as const,

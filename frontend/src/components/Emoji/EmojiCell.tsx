@@ -3,6 +3,7 @@ import type { PickerEmoji } from "./emojiSearch";
 import { emojiDisplayChar, pickerEmojiId } from "./emojiSearch";
 import { emojiDisplayName, type EmojiAnnotationStack } from "./emojiAnnotations";
 import { CustomEmojiImage } from "./CustomEmojiImage";
+import { PressButton } from "../ui/PressButton";
 
 interface EmojiCellProps {
   item: PickerEmoji;
@@ -13,7 +14,7 @@ interface EmojiCellProps {
   onPreview: (item: PickerEmoji | null) => void;
 }
 
-/** A real `<button>`; `data-emoji-index` is its flat nav position. */
+/** A real `<button>` (`PressButton`, acting on click); `data-emoji-index` is its flat nav position. */
 export const EmojiCell: React.FC<EmojiCellProps> = ({
   item,
   toneIndex,
@@ -28,8 +29,8 @@ export const EmojiCell: React.FC<EmojiCellProps> = ({
       : `:${item.emoji.shortcode}:`;
 
   return (
-    <button
-      type="button"
+    <PressButton
+      activateOn="click"
       data-testid="emoji-cell"
       data-emoji-index={index}
       data-emoji-id={pickerEmojiId(item)}
@@ -39,7 +40,7 @@ export const EmojiCell: React.FC<EmojiCellProps> = ({
       onMouseEnter={() => onPreview(item)}
       onFocus={() => onPreview(item)}
       onMouseLeave={() => onPreview(null)}
-      className="flex items-center justify-center w-8 h-8 text-xl leading-none
+      className="flex items-center justify-center w-8 h-8 text-glyph leading-none
  hover:bg-hover focus:bg-active
                  focus:outline-none rounded-chip"
     >
@@ -52,6 +53,6 @@ export const EmojiCell: React.FC<EmojiCellProps> = ({
           sizeRem={1.5}
         />
       )}
-    </button>
+    </PressButton>
   );
 };

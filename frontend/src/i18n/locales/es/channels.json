@@ -109,7 +109,7 @@
     "empty": "No hay miembros.",
     "self": "(tú)",
     "adminToggle": "admin",
-    "kick": "expulsar",
+    "kick": "Expulsar",
     "verified": "Contacto verificado",
     "keyChanged": "La clave de identidad ha cambiado: vuelve a verificar",
     "invited": {
@@ -134,12 +134,12 @@
     "pageTitle": "Invitaciones",
     "empty": "No hay invitaciones pendientes.",
     "invitedBy": "Invitación de {{name}}",
-    "accept": "aceptar",
-    "decline": "rechazar",
+    "accept": "Aceptar",
+    "decline": "Rechazar",
     "acceptFailed": "No se pudo aceptar la invitación. Inténtalo de nuevo."
   },
   "inviteMember": {
-    "pageTitle": "Invitar miembro :: {{group}}",
+    "pageTitle": "Invitar miembro — {{group}}",
     "intro": "Invita a alguien a <accent>{{name}}</accent>",
     "identifierLabel": "Nombre de usuario o correo",
     "identifierPlaceholder": "amigo@pollis.com",
@@ -149,18 +149,20 @@
     "sendFailed": "No se pudo enviar la invitación"
   },
   "joinRequests": {
-    "pageTitle": "Solicitudes de acceso :: {{group}}",
+    "pageTitle": "Solicitudes de acceso — {{group}}",
     "allPageTitle": "Solicitudes de acceso",
     "pendingFor": "Solicitudes pendientes para entrar en <accent>{{name}}</accent>",
     "empty": "No hay solicitudes pendientes.",
     "allEmpty": "No hay solicitudes de acceso pendientes.",
-    "approve": "aprobar",
-    "reject": "rechazar"
+    "approve": "Aprobar",
+    "reject": "Rechazar"
   },
   "joinByInvite": {
     "pageTitle": "Unirse a un grupo",
     "heading": "Unirse a un grupo",
     "headingTerminal": "> UNIRSE A UN GRUPO",
+    "headingNamed": "¿Unirte a {{name}}?",
+    "headingNamedTerminal": "> UNIRSE A {{name}}",
     "blurb": "Los enlaces de invitación te dejan entrar sin que un administrador tenga que buscarte antes.",
     "tokenLabel": "Enlace o código de invitación",
     "tokenLabelTerminal": "ENLACE O CÓDIGO DE INVITACIÓN",

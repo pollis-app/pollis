@@ -81,10 +81,12 @@ export const VoiceChannelMembers: React.FC<VoiceChannelMembersProps> = observer(
           data-testid={`sidebar-voice-member-${channelId}-${m.userId}`}
           data-speaking={m.speaking ? "true" : undefined}
           data-muted={m.muted ? "true" : undefined}
-          className={`flex items-center gap-1.5 text-sm leading-tight ${m.speaking ? "text-accent" : "text-dim"}`}
+          className={`flex items-center gap-1.5 text-body leading-tight ${m.speaking ? "text-accent" : "text-dim"}`}
         >
-          {/* A flex box, so it is exactly the avatar: as a block it took the row's line height and the ring stretched (#1789). */}
-          <span className={`flex shrink-0 rounded-full ${m.speaking ? "ring-2 ring-accent" : ""}`}>
+          {/* A flex box, so it is exactly the avatar: as a block it took the row's line height and the ring stretched (#1789).
+              Set 1px down from the line's top rather than centred: centring a 16px avatar in an 18.75px line put it on a
+              fractional pixel, where the ring and the avatar round to different device pixels and the ring sat off-centre (#1966). */}
+          <span className={`mt-px flex shrink-0 self-start rounded-full ${m.speaking ? "ring-2 ring-accent" : ""}`}>
             <Avatar avatarKey={m.avatarKey} size={16} alt="" />
           </span>
           <bdi className="min-w-0 flex-1 truncate">{m.name}</bdi>

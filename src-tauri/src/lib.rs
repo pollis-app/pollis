@@ -597,6 +597,7 @@ pub fn run() {
             commands::groups::create_group_invite_link,
             commands::groups::list_group_invite_links,
             commands::groups::revoke_group_invite_link,
+            commands::groups::preview_group_invite_link,
             commands::groups::redeem_group_invite_link,
             commands::groups::request_group_access,
             commands::groups::get_group_join_requests,

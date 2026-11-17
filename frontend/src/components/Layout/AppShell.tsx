@@ -33,7 +33,7 @@ import { acceptIncomingCall, declineIncomingCall } from "../../voice/incomingCal
 import { flushOutbox } from "../../hooks/queries/useMessages";
 import { useBadge } from "../../hooks/useBadge";
 import { useAutoLock } from "../../hooks/useAutoLock";
-import { AlertTriangle, Download, Mail, Phone, X } from "lucide-react";
+import { AlertTriangle, Download, Mail, Phone } from "lucide-react";
 import { startUpdatePolling, stopUpdatePolling } from "../../services/updatePoller";
 import { loadDeviceCallRingtone } from "../../utils/notify";
 import { logIgnored } from "../../utils/log";
@@ -49,6 +49,8 @@ import { shareOf, cameraOf } from "../../types/voice-state";
 import { useGlobalShortcut } from "../../keyboard";
 import type { RouterContext } from "../../types/router";
 import { PressButton } from "../ui/PressButton";
+import { FOCUS_RING } from "../ui/focusRing";
+import { StatusBarDismissButton } from "./StatusBarDismissButton";
 
 const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
 
@@ -513,26 +515,11 @@ export const AppShell: React.FC = observer(() => {
     }
   }, [pathname, statusBarAlert, setStatusBarAlert]);
 
-  const isChatScreen = useMemo(() => {
-    const channelMatch = pathname.match(/^\/groups\/[^/]+\/channels\/([^/]+)/);
-    if (channelMatch && channelMatch[1] !== "new") {
-      return true;
-    }
-    const dmMatch = pathname.match(/^\/dms\/([^/]+)/);
-    if (dmMatch && dmMatch[1] !== "new") {
-      return true;
-    }
-    return false;
-  }, [pathname]);
-
-  // Modern bar is neutral; terminal fills it with the accent. `barInk` stays legible on `barBg`.
+  // The bar is chrome, never a solid accent fill (#1965): Modern's is neutral, Terminal's the
+  // ground with accent ink, on every screen.
   const modern = skin === "modern";
-  const barBg = modern
-    ? "var(--c-surface)"
-    : isChatScreen ? "var(--c-bg)" : "var(--c-accent)";
-  const barInk = modern
-    ? "var(--c-text-dim)"
-    : isChatScreen ? "var(--c-accent)" : "var(--c-surface)";
+  const barBg = modern ? "var(--c-surface)" : "var(--c-bg)";
+  const barInk = modern ? "var(--c-text-dim)" : "var(--c-accent)";
 
   const voiceChannelName = useMemo(() => {
     if (!activeVoiceChannelId) {
@@ -629,15 +616,8 @@ export const AppShell: React.FC = observer(() => {
           className="absolute inset-0 flex items-center justify-center pointer-events-none"
           style={{ zIndex: 9000, background: "rgba(0,0,0,0.7)" }}
         >
-          <div
-            className="flex flex-col items-center gap-2"
-            style={{
-              border: "2px dashed var(--c-accent)",
-              borderRadius: 8,
-              padding: "28px 56px",
-            }}
-          >
-            <span className="text-sm font-mono text-accent">
+          <div className="flex flex-col items-center gap-2 border-2 border-dashed border-accent rounded-panel py-7 px-14">
+            <span className="text-body font-mono text-accent">
               {t("shell.dropFiles")}
             </span>
           </div>
@@ -646,6 +626,7 @@ export const AppShell: React.FC = observer(() => {
 
       <div
         className="border-t border-line"
+        data-testid="status-bar"
         style={{
           flexShrink: 0,
           background: barBg,
@@ -660,7 +641,7 @@ export const AppShell: React.FC = observer(() => {
         {availableUpdateVersion && (
           <PressButton
             data-testid="status-bar-update-available"
-            className="text-xs font-mono flex items-center gap-1 cursor-pointer border-0"
+            className="text-secondary font-mono flex items-center gap-1 cursor-pointer border-0"
             style={{
               color: barInk,
               background: "none",
@@ -683,24 +664,20 @@ export const AppShell: React.FC = observer(() => {
             className="flex items-center gap-2"
             style={{ color: barInk }}
           >
-            <button
+            <PressButton
               data-testid="status-bar-incoming-call-accept"
-              className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
-              style={{ color: "inherit", background: "none", padding: 0 }}
+              activateOn="click"
+              className={`text-secondary font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0 bg-transparent p-0 text-inherit rounded-chip ${FOCUS_RING}`}
               onClick={() => acceptIncomingCall(router, incomingCall)}
               aria-label={t("statusBar.answerCall", { username: incomingCall.callerUsername })}
             >
               <Phone className="w-4 h-4" />: <bdi>@{incomingCall.callerUsername}</bdi>
-            </button>
-            <button
+            </PressButton>
+            <StatusBarDismissButton
               data-testid="status-bar-incoming-call-decline"
-              className="cursor-pointer border-0"
-              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => declineIncomingCall(incomingCall)}
-              aria-label={t("statusBar.declineCall")}
-            >
-              <X className="w-4 h-4" />
-            </button>
+              ariaLabel={t("statusBar.declineCall")}
+            />
           </div>
         ) : voiceError ? (
           <div
@@ -708,19 +685,15 @@ export const AppShell: React.FC = observer(() => {
             className="flex items-center gap-2"
             style={{ color: barInk }}
           >
-            <span className="text-xs font-mono flex items-center gap-1">
+            <span className="text-secondary font-mono flex items-center gap-1">
               <AlertTriangle className="w-4 h-4" />
               {voiceError}
             </span>
-            <button
+            <StatusBarDismissButton
               data-testid="status-bar-voice-error-dismiss"
-              className="cursor-pointer border-0"
-              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => setVoiceError(null)}
-              aria-label={t("statusBar.dismissVoiceError")}
-            >
-              <X className="w-4 h-4" />
-            </button>
+              ariaLabel={t("statusBar.dismissVoiceError")}
+            />
           </div>
         ) : screenShareError ? (
           <div
@@ -729,21 +702,17 @@ export const AppShell: React.FC = observer(() => {
             style={{ color: barInk }}
           >
             <span
-              className="text-xs font-mono flex items-center gap-1 min-w-0 truncate"
+              className="text-secondary font-mono flex items-center gap-1 min-w-0 truncate"
               title={screenShareError}
             >
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{screenShareError}</span>
             </span>
-            <button
+            <StatusBarDismissButton
               data-testid="status-bar-screenshare-error-dismiss"
-              className="cursor-pointer border-0"
-              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => shareStopped()}
-              aria-label={t("statusBar.dismissScreenShareError")}
-            >
-              <X className="w-4 h-4" />
-            </button>
+              ariaLabel={t("statusBar.dismissScreenShareError")}
+            />
           </div>
         ) : cameraError ? (
           <div
@@ -752,38 +721,35 @@ export const AppShell: React.FC = observer(() => {
             style={{ color: barInk }}
           >
             <span
-              className="text-xs font-mono flex items-center gap-1 min-w-0 truncate"
+              className="text-secondary font-mono flex items-center gap-1 min-w-0 truncate"
               title={cameraError}
             >
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{cameraError}</span>
             </span>
-            <button
+            <StatusBarDismissButton
               data-testid="status-bar-camera-error-dismiss"
-              className="cursor-pointer border-0"
-              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => cameraStopped()}
-              aria-label={t("statusBar.dismissCameraError")}
-            >
-              <X className="w-4 h-4" />
-            </button>
+              ariaLabel={t("statusBar.dismissCameraError")}
+            />
           </div>
         ) : statusBarAlert ? (
-          <button
+          <PressButton
             data-testid="status-bar-alert"
-            className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
-            style={{ color: barInk, background: "none", padding: 0 }}
+            activateOn="click"
+            className={`text-secondary font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0 bg-transparent p-0 rounded-chip ${FOCUS_RING}`}
+            style={{ color: barInk }}
             onClick={() => {
               router.navigate({ to: "/dms/$conversationId", params: { conversationId: statusBarAlert.roomId } });
               setStatusBarAlert(null);
             }}
           >
             <Mail className="w-4 h-4" />: <bdi>@{statusBarAlert.senderUsername}</bdi>
-          </button>
+          </PressButton>
         ) : isSyncing ? (
           <div
             data-testid="status-bar-syncing"
-            className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
+            className="flex items-center gap-1.5 text-secondary font-mono pointer-events-none"
             style={{ color: barInk }}
           >
             <span>{t("statusBar.syncing")}</span>

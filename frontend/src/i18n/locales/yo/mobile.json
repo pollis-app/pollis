@@ -267,6 +267,7 @@
     "checking": "Ó ń ṣàyẹ̀wò ìkésíni rẹ…",
     "confirm": "Dídarapọ̀ yóò pín orúkọ olùmúlò rẹ àti ìdánimọ̀ ẹ̀rọ rẹ pẹ̀lú gbogbo ènìyàn nínú ẹgbẹ́ yìí. Darapọ̀ nípasẹ̀ líǹkì tí o fọkàn tán nìkan.",
     "confirmTitle": "Ṣé o fẹ́ darapọ̀ mọ́ ẹgbẹ́ yìí?",
+    "confirmTitleNamed": "Ṣé o fẹ́ darapọ̀ mọ́ {{name}}?",
     "join": "Darapọ̀ mọ́ ẹgbẹ́",
     "joining": "Ó ń darapọ̀…",
     "failed": "Líǹkì ìkésíni yìí kò ṣiṣẹ́ mọ́. Béèrè fún tuntun.",
@@ -341,6 +342,8 @@
     "filtersLabel": "Àwọn àlẹ̀mọ́",
     "messages": "Àwọn ìfiránṣẹ́",
     "placeholder": "Wá ohun gbogbo…",
+    "scope": "Nínú {{name}}",
+    "scopeClear": "Wá níbi gbogbo, kì í ṣe nínú {{name}} nìkan",
     "resultCount_other": "Àbájáde {{count}}",
     "typePrompt": "Tẹ̀wé…"
   },

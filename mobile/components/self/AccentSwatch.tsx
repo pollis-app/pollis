@@ -1,7 +1,7 @@
 import { Pressable, View } from "react-native";
 import { Text } from "../Text";
 import { Icon } from "../icons";
-import { semantic, type as ty, fonts, r, space, layout } from "../../theme/tokens";
+import { semantic, type as ty, fonts, r, space, layout, typeSize } from "../../theme/tokens";
 
 const DISC = layout.touchMin;
 const DISC_SELECTED = layout.touchMin + 8;
@@ -62,7 +62,7 @@ export function AccentSwatch({
         style={[
           ty.meta,
           {
-            fontSize: 13,
+            fontSize: typeSize.section,
             fontFamily: selected ? fonts.bold : fonts.medium,
             color: selected ? semantic.text : semantic.dim,
           },

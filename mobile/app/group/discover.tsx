@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Screen, Header, Body, Field, Button, Card } from "../../components/ui";
 import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty, fonts, space } from "../../theme/tokens";
+import { semantic, type as ty, fonts, space, typeSize } from "../../theme/tokens";
 import { useGroupBySlug, useRequestGroupAccess, useMyJoinRequest } from "../../hooks/queries";
 import { useThemeRerender } from "../../components/theme";
 
@@ -95,7 +95,7 @@ export default function Discover() {
                 ) : (
                   <Icon.check size={16} color={semantic.accent} />
                 )}
-                <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 15, color: semantic.text }}>
+                <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: typeSize.button, color: semantic.text }}>
                   {statusText}
                 </Text>
               </View>

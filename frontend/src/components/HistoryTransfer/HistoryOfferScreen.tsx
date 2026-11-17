@@ -53,7 +53,7 @@ export const HistoryOfferScreen: React.FC<HistoryOfferScreenProps> = ({ sources,
     content = (
       <>
         <TransferStatus transfer={transfer} onRetried={(next) => setTransferId(next.transfer_id)} />
-        {!finished && <p className="text-xs font-mono text-muted leading-relaxed">{t("historyTransfer.continueHint")}</p>}
+        {!finished && <p className="text-secondary font-mono text-muted leading-relaxed">{t("historyTransfer.continueHint")}</p>}
         <div>
           <Button data-testid="history-offer-continue" variant={finished ? "primary" : "secondary"} onClick={onContinue}>
             {t("historyTransfer.continue")}
@@ -65,16 +65,16 @@ export const HistoryOfferScreen: React.FC<HistoryOfferScreenProps> = ({ sources,
     content = (
       <>
         <div className="flex flex-col gap-2">
-          <h2 className="text-lg text-fg" data-testid="history-offer-title">
+          <h2 className="text-heading text-fg" data-testid="history-offer-title">
             {named
               ? t("historyTransfer.offerTitle", { device: named.device_name ?? t("historyTransfer.unnamedDevice") })
               : t("historyTransfer.offerTitlePick")}
           </h2>
-          <p className="text-sm text-muted leading-relaxed">{t("historyTransfer.offerSubtitle")}</p>
+          <p className="text-body text-muted leading-relaxed">{t("historyTransfer.offerSubtitle")}</p>
         </div>
         {!named && <SourcePicker sources={sources} value={picked} onChange={setPicked} />}
         {error && (
-          <p className="text-sm text-danger" data-testid="history-offer-error">
+          <p className="text-body text-danger" data-testid="history-offer-error">
             {error}
           </p>
         )}

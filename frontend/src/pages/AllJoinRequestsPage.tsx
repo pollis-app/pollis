@@ -63,7 +63,7 @@ export const AllJoinRequestsPage: React.FC = () => {
           className="flex-1 flex flex-col overflow-auto bg-bg"
         >
           <div className="px-4 py-4">
-            <p className="text-xs font-mono text-muted">
+            <p className="text-secondary font-mono text-muted">
               {t("common:states.loading")}
             </p>
           </div>
@@ -100,7 +100,7 @@ export const AllJoinRequestsPage: React.FC = () => {
           return (
             <div key={groupId} className="flex flex-col">
               <div className="px-4 py-4">
-                <p className="text-xs font-mono text-dim">
+                <p className="text-secondary font-mono text-dim">
                   <Trans
                     i18nKey="channels:joinRequests.pendingFor"
                     values={{ name: groupName }}
@@ -115,7 +115,7 @@ export const AllJoinRequestsPage: React.FC = () => {
                 rowTestId={(req) => `join-request-${req.id}`}
                 renderRow={(req) => (
                   <span
-                    className="flex-1 truncate text-xs font-mono text-fg"
+                    className="flex-1 truncate text-secondary font-mono text-fg"
                   >
                     {req.requester_username ?? req.requester_id}
                   </span>
@@ -145,7 +145,7 @@ export const AllJoinRequestsPage: React.FC = () => {
           );
         })}
         {decisionError && (
-          <p data-testid="join-request-error" className="px-4 py-2 text-xs font-mono text-danger" role="alert">
+          <p data-testid="join-request-error" className="px-4 py-2 text-secondary font-mono text-danger" role="alert">
             {errorMessage(decisionError)}
           </p>
         )}

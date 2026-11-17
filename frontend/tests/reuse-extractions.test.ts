@@ -7,8 +7,9 @@ import { fieldControlClass, fieldControlStyle } from "../src/components/ui/field
 import { deriveSlug, resolveSlug } from "../src/utils/urlRouting.ts";
 import { detachChannel } from "../src/utils/detachChannel.ts";
 
+// The control radius buttons use, and the shared focus ring (#1964).
 const RING =
-  "font-mono text-sm focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2";
+  "font-mono text-body rounded-control focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg transition-all bg-surface text-fg border-2";
 
 test("TextInput / TextArea class: the border tracks error, then focus", () => {
   assert.equal(
@@ -31,7 +32,6 @@ test("TextInput / TextArea style: chevron padding only when focused and enabled;
     paddingInlineStart: "0.75rem",
     paddingInlineEnd: "0.75rem",
     outline: "none",
-    borderRadius: "0.5rem",
     opacity: 1,
     cursor: undefined,
   });

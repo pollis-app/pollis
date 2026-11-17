@@ -92,6 +92,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::groups::create_group_invite_link,
             crate::commands::groups::list_group_invite_links,
             crate::commands::groups::revoke_group_invite_link,
+            crate::commands::groups::preview_group_invite_link,
             crate::commands::groups::redeem_group_invite_link,
             crate::commands::groups::request_group_access,
             crate::commands::groups::get_group_join_requests,

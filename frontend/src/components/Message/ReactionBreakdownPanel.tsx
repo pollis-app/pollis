@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { Avatar } from "../ui/Avatar";
+import { PressButton } from "../ui/PressButton";
 import { ReactionEmoji, spokenEmoji } from "./ReactionEmoji";
 import {
   selectTab,
@@ -82,8 +83,9 @@ export const ReactionBreakdownPanel: React.FC<ReactionBreakdownPanelProps> = ({
         {tabs.map((x) => {
           const on = x.key === tab?.key;
           return (
-            <button
+            <PressButton
               key={x.key}
+              activateOn="click"
               ref={(el) => {
                 if (el) {
                   tabRefs.current.set(x.key, el);
@@ -102,13 +104,13 @@ export const ReactionBreakdownPanel: React.FC<ReactionBreakdownPanelProps> = ({
                   : t("reactions.tabLabel", { emoji: spokenEmoji(x.emoji), count: x.count })
               }
               onClick={() => setWanted(x.key)}
-              className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-chip text-xs font-mono transition-colors duration-75 ${
+              className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-chip text-secondary font-mono transition-colors duration-75 ${
                 on ? "bg-surface-high text-accent font-bold" : "text-muted hover:bg-hover"
               }`}
             >
               {x.emoji === null ? <span>{t("reactions.all")}</span> : <ReactionEmoji emoji={x.emoji} />}
               <span>{x.count}</span>
-            </button>
+            </PressButton>
           );
         })}
       </div>
@@ -156,13 +158,13 @@ const ReactorRow: React.FC<{
     <>
       <Avatar avatarKey={person.avatarKey ?? null} size={24} alt="" />
       <span className="flex-1 min-w-0 flex items-baseline gap-1.5">
-        <span className="truncate text-sm text-fg">{name}</span>
+        <span className="truncate text-body text-fg">{name}</span>
         {person.handle ? (
-          <span className="truncate text-xs font-mono text-muted">@{person.handle}</span>
+          <span className="truncate text-secondary font-mono text-muted">@{person.handle}</span>
         ) : null}
       </span>
       {person.isSelf ? (
-        <span className="shrink-0 px-1.5 rounded-chip bg-surface-high text-accent text-2xs font-medium">
+        <span className="shrink-0 px-1.5 rounded-chip bg-surface-high text-accent text-meta font-medium">
           {t("reactions.you")}
         </span>
       ) : null}
@@ -179,9 +181,9 @@ const ReactorRow: React.FC<{
   return (
     <li data-testid="reaction-breakdown-row" data-user-id={person.userId}>
       {onOpen ? (
-        <button type="button" onClick={onOpen} aria-label={label} className={`${rowClass} hover:bg-hover`}>
+        <PressButton activateOn="click" onClick={onOpen} aria-label={label} className={`${rowClass} hover:bg-hover`}>
           {body}
-        </button>
+        </PressButton>
       ) : (
         <div aria-label={label} className={rowClass}>
           {body}

@@ -17,6 +17,7 @@ import { usePeerVerificationMap } from "../hooks/queries/useUserProfile";
 import { useReadReceipts } from "../hooks/useReadReceipts";
 import { useSendReadReceipts } from "../hooks/queries/usePreferences";
 import { PressButton } from "../components/ui/PressButton";
+import { IconButton } from "../components/ui/IconButton";
 import { PillButton } from "../components/ui/PillButton";
 import { ConversationHeader } from "../components/Layout/ConversationHeader";
 import { activeCallIdOf, voiceCounterpartyUserId } from "../types/voice-state";
@@ -154,7 +155,7 @@ export const DMPage: React.FC = observer(() => {
     <PressButton
       data-testid="dm-header-username"
       onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
-      className="font-mono transition-colors text-inherit hover:text-accent border-0 bg-transparent p-0 cursor-pointer text-xs"
+      className="font-mono transition-colors text-inherit hover:text-accent border-0 bg-transparent p-0 cursor-pointer text-secondary"
       aria-label={t("conversation.viewProfile", { name: username })}
     >
       <bdi>@{username}</bdi>
@@ -170,29 +171,31 @@ export const DMPage: React.FC = observer(() => {
       <ConversationHeader title={title}>
         {isOneOnOne && otherUserId && (
           // Verified only while `verified = 1`; a key change clears it, the timeline says why (#1605).
-          <PressButton
+          <IconButton
             data-testid={peerVerified ? "dm-header-verified" : "dm-header-unverified"}
+            activateOn="press"
             onClick={() => setSafety(otherUserId)}
             aria-label={peerVerified ? t("list.verified") : t("safety.verify")}
             title={peerVerified ? t("list.verified") : t("safety.verify")}
-            className={`icon-btn-sm flex-shrink-0 ${peerVerified ? "text-accent" : ""}`}
+            className={`flex-shrink-0 ${peerVerified ? "text-accent" : ""}`}
           >
             {peerVerified ? (
               <ShieldCheck size={14} aria-hidden="true" />
             ) : (
               <Shield size={14} aria-hidden="true" />
             )}
-          </PressButton>
+          </IconButton>
         )}
-        <PressButton
+        <IconButton
           data-testid="dm-pins-trigger"
+          activateOn="press"
           onClick={togglePins}
           aria-label={t("conversation.pinsLabel")}
           title={t("conversation.pinsLabel")}
-          className="icon-btn-sm flex-shrink-0"
+          className="flex-shrink-0"
         >
           <Pin size={14} aria-hidden="true" />
-        </PressButton>
+        </IconButton>
         {activeCallId ? (
           // In a 1:1 call: the call slot becomes the voice bar's "return to call" (#1640).
           <PillButton
@@ -206,17 +209,17 @@ export const DMPage: React.FC = observer(() => {
             {t("voice:bar.returnToCall")}
           </PillButton>
         ) : canCall ? (
-          <button
+          <IconButton
             data-testid="dm-header-call"
             onClick={() => {
               void startCall();
             }}
             aria-label={t("conversation.call", { name: username })}
             title={t("conversation.call", { name: username })}
-            className="icon-btn-sm flex-shrink-0"
+            className="flex-shrink-0"
           >
             <Phone size={14} aria-hidden="true" />
-          </button>
+          </IconButton>
         ) : null}
       </ConversationHeader>
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">

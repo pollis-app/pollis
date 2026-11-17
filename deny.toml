@@ -88,6 +88,18 @@ ignore = [
     # "unmaintained", not vulnerable. Clears when uniffi moves askama off it.
     { id = "RUSTSEC-2026-0374", reason = "basic-toml unmaintained; build-time only via uniffi_bindgen -> askama_derive; no runtime surface" },
 
+    # chrono unmaintained (#1992): informational, no vulnerability and no
+    # patched release (the advisory recommends jiff or time). The newest
+    # LiveKit stack still requires it — livekit 0.11.0 and livekit-data-stream
+    # 0.2.1 depend on chrono directly, and livekit-protocol 0.8.3 pulls it via
+    # pbjson-types 0.9.0 (latest) — so the desktop `media` graph keeps chrono
+    # whatever we do. Our own direct uses (pollis-core, pollis-delivery, pollis,
+    # pollis-tui, fuzz) are kept: ~180 sites of timestamp formatting whose
+    # byte-exact RFC 3339 output is stored and compared as strings, and moving
+    # them would not take chrono out of this graph. Migrate them to jiff
+    # together with the livekit bump that drops chrono; this entry goes then.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, not vulnerable; required by livekit, livekit-data-stream and pbjson-types (latest releases); no patched release" },
+
     # unic-* unmaintained: transitive unicode tables (via idna/url handling).
     # Compile/runtime static data; no security impact from unmaintained status.
     { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained; transitive unicode tables; no security impact" },
@@ -322,11 +334,15 @@ skip = [
     { name = "inout", version = "0.1.4" },
     { name = "itertools", version = "0.12.1" },
     { name = "itertools", version = "0.13.0" },
+    # cpal 0.18 (#1989) declares jni 0.22 for its Android host; pollis-core's
+    # Android keystore and libwebrtc are on 0.21. cpal is never built for
+    # Android (mobile builds pollis-core without `media`), so no binary links
+    # both. Goes when pollis-core and libwebrtc move to jni 0.22.
+    { name = "jni", version = "0.21.1" },
+    { name = "jni-sys", version = "0.3.1" },
     { name = "libloading", version = "0.7.4" },
     { name = "linux-raw-sys", version = "0.4.15" },
     { name = "matchit", version = "0.7.3" },
-    { name = "ndk", version = "0.8.0" },
-    { name = "ndk-sys", version = "0.5.0+25.2.9519653" },
     { name = "nix", version = "0.29.0" },
     # 0.30.1 is the rest of the tree; 0.31.3 comes with zip 9 (pollis-core).
     { name = "nix", version = "0.30.1" },

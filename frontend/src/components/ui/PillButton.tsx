@@ -1,4 +1,5 @@
 import React from "react";
+import { FOCUS_RING } from "./focusRing";
 
 interface PillButtonProps {
   accent: string;
@@ -39,13 +40,11 @@ export const PillButton: React.FC<PillButtonProps> = ({
       aria-pressed={ariaPressed}
       title={title}
       onClick={onClick}
-      className="flex items-center justify-center font-mono transition-colors cursor-pointer rounded-[3px] border border-solid border-[var(--pill-accent)] bg-[var(--pill-accent)] text-bg hover:bg-bg hover:text-[var(--pill-accent)]"
-      style={{
-        ["--pill-accent" as string]: accent,
-        padding: square ? "3px" : "1px 8px",
-        gap: square ? 0 : "0.375rem",
-        lineHeight: 1.4,
-      } as React.CSSProperties}
+      className={`flex items-center justify-center font-mono leading-[1.4] transition-colors cursor-pointer rounded-chip border border-solid border-[var(--pill-accent)] bg-[var(--pill-accent)] text-bg hover:bg-bg hover:text-[var(--pill-accent)] ${
+        square ? "p-1" : "px-2 py-0.5 gap-1.5"
+      } ${FOCUS_RING}`}
+      // The accent is a runtime colour (the voice state's), so it rides a CSS variable.
+      style={{ ["--pill-accent" as string]: accent } as React.CSSProperties}
     >
       {children}
     </button>

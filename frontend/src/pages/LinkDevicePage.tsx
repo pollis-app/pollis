@@ -4,9 +4,14 @@ import { useNavigate } from "@tanstack/react-router";
 import { observer } from "mobx-react-lite";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormLead } from "../components/ui/FormLead";
+import { FormActions } from "../components/ui/FormActions";
 import { InputOtp } from "../components/ui/InputOtp";
 import { LoadingSpinner } from "../components/ui/LoaderSpinner";
 import { ThemedQr } from "../components/ui/ThemedQr";
+import { PressButton } from "../components/ui/PressButton";
+import { FOCUS_RING } from "../components/ui/focusRing";
 import { LinkedHistoryRequest } from "../components/HistoryTransfer/LinkedHistoryRequest";
 import { writeClipboardText } from "../bridge";
 import { appStore } from "../stores/appStore";
@@ -20,13 +25,6 @@ type Step =
   | { kind: "code"; handle: api.DeviceLinkHandle; status: api.DeviceLinkStatus }
   | { kind: "linked"; name: string; deviceId: string | null }
   | { kind: "error"; message: string };
-
-const Heading: React.FC<{ title: string; subtitle?: string; testId?: string }> = ({ title, subtitle, testId }) => (
-  <div className="flex flex-col gap-3" data-testid={testId}>
-    <h1 className="text-xl text-fg">{title}</h1>
-    {subtitle && <p className="text-sm text-muted leading-relaxed">{subtitle}</p>}
-  </div>
-);
 
 export const LinkDevicePage: React.FC = observer(() => {
   const { t } = useTranslation("settings");
@@ -121,7 +119,7 @@ export const LinkDevicePage: React.FC = observer(() => {
   if (step.kind === "pin") {
     body = (
       <>
-        <Heading title={t("linkDevice.pinTitle")} subtitle={t("linkDevice.pinSubtitle")} />
+        <FormLead title={t("linkDevice.pinTitle")}>{t("linkDevice.pinSubtitle")}</FormLead>
         <div className="flex flex-col gap-3" data-testid="link-device-pin-input">
           <InputOtp
             length={4}
@@ -136,34 +134,29 @@ export const LinkDevicePage: React.FC = observer(() => {
             mask
             autoFocus
           />
-          {pinError && <p className="text-sm text-danger" data-testid="link-device-pin-error">{pinError}</p>}
+          {pinError && <p className="text-body text-danger" data-testid="link-device-pin-error">{pinError}</p>}
         </div>
-        <div>
-          <Button variant="ghost" onClick={() => navigate({ to: "/security" })}>
-            {t("common:actions.cancel")}
-          </Button>
-        </div>
+        <FormActions cancel={{ onClick: () => navigate({ to: "/security" }) }} />
       </>
     );
   } else if (step.kind === "linked") {
     body = (
       <>
-        <Heading testId="link-device-done" title={t("linkDevice.linked", { name: step.name })} />
+        <FormLead testId="link-device-done" title={t("linkDevice.linked", { name: step.name })} />
         {/* #1735: the new device may ask for this one's message history right away. */}
         <LinkedHistoryRequest deviceId={step.deviceId} deviceName={step.name} />
-        <div>
+        <FormActions>
           <Button onClick={() => navigate({ to: "/security" })}>{t("linkDevice.done")}</Button>
-        </div>
+        </FormActions>
       </>
     );
   } else if (step.kind === "error") {
     body = (
       <>
-        <Heading testId="link-device-error" title={t("linkDevice.failed")} subtitle={step.message} />
-        <div className="flex gap-2">
+        <FormLead testId="link-device-error" title={t("linkDevice.failed")}>{step.message}</FormLead>
+        <FormActions cancel={{ onClick: leave }}>
           <Button onClick={restart}>{t("linkDevice.newCode")}</Button>
-          <Button variant="ghost" onClick={leave}>{t("common:actions.cancel")}</Button>
-        </div>
+        </FormActions>
       </>
     );
   } else {
@@ -175,26 +168,22 @@ export const LinkDevicePage: React.FC = observer(() => {
       const tampered = status.state === "tampered";
       body = (
         <>
-          <Heading
+          <FormLead
             testId={`link-device-${status.state}`}
             title={tampered ? t("linkDevice.tamperedTitle") : t("linkDevice.expiredTitle")}
-            subtitle={tampered ? t("linkDevice.tampered") : t("linkDevice.expired")}
-          />
-          <div className="flex gap-2">
+          >
+            {tampered ? t("linkDevice.tampered") : t("linkDevice.expired")}
+          </FormLead>
+          <FormActions cancel={{ onClick: leave }}>
             <Button onClick={restart}>{t("linkDevice.newCode")}</Button>
-            <Button variant="ghost" onClick={leave}>{t("common:actions.cancel")}</Button>
-          </div>
+          </FormActions>
         </>
       );
     } else if (status.state === "ready_to_approve") {
       body = (
         <>
-          <Heading
-            testId="link-device-approve-card"
-            title={t("linkDevice.wantsToSignIn", { name })}
-            subtitle={t("linkDevice.approveHint")}
-          />
-          <div className="flex gap-2">
+          <FormLead testId="link-device-approve-card" title={t("linkDevice.wantsToSignIn", { name })}>{t("linkDevice.approveHint")}</FormLead>
+          <FormActions>
             <Button data-testid="link-device-approve" isLoading={busy} onClick={() => approve(handle, name, status.new_device_id)}>
               {t("linkDevice.approve")}
             </Button>
@@ -209,17 +198,15 @@ export const LinkDevicePage: React.FC = observer(() => {
             >
               {t("linkDevice.reject")}
             </Button>
-          </div>
+          </FormActions>
         </>
       );
     } else if (status.state === "claimed") {
       body = (
         <>
-          <Heading testId="link-device-claimed" title={t("linkDevice.claimedTitle")} subtitle={t("linkDevice.claimed", { name })} />
+          <FormLead testId="link-device-claimed" title={t("linkDevice.claimedTitle")}>{t("linkDevice.claimed", { name })}</FormLead>
           <LoadingSpinner size="sm" />
-          <div>
-            <Button variant="ghost" onClick={leave}>{t("common:actions.cancel")}</Button>
-          </div>
+          <FormActions cancel={{ onClick: leave }} />
         </>
       );
     } else {
@@ -229,11 +216,9 @@ export const LinkDevicePage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("linkDevice.heading")} scrollable>
-      <div className="flex justify-center px-6 py-12">
-        <div className="flex flex-col gap-10 w-full max-w-md" data-testid="link-device-page">
-          {body}
-        </div>
-      </div>
+      <PageColumn spacing="sections" data-testid="link-device-page">
+        {body}
+      </PageColumn>
     </PageShell>
   );
 });
@@ -259,7 +244,9 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
 
   return (
     <>
-      <Heading title={t("linkDevice.showTitle")} subtitle={mode === "qr" ? t("linkDevice.showSubtitle") : t("linkDevice.codeSubtitle")} />
+      <FormLead title={t("linkDevice.showTitle")}>
+        {mode === "qr" ? t("linkDevice.showSubtitle") : t("linkDevice.codeSubtitle")}
+      </FormLead>
       <div className="flex gap-2" role="tablist">
         <Button data-testid="link-device-tab-qr" size="sm" variant={mode === "qr" ? "primary" : "ghost"} onClick={() => setMode("qr")}>
           {t("linkDevice.tabQr")}
@@ -273,26 +260,24 @@ const ShowCode: React.FC<{ handle: api.DeviceLinkHandle; onCancel: () => void }>
           <ThemedQr data-testid="link-device-qr" value={handle.qr_payload} size={208} />
         </div>
       ) : (
-        <button
-          type="button"
+        <PressButton
           data-testid="link-device-copy"
+          activateOn="click"
           onClick={copy}
-          className="text-start flex flex-col gap-3 p-5 rounded-lg border border-accent bg-surface hover:bg-hover"
+          className={`text-start flex flex-col gap-3 p-5 rounded-panel border border-accent bg-surface hover:bg-hover ${FOCUS_RING}`}
         >
-          <code className="font-mono text-base text-fg break-all leading-relaxed" data-testid="link-device-payload">
+          <code className="font-mono text-row text-fg break-all leading-relaxed" data-testid="link-device-payload">
             {handle.qr_payload}
           </code>
-          <span className={copied ? "text-xs font-mono text-accent" : "text-xs font-mono text-muted"}>
+          <span className={copied ? "text-secondary font-mono text-accent" : "text-secondary font-mono text-muted"}>
             {copied ? t("linkDevice.copied") : t("linkDevice.clickToCopy")}
           </span>
-        </button>
+        </PressButton>
       )}
-      <p className="text-sm text-muted" data-testid="link-device-status">
+      <p className="text-body text-muted" data-testid="link-device-status">
         {secondsLeft > 0 ? t("linkDevice.expiresIn", { time: `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}` }) : t("linkDevice.expiredTitle")}
       </p>
-      <div>
-        <Button variant="ghost" onClick={onCancel}>{t("common:actions.cancel")}</Button>
-      </div>
+      <FormActions cancel={{ onClick: onCancel }} />
     </>
   );
 };

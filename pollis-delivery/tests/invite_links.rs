@@ -2,8 +2,9 @@
 
 use pollis_delivery::db::Db;
 use pollis_delivery::groups::{
-    apply_create_invite_link, apply_redeem_invite_link, apply_revoke_invite_link,
-    CreateInviteLinkBody, RedeemInviteLinkBody, RedeemOutcome, RevokeInviteLinkBody,
+    apply_create_invite_link, apply_preview_invite_link, apply_redeem_invite_link,
+    apply_revoke_invite_link, CreateInviteLinkBody, PreviewInviteLinkBody, PreviewOutcome,
+    RedeemInviteLinkBody, RedeemOutcome, RevokeInviteLinkBody,
 };
 use pollis_delivery::invite_token;
 use pollis_delivery::writes::WriteOutcome;
@@ -714,4 +715,73 @@ async fn revocation_is_permanent_and_keeps_its_first_timestamp() {
         .unwrap();
     let revoked_at: String = rows.next().await.unwrap().unwrap().get(0).unwrap();
     assert_eq!(revoked_at, NOW, "the first revocation time must stand");
+}
+
+async fn preview(db: &Db, token: &str, attempt: &str) -> PreviewOutcome {
+    apply_preview_invite_link(
+        &db.conn().await.unwrap(),
+        Some(JOINER),
+        &PreviewInviteLinkBody {
+            token: token.to_string(),
+            user_id: Some(JOINER.to_string()),
+            attempt_id: attempt.to_string(),
+        },
+    )
+    .await
+    .expect("preview")
+}
+
+/// #1972: a live token names its group, and that is all a preview does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_preview_names_the_group_without_joining_or_burning_a_use() {
+    let db = fresh().await;
+    let link = create_link(&db, "link-1", None, Some(1)).await;
+
+    assert_eq!(
+        preview(&db, &link.token, "att-preview").await,
+        PreviewOutcome::Live {
+            group_name: Some("Group One".to_string())
+        }
+    );
+    assert!(!is_member(&db, GROUP, JOINER).await, "a preview must not join");
+
+    // The single use is still there to redeem.
+    assert_eq!(redeem(&db, &link.token, "att-1", NOW).await, joined());
+}
+
+/// #1972: a preview fails exactly like a redeem, so it names nothing it shouldn't.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_preview_of_a_dead_token_is_rejected() {
+    let db = fresh().await;
+    let link = create_link(&db, "link-1", Some(&server_time_offset(-3600)), None).await;
+    assert_eq!(
+        preview(&db, &link.token, "att-expired").await,
+        PreviewOutcome::Rejected
+    );
+    assert_eq!(
+        preview(&db, "not-a-token", "att-malformed").await,
+        PreviewOutcome::Rejected
+    );
+}
+
+/// #1972: failed previews spend the same budget as failed redeems, so a
+/// preview is not a free oracle for guessing tokens.
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_previews_spend_the_redeem_failure_budget() {
+    let db = fresh().await;
+    let link = create_link(&db, "link-1", None, None).await;
+
+    let forged = format!("{}.{}", "A".repeat(16), "B".repeat(43));
+    for i in 0..10 {
+        preview(&db, &forged, &format!("att-{i}")).await;
+    }
+    assert_eq!(
+        preview(&db, &link.token, "att-limited").await,
+        PreviewOutcome::RateLimited
+    );
+    assert_eq!(
+        redeem(&db, &link.token, "att-redeem", NOW).await,
+        RedeemOutcome::RateLimited,
+        "the redeem shares the spent budget"
+    );
 }

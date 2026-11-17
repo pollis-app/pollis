@@ -31,7 +31,8 @@ use crate::{
 };
 
 use super::capture::{open_mic, spawn_capture_task, CaptureParams, CaptureTask, MicSource};
-use super::devices::{get_device, warm_device_cache};
+use super::device_watch::{next_generation, stream_hook};
+use super::devices::{open_device, warm_host};
 use super::gate::{TransmitGate, VoiceGateState, VoiceInputMode};
 use super::join::{
     classify_connect_error, classify_ds_error, disconnect_is_retryable, reconnect_delay,
@@ -40,7 +41,7 @@ use super::join::{
 use super::playback::{ensure_playback, register_remote_track, unregister_remote_track};
 use super::resampler::MIX_RATE_HZ;
 use super::types::{
-    user_id_from_voice_identity, JoinTimings, SendableStream, VoiceEvent, VoiceState,
+    user_id_from_voice_identity, JoinTimings, OpenedDevice, SendableStream, VoiceEvent, VoiceState,
     VoiceWarmup, VOICE_WARMUP_TTL,
 };
 
@@ -113,6 +114,9 @@ pub async fn subscribe_voice_events(
 ) -> Result<()> {
     let mut voice = state.voice.lock().await;
     voice.channel = Some(on_event);
+    drop(voice);
+    // The device hot-plug watch reports through this channel (#1989).
+    super::device_watch::start(state);
     Ok(())
 }
 
@@ -155,8 +159,8 @@ impl Drop for WarmGuard {
     }
 }
 
-/// Warmup before Join: pre-mint the token, prime DNS/TLS, and enumerate the
-/// audio devices so the join opens the mic without an ALSA scan.
+/// Warmup before Join: pre-mint the token, prime DNS/TLS, and connect the
+/// audio host so the join's mic open skips the sound-server handshake.
 /// Same channel_id is a no-op; a different one supersedes it.
 pub async fn prepare_voice_connection(
     channel_id: String,
@@ -185,7 +189,7 @@ pub async fn prepare_voice_connection(
     let Some(_warming) = begin_warm(&channel_id) else {
         return Ok(());
     };
-    warm_device_cache();
+    warm_host();
 
     // Pre-fetch the DS-minted token; best-effort.
     let (token, ds_url) = match crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await {
@@ -421,12 +425,14 @@ impl Gate {
 struct MicOutcome {
     /// The cpal stream and the ring its callback fills; both `None` on listen-only.
     stream: Option<(SendableStream, MicSource)>,
+    /// The device the stream opened on.
+    device: OpenedDevice,
     init_ms: u64,
 }
 
 impl MicOutcome {
     fn listen_only() -> Self {
-        Self { stream: None, init_ms: 0 }
+        Self { stream: None, device: OpenedDevice::default(), init_ms: 0 }
     }
 }
 
@@ -588,18 +594,23 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
                 if std::env::var("POLLIS_DISABLE_MIC").is_ok() {
                     return Err(anyhow::anyhow!("mic disabled via POLLIS_DISABLE_MIC").into());
                 }
-                let host = cpal::default_host();
-                let dev = get_device(&host, input_device_clone.as_deref(), true)?;
+                // A saved device that is gone or will not open falls back to
+                // the default mic; only a failing default goes listen-only.
+                let generation = next_generation();
+                let opened = open_device(input_device_clone.as_deref(), true, |dev| {
+                    open_mic(dev, Some(stream_hook(true, generation)))
+                })?;
                 crate::diag!("[voice] mic device opened");
-                open_mic(&dev)
+                Ok::<_, crate::error::Error>((opened.value, OpenedDevice { id: opened.device_id, generation }))
             }),
         )
         .await;
         // Mic is best-effort: on failure (or a device that takes longer than the
         // budget) join listen-only. A late stream drops on its blocking thread.
         let mic = match opened {
-            Ok(Ok(Ok((stream, source)))) => MicOutcome {
+            Ok(Ok(Ok(((stream, source), device)))) => MicOutcome {
                 stream: Some((stream, source)),
+                device,
                 init_ms: mic_started.elapsed().as_millis() as u64,
             },
             Ok(Ok(Err(e))) => {
@@ -651,7 +662,7 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
         }
 
         // Open playback before any TrackSubscribed is processed (the gate below).
-        let speaker_ok = match ensure_playback(Arc::clone(&voice_for_mic), output_device_for_mic).await {
+        let speaker_ok = match ensure_playback(Arc::clone(&voice_for_mic), output_device_for_mic, false).await {
             Ok(()) => true,
             Err(e) => {
                 crate::diag!("[voice] playback init failed (speaker disabled this session): {e}");
@@ -673,6 +684,7 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
             }
         };
     let mic_init_ms = mic.init_ms;
+    let mic_device = mic.device.clone();
     let (mic_stream, mic_source): (Option<SendableStream>, Option<MicSource>) = match mic.stream {
         Some((s, src)) => (Some(s), Some(src)),
         None => (None, None),
@@ -864,6 +876,7 @@ async fn join_inner(clock: &JoinClock, args: JoinArgs, state: &Arc<AppState>) ->
     voice.frame_task = frame_task;
     voice.room_task = room_task;
     voice.current_input_device = input_device;
+    voice.input_device = mic_device;
     voice.apm = apm_stage;
     voice.e2ee_key_provider = Some(key_provider);
     voice.e2ee_mls_group_id = Some(voice_mls_group_id);
@@ -1527,6 +1540,7 @@ async fn release_voice_resources(
             publish_gate(&voice, &gate);
         }
         voice.current_input_device = None;
+        voice.input_device = OpenedDevice::default();
         voice.e2ee_key_provider = None;
         voice.e2ee_mls_group_id = None;
         voice.e2ee_epoch = 0;
@@ -1678,15 +1692,19 @@ pub async fn set_voice_input_device(
         }
     }
 
-    // cpal init blocks (ALSA): off the worker and outside the voice lock.
+    // cpal init blocks (a server round trip, ALSA): off the worker and outside
+    // the voice lock. A device that is gone or will not open falls back to the
+    // default mic rather than leaving the call without one.
     let device_name_clone = device_name.clone();
-    let (new_mic, new_source) = tokio::task::spawn_blocking(move || {
-        let host = cpal::default_host();
-        let device = get_device(&host, Some(&device_name_clone), true)?;
-        open_mic(&device)
+    let generation = next_generation();
+    let opened = tokio::task::spawn_blocking(move || {
+        open_device(Some(&device_name_clone), true, |dev| {
+            open_mic(dev, Some(stream_hook(true, generation)))
+        })
     })
     .await
     .map_err(|e| anyhow::anyhow!("audio init panicked: {e}"))??;
+    let (new_mic, new_source) = opened.value;
 
     let mut voice = state.voice.lock().await;
     // Leave raced the open: nothing to attach to.
@@ -1727,6 +1745,7 @@ pub async fn set_voice_input_device(
     voice.frame_task = Some(task);
     let old_mic = voice.input_stream.replace(new_mic);
     voice.current_input_device = Some(device_name);
+    voice.input_device = OpenedDevice { id: opened.device_id, generation };
     drop(voice);
 
     // ALSA close blocks and macOS's mic indicator sticks if dropped on a
@@ -1742,7 +1761,7 @@ pub async fn set_voice_output_device(
     device_name: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    ensure_playback(Arc::clone(&state.voice), Some(device_name)).await
+    ensure_playback(Arc::clone(&state.voice), Some(device_name), false).await
 }
 
 /// Update the live APM config without rejoining; no-op outside a session.

@@ -36,7 +36,16 @@ Pollis is end-to-end encrypted, and the UI never performs that. No hacker theatr
 - No emoji as icons or ornament. Emoji are user content and reactions only.
 - Terminal idioms (brackets around words, `> prompt`, `↑↓ navigate`, UPPERCASE spaced labels, the
   braille spinner) belong to the Terminal skin only, behind a skin check or a terminal-only string.
-  Modern and Mobile use plain sentences.
+  Modern and Mobile use plain sentences. How desktop keeps them there (#1965):
+  - A bracketed string is a `…Terminal` sibling key (`list.blockedBodyTerminal: "[blocked]"`
+    beside `list.blockedBody: "Blocked"`), picked by `useSkin()` at the call site, in every locale.
+  - The braille `LoadingSpinner` draws a plain ring in Modern (`.loader-spinner` in `index.css`),
+    so no call site checks the skin.
+  - An `uppercase` label with a tracking utility, or `.section-label`, reads as written in Modern
+    (`index.css` undoes the transform and spacing), so its string must be sentence case.
+  - No `::` separators in titles; an em dash joins a page and its group ("Invite Member — Acme").
+  - `e2e/terminal-idioms.spec.ts` holds all of this over a channel, a group page and two settings
+    pages.
 
 ## Colour
 
@@ -85,7 +94,9 @@ background the ramp flips toward black.
   background preset (`frontend/tests/theme-contrast.test.ts`, `mobile/tests/theme-contrast.test.ts`).
   A recipe change that breaks it does not merge.
 - **The accent is rare.** In Modern and Mobile, it marks the one primary action on a screen, the
-  current selection, unread counts and focus. It is not a text colour for names, headings or
+  current selection, unread counts and focus. A selection is the `active` tint plus a marker (the
+  radio dot, the sidebar's edge), never a solid accent fill, in every look: not a selected radio
+  row, not a focused composer, not the status bar (#1965). It is not a text colour for names, headings or
   links in running text. (Terminal is the exception: its text is the accent by design.)
 - **One red.** Every destructive action uses `danger`: remove, kick, revoke, reject, decline,
   block, leave, delete, discard, wipe. Desktop `<Button variant="danger">`; mobile
@@ -105,12 +116,34 @@ background the ramp flips toward black.
 |---|---|---|---|
 | UI face | Geist Sans | DM Mono (UI) + Atkinson Hyperlegible Next | Geist |
 | Machine text (ids, keys, codes) | DM Mono via `font-machine` | DM Mono | `fonts.mono400` |
-| Scale | rem at a 15px root: `2xs` 11, `xs` 13, `sm`/`base` 15 | same | `ty.meta` 12 · `section` 13 · `secondary` 14 · `body` 16 · `heading` 17 · `title` 20 · `display` 28 |
 
+The scale is named by role, the same names on both platforms; each keeps its own sizes (mobile
+body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px root, shown in px.
+
+| Role | Desktop (`text-*`) | Mobile (`typeSize.*`, `ty.*`) | Used for |
+|---|---|---|---|
+| Meta | `text-meta` 11 | `meta` 12 | timestamps, counts, hints |
+| Section | — | `section` 13 | section titles, small labels |
+| Secondary | `text-secondary` 13 | `secondary` 14 | previews, subtitles, chips |
+| Button | — | `button` 15 (`ty.button`) | inline button labels, dense rows |
+| Body | `text-body` 15 | `body` 16 | running text, fields |
+| Row title | `text-row` 15 (taller line) | `rowTitle` 16 (`ty.rowTitle`, semibold) | a list row's name; a full-width button's label |
+| Heading | `text-heading` 16.9 | `heading` 17 | page and card headings |
+| Title | `text-title` 18.75 | `title` 20 | page titles |
+| Display | `text-display` 22.5 | `display` 28 | large titles, PIN and code digits |
+
+- Desktop's fontSize theme holds only these roles (plus `glyph` / `glyph-lg` for emoji and the
+  spinner, `code` for the enrollment code), so a Tailwind t-shirt size (`text-xs`) draws nothing;
+  `frontend/tests/type-scale.test.ts` fails on one.
+- A mobile component's `fontSize` reads `typeSize` or spreads a `ty.*` step, never a number.
+  `mobile/tests/type-scale.test.ts` lists the deliberate exceptions: emoji and initials sized to
+  their box, the enrollment code, and the 11pt count badges.
 - Desktop sizes are `rem` so the font-size preference scales them. Never a `px` font size.
 - Sentence case everywhere in Modern and Mobile: titles, buttons, section headers. Terminal may use
   its uppercase spaced labels.
 - Mono is for machine text, never for decoration.
+- Every weight in use is a loaded face (`frontend/src/index.css`): Geist and Atkinson 400–700,
+  DM Mono 500. A synthesized bold is a missing import.
 
 ## Space, radius, size
 
@@ -119,20 +152,80 @@ background the ramp flips toward black.
 - Corners: Modern `rounded-chip` 6px, `rounded-control` 8px, panels 10px; Terminal 2 / 4 / 10;
   Mobile 12 for fields and full-width buttons, pills for inline buttons. An input and a button on
   the same form share a radius.
+- Every desktop corner is one of those tokens, picked by role (#1967): `rounded-chip` for
+  chip-sized things (a key chip, a preset, a badge, a small thumbnail), `rounded-control` for
+  controls (buttons, inputs, menus, icon buttons), `rounded-panel` for cards, panels and media
+  frames, `rounded-full` for a circle or a pill. No inline `borderRadius` and no stock
+  `rounded`, `rounded-sm/md/lg` or `rounded-[…]`; a corner the token set cannot draw (an avatar
+  circle, a radius the OS draws for the window) says why in a comment above it.
 - Desktop chrome bars use `h-bar`; mobile tap targets are at least 44pt.
+- Desktop `Button` has three sizes, all on the type scale so they follow the font-size
+  preference: `xs` (a row's inline action) and `sm` (a compact button beside content) in
+  `text-meta`, `md` (a form's own action, the default) in `text-secondary`; padding tells them
+  apart. A call site never sets a button's text size, letter-spacing or casing. Labels are
+  sentence case ("Approve", not "approve") in every look. `secondary` is a neutral outline; the
+  accent belongs to `primary`.
+- **No hand-rolled `<button>` outside `components/ui/`** (#1967). A text action is a `Button`; an
+  icon-only one is an `IconButton` (`aria-label` required, `sm` for a header or row action, `md`
+  for window chrome); a link-styled action in a sentence or under a status is a `LinkButton`; a
+  preset, a remembered account or a key combo to rebind is a `Chip` (`selected` is the accent edge
+  on the `active` tint); a shortcut beside an action is a `Kbd`. A whole row, a grid cell or a
+  tile whose look is its own is a `PressButton` (`activateOn="click"` when it sends, saves,
+  toggles or destroys), so press activation stays one implementation.
+- **Focus** is one ring on every control, desktop: 2px, offset by `bg`, keyboard focus only
+  (`ui/focusRing.ts`: `FOCUS_RING`; `FOCUS_RING_DANGER` on a destructive control, which never
+  wears the accent; `FOCUS_WITHIN_RING` for a field drawn around a native input). No other
+  ring width, no black offset band.
 
 ## Layout and behaviour
 
 - **Desktop:** title bar, breadcrumb bar, sidebar, main column, optional right panel, status bar.
-  Settings-type pages are a single column, at most 420px wide, inside the main pane.
+  Settings-type pages are a single column, at most 420px wide, inside the main pane. Every page's
+  title is `PageShell`'s `<h1>` (#1966): a sentence-case heading in `text-fg` in Modern, Terminal's
+  small accent strip; a page draws no second title of its own. Every route has a full breadcrumb
+  (`utils/breadcrumbTrail.ts`, walked for every route by `tests/breadcrumb-trail.test.ts`), and the
+  breadcrumb, page title and status bars share `h-bar`.
+- **Sign-in looks like the app.** The device remembers the last account's skin, accent and
+  background (`colorUtils.rememberBootLook`), so sign-in, the code step and the PIN paint in them
+  rather than the defaults; signing out with "delete data" forgets it. Mobile does the same with
+  its boot accent (#1447).
 - **Mobile:** tabs plus stacks, native sheets for menus and confirmations, master–detail on tablets.
   A confirmation is a `SheetOverlay` (the question as its title, the action as a row in
   `Group surface="high"`, red when destructive; Close cancels), never a stock `Alert`, whose
   platform dialog ignores the theme.
 - **No modals on desktop.** The Cmd+K palette is the only overlay. A confirmation replaces the
-  chat input bar or is its own page.
+  chat input bar or sits in the page column (see "Confirmations and forms").
+- **Confirmations and forms (desktop, #1968).** One pattern each.
+  - **The form pattern.** A form, settings or confirmation page is `PageShell` (the title) over one
+    `PageColumn`: a single column at most 420px, top-aligned and centred in the main pane, with no
+    card, border or fill around it. Fields stack in it (`spacing="fields"`), a settings page's
+    sections are spaced wider (`spacing="sections"`). A step that needs a heading under the page
+    title uses `FormLead` (a question or step name and one sentence), never a second page title.
+    Errors sit under the fields in `danger`. The actions are one `FormActions` row under them:
+    left-aligned, every button at its natural width, the action first (`primary`, or `danger` when
+    it destroys) and Cancel last as a `ghost` button. No full-width submit, no button stack.
+  - **The confirmation pattern.** A question that names its object ("Leave Studio?"), the
+    consequence in one plain sentence ("You will need a new invite to rejoin."), then the
+    destructive action (`danger`, and on a confirmation page the only one) and Cancel. Cancel,
+    never the action, is the default focus; Escape goes back as on every page. On a page this is a `ConfirmBlock` in the
+    `PageColumn`: as its own page (`ConfirmPage`: Leave group, Remove member), as a section of a
+    settings page (Conversation settings' Leave), or in place of the control it confirms (the
+    Security page's Revoke device and Revoke now). Inside a conversation it is a `ConfirmBar`, which
+    replaces the chat input (delete a message, delete a channel, delete in the Vault): there the
+    user has just picked the action on that very message, so the action holds focus and Enter
+    confirms, while Escape or the bar's X cancels.
+  - Kept apart, on purpose: sign-out and "wipe this device" confirm on the sign-in card, because
+    they run outside the app shell where there is no main pane; Custom emoji keeps a wider column
+    for its grid; the Settings hub and a user's profile keep their profile header layout.
+  - Mobile keeps its native patterns (a `SheetOverlay`, a tap-again row or button, grouped lists);
+    the copy is shared, and the destructive row or button is the only red one.
 - **Same-frame feedback.** Anything that can take time shows an optimistic result or a busy,
   un-repeatable control on the same frame, on every platform.
+- **Name what an action acts on.** A confirmation names its object ("Join Design team?", not
+  "Join this group?") whenever the app can know it; a scoped search shows its scope as a
+  removable chip ("In Design team"); a count over a filtered list counts what is shown
+  ("Packages shown: 4 of 312"). A screen opened with nothing to act on says so in one plain
+  sentence, never a sentence with a blank where the object should be.
 - **People in rows** (members, message requests, conversation lists): the display name when the
   person set one, else the handle. A name stays on one line and never wraps mid-word: mobile
   truncates a handle in the middle (`ListRow`'s `nameIsHandle`, so both ends stay readable) and a
@@ -160,7 +253,10 @@ Use the existing primitives. Do not hand-roll a styled `<button>`, input, toggle
 primitive cannot do what a screen needs, extend it in its own file and use it everywhere.
 
 - **Desktop** (`frontend/src/components/ui/`): `Button` (`primary`, `secondary`, `ghost`,
-  `danger`), `TextInput`, `TextArea`, `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`,
+  `danger`), `IconButton`, `LinkButton`, `Chip`, `Kbd`, `PanelCloseRow`, `TextInput`, `TextArea`,
+  `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`, `PageColumn`, `FormLead`,
+  `FormActions`, `ConfirmBlock` (and `Layout/ConfirmPage`), `ConfirmBar`, `ComposerBarHeader`,
+  `Select` (a pick-one dropdown with its label), `SectionHeader` (a panel section's title),
   `Card`, `EmptyState`, `Avatar`, `PresenceAvatar`, `PresenceDot`, `PillButton`, `PressButton`,
   `NavigableList`, `NavigableGrid`, `TerminalMenu` (Terminal hub pages), `LoaderSpinner`,
   `IconSpinner`, `ChatInput`, `EditMessageBar`, `SuggestList`.

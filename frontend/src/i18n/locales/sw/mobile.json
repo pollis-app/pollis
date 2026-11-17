@@ -275,6 +275,7 @@
     "checking": "Inakagua mwaliko wako…",
     "confirm": "Kujiunga hushiriki jina lako la mtumiaji na utambulisho wa kifaa chako na kila mtu kwenye kikundi hiki. Jiunge tu kupitia kiungo unachokiamini.",
     "confirmTitle": "Ungependa kujiunga na kikundi hiki?",
+    "confirmTitleNamed": "Ungependa kujiunga na {{name}}?",
     "join": "Jiunge na kikundi",
     "joining": "Inajiunga…",
     "failed": "Kiungo hiki cha mwaliko hakifanyi kazi tena. Omba kipya.",
@@ -349,6 +350,8 @@
     "filtersLabel": "Vichujio",
     "messages": "Ujumbe",
     "placeholder": "Tafuta kila kitu…",
+    "scope": "Ndani ya {{name}}",
+    "scopeClear": "Tafuta kila mahali, si {{name}} pekee",
     "resultCount_one": "Tokeo {{count}}",
     "resultCount_other": "Matokeo {{count}}",
     "typePrompt": "Andika…"

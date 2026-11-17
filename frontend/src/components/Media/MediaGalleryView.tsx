@@ -6,6 +6,8 @@ import { useResolveMediaUrl } from "../../hooks/useResolveMediaUrl";
 import { AttachmentDisplay } from "../Message/AttachmentDisplay";
 import type { MessageAttachment } from "../../types";
 import { PressButton } from "../ui/PressButton";
+import { IconButton } from "../ui/IconButton";
+import { FOCUS_RING } from "../ui/focusRing";
 import { observer } from "mobx-react-lite";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { SensitiveCover } from "./SensitiveCover";
@@ -101,7 +103,7 @@ export const MediaGalleryView: React.FC<MediaGalleryViewProps> = ({
 
       {files.length > 0 && (
         <div className="mt-4 flex flex-col gap-2">
-          <h2 className="text-xs font-medium uppercase tracking-widest text-muted">
+          <h2 className="text-secondary font-medium uppercase tracking-widest text-muted">
             {t("media.filesHeading")}
           </h2>
           {files.map((attachment) => (
@@ -148,8 +150,8 @@ const GalleryTile = observer(({
 
   useResolveMediaUrl(attachment, !isPending && !url && !failed, setUrl, () => setFailed(true));
 
-  // The chat card's shape (AttachmentDisplay: 0.5rem, no frame), in both skins.
-  const shape = "relative aspect-square overflow-hidden rounded-lg bg-surface-raised";
+  // The chat card's shape (AttachmentDisplay: the panel radius, no frame), in both skins.
+  const shape = "relative aspect-square overflow-hidden rounded-panel bg-surface-raised";
   if (sensitivity.hidden) {
     // One click only reveals; a video does not open.
     return (
@@ -203,7 +205,7 @@ const GalleryTile = observer(({
       )}
       {isVideo && (
         <span className="absolute inset-0 flex items-center justify-center">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-high text-fg">
             <Play size={16} aria-hidden fill="currentColor" />
           </span>
         </span>
@@ -277,45 +279,40 @@ const GalleryViewer = observer(({
         justifyContent: "center",
       }}
     >
-      <div className="absolute start-4 top-3 text-xs text-white/70">
+      <div className="absolute start-4 top-3 text-secondary text-muted">
         <span className="me-3">{position}</span>
         <span>{attachment.filename}</span>
       </div>
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label={t("media.close")}
-        className="absolute end-4 top-3 text-white/70 transition-colors hover:text-white"
-      >
+      <IconButton size="md" onClick={onClose} aria-label={t("media.close")} className="absolute end-4 top-3">
         <X size={22} aria-hidden />
-      </button>
+      </IconButton>
 
       {hasMultiple && (
-        <button
-          type="button"
+        <IconButton
+          size="md"
           data-testid="media-gallery-prev"
           onClick={(event) => {
             event.stopPropagation();
             onStep(-1);
           }}
           aria-label={t("media.previous")}
-          className="absolute start-3 top-1/2 -translate-y-1/2 text-white/70 transition-colors hover:text-white"
+          className="absolute start-3 top-1/2 -translate-y-1/2"
         >
-          <ChevronLeft size={32} aria-hidden className="rtl-mirror" />
-        </button>
+          <ChevronLeft size={24} aria-hidden className="rtl-mirror" />
+        </IconButton>
       )}
 
       <div onClick={(event) => event.stopPropagation()}>
         {sensitivity.hidden ? (
-          <button
-            type="button"
+          <PressButton
+            activateOn="click"
             data-testid="media-gallery-viewer-cover"
             onClick={sensitivity.reveal}
             aria-label={tChat("attachment.sensitiveReveal", { filename: attachment.filename })}
-            className="relative block h-[60vh] w-[60vh] max-w-[90vw] overflow-hidden rounded"
+            className={`relative block h-[60vh] w-[60vh] max-w-[90vw] overflow-hidden rounded-panel ${FOCUS_RING}`}
           >
             <SensitiveCover blurhash={attachment.blurhash} />
-          </button>
+          </PressButton>
         ) : url && isVideo ? (
           // eslint-disable-next-line jsx-a11y/media-has-caption
           <video
@@ -331,23 +328,23 @@ const GalleryViewer = observer(({
             style={{ maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain" }}
           />
         ) : (
-          <div className="p-8 text-sm text-white/70">{attachment.filename}</div>
+          <div className="p-8 text-body text-muted">{attachment.filename}</div>
         )}
       </div>
 
       {hasMultiple && (
-        <button
-          type="button"
+        <IconButton
+          size="md"
           data-testid="media-gallery-next"
           onClick={(event) => {
             event.stopPropagation();
             onStep(1);
           }}
           aria-label={t("media.next")}
-          className="absolute end-3 top-1/2 -translate-y-1/2 text-white/70 transition-colors hover:text-white"
+          className="absolute end-3 top-1/2 -translate-y-1/2"
         >
-          <ChevronRight size={32} aria-hidden className="rtl-mirror" />
-        </button>
+          <ChevronRight size={24} aria-hidden className="rtl-mirror" />
+        </IconButton>
       )}
     </div>
   );

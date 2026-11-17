@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
+import { Select } from "../components/ui/Select";
 import { VoiceInputModeSelect } from "../components/Voice/VoiceInputModeSelect";
 import { ResolutionSelect } from "../components/Voice/ResolutionSelect";
 import { useOutgoingResolution } from "../hooks/useOutgoingResolution";
@@ -25,7 +26,7 @@ import {
   type PreferencesData,
 } from "../hooks/queries/usePreferences";
 import { useVoiceTest } from "../hooks/useVoiceTest";
-import { voiceSession, readDevicePrefs } from "../voice";
+import { voiceSession, readDevicePrefs, persistDevicePref, resolveSavedDevice, shownDevice } from "../voice";
 import type { AudioDevice } from "../types";
 import { observer } from "mobx-react-lite";
 import { cameraSession, LOCAL_CAMERA_PREVIEW_KEY, friendlyCameraError } from "../camera/cameraSession";
@@ -42,33 +43,23 @@ interface DeviceSelectProps {
   value: string;
   onChange: (id: string) => void;
   fallbackLabel: string;
+  // Audio: the OS default (value "default", labelled `fallbackLabel`) is always the first entry, not only when nothing is listed.
+  offerDefault?: boolean;
+  testId?: string;
 }
 
-const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onChange, fallbackLabel }) => (
-  <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
-    <span className="text-muted">{label}</span>
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        {...selectSkin}
-      >
-        {devices.length === 0 ? (
-          <option value="default">{fallbackLabel}</option>
-        ) : (
-          devices.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))
-        )}
-      </select>
-      <ChevronDown
-        size={14}
-        className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted"
-      />
-    </div>
-  </div>
+// A device picker. Audio offers the OS default first; with nothing listed, the default is the one option.
+const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onChange, fallbackLabel, offerDefault, testId }) => (
+  <Select
+    label={label}
+    value={value}
+    onChange={onChange}
+    data-testid={testId}
+    options={[
+      ...(offerDefault || devices.length === 0 ? [{ value: "default", label: fallbackLabel }] : []),
+      ...devices.map((d) => ({ value: d.id, label: d.name })),
+    ]}
+  />
 );
 
 interface NoiseSuppressionSelectProps {
@@ -89,29 +80,12 @@ const NOISE_SUPPRESSION_LEVELS: NoiseSuppressionLevel[] = ["off", "low", "modera
 const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, onChange }) => {
   const { t } = useTranslation("voice");
   return (
-    <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
-      <span className="text-muted">{t("settings.noiseSuppression")}</span>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value as NoiseSuppressionLevel)}
-          {...selectSkin}
-        >
-          {NOISE_SUPPRESSION_LEVELS.map((level) => (
-            <option key={level} value={level}>
-              {t(NOISE_SUPPRESSION_LABEL_KEY[level])}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          size={14}
-          className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted"
-        />
-      </div>
-      <span className="text-xs font-mono text-muted">
-        {t("settings.noiseSuppressionHint")}
-      </span>
-    </div>
+    <Select<NoiseSuppressionLevel>
+      label={t("settings.noiseSuppression")}
+      value={value}
+      onChange={onChange}
+      options={NOISE_SUPPRESSION_LEVELS.map((level) => ({ value: level, label: t(NOISE_SUPPRESSION_LABEL_KEY[level]) }))}
+    />
   );
 };
 
@@ -145,7 +119,7 @@ const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onCh
           </Button>
         ))}
       </div>
-      <span className="text-xs font-mono text-muted">
+      <span className="text-secondary font-mono text-muted">
         {t("settings.fpsHint", {
           hint: t(SCREEN_SHARE_FPS_HINT_KEYS[value] ?? "settings.fpsHintStandard"),
         })}
@@ -174,7 +148,7 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
     <div className="flex items-center justify-between gap-3" style={{ maxWidth: 320 }}>
       <div className="flex flex-col">
         <span className="text-fg">{label}</span>
-        <span className="text-xs font-mono text-muted">
+        <span className="text-secondary font-mono text-muted">
           {t(PERMISSION_LABEL_KEY[state])}
         </span>
       </div>
@@ -185,32 +159,6 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
       )}
     </div>
   );
-};
-
-// Token-backed `<select>` skin; `selectStyle` holds the rest.
-const selectClass = "bg-surface text-fg border-2 border-line";
-
-const selectStyle: React.CSSProperties = {
-  appearance: "none",
-  WebkitAppearance: "none",
-  // Trailing padding for the caret, which flips under `dir=rtl`.
-  paddingBlock: "6px",
-  paddingInlineStart: "8px",
-  paddingInlineEnd: "28px",
-  fontFamily: "var(--font-mono)",
-  fontSize: "inherit",
-  outline: "none",
-  cursor: "pointer",
-  borderRadius: "0.5rem",
-  width: "100%",
-};
-
-// Both selects' skin, plus the border that marks focus.
-const selectSkin = {
-  className: selectClass,
-  style: selectStyle,
-  onFocus: (e: React.FocusEvent<HTMLSelectElement>) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; },
-  onBlur: (e: React.FocusEvent<HTMLSelectElement>) => { e.currentTarget.style.borderColor = "var(--c-border)"; },
 };
 
 /** Push the live APM config; a no-op outside a call. */
@@ -237,23 +185,42 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     () => readDevicePrefs().output ?? "default",
   );
 
+  // Listed on open, on window focus, and whenever Rust reports a device change (plug/unplug, default moved; #1989).
   useEffect(() => {
-    invoke<AudioDevice[]>("list_audio_devices").then((devices) => {
-      const ins = devices.filter((d) => d.kind === "input");
-      const outs = devices.filter((d) => d.kind === "output");
-      setInputs(ins);
-      setOutputs(outs);
-      // Clear a saved device id that is no longer enumerated.
-      if (selectedInput !== "default" && !ins.some((d) => d.id === selectedInput)) {
-        setSelectedInputState("default");
-        void voiceSession.setInputDevice("default");
-      }
-      if (selectedOutput !== "default" && !outs.some((d) => d.id === selectedOutput)) {
-        setSelectedOutputState("default");
-        void voiceSession.setOutputDevice("default");
-      }
-    }).catch((e) => console.warn("list_audio_devices failed", e));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    const refresh = () => {
+      invoke<AudioDevice[]>("list_audio_devices").then((devices) => {
+        if (cancelled) {
+          return;
+        }
+        const ins = devices.filter((d) => d.kind === "input");
+        const outs = devices.filter((d) => d.kind === "output");
+        setInputs(ins);
+        setOutputs(outs);
+        // A value saved by an older release becomes what it names now; Rust already opens it that way, so storage only.
+        const saved = readDevicePrefs();
+        const savedInput = saved.input ?? "default";
+        const savedOutput = saved.output ?? "default";
+        const input = resolveSavedDevice(savedInput, ins);
+        const output = resolveSavedDevice(savedOutput, outs);
+        if (input !== savedInput) {
+          persistDevicePref("input", input);
+        }
+        if (output !== savedOutput) {
+          persistDevicePref("output", output);
+        }
+        setSelectedInputState(input);
+        setSelectedOutputState(output);
+      }).catch((e) => console.warn("list_audio_devices failed", e));
+    };
+    refresh();
+    const offChanged = voiceSession.on("audioDevicesChanged", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      offChanged();
+      window.removeEventListener("focus", refresh);
+    };
   }, []);
 
   const setInput = (id: string) => {
@@ -365,34 +332,36 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("settings.title")} scrollable>
-      <div data-testid="voice-settings-page" className="flex justify-center px-6 py-8">
-      <div className="flex flex-col gap-8 w-full max-w-md">
-
+      <PageColumn spacing="sections" paneTestId="voice-settings-page">
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.devicesHeading")}
           </h2>
           <DeviceSelect
             label={t("settings.microphone")}
             devices={inputs}
-            value={selectedInput}
+            value={shownDevice(selectedInput, inputs)}
             onChange={setInput}
             fallbackLabel={t("settings.defaultMicrophone")}
+            offerDefault
+            testId="voice-input-select"
           />
           <DeviceSelect
             label={t("settings.speaker")}
             devices={outputs}
-            value={selectedOutput}
+            value={shownDevice(selectedOutput, outputs)}
             onChange={setOutput}
             fallbackLabel={t("settings.defaultSpeaker")}
+            offerDefault
+            testId="voice-output-select"
           />
         </section>
 
         <section className="flex flex-col gap-4 mb-12" data-testid="voice-camera-section">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.cameraHeading")}
           </h2>
@@ -413,7 +382,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                   letterbox; RemoteVideoTile contains + auto-mirrors the key. */}
               <div
                 data-testid="voice-camera-preview"
-                className="flex items-center justify-center overflow-hidden rounded border border-line"
+                className="flex items-center justify-center overflow-hidden rounded-panel border border-line"
                 style={{
                   width: "100%",
                   maxWidth: 320,
@@ -424,7 +393,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                 {cam.kind === "live" ? (
                   <RemoteVideoTile trackKey={LOCAL_CAMERA_PREVIEW_KEY} />
                 ) : (
-                  <span className="px-3 text-center text-sm text-muted">
+                  <span className="px-3 text-center text-body text-muted">
                     {cam.kind === "failed"
                       ? cam.error
                       : cam.kind === "starting"
@@ -460,7 +429,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
         {permissions.data && (
           <section className="flex flex-col gap-4 mb-12" data-testid="voice-permissions-section">
             <h2
-              className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+              className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
             >
               {t("settings.permissionsHeading")}
             </h2>
@@ -479,7 +448,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-5 mb-12" data-testid="voice-test-section">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.testHeading")}
           </h2>
@@ -588,7 +557,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
           {test.error && (
             <p
               data-testid="voice-test-error"
-              className="text-xs font-mono text-danger"
+              className="text-secondary font-mono text-danger"
             >
               {test.error}
             </p>
@@ -597,7 +566,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-7 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.audioProcessingHeading")}
           </h2>
@@ -660,7 +629,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.screenShareHeading")}
           </h2>
@@ -681,7 +650,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.behaviorHeading")}
           </h2>
@@ -692,9 +661,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             description={t("settings.autoJoinVoiceDescription")}
           />
         </section>
-
-      </div>
-      </div>
+      </PageColumn>
     </PageShell>
   );
 });

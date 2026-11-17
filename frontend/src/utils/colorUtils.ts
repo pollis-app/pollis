@@ -6,7 +6,7 @@ import {
   normalizeHex,
   type ThemeTokens,
 } from "../../../design/theme";
-import { DEFAULT_SKIN, setSkinAttribute, type Skin } from "./skin";
+import { DEFAULT_SKIN, normalizeSkin, setSkinAttribute, type Skin } from "./skin";
 
 /** Convert a hex color string to [h (0-360), s (0-100), l (0-100)] */
 function hexToHsl(hex: string): [number, number, number] {
@@ -77,8 +77,57 @@ function paint(): void {
 
 /** Paint the defaults (Modern, default accent and background) before the first render. */
 export function initTheme(): void {
+  const remembered = readBootLook();
+  if (remembered) {
+    current.skin = remembered.skin;
+    current.accent = remembered.accent;
+    current.background = remembered.background;
+  }
   setSkinAttribute(current.skin);
   paint();
+}
+
+/** Device-local copy of the last account's look, painted before sign-in (#1966). */
+const BOOT_LOOK_KEY = "pollis:boot-look";
+
+/**
+ * Remember the look now applied, so the next launch paints sign-in, OTP and PIN in it rather than
+ * the defaults (the synced preferences are unknown until an account is open). Like mobile's boot
+ * accent (#1447). Only the skin and the two colours; nothing about the account.
+ */
+export function rememberBootLook(): void {
+  try {
+    localStorage.setItem(BOOT_LOOK_KEY, JSON.stringify(current));
+  } catch {
+    // Storage off or full: the next launch paints the defaults, as before.
+  }
+}
+
+/** Drop the remembered look, with the rest of this device's data (sign out and delete data). */
+export function forgetBootLook(): void {
+  try {
+    localStorage.removeItem(BOOT_LOOK_KEY);
+  } catch {
+    // Nothing stored, or storage off.
+  }
+}
+
+function readBootLook(): { skin: Skin; accent: string; background: string } | null {
+  try {
+    const raw = localStorage.getItem(BOOT_LOOK_KEY);
+    if (!raw) {
+      return null;
+    }
+    const v = JSON.parse(raw) as { skin?: unknown; accent?: unknown; background?: unknown };
+    const accent = typeof v.accent === "string" ? normalizeHex(v.accent) : null;
+    const background = typeof v.background === "string" ? normalizeHex(v.background) : null;
+    if (!accent || !background) {
+      return null;
+    }
+    return { skin: normalizeSkin(v.skin), accent, background };
+  } catch {
+    return null;
+  }
 }
 
 /** The accent the page is painted with, as "#rrggbb". */

@@ -9,7 +9,7 @@ import {
 import { isTerminal } from "../../utils/historyTransfer";
 
 const sectionHeaderClass =
-  "text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line";
+  "text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line";
 
 /** #1735, on Security beside Devices: start a copy of message history, and get back to any request or copy under way. */
 export const HistoryTransferSection: React.FC = () => {
@@ -25,15 +25,15 @@ export const HistoryTransferSection: React.FC = () => {
   return (
     <section className="flex flex-col gap-4 mb-12" data-testid="history-transfer-section">
       <h2 className={sectionHeaderClass}>{t("historyTransfer.heading")}</h2>
-      <p className="text-xs text-muted leading-normal">{t("historyTransfer.securityDescription")}</p>
+      <p className="text-secondary text-muted leading-normal">{t("historyTransfer.securityDescription")}</p>
 
       {(pending.data ?? []).map((request) => (
         <div
           key={request.transfer_id}
-          className="flex items-center justify-between gap-3 rounded-lg bg-surface-raised px-4 py-3"
+          className="flex items-center justify-between gap-3 rounded-control bg-surface-raised px-4 py-3"
           data-testid={`history-pending-${request.transfer_id}`}
         >
-          <span className="min-w-0 text-xs text-fg">
+          <span className="min-w-0 text-secondary text-fg">
             {t("historyTransfer.approveTitle", { device: request.requester_device_name ?? unnamed })}
           </span>
           <Button
@@ -50,10 +50,10 @@ export const HistoryTransferSection: React.FC = () => {
       {active.map((tr) => (
         <div
           key={tr.transfer_id}
-          className="flex items-center justify-between gap-3 rounded-lg bg-surface-raised px-4 py-3"
+          className="flex items-center justify-between gap-3 rounded-control bg-surface-raised px-4 py-3"
           data-testid={`history-active-${tr.transfer_id}`}
         >
-          <span className="min-w-0 flex flex-col text-xs">
+          <span className="min-w-0 flex flex-col text-secondary">
             <span className="text-fg">
               {tr.role === "receiver"
                 ? t("historyTransfer.activeReceiving", { device: tr.peer_device_name ?? unnamed })

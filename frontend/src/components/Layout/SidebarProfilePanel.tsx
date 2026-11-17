@@ -12,6 +12,7 @@ import { SidebarVoiceControls } from "../Voice/SidebarVoiceControls";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { shareOf, isMediaBusy } from "../../types/voice-state";
 import { PressButton } from "../ui/PressButton";
+import { IconButton } from "../ui/IconButton";
 import { IconSpinner } from "../ui/IconSpinner";
 
 /** Modern skin's identity panel at the sidebar bottom; while in voice it also carries the full voice controls (AppShell hides `VoiceBar` in Modern). */
@@ -80,23 +81,22 @@ export const SidebarProfilePanel: React.FC = observer(() => {
           testId="sidebar-profile-avatar"
         />
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="truncate text-sm font-semibold text-fg">
+          <span className="truncate text-body font-semibold text-fg">
             {displayName}
           </span>
           {handle && (
-            <bdi className="truncate text-2xs text-muted">{handle}</bdi>
+            <bdi className="truncate text-meta text-muted">{handle}</bdi>
           )}
         </div>
-        <PressButton
-          type="button"
+        <IconButton
           data-testid="sidebar-profile-settings"
+          activateOn="press"
           onClick={() => router.navigate({ to: "/settings" })}
           aria-label={t("profile.settings")}
           title={t("profile.settings")}
-          className="icon-btn-sm"
         >
           <SettingsIcon size={15} className="size-[0.933rem] shrink-0" />
-        </PressButton>
+        </IconButton>
       </div>
 
       {inVoice && (
@@ -106,8 +106,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
         >
           <Volume2
             size={14}
-            className="size-[0.933rem] shrink-0"
-            style={{ color: "var(--c-voice-connected, var(--c-accent))" }}
+            className="size-[0.933rem] shrink-0 text-connected"
           />
           <PressButton
             type="button"
@@ -119,44 +118,43 @@ export const SidebarProfilePanel: React.FC = observer(() => {
           >
             {reconnecting ? (
               <span
-                className="text-2xs font-semibold text-warning"
+                className="text-meta font-semibold text-warning"
                 data-testid="sidebar-voice-reconnecting"
                 role="status"
               >
                 {tVoice("bar.reconnecting")}
               </span>
             ) : (
-              <span className="text-2xs font-semibold text-connected">
+              <span className="text-meta font-semibold text-connected">
                 {t("profile.voiceConnected")}
               </span>
             )}
-            <span className="truncate text-2xs text-muted transition-colors group-hover:text-fg group-hover:underline">
+            <span className="truncate text-meta text-muted transition-colors group-hover:text-fg group-hover:underline">
               {voiceChannelName}
             </span>
           </PressButton>
           <SidebarVoiceControls />
-          <button
-            type="button"
+          <IconButton
             data-testid="sidebar-voice-screenshare"
             onClick={() => toggleScreenShare(share)}
             aria-label={shareActive ? t("profile.stopScreenShare") : t("profile.shareScreen")}
             aria-pressed={shareActive}
             data-busy={isMediaBusy(share) || undefined}
             title={shareActive ? t("profile.stopScreenShare") : t("profile.shareScreen")}
-            className={`icon-btn-sm ${shareActive ? "text-accent hover:text-accent" : ""}`}
+            className={shareActive ? "text-accent hover:text-accent" : ""}
           >
             {isMediaBusy(share) ? <IconSpinner size={15} /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
-          </button>
-          <button
-            type="button"
+          </IconButton>
+          <IconButton
+            destructive
             data-testid="sidebar-voice-disconnect"
             onClick={() => voiceSession.leave()}
             aria-label={t("profile.disconnect")}
             title={t("profile.disconnect")}
-            className="icon-btn-sm hover:text-danger"
+            className="hover:text-danger"
           >
             <PhoneOff size={15} />
-          </button>
+          </IconButton>
         </div>
       )}
     </div>

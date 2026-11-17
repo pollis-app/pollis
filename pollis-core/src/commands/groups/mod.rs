@@ -14,7 +14,8 @@ mod types;
 
 pub use types::{
     Channel, CreatedInviteLink, Group, GroupInvite, GroupMember, GroupPreview,
-    GroupWithChannels, InviteLinkSummary, JoinRequest, PendingInvite, RedeemedInvite,
+    GroupWithChannels, InviteLinkSummary, InvitePreview, JoinRequest, PendingInvite,
+    RedeemedInvite,
 };
 
 pub use groups::{
@@ -33,7 +34,8 @@ pub use membership::{
 
 pub use invites::{
     accept_group_invite, create_group_invite_link, decline_group_invite, get_pending_invites,
-    list_group_invite_links, list_group_invites, redeem_group_invite_link, revoke_group_invite,
+    list_group_invite_links, list_group_invites, preview_group_invite_link,
+    redeem_group_invite_link, revoke_group_invite,
     revoke_group_invite_link, send_group_invite, INVITE_LINK_ERR,
 };
 

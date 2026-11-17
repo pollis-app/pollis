@@ -38,21 +38,7 @@ const TAG = "voice-removal";
 
 const FAILURE_STATES = new Set(["MissingKey", "DecryptionFailed"]);
 
-// Call a Tauri command from the page (the app's own IPC, as the renderer would).
-async function invokeApp(browser, cmd, args = {}) {
-  const res = await browser.executeAsync((c, a, done) => {
-    window.__TAURI_INTERNALS__.invoke(c, a).then(
-      (r) => done({ ok: true, r }),
-      (e) => done({ ok: false, e: typeof e === "string" ? e : JSON.stringify(e) }),
-    );
-  }, cmd, args);
-  if (!res.ok) {
-    throw new Error(`${cmd}: ${res.e}`);
-  }
-  return res.r;
-}
-
-const snapshot = (browser) => invokeApp(browser, "e2e_voice_e2ee_snapshot");
+const snapshot = (browser) => h.invokeApp(browser, "e2e_voice_e2ee_snapshot");
 
 // Poll `probe` until it returns a truthy value; null on timeout.
 async function waitFor(label, timeoutMs, probe) {
@@ -245,7 +231,7 @@ async function main() {
 
     // 3. C re-enters with its join-time token and keys and must not decrypt anything.
     console.log(`[${TAG}] C: re-entering the room as an adversary with its join-time token and keys`);
-    await invokeApp(C, "e2e_voice_adversary_reenter");
+    await h.invokeApp(C, "e2e_voice_adversary_reenter");
     const sawFailures = await waitFor("the adversary's frame verdicts", ADVERSARY_TIMEOUT_MS, async () => {
       const s = await snapshot(C);
       const by = verdicts(s, "adversary");
@@ -278,7 +264,7 @@ async function main() {
     if (!adv.Ok && !adv.KeyRatcheted && failedPeers.size < 2) {
       failures.push(`the adversary saw a failure verdict for ${failedPeers.size} of 2 peers — frames never reached it, so nothing was proven`);
     }
-    await invokeApp(C, "e2e_voice_adversary_leave").catch(() => {});
+    await h.invokeApp(C, "e2e_voice_adversary_leave").catch(() => {});
 
     if (failures.length) {
       throw new Error(`frame-key checks failed:\n  - ${failures.join("\n  - ")}`);

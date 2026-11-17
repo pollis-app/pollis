@@ -127,6 +127,14 @@ word still being typed, not on words the user finished).
 | `in:#channel` / `in:@person` | `conversation_cache` (local only); `m.conversation_id = ?` |
 | `before:` / `after:` / `on:` | `m.sent_at` string compare — ISO-8601 sorts lexicographically |
 | `has:attachment` / `has:link` | the sentinel tokens, as ordinary MATCH terms |
+| `groupId` argument (not typed) | `m.conversation_id IN (SELECT id FROM conversation_cache WHERE group_id = ?)` (#1972) |
+
+**Group scope (#1972).** Mobile's "Search <group>" (the group panel) opens Self's
+search with `searchGroup=<id>`: the results show a removable "In <group>" chip
+(`chip-search-scope`), messages are searched with `groupId`, channel hits are that
+group's only, and group and page hits are hidden. Clearing the chip, Cancel or a
+second tap on Self drops the scope. Desktop has no group-search entry point (Cmd+K
+is global), so it has no scope UI.
 
 An **unresolvable** `from:`/`in:` yields zero results, not "ignore the filter and
 show everything". A malformed date stays a search term rather than silently
@@ -199,7 +207,7 @@ before this table existed.
 
 | Command | Notes |
 |---|---|
-| `search_messages(query, conversationId?, sort?, limit?, cursor?)` | Returns `SearchPage` |
+| `search_messages(query, conversationId?, groupId?, sort?, limit?, cursor?)` | Returns `SearchPage`. `groupId` (#1972) keeps the group's conversations only (`conversation_cache.group_id`) and leaves the default sort at relevance |
 | `rebuild_search_index()` | The Preferences escape hatch |
 | `read_messages_around(conversationId, messageId, limit?)` | A page centred on one message, anchored on `(sent_at, id)` — the jump-to-message read path |
 | `read_messages_after(conversationId, cursor, limit?)` | The oldest `limit` messages newer than `cursor` — how a jump's window pages forward to the live tail (#1039) |

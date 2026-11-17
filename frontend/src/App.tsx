@@ -37,6 +37,7 @@ import { clearAllDrafts } from "./utils/drafts";
 import { AUTO_LOCK_EVENT } from "./utils/autoLock";
 import { clearsQueryCache } from "./utils/queryCacheLifecycle";
 import { adoptUserLanguage } from "./i18n";
+import { forgetBootLook } from "./utils/colorUtils";
 
 type AppState =
   | "initializing"
@@ -506,6 +507,9 @@ function MainApp() {
     } catch (error) {
       console.error("Failed to logout:", error);
     }
+    if (deleteData) {
+      forgetBootLook();
+    }
     appStore.logout();
     try {
       const index = await api.listKnownAccounts();
@@ -589,7 +593,7 @@ function MainApp() {
       >
         <span
           data-testid="loading-spinner"
-          className="text-xs font-mono text-muted"
+          className="text-secondary font-mono text-muted"
         >
           {t("shell.initializing")}
         </span>
@@ -618,10 +622,10 @@ function MainApp() {
           <Card padding="lg" style={{ width: "100%", maxWidth: 360 }}>
             <div className="flex flex-col gap-5">
               <div>
-                <h2 className="text-sm font-mono font-semibold text-fg">
+                <h2 className="text-body font-mono font-semibold text-fg">
                   {t("shell.signOutTitle")}
                 </h2>
-                <p className="text-xs mt-1 font-mono text-muted">
+                <p className="text-secondary mt-1 font-mono text-muted">
                   {t("shell.signOutQuestion")}
                 </p>
               </div>
@@ -670,7 +674,7 @@ function MainApp() {
               >
                 {t("shell.welcome")}
               </span>
-              <p className="text-xs font-mono flex items-center gap-2 text-fg">
+              <p className="text-secondary font-mono flex items-center gap-2 text-fg">
                 <span>
                   {t("shell.gettingReady")}
                 </span>
@@ -780,7 +784,7 @@ function MainApp() {
     >
       <span
         data-testid="loading-spinner"
-        className="text-xs font-mono text-muted"
+        className="text-secondary font-mono text-muted"
       >
         {t("shell.loading")}
       </span>

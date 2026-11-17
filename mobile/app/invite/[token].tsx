@@ -11,7 +11,7 @@ import { invoke } from "../../lib/native";
 import { restoreSession } from "../../hooks/queries/useAuth";
 import { appStore } from "../../stores/appStore";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
-import { groupQueryKeys, type RedeemedInvite } from "../../hooks/queries";
+import { groupQueryKeys, type InvitePreview, type RedeemedInvite } from "../../hooks/queries";
 import { useThemeRerender } from "../../components/theme";
 
 interface UnlockStateSnapshot {
@@ -32,6 +32,8 @@ export default function InviteLanding() {
   const { token } = useLocalSearchParams<{ token?: string }>();
   const [phase, setPhase] = useState<Phase>("working");
   const [readyUserId, setReadyUserId] = useState<string | null>(null);
+  // #1972: the group the link names, read before the press; null = not named.
+  const [groupName, setGroupName] = useState<string | null>(null);
 
   // A cold start bypasses app/index.tsx: restore the session first.
   const ran = useRef(false);
@@ -62,6 +64,12 @@ export default function InviteLanding() {
           userId = profile.id;
         }
         setReadyUserId(userId);
+        // A dead link says so now, with the same one message a failed join gives.
+        const preview = await invoke<InvitePreview>("preview_group_invite_link", {
+          token: trimmed,
+          userId,
+        });
+        setGroupName(preview.group_name?.trim() || null);
         setPhase("confirm");
       } catch (e) {
         console.warn("[invite] could not resolve the session:", e);
@@ -123,7 +131,9 @@ export default function InviteLanding() {
               accessibilityRole="header"
               style={[ty.title, { textAlign: "center" }]}
             >
-              {t("mobile:invite.confirmTitle")}
+              {groupName
+                ? t("mobile:invite.confirmTitleNamed", { name: groupName })
+                : t("mobile:invite.confirmTitle")}
             </Text>
           ) : null}
           <Text

@@ -1,9 +1,15 @@
-@import "@fontsource/atkinson-hyperlegible-next";
+/* Every weight the UI asks for is a real face, never a synthesized bold (#1964): regular,
+   medium, semibold, bold. DM Mono stops at 500, the weight mono text is set in (below). */
+@import "@fontsource/atkinson-hyperlegible-next/400.css";
+@import "@fontsource/atkinson-hyperlegible-next/500.css";
+@import "@fontsource/atkinson-hyperlegible-next/600.css";
+@import "@fontsource/atkinson-hyperlegible-next/700.css";
 @import "@fontsource/dm-mono/500.css";
 /* Geist Sans — the Modern (base) UI sans; Terminal uses Atkinson (see :root). */
 @import "@fontsource/geist-sans/400.css";
 @import "@fontsource/geist-sans/500.css";
 @import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-sans/700.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -263,13 +269,13 @@ input[type="range"]::-moz-range-thumb {
 
   /* Section label — ncurses / htop style ──────────────────────── */
   .section-label {
-    @apply text-xs font-mono tracking-widest uppercase select-none px-2;
+    @apply text-secondary font-mono tracking-widest uppercase select-none px-2;
     color: var(--c-text-muted);
   }
 
   /* Sidebar nav item ───────────────────────────────────────────── */
   .sidebar-item {
-    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-start text-xs cursor-pointer select-none;
+    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-start text-secondary cursor-pointer select-none;
     border-radius: var(--radius-chip);
     color: var(--c-text-dim);
   }
@@ -287,6 +293,8 @@ input[type="range"]::-moz-range-thumb {
   }
 
   /* Icon buttons ───────────────────────────────────────────────── */
+  /* `ui/IconButton`'s look (#1967): use the component, not the class. A component class, so a
+     utility a call site passes (a state colour) wins over it. */
   .icon-btn {
     @apply flex items-center justify-center w-8 h-8 cursor-pointer;
     border-radius: var(--radius-control);
@@ -311,7 +319,7 @@ input[type="range"]::-moz-range-thumb {
 
   /* Input / textarea ───────────────────────────────────────────── */
   .pollis-input {
-    @apply w-full rounded-panel px-3 py-2 text-sm outline-none transition-colors duration-150;
+    @apply w-full rounded-panel px-3 py-2 text-body outline-none transition-colors duration-150;
     background: var(--c-surface-high);
     border: 2px solid var(--c-border);
     color: var(--c-text);
@@ -330,16 +338,10 @@ input[type="range"]::-moz-range-thumb {
     border-color: var(--c-border-active);
   }
 
-  /* Chat input placeholder: muted when unfocused, dark when focused (on accent bg).
-     Driven by an explicit `is-focused` class rather than `:focus` so it stays in
-     sync with the React-controlled background when the OS window loses focus
-     (Webkit drops `:focus`-based ::placeholder styling on window blur). */
+  /* Chat input placeholder: muted, focused or not; focus is the `active` tint, so the
+     muted ink stays legible on it (#1965). */
   .chat-input-textarea::placeholder {
     color: var(--c-text-muted);
-  }
-
-  .chat-input-textarea.is-focused::placeholder {
-    color: color-mix(in srgb, var(--c-bg) 65%, transparent);
   }
 
   /* The composer is a contentEditable now (RichTextInput), which has no
@@ -363,17 +365,13 @@ input[type="range"]::-moz-range-thumb {
     text-overflow: ellipsis;
   }
 
-  .chat-input-textarea.is-focused[data-empty="true"]::before {
-    color: color-mix(in srgb, var(--c-bg) 65%, transparent);
-  }
-
   .pollis-textarea {
     @apply pollis-input resize-none;
   }
 
   /* Buttons ────────────────────────────────────────────────────── */
   .btn-primary {
-    @apply px-4 py-2 text-sm font-mono rounded-panel cursor-pointer font-medium;
+    @apply px-4 py-2 text-body font-mono rounded-panel cursor-pointer font-medium;
     background: var(--c-accent);
     color: var(--c-bg);
   }
@@ -388,7 +386,7 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .btn-ghost {
-    @apply px-3 py-2 text-sm rounded-panel cursor-pointer;
+    @apply px-3 py-2 text-body rounded-panel cursor-pointer;
     color: var(--c-text-dim);
     border: 2px solid var(--c-border);
   }
@@ -473,21 +471,12 @@ input[type="range"]::-moz-range-thumb {
   font-weight: 500;
 }
 
-/* Composer: terminal inverts the textarea to a solid accent fill on focus
-   (the "you're typing into the terminal" signal). Modern keeps it a normal
+/* Composer: Terminal tints the field with `active` on focus; Modern keeps it a normal
    surface with an accent border instead. */
 :root[data-skin="modern"] .chat-input-textarea.is-focused {
   background: var(--c-surface) !important;
   color: var(--c-text) !important;
   border-color: var(--c-border-active) !important;
-}
-
-:root[data-skin="modern"] .chat-input-textarea.is-focused::placeholder {
-  color: var(--c-text-muted);
-}
-
-:root[data-skin="modern"] .chat-input-textarea.is-focused[data-empty="true"]::before {
-  color: var(--c-text-muted);
 }
 
 /* ── Composer's inline custom emoji ──────────────────────────────
@@ -597,6 +586,34 @@ html:has([data-window-viewer]) ::-webkit-scrollbar-thumb {
 .loader-spinner::before {
   content: "⠋";
   animation: loader-spinner-frames 0.8s steps(10) infinite;
+}
+
+/* The braille spinner is a Terminal idiom (#1965). Modern draws a plain ring the size of the
+   text it sits in, in the same colour, so every `LoadingSpinner` and `IconSpinner` follows. */
+@keyframes loader-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+:root[data-skin="modern"] .loader-spinner::before {
+  content: "";
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  vertical-align: -0.1em;
+  border: 0.15em solid currentColor;
+  border-top-color: transparent;
+  border-radius: 9999px;
+  animation: loader-ring 0.8s linear infinite;
+}
+
+/* Uppercase spaced labels are a Terminal idiom (#1965): in Modern the same label reads in
+   sentence case as written, unspaced. Covers `.section-label` and any `uppercase` paired with
+   a tracking utility, so a new label is plain in Modern without a skin check. */
+:root[data-skin="modern"] :is(.section-label, .uppercase:is(.tracking-wide, .tracking-wider, .tracking-widest, [class*="tracking-["])) {
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 /* ── Status bar unread blink ─────────────────────────────────────── */

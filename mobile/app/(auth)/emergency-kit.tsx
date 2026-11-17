@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Screen, Body, Card, Button, BottomAction, CheckRow } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { Heading } from "../../components/auth/Heading";
-import { semantic, type as ty, fonts } from "../../theme/tokens";
+import { semantic, type as ty, fonts, typeSize } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import i18n from "../../i18n";
@@ -105,7 +105,7 @@ function EmergencyKit() {
                   key={i}
                   style={{
                     fontFamily: fonts.mono400,
-                    fontSize: 17,
+                    fontSize: typeSize.heading,
                     lineHeight: 26,
                     color: semantic.text,
                   }}

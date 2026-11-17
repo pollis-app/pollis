@@ -140,6 +140,22 @@ separate chunk per locale (#874's code-splitting rule); Metro does not split,
 so on mobile every locale ships in the binary and the dynamic import only
 defers parsing until the picker opens.
 
+Where the order comes from
+--------------------------
+Within a category, entries follow the CLDR emoji order (#1972), the order
+Unicode's ``emoji-test.txt`` lists them in and the one Slack, Discord and the
+system keyboards use: 😀 first, not U+261D ☝ just because its codepoint is
+lowest. ``unicodedata`` has no order, so the single-codepoint part of that file
+is vendored, trimmed, in ``scripts/emoji-order.json`` (provenance, sha256 and
+licence inside). Anything the file does not list sorts after the listed ones,
+in codepoint order, so a newer ``unicodedata`` still emits every emoji. Refresh
+it with::
+
+    python3 scripts/generate-emoji-data.py --refresh-order
+
+which is network-only like ``--refresh-annotations`` (pinned to
+``EMOJI_TEST_VERSION``); a plain run stays offline.
+
 Known approximation limits
 --------------------------
 This is a good approximation of the official CLDR groups, not a reproduction
@@ -200,6 +216,11 @@ MOBILE_OUTPUT_PATH = REPO_ROOT / "mobile" / "components" / "emoji" / "emojiData.
 # The vendored gemoji alias table. See "Where the shortcodes come from" above
 # for its provenance, licence and refresh recipe.
 SHORTCODES_PATH = REPO_ROOT / "scripts" / "emoji-shortcodes.json"
+
+# The vendored CLDR emoji order. See "Where the order comes from" above.
+ORDER_PATH = REPO_ROOT / "scripts" / "emoji-order.json"
+EMOJI_TEST_VERSION = "16.0"
+EMOJI_TEST_URL = f"https://unicode.org/Public/emoji/{EMOJI_TEST_VERSION}/emoji-test.txt"
 
 # The vendored, trimmed CLDR annotation table. See "Where the localized names
 # and keywords come from" above.
@@ -677,6 +698,45 @@ def load_shortcodes() -> tuple[dict[str, list[str]], str]:
     return by_char, str(payload["_version"])
 
 
+def load_order() -> dict[int, int]:
+    """``codepoint -> rank`` in CLDR order, from the vendored ``emoji-order.json``."""
+    payload = json.loads(ORDER_PATH.read_text(encoding="utf-8"))
+    return {int(key, 16): rank for rank, key in enumerate(payload["order"])}
+
+
+def refresh_order() -> None:
+    """Re-download ``emoji-test.txt`` and rewrite ``emoji-order.json`` (network)."""
+    with urllib.request.urlopen(EMOJI_TEST_URL, timeout=60) as response:
+        raw = response.read()
+    order: list[str] = []
+    seen: set[str] = set()
+    for line in raw.decode("utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ";" not in line:
+            continue
+        codepoints, rest = line.split(";", 1)
+        if rest.split("#", 1)[0].strip() == "component":
+            continue
+        # Bases only: U+FE0F is presentation, and anything longer is a sequence.
+        parts = [part for part in codepoints.split() if part.upper() != "FE0F"]
+        if len(parts) != 1:
+            continue
+        key = parts[0].upper()
+        if key not in seen:
+            seen.add(key)
+            order.append(key)
+    doc = {
+        "_source": EMOJI_TEST_URL,
+        "_version": EMOJI_TEST_VERSION,
+        "_sha256": hashlib.sha256(raw).hexdigest(),
+        "_licence": "Unicode-3.0 — Copyright © 1991-2024 Unicode, Inc.",
+        "_shape": "single-codepoint emoji bases in CLDR order (the file's own order), U+FE0F stripped; sequences dropped",
+        "_regenerate": "python3 scripts/generate-emoji-data.py --refresh-order",
+        "order": order,
+    }
+    ORDER_PATH.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def read_zoneinfo_table(path: Path) -> dict[str, str]:
     """Parse tzdata's iso3166.tab: ``XX<TAB>Country Name``, ``#`` comments."""
     names: dict[str, str] = {}
@@ -725,8 +785,10 @@ def flag_char(code: str) -> str:
 
 
 def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str, str]:
-    """Assemble every entry, in category order then codepoint order."""
+    """Assemble every entry, in category order then CLDR order (codepoint order after it)."""
     tonable_bases = expand(EMOJI_MODIFIER_BASE_RANGES)
+    rank = load_order()
+    unranked = len(rank)
     shortcodes, shortcode_version = load_shortcodes()
     entries: list[dict[str, object]] = []
     counts: dict[str, int] = {}
@@ -736,7 +798,11 @@ def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str, str]:
         if category_id == "flags":
             continue
         count = 0
-        for codepoint in sorted(expand(CATEGORY_RANGES[category_id])):
+        ordered = sorted(
+            expand(CATEGORY_RANGES[category_id]),
+            key=lambda cp: (rank.get(cp, unranked), cp),
+        )
+        for codepoint in ordered:
             # First matching category wins, so a codepoint already taken by an
             # earlier category is skipped here.
             if codepoint in claimed:
@@ -1145,7 +1211,14 @@ def main() -> None:
         action="store_true",
         help="re-download the CLDR annotations for every shipped locale (network)",
     )
+    parser.add_argument(
+        "--refresh-order",
+        action="store_true",
+        help="re-download Unicode's emoji-test.txt and rewrite scripts/emoji-order.json (network)",
+    )
     args = parser.parse_args()
+    if args.refresh_order:
+        refresh_order()
 
     # The emoji set comes from this Python's `unicodedata`: an older Python
     # (macOS's /usr/bin/python3 is 3.9, Unicode 13) silently drops every newer

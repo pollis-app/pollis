@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../ui/Button";
+import { FormActions } from "../ui/FormActions";
 import { InputOtp } from "../ui/InputOtp";
 import * as api from "../../services/api";
 import { errorMessage } from "../../utils/errorMessage";
@@ -86,31 +87,31 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
   return (
     <div className="flex flex-col gap-5" data-testid="history-approval-card">
       <div className="flex flex-col gap-2">
-        <h2 className="text-lg text-fg" data-testid="history-approval-title">
+        <h2 className="text-heading text-fg" data-testid="history-approval-title">
           {t("historyTransfer.approveTitle", { device })}
         </h2>
         {request.requester_added_at && (
-          <p className="text-xs font-mono text-dim" data-testid="history-approval-added">
+          <p className="text-secondary font-mono text-dim" data-testid="history-approval-added">
             {t("historyTransfer.approveAdded", { time: formatDateTime(request.requester_added_at) })}
           </p>
         )}
-        <p className="text-sm text-muted leading-relaxed">{t("historyTransfer.approveWarning")}</p>
+        <p className="text-body text-muted leading-relaxed">{t("historyTransfer.approveWarning")}</p>
       </div>
 
       {needPin && (
         <div className="flex flex-col gap-3" data-testid="history-approval-pin">
-          <p className="text-sm text-fg">{t("historyTransfer.approvePin")}</p>
+          <p className="text-body text-fg">{t("historyTransfer.approvePin")}</p>
           <InputOtp length={4} value={pin} onChange={setPin} disabled={busy !== null} mask autoFocus />
         </div>
       )}
 
       {error && (
-        <p className="text-sm text-danger" data-testid="history-approval-error">
+        <p className="text-body text-danger" data-testid="history-approval-error">
           {error}
         </p>
       )}
 
-      <div className="flex gap-2">
+      <FormActions>
         <Button
           data-testid="history-approval-approve"
           isLoading={busy === "approve"}
@@ -128,7 +129,7 @@ export const HistoryApprovalCard: React.FC<HistoryApprovalCardProps> = ({
         >
           {t("historyTransfer.decline")}
         </Button>
-      </div>
+      </FormActions>
     </div>
   );
 };

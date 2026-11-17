@@ -28,14 +28,16 @@ export const OpenSourcePage: React.FC = () => {
   return (
     <PageShell title={t("openSource.title")} scrollable>
       <div data-testid="open-source-page" className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex flex-col gap-3 px-6 pt-6 pb-3 font-mono text-xs">
+        <div className="flex flex-col gap-3 px-6 pt-6 pb-3 font-mono text-secondary">
           {state.status === "ready" && (
             <>
               <p data-testid="open-source-intro" className="text-fg">
                 {t("openSource.intro")}
               </p>
               <p data-testid="open-source-count" className="text-dim">
-                {t("openSource.count", { count: packages.length })}
+                {visible.length === packages.length
+                  ? t("openSource.count", { count: packages.length })
+                  : t("openSource.countFiltered", { shown: visible.length, count: packages.length })}
               </p>
             </>
           )}

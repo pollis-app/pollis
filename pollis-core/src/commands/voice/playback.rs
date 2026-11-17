@@ -8,12 +8,13 @@ use libwebrtc::audio_stream::native::NativeAudioStream;
 
 use crate::error::Result;
 
-use super::devices::get_device;
+use super::device_watch::{next_generation, stream_hook};
+use super::devices::open_device;
 use super::levels::{frame_peak, BandAnalyzer, LevelsHub};
 use super::mixer::{OutputMixer, TrackFeed};
 use super::resampler::{MIX_FRAME_SAMPLES, MIX_RATE_HZ};
 use super::streams::build_output_stream;
-use super::types::{user_id_from_voice_identity, VoiceEvent, VoiceState};
+use super::types::{user_id_from_voice_identity, OpenedDevice, VoiceEvent, VoiceState};
 
 /// Speaking: two consecutive loud frames to trigger, 120 ms hold.
 const SPEAK_PEAK: u16 = 1_000;
@@ -92,66 +93,66 @@ async fn run_drain_task(
     );
 }
 
-/// Open the speaker on `output_device_name` (reusing an open stream on the
-/// same device). Tracks, rings and the AEC tap live in `MixerShared` and
-/// are untouched: switching devices mid-call keeps every participant.
+/// Open the speaker on `output_device_name` (the user's choice; `None` or
+/// `"default"` is the OS default), reusing an open stream on the same choice
+/// unless `reopen` (the device under it changed; `device_watch.rs`). `reopen`
+/// never opens a speaker that is not open. Tracks, rings and the AEC tap live
+/// in `MixerShared` and are untouched: switching devices mid-call keeps every
+/// participant.
 pub(crate) async fn ensure_playback(
     voice_arc: Arc<tokio::sync::Mutex<VoiceState>>,
     output_device_name: Option<String>,
+    reopen: bool,
 ) -> Result<()> {
     let (shared, previous) = {
         let voice = voice_arc.lock().await;
         let mut pb = voice.playback.lock().unwrap();
-        if pb.output_stream.is_some()
-            && pb.output_device_name.as_deref() == output_device_name.as_deref()
-        {
+        let open = pb.output_stream.is_some();
+        if reopen && !open {
+            return Ok(());
+        }
+        if !reopen && open && pb.output_device_name.as_deref() == output_device_name.as_deref() {
             return Ok(());
         }
         (Arc::clone(&pb.shared), pb.stop_output())
     };
 
-    // Open on a blocking thread; on failure fall back to the OS default output.
-    // The old stream drops there too (ALSA close blocks; macOS indicator).
-    let output_device_name_for_open = output_device_name.clone();
-    let (stream, sample_rate, channels, opened_device_name) =
-        tokio::task::spawn_blocking(move || -> Result<_> {
-            drop(previous);
-            let host = cpal::default_host();
-            let try_open = |name: Option<&str>| -> Result<_> {
-                let dev = get_device(&host, name, false)?;
-                let shared = Arc::clone(&shared);
-                build_output_stream(&dev, move |rate, channels| {
+    // Open on a blocking thread; a choice that is gone or will not open falls
+    // back to the OS default (`open_device`). The old stream drops there too
+    // (ALSA close blocks; macOS indicator).
+    let choice = output_device_name.clone();
+    let generation = next_generation();
+    let opened = tokio::task::spawn_blocking(move || {
+        drop(previous);
+        open_device(choice.as_deref(), false, |dev| {
+            let shared = Arc::clone(&shared);
+            build_output_stream(
+                dev,
+                move |rate, channels| {
                     let mut mixer = OutputMixer::new(shared, rate, channels);
                     move |out: &mut [f32]| mixer.fill(out)
-                })
-            };
-            match try_open(output_device_name_for_open.as_deref()) {
-                Ok((s, sr, ch)) => Ok((s, sr, ch, output_device_name_for_open)),
-                Err(e) => {
-                    let was_explicit = output_device_name_for_open
-                        .as_deref()
-                        .map(|n| !n.is_empty() && n != "default")
-                        .unwrap_or(false);
-                    if !was_explicit {
-                        return Err(e);
-                    }
-                    crate::diag!(
-                        "[voice] speaker open failed for the selected device: {e} — falling back to OS default output"
-                    );
-                    let (s, sr, ch) = try_open(None)?;
-                    Ok((s, sr, ch, None))
-                }
-            }
+                },
+                Some(stream_hook(false, generation)),
+            )
         })
-        .await
-        .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
+    let (stream, sample_rate, channels) = opened.value;
 
     let voice = voice_arc.lock().await;
+    // A leave raced a hot-plug reopen: the session it was for is gone.
+    if reopen && voice.room.is_none() {
+        drop(voice);
+        let _ = tokio::task::spawn_blocking(move || drop(stream)).await;
+        return Ok(());
+    }
     let mut pb = voice.playback.lock().unwrap();
     pb.output_stream = Some(stream);
     pb.output_sample_rate = sample_rate;
     pb.output_channels = channels;
-    pb.output_device_name = opened_device_name;
+    pb.output_device_name = output_device_name;
+    pb.output_device = OpenedDevice { id: opened.device_id, generation };
     Ok(())
 }
 

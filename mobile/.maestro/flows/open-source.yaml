@@ -51,6 +51,10 @@ tags:
     timeout: 5000
 - assertNotVisible:
     id: "row-open-source-react-native"
+# #1972: the count follows the filter.
+- assertVisible:
+    id: "text-open-source-count"
+    text: "Packages shown: [0-9]+ of [0-9]{3,}"
 - takeScreenshot: open-source-02-filtered
 
 # --- the package opens its licence text ---

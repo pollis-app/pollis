@@ -64,7 +64,8 @@
     "empty": "এখনও কোনো মেসেজ নেই। কথোপকথন শুরু করুন।",
     "unknownAuthor": "অজানা",
     "blockedAuthor": "ব্লক করা ব্যবহারকারী",
-    "blockedBody": "[ব্লক করা]"
+    "blockedBody": "ব্লক করা",
+    "blockedBodyTerminal": "[ব্লক করা]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name>-কে উত্তর দিচ্ছেন",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "সারি",
-    "pendingPlaceholder": "[অপেক্ষমাণ মেসেজ]",
+    "pendingPlaceholder": "অপেক্ষমাণ মেসেজ",
+    "pendingPlaceholderTerminal": "[অপেক্ষমাণ মেসেজ]",
     "cancel": "মেসেজ বাতিল করুন",
     "retry": "আবার চেষ্টা করুন",
     "failedCount_one": "ব্যর্থ ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "এখনও কোনো মেসেজ নেই",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}}টি অ্যাটাচমেন্ট]",
-    "attachments_other": "[{{count}}টি অ্যাটাচমেন্ট]",
+    "attachments_one": "{{count}}টি অ্যাটাচমেন্ট",
+    "attachments_other": "{{count}}টি অ্যাটাচমেন্ট",
+    "attachmentsTerminal_one": "[{{count}}টি অ্যাটাচমেন্ট]",
+    "attachmentsTerminal_other": "[{{count}}টি অ্যাটাচমেন্ট]",
     "undecryptable": "একটি মেসেজ এই ডিভাইসে ডিক্রিপ্ট করা যায়নি"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "লোড করা যায়নি",
     "failedToDownload": "ডাউনলোড করা যায়নি",
     "lightboxFetch": "আনুন",
-    "lightboxDone": "[ হয়ে গেছে ]",
-    "lightboxDownload": "[ডাউনলোড]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "হয়ে গেছে",
+    "lightboxDoneTerminal": "[ হয়ে গেছে ]",
+    "lightboxDownload": "ডাউনলোড",
+    "lightboxDownloadTerminal": "[ডাউনলোড]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "সংবেদনশীল মিডিয়া দেখান: {{filename}}",
     "sensitiveHide": "{{filename}} লুকান"
   },

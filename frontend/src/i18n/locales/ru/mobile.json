@@ -294,7 +294,9 @@
     "locked": "Сначала разблокируйте Pollis, затем откройте ссылку-приглашение снова.",
     "openPollis": "Открыть Pollis",
     "signedOut": "Сначала войдите в Pollis, затем откройте ссылку-приглашение снова.",
-    "title": "Приглашение"
+    "title": "Приглашение",
+    "confirmTitle": "Вступить в эту группу?",
+    "confirmTitleNamed": "Вступить в {{name}}?"
   },
   "language": {
     "restartRequired": "Перезапустите Pollis, чтобы изменить направление интерфейса."
@@ -356,6 +358,8 @@
     "filtersLabel": "Фильтры",
     "messages": "Сообщения",
     "placeholder": "Искать везде…",
+    "scope": "В {{name}}",
+    "scopeClear": "Искать везде, а не только в {{name}}",
     "resultCount_one": "{{count}} результат",
     "resultCount_few": "{{count}} результата",
     "resultCount_many": "{{count}} результатов",

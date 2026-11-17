@@ -63,7 +63,7 @@ export const ResolutionSelect: React.FC<ResolutionSelectProps> = ({
               : t("settings.resolutionOption", { height }),
         }))}
       />
-      {showHint && <span className="text-xs font-mono text-muted">{t(hintKey)}</span>}
+      {showHint && <span className="text-secondary font-mono text-muted">{t(hintKey)}</span>}
     </div>
   );
 };

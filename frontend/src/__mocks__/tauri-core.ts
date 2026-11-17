@@ -1050,9 +1050,12 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_group_join_requests':
     case 'list_devices':
     case 'list_user_devices':
-    case 'list_blocked_users':
     case 'get_pinned_messages':
       return [];
+
+    // Seeded by a spec that shows a blocked author's message (#1965); none by default.
+    case 'list_blocked_users':
+      return (preload.blockedUsers ?? []) as unknown[];
 
     case 'list_security_events':
       return securityEventsPage(
@@ -2111,6 +2114,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         }));
     }
 
+    // #1972: `invitePreviews` maps a token to the group it names; anything else fails like the DS.
+    case 'preview_group_invite_link': {
+      const { token } = args as { token: string };
+      const previews = (preload.invitePreviews ?? {}) as Record<string, string>;
+      if (!(token in previews)) {
+        throw new Error('this invite link is not valid');
+      }
+      return { group_name: previews[token] };
+    }
+
     case 'get_pending_invites':
       return store.pendingInvites.map(({ channels: _c, ...rest }) => rest);
 
@@ -2231,8 +2244,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'list_voice_participants':
     case 'list_voice_room_counts':
-    case 'list_audio_devices':
       return [];
+
+    // cpal device ids and server descriptions, as the PulseAudio host lists them (#1989).
+    case 'list_audio_devices':
+      return [
+        { id: 'pulseaudio:alsa_input.pci-0000_00_1f.3.analog-stereo', name: 'Built-in Audio Analog Stereo', kind: 'input' },
+        { id: 'pulseaudio:alsa_input.usb-Blue_Microphones_Yeti-00.analog-stereo', name: 'Yeti Stereo Microphone', kind: 'input' },
+        { id: 'pulseaudio:alsa_output.pci-0000_00_1f.3.analog-stereo', name: 'Built-in Audio Analog Stereo', kind: 'output' },
+        { id: 'pulseaudio:bluez_output.AA_BB_CC_DD_EE_FF.1', name: 'AirPods Pro', kind: 'output' },
+      ];
 
     // Session lifecycle: a join succeeds instantly, so a spec can drive `VoiceSessionManager` itself.
     case 'join_voice_channel':

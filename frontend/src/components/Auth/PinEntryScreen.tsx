@@ -65,11 +65,11 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
       <AuthCard>
         <div className="flex flex-col gap-5">
           <div>
-            <h2 className="text-sm font-mono font-semibold text-fg">
+            <h2 className="text-body font-mono font-semibold text-fg">
               {t("pinEntry.headline")}
             </h2>
             <p
-              className="text-xs mt-1 font-mono text-muted"
+              className="text-secondary mt-1 font-mono text-muted"
               style={{ lineHeight: 1.5 }}
             >
               {username
@@ -88,7 +88,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
           {error && (
             <p
               data-testid="pin-entry-error"
-              className="text-xs font-mono text-danger"
+              className="text-secondary font-mono text-danger"
             >
               {error}
             </p>
@@ -117,31 +117,13 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
           </Button>
 
           <div className="flex flex-col gap-1 items-center">
-            <button
-              data-testid="pin-forgot-button"
-              onClick={onForgotPin}
-              className="text-xs font-mono text-muted border-0"
-              style={{
-                background: "none",
-                cursor: "pointer",
-                padding: "0.25rem 0",
-              }}
-            >
+            <Button variant="ghost" data-testid="pin-forgot-button" onClick={onForgotPin}>
               {t("pinEntry.forgot")}
-            </button>
+            </Button>
             {onSwitchAccount && (
-              <button
-                data-testid="pin-switch-account-button"
-                onClick={onSwitchAccount}
-                className="text-xs font-mono text-muted border-0"
-                style={{
-                  background: "none",
-                  cursor: "pointer",
-                  padding: "0.25rem 0",
-                }}
-              >
+              <Button variant="ghost" data-testid="pin-switch-account-button" onClick={onSwitchAccount}>
                 {t("pinEntry.switchAccount")}
-              </button>
+              </Button>
             )}
           </div>
         </div>

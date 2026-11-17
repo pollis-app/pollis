@@ -38,7 +38,7 @@ export const InvitesPage: React.FC = () => {
           <p
             data-testid="accept-invite-error"
             role="status"
-            className="px-4 py-2 text-xs font-mono text-fg"
+            className="px-4 py-2 text-secondary font-mono text-fg"
           >
             {t("invites.acceptFailed")}
           </p>
@@ -52,12 +52,12 @@ export const InvitesPage: React.FC = () => {
           renderRow={(invite) => (
             <div className="flex-1 min-w-0 flex flex-col gap-0.5">
               <span
-                className="text-sm font-mono font-medium truncate text-fg"
+                className="text-body font-mono font-medium truncate text-fg"
               >
                 {invite.group_name}
               </span>
               <span
-                className="text-xs font-mono truncate text-muted"
+                className="text-secondary font-mono truncate text-muted"
               >
                 {t("invites.invitedBy", { name: invite.inviter_username ?? invite.inviter_id })}
               </span>

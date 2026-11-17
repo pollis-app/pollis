@@ -152,7 +152,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
       aria-label={t("menu.navigationLabel")}
     >
       <div
-        className="flex items-center gap-1 px-4 text-xs font-mono flex-shrink-0 h-bar border-b border-line text-muted"
+        className="flex items-center gap-1 px-4 text-secondary font-mono flex-shrink-0 h-bar border-b border-line text-muted"
       >
         <ArrowUp className="w-3 h-3" />
         <ArrowDown className="w-3 h-3" />
@@ -208,7 +208,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
 
               <div className="flex-1 min-w-0">
                 <div
-                  className={`font-mono text-sm flex items-center gap-3 ${
+                  className={`font-mono text-body flex items-center gap-3 ${
                     isSelected ? "text-accent" : isSystem ? "text-muted" : "text-fg"
                   }`}
                 >
@@ -224,13 +224,13 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                     </span>
                   )}
                   {item.badge != null && item.badge > 0 && (
-                    <span className="font-mono text-xs text-accent">
+                    <span className="font-mono text-secondary text-accent">
                       [{item.badge}]
                     </span>
                   )}
                 </div>
                 {item.description && (
-                  <div className="text-xs font-mono mt-0.5 truncate text-muted">
+                  <div className="text-secondary font-mono mt-0.5 truncate text-muted">
                     {item.description}
                   </div>
                 )}

@@ -270,7 +270,9 @@
     "locked": "请先解锁 Pollis，然后重新打开邀请链接。",
     "openPollis": "打开 Pollis",
     "signedOut": "请先登录 Pollis，然后重新打开邀请链接。",
-    "title": "邀请"
+    "title": "邀请",
+    "confirmTitle": "加入此群组？",
+    "confirmTitleNamed": "加入 {{name}}？"
   },
   "language": {
     "restartRequired": "重启 Pollis 以切换布局方向。"
@@ -332,6 +334,8 @@
     "filtersLabel": "筛选",
     "messages": "消息",
     "placeholder": "搜索所有内容…",
+    "scope": "在 {{name}} 中",
+    "scopeClear": "搜索全部，而不仅是 {{name}}",
     "resultCount_other": "{{count}} 条结果",
     "typePrompt": "输入…"
   },

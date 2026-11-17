@@ -396,6 +396,7 @@
     "title": "开源许可",
     "intro": "Pollis 基于开源软件构建。此版本中的每个第三方软件包都列出了其许可证；选择一个即可阅读许可证全文。",
     "count": "此版本中的软件包：{{count}}",
+    "countFiltered": "显示的软件包：{{shown}} / {{count}}",
     "unavailable": "许可证列表在构建应用时生成，此开发版本中没有。",
     "filterLabel": "筛选软件包",
     "filterPlaceholder": "按名称或许可证筛选",

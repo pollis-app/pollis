@@ -89,11 +89,11 @@ version = "0.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alsa]]
-version = "0.9.1"
+version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.alsa-sys]]
-version = "0.3.1"
+version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.annotate-snippets]]
@@ -130,6 +130,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.argon2]]
 version = "0.5.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.arrayvec]]
+version = "0.7.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.ashpd]]
@@ -465,15 +469,7 @@ version = "0.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.coreaudio-rs]]
-version = "0.11.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.coreaudio-sys]]
-version = "0.2.17"
-criteria = "safe-to-deploy"
-
-[[exemptions.cpal]]
-version = "0.15.3"
+version = "0.14.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.cpubits]]
@@ -728,6 +724,10 @@ criteria = "safe-to-deploy"
 version = "1.1.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.enum-primitive-derive]]
+version = "0.3.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.enumflags2]]
 version = "0.7.12"
 criteria = "safe-to-deploy"
@@ -754,6 +754,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.event-listener-strategy]]
 version = "0.5.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.extended]]
+version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.fastrand]]
@@ -1022,10 +1026,6 @@ criteria = "safe-to-deploy"
 version = "0.5.12"
 criteria = "safe-to-deploy"
 
-[[exemptions.hound]]
-version = "3.5.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.hpke-rs]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
@@ -1206,6 +1206,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.javascriptcore-rs-sys]]
 version = "1.1.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.jni]]
+version = "0.22.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.jni-macros]]
+version = "0.22.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.jni-sys]]
@@ -1567,7 +1575,7 @@ version = "0.6.12"
 criteria = "safe-to-deploy"
 
 [[exemptions.mach2]]
-version = "0.4.3"
+version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.markup5ever]]
@@ -1631,15 +1639,7 @@ version = "0.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.ndk]]
-version = "0.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.ndk]]
 version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.ndk-sys]]
-version = "0.5.0+25.2.9519653"
 criteria = "safe-to-deploy"
 
 [[exemptions.ndk-sys]]
@@ -1699,6 +1699,10 @@ version = "0.6.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.objc2-app-kit]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.objc2-audio-toolbox]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
 
@@ -1772,14 +1776,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.objc2-web-kit]]
 version = "0.3.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.oboe]]
-version = "0.6.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.oboe-sys]]
-version = "0.6.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.once_cell]]
@@ -2042,6 +2038,10 @@ criteria = "safe-to-deploy"
 version = "0.7.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.portable-atomic]]
+version = "1.15.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.potential_utf]]
 version = "0.1.5"
 criteria = "safe-to-deploy"
@@ -2109,6 +2109,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.prost-types]]
 version = "0.14.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.pulseaudio]]
+version = "0.3.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.pxfm]]
@@ -2239,7 +2243,7 @@ criteria = "safe-to-deploy"
 notes = "No independent review performed. The AEAD/hash/HMAC/RSA-verify primitives underneath rustls across this whole tree (reqwest's TLS to the DS/LiveKit, quinn's QUIC, `pollis-libsql-connector`'s TLS to Turso) — one of the highest-stakes crates in this file since it is the actual crypto, not a protocol shell around someone else's crypto. Exempted on ring's status as the most widely-deployed Rust crypto primitive crate (BoringSSL-derived, used by rustls/quinn/webpki upstream), not a source read. If first-party review time is spent anywhere in this file, this crate is one of the top candidates."
 
 [[exemptions.rodio]]
-version = "0.19.0"
+version = "0.23.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rsqlite-vfs]]
@@ -2498,6 +2502,14 @@ criteria = "safe-to-deploy"
 version = "0.3.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.simd_cesu8]]
+version = "1.2.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.simdutf8]]
+version = "0.1.5"
+criteria = "safe-to-deploy"
+
 [[exemptions.siphasher]]
 version = "1.0.2"
 criteria = "safe-to-deploy"
@@ -2570,6 +2582,26 @@ criteria = "safe-to-deploy"
 
 [[exemptions.swift-rs]]
 version = "1.0.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.symphonia]]
+version = "0.5.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.symphonia-codec-pcm]]
+version = "0.5.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.symphonia-core]]
+version = "0.5.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.symphonia-format-riff]]
+version = "0.5.5"
+criteria = "safe-to-deploy"
+
+[[exemptions.symphonia-metadata]]
+version = "0.5.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
@@ -3059,10 +3091,6 @@ version = "0.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows]]
-version = "0.54.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows]]
 version = "0.61.3"
 criteria = "safe-to-deploy"
 
@@ -3080,10 +3108,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.windows-collections]]
 version = "0.3.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-core]]
-version = "0.54.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-core]]
@@ -3128,10 +3152,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.windows-registry]]
 version = "0.6.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-result]]
-version = "0.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-result]]

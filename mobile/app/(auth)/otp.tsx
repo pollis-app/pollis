@@ -8,7 +8,7 @@ import { Screen, Header, Body, Button, BottomAction } from "../../components/ui"
 import { Icon } from "../../components/icons";
 import { Heading } from "../../components/auth/Heading";
 import { AuthError } from "../../components/auth/AuthError";
-import { semantic, fonts, r } from "../../theme/tokens";
+import { semantic, fonts, r, typeSize } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { reopenKeyboard } from "../../lib/codeFieldFocus";
@@ -100,7 +100,7 @@ export default function AuthOTP() {
                   }}
                 >
                   {filled ? (
-                    <Text style={{ fontFamily: fonts.semibold, fontSize: 28, color: semantic.text }}>
+                    <Text style={{ fontFamily: fonts.semibold, fontSize: typeSize.display, color: semantic.text }}>
                       {code[i]}
                     </Text>
                   ) : active ? (

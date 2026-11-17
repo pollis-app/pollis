@@ -37,7 +37,7 @@ export const DiagnosticsPage: React.FC = () => {
   return (
     <PageShell title={t("diagnostics.title")} scrollable>
       <div data-testid="diagnostics-page" className="flex justify-center px-6 py-10">
-        <div className="w-full max-w-2xl flex flex-col gap-4 font-mono text-xs">
+        <div className="w-full max-w-2xl flex flex-col gap-4 font-mono text-secondary">
           <p className="text-fg">{t("diagnostics.intro")}</p>
           <p className="text-dim">{t("diagnostics.privacy")}</p>
           <div className="flex gap-2">

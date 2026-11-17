@@ -8,6 +8,7 @@ import {
 } from "../../../hooks/queries/useUserProfile";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { Button } from "../../ui/Button";
+import { IconButton } from "../../ui/IconButton";
 import { ThemedQr } from "../../ui/ThemedQr";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 
@@ -36,7 +37,7 @@ export const SafetyNumberPanel: React.FC<SafetyNumberPanelProps> = observer(
       );
     } else if (isError || !safety) {
       body = (
-        <p className={`${gutter} py-2 text-xs text-muted`}>
+        <p className={`${gutter} py-2 text-secondary text-muted`}>
           {t("safety.failed")}
         </p>
       );
@@ -47,10 +48,10 @@ export const SafetyNumberPanel: React.FC<SafetyNumberPanelProps> = observer(
           className={`flex flex-col gap-3 ${gutter} py-3`}
         >
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-muted">{t("profile.safetyNumber")}</span>
+            <span className="text-secondary text-muted">{t("profile.safetyNumber")}</span>
             <span
               data-testid="safety-status"
-              className={`text-xs ${
+              className={`text-secondary ${
                 safety.status === "verified"
                   ? "text-accent"
                   : safety.status === "changed"
@@ -75,16 +76,16 @@ export const SafetyNumberPanel: React.FC<SafetyNumberPanelProps> = observer(
           <code
             dir="ltr"
             data-testid="safety-number-digits"
-            className="font-mono font-machine text-sm leading-relaxed text-center break-words text-fg"
+            className="font-mono font-machine text-body leading-relaxed text-center break-words text-fg"
           >
             {safety.safety_number}
           </code>
           {safety.status === "changed" && (
-            <span className="text-xs text-danger">
+            <span className="text-secondary text-danger">
               {t("profile.keyChangedWarning")}
             </span>
           )}
-          <p className="text-xs text-muted" data-testid="safety-number-shared">
+          <p className="text-secondary text-muted" data-testid="safety-number-shared">
             {t("safety.shared", { name: peerLabel })}
           </p>
           <div>
@@ -109,19 +110,18 @@ export const SafetyNumberPanel: React.FC<SafetyNumberPanelProps> = observer(
           className={
             isTerminal
               ? "sticky top-0 z-[1] flex h-bar w-full items-center gap-2 border-b border-line bg-surface px-2.5 text-[0.8rem] text-muted select-none"
-              : "flex items-center gap-2 px-2 pt-3 pb-1 text-xs font-medium text-muted"
+              : "flex items-center gap-2 px-2 pt-3 pb-1 text-secondary font-medium text-muted"
           }
         >
-          <button
-            type="button"
-            className="icon-btn-sm shrink-0"
+          <IconButton
+            className="shrink-0"
             aria-label={t("common:actions.goBack")}
             title={t("common:actions.goBack")}
             data-testid="safety-panel-back"
             onClick={onBack}
           >
             <ArrowLeft size={14} className="rtl-mirror" aria-hidden="true" />
-          </button>
+          </IconButton>
           <ShieldCheck size={12} aria-hidden="true" />
           <bdi className="min-w-0 flex-1 truncate" data-testid="safety-panel-title">
             {title}

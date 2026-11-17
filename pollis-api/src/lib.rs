@@ -191,6 +191,7 @@ endpoints! {
     Client   groups::CreateInviteLinkBody       => "/v1/invite-links/create",            StatusOk;
     Client   groups::RevokeInviteLinkBody       => "/v1/invite-links/revoke",            StatusOk;
     Client   groups::RedeemInviteLinkBody       => "/v1/invite-links/redeem",            groups::RedeemInviteLinkResponse;
+    Client   groups::PreviewInviteLinkBody      => "/v1/invite-links/preview",           groups::PreviewInviteLinkResponse;
     Client   groups::CreateJoinRequestBody      => "/v1/join-requests/create",           groups::JoinRequestCreated;
     Client   groups::ApproveJoinRequestBody     => "/v1/join-requests/approve",          groups::ReviewedJoinRequest;
     Client   groups::RejectJoinRequestBody      => "/v1/join-requests/reject",           groups::ReviewedJoinRequest;
@@ -496,6 +497,12 @@ mod tests {
                 group_name: Some("Team".into()),
             },
             r#"{"status":"ok","group_id":"g1","group_name":"Team"}"#,
+        );
+        round_trip(
+            &groups::PreviewInviteLinkResponse::Ok {
+                group_name: Some("Team".into()),
+            },
+            r#"{"status":"ok","group_name":"Team"}"#,
         );
         round_trip(
             &broker::LivekitTokenResponse {

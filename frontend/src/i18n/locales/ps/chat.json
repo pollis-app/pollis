@@ -64,7 +64,8 @@
     "empty": "لا پیغام نشته. خبرې اترې پیل کړئ.",
     "unknownAuthor": "نامعلوم",
     "blockedAuthor": "بلاک شوی کارن",
-    "blockedBody": "[بلاک شوی]"
+    "blockedBody": "بلاک شوی",
+    "blockedBodyTerminal": "[بلاک شوی]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> ته ځواب",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "کتار",
-    "pendingPlaceholder": "[په تمه پیغام]",
+    "pendingPlaceholder": "په تمه پیغام",
+    "pendingPlaceholderTerminal": "[په تمه پیغام]",
     "cancel": "پیغام لغوه کړئ",
     "retry": "بیا هڅه",
     "failedCount_one": "ناکام ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "لا پیغام نشته",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} ضمیمه]",
-    "attachments_other": "[{{count}} ضمیمې]",
+    "attachments_one": "{{count}} ضمیمه",
+    "attachments_other": "{{count}} ضمیمې",
+    "attachmentsTerminal_one": "[{{count}} ضمیمه]",
+    "attachmentsTerminal_other": "[{{count}} ضمیمې]",
     "undecryptable": "د یوه پیغام کوډ په دې وسیله کې خلاص نه شو"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "بار نه شو",
     "failedToDownload": "ډاونلوډ نه شو",
     "lightboxFetch": "راوړل",
-    "lightboxDone": "[ بشپړ ]",
-    "lightboxDownload": "[ډاونلوډ]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "بشپړ",
+    "lightboxDoneTerminal": "[ بشپړ ]",
+    "lightboxDownload": "ډاونلوډ",
+    "lightboxDownloadTerminal": "[ډاونلوډ]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "حساسه رسنۍ وښایئ: {{filename}}",
     "sensitiveHide": "{{filename}} پټ کړئ"
   },

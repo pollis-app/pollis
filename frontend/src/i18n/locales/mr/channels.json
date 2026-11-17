@@ -143,7 +143,7 @@
     "acceptFailed": "आमंत्रण स्वीकारता आले नाही. पुन्हा प्रयत्न करा."
   },
   "inviteMember": {
-    "pageTitle": "सदस्याला आमंत्रित करा :: {{group}}",
+    "pageTitle": "सदस्याला आमंत्रित करा — {{group}}",
     "intro": "<accent>{{name}}</accent> मध्ये एखाद्याला आमंत्रित करा",
     "identifierLabel": "युझरनेम किंवा ईमेल",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +153,7 @@
     "sendFailed": "आमंत्रण पाठवता आले नाही"
   },
   "joinRequests": {
-    "pageTitle": "सामील होण्याच्या विनंत्या :: {{group}}",
+    "pageTitle": "सामील होण्याच्या विनंत्या — {{group}}",
     "allPageTitle": "सामील होण्याच्या विनंत्या",
     "pendingFor": "<accent>{{name}}</accent> मध्ये सामील होण्याच्या प्रलंबित विनंत्या",
     "empty": "कोणत्याही प्रलंबित विनंत्या नाहीत.",
@@ -165,6 +165,8 @@
     "pageTitle": "ग्रुपमध्ये सामील व्हा",
     "heading": "ग्रुपमध्ये सामील व्हा",
     "headingTerminal": "> ग्रुपमध्ये सामील व्हा",
+    "headingNamed": "{{name}} मध्ये सामील व्हायचे?",
+    "headingNamedTerminal": "> {{name}} मध्ये सामील व्हा",
     "blurb": "आमंत्रण लिंकमुळे ॲडमिनने आधी तुम्हाला शोधण्याची गरज न पडता तुम्ही सामील होऊ शकता.",
     "tokenLabel": "आमंत्रण लिंक किंवा कोड",
     "tokenLabelTerminal": "आमंत्रण लिंक किंवा कोड",

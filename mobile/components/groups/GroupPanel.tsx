@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Divider, IconButton, PressInPressable, EmptyState } from "../ui";
 import { Icon } from "../icons";
-import { semantic, type as ty, fonts, r, space, layout } from "../../theme/tokens";
+import { semantic, type as ty, fonts, r, space, layout, typeSize } from "../../theme/tokens";
 import {
   useUserGroupsWithChannels,
   useGroupChannels,
@@ -146,7 +146,7 @@ function GroupPanelImpl({
             <Icon.chevronDown size={18} color={semantic.dim} />
           </View>
           {/* Reserved while members load, so the header doesn't grow when the count lands (#1733). */}
-          <Text style={[ty.meta, { fontSize: 13 }]}>{memberCountLabel ?? "\u00a0"}</Text>
+          <Text style={[ty.meta, { fontSize: typeSize.section }]}>{memberCountLabel ?? "\u00a0"}</Text>
         </PressInPressable>
         <IconButton
           testID="row-group-invite"
@@ -164,7 +164,12 @@ function GroupPanelImpl({
           testID="btn-search-group"
           accessibilityRole="button"
           accessibilityLabel={t("group.panel.search", { name: groupName })}
-          onPress={() => rootRouter.navigate({ pathname: "/(tabs)/self", params: { search: "1" } })}
+          onPress={() =>
+            rootRouter.navigate({
+              pathname: "/(tabs)/self",
+              params: { search: "1", searchGroup: groupId },
+            })
+          }
           style={{
             minHeight: layout.touchMin,
             borderRadius: r.sm,
@@ -176,7 +181,7 @@ function GroupPanelImpl({
           }}
         >
           <Icon.search size={16} color={semantic.muted} />
-          <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.regular, fontSize: 15, color: semantic.muted }}>
+          <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.regular, fontSize: typeSize.button, color: semantic.muted }}>
             {t("group.panel.search", { name: groupName })}
           </Text>
         </PressInPressable>

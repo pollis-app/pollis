@@ -81,7 +81,7 @@ export const SavedPage: React.FC = () => {
         {unresolved && (
           <div
             data-testid="saved-unresolved-notice"
-            className="mx-4 mt-3 rounded border border-line bg-surface-raised px-3 py-2 text-xs text-dim"
+            className="mx-4 mt-3 rounded-control border border-line bg-surface-raised px-3 py-2 text-secondary text-dim"
           >
             {t("page.unresolved")}
           </div>

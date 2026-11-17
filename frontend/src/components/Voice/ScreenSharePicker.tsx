@@ -11,9 +11,9 @@ import {
   type WindowSource,
 } from "../../screenshare/screenShareSession";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
 import { Switch } from "../ui/Switch";
 import { EmptyState } from "../ui/EmptyState";
+import { SourceCard } from "./SourceCard";
 
 /** Inline screen-share source picker replacing the participant grid (no modal). */
 export const ScreenSharePicker: React.FC = observer(() => {
@@ -100,7 +100,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
   return (
     <div
       data-testid="screen-share-picker"
-      className="flex-1 flex flex-col font-mono text-xs min-h-0 border-t border-b border-line bg-bg"
+      className="flex-1 flex flex-col font-mono text-secondary min-h-0 border-t border-b border-line bg-bg"
     >
       <header
         className="flex items-center justify-between px-3 py-2 border-b border-line text-fg"
@@ -192,68 +192,12 @@ export const ScreenSharePicker: React.FC = observer(() => {
   );
 });
 
-interface SourceCardProps {
-  disabled: boolean;
-  onPick: () => void;
-  testId: string;
-  title: string;
-  subtitle?: string;
-  /** PNG data URL; the capture-helper path has none, so `icon` shows. */
-  thumbnail?: string;
-  icon: React.ReactNode;
-}
-
-const SourceCardShell: React.FC<SourceCardProps> = ({
-  disabled,
-  onPick,
-  testId,
-  title,
-  subtitle,
-  thumbnail,
-  icon,
-}) => (
-  <button
-    type="button"
-    onClick={onPick}
-    disabled={disabled}
-    data-testid={testId}
-    className="min-h-[6.25rem] text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-md"
-  >
-    <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
-      {/* Fixed 16:10 (the requested thumbnail size) keeps the grid even. */}
-      <div className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted aspect-[16/10]">
-        {thumbnail ? (
-          // alt="": the title labels it. object-contain avoids cropping.
-          <img
-            src={thumbnail}
-            alt=""
-            className="w-full h-full object-contain"
-            draggable={false}
-          />
-        ) : (
-          icon
-        )}
-      </div>
-      <div className="p-2">
-        <div className="truncate text-fg">
-          {title}
-        </div>
-        {subtitle ? (
-          <div className="truncate text-muted text-2xs">
-            {subtitle}
-          </div>
-        ) : null}
-      </div>
-    </Card>
-  </button>
-);
-
 const DisplayCard: React.FC<{
   display: DisplaySource;
   disabled: boolean;
   onPick: () => void;
 }> = ({ display, disabled, onPick }) => (
-  <SourceCardShell
+  <SourceCard
     disabled={disabled}
     onPick={onPick}
     testId={`screen-share-source-display-${display.id}`}
@@ -282,7 +226,7 @@ const WindowCard: React.FC<{
       ? window.app_name
       : undefined;
   return (
-    <SourceCardShell
+    <SourceCard
       disabled={disabled}
       onPick={onPick}
       testId={`screen-share-source-window-${window.id}`}

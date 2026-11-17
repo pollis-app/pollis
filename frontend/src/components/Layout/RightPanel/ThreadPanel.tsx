@@ -88,7 +88,7 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
           )}
 
           {isLoading ? (
-            <p className="px-1 text-xs text-muted">{t("thread.loading")}</p>
+            <p className="px-1 text-secondary text-muted">{t("thread.loading")}</p>
           ) : replies.length === 0 ? (
             <EmptyState background={false} testId="thread-panel-empty">
               {t("thread.empty")}

@@ -14,6 +14,8 @@ import { useMessagePermalink } from "../hooks/useMessagePermalink";
 import { useGlobalShortcut, useShortcutLabel } from "../keyboard";
 import { usePressActivator } from "../hooks/usePressActivation";
 import { EmptyState } from "./ui/EmptyState";
+import { Kbd } from "./ui/Kbd";
+import { useSkin } from "../hooks/queries/usePreferences";
 
 type SearchResultItem =
   | {
@@ -209,6 +211,8 @@ function filterResults(
 
 export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClose }) => {
   const { t } = useTranslation("search");
+  // Bracketed forms are Terminal's (#1965).
+  const isTerminal = useSkin() === "terminal";
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const press = usePressActivator();
@@ -451,6 +455,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         flexDirection: "column",
         alignItems: "center",
         paddingTop: "10vh",
+        // The window's own corner (`#root` in index.css), so the backdrop never paints past it.
         borderRadius: "10px",
         overflow: "hidden",
       }}
@@ -462,14 +467,13 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     >
       <div
         data-testid="search-panel"
-        className="bg-surface border border-line"
+        className="bg-surface border border-line rounded-panel"
         style={{
           width: "100%",
           maxWidth: 560,
           maxHeight: "70vh",
           display: "flex",
           flexDirection: "column",
-          borderRadius: "0.75rem",
           overflow: "hidden",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
         }}
@@ -499,25 +503,19 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            className="flex-1 font-mono text-sm text-fg border-0"
+            className="flex-1 font-mono text-body text-fg border-0"
             style={{
               background: "transparent",
               outline: "none",
             }}
           />
-          <kbd
-            className="font-mono font-machine text-xs text-muted bg-bg border border-line"
-            style={{
-              padding: "2px 6px",
-              borderRadius: "4px",
-            }}
-          >
-            {t("common:keys.escape")}
-          </kbd>
+          <span className="text-muted">
+            <Kbd>{t("common:keys.escape")}</Kbd>
+          </span>
         </div>
 
         <div
-          className="flex items-center gap-1 px-4 py-1.5 text-xs font-mono flex-shrink-0 border-b border-line text-muted"
+          className="flex items-center gap-1 px-4 py-1.5 text-secondary font-mono flex-shrink-0 border-b border-line text-muted"
         >
           <ArrowUp className="w-3 h-3" />
           <ArrowDown className="w-3 h-3" />
@@ -545,7 +543,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
             // Missing must not hint at whether the message exists.
             <div
               data-testid="search-panel-permalink"
-              className="flex items-center gap-3 px-4 py-3 font-mono text-xs text-muted"
+              className="flex items-center gap-3 px-4 py-3 font-mono text-secondary text-muted"
             >
               <LinkIcon size={14} className="flex-shrink-0" />
               {permalinkStatus === "missing" ? (
@@ -604,15 +602,15 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
 
                   <div className="flex-1 min-w-0">
                     <div
-                      className={`font-sans text-sm truncate flex items-center gap-2 ${isSelected ? "text-accent" : "text-fg"}`}
+                      className={`font-sans text-body truncate flex items-center gap-2 ${isSelected ? "text-accent" : "text-fg"}`}
                     >
                       <span>{item.name}</span>
                       {item.type === "voice" && item.channelId === activeVoiceChannelId && (
-                        <span className="font-mono text-xs text-accent">{t("panel.live")}</span>
+                        <span className="font-mono text-secondary text-accent">{t(isTerminal ? "panel.liveTerminal" : "panel.live")}</span>
                       )}
                     </div>
                     <div
-                      className="font-mono text-xs truncate text-muted"
+                      className="font-mono text-secondary truncate text-muted"
                     >
                       {item.breadcrumb}
                     </div>

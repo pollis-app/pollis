@@ -27,11 +27,11 @@ export const RelayServingSection: React.FC<RelayServingSectionProps> = ({
 
   return (
     <section className="flex flex-col gap-4 mb-12" data-testid="pref-relay-serving">
-      <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg">
+      <h2 className="text-secondary font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg">
         {t("relayServing.heading")}
       </h2>
 
-      <p className="text-xs font-mono text-muted">
+      <p className="text-secondary font-mono text-muted">
         <Trans
           t={t}
           i18nKey="relayServing.intro"
@@ -49,17 +49,17 @@ export const RelayServingSection: React.FC<RelayServingSectionProps> = ({
       />
 
       <div className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3">
-        <p className="text-xs font-mono text-dim">{t("relayServing.wouldDoHeading")}</p>
-        <p className="text-xs font-mono text-muted">{t("relayServing.wouldDoBody")}</p>
-        <p className="text-xs font-mono text-dim">{t("relayServing.wouldSeeHeading")}</p>
-        <p className="text-xs font-mono text-muted">{t("relayServing.wouldSeeBody")}</p>
-        <p className="text-xs font-mono text-dim">{t("relayServing.costHeading")}</p>
-        <p className="text-xs font-mono text-muted">{t("relayServing.costBody")}</p>
+        <p className="text-secondary font-mono text-dim">{t("relayServing.wouldDoHeading")}</p>
+        <p className="text-secondary font-mono text-muted">{t("relayServing.wouldDoBody")}</p>
+        <p className="text-secondary font-mono text-dim">{t("relayServing.wouldSeeHeading")}</p>
+        <p className="text-secondary font-mono text-muted">{t("relayServing.wouldSeeBody")}</p>
+        <p className="text-secondary font-mono text-dim">{t("relayServing.costHeading")}</p>
+        <p className="text-secondary font-mono text-muted">{t("relayServing.costBody")}</p>
       </div>
 
-      <p className="text-xs font-mono text-muted">{t("relayServing.exactBody")}</p>
+      <p className="text-secondary font-mono text-muted">{t("relayServing.exactBody")}</p>
 
-      <p className="text-xs font-mono uppercase tracking-widest text-dim">
+      <p className="text-secondary font-mono uppercase tracking-widest text-dim">
         {t("relayServing.conditionsHeading")}
       </p>
 
@@ -81,12 +81,12 @@ export const RelayServingSection: React.FC<RelayServingSectionProps> = ({
         onChange={(power_only) => onChange({ ...config, power_only })}
       />
 
-      <p className="text-xs font-mono text-muted" data-testid="pref-relay-serving-status">
+      <p className="text-secondary font-mono text-muted" data-testid="pref-relay-serving-status">
         {t("relayServing.statusLine", { status: describeStatus(t, config, status) })}
       </p>
 
       {status !== null && (
-        <p className="text-xs font-mono text-muted">
+        <p className="text-secondary font-mono text-muted">
           {t("relayServing.signals", {
             wifi: describeSignal(t, status.on_wifi),
             power: describeSignal(t, status.on_power),
@@ -97,7 +97,7 @@ export const RelayServingSection: React.FC<RelayServingSectionProps> = ({
       {applyError !== null && (
         <p
           data-testid="pref-relay-serving-error"
-          className="text-xs font-mono text-danger"
+          className="text-secondary font-mono text-danger"
         >
           {t("relayServing.applyError", { error: applyError })}
         </p>

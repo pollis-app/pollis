@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { NavigableList } from "../components/ui/NavigableList";
 import { Button } from "../components/ui/Button";
+import { Chip } from "../components/ui/Chip";
 import {
   SHORTCUT_COMMANDS,
   ALL_SHORTCUT_COMMAND_IDS,
@@ -145,27 +146,17 @@ export const KeyboardShortcutsPage: React.FC = () => {
           controls={(r) => {
             const isCapturing = capturingId === r.id;
             const controls: React.ReactNode[] = [
-              <button
+              <Chip
                 key="edit"
-                type="button"
+                machine
+                selected={isCapturing}
                 disabled={!dataLoaded}
                 onClick={() => setCapturingId(r.id)}
                 aria-label={t("shortcuts.rebindLabel", { name: r.title })}
                 data-testid={`shortcut-${r.id}-edit`}
-                className={`font-mono text-xs bg-bg border ${
-                  isCapturing ? "border-accent" : "border-line"
-                }`}
-                style={{
-                  color: "inherit",
-                  padding: "1px 6px",
-                  borderRadius: 3,
-                  lineHeight: 1.2,
-                  cursor: dataLoaded ? "pointer" : "default",
-                  opacity: dataLoaded ? 1 : 0.6,
-                }}
               >
                 {isCapturing ? t("shortcuts.capturing") : formatCombo(r.combo)}
-              </button>,
+              </Chip>,
             ];
             if (r.isOverridden) {
               controls.push(

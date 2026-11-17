@@ -143,7 +143,7 @@
     "acceptFailed": "بلنه ونه منل شوه. بیا هڅه وکړئ."
   },
   "inviteMember": {
-    "pageTitle": "غړي ته بلنه :: {{group}}",
+    "pageTitle": "غړي ته بلنه — {{group}}",
     "intro": "یو څوک <accent>{{name}}</accent> ته بلنه ورکړئ",
     "identifierLabel": "کارن نوم یا برېښنالیک",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +153,7 @@
     "sendFailed": "بلنه ونه لېږل شوه"
   },
   "joinRequests": {
-    "pageTitle": "د ګډون غوښتنې :: {{group}}",
+    "pageTitle": "د ګډون غوښتنې — {{group}}",
     "allPageTitle": "د ګډون غوښتنې",
     "pendingFor": "<accent>{{name}}</accent> کې د ګډون پاتې غوښتنې",
     "empty": "هېڅ پاتې غوښتنه نشته.",
@@ -165,6 +165,8 @@
     "pageTitle": "په ګروپ کې ګډون وکړئ",
     "heading": "په ګروپ کې ګډون وکړئ",
     "headingTerminal": "> په ګروپ کې ګډون",
+    "headingNamed": "په {{name}} کې ګډون کوئ؟",
+    "headingNamedTerminal": "> په {{name}} کې ګډون",
     "blurb": "د بلنې لینکونه تاسو ته اجازه درکوي چې پرته له دې چې اډمین لومړی تاسو ولټوي ورګډ شئ.",
     "tokenLabel": "د بلنې لینک یا کوډ",
     "tokenLabelTerminal": "د بلنې لینک یا کوډ",

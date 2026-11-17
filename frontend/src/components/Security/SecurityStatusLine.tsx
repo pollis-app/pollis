@@ -27,7 +27,7 @@ export const SecurityStatusLine: React.FC<SecurityStatusLineProps> = ({
     className="flex flex-col gap-1"
   >
     <span
-      className="inline-flex items-center gap-1 text-2xs font-mono"
+      className="inline-flex items-center gap-1 text-meta font-mono"
       style={{ color }}
     >
       {icon}
@@ -36,7 +36,7 @@ export const SecurityStatusLine: React.FC<SecurityStatusLineProps> = ({
     {reason && (
       <span
         data-testid={`${testId}-reason`}
-        className="text-2xs font-mono"
+        className="text-meta font-mono"
         style={{ color }}
       >
         {reason}

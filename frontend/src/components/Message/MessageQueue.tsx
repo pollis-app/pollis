@@ -4,9 +4,13 @@ import { X, Clock, Send, AlertCircle } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { appStore } from '../../stores/appStore';
 import { Button } from '../ui/Button';
+import { IconButton } from '../ui/IconButton';
+import { useSkin } from "../../hooks/queries/usePreferences";
 
 export const MessageQueue: React.FC = observer(() => {
   const { t } = useTranslation('chat');
+  // Bracketed forms are Terminal's (#1965).
+  const isTerminal = useSkin() === 'terminal';
   const {
     messageQueue,
     removeFromMessageQueue,
@@ -24,7 +28,7 @@ export const MessageQueue: React.FC = observer(() => {
   }
 
   const getMessageContent = (_messageId: string): string => {
-    return t('queue.pendingPlaceholder');
+    return t(isTerminal ? 'queue.pendingPlaceholderTerminal' : 'queue.pendingPlaceholder');
   };
 
   const snippetFor = (messageId: string): string => {
@@ -49,7 +53,7 @@ export const MessageQueue: React.FC = observer(() => {
       data-testid="message-queue"
       className="flex flex-col gap-1 px-4 py-2 flex-shrink-0 border-t border-line bg-surface"
     >
-      <span className="text-2xs font-mono uppercase tracking-widest text-muted">
+      <span className="text-meta font-mono uppercase tracking-widest text-muted">
         {t('queue.heading')}
       </span>
 
@@ -70,19 +74,18 @@ export const MessageQueue: React.FC = observer(() => {
               )}
               <span
                 data-testid="queue-item-status"
-                className="text-2xs font-mono text-muted"
+                className="text-meta font-mono text-muted"
               >
                 {t(`status.${item.status}`)}
               </span>
-              <p className="text-xs font-mono flex-1 truncate text-dim">{snippet}</p>
-              <button
+              <p className="text-secondary font-mono flex-1 truncate text-dim">{snippet}</p>
+              <IconButton
                 data-testid={`cancel-queue-item-${item.id}`}
                 onClick={() => handleCancel(item.id, item.message_id)}
                 aria-label={t('queue.cancel')}
-                className="icon-btn-sm"
               >
                 <X size={14} aria-hidden="true" />
-              </button>
+              </IconButton>
             </div>
           );
         })}
@@ -97,10 +100,10 @@ export const MessageQueue: React.FC = observer(() => {
               className="flex items-center gap-2"
             >
               <AlertCircle size={14} aria-hidden="true" className="text-danger" />
-              <span className="text-2xs font-mono text-danger">
+              <span className="text-meta font-mono text-danger">
                 {t('queue.failedCount', { count: item.retry_count })}
               </span>
-              <p className="text-xs font-mono flex-1 truncate text-dim">{snippet}</p>
+              <p className="text-secondary font-mono flex-1 truncate text-dim">{snippet}</p>
               <div className="flex items-center gap-1">
                 <Button
                   data-testid={`retry-queue-item-${item.id}`}
@@ -110,14 +113,13 @@ export const MessageQueue: React.FC = observer(() => {
                 >
                   {t('queue.retry')}
                 </Button>
-                <button
+                <IconButton
                   data-testid={`cancel-queue-item-${item.id}`}
                   onClick={() => handleCancel(item.id, item.message_id)}
                   aria-label={t('queue.cancel')}
-                  className="icon-btn-sm"
                 >
                   <X size={14} aria-hidden="true" />
-                </button>
+                </IconButton>
               </div>
             </div>
           );

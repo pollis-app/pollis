@@ -1,4 +1,5 @@
 import React from "react";
+import { FOCUS_RING } from "./focusRing";
 
 interface SwitchProps {
   label: string;
@@ -36,7 +37,7 @@ export const Switch: React.FC<SwitchProps> = ({
           aria-describedby={descriptionId}
           onClick={() => { if (!disabled) { onChange(!checked); } }}
           disabled={disabled}
-          className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black disabled:opacity-50 disabled:cursor-not-allowed ${checked ? "bg-accent" : "bg-line-strong"}`}
+          className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${checked ? "bg-accent" : "bg-line-strong"} ${FOCUS_RING}`}
           style={{
             cursor: disabled ? "not-allowed" : "pointer",
           }}
@@ -54,7 +55,7 @@ export const Switch: React.FC<SwitchProps> = ({
 
         <label
           htmlFor={inputId}
-          className="text-sm font-mono text-dim"
+          className="text-body font-mono text-dim"
           style={{
             cursor: disabled ? "not-allowed" : "pointer",
           }}
@@ -66,7 +67,7 @@ export const Switch: React.FC<SwitchProps> = ({
       {description && (
         <p
           id={descriptionId}
-          className="text-xs font-mono ms-12 text-muted"
+          className="text-secondary font-mono ms-12 text-muted"
         >
           {description}
         </p>

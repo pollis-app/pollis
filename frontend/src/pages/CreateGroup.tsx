@@ -10,6 +10,8 @@ import { groupQueryKeys } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormActions } from "../components/ui/FormActions";
 import { Switch } from "../components/ui/Switch";
 import type { Group } from "../types";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -84,84 +86,79 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
   }
 
   return (
-    <div
-      data-testid="create-group-page"
-      className="flex-1 flex flex-col overflow-auto bg-bg"
+    <PageColumn
+      as="form"
+      paneTestId="create-group-page"
+      data-testid="create-group-form"
+      onSubmit={handleSubmit}
     >
-      <div data-testid="create-group-content" className="flex-1 flex justify-center overflow-auto px-6 py-8">
-        <form
-          data-testid="create-group-form"
-          onSubmit={handleSubmit}
-          className="w-full max-w-md flex flex-col gap-5"
+      <TextInput
+        label={t("createGroup.nameLabel")}
+        value={name}
+        onChange={onNameChange}
+        placeholder={t("createGroup.namePlaceholder")}
+        disabled={isLoading}
+        id="create-group-name"
+        required
+      />
+      {/* Preserve testid for E2E */}
+      <input data-testid="create-group-name-input" type="hidden" value={name} readOnly />
+
+      <TextInput
+        label={t("createGroup.slugLabel")}
+        value={slug}
+        onChange={onSlugChange}
+        placeholder={t("createGroup.slugPlaceholder")}
+        disabled={isLoading}
+        id="create-group-slug"
+        required
+        description={t("createGroup.slugDescription")}
+      />
+      <input data-testid="create-group-slug-input" type="hidden" value={slug} readOnly />
+
+      <TextArea
+        label={t("createGroup.descriptionLabel")}
+        value={description}
+        onChange={setDescription}
+        placeholder={t("createGroup.descriptionPlaceholder")}
+        disabled={isLoading}
+        rows={3}
+        id="create-group-description"
+      />
+      <input data-testid="create-group-description-input" type="hidden" value={description} readOnly />
+
+      <Switch
+        label={t("createGroup.textChannelLabel")}
+        checked={createTextChannel}
+        onChange={setCreateTextChannel}
+        disabled={isLoading}
+        description={t("createGroup.textChannelDescription")}
+      />
+
+      <Switch
+        label={t("createGroup.voiceChannelLabel")}
+        checked={createVoiceChannel}
+        onChange={setCreateVoiceChannel}
+        disabled={isLoading}
+        description={t("createGroup.voiceChannelDescription")}
+      />
+
+      {error && (
+        <p data-testid="create-group-error" className="text-secondary font-mono text-danger">
+          {error}
+        </p>
+      )}
+
+      <FormActions>
+        <Button
+          data-testid="create-group-submit-button"
+          type="submit"
+          isLoading={isLoading}
+          loadingText={t("createGroup.submitting")}
         >
-          <TextInput
-            label={t("createGroup.nameLabel")}
-            value={name}
-            onChange={onNameChange}
-            placeholder={t("createGroup.namePlaceholder")}
-            disabled={isLoading}
-            id="create-group-name"
-            required
-          />
-          {/* Preserve testid for E2E */}
-          <input data-testid="create-group-name-input" type="hidden" value={name} readOnly />
-
-          <TextInput
-            label={t("createGroup.slugLabel")}
-            value={slug}
-            onChange={onSlugChange}
-            placeholder={t("createGroup.slugPlaceholder")}
-            disabled={isLoading}
-            id="create-group-slug"
-            required
-            description={t("createGroup.slugDescription")}
-          />
-          <input data-testid="create-group-slug-input" type="hidden" value={slug} readOnly />
-
-          <TextArea
-            label={t("createGroup.descriptionLabel")}
-            value={description}
-            onChange={setDescription}
-            placeholder={t("createGroup.descriptionPlaceholder")}
-            disabled={isLoading}
-            rows={3}
-            id="create-group-description"
-          />
-          <input data-testid="create-group-description-input" type="hidden" value={description} readOnly />
-
-          <Switch
-            label={t("createGroup.textChannelLabel")}
-            checked={createTextChannel}
-            onChange={setCreateTextChannel}
-            disabled={isLoading}
-            description={t("createGroup.textChannelDescription")}
-          />
-
-          <Switch
-            label={t("createGroup.voiceChannelLabel")}
-            checked={createVoiceChannel}
-            onChange={setCreateVoiceChannel}
-            disabled={isLoading}
-            description={t("createGroup.voiceChannelDescription")}
-          />
-
-          {error && (
-            <p data-testid="create-group-error" className="text-xs font-mono text-danger">
-              {error}
-            </p>
-          )}
-
-          <Button
-            data-testid="create-group-submit-button"
-            type="submit"
-            isLoading={isLoading}
-            loadingText={t("createGroup.submitting")}
-            className="w-full"
-          >
-            {t("createGroup.submit")}
-          </Button>
-        </form>
-      </div>
-    </div>
+          {t("createGroup.submit")}
+        </Button>
+      </FormActions>
+    </PageColumn>
   );
 });

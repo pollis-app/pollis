@@ -6,6 +6,7 @@ import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { Volume2, VolumeX, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff, Video, VideoOff, AudioLines } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
+import { IconButton } from "../ui/IconButton";
 import { voiceSession } from "../../voice";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
@@ -100,7 +101,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   return (
     <div
       data-testid="voice-bar"
-      className="flex items-center ps-1 pe-3 gap-2 font-mono text-xs flex-shrink-0 min-h-composer-flush border-t border-line bg-surface text-muted"
+      className="flex items-center ps-1 pe-3 gap-2 font-mono text-secondary flex-shrink-0 min-h-composer-flush border-t border-line bg-surface text-muted"
     >
       <PillButton
         data-testid="voice-bar-channel-name"
@@ -321,15 +322,15 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
           : null}
       </span>
 
-      <button
+      <IconButton
         data-testid="voice-bar-settings-button"
         onClick={() => navigate({ to: "/voice-settings" })}
         aria-label={t("bar.settings")}
         title={t("bar.settings")}
-        className="flex size-5 shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent p-0 transition-colors text-muted hover:text-accent"
+        className="size-5 shrink-0 transition-colors"
       >
         <SlidersHorizontal size={14} />
-      </button>
+      </IconButton>
     </div>
   );
 });

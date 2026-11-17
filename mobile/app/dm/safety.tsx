@@ -7,7 +7,7 @@ import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { Screen, Header, Body, Card, Chip, Txt } from "../../components/ui";
 import { QrCode } from "../../components/QrCode";
 import { Icon } from "../../components/icons";
-import { semantic, fonts, space } from "../../theme/tokens";
+import { semantic, fonts, space, typeSize } from "../../theme/tokens";
 import { invoke } from "../../lib/native";
 import { useSafetyNumber, useSetContactVerified } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
@@ -95,7 +95,7 @@ function DMSafetyNumber() {
               testID="text-safety-number"
               style={{
                 fontFamily: fonts.mono400,
-                fontSize: 16,
+                fontSize: typeSize.body,
                 lineHeight: 26,
                 color: semantic.text,
                 letterSpacing: 0.6,

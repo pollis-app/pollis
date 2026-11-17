@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
 import { formatFullTimestamp, formatTimeOfDay } from "../../utils/format";
 import type { Skin } from "../../utils/colorUtils";
+import { LinkButton } from "../ui/LinkButton";
 
 interface KeyChangeNoticeRowProps {
   noticeId: number;
@@ -32,26 +33,21 @@ export const KeyChangeNoticeRow: React.FC<KeyChangeNoticeRowProps> = React.memo(
       data-peer-user-id={peerUserId}
       className={
         modern
-          ? "flex items-center justify-center gap-2 px-4 py-2 text-xs text-muted"
-          : "flex items-center justify-center gap-2 px-4 py-1 text-xs font-mono text-muted"
+          ? "flex items-center justify-center gap-2 px-4 py-2 text-secondary text-muted"
+          : "flex items-center justify-center gap-2 px-4 py-1 text-secondary font-mono text-muted"
       }
     >
       <ShieldAlert size={14} aria-hidden="true" className="flex-shrink-0 text-accent" />
       <span data-testid="key-change-notice-text">
         {t("keyChange.notice", { name })}{" "}
-        <button
-          type="button"
-          data-testid="key-change-notice-verify"
-          className="underline bg-transparent text-accent"
-          onClick={() => onVerify(peerUserId)}
-        >
+        <LinkButton data-testid="key-change-notice-verify" onClick={() => onVerify(peerUserId)}>
           {t("keyChange.verify")}
-        </button>
+        </LinkButton>
       </span>
       <bdi
         dir="ltr"
         title={formatFullTimestamp(at)}
-        className={modern ? "font-machine text-2xs tabular-nums" : "tabular-nums"}
+        className={modern ? "font-machine text-meta tabular-nums" : "tabular-nums"}
       >
         {formatTimeOfDay(at)}
       </bdi>

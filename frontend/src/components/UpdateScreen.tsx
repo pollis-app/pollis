@@ -189,7 +189,7 @@ export const UpdateScreen: React.FC<Props> = ({ onContinue }) => {
           <span
             data-testid="update-status"
             role={phase === "error" ? "alert" : undefined}
-            className={`text-xs font-mono break-words ${phase === "error" ? "text-danger" : "text-fg"}`}
+            className={`text-secondary font-mono break-words ${phase === "error" ? "text-danger" : "text-fg"}`}
           >
             {label}
           </span>
@@ -211,12 +211,11 @@ export const UpdateScreen: React.FC<Props> = ({ onContinue }) => {
 
         {phase === "downloading" && progress !== null && (
           <div
-            className="bg-line"
+            className="bg-line rounded-full"
             style={{
               width: "100%",
               maxWidth: 280,
               height: 4,
-              borderRadius: 2,
               overflow: "hidden",
             }}
           >

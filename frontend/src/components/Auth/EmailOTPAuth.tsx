@@ -5,6 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { isMac, isLinux, isWindows } from '../../utils/platform';
 import * as api from '../../services/api';
 import { Button } from '../ui/Button';
+import { LinkButton } from '../ui/LinkButton';
 import { InputOtp } from '../ui/InputOtp';
 import { AuthError } from './AuthError';
 import { TextInput } from '../ui/TextInput';
@@ -141,7 +142,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   if (step === 'otp') {
     return (
       <div data-testid="otp-form-container" className="flex flex-col gap-4">
-        <p className="text-xs font-mono text-dim">
+        <p className="text-secondary font-mono text-dim">
           <Trans
             t={t}
             i18nKey="otp.sentTo"
@@ -152,7 +153,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
         {error && <AuthError message={error} />}
         <form data-testid="otp-form" onSubmit={handleVerifyOTP} className="flex flex-col gap-4">
           <div>
-            <label className="block text-xs font-mono font-medium mb-2 text-dim">
+            <label className="block text-secondary font-mono font-medium mb-2 text-dim">
               {t('otp.codeLabel')}
             </label>
             <InputOtp
@@ -174,13 +175,13 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
             {t('otp.verify')}
           </Button>
         </form>
-        <button
+        <Button
+          variant="ghost"
           data-testid="back-to-email-button"
           onClick={() => { setStep('email'); setOtp(''); setError(null); }}
-          className="inline-flex items-center gap-1 leading-none text-xs font-mono text-muted"
         >
           <ArrowLeft size={14} className="rtl-mirror" /> {t('common:actions.back')}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -188,11 +189,11 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   if (linkMode) {
     return (
       <div data-testid="link-form-container" className="flex flex-col gap-6">
-        <h2 className="text-base text-fg">{t('link.scanTitle')}</h2>
+        <h2 className="text-row text-fg">{t('link.scanTitle')}</h2>
         <OfferCode deviceName={desktopDeviceName()} onSignedIn={onSuccess} />
         <div className="flex flex-col gap-2 pt-4 border-t border-line">
-          <h3 className="text-sm text-fg">{t('link.pasteHeading')}</h3>
-          <p className="text-sm text-muted leading-relaxed">{t('link.codeIntro')}</p>
+          <h3 className="text-body text-fg">{t('link.pasteHeading')}</h3>
+          <p className="text-body text-muted leading-relaxed">{t('link.codeIntro')}</p>
         </div>
         {error && <AuthError message={error} />}
         <form data-testid="link-form" onSubmit={handleClaimLink} className="flex flex-col gap-4">
@@ -258,16 +259,16 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
         {t('link.useDevice')}
       </Button>
       {/* Agreeing to the terms is part of sign-up (#1213). */}
-      <p data-testid="legal-agree" className="text-xs text-muted text-center leading-relaxed">
+      <p data-testid="legal-agree" className="text-secondary text-muted text-center leading-relaxed">
         <Trans
           t={t}
           i18nKey="legal.agree"
           components={{
             terms: (
-              <button type="button" className="underline bg-transparent text-accent" onClick={() => void shellOpen('https://pollis.com/terms')} />
+              <LinkButton onClick={() => void shellOpen('https://pollis.com/terms')} />
             ),
             privacy: (
-              <button type="button" className="underline bg-transparent text-accent" onClick={() => void shellOpen('https://pollis.com/privacy')} />
+              <LinkButton onClick={() => void shellOpen('https://pollis.com/privacy')} />
             ),
           }}
         />

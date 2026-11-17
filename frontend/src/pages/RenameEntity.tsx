@@ -11,6 +11,8 @@ import {
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormActions } from "../components/ui/FormActions";
 import { EmptyState } from "../components/ui/EmptyState";
 import { identityFieldMode } from "../utils/identityFields";
 
@@ -139,117 +141,99 @@ export const RenameEntity: React.FC<RenameEntityProps> = observer((props) => {
 
   if (!isAdmin) {
     return (
-      <div
-        data-testid={`${testId}-page`}
-        className="flex-1 flex flex-col overflow-auto bg-bg"
+      <PageColumn
+        paneTestId={`${testId}-page`}
+        data-testid={`${testId}-readonly`}
       >
-        <div
-          data-testid={`${testId}-content`}
-          className="flex-1 flex justify-center overflow-auto px-6 py-8"
-        >
-          <div
-            data-testid={`${testId}-readonly`}
-            className="w-full max-w-md flex flex-col gap-5"
-          >
-            <p className="text-sm text-dim">{copy.notAdmin}</p>
-            {nameMode === "read" && (
-              <div>
-                <p className="text-xs font-sans font-medium mb-1.5 text-fg">
-                  {copy.nameLabel}
-                </p>
-                <p
-                  data-testid={`${testId}-name-value`}
-                  className="text-sm text-fg break-words"
-                >
-                  {entity.name}
-                </p>
-              </div>
-            )}
-            {descriptionMode === "read" && (
-              <div>
-                <p className="text-xs font-sans font-medium mb-1.5 text-fg">
-                  {copy.descriptionLabel}
-                </p>
-                <p
-                  data-testid={`${testId}-description-value`}
-                  className="text-sm text-fg whitespace-pre-wrap break-words"
-                >
-                  {entity.description}
-                </p>
-              </div>
-            )}
+        <p className="text-body text-dim">{copy.notAdmin}</p>
+        {nameMode === "read" && (
+          <div>
+            <p className="text-secondary font-sans font-medium mb-1.5 text-fg">
+              {copy.nameLabel}
+            </p>
+            <p
+              data-testid={`${testId}-name-value`}
+              className="text-body text-fg break-words"
+            >
+              {entity.name}
+            </p>
           </div>
-        </div>
-      </div>
+        )}
+        {descriptionMode === "read" && (
+          <div>
+            <p className="text-secondary font-sans font-medium mb-1.5 text-fg">
+              {copy.descriptionLabel}
+            </p>
+            <p
+              data-testid={`${testId}-description-value`}
+              className="text-body text-fg whitespace-pre-wrap break-words"
+            >
+              {entity.description}
+            </p>
+          </div>
+        )}
+      </PageColumn>
     );
   }
 
   return (
-    <div
-      data-testid={`${testId}-page`}
-      className="flex-1 flex flex-col overflow-auto bg-bg"
+    <PageColumn
+      as="form"
+      paneTestId={`${testId}-page`}
+      data-testid={`${testId}-form`}
+      onSubmit={handleSubmit}
     >
-      <div
-        data-testid={`${testId}-content`}
-        className="flex-1 flex justify-center overflow-auto px-6 py-8"
-      >
-        <form
-          data-testid={`${testId}-form`}
-          onSubmit={handleSubmit}
-          className="w-full max-w-md flex flex-col gap-5"
+      <TextInput
+        label={copy.nameLabel}
+        value={name}
+        onChange={setName}
+        placeholder={copy.namePlaceholder}
+        disabled={isPending}
+        id={`${testId}-name`}
+        required
+      />
+      <input
+        data-testid={`${testId}-name-input`}
+        type="hidden"
+        value={name}
+        readOnly
+      />
+
+      <TextArea
+        label={copy.descriptionLabel}
+        value={description}
+        onChange={setDescription}
+        placeholder={copy.descriptionPlaceholder}
+        disabled={isPending}
+        rows={2}
+        id={`${testId}-description`}
+      />
+      <input
+        data-testid={`${testId}-description-input`}
+        type="hidden"
+        value={description}
+        readOnly
+      />
+
+      {error && (
+        <p
+          data-testid={`${testId}-error`}
+          className="text-secondary font-mono text-danger"
         >
-          <TextInput
-            label={copy.nameLabel}
-            value={name}
-            onChange={setName}
-            placeholder={copy.namePlaceholder}
-            disabled={isPending}
-            id={`${testId}-name`}
-            required
-          />
-          <input
-            data-testid={`${testId}-name-input`}
-            type="hidden"
-            value={name}
-            readOnly
-          />
+          {error}
+        </p>
+      )}
 
-          <TextArea
-            label={copy.descriptionLabel}
-            value={description}
-            onChange={setDescription}
-            placeholder={copy.descriptionPlaceholder}
-            disabled={isPending}
-            rows={2}
-            id={`${testId}-description`}
-          />
-          <input
-            data-testid={`${testId}-description-input`}
-            type="hidden"
-            value={description}
-            readOnly
-          />
-
-          {error && (
-            <p
-              data-testid={`${testId}-error`}
-              className="text-xs font-mono text-danger"
-            >
-              {error}
-            </p>
-          )}
-
-          <Button
-            data-testid={`${testId}-submit-button`}
-            type="submit"
-            isLoading={isPending}
-            loadingText={copy.submitting}
-            className="w-full"
-          >
-            {copy.submit}
-          </Button>
-        </form>
-      </div>
-    </div>
+      <FormActions>
+        <Button
+          data-testid={`${testId}-submit-button`}
+          type="submit"
+          isLoading={isPending}
+          loadingText={copy.submitting}
+        >
+          {copy.submit}
+        </Button>
+      </FormActions>
+    </PageColumn>
   );
 });
