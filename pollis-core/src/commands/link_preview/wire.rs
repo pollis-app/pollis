@@ -115,19 +115,42 @@ pub fn is_previewable_url(url: &str) -> bool {
 }
 
 /// `url` appears in `body` as a whole token: not a prefix of a longer link, not
-/// glued to the word before it. The renderers then require an exact match with
-/// a link their own parser finds, so this is the floor, not the whole rule.
+/// glued to the word before it. The token may differ in what URL parsing
+/// normalizes (`https://GitHub.com` for `https://github.com/`), because the
+/// composer previews the parsed link, not the typed text. The renderers then
+/// require an exact match with a link their own parser finds, so this is the
+/// floor, not the whole rule.
 pub fn body_contains_link(body: &str, url: &str) -> bool {
     if url.is_empty() {
         return false;
     }
-    body.match_indices(url).any(|(at, _)| {
+    let exact = body.match_indices(url).any(|(at, _)| {
         let before = body[..at].chars().next_back();
         let after = body[at + url.len()..].chars().next();
-        let clean_before = before.is_none_or(|c| c.is_whitespace() || "([<\"'".contains(c));
-        let clean_after =
-            after.is_none_or(|c| c.is_whitespace() || ".,;:!?)]>\"'".contains(c));
+        let clean_before = before.is_none_or(|c| c.is_whitespace() || LEADING.contains(c));
+        let clean_after = after.is_none_or(|c| c.is_whitespace() || TRAILING.contains(c));
         clean_before && clean_after
+    });
+    exact || body_has_normalized(body, url)
+}
+
+/// Characters a link may sit inside, before and after it.
+const LEADING: &str = "([<\"'";
+const TRAILING: &str = ".,;:!?)]>\"'";
+
+/// Some whitespace-separated token of `body`, without the punctuation around
+/// it, parses to the same URL as `url`.
+fn body_has_normalized(body: &str, url: &str) -> bool {
+    let Ok(want) = url::Url::parse(url) else {
+        return false;
+    };
+    body.split_whitespace().any(|token| {
+        let token = token
+            .trim_start_matches(|c| LEADING.contains(c))
+            .trim_end_matches(|c| TRAILING.contains(c));
+        token.len() <= MAX_URL_LEN
+            && token.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://"))
+            && url::Url::parse(token).is_ok_and(|got| got == want)
     })
 }
 
@@ -231,6 +254,19 @@ mod tests {
         assert_eq!(decode(&bytes, "https://example.com/article-two"), None, "a prefix of a longer link");
         assert_eq!(decode(&bytes, "xhttps://example.com/article"), None, "glued to a word");
         assert!(decode(&bytes, "(https://example.com/article).").is_some());
+    }
+
+    /// The composer previews the parsed link; a keyboard may capitalise the
+    /// host, and a person may leave off the trailing slash.
+    #[test]
+    fn a_link_typed_differently_but_parsing_the_same_matches() {
+        assert!(body_contains_link("Look https://GitHub.com/", "https://github.com/"));
+        assert!(body_contains_link("see https://github.com", "https://github.com/"));
+        assert!(body_contains_link("(HTTPS://Example.COM:443/article).", URL));
+        assert!(!body_contains_link("https://github.com.evil.example/", "https://github.com/"));
+        assert!(!body_contains_link("https://github.com/x", "https://github.com/"));
+        assert!(!body_contains_link("xhttps://github.com/", "https://github.com/"));
+        assert!(!body_contains_link("http://github.com/", "https://github.com/"));
     }
 
     #[test]
