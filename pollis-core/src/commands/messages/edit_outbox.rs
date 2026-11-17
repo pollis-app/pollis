@@ -35,6 +35,7 @@ fn not_signed_in() -> Error {
 
 /// Store an edit — the first thing `edit_message` does, before any network.
 /// The same text keeps the envelope id and re-arms a failed edit; new text is a new edit.
+#[cfg(test)]
 pub(super) fn enqueue_edit_on(
     conn: &rusqlite::Connection,
     conversation_id: &str,

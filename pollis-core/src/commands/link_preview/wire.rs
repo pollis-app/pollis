@@ -300,7 +300,8 @@ mod tests {
     /// A bad thumbnail reference costs the thumbnail, not the card.
     #[test]
     fn a_malformed_image_is_dropped_alone() {
-        let cases: Vec<Box<dyn Fn(&mut PreviewImage)>> = vec![
+        type Break = Box<dyn Fn(&mut PreviewImage)>;
+        let cases: Vec<Break> = vec![
             Box::new(|i| i.key = "avatars/x/y.png".into()),
             Box::new(|i| i.hash = "zz".into()),
             Box::new(|i| i.ct = "image/svg+xml".into()),

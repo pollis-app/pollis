@@ -299,9 +299,9 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
     }
     // Inside 2000::/3: IETF protocol assignments 2001::/23 (Teredo, benchmarking, ORCHID and
     // the rest), documentation 2001:db8::/32 and 3fff::/20.
-    !((seg[0] == 0x2001 && seg[1] < 0x0200)
-        || (seg[0] == 0x2001 && seg[1] == 0x0db8)
-        || seg[0] & 0xfff0 == 0x3ff0)
+    let ietf = seg[0] == 0x2001 && (seg[1] < 0x0200 || seg[1] == 0x0db8);
+    let documentation = seg[0] & 0xfff0 == 0x3ff0;
+    !(ietf || documentation)
 }
 
 #[cfg(test)]

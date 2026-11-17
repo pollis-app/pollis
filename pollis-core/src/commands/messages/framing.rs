@@ -310,6 +310,7 @@ pub fn classify(buf: &[u8]) -> Frame {
 ///
 /// Identical to [`pad`] up to the end of the plaintext — which is exactly what
 /// makes a thread reply readable on a client that has never heard of threads.
+#[cfg(any(test, feature = "fuzzing"))]
 pub fn pad_threaded(plaintext: &[u8], thread_id: &str) -> Vec<u8> {
     pad_with_trailers(plaintext, Some(thread_id), None)
 }

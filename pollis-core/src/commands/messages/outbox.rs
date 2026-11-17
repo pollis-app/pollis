@@ -444,11 +444,11 @@ pub(super) fn store_preview_thumbnail_on(
     Ok(())
 }
 
-/// `id`'s stored link-preview thumbnail: bytes, width, height, blurhash.
-fn preview_thumbnail_on(
-    conn: &rusqlite::Connection,
-    id: &str,
-) -> Result<Option<(Vec<u8>, u32, u32, Option<String>)>> {
+/// A stored link-preview thumbnail: bytes, width, height, blurhash.
+type StoredThumbnail = (Vec<u8>, u32, u32, Option<String>);
+
+/// `id`'s stored link-preview thumbnail.
+fn preview_thumbnail_on(conn: &rusqlite::Connection, id: &str) -> Result<Option<StoredThumbnail>> {
     Ok(conn
         .query_row(
             "SELECT data, width, height, blurhash FROM outbox_attachment
