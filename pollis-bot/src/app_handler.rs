@@ -97,18 +97,8 @@ impl AppHandler {
     }
 }
 
-#[cfg(debug_assertions)]
 fn dev_grants() -> Result<AdminGrants> {
-    use pollis_app_manifest::dev_grants::{load, DEV_GRANTS_ENV};
-    let path = std::env::var_os(DEV_GRANTS_ENV).with_context(|| {
-        format!("an App installation needs the admin's grants. Fix: until App approvals ship (#2005), set {DEV_GRANTS_ENV} to a grants JSON file (development builds only)")
-    })?;
-    Ok(load(Path::new(&path))?)
-}
-
-#[cfg(not(debug_assertions))]
-fn dev_grants() -> Result<AdminGrants> {
-    anyhow::bail!("an App installation needs an admin's signed approval, which this release cannot read yet (#2005); release builds never read development grants")
+    anyhow::bail!("an App installation runs only under an admin's signed approval")
 }
 
 /// The App's view of a message the runtime decrypted, with its author from
