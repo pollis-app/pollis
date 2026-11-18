@@ -333,6 +333,13 @@ test("a first approval offers everything the manifest asks for", () => {
   assert.equal(isLinkSource("http://example.com/app.wasm"), false);
 });
 
+test("the approved App's channels read as they are named in the group now", () => {
+  const live = CHANNELS[0];
+  const a = approved(manifest(), grants({ channels: [{ id: live.id, name: live.name.toLowerCase() + "-old" }] }));
+  const opts = grantOptions(view({ approved: a }), "approved", new Set());
+  assert.equal(opts?.channels.find((c) => c.id === live.id)?.name, live.name);
+});
+
 test("narrowing in place re-signs the approved App hash and manifest; it can re-widen only up to the manifest", () => {
   const a = approved(manifest(), grants({ channels: [{ id: "c1", name: "alerts" }], history: 7 }));
   const v = view({ approved: a });
