@@ -12,6 +12,9 @@
 
 use async_trait::async_trait;
 
+use pollis_core::commands::bots::app_approval::{AppApprovalRefusal, VerifiedAppApproval};
+use pollis_core::commands::bots::apps::AppRunReport;
+
 use crate::action::{ChannelInfo, CheckedAction};
 use crate::trigger::{IncomingMessage, TriggerKey};
 
@@ -102,6 +105,19 @@ pub trait InstallationCore: Send + Sync {
     /// #2004: the channel and author of a message this host has seen.
     async fn message_meta(&self, _message_id: &str) -> Result<Option<(String, String)>, CoreError> {
         Ok(None)
+    }
+
+    /// #2005: the installation's latest App approval, verified from this
+    /// host's own state (signature, approver certified and a current admin in
+    /// this host's MLS view and roster, manifest, grants, and a `seq` not lower
+    /// than this host already accepted). `Ok(Err(_))` is a refusal.
+    async fn app_approval(&self) -> Result<Result<VerifiedAppApproval, AppApprovalRefusal>, CoreError> {
+        Ok(Err(AppApprovalRefusal::NotApproved))
+    }
+
+    /// #2005: tell the group's admins what the last check found (sent only when it changed).
+    async fn app_report(&self, _report: &AppRunReport) -> Result<(), CoreError> {
+        Ok(())
     }
 }
 

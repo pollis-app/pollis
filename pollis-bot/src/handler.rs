@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::action::Action;
-use crate::core::{InstallationCore, StateWrite};
+use crate::core::{CoreError, InstallationCore, StateWrite};
 use crate::trigger::{Trigger, WebhookPayload};
 
 /// A handler's failure. The loop discards every action of a job whose handler
@@ -32,6 +32,13 @@ pub trait Handler: Send + Sync {
     fn kind(&self) -> &'static str;
 
     async fn handle(&self, trigger: &Trigger) -> Result<Vec<Action>, HandlerError>;
+
+    /// #2005: called once at the start of every job, with the installation
+    /// open, before any trigger. An App re-checks its approval and artifact
+    /// here. `Err` stops the job without handling anything (nothing is skipped).
+    async fn prepare(&self, _ctx: &HandlerContext) -> Result<(), CoreError> {
+        Ok(())
+    }
 
     /// What the job loop calls: the handler's actions and, for an App, the
     /// App state writes to commit under the trigger's claim. The default wraps
@@ -60,10 +67,14 @@ pub struct HandlerOutput {
 pub enum HandlerKind {
     #[default]
     Alerts,
-    /// #2004: a sandboxed App: its component and `pollis-app.json`. Until
-    /// signed approvals (#2005), a development build reads the admin's grants
-    /// from the file named by `POLLIS_APP_DEV_GRANTS`; a release build refuses.
-    App { component: std::path::PathBuf, manifest: std::path::PathBuf },
+    /// #2004: a sandboxed App: its component and `pollis-app.json`, each a
+    /// local path or an `https://` URL. It runs only under an admin's verified
+    /// approval (#2005), re-checked before every job; a development build's
+    /// signature is read from `<component>.sig.json`.
+    App {
+        component: crate::app_approval::ArtifactLocation,
+        manifest: crate::app_approval::ArtifactLocation,
+    },
 }
 
 impl HandlerKind {
@@ -71,7 +82,7 @@ impl HandlerKind {
         Ok(match self {
             HandlerKind::Alerts => Arc::new(AlertsHandler),
             HandlerKind::App { component, manifest } => {
-                Arc::new(crate::app_handler::AppHandler::load(component, manifest)?)
+                Arc::new(crate::app_handler::AppHandler::approved(component.clone(), manifest.clone()))
             }
         })
     }

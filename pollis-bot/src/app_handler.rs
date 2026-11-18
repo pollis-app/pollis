@@ -16,20 +16,18 @@
 //! hash in the process-wide [`AppHost`].
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use pollis_app_host as host;
 use pollis_app_host::{AppHost, HostConfig, HostServices, PublicHttpClient, ServiceError};
 use pollis_app_manifest::{Manifest, TriggerKind};
 /// The admin's grants, as #2005 and the tests hand them to [`AppHandler::new`].
 pub use pollis_app_manifest::{ActionKind, AdminGrants, ChannelGrant, EventKind};
-use sha2::{Digest, Sha256};
-
 use crate::action::Action;
+use crate::app_approval::{ApprovedApp, ArtifactLocation, ReadyApp};
 use crate::core::{InstallationCore, Member, StateWrite};
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerOutput};
 use crate::trigger::{IncomingMessage, Trigger, WebhookPayload};
@@ -46,19 +44,24 @@ fn app_host() -> Result<Arc<AppHost>, HandlerError> {
 }
 
 pub struct AppHandler {
-    app_hash: [u8; 32],
-    component: Arc<Vec<u8>>,
-    manifest: Manifest,
-    grants: AdminGrants,
-    /// Whether the effective grants deliver `mentions` (a mention of the bot
-    /// then reaches `on-mention` instead of `on-message`).
-    mentions: bool,
+    source: AppSource,
     http: PublicHttpClient,
 }
 
+/// Where a job's App and grants come from.
+enum AppSource {
+    /// Given directly ([`AppHandler::new`]): tests and embedders that verified
+    /// the App themselves.
+    Fixed(ReadyApp),
+    /// An installation's App: re-checked against its admin's approval before
+    /// every job (#2005). The runtime's only path.
+    Approved(ApprovedApp),
+}
+
 impl AppHandler {
-    /// An App with the admin's grants given directly. #2005 calls this with
-    /// grants from a verified approval; tests call it with their own.
+    /// An App with the admin's grants given directly, for tests. The runtime
+    /// never builds one this way: an installation's App runs only through
+    /// [`AppHandler::approved`].
     pub fn new(
         component: Vec<u8>,
         manifest_json: &[u8],
@@ -66,39 +69,35 @@ impl AppHandler {
     ) -> Result<AppHandler> {
         let manifest = Manifest::from_json(manifest_json)?;
         grants.check_not_wider(&manifest)?;
-        // The cache key. #2005 replaces it with the App hash an approval pins.
-        let mut h = Sha256::new();
-        h.update(b"pollis-app-cache-v1\0");
-        h.update((component.len() as u64).to_be_bytes());
-        h.update(&component);
-        h.update(manifest_json);
         let mentions = pollis_app_manifest::effective_grants(&manifest, &grants)
             .triggers
             .contains(&TriggerKind::Mentions);
         Ok(AppHandler {
-            mentions,
-            app_hash: h.finalize().into(),
-            component: Arc::new(component),
-            manifest,
-            grants,
+            source: AppSource::Fixed(ReadyApp {
+                app_hash: pollis_app_manifest::app_hash(&component, manifest_json)?,
+                component: Arc::new(component),
+                manifest,
+                grants,
+                development: false,
+                mentions,
+            }),
             http: PublicHttpClient::new(),
         })
     }
 
-    /// From an installation's files. Until signed approvals land (#2005) the
-    /// admin's grants come from the development grants file, which exists only
-    /// in debug builds.
-    pub fn load(component: &Path, manifest: &Path) -> Result<AppHandler> {
-        let bytes = std::fs::read(component)
-            .with_context(|| format!("reading the App component {}", component.display()))?;
-        let manifest_json =
-            std::fs::read(manifest).with_context(|| format!("reading {}", manifest.display()))?;
-        AppHandler::new(bytes, &manifest_json, dev_grants()?)
+    /// An installation's App from its artifact location (a local path or an
+    /// `https://` URL). Nothing is loaded here: every job first checks the
+    /// installation's approval and holds the artifact against it.
+    pub fn approved(component: ArtifactLocation, manifest: ArtifactLocation) -> AppHandler {
+        AppHandler { source: AppSource::Approved(ApprovedApp::new(component, manifest)), http: PublicHttpClient::new() }
     }
-}
 
-fn dev_grants() -> Result<AdminGrants> {
-    anyhow::bail!("an App installation runs only under an admin's signed approval")
+    fn ready(&self) -> Result<ReadyApp, HandlerError> {
+        match &self.source {
+            AppSource::Fixed(app) => Ok(app.clone()),
+            AppSource::Approved(a) => a.ready().map_err(|why| HandlerError(format!("not running the App: {why}"))),
+        }
+    }
 }
 
 /// The App's view of a message the runtime decrypted, with its author from
@@ -175,11 +174,19 @@ impl Handler for AppHandler {
         ))
     }
 
+    async fn prepare(&self, ctx: &HandlerContext) -> Result<(), crate::core::CoreError> {
+        match &self.source {
+            AppSource::Fixed(_) => Ok(()),
+            AppSource::Approved(a) => a.prepare(ctx.core.as_ref()).await,
+        }
+    }
+
     async fn handle_job(
         &self,
         trigger: &Trigger,
         ctx: &HandlerContext,
     ) -> Result<HandlerOutput, HandlerError> {
+        let app = self.ready()?;
         let (app_trigger, message) = match trigger {
             Trigger::Message(m) => {
                 // A message this host could not decrypt is nothing an App can read.
@@ -195,7 +202,7 @@ impl Handler for AppHandler {
                 let mentioned = own_name.is_some_and(|n| pollis_core::commands::bots::mentions_username(text, &n));
                 // One delivery per message: a mention of the bot reaches
                 // `on-mention` when the App takes mentions, else `on-message`.
-                let trigger = if mentioned && self.mentions {
+                let trigger = if mentioned && app.mentions {
                     host::Trigger::Mention(msg.clone())
                 } else {
                     host::Trigger::Message(msg.clone())
@@ -236,12 +243,7 @@ impl Handler for AppHandler {
             bot_user_id: ctx.core.bot_user_id().to_string(),
         };
         let sandbox = app_host()?;
-        let (component, manifest, grants, app_hash) = (
-            self.component.clone(),
-            self.manifest.clone(),
-            self.grants.clone(),
-            self.app_hash,
-        );
+        let (component, manifest, grants, app_hash) = (app.component, app.manifest, app.grants, app.app_hash);
         let job_services: Arc<dyn HostServices> = services.clone();
         let result = tokio::task::spawn_blocking(move || {
             sandbox.run_job(host::Job {
