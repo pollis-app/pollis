@@ -1,5 +1,7 @@
 pub mod account_identity;
 pub mod auth;
+// Bots (#1182): pairing, host approvals, unattended start, admin commands.
+pub mod bots;
 pub mod pin;
 // Biometric unlock on mobile, on top of the PIN (#1685).
 pub mod device_unlock;
