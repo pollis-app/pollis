@@ -11,6 +11,8 @@ mod harness;
 mod adversarial;
 #[path = "flows/auth.rs"]
 mod auth;
+#[path = "flows/bots.rs"]
+mod bots;
 #[path = "flows/channel_mute.rs"]
 mod channel_mute;
 #[path = "flows/cross_channel_ingest.rs"]

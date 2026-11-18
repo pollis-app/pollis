@@ -31,6 +31,19 @@ No OTP issued or verified for a `bot.invalid` address; no email change (403 for 
 ## Teardown
 A group left with no people (leave, or the last person's account deletion) is torn down with its bots; ownership and admin handoff never pick a bot. Account deletion of an admin blanks `bot.created_by`.
 
+## Client (`pollis-core/src/commands/bots/`)
+API summary at the top of `mod.rs`. One `AppState` per installation, with its own keystore and data dir (`AppState::local_dir`, no longer harness-only), so installations in one process share nothing.
+
+**Pairing code** (`code.rs`): eight characters, the enrollment SAS alphabet and input rule, HKDF over the request's ephemeral key, the host's device id and the target (the new bot's account key, or the existing bot's id), so a DS that swaps any of them breaks the admin's typed code. `code_lookup` = SHA-256 of a domain and the normalized code. Unsalted by request id (the admin finds the request by the code).
+
+**Host** (`host.rs`): `start_new_bot_pairing` generates the account seed and device id locally; `await_pairing` backs off 1→8 s to the TTL (one call, like `await_enrollment_approval`), then opens the store, publishes the cert (cert-validity gate) and key packages, checks through a signed read that the DS holds the account key this host generated (else "tampering"), confirms `is_bot`, and saves the installation. An add-host pairing unwraps the account key with the enrollment unwrap (`device_enrollment::unwrap_account_key`). `join_bot_group` drains Welcomes, then external-joins.
+
+**Host approval** (`approval.rs`): canonical JSON (sorted fields, compact, no unknown fields, re-serialization must match), ML-DSA-44 by the admin's device over `pollis-bot-host-approval-v1 ‖ 0x00 ‖ payload`, wrapped as `{payload, signature}` base64. `handle_host_approvals` verifies each pending request from the host's own state (`verify_host_approval`): approver device is a leaf in the host's local tree of the group, `Certified` under the approver's account key (`IdentityDirectory`, TOFU-pinned), signature under that leaf key, own bot and group, unexpired with a lifetime ≤ 10 min, request id not in the local `bot_consumed_host_request` table, approved ephemeral key byte-equal to the request's (else `Tampered`), the transparency log not `Alarm`, and the roster read listing the approver as admin (re-read just before the wrap). Wrapper rule: hosts that are live, certified and seen within 15 min, sorted by device id; rank *k* wraps at `issued_at + 30·k s` (`Deferred` until then), the DS's status CAS makes the first wrap win and the rest record the request consumed. The wrap is `device_enrollment::wrap_account_seed_to`, the one human enrollment uses.
+
+**Unattended start** (`unattended.rs`): per-bot keystore slot `bot_installation_<id>` (account seed, local-DB key, device id, group), written only by pairing. `start_unattended` refuses (`unattended_refused: …`) an account with a PIN, an account without a slot, and one the DS does not report as a bot.
+
+Flows: `src-tauri/tests/flows/bots.rs` (harness: `BotHostClient`, `pair_new_bot`, `plant_host_approval`, `swap_pairing_ephemeral`).
+
 ## Runtime
 `pollis-bot` (crate `pollis-bot/`, install/run: `pollis-bot/README.md`) hosts bot installations and runs their **job loop**. Headless, on `pollis-core`, dials out to the DS only, survives restarts (installations reopen unattended from their keystore slot; the first job after start catches up on everything missed).
 

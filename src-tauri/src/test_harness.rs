@@ -176,6 +176,12 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::mls::poll_mls_welcomes,
             crate::commands::mls::process_pending_commits,
             crate::commands::mls::catch_up_all_mls_groups,
+            crate::commands::bots::list_group_bots,
+            crate::commands::bots::get_bot,
+            crate::commands::bots::create_bot,
+            crate::commands::bots::add_bot_host,
+            crate::commands::bots::revoke_bot_host,
+            crate::commands::bots::delete_bot,
             crate::commands::overlay::get_overlay_mode,
             crate::commands::overlay::set_overlay_mode,
         ])
@@ -404,6 +410,13 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 /// Reset every row in both test DBs, preserving `schema_migrations`.
 pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) -> Result<()> {
     // Children before parents; the MLS control-plane tables are wiped on `log` below.
+    // Bots first (#1182): the schema deletes a bot user before its `bot` row,
+    // and refuses its membership's or its group's delete while it exists.
+    remote
+        .execute("DELETE FROM users WHERE kind = 'bot'", ())
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("wipe bot users: {e}")))?;
+    wipe_tables(remote, &["bot", "bot_pairing_request", "bot_trigger_claim"]).await?;
     let main_tables = [
         "history_transfer_chunk",
         "history_transfer",

@@ -689,3 +689,11 @@ CREATE TABLE IF NOT EXISTS video_poster_cache (
     height       INTEGER NOT NULL CHECK (height > 0),
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Add-host requests this bot host already acted on (#1182): wrapped, or found
+-- wrapped by a sibling host. A host approval naming one is refused as a replay.
+-- Only bot installations write it; it stays empty for a person's device.
+CREATE TABLE IF NOT EXISTS bot_consumed_host_request (
+    request_id  TEXT PRIMARY KEY CHECK (length(request_id) BETWEEN 1 AND 64),
+    consumed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

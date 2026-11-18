@@ -57,7 +57,11 @@ export interface GroupMember {
   avatar_url?: string;
   role: 'admin' | 'member';
   joined_at: string;
+  /** #1182: the member is a bot (show the Bot badge). Absent from an older core. */
+  is_bot?: boolean;
 }
+
+export * from './bots';
 
 export interface Channel {
   id: string; // ULID
