@@ -47,18 +47,20 @@ tags:
     id: "row-command-${APP_COMMAND}-.*"
 - assertNotVisible:
     id: "list-command-suggestions"
-- inputText: "from maestro"
+# The fixture App runs its args as a script: `ack <text>` replies <text> to the command.
+- inputText: "ack ${APP_REPLY}"
 - tapOn:
     id: "btn-send"
 
 # An ordinary message, then the App's reply with the Bot badge.
 - extendedWaitUntil:
-    visible: ".*/${APP_COMMAND}.*from maestro.*"
+    visible: ".*/${APP_COMMAND}.*ack ${APP_REPLY}.*"
     timeout: 30000
 - assertNotVisible:
     id: "text-command-notice"
 - extendedWaitUntil:
-    visible: ".*${APP_REPLY}.*"
+    # Exactly the reply: the command message itself reads "/${APP_COMMAND} ack ${APP_REPLY}".
+    visible: "${APP_REPLY}"
     timeout: 120000
 - assertVisible:
     id: "message-bot-badge"

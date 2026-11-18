@@ -203,9 +203,11 @@ JSON
  "schedules":[{"name":"digest","every":3600}]}
 JSON
     ;;
+    # An update of 4a's App (whose #General grant 4a narrowed off): "*" is new access, so the
+    # admin can grant #General again by switching it on (4b-approve-app.yaml).
     commands) cat >"$APP_DIR/pollis-app.json" <<JSON
 {"name":"echo","version":"1.0.0","triggers":["commands","mentions"],
- "read":{"channels":["#general"]},"actions":["post","reply"],
+ "read":{"channels":["*"]},"actions":["post","reply"],
  "commands":[{"name":"$APP_COMMAND","description":"Echo for the e2e","arg_hint":"<text>"}]}
 JSON
     ;;
@@ -264,6 +266,9 @@ maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" "${A[@]}" -e MAESTRO_
   "$HERE/.maestro/flows/bot-app-approval.yaml" &
 MAESTRO_PID=$!
 await_running "$V1_HASH" 300
+# Stage 2 narrows the approved App in place (a new approval of the same hash); only then is there
+# an update to install. Swapping sooner puts v2 on the page while stage 2 still edits v1.
+await_running "$V1_HASH under approval 2" 300
 app_version v2
 V2_HASH="$(install_app host1)"
 install_app host2 >/dev/null
@@ -282,7 +287,7 @@ install_app host2 >/dev/null
 restart_hosts
 nudge
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$ADMIN_EMAIL" \
-  "$FLOWS/4b-approve-app.yaml"
+  -e APP_COMMAND="$APP_COMMAND" "$FLOWS/4b-approve-app.yaml"
 for _ in $(seq 1 60); do grep -q "running App $CMD_HASH" "$WORK/HOST1.err" && break; nudge; sleep 2; done
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e APP_COMMAND="$APP_COMMAND" -e APP_REPLY="$APP_REPLY" \
   "$FLOWS/5-commands.yaml"
