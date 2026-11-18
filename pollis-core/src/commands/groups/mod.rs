@@ -1,5 +1,6 @@
 //! Group / channel / membership commands — split into cohesive submodules.
 
+mod aliases;
 pub mod authz;
 mod channels;
 // `groups::groups` holds the group CRUD proper, the others its neighbours;
@@ -22,6 +23,11 @@ pub use groups::{
     create_group, delete_group, list_user_groups, list_user_groups_with_channels,
     search_group_by_slug, update_group,
 };
+
+pub use aliases::{
+    list_group_aliases, list_my_aliases, reset_group_alias, set_group_alias, GroupAlias,
+};
+pub(crate) use aliases::{cache_group_aliases, cached_alias_name};
 
 pub use channels::{
     create_channel, delete_channel, list_group_channels, list_muted_channels, set_channel_muted,

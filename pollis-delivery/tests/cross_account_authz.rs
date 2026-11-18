@@ -714,3 +714,89 @@ async fn b_cannot_read_as_conversation_directory() {
     let groups: Vec<String> = serde_json::from_value(body["group_ids"].clone()).unwrap();
     assert_eq!(groups, vec!["bob-grp".to_string()]);
 }
+
+/// #2003: per-group aliases over the real router, signed. A non-member reads
+/// nothing, nobody writes or resets as someone else, and a former member's
+/// alias stays readable by the members who remain.
+#[tokio::test(flavor = "multi_thread")]
+async fn group_aliases_are_members_only_and_owner_or_admin_written() {
+    let db = fresh_db().await;
+    let alice = seed_account(&db, "alice").await;
+    let bob = seed_account(&db, "bob").await;
+    let mallory = seed_account(&db, "mallory").await;
+    seed_member(&db, "grp", "alice", "admin").await;
+    seed_member(&db, "grp", "bob", "member").await;
+
+    let (status, _) = post_json(
+        &db,
+        &bob,
+        "/v1/group-aliases/set",
+        serde_json::json!({ "user_id": "bob", "group_id": "grp", "display_name": "Bobby" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Writing as someone else, or into a group you are not in.
+    for (path, body) in [
+        ("/v1/group-aliases/set", serde_json::json!({ "user_id": "bob", "group_id": "grp", "display_name": "pwned" })),
+        ("/v1/group-aliases/set", serde_json::json!({ "user_id": "mallory", "group_id": "grp", "display_name": "x" })),
+        ("/v1/group-aliases/reset", serde_json::json!({ "requester_id": "mallory", "group_id": "grp", "user_id": "bob" })),
+        ("/v1/group-aliases/reset", serde_json::json!({ "requester_id": "alice", "group_id": "grp", "user_id": "bob" })),
+    ] {
+        assert_eq!(post(&db, &mallory, path, body).await, StatusCode::FORBIDDEN, "{path}");
+    }
+    // Reading another account's list, or a group you are not in.
+    assert_eq!(
+        post(&db, &mallory, "/v1/read/my-aliases", serde_json::json!({ "user_id": "bob" })).await,
+        StatusCode::FORBIDDEN
+    );
+    let (status, outsider) = post_json(
+        &db,
+        &mallory,
+        "/v1/read/group-aliases",
+        serde_json::json!({ "user_id": "mallory", "group_id": "grp" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(outsider["authorized"], false);
+    assert_eq!(outsider["aliases"], serde_json::json!([]), "a non-member sees no alias");
+
+    // Bob leaves; alice still reads his alias.
+    let conn = db.conn().await.unwrap();
+    conn.execute("DELETE FROM group_member WHERE group_id = 'grp' AND user_id = 'bob'", ())
+        .await
+        .unwrap();
+    let (_, seen) = post_json(
+        &db,
+        &alice,
+        "/v1/read/group-aliases",
+        serde_json::json!({ "user_id": "alice", "group_id": "grp" }),
+    )
+    .await;
+    assert_eq!(seen["authorized"], true);
+    assert_eq!(seen["aliases"][0]["user_id"], "bob");
+    assert_eq!(seen["aliases"][0]["display_name"], "Bobby");
+    let (_, former) = post_json(
+        &db,
+        &bob,
+        "/v1/read/group-aliases",
+        serde_json::json!({ "user_id": "bob", "group_id": "grp" }),
+    )
+    .await;
+    assert_eq!(former["authorized"], false, "the former member no longer reads the group");
+    let (_, mine) = post_json(&db, &bob, "/v1/read/my-aliases", serde_json::json!({ "user_id": "bob" })).await;
+    assert_eq!(mine["aliases"][0]["group_id"], "grp", "the owner still lists it");
+
+    // The admin resets it.
+    assert_eq!(
+        post(
+            &db,
+            &alice,
+            "/v1/group-aliases/reset",
+            serde_json::json!({ "requester_id": "alice", "group_id": "grp", "user_id": "bob" }),
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM group_alias", ()).await, 0);
+}

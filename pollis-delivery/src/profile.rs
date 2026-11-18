@@ -179,6 +179,19 @@ pub async fn apply_update_profile(
             return Ok(ProfileOutcome::Invalid(DISPLAY_NAME_INVALID));
         }
     }
+    // #2003: a replaced picture is released; the reclaim pass deletes its object
+    // once no alias references it either.
+    if let Some(new_avatar) = body.avatar_url.as_deref() {
+        let old = crate::util::query_strings(
+            conn,
+            "SELECT avatar_url FROM users WHERE id = ?1 AND avatar_url IS NOT NULL",
+            libsql::params![user.clone()],
+        )
+        .await?;
+        for key in old.iter().filter(|k| k.as_str() != new_avatar) {
+            crate::aliases::release_avatar(conn, Some(key)).await?;
+        }
+    }
     conn.execute(
         "UPDATE users SET \
             username = COALESCE(?2, username), \

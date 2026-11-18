@@ -632,6 +632,8 @@ async fn finish(
     }
 
     let names = sender_names(state, &rows, deadline).await;
+    // #2003: inside a group the sender is named as that group shows them.
+    let aliases = alias_names(state, user_id, &rows, deadline).await;
     let my_name = crate::accounts::read_accounts_index()
         .ok()
         .and_then(|i| i.accounts.into_iter().find(|a| a.user_id == user_id))
@@ -657,14 +659,21 @@ async fn finish(
             )
             .is_empty();
         let muted = !is_dm && !mention && mutes.contains(&row.conversation_id);
+        let sender_name = aliases
+            .iter()
+            .find(|(conv, id, _)| *conv == row.conversation_id && *id == row.sender_id)
+            .map(|(_, _, n)| n.clone())
+            .or_else(|| {
+                names
+                    .iter()
+                    .find(|(id, _)| *id == row.sender_id)
+                    .map(|(_, n)| n.clone())
+            })
+            .unwrap_or_default();
         items.push(Item {
             conversation_id: row.conversation_id,
             message_id: row.id,
-            sender_name: names
-                .iter()
-                .find(|(id, _)| *id == row.sender_id)
-                .map(|(_, n)| n.clone())
-                .unwrap_or_default(),
+            sender_name,
             conversation_title: title,
             is_dm,
             body,
@@ -816,6 +825,64 @@ async fn sender_names(
         }
     }
     found
+}
+
+/// `(conversation_id, sender_id, alias)` for every channel row whose sender has an
+/// alias name in that channel's group (#2003). Each group's aliases are read
+/// once from the DS within the deadline, refreshing `group_alias_cache`; when
+/// that read fails the cache answers, and a miss leaves the username.
+async fn alias_names(
+    state: &Arc<AppState>,
+    user_id: &str,
+    rows: &[Row],
+    deadline: Instant,
+) -> Vec<(String, String, String)> {
+    let row_groups: Vec<(&Row, String)> = {
+        let guard = state.local_db.lock().await;
+        let Some(db) = guard.as_ref() else {
+            return Vec::new();
+        };
+        rows.iter()
+            .filter_map(|r| {
+                db.conn()
+                    .query_row(
+                        "SELECT group_id FROM conversation_cache
+                         WHERE id = ?1 AND kind = 'channel' AND group_id IS NOT NULL",
+                        rusqlite::params![r.conversation_id],
+                        |q| q.get::<_, String>(0),
+                    )
+                    .ok()
+                    .map(|g| (r, g))
+            })
+            .collect()
+    };
+    let mut groups: Vec<&str> = row_groups.iter().map(|(_, g)| g.as_str()).collect();
+    groups.sort_unstable();
+    groups.dedup();
+    for group_id in groups {
+        let read = crate::commands::ds_reads::group_aliases(state, user_id, group_id);
+        if let Ok(Ok(resp)) = tokio::time::timeout_at(deadline.into(), read).await {
+            if resp.authorized {
+                let aliases: Vec<crate::commands::groups::GroupAlias> =
+                    resp.aliases.into_iter().map(Into::into).collect();
+                let guard = state.local_db.lock().await;
+                if let Some(db) = guard.as_ref() {
+                    let _ = crate::commands::groups::cache_group_aliases(db.conn(), group_id, &aliases);
+                }
+            }
+        }
+    }
+    let guard = state.local_db.lock().await;
+    let Some(db) = guard.as_ref() else {
+        return Vec::new();
+    };
+    row_groups
+        .into_iter()
+        .filter_map(|(r, g)| {
+            crate::commands::groups::cached_alias_name(db.conn(), &g, &r.sender_id)
+                .map(|n| (r.conversation_id.clone(), r.sender_id.clone(), n))
+        })
+        .collect()
 }
 
 /// The channels this user muted, asked only when a channel message is in the answer. A failed

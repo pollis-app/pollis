@@ -22,6 +22,7 @@ const USER_COLUMNS: &[(&str, &str)] = &[
     ("dm_channel", "created_by"),
     ("dm_channel_member", "user_id"),
     ("dm_channel_member", "added_by"),
+    ("group_alias", "user_id"),
     ("group_emoji", "created_by"),
     ("group_join_request", "reviewed_by"),
     ("groups", "owner_id"),
@@ -55,6 +56,7 @@ const USER_COLUMNS: &[(&str, &str)] = &[
 
 const GROUP_COLUMNS: &[(&str, &str)] = &[
     ("channels", "group_id"),
+    ("group_alias", "group_id"),
     ("group_emoji", "group_id"),
     ("group_invite", "group_id"),
     ("group_invite_link", "group_id"),
@@ -173,6 +175,9 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     )).await;
     exec(c, &format!(
         "INSERT INTO channel_mute (user_id, channel_id) VALUES ('{u}', '{cid}')"
+    )).await;
+    exec(c, &format!(
+        "INSERT INTO group_alias (group_id, user_id, display_name) VALUES ('{gid}', '{u}', 'Alias')"
     )).await;
     exec(c, &format!(
         "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
