@@ -73,6 +73,8 @@ export interface TestOptions extends JobOptions {
   manifest?: string;
   /** The `pollis-app-dev` program. Default: `$POLLIS_APP_DEV_BIN`, else `pollis-app-dev` on PATH. */
   bin?: string;
+  /** The bot's username, for `@mentions` and commands addressed `/name @username`. Default `test_bot`. */
+  botUsername?: string;
 }
 
 /** A message as tests describe it: everything optional. */
@@ -120,9 +122,20 @@ export interface JobResult {
 /** A built App, ready to run in tests. */
 export interface TestApp {
   readonly manifest: ResolvedManifest;
+  /**
+   * A member sends this message in a channel, and it is routed as the runtime
+   * routes it: a command your manifest declares goes to `onCommand`; else a
+   * message that @mentions the bot goes to `onMention` (if you take
+   * mentions); else `onMessage`.
+   */
+  send(message: string | MessageInput, options?: JobOptions): Promise<JobResult>;
+  /** `onMessage`, directly. */
   message(message: string | MessageInput, options?: JobOptions): Promise<JobResult>;
+  /** `onMention`, directly. */
   mention(message: string | MessageInput, options?: JobOptions): Promise<JobResult>;
+  /** A member sends `/name args`, routed like {@link TestApp.send}: an undeclared command is an ordinary message. */
   command(name: string, args?: string, options?: JobOptions & { message?: MessageInput }): Promise<JobResult>;
+  /** A declared schedule fires. Default slot: the latest one at or before `now`. */
   schedule(name: string, options?: JobOptions & { slot?: number | Date }): Promise<JobResult>;
   request(body: string, options?: JobOptions & { id?: string; requester?: Partial<Author> }): Promise<JobResult>;
   webhook(body: string | Uint8Array | unknown, options?: JobOptions & { headers?: Record<string, string>; deliveryId?: string }): Promise<JobResult>;
@@ -263,6 +276,7 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
     const now = msOf(o.now, DEFAULT_NOW);
     const request = {
       component,
+      botUsername: options.botUsername,
       manifest: manifestPath,
       trigger,
       grants: grants(o.grants),
@@ -290,22 +304,30 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
   }
 
   const now = () => msOf(defaults.now, DEFAULT_NOW);
+  /** The latest slot of schedule `name` at or before `at` (ms), as the runtime computes it. */
+  function slotAt(name: string, at: number): number {
+    const spec = manifest.schedules?.find((s) => s.name === name);
+    if (!spec) {
+      return at;
+    }
+    const secs = Math.floor(at / 1000);
+    const offset = spec.offset ?? 0;
+    const slot = secs < offset ? offset : Math.floor((secs - offset) / spec.every) * spec.every + offset;
+    return slot * 1000;
+  }
   return {
     manifest,
+    send: (m, o) => job({ send: message(m, msOf(o?.now, now())) }, o),
     message: (m, o) => job({ message: message(m, msOf(o?.now, now())) }, o),
     mention: (m, o) => job({ mention: message(m, msOf(o?.now, now())) }, o),
     command: (name, args = "", o) =>
       job(
         {
-          command: {
-            name,
-            args,
-            message: message({ text: `/${name}${args ? " " + args : ""}`, ...o?.message }, msOf(o?.now, now())),
-          },
+          send: message({ text: `/${name}${args ? " " + args : ""}`, ...o?.message }, msOf(o?.now, now())),
         },
         o,
       ),
-    schedule: (name, o) => job({ schedule: { name, slot: msOf(o?.slot, msOf(o?.now, now())) } }, o),
+    schedule: (name, o) => job({ schedule: { name, slot: msOf(o?.slot, slotAt(name, msOf(o?.now, now()))) } }, o),
     request: (body, o) =>
       job(
         {
@@ -326,7 +348,10 @@ export async function testApp(options: TestOptions = {}): Promise<TestApp> {
         {
           webhook: {
             deliveryId: o?.deliveryId ?? `d${++ids}`,
-            headers: Object.entries(o?.headers ?? {}),
+            headers: Object.entries({
+              ...(typeof body === "string" || body instanceof Uint8Array ? {} : { "content-type": "application/json" }),
+              ...o?.headers,
+            }),
             body: bytes(body),
           },
         },

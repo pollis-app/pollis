@@ -16,8 +16,7 @@ test("/hello with no name greets the sender", async () => {
   assert.deepEqual(result.replies, ["Hello, Ann!"]);
 });
 
-test("other commands are ignored", async () => {
+test("a command the App did not declare never reaches it", async () => {
   const result = await app.command("weather");
-  assert.ok(result.ok);
   assert.deepEqual(result.actions, []);
 });

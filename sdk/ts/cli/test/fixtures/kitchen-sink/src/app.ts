@@ -6,6 +6,17 @@ export default app({
     actions: ["post", "reply", "react"],
     state: { quota: 1024 },
     egress: ["api.example.com"],
+    commands: [
+      { name: "count", description: "Count up" },
+      { name: "ticket", description: "File a ticket", arg_hint: "<title>" },
+      { name: "leak", description: "Try an undeclared host" },
+      { name: "edit", description: "Try an undeclared action" },
+      { name: "history", description: "Read history" },
+      { name: "random", description: "Roll" },
+      { name: "throw", description: "Fail" },
+      { name: "other", description: "Falls through" },
+    ],
+    schedules: [{ name: "daily", every: 86400, offset: 32400 }],
   },
 
   async onCommand(cmd, ctx) {
@@ -65,11 +76,17 @@ export default app({
     }
   },
 
+  async onMention(message, ctx) {
+    await ctx.reply(message, "you rang");
+  },
+
   async onSchedule(schedule, ctx) {
     ctx.log.info(`schedule ${schedule.name} at ${new Date(schedule.slot).toISOString()} now ${ctx.now()}`);
   },
 
   async onWebhook(webhook, ctx) {
+    const type = webhook.headers.find(([k]) => k === "content-type")?.[1];
+    ctx.log.info(`webhook ${type}`);
     const event = webhook.json<{ text: string; channel: string }>();
     await ctx.post(event.channel, event.text);
   },

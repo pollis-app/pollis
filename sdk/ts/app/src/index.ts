@@ -24,6 +24,8 @@
 
 export type {
   Action,
+  CommandSpec,
+  ScheduleSpec,
   EventKind,
   Manifest,
   ResolvedManifest,
@@ -71,7 +73,7 @@ export interface Message {
 export interface Command {
   /** The command name, without the slash. */
   name: string;
-  /** Everything after the name, unparsed. */
+  /** Everything after the name (and after `@bot`, if the member addressed one), trimmed. */
   args: string;
   /** The message that carried the command. Reply to it to answer. */
   message: Message;
@@ -91,7 +93,11 @@ export interface Request {
   body: string;
 }
 
-/** An inbound webhook delivery. */
+/**
+ * An inbound webhook delivery: the request body as sent, and its
+ * `content-type`, `user-agent` and `x-*` headers (never `authorization`,
+ * cookies or the signature).
+ */
 export interface Webhook {
   deliveryId: string;
   headers: [string, string][];
@@ -203,11 +209,11 @@ export interface Context {
 export interface Handlers {
   /** Every new message in a granted channel. Trigger: `messages`. */
   onMessage?(message: Message, ctx: Context): void | Promise<void>;
-  /** A message that mentions the bot. Trigger: `mentions`. */
+  /** A message that @mentions the bot by its username (`@all` does not count). Trigger: `mentions`. */
   onMention?(message: Message, ctx: Context): void | Promise<void>;
-  /** A slash command addressed to the App. Trigger: `commands`. */
+  /** A slash command declared in `manifest.commands`. Trigger: `commands`. */
   onCommand?(command: Command, ctx: Context): void | Promise<void>;
-  /** A schedule firing. Trigger: `schedule`. */
+  /** A schedule from `manifest.schedules` firing. Trigger: `schedule`. */
   onSchedule?(schedule: Schedule, ctx: Context): void | Promise<void>;
   /** A member's request. Trigger: `requests`. */
   onRequest?(request: Request, ctx: Context): void | Promise<void>;

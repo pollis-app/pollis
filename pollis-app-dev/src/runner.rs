@@ -27,6 +27,8 @@ use sha2::{Digest, Sha256};
 pub const DEFAULT_INSTALLATION: &str = "test-installation";
 /// The bot's user id in tests, unless the request names one.
 pub const DEFAULT_BOT: &str = "test-bot";
+/// The bot's username in tests, unless the request names one.
+pub const DEFAULT_BOT_USERNAME: &str = "test_bot";
 /// 2027-01-15T08:00:00Z: a fixed clock, so tests are deterministic.
 pub const DEFAULT_NOW: u64 = 1_800_000_000_000;
 
@@ -45,6 +47,10 @@ pub struct TestRequest {
     pub installation_id: Option<String>,
     #[serde(default)]
     pub bot_user_id: Option<String>,
+    /// The bot's username, for routing a `send` trigger (commands addressed
+    /// `@username`, mentions). Default [`DEFAULT_BOT_USERNAME`].
+    #[serde(default)]
+    pub bot_username: Option<String>,
     pub trigger: WireTrigger,
     /// What `query-messages` and message lookups can find (the host narrows
     /// it to the grants, as it does in production).
@@ -103,6 +109,10 @@ pub struct WireMessage {
     deny_unknown_fields
 )]
 pub enum WireTrigger {
+    /// A member sent this message in a channel: routed as the runtime routes
+    /// it (a declared command to `on-command`, else a mention of the bot to
+    /// `on-mention` if the App takes mentions, else `on-message`).
+    Send(WireMessage),
     Message(WireMessage),
     Mention(WireMessage),
     Command {
@@ -400,8 +410,57 @@ fn message(m: WireMessage) -> host::Message {
     }
 }
 
-fn trigger(t: WireTrigger) -> host::Trigger {
+/// Whether `text` mentions `username`, by the rule the runtime uses
+/// (`pollis_core::commands::bots::mentions_username`, #843): an `@` at the
+/// start or after whitespace, then letters, digits, `_`, `-` or `.`, trailing
+/// `.`, `-` and `_` dropped, case-insensitive; `@all` names nobody. Mirrored
+/// here because this crate does not link pollis-core.
+pub fn mentions(text: &str, username: &str) -> bool {
+    let want = username.to_lowercase();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '@' || (i > 0 && !chars[i - 1].is_whitespace()) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < chars.len() && (chars[j].is_alphanumeric() || matches!(chars[j], '_' | '-' | '.'))
+        {
+            j += 1;
+        }
+        let token: String = chars[i + 1..j].iter().collect::<String>();
+        let token = token.trim_end_matches(['.', '-', '_']).to_lowercase();
+        if !token.is_empty() && token != "all" && token == want {
+            return true;
+        }
+        i = j.max(i + 1);
+    }
+    false
+}
+
+/// Route a channel message as the runtime's App handler does.
+pub fn route(manifest: &Manifest, m: host::Message, username: &str) -> host::Trigger {
+    if let Some(cmd) = pollis_app_manifest::route_command(manifest, &m.text, Some(username)) {
+        return host::Trigger::Command(host::Command {
+            name: cmd.name,
+            args: cmd.args,
+            message: m,
+        });
+    }
+    if manifest
+        .triggers
+        .contains(&pollis_app_manifest::TriggerKind::Mentions)
+        && mentions(&m.text, username)
+    {
+        return host::Trigger::Mention(m);
+    }
+    host::Trigger::Message(m)
+}
+
+fn trigger(t: WireTrigger, manifest: &Manifest, username: &str) -> host::Trigger {
     match t {
+        WireTrigger::Send(m) => route(manifest, message(m), username),
         WireTrigger::Message(m) => host::Trigger::Message(message(m)),
         WireTrigger::Mention(m) => host::Trigger::Mention(message(m)),
         WireTrigger::Command {
@@ -561,7 +620,20 @@ impl TestHost {
             Err(e) => return TestResult::failed("setup", e.to_string()),
         };
 
-        let trigger = trigger(request.trigger);
+        let username = request
+            .bot_username
+            .clone()
+            .unwrap_or_else(|| DEFAULT_BOT_USERNAME.to_string());
+        let trigger = trigger(request.trigger, &manifest, &username);
+        // The runtime fires only declared schedules.
+        if let host::Trigger::Schedule(sched) = &trigger {
+            if !manifest.schedules.iter().any(|d| d.name == sched.name) {
+                return TestResult::failed(
+                    "not_delivered",
+                    format!("not delivered: schedule `{}` is not in `schedules`", sched.name),
+                );
+            }
+        }
         let messages: Vec<host::Message> = request.messages.into_iter().map(message).collect();
         let mut channel_ids: Vec<String> = messages.iter().map(|m| m.channel.clone()).collect();
         if let Some(m) = host::trigger_message(&trigger) {

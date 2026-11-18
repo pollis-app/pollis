@@ -90,11 +90,22 @@ describe("pollis app build", () => {
       name: "kitchen-sink",
       version: "1.2.3",
       description: "Every handler and host function, for the CLI's tests.",
-      triggers: ["messages", "commands", "schedule", "webhook"],
+      triggers: ["messages", "mentions", "commands", "schedule", "webhook"],
       read: { channels: ["#support"], history: 7, events: ["created", "edited"] },
       actions: ["post", "reply", "react"],
       state: { quota: 1024 },
       egress: ["api.example.com"],
+      commands: [
+        { name: "count", description: "Count up" },
+        { name: "ticket", description: "File a ticket", arg_hint: "<title>" },
+        { name: "leak", description: "Try an undeclared host" },
+        { name: "edit", description: "Try an undeclared action" },
+        { name: "history", description: "Read history" },
+        { name: "random", description: "Roll" },
+        { name: "throw", description: "Fail" },
+        { name: "other", description: "Falls through" },
+      ],
+      schedules: [{ name: "daily", every: 86400, offset: 32400 }],
     });
   });
 
@@ -123,7 +134,7 @@ describe("npm dependencies", () => {
     writeFileSync(
       join(dir, "src", "app.ts"),
       'import { app } from "@pollis/app";\nimport { where } from "dual";\n' +
-        'export default app({ manifest: { read: { channels: ["*"] }, actions: ["reply"] },\n' +
+        'export default app({ manifest: { read: { channels: ["*"] }, actions: ["reply"], commands: [{ name: "x", description: "X" }] },\n' +
         '  async onCommand(cmd, ctx) { await ctx.reply(cmd.message, where()); } });\n',
     );
     const built = await buildApp({ dir, quiet: true });
@@ -190,6 +201,17 @@ describe("@pollis/app in the real sandbox", () => {
     assert.match(result.error?.message ?? "", /something broke/);
   });
 
+  test("messages are routed as the runtime routes them: declared command, then mention, then message", async () => {
+    assert.deepEqual((await app.send("/count @test_bot")).replies, ["count is 1"]);
+    assert.deepEqual((await app.send("/count @other_bot help")).replies, ["Try /ticket"]);
+    assert.deepEqual((await app.send("/deploy help")).replies, ["Try /ticket"]);
+    assert.deepEqual((await app.send("hey @Test_Bot help")).replies, ["you rang"]);
+    assert.deepEqual((await app.send("@all help")).replies, ["Try /ticket"]);
+    assert.deepEqual((await app.command("ticket", "@test_bot  Printer  ", {
+      http: [{ url: "https://api.example.com/tickets", method: "POST", body: { id: "T-9" } }],
+    })).fetches[0].body, JSON.stringify({ title: "Printer" }));
+  });
+
   test("history comes from granted channels only", async () => {
     const result = await app.command("history", "", {
       messages: [
@@ -213,10 +235,13 @@ describe("@pollis/app in the real sandbox", () => {
 
   test("messages, schedules and webhooks reach their handlers", async () => {
     assert.deepEqual((await app.message("I need help")).replies, ["Try /ticket"]);
-    const scheduled = await app.schedule("daily", { slot: Date.UTC(2027, 0, 15, 9) });
-    assert.ok(scheduled.logs.some((l) => l.text === "schedule daily at 2027-01-15T09:00:00.000Z now 1800000000000"));
+    // Default slot: the latest at or before now (08:00): 09:00 UTC the day before.
+    const scheduled = await app.schedule("daily");
+    assert.ok(scheduled.logs.some((l) => l.text === "schedule daily at 2027-01-14T09:00:00.000Z now 1800000000000"), JSON.stringify(scheduled.logs));
+    assert.equal((await app.schedule("weekly")).error?.kind, "not_delivered");
     const hook = await app.webhook({ text: "deploy finished", channel: "support" });
     assert.deepEqual(hook.posts, [{ channel: "support", text: "deploy finished" }]);
+    assert.ok(hook.logs.some((l) => l.text === "webhook application/json"));
   });
 
   test("a channel the App was not granted never reaches it", async () => {

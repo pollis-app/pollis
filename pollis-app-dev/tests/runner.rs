@@ -41,7 +41,8 @@ const MANIFEST: &str = r##"{
   "read": { "channels": ["#support"] },
   "actions": ["reply"],
   "state": { "quota": 64 },
-  "egress": ["api.example.com"]
+  "egress": ["api.example.com"],
+  "commands": [{ "name": "run", "description": "Run a test script" }]
 }"##;
 
 fn request(
@@ -214,5 +215,57 @@ fn trigger_fields_are_camel_case_on_the_wire() {
             channel: "support".into(),
             text: "deployed".into()
         }]
+    );
+}
+
+#[test]
+fn mentions_follow_the_runtimes_rule() {
+    use pollis_app_dev::mentions;
+    assert!(mentions("hey @Test_Bot, look", "test_bot"));
+    assert!(mentions("@test_bot", "test_bot"));
+    assert!(!mentions("@all please", "test_bot"));
+    assert!(!mentions("mail@test_bot", "test_bot"));
+    assert!(!mentions("@test_bots", "test_bot"));
+}
+
+#[test]
+fn a_sent_message_is_routed_like_the_runtime_routes_it() {
+    let dir = tempdir::Dir::new("send");
+    let host = TestHost::new().unwrap();
+    let send = |text: &str| {
+        serde_json::json!({ "send": {
+            "id": "m1", "channel": "support", "author": { "id": "u1", "displayName": "Ann" },
+            "text": text, "sentAt": 1_800_000_000_000u64
+        }})
+    };
+    // A declared command, addressed to this bot: on-command with the args after the target.
+    let r = host.run(request(
+        &dir,
+        send("/run @test_bot reply m1 hi"),
+        serde_json::json!({}),
+    ));
+    assert!(r.ok, "{r:?}");
+    assert!(
+        r.logs[0].text.starts_with("trigger command run"),
+        "{:?}",
+        r.logs
+    );
+    // Addressed to another bot: not a command for this one, so an ordinary message.
+    let r = host.run(request(
+        &dir,
+        send("/run @other_bot reply m1 hi"),
+        serde_json::json!({}),
+    ));
+    assert!(
+        r.logs[0].text.starts_with("trigger message"),
+        "{:?}",
+        r.logs
+    );
+    // An undeclared command is an ordinary message too.
+    let r = host.run(request(&dir, send("/deploy now"), serde_json::json!({})));
+    assert!(
+        r.logs[0].text.starts_with("trigger message"),
+        "{:?}",
+        r.logs
     );
 }
