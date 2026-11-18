@@ -16,6 +16,7 @@ pub mod aliases;
 pub mod account_reads;
 pub mod auth;
 pub mod bootstrap;
+pub mod bots;
 pub mod broker;
 pub mod cert;
 pub mod client_policy;
@@ -481,6 +482,18 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<account_reads::ReadCursorsBody as DsRequest>::PATH, post(account_reads::read_cursors))
         // UNAUTHENTICATED by necessity (pre-PIN); `probe` tier (#987 §6.5).
         .route(<account_reads::AccountProbeBody as DsRequest>::PATH, post(account_reads::account_probe))
+        // Bots (#1182): pairing request and status are pre-credential (the host has no
+        // key yet); everything else is device-signed. See `bots`.
+        .route(<bots::BotPairingRequestBody as DsRequest>::PATH, post(bots::pairing_request))
+        .route(<bots::BotPairingLookupBody as DsRequest>::PATH, post(bots::pairing_lookup))
+        .route(<bots::BotPairingStatusBody as DsRequest>::PATH, post(bots::pairing_status))
+        .route(<bots::CreateBotBody as DsRequest>::PATH, post(bots::create_bot))
+        .route(<bots::DeleteBotBody as DsRequest>::PATH, post(bots::delete_bot))
+        .route(<bots::ListBotsBody as DsRequest>::PATH, post(bots::list_bots))
+        .route(<bots::ApproveBotHostBody as DsRequest>::PATH, post(bots::approve_bot_host))
+        .route(<bots::PendingBotHostsBody as DsRequest>::PATH, post(bots::pending_bot_hosts))
+        .route(<bots::WrapBotHostBody as DsRequest>::PATH, post(bots::wrap_bot_host))
+        .route(<bots::ClaimTriggerBody as DsRequest>::PATH, post(bots::claim_trigger))
         // Failed-request log (#1305): a ROUTE layer (matched patterns only), inside the limiter.
         .route_layer(from_fn_with_state(state.clone(), error_log::record))
         // #1611: 426 a POST from a build below its platform's minimum, before any handler runs.

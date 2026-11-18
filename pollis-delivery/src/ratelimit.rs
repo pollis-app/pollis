@@ -390,16 +390,25 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
         // #987: guessable-input reads (`group-by-slug`, `account-probe`) need a guessing bound.
         // `/v1/invites/create` too: its username-or-email input is guessable.
         // `/v1/link/offer` (#1361): pre-credential, and holds memory until it lapses.
+        // #1182: a bot pairing request is pre-credential and holds a row until it
+        // lapses; a pairing lookup takes a typed code, so it is guessable input.
         "/v1/directory/group-by-slug"
         | "/v1/auth/account-probe"
         | "/v1/invites/create"
-        | "/v1/link/offer" => {
+        | "/v1/link/offer"
+        | "/v1/bots/pairing/request"
+        | "/v1/bots/pairing/lookup" => {
             Some(("probe", cfg.probe_max, cfg.probe_window_secs))
         }
         // Every other read (#987); a cold launch issues far more reads than writes.
         // `/v1/link/status` (#1207) is a QR poll, so a read.
         // `/v1/link/poll-offer` (#1361): a 32-byte secret, so the bound is volume.
         "/v1/link/status" | "/v1/link/poll-offer" => Some(("read", cfg.read_max, cfg.read_window_secs)),
+        // #1182: a host awaiting its pairing (a 32-byte secret, so the bound is
+        // volume), and a host reading the approvals it may wrap for.
+        "/v1/bots/pairing/status" | "/v1/bots/hosts/pending" => {
+            Some(("read", cfg.read_max, cfg.read_window_secs))
+        }
         // #1735: the transfer polls are reads; the durable per-ACCOUNT request budget is in the handler.
         "/v1/history-transfer/status" | "/v1/history-transfer/pending" | "/v1/history-transfer/chunk/get" => {
             Some(("read", cfg.read_max, cfg.read_window_secs))

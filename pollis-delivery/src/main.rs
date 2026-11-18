@@ -163,6 +163,19 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle, state: 
                             Ok(_) => {}
                             Err(e) => tracing::warn!("key-package claim sweep failed: {e}"),
                         }
+                        // #1182: lapsed bot pairing requests and old trigger claims.
+                        match pollis_delivery::bots::sweep_expired(
+                            &conn,
+                            pollis_delivery::util::now_unix(),
+                        )
+                        .await
+                        {
+                            Ok((requests, claims)) if requests > 0 || claims > 0 => tracing::info!(
+                                "retention sweep: aged out {requests} bot pairing request(s), {claims} trigger claim(s)"
+                            ),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("bot sweep failed: {e}"),
+                        }
                         // #1735: expired history transfers and their sealed chunks.
                         match pollis_delivery::history_transfer::sweep_expired(
                             &conn,
