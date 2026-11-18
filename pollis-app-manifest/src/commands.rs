@@ -163,6 +163,11 @@ impl Manifest {
 /// The `commands` checks [`Manifest::validate`] runs.
 pub(crate) fn validate_commands(manifest: &Manifest) -> Result<(), crate::ManifestError> {
     use crate::ManifestError::Command;
+    // Like `schedules`: the trigger needs something to fire on. `requests` may
+    // stand alone (a member request can come from a surface other than a command).
+    if manifest.triggers.contains(&TriggerKind::Commands) && !manifest.commands.iter().any(|c| !c.request) {
+        return Err(Command("the `commands` trigger needs at least one command that is not a `request`".into()));
+    }
     if manifest.commands.len() > MAX_COMMANDS {
         return Err(Command(format!("at most {MAX_COMMANDS} commands")));
     }
@@ -282,7 +287,12 @@ mod tests {
         let mut m = ticket();
         m.triggers.remove(&TriggerKind::Commands);
         m.commands.retain(|c| c.request);
+        m.validate().unwrap();
         assert_eq!(route_command(&m, "/forget-me", None), None);
+        let mut m = ticket();
+        m.triggers.remove(&TriggerKind::Commands);
+        assert!(m.validate().is_err(), "a plain command without the trigger");
+        assert_eq!(route_command(&m, "/ticket x", None), None);
     }
 
     #[test]
@@ -294,7 +304,8 @@ mod tests {
             (r#"{"name":"t","description":"d","arg_hint":""}"#, r#""commands""#, "`arg_hint`"),
             (r#"{"name":"t","description":"d"},{"name":"t","description":"e"}"#, r#""commands""#, "declared twice"),
             (r#"{"name":"t","description":"d"}"#, r#""messages""#, "needs `commands`"),
-            (r#"{"name":"t","description":"d","request":true}"#, r#""commands""#, "needs `requests`"),
+            (r#"{"name":"t","description":"d","request":true}"#, r#""commands""#, "needs at least one command"),
+            (r#"{"name":"t","description":"d","request":true}"#, r#""messages""#, "needs `requests`"),
         ];
         for (commands, triggers, why) in bad {
             let err = manifest(commands, triggers).unwrap_err().to_string();

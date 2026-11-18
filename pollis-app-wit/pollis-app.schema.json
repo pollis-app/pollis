@@ -111,7 +111,7 @@
       "type": "array",
       "default": [],
       "maxItems": 25,
-      "description": "Slash commands members can pick in the composer (#2018). A command is an ordinary message starting with /name; the runtime hands it to on-command only if it is declared here and the App takes the commands trigger. With request: true it is delivered to the bot as a sealed request (on-request) and never posted in the channel. Names are unique.",
+      "description": "Slash commands members can pick in the composer (#2018). A command is an ordinary message starting with /name; the runtime hands it to on-command only if it is declared here and the App takes the commands trigger. With request: true it is delivered to the bot as a sealed request (on-request) and never posted in the channel. Names are unique. The commands trigger needs at least one command that is not a request, and a command needs its trigger (commands, or requests for a request command).",
       "items": {
         "type": "object",
         "additionalProperties": false,

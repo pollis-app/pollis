@@ -36,6 +36,16 @@ use crate::core::{InstallationCore, Member, StateWrite};
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerOutput};
 use crate::trigger::{IncomingMessage, Trigger, WebhookPayload};
 
+static COMPILED_CACHE_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// Where compiled App components are kept between processes
+/// (`<data dir>/app-cache`), so a cold start (`run --once`) loads an App in
+/// milliseconds instead of compiling it. Set once, before the first job; a
+/// runtime that never sets it compiles in memory only.
+pub fn set_compiled_cache_dir(dir: std::path::PathBuf) {
+    let _ = COMPILED_CACHE_DIR.set(dir);
+}
+
 /// One sandbox host per process, so compiled components are shared by every
 /// installation running the same App.
 fn app_host() -> Result<Arc<AppHost>, HandlerError> {
@@ -43,7 +53,11 @@ fn app_host() -> Result<Arc<AppHost>, HandlerError> {
     if let Some(h) = HOST.get() {
         return Ok(h.clone());
     }
-    let h = Arc::new(AppHost::new(HostConfig::default()).map_err(|e| HandlerError(e.to_string()))?);
+    let config = HostConfig {
+        compiled_cache_dir: COMPILED_CACHE_DIR.get().cloned(),
+        ..HostConfig::default()
+    };
+    let h = Arc::new(AppHost::new(config).map_err(|e| HandlerError(e.to_string()))?);
     Ok(HOST.get_or_init(|| h).clone())
 }
 

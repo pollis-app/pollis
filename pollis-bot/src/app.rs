@@ -105,6 +105,7 @@ pub async fn run(
     }
     check_capacity(records.len(), config.max_installations)?;
 
+    crate::app_handler::set_compiled_cache_dir(data_dir.join(APP_CACHE_DIR));
     let status = Arc::new(StatusBoard::new(Some(data_dir), webhook.as_ref().map(|w| w.bind.to_string())));
     let mut installations = Vec::new();
     let mut slots = HashMap::new();
@@ -329,6 +330,10 @@ pub fn status(data_dir: &Path, config: &RuntimeConfig) -> Result<String> {
     }
     Ok(out)
 }
+
+/// Compiled App components, shared by the installations on this host
+/// (`pollis-app-host` disk cache; safe to delete).
+pub const APP_CACHE_DIR: &str = "app-cache";
 
 /// Where an installed App's files live: `<installation dir>/app/`.
 pub const APP_DIR: &str = "app";

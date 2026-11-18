@@ -540,7 +540,8 @@ mod tests {
                 "read": { "channels": ["#support", "#Ops"], "history": 30, "events": ["created", "edited"] },
                 "actions": ["reply", "react"],
                 "state": { "quota": 4096 },
-                "egress": ["api.linear.app"]
+                "egress": ["api.linear.app"],
+                "commands": [{ "name": "bug", "description": "File an issue" }]
             }"##,
         )
         .unwrap()

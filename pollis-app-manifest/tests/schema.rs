@@ -95,9 +95,15 @@ fn schema_enums_match_the_rust_enums() {
                     format!(r#"{{"name":"a","version":"1","read":{{"events":["{value}"]}}}}"#)
                 }
                 // The schedule trigger comes with its schedules.
-                _ if value == "schedule" => format!(
-                    r#"{{"name":"a","version":"1","triggers":["schedule"],"schedules":[{{"name":"s","every":60}}]}}"#
-                ),
+                _ if value == "schedule" => {
+                    r#"{"name":"a","version":"1","triggers":["schedule"],"schedules":[{"name":"s","every":60}]}"#
+                        .to_string()
+                }
+                // So does the commands trigger, with its commands.
+                _ if value == "commands" => {
+                    r#"{"name":"a","version":"1","triggers":["commands"],"commands":[{"name":"c","description":"d"}]}"#
+                        .to_string()
+                }
                 _ => format!(r#"{{"name":"a","version":"1","{field}":["{value}"]}}"#),
             };
             assert!(

@@ -22,6 +22,7 @@
 //! Every host function checks its call against the grants first and reports
 //! a refusal to the App as an error that names the manifest field.
 
+mod disk_cache;
 mod egress;
 mod http;
 mod state;
@@ -71,6 +72,14 @@ pub struct HostConfig {
     /// Compiled components kept in memory. Compilation is the expensive part;
     /// instantiation per job is cheap.
     pub cache_capacity: usize,
+    /// A directory for compiled components, so a cold process (`run --once`,
+    /// a fresh start) need not compile again. A pure performance cache: it
+    /// may be absent (Secure Cloud runs without one), and an entry is used
+    /// only when its key matches this App and this engine and its bytes are
+    /// intact; anything else is compiled afresh and rewritten.
+    pub compiled_cache_dir: Option<std::path::PathBuf>,
+    /// Compile on all cores. On by default.
+    pub parallel_compilation: bool,
 }
 
 impl Default for HostConfig {
@@ -78,8 +87,21 @@ impl Default for HostConfig {
         HostConfig {
             limits: JobLimits::default(),
             cache_capacity: 64,
+            compiled_cache_dir: None,
+            parallel_compilation: true,
         }
     }
+}
+
+/// How components reached the host, since it started.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HostStats {
+    /// Compiled from the component bytes.
+    pub compiled: u64,
+    /// Loaded from the compiled-component cache directory.
+    pub loaded_from_disk: u64,
+    /// Cache entries refused (wrong key, other engine, corrupt) and replaced.
+    pub rejected_from_disk: u64,
 }
 
 /// One job's inputs.
@@ -111,6 +133,7 @@ pub struct AppHost {
     linker: Linker<JobState>,
     config: HostConfig,
     cache: Mutex<Cache>,
+    stats: Mutex<HostStats>,
 }
 
 impl AppHost {
@@ -119,6 +142,7 @@ impl AppHost {
         wasm.wasm_component_model(true);
         wasm.epoch_interruption(true);
         wasm.max_wasm_stack(1 << 20);
+        wasm.parallel_compilation(config.parallel_compilation);
         let engine =
             Engine::new(&wasm).map_err(|e| JobError::InvalidComponent(format!("engine: {e}")))?;
         let mut linker = Linker::new(&engine);
@@ -131,6 +155,7 @@ impl AppHost {
             linker,
             config,
             cache: Mutex::new(Cache::default()),
+            stats: Mutex::new(HostStats::default()),
         })
     }
 
@@ -142,6 +167,40 @@ impl AppHost {
     /// Exposed so the runtime can validate an App when it is installed.
     pub fn prepare(&self, app_hash: AppHash, component: &[u8]) -> Result<(), JobError> {
         self.pre(app_hash, component).map(|_| ())
+    }
+
+    pub fn stats(&self) -> HostStats {
+        self.stats.lock().map(|s| *s).unwrap_or_default()
+    }
+
+    fn count(&self, f: impl FnOnce(&mut HostStats)) {
+        if let Ok(mut s) = self.stats.lock() {
+            f(&mut s);
+        }
+    }
+
+    /// The component for `app_hash`: from the compiled-component cache
+    /// directory when an entry there checks out, else compiled (and written
+    /// back to the directory, best effort).
+    fn compile(&self, app_hash: &AppHash, digest: &[u8; 32], component: &[u8]) -> Result<Component, JobError> {
+        let dir = self.config.compiled_cache_dir.as_deref();
+        if let Some(dir) = dir {
+            match disk_cache::load(&self.engine, dir, app_hash, digest) {
+                disk_cache::Lookup::Hit(c) => {
+                    self.count(|s| s.loaded_from_disk += 1);
+                    return Ok(c);
+                }
+                disk_cache::Lookup::Rejected => self.count(|s| s.rejected_from_disk += 1),
+                disk_cache::Lookup::Absent => {}
+            }
+        }
+        let compiled = Component::new(&self.engine, component)
+            .map_err(|e| JobError::InvalidComponent(format!("does not compile: {e}")))?;
+        self.count(|s| s.compiled += 1);
+        if let Some(dir) = dir {
+            disk_cache::store(&self.engine, dir, app_hash, digest, &compiled);
+        }
+        Ok(compiled)
     }
 
     /// Whether a compiled component for this App hash is cached.
@@ -166,8 +225,7 @@ impl AppHost {
                 return Ok(entry.pre.clone());
             }
         }
-        let compiled = Component::new(&self.engine, component)
-            .map_err(|e| JobError::InvalidComponent(format!("does not compile: {e}")))?;
+        let compiled = self.compile(&app_hash, &digest, component)?;
         for (name, _) in compiled.component_type().imports(&self.engine) {
             wasi::check_import(name).map_err(JobError::ImportRefused)?;
         }
