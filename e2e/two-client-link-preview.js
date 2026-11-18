@@ -237,9 +237,15 @@ async function waitComposerCard(browser, title) {
 async function editTo(browser, token, text, title) {
   await clickInRow(browser, token, "edit-button");
   await h.waitTestId(browser, "edit-message-bar", 15000);
-  const input = await browser.$('[data-testid="edit-message-bar-input"]');
-  await input.clearValue();
-  await input.setValue(text);
+  // WebKitWebDriver's typing does not reach React's onChange on this textarea:
+  // set the value through the native setter and fire the input event React listens to.
+  await browser.execute((t) => {
+    const el = document.querySelector('[data-testid="edit-message-bar-input"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+    setter.call(el, t);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.focus();
+  }, text);
   await waitComposerCard(browser, title);
   await browser.keys("Enter");
   await h.waitTestId(browser, "message-form", 30000);
