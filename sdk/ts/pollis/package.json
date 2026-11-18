@@ -1,0 +1,28 @@
+{
+  "name": "pollis",
+  "version": "0.1.0",
+  "description": "The Pollis command line for App developers: `npx pollis app new my-bot`. Runs @pollis-inc/cli.",
+  "license": "MIT",
+  "homepage": "https://pollis.com/bots-developers.html",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pollis-app/pollis.git",
+    "directory": "sdk/ts/pollis"
+  },
+  "type": "module",
+  "bin": {
+    "pollis": "./bin/pollis.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@pollis-inc/cli": "workspace:*"
+  }
+}

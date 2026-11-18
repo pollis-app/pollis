@@ -39,6 +39,12 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
+  pollis:
+    dependencies:
+      '@pollis-inc/cli':
+        specifier: workspace:*
+        version: link:../cli
+
 packages:
 
   '@andreiltd/componentize-qjs-binding-darwin-arm64@0.5.0':
