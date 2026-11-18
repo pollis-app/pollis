@@ -1,7 +1,5 @@
 import { View } from "react-native";
-import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import {
   Screen,
   Header,
@@ -15,29 +13,15 @@ import {
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
 import { semantic, space } from "../../theme/tokens";
-import { useGroupBots, useBot, useGroupMembers, useUserGroupsWithChannels } from "../../hooks/queries";
-import { isGroupAdmin } from "../../lib/identityFields";
+import { useGroupBots, useBot } from "../../hooks/queries";
+import { useBotRoute } from "../../hooks/useBotRoute";
 import { botCapReached } from "../../lib/bots";
-import { appStore } from "../../stores/appStore";
 import { useThemeRerender } from "../../components/theme";
 
 /** Group settings → Bots (#1182): the group's bots, and "Add a bot". Admins only. */
 function GroupBots() {
   useThemeRerender();
-  const { t } = useTranslation("mobile");
-  const router = useNav();
-  const { groupId } = useRouteParams<{ groupId?: string }>();
-  const id = groupId ?? null;
-  const currentUser = appStore.currentUser;
-
-  const { data: groups = [] } = useUserGroupsWithChannels();
-  const group = groups.find((g) => g.id === id);
-  const groupName = group?.name ?? t("group.common.fallbackName");
-  const { data: members = [] } = useGroupMembers(id);
-  const iAmAdmin = isGroupAdmin(
-    members.find((m) => m.user_id === currentUser?.id)?.role,
-    group?.current_user_role,
-  );
+  const { t, router, gid: id, group, groupName, iAmAdmin } = useBotRoute();
 
   const { data: bots = [], isLoading, isError } = useGroupBots(iAmAdmin ? id : null);
   // The cap rides on `get_bot`; any one bot of the group answers it, and the list is cached.

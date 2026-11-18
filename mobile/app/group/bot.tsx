@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { View } from "react-native";
-import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import {
   Screen,
   Header,
@@ -20,12 +18,8 @@ import { BotBadge } from "../../components/BotBadge";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { Text } from "../../components/Text";
-import {
-  useBot,
-  useDeleteBot,
-  useRevokeBotHost,
-  useUserGroupsWithChannels,
-} from "../../hooks/queries";
+import { useBot, useDeleteBot, useRevokeBotHost } from "../../hooks/queries";
+import { useBotRoute } from "../../hooks/useBotRoute";
 import { isLastHost } from "../../lib/bots";
 import { formatRelative } from "../../lib/relativeTime";
 import { haptic } from "../../lib/haptics";
@@ -38,14 +32,7 @@ import { useThemeRerender } from "../../components/theme";
  */
 function BotPage() {
   useThemeRerender();
-  const { t } = useTranslation("mobile");
-  const router = useNav();
-  const { groupId, botId } = useRouteParams<{ groupId?: string; botId?: string }>();
-  const gid = groupId ?? null;
-  const bid = botId ?? null;
-
-  const { data: groups = [] } = useUserGroupsWithChannels();
-  const groupName = groups.find((g) => g.id === gid)?.name ?? t("group.common.fallbackName");
+  const { t, router, gid, bid, groupName } = useBotRoute();
   const { data: bot, isLoading, isError } = useBot(bid);
   const revokeHost = useRevokeBotHost(bid, gid);
   const deleteBot = useDeleteBot(gid);

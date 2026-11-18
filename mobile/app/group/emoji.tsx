@@ -19,8 +19,6 @@ import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits"
 import { Icon } from "../../components/icons";
 import { semantic, space } from "../../theme/tokens";
 import {
-  useUserGroupsWithChannels,
-  useGroupMembers,
   useGroupEmoji,
   useUsableEmoji,
   useUploadGroupEmoji,
@@ -28,7 +26,7 @@ import {
   SHORTCODE_RE,
 } from "../../hooks/queries";
 import { CustomEmojiImage } from "../../components/emoji/CustomEmojiImage";
-import { appStore } from "../../stores/appStore";
+import { useGroupAccess } from "../../hooks/useGroupAccess";
 import { observer } from "mobx-react-lite";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
@@ -47,11 +45,8 @@ function GroupEmoji() {
   const { groupId } = useRouteParams<{ groupId?: string }>();
   const router = useNav();
   const id = groupId ?? null;
-  const currentUser = appStore.currentUser;
 
-  const { data: groups = [] } = useUserGroupsWithChannels();
-  const group = groups.find((g) => g.id === id);
-  const { data: members = [] } = useGroupMembers(id);
+  const { group, iAmAdmin } = useGroupAccess(id);
   // The group's own list can lag; the composer's usable set stands in until it arrives.
   const groupEmoji = useGroupEmoji(id);
   const usable = useUsableEmoji();
@@ -66,8 +61,6 @@ function GroupEmoji() {
   const remove = useRemoveGroupEmoji(id);
 
   // Any member may add (#848); only admins remove (#1280). The DS enforces both.
-  const myRole = members.find((m) => m.user_id === currentUser?.id)?.role;
-  const iAmAdmin = myRole === "admin" || myRole === "owner";
 
   const [shortcode, setShortcode] = useState("");
   const [pickError, setPickError] = useState<string | null>(null);

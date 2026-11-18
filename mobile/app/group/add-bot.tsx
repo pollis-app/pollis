@@ -1,15 +1,14 @@
 import { useState } from "react";
 import { View } from "react-native";
-import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Text } from "../../components/Text";
-import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { Screen, Header, Body, Field, Button, BottomAction, Card } from "../../components/ui";
 import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { SasCodeField } from "../../components/SasCodeField";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r, space } from "../../theme/tokens";
-import { useAddBotHost, useBot, useCreateBot, useUserGroupsWithChannels } from "../../hooks/queries";
+import { useAddBotHost, useBot, useCreateBot } from "../../hooks/queries";
+import { useBotRoute } from "../../hooks/useBotRoute";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { useCopyFeedback } from "../../hooks/useCopyFeedback";
 import { SAS_LENGTH } from "../../lib/enrollmentSas";
@@ -24,15 +23,9 @@ import { useThemeRerender } from "../../components/theme";
  */
 function AddBot() {
   useThemeRerender();
-  const { t } = useTranslation("mobile");
-  const router = useNav();
-  const { groupId, botId } = useRouteParams<{ groupId?: string; botId?: string }>();
-  const gid = groupId ?? null;
-  const bid = botId ?? null;
+  const { t, router, gid, bid, groupName } = useBotRoute();
   const addingHost = bid !== null;
 
-  const { data: groups = [] } = useUserGroupsWithChannels();
-  const groupName = groups.find((g) => g.id === gid)?.name ?? t("group.common.fallbackName");
   const { data: bot } = useBot(bid);
   const createBot = useCreateBot(gid);
   const addHost = useAddBotHost(bid, gid);
