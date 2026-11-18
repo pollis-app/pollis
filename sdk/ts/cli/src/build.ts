@@ -19,8 +19,8 @@ import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { build as esbuild, type Plugin } from "esbuild";
-import { isApp, type AppDefinition } from "@pollis/app";
-import { HANDLER_FOR, ManifestError, resolveManifest, type ResolvedManifest } from "@pollis/app/manifest";
+import { isApp, type AppDefinition } from "@pollis-inc/app";
+import { HANDLER_FOR, ManifestError, resolveManifest, type ResolvedManifest } from "@pollis-inc/app/manifest";
 
 import { devTool, findDevTool } from "./devtool.js";
 
@@ -137,7 +137,7 @@ async function loadDefinition(dir: string, entry: string, scratch: string): Prom
   }
   const mod = (await import(pathToFileURL(outfile).href + `?t=${Date.now()}`)) as { default?: unknown };
   if (!isApp(mod.default)) {
-    throw new BuildError(`${entry} must \`export default app({ manifest, ...handlers })\` from "@pollis/app"`);
+    throw new BuildError(`${entry} must \`export default app({ manifest, ...handlers })\` from "@pollis-inc/app"`);
   }
   return mod.default;
 }
@@ -147,7 +147,7 @@ function entrySource(entry: string): string {
   const handlers = Object.values(HANDLER_FOR);
   return [
     `import definition from ${JSON.stringify("./" + entry.replace(/\\/g, "/"))};`,
-    `import { exportsFor } from "@pollis/app/runtime";`,
+    `import { exportsFor } from "@pollis-inc/app/runtime";`,
     `const handlers = exportsFor(definition);`,
     ...handlers.map((h) => `export function ${h}(arg) { return handlers.${h}(arg); }`),
     "",
@@ -317,9 +317,9 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
     const require = createRequire(join(dir, "package.json"));
     let witPath: string;
     try {
-      witPath = require.resolve("@pollis/app/wit/app.wit");
+      witPath = require.resolve("@pollis-inc/app/wit/app.wit");
     } catch {
-      throw new BuildError("@pollis/app is not installed in this project; add it with `pnpm add @pollis/app`");
+      throw new BuildError("@pollis-inc/app is not installed in this project; add it with `pnpm add @pollis-inc/app`");
     }
     log(options.quiet, `compiling ${relative(process.cwd(), join(dir, entry)) || entry} to a component...`);
     let component: Uint8Array;

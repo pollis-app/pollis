@@ -1,5 +1,5 @@
 /**
- * `@pollis/app/testing`: run your built App offline, in your test files.
+ * `@pollis-inc/app/testing`: run your built App offline, in your test files.
  *
  * Each call runs one handler in the same sandbox the bot runtime uses, with
  * the same permission checks and the same error messages, so a call your
@@ -10,7 +10,7 @@
  * ```ts
  * import { test } from "node:test";
  * import assert from "node:assert/strict";
- * import { testApp } from "@pollis/app/testing";
+ * import { testApp } from "@pollis-inc/app/testing";
  *
  * const app = await testApp();
  *

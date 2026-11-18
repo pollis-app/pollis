@@ -25,7 +25,7 @@ importers:
       '@bytecodealliance/componentize-js':
         specifier: 0.23.0
         version: 0.23.0
-      '@pollis/app':
+      '@pollis-inc/app':
         specifier: workspace:*
         version: link:../app
       esbuild:

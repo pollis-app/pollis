@@ -2,7 +2,7 @@ name: App SDK
 
 # The developer side of Pollis Apps (#2006): `pollis-app-dev` (the offline
 # test runner through the real App host, the deterministic pre-initializer and
-# the App hash) and the TypeScript SDK in sdk/ts (`@pollis/app`, `@pollis/cli`).
+# the App hash) and the TypeScript SDK in sdk/ts (`@pollis-inc/app`, `@pollis-inc/cli`).
 #
 # The CLI suite builds real Apps end to end and runs them in the real App
 # host, including the reproducibility test: the same source and lockfile give

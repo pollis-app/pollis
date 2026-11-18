@@ -49,7 +49,7 @@ git clone https://github.com/pollis-app/pollis.git
 cd pollis
 cargo build --release -p pollis-app-dev
 export PATH="$PWD/target/release:$PATH"      # puts pollis-app-dev on your PATH
-(cd sdk/ts && pnpm install && pnpm build)    # @pollis/app and @pollis/cli
+(cd sdk/ts && pnpm install && pnpm build)    # @pollis-inc/app and @pollis-inc/cli
 alias pollis="node $PWD/sdk/ts/cli/dist/main.js"
 ```
 
@@ -100,7 +100,7 @@ That hash names exactly this build. It is what an admin approves.
 `src/app.ts`, as `pollis app new` writes it:
 
 ```ts
-import { app } from "@pollis/app";
+import { app } from "@pollis-inc/app";
 
 export default app({
   manifest: {
@@ -243,7 +243,7 @@ await ctx.state.setJSON("count", count);
 **Handling a refusal** is ordinary error handling:
 
 ```ts
-import { RefusedError } from "@pollis/app";
+import { RefusedError } from "@pollis-inc/app";
 
 try {
   await ctx.fetch("https://status.example.com/");
@@ -263,7 +263,7 @@ try {
 ```ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testApp } from "@pollis/app/testing";
+import { testApp } from "@pollis-inc/app/testing";
 
 const app = await testApp();
 

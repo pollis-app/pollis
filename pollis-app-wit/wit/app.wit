@@ -4,7 +4,7 @@
 /// runtime instantiates it fresh for every job, calls exactly one handler, and
 /// lets it act only through the `host` imports, each checked against the
 /// installation's effective grants (manifest intersected with the admin's
-/// grants). The SDKs (`@pollis/app`, the Rust SDK) are generated from this file.
+/// grants). The SDKs (`@pollis-inc/app`, the Rust SDK) are generated from this file.
 ///
 /// Versioning: this package is `pollis:app@0.1.0`. A change that removes or
 /// retypes anything is a new version; the runtime keeps hosting the old one.

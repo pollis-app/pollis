@@ -1,4 +1,4 @@
-# The TypeScript SDK for Pollis Apps (#2006): `@pollis/app` and `@pollis/cli`.
+# The TypeScript SDK for Pollis Apps (#2006): `@pollis-inc/app` and `@pollis-inc/cli`.
 # Its own pnpm workspace and lockfile, separate from the repo root's, so the
 # desktop app's install never pulls the WASM toolchain (ComponentizeJS ships
 # ~40 MB of engine builds).

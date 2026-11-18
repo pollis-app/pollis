@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { buildApp, BuildError } from "../dist/build.js";
 import { findDevTool } from "../dist/devtool.js";
 import { newApp } from "../dist/new.js";
-import { testApp, type TestApp } from "@pollis/app/testing";
+import { testApp, type TestApp } from "@pollis-inc/app/testing";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sdk = join(here, "..", "..");
@@ -23,9 +23,9 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 /** Install the in-repo SDK into an App directory without the network. */
 function linkSdk(dir: string): void {
-  mkdirSync(join(dir, "node_modules", "@pollis"), { recursive: true });
-  symlinkSync(join(sdk, "app"), join(dir, "node_modules", "@pollis", "app"), "dir");
-  symlinkSync(join(sdk, "cli"), join(dir, "node_modules", "@pollis", "cli"), "dir");
+  mkdirSync(join(dir, "node_modules", "@pollis-inc"), { recursive: true });
+  symlinkSync(join(sdk, "app"), join(dir, "node_modules", "@pollis-inc", "app"), "dir");
+  symlinkSync(join(sdk, "cli"), join(dir, "node_modules", "@pollis-inc", "cli"), "dir");
 }
 
 function fixture(name: string, into: string): string {
@@ -186,7 +186,7 @@ describe("npm dependencies", () => {
     writeFileSync(join(pkg, "web.js"), 'export const where = () => "web";\n');
     writeFileSync(
       join(dir, "src", "app.ts"),
-      'import { app } from "@pollis/app";\nimport { where } from "dual";\n' +
+      'import { app } from "@pollis-inc/app";\nimport { where } from "dual";\n' +
         'export default app({ manifest: { read: { channels: ["*"] }, actions: ["reply"], commands: [{ name: "x", description: "X" }] },\n' +
         '  async onCommand(cmd, ctx) { await ctx.reply(cmd.message, where()); } });\n',
     );
@@ -200,7 +200,7 @@ describe("npm dependencies", () => {
   });
 });
 
-describe("@pollis/app in the real sandbox", () => {
+describe("@pollis-inc/app in the real sandbox", () => {
   let app: TestApp;
   before(async () => {
     const built = await buildApp({ dir: fixture("kitchen-sink", "sandbox"), quiet: true });

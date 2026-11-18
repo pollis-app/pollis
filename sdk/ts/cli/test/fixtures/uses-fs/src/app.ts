@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { app } from "@pollis/app";
+import { app } from "@pollis-inc/app";
 
 export default app({
   manifest: { read: { channels: ["*"] }, actions: ["reply"], commands: [{ name: "host", description: "Hostname" }] },

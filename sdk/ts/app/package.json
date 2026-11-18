@@ -1,5 +1,5 @@
 {
-  "name": "@pollis/app",
+  "name": "@pollis-inc/app",
   "version": "0.1.0",
   "description": "Write Pollis Apps in TypeScript: handlers, a typed context and the manifest, compiled to a sandboxed component by `pollis app build`.",
   "license": "MIT",

@@ -1,4 +1,4 @@
-import { app, RefusedError } from "@pollis/app";
+import { app, RefusedError } from "@pollis-inc/app";
 
 export default app({
   manifest: {

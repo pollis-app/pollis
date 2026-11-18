@@ -1,4 +1,4 @@
-import { app } from "@pollis/app";
+import { app } from "@pollis-inc/app";
 
 export default app({
   manifest: {

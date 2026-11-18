@@ -1,5 +1,5 @@
 /**
- * `@pollis/app`: write a Pollis App in TypeScript.
+ * `@pollis-inc/app`: write a Pollis App in TypeScript.
  *
  * An App is a default export of {@link app}: a manifest saying what it needs,
  * and handlers the bot runtime calls when something happens in the group.
@@ -7,7 +7,7 @@
  * writes the manifest beside it as `pollis-app.json`.
  *
  * ```ts
- * import { app } from "@pollis/app";
+ * import { app } from "@pollis-inc/app";
  *
  * export default app({
  *   manifest: { read: { channels: ["#support"] }, actions: ["reply"] },
@@ -19,7 +19,7 @@
  *
  * Everything here is types plus the `app()` marker, so it imports cleanly in
  * Node (the build reads the manifest that way). The code that talks to the
- * runtime is `@pollis/app/runtime`, which only the built component loads.
+ * runtime is `@pollis-inc/app/runtime`, which only the built component loads.
  */
 
 export type {

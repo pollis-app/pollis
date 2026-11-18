@@ -1,6 +1,6 @@
 /**
  * `pollis app test`: build the App, then run its `*.test.ts` files with Node's
- * test runner, wired to the build through `@pollis/app/testing`.
+ * test runner, wired to the build through `@pollis-inc/app/testing`.
  */
 
 import { spawnSync } from "node:child_process";

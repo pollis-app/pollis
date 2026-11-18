@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testApp } from "@pollis/app/testing";
+import { testApp } from "@pollis-inc/app/testing";
 
 // Runs the built App in the same sandbox the bot runtime uses, offline.
 const app = await testApp();
