@@ -21,6 +21,11 @@ use libsql::Connection;
 
 /// Every table [`purge_user_rows`] clears (plus `users`); with [`EXEMPT_FROM_USER_PURGE`], the whole schema.
 pub const USER_PURGED_TABLES: &[&str] = &[
+    // #1182: a bot's own row goes with its account (`bots::delete_bot_in_tx`);
+    // a creating admin's `created_by` pointer is blanked.
+    "bot",
+    "bot_pairing_request",
+    "bot_trigger_claim",
     "history_transfer",
     "history_transfer_budget",
     "account_recovery",
@@ -65,6 +70,9 @@ pub const USER_PURGED_TABLES: &[&str] = &[
 /// [`purge_group`], [`purge_dm_channel`] and [`purge_conversation_log`] between
 /// them.
 pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
+    // #1182: a group's bots are deleted with it, through account deletion.
+    "bot",
+    "bot_pairing_request",
     "channel_mute",
     "group_alias",
     "channels",
@@ -356,6 +364,8 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     conn.execute("DELETE FROM security_event WHERE user_id = ?1", uid()).await?;
     // #1735: transfers (and their sealed chunks) and the request budget.
     crate::history_transfer::purge_user(conn, user_id).await?;
+    // #1182: pairing requests and trigger claims, and `bot.created_by`.
+    crate::bots::purge_bot_rows_of(conn, user_id).await?;
 
     // Rows that SURVIVE but still point at this user by id.
     hand_over_dangling_pointers(conn, user_id).await?;
@@ -375,16 +385,19 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
 async fn hand_over_dangling_pointers(conn: &Connection, user_id: &str) -> anyhow::Result<()> {
     let uid = || libsql::params![user_id.to_string()];
 
-    // Prefer an admin, else any member; a NULL subquery leaves the row unchanged.
+    // Prefer an admin, else any member, never a bot (#1182: the schema refuses
+    // one as owner); a NULL subquery leaves the row unchanged.
     conn.execute(
         "UPDATE groups SET owner_id = ( \
              SELECT gm.user_id FROM group_member gm \
              WHERE gm.group_id = groups.id AND gm.user_id != ?1 \
+               AND NOT EXISTS (SELECT 1 FROM bot b WHERE b.user_id = gm.user_id) \
              ORDER BY CASE WHEN gm.role = 'admin' THEN 0 ELSE 1 END, gm.user_id \
              LIMIT 1) \
          WHERE owner_id = ?1 \
            AND EXISTS (SELECT 1 FROM group_member gm2 \
-                       WHERE gm2.group_id = groups.id AND gm2.user_id != ?1)",
+                       WHERE gm2.group_id = groups.id AND gm2.user_id != ?1 \
+                         AND NOT EXISTS (SELECT 1 FROM bot b2 WHERE b2.user_id = gm2.user_id))",
         uid(),
     )
     .await?;
@@ -469,6 +482,10 @@ pub async fn purge_member_channel_mutes(
 /// Returns the gone channel ids, whose commit-log rows the caller purges after commit.
 pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Vec<String>> {
     let gid = || libsql::params![group_id.to_string()];
+
+    // #1182: the group's bots first, through account deletion — the schema
+    // refuses the group's delete while it has any.
+    crate::bots::purge_group_bots(conn, group_id).await?;
 
     // Channels first: their history is only reachable through them.
     let mut channel_ids: Vec<String> = Vec::new();

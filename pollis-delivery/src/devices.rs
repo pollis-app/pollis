@@ -330,6 +330,11 @@ async fn may_claim_from(
     if claimer == target {
         return Ok(true);
     }
+    // #1182: a bot's devices are reachable only by admins of its group, who
+    // add it to that group — not by every member who shares its roster.
+    if crate::bots::is_bot(conn, target).await? {
+        return crate::bots::is_admin_of_bot(conn, claimer, target).await;
+    }
     if crate::profile::is_blocked_either_way(conn, claimer, target).await? {
         return Ok(false);
     }
@@ -727,6 +732,11 @@ pub async fn apply_register_push_token(
         Err(o) => return Ok(o),
     };
     if !is_expo_push_token(&body.token) {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    // #1182: a bot is reached through realtime, never a push (the schema
+    // refuses its token row, too).
+    if crate::bots::is_bot(conn, &actor).await? {
         return Ok(WriteOutcome::Forbidden);
     }
 

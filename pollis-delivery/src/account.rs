@@ -148,6 +148,10 @@ pub async fn apply_rotate_identity(
         Ok(a) => a,
         Err(_) => return Ok((RotateOutcome::Forbidden, Vec::new())),
     };
+    // #1182: a bot's identity is not rotated or recovered; it is replaced.
+    if crate::bots::is_bot(conn, &actor).await? {
+        return Ok((RotateOutcome::Forbidden, Vec::new()));
+    }
     let pub_bytes = b64_decode(&body.account_id_pub)?;
     let salt = b64_decode(&body.salt)?;
     let nonce = b64_decode(&body.nonce)?;
@@ -423,14 +427,15 @@ pub async fn revoke_device(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
+    let owner = revoke_owner(&conn, authed.as_deref(), parsed.user_id.as_deref()).await?;
     // The device's name BEFORE the write (#987).
-    let device_name = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
-        Ok(owner) => live_device_name(&conn, &owner, &parsed.device_id).await?,
+    let device_name = match &owner {
+        Ok(owner) => live_device_name(&conn, owner, &parsed.device_id).await?,
         Err(_) => None,
     };
     let outcome = apply_revoke_device(&conn, authed.as_deref(), &parsed).await?;
     // Revocation must bite on the NEXT request (#658); evicting on Forbidden costs a re-read.
-    if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+    if let Ok(owner) = owner {
         state
             .device_keys
             .invalidate_device(&owner, &parsed.device_id);
@@ -461,6 +466,22 @@ pub async fn revoke_device(
             },
         )),
     }
+}
+
+/// The account whose device a revoke acts on: the signer's own, or (#1182) a
+/// bot of a group the signer is a current admin of — removing a host is an
+/// ordinary revoke of the bot's device, by any admin of its group.
+pub(crate) async fn revoke_owner(
+    conn: &Connection,
+    authed: Option<&str>,
+    body_user: Option<&str>,
+) -> anyhow::Result<Result<String, WriteOutcome>> {
+    if let (Some(signer), Some(target)) = (authed, body_user) {
+        if signer != target && crate::bots::is_admin_of_bot(conn, signer, target).await? {
+            return Ok(Ok(target.to_string()));
+        }
+    }
+    Ok(resolve_actor(authed, body_user))
 }
 
 /// The name of a LIVE (non-tombstoned) device on `user_id`'s account.
@@ -556,11 +577,31 @@ pub async fn apply_revoke_device(
     authed: Option<&str>,
     body: &RevokeDeviceBody,
 ) -> anyhow::Result<WriteOutcome> {
-    let actor = match resolve_actor(authed, body.user_id.as_deref()) {
+    let actor = match revoke_owner(conn, authed, body.user_id.as_deref()).await? {
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
     let tx = crate::db::write_tx(conn).await?;
+    // #1182: an admin removing a host of their group's bot leaves a trace on
+    // both accounts.
+    if let Some(admin) = authed.filter(|a| *a != actor) {
+        let meta = serde_json::json!({ "bot_user_id": actor, "device_id": body.device_id, "revoked_by": admin })
+            .to_string();
+        for (user, kind) in [(admin, "bot_host_revoked"), (actor.as_str(), "bot_host_revoked")] {
+            tx.execute(
+                "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                libsql::params![
+                    ulid::Ulid::new().to_string(),
+                    user.to_string(),
+                    kind,
+                    body.device_id.clone(),
+                    meta.clone(),
+                ],
+            )
+            .await?;
+        }
+    }
     // #1874: the device's leaves must go before anyone seals to them again.
     crate::directory::bump_membership_versions_of(&tx, &actor).await?;
     purge_device_state(&tx, &actor, &body.device_id).await?;
@@ -669,6 +710,10 @@ pub async fn apply_reset_recover(
         Ok(a) => a,
         Err(o) => return Ok((o, Vec::new())),
     };
+    // #1182: a bot has no recovery; it is deleted and replaced.
+    if crate::bots::is_bot(conn, &actor).await? {
+        return Ok((WriteOutcome::Forbidden, Vec::new()));
+    }
     let tx = crate::db::write_tx(conn).await?;
     let dead_conversations =
         reset_recover_in_tx(&tx, &actor, body.current_device_id.as_deref()).await?;
@@ -801,29 +846,79 @@ pub async fn delete_account(
         Ok(owner) => crate::directory::mls_groups_of(&conn, &owner).await?,
         Err(_) => crate::directory::MlsGroupsOf::default(),
     };
+    // The bots of every group this deletion may tear down (#1182), to evict
+    // their cached keys if they went with it.
+    let bots = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        Ok(_) => {
+            let mut bots = Vec::new();
+            for gid in &left.groups {
+                bots.extend(crate::bots::bots_of_group(&conn, gid).await?);
+            }
+            bots
+        }
+        Err(_) => Vec::new(),
+    };
     let (outcome, _dead_conversations) =
         apply_delete_account(&conn, authed.as_deref(), &parsed).await?;
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
-        // `user_device` is now empty for this user, so every one of their cached
-        // keys is stale (#658).
-        state.device_keys.invalidate_user(&owner);
         if matches!(outcome, WriteOutcome::Ok) {
-            spawn_leave_wakes(&state, left);
-            // The commit-log half the deletion transaction recorded. The
-            // account is gone and the half is owed durably, so a failure here
-            // is logged, not returned: the record stays for the next drain
-            // (`spawn_account_log_purge_drain`), and the client finishes its
-            // own cleanup instead of retrying a request that can no longer sign.
-            if let Err(e) = finish_owed_log_purge(&state, &conn, &owner).await {
-                tracing::warn!("account deletion: commit-log purge left owed: {e:#}");
-            }
-            spawn_account_log_purge_drain(&state);
-            // The account's vault went with it, and may have held the last
-            // reference to a file (#1881).
-            crate::messages::spawn_attachment_reclaim(&state);
+            after_account_deleted(&state, &conn, &owner, left).await;
+            evict_deleted_bots(&state, &conn, &bots).await?;
+        } else {
+            state.device_keys.invalidate_user(&owner);
         }
     }
     outcome_response::<DeleteAccountBody>(outcome)
+}
+
+/// What follows a committed account deletion — the deleting account's own, a
+/// bot an admin deleted (#1182), or a bot that went with its group: evict its
+/// cached device keys, wake the conversations it left, and run the commit-log
+/// half the deletion recorded.
+pub(crate) async fn after_account_deleted(
+    state: &AppState,
+    conn: &Connection,
+    owner: &str,
+    left: crate::directory::MlsGroupsOf,
+) {
+    // `user_device` is now empty for this user, so every one of their cached
+    // keys is stale (#658).
+    state.device_keys.invalidate_user(owner);
+    spawn_leave_wakes(state, left);
+    // The commit-log half the deletion transaction recorded. The
+    // account is gone and the half is owed durably, so a failure here
+    // is logged, not returned: the record stays for the next drain
+    // (`spawn_account_log_purge_drain`), and the client finishes its
+    // own cleanup instead of retrying a request that can no longer sign.
+    if let Err(e) = finish_owed_log_purge(state, conn, owner).await {
+        tracing::warn!("account deletion: commit-log purge left owed: {e:#}");
+    }
+    spawn_account_log_purge_drain(state);
+    // The account's vault went with it, and may have held the last
+    // reference to a file (#1881).
+    crate::messages::spawn_attachment_reclaim(state);
+}
+
+/// Evict the cached keys of every bot in `candidates` whose account is gone —
+/// deleted with its group in a transaction that just committed — and run the
+/// commit-log halves those deletions recorded (#1182).
+pub(crate) async fn evict_deleted_bots(
+    state: &AppState,
+    conn: &Connection,
+    candidates: &[String],
+) -> anyhow::Result<()> {
+    let mut any = false;
+    for bot in candidates {
+        if crate::bots::is_bot(conn, bot).await? {
+            continue;
+        }
+        state.device_keys.invalidate_user(bot);
+        any = true;
+    }
+    if any {
+        spawn_account_log_purge_drain(state);
+    }
+    Ok(())
 }
 
 async fn finish_owed_log_purge(state: &AppState, conn: &Connection, owner: &str) -> anyhow::Result<()> {
@@ -863,7 +958,7 @@ pub fn spawn_account_log_purge_drain(state: &AppState) {
 /// deleting client's own wake-up got through. The same `membership_changed`
 /// leave the clients publish; best-effort, like theirs. The membership version
 /// bumped in the deletion is what makes the next seal wait for the removal.
-fn spawn_leave_wakes(state: &AppState, left: crate::directory::MlsGroupsOf) {
+pub(crate) fn spawn_leave_wakes(state: &AppState, left: crate::directory::MlsGroupsOf) {
     if state.broker.livekit_ready().is_none() {
         return;
     }
@@ -905,6 +1000,14 @@ pub async fn apply_delete_account(
     // The actor's undelivered envelopes, by capability: sealed ones carry no
     // sender id for `purge_user_rows` to match.
     crate::messages::withdraw_envelopes(&tx, &body.withdraw).await?;
+
+    // A bot (#1182) is in no DM and owns no group; its rows go in the schema's
+    // delete order, users first.
+    if crate::bots::is_bot(&tx, &actor).await? {
+        crate::bots::delete_bot_in_tx(&tx, &actor).await?;
+        tx.commit().await?;
+        return Ok((WriteOutcome::Ok, Vec::new()));
+    }
 
     // Note the actor's DMs BEFORE their membership rows go — afterwards there is
     // nothing left to identify which channels they were in, and an emptied DM
@@ -962,10 +1065,13 @@ async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Resu
     }
 
     for (gid, role) in &memberships {
+        // People only (#1182): a group left with nothing but its bots goes,
+        // bots and all, as one left with nobody does.
         let member_count: i64 = {
             let mut rows = conn
                 .query(
-                    "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+                    "SELECT COUNT(*) FROM group_member gm WHERE gm.group_id = ?1 \
+                     AND NOT EXISTS (SELECT 1 FROM bot b WHERE b.user_id = gm.user_id)",
                     libsql::params![gid.clone()],
                 )
                 .await?;
@@ -998,8 +1104,10 @@ async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Resu
                 let candidate: Option<String> = {
                     let mut rows = conn
                         .query(
-                            "SELECT user_id FROM group_member \
-                             WHERE group_id = ?1 AND user_id != ?2 LIMIT 1",
+                            "SELECT gm.user_id FROM group_member gm \
+                             WHERE gm.group_id = ?1 AND gm.user_id != ?2 \
+                               AND NOT EXISTS (SELECT 1 FROM bot b WHERE b.user_id = gm.user_id) \
+                             LIMIT 1",
                             libsql::params![gid.clone(), actor.to_string()],
                         )
                         .await?;

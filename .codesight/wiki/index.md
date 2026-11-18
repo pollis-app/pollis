@@ -13,6 +13,7 @@ Start here. Navigate to the article you need.
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
 - [Drift sweeps](./sweeps.md) — Checks that keep published docs, commands and facts true to the code (epic #1720): CLI invocations (#1721), the facts registry `scripts/facts.json` (#1722), the public-claims ledger `scripts/claims.json` + `/sweep-claims` (#1723), the surface registry `scripts/surfaces.json`, the `scripts/sweep.mjs` engine + ledger and the platform coverage matrix (#1728), the clone ratchet `scripts/check-clones.mjs` + `/reuse-check` (#1731), i18n coverage: `scripts/i18n-surfaces.json` + `i18n-check.mjs --report` (#1724)
 - [Code boundaries](./code-boundaries.md) — Where code may be shared and where it deliberately is not: frontend/ vs mobile/ (features, not code; the sanctioned shared channels and parity twins), the Rust crate graph, the no-build website (#1731)
+- [Bots](./bots.md) — Group-scoped bot users and their hosts: schema invariants, pairing, host approval relay, trigger claims, DS refusals (#1182)
 - [Safety & Verification](./safety.md) — Signal-style safety numbers, TOFU pinning, group MITM defence (refs #277)
 - [Windows Signing](./windows-signing.md) — Azure Artifact Signing setup for Windows installer signing
 - [Windows Dev VM](./windows-vm.md) — `scripts/windows-vm.sh`: local Windows 11 ARM64 VM in Docker (colima nested virt + dockur/windows-arm) for fast Windows testing

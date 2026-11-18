@@ -140,9 +140,14 @@ pub async fn request_email_change_otp(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let new_email = parsed.new_email.trim().to_string();
-    if !new_email.is_empty() {
+    let conn = state.db.conn().await?;
+    // #1182: a bot's address is fixed, derived from its id.
+    if crate::bots::is_bot(&conn, &requester).await? {
+        return Ok(AuthRejection::Forbidden.into_response());
+    }
+    // Nobody moves to a bot.invalid address: no code is sent, the answer is the same 200.
+    if !new_email.is_empty() && !crate::bots::is_bot_address(&new_email) {
         // The address to challenge comes from the account row, never the body.
-        let conn = state.db.conn().await?;
         let current_email = match email_of(&conn, &requester).await {
             Ok(e) => e,
             Err(e) => return Ok(internal(e)),
@@ -231,6 +236,11 @@ pub async fn apply_verify_email_change(
     // Canonical form, as the OTP store and `users.email` (#1088) hold it.
     let canonical = normalize_email(new_email);
     let trimmed = canonical.as_str();
+
+    // #1182: a bot's address is fixed, and no account takes a bot.invalid one.
+    if crate::bots::is_bot(conn, authed).await? || crate::bots::is_bot_address(trimmed) {
+        return Ok(EmailChangeOutcome::Mismatch);
+    }
 
     // Binding gate FIRST, so another user can't even burn the attempt counter.
     match store.requester_of(trimmed) {

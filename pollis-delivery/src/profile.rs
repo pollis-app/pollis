@@ -633,6 +633,13 @@ pub async fn apply_create_dm(
     if others.is_empty() {
         return Ok(DmOutcome::Forbidden);
     }
+    // #1182: no DM with a bot, in either direction (the schema refuses the
+    // member row, too).
+    for member in std::iter::once(&creator).chain(others.iter()) {
+        if crate::bots::is_bot(conn, member).await? {
+            return Ok(DmOutcome::Forbidden);
+        }
+    }
 
     // Re-check blocks server-side: refuse if ANY pairing is blocked either way.
     // Skipped on the no-auth path (mirrors the membership skips in `messages`).
@@ -831,6 +838,10 @@ pub async fn apply_add_dm_member(
     };
     // The actor must already belong to the DM to add anyone to it.
     if authed.is_some() && !is_dm_member(conn, &body.dm_channel_id, &actor).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    // #1182: no bot in a DM.
+    if crate::bots::is_bot(conn, &body.user_id).await? {
         return Ok(WriteOutcome::Forbidden);
     }
     let tx = crate::db::write_tx(conn).await?;
