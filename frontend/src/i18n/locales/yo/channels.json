@@ -222,5 +222,132 @@
     "confirmButton": "Bẹ́ẹ̀ni, tún un ṣe",
     "submitting": "Ń tún un ṣe…",
     "failed": "A kò lè tún orúkọ àpèjẹ náà ṣe"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "A kò lè gbé App bọ́ọ̀tì yìí wọlé.",
+      "noApp": "Agbàlejò rẹ̀ kò tíì pèsè App kankan. Bẹ̀rẹ̀ bọ́ọ̀tì náà pẹ̀lú App, yóò sì hàn níbí.",
+      "notice": {
+        "title": "Bọ́ọ̀tì yìí kò ṣiṣẹ́",
+        "waiting": "Ó ń dúró de ìfọwọ́sí rẹ."
+      },
+      "reasons": {
+        "not_approved": "A kò tíì fọwọ́ sí App kankan fún un.",
+        "hash_mismatch": "Agbàlejò rẹ̀ ń ṣiṣẹ́ àkọ́kọ́ tí o kò fọwọ́ sí.",
+        "developer_key_mismatch": "Kọ́kọ́rọ́ olùgbéjáde tí o kò fọwọ́ sí ló fọwọ́ sí àkọ́kọ́ rẹ̀.",
+        "build_widens": "Àkọ́kọ́ tuntun rẹ̀ ń béèrè ju ohun tí o fọwọ́ sí lọ.",
+        "malformed": "A kò lè ka ìfọwọ́sí rẹ̀.",
+        "wrong_kind": "Ìfọwọ́sí rẹ̀ kì í ṣe irú tó tọ́.",
+        "wrong_installation": "Wọ́n ṣe ìfọwọ́sí rẹ̀ fún bọ́ọ̀tì míì.",
+        "approver_not_in_group": "Alábòójútó tó fọwọ́ sí i kò sí nínú ẹgbẹ́ yìí mọ́.",
+        "uncertified_approver": "A kò lè jẹ́rìísí pé ẹ̀rọ tó fọwọ́ sí i jẹ́ ti alábòójútó.",
+        "bad_signature": "Ìbuwọ́lù ìfọwọ́sí rẹ̀ kò tọ̀nà.",
+        "transparency_alarm": "Àwọn kọ́kọ́rọ́ alábòójútó tó fọwọ́ sí i kò bá àkọsílẹ̀ kọ́kọ́rọ́ gbogbogbò mu.",
+        "not_admin": "Ẹnì kan tí kì í ṣe alábòójútó ẹgbẹ́ yìí ló fọwọ́ sí i.",
+        "manifest_mismatch": "App rẹ̀ kò bá èyí tí a fọwọ́ sí mu.",
+        "widened_grants": "Ìfọwọ́sí rẹ̀ fún un ju ohun tí App ń béèrè lọ.",
+        "rolled_back": "Wọ́n dá ìfọwọ́sí àtijọ́ padà sípò èyí tuntun.",
+        "bad_build_signature": "Ìbuwọ́lù olùgbéjáde lórí àkọ́kọ́ rẹ̀ kò tọ̀nà.",
+        "artifact_unavailable": "Agbàlejò rẹ̀ kò lè gbé App náà wọlé."
+      },
+      "approvedHeading": "App tí a fọwọ́ sí",
+      "version": "Ẹ̀dà {{version}}",
+      "appHash": "Hash App",
+      "developerKey": "Kọ́kọ́rọ́ olùgbéjáde",
+      "source": "Orísun",
+      "approvedBy": "{{name}} fọwọ́ sí i ní {{date}}",
+      "seq": "Ìfọwọ́sí {{seq}}",
+      "marks": {
+        "development": "Àkọ́kọ́ ìdàgbàsókè",
+        "noEgress": "Kò lè fi dátà ránṣẹ́ sí ìta ẹgbẹ́ yìí",
+        "autoUpdate": "Àwọn àtúnṣe ń fọwọ́ sí ara wọn"
+      },
+      "canDoHeading": "Ohun tí ó lè ṣe",
+      "lines": {
+        "reads": "Ó ń ka {{events}} nínú {{channels}}, àti ìtàn {{history}} tó kọjá",
+        "readsNoHistory": "Ó ń ka {{events}} nínú {{channels}}, láìsí ìtàn",
+        "readsNothing": "Kò ka ìkànnì kankan",
+        "eventsNew": "àwọn ìfiránṣẹ́ tuntun",
+        "eventsNewEdited": "àwọn ìfiránṣẹ́ tuntun àti èyí tí a ṣàtúnṣe",
+        "wakes": "Ó ń jí sí: {{triggers}}",
+        "can": "Ó lè: {{actions}}",
+        "sendsTo": "Ó lè fi dátà ránṣẹ́ sí: {{hosts}}",
+        "keeps": "Ó ń tọ́jú tó {{size}} lára dátà tirẹ̀"
+      },
+      "triggers": {
+        "messages": "àwọn ìfiránṣẹ́ tuntun",
+        "mentions": "àwọn ìdárúkọ",
+        "commands": "àwọn àṣẹ",
+        "schedule": "ètò àkókò",
+        "requests": "àwọn ìbéèrè",
+        "webhook": "àwọn ìpè webhook"
+      },
+      "actions": {
+        "post": "fi ránṣẹ́",
+        "reply": "fèsì",
+        "react": "fi ìmọ̀lára hàn",
+        "edit_own": "ṣàtúnṣe àwọn ìfiránṣẹ́ tirẹ̀",
+        "delete_own": "pa àwọn ìfiránṣẹ́ tirẹ̀ rẹ́",
+        "transfer_history": "fi ìtàn ìfiránṣẹ́ lé lọ́wọ́"
+      },
+      "events": {
+        "created": "àwọn ìfiránṣẹ́ tuntun",
+        "edited": "àwọn ìfiránṣẹ́ tí a ṣàtúnṣe"
+      },
+      "anyChannel": "ìkànnì èyíkéyìí tí o bá yàn",
+      "grants": {
+        "heading": "Ààyè",
+        "description": "Yọ ohun tí kò nílò kúrò. Kò ní gba ju ohun tí App rẹ̀ béèrè lọ láé.",
+        "channels": "Àwọn ìkànnì tí ó ń kà",
+        "noChannels": "Ẹgbẹ́ yìí kò ní ìkànnì kankan tí ó ń béèrè.",
+        "history": "Ọjọ́ ìtàn tí ó lè kà (0 sí {{max}})",
+        "egress": "Àwọn agbàlejò tí ó lè fi dátà ránṣẹ́ sí"
+      },
+      "changes": {
+        "heading": "Ohun tó yí padà",
+        "newAccess": "Ààyè tuntun",
+        "needed": "Ó pọndandan láti fọwọ́ sí i",
+        "allow": "Gbà á láàyè",
+        "trigger_added": "Ó ń jí sí {{value}}",
+        "trigger_removed": "Kò jí sí {{value}} mọ́",
+        "channel_added": "Ó ń ka {{value}}",
+        "channel_removed": "Kò ka {{value}} mọ́",
+        "history_increased": "Ìtàn: láti {{previous}} sí {{value}}",
+        "history_decreased": "Ìtàn: láti {{previous}} sí {{value}}",
+        "event_added": "Ó ń rí {{value}}",
+        "event_removed": "Kò rí {{value}} mọ́",
+        "action_added": "Ó lè {{value}}",
+        "action_removed": "Kò lè {{value}} mọ́",
+        "egress_added": "Ó lè fi dátà ránṣẹ́ sí {{value}}",
+        "egress_removed": "Kò fi dátà ránṣẹ́ sí {{value}} mọ́",
+        "state_quota_increased": "Ibi ìpamọ́: láti {{previous}} sí {{value}}",
+        "state_quota_decreased": "Ibi ìpamọ́: láti {{previous}} sí {{value}}"
+      },
+      "pending": {
+        "firstHeading": "Fọwọ́ sí App yìí",
+        "firstLead": "Agbàlejò bọ́ọ̀tì náà ń pèsè App yìí. Kò sí ohun tí yóò ṣiṣẹ́ títí alábòójútó yóò fi fọwọ́ sí i.",
+        "updateHeading": "Àtúnṣe kan ń dúró",
+        "updateLead": "Agbàlejò rẹ̀ ń pèsè àkọ́kọ́ tuntun. Wo ohun tó yí padà kí o tó fọwọ́ sí i.",
+        "nothingNew": "Kò béèrè ohunkóhun tuntun.",
+        "neededHint": "Gba ààyè tuntun kọ̀ọ̀kan tí a sàmì sí pé ó pọndandan láàyè láti fọwọ́ sí àtúnṣe yìí.",
+        "approve": "Fọwọ́ sí i",
+        "approveUpdate": "Fọwọ́ sí àtúnṣe",
+        "approving": "Ó ń fọwọ́ sí i…",
+        "development": "Ìfisílẹ̀ ìdàgbàsókè",
+        "developmentHint": "Ó ń ṣiṣẹ́ àkọ́kọ́ èyíkéyìí tí kọ́kọ́rọ́ olùgbéjáde yìí fọwọ́ sí, tí kò béèrè ju ohun tí o fọwọ́ sí lọ.",
+        "developmentUnavailable": "Bẹ̀rẹ̀ pollis app dev láti pèsè kọ́kọ́rọ́ olùgbéjáde.",
+        "autoUpdate": "Fọwọ́ sí i fúnra rẹ̀ nígbà míì",
+        "autoUpdateHint": "Àwọn àtúnṣe láti orísun kan náà tí kò béèrè ohunkóhun tuntun ń fọwọ́ sí ara wọn."
+      },
+      "edit": {
+        "save": "Fi ààyè pamọ́",
+        "saving": "Ó ń fi pamọ́…"
+      },
+      "errors": {
+        "stale": "Alábòójútó míì ṣẹ̀ṣẹ̀ fọwọ́ sí bọ́ọ̀tì yìí. Tún wò ó kí o tó fọwọ́ sí i.",
+        "changed": "App ti yí padà láti ìgbà tí a ti ṣí ojú-ìwé yìí. Tún wò ó kí o tó fọwọ́ sí i.",
+        "failed": "A kò lè fi ìfọwọ́sí náà pamọ́."
+      }
+    }
   }
 }

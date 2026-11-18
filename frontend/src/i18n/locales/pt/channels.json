@@ -230,5 +230,132 @@
     "confirmButton": "Sim, redefinir",
     "submitting": "Redefinindo…",
     "failed": "Não foi possível redefinir o apelido"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "Não foi possível carregar o App deste bot.",
+      "noApp": "O host dele ainda não ofereceu um App. Inicie o bot com um App e ele aparecerá aqui.",
+      "notice": {
+        "title": "Este bot não está em execução",
+        "waiting": "Aguardando sua aprovação."
+      },
+      "reasons": {
+        "not_approved": "Nenhum App foi aprovado para ele ainda.",
+        "hash_mismatch": "O host dele executa uma versão que você não aprovou.",
+        "developer_key_mismatch": "A versão dele é assinada por uma chave de desenvolvedor que você não aprovou.",
+        "build_widens": "A nova versão dele pede mais do que você aprovou.",
+        "malformed": "Não foi possível ler a aprovação dele.",
+        "wrong_kind": "A aprovação dele é do tipo errado.",
+        "wrong_installation": "A aprovação dele foi feita para outro bot.",
+        "approver_not_in_group": "O administrador que o aprovou não está mais neste grupo.",
+        "uncertified_approver": "Não foi possível confirmar que o dispositivo que o aprovou é de um administrador.",
+        "bad_signature": "A assinatura da aprovação dele não é válida.",
+        "transparency_alarm": "As chaves do administrador que o aprovou não correspondem ao registro público de chaves.",
+        "not_admin": "Ele foi aprovado por alguém que não é administrador deste grupo.",
+        "manifest_mismatch": "O App dele não corresponde ao que foi aprovado.",
+        "widened_grants": "A aprovação dele concede mais do que o App pede.",
+        "rolled_back": "Uma aprovação mais antiga foi colocada no lugar de uma mais recente.",
+        "bad_build_signature": "A assinatura de desenvolvedor da versão dele não é válida.",
+        "artifact_unavailable": "O host dele não conseguiu carregar o App."
+      },
+      "approvedHeading": "App aprovado",
+      "version": "Versão {{version}}",
+      "appHash": "Hash do App",
+      "developerKey": "Chave de desenvolvedor",
+      "source": "Origem",
+      "approvedBy": "Aprovado por {{name}} em {{date}}",
+      "seq": "Aprovação {{seq}}",
+      "marks": {
+        "development": "Versão de desenvolvimento",
+        "noEgress": "Não pode enviar dados para fora deste grupo",
+        "autoUpdate": "As atualizações se aprovam sozinhas"
+      },
+      "canDoHeading": "O que ele pode fazer",
+      "lines": {
+        "reads": "Lê {{events}} em {{channels}}, e o histórico dos últimos {{history}}",
+        "readsNoHistory": "Lê {{events}} em {{channels}}, sem histórico",
+        "readsNothing": "Não lê nenhum canal",
+        "eventsNew": "mensagens novas",
+        "eventsNewEdited": "mensagens novas e editadas",
+        "wakes": "É acionado por: {{triggers}}",
+        "can": "Pode: {{actions}}",
+        "sendsTo": "Pode enviar dados para: {{hosts}}",
+        "keeps": "Guarda até {{size}} de dados próprios"
+      },
+      "triggers": {
+        "messages": "mensagens novas",
+        "mentions": "menções",
+        "commands": "comandos",
+        "schedule": "um agendamento",
+        "requests": "solicitações",
+        "webhook": "chamadas de webhook"
+      },
+      "actions": {
+        "post": "publicar",
+        "reply": "responder",
+        "react": "reagir",
+        "edit_own": "editar as próprias mensagens",
+        "delete_own": "apagar as próprias mensagens",
+        "transfer_history": "transferir o histórico de mensagens"
+      },
+      "events": {
+        "created": "mensagens novas",
+        "edited": "mensagens editadas"
+      },
+      "anyChannel": "qualquer canal que você escolher",
+      "grants": {
+        "heading": "Acesso",
+        "description": "Tire o que ele não precisa. Ele nunca recebe mais do que o App pede.",
+        "channels": "Canais que ele lê",
+        "noChannels": "Este grupo não tem nenhum canal que ele pede.",
+        "history": "Dias de histórico que ele pode ler (0 a {{max}})",
+        "egress": "Hosts para os quais ele pode enviar dados"
+      },
+      "changes": {
+        "heading": "O que mudou",
+        "newAccess": "Novo acesso",
+        "needed": "Necessário para aprovar",
+        "allow": "Permitir",
+        "trigger_added": "É acionado por {{value}}",
+        "trigger_removed": "Não é mais acionado por {{value}}",
+        "channel_added": "Lê {{value}}",
+        "channel_removed": "Não lê mais {{value}}",
+        "history_increased": "Histórico: de {{previous}} para {{value}}",
+        "history_decreased": "Histórico: de {{previous}} para {{value}}",
+        "event_added": "Vê {{value}}",
+        "event_removed": "Não vê mais {{value}}",
+        "action_added": "Pode {{value}}",
+        "action_removed": "Não pode mais {{value}}",
+        "egress_added": "Pode enviar dados para {{value}}",
+        "egress_removed": "Não envia mais dados para {{value}}",
+        "state_quota_increased": "Armazenamento: de {{previous}} para {{value}}",
+        "state_quota_decreased": "Armazenamento: de {{previous}} para {{value}}"
+      },
+      "pending": {
+        "firstHeading": "Aprovar este App",
+        "firstLead": "O host do bot oferece este App. Nada é executado até que um administrador o aprove.",
+        "updateHeading": "Há uma atualização aguardando",
+        "updateLead": "O host dele oferece uma nova versão. Veja o que mudou antes de aprovar.",
+        "nothingNew": "Não pede nada novo.",
+        "neededHint": "Permita cada novo acesso marcado como necessário para aprovar esta atualização.",
+        "approve": "Aprovar",
+        "approveUpdate": "Aprovar atualização",
+        "approving": "Aprovando…",
+        "development": "Instalação de desenvolvimento",
+        "developmentHint": "Executa qualquer versão assinada por esta chave de desenvolvedor que não peça mais do que você aprovou.",
+        "developmentUnavailable": "Inicie pollis app dev para oferecer uma chave de desenvolvedor.",
+        "autoUpdate": "Aprovar automaticamente da próxima vez",
+        "autoUpdateHint": "Atualizações da mesma origem que não pedem nada novo se aprovam sozinhas."
+      },
+      "edit": {
+        "save": "Salvar acesso",
+        "saving": "Salvando…"
+      },
+      "errors": {
+        "stale": "Outro administrador acabou de aprovar este bot. Confira de novo antes de aprovar.",
+        "changed": "O App mudou desde que esta página foi aberta. Confira de novo antes de aprovar.",
+        "failed": "Não foi possível salvar a aprovação."
+      }
+    }
   }
 }
