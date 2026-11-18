@@ -57,7 +57,7 @@ test("the Bots page's cap is the DS's MAX_BOTS_PER_GROUP", () => {
 });
 
 test("the add-host command names the bot", () => {
-  assert.equal(botAddHostCommand("u_bot1"), "pollis-bot pair --bot u_bot1");
+  assert.equal(botAddHostCommand("u_bot1"), "pollis-bot add-host --bot u_bot1");
 });
 
 const ctx = {

@@ -54,7 +54,7 @@ export const BOT_PAIR_COMMAND = "pollis-bot pair";
 
 /** The command an admin runs on a further machine for an existing bot. */
 export function botAddHostCommand(botUserId: string): string {
-  return `${BOT_PAIR_COMMAND} --bot ${botUserId}`;
+  return `pollis-bot add-host --bot ${botUserId}`;
 }
 
 /** The refusals the Bots pages explain in their own words; the core's error strings start with these. */

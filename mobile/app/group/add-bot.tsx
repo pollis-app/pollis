@@ -13,7 +13,7 @@ import { useBotRoute } from "../../hooks/useBotRoute";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { useCopyFeedback } from "../../hooks/useCopyFeedback";
 import { SAS_LENGTH } from "../../lib/enrollmentSas";
-import { BOT_PAIR_COMMAND, botErrorKey } from "../../lib/bots";
+import { BOT_PAIR_COMMAND, botAddHostCommand, botErrorKey } from "../../lib/bots";
 import { useThemeRerender } from "../../components/theme";
 
 /**
@@ -34,6 +34,7 @@ function AddBot() {
   const submit = useSubmitLock();
   const { copyState, copy } = useCopyFeedback();
 
+  const command = bid !== null ? botAddHostCommand(bid) : BOT_PAIR_COMMAND;
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -102,14 +103,14 @@ function AddBot() {
               }}
             >
               <Text testID="text-bot-pair-command" selectable style={[ty.mono, { color: semantic.text }]}>
-                {BOT_PAIR_COMMAND}
+                {command}
               </Text>
             </View>
             <Button
               testID="btn-copy-bot-command"
               surface="raised"
               icon={copyState === "copied" ? <Icon.check size={14} /> : <Icon.copy size={14} />}
-              onPress={() => void copy(BOT_PAIR_COMMAND)}
+              onPress={() => void copy(command)}
             >
               {copyState === "copied"
                 ? t("common:actions.copied")

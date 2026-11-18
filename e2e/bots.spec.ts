@@ -212,7 +212,7 @@ for (const skin of SKINS) {
       // Add a host: the command names the bot; the code is typed.
       await page.getByTestId("bot-add-host").click();
       const form = page.getByTestId("add-bot-host-page");
-      await expect(form.getByTestId("bot-pair-command")).toHaveText(`pollis-bot pair --bot ${BOT}`);
+      await expect(form.getByTestId("bot-pair-command")).toHaveText(`pollis-bot add-host --bot ${BOT}`);
       await expect(form.getByTestId("bot-pair-code")).toHaveValue("");
       await form.getByTestId("bot-pair-code").fill(CODE);
       await form.getByTestId("bot-pair-submit").click();

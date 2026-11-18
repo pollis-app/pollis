@@ -29,6 +29,11 @@ export interface BotDetail extends BotSummary {
 /** The command an admin runs on the machine that will host the bot; it prints the pairing code. */
 export const BOT_PAIR_COMMAND = "pollis-bot pair";
 
+/** The command an admin runs on a further machine for an existing bot; it prints that host's code. */
+export function botAddHostCommand(botUserId: string): string {
+  return `pollis-bot add-host --bot ${botUserId}`;
+}
+
 /** Error codes the core puts at the start of a refused pairing (lane contract). */
 const BOT_ERROR_KEYS: [prefix: string, key: string][] = [
   ["pairing_code_mismatch", "mobile:bots.errors.codeMismatch"],
