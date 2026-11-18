@@ -320,7 +320,7 @@ pub async fn ds_livekit_send_data_delivered(
 /// List a voice room's roster via the DS (server-side `ListParticipants`).
 ///
 /// Participants come back resolved to users (#836); desktop-only.
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 pub async fn ds_livekit_participants(
     state: &Arc<AppState>,
     room: &str,
@@ -346,7 +346,7 @@ pub async fn ds_livekit_participants(
 /// Voice participant counts for many rooms in ONE DS call; desktop-only.
 ///
 /// An older DS answers 404 (an `Err` here); the caller falls back per room.
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 pub async fn ds_livekit_room_counts(
     state: &Arc<AppState>,
     rooms: Vec<String>,

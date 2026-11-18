@@ -221,8 +221,10 @@ journalctl -u pollis-bot -f</code>
           <code>~/.local/share/pollis-bot</code> (Linux), <code>~/Library/Application Support/com.pollis.bot</code>
           (macOS) or <code>%APPDATA%\pollis-bot</code> (Windows). It holds <code>config.json</code>,
           <code>installations/&lt;id&gt;/installation.json</code>, each installation's encrypted store in
-          <code>stores/&lt;device id&gt;/</code>, and <code>status.json</code>. The bot's keys are
-          in the keystore, not in these files.</p>
+          <code>stores/&lt;device id&gt;/</code> (including how far its job loop has read each channel),
+          and <code>status.json</code>. The bot's keys are in the keystore, not in these files.
+          <code>pollis-bot forget --installation &lt;id&gt;</code> removes an installation's record, store
+          and keys together.</p>
         <p>
           <code>pollis-bot</code> logs to standard error, one line per event. Every failure reads
           <code>FAILED: &lt;what happened&gt;. Fix: &lt;one thing to do&gt;</code>.
@@ -244,8 +246,9 @@ journalctl -u pollis-bot -f</code>
               <tr><td><code>no installations on this host</code></td>
                 <td class="doc-td-dim">Run <code>pollis-bot pair</code>.</td></tr>
               <tr><td><code>opening installation …</code></td>
-                <td class="doc-td-dim">The host may have been revoked or the bot deleted. If so, remove
-                  <code>installations/&lt;id&gt;</code> and pair again.</td></tr>
+                <td class="doc-td-dim">The host may have been revoked or the bot deleted. If so, run
+                  <code>pollis-bot forget --installation &lt;id&gt;</code>, then pair again if the bot
+                  should stay.</td></tr>
               <tr><td><code>unattended_refused: no bot installation for this account on this machine</code></td>
                 <td class="doc-td-dim">Run as the user who paired, or pair again.</td></tr>
               <tr><td><code>binding the webhook listener to …</code></td>

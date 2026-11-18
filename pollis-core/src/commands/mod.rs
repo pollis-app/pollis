@@ -27,10 +27,10 @@ pub mod groups;
 pub mod history_transfer;
 pub mod messages;
 pub mod dm;
-// LiveKit: real impl with `media` (desktop), no-op stub otherwise (#185).
-#[cfg(feature = "media")]
+// LiveKit: real impl with `realtime` (desktop, bot runtime), no-op stub otherwise (#185).
+#[cfg(feature = "realtime")]
 pub mod livekit;
-#[cfg(not(feature = "media"))]
+#[cfg(not(feature = "realtime"))]
 #[path = "livekit_stub.rs"]
 pub mod livekit;
 // Pure wire-payload builders, outside the media gate so they test on every target.

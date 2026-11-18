@@ -48,7 +48,7 @@ fn main() -> ExitCode {
 
 async fn dispatch(data_dir: &std::path::Path, command: Command) -> anyhow::Result<()> {
     let config = RuntimeConfig::load(data_dir)?;
-    let host = CoreHost::new()?;
+    let host = CoreHost::new(data_dir)?;
     match command {
         Command::Help | Command::Version => {}
         Command::Pair { name } => {

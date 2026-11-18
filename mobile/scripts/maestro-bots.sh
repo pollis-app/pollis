@@ -5,12 +5,14 @@
 #
 # Host 1 starts `pollis-bot pair` with no state and prints its pairing code.
 # Part 1 (flows/bots.yaml) signs a fresh admin in, creates a group, is refused
-# a wrong code and types the real one: the bot is created and paired. The
-# script then posts an alert through the bot's webhook (`pollis-bot post`);
-# part 2 sees it in #General with the Bot badge, and the badge on the member
-# list. Host 2 pairs as a second host of the same bot; part 3 types its code.
-# Part 4 revokes host 2 and deletes the bot, after which host 1 must have
-# stopped: its identity is gone.
+# a wrong code and types the real one: the bot is created and `pair` exits.
+# Host 1 then runs (`pollis-bot run --webhook`) and the script posts an alert
+# through the bot's webhook (`pollis-bot post`); part 2 sees it in #General
+# with the Bot badge, and the badge on the member list. Host 2 asks to join the
+# same bot (`pollis-bot add-host --bot <bot id>`); part 3 types its code, and
+# running host 1 verifies the approval and hands over the key. Part 4 revokes
+# host 2 and deletes the bot; the script then stops both hosts and removes
+# their installations (`pollis-bot forget`).
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled
 # in, and POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler
@@ -66,10 +68,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Each host is its own installation directory: nothing is shared between them.
-BOT_PAIR=(pair)
-BOT_ADD_HOST=(pair)
-BOT_POST=(post --channel General)
+# Each host is its own data directory (and keystore namespace): nothing is shared.
+WEBHOOK="127.0.0.1:$((20000 + RANDOM % 20000))"
+BOT_PAIR=(pair --name host-1)
+BOT_RUN_WEBHOOK=(run --webhook "$WEBHOOK")
+BOT_RUN=(run)
 
 # Wait (up to $3 seconds) for a line matching $2 in host $1's output; fail if it dies first.
 await_host() {
@@ -85,9 +88,39 @@ await_host() {
   exit 1
 }
 
-# The eight-character pairing code (enrollment-SAS alphabet) on the host's "code" line.
+# The eight-character pairing code (enrollment-SAS alphabet) on the host's
+# "Pairing code:" line (stdout).
 code_of() {
-  grep -iE 'code' "$WORK/$1.out" | grep -oE '\b[0-9A-HJKMNP-TV-Z]{8}\b' | head -1
+  grep -E 'Pairing code:' "$WORK/$1.out" | grep -oE '\b[0-9A-HJKMNP-TV-Z]{8}\b' | head -1
+}
+
+# Wait for a `pair`/`add-host` process to exit; it prints `paired: bot <id> …` (stderr) on success.
+await_paired() {
+  local name="$1" secs="$2" pid
+  pid="$(eval echo "\${${name}_PID}")"
+  for _ in $(seq 1 "$secs"); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  # Runs in a command substitution, so it cannot `wait` on the host: success is the `paired:` line.
+  if kill -0 "$pid" 2>/dev/null || ! grep -qE 'paired: bot [0-9A-Z]+' "$WORK/$name.err"; then
+    echo "$name did not finish pairing" >&2
+    cat "$WORK/$name.out" "$WORK/$name.err" >&2
+    exit 1
+  fi
+  grep -oE 'paired: bot [0-9A-Z]+' "$WORK/$name.err" | awk '{print $3}' | head -1
+}
+
+# Wait (up to $3 seconds) until `pollis-bot status` for data dir $1 shows installation $2 connected.
+await_connected() {
+  local dir="$1" id="$2" secs="$3"
+  for _ in $(seq 1 "$secs"); do
+    "$BOT_BIN" --data-dir "$dir" status 2>/dev/null | grep -A1 "^$id " | grep -q 'connected' && return 0
+    sleep 1
+  done
+  echo "installation $id in $dir never reported connected" >&2
+  "$BOT_BIN" --data-dir "$dir" status >&2 || true
+  exit 1
 }
 
 echo "==> host 1 starts with no state and prints its pairing code"
@@ -105,16 +138,23 @@ maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$AD
   -e BOT_CODE="$BOT_CODE" "$HERE/.maestro/flows/bots.yaml"
 
 echo "==> host 1 picks up the approval and joins the group"
-await_host HOST1 'connected' 180
+BOT_ID="$(await_paired HOST1 180)"
+[ -n "$BOT_ID" ] || { echo "host 1 printed no bot id" >&2; cat "$WORK/HOST1.err" >&2; exit 1; }
+echo "    bot: $BOT_ID"
+
+echo "==> host 1 runs with the webhook on $WEBHOOK"
+"$BOT_BIN" --data-dir "$WORK/host1" "${BOT_RUN_WEBHOOK[@]}" >"$WORK/HOST1.out" 2>"$WORK/HOST1.err" &
+HOST1_PID=$!
+await_connected "$WORK/host1" "$BOT_ID" 120
 
 echo "==> the bot posts an alert through its webhook"
-"$BOT_BIN" --data-dir "$WORK/host1" "${BOT_POST[@]}" "$ALERT_TEXT"
+"$BOT_BIN" --data-dir "$WORK/host1" post --installation "$BOT_ID" --channel General "$ALERT_TEXT"
 
 echo "==> 2/4 the alert carries the Bot badge"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" "$FLOWS/2-alert.yaml"
 
 echo "==> host 2 asks to join the same bot"
-"$BOT_BIN" --data-dir "$WORK/host2" "${BOT_ADD_HOST[@]}" >"$WORK/HOST2.out" 2>"$WORK/HOST2.err" &
+"$BOT_BIN" --data-dir "$WORK/host2" add-host --bot "$BOT_ID" --name host-2 >"$WORK/HOST2.out" 2>"$WORK/HOST2.err" &
 HOST2_PID=$!
 await_host HOST2 'code' 60
 HOST_CODE="$(code_of HOST2)"
@@ -123,19 +163,26 @@ echo "    code: $HOST_CODE"
 
 echo "==> 3/4 admin adds host 2"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e HOST_CODE="$HOST_CODE" "$FLOWS/3-add-host.yaml"
-await_host HOST2 'connected' 180
+HOST2_BOT="$(await_paired HOST2 180)"
+[ "$HOST2_BOT" = "$BOT_ID" ] || { echo "host 2 joined '$HOST2_BOT', not $BOT_ID" >&2; exit 1; }
+"$BOT_BIN" --data-dir "$WORK/host2" "${BOT_RUN[@]}" >"$WORK/HOST2.out" 2>"$WORK/HOST2.err" &
+HOST2_PID=$!
+await_connected "$WORK/host2" "$BOT_ID" 120
 
 echo "==> 4/4 admin revokes host 2 and deletes the bot"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" "$FLOWS/4-revoke-delete.yaml"
 
-echo "==> host 1 stops once its bot is deleted"
-for _ in $(seq 1 120); do
-  kill -0 "$HOST1_PID" 2>/dev/null || break
-  sleep 1
-done
-if kill -0 "$HOST1_PID" 2>/dev/null; then
-  echo "host 1 is still running after its bot was deleted" >&2
-  exit 1
-fi
+echo "==> both hosts stop and forget the deleted bot"
+kill "$HOST1_PID" "$HOST2_PID" 2>/dev/null || true
+wait "$HOST1_PID" "$HOST2_PID" 2>/dev/null || true
 HOST1_PID=""
+HOST2_PID=""
+for host in host1 host2; do
+  "$BOT_BIN" --data-dir "$WORK/$host" forget --installation "$BOT_ID"
+  if [ -n "$(ls -A "$WORK/$host/installations" 2>/dev/null)" ]; then
+    echo "$host still holds an installation after forget" >&2
+    exit 1
+  fi
+done
+
 echo "==> bots passed"

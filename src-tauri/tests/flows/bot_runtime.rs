@@ -38,7 +38,7 @@ impl Handler for Ack {
 }
 
 fn installation(host: &BotHostClient) -> Installation {
-    let core = installation_core(host.state.clone(), host.session().clone(), &host.dir);
+    let core = installation_core(host.state.clone(), host.session().clone());
     Installation::new(core, Arc::new(Ack))
 }
 

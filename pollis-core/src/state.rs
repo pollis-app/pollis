@@ -49,7 +49,7 @@ pub struct AppState {
     /// Its own lock so voice/realtime paths never nest two locks.
     /// Stores the internal identity because the LOCAL participant's entry is pinned at join, not derived.
     /// Never invalidated: a pseudonym is deterministic, so entries cannot go stale.
-    #[cfg(feature = "media")]
+    #[cfg(feature = "realtime")]
     pub livekit_identities: Arc<Mutex<crate::commands::livekit_identity::IdentityCache>>,
     #[cfg(feature = "media")]
     pub voice: Arc<Mutex<VoiceState>>,
@@ -162,7 +162,7 @@ impl AppState {
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
-            #[cfg(feature = "media")]
+            #[cfg(feature = "realtime")]
             livekit_identities: Arc::new(Mutex::new(Default::default())),
             #[cfg(feature = "media")]
             voice: Arc::new(Mutex::new(VoiceState::new())),
@@ -291,7 +291,7 @@ impl AppState {
     pub async fn shutdown(&self) {
         self.shutdown_signal.notify_waiters();
 
-        #[cfg(feature = "media")]
+        #[cfg(feature = "realtime")]
         {
             let mut guard = self.livekit.lock().await;
             let rooms = std::mem::take(&mut guard.rooms);
@@ -304,6 +304,8 @@ impl AppState {
             }
 
             // The voice room lives in `self.voice.room`; close it too or we linger as a "ghost card" until LiveKit times out.
+            #[cfg(feature = "media")]
+            {
             let room = {
                 let mut voice = self.voice.lock().await;
                 if let Some(t) = voice.frame_task.take() {
@@ -316,6 +318,7 @@ impl AppState {
             };
             if let Some(room) = room {
                 let _ = tokio::time::timeout(std::time::Duration::from_secs(3), room.close()).await;
+            }
             }
         }
     }

@@ -63,7 +63,7 @@ So before carrying out any action, a host **claims** the trigger on the Delivery
 - Every other host gets "already claimed" and discards its actions.
 - If the winner asks again (a retry after a network error), it is told it won again, so it can finish.
 
-The claim is a single request, with no leases and no keepalives. Claims are kept for seven days.
+The claim is a single request, with no leases and no keepalives. Claims are kept for seven days: a host that retries a trigger within that time gets the same answer, but a trigger first retried more than seven days after it was claimed can be claimed and acted on again.
 
 A trigger with no actions is never claimed: there is nothing to deduplicate.
 

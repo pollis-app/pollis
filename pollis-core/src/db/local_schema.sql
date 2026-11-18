@@ -697,3 +697,12 @@ CREATE TABLE IF NOT EXISTS bot_consumed_host_request (
     request_id  TEXT PRIMARY KEY CHECK (length(request_id) BETWEEN 1 AND 64),
     consumed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- The bot runtime's read cursor per channel (#1182): the newest message its job
+-- loop has finished with. Ids and times only, inside the encrypted store. Only
+-- bot installations write it; it stays empty for a person's device.
+CREATE TABLE IF NOT EXISTS bot_trigger_cursor (
+    channel_id TEXT PRIMARY KEY CHECK (length(channel_id) BETWEEN 1 AND 64),
+    sent_at    TEXT NOT NULL,
+    message_id TEXT NOT NULL CHECK (length(message_id) <= 64)
+);

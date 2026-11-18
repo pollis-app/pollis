@@ -170,7 +170,9 @@ proptest = "1"
 ulid = "1"
 # tests/flows/bot_runtime.rs runs the bot runtime's job loop (#1182) over the
 # harness's bot hosts, and its handler is an async-trait impl.
-pollis-bot = { path = "../pollis-bot" }
+# Default features off: the test drives jobs directly and needs no realtime, so
+# a headless (`--no-default-features`) flows build links no LiveKit through it.
+pollis-bot = { path = "../pollis-bot", default-features = false }
 async-trait = "0.1"
 # Used directly by the flows harness (tests/flows/harness.rs) for in-process MLS
 # state simulation. Production lib code reaches MLS through pollis-core.
