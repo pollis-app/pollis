@@ -22,6 +22,7 @@ pub enum Command {
     Post { installation_id: String, channel: String, text: String },
     Status,
     RotateSecret { installation_id: String },
+    Forget { installation_id: String },
 }
 
 pub fn help_text() -> String {
@@ -34,10 +35,10 @@ USAGE
 COMMANDS
     pair [--name NAME]
         Start a new bot on this host. Prints an eight-character code; a group
-        admin types it in the group's settings → Bots → Add a bot.
+        admin types it in Pollis: open the group, then Bots → Add a bot.
     add-host --bot BOT_USER_ID [--name NAME]
         Make this host another host of an existing bot. Prints a code; an admin
-        types it on the bot's page → Add a host.
+        types it in Pollis: open the group, then Bots → the bot → Add a host.
     run [--webhook [ADDR]] [--max-installations N]
         Run every installation on this host until stopped. --webhook turns the
         alerts webhook on (default {bind}, loopback) for this run.
@@ -47,6 +48,9 @@ COMMANDS
         Show this host's installations and what the runtime is doing.
     rotate-secret --installation ID
         Replace an installation's webhook secret and print the new one once.
+    forget --installation ID
+        Remove an installation from this host (its record, store and keys),
+        e.g. after an admin revoked this host or deleted the bot.
 
 FILES
     DIR/config.json      max_installations (default {max}), webhook {{bind, per_minute, burst}}
@@ -155,6 +159,9 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Stri
         "rotate-secret" => Command::RotateSecret {
             installation_id: take("installation").flatten().ok_or("rotate-secret needs --installation ID")?,
         },
+        "forget" => Command::Forget {
+            installation_id: take("installation").flatten().ok_or("forget needs --installation ID")?,
+        },
         other => return Err(format!("unknown command `{other}`")),
     };
     if let Some((flag, _)) = flags.first() {
@@ -196,6 +203,10 @@ mod tests {
         assert_eq!(
             p(&["rotate-secret", "--installation", "01I"]).unwrap().command,
             Command::RotateSecret { installation_id: "01I".into() }
+        );
+        assert_eq!(
+            p(&["forget", "--installation", "01I"]).unwrap().command,
+            Command::Forget { installation_id: "01I".into() }
         );
     }
 

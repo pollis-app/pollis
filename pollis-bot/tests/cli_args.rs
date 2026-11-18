@@ -17,7 +17,7 @@ fn help_lists_every_command_and_the_defaults() {
     let out = bot(&["--help"]);
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
-    for word in ["pair", "add-host", "run", "post", "status", "rotate-secret", "max_installations", "127.0.0.1:8787"] {
+    for word in ["pair", "add-host", "run", "post", "status", "rotate-secret", "forget", "max_installations", "127.0.0.1:8787"] {
         assert!(text.contains(word), "{word} missing from:\n{text}");
     }
 }

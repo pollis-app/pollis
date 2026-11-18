@@ -70,6 +70,10 @@ async fn dispatch(data_dir: &std::path::Path, command: Command) -> anyhow::Resul
             println!("{answer}");
         }
         Command::Status => print!("{}", app::status(data_dir, &config)?),
+        Command::Forget { installation_id } => {
+            app::forget(&host, data_dir, &installation_id).await?;
+            println!("Installation {installation_id} removed from this host.");
+        }
         Command::RotateSecret { installation_id } => {
             let secret = app::rotate_secret(&host, data_dir, &installation_id).await?;
             println!("New webhook secret for installation {installation_id} (shown once; restart `pollis-bot run` to use it):\n    {secret}");

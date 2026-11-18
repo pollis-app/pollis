@@ -19,7 +19,7 @@ The runtime talks to the Delivery Service set in the environment (`POLLIS_DELIVE
 pollis-bot pair --name "monitoring box"
 ```
 
-It prints an eight-character code and waits. A group admin opens the group's settings → **Bots** → **Add a bot** and types the code. When the admin confirms, the bot joins the group and `pair` exits.
+It prints an eight-character code and waits. A group admin opens the group in Pollis, then **Bots** → **Add a bot**, and types the code. When the admin confirms, the bot joins the group and `pair` exits.
 
 ## Add another host to a bot
 
@@ -29,7 +29,7 @@ On the new machine:
 pollis-bot add-host --bot <bot user id> --name "backup box"
 ```
 
-An admin types the printed code on the bot's page → **Add a host**. One of the bot's running hosts checks the approval and hands over the bot's key. Both hosts then see every message, and for each trigger exactly one of them acts.
+An admin opens the group, then **Bots** → the bot → **Add a host**, and types the printed code. One of the bot's running hosts checks the approval and hands over the bot's key. Both hosts then see every message, and for each trigger exactly one of them acts.
 
 ## Run
 
@@ -37,6 +37,7 @@ An admin types the printed code on the bot's page → **Add a host**. One of the
 pollis-bot run                 # every installation on this host, until stopped
 pollis-bot run --webhook       # also the alerts webhook on 127.0.0.1:8787
 pollis-bot status              # installations and what each is doing
+pollis-bot forget --installation <id>   # remove a revoked host's or deleted bot's installation
 ```
 
 Run it under your service manager (systemd, launchd) so it starts on boot. It needs no network listener of its own except the optional webhook; everything else is outbound to the Delivery Service.
@@ -91,6 +92,6 @@ Every failure in the log ends with `Fix:` and one thing to do. The common ones:
 | `the code expired before an admin typed it` | Run `pair` / `add-host` again and type the new code before it expires |
 | `no installations on this host` | `pollis-bot pair` |
 | `configured for at most N installations` | Raise `max_installations`, or run the extra bot on another host |
-| `opening installation …` | If the host was revoked on the bot's page, remove its directory and pair again |
+| `opening installation …` | If an admin revoked this host or deleted the bot, `pollis-bot forget --installation <id>` (then `pair`/`add-host` again if the bot should stay) |
 | `job failed while catching up` | Check the machine reaches the Delivery Service; the next message or restart retries |
 | `webhook call with a wrong secret or signature` | Give the sender the current secret (`rotate-secret` if lost) |

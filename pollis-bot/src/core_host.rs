@@ -134,8 +134,8 @@ impl BotHost for CoreHost {
         let session = bots::start_unattended(&state, &record.bot_user_id).await?;
         if session.group_id != record.group_id || session.device_id != record.device_id {
             return Err(anyhow!(
-                "installation.json disagrees with the keystore about this bot's group or device. Fix: remove {} and pair again",
-                dir.display()
+                "installation.json disagrees with the keystore about this bot's group or device. Fix: run `pollis-bot forget --installation {}` and pair again",
+                record.installation_id
             ));
         }
         bots::join_bot_group(&state, &session, REJOIN_WAIT).await?;
@@ -150,6 +150,21 @@ impl BotHost for CoreHost {
             core,
             secrets: Arc::new(self.keystore.clone()),
         })
+    }
+
+    async fn forget(&self, record: &InstallationRecord, dir: &Path) -> Result<()> {
+        let store = store_dir(data_dir_of(dir)?, &record.device_id)?;
+        let state = self.state_for(store.clone())?;
+        bots::forget_installation(&state, &record.bot_user_id).await?;
+        self.keystore
+            .delete_for_user(crate::secrets::WEBHOOK_SECRET_KEY, &record.installation_id)
+            .await?;
+        drop(state);
+        match std::fs::remove_dir_all(&store) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e).with_context(|| format!("removing {}", store.display())),
+        }
     }
 
     async fn secrets(&self, _record: &InstallationRecord, _dir: &Path) -> Result<Arc<dyn SecretSlot>> {

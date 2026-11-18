@@ -43,13 +43,13 @@ pub async fn pair(
                 .map(|t| t.format("%H:%M UTC").to_string())
                 .unwrap_or_default();
             let place = match &target {
-                PairTarget::NewBot => "the group's settings → Bots → Add a bot",
-                PairTarget::ExistingBot { .. } => "the bot's page → Add a host",
+                PairTarget::NewBot => "open the group, then Bots → Add a bot",
+                PairTarget::ExistingBot { .. } => "open the group, then Bots → the bot → Add a host",
             };
             println!();
             println!("    Pairing code:  {}", ticket.code);
             println!();
-            println!("A group admin types this code in Pollis, in {place}. It expires at {expires}.");
+            println!("A group admin types this code in Pollis: {place}. It expires at {expires}.");
             log::info("pairing", "waiting for approval");
         }
         PairingProgress::JoiningGroup => log::info("pairing", "approved; joining the bot's group"),
@@ -116,7 +116,10 @@ pub async fn run(host: &dyn BotHost, data_dir: &Path, config: &RuntimeConfig, we
             })
         };
         let opened = host.open(record, &dir, wake).await.with_context(|| {
-            format!("opening installation {}. Fix: check this host was not revoked on the bot's page; if it was, remove {} and pair again", record.installation_id, dir.display())
+            format!(
+                "opening installation {id}. Fix: if this host was revoked or the bot deleted, run `pollis-bot forget --installation {id}` (then `pair` or `add-host` again if the bot should stay)",
+                id = record.installation_id
+            )
         })?;
         slots.insert(record.installation_id.clone(), opened.secrets);
         installations.push(Arc::new(Installation::new(opened.core, record.handler.build())));
@@ -213,6 +216,21 @@ pub async fn post(
         bail!("the runtime answered {} {}: {detail}", answer.status, answer.body.get("status").cloned().unwrap_or_default());
     }
     Ok(answer.body)
+}
+
+/// `forget`: remove an installation from this host — its record, its store and
+/// its keystore slots. For a revoked host or a deleted bot; the bot itself is
+/// unchanged on the DS (an admin revokes or deletes it in Pollis).
+pub async fn forget(host: &dyn BotHost, data_dir: &Path, installation_id: &str) -> Result<()> {
+    let registry = Registry::new(data_dir);
+    let record = registry
+        .get(installation_id)?
+        .ok_or_else(|| anyhow!("no installation {installation_id} on this host. Fix: use an id from `pollis-bot status`"))?;
+    let dir = registry.dir_for(&record.installation_id)?;
+    host.forget(&record, &dir).await?;
+    std::fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
+    log::info(&log::scope(installation_id), "forgotten: its record, store and keys are gone from this host");
+    Ok(())
 }
 
 /// `rotate-secret`: a new secret, printed once. The running runtime picks it up on restart.

@@ -77,6 +77,10 @@ pub trait BotHost: Send + Sync {
     /// wire its realtime wake-ups to `wake`.
     async fn open(&self, record: &InstallationRecord, dir: &Path, wake: WakeFn) -> Result<OpenedInstallation>;
 
+    /// Remove the installation's store and keystore slots (its webhook secret
+    /// included). The caller removes its record afterwards.
+    async fn forget(&self, record: &InstallationRecord, dir: &Path) -> Result<()>;
+
     /// The installation's secret slot alone, for `post` and `rotate-secret`.
     async fn secrets(&self, record: &InstallationRecord, dir: &Path) -> Result<Arc<dyn SecretSlot>>;
 }

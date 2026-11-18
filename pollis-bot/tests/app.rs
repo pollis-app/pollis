@@ -58,6 +58,11 @@ impl BotHost for FakeHost {
         Ok(OpenedInstallation { core: FakeCore::new("01HOSTA", self.ds.clone()), secrets: self.secrets.clone() })
     }
 
+    async fn forget(&self, record: &InstallationRecord, _dir: &Path) -> anyhow::Result<()> {
+        self.secrets.0.lock().unwrap().remove(&record.installation_id);
+        Ok(())
+    }
+
     async fn secrets(&self, _record: &InstallationRecord, _dir: &Path) -> anyhow::Result<Arc<dyn SecretSlot>> {
         Ok(self.secrets.clone())
     }
@@ -186,4 +191,20 @@ async fn rotating_replaces_the_secret() {
     assert_ne!(first, second);
     assert_eq!(host.secrets.load(BOT).await.unwrap().unwrap().as_slice(), second.as_bytes());
     assert!(app::rotate_secret(&host, dir.path(), "01UNKNOWN").await.is_err());
+}
+
+#[tokio::test]
+async fn forget_removes_the_installation_and_its_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::new(dir.path());
+    registry.save(&record(BOT)).unwrap();
+    registry.save(&record("01OTHER")).unwrap();
+    let host = FakeHost::new(None);
+    app::rotate_secret(&host, dir.path(), BOT).await.unwrap();
+
+    app::forget(&host, dir.path(), BOT).await.unwrap();
+    let left: Vec<_> = registry.list().unwrap().into_iter().map(|r| r.installation_id).collect();
+    assert_eq!(left, ["01OTHER"]);
+    assert!(host.secrets.load(BOT).await.unwrap().is_none());
+    assert!(app::forget(&host, dir.path(), BOT).await.is_err(), "a second forget names the missing id");
 }
