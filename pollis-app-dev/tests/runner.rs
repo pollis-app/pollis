@@ -189,3 +189,30 @@ fn a_component_importing_sockets_is_refused_at_check() {
     host.check(&std::fs::read(fixture("std-app.wasm")).unwrap())
         .unwrap();
 }
+
+#[test]
+fn trigger_fields_are_camel_case_on_the_wire() {
+    let dir = tempdir::Dir::new("webhook");
+    let host = TestHost::new().unwrap();
+    let manifest = dir.0.join("hook.json");
+    std::fs::write(
+        &manifest,
+        r##"{ "name": "hook", "version": "1", "triggers": ["webhook"], "read": { "channels": ["#support"] }, "actions": ["post"] }"##,
+    )
+    .unwrap();
+    let request: TestRequest = serde_json::from_value(serde_json::json!({
+        "component": fixture("test-app.wasm"),
+        "manifest": manifest,
+        "trigger": { "webhook": { "deliveryId": "d1", "headers": [["x", "y"]], "body": b"post support deployed".to_vec() } },
+    }))
+    .unwrap();
+    let result = host.run(request);
+    assert!(result.ok, "{result:?}");
+    assert_eq!(
+        result.actions,
+        vec![WireAction::Post {
+            channel: "support".into(),
+            text: "deployed".into()
+        }]
+    );
+}

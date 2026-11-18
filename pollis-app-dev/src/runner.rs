@@ -97,7 +97,11 @@ pub struct WireMessage {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum WireTrigger {
     Message(WireMessage),
     Mention(WireMessage),
