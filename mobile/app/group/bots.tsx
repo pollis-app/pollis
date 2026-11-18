@@ -14,7 +14,7 @@ import {
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { Icon } from "../../components/icons";
 import { semantic, space } from "../../theme/tokens";
-import { useGroupBots, useBot } from "../../hooks/queries";
+import { useGroupBots, useBot, useAutoApproveBotApps } from "../../hooks/queries";
 import { useBotRoute } from "../../hooks/useBotRoute";
 import { botCapReached } from "../../lib/bots";
 import { useThemeRerender } from "../../components/theme";
@@ -29,6 +29,8 @@ function GroupBots() {
   // The cap rides on `get_bot`; any one bot of the group answers it, and the list is cached.
   const { data: firstBot } = useBot(bots[0]?.userId ?? null);
   const atCap = botCapReached(bots.length, firstBot?.groupBotCap);
+  // Waiting non-widening updates set to approve themselves land when an admin opens this (#2005).
+  useAutoApproveBotApps(id, bots.map((b) => b.userId), iAmAdmin);
 
   return (
     <Screen testID="screen-group-bots" aboveTabBar={router.inPane}>

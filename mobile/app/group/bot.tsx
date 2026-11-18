@@ -16,10 +16,11 @@ import {
 } from "../../components/ui";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { BotBadge } from "../../components/BotBadge";
+import { BotAppSection } from "../../components/bots/BotAppSection";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { Text } from "../../components/Text";
-import { useBot, useDeleteBot, useRevokeBotHost } from "../../hooks/queries";
+import { useAutoApproveBotApps, useBot, useDeleteBot, useRevokeBotHost } from "../../hooks/queries";
 import { useBotRoute } from "../../hooks/useBotRoute";
 import { isLastHost } from "../../lib/bots";
 import { formatRelative } from "../../lib/relativeTime";
@@ -34,8 +35,14 @@ import { useThemeRerender } from "../../components/theme";
 function BotPage() {
   useThemeRerender();
   const { t } = useTranslation("mobile");
-  const { router, gid, bid, groupName } = useBotRoute();
+  const { router, gid, bid, groupName, members, iAmAdmin } = useBotRoute();
   const { data: bot, isLoading, isError } = useBot(bid);
+  // An update an admin set to approve itself lands when an admin opens the page (#2005); no timer.
+  useAutoApproveBotApps(gid, bid ? [bid] : [], iAmAdmin);
+  const approverName = (userId: string) => {
+    const m = members.find((x) => x.user_id === userId);
+    return m?.username ? `@${m.username}` : userId.slice(0, 8);
+  };
   const revokeHost = useRevokeBotHost(bid, gid);
   const deleteBot = useDeleteBot(gid);
 
@@ -96,6 +103,8 @@ function BotPage() {
           </View>
           <Text style={ty.secondary}>{t("bots.machineNote", { group: groupName })}</Text>
         </Card>
+
+        {gid ? <BotAppSection groupId={gid} botUserId={bid} approverName={approverName} /> : null}
 
         <SectionTitle style={{ paddingHorizontal: 0 }}>{t("bots.hostsSection")}</SectionTitle>
         <Hint>{t("bots.unrecoverable")}</Hint>

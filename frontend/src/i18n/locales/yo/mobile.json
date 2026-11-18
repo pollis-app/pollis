@@ -815,7 +815,15 @@
         "actionRemoved": "Kò lè {{value}} mọ́",
         "egressAdded": "Ó lè fi dátà ránṣẹ́ sí {{value}}",
         "egressRemoved": "Kò fi dátà ránṣẹ́ sí {{value}} mọ́",
-        "quota": "Ó ń tọ́jú tó {{value}} lára dátà tirẹ̀ (tẹ́lẹ̀ {{was}})"
+        "quota": "Ó ń tọ́jú tó {{value}} lára dátà tirẹ̀ (tẹ́lẹ̀ {{was}})",
+        "commandAdded": "Ó fi àṣẹ {{value}} kún un",
+        "commandRemoved": "Kò pèsè {{value}} mọ́",
+        "commandToRequest": "{{value}} di ìbéèrè àdáni",
+        "commandToPosted": "{{value}} ń fi síta nínú ìkànnì báyìí",
+        "scheduleAdded": "Ó ń ṣiṣẹ́ lórí ètò àkókò tuntun: {{value}}",
+        "scheduleRemoved": "Kò ṣiṣẹ́ lórí ètò àkókò {{value}} mọ́",
+        "scheduleChanged": "Ó ń ṣiṣẹ́ {{value}} ní gbogbo {{every}} (tẹ́lẹ̀ gbogbo {{was}})",
+        "scheduleChangedPlain": "Ètò àkókò yí padà: {{value}}"
       },
       "approve": "Fọwọ́ sí i",
       "approveUpdate": "Fọwọ́ sí ìmúdójúìwọ̀n",
@@ -824,7 +832,7 @@
         "label": "Ìfisórí ìdàgbàsókè",
         "hint": "Ó ń ṣiṣẹ́ build èyíkéyìí tí a fi kọ́kọ́rọ́ olùgbéejáde yìí buwọ́lu tí kò béèrè ju ohun tí o fọwọ́ sí lọ.",
         "key": "Kọ́kọ́rọ́ {{key}}",
-        "noKey": "Bẹ̀rẹ̀ `pollis app dev` láti pèsè kọ́kọ́rọ́ olùgbéejáde."
+        "noKey": "Bẹ̀rẹ̀ `pollis-bot app sign` láti pèsè kọ́kọ́rọ́ olùgbéejáde."
       },
       "errors": {
         "stale": "Alábòójútó mìíràn ṣẹ̀ṣẹ̀ fọwọ́ sí bọ́ọ̀tì yìí. Tún wò ó kí o tó fọwọ́ sí i.",

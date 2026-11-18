@@ -837,7 +837,15 @@
         "actionRemoved": "अब {{value}} नहीं कर सकता",
         "egressAdded": "{{value}} को डेटा भेज सकता है",
         "egressRemoved": "अब {{value}} को डेटा नहीं भेजता",
-        "quota": "अपना {{value}} तक डेटा रखता है (पहले {{was}})"
+        "quota": "अपना {{value}} तक डेटा रखता है (पहले {{was}})",
+        "commandAdded": "कमांड {{value}} जोड़ता है",
+        "commandRemoved": "अब {{value}} नहीं देता",
+        "commandToRequest": "{{value}} निजी अनुरोध बन जाता है",
+        "commandToPosted": "{{value}} अब चैनल में पोस्ट करता है",
+        "scheduleAdded": "नए शेड्यूल पर चलता है: {{value}}",
+        "scheduleRemoved": "अब शेड्यूल {{value}} पर नहीं चलता",
+        "scheduleChanged": "{{value}} हर {{every}} में चलाता है (पहले हर {{was}})",
+        "scheduleChangedPlain": "शेड्यूल बदला: {{value}}"
       },
       "approve": "मंज़ूर करें",
       "approveUpdate": "अपडेट मंज़ूर करें",
@@ -846,7 +854,7 @@
         "label": "डेवलपमेंट इंस्टॉलेशन",
         "hint": "इस डेवलपर कुंजी से हस्ताक्षरित हर वह बिल्ड चलाता है जो आपकी मंज़ूरी से ज़्यादा न माँगे।",
         "key": "कुंजी {{key}}",
-        "noKey": "डेवलपर कुंजी देने के लिए `pollis app dev` शुरू करें।"
+        "noKey": "डेवलपर कुंजी देने के लिए `pollis-bot app sign` शुरू करें।"
       },
       "errors": {
         "stale": "किसी दूसरे एडमिन ने अभी-अभी इस बॉट को मंज़ूर किया। मंज़ूर करने से पहले फिर से देखें।",

@@ -837,7 +837,15 @@
         "actionRemoved": "ہن {{value}} نہیں کر سکدا",
         "egressAdded": "{{value}} نوں ڈیٹا بھیج سکدا اے",
         "egressRemoved": "ہن {{value}} نوں ڈیٹا نہیں بھیجدا",
-        "quota": "اپنا {{value}} تک ڈیٹا رکھدا اے (پہلاں {{was}})"
+        "quota": "اپنا {{value}} تک ڈیٹا رکھدا اے (پہلاں {{was}})",
+        "commandAdded": "کمانڈ {{value}} جوڑدا اے",
+        "commandRemoved": "ہن {{value}} پیش نہیں کردا",
+        "commandToRequest": "{{value}} نجی درخواست بن جاندی اے",
+        "commandToPosted": "{{value}} ہن چینل وچ پوسٹ کردی اے",
+        "scheduleAdded": "نویں شیڈول تے چلدا اے: {{value}}",
+        "scheduleRemoved": "ہن شیڈول {{value}} تے نہیں چلدا",
+        "scheduleChanged": "{{value}} ہر {{every}} بعد چلاؤندا اے (پہلاں ہر {{was}})",
+        "scheduleChangedPlain": "شیڈول بدل گیا: {{value}}"
       },
       "approve": "منظور کرو",
       "approveUpdate": "اپڈیٹ منظور کرو",
@@ -846,7 +854,7 @@
         "label": "ڈویلپمنٹ انسٹالیشن",
         "hint": "ایس ڈویلپر کنجی نال دستخط شدہ ہر اوہ بلڈ چلاؤندا اے جو تہاڈی منظوری توں ودھ نہ منگے۔",
         "key": "کنجی {{key}}",
-        "noKey": "ڈویلپر کنجی پیش کرن لئی `pollis app dev` شروع کرو۔"
+        "noKey": "ڈویلپر کنجی پیش کرن لئی `pollis-bot app sign` شروع کرو۔"
       },
       "errors": {
         "stale": "اک ہور ایڈمن نے ہنے ایس بوٹ نوں منظور کیتا اے۔ منظور کرن توں پہلاں دوبارہ ویکھو۔",

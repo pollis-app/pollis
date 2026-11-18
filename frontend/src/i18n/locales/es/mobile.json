@@ -724,7 +724,15 @@
         "actionRemoved": "Ya no puede {{value}}",
         "egressAdded": "Puede enviar datos a {{value}}",
         "egressRemoved": "Ya no envía datos a {{value}}",
-        "quota": "Guarda hasta {{value}} de datos propios (antes {{was}})"
+        "quota": "Guarda hasta {{value}} de datos propios (antes {{was}})",
+        "commandAdded": "Añade el comando {{value}}",
+        "commandRemoved": "Ya no ofrece {{value}}",
+        "commandToRequest": "{{value}} pasa a ser una solicitud privada",
+        "commandToPosted": "{{value}} ahora publica en el canal",
+        "scheduleAdded": "Se ejecuta con una nueva programación: {{value}}",
+        "scheduleRemoved": "Ya no se ejecuta con la programación {{value}}",
+        "scheduleChanged": "Ejecuta {{value}} cada {{every}} (antes cada {{was}})",
+        "scheduleChangedPlain": "Programación cambiada: {{value}}"
       },
       "approve": "Aprobar",
       "approveUpdate": "Aprobar actualización",
@@ -733,7 +741,7 @@
         "label": "Instalación de desarrollo",
         "hint": "Ejecuta cualquier compilación firmada con esta clave de desarrollador que no pida más de lo que aprobaste.",
         "key": "Clave {{key}}",
-        "noKey": "Inicia `pollis app dev` para ofrecer una clave de desarrollador."
+        "noKey": "Inicia `pollis-bot app sign` para ofrecer una clave de desarrollador."
       },
       "errors": {
         "stale": "Otro administrador acaba de aprobar este bot. Vuelve a revisarlo antes de aprobar.",

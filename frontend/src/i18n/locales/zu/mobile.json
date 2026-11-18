@@ -837,7 +837,15 @@
         "actionRemoved": "Ayisakwazi {{value}}",
         "egressAdded": "Ingathumela idatha ku-{{value}}",
         "egressRemoved": "Ayisathumeli idatha ku-{{value}}",
-        "quota": "Igcina kuze kufike ku-{{value}} wedatha yayo (ngaphambili {{was}})"
+        "quota": "Igcina kuze kufike ku-{{value}} wedatha yayo (ngaphambili {{was}})",
+        "commandAdded": "Yengeza umyalo {{value}}",
+        "commandRemoved": "Ayisanikezi {{value}}",
+        "commandToRequest": "{{value}} iba yisicelo esiyimfihlo",
+        "commandToPosted": "{{value}} manje ithumela esiteshini",
+        "scheduleAdded": "Isebenza ngohlelo olusha: {{value}}",
+        "scheduleRemoved": "Ayisasebenzi ngohlelo {{value}}",
+        "scheduleChanged": "Isebenzisa {{value}} njalo ngemva kuka-{{every}} (ngaphambili njalo ngemva kuka-{{was}})",
+        "scheduleChangedPlain": "Uhlelo lushintshile: {{value}}"
       },
       "approve": "Gunyaza",
       "approveUpdate": "Gunyaza isibuyekezo",
@@ -846,7 +854,7 @@
         "label": "Ukufaka kokuthuthukisa",
         "hint": "Isebenzisa noma iyiphi i-build esayinwe ngalo khiye wonjiniyela engaceli okungaphezu kwalokho okugunyazile.",
         "key": "Ukhiye {{key}}",
-        "noKey": "Qala `pollis app dev` ukuze unikeze ukhiye wonjiniyela."
+        "noKey": "Qala `pollis-bot app sign` ukuze unikeze ukhiye wonjiniyela."
       },
       "errors": {
         "stale": "Omunye umphathi usanda kugunyaza le bhothi. Phinda ubheke ngaphambi kokugunyaza.",

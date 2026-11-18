@@ -837,7 +837,15 @@
         "actionRemoved": "ਹੁਣ {{value}} ਨਹੀਂ ਕਰ ਸਕਦਾ",
         "egressAdded": "{{value}} ਨੂੰ ਡਾਟਾ ਭੇਜ ਸਕਦਾ ਹੈ",
         "egressRemoved": "ਹੁਣ {{value}} ਨੂੰ ਡਾਟਾ ਨਹੀਂ ਭੇਜਦਾ",
-        "quota": "ਆਪਣਾ {{value}} ਤੱਕ ਡਾਟਾ ਰੱਖਦਾ ਹੈ (ਪਹਿਲਾਂ {{was}})"
+        "quota": "ਆਪਣਾ {{value}} ਤੱਕ ਡਾਟਾ ਰੱਖਦਾ ਹੈ (ਪਹਿਲਾਂ {{was}})",
+        "commandAdded": "ਕਮਾਂਡ {{value}} ਜੋੜਦਾ ਹੈ",
+        "commandRemoved": "ਹੁਣ {{value}} ਪੇਸ਼ ਨਹੀਂ ਕਰਦਾ",
+        "commandToRequest": "{{value}} ਨਿੱਜੀ ਬੇਨਤੀ ਬਣ ਜਾਂਦੀ ਹੈ",
+        "commandToPosted": "{{value}} ਹੁਣ ਚੈਨਲ ਵਿੱਚ ਪੋਸਟ ਕਰਦੀ ਹੈ",
+        "scheduleAdded": "ਨਵੀਂ ਸਮਾਂ-ਸੂਚੀ 'ਤੇ ਚੱਲਦਾ ਹੈ: {{value}}",
+        "scheduleRemoved": "ਹੁਣ ਸਮਾਂ-ਸੂਚੀ {{value}} 'ਤੇ ਨਹੀਂ ਚੱਲਦਾ",
+        "scheduleChanged": "{{value}} ਹਰ {{every}} ਬਾਅਦ ਚਲਾਉਂਦਾ ਹੈ (ਪਹਿਲਾਂ ਹਰ {{was}})",
+        "scheduleChangedPlain": "ਸਮਾਂ-ਸੂਚੀ ਬਦਲੀ: {{value}}"
       },
       "approve": "ਮਨਜ਼ੂਰ ਕਰੋ",
       "approveUpdate": "ਅੱਪਡੇਟ ਮਨਜ਼ੂਰ ਕਰੋ",
@@ -846,7 +854,7 @@
         "label": "ਡਿਵੈਲਪਮੈਂਟ ਇੰਸਟਾਲੇਸ਼ਨ",
         "hint": "ਇਸ ਡਿਵੈਲਪਰ ਕੁੰਜੀ ਨਾਲ ਦਸਤਖ਼ਤ ਹਰ ਉਹ ਬਿਲਡ ਚਲਾਉਂਦਾ ਹੈ ਜੋ ਤੁਹਾਡੀ ਮਨਜ਼ੂਰੀ ਤੋਂ ਵੱਧ ਨਾ ਮੰਗੇ।",
         "key": "ਕੁੰਜੀ {{key}}",
-        "noKey": "ਡਿਵੈਲਪਰ ਕੁੰਜੀ ਦੇਣ ਲਈ `pollis app dev` ਸ਼ੁਰੂ ਕਰੋ।"
+        "noKey": "ਡਿਵੈਲਪਰ ਕੁੰਜੀ ਦੇਣ ਲਈ `pollis-bot app sign` ਸ਼ੁਰੂ ਕਰੋ।"
       },
       "errors": {
         "stale": "ਕਿਸੇ ਹੋਰ ਐਡਮਿਨ ਨੇ ਹੁਣੇ ਇਸ ਬੋਟ ਨੂੰ ਮਨਜ਼ੂਰ ਕੀਤਾ ਹੈ। ਮਨਜ਼ੂਰ ਕਰਨ ਤੋਂ ਪਹਿਲਾਂ ਦੁਬਾਰਾ ਵੇਖੋ।",

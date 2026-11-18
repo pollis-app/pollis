@@ -837,7 +837,15 @@
         "actionRemoved": "Haiwezi tena {{value}}",
         "egressAdded": "Inaweza kutuma data kwa {{value}}",
         "egressRemoved": "Haitumi tena data kwa {{value}}",
-        "quota": "Huhifadhi hadi {{value}} ya data yake (awali {{was}})"
+        "quota": "Huhifadhi hadi {{value}} ya data yake (awali {{was}})",
+        "commandAdded": "Inaongeza amri {{value}}",
+        "commandRemoved": "Haitoi tena {{value}}",
+        "commandToRequest": "{{value}} inakuwa ombi la faragha",
+        "commandToPosted": "{{value}} sasa inachapisha kwenye chaneli",
+        "scheduleAdded": "Inaendeshwa kwa ratiba mpya: {{value}}",
+        "scheduleRemoved": "Haiendeshwi tena kwa ratiba {{value}}",
+        "scheduleChanged": "Inaendesha {{value}} kila {{every}} (awali kila {{was}})",
+        "scheduleChangedPlain": "Ratiba imebadilika: {{value}}"
       },
       "approve": "Idhinisha",
       "approveUpdate": "Idhinisha sasisho",
@@ -846,7 +854,7 @@
         "label": "Usakinishaji wa uundaji",
         "hint": "Huendesha build yoyote iliyotiwa sahihi kwa ufunguo huu wa msanidi isiyoomba zaidi ya ulichoidhinisha.",
         "key": "Ufunguo {{key}}",
-        "noKey": "Anzisha `pollis app dev` ili kutoa ufunguo wa msanidi."
+        "noKey": "Anzisha `pollis-bot app sign` ili kutoa ufunguo wa msanidi."
       },
       "errors": {
         "stale": "Msimamizi mwingine ameidhinisha boti hii sasa hivi. Angalia tena kabla ya kuidhinisha.",

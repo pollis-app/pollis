@@ -837,7 +837,15 @@
         "actionRemoved": "Ba za ta ƙara iya {{value}} ba",
         "egressAdded": "Za ta iya aika bayanai zuwa {{value}}",
         "egressRemoved": "Ba ta ƙara aika bayanai zuwa {{value}}",
-        "quota": "Tana ajiye har zuwa {{value}} na bayananta (a da {{was}})"
+        "quota": "Tana ajiye har zuwa {{value}} na bayananta (a da {{was}})",
+        "commandAdded": "Tana ƙara umarnin {{value}}",
+        "commandRemoved": "Ba ta ƙara bayar da {{value}}",
+        "commandToRequest": "{{value}} ya zama buƙata ta sirri",
+        "commandToPosted": "{{value}} yanzu yana wallafawa a tasha",
+        "scheduleAdded": "Tana aiki a kan sabon jadawali: {{value}}",
+        "scheduleRemoved": "Ba ta ƙara aiki a kan jadawalin {{value}}",
+        "scheduleChanged": "Tana gudanar da {{value}} kowane {{every}} (a da kowane {{was}})",
+        "scheduleChangedPlain": "An canza jadawali: {{value}}"
       },
       "approve": "Amince",
       "approveUpdate": "Amince da sabuntawa",
@@ -846,7 +854,7 @@
         "label": "Shigarwa ta haɓakawa",
         "hint": "Tana gudanar da kowane build da aka sa hannu da wannan makullin mai haɓakawa wanda bai nemi fiye da abin da ka amince ba.",
         "key": "Makulli {{key}}",
-        "noKey": "Fara `pollis app dev` don bayar da makullin mai haɓakawa."
+        "noKey": "Fara `pollis-bot app sign` don bayar da makullin mai haɓakawa."
       },
       "errors": {
         "stale": "Wani mai gudanarwa ya amince da wannan bot ɗin yanzun nan. Sake dubawa kafin ka amince.",

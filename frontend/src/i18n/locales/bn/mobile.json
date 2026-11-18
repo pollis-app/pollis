@@ -837,7 +837,15 @@
         "actionRemoved": "আর {{value}} পারে না",
         "egressAdded": "{{value}}-এ ডেটা পাঠাতে পারে",
         "egressRemoved": "আর {{value}}-এ ডেটা পাঠায় না",
-        "quota": "নিজের {{value}} পর্যন্ত ডেটা রাখে (আগে {{was}})"
+        "quota": "নিজের {{value}} পর্যন্ত ডেটা রাখে (আগে {{was}})",
+        "commandAdded": "{{value}} কমান্ড যোগ করে",
+        "commandRemoved": "আর {{value}} দেয় না",
+        "commandToRequest": "{{value}} একটি ব্যক্তিগত অনুরোধ হয়ে যায়",
+        "commandToPosted": "{{value}} এখন চ্যানেলে পোস্ট করে",
+        "scheduleAdded": "নতুন সময়সূচিতে চলে: {{value}}",
+        "scheduleRemoved": "আর {{value}} সময়সূচিতে চলে না",
+        "scheduleChanged": "প্রতি {{every}} পর {{value}} চালায় (আগে প্রতি {{was}})",
+        "scheduleChangedPlain": "সময়সূচি বদলেছে: {{value}}"
       },
       "approve": "অনুমোদন দিন",
       "approveUpdate": "আপডেট অনুমোদন দিন",
@@ -846,7 +854,7 @@
         "label": "ডেভেলপমেন্ট ইনস্টলেশন",
         "hint": "এই ডেভেলপার কী দিয়ে স্বাক্ষরিত যেকোনো বিল্ড চালায়, যা আপনার অনুমোদনের চেয়ে বেশি চায় না।",
         "key": "কী {{key}}",
-        "noKey": "ডেভেলপার কী দিতে `pollis app dev` চালু করুন।"
+        "noKey": "ডেভেলপার কী দিতে `pollis-bot app sign` চালু করুন।"
       },
       "errors": {
         "stale": "অন্য একজন অ্যাডমিন এইমাত্র এই বটটি অনুমোদন করেছেন। অনুমোদনের আগে আবার দেখুন।",

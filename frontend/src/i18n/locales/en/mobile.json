@@ -837,7 +837,15 @@
         "actionRemoved": "Can no longer {{value}}",
         "egressAdded": "Can send data to {{value}}",
         "egressRemoved": "No longer sends data to {{value}}",
-        "quota": "Keeps up to {{value}} of its own data (was {{was}})"
+        "quota": "Keeps up to {{value}} of its own data (was {{was}})",
+        "commandAdded": "Adds the command {{value}}",
+        "commandRemoved": "No longer offers {{value}}",
+        "commandToRequest": "{{value}} becomes a private request",
+        "commandToPosted": "{{value}} now posts in the channel",
+        "scheduleAdded": "Runs on a new schedule: {{value}}",
+        "scheduleRemoved": "No longer runs on the schedule {{value}}",
+        "scheduleChanged": "Runs {{value}} every {{every}} (was every {{was}})",
+        "scheduleChangedPlain": "Schedule changed: {{value}}"
       },
       "approve": "Approve",
       "approveUpdate": "Approve update",
@@ -846,7 +854,7 @@
         "label": "Development installation",
         "hint": "Runs any build signed by this developer key that doesn't ask for more than you approved.",
         "key": "Key {{key}}",
-        "noKey": "Start `pollis app dev` to offer a developer key."
+        "noKey": "Sign the build with `pollis-bot app sign` on the bot's host to offer a developer key."
       },
       "errors": {
         "stale": "Another admin approved this bot just now. Look again before approving.",

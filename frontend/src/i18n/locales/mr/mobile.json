@@ -837,7 +837,15 @@
         "actionRemoved": "आता {{value}} करू शकत नाही",
         "egressAdded": "{{value}} ला डेटा पाठवू शकते",
         "egressRemoved": "आता {{value}} ला डेटा पाठवत नाही",
-        "quota": "स्वतःचा {{value}} पर्यंत डेटा ठेवते (आधी {{was}})"
+        "quota": "स्वतःचा {{value}} पर्यंत डेटा ठेवते (आधी {{was}})",
+        "commandAdded": "कमांड {{value}} जोडते",
+        "commandRemoved": "आता {{value}} देत नाही",
+        "commandToRequest": "{{value}} खाजगी विनंती बनते",
+        "commandToPosted": "{{value}} आता चॅनेलमध्ये पोस्ट करते",
+        "scheduleAdded": "नवीन वेळापत्रकावर चालते: {{value}}",
+        "scheduleRemoved": "आता वेळापत्रक {{value}} वर चालत नाही",
+        "scheduleChanged": "{{value}} दर {{every}} ने चालवते (आधी दर {{was}})",
+        "scheduleChangedPlain": "वेळापत्रक बदलले: {{value}}"
       },
       "approve": "मंजूर करा",
       "approveUpdate": "अपडेट मंजूर करा",
@@ -846,7 +854,7 @@
         "label": "डेव्हलपमेंट इंस्टॉलेशन",
         "hint": "या डेव्हलपर कीने स्वाक्षरित आणि तुम्ही मंजूर केलेल्यापेक्षा जास्त न मागणारा कोणताही बिल्ड चालवते.",
         "key": "की {{key}}",
-        "noKey": "डेव्हलपर की देण्यासाठी `pollis app dev` सुरू करा."
+        "noKey": "डेव्हलपर की देण्यासाठी `pollis-bot app sign` सुरू करा."
       },
       "errors": {
         "stale": "दुसऱ्या ॲडमिनने आत्ताच हा बॉट मंजूर केला. मंजूर करण्यापूर्वी पुन्हा पाहा.",

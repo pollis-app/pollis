@@ -837,7 +837,15 @@
         "actionRemoved": "نور {{value}} نشي کولی",
         "egressAdded": "{{value}} ته معلومات لېږلی شي",
         "egressRemoved": "نور {{value}} ته معلومات نه لېږي",
-        "quota": "تر {{value}} پورې خپل معلومات ساتي (پخوا {{was}})"
+        "quota": "تر {{value}} پورې خپل معلومات ساتي (پخوا {{was}})",
+        "commandAdded": "امر {{value}} زیاتوي",
+        "commandRemoved": "نور {{value}} نه وړاندې کوي",
+        "commandToRequest": "{{value}} په شخصي غوښتنه بدلېږي",
+        "commandToPosted": "{{value}} اوس په چینل کې خپروي",
+        "scheduleAdded": "په نوي مهالویش چلېږي: {{value}}",
+        "scheduleRemoved": "نور په مهالویش {{value}} نه چلېږي",
+        "scheduleChanged": "{{value}} هر {{every}} وروسته چلوي (پخوا هر {{was}})",
+        "scheduleChangedPlain": "مهالویش بدل شو: {{value}}"
       },
       "approve": "تصویب",
       "approveUpdate": "تازه کېدنه تصویب کړئ",
@@ -846,7 +854,7 @@
         "label": "پراختیایي نصب",
         "hint": "هر هغه جوړښت چلوي چې په دې پراختیاکوونکي کیلي لاسلیک شوی وي او ستاسو له تصویب ډېر ونه غواړي.",
         "key": "کیلي {{key}}",
-        "noKey": "د پراختیاکوونکي کیلي وړاندې کولو لپاره `pollis app dev` پیل کړئ."
+        "noKey": "د پراختیاکوونکي کیلي وړاندې کولو لپاره `pollis-bot app sign` پیل کړئ."
       },
       "errors": {
         "stale": "بل اډمین همدا اوس دا بوټ تصویب کړ. د تصویب مخکې یې بیا وګورئ.",

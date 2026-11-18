@@ -815,7 +815,15 @@
         "actionRemoved": "{{value}} ができなくなります",
         "egressAdded": "{{value}} にデータを送れる",
         "egressRemoved": "{{value}} にデータを送らなくなります",
-        "quota": "自分のデータを最大 {{value}} 保存（以前は {{was}}）"
+        "quota": "自分のデータを最大 {{value}} 保存（以前は {{was}}）",
+        "commandAdded": "コマンド {{value}} を追加",
+        "commandRemoved": "{{value}} を提供しなくなります",
+        "commandToRequest": "{{value}} が非公開のリクエストになります",
+        "commandToPosted": "{{value}} がチャンネルに投稿するようになります",
+        "scheduleAdded": "新しいスケジュールで実行：{{value}}",
+        "scheduleRemoved": "スケジュール {{value}} で実行しなくなります",
+        "scheduleChanged": "{{value}} を {{every}} ごとに実行（以前は {{was}} ごと）",
+        "scheduleChangedPlain": "スケジュールの変更：{{value}}"
       },
       "approve": "承認",
       "approveUpdate": "更新を承認",
@@ -824,7 +832,7 @@
         "label": "開発用インストール",
         "hint": "この開発者キーで署名され、承認した範囲を超えないビルドなら何でも実行します。",
         "key": "キー {{key}}",
-        "noKey": "開発者キーを提示するには `pollis app dev` を起動してください。"
+        "noKey": "開発者キーを提示するには `pollis-bot app sign` を起動してください。"
       },
       "errors": {
         "stale": "別の管理者がたった今このボットを承認しました。承認する前にもう一度確認してください。",

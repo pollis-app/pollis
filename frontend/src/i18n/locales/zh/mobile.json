@@ -707,7 +707,15 @@
         "actionRemoved": "不再可以{{value}}",
         "egressAdded": "可以发送数据到 {{value}}",
         "egressRemoved": "不再发送数据到 {{value}}",
-        "quota": "最多保存 {{value}} 自己的数据（原为 {{was}}）"
+        "quota": "最多保存 {{value}} 自己的数据（原为 {{was}}）",
+        "commandAdded": "添加命令 {{value}}",
+        "commandRemoved": "不再提供 {{value}}",
+        "commandToRequest": "{{value}} 改为私密请求",
+        "commandToPosted": "{{value}} 现在会在频道中发布",
+        "scheduleAdded": "按新的计划运行：{{value}}",
+        "scheduleRemoved": "不再按计划 {{value}} 运行",
+        "scheduleChanged": "每 {{every}} 运行一次 {{value}}（原为每 {{was}}）",
+        "scheduleChangedPlain": "计划已更改：{{value}}"
       },
       "approve": "批准",
       "approveUpdate": "批准更新",
@@ -716,7 +724,7 @@
         "label": "开发安装",
         "hint": "运行由此开发者密钥签名、且请求不超过你所批准范围的任何构建。",
         "key": "密钥 {{key}}",
-        "noKey": "启动 `pollis app dev` 以提供开发者密钥。"
+        "noKey": "启动 `pollis-bot app sign` 以提供开发者密钥。"
       },
       "errors": {
         "stale": "另一位管理员刚刚批准了此机器人。请在批准前重新查看。",

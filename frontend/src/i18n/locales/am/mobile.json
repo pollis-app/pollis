@@ -837,7 +837,15 @@
         "actionRemoved": "ከአሁን በኋላ {{value}} አይችልም",
         "egressAdded": "ወደ {{value}} ውሂብ መላክ ይችላል",
         "egressRemoved": "ከአሁን በኋላ ወደ {{value}} ውሂብ አይልክም",
-        "quota": "እስከ {{value}} የራሱን ውሂብ ያስቀምጣል (ቀድሞ {{was}})"
+        "quota": "እስከ {{value}} የራሱን ውሂብ ያስቀምጣል (ቀድሞ {{was}})",
+        "commandAdded": "ትዕዛዙን {{value}} ያክላል",
+        "commandRemoved": "ከአሁን በኋላ {{value}} አያቀርብም",
+        "commandToRequest": "{{value}} የግል ጥያቄ ይሆናል",
+        "commandToPosted": "{{value}} አሁን በቻናሉ ላይ ይለጥፋል",
+        "scheduleAdded": "በአዲስ የጊዜ ሰሌዳ ይሰራል፦ {{value}}",
+        "scheduleRemoved": "ከአሁን በኋላ በጊዜ ሰሌዳ {{value}} አይሰራም",
+        "scheduleChanged": "{{value}}ን በየ{{every}} ያሄዳል (ቀድሞ በየ{{was}})",
+        "scheduleChangedPlain": "የጊዜ ሰሌዳ ተቀይሯል፦ {{value}}"
       },
       "approve": "አጽድቅ",
       "approveUpdate": "ዝማኔውን አጽድቅ",
@@ -846,7 +854,7 @@
         "label": "የልማት ጭነት",
         "hint": "በዚህ የገንቢ ቁልፍ የተፈረመና እርስዎ ካጸደቁት በላይ የማይጠይቅ ማንኛውንም ግንባታ ያሄዳል።",
         "key": "ቁልፍ {{key}}",
-        "noKey": "የገንቢ ቁልፍ ለማቅረብ `pollis app dev` ይጀምሩ።"
+        "noKey": "የገንቢ ቁልፍ ለማቅረብ `pollis-bot app sign` ይጀምሩ።"
       },
       "errors": {
         "stale": "ሌላ አስተዳዳሪ ይህን ቦት አሁን አጽድቆታል። ከማጽደቅዎ በፊት እንደገና ይመልከቱ።",

@@ -724,7 +724,15 @@
         "actionRemoved": "Ne peut plus {{value}}",
         "egressAdded": "Peut envoyer des données à {{value}}",
         "egressRemoved": "N'envoie plus de données à {{value}}",
-        "quota": "Conserve jusqu'à {{value}} de ses propres données (avant : {{was}})"
+        "quota": "Conserve jusqu'à {{value}} de ses propres données (avant : {{was}})",
+        "commandAdded": "Ajoute la commande {{value}}",
+        "commandRemoved": "Ne propose plus {{value}}",
+        "commandToRequest": "{{value}} devient une requête privée",
+        "commandToPosted": "{{value}} publie désormais dans le salon",
+        "scheduleAdded": "S'exécute selon un nouvel horaire : {{value}}",
+        "scheduleRemoved": "Ne s'exécute plus selon l'horaire {{value}}",
+        "scheduleChanged": "Exécute {{value}} toutes les {{every}} (avant : toutes les {{was}})",
+        "scheduleChangedPlain": "Horaire modifié : {{value}}"
       },
       "approve": "Approuver",
       "approveUpdate": "Approuver la mise à jour",
@@ -733,7 +741,7 @@
         "label": "Installation de développement",
         "hint": "Exécute tout build signé par cette clé de développeur qui ne demande pas plus que ce que vous avez approuvé.",
         "key": "Clé {{key}}",
-        "noKey": "Lancez `pollis app dev` pour proposer une clé de développeur."
+        "noKey": "Lancez `pollis-bot app sign` pour proposer une clé de développeur."
       },
       "errors": {
         "stale": "Un autre admin vient d'approuver ce bot. Vérifiez à nouveau avant d'approuver.",

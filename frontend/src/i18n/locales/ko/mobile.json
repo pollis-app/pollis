@@ -815,7 +815,15 @@
         "actionRemoved": "더 이상 {{value}} 불가",
         "egressAdded": "{{value}}(으)로 데이터 전송 가능",
         "egressRemoved": "더 이상 {{value}}(으)로 데이터를 보내지 않음",
-        "quota": "자체 데이터를 최대 {{value}}까지 보관 (이전: {{was}})"
+        "quota": "자체 데이터를 최대 {{value}}까지 보관 (이전: {{was}})",
+        "commandAdded": "{{value}} 명령 추가",
+        "commandRemoved": "더 이상 {{value}}을(를) 제공하지 않음",
+        "commandToRequest": "{{value}}이(가) 비공개 요청이 됨",
+        "commandToPosted": "{{value}}이(가) 이제 채널에 게시함",
+        "scheduleAdded": "새 일정으로 실행: {{value}}",
+        "scheduleRemoved": "더 이상 {{value}} 일정으로 실행되지 않음",
+        "scheduleChanged": "{{value}}을(를) {{every}}마다 실행 (이전: {{was}}마다)",
+        "scheduleChangedPlain": "일정 변경: {{value}}"
       },
       "approve": "승인",
       "approveUpdate": "업데이트 승인",
@@ -824,7 +832,7 @@
         "label": "개발용 설치",
         "hint": "이 개발자 키로 서명되고 승인한 범위를 넘지 않는 빌드는 모두 실행합니다.",
         "key": "키 {{key}}",
-        "noKey": "개발자 키를 제공하려면 `pollis app dev`를 시작하세요."
+        "noKey": "개발자 키를 제공하려면 `pollis-bot app sign`를 시작하세요."
       },
       "errors": {
         "stale": "다른 관리자가 방금 이 봇을 승인했습니다. 승인하기 전에 다시 확인하세요.",

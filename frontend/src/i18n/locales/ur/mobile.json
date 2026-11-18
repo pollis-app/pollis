@@ -837,7 +837,15 @@
         "actionRemoved": "اب {{value}} نہیں کر سکتا",
         "egressAdded": "{{value}} کو ڈیٹا بھیج سکتا ہے",
         "egressRemoved": "اب {{value}} کو ڈیٹا نہیں بھیجتا",
-        "quota": "اپنا {{value}} تک ڈیٹا رکھتا ہے (پہلے {{was}})"
+        "quota": "اپنا {{value}} تک ڈیٹا رکھتا ہے (پہلے {{was}})",
+        "commandAdded": "کمانڈ {{value}} شامل کرتا ہے",
+        "commandRemoved": "اب {{value}} پیش نہیں کرتا",
+        "commandToRequest": "{{value}} نجی درخواست بن جاتی ہے",
+        "commandToPosted": "{{value}} اب چینل میں پوسٹ کرتی ہے",
+        "scheduleAdded": "نئے شیڈول پر چلتا ہے: {{value}}",
+        "scheduleRemoved": "اب شیڈول {{value}} پر نہیں چلتا",
+        "scheduleChanged": "{{value}} ہر {{every}} بعد چلاتا ہے (پہلے ہر {{was}})",
+        "scheduleChangedPlain": "شیڈول بدل گیا: {{value}}"
       },
       "approve": "منظور کریں",
       "approveUpdate": "اپ ڈیٹ منظور کریں",
@@ -846,7 +854,7 @@
         "label": "ڈویلپمنٹ انسٹالیشن",
         "hint": "اس ڈویلپر کلید سے دستخط شدہ ہر وہ بلڈ چلاتا ہے جو آپ کی منظوری سے زیادہ نہ مانگے۔",
         "key": "کلید {{key}}",
-        "noKey": "ڈویلپر کلید پیش کرنے کے لیے `pollis app dev` شروع کریں۔"
+        "noKey": "ڈویلپر کلید پیش کرنے کے لیے `pollis-bot app sign` شروع کریں۔"
       },
       "errors": {
         "stale": "ایک اور ایڈمن نے ابھی اس بوٹ کو منظور کیا ہے۔ منظور کرنے سے پہلے دوبارہ دیکھیں۔",

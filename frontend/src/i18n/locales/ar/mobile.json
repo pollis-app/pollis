@@ -792,7 +792,15 @@
         "actionRemoved": "لم يعد يمكنه {{value}}",
         "egressAdded": "يمكنه إرسال بيانات إلى {{value}}",
         "egressRemoved": "لم يعد يرسل بيانات إلى {{value}}",
-        "quota": "يحتفظ بما يصل إلى {{value}} من بياناته (كان {{was}})"
+        "quota": "يحتفظ بما يصل إلى {{value}} من بياناته (كان {{was}})",
+        "commandAdded": "يضيف الأمر {{value}}",
+        "commandRemoved": "لم يعد يقدّم {{value}}",
+        "commandToRequest": "يصبح {{value}} طلبًا خاصًا",
+        "commandToPosted": "أصبح {{value}} ينشر في القناة",
+        "scheduleAdded": "يعمل وفق جدول جديد: {{value}}",
+        "scheduleRemoved": "لم يعد يعمل وفق الجدول {{value}}",
+        "scheduleChanged": "يشغّل {{value}} كل {{every}} (كان كل {{was}})",
+        "scheduleChangedPlain": "تغيّر الجدول: {{value}}"
       },
       "approve": "موافقة",
       "approveUpdate": "الموافقة على التحديث",
@@ -801,7 +809,7 @@
         "label": "تثبيت تطويري",
         "hint": "يشغّل أي بناء موقّع بمفتاح المطوّر هذا لا يطلب أكثر مما وافقت عليه.",
         "key": "المفتاح {{key}}",
-        "noKey": "شغّل `pollis app dev` لتقديم مفتاح مطوّر."
+        "noKey": "شغّل `pollis-bot app sign` لتقديم مفتاح مطوّر."
       },
       "errors": {
         "stale": "وافق مشرف آخر على هذا البوت للتو. راجعه مجددًا قبل الموافقة.",
