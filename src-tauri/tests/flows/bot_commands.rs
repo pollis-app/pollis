@@ -11,13 +11,15 @@ use std::sync::Arc;
 
 use serial_test::serial;
 
-use pollis_app_manifest::{ActionKind, AdminGrants, ChannelGrant, EventKind, Manifest};
+use pollis_app_manifest::{ActionKind, AdminGrants, ChannelGrant, EventKind};
 use pollis_bot::app_handler::AppHandler;
 use pollis_bot::core_host::installation_core;
 use pollis_bot::handler::Handler;
 use pollis_bot::job::{Installation, JobInput};
 use pollis_core::commands::bots;
-use pollis_core::commands::bots::app_commands::{self, ApprovedApp, BOT_REQUESTS_UNAVAILABLE};
+use pollis_core::commands::bots::app_approval::AppApprovalRefusal;
+use pollis_core::commands::bots::app_commands::BOT_REQUESTS_UNAVAILABLE;
+use pollis_core::commands::bots::apps::{self, AppRunReport, ArtifactFacts};
 
 use crate::harness::{pair_new_bot, wipe, world, BotHostClient, TestClient};
 
@@ -49,10 +51,36 @@ fn grants(general: &str) -> AdminGrants {
     }
 }
 
+fn wasm() -> Vec<u8> {
+    std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm")).expect("fixture App")
+}
+
 fn app(manifest: &str, general: &str) -> Arc<dyn Handler> {
-    let wasm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm"))
-        .expect("fixture App");
-    Arc::new(AppHandler::new(wasm, manifest.as_bytes(), grants(general)).expect("App handler"))
+    Arc::new(AppHandler::new(wasm(), manifest.as_bytes(), grants(general)).expect("App handler"))
+}
+
+/// The real approval path (#2005): the host reports the App it has, and an
+/// admin approves it with #general granted, as the bot's page does.
+async fn approve(admin: &TestClient, group: &str, host: &BotHostClient, manifest: &str, general: &str) {
+    let facts = ArtifactFacts {
+        app_hash: Some(pollis_app_manifest::hex(&pollis_app_manifest::app_hash(&wasm(), manifest.as_bytes()).unwrap())),
+        manifest: Some(manifest.to_string()),
+        source: None,
+        developer_key: None,
+    };
+    apps::report_app(&host.state, host.session(), &AppRunReport::refused(&AppApprovalRefusal::NotApproved, facts))
+        .await
+        .expect("report");
+    let view = admin
+        .invoke_json("get_bot_app", serde_json::json!({ "groupId": group, "botUserId": host.bot_user_id() }))
+        .await;
+    let pending = &view["pending"];
+    let input = serde_json::json!({
+        "groupId": group, "botUserId": host.bot_user_id(), "development": false,
+        "appHash": pending["appHash"], "manifestHash": pending["manifestHash"],
+        "grants": grants(general), "autoUpdate": false,
+    });
+    admin.invoke_try("approve_bot_app", serde_json::json!({ "input": input })).await.expect("approve");
 }
 
 /// Seal `host` and return the runtime's handle on it (unseals per job).
@@ -93,11 +121,10 @@ impl Setup {
 }
 
 /// Alice's group with #general and #random, Bob a member, and two Apps that
-/// both declare `/ticket`, granted #general only and approved (through the
-/// approval seam until #2005 lands).
+/// both declare `/ticket`, granted #general only and approved by Alice through
+/// the real approval path (#2005).
 async fn setup() -> Setup {
     wipe().await;
-    app_commands::test_hooks::clear();
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
     alice.sign_up("alice@test.local").await;
@@ -113,14 +140,9 @@ async fn setup() -> Setup {
 
     let (linear_host, linear_bot) = pair_new_bot(&alice, &group, "Linear").await;
     let (jira_host, jira_bot) = pair_new_bot(&alice, &group, "Jira").await;
-    for (bot, manifest) in [(&linear_bot, LINEAR), (&jira_bot, JIRA)] {
-        let id = bot["userId"].as_str().expect("bot id").to_string();
-        app_commands::test_hooks::approve(ApprovedApp {
-            installation_id: id.clone(),
-            bot_user_id: id,
-            manifest: Manifest::from_json(manifest.as_bytes()).expect("manifest"),
-            grants: grants(&general),
-        });
+    for (host, manifest) in [(&linear_host, LINEAR), (&jira_host, JIRA)] {
+        host.read_channel(&general).await.expect("host catches up");
+        approve(&alice, &group, host, manifest, &general).await;
     }
     let linear = asleep(&linear_host, app(LINEAR, &general)).await;
     let jira = asleep(&jira_host, app(JIRA, &general)).await;
@@ -171,7 +193,6 @@ async fn members_see_each_apps_commands_only_where_it_is_granted_and_shared_name
     let linear = listed.as_array().unwrap().iter().find(|c| c["appName"] == "linear").unwrap();
     assert_eq!(linear["botUsername"], s.linear_name.as_str());
     assert_eq!(linear["argHint"], "<title>");
-    app_commands::test_hooks::clear();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -188,7 +209,6 @@ async fn a_command_reaches_on_command_with_its_arguments_and_only_the_picked_app
     assert_eq!(all.iter().filter(|t| *t == "jira filed it").count(), 1, "{all:?}");
     // The bot's reply is an ordinary message: Bob sees it too.
     assert!(contents(&s.bob, g).await.contains(&"linear filed it".to_string()));
-    app_commands::test_hooks::clear();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -204,7 +224,6 @@ async fn undeclared_and_ungranted_commands_reach_no_app_and_mentions_route_to_th
     let all = contents(&s.alice, g).await;
     assert!(!all.iter().any(|t| t == "undeclared" || t == "ungranted"), "{all:?}");
     assert_eq!(all.iter().filter(|t| *t == "paged").count(), 1, "{all:?}");
-    app_commands::test_hooks::clear();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -234,5 +253,4 @@ async fn a_request_command_never_appears_in_the_channel() {
     s.bob.send_channel_message(g, &format!("/forget-me post {g} typed-request")).await;
     s.run_bots().await;
     assert!(!contents(&s.alice, g).await.contains(&"typed-request".to_string()));
-    app_commands::test_hooks::clear();
 }

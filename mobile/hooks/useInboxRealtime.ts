@@ -15,6 +15,7 @@ import { groupQueryKeys, useUserGroupsWithChannels } from "./queries/useUserGrou
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
 import { aliasQueryKeys } from "./queries/useGroupAliases";
 import { botQueryKeys } from "./queries/useBots";
+import { botAppQueryKeys } from "./queries/useBotApps";
 import {
   flushOutbox,
   lastMessageQueryKeys,
@@ -162,6 +163,8 @@ export function useInboxRealtime() {
         case "bots_changed":
           // #1182: a host joined one of this admin's bots; an open Bots page re-reads.
           void qc.invalidateQueries({ queryKey: botQueryKeys.all });
+          // #2005: an approval or the runtime's report changed; the bot's App section re-reads.
+          void qc.invalidateQueries({ queryKey: botAppQueryKeys.all });
           break;
         case "read_cursors_changed":
           // #1628: another device read something; converge, re-badge, clear its notifications.

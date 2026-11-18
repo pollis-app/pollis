@@ -16,6 +16,7 @@ import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipa
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useMutedChannels, useUserGroupsWithChannels } from './queries/useGroups';
 import { botQueryKeys } from './queries/useBots';
+import { botAppQueryKeys } from './queries/useBotApps';
 import { blocksQueryKeys } from './queries/useBlocks';
 import { aliasQueryKeys, channelAliasName } from './queries/useGroupAliases';
 import { notify, setNotifyPrefs, setMutedChannels, loadDeviceCallRingtone } from '../utils/notify';
@@ -552,6 +553,8 @@ export function useLiveKitRealtime() {
 
       if (event.type === 'bots_changed') {
         queryClientRef.current.invalidateQueries({ queryKey: botQueryKeys.all });
+        // #2005: an approval or the runtime's report changed; the bot's App section re-reads.
+        queryClientRef.current.invalidateQueries({ queryKey: botAppQueryKeys.all });
         return;
       }
 

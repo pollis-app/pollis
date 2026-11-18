@@ -71,27 +71,33 @@ impl HostApproval {
 
     /// Sign with a device ML-DSA-44 key and encode for the DS.
     pub fn sign(&self, device_key: &SigningKey<MlDsa44>) -> String {
-        let payload = self.canonical();
-        let sig = device_key.sign(&signed_message(&payload)).encode().to_vec();
-        let wire = SignedHostApproval {
-            payload: b64().encode(&payload),
-            signature: b64().encode(sig),
-        };
-        b64().encode(serde_json::to_vec(&wire).expect("a SignedHostApproval always serializes"))
+        sign_payload(HOST_APPROVAL_DOMAIN, &self.canonical(), device_key)
     }
 }
 
-fn signed_message(payload: &[u8]) -> Vec<u8> {
-    let mut m = Vec::with_capacity(HOST_APPROVAL_DOMAIN.len() + 1 + payload.len());
-    m.extend_from_slice(HOST_APPROVAL_DOMAIN);
+/// `domain ‖ 0x00 ‖ payload`: what every admin-signed record (#1182 host
+/// approvals, #2005 App approvals) is signed over.
+pub(crate) fn signed_message_in(domain: &[u8], payload: &[u8]) -> Vec<u8> {
+    let mut m = Vec::with_capacity(domain.len() + 1 + payload.len());
+    m.extend_from_slice(domain);
     m.push(0);
     m.extend_from_slice(payload);
     m
 }
 
-/// Parse an approval WITHOUT checking its signature, to learn who claims to have
-/// signed it (so the verifier can look up that device's certified key).
-pub fn decode_unverified(encoded: &str) -> Result<(HostApproval, Vec<u8>, Vec<u8>), ApprovalDecodeError> {
+/// Sign `payload` under `domain` and encode it as a [`SignedHostApproval`]-shaped
+/// wire record (`{payload, signature}`, base64 inside and out).
+pub(crate) fn sign_payload(domain: &[u8], payload: &[u8], device_key: &SigningKey<MlDsa44>) -> String {
+    let sig = device_key.sign(&signed_message_in(domain, payload)).encode().to_vec();
+    let wire = SignedHostApproval {
+        payload: b64().encode(payload),
+        signature: b64().encode(sig),
+    };
+    b64().encode(serde_json::to_vec(&wire).expect("a SignedHostApproval always serializes"))
+}
+
+/// The `(payload, signature)` bytes of a wire record, not yet checked.
+pub(crate) fn decode_wire(encoded: &str) -> Result<(Vec<u8>, Vec<u8>), ApprovalDecodeError> {
     let outer = b64().decode(encoded).map_err(|_| ApprovalDecodeError::Malformed("approval is not base64"))?;
     let wire: SignedHostApproval =
         serde_json::from_slice(&outer).map_err(|_| ApprovalDecodeError::Malformed("approval is not JSON"))?;
@@ -101,6 +107,13 @@ pub fn decode_unverified(encoded: &str) -> Result<(HostApproval, Vec<u8>, Vec<u8
     let signature = b64()
         .decode(&wire.signature)
         .map_err(|_| ApprovalDecodeError::Malformed("signature is not base64"))?;
+    Ok((payload, signature))
+}
+
+/// Parse an approval WITHOUT checking its signature, to learn who claims to have
+/// signed it (so the verifier can look up that device's certified key).
+pub fn decode_unverified(encoded: &str) -> Result<(HostApproval, Vec<u8>, Vec<u8>), ApprovalDecodeError> {
+    let (payload, signature) = decode_wire(encoded)?;
     let approval: HostApproval =
         serde_json::from_slice(&payload).map_err(|_| ApprovalDecodeError::Malformed("payload is not an approval"))?;
     if approval.canonical() != payload {
@@ -111,13 +124,23 @@ pub fn decode_unverified(encoded: &str) -> Result<(HostApproval, Vec<u8>, Vec<u8
 
 /// Verify a decoded approval's signature under the signer's ML-DSA-44 key.
 pub fn verify_signature(pq_pub: &[u8], payload: &[u8], signature: &[u8]) -> Result<(), ApprovalDecodeError> {
+    verify_signature_in(HOST_APPROVAL_DOMAIN, pq_pub, payload, signature)
+}
+
+/// Verify `signature` over `domain ‖ 0x00 ‖ payload` under an ML-DSA-44 key.
+pub fn verify_signature_in(
+    domain: &[u8],
+    pq_pub: &[u8],
+    payload: &[u8],
+    signature: &[u8],
+) -> Result<(), ApprovalDecodeError> {
     let encoded_key: &EncodedVerifyingKey<MlDsa44> =
         pq_pub.try_into().map_err(|_| ApprovalDecodeError::BadSignature)?;
     let encoded_sig: &EncodedSignature<MlDsa44> =
         signature.try_into().map_err(|_| ApprovalDecodeError::BadSignature)?;
     let vk = VerifyingKey::<MlDsa44>::decode(encoded_key);
     let sig = Signature::<MlDsa44>::decode(encoded_sig).ok_or(ApprovalDecodeError::BadSignature)?;
-    vk.verify(&signed_message(payload), &sig)
+    vk.verify(&signed_message_in(domain, payload), &sig)
         .map_err(|_| ApprovalDecodeError::BadSignature)
 }
 
@@ -198,7 +221,7 @@ mod tests {
     fn a_non_canonical_or_extended_payload_is_refused() {
         let k = key(1);
         let pretty = serde_json::to_vec_pretty(&approval()).unwrap();
-        let sig = k.sign(&signed_message(&pretty)).encode().to_vec();
+        let sig = k.sign(&signed_message_in(HOST_APPROVAL_DOMAIN, &pretty)).encode().to_vec();
         let wire = SignedHostApproval { payload: b64().encode(&pretty), signature: b64().encode(&sig) };
         let encoded = b64().encode(serde_json::to_vec(&wire).unwrap());
         assert_eq!(

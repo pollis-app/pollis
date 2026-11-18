@@ -8,30 +8,84 @@ tags:
 # the bot (two taps). The Bots page is empty again and the bot is no longer a
 # member.
 
+# After the App parts (4a/4b/5) the app is elsewhere: open the bot from the member list again,
+# as part 3 left it.
+- runFlow:
+    when:
+      notVisible:
+        id: "screen-bot"
+    commands:
+      - stopApp
+      - launchApp
+      - runFlow:
+          when:
+            visible:
+              id: "screen-auth-pin"
+          commands:
+            - runFlow: ../../subflows/enter-pin.yaml
+      - extendedWaitUntil:
+          visible:
+            id: "tab-groups"
+          timeout: 30000
+      - tapOn:
+          id: "tab-groups"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-group-menu"
+            text: "${GROUP_NAME}, .*"
+          timeout: 30000
+      # As part 2 does: into #General, back to the group, then its members.
+      - tapOn: "General"
+      - tapOn:
+          id: "btn-back"
+      - tapOn:
+          id: "row-group-members"
+      - tapOn:
+          id: "badge-bot-.*"
 - extendedWaitUntil:
     visible:
       id: "screen-bot"
     timeout: 15000
-- tapOn:
-    id: "btn-revoke-bot-host-.*"
-    index: 1
-- tapOn:
-    id: "btn-revoke-bot-host-.*"
-    index: 1
+# The App section sits above the hosts. The first tap arms the revoke (the button then reads
+# Confirm); the page can still be settling after opening, so arm until it holds.
+- waitForAnimationToEnd
+- repeat:
+    while:
+      notVisible: "Confirm"
+    times: 3
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: "btn-revoke-bot-host-.*"
+            index: 1
+          direction: DOWN
+      - tapOn:
+          id: "btn-revoke-bot-host-.*"
+          index: 1
+      - waitForAnimationToEnd
+- tapOn: "Confirm"
 - extendedWaitUntil:
     notVisible:
       id: "row-bot-host-.*"
       index: 1
     timeout: 60000
-- assertVisible:
-    id: "row-bot-host-.*"
+- scrollUntilVisible:
+    element:
+      id: "row-bot-host-.*"
+    direction: UP
 - takeScreenshot: bots-07-one-host
 
 # Arming the last host's revoke says what it costs; leaving the page disarms it.
+- scrollUntilVisible:
+    element:
+      id: "btn-revoke-bot-host-.*"
+    direction: DOWN
 - tapOn:
     id: "btn-revoke-bot-host-.*"
-- assertVisible:
-    id: "text-bot-last-host"
+- scrollUntilVisible:
+    element:
+      id: "text-bot-last-host"
+    direction: DOWN
 - takeScreenshot: bots-08-last-host-warning
 - tapOn:
     id: "btn-back"

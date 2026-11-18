@@ -68,6 +68,16 @@ pollis-bot post --installation <id> --channel alerts "deploy finished"
 - Rate limit, per installation: a burst of 10, then 30 a minute (`webhook.burst`, `webhook.per_minute`). Over it: 429 with `Retry-After`.
 - To take alerts from another machine on your network (Grafana on the LAN), set `bind` to that interface. Callers still need the secret.
 
+## Apps
+
+```bash
+pollis-bot app install --installation <id> --artifact <dir or https URL>   # prints the App hash
+pollis-bot app dev-key                                                     # development installations: your signing key
+pollis-bot app sign --artifact <dir>                                       # sign a build with it
+```
+
+An App runs only once a group admin approves its exact App hash (or, for a development installation, your key) on the bot's page, and the runtime re-checks that approval and the artifact before every job. See [`docs/bots/app-approval.md`](../docs/bots/app-approval.md).
+
 ## Limits
 
 - Installations per runtime: `max_installations` in `config.json`, default **8**. The runtime refuses to start more, and `pair`/`add-host` refuse to add more.

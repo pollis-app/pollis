@@ -149,6 +149,12 @@ pub enum RealtimeEvent {
     BotHostApproval {
         request_id: String,
     },
+    /// #2005: an admin approved an App for this bot (approval `seq`). Only a
+    /// wake-up: the runtime reads and verifies the approval itself at its next
+    /// job (`bots::apps::verify_installation_approval`). Never sent to a person's inbox.
+    BotAppApproval {
+        seq: i64,
+    },
     /// A group's bots changed without this client doing it (#1182: another host
     /// of a bot was added). Sent to the group's admins' inboxes by the DS,
     /// content-free; re-read over the signed channel.

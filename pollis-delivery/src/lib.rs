@@ -17,6 +17,7 @@ pub mod account_reads;
 pub mod auth;
 pub mod bootstrap;
 pub mod bots;
+pub mod bot_apps;
 pub mod broker;
 pub mod cert;
 pub mod client_policy;
@@ -496,6 +497,9 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<bots::ClaimTriggerBody as DsRequest>::PATH, post(bots::claim_trigger))
         .route(<bots::AppStateReadBody as DsRequest>::PATH, post(bots::app_state_read))
         .route(<bots::AppStateCommitBody as DsRequest>::PATH, post(bots::app_state_commit))
+        .route(<bot_apps::ApproveBotAppBody as DsRequest>::PATH, post(bot_apps::approve_bot_app))
+        .route(<bot_apps::BotAppsReadBody as DsRequest>::PATH, post(bot_apps::read_bot_apps))
+        .route(<bot_apps::BotAppReportBody as DsRequest>::PATH, post(bot_apps::report_bot_app))
         // Failed-request log (#1305): a ROUTE layer (matched patterns only), inside the limiter.
         .route_layer(from_fn_with_state(state.clone(), error_log::record))
         // #1611: 426 a POST from a build below its platform's minimum, before any handler runs.

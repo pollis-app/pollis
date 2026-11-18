@@ -292,6 +292,14 @@ pub(super) fn dispatch_data(
                 });
             }
         }
+        Some("bot_app_approval") => {
+            // DS-originated only (#2005), like `bot_host_approval`.
+            if sender.is_some() {
+                return None;
+            }
+            let seq = data.get("seq").and_then(|v| v.as_i64()).unwrap_or(0);
+            let _ = channel.send(RealtimeEvent::BotAppApproval { seq });
+        }
         Some("bots_changed") => {
             // DS-originated only (#1182), like `group_aliases_changed`.
             if sender.is_some() {
@@ -634,6 +642,19 @@ mod tests {
         let payload = serde_json::json!({ "type": "bot_host_approval", "request_id": "R" });
         let events = run(payload.clone(), None);
         assert!(matches!(&events[..], [RealtimeEvent::BotHostApproval { request_id }] if request_id == "R"));
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #2005: the App approval nudge is forwarded from the DS, dropped from a participant.
+    #[test]
+    fn bot_app_approval_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "bot_app_approval", "seq": 3 });
+        let events = run(payload.clone(), None);
+        assert!(matches!(&events[..], [RealtimeEvent::BotAppApproval { seq: 3 }]));
         let someone = PacketSender {
             user_id: "alice".into(),
             username: None,

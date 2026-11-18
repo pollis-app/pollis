@@ -94,6 +94,21 @@ interface MockBot {
   hosts: MockBotHost[];
 }
 
+/**
+ * A bot's App (#2005), as `get_bot_app` returns it minus the ids: the approved App, what the
+ * runtime reports, and the build waiting for approval. Preloaded by a spec as realistic data
+ * (`e2e/bot-app-approval.spec.ts`); `channels` defaults to the group's channels.
+ */
+interface MockBotApp {
+  approved: Record<string, any> | null;
+  approvalRefusal: { code: string; detail: string } | null;
+  report: { state: 'running' | 'awaiting_approval' | 'refused'; reason: string; detail: string; updatedAt: string } | null;
+  pending: Record<string, any> | null;
+  running?: { appHash: string; version: string; autoUpdated: boolean } | null;
+  channels?: Array<{ id: string; name: string }>;
+  latestSeq: number;
+}
+
 /// #1182: the pairing code the mock "pollis-bot" printed; anything else is a mismatch.
 const MOCK_BOT_PAIR_CODE = 'K7M2Q9XA';
 /// #1182: a code whose pairing request has expired.
@@ -246,6 +261,8 @@ interface MockGroupAlias {
 interface MockStore {
   /** #1182: every bot, with its hosts; its member row lives in `groupMembers`. */
   bots: MockBot[];
+  /** #2005: each bot's App, by bot user id. */
+  botApps: Record<string, MockBotApp>;
   /** #2018: each group's slash commands, as `list_group_commands` returns them. */
   groupCommands: Record<string, unknown[]>;
   /** #2003: every alias the mock DS holds, of members past and present. */
@@ -417,6 +434,7 @@ function readPreferences(raw: unknown): Record<string, unknown> {
 
 const store: MockStore = {
   bots: (preload.bots as MockBot[] | undefined) ?? [],
+  botApps: (preload.botApps as Record<string, MockBotApp> | undefined) ?? {},
   groupCommands: (preload.groupCommands as Record<string, unknown[]> | undefined) ?? {},
   groupAliases: (preload.groupAliases as MockGroupAlias[] | undefined) ?? [],
   uploadedFiles: {},
@@ -622,6 +640,87 @@ function requireAdminMock(groupId: string): void {
   if (!admin) {
     throw 'Forbidden: only group admins manage bots';
   }
+}
+
+function botAppMock(botUserId: string): MockBotApp {
+  return (store.botApps[botUserId] ??= {
+    approved: null,
+    approvalRefusal: null,
+    report: null,
+    pending: null,
+    latestSeq: 0,
+  });
+}
+
+function botAppViewMock(groupId: string, botUserId: string) {
+  const app = botAppMock(botUserId);
+  const channels = app.channels ?? (store.channels[groupId] ?? []).map((c) => ({ id: c.id, name: c.name }));
+  return JSON.parse(
+    JSON.stringify({
+      botUserId,
+      groupId,
+      approved: app.approved,
+      approvalRefusal: app.approvalRefusal,
+      report: app.report,
+      pending: app.pending,
+      running: app.running ?? null,
+      channels,
+      latestSeq: app.latestSeq,
+    }),
+  );
+}
+
+/**
+ * `approve_bot_app` with the core's refusals: the manifest hash and the App hash (or developer
+ * key) must be what the page showed, and the grants never wider than the manifest.
+ */
+function approveBotAppMock(input: Record<string, any>) {
+  const app = botAppMock(input.botUserId);
+  const { pending, approved } = app;
+  const matches = (v: Record<string, any> | null) =>
+    !!v &&
+    v.manifestHash === input.manifestHash &&
+    (input.development
+      ? input.developerKey && (input.developerKey === v.developerKey || input.developerKey === approved?.developerKey)
+      : input.appHash && input.appHash === v.appHash);
+  const shown = matches(pending) ? pending : matches(approved) ? approved : null;
+  if (!shown) {
+    throw 'app_approval_changed: the App changed since this page loaded; look again';
+  }
+  const manifest = shown.manifest;
+  const g = input.grants;
+  const wider =
+    g.history > manifest.read.history ||
+    g.egress.some((h: string) => !manifest.egress.includes(h)) ||
+    g.actions.some((a: string) => !manifest.actions.includes(a)) ||
+    g.events.some((e: string) => !manifest.read.events.includes(e));
+  if (wider) {
+    throw 'grants are wider than the manifest';
+  }
+  const at = nowIso();
+  app.latestSeq += 1;
+  app.approved = {
+    seq: app.latestSeq,
+    development: !!input.development,
+    appHash: input.development ? null : input.appHash,
+    developerKey: input.development ? input.developerKey : null,
+    manifestHash: input.manifestHash,
+    manifest,
+    grants: g,
+    source: input.development ? null : shown.source ?? null,
+    autoUpdate: input.development ? false : !!input.autoUpdate,
+    approverUserId: store.session?.id ?? '',
+    issuedAt: Math.floor(Date.now() / 1000),
+    cannotSendOutside: !g.egress.some((h: string) => manifest.egress.includes(h)),
+  };
+  if (shown === pending) {
+    app.pending = null;
+  }
+  app.approvalRefusal = null;
+  app.report = { state: 'running', reason: '', detail: '', updatedAt: at };
+  app.running = input.development
+    ? null
+    : { appHash: input.appHash, version: manifest.version, autoUpdated: false };
 }
 
 function checkBotCodeMock(code: string): void {
@@ -1501,6 +1600,45 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         (m) => m.user_id !== botUserId,
       );
       return null;
+    }
+
+    // Bot Apps (#2005): the admins' approval page and the members' marks.
+    case 'get_bot_app': {
+      const { groupId, botUserId } = args as { groupId: string; botUserId: string };
+      requireAdminMock(groupId);
+      findBotMock(botUserId);
+      return botAppViewMock(groupId, botUserId);
+    }
+
+    case 'approve_bot_app': {
+      const { input } = args as { input: Record<string, any> };
+      requireAdminMock(input.groupId);
+      findBotMock(input.botUserId);
+      approveBotAppMock(input);
+      return botAppViewMock(input.groupId, input.botUserId);
+    }
+
+    case 'list_group_apps': {
+      const { groupId } = args as { groupId: string };
+      return store.bots
+        .filter((b) => b.groupId === groupId)
+        .flatMap((b) => {
+          const app = store.botApps[b.userId];
+          if (!app?.approved || app.approvalRefusal) {
+            return [];
+          }
+          const a = app.approved;
+          return [
+            {
+              botUserId: b.userId,
+              development: a.development,
+              manifest: a.manifest,
+              manifestJson: JSON.stringify(a.manifest),
+              grants: a.grants,
+              cannotSendOutside: a.cannotSendOutside,
+            },
+          ];
+        });
     }
 
     case 'list_muted_channels':

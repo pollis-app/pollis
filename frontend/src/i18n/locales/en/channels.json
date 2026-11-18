@@ -302,6 +302,144 @@
       "codeMismatch": "That code doesn't match. Read it again off the bot's machine and type it in.",
       "capReached": "This group already has the most bots it can have. Delete one to add another.",
       "requestExpired": "That code has expired. Run the command again for a new one."
+    },
+    "app": {
+      "loadFailed": "Couldn't load this bot's App.",
+      "noApp": "Its host hasn't offered an App yet. Start the bot with an App and it shows up here.",
+      "notice": {
+        "title": "This bot is not running",
+        "waiting": "Waiting for your approval."
+      },
+      "reasons": {
+        "not_approved": "No App has been approved for it yet.",
+        "hash_mismatch": "Its host runs a build you haven't approved.",
+        "developer_key_mismatch": "Its build is signed by a developer key you haven't approved.",
+        "build_widens": "Its new build asks for more than you approved.",
+        "malformed": "Its approval couldn't be read.",
+        "wrong_kind": "Its approval is of the wrong kind.",
+        "wrong_installation": "Its approval was made for a different bot.",
+        "approver_not_in_group": "The admin who approved it is no longer in this group.",
+        "uncertified_approver": "The device that approved it couldn't be confirmed as an admin's.",
+        "bad_signature": "Its approval's signature doesn't check out.",
+        "transparency_alarm": "The approving admin's keys don't match the public key log.",
+        "not_admin": "It was approved by someone who isn't an admin of this group.",
+        "manifest_mismatch": "Its App doesn't match the one that was approved.",
+        "widened_grants": "Its approval grants more than the App asks for.",
+        "rolled_back": "An older approval was put back in place of a newer one.",
+        "bad_build_signature": "Its build's developer signature doesn't check out.",
+        "artifact_unavailable": "Its host couldn't load the App.",
+        "artifact_rolled_back": "Its machine offered an older version than one the bot already ran, so the bot keeps refusing it."
+      },
+      "approvedHeading": "Approved App",
+      "version": "Version {{version}}",
+      "appHash": "App hash",
+      "developerKey": "Developer key",
+      "source": "Source",
+      "approvedBy": "Approved by {{name}} on {{date}}",
+      "seq": "Approval {{seq}}",
+      "marks": {
+        "development": "Development build",
+        "noEgress": "Can't send data outside this group",
+        "autoUpdate": "Updates approve themselves"
+      },
+      "canDoHeading": "What it can do",
+      "lines": {
+        "reads": "Reads {{events}} in {{channels}}, and history from the last {{history}}",
+        "readsNoHistory": "Reads {{events}} in {{channels}}, no history",
+        "readsNothing": "Reads no channels",
+        "eventsNew": "new messages",
+        "eventsNewEdited": "new and edited messages",
+        "wakes": "Wakes on: {{triggers}}",
+        "can": "Can: {{actions}}",
+        "sendsTo": "Can send data to: {{hosts}}",
+        "keeps": "Keeps up to {{size}} of its own data"
+      },
+      "triggers": {
+        "messages": "new messages",
+        "mentions": "mentions",
+        "commands": "commands",
+        "schedule": "a schedule",
+        "requests": "requests",
+        "webhook": "webhook calls"
+      },
+      "actions": {
+        "post": "post",
+        "reply": "reply",
+        "react": "react",
+        "edit_own": "edit its own messages",
+        "delete_own": "delete its own messages",
+        "transfer_history": "hand over message history"
+      },
+      "events": {
+        "created": "new messages",
+        "edited": "edited messages"
+      },
+      "anyChannel": "any channel you choose",
+      "grants": {
+        "heading": "Access",
+        "description": "Take away what it doesn't need. It never gets more than its App asks for.",
+        "channels": "Channels it reads",
+        "noChannels": "This group has no channel it asks for.",
+        "history": "Days of history it may read (0 to {{max}})",
+        "egress": "Hosts it may send data to"
+      },
+      "changes": {
+        "heading": "What changed",
+        "newAccess": "New access",
+        "needed": "Needed to approve",
+        "allow": "Allow",
+        "trigger_added": "Wakes on {{value}}",
+        "trigger_removed": "No longer wakes on {{value}}",
+        "channel_added": "Reads {{value}}",
+        "channel_removed": "No longer reads {{value}}",
+        "history_increased": "History: from {{previous}} to {{value}}",
+        "history_decreased": "History: from {{previous}} to {{value}}",
+        "event_added": "Sees {{value}}",
+        "event_removed": "No longer sees {{value}}",
+        "action_added": "Can {{value}}",
+        "action_removed": "Can no longer {{value}}",
+        "egress_added": "Can send data to {{value}}",
+        "egress_removed": "No longer sends data to {{value}}",
+        "state_quota_increased": "Storage: from {{previous}} to {{value}}",
+        "state_quota_decreased": "Storage: from {{previous}} to {{value}}",
+        "command_added": "New command: /{{value}}",
+        "command_removed": "No longer offers /{{value}}",
+        "command_increased": "/{{value}} changes from {{previous}} to {{next}}",
+        "schedule_added": "Runs on a new schedule: {{value}}",
+        "schedule_removed": "Schedule {{value}} removed",
+        "schedule_increased": "Schedule {{value}} runs more often: every {{next}}, was every {{previous}}",
+        "schedule_decreased": "Schedule {{value}} runs less often: every {{next}}, was every {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "Approve this App",
+        "firstLead": "The bot's host offers this App. Nothing runs until an admin approves it.",
+        "updateHeading": "An update is waiting",
+        "updateLead": "Its host offers a new build. Look at what changed before you approve it.",
+        "nothingNew": "It asks for nothing new.",
+        "neededHint": "Allow each new access marked as needed to approve this update.",
+        "approve": "Approve",
+        "approveUpdate": "Approve update",
+        "approving": "Approving…",
+        "development": "Development installation",
+        "developmentHint": "Runs any build signed by this developer key that doesn't ask for more than you approved.",
+        "developmentUnavailable": "Start pollis app dev to offer a developer key.",
+        "autoUpdate": "Approve automatically next time",
+        "autoUpdateHint": "The bot runs a newer version from the same source by itself when it asks for nothing more, with no admin needed. Anything that asks for more still waits for approval."
+      },
+      "edit": {
+        "save": "Save access",
+        "saving": "Saving…"
+      },
+      "errors": {
+        "stale": "Another admin approved this bot just now. Look again before you approve.",
+        "changed": "The App changed since this page opened. Look again before you approve.",
+        "failed": "Couldn't save the approval."
+      },
+      "commandKinds": {
+        "command": "a command posted in the channel",
+        "request": "a private request"
+      },
+      "runningAutoUpdated": "Running version {{version}}, updated automatically from the approved source"
     }
   }
 }

@@ -7,10 +7,11 @@
 //! `request: true` command goes to the bot as a sealed request
 //! ([`send_command_request`]) and never into the channel.
 //!
-//! **Source of approved manifests.** [`approved_app`] is the single place that
-//! reads an installation's approved manifest and grants. App approval (#2005)
-//! supplies it; until that lands it returns nothing outside the integration
-//! harness, so the composer offers no commands.
+//! **Source of approved manifests.** [`approved_apps`] is the single place that
+//! reads the installations' approved manifests and grants: the members-readable
+//! approvals of #2005 (`apps::list_group_apps`), each verified on this device
+//! (signed by a current admin's certified device, manifest hash, grants). An
+//! approval that does not verify here offers no commands.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -58,21 +59,23 @@ pub struct GroupCommand {
     pub needs_target: bool,
 }
 
-/// The approved App of the bot `bot_user_id`, if it has one.
-///
-/// The one seam to App approval: #2005 replaces the body with its
-/// members-readable read of the installation's current approved manifest.
-pub async fn approved_app(state: &Arc<AppState>, bot_user_id: &str) -> Result<Option<ApprovedApp>> {
-    #[cfg(feature = "test-harness")]
-    {
-        let _ = state;
-        Ok(test_hooks::approved(bot_user_id))
-    }
-    #[cfg(not(feature = "test-harness"))]
-    {
-        let _ = (state, bot_user_id);
-        Ok(None)
-    }
+/// The approved Apps of `group_id`'s bots, each verified on this device.
+pub async fn approved_apps(state: &Arc<AppState>, group_id: &str) -> Result<Vec<ApprovedApp>> {
+    Ok(super::apps::list_group_apps(state, group_id.to_string())
+        .await?
+        .into_iter()
+        .map(|a| ApprovedApp {
+            installation_id: a.bot_user_id.clone(),
+            bot_user_id: a.bot_user_id,
+            manifest: a.manifest,
+            grants: a.grants,
+        })
+        .collect())
+}
+
+/// The approved App of the bot `bot_user_id` in `group_id`, if it has one.
+pub async fn approved_app(state: &Arc<AppState>, group_id: &str, bot_user_id: &str) -> Result<Option<ApprovedApp>> {
+    Ok(approved_apps(state, group_id).await?.into_iter().find(|a| a.bot_user_id == bot_user_id))
 }
 
 /// The commands members can pick in `group_id`'s composer: every command of
@@ -80,14 +83,15 @@ pub async fn approved_app(state: &Arc<AppState>, bot_user_id: &str) -> Result<Op
 /// name across Apps marked `needs_target`. Readable by any member.
 pub async fn list_group_commands(state: &Arc<AppState>, group_id: String) -> Result<Vec<GroupCommand>> {
     let me = crate::commands::mls::current_user_id(state).await?;
+    let approved = approved_apps(state, &group_id).await?;
     let members = crate::commands::groups::get_group_members(group_id, me, state).await?;
     let mut apps = Vec::new();
     for bot in members.into_iter().filter(|m| m.is_bot) {
         let Some(username) = bot.username else {
             continue;
         };
-        if let Some(app) = approved_app(state, &bot.user_id).await? {
-            apps.push((username, app));
+        if let Some(app) = approved.iter().find(|a| a.bot_user_id == bot.user_id) {
+            apps.push((username, app.clone()));
         }
     }
     Ok(commands_of(&apps))
@@ -152,35 +156,6 @@ pub async fn send_command_request(
     )))
 }
 
-/// Integration-harness seam for [`approved_app`] until App approval (#2005).
-#[cfg(feature = "test-harness")]
-pub mod test_hooks {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    use super::ApprovedApp;
-
-    static APPROVED: Mutex<Option<HashMap<String, ApprovedApp>>> = Mutex::new(None);
-
-    /// Treat `app` as the approved App of its bot.
-    pub fn approve(app: ApprovedApp) {
-        let mut g = APPROVED.lock().unwrap_or_else(|e| e.into_inner());
-        g.get_or_insert_with(HashMap::new).insert(app.bot_user_id.clone(), app);
-    }
-
-    /// Forget every approval set by [`approve`].
-    pub fn clear() {
-        *APPROVED.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    }
-
-    pub(super) fn approved(bot_user_id: &str) -> Option<ApprovedApp> {
-        APPROVED
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .and_then(|m| m.get(bot_user_id).cloned())
-    }
-}
 
 #[cfg(test)]
 mod tests {

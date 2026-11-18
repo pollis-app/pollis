@@ -4,26 +4,17 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-description = "The Pollis App manifest (`pollis-app.json`) and grants as types: parsing, validation, and effective grants = manifest intersected with the admin's grants (#2004). No WASM engine here, so the desktop and mobile apps can show and narrow a manifest (#2005) without linking wasmtime; the runtime's sandbox lives in pollis-app-host."
+description = "The Pollis App manifest (`pollis-app.json`) and grants as types: parsing, validation, the App hash, the manifest diff, and effective grants = manifest intersected with the admin's grants (#2004). No WASM engine here, so the desktop and mobile apps can show and narrow a manifest (#2005) without linking wasmtime; the runtime's sandbox lives in pollis-app-host."
 
 [lib]
 name = "pollis_app_manifest"
 path = "src/lib.rs"
 
-[features]
-# Only for the release-build probe (tests/dev_grants_release.rs). Never enable
-# it anywhere else: it exists so the probe example is not built by an ordinary
-# `cargo build --release --all-targets`.
-release-probe = []
-
-[[example]]
-name = "release_probe"
-required-features = ["release-probe"]
-
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+sha2 = "0.10"
 
 [lints]
 workspace = true

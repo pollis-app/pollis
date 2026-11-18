@@ -82,7 +82,8 @@ test("the pairing code is TYPED (#1096): one field, never pre-filled", () => {
 });
 
 test("the Bot badge sits on member rows, message rows and mentions, driven by the roster", () => {
-  assert.match(read("app/group/members.tsx"), /isBot \? <BotBadge/);
+  // The row may add the App's "Development build" mark beside the badge (#2005).
+  assert.match(read("app/group/members.tsx"), /isBot \?[\s(<>]*<BotBadge/);
   assert.match(read("components/chat/MessageRow.tsx"), /isBot \? <BotBadge/);
   assert.match(read("components/chat/MentionToken.tsx"), /<BotBadge inline/);
   assert.match(read("components/chat/Composer.tsx"), /candidate\.isBot \? \(\s*<BotBadge/);

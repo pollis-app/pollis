@@ -143,6 +143,14 @@
         "claims"
       ]
     },
+    "docs/bots/app-approval": {
+      "kind": "doc",
+      "about": "Bots: approving an App (App hash, plain-language manifest, narrowing, updates and widenings, development installations, refusals); source for the website/bots.html 'Approving an App' section",
+      "source": "docs/bots/app-approval.md",
+      "checked_by": [
+        "claims"
+      ]
+    },
     "docs/bots/self-hosting": {
       "kind": "doc",
       "about": "Bots self-hosting: install, pair and run pollis-bot (source for website/bots-self-hosting.html)",

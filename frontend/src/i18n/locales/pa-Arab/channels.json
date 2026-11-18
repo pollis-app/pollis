@@ -230,5 +230,145 @@
     "confirmButton": "ہاں، ری سیٹ کرو",
     "submitting": "ری سیٹ ہو رہیا اے…",
     "failed": "اُپ ناں ری سیٹ نہیں ہو سکیا"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "ایس بوٹ دی App لوڈ نہیں ہو سکی۔",
+      "noApp": "ایہدے ہوسٹ نے ہلے تک کوئی App پیش نہیں کیتی۔ بوٹ نوں App نال چلاؤ، اوہ ایتھے دسے گی۔",
+      "notice": {
+        "title": "ایہ بوٹ نہیں چل رہیا",
+        "waiting": "تہاڈی منظوری دی اڈیک اے۔"
+      },
+      "reasons": {
+        "not_approved": "ایہدے لئی ہلے تک کوئی App منظور نہیں ہوئی۔",
+        "hash_mismatch": "ایہدا ہوسٹ اجیہا بلڈ چلا رہیا اے جیہڑا تسیں منظور نہیں کیتا۔",
+        "developer_key_mismatch": "ایہدا بلڈ اجیہی ڈویلپر کنجی نال دستخط شدہ اے جیہڑی تسیں منظور نہیں کیتی۔",
+        "build_widens": "ایہدا نواں بلڈ تہاڈی منظوری توں ودھ منگدا اے۔",
+        "malformed": "ایہدی منظوری پڑھی نہیں جا سکی۔",
+        "wrong_kind": "ایہدی منظوری غلط قسم دی اے۔",
+        "wrong_installation": "ایہدی منظوری کسے ہور بوٹ لئی سی۔",
+        "approver_not_in_group": "جس ایڈمن نے ایہنوں منظور کیتا سی اوہ ہن ایس گروپ وچ نہیں۔",
+        "uncertified_approver": "پکا نہیں ہو سکیا کہ منظوری دین والی ڈیوائس کسے ایڈمن دی اے۔",
+        "bad_signature": "ایہدی منظوری دا دستخط ٹھیک نہیں نکلیا۔",
+        "transparency_alarm": "منظوری دین والے ایڈمن دیاں کنجیاں عوامی کنجی لاگ نال نہیں ملدیاں۔",
+        "not_admin": "ایہنوں کسے اجیہے بندے نے منظور کیتا جیہڑا ایس گروپ دا ایڈمن نہیں۔",
+        "manifest_mismatch": "ایہدی App منظور شدہ App نال نہیں ملدی۔",
+        "widened_grants": "ایہدی منظوری App دی منگ توں ودھ دیندی اے۔",
+        "rolled_back": "نویں منظوری دی تھاں پرانی منظوری واپس لا دتی گئی۔",
+        "bad_build_signature": "ایہدے بلڈ دا ڈویلپر دستخط ٹھیک نہیں نکلیا۔",
+        "artifact_unavailable": "ایہدا ہوسٹ App لوڈ نہیں کر سکیا۔",
+        "artifact_rolled_back": "ایہدی مشین نے اجیہا ورژن پیش کیتا جیہڑا بوٹ دے پہلاں چلائے ورژن توں پرانا اے، ایس لئی بوٹ ایہنوں رد کردا رہندا اے۔"
+      },
+      "approvedHeading": "منظور شدہ App",
+      "version": "ورژن {{version}}",
+      "appHash": "App ہیش",
+      "developerKey": "ڈویلپر کنجی",
+      "source": "سرچشمہ",
+      "approvedBy": "{{name}} نے {{date}} نوں منظور کیتا",
+      "seq": "منظوری {{seq}}",
+      "marks": {
+        "development": "ڈویلپمنٹ بلڈ",
+        "noEgress": "ایس گروپ توں باہر ڈیٹا نہیں بھیج سکدا",
+        "autoUpdate": "اپ ڈیٹاں آپے منظور ہو جاندیاں نیں"
+      },
+      "canDoHeading": "ایہ کی کر سکدا اے",
+      "lines": {
+        "reads": "{{channels}} وچ {{events}} پڑھدا اے، تے پچھلے {{history}} دی ہسٹری",
+        "readsNoHistory": "{{channels}} وچ {{events}} پڑھدا اے، کوئی ہسٹری نہیں",
+        "readsNothing": "کوئی چینل نہیں پڑھدا",
+        "eventsNew": "نویں سنیہے",
+        "eventsNewEdited": "نویں تے بدلے ہوئے سنیہے",
+        "wakes": "ایہناں تے چلدا اے: {{triggers}}",
+        "can": "کر سکدا اے: {{actions}}",
+        "sendsTo": "ایہناں نوں ڈیٹا بھیج سکدا اے: {{hosts}}",
+        "keeps": "اپنا {{size}} تک ڈیٹا رکھدا اے"
+      },
+      "triggers": {
+        "messages": "نویں سنیہے",
+        "mentions": "مینشن",
+        "commands": "کمانڈاں",
+        "schedule": "شیڈول",
+        "requests": "درخواستاں",
+        "webhook": "webhook کالاں"
+      },
+      "actions": {
+        "post": "پوسٹ کرنا",
+        "reply": "جواب دینا",
+        "react": "ردعمل دینا",
+        "edit_own": "اپنے سنیہے بدلنا",
+        "delete_own": "اپنے سنیہے مٹانا",
+        "transfer_history": "سنیہیاں دی ہسٹری سونپنا"
+      },
+      "events": {
+        "created": "نویں سنیہے",
+        "edited": "بدلے ہوئے سنیہے"
+      },
+      "anyChannel": "تہاڈا چنیا کوئی وی چینل",
+      "grants": {
+        "heading": "رسائی",
+        "description": "جو ایہنوں نہیں چاہیدا اوہ ہٹا دیو۔ ایہنوں کدے وی اپنی App دی منگ توں ودھ نہیں ملدا۔",
+        "channels": "اوہ چینل جیہڑے ایہ پڑھدا اے",
+        "noChannels": "ایس گروپ وچ اجیہا کوئی چینل نہیں جیہڑا ایہ منگدا اے۔",
+        "history": "ہسٹری دے کنے دن پڑھ سکدا اے (0 توں {{max}})",
+        "egress": "ہوسٹ جنہاں نوں ایہ ڈیٹا بھیج سکدا اے"
+      },
+      "changes": {
+        "heading": "کی بدلیا",
+        "newAccess": "نویں رسائی",
+        "needed": "منظوری لئی ضروری",
+        "allow": "اجازت دیو",
+        "trigger_added": "{{value}} تے چلدا اے",
+        "trigger_removed": "ہن {{value}} تے نہیں چلدا",
+        "channel_added": "{{value}} پڑھدا اے",
+        "channel_removed": "ہن {{value}} نہیں پڑھدا",
+        "history_increased": "ہسٹری: {{previous}} توں {{value}}",
+        "history_decreased": "ہسٹری: {{previous}} توں {{value}}",
+        "event_added": "{{value}} ویکھدا اے",
+        "event_removed": "ہن {{value}} نہیں ویکھدا",
+        "action_added": "{{value}} کر سکدا اے",
+        "action_removed": "ہن {{value}} نہیں کر سکدا",
+        "egress_added": "{{value}} نوں ڈیٹا بھیج سکدا اے",
+        "egress_removed": "ہن {{value}} نوں ڈیٹا نہیں بھیجدا",
+        "state_quota_increased": "سٹوریج: {{previous}} توں {{value}}",
+        "state_quota_decreased": "سٹوریج: {{previous}} توں {{value}}",
+        "command_added": "نواں کمانڈ: /{{value}}",
+        "command_removed": "ہن /{{value}} پیش نہیں کردا",
+        "command_increased": "/{{value}} {{previous}} توں {{next}} وچ بدلدا اے",
+        "schedule_added": "نویں شیڈول تے چلدا اے: {{value}}",
+        "schedule_removed": "شیڈول {{value}} ہٹا دتا گیا",
+        "schedule_increased": "شیڈول {{value}} ہن ودھ وار چلدا اے: ہر {{next}}، پہلاں ہر {{previous}}",
+        "schedule_decreased": "شیڈول {{value}} ہن گھٹ وار چلدا اے: ہر {{next}}، پہلاں ہر {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "ایہ App منظور کرو",
+        "firstLead": "بوٹ دا ہوسٹ ایہ App پیش کر رہیا اے۔ جدوں تک کوئی ایڈمن منظور نہ کرے، کجھ نہیں چلدا۔",
+        "updateHeading": "اک اپ ڈیٹ اڈیک وچ اے",
+        "updateLead": "ایہدا ہوسٹ نواں بلڈ پیش کر رہیا اے۔ منظور کرن توں پہلاں ویکھو کی بدلیا۔",
+        "nothingNew": "ایہ کجھ نواں نہیں منگدا۔",
+        "neededHint": "ایہ اپ ڈیٹ منظور کرن لئی ضروری دسی گئی ہر نویں رسائی دی اجازت دیو۔",
+        "approve": "منظور کرو",
+        "approveUpdate": "اپ ڈیٹ منظور کرو",
+        "approving": "منظور ہو رہیا اے…",
+        "development": "ڈویلپمنٹ انسٹالیشن",
+        "developmentHint": "ایس ڈویلپر کنجی نال دستخط شدہ ہر اوہ بلڈ چلاندا اے جیہڑا تہاڈی منظوری توں ودھ نہ منگے۔",
+        "developmentUnavailable": "ڈویلپر کنجی پیش کرن لئی pollis app dev شروع کرو۔",
+        "autoUpdate": "اگلی وار آپے منظور کرو",
+        "autoUpdateHint": "جدوں اوسے سرچشمے دا نواں ورژن کجھ ودھ نہیں منگدا تاں بوٹ کسے ایڈمن توں بغیر ایہنوں آپ چلا لیندا اے۔ جو ودھ منگے اوہ ہلے وی منظوری دی اڈیک کردا اے۔"
+      },
+      "edit": {
+        "save": "رسائی محفوظ کرو",
+        "saving": "محفوظ ہو رہیا اے…"
+      },
+      "errors": {
+        "stale": "کسے ہور ایڈمن نے ہنے ایہ بوٹ منظور کیتا۔ منظور کرن توں پہلاں دوبارہ ویکھو۔",
+        "changed": "ایہ صفحہ کھلن توں بعد App بدل گئی۔ منظور کرن توں پہلاں دوبارہ ویکھو۔",
+        "failed": "منظوری محفوظ نہیں ہو سکی۔"
+      },
+      "commandKinds": {
+        "command": "چینل وچ پوسٹ ہون والا کمانڈ",
+        "request": "نجی درخواست"
+      },
+      "runningAutoUpdated": "ورژن {{version}} چل رہیا اے، منظور شدہ سرچشمے توں آپے اپ ڈیٹ ہویا"
+    }
   }
 }

@@ -153,7 +153,7 @@ fn valid_device_id(id: &str) -> bool {
 }
 
 /// Record a DS-authored security event. Not counted against the client budget.
-async fn security_event(
+pub(crate) async fn security_event(
     conn: &Connection,
     user_id: &str,
     kind: &str,
@@ -197,7 +197,7 @@ fn signed(identity: Option<(String, String)>) -> Result<(String, String), Respon
 
 /// Gate and parse a device-signed request: `(body, actor, device)`, or the
 /// refusal to send back.
-async fn signed_request<B: serde::de::DeserializeOwned>(
+pub(crate) async fn signed_request<B: serde::de::DeserializeOwned>(
     state: &AppState,
     req: &RawRequest,
 ) -> Result<Result<(B, String, String), Response>, AppError> {
@@ -210,7 +210,7 @@ async fn signed_request<B: serde::de::DeserializeOwned>(
 
 /// The response for a host endpoint's outcome: its body, a 400 naming what was
 /// invalid, or 403 for anything the host may not do.
-fn host_outcome<B: pollis_api::DsRequest>(outcome: Result<B::Response, WriteOutcome>) -> Response {
+pub(crate) fn host_outcome<B: pollis_api::DsRequest>(outcome: Result<B::Response, WriteOutcome>) -> Response {
     match outcome {
         Ok(body) => ok_response::<B>(body),
         Err(WriteOutcome::Invalid(why)) => bad_request(why),
@@ -823,6 +823,7 @@ pub async fn purge_bot_rows_of(conn: &Connection, user_id: &str) -> anyhow::Resu
         .await?;
     conn.execute("DELETE FROM bot_trigger_claim WHERE installation_id = ?1", uid()).await?;
     conn.execute("DELETE FROM bot_app_state WHERE installation_id = ?1", uid()).await?;
+    crate::bot_apps::purge_bot_app_rows_of(conn, user_id).await?;
     conn.execute("UPDATE bot SET created_by = NULL WHERE created_by = ?1", uid()).await?;
     Ok(())
 }
@@ -996,17 +997,20 @@ pub async fn wrap_bot_host(State(state): State<AppState>, req: RawRequest) -> Re
     })
 }
 
+/// A connection and `bot_user_id`'s group, when realtime is up and the bot exists: what a
+/// best-effort bots-changed nudge needs.
+async fn notify_target(state: &AppState, bot_user_id: &str) -> Option<(crate::db::ConnGuard, String)> {
+    state.broker.livekit_ready()?;
+    let conn = state.db.conn().await.ok()?;
+    let group_id = bot_group(&conn, bot_user_id).await.ok()??;
+    Some((conn, group_id))
+}
+
 /// Tell the current admins of `bot_user_id`'s group (their inboxes) that its bots changed: a host
 /// was added by a wrap the admin's own client did not do, so a Bots page left open refetches.
 /// Content-free; best-effort (the page also reads afresh on its next visit).
-async fn notify_admins_bots_changed(state: &AppState, bot_user_id: &str) {
-    if state.broker.livekit_ready().is_none() {
-        return;
-    }
-    let Ok(conn) = state.db.conn().await else {
-        return;
-    };
-    let Ok(Some(group_id)) = bot_group(&conn, bot_user_id).await else {
+pub(crate) async fn notify_admins_bots_changed(state: &AppState, bot_user_id: &str) {
+    let Some((conn, group_id)) = notify_target(state, bot_user_id).await else {
         return;
     };
     let mut admins = Vec::new();
@@ -1028,6 +1032,19 @@ async fn notify_admins_bots_changed(state: &AppState, bot_user_id: &str) {
         if let Err(e) = crate::broker::room_send_data(state, &format!("inbox-{admin}"), &event).await {
             tracing::warn!("bots changed: inbox notify failed (non-fatal): {e}");
         }
+    }
+}
+
+/// Tell everyone in `bot_user_id`'s group (its realtime room) that its bots changed: an approval
+/// changes which slash commands members can pick (#2018) and the marks they see (#2005), so an
+/// open composer re-reads them. Content-free; best-effort.
+pub(crate) async fn notify_group_bots_changed(state: &AppState, bot_user_id: &str) {
+    let Some((_, group_id)) = notify_target(state, bot_user_id).await else {
+        return;
+    };
+    let event = serde_json::json!({ "type": "bots_changed", "group_id": group_id });
+    if let Err(e) = crate::broker::room_send_data(state, &group_id, &event).await {
+        tracing::warn!("bots changed: group room notify failed (non-fatal): {e}");
     }
 }
 

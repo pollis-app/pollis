@@ -15,6 +15,8 @@ import {
   Txt,
 } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
+import { BotBadge } from "../../components/BotBadge";
+import { AppMark } from "../../components/bots/AppMark";
 import { Icon } from "../../components/icons";
 import { semantic, fonts, space } from "../../theme/tokens";
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +26,11 @@ import {
   useBlockedUsers,
   useBlockUser,
   useUnblockUser,
+  useGroupApps,
+  useGroupMembers,
+  useUserGroupsWithChannels,
 } from "../../hooks/queries";
+import { isBotUser } from "../../lib/bots";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useThemeRerender } from "../../components/theme";
@@ -48,6 +54,13 @@ function UserProfile() {
   const alias = useGroupAliases(groupId ?? null).get(peerId ?? "");
   const currentUser = appStore.currentUser;
   const isSelf = currentUser?.id === peerId;
+  // A bot seen from its group (#1182, #2005): the Bot badge, who manages it, and its App's marks.
+  const { data: groupMembers = [] } = useGroupMembers(groupId ?? null);
+  const { data: groups = [] } = useUserGroupsWithChannels();
+  const { data: groupApps = [] } = useGroupApps(groupId ?? null);
+  const isBot = isBotUser(groupMembers.find((m) => m.user_id === peerId));
+  const app = isBot ? groupApps.find((a) => a.botUserId === peerId) : undefined;
+  const groupName = groups.find((g) => g.id === groupId)?.name ?? t("mobile:group.common.fallbackName");
 
   const profile = useQuery({
     queryKey: ["user", "profile", peerId],
@@ -127,8 +140,20 @@ function UserProfile() {
             <Txt variant="secondary" style={{ color: semantic.muted }}>
               @{handle}
             </Txt>
+            {isBot ? (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm, paddingTop: space.xs }}>
+                <BotBadge testID="badge-bot-profile" />
+                {app?.development ? <AppMark kind="development" testID="mark-bot-profile-dev" /> : null}
+                {app?.cannotSendOutside ? <AppMark kind="noEgress" testID="mark-bot-profile-no-egress" /> : null}
+              </View>
+            ) : null}
           </View>
         </Card>
+        {isBot ? (
+          <Txt testID="text-bot-profile-managed" variant="secondary">
+            {t("mobile:bots.managedBy", { group: groupName })}
+          </Txt>
+        ) : null}
 
         {isSelf ? (
           <Txt variant="secondary">

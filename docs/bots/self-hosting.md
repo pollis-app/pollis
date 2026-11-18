@@ -10,6 +10,7 @@ The full command reference is `pollis-bot --help` and [`pollis-bot/README.md`](.
 - [Install](#install)
 - [Pair](#pair)
 - [Run](#run)
+- [Run an App](#run-an-app)
 - [Run as a service](#run-as-a-service)
 - [How the keys are kept](#how-the-keys-are-kept)
 - [Several bots on one machine](#several-bots-on-one-machine)
@@ -98,6 +99,17 @@ To keep the webhook on without the flag, add it to `config.json` in the data dir
 ```
 
 The first time the webhook is on, `run` prints each installation's webhook secret **once**. Store it where your alert sender can use it. [Alerts webhook](./alerts-webhook.md) explains the rest.
+
+## Run an App
+
+A bot runs the built-in alerts handler until you point it at an App. The App can be a directory on this machine (with `pollis-app.json` and one `.wasm`) or an `https://` address:
+
+```bash
+pollis-bot app install --installation <installation id> --artifact /opt/apps/triage
+pollis-bot run
+```
+
+`app install` prints the App's **App hash**. The App runs only once a group admin approves that exact hash on the bot's page in Pollis, and the runtime checks the approval and the file again before every job. If the file changes (a new version), the bot stops running it until an admin approves the new one. The log says why it is not running and what to do; the admins see the same on the bot's page. See [Approving an App](./app-approval.md).
 
 ## Run as a service
 

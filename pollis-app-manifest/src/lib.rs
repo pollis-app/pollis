@@ -3,7 +3,8 @@
 //! An App ships a component plus `pollis-app.json`, the manifest: what it wants
 //! to be woken by, what it wants to read, what it wants to do and which hosts it
 //! wants to reach. An admin narrows that when approving it (#2005), never
-//! widens it. The runtime enforces only the **effective grants**: the manifest
+//! widens it. [`app_hash`] is the one App hash the runtime, the CLI and the
+//! apps compute; [`diff`] is the update diff and the widening rule. The runtime enforces only the **effective grants**: the manifest
 //! intersected with the admin's grants ([`effective_grants`]).
 //!
 //! The JSON schema published beside the WIT (`pollis-app-wit/pollis-app.schema.json`)
@@ -13,9 +14,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+pub mod app_hash;
 pub mod commands;
-#[cfg(debug_assertions)]
-pub mod dev_grants;
+pub mod diff;
+
+pub use app_hash::{app_hash, hex, manifest_hash, parse_hex_hash, Hash};
+pub use diff::{diff, widenings_between, ChangeField, ChangeKind, ManifestChange};
 
 pub use commands::{command_text, parse_command, route_command, CommandSpec, ParsedCommand, RoutedCommand};
 
@@ -397,8 +401,8 @@ pub struct ChannelGrant {
     pub name: String,
 }
 
-/// The admin's narrowing of a manifest. Signed into the approval record by
-/// #2005; until then it comes from [`dev_grants`] in development builds only.
+/// The admin's narrowing of a manifest, signed into the App approval record
+/// (#2005). The runtime takes grants from a verified approval only.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminGrants {
@@ -416,7 +420,7 @@ pub struct AdminGrants {
 }
 
 impl AdminGrants {
-    /// Everything in these grants that the manifest did not request. #2005's
+    /// Everything in these grants that the manifest did not request. The
     /// approval flow refuses to produce, and the runtime refuses to accept, a
     /// grant set for which this is non-empty.
     pub fn widenings(&self, manifest: &Manifest) -> Vec<String> {

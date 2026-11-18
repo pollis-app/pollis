@@ -315,11 +315,20 @@ pub async fn add_bot_host(state: &Arc<AppState>, bot_user_id: String, code: Stri
 /// Sign `approval` with this device's ML-DSA-44 key. Public for the flows
 /// harness, which forges approvals from devices that should be refused.
 pub async fn sign_approval(state: &Arc<AppState>, user_id: &str, device_id: &str, approval: &HostApproval) -> Result<String> {
+    Ok(approval.sign(&device_signing_key(state, user_id, device_id).await?))
+}
+
+/// This device's ML-DSA-44 signing key, which signs an admin's approvals.
+pub(crate) async fn device_signing_key(
+    state: &Arc<AppState>,
+    user_id: &str,
+    device_id: &str,
+) -> Result<ml_dsa::SigningKey<ml_dsa::MlDsa44>> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| err("not signed in"))?;
     let provider = crate::commands::mls::PollisProvider::new(db.conn());
     let (key, _) = crate::commands::mls::load_device_pq_signing_key(&provider, user_id, device_id)?;
-    Ok(approval.sign(&key))
+    Ok(key)
 }
 
 /// Revoke one host of a bot. Any admin of its group; the host's leaf leaves the

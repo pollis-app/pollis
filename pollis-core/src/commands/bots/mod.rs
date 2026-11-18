@@ -51,11 +51,20 @@
 //! DS, shared by every host; [`app_state::commit_app_state`] writes a job's
 //! changes once, under the claim the host won, at the versions it read.
 //!
+//! **App approvals (#2005).** [`app_approval`] holds the two signed record
+//! types (production pins an App hash, development names a developer key; never
+//! interchangeable) and the pure checks before every load
+//! ([`app_approval::check_artifact`]). [`apps`] verifies a stored record from
+//! the reader's own state with the same admin-signer rule as host approvals
+//! (`signer.rs`), keeps the highest accepted `seq` in the installation's store
+//! (rollback protection), and reports to admins. Bridge commands:
+//! [`get_bot_app`], [`approve_bot_app`] (admins) and
+//! [`list_group_apps`] (any member: the approved manifests, the marks).
 //! **Slash commands (bridge commands, #2018).** [`app_commands::list_group_commands`]:
 //! the commands of the group's approved Apps, for any member's composer;
 //! [`app_commands::send_command_request`]: a `request: true` command, sealed to
 //! the bot and never posted (the transport is #2008's; until then it refuses).
-//! [`app_commands::approved_app`] is the one seam to App approval (#2005).
+//! [`app_commands::approved_apps`] reads them from #2005's verified approvals.
 //!
 //! **Admin (bridge commands).** [`list_group_bots`], [`get_bot`], [`create_bot`],
 //! [`add_bot_host`], [`revoke_bot_host`], [`delete_bot`]. Error strings start
@@ -66,12 +75,18 @@
 //! id and the bot's account key (or bot id); [`normalize_pairing_code`] is the
 //! enrollment SAS input rule.
 
+/// The App manifest crate, for callers that hold approvals (#2005).
+pub use pollis_app_manifest as manifest;
+
 mod admin;
+pub mod app_approval;
 pub mod app_commands;
 pub mod app_state;
 pub mod approval;
+pub mod apps;
 mod code;
 mod host;
+mod signer;
 mod triggers;
 mod unattended;
 
@@ -80,6 +95,10 @@ pub use admin::{
     BotHost, BotSummary, BOT_CAP_REACHED, PAIRING_CODE_MISMATCH, PAIRING_REQUEST_EXPIRED,
 };
 pub use approval::{HostApproval, HOST_APPROVAL_DOMAIN, HOST_APPROVAL_MAX_TTL_SECS, HOST_APPROVAL_VERSION};
+pub use apps::{
+    approve_bot_app, get_bot_app, list_group_apps, ApproveBotAppInput, BotAppView, GroupAppView,
+    APP_APPROVAL_CHANGED, APP_APPROVAL_STALE,
+};
 pub use code::{code_lookup, derive_pairing_code, normalize_pairing_code, PAIRING_CODE_LEN};
 pub use host::{
     await_pairing, handle_host_approvals, handle_host_approvals_with, join_bot_group, start_add_host_pairing, start_new_bot_pairing,

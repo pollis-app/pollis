@@ -39,6 +39,7 @@ pub mod account;
 pub mod account_reads;
 pub mod bootstrap;
 pub mod bots;
+pub mod bot_apps;
 pub mod broker;
 pub mod client_policy;
 pub mod commit;
@@ -326,6 +327,10 @@ endpoints! {
     // #2004: App key-value state, sealed by the bot's hosts.
     Client   bots::AppStateReadBody             => "/v1/bots/app-state/read",            bots::AppStateReadResponse;
     Client   bots::AppStateCommitBody           => "/v1/bots/app-state/commit",          bots::AppStateCommitResponse, idempotent;
+    // #2005: App approvals and the runtime's report.
+    Client   bot_apps::ApproveBotAppBody        => "/v1/bots/app/approve",               bot_apps::ApproveBotAppResponse;
+    Client   bot_apps::BotAppsReadBody          => "/v1/read/bot-apps",                  bot_apps::BotAppsReadResponse;
+    Client   bot_apps::BotAppReportBody         => "/v1/bots/app/report",                StatusOk, idempotent;
 }
 
 /// The guarantee, executable: a body missing a field does not compile.

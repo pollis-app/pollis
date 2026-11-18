@@ -75,6 +75,8 @@ pub enum JobError {
     State(CoreError),
     Post(CoreError),
     MarkHandled(CoreError),
+    /// #2005: the App's approval could not be checked (nothing was handled).
+    Approval(CoreError),
 }
 
 /// How often a job re-runs an App whose state another host moved meanwhile.
@@ -138,6 +140,9 @@ impl JobError {
             JobError::MarkHandled(_) => {
                 "check the data directory is writable and has free space"
             }
+            JobError::Approval(_) => {
+                "check this host can reach the Delivery Service and the App's artifact; the next message or restart retries"
+            }
         }
     }
 }
@@ -152,6 +157,7 @@ impl std::fmt::Display for JobError {
             JobError::State(e) => ("saving the App's state", e),
             JobError::Post(e) => ("posting", e),
             JobError::MarkHandled(e) => ("saving progress", e),
+            JobError::Approval(e) => ("checking the App's approval", e),
         };
         write!(f, "{step}: {e}")
     }
@@ -263,6 +269,10 @@ impl Installation {
         }
 
         let messages = self.core.catch_up().await.map_err(JobError::CatchUp)?;
+
+        // #2005: an App re-checks its approval and artifact before every job.
+        let ctx = HandlerContext { core: self.core.clone() };
+        self.handler.prepare(&ctx).await.map_err(JobError::Approval)?;
 
         let mut triggers: Vec<Trigger> = Vec::new();
         // A webhook goes first: its sender is waiting on the answer.

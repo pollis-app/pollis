@@ -329,6 +329,35 @@ impl InstallationCore for CoreInstallation {
         }
     }
 
+    async fn app_approval(
+        &self,
+    ) -> Result<
+        Result<bots::app_approval::VerifiedAppApproval, bots::app_approval::AppApprovalRefusal>,
+        CoreError,
+    > {
+        let state = self.state().await?;
+        bots::apps::verify_installation_approval(&state, &self.session, &bots::TransparencyLogAudit)
+            .await
+            .map_err(core_err)
+    }
+
+    async fn app_accept_hash(
+        &self,
+        seq: i64,
+        approved_hash: &str,
+        hash: &str,
+    ) -> Result<Result<(), bots::app_approval::AppApprovalRefusal>, CoreError> {
+        let state = self.state().await?;
+        bots::apps::accept_app_hash(&state, &self.session.bot_user_id, seq, approved_hash, hash)
+            .await
+            .map_err(core_err)
+    }
+
+    async fn app_report(&self, report: &bots::apps::AppRunReport) -> Result<(), CoreError> {
+        let state = self.state().await?;
+        bots::apps::report_app(&state, &self.session, report).await.map_err(core_err)
+    }
+
     async fn host_approvals(&self, wrap_now: bool) -> Result<Option<i64>, CoreError> {
         let state = self.state().await?;
         let timing = if wrap_now { bots::WrapTiming::Now } else { bots::WrapTiming::Staggered };
@@ -639,7 +668,9 @@ mod realtime {
                 | RealtimeEvent::EditedMessage { .. }
                 | RealtimeEvent::DeletedMessage { .. }
                 | RealtimeEvent::MembershipChanged { .. }
-                | RealtimeEvent::RosterChanged { .. } => (self.wakes.wake)(),
+                | RealtimeEvent::RosterChanged { .. }
+                // #2005: the job re-reads and verifies the approval itself.
+                | RealtimeEvent::BotAppApproval { .. } => (self.wakes.wake)(),
                 // Missed events are not replayed: catch up, and look for approvals too.
                 RealtimeEvent::BotHostApproval { .. } | RealtimeEvent::RealtimeReconnected { .. } => {
                     (self.wakes.approval)()

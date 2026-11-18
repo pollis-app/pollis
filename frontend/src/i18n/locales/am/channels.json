@@ -230,5 +230,145 @@
     "confirmButton": "አዎ፣ ዳግም አስጀምር",
     "submitting": "ዳግም በማስጀመር ላይ…",
     "failed": "ቅጽል ስሙን ዳግም ማስጀመር አልተቻለም"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "የዚህን ቦት App መጫን አልተቻለም።",
+      "noApp": "አስተናጋጁ እስካሁን ምንም App አላቀረበም። ቦቱን ከApp ጋር ያስጀምሩት፣ እዚህ ይታያል።",
+      "notice": {
+        "title": "ይህ ቦት እየሰራ አይደለም",
+        "waiting": "የእርስዎን ማጽደቅ በመጠበቅ ላይ።"
+      },
+      "reasons": {
+        "not_approved": "እስካሁን ለእሱ ምንም App አልጸደቀም።",
+        "hash_mismatch": "አስተናጋጁ ያላጸደቁትን ግንባታ እያሄደ ነው።",
+        "developer_key_mismatch": "ግንባታው ባላጸደቁት የገንቢ ቁልፍ ተፈርሟል።",
+        "build_widens": "አዲሱ ግንባታው ካጸደቁት በላይ ይጠይቃል።",
+        "malformed": "ማጽደቁን ማንበብ አልተቻለም።",
+        "wrong_kind": "ማጽደቁ የተሳሳተ ዓይነት ነው።",
+        "wrong_installation": "ማጽደቁ የተሰጠው ለሌላ ቦት ነው።",
+        "approver_not_in_group": "ያጸደቀው አስተዳዳሪ ከዚህ በኋላ በዚህ ቡድን ውስጥ የለም።",
+        "uncertified_approver": "ያጸደቀው መሣሪያ የአስተዳዳሪ መሆኑን ማረጋገጥ አልተቻለም።",
+        "bad_signature": "የማጽደቁ ፊርማ ትክክል አይደለም።",
+        "transparency_alarm": "የአጽዳቂው አስተዳዳሪ ቁልፎች ከይፋዊው የቁልፍ መዝገብ ጋር አይዛመዱም።",
+        "not_admin": "የዚህ ቡድን አስተዳዳሪ ያልሆነ ሰው አጽድቆታል።",
+        "manifest_mismatch": "የእሱ App ከጸደቀው ጋር አይዛመድም።",
+        "widened_grants": "ማጽደቁ App ከሚጠይቀው በላይ ይሰጣል።",
+        "rolled_back": "በአዲሱ ማጽደቅ ቦታ የቆየ ማጽደቅ ተመልሷል።",
+        "bad_build_signature": "የግንባታው የገንቢ ፊርማ ትክክል አይደለም።",
+        "artifact_unavailable": "አስተናጋጁ App ን መጫን አልቻለም።",
+        "artifact_rolled_back": "ማሽኑ ቦቱ ከዚህ በፊት ካሄደው የቆየ ስሪት አቀረበ፣ ስለዚህ ቦቱ እምቢ ማለቱን ይቀጥላል።"
+      },
+      "approvedHeading": "የጸደቀ App",
+      "version": "ስሪት {{version}}",
+      "appHash": "የApp ሃሽ",
+      "developerKey": "የገንቢ ቁልፍ",
+      "source": "ምንጭ",
+      "approvedBy": "በ{{name}} በ{{date}} ጸድቋል",
+      "seq": "ማጽደቅ {{seq}}",
+      "marks": {
+        "development": "የልማት ግንባታ",
+        "noEgress": "ከዚህ ቡድን ውጭ ውሂብ መላክ አይችልም",
+        "autoUpdate": "ዝማኔዎች ራሳቸውን ያጸድቃሉ"
+      },
+      "canDoHeading": "ምን ማድረግ ይችላል",
+      "lines": {
+        "reads": "በ{{channels}} ውስጥ {{events}} ያነባል፣ እንዲሁም ያለፉትን {{history}} ታሪክ",
+        "readsNoHistory": "በ{{channels}} ውስጥ {{events}} ያነባል፣ ታሪክ የለም",
+        "readsNothing": "ምንም ቻናል አያነብም",
+        "eventsNew": "አዲስ መልዕክቶች",
+        "eventsNewEdited": "አዲስ እና የተስተካከሉ መልዕክቶች",
+        "wakes": "የሚነሳው በ፦ {{triggers}}",
+        "can": "ይችላል፦ {{actions}}",
+        "sendsTo": "ውሂብ መላክ የሚችለው ወደ፦ {{hosts}}",
+        "keeps": "የራሱን ውሂብ እስከ {{size}} ያስቀምጣል"
+      },
+      "triggers": {
+        "messages": "አዲስ መልዕክቶች",
+        "mentions": "ጥቀሳዎች",
+        "commands": "ትዕዛዞች",
+        "schedule": "የጊዜ ሰሌዳ",
+        "requests": "ጥያቄዎች",
+        "webhook": "የwebhook ጥሪዎች"
+      },
+      "actions": {
+        "post": "መለጠፍ",
+        "reply": "መመለስ",
+        "react": "ምላሽ መስጠት",
+        "edit_own": "የራሱን መልዕክቶች ማስተካከል",
+        "delete_own": "የራሱን መልዕክቶች መሰረዝ",
+        "transfer_history": "የመልዕክት ታሪክ ማስረከብ"
+      },
+      "events": {
+        "created": "አዲስ መልዕክቶች",
+        "edited": "የተስተካከሉ መልዕክቶች"
+      },
+      "anyChannel": "እርስዎ የሚመርጡት ማንኛውም ቻናል",
+      "grants": {
+        "heading": "መዳረሻ",
+        "description": "የማያስፈልገውን ያስወግዱ። App ከሚጠይቀው በላይ በፍጹም አያገኝም።",
+        "channels": "የሚያነባቸው ቻናሎች",
+        "noChannels": "ይህ ቡድን የሚጠይቀው ቻናል የለውም።",
+        "history": "ሊያነበው የሚችለው የታሪክ ቀናት (ከ0 እስከ {{max}})",
+        "egress": "ውሂብ ሊልክላቸው የሚችላቸው አስተናጋጆች"
+      },
+      "changes": {
+        "heading": "ምን ተለወጠ",
+        "newAccess": "አዲስ መዳረሻ",
+        "needed": "ለማጽደቅ ያስፈልጋል",
+        "allow": "ፍቀድ",
+        "trigger_added": "በ{{value}} ይነሳል",
+        "trigger_removed": "ከዚህ በኋላ በ{{value}} አይነሳም",
+        "channel_added": "{{value}} ያነባል",
+        "channel_removed": "ከዚህ በኋላ {{value}} አያነብም",
+        "history_increased": "ታሪክ፦ ከ{{previous}} ወደ {{value}}",
+        "history_decreased": "ታሪክ፦ ከ{{previous}} ወደ {{value}}",
+        "event_added": "{{value}} ያያል",
+        "event_removed": "ከዚህ በኋላ {{value}} አያይም",
+        "action_added": "{{value}} ይችላል",
+        "action_removed": "ከዚህ በኋላ {{value}} አይችልም",
+        "egress_added": "ወደ {{value}} ውሂብ መላክ ይችላል",
+        "egress_removed": "ከዚህ በኋላ ወደ {{value}} ውሂብ አይልክም",
+        "state_quota_increased": "ማከማቻ፦ ከ{{previous}} ወደ {{value}}",
+        "state_quota_decreased": "ማከማቻ፦ ከ{{previous}} ወደ {{value}}",
+        "command_added": "አዲስ ትዕዛዝ፦ /{{value}}",
+        "command_removed": "ከዚህ በኋላ /{{value}} አያቀርብም",
+        "command_increased": "/{{value}} ከ{{previous}} ወደ {{next}} ይቀየራል",
+        "schedule_added": "በአዲስ የጊዜ ሰሌዳ ይሰራል፦ {{value}}",
+        "schedule_removed": "የጊዜ ሰሌዳ {{value}} ተወግዷል",
+        "schedule_increased": "የጊዜ ሰሌዳ {{value}} ብዙ ጊዜ ይሰራል፦ በየ{{next}}፣ ቀድሞ በየ{{previous}}",
+        "schedule_decreased": "የጊዜ ሰሌዳ {{value}} ያነሰ ጊዜ ይሰራል፦ በየ{{next}}፣ ቀድሞ በየ{{previous}}"
+      },
+      "pending": {
+        "firstHeading": "ይህን App ያጽድቁ",
+        "firstLead": "የቦቱ አስተናጋጅ ይህን App እያቀረበ ነው። አስተዳዳሪ እስኪያጸድቀው ድረስ ምንም አይሰራም።",
+        "updateHeading": "ዝማኔ በመጠበቅ ላይ ነው",
+        "updateLead": "አስተናጋጁ አዲስ ግንባታ እያቀረበ ነው። ከማጽደቅዎ በፊት ምን እንደተለወጠ ይመልከቱ።",
+        "nothingNew": "ምንም አዲስ ነገር አይጠይቅም።",
+        "neededHint": "ይህን ዝማኔ ለማጽደቅ እንደሚያስፈልግ የተመለከተውን እያንዳንዱን አዲስ መዳረሻ ይፍቀዱ።",
+        "approve": "አጽድቅ",
+        "approveUpdate": "ዝማኔውን አጽድቅ",
+        "approving": "በማጽደቅ ላይ…",
+        "development": "የልማት ጭነት",
+        "developmentHint": "በዚህ የገንቢ ቁልፍ የተፈረመና ካጸደቁት በላይ የማይጠይቅ ማንኛውንም ግንባታ ያሄዳል።",
+        "developmentUnavailable": "የገንቢ ቁልፍ ለማቅረብ pollis app dev ያስጀምሩ።",
+        "autoUpdate": "በሚቀጥለው ጊዜ በራስ-ሰር አጽድቅ",
+        "autoUpdateHint": "ከተመሳሳይ ምንጭ የመጣ አዲስ ስሪት ምንም ተጨማሪ ካልጠየቀ ቦቱ ያለ አስተዳዳሪ ራሱ ያሄደዋል። ተጨማሪ የሚጠይቅ ማንኛውም ነገር አሁንም ማጽደቅን ይጠብቃል።"
+      },
+      "edit": {
+        "save": "መዳረሻን አስቀምጥ",
+        "saving": "በማስቀመጥ ላይ…"
+      },
+      "errors": {
+        "stale": "ሌላ አስተዳዳሪ አሁን ይህን ቦት አጽድቋል። ከማጽደቅዎ በፊት እንደገና ይመልከቱ።",
+        "changed": "ይህ ገጽ ከተከፈተ በኋላ App ተለውጧል። ከማጽደቅዎ በፊት እንደገና ይመልከቱ።",
+        "failed": "ማጽደቁን ማስቀመጥ አልተቻለም።"
+      },
+      "commandKinds": {
+        "command": "በቻናሉ የሚለጠፍ ትዕዛዝ",
+        "request": "የግል ጥያቄ"
+      },
+      "runningAutoUpdated": "ስሪት {{version}} እየሰራ ነው፣ ከጸደቀው ምንጭ በራስ-ሰር ተዘምኗል"
+    }
   }
 }

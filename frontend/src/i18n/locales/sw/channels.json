@@ -230,5 +230,145 @@
     "confirmButton": "Ndiyo, rejesha",
     "submitting": "Inarejesha…",
     "failed": "Imeshindwa kurejesha jina bandia"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "Imeshindikana kupakia App ya boti hii.",
+      "noApp": "Mwenyeji wake bado hajatoa App. Anzisha boti pamoja na App nayo itaonekana hapa.",
+      "notice": {
+        "title": "Boti hii haifanyi kazi",
+        "waiting": "Inasubiri idhini yako."
+      },
+      "reasons": {
+        "not_approved": "Bado hakuna App iliyoidhinishwa kwa ajili yake.",
+        "hash_mismatch": "Mwenyeji wake anaendesha toleo ambalo hujaidhinisha.",
+        "developer_key_mismatch": "Toleo lake limesainiwa kwa ufunguo wa msanidi ambao hujaidhinisha.",
+        "build_widens": "Toleo lake jipya linaomba zaidi ya ulichoidhinisha.",
+        "malformed": "Idhini yake haikuweza kusomwa.",
+        "wrong_kind": "Idhini yake ni ya aina isiyo sahihi.",
+        "wrong_installation": "Idhini yake ilitolewa kwa boti nyingine.",
+        "approver_not_in_group": "Msimamizi aliyeiidhinisha hayupo tena kwenye kikundi hiki.",
+        "uncertified_approver": "Haikuweza kuthibitishwa kuwa kifaa kilichoiidhinisha ni cha msimamizi.",
+        "bad_signature": "Sahihi ya idhini yake si halali.",
+        "transparency_alarm": "Funguo za msimamizi aliyeidhinisha hazilingani na kumbukumbu ya funguo ya umma.",
+        "not_admin": "Iliidhinishwa na mtu ambaye si msimamizi wa kikundi hiki.",
+        "manifest_mismatch": "App yake hailingani na ile iliyoidhinishwa.",
+        "widened_grants": "Idhini yake inatoa zaidi ya kile App inachoomba.",
+        "rolled_back": "Idhini ya zamani ilirudishwa badala ya mpya.",
+        "bad_build_signature": "Sahihi ya msanidi kwenye toleo lake si halali.",
+        "artifact_unavailable": "Mwenyeji wake hakuweza kupakia App.",
+        "artifact_rolled_back": "Mashine yake ilitoa toleo la zamani kuliko lile ambalo boti tayari imeendesha, kwa hiyo boti inaendelea kulikataa."
+      },
+      "approvedHeading": "App iliyoidhinishwa",
+      "version": "Toleo {{version}}",
+      "appHash": "Hashi ya App",
+      "developerKey": "Ufunguo wa msanidi",
+      "source": "Chanzo",
+      "approvedBy": "Iliidhinishwa na {{name}} tarehe {{date}}",
+      "seq": "Idhini {{seq}}",
+      "marks": {
+        "development": "Toleo la majaribio",
+        "noEgress": "Haiwezi kutuma data nje ya kikundi hiki",
+        "autoUpdate": "Masasisho hujiidhinisha yenyewe"
+      },
+      "canDoHeading": "Inachoweza kufanya",
+      "lines": {
+        "reads": "Inasoma {{events}} katika {{channels}}, na historia ya {{history}} zilizopita",
+        "readsNoHistory": "Inasoma {{events}} katika {{channels}}, bila historia",
+        "readsNothing": "Haisomi chaneli yoyote",
+        "eventsNew": "ujumbe mpya",
+        "eventsNewEdited": "ujumbe mpya na uliohaririwa",
+        "wakes": "Huamka kwa: {{triggers}}",
+        "can": "Inaweza: {{actions}}",
+        "sendsTo": "Inaweza kutuma data kwa: {{hosts}}",
+        "keeps": "Huhifadhi hadi {{size}} ya data yake"
+      },
+      "triggers": {
+        "messages": "ujumbe mpya",
+        "mentions": "kutajwa",
+        "commands": "amri",
+        "schedule": "ratiba",
+        "requests": "maombi",
+        "webhook": "miito ya webhook"
+      },
+      "actions": {
+        "post": "kuchapisha",
+        "reply": "kujibu",
+        "react": "kutoa hisia",
+        "edit_own": "kuhariri ujumbe wake",
+        "delete_own": "kufuta ujumbe wake",
+        "transfer_history": "kukabidhi historia ya ujumbe"
+      },
+      "events": {
+        "created": "ujumbe mpya",
+        "edited": "ujumbe uliohaririwa"
+      },
+      "anyChannel": "chaneli yoyote utakayochagua",
+      "grants": {
+        "heading": "Ufikiaji",
+        "description": "Ondoa kile isichohitaji. Haipati kamwe zaidi ya kile App yake inachoomba.",
+        "channels": "Chaneli inazosoma",
+        "noChannels": "Kikundi hiki hakina chaneli yoyote inayoiomba.",
+        "history": "Siku za historia inazoweza kusoma (0 hadi {{max}})",
+        "egress": "Seva inazoweza kutumia kutuma data"
+      },
+      "changes": {
+        "heading": "Kilichobadilika",
+        "newAccess": "Ufikiaji mpya",
+        "needed": "Unahitajika ili kuidhinisha",
+        "allow": "Ruhusu",
+        "trigger_added": "Huamka kwa {{value}}",
+        "trigger_removed": "Haiamki tena kwa {{value}}",
+        "channel_added": "Inasoma {{value}}",
+        "channel_removed": "Haisomi tena {{value}}",
+        "history_increased": "Historia: kutoka {{previous}} hadi {{value}}",
+        "history_decreased": "Historia: kutoka {{previous}} hadi {{value}}",
+        "event_added": "Inaona {{value}}",
+        "event_removed": "Haioni tena {{value}}",
+        "action_added": "Inaweza {{value}}",
+        "action_removed": "Haiwezi tena {{value}}",
+        "egress_added": "Inaweza kutuma data kwa {{value}}",
+        "egress_removed": "Haitumi tena data kwa {{value}}",
+        "state_quota_increased": "Hifadhi: kutoka {{previous}} hadi {{value}}",
+        "state_quota_decreased": "Hifadhi: kutoka {{previous}} hadi {{value}}",
+        "command_added": "Amri mpya: /{{value}}",
+        "command_removed": "Haitoi tena /{{value}}",
+        "command_increased": "/{{value}} inabadilika kutoka {{previous}} kuwa {{next}}",
+        "schedule_added": "Inaendeshwa kwa ratiba mpya: {{value}}",
+        "schedule_removed": "Ratiba {{value}} imeondolewa",
+        "schedule_increased": "Ratiba {{value}} inaendeshwa mara nyingi zaidi: kila {{next}}, awali kila {{previous}}",
+        "schedule_decreased": "Ratiba {{value}} inaendeshwa mara chache zaidi: kila {{next}}, awali kila {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "Idhinisha App hii",
+        "firstLead": "Mwenyeji wa boti anatoa App hii. Hakuna kinachoendeshwa hadi msimamizi aiidhinishe.",
+        "updateHeading": "Sasisho linasubiri",
+        "updateLead": "Mwenyeji wake anatoa toleo jipya. Angalia kilichobadilika kabla ya kuidhinisha.",
+        "nothingNew": "Haiombi kitu kipya.",
+        "neededHint": "Ruhusu kila ufikiaji mpya uliowekwa alama kuwa unahitajika ili kuidhinisha sasisho hili.",
+        "approve": "Idhinisha",
+        "approveUpdate": "Idhinisha sasisho",
+        "approving": "Inaidhinisha…",
+        "development": "Usakinishaji wa majaribio",
+        "developmentHint": "Inaendesha toleo lolote lililosainiwa kwa ufunguo huu wa msanidi lisiloomba zaidi ya ulichoidhinisha.",
+        "developmentUnavailable": "Anzisha pollis app dev ili kutoa ufunguo wa msanidi.",
+        "autoUpdate": "Idhinisha kiotomatiki wakati ujao",
+        "autoUpdateHint": "Boti huendesha yenyewe toleo jipya kutoka chanzo kilekile lisipoomba zaidi, bila kuhitaji msimamizi. Chochote kinachoomba zaidi bado husubiri idhini."
+      },
+      "edit": {
+        "save": "Hifadhi ufikiaji",
+        "saving": "Inahifadhi…"
+      },
+      "errors": {
+        "stale": "Msimamizi mwingine ameidhinisha boti hii sasa hivi. Angalia tena kabla ya kuidhinisha.",
+        "changed": "App imebadilika tangu ukurasa huu ufunguliwe. Angalia tena kabla ya kuidhinisha.",
+        "failed": "Imeshindikana kuhifadhi idhini."
+      },
+      "commandKinds": {
+        "command": "amri inayochapishwa kwenye chaneli",
+        "request": "ombi la faragha"
+      },
+      "runningAutoUpdated": "Inaendesha toleo {{version}}, lililosasishwa kiotomatiki kutoka chanzo kilichoidhinishwa"
+    }
   }
 }

@@ -94,6 +94,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `groups` | create group, open, channel visible | no |
 | `group-aliases` | #2003 Self → Group aliases: two groups start on the main profile; a name and photo set in one group (photo picked through `subflows/pick-square-photo.yaml`, shared with `profile-photo`); "Apply to all my groups" writes the name to both, not the photo; own messages there carry the alias and its photo; "Use my main profile" in one group resets only that one | no |
 | `bots` | #1182 Group settings → Bots: empty list and the "runs on a machine you control, reads what it receives" copy; a wrong pairing code is refused; the typed code (never pre-filled) creates and pairs the bot. Run by `scripts/maestro-bots.sh`, which starts `pollis-bot` and continues in `two-client/bots/` | yes (`pollis-bot` hosts) |
+| `bot-app-approval` | #2005 a bot's App on its page: first approval with access narrowed (a channel off, history shortened, the host dropped, the plain-language lines follow); narrowing the approved App in place; an update whose widened rows say "New access" and start OFF, with Approve held until the new trigger is switched on and the new host left off; the "This bot is not running" notice once the build's files are gone. Runs after `bots` under `scripts/maestro-bots.sh`, whose driver installs v1, then v2, then removes v2's artifact on the bot's host (`APP_HOST`, `APP_NEW_HOST`) | yes (`pollis-bot` host) |
 | `self-update` | #1880 a return to the foreground rotates this device's own leaf in a group where it is due (a group it just created): the newest `[mls-backstop]` line in Diagnostics counts `1 self-updated`; a second return counts `0`, so the rotation was recorded. Needs a binary with the core change | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `composer-draft` | unsent composer text survives backing out to another tab and returning (desktop's in-memory draft store, `mobile/lib/drafts.ts`); sending clears it | no |
@@ -434,7 +435,15 @@ top of the script. `5-commands.yaml` (#2018) types `/`, picks an installed
 App's command, sends it and waits for the App's reply with the Bot badge, then
 checks the bot in the mention picker; it needs an App installed on the host
 and approved by the admin (#2005), with `APP_COMMAND` and `APP_REPLY` passed
-to Maestro, so the script runs it once App installs and approvals are in it.
+to Maestro. Between parts 3 and 4 the script points both hosts at App v1
+(`pollis-bot app install`, the fixture component with its own manifest), runs
+`flows/bot-app-approval.yaml` in the background and swaps in v2 (a widening
+update) and then removes the files as the admin approves; it then installs a
+commands App, approves it (`4b-approve-app.yaml`) and runs `5-commands.yaml`.
+The fixture App's `on-command` runs its arguments as a script and has no way
+to reply to its own command without the channel's id, so `5-commands.yaml`'s
+reply step needs an App that echoes its command (the #2006 TypeScript
+template does) before it can pass.
 
 **Unread for messages that arrived while away (automated, #1422):** `mobile/scripts/maestro-unread.sh <device>`
 — the lost-message shape with `pollis-tui`'s `unread_peer` example, which sends
