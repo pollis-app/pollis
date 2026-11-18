@@ -78,7 +78,7 @@ export function mentionLabels(
 }
 
 /** Longest alias name, as the DS's `DISPLAY_NAME_MAX_LEN`. */
-export const ALIAS_NAME_MAX = 100;
+const ALIAS_NAME_MAX = 100;
 
 /**
  * Whether `name` (already trimmed, non-empty) passes the DS's display-name rule:

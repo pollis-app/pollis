@@ -18,7 +18,7 @@ export interface GroupAlias {
 /** A group's aliases by user id. */
 export type AliasMap = ReadonlyMap<string, GroupAlias>;
 
-export const EMPTY_ALIASES: AliasMap = new Map();
+const EMPTY_ALIASES: AliasMap = new Map();
 
 export function toAliasMap(list: readonly GroupAlias[] | undefined): AliasMap {
   if (!list || list.length === 0) {
@@ -79,7 +79,7 @@ export function mentionLabels(
 }
 
 /** Longest alias name, as the DS's `DISPLAY_NAME_MAX_LEN`. */
-export const ALIAS_NAME_MAX = 100;
+const ALIAS_NAME_MAX = 100;
 
 /**
  * Whether `name` (already trimmed, non-empty) passes the DS's display-name rule:
