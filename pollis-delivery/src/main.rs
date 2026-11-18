@@ -49,11 +49,15 @@ async fn main() -> Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(8788);
 
-    let db = Arc::new(
+    // `file:<path>`: a local DB with production's foreign_keys=OFF, for a local lab (e2e/bots-real.js).
+    // A local sqld enforces foreign keys, which Turso does not, so bot creation fails there.
+    let db = Arc::new(if let Some(path) = url.strip_prefix("file:") {
+        Db::connect_local(path).await.context("connect to local file")?
+    } else {
         Db::connect_remote(&url, &token)
             .await
-            .context("connect to Turso")?,
-    );
+            .context("connect to Turso")?
+    });
 
     // Optional separate commit-log DB; otherwise fall back to the single `db` above.
     let log_url = std::env::var("LOG_DB_URL").ok().filter(|s| !s.is_empty());
