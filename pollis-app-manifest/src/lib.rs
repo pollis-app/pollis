@@ -13,8 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+pub mod commands;
 #[cfg(debug_assertions)]
 pub mod dev_grants;
+
+pub use commands::{command_text, parse_command, route_command, CommandSpec, ParsedCommand, RoutedCommand};
 
 /// The file name a manifest is shipped under, beside the component.
 pub const MANIFEST_FILE_NAME: &str = "pollis-app.json";
@@ -181,6 +184,10 @@ pub struct Manifest {
     /// literals, no ports.
     #[serde(default)]
     pub egress: BTreeSet<String>,
+    /// #2018: slash commands members can pick in the composer. Each needs the
+    /// `commands` trigger (or `requests`, for a `request` command).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<CommandSpec>,
 }
 
 /// Why a manifest or a grant set was refused.
@@ -196,6 +203,8 @@ pub enum ManifestError {
     Channel(String),
     #[error("`egress` entry {0:?} is not valid: {1}")]
     Egress(String, &'static str),
+    #[error("`commands`: {0}")]
+    Command(String),
     #[error("grants are wider than the manifest: {0}")]
     Widening(String),
 }
@@ -225,6 +234,7 @@ impl Manifest {
         for host in &self.egress {
             validate_egress_host(host).map_err(|why| ManifestError::Egress(host.clone(), why))?;
         }
+        commands::validate_commands(self)?;
         Ok(())
     }
 
