@@ -16,4 +16,9 @@ export interface MessageRenderContext {
   aliases?: AliasMap;
   /** Alias names by lowercased handle, so an `@handle` mention renders the alias. */
   mentionLabels?: ReadonlyMap<string, string>;
+  /** The group's bots (#1182), by user id and by lowercased handle; empty in DMs. */
+  botIds?: ReadonlySet<string>;
+  botHandles?: ReadonlySet<string>;
+  /** The open group's name, for the Bot badge's "Managed by the admins of …". */
+  groupName?: string;
 }

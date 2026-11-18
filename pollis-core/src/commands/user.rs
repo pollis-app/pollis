@@ -11,6 +11,9 @@ pub struct UserProfile {
     pub username: Option<String>,
     pub preferred_name: Option<String>,
     pub avatar_url: Option<String>,
+    /// #1182: a bot; the UI shows the Bot badge.
+    #[serde(default)]
+    pub is_bot: bool,
 }
 
 pub async fn get_user_profile(
@@ -49,6 +52,7 @@ fn profile_from_wire(u: pollis_api::directory::UserWire) -> UserProfile {
         username: Some(u.username),
         preferred_name: u.preferred_name,
         avatar_url: u.avatar_url,
+        is_bot: u.is_bot,
     }
 }
 

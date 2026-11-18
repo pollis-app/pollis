@@ -13,12 +13,15 @@ import { authorName } from "../../lib/authorName";
 import { aliasAvatar, aliasName } from "../../lib/groupAlias";
 import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { outgoingText } from "../../lib/messageText";
+import { botHandles, botIds } from "../../lib/bots";
 import {
   useMessages,
   useSendMessage,
   useRetryMessage,
   useDiscardUnsent,
   useThreadMessages,
+  useGroupMembers,
+  useUserGroupsWithChannels,
   flattenPages,
   type ConversationKind,
   type Message,
@@ -75,6 +78,12 @@ function ThreadScreen() {
   );
   // Per-group aliases (#2003): the thread's group shows people as it does.
   const aliases = useGroupAliases(mentionGroupId);
+  // Bots (#1182): the roster says who is one (the same cached read the mention picker makes).
+  const { data: threadMembers } = useGroupMembers(mentionGroupId);
+  const { data: groupsWithChannels } = useUserGroupsWithChannels();
+  const botGroup = groupsWithChannels?.find((g) => g.id === mentionGroupId)?.name;
+  const botSenders = useMemo(() => botIds(threadMembers ?? []), [threadMembers]);
+  const botMentions = useMemo(() => botHandles(threadMembers ?? []), [threadMembers]);
   const selfName = currentUser?.username?.toLowerCase() ?? null;
   const mentionNames = useMemo(() => {
     const set = new Set<string>(["all"]);
@@ -140,7 +149,10 @@ function ThreadScreen() {
           edited={!!m.edited_at}
           editUnsent={m.edit_unsent}
           continued={continued}
+          isBot={botSenders.has(m.sender_id)}
+          botGroup={botGroup}
           mentionNames={mentionNames}
+          botMentions={botMentions}
           selfName={selfName}
           onPressAvatar={
             mine
@@ -154,7 +166,7 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases],
+    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases, botSenders, botGroup, botMentions],
   );
 
   const rootName = root
@@ -177,7 +189,10 @@ function ThreadScreen() {
           onOpenAttachment={openMedia}
           edited={!!root.edited_at}
           editUnsent={root.edit_unsent}
+          isBot={botSenders.has(root.sender_id)}
+          botGroup={botGroup}
           mentionNames={mentionNames}
+          botMentions={botMentions}
           selfName={selfName}
         />
       ) : null}

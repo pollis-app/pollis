@@ -20,6 +20,7 @@
     "newChannel": "New Channel",
     "inviteMember": "Invite Member",
     "joinRequests": "Join Requests",
+    "bots": "Bots",
     "leave": "Leave Group",
     "joinVoiceChat": "Join voice chat",
     "inCall_one": "{{count}} in call",
@@ -230,5 +231,77 @@
     "confirmButton": "Yes, reset",
     "submitting": "Resetting…",
     "failed": "Couldn't reset the alias"
+  },
+  "bots": {
+    "pageTitle": "Bots — {{group}}",
+    "intro": "A bot is a member of this group that runs on a machine an admin controls, not on Pollis's servers. It can read every message it receives in this group and post into its channels.",
+    "empty": "No bots yet.",
+    "add": "Add a bot",
+    "capReached": "This group has {{count}} bots, the most it can have. Delete one to add another.",
+    "hostCount_one": "{{count}} host",
+    "hostCount_other": "{{count}} hosts",
+    "manage": "Manage bot",
+    "adminOnly": "Only this group's admins manage its bots.",
+    "notFound": "This bot no longer exists.",
+    "loadFailed": "Couldn't load the bots.",
+    "badge": {
+      "label": "Bot",
+      "labelTerminal": "[bot]",
+      "managedBy": "Managed by the admins of {{group}}"
+    },
+    "pairing": {
+      "commandLabel": "Run this on the bot's machine",
+      "machineNotice": "The bot runs on that machine and keeps its keys there. It can read everything it receives, so use a machine you control.",
+      "codeLabel": "Code shown by pollis-bot"
+    },
+    "create": {
+      "pageTitle": "Add a bot — {{group}}",
+      "leadTitle": "Pair a bot",
+      "lead": "Install pollis-bot on the machine that will run the bot, then run the command below there. It prints a code; type that code here.",
+      "nameLabel": "Bot name",
+      "submit": "Add bot",
+      "submitting": "Adding…",
+      "failed": "Couldn't add the bot."
+    },
+    "addHost": {
+      "pageTitle": "Add a host — {{bot}}",
+      "leadTitle": "Add a host",
+      "lead": "A second machine keeps {{bot}} running when one goes down. Install pollis-bot there and run the command below; it prints a code to type here. One of the bot's current hosts hands it the bot's keys.",
+      "submit": "Add host",
+      "submitting": "Adding…",
+      "failed": "Couldn't add the host."
+    },
+    "detail": {
+      "hostsHeading": "Hosts",
+      "hostsDescription": "The machines this bot runs on. Each one holds the bot's keys and can read what it receives.",
+      "hostsEmpty": "This bot has no hosts.",
+      "lastSeen": "Last seen {{time}}",
+      "neverSeen": "Not seen yet",
+      "addHost": "Add a host",
+      "recoveryNote": "If every host is lost, the bot can't be recovered: delete it and create a new one.",
+      "revoke": "Revoke",
+      "revokeConfirm": "Revoke <name>{{host}}</name>?",
+      "revokeConsequence": "That machine stops running the bot. Its other hosts keep it running.",
+      "revokeLastConsequence": "This is the bot's only host. Once it is revoked the bot can't be recovered: delete it and create a new one.",
+      "revokeSubmit": "Revoke host",
+      "revoking": "Revoking…",
+      "revokeFailed": "Couldn't revoke the host.",
+      "deleteHeading": "Delete this bot",
+      "deleteDescription": "It leaves the group and stops running on every host.",
+      "delete": "Delete bot"
+    },
+    "delete": {
+      "pageTitle": "Delete bot",
+      "confirm": "Delete <strong>{{name}}</strong>?",
+      "consequence": "It leaves the group and stops running on every host. This can't be undone.",
+      "submit": "Delete bot",
+      "submitting": "Deleting…",
+      "failed": "Couldn't delete the bot."
+    },
+    "errors": {
+      "codeMismatch": "That code doesn't match. Read it again off the bot's machine and type it in.",
+      "capReached": "This group already has the most bots it can have. Delete one to add another.",
+      "requestExpired": "That code has expired. Run the command again for a new one."
+    }
   }
 }

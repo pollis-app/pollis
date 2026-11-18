@@ -19,13 +19,16 @@ import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
 import { useGroupAliases } from "../hooks/queries/useGroupAliases";
 import { aliasName, hasAlias } from "../utils/groupAlias";
+import { isBotUser } from "../utils/bots";
+import { BotBadge } from "../components/ui/BotBadge";
 
 interface MembersProps {
   groupId: string;
+  groupName: string;
   isAdmin: boolean;
 }
 
-export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) => {
+export const Members: React.FC<MembersProps> = observer(({ groupId, groupName, isAdmin }) => {
   const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
@@ -93,6 +96,9 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
                   @{m.username}
                 </bdi>
               )}
+              {isBotUser(m) && (
+                <BotBadge groupName={groupName} data-testid={`member-bot-badge-${m.user_id}`} />
+              )}
               {badge}
               {isSelf && (
                 <span className="ms-1 text-muted">
@@ -106,6 +112,24 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
           const isSelf = m.user_id === currentUser?.id;
           if (!isAdmin || isSelf) {
             return [];
+          }
+          // A bot is never an admin and leaves through its own page (#1182).
+          if (isBotUser(m)) {
+            return [
+              <Button
+                size="sm"
+                variant="secondary"
+                data-testid={`member-manage-bot-${m.user_id}`}
+                onClick={() =>
+                  navigate({
+                    to: "/groups/$groupId/bots/$botId",
+                    params: { groupId, botId: m.user_id },
+                  })
+                }
+              >
+                {t("bots.manage")}
+              </Button>,
+            ];
           }
           return [
             <Switch

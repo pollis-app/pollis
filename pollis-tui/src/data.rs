@@ -3,12 +3,14 @@
 //! Thin wrappers over the core read surface, which goes through the DS (#987); message reads
 //! also ingest new envelopes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
 use pollis_core::commands::dm::{list_dm_channels, list_dm_requests, DmChannel};
-use pollis_core::commands::groups::{list_user_groups_with_channels, GroupWithChannels};
+use pollis_core::commands::groups::{
+    get_group_members, list_user_groups_with_channels, GroupMember, GroupWithChannels,
+};
 use pollis_core::commands::messages::{
     get_channel_messages, get_dm_messages, get_reactions_for_messages, list_thread_summaries,
     read_thread_messages, ChannelMessage, MessageCursor, MessagePage, Reaction,
@@ -147,6 +149,38 @@ pub async fn thread_replies(state: &Arc<AppState>, root_id: &str) -> Result<Vec<
     Ok(read_thread_messages(root_id.to_string(), state).await?)
 }
 
+/// The group holding `channel_id` in `tree`, if any.
+pub fn group_of_channel<'a>(tree: &'a ConversationTree, channel_id: &str) -> Option<&'a str> {
+    tree.groups
+        .iter()
+        .find(|g| g.channels.iter().any(|c| c.id == channel_id))
+        .map(|g| g.id.as_str())
+}
+
+/// The ids of a group's bots (#1182), for the Bot badge on their messages.
+pub async fn group_bot_ids(
+    state: &Arc<AppState>,
+    user_id: &str,
+    group_id: &str,
+) -> Result<HashSet<String>> {
+    let members = get_group_members(group_id.to_string(), user_id.to_string(), state).await?;
+    Ok(members
+        .iter()
+        .filter(|m| member_is_bot(m))
+        .map(|m| m.user_id.clone())
+        .collect())
+}
+
+/// Whether a member is a bot (#1182). Read through its serialized form so this builds before
+/// and after pollis-core's `GroupMember` gains `is_bot`; a member without the field is a person.
+/// Once `is_bot` lands in pollis-core this becomes `m.is_bot`.
+pub fn member_is_bot(m: &GroupMember) -> bool {
+    serde_json::to_value(m)
+        .ok()
+        .and_then(|v| v.get("is_bot").and_then(serde_json::Value::as_bool))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +232,22 @@ mod tests {
             tree.conversation_ids(),
             vec!["general".to_string(), "dev".to_string()]
         );
+        assert_eq!(group_of_channel(&tree, "dev"), Some("g1"));
+        assert_eq!(group_of_channel(&tree, "voice-chat"), None);
+    }
+
+    // A member row from a core or DS that predates bots reads as a person (#1182).
+    #[test]
+    fn a_member_without_the_bot_field_is_a_person() {
+        let member: GroupMember = serde_json::from_value(serde_json::json!({
+            "user_id": "u1",
+            "username": "ann",
+            "display_name": null,
+            "avatar_url": null,
+            "role": "member",
+            "joined_at": "2026-01-01T00:00:00Z",
+        }))
+        .unwrap();
+        assert!(!member_is_bot(&member));
     }
 }

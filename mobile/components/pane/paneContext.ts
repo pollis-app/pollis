@@ -25,6 +25,9 @@ const PANE_PATHS = [
   "/group/invite-links",
   "/group/emoji",
   "/group/requests",
+  "/group/bots",
+  "/group/bot",
+  "/group/add-bot",
 ] as const;
 
 export type PanePath = (typeof PANE_PATHS)[number];

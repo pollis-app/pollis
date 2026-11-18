@@ -71,7 +71,35 @@ interface MockGroupMember {
   avatar_url?: string;
   role: 'admin' | 'member';
   joined_at: string;
+  /** #1182: a bot account (the Bot badge). */
+  is_bot?: boolean;
 }
+
+/** A bot host (#1182), as `get_bot` returns it (camelCase, like every bot command). */
+interface MockBotHost {
+  deviceId: string;
+  name: string;
+  lastSeenAt: string | null;
+  createdAt: string;
+}
+
+/** A bot (#1182): `BotSummary` fields plus its hosts; `hostCount` is derived. */
+interface MockBot {
+  userId: string;
+  groupId: string;
+  displayName: string;
+  username: string;
+  createdBy: string;
+  createdAt: string;
+  hosts: MockBotHost[];
+}
+
+/// #1182: the pairing code the mock "pollis-bot" printed; anything else is a mismatch.
+const MOCK_BOT_PAIR_CODE = 'K7M2Q9XA';
+/// #1182: a code whose pairing request has expired.
+const MOCK_BOT_EXPIRED_CODE = 'EXP1RED0';
+/// #1182: mirrors `MAX_BOTS_PER_GROUP` in pollis-api.
+const MOCK_GROUP_BOT_CAP = 25;
 
 interface MockDmChannel {
   id: string;
@@ -216,6 +244,8 @@ interface MockGroupAlias {
 }
 
 interface MockStore {
+  /** #1182: every bot, with its hosts; its member row lives in `groupMembers`. */
+  bots: MockBot[];
   /** #2003: every alias the mock DS holds, of members past and present. */
   groupAliases: MockGroupAlias[];
   /** Bytes `upload_public_file` received, served back by `get_public_file_url`. */
@@ -384,6 +414,7 @@ function readPreferences(raw: unknown): Record<string, unknown> {
 }
 
 const store: MockStore = {
+  bots: (preload.bots as MockBot[] | undefined) ?? [],
   groupAliases: (preload.groupAliases as MockGroupAlias[] | undefined) ?? [],
   uploadedFiles: {},
   deviceRevoked: false,
@@ -565,6 +596,38 @@ for (const command of (preload.holdCommands ?? []) as string[]) {
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 11);
+}
+
+function botSummaryMock(bot: MockBot) {
+  const { hosts, ...summary } = bot;
+  return { ...summary, hostCount: hosts.length };
+}
+
+function findBotMock(botUserId: string): MockBot {
+  const bot = store.bots.find((b) => b.userId === botUserId);
+  if (!bot) {
+    throw `bot not found: ${botUserId}`;
+  }
+  return bot;
+}
+
+/** Bots are managed by the group's admins only. */
+function requireAdminMock(groupId: string): void {
+  const me = store.session?.id;
+  const admin = (store.groupMembers[groupId] ?? []).some((m) => m.user_id === me && m.role === 'admin')
+    || store.groups.some((g) => g.id === groupId && g.current_user_role === 'admin');
+  if (!admin) {
+    throw 'Forbidden: only group admins manage bots';
+  }
+}
+
+function checkBotCodeMock(code: string): void {
+  if (code === MOCK_BOT_EXPIRED_CODE) {
+    throw 'pairing_request_expired: the pairing request has expired';
+  }
+  if (code !== MOCK_BOT_PAIR_CODE) {
+    throw 'pairing_code_mismatch: the typed code does not match the host';
+  }
 }
 
 function nowIso(): string {
@@ -1342,6 +1405,91 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'plugin:notification|notify':
       return null;
+
+    // Bots (#1182), with the core's refusals: a typed code must match the one the
+    // host printed, an expired request is refused, and a group holds at most the cap.
+    case 'list_group_bots': {
+      const { groupId } = args as { groupId: string };
+      requireAdminMock(groupId);
+      return store.bots.filter((b) => b.groupId === groupId).map(botSummaryMock);
+    }
+
+    case 'get_bot': {
+      const { botUserId } = args as { botUserId: string };
+      const bot = findBotMock(botUserId);
+      requireAdminMock(bot.groupId);
+      return {
+        ...botSummaryMock(bot),
+        hosts: bot.hosts.map((h) => ({ ...h })),
+        groupBotCap: MOCK_GROUP_BOT_CAP,
+      };
+    }
+
+    case 'create_bot': {
+      const { groupId, code, displayName } = args as { groupId: string; code: string; displayName: string };
+      requireAdminMock(groupId);
+      checkBotCodeMock(code);
+      if (store.bots.filter((b) => b.groupId === groupId).length >= MOCK_GROUP_BOT_CAP) {
+        throw `bot_cap_reached: the group already has ${MOCK_GROUP_BOT_CAP} bots`;
+      }
+      const userId = `u_bot_${generateId()}`;
+      const username = `${displayName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_bot`;
+      const at = nowIso();
+      const bot: MockBot = {
+        userId,
+        groupId,
+        displayName,
+        username,
+        createdBy: store.session?.id ?? '',
+        createdAt: at,
+        hosts: [{ deviceId: `dev_${generateId()}`, name: 'bot-host-1', lastSeenAt: at, createdAt: at }],
+      };
+      store.bots.push(bot);
+      (store.groupMembers[groupId] ??= []).push({
+        user_id: userId,
+        username,
+        display_name: displayName,
+        role: 'member',
+        joined_at: at,
+        is_bot: true,
+      });
+      return botSummaryMock(bot);
+    }
+
+    case 'add_bot_host': {
+      const { botUserId, code } = args as { botUserId: string; code: string };
+      const bot = findBotMock(botUserId);
+      requireAdminMock(bot.groupId);
+      checkBotCodeMock(code);
+      const at = nowIso();
+      const host: MockBotHost = {
+        deviceId: `dev_${generateId()}`,
+        name: `bot-host-${bot.hosts.length + 1}`,
+        lastSeenAt: null,
+        createdAt: at,
+      };
+      bot.hosts.push(host);
+      return { ...host };
+    }
+
+    case 'revoke_bot_host': {
+      const { botUserId, deviceId } = args as { botUserId: string; deviceId: string };
+      const bot = findBotMock(botUserId);
+      requireAdminMock(bot.groupId);
+      bot.hosts = bot.hosts.filter((h) => h.deviceId !== deviceId);
+      return null;
+    }
+
+    case 'delete_bot': {
+      const { botUserId } = args as { botUserId: string };
+      const bot = findBotMock(botUserId);
+      requireAdminMock(bot.groupId);
+      store.bots = store.bots.filter((b) => b.userId !== botUserId);
+      store.groupMembers[bot.groupId] = (store.groupMembers[bot.groupId] ?? []).filter(
+        (m) => m.user_id !== botUserId,
+      );
+      return null;
+    }
 
     case 'list_muted_channels':
       return [...store.mutedChannels];

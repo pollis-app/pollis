@@ -47,6 +47,9 @@ pub struct GroupMember {
     pub avatar_url: Option<String>,
     pub role: String,
     pub joined_at: String,
+    /// #1182: a bot; the UI shows the Bot badge.
+    #[serde(default)]
+    pub is_bot: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

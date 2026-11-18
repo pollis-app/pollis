@@ -38,6 +38,7 @@
 pub mod account;
 pub mod account_reads;
 pub mod bootstrap;
+pub mod bots;
 pub mod broker;
 pub mod client_policy;
 pub mod commit;
@@ -310,6 +311,18 @@ endpoints! {
     Client   account_reads::EmojiReadBody        => "/v1/read/emoji",                     account_reads::EmojiReadResponse;
     Client   account_reads::ObjectExistsBody     => "/v1/read/objects",                   account_reads::ObjectExistsResponse;
     Client   account_reads::ReadCursorsBody      => "/v1/read/read-cursors",             account_reads::ReadCursorsResponse;
+
+    // #1182: bots — pairing, creation, host approval, deletion, trigger claims.
+    Client   bots::BotPairingRequestBody        => "/v1/bots/pairing/request",           bots::BotPairingRequestResponse;
+    Client   bots::BotPairingLookupBody         => "/v1/bots/pairing/lookup",            bots::BotPairingLookupResponse;
+    Client   bots::BotPairingStatusBody         => "/v1/bots/pairing/status",            bots::BotPairingStatus;
+    Client   bots::CreateBotBody                => "/v1/bots/create",                    bots::BotCreated;
+    Client   bots::DeleteBotBody                => "/v1/bots/delete",                    StatusOk;
+    Client   bots::ListBotsBody                 => "/v1/read/bots",                      bots::ListBotsResponse;
+    Client   bots::ApproveBotHostBody           => "/v1/bots/hosts/approve",             StatusOk;
+    Client   bots::PendingBotHostsBody          => "/v1/bots/hosts/pending",             bots::PendingBotHostsResponse;
+    Client   bots::WrapBotHostBody              => "/v1/bots/hosts/wrap",                StatusOk;
+    Client   bots::ClaimTriggerBody             => "/v1/bots/triggers/claim",            bots::ClaimTriggerResponse, idempotent;
 }
 
 /// The guarantee, executable: a body missing a field does not compile.

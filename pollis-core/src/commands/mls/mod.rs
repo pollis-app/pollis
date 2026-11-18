@@ -45,12 +45,12 @@ pub(crate) use ds_client::{
     ds_post_signed_or_session_ok, EnvelopePost,
 };
 // Desktop-only (voice roster); mobile has no Rust-side participants path.
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 pub(crate) use ds_client::ds_livekit_participants;
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 pub(crate) use ds_client::ds_livekit_room_counts;
 // The ring's "was anybody home" answer; only the desktop call path asks.
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 pub(crate) use ds_client::ds_livekit_send_data_delivered;
 // #836 identity resolution: desktop's realtime loop, and mobile's JS data channel (#1635).
 pub(crate) use ds_client::ds_livekit_identities;
@@ -75,6 +75,8 @@ pub use group_state::{
 #[cfg(feature = "test-harness")]
 pub use group_state::rendezvous;
 
+// #1182: a bot host verifies a host approval's signer against these.
+pub(crate) use reconcile::{load_pinned_identities, local_leaf_signature_key};
 pub use sweep::catch_up_all_mls_groups;
 pub use sweep::{backstop_before_seal, backstop_on_membership_change, reconcile_backstop_all, reconcile_backstop_one, BackstopReport};
 pub use sweep::apply_membership_wake;

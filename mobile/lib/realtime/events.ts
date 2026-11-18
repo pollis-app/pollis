@@ -80,6 +80,11 @@ export type RealtimeEvent =
       group_id?: string;
     }
   | {
+      // DS-only (#1182): the bots of `group_id` changed (a host was added); admins re-read.
+      type: "bots_changed";
+      group_id: string;
+    }
+  | {
       // DS-only (#1628): another of this account's devices pushed read cursors; converge.
       type: "read_cursors_changed";
     }
@@ -119,6 +124,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "enrollment_requested",
   "channel_mutes_changed",
   "group_aliases_changed",
+  "bots_changed",
   "read_cursors_changed",
   "typing",
   "history_transfer",
@@ -183,6 +189,7 @@ export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean):
     event.type === "enrollment_requested" ||
     event.type === "channel_mutes_changed" ||
     event.type === "group_aliases_changed" ||
+    event.type === "bots_changed" ||
     event.type === "read_cursors_changed" ||
     event.type === "history_transfer"
   ) {

@@ -172,14 +172,15 @@ pub async fn connect_rooms(
                                             }
                                             None => None,
                                         };
-                                        let channel = {
+                                        let (channel, wake_only) = {
                                             let lk = lk_arc.lock().await;
-                                            lk.channel.clone()
+                                            (lk.channel.clone(), lk.wake_only)
                                         };
                                         if let Some(ch) = channel {
                                             let wake = super::dispatch_data(payload.as_slice(), sender.as_ref(), ch.as_ref());
                                             // Membership wake: catch up; on a LEAVE stage the remove (`mls::apply_membership_wake`).
-                                            if let Some(super::MembershipWake { conversation_id, is_leave }) = wake {
+                                            // A wake-only listener (the bot runtime) leaves that to its next job.
+                                            if let Some(super::MembershipWake { conversation_id, is_leave }) = wake.filter(|_| !wake_only) {
                                                 let state = Arc::clone(app_state);
                                                 let uid = user_id.to_owned();
                                                 tokio::spawn(async move {

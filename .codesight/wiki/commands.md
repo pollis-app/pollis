@@ -602,6 +602,9 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `reset_identity(user_id)` → new secret key. **Not a registered Tauri command** as of 2026-08-03 (#714): it is `pollis_core::commands::account_identity::reset_identity`, reached from the registered `reset_identity_and_recover`.
 - `list_security_events(user_id, limit?, before?, kinds?)` → `SecurityEventsPage { events: SecurityEvent[], next_cursor: SecurityEventCursor | null }` (#1548). One keyset page of the account's audit log, newest first: `before` is the previous page's `next_cursor` (`{ created_at, id }`), `kinds` narrows to those kinds (`None`/empty = all), `limit` is clamped 1..=500 here and again on the DS (`POST /v1/read/security-events`; query and indexes in `database.md` → `security_event`). Neither new field is sent when unset, so the body is the pre-#1548 one. Used by the Security page's three-row preview (`limit: 3`) and the Security events page (desktop `/security/events`, mobile `self/security-events`), which pages with `useInfiniteQuery` and keeps the previous filter's rows on screen (`keepPreviousData`) until the new filter's page lands. The quick filters — All · Devices (`device_enrolled`/`device_rejected`/`device_revoked`) · Identity & keys (`identity_reset`/`identity_rotated`/`secret_key_rotated`/`recovery_blob_fetched`) · Account (`email_changed`) — #1735 adds `history_transfer_approved` (on the source, `device_id` = the receiver, metadata `via=link|sibling`) and `history_transfer_completed` (on the receiver, `device_id` = the source); the UI tables decide which filter shows them — are one table per app (`frontend/src/components/Security/securityEvents.ts`, `mobile/lib/securityEvents.ts`; `mobile/tests/security-events.test.ts` fails if they drift). Proofs: `pollis-delivery/tests/security_events_page.rs`, flows `device_link::a_qr_link_enrolls_a_phone_without_the_email_otp`, `e2e/security-events.spec.ts`, Maestro `flows/security-events.yaml`.
 
+## bots (`commands/bots/`) — bots (#1182)
+Admin commands, camelCase over Tauri and the mobile bridge (same arg names): `list_group_bots(groupId)` → `BotSummary[]`, `get_bot(botUserId)` → `BotDetail` (`BotSummary` + live `hosts` + `groupBotCap`), `create_bot(groupId, code, displayName)` → `BotSummary`, `add_bot_host(botUserId, code)` → `BotHost`, `revoke_bot_host(botUserId, deviceId)`, `delete_bot(botUserId)`. TS: `frontend/src/types/bots.ts`, twin `mobile/types/bots.ts`. Errors the pages tell apart start with `pairing_code_mismatch`, `bot_cap_reached`, `pairing_request_expired`. The typed code is re-derived from what the lookup served (ephemeral key, device id, and the new bot's account key or the existing bot's id) and compared in constant time, never against a DS copy (#1096). `create_bot` waits (backing off, at most two minutes) for the host's key packages and then reconciles the group, so the host arrives by Welcome; a host slower than that external-joins by itself. `revoke_bot_host` and `delete_bot` reconcile the bot's leaves out at once. The host-side library (`pollis-bot` calls it): pairing, `await_pairing`, `join_bot_group`, `handle_host_approvals`, `start_unattended`; its summary heads `commands/bots/mod.rs`, and [Bots](./bots.md) has the protocol. `GroupMember` and `UserProfile` carry `is_bot` (from the DS, default false).
+
 ## device_link (`commands/device_link.rs`) — QR device link (#1207, #1361)
 
 Sign a new device in by QR instead of the email OTP plus a typed SAS, in either direction: v1, an enrolled device shows the QR and the new device scans it (desktop pastes its code, having no scanner), or v2, the NEW device shows the QR and a signed-in phone scans it. Protocol, threat model and guardrails: `docs/qr-device-link-design.md`. Mobile no longer shows a v1 code; its Security screen is the v2 scanner.
@@ -837,7 +840,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **253 commands** in 36 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **259 commands** in 37 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -851,6 +854,8 @@ than hand-edit.
 **`pin`** (4) — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 
 **`autolock`** (2) — `report_user_activity`, `set_auto_lock_timeout`
+
+**`bots`** (6) — `add_bot_host`, `create_bot`, `delete_bot`, `get_bot`, `list_group_bots`, `revoke_bot_host`
 
 **`device_enrollment`** (9) — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 

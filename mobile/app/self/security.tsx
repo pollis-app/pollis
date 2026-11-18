@@ -11,7 +11,6 @@ import {
   ListRow,
   Chip,
   Button,
-  Field,
   ActionRow,
   EmptyState,
 } from "../../components/ui";
@@ -47,7 +46,8 @@ import {
   useLockNow,
 } from "../../lib/autolock";
 import { ExportArchive } from "../../components/ExportArchive";
-import { SAS_LENGTH, normalizeSasInput } from "../../lib/enrollmentSas";
+import { SAS_LENGTH } from "../../lib/enrollmentSas";
+import { SasCodeField } from "../../components/SasCodeField";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
 
@@ -141,20 +141,18 @@ export default function Security() {
                 return (
                   <View key={req.request_id} style={{ padding: space.xxl, gap: space.md }}>
                     <Text style={ty.body}>{t("mobile:self.security.pairIntro")}</Text>
-                    <Field
+                    <SasCodeField
                       testID={`input-approval-code-${req.request_id}`}
                       surface="raised"
                       accessibilityLabel={t("auth:approval.codeLabel")}
                       value={typed}
-                      onChangeText={(next) =>
+                      onChange={(next) =>
                         setTypedCodes((prev) => ({
                           ...prev,
-                          [req.request_id]: normalizeSasInput(next),
+                          [req.request_id]: next,
                         }))
                       }
-                      placeholder={"·".repeat(SAS_LENGTH)}
                       editable={!approveEnrollment.isPending}
-                      style={{ fontFamily: fonts.mono400, letterSpacing: 2 }}
                     />
                     <Text style={ty.meta}>{t("mobile:self.security.pairHint")}</Text>
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>

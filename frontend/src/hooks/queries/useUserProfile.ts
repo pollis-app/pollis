@@ -6,6 +6,7 @@ import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import { messageQueryKeys } from "./useMessages";
 import { groupQueryKeys } from "./useGroups";
+import { isBotUser, type MaybeBot } from "../../utils/bots";
 
 /** The signed-in user's own profile; no `phone` here (#929). */
 export interface ServiceUserData {
@@ -31,11 +32,11 @@ function invalidateOwnProfile(queryClient: QueryClient, userId: string | null) {
 export function useOtherUserProfile(userId: string | null | undefined) {
   return useQuery({
     queryKey: userQueryKeys.otherProfile(userId ?? null),
-    queryFn: async (): Promise<{ id: string; username: string; preferred_name?: string; avatar_url?: string } | null> => {
+    queryFn: async (): Promise<{ id: string; username: string; preferred_name?: string; avatar_url?: string; is_bot: boolean } | null> => {
       if (!userId) {
         return null;
       }
-      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; avatar_url?: string } | null>(
+      const profile = await invoke<({ id: string; username?: string; preferred_name?: string; avatar_url?: string } & MaybeBot) | null>(
         'get_user_profile',
         { userId },
       );
@@ -47,6 +48,7 @@ export function useOtherUserProfile(userId: string | null | undefined) {
         username: profile.username ?? '',
         preferred_name: profile.preferred_name,
         avatar_url: profile.avatar_url,
+        is_bot: isBotUser(profile),
       };
     },
     enabled: !!userId,

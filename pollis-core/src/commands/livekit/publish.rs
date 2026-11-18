@@ -302,12 +302,16 @@ pub async fn start_call(
 
     let inbox = format!("inbox-{callee_id}");
     // The caller joins `room_name` the moment this returns: have its token warm by then.
+    #[cfg(feature = "media")]
     let warm = crate::commands::voice::prepare_voice_connection(
         room_name.clone(),
         caller_id.clone(),
         caller_username.clone(),
         state,
     );
+    // A realtime-only build (the bot runtime) has no voice path to warm.
+    #[cfg(not(feature = "media"))]
+    let warm = std::future::ready(());
     let (delivered, _) = tokio::join!(
         crate::commands::mls::ds_livekit_send_data_delivered(state, &inbox, payload),
         warm,

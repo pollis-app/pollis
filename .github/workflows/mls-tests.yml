@@ -390,6 +390,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test -p pollis-tui
 
+      # #1182: the bot runtime's job loop, webhook and subcommands, plus its
+      # in-process-DS flows test (two hosts, one post). Headless like the TUI.
+      - name: Bot runtime tests (pollis-bot)
+        if: ${{ !cancelled() }}
+        run: cargo test -p pollis-bot
+
       # The multi-client flows harness RUNS in the sharded `flows` job below,
       # in parallel with this one. It is still BUILT here on `main`, because
       # this job is the only writer of the `tests` cache the shards restore

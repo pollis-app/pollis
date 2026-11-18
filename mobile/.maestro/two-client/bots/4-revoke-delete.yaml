@@ -1,0 +1,84 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# BOTS (#1182), part 4 of 4 — driven by scripts/maestro-bots.sh. Revoke the
+# second host (two taps: the first arms it), leaving one; arm a revoke of the
+# last host and see the "can never run again" warning, then back out; delete
+# the bot (two taps). The Bots page is empty again and the bot is no longer a
+# member.
+
+- extendedWaitUntil:
+    visible:
+      id: "screen-bot"
+    timeout: 15000
+- tapOn:
+    id: "btn-revoke-bot-host-.*"
+    index: 1
+- tapOn:
+    id: "btn-revoke-bot-host-.*"
+    index: 1
+- extendedWaitUntil:
+    notVisible:
+      id: "row-bot-host-.*"
+      index: 1
+    timeout: 60000
+- assertVisible:
+    id: "row-bot-host-.*"
+- takeScreenshot: bots-07-one-host
+
+# Arming the last host's revoke says what it costs; leaving the page disarms it.
+- tapOn:
+    id: "btn-revoke-bot-host-.*"
+- assertVisible:
+    id: "text-bot-last-host"
+- takeScreenshot: bots-08-last-host-warning
+- tapOn:
+    id: "btn-back"
+# The badge sits inside the bot's member row, so tapping it opens the row (the bot's page, for an admin).
+- tapOn:
+    id: "badge-bot-.*"
+- extendedWaitUntil:
+    visible:
+      id: "screen-bot"
+    timeout: 15000
+- assertNotVisible:
+    id: "text-bot-last-host"
+
+# Delete: two taps on the red row at the foot of the page.
+- scrollUntilVisible:
+    element:
+      id: "btn-delete-bot"
+    direction: DOWN
+- tapOn:
+    id: "btn-delete-bot"
+- assertVisible: "Tap again to delete ${BOT_NAME}"
+- tapOn:
+    id: "btn-delete-bot"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-bot"
+    timeout: 60000
+# Back on the member list: the bot is gone from the roster.
+- extendedWaitUntil:
+    notVisible:
+      id: "badge-bot-.*"
+    timeout: 60000
+- takeScreenshot: bots-09-deleted
+
+# The Bots page is empty again.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-group-settings"
+- scrollUntilVisible:
+    element:
+      id: "row-group-bots"
+    direction: DOWN
+- tapOn:
+    id: "row-group-bots"
+- extendedWaitUntil:
+    visible:
+      id: "bots-empty"
+    timeout: 30000
+- takeScreenshot: bots-10-empty-again

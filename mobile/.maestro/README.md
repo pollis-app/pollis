@@ -93,6 +93,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch: a wrong PIN puts the pad back with `pin-error`, and the right one's fourth digit must, within a second, show `pin-busy` (the launch loader, with no keypad key left on screen) or have already left the pad (a fast unlock; never a frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
 | `group-aliases` | #2003 Self → Group aliases: two groups start on the main profile; a name and photo set in one group (photo picked through `subflows/pick-square-photo.yaml`, shared with `profile-photo`); "Apply to all my groups" writes the name to both, not the photo; own messages there carry the alias and its photo; "Use my main profile" in one group resets only that one | no |
+| `bots` | #1182 Group settings → Bots: empty list and the "runs on a machine you control, reads what it receives" copy; a wrong pairing code is refused; the typed code (never pre-filled) creates and pairs the bot. Run by `scripts/maestro-bots.sh`, which starts `pollis-bot` and continues in `two-client/bots/` | yes (`pollis-bot` hosts) |
 | `self-update` | #1880 a return to the foreground rotates this device's own leaf in a group where it is due (a group it just created): the newest `[mls-backstop]` line in Diagnostics counts `1 self-updated`; a second return counts `0`, so the rotation was recorded. Needs a binary with the core change | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `composer-draft` | unsent composer text survives backing out to another tab and returning (desktop's in-memory draft store, `mobile/lib/drafts.ts`); sending clears it | no |
@@ -415,6 +416,21 @@ list with the handle beside it, and on the profile opened from the group
 admin; the device resets the alias from the member page, and both the row and
 the peer's old message fall back to the main profile (`2-admin-reset.yaml`). The
 script passes only when the peer has seen its alias gone.
+
+**Bots (automated, #1182):** `mobile/scripts/maestro-bots.sh <device>`
+— builds `pollis-bot` from the checkout and starts a stateless host, which
+prints its pairing code. The device signs a fresh admin in, creates a group,
+opens Settings → Bots, is refused a wrong code and types the real one
+(`flows/bots.yaml`); the bot is created with its first host. Once the host
+reports `connected`, the script posts an alert through the bot's webhook
+(`pollis-bot post`); it shows in #General with the Bot badge and the member
+list badges the bot, "Managed by the admins of <group>"
+(`two-client/bots/2-alert.yaml`). A second host pairs for the same bot and the
+admin types its code (`3-add-host.yaml`); the admin revokes it, sees the
+last-host warning when arming the remaining one, and deletes the bot
+(`4-revoke-delete.yaml`). The script passes only when the first host has
+stopped after the delete. The `pollis-bot` command lines are variables at the
+top of the script.
 
 **Unread for messages that arrived while away (automated, #1422):** `mobile/scripts/maestro-unread.sh <device>`
 — the lost-message shape with `pollis-tui`'s `unread_peer` example, which sends

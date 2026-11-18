@@ -17,19 +17,17 @@ import {
 } from "../../components/ui";
 import { LabeledField, Hint, ErrorText } from "../../components/groups/FormBits";
 import { ReadOnlyField } from "../../components/self/SettingsField";
-import { identityFieldMode, isGroupAdmin } from "../../lib/identityFields";
+import { identityFieldMode } from "../../lib/identityFields";
+import { useGroupAccess } from "../../hooks/useGroupAccess";
 import { Icon } from "../../components/icons";
 import { semantic, space } from "../../theme/tokens";
 import {
   useGroupChannels,
-  useUserGroupsWithChannels,
   useUpdateGroup,
   useDeleteGroup,
   useDeleteChannel,
-  useGroupMembers,
   useLeaveGroup,
 } from "../../hooks/queries";
-import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
@@ -40,22 +38,14 @@ function GroupSettings() {
   const router = useNav();
   const { groupId } = useRouteParams<{ groupId?: string }>();
   const id = groupId ?? null;
-  const currentUser = appStore.currentUser;
 
-  const { data: groups = [] } = useUserGroupsWithChannels();
-  const group = groups.find((g) => g.id === id);
+  const { group, iAmAdmin } = useGroupAccess(id);
   const { data: channels = [] } = useGroupChannels(id);
-  const { data: members = [] } = useGroupMembers(id);
   const updateGroup = useUpdateGroup(id);
   const deleteGroup = useDeleteGroup();
   const deleteChannel = useDeleteChannel(id);
   const leaveGroup = useLeaveGroup();
 
-  // The group row's role covers the moment before the roster loads.
-  const iAmAdmin = isGroupAdmin(
-    members.find((m) => m.user_id === currentUser?.id)?.role,
-    group?.current_user_role,
-  );
   // Non-admins see text, not inputs (#1281).
   const nameMode = identityFieldMode(iAmAdmin, group?.name);
   const descriptionMode = identityFieldMode(iAmAdmin, group?.description);
@@ -261,6 +251,29 @@ function GroupSettings() {
             }
           />
         </Group>
+
+        {iAmAdmin ? (
+          <>
+            <SectionTitle style={{ paddingHorizontal: 0 }}>{t("mobile:bots.title")}</SectionTitle>
+            <Group>
+              <ListRow
+                testID="row-group-bots"
+                glyph={<Icon.bot size={20} color={semantic.dim} />}
+                name={t("mobile:bots.title")}
+                sub={t("mobile:bots.settingsRowSub")}
+                chevron
+                onPress={() =>
+                  id
+                    ? router.push({
+                        pathname: "/group/bots",
+                        params: { groupId: id },
+                      })
+                    : undefined
+                }
+              />
+            </Group>
+          </>
+        ) : null}
 
         {/* Leave / delete: destructive, apart, two taps each. */}
         <View style={{ paddingTop: space.xxxl * 2, paddingBottom: space.xxl, gap: space.sm }}>

@@ -1,0 +1,115 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+  - two-client
+---
+# BOTS (#1182), part 1 of 4 — driven by scripts/maestro-bots.sh, which starts a
+# fresh `pollis-bot pair` on the host machine first and passes the code it
+# printed as ${BOT_CODE}. The admin creates a group, opens Settings → Bots,
+# sees the empty list and the machine/visibility copy, is refused a wrong code,
+# then TYPES the real one (never pre-filled, #1096) and lands on the new bot's
+# page with its first host. Parts 2-4 (two-client/bots/): the alert the bot
+# posts carries the Bot badge; a second host is added by its code; one host is
+# revoked and the bot deleted.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+# The "+" sheet animates in (slower on iPad).
+- extendedWaitUntil:
+    visible:
+      id: "btn-create-group"
+    timeout: 10000
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "${GROUP_NAME}"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "${GROUP_NAME}"
+
+# Settings → Bots: admins only, a page (no modal).
+- tapOn:
+    id: "row-group-settings"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-settings"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: "row-group-bots"
+    direction: DOWN
+- tapOn:
+    id: "row-group-bots"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-bots"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "bots-empty"
+    timeout: 30000
+- assertVisible: ".*runs on a machine an admin controls.*"
+- takeScreenshot: bots-01-empty
+
+# Add a bot: the install command, the name and the typed code.
+- tapOn:
+    id: "btn-add-bot"
+- assertVisible:
+    id: "screen-add-bot"
+- assertVisible:
+    id: "text-bot-pair-command"
+- assertVisible: ".*can read everything it receives.*"
+# Submit stays off until a name and all eight characters are typed.
+- assertVisible:
+    id: "btn-submit-bot"
+    enabled: false
+- tapOn:
+    id: "input-bot-name"
+- inputText: "${BOT_NAME}"
+# On a small screen the keyboard covers the code field below the name.
+- scrollUntilVisible:
+    element:
+      id: "input-bot-code"
+    direction: DOWN
+- tapOn:
+    id: "input-bot-code"
+# A code that is not the one the host printed is refused, and nothing is created.
+- inputText: "00000000"
+- tapOn:
+    id: "btn-submit-bot"
+- extendedWaitUntil:
+    visible:
+      id: "text-add-bot-error"
+    timeout: 60000
+- takeScreenshot: bots-02-wrong-code
+- tapOn:
+    id: "input-bot-code"
+- eraseText: 8
+- inputText: "${BOT_CODE}"
+- tapOn:
+    id: "btn-submit-bot"
+# Creating the bot adds it to the group's MLS tree: allow a dev-DS round trip or few.
+- extendedWaitUntil:
+    visible:
+      id: "screen-bot"
+    timeout: 120000
+- assertVisible: "${BOT_NAME}"
+- assertVisible:
+    id: "badge-bot-page"
+- assertVisible: "Managed by the admins of ${GROUP_NAME}"
+- extendedWaitUntil:
+    visible:
+      id: "row-bot-host-.*"
+    timeout: 60000
+- assertVisible: ".*the bot can't be recovered.*"
+- takeScreenshot: bots-03-created

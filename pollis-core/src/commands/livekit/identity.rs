@@ -1,3 +1,6 @@
+// Several helpers serve only the voice and call paths, absent from a realtime-only build.
+#![cfg_attr(not(feature = "media"), allow(dead_code))]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

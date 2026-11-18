@@ -21,6 +21,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { usePrefetchAvatars } from "../../components/UserAvatar";
 import { isNewMemberMessage, newMemberJoins } from "../../lib/newMember";
+import { botHandles, botIds } from "../../lib/bots";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
 import { aliasAvatar, aliasName, mentionLabels } from "../../lib/groupAlias";
@@ -585,6 +586,10 @@ function TextChat(props: ChatViewProps = {}) {
     [groupMembers, group?.owner_id],
   );
 
+  // Bots (#1182): the roster says who is one; their rows and mentions carry the Bot badge.
+  const botSenders = useMemo(() => botIds(groupMembers ?? []), [groupMembers]);
+  const botMentions = useMemo(() => botHandles(groupMembers ?? []), [groupMembers]);
+
   // Per-group aliases (#2003): inside a group, people show as it shows them; a DM, by main profile.
   const aliases = useGroupAliases(kind === "channel" ? groupId ?? null : null);
   const groupAuthor = useCallback(
@@ -781,6 +786,9 @@ function TextChat(props: ChatViewProps = {}) {
           showReceipt={mine && isDm}
           continued={item.continued}
           isNew={isNewMemberMessage(newMemberJoinMs, m.sender_id, m.created_at)}
+          isBot={botSenders.has(m.sender_id)}
+          botGroup={group?.name}
+          botMentions={botMentions}
           threadCount={summary?.reply_count ?? 0}
           threadLastReply={
             summary?.last_reply_at
@@ -839,6 +847,9 @@ function TextChat(props: ChatViewProps = {}) {
       retryMessage,
       discardUnsent,
       newMemberJoinMs,
+      botSenders,
+      botMentions,
+      group?.name,
       viewerJoinedAtMs,
       peerLabel,
       avatarKeyById,
