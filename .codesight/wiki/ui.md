@@ -1001,7 +1001,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **AttachmentDisplay** — props: attachment, tile, testId, roll — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **DownloadStatusIcon** — props: status — `frontend/src/components/Message/DownloadStatusIcon.tsx`. Download / spinner / check glyph of `AttachmentDisplay`'s download buttons (#1731).
 - **KeyChangeNoticeRow** — props: noticeId, peerUserId, peerLabel, at, skin, onVerify — `frontend/src/components/Message/KeyChangeNoticeRow.tsx`
-- **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
+- **LastMessagePreview** — props: message, isLoading, aliases — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **LightboxActions** — props: status, downloadDisabled, onDownload, onClose — `frontend/src/components/Message/LightboxActions.tsx`
 - **LightboxDownloadLabel** — `frontend/src/components/Message/LightboxDownloadLabel.tsx`
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`. Inline previews for image/video URLs found in message text. **Every host is click-to-load, with no allowlist.** Painting `<img src>` from message text makes merely opening a message fetch from a host the SENDER chose — a read receipt and an IP disclosure in one, from any message including an unaccepted DM request. There was an exception for `cdn.pollis.com`; it is gone, because the hostname comes out of the message (so the sender picks what the check is run against, and the path was never checked at all) and because a webview image request is the renderer's own, not `http_client`'s, so it cannot ride the relay overlay. The reveal is per-URL and deliberately not remembered.
