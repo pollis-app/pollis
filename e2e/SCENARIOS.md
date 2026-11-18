@@ -22,6 +22,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 | M-INV | Invite link (#847): A mints a link, copies it, B redeems and joins; A revokes, B's retry is refused. Run in BOTH skins | 5 | 2 | ✅ | invite-links.js. Asserts the clipboard really holds the token (it can never be shown again) and that the failure message does not disclose WHY. |
 | M-JR | Join-request path: B searches group by slug, requests, A approves, B becomes member | 4 | 2 | ⬜ | Alt to invite; relies on async realtime membership_changed → welcome poll. |
 | M-EDIT | Edit convergence: A edits a message, B sees new text + (edited) | 3 | 2 | ⬜ | |
+| M-LP | Link previews (#1987): A sends a link, B sees the card; A edits to another link, both see the new card; A deletes, the card goes on both; B → A the same | 4 | 2 | ✅ | two-client-link-preview.js. Image-less pages (no object storage in this backend); thumbnails and their release are on the dev DS in mobile/scripts/maestro-link-previews.sh. |
 | M-DEL | Delete convergence: A deletes, B sees "Message deleted" | 3 | 2 | ✅ | two-client-delete.js (delete-for-everyone). Content tombstoned, row stays. |
 | M-ORD | Ordering: A sends 3 messages, B receives all 3 in order | 4 | 3 | ⬜ | |
 | M-PRES | Presence: A sees B come online / go offline | 3 | 2 | ⬜ | LiveKit realtime dependent. |

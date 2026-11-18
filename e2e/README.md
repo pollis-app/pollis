@@ -80,6 +80,7 @@ entry point (see below):
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
 | `two-client-dm-reply.js` | bidirectional 1:1 DM — B replies and A sees it (reverse leg of two-client) | yes | yes (writable) |
 | `two-client-delete.js` | delete-for-everyone — after A's DM converges into B, A deletes it and B's already-delivered copy flips to "Message deleted" (E2EE redaction) | yes | yes (writable) |
+| `two-client-link-preview.js` | link previews (#1987) — A's core builds a preview (real fetch) and B draws the card from the message; an edit to another link shows the new card in both windows; delete-for-everyone takes it in both; then B → A. Image-less pages, since this backend has no object storage | yes | yes (writable) |
 | `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
 | `voice-ptt-deafen.js` | push-to-talk + self-deafen (#849): deafen implies mute and undeafen restores the *prior* mute state; PTT-idle renders distinctly from muted | yes | yes (writable) + LiveKit + audio |
 | `two-client-voice-channel.js` | A + B join a group voice channel, both see 2 participants, A leaves, B sees the drop | yes | yes (writable) + LiveKit + audio |
@@ -101,6 +102,7 @@ pnpm --filter @pollis/e2e e2e restart-persistence       # account persists acros
 pnpm --filter @pollis/e2e e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
 pnpm --filter @pollis/e2e e2e two-client-dm-reply       # bidirectional DM (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-delete         # delete-for-everyone redaction (needs backend)
+pnpm --filter @pollis/e2e e2e two-client-link-preview   # link-preview cards: send, edit, delete in both windows (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-channel        # group text-channel convergence (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-voice-channel  # group voice join/leave (needs backend + LiveKit + audio)
 pnpm --filter @pollis/e2e e2e voice-removal-frame-keys  # removed member's frame keys (needs backend + LiveKit + audio; app built with --features pollis/e2e-hooks)
@@ -663,6 +665,7 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `two-client.js` | `e2e-two-client.yml` | — |
 | `two-client-dm-reply.js` | `e2e-two-client-dm-reply.yml` | — |
 | `two-client-delete.js` | `e2e-two-client-delete.yml` | — |
+| `two-client-link-preview.js` | `e2e-two-client-link-preview.yml` (also on a PR that changes the scenario) | network to example.com/.org/.net |
 | `two-client-channel.js` | `e2e-two-client-channel.yml` | — |
 | `two-client-voice-channel.js` | `e2e-two-client-voice-channel.yml` | LiveKit + audio |
 | `voice-removal-frame-keys.js` | `e2e-two-client-voice-channel.yml` (second step) | LiveKit + audio, `pollis/e2e-hooks` build |

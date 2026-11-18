@@ -380,9 +380,16 @@ the device's 👍. `SHOTS_DIR=<dir>` keeps the screenshots.
 desktop app's `pollis-core`: the device opens a DM with a fresh peer
 (`two-client/link-previews/1-open-dm.yaml`), the peer builds a preview of
 github.com itself (a real fetch from the Mac) and sends it, the device must draw
-that card from the message, then send its own (`2-cards.yaml`); the script
-passes only when the peer has read the device's preview back. The one-device
-half is `flows/link-previews.yaml`.
+that card from the message, then send its own (`2-cards.yaml`). Then edit and
+delete, both ways: the peer edits its message to another link with a new
+preview and checks its replaced thumbnail stops downloading (released through
+`/v1/attachments/release`, then reclaimed by the DS), and the device must show
+the new card (`3-peer-edit.yaml`); the peer deletes for everyone and checks the
+new thumbnail goes too, and the device must show the tombstone with no card,
+then edits its own message to another link and deletes it
+(`4-peer-delete.yaml`). The script passes only when the peer has read the
+device's preview, its edit and its delete back. The one-device half is
+`flows/link-previews.yaml`.
 
 **Pins across members (automated, #1315):** `mobile/scripts/maestro-pins.sh <device>`
 — the lost-message shape with `pollis-tui`'s `pins_peer` example: the device

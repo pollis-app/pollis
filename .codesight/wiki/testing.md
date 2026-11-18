@@ -1171,7 +1171,7 @@ Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
 
 The only tier that drives the **actual shipped app** — the real WebKitGTK
 WebView inside the Tauri shell, real Rust core, real Tauri IPC — rather than
-`MockRuntime` or a browser build of the frontend. **Thirteen scenario scripts**
+`MockRuntime` or a browser build of the frontend. **Sixteen scenario scripts**
 under `e2e/` (plus `run.js`, the single entry point), sharing
 `e2e/lib/harness.js` for the `tauri-driver`/WebKitWebDriver plumbing
 (raw `webdriverio` `remote()` calls, not the wdio test runner — the runner
@@ -1188,6 +1188,7 @@ build):
 | `two-client-dm-reply.js` | the reverse direction: B replies, A sees it | yes |
 | `two-client-channel.js` | group + channel convergence: create, invite, accept, post, receive | yes |
 | `two-client-delete.js` | delete convergence — the peer sees the tombstone | yes |
+| `two-client-link-preview.js` | link-preview cards (#1987): send, edit to another link and delete-for-everyone, each seen in both windows, both directions | yes |
 | `two-client-call.js` | 1:1 call place + accept (B answers from the #1639 takeover, hovering Accept first), both sides see each other | yes (+ LiveKit) |
 | `two-client-camera.js` | camera on → the peer renders the remote tile | yes (+ LiveKit) |
 | `two-client-screenshare.js` | screenshare → the peer renders the remote tile | yes (+ LiveKit) |
