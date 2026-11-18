@@ -549,6 +549,16 @@ impl InstallationCore for CoreInstallation {
             .collect())
     }
 
+    async fn schedule_cursor(&self, name: &str) -> Result<Option<u64>, CoreError> {
+        let state = self.state().await?;
+        bots::schedule_cursor(&state, name).await.map_err(core_err)
+    }
+
+    async fn mark_schedule(&self, name: &str, slot: u64) -> Result<(), CoreError> {
+        let state = self.state().await?;
+        bots::set_schedule_cursor(&state, name, slot).await.map_err(core_err)
+    }
+
     async fn message_meta(&self, message_id: &str) -> Result<Option<(String, String)>, CoreError> {
         let state = self.state().await?;
         bots::message_meta(&state, message_id)

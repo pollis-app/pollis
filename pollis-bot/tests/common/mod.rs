@@ -60,6 +60,8 @@ pub struct FakeCore {
     pub fail_claim: AtomicBool,
     pub fail_post: AtomicBool,
     pub claim_calls: AtomicUsize,
+    /// #2004: this host's schedule cursors.
+    pub schedule_cursors: Mutex<HashMap<String, u64>>,
     /// Unsealed right now; every other call asserts it.
     pub open: AtomicBool,
     pub opens: AtomicUsize,
@@ -82,6 +84,7 @@ impl FakeCore {
             fail_claim: AtomicBool::new(false),
             fail_post: AtomicBool::new(false),
             claim_calls: AtomicUsize::new(0),
+            schedule_cursors: Mutex::new(HashMap::new()),
             open: AtomicBool::new(false),
             opens: AtomicUsize::new(0),
             closes: AtomicUsize::new(0),
@@ -180,6 +183,17 @@ impl InstallationCore for FakeCore {
         if !posts.iter().any(|(id, _, _)| id == message_id) {
             posts.push((message_id.into(), channel_id.into(), text.into()));
         }
+        Ok(())
+    }
+
+    async fn schedule_cursor(&self, name: &str) -> Result<Option<u64>, CoreError> {
+        self.assert_open();
+        Ok(self.schedule_cursors.lock().unwrap().get(name).copied())
+    }
+
+    async fn mark_schedule(&self, name: &str, slot: u64) -> Result<(), CoreError> {
+        self.assert_open();
+        self.schedule_cursors.lock().unwrap().insert(name.to_string(), slot);
         Ok(())
     }
 
@@ -288,7 +302,7 @@ impl Handler for EchoHandler {
                 channel: m.channel_id.clone(),
                 text: format!("echo: {}", m.text.clone().unwrap_or_default()),
             }]),
-            Trigger::Webhook(_) => Ok(Vec::new()),
+            Trigger::Webhook(_) | Trigger::Schedule(_) => Ok(Vec::new()),
         }
     }
 }

@@ -166,7 +166,8 @@ pub fn manifest() -> Manifest {
             "read": { "channels": ["#general", "#ops"], "history": 7, "events": ["created", "edited"] },
             "actions": ["post", "reply", "react", "edit_own", "delete_own"],
             "state": { "quota": 64 },
-            "egress": ["api.x.com"]
+            "egress": ["api.x.com"],
+            "schedules": [{ "name": "now", "every": 60 }]
         }"##,
     )
     .unwrap()

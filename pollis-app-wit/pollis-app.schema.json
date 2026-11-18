@@ -83,6 +83,20 @@
         }
       }
     },
+    "schedules": {
+      "type": "array",
+      "description": "When the `schedule` trigger fires; required with it and refused without it. Each fires at every Unix time k * every + offset (UTC seconds).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "every"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Passed to on-schedule." },
+          "every": { "type": "integer", "minimum": 60, "maximum": 604800, "description": "Period in seconds." },
+          "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "Seconds after each period boundary; less than every." }
+        }
+      }
+    },
     "egress": {
       "type": "array",
       "uniqueItems": true,

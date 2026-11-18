@@ -20,7 +20,7 @@ fn keys(v: &Value) -> BTreeSet<String> {
 fn full_manifest() -> Value {
     serde_json::to_value(
         Manifest::from_json(
-            br##"{"$schema":"x","name":"a","version":"1","description":"d","triggers":["webhook"],
+            br##"{"$schema":"x","name":"a","version":"1","description":"d","triggers":["webhook","schedule"],"schedules":[{"name":"s","every":60,"offset":1}],
                 "read":{"channels":["*"],"history":1,"events":["created"]},
                 "actions":["post"],"state":{"quota":1},"egress":["a.example"]}"##,
         )
@@ -41,6 +41,10 @@ fn schema_properties_match_the_rust_type() {
     assert_eq!(
         keys(&schema["properties"]["state"]["properties"]),
         keys(&m["state"])
+    );
+    assert_eq!(
+        keys(&schema["properties"]["schedules"]["items"]["properties"]),
+        keys(&m["schedules"][0])
     );
 }
 
@@ -67,6 +71,10 @@ fn schema_enums_match_the_rust_enums() {
                 "events" => {
                     format!(r#"{{"name":"a","version":"1","read":{{"events":["{value}"]}}}}"#)
                 }
+                // The schedule trigger comes with its schedules.
+                _ if value == "schedule" => format!(
+                    r#"{{"name":"a","version":"1","triggers":["schedule"],"schedules":[{{"name":"s","every":60}}]}}"#
+                ),
                 _ => format!(r#"{{"name":"a","version":"1","{field}":["{value}"]}}"#),
             };
             assert!(
