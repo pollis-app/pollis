@@ -801,22 +801,20 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(crate::commands::avatar::get_avatar_path(user_id, key, px, dest_dir, &state()?)
                 .await?)
         }
-        "upload_avatar" => {
+        // `upload_avatar_image` (#2003): an alias picture, uploaded the same way but
+        // not saved on the profile.
+        "upload_avatar" | "upload_avatar_image" => {
             let user_id: String = arg(&args, "userId")?;
             let path: String = arg(&args, "path")?;
             let px: u32 = arg(&args, "px")?;
             let dest_dir: Option<String> = arg_opt(&args, "destDir")?;
-            ok(crate::commands::avatar::upload_avatar(user_id, path, px, dest_dir, &state()?)
-                .await?)
-        }
-        // #2003: an alias picture is uploaded the same way but not saved on the profile.
-        "upload_avatar_image" => {
-            let user_id: String = arg(&args, "userId")?;
-            let path: String = arg(&args, "path")?;
-            let px: u32 = arg(&args, "px")?;
-            let dest_dir: Option<String> = arg_opt(&args, "destDir")?;
-            ok(crate::commands::avatar::upload_avatar_image(user_id, path, px, dest_dir, &state()?)
-                .await?)
+            let state = state()?;
+            ok(if cmd == "upload_avatar" {
+                crate::commands::avatar::upload_avatar(user_id, path, px, dest_dir, &state).await?
+            } else {
+                crate::commands::avatar::upload_avatar_image(user_id, path, px, dest_dir, &state)
+                    .await?
+            })
         }
         "remove_avatar" => {
             let user_id: String = arg(&args, "userId")?;

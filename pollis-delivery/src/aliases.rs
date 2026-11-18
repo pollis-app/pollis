@@ -299,27 +299,43 @@ pub async fn read_group_aliases(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: GroupAliasesBody = match serde_json::from_slice(&req.body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
-    };
-    let who = match crate::reads::authed_user(&state, &req, Some(parsed.user_id.as_str())).await? {
-        Ok(u) => u,
-        Err(resp) => return Ok(resp),
-    };
+    let (parsed, who) =
+        match crate::reads::parse_user_read(&state, &req, |b: &GroupAliasesBody| &b.user_id).await? {
+            Ok(v) => v,
+            Err(resp) => return Ok(resp),
+        };
     let conn = state.db.conn().await?;
     Ok(crate::writes::ok_response::<GroupAliasesBody>(
         list_group_aliases(&conn, &parsed.group_id, &who).await?,
     ))
 }
 
-fn alias_from_row(row: &libsql::Row) -> anyhow::Result<GroupAliasWire> {
-    Ok(GroupAliasWire {
-        group_id: row.get(0)?,
-        user_id: row.get(1)?,
-        display_name: row.get(2)?,
-        avatar_url: row.get(3)?,
-    })
+/// The aliases `WHERE <column> = ?1` selects, ordered by `order`.
+async fn query_aliases(
+    conn: &Connection,
+    column: &str,
+    order: &str,
+    value: &str,
+) -> anyhow::Result<Vec<GroupAliasWire>> {
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT group_id, user_id, display_name, avatar_url FROM group_alias \
+                 WHERE {column} = ?1 ORDER BY {order}"
+            ),
+            libsql::params![value.to_string()],
+        )
+        .await?;
+    let mut aliases = Vec::new();
+    while let Some(row) = rows.next().await? {
+        aliases.push(GroupAliasWire {
+            group_id: row.get(0)?,
+            user_id: row.get(1)?,
+            display_name: row.get(2)?,
+            avatar_url: row.get(3)?,
+        });
+    }
+    Ok(aliases)
 }
 
 /// Every alias in `group_id` (members past and present), sorted by user, when
@@ -332,30 +348,18 @@ pub async fn list_group_aliases(
     if !crate::groups::is_member(conn, group_id, reader).await? {
         return Ok(GroupAliasesResponse::default());
     }
-    let mut rows = conn
-        .query(
-            "SELECT group_id, user_id, display_name, avatar_url FROM group_alias \
-             WHERE group_id = ?1 ORDER BY user_id",
-            libsql::params![group_id.to_string()],
-        )
-        .await?;
-    let mut aliases = Vec::new();
-    while let Some(row) = rows.next().await? {
-        aliases.push(alias_from_row(&row)?);
-    }
-    Ok(GroupAliasesResponse { authorized: true, aliases })
+    Ok(GroupAliasesResponse {
+        authorized: true,
+        aliases: query_aliases(conn, "group_id", "user_id", group_id).await?,
+    })
 }
 
 pub async fn read_my_aliases(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: MyAliasesBody = match serde_json::from_slice(&req.body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
-    };
-    let who = match crate::reads::authed_user(&state, &req, Some(parsed.user_id.as_str())).await? {
-        Ok(u) => u,
+    let who = match crate::reads::parse_user_read(&state, &req, |b: &MyAliasesBody| &b.user_id).await? {
+        Ok((_, who)) => who,
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
@@ -364,18 +368,9 @@ pub async fn read_my_aliases(
 
 /// Every alias `user_id` owns, in any group (including ones they left), sorted by group.
 pub async fn list_my_aliases(conn: &Connection, user_id: &str) -> anyhow::Result<MyAliasesResponse> {
-    let mut rows = conn
-        .query(
-            "SELECT group_id, user_id, display_name, avatar_url FROM group_alias \
-             WHERE user_id = ?1 ORDER BY group_id",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    let mut aliases = Vec::new();
-    while let Some(row) = rows.next().await? {
-        aliases.push(alias_from_row(&row)?);
-    }
-    Ok(MyAliasesResponse { aliases })
+    Ok(MyAliasesResponse {
+        aliases: query_aliases(conn, "user_id", "group_id", user_id).await?,
+    })
 }
 
 /// How long a released avatar waits before its object may be deleted. Covers
