@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
+import { botQueryKeys } from "./useBots";
 import {
   isStaleApprovalError,
   type ApproveBotAppInput,
@@ -68,6 +69,8 @@ export function useApproveBotApp(groupId: string | null, botUserId: string | nul
     onSuccess: (view) => {
       queryClient.setQueryData(botAppQueryKeys.app(groupId, botUserId), view);
       queryClient.invalidateQueries({ queryKey: botAppQueryKeys.group(groupId) });
+      // The approved App's slash commands (#2018) change with it; the composer re-reads them.
+      queryClient.invalidateQueries({ queryKey: botQueryKeys.commands(groupId) });
     },
     onError: (error) => {
       if (isStaleApprovalError((error as Error)?.message)) {
