@@ -329,7 +329,14 @@
         "egress_added": "ወደ {{value}} ውሂብ መላክ ይችላል",
         "egress_removed": "ከዚህ በኋላ ወደ {{value}} ውሂብ አይልክም",
         "state_quota_increased": "ማከማቻ፦ ከ{{previous}} ወደ {{value}}",
-        "state_quota_decreased": "ማከማቻ፦ ከ{{previous}} ወደ {{value}}"
+        "state_quota_decreased": "ማከማቻ፦ ከ{{previous}} ወደ {{value}}",
+        "command_added": "አዲስ ትዕዛዝ፦ /{{value}}",
+        "command_removed": "ከዚህ በኋላ /{{value}} አያቀርብም",
+        "command_increased": "/{{value}} ከ{{previous}} ወደ {{next}} ይቀየራል",
+        "schedule_added": "በአዲስ የጊዜ ሰሌዳ ይሰራል፦ {{value}}",
+        "schedule_removed": "የጊዜ ሰሌዳ {{value}} ተወግዷል",
+        "schedule_increased": "የጊዜ ሰሌዳ {{value}} ብዙ ጊዜ ይሰራል፦ በየ{{next}}፣ ቀድሞ በየ{{previous}}",
+        "schedule_decreased": "የጊዜ ሰሌዳ {{value}} ያነሰ ጊዜ ይሰራል፦ በየ{{next}}፣ ቀድሞ በየ{{previous}}"
       },
       "pending": {
         "firstHeading": "ይህን App ያጽድቁ",
@@ -355,6 +362,10 @@
         "stale": "ሌላ አስተዳዳሪ አሁን ይህን ቦት አጽድቋል። ከማጽደቅዎ በፊት እንደገና ይመልከቱ።",
         "changed": "ይህ ገጽ ከተከፈተ በኋላ App ተለውጧል። ከማጽደቅዎ በፊት እንደገና ይመልከቱ።",
         "failed": "ማጽደቁን ማስቀመጥ አልተቻለም።"
+      },
+      "commandKinds": {
+        "command": "በቻናሉ የሚለጠፍ ትዕዛዝ",
+        "request": "የግል ጥያቄ"
       }
     }
   }

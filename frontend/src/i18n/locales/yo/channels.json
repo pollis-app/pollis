@@ -321,7 +321,14 @@
         "egress_added": "Ó lè fi dátà ránṣẹ́ sí {{value}}",
         "egress_removed": "Kò fi dátà ránṣẹ́ sí {{value}} mọ́",
         "state_quota_increased": "Ibi ìpamọ́: láti {{previous}} sí {{value}}",
-        "state_quota_decreased": "Ibi ìpamọ́: láti {{previous}} sí {{value}}"
+        "state_quota_decreased": "Ibi ìpamọ́: láti {{previous}} sí {{value}}",
+        "command_added": "Àṣẹ tuntun: /{{value}}",
+        "command_removed": "Kò pèsè /{{value}} mọ́",
+        "command_increased": "/{{value}} yí padà láti {{previous}} sí {{next}}",
+        "schedule_added": "Ó ń ṣiṣẹ́ lórí ètò àkókò tuntun: {{value}}",
+        "schedule_removed": "A ti yọ ètò àkókò {{value}} kúrò",
+        "schedule_increased": "Ètò àkókò {{value}} ń ṣiṣẹ́ léraléra sí i: ní gbogbo {{next}}, tẹ́lẹ̀ ní gbogbo {{previous}}",
+        "schedule_decreased": "Ètò àkókò {{value}} ń ṣiṣẹ́ díẹ̀ sí i: ní gbogbo {{next}}, tẹ́lẹ̀ ní gbogbo {{previous}}"
       },
       "pending": {
         "firstHeading": "Fọwọ́ sí App yìí",
@@ -347,6 +354,10 @@
         "stale": "Alábòójútó míì ṣẹ̀ṣẹ̀ fọwọ́ sí bọ́ọ̀tì yìí. Tún wò ó kí o tó fọwọ́ sí i.",
         "changed": "App ti yí padà láti ìgbà tí a ti ṣí ojú-ìwé yìí. Tún wò ó kí o tó fọwọ́ sí i.",
         "failed": "A kò lè fi ìfọwọ́sí náà pamọ́."
+      },
+      "commandKinds": {
+        "command": "àṣẹ tí a fi ránṣẹ́ sí ìkànnì",
+        "request": "ìbéèrè àdáni"
       }
     }
   }

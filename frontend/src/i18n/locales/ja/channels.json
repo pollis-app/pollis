@@ -321,7 +321,14 @@
         "egress_added": "{{value}} にデータを送信できます",
         "egress_removed": "{{value}} にデータを送信しなくなります",
         "state_quota_increased": "ストレージ：{{previous}} → {{value}}",
-        "state_quota_decreased": "ストレージ：{{previous}} → {{value}}"
+        "state_quota_decreased": "ストレージ：{{previous}} → {{value}}",
+        "command_added": "新しいコマンド：/{{value}}",
+        "command_removed": "/{{value}} を提供しなくなります",
+        "command_increased": "/{{value}} が{{previous}}から{{next}}に変わります",
+        "schedule_added": "新しいスケジュールで実行：{{value}}",
+        "schedule_removed": "スケジュール {{value}} を削除",
+        "schedule_increased": "スケジュール {{value}} の実行が増えます：{{next}}ごと（以前は{{previous}}ごと）",
+        "schedule_decreased": "スケジュール {{value}} の実行が減ります：{{next}}ごと（以前は{{previous}}ごと）"
       },
       "pending": {
         "firstHeading": "このAppを承認",
@@ -347,6 +354,10 @@
         "stale": "別の管理者がたった今このボットを承認しました。もう一度確認してから承認してください。",
         "changed": "このページを開いてからAppが変わりました。もう一度確認してから承認してください。",
         "failed": "承認を保存できませんでした。"
+      },
+      "commandKinds": {
+        "command": "チャンネルに投稿されるコマンド",
+        "request": "非公開のリクエスト"
       }
     }
   }

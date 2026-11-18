@@ -329,7 +329,14 @@
         "egress_added": "{{value}} కి డేటా పంపగలదు",
         "egress_removed": "ఇకపై {{value}} కి డేటా పంపదు",
         "state_quota_increased": "నిల్వ: {{previous}} నుండి {{value}}",
-        "state_quota_decreased": "నిల్వ: {{previous}} నుండి {{value}}"
+        "state_quota_decreased": "నిల్వ: {{previous}} నుండి {{value}}",
+        "command_added": "కొత్త కమాండ్: /{{value}}",
+        "command_removed": "ఇకపై /{{value}} అందించదు",
+        "command_increased": "/{{value}} {{previous}} నుండి {{next}} గా మారుతుంది",
+        "schedule_added": "కొత్త షెడ్యూల్‌లో నడుస్తుంది: {{value}}",
+        "schedule_removed": "షెడ్యూల్ {{value}} తొలగించబడింది",
+        "schedule_increased": "షెడ్యూల్ {{value}} తరచుగా నడుస్తుంది: ప్రతి {{next}}, ముందు ప్రతి {{previous}}",
+        "schedule_decreased": "షెడ్యూల్ {{value}} తక్కువగా నడుస్తుంది: ప్రతి {{next}}, ముందు ప్రతి {{previous}}"
       },
       "pending": {
         "firstHeading": "ఈ App ను ఆమోదించండి",
@@ -355,6 +362,10 @@
         "stale": "మరో అడ్మిన్ ఇప్పుడే ఈ బాట్‌ను ఆమోదించారు. ఆమోదించే ముందు మళ్ళీ చూడండి.",
         "changed": "ఈ పేజీ తెరిచినప్పటి నుండి App మారింది. ఆమోదించే ముందు మళ్ళీ చూడండి.",
         "failed": "ఆమోదాన్ని సేవ్ చేయలేకపోయాం."
+      },
+      "commandKinds": {
+        "command": "ఛానెల్‌లో పోస్ట్ అయ్యే కమాండ్",
+        "request": "ప్రైవేట్ అభ్యర్థన"
       }
     }
   }

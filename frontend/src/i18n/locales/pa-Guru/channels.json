@@ -329,7 +329,14 @@
         "egress_added": "{{value}} ਨੂੰ ਡਾਟਾ ਭੇਜ ਸਕਦਾ ਹੈ",
         "egress_removed": "ਹੁਣ {{value}} ਨੂੰ ਡਾਟਾ ਨਹੀਂ ਭੇਜਦਾ",
         "state_quota_increased": "ਸਟੋਰੇਜ: {{previous}} ਤੋਂ {{value}}",
-        "state_quota_decreased": "ਸਟੋਰੇਜ: {{previous}} ਤੋਂ {{value}}"
+        "state_quota_decreased": "ਸਟੋਰੇਜ: {{previous}} ਤੋਂ {{value}}",
+        "command_added": "ਨਵੀਂ ਕਮਾਂਡ: /{{value}}",
+        "command_removed": "ਹੁਣ /{{value}} ਪੇਸ਼ ਨਹੀਂ ਕਰਦਾ",
+        "command_increased": "/{{value}} {{previous}} ਤੋਂ {{next}} ਵਿੱਚ ਬਦਲਦੀ ਹੈ",
+        "schedule_added": "ਨਵੀਂ ਸਮਾਂ-ਸਾਰਣੀ 'ਤੇ ਚੱਲਦਾ ਹੈ: {{value}}",
+        "schedule_removed": "ਸਮਾਂ-ਸਾਰਣੀ {{value}} ਹਟਾਈ ਗਈ",
+        "schedule_increased": "ਸਮਾਂ-ਸਾਰਣੀ {{value}} ਹੁਣ ਵੱਧ ਵਾਰ ਚੱਲਦੀ ਹੈ: ਹਰ {{next}}, ਪਹਿਲਾਂ ਹਰ {{previous}}",
+        "schedule_decreased": "ਸਮਾਂ-ਸਾਰਣੀ {{value}} ਹੁਣ ਘੱਟ ਵਾਰ ਚੱਲਦੀ ਹੈ: ਹਰ {{next}}, ਪਹਿਲਾਂ ਹਰ {{previous}}"
       },
       "pending": {
         "firstHeading": "ਇਹ App ਮਨਜ਼ੂਰ ਕਰੋ",
@@ -355,6 +362,10 @@
         "stale": "ਕਿਸੇ ਹੋਰ ਐਡਮਿਨ ਨੇ ਹੁਣੇ ਇਹ ਬੋਟ ਮਨਜ਼ੂਰ ਕੀਤਾ। ਮਨਜ਼ੂਰ ਕਰਨ ਤੋਂ ਪਹਿਲਾਂ ਦੁਬਾਰਾ ਦੇਖੋ।",
         "changed": "ਇਹ ਪੰਨਾ ਖੁੱਲ੍ਹਣ ਤੋਂ ਬਾਅਦ App ਬਦਲ ਗਈ। ਮਨਜ਼ੂਰ ਕਰਨ ਤੋਂ ਪਹਿਲਾਂ ਦੁਬਾਰਾ ਦੇਖੋ।",
         "failed": "ਮਨਜ਼ੂਰੀ ਸੇਵ ਨਹੀਂ ਹੋ ਸਕੀ।"
+      },
+      "commandKinds": {
+        "command": "ਚੈਨਲ ਵਿੱਚ ਪੋਸਟ ਹੋਣ ਵਾਲੀ ਕਮਾਂਡ",
+        "request": "ਨਿੱਜੀ ਬੇਨਤੀ"
       }
     }
   }

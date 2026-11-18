@@ -329,7 +329,14 @@
         "egress_added": "{{value}} ته معلومات لېږلای شي",
         "egress_removed": "نور {{value}} ته معلومات نه لېږي",
         "state_quota_increased": "زېرمه: له {{previous}} څخه {{value}} ته",
-        "state_quota_decreased": "زېرمه: له {{previous}} څخه {{value}} ته"
+        "state_quota_decreased": "زېرمه: له {{previous}} څخه {{value}} ته",
+        "command_added": "نوی امر: /{{value}}",
+        "command_removed": "نور /{{value}} نه وړاندې کوي",
+        "command_increased": "/{{value}} له {{previous}} څخه {{next}} ته بدلېږي",
+        "schedule_added": "په نوي مهالوېش چلېږي: {{value}}",
+        "schedule_removed": "مهالوېش {{value}} لرې شو",
+        "schedule_increased": "مهالوېش {{value}} ډېر ځله چلېږي: هر {{next}}، مخکې هر {{previous}}",
+        "schedule_decreased": "مهالوېش {{value}} لږ ځله چلېږي: هر {{next}}، مخکې هر {{previous}}"
       },
       "pending": {
         "firstHeading": "دا App تایید کړئ",
@@ -355,6 +362,10 @@
         "stale": "بل اډمین همدا اوس دا بوټ تایید کړ. د تایید مخکې بیا وګورئ.",
         "changed": "له دې پاڼې د پرانیستلو راهیسې App بدل شوی. د تایید مخکې بیا وګورئ.",
         "failed": "تایید خوندي نه شو."
+      },
+      "commandKinds": {
+        "command": "هغه امر چې په چینل کې خپرېږي",
+        "request": "شخصي غوښتنه"
       }
     }
   }

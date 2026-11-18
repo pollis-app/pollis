@@ -329,7 +329,14 @@
         "egress_added": "Ingathumela idatha ku-{{value}}",
         "egress_removed": "Ayisathumeli idatha ku-{{value}}",
         "state_quota_increased": "Isitoreji: kusuka ku-{{previous}} kuya ku-{{value}}",
-        "state_quota_decreased": "Isitoreji: kusuka ku-{{previous}} kuya ku-{{value}}"
+        "state_quota_decreased": "Isitoreji: kusuka ku-{{previous}} kuya ku-{{value}}",
+        "command_added": "Umyalo omusha: /{{value}}",
+        "command_removed": "Ayisanikezi /{{value}}",
+        "command_increased": "/{{value}} iyashintsha isuka ku-{{previous}} iye ku-{{next}}",
+        "schedule_added": "Isebenza ngesheduli entsha: {{value}}",
+        "schedule_removed": "Isheduli {{value}} isusiwe",
+        "schedule_increased": "Isheduli {{value}} isebenza kaningi: njalo ngemva kuka-{{next}}, ngaphambili njalo ngemva kuka-{{previous}}",
+        "schedule_decreased": "Isheduli {{value}} isebenza kancane: njalo ngemva kuka-{{next}}, ngaphambili njalo ngemva kuka-{{previous}}"
       },
       "pending": {
         "firstHeading": "Vuma le App",
@@ -355,6 +362,10 @@
         "stale": "Omunye umphathi usanda kuvuma le bhothi. Phinda ubheke ngaphambi kokuthi uvume.",
         "changed": "I-App ishintshile selokhu leli khasi lavulwa. Phinda ubheke ngaphambi kokuthi uvume.",
         "failed": "Asikwazanga ukulondoloza imvume."
+      },
+      "commandKinds": {
+        "command": "umyalo othunyelwa eteshini",
+        "request": "isicelo esiyimfihlo"
       }
     }
   }

@@ -329,7 +329,14 @@
         "egress_added": "{{value}} க்கு தரவை அனுப்ப முடியும்",
         "egress_removed": "இனி {{value}} க்கு தரவை அனுப்பாது",
         "state_quota_increased": "சேமிப்பகம்: {{previous}} இலிருந்து {{value}}",
-        "state_quota_decreased": "சேமிப்பகம்: {{previous}} இலிருந்து {{value}}"
+        "state_quota_decreased": "சேமிப்பகம்: {{previous}} இலிருந்து {{value}}",
+        "command_added": "புதிய கட்டளை: /{{value}}",
+        "command_removed": "இனி /{{value}} ஐ வழங்காது",
+        "command_increased": "/{{value}} {{previous}} இலிருந்து {{next}} ஆக மாறுகிறது",
+        "schedule_added": "புதிய அட்டவணையில் இயங்கும்: {{value}}",
+        "schedule_removed": "அட்டவணை {{value}} நீக்கப்பட்டது",
+        "schedule_increased": "அட்டவணை {{value}} அடிக்கடி இயங்கும்: ஒவ்வொரு {{next}}, முன்பு ஒவ்வொரு {{previous}}",
+        "schedule_decreased": "அட்டவணை {{value}} குறைவாக இயங்கும்: ஒவ்வொரு {{next}}, முன்பு ஒவ்வொரு {{previous}}"
       },
       "pending": {
         "firstHeading": "இந்த App-க்கு ஒப்புதல் அளி",
@@ -355,6 +362,10 @@
         "stale": "மற்றொரு நிர்வாகி இப்போதுதான் இந்த பாட்டுக்கு ஒப்புதல் அளித்தார். ஒப்புதல் அளிக்கும் முன் மீண்டும் பாருங்கள்.",
         "changed": "இந்தப் பக்கம் திறக்கப்பட்ட பிறகு App மாறிவிட்டது. ஒப்புதல் அளிக்கும் முன் மீண்டும் பாருங்கள்.",
         "failed": "ஒப்புதலைச் சேமிக்க முடியவில்லை."
+      },
+      "commandKinds": {
+        "command": "சேனலில் இடுகையிடப்படும் கட்டளை",
+        "request": "தனிப்பட்ட கோரிக்கை"
       }
     }
   }

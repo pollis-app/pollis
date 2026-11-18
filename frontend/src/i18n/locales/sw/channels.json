@@ -329,7 +329,14 @@
         "egress_added": "Inaweza kutuma data kwa {{value}}",
         "egress_removed": "Haitumi tena data kwa {{value}}",
         "state_quota_increased": "Hifadhi: kutoka {{previous}} hadi {{value}}",
-        "state_quota_decreased": "Hifadhi: kutoka {{previous}} hadi {{value}}"
+        "state_quota_decreased": "Hifadhi: kutoka {{previous}} hadi {{value}}",
+        "command_added": "Amri mpya: /{{value}}",
+        "command_removed": "Haitoi tena /{{value}}",
+        "command_increased": "/{{value}} inabadilika kutoka {{previous}} kuwa {{next}}",
+        "schedule_added": "Inaendeshwa kwa ratiba mpya: {{value}}",
+        "schedule_removed": "Ratiba {{value}} imeondolewa",
+        "schedule_increased": "Ratiba {{value}} inaendeshwa mara nyingi zaidi: kila {{next}}, awali kila {{previous}}",
+        "schedule_decreased": "Ratiba {{value}} inaendeshwa mara chache zaidi: kila {{next}}, awali kila {{previous}}"
       },
       "pending": {
         "firstHeading": "Idhinisha App hii",
@@ -355,6 +362,10 @@
         "stale": "Msimamizi mwingine ameidhinisha boti hii sasa hivi. Angalia tena kabla ya kuidhinisha.",
         "changed": "App imebadilika tangu ukurasa huu ufunguliwe. Angalia tena kabla ya kuidhinisha.",
         "failed": "Imeshindikana kuhifadhi idhini."
+      },
+      "commandKinds": {
+        "command": "amri inayochapishwa kwenye chaneli",
+        "request": "ombi la faragha"
       }
     }
   }

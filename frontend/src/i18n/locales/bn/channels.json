@@ -329,7 +329,14 @@
         "egress_added": "{{value}}-এ ডেটা পাঠাতে পারে",
         "egress_removed": "আর {{value}}-এ ডেটা পাঠায় না",
         "state_quota_increased": "স্টোরেজ: {{previous}} থেকে {{value}}",
-        "state_quota_decreased": "স্টোরেজ: {{previous}} থেকে {{value}}"
+        "state_quota_decreased": "স্টোরেজ: {{previous}} থেকে {{value}}",
+        "command_added": "নতুন কমান্ড: /{{value}}",
+        "command_removed": "আর /{{value}} দেয় না",
+        "command_increased": "/{{value}} {{previous}} থেকে {{next}}-এ বদলায়",
+        "schedule_added": "নতুন সময়সূচিতে চলে: {{value}}",
+        "schedule_removed": "সময়সূচি {{value}} সরানো হয়েছে",
+        "schedule_increased": "সময়সূচি {{value}} আরও ঘনঘন চলে: প্রতি {{next}}, আগে প্রতি {{previous}}",
+        "schedule_decreased": "সময়সূচি {{value}} কম ঘনঘন চলে: প্রতি {{next}}, আগে প্রতি {{previous}}"
       },
       "pending": {
         "firstHeading": "এই App অনুমোদন করুন",
@@ -355,6 +362,10 @@
         "stale": "আরেকজন অ্যাডমিন এইমাত্র এই বটটি অনুমোদন করেছেন। অনুমোদনের আগে আবার দেখে নিন।",
         "changed": "এই পেজ খোলার পর App বদলে গেছে। অনুমোদনের আগে আবার দেখে নিন।",
         "failed": "অনুমোদন সংরক্ষণ করা যায়নি।"
+      },
+      "commandKinds": {
+        "command": "চ্যানেলে পোস্ট করা কমান্ড",
+        "request": "ব্যক্তিগত অনুরোধ"
       }
     }
   }

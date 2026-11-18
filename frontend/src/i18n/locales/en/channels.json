@@ -400,7 +400,14 @@
         "egress_added": "Can send data to {{value}}",
         "egress_removed": "No longer sends data to {{value}}",
         "state_quota_increased": "Storage: from {{previous}} to {{value}}",
-        "state_quota_decreased": "Storage: from {{previous}} to {{value}}"
+        "state_quota_decreased": "Storage: from {{previous}} to {{value}}",
+        "command_added": "New command: /{{value}}",
+        "command_removed": "No longer offers /{{value}}",
+        "command_increased": "/{{value}} changes from {{previous}} to {{next}}",
+        "schedule_added": "Runs on a new schedule: {{value}}",
+        "schedule_removed": "Schedule {{value}} removed",
+        "schedule_increased": "Schedule {{value}} runs more often: every {{next}}, was every {{previous}}",
+        "schedule_decreased": "Schedule {{value}} runs less often: every {{next}}, was every {{previous}}"
       },
       "pending": {
         "firstHeading": "Approve this App",
@@ -426,6 +433,10 @@
         "stale": "Another admin approved this bot just now. Look again before you approve.",
         "changed": "The App changed since this page opened. Look again before you approve.",
         "failed": "Couldn't save the approval."
+      },
+      "commandKinds": {
+        "command": "a command posted in the channel",
+        "request": "a private request"
       }
     }
   }

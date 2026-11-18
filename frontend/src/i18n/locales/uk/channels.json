@@ -338,7 +338,14 @@
         "egress_added": "Може надсилати дані на {{value}}",
         "egress_removed": "Більше не надсилає дані на {{value}}",
         "state_quota_increased": "Сховище: з {{previous}} до {{value}}",
-        "state_quota_decreased": "Сховище: з {{previous}} до {{value}}"
+        "state_quota_decreased": "Сховище: з {{previous}} до {{value}}",
+        "command_added": "Нова команда: /{{value}}",
+        "command_removed": "Більше не пропонує /{{value}}",
+        "command_increased": "/{{value}} змінюється з «{{previous}}» на «{{next}}»",
+        "schedule_added": "Працює за новим розкладом: {{value}}",
+        "schedule_removed": "Розклад {{value}} видалено",
+        "schedule_increased": "Розклад {{value}} спрацьовує частіше: раз на {{next}}, було раз на {{previous}}",
+        "schedule_decreased": "Розклад {{value}} спрацьовує рідше: раз на {{next}}, було раз на {{previous}}"
       },
       "pending": {
         "firstHeading": "Схвалити цей App",
@@ -364,6 +371,10 @@
         "stale": "Інший адміністратор щойно схвалив цього бота. Перевірте ще раз перед схваленням.",
         "changed": "App змінився відтоді, як відкрилася ця сторінка. Перевірте ще раз перед схваленням.",
         "failed": "Не вдалося зберегти схвалення."
+      },
+      "commandKinds": {
+        "command": "команда, що публікується в каналі",
+        "request": "особистий запит"
       }
     }
   }

@@ -329,7 +329,14 @@
         "egress_added": "Pode enviar dados para {{value}}",
         "egress_removed": "Não envia mais dados para {{value}}",
         "state_quota_increased": "Armazenamento: de {{previous}} para {{value}}",
-        "state_quota_decreased": "Armazenamento: de {{previous}} para {{value}}"
+        "state_quota_decreased": "Armazenamento: de {{previous}} para {{value}}",
+        "command_added": "Novo comando: /{{value}}",
+        "command_removed": "Não oferece mais /{{value}}",
+        "command_increased": "/{{value}} muda de {{previous}} para {{next}}",
+        "schedule_added": "É executado em um novo agendamento: {{value}}",
+        "schedule_removed": "Agendamento {{value}} removido",
+        "schedule_increased": "O agendamento {{value}} roda com mais frequência: a cada {{next}}, antes a cada {{previous}}",
+        "schedule_decreased": "O agendamento {{value}} roda com menos frequência: a cada {{next}}, antes a cada {{previous}}"
       },
       "pending": {
         "firstHeading": "Aprovar este App",
@@ -355,6 +362,10 @@
         "stale": "Outro administrador acabou de aprovar este bot. Confira de novo antes de aprovar.",
         "changed": "O App mudou desde que esta página foi aberta. Confira de novo antes de aprovar.",
         "failed": "Não foi possível salvar a aprovação."
+      },
+      "commandKinds": {
+        "command": "um comando publicado no canal",
+        "request": "uma solicitação privada"
       }
     }
   }

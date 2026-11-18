@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import type { ActionKind, ManifestChange, TriggerKind } from "../../types";
 import { activeLocale, formatFileSize } from "../../utils/format";
 import { errorMessage } from "../../utils/errorMessage";
-import { appApprovalErrorKind, isAppReasonCode, type AppLine } from "../../utils/botApps";
+import { appApprovalErrorKind, isAppReasonCode, scheduleChangeParts, type AppLine } from "../../utils/botApps";
 
 type T = TFunction<"channels">;
 
@@ -21,6 +21,23 @@ function formatDays(days: number): string {
     return new Intl.NumberFormat(activeLocale(), { style: "unit", unit: "day", unitDisplay: "long" }).format(days);
   } catch {
     return String(days);
+  }
+}
+
+/** A schedule's period in the largest whole unit: "10 minutes", "1 hour", "45 seconds". */
+function formatPeriod(seconds: number): string {
+  const [n, unit] =
+    seconds > 0 && seconds % 86400 === 0
+      ? [seconds / 86400, "day"]
+      : seconds > 0 && seconds % 3600 === 0
+        ? [seconds / 3600, "hour"]
+        : seconds > 0 && seconds % 60 === 0
+          ? [seconds / 60, "minute"]
+          : [seconds, "second"];
+  try {
+    return new Intl.NumberFormat(activeLocale(), { style: "unit", unit, unitDisplay: "long" }).format(n);
+  } catch {
+    return `${seconds}s`;
   }
 }
 
@@ -94,10 +111,31 @@ export function changeText(t: T, c: ManifestChange): string {
       value = formatBytes(Number(c.value) || 0);
       previous = formatBytes(Number(c.previous) || 0);
       break;
+    case "command":
+      if (c.kind === "increased") {
+        const next = c.previous === "request" ? "command" : "request";
+        return t("channels:bots.app.changes.command_increased", {
+          value: c.value,
+          previous: t(`channels:bots.app.commandKinds.${c.previous === "request" ? "request" : "command"}`),
+          next: t(`channels:bots.app.commandKinds.${next}`),
+        });
+      }
+      break;
+    case "schedule": {
+      const parts = c.kind === "increased" || c.kind === "decreased" ? scheduleChangeParts(c) : null;
+      if (parts) {
+        return t(`channels:bots.app.changes.schedule_${c.kind as "increased" | "decreased"}`, {
+          value: parts.name,
+          previous: parts.previousEvery === null ? c.previous ?? "" : formatPeriod(parts.previousEvery),
+          next: formatPeriod(parts.every),
+        });
+      }
+      break;
+    }
     default:
       break;
   }
-  return t(`channels:bots.app.changes.${c.field}_${c.kind}` as "channels:bots.app.changes.trigger_added", { value, previous });
+  return t(`channels:bots.app.changes.${c.field}_${c.kind}` as "channels:bots.app.changes.trigger_added", { value, previous, next: value });
 }
 
 /** Why the bot is not running, in words; the core's detail for a code this build doesn't know. */

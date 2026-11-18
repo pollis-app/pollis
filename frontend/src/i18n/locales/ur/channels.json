@@ -329,7 +329,14 @@
         "egress_added": "{{value}} کو ڈیٹا بھیج سکتا ہے",
         "egress_removed": "اب {{value}} کو ڈیٹا نہیں بھیجتا",
         "state_quota_increased": "اسٹوریج: {{previous}} سے {{value}}",
-        "state_quota_decreased": "اسٹوریج: {{previous}} سے {{value}}"
+        "state_quota_decreased": "اسٹوریج: {{previous}} سے {{value}}",
+        "command_added": "نیا کمانڈ: /{{value}}",
+        "command_removed": "اب /{{value}} پیش نہیں کرتا",
+        "command_increased": "/{{value}} {{previous}} سے {{next}} میں بدلتا ہے",
+        "schedule_added": "نئے شیڈول پر چلتا ہے: {{value}}",
+        "schedule_removed": "شیڈول {{value}} ہٹا دیا گیا",
+        "schedule_increased": "شیڈول {{value}} اب زیادہ بار چلتا ہے: ہر {{next}}، پہلے ہر {{previous}}",
+        "schedule_decreased": "شیڈول {{value}} اب کم بار چلتا ہے: ہر {{next}}، پہلے ہر {{previous}}"
       },
       "pending": {
         "firstHeading": "یہ App منظور کریں",
@@ -355,6 +362,10 @@
         "stale": "کسی دوسرے ایڈمن نے ابھی یہ بوٹ منظور کیا۔ منظور کرنے سے پہلے دوبارہ دیکھیں۔",
         "changed": "یہ صفحہ کھلنے کے بعد App بدل گئی۔ منظور کرنے سے پہلے دوبارہ دیکھیں۔",
         "failed": "منظوری محفوظ نہیں ہو سکی۔"
+      },
+      "commandKinds": {
+        "command": "چینل میں پوسٹ ہونے والا کمانڈ",
+        "request": "نجی درخواست"
       }
     }
   }

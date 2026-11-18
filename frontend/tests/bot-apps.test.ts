@@ -19,6 +19,7 @@ import {
   orderChanges,
   requestsChannel,
   requiredWidenings,
+  scheduleChangeParts,
 } from "../src/utils/botApps.ts";
 import type { AdminGrants, AppManifest, BotAppView, ManifestChange } from "../src/types/botApps.ts";
 
@@ -258,4 +259,31 @@ test("stale and changed refusals are told apart from other failures", () => {
   assert.equal(appApprovalErrorKind("app_approval_stale: another admin approved"), "stale");
   assert.equal(appApprovalErrorKind(new Error("app_approval_changed: look again")), "changed");
   assert.equal(appApprovalErrorKind("network down"), null);
+});
+
+test("new or switched commands and more frequent schedules can't be held back, so they must be allowed", () => {
+  const changes: ManifestChange[] = [
+    { field: "command", kind: "added", value: "close", widening: true },
+    { field: "command", kind: "increased", value: "ticket", previous: "request", widening: true },
+    { field: "command", kind: "removed", value: "old", widening: false },
+    { field: "schedule", kind: "added", value: "nightly", widening: true },
+    { field: "schedule", kind: "increased", value: "digest every 600s", previous: "every 3600s", widening: true },
+    { field: "schedule", kind: "decreased", value: "sweep every 7200s", previous: "every 3600s", widening: false },
+  ];
+  assert.deepEqual(requiredWidenings(changes).map(changeKey), [
+    "command:added:close",
+    "command:increased:ticket",
+    "schedule:added:nightly",
+    "schedule:increased:digest every 600s",
+  ]);
+  // Nothing grantable among them: the ceiling stays the carried-over grants.
+  assert.deepEqual(grantCeiling(V1_GRANTS, changes, new Set(changes.map(changeKey)), V1, CHANNELS), V1_GRANTS);
+});
+
+test("a changed schedule is read back into its name and periods", () => {
+  assert.deepEqual(
+    scheduleChangeParts({ field: "schedule", kind: "increased", value: "daily digest every 600s", previous: "every 3600s", widening: true }),
+    { name: "daily digest", every: 600, previousEvery: 3600 },
+  );
+  assert.equal(scheduleChangeParts({ field: "schedule", kind: "added", value: "nightly", widening: true }), null);
 });

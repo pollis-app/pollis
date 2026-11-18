@@ -329,7 +329,14 @@
         "egress_added": "{{value}} को डेटा भेज सकता है",
         "egress_removed": "अब {{value}} को डेटा नहीं भेजता",
         "state_quota_increased": "स्टोरेज: {{previous}} से {{value}}",
-        "state_quota_decreased": "स्टोरेज: {{previous}} से {{value}}"
+        "state_quota_decreased": "स्टोरेज: {{previous}} से {{value}}",
+        "command_added": "नया कमांड: /{{value}}",
+        "command_removed": "अब /{{value}} नहीं देता",
+        "command_increased": "/{{value}} {{previous}} से {{next}} में बदलता है",
+        "schedule_added": "नए शेड्यूल पर चलता है: {{value}}",
+        "schedule_removed": "शेड्यूल {{value}} हटाया गया",
+        "schedule_increased": "शेड्यूल {{value}} अब ज़्यादा बार चलता है: हर {{next}}, पहले हर {{previous}}",
+        "schedule_decreased": "शेड्यूल {{value}} अब कम बार चलता है: हर {{next}}, पहले हर {{previous}}"
       },
       "pending": {
         "firstHeading": "इस App को मंज़ूर करें",
@@ -355,6 +362,10 @@
         "stale": "किसी दूसरे एडमिन ने अभी-अभी यह बॉट मंज़ूर किया। मंज़ूर करने से पहले फिर से देखें।",
         "changed": "यह पेज खुलने के बाद App बदल गया। मंज़ूर करने से पहले फिर से देखें।",
         "failed": "मंज़ूरी सेव नहीं हो सकी।"
+      },
+      "commandKinds": {
+        "command": "चैनल में पोस्ट होने वाला कमांड",
+        "request": "निजी अनुरोध"
       }
     }
   }

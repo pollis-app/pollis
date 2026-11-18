@@ -314,7 +314,14 @@
         "egress_added": "可以向 {{value}} 发送数据",
         "egress_removed": "不再向 {{value}} 发送数据",
         "state_quota_increased": "存储空间：从 {{previous}} 改为 {{value}}",
-        "state_quota_decreased": "存储空间：从 {{previous}} 改为 {{value}}"
+        "state_quota_decreased": "存储空间：从 {{previous}} 改为 {{value}}",
+        "command_added": "新命令：/{{value}}",
+        "command_removed": "不再提供 /{{value}}",
+        "command_increased": "/{{value}} 从{{previous}}改为{{next}}",
+        "schedule_added": "按新的计划运行：{{value}}",
+        "schedule_removed": "计划 {{value}} 已移除",
+        "schedule_increased": "计划 {{value}} 运行更频繁：每 {{next}} 一次，之前每 {{previous}} 一次",
+        "schedule_decreased": "计划 {{value}} 运行更少：每 {{next}} 一次，之前每 {{previous}} 一次"
       },
       "pending": {
         "firstHeading": "批准此 App",
@@ -340,6 +347,10 @@
         "stale": "另一位管理员刚刚批准了此机器人。请重新查看后再批准。",
         "changed": "自此页面打开以来，App 已发生变化。请重新查看后再批准。",
         "failed": "无法保存批准。"
+      },
+      "commandKinds": {
+        "command": "在频道中发布的命令",
+        "request": "私密请求"
       }
     }
   }

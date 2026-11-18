@@ -338,7 +338,14 @@
         "egress_added": "Может отправлять данные на {{value}}",
         "egress_removed": "Больше не отправляет данные на {{value}}",
         "state_quota_increased": "Хранилище: с {{previous}} до {{value}}",
-        "state_quota_decreased": "Хранилище: с {{previous}} до {{value}}"
+        "state_quota_decreased": "Хранилище: с {{previous}} до {{value}}",
+        "command_added": "Новая команда: /{{value}}",
+        "command_removed": "Больше не предлагает /{{value}}",
+        "command_increased": "/{{value}} меняется с «{{previous}}» на «{{next}}»",
+        "schedule_added": "Работает по новому расписанию: {{value}}",
+        "schedule_removed": "Расписание {{value}} удалено",
+        "schedule_increased": "Расписание {{value}} срабатывает чаще: раз в {{next}}, было раз в {{previous}}",
+        "schedule_decreased": "Расписание {{value}} срабатывает реже: раз в {{next}}, было раз в {{previous}}"
       },
       "pending": {
         "firstHeading": "Одобрить этот App",
@@ -364,6 +371,10 @@
         "stale": "Другой администратор только что одобрил этого бота. Проверьте ещё раз перед одобрением.",
         "changed": "App изменился с момента открытия страницы. Проверьте ещё раз перед одобрением.",
         "failed": "Не удалось сохранить одобрение."
+      },
+      "commandKinds": {
+        "command": "команда, публикуемая в канале",
+        "request": "личный запрос"
       }
     }
   }

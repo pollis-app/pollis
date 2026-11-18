@@ -329,7 +329,14 @@
         "egress_added": "Zai iya aika bayanai zuwa {{value}}",
         "egress_removed": "Ba ya aika bayanai zuwa {{value}} kuma",
         "state_quota_increased": "Ma'aji: daga {{previous}} zuwa {{value}}",
-        "state_quota_decreased": "Ma'aji: daga {{previous}} zuwa {{value}}"
+        "state_quota_decreased": "Ma'aji: daga {{previous}} zuwa {{value}}",
+        "command_added": "Sabon umarni: /{{value}}",
+        "command_removed": "Ba ya bayar da /{{value}} kuma",
+        "command_increased": "/{{value}} yana canzawa daga {{previous}} zuwa {{next}}",
+        "schedule_added": "Yana aiki a kan sabon jadawali: {{value}}",
+        "schedule_removed": "An cire jadawali {{value}}",
+        "schedule_increased": "Jadawali {{value}} yana aiki sau da yawa: kowane {{next}}, a da kowane {{previous}}",
+        "schedule_decreased": "Jadawali {{value}} yana aiki ƙasa da da: kowane {{next}}, a da kowane {{previous}}"
       },
       "pending": {
         "firstHeading": "Amince da wannan App",
@@ -355,6 +362,10 @@
         "stale": "Wani mai gudanarwa ya amince da wannan bot yanzu. Sake duba kafin ka amince.",
         "changed": "App ta canza tun da aka buɗe wannan shafi. Sake duba kafin ka amince.",
         "failed": "An kasa ajiye amincewar."
+      },
+      "commandKinds": {
+        "command": "umarnin da ake wallafawa a tasha",
+        "request": "buƙata ta sirri"
       }
     }
   }

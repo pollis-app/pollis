@@ -329,7 +329,14 @@
         "egress_added": "{{value}} ला डेटा पाठवू शकते",
         "egress_removed": "आता {{value}} ला डेटा पाठवत नाही",
         "state_quota_increased": "स्टोरेज: {{previous}} पासून {{value}}",
-        "state_quota_decreased": "स्टोरेज: {{previous}} पासून {{value}}"
+        "state_quota_decreased": "स्टोरेज: {{previous}} पासून {{value}}",
+        "command_added": "नवीन कमांड: /{{value}}",
+        "command_removed": "आता /{{value}} देत नाही",
+        "command_increased": "/{{value}} {{previous}} वरून {{next}} मध्ये बदलते",
+        "schedule_added": "नवीन वेळापत्रकावर चालते: {{value}}",
+        "schedule_removed": "वेळापत्रक {{value}} काढले",
+        "schedule_increased": "वेळापत्रक {{value}} आता जास्त वेळा चालते: दर {{next}}, आधी दर {{previous}}",
+        "schedule_decreased": "वेळापत्रक {{value}} आता कमी वेळा चालते: दर {{next}}, आधी दर {{previous}}"
       },
       "pending": {
         "firstHeading": "हे App मंजूर करा",
@@ -355,6 +362,10 @@
         "stale": "दुसऱ्या ॲडमिनने आत्ताच हा बॉट मंजूर केला. मंजूर करण्यापूर्वी पुन्हा पाहा.",
         "changed": "हे पेज उघडल्यापासून App बदलले आहे. मंजूर करण्यापूर्वी पुन्हा पाहा.",
         "failed": "मंजुरी सेव्ह होऊ शकली नाही."
+      },
+      "commandKinds": {
+        "command": "चॅनेलमध्ये पोस्ट होणारी कमांड",
+        "request": "खाजगी विनंती"
       }
     }
   }

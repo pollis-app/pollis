@@ -354,7 +354,14 @@
         "egress_added": "يمكنه إرسال بيانات إلى {{value}}",
         "egress_removed": "لم يعد يرسل بيانات إلى {{value}}",
         "state_quota_increased": "التخزين: من {{previous}} إلى {{value}}",
-        "state_quota_decreased": "التخزين: من {{previous}} إلى {{value}}"
+        "state_quota_decreased": "التخزين: من {{previous}} إلى {{value}}",
+        "command_added": "أمر جديد: /{{value}}",
+        "command_removed": "لم يعد يوفّر /{{value}}",
+        "command_increased": "يتغيّر /{{value}} من {{previous}} إلى {{next}}",
+        "schedule_added": "يعمل وفق جدول زمني جديد: {{value}}",
+        "schedule_removed": "أُزيل الجدول الزمني {{value}}",
+        "schedule_increased": "يعمل الجدول الزمني {{value}} أكثر: كل {{next}}، وكان كل {{previous}}",
+        "schedule_decreased": "يعمل الجدول الزمني {{value}} أقل: كل {{next}}، وكان كل {{previous}}"
       },
       "pending": {
         "firstHeading": "الموافقة على هذا App",
@@ -380,6 +387,10 @@
         "stale": "وافق مشرف آخر على هذا البوت للتو. راجعه مرة أخرى قبل الموافقة.",
         "changed": "تغيّر App منذ فتح هذه الصفحة. راجعه مرة أخرى قبل الموافقة.",
         "failed": "تعذّر حفظ الموافقة."
+      },
+      "commandKinds": {
+        "command": "أمر يُنشر في القناة",
+        "request": "طلب خاص"
       }
     }
   }

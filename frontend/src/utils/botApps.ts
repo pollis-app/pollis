@@ -137,12 +137,29 @@ export function orderChanges(changes: ReadonlyArray<ManifestChange>): ManifestCh
   return [...changes.filter((c) => c.widening), ...changes.filter((c) => !c.widening)];
 }
 
+/** Fields no grant can narrow: the runtime takes every declared trigger, quota, command and schedule. */
+const UNGRANTABLE_FIELDS: ReadonlyArray<ManifestChange["field"]> = ["trigger", "state_quota", "command", "schedule"];
+
 /**
- * Widenings no grant can hold back (a new trigger, a larger storage quota): the App gets them
- * with the build, so the update can only be approved once the admin has turned each one on.
+ * Widenings no grant can hold back (a new trigger, a larger storage quota, a new or switched
+ * command, a schedule that fires more often): the App gets them with the build, so the update
+ * can only be approved once the admin has turned each one on.
  */
 export function requiredWidenings(changes: ReadonlyArray<ManifestChange>): ManifestChange[] {
-  return changes.filter((c) => c.widening && (c.field === "trigger" || c.field === "state_quota"));
+  return changes.filter((c) => c.widening && UNGRANTABLE_FIELDS.includes(c.field));
+}
+
+/**
+ * A changed schedule's parts: the core words it "digest every 600s" (was "every 3600s"), so the
+ * page can say it in the app language. Null when the value isn't in that shape.
+ */
+export function scheduleChangeParts(c: ManifestChange): { name: string; every: number; previousEvery: number | null } | null {
+  const m = /^(.*) every (\d+)s$/.exec(c.value);
+  if (!m) {
+    return null;
+  }
+  const prev = /every (\d+)s$/.exec(c.previous ?? "");
+  return { name: m[1], every: Number(m[2]), previousEvery: prev ? Number(prev[1]) : null };
 }
 
 /**

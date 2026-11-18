@@ -39,16 +39,28 @@ export interface AdminGrants {
   egress: string[];
 }
 
-type ChangeField = "trigger" | "channel" | "history" | "event" | "action" | "egress" | "state_quota";
+type ChangeField =
+  | "trigger"
+  | "channel"
+  | "history"
+  | "event"
+  | "action"
+  | "egress"
+  | "state_quota"
+  | "command"
+  | "schedule";
 type ChangeKind = "added" | "removed" | "increased" | "decreased";
 
 /** One change between the approved manifest and the waiting one. */
 export interface ManifestChange {
   field: ChangeField;
   kind: ChangeKind;
-  /** The item added or removed ("#ops", "api.linear.app", "post"), or a number's new value. */
+  /**
+   * The item added or removed ("#ops", "api.linear.app", "post", a command or schedule name), a
+   * number's new value, a switched command's name, or a changed schedule as "digest every 600s".
+   */
   value: string;
-  /** A number's old value. */
+  /** A number's old value; a switched command's old kind ("command" | "request"); "every 3600s". */
   previous?: string;
   /** The App may see or do more than before. */
   widening: boolean;
