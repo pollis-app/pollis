@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pollis_bot::action::{Action, ChannelInfo};
-use pollis_bot::core::{CoreError, InstallationCore};
+use pollis_bot::core::{CoreError, InstallationCore, Member, StateCommit, StateValue, StateWrite};
 use pollis_bot::handler::{Handler, HandlerError};
 use pollis_bot::trigger::{IncomingMessage, Trigger, TriggerKey};
 
@@ -24,6 +24,11 @@ pub struct FakeDs {
     pub posts: Mutex<Vec<(String, String, String)>>,
     /// The group's message log every host catches up from.
     pub log: Mutex<Vec<IncomingMessage>>,
+    /// #2004: App state, key -> (version, value), and the claims whose state was committed.
+    pub state: Mutex<HashMap<String, (i64, Vec<u8>)>>,
+    pub state_committed: Mutex<Vec<String>>,
+    /// The group's roster.
+    pub members: Mutex<Vec<Member>>,
 }
 
 impl FakeDs {
@@ -55,6 +60,8 @@ pub struct FakeCore {
     pub fail_claim: AtomicBool,
     pub fail_post: AtomicBool,
     pub claim_calls: AtomicUsize,
+    /// #2004: this host's schedule cursors.
+    pub schedule_cursors: Mutex<HashMap<String, u64>>,
     /// Unsealed right now; every other call asserts it.
     pub open: AtomicBool,
     pub opens: AtomicUsize,
@@ -77,6 +84,7 @@ impl FakeCore {
             fail_claim: AtomicBool::new(false),
             fail_post: AtomicBool::new(false),
             claim_calls: AtomicUsize::new(0),
+            schedule_cursors: Mutex::new(HashMap::new()),
             open: AtomicBool::new(false),
             opens: AtomicUsize::new(0),
             closes: AtomicUsize::new(0),
@@ -177,6 +185,105 @@ impl InstallationCore for FakeCore {
         }
         Ok(())
     }
+
+    async fn schedule_cursor(&self, name: &str) -> Result<Option<u64>, CoreError> {
+        self.assert_open();
+        Ok(self.schedule_cursors.lock().unwrap().get(name).copied())
+    }
+
+    async fn mark_schedule(&self, name: &str, slot: u64) -> Result<(), CoreError> {
+        self.assert_open();
+        self.schedule_cursors.lock().unwrap().insert(name.to_string(), slot);
+        Ok(())
+    }
+
+    async fn members(&self) -> Result<Vec<Member>, CoreError> {
+        self.assert_open();
+        Ok(self.ds.members.lock().unwrap().clone())
+    }
+
+    async fn state_read(&self, key: &str) -> Result<(StateValue, u64), CoreError> {
+        self.assert_open();
+        let state = self.ds.state.lock().unwrap();
+        let usage = state
+            .iter()
+            .map(|(k, (_, v))| (k.len() + v.len()) as u64)
+            .sum();
+        let value = match state.get(key) {
+            Some((version, v)) => StateValue {
+                version: *version,
+                value: Some(v.clone()),
+            },
+            None => StateValue {
+                version: 0,
+                value: None,
+            },
+        };
+        Ok((value, usage))
+    }
+
+    async fn state_commit(
+        &self,
+        key: &TriggerKey,
+        writes: &[StateWrite],
+    ) -> Result<StateCommit, CoreError> {
+        self.assert_open();
+        let claims = self.ds.claims.lock().unwrap();
+        let winner = claims.get(&(BOT.to_string(), key.as_str().to_string()));
+        assert_eq!(
+            winner,
+            Some(&self.device),
+            "state committed without this host winning the claim"
+        );
+        let mut committed = self.ds.state_committed.lock().unwrap();
+        if committed.contains(&key.as_str().to_string()) {
+            return Ok(StateCommit::AlreadyCommitted);
+        }
+        let mut state = self.ds.state.lock().unwrap();
+        for w in writes {
+            let current = state.get(&w.key).map_or(0, |(v, _)| *v);
+            if current != w.expected_version {
+                return Ok(StateCommit::Conflict);
+            }
+        }
+        for w in writes {
+            match &w.value {
+                Some(v) => {
+                    let next = state.get(&w.key).map_or(1, |(ver, _)| ver + 1);
+                    state.insert(w.key.clone(), (next, v.clone()));
+                }
+                None => {
+                    state.remove(&w.key);
+                }
+            }
+        }
+        committed.push(key.as_str().to_string());
+        Ok(StateCommit::Committed)
+    }
+
+    async fn act(
+        &self,
+        action: &pollis_bot::action::CheckedAction,
+        message_id: &str,
+    ) -> Result<(), CoreError> {
+        use pollis_bot::action::CheckedAction as C;
+        match action {
+            C::Post { channel_id, text } => self.post(channel_id, text, message_id).await,
+            C::Reply {
+                channel_id,
+                message_id: target,
+                text,
+            } => {
+                self.post(
+                    channel_id,
+                    &format!("reply to {target}: {text}"),
+                    message_id,
+                )
+                .await
+            }
+            other => Err(CoreError(format!("fake cannot apply {other:?}"))),
+        }
+    }
 }
 
 /// Replies to every message in its channel: a handler whose actions come from
@@ -195,7 +302,7 @@ impl Handler for EchoHandler {
                 channel: m.channel_id.clone(),
                 text: format!("echo: {}", m.text.clone().unwrap_or_default()),
             }]),
-            Trigger::Webhook(_) => Ok(Vec::new()),
+            Trigger::Webhook(_) | Trigger::Schedule(_) => Ok(Vec::new()),
         }
     }
 }

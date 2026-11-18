@@ -266,3 +266,70 @@ pub struct ClaimTriggerBody {
 pub struct ClaimTriggerResponse {
     pub won: bool,
 }
+
+// ---------------------------------------------------------------- App state (#2004)
+
+/// `POST /v1/bots/app-state/read` — device-signed by one of the bot's hosts:
+/// the sealed App key-value entries for `key_ids`, and the installation's
+/// total usage. The DS sees only opaque key ids and ciphertext.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppStateReadBody {
+    /// The bot's user id, while a bot has one installation.
+    pub installation_id: String,
+    /// base64 (STANDARD) of 32-byte key ids (HMAC of the App's key under a
+    /// key only the bot's hosts hold). At most [`APP_STATE_MAX_KEYS_PER_CALL`].
+    pub key_ids: Vec<String>,
+}
+
+/// Most key ids in one read, and most writes in one commit.
+pub const APP_STATE_MAX_KEYS_PER_CALL: usize = 256;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppStateEntry {
+    /// base64 (STANDARD), 32 bytes.
+    pub key_id: String,
+    /// Starts at 1, +1 per write.
+    pub version: i64,
+    /// base64 (STANDARD) of `nonce(12) || ChaCha20-Poly1305(len(key) u16 BE || key || value)`.
+    pub sealed: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppStateReadResponse {
+    /// Only the requested keys that exist.
+    pub entries: Vec<AppStateEntry>,
+    /// Sum of sealed bytes over the installation's rows.
+    pub used_bytes: u64,
+    pub rows: u64,
+}
+
+/// One write in a commit. `expected_version` is the version the host read
+/// (0 when the key was absent); `sealed: None` deletes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppStateWrite {
+    pub key_id: String,
+    pub expected_version: i64,
+    pub sealed: Option<String>,
+}
+
+/// `POST /v1/bots/app-state/commit` — device-signed by the bot's host that won
+/// the claim on `trigger_key`: apply a job's writes, all or none, once.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppStateCommitBody {
+    pub installation_id: String,
+    pub trigger_key: String,
+    pub writes: Vec<AppStateWrite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum AppStateCommitResponse {
+    /// Every write applied.
+    Committed,
+    /// A key moved since the host read it; nothing applied. Re-run the job.
+    Conflict { key_id: String },
+    /// This trigger's state was committed before (a retried job); nothing applied.
+    AlreadyCommitted,
+    /// The writes would take the installation past the DS's ceiling; nothing applied.
+    OverQuota { max_bytes: u64 },
+}

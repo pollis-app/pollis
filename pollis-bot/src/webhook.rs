@@ -1,6 +1,8 @@
 //! The alerts webhook listener (#1182, "Built-in alerts handler").
 //!
-//! `POST /hooks/<installation_id>` with `{"channel": "...", "text": "..."}`.
+//! `POST /hooks/<installation_id>` with `{"channel": "...", "text": "..."}`, or,
+//! for an App installation (#2004), any body: the App's `on-webhook` receives
+//! the body, its content type and the non-credential headers.
 //! Off until configured; binds loopback by default. Authenticated per
 //! installation, by either:
 //!
@@ -36,7 +38,7 @@ use zeroize::Zeroizing;
 
 use crate::job::{JobError, JobReport, TriggerOutcome};
 use crate::ratelimit::TokenBucket;
-use crate::trigger::WebhookCall;
+use crate::trigger::{RawWebhook, WebhookCall, WebhookPayload};
 
 /// Largest request body accepted.
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -61,12 +63,41 @@ pub trait JobSubmitter: Send + Sync {
 pub struct HookEntry {
     secret: Zeroizing<Vec<u8>>,
     limiter: std::sync::Mutex<TokenBucket>,
+    /// An App installation: pass the request through instead of parsing it.
+    raw: bool,
 }
 
 impl HookEntry {
     pub fn new(secret: Zeroizing<Vec<u8>>, limiter: TokenBucket) -> Self {
-        Self { secret, limiter: std::sync::Mutex::new(limiter) }
+        Self { secret, limiter: std::sync::Mutex::new(limiter), raw: false }
     }
+
+    /// For an App installation (#2004).
+    pub fn raw(mut self) -> Self {
+        self.raw = true;
+        self
+    }
+}
+
+/// Most headers handed to an App, and the longest value.
+pub const MAX_APP_HEADERS: usize = 32;
+pub const MAX_APP_HEADER_BYTES: usize = 1024;
+
+/// The headers an App's webhook sees: `user-agent` and `x-*`, never the
+/// credentials (`authorization`, the signature) or cookies.
+fn app_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter(|(name, _)| {
+            let n = name.as_str();
+            (n == "user-agent" || n.starts_with("x-")) && n != SIGNATURE_HEADER
+        })
+        .filter_map(|(name, value)| {
+            let v = value.to_str().ok()?;
+            (v.len() <= MAX_APP_HEADER_BYTES).then(|| (name.as_str().to_string(), v.to_string()))
+        })
+        .take(MAX_APP_HEADERS)
+        .collect()
 }
 
 pub struct WebhookState {
@@ -177,11 +208,23 @@ async fn handle_hook(
         }
         return response;
     }
-    let Ok(parsed) = serde_json::from_slice::<HookBody>(&body) else {
-        return answer(
-            StatusCode::BAD_REQUEST,
-            json!({"status": "bad_request", "fix": "send a JSON body {\"channel\": \"...\", \"text\": \"...\"}"}),
-        );
+    let payload = if entry.raw {
+        WebhookPayload::Raw(RawWebhook {
+            content_type: headers
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string),
+            headers: app_headers(&headers),
+            body: body.to_vec(),
+        })
+    } else {
+        let Ok(parsed) = serde_json::from_slice::<HookBody>(&body) else {
+            return answer(
+                StatusCode::BAD_REQUEST,
+                json!({"status": "bad_request", "fix": "send a JSON body {\"channel\": \"...\", \"text\": \"...\"}"}),
+            );
+        };
+        WebhookPayload::Alert { channel: parsed.channel, text: parsed.text }
     };
     let delivery_id = match headers.get(DELIVERY_HEADER) {
         Some(v) => match v.to_str() {
@@ -196,7 +239,7 @@ async fn handle_hook(
         None => ulid::Ulid::new().to_string(),
     };
 
-    let call = WebhookCall { delivery_id: delivery_id.clone(), channel: parsed.channel, text: parsed.text };
+    let call = WebhookCall { delivery_id: delivery_id.clone(), payload };
     let rx = state.submitter.submit_webhook(&installation_id, call);
     match tokio::time::timeout(state.answer_timeout, rx).await {
         Err(_) => answer(StatusCode::ACCEPTED, json!({"status": "accepted", "delivery_id": delivery_id})),
@@ -331,8 +374,10 @@ mod tests {
         let calls = submitter.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "INST");
-        assert_eq!(calls[0].1.channel, "alerts");
-        assert_eq!(calls[0].1.text, "disk full");
+        assert_eq!(
+            calls[0].1.payload,
+            WebhookPayload::Alert { channel: "alerts".into(), text: "disk full".into() }
+        );
     }
 
     #[tokio::test]
@@ -448,5 +493,37 @@ mod tests {
         let (status, body) = send(&app, request("/hooks/INST", &[("authorization", &bearer())], BODY)).await;
         assert_eq!(status, StatusCode::ACCEPTED, "{body}");
         assert_eq!(submitter.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_app_installation_gets_the_raw_request_without_credentials() {
+        let submitter = Arc::new(FakeSubmitter::default());
+        let mut hooks = HashMap::new();
+        hooks.insert(
+            "INST".to_string(),
+            HookEntry::new(Zeroizing::new(SECRET.to_vec()), TokenBucket::new(60, 10, Instant::now())).raw(),
+        );
+        let app = router(Arc::new(WebhookState::new(hooks, submitter.clone())));
+        let body = "not json at all";
+        let mut req = Request::post("/hooks/INST")
+            .header("content-type", "text/plain")
+            .header("x-github-event", "push")
+            .header("user-agent", "GitHub-Hookshot")
+            .header("cookie", "s=1")
+            .header(SIGNATURE_HEADER, sign(SECRET, body.as_bytes()))
+            .body(Body::from(body))
+            .unwrap();
+        req.headers_mut().insert("x-pollis-delivery", HeaderValue::from_static("d-1"));
+        let (status, v) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let calls = submitter.calls.lock().unwrap();
+        let WebhookPayload::Raw(raw) = &calls[0].1.payload else {
+            panic!("an App's call is raw");
+        };
+        assert_eq!(raw.body, body.as_bytes());
+        assert_eq!(raw.content_type.as_deref(), Some("text/plain"));
+        let names: Vec<&str> = raw.headers.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"x-github-event") && names.contains(&"user-agent"), "{names:?}");
+        assert!(!names.contains(&SIGNATURE_HEADER) && !names.contains(&"cookie") && !names.contains(&"authorization"));
     }
 }

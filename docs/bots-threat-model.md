@@ -41,11 +41,21 @@ An App runs as a WebAssembly component in `pollis-app-host`. It has no system ca
 
 - **Triggers** only of a kind its manifest declares (`triggers`), carrying a message only from a granted channel (`read.channels`) and of a granted event kind (`read.events`). The bot's own messages are never delivered to it.
   Pinned by `undeclared_trigger_kind_is_not_delivered`, `message_from_an_ungranted_channel_is_not_delivered`, `channel_the_admin_granted_but_the_manifest_did_not_request_is_not_delivered`, `undeclared_event_kind_is_not_delivered`, `the_bots_own_message_is_not_delivered`.
+- **Commands and mentions** by the runtime's routing, never the App's (#2018). A message reaches `on-command` only when its first word is `/<name>`, the name is declared in that installation's approved manifest (`commands`, not as a `request`), the App takes the `commands` trigger, and any bot named right after the command is this one; every other check above still applies. A `request: true` command is never routed from a channel message.
+  Pinned by `routes_only_declared_non_request_commands`, `a_target_routes_to_that_bot_only` (pollis-app-manifest), `a_command_the_app_did_not_declare_or_aimed_at_another_bot_runs_nothing`, `a_command_in_a_channel_the_app_is_not_granted_runs_nothing` (`pollis-bot/tests/app_handler.rs`) and the flows tests in `src-tauri/tests/flows/bot_commands.rs`.
 - **History** through `query-messages`, only from granted channels, of granted event kinds, inside the granted history window (`read.history`). The host narrows the query it sends to the runtime and filters the answer again, so a runtime bug that over-returns does not widen what the App sees.
   Pinned by `query_returns_only_granted_channels_events_and_history`.
 - **Attachments** as metadata only (name, type, size).
 - **State** only its own installation's: the key-value store is addressed by installation, never by App, so two installations of the same App share nothing.
   Pinned by `two_installations_of_the_same_app_share_nothing`.
+
+## App state at rest
+
+- An installation's App state is stored on the Delivery Service, shared by the bot's hosts, and sealed on the hosts with keys derived from the bot's account secret, which only the bot's hosts hold. Each key name becomes an HMAC under one derived key; each key and value is sealed (ChaCha20-Poly1305) under another, bound to the installation and the key, so an entry moved to another key, installation or bot does not open. The DS stores ciphertext, sizes, versions and write times.
+  Pinned by `every_host_derives_the_same_keys_and_only_from_the_account_secret`, `a_sealed_value_opens_only_under_its_own_key_and_installation`, `the_key_name_never_reaches_the_wire_in_the_clear` (`pollis-core/src/commands/bots/app_state.rs`).
+- State is written only by the host that won the trigger's claim, all of a job's writes or none, once per claim, and only at the versions the job read, so two hosts never overwrite each other and a retried job never writes twice. Only a bot's own hosts can read or write it; it is capped per installation and deleted with the bot.
+  Pinned by `app_state_is_written_only_under_a_claim_the_writer_won_and_only_once`, `two_hosts_cannot_clobber_each_other`, `app_state_stays_under_the_ds_quota`, `app_state_endpoints_are_device_signed_for_the_signers_own_installation`, `app_state_goes_with_its_bot` (`pollis-delivery/tests/bots.rs`), `app_state_is_a_bots_versioned_and_within_the_quota`, `a_claims_state_commit_cannot_be_undone` (`bot_schema.rs`), `a_state_conflict_reruns_the_handler_on_the_new_state` (`pollis-bot/tests/app_handler.rs`) and the flows test `an_app_runs_on_asleep_hosts_that_share_its_state_beside_the_alerts_handler`.
+- Nothing about an App's run is kept on a host between jobs: each job opens the installation, runs a fresh sandbox, and seals the installation again.
 
 ## What an App can do
 
@@ -60,6 +70,8 @@ An App runs as a WebAssembly component in `pollis-app-host`. It has no system ca
 - **Never into the runtime's own network.** A granted host name must resolve to a public address. The runtime's client (`PublicHttpClient`, which `HostServices::http_fetch` delegates to) resolves the name once, drops loopback, private, link-local (including cloud metadata), CGNAT, unique-local and reserved addresses (also when embedded in IPv6), refuses the request if none remain, and connects only to the addresses it checked, so a second DNS answer is never used. It follows no redirects and uses no proxy from the environment.
   Pinned by `non_public_addresses_are_refused`, `a_mixed_answer_keeps_only_public_addresses_and_looks_up_once`, `a_granted_name_that_resolves_inside_is_refused_without_connecting` (`pollis-app-host/src/http.rs`).
 - **Logging** to the runtime's log, never to the group.
+- **Webhooks** reach an App with their body, content type, user agent and `x-*` headers, never the credentials that authenticated the call (`authorization`, the signature) or cookies.
+  Pinned by `an_app_installation_gets_the_raw_request_without_credentials` (`pollis-bot/src/webhook.rs`).
 
 ## Grants
 
@@ -73,6 +85,8 @@ An App runs as a WebAssembly component in `pollis-app-host`. It has no system ca
 These are properties of the design, stated in developer docs and install copy:
 
 - **An App can send what it reads to the hosts the admin approved.** Egress is the boundary; inside it, the App decides what to send. An App with no egress cannot send data outside the group.
+- **Compiled Apps are cached on the host.** To keep cold starts fast, a host keeps each App's compiled code in its data directory and loads it only when the entry names the same App, the same engine build and settings, and its checksum holds; anything else is recompiled. The cache is as trusted as the rest of the runtime's data directory and is optional: a runtime without one compiles every App itself.
+  Pinned by `a_cold_host_loads_what_an_earlier_one_compiled`, `a_corrupt_or_mismatched_entry_is_recompiled_never_loaded` (`pollis-app-host/tests/disk_cache.rs`).
 - **The sandbox engine is in the trusted base.** Isolation rests on wasmtime and Cranelift being correct. The runtime keeps the engine's feature set minimal (no async, no GC proposals, no threads) and implements its WASI stubs itself rather than linking a general-purpose WASI implementation, to keep that base small.
 - **Jobs that share a CPU can observe timing.** The sandbox isolates memory and capabilities, not microarchitectural side channels between jobs running on the same machine. Installations that must not share hardware run on separate hosts.
 - **The host machine is trusted like any device of the bot.** Whoever controls the machine the runtime runs on can read what the bot can read. That is the admin's own machine for self-hosted bots; #2009 covers attested hosting.

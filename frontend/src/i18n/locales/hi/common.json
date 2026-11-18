@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}} हटाएं",
     "send": "मैसेज भेजें",
     "markSensitive": "{{name}} को संवेदनशील मार्क करें",
-    "unmarkSensitive": "{{name}} से संवेदनशील मार्क हटाएं"
+    "unmarkSensitive": "{{name}} से संवेदनशील मार्क हटाएं",
+    "commandAmbiguous": "/{{command}} एक से ज़्यादा ऐप में है। सूची में से एक चुनें।",
+    "commandRequestHint": "{{app}} को निजी तौर पर भेजा जाता है, इस चैनल में पोस्ट नहीं होता",
+    "commandRequestUnavailable": "इस वर्ज़न में ऐप को निजी अनुरोध उपलब्ध नहीं हैं। कुछ भी पोस्ट नहीं हुआ।",
+    "commandRequestFailed": "यह कमांड नहीं भेजा जा सका। कुछ भी पोस्ट नहीं हुआ।"
   },
   "mentions": {
     "listLabel": "मेंशन के सुझाव",
@@ -112,5 +116,9 @@
     "quit": "Pollis बंद करें",
     "unread_one": "Pollis — {{count}} अनपढ़ा",
     "unread_other": "Pollis — {{count}} अनपढ़े"
+  },
+  "commands": {
+    "listLabel": "कमांड सुझाव",
+    "matching": "<hl>/{{query}}</hl> से मेल खाने वाले कमांड"
   }
 }

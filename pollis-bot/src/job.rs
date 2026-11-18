@@ -6,7 +6,9 @@
 //! 3. open (unseal) the installation's store, catch MLS up through the normal
 //!    ingest path; new messages become message triggers
 //! 4. hand each trigger to the installation's handler, which returns actions
-//! 5. claim (installation_id, trigger_key) on the DS; a lost claim discards the actions
+//!    (and, for an App, App state writes at the versions it read)
+//! 5. claim (installation_id, trigger_key) on the DS; a lost claim discards the actions;
+//!    a won one commits the App state writes (once; a conflict re-runs step 4)
 //! 6. check each action against the grants and apply what passes; a handler error discards all
 //! 7. seal the store and release the lock
 //! ```
@@ -15,7 +17,8 @@
 //! → seal" is the only way work happens, and nothing depends on a host having
 //! stayed up since the last job.
 //!
-//! A trigger with no actions is not claimed: there is nothing to deduplicate.
+//! A trigger with no actions and no state writes is not claimed: there is
+//! nothing to deduplicate.
 //! A message trigger's cursor advances once its outcome is final (applied,
 //! claimed elsewhere, refused or handler failed); a transient failure (the
 //! claim or the send could not reach the DS) leaves it unadvanced, so the next
@@ -28,10 +31,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
-use crate::action::{CheckedAction, Grants, Refusal};
-use crate::core::{CoreError, InstallationCore};
-use crate::handler::Handler;
-use crate::trigger::{Trigger, TriggerKey, WebhookCall};
+use crate::action::{Grants, Refusal};
+use crate::core::{CoreError, InstallationCore, StateCommit};
+use crate::handler::{Handler, HandlerContext};
+use crate::trigger::{ScheduleSlot, Trigger, TriggerKey, WebhookCall};
 
 /// What woke a job.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,8 +71,47 @@ pub enum JobError {
     CatchUp(CoreError),
     Channels(CoreError),
     Claim(CoreError),
+    /// #2004: committing an App's state writes.
+    State(CoreError),
     Post(CoreError),
     MarkHandled(CoreError),
+}
+
+/// How often a job re-runs an App whose state another host moved meanwhile.
+pub const STATE_CONFLICT_ATTEMPTS: usize = 3;
+
+/// The most missed slots of one schedule a job runs. A host that was asleep
+/// through more runs only the newest ones; the older are skipped (counted in
+/// [`JobReport::skipped_slots`]), never run late in a burst.
+pub const MAX_MISSED_SLOTS: usize = 3;
+
+/// Which slots of `spec` a job should run, given the slot this host last
+/// finished (`cursor`) and the time now (Unix seconds).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DueSlots {
+    /// Oldest first, at most [`MAX_MISSED_SLOTS`].
+    pub run: Vec<u64>,
+    /// Due slots older than those, not run.
+    pub skipped: u64,
+    /// First sight of the schedule: start the cursor here and run nothing,
+    /// so an installation never replays slots from before it existed.
+    pub seed: Option<u64>,
+}
+
+pub fn due_slots(spec: &pollis_app_manifest::ScheduleSpec, cursor: Option<u64>, now: u64) -> DueSlots {
+    let Some(latest) = spec.slot_at_or_before(now) else {
+        return DueSlots::default();
+    };
+    let Some(cursor) = cursor else {
+        return DueSlots { seed: Some(latest), ..Default::default() };
+    };
+    if latest <= cursor {
+        return DueSlots::default();
+    }
+    let due = (latest - cursor) / spec.every;
+    let run_n = due.min(MAX_MISSED_SLOTS as u64);
+    let run = (0..run_n).rev().map(|k| latest - k * spec.every).collect();
+    DueSlots { run, skipped: due - run_n, seed: None }
 }
 
 impl JobError {
@@ -86,6 +128,9 @@ impl JobError {
             }
             JobError::Claim(_) => {
                 "check this host can reach the Delivery Service and has not been revoked (pollis-bot status); the trigger is retried"
+            }
+            JobError::State(_) => {
+                "check this host can reach the Delivery Service; the trigger is retried under the same claim"
             }
             JobError::Post(_) => {
                 "check this host can reach the Delivery Service; the message is kept and retried under the same id"
@@ -104,6 +149,7 @@ impl std::fmt::Display for JobError {
             JobError::CatchUp(e) => ("catching up", e),
             JobError::Channels(e) => ("reading the group's channels", e),
             JobError::Claim(e) => ("claiming the trigger", e),
+            JobError::State(e) => ("saving the App's state", e),
             JobError::Post(e) => ("posting", e),
             JobError::MarkHandled(e) => ("saving progress", e),
         };
@@ -129,6 +175,8 @@ pub struct JobReport {
     pub approvals_error: Option<String>,
     /// How long unsealing and sealing the store took.
     pub open_close: std::time::Duration,
+    /// Missed schedule slots past [`MAX_MISSED_SLOTS`] that were skipped.
+    pub skipped_slots: u64,
 }
 
 impl JobReport {
@@ -147,11 +195,19 @@ pub struct Installation {
     /// A wake job is queued and has not started catching up yet; further
     /// wake-ups fold into it.
     wake_queued: AtomicBool,
+    /// The schedule slot the runtime's one timer for this installation is set for.
+    pub(crate) armed_for: std::sync::Mutex<Option<u64>>,
 }
 
 impl Installation {
     pub fn new(core: Arc<dyn InstallationCore>, handler: Arc<dyn Handler>) -> Self {
-        Self { core, handler, lock: Mutex::new(()), wake_queued: AtomicBool::new(false) }
+        Self {
+            core,
+            handler,
+            lock: Mutex::new(()),
+            wake_queued: AtomicBool::new(false),
+            armed_for: std::sync::Mutex::new(None),
+        }
     }
 
     pub fn id(&self) -> &str {
@@ -160,6 +216,11 @@ impl Installation {
 
     pub fn handler_kind(&self) -> &'static str {
         self.handler.kind()
+    }
+
+    /// The next schedule slot after `now` (Unix seconds), if the handler has schedules.
+    pub fn next_slot(&self, now: u64) -> Option<u64> {
+        self.handler.schedules().iter().map(|s| s.next_after(now)).min()
     }
 
     /// Marks a wake job queued. `false` when one already is, and the caller
@@ -215,6 +276,23 @@ impl Installation {
                 .filter(|m| m.sender_id != own_id)
                 .map(Trigger::Message),
         );
+        // Schedules: the slots due since this host last ran each one, so a
+        // host that slept through a slot runs it when it next wakes, and the
+        // claim lets one host of the bot run each slot.
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
+        for spec in self.handler.schedules() {
+            let cursor = self.core.schedule_cursor(&spec.name).await.map_err(JobError::CatchUp)?;
+            let due = due_slots(&spec, cursor, now);
+            if let Some(seed) = due.seed {
+                self.core.mark_schedule(&spec.name, seed).await.map_err(JobError::MarkHandled)?;
+            }
+            report.skipped_slots += due.skipped;
+            triggers.extend(
+                due.run
+                    .into_iter()
+                    .map(|slot| Trigger::Schedule(ScheduleSlot { name: spec.name.clone(), slot })),
+            );
+        }
 
         let mut grants: Option<Grants> = None;
         for trigger in triggers {
@@ -222,13 +300,19 @@ impl Installation {
             let kind = trigger.kind();
             let result = self.run_trigger(&trigger, &mut grants).await;
             let failed = result.is_err();
-            if let (Trigger::Message(m), Ok(_)) = (&trigger, &result) {
-                self.core.mark_handled(m).await.map_err(JobError::MarkHandled)?;
+            match (&trigger, &result) {
+                (Trigger::Message(m), Ok(_)) => {
+                    self.core.mark_handled(m).await.map_err(JobError::MarkHandled)?;
+                }
+                (Trigger::Schedule(s), Ok(_)) => {
+                    self.core.mark_schedule(&s.name, s.slot).await.map_err(JobError::MarkHandled)?;
+                }
+                _ => {}
             }
             report.triggers.push(TriggerResult { key, kind, result });
             // Messages are handled in order: stop at a transient failure so the
             // cursor never skips past one that still needs another attempt.
-            if failed && kind == "message" {
+            if failed && (kind == "message" || kind == "schedule") {
                 break;
             }
         }
@@ -241,19 +325,50 @@ impl Installation {
         trigger: &Trigger,
         grants: &mut Option<Grants>,
     ) -> Result<TriggerOutcome, JobError> {
-        // Step 4.
-        let actions = match self.handler.handle(trigger).await {
-            Ok(actions) => actions,
-            Err(e) => return Ok(TriggerOutcome::HandlerFailed { error: e.0 }),
+        let key = trigger.key();
+        let ctx = HandlerContext { core: self.core.clone() };
+        let mut claimed = false;
+        let mut attempt = 0;
+        let actions = loop {
+            attempt += 1;
+            // Step 4.
+            let output = match self.handler.handle_job(trigger, &ctx).await {
+                Ok(output) => output,
+                Err(e) => return Ok(TriggerOutcome::HandlerFailed { error: e.0 }),
+            };
+            if output.actions.is_empty() && output.state.is_empty() {
+                return Ok(TriggerOutcome::NoActions);
+            }
+
+            // Step 5.
+            if !claimed {
+                if !self.core.claim(&key).await.map_err(JobError::Claim)? {
+                    return Ok(TriggerOutcome::ClaimedElsewhere);
+                }
+                claimed = true;
+            }
+            if output.state.is_empty() {
+                break output.actions;
+            }
+            match self.core.state_commit(&key, &output.state).await.map_err(JobError::State)? {
+                StateCommit::Committed | StateCommit::AlreadyCommitted => break output.actions,
+                StateCommit::Conflict if attempt < STATE_CONFLICT_ATTEMPTS => continue,
+                StateCommit::Conflict => {
+                    return Ok(TriggerOutcome::HandlerFailed {
+                        error: format!(
+                            "the App's state kept changing under it ({STATE_CONFLICT_ATTEMPTS} attempts); nothing was applied"
+                        ),
+                    })
+                }
+                StateCommit::OverQuota { max_bytes } => {
+                    return Ok(TriggerOutcome::HandlerFailed {
+                        error: format!("the App's state would pass the {max_bytes}-byte ceiling; nothing was applied"),
+                    })
+                }
+            }
         };
         if actions.is_empty() {
-            return Ok(TriggerOutcome::NoActions);
-        }
-
-        // Step 5.
-        let key = trigger.key();
-        if !self.core.claim(&key).await.map_err(JobError::Claim)? {
-            return Ok(TriggerOutcome::ClaimedElsewhere);
+            return Ok(TriggerOutcome::Applied { posted: 0, refused: Vec::new() });
         }
 
         // Step 6. The channel list is read once per job, and only when needed.
@@ -266,12 +381,9 @@ impl Installation {
         let mut refused = Vec::new();
         for (index, action) in actions.iter().enumerate() {
             match grants.check(action) {
-                Ok(CheckedAction::Post { channel_id, text }) => {
+                Ok(checked) => {
                     let message_id = action_message_id(self.id(), trigger, index);
-                    self.core
-                        .post(&channel_id, &text, &message_id)
-                        .await
-                        .map_err(JobError::Post)?;
+                    self.core.act(&checked, &message_id).await.map_err(JobError::Post)?;
                     posted += 1;
                 }
                 Err(refusal) => refused.push(refusal),

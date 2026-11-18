@@ -17,12 +17,23 @@ pub const MAX_POST_CHARS: usize = 4000;
 pub enum Action {
     /// Post `text` into `channel` (an id, or a name with or without `#`).
     Post { channel: String, text: String },
+    /// #2004 App actions. Each was already checked by the App sandbox against
+    /// the installation's App grants; `channel` is the target message's
+    /// channel id, checked again here against the bot's group.
+    Reply { channel: String, message: String, text: String },
+    React { channel: String, message: String, emoji: String },
+    EditOwn { channel: String, message: String, text: String },
+    DeleteOwn { channel: String, message: String },
 }
 
 /// An action that passed the grant check, with its channel resolved to an id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckedAction {
     Post { channel_id: String, text: String },
+    Reply { channel_id: String, message_id: String, text: String },
+    React { channel_id: String, message_id: String, emoji: String },
+    EditOwn { channel_id: String, message_id: String, text: String },
+    DeleteOwn { channel_id: String, message_id: String },
 }
 
 /// Why an action was refused. Each names what to change.
@@ -33,6 +44,8 @@ pub enum Refusal {
     ChannelNotGranted { channel: String },
     EmptyText,
     TextTooLong { chars: usize, max: usize },
+    /// An App action on a channel that is not a text channel of the bot's group.
+    NotInGroup { action: &'static str, channel: String },
 }
 
 impl std::fmt::Display for Refusal {
@@ -46,8 +59,22 @@ impl std::fmt::Display for Refusal {
             Refusal::TextTooLong { chars, max } => {
                 write!(f, "`post` refused: the text is {chars} characters, the limit is {max}")
             }
+            Refusal::NotInGroup { action, channel } => {
+                write!(f, "`{action}` in `{channel}` refused: not a text channel of this bot's group")
+            }
         }
     }
+}
+
+fn check_text(text: &str) -> Result<(), Refusal> {
+    if text.trim().is_empty() {
+        return Err(Refusal::EmptyText);
+    }
+    let chars = text.chars().count();
+    if chars > MAX_POST_CHARS {
+        return Err(Refusal::TextTooLong { chars, max: MAX_POST_CHARS });
+    }
+    Ok(())
 }
 
 /// A channel of the bot's group, as the grant check sees it.
@@ -77,16 +104,40 @@ impl Grants {
                 let channel_id = self
                     .resolve(channel)
                     .ok_or_else(|| Refusal::ChannelNotGranted { channel: channel.clone() })?;
-                if text.trim().is_empty() {
-                    return Err(Refusal::EmptyText);
-                }
-                let chars = text.chars().count();
-                if chars > MAX_POST_CHARS {
-                    return Err(Refusal::TextTooLong { chars, max: MAX_POST_CHARS });
-                }
+                check_text(text)?;
                 Ok(CheckedAction::Post { channel_id, text: text.clone() })
             }
+            Action::Reply { channel, message, text } => {
+                let channel_id = self.exact(channel, "reply")?;
+                check_text(text)?;
+                Ok(CheckedAction::Reply { channel_id, message_id: message.clone(), text: text.clone() })
+            }
+            Action::React { channel, message, emoji } => {
+                let channel_id = self.exact(channel, "react")?;
+                if emoji.trim().is_empty() {
+                    return Err(Refusal::EmptyText);
+                }
+                Ok(CheckedAction::React { channel_id, message_id: message.clone(), emoji: emoji.clone() })
+            }
+            Action::EditOwn { channel, message, text } => {
+                let channel_id = self.exact(channel, "edit-own")?;
+                check_text(text)?;
+                Ok(CheckedAction::EditOwn { channel_id, message_id: message.clone(), text: text.clone() })
+            }
+            Action::DeleteOwn { channel, message } => {
+                let channel_id = self.exact(channel, "delete-own")?;
+                Ok(CheckedAction::DeleteOwn { channel_id, message_id: message.clone() })
+            }
         }
+    }
+
+    /// An App action names its channel by id only.
+    fn exact(&self, channel: &str, action: &'static str) -> Result<String, Refusal> {
+        self.channels
+            .iter()
+            .find(|c| c.is_text && c.id == channel)
+            .map(|c| c.id.clone())
+            .ok_or_else(|| Refusal::NotInGroup { action, channel: channel.to_string() })
     }
 
     /// An exact id wins; otherwise a case-insensitive name, `#` optional. A

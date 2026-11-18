@@ -844,3 +844,137 @@ async fn the_bot_endpoints_require_a_device_signature() {
     let (s, _) = call(&w, &w.alice, "/v1/bots/delete", serde_json::json!({ "bot_user_id": bot })).await;
     assert_eq!(s, StatusCode::OK);
 }
+
+// ================================================================ App state (#2004)
+
+fn kid(n: u8) -> String {
+    b64(&[n; 32])
+}
+
+fn sealed(len: usize) -> Option<String> {
+    Some(b64(&vec![7u8; len]))
+}
+
+fn commit_body(bot: &str, trigger: &str, writes: Vec<(String, i64, Option<String>)>) -> AppStateCommitBody {
+    AppStateCommitBody {
+        installation_id: bot.to_string(),
+        trigger_key: trigger.to_string(),
+        writes: writes
+            .into_iter()
+            .map(|(key_id, expected_version, sealed)| AppStateWrite { key_id, expected_version, sealed })
+            .collect(),
+    }
+}
+
+#[tokio::test]
+async fn app_state_is_written_only_under_a_claim_the_writer_won_and_only_once() {
+    let w = world().await;
+    let (bot, host) = make_bot(&w).await;
+    let body = commit_body(&bot, "msg:1", vec![(kid(1), 0, sealed(40))]);
+    // No claim yet.
+    assert!(bots::apply_app_state_commit(&w.c, &bot, &host, &body, NOW).await.unwrap().is_err());
+    bots::apply_claim_trigger(&w.c, &bot, &host, "msg:1", NOW).await.unwrap().unwrap();
+    // Another host of the bot did not win this claim.
+    assert!(bots::apply_app_state_commit(&w.c, &bot, "host-2", &body, NOW).await.unwrap().is_err());
+    assert_eq!(bots::apply_app_state_commit(&w.c, &bot, &host, &body, NOW).await.unwrap().unwrap(), AppStateCommitResponse::Committed);
+    assert_eq!(
+        bots::apply_app_state_commit(&w.c, &bot, &host, &body, NOW).await.unwrap().unwrap(),
+        AppStateCommitResponse::AlreadyCommitted,
+        "a retried job never applies its state twice"
+    );
+    let read = bots::apply_app_state_read(&w.c, &bot, &[kid(1), kid(2)]).await.unwrap().unwrap();
+    assert_eq!(read.entries.len(), 1);
+    assert_eq!(read.entries[0].version, 1);
+    assert_eq!((read.used_bytes, read.rows), (40, 1));
+}
+
+#[tokio::test]
+async fn two_hosts_cannot_clobber_each_other() {
+    let w = world().await;
+    let (bot, host) = make_bot(&w).await;
+    bots::apply_claim_trigger(&w.c, &bot, &host, "msg:1", NOW).await.unwrap().unwrap();
+    bots::apply_claim_trigger(&w.c, &bot, "host-2", "msg:2", NOW).await.unwrap().unwrap();
+    bots::apply_claim_trigger(&w.c, &bot, "host-2", "msg:3", NOW).await.unwrap().unwrap();
+    // Both read the key absent (version 0); the first commit wins.
+    let first = commit_body(&bot, "msg:1", vec![(kid(1), 0, sealed(40)), (kid(2), 0, sealed(40))]);
+    let second = commit_body(&bot, "msg:2", vec![(kid(3), 0, sealed(40)), (kid(1), 0, sealed(50))]);
+    assert_eq!(bots::apply_app_state_commit(&w.c, &bot, &host, &first, NOW).await.unwrap().unwrap(), AppStateCommitResponse::Committed);
+    assert_eq!(
+        bots::apply_app_state_commit(&w.c, &bot, "host-2", &second, NOW).await.unwrap().unwrap(),
+        AppStateCommitResponse::Conflict { key_id: kid(1) }
+    );
+    // Nothing of the conflicting commit landed, not even the key that did not conflict.
+    assert_eq!(count(&w.c, &format!("SELECT COUNT(*) FROM bot_app_state WHERE installation_id = '{bot}'")).await, 2);
+    // At the version it read, it lands; a delete at the current version too.
+    let retry = commit_body(&bot, "msg:2", vec![(kid(1), 1, sealed(50)), (kid(2), 1, None)]);
+    assert_eq!(bots::apply_app_state_commit(&w.c, &bot, "host-2", &retry, NOW).await.unwrap().unwrap(), AppStateCommitResponse::Committed);
+    let read = bots::apply_app_state_read(&w.c, &bot, &[kid(1), kid(2)]).await.unwrap().unwrap();
+    assert_eq!(read.entries.len(), 1);
+    assert_eq!(read.entries[0].version, 2);
+    // A stale delete conflicts too.
+    let stale = commit_body(&bot, "msg:3", vec![(kid(1), 1, None)]);
+    assert!(matches!(
+        bots::apply_app_state_commit(&w.c, &bot, "host-2", &stale, NOW).await.unwrap().unwrap(),
+        AppStateCommitResponse::Conflict { .. }
+    ));
+}
+
+#[tokio::test]
+async fn app_state_stays_under_the_ds_quota() {
+    let w = world().await;
+    let (bot, host) = make_bot(&w).await;
+    let mut writes = Vec::new();
+    for n in 0..15u8 {
+        writes.push((kid(n), 0, sealed(bots::BOT_APP_STATE_MAX_ENTRY_BYTES)));
+    }
+    bots::apply_claim_trigger(&w.c, &bot, &host, "msg:1", NOW).await.unwrap().unwrap();
+    assert_eq!(
+        bots::apply_app_state_commit(&w.c, &bot, &host, &commit_body(&bot, "msg:1", writes), NOW).await.unwrap().unwrap(),
+        AppStateCommitResponse::OverQuota { max_bytes: bots::BOT_APP_STATE_MAX_BYTES }
+    );
+    assert_eq!(count(&w.c, "SELECT COUNT(*) FROM bot_app_state").await, 0);
+    let oversized = commit_body(&bot, "msg:1", vec![(kid(1), 0, sealed(bots::BOT_APP_STATE_MAX_ENTRY_BYTES + 1))]);
+    assert!(bots::apply_app_state_commit(&w.c, &bot, &host, &oversized, NOW).await.unwrap().is_err());
+}
+
+#[tokio::test]
+async fn only_a_bot_has_app_state() {
+    let w = world().await;
+    assert!(bots::apply_app_state_read(&w.c, "alice", &[kid(1)]).await.unwrap().is_err());
+    assert!(bots::apply_app_state_read(&w.c, "alice", &["short".into()]).await.unwrap().is_err());
+}
+
+#[tokio::test]
+async fn app_state_endpoints_are_device_signed_for_the_signers_own_installation() {
+    let w = world().await;
+    let (bot, host) = make_bot(&w).await;
+    let host = bot_host(&w, &bot, &host).await;
+    let read = serde_json::json!({ "installation_id": bot, "key_ids": [kid(1)] });
+    let (s, v) = call(&w, &host, "/v1/bots/app-state/read", read.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["rows"], 0);
+    let (s, _) = call(&w, &w.alice, "/v1/bots/app-state/read", read.clone()).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "an admin reads no bot's state");
+    let (s, _) = call_open(&w, "/v1/bots/app-state/read", read).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+
+    let (s, _) = call(&w, &host, "/v1/bots/triggers/claim", serde_json::json!({ "installation_id": bot, "trigger_key": "msg:1" })).await;
+    assert_eq!(s, StatusCode::OK);
+    let commit = serde_json::json!({ "installation_id": bot, "trigger_key": "msg:1", "writes": [{ "key_id": kid(1), "expected_version": 0, "sealed": sealed(40) }] });
+    let (s, v) = call(&w, &host, "/v1/bots/app-state/commit", commit.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["outcome"], "committed");
+    let (s, _) = call(&w, &w.alice, "/v1/bots/app-state/commit", commit).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn app_state_goes_with_its_bot() {
+    let w = world().await;
+    let (bot, host) = make_bot(&w).await;
+    bots::apply_claim_trigger(&w.c, &bot, &host, "msg:1", NOW).await.unwrap().unwrap();
+    let body = commit_body(&bot, "msg:1", vec![(kid(1), 0, sealed(40))]);
+    bots::apply_app_state_commit(&w.c, &bot, &host, &body, NOW).await.unwrap().unwrap();
+    assert!(matches!(bots::apply_delete_bot(&w.c, "alice", "alice-d", &bot).await.unwrap(), WriteOutcome::Ok));
+    assert_eq!(count(&w.c, "SELECT COUNT(*) FROM bot_app_state").await, 0);
+}

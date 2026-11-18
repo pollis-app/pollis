@@ -16,9 +16,12 @@ path = "src/lib.rs"
 [dependencies]
 pollis-app-manifest = { path = "../pollis-app-manifest" }
 # The minimum for a synchronous component-model host compiled with Cranelift:
-# no WASI, no async/fibers, no GC proposals, no profiling, no on-disk cache,
-# no WAT parser, no parallel compilation.
-wasmtime = { version = "49.0.6", default-features = false, features = ["runtime", "cranelift", "component-model", "std"] }
+# no WASI implementation (ours is in src/wasi.rs), no async/fibers, no GC
+# proposals, no profiling, no wasmtime-cache (our compiled-module cache is in
+# src/disk_cache.rs), no WAT parser. `parallel-compilation` (rayon, already in
+# the tree) because a JS App's ~12 MB component takes seconds to compile on
+# one thread.
+wasmtime = { version = "49.0.6", default-features = false, features = ["runtime", "cranelift", "component-model", "std", "parallel-compilation"] }
 url = "2"
 # The reference http-fetch client (src/http.rs): rustls + webpki roots, already
 # in the tree through verifiable-log-serve.
@@ -29,3 +32,6 @@ thiserror = "2"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"

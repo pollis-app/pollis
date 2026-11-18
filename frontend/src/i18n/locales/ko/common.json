@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}} 삭제",
     "send": "메시지 보내기",
     "markSensitive": "{{name}}을(를) 민감한 콘텐츠로 표시",
-    "unmarkSensitive": "{{name}}의 민감한 콘텐츠 표시 해제"
+    "unmarkSensitive": "{{name}}의 민감한 콘텐츠 표시 해제",
+    "commandAmbiguous": "/{{command}} 명령어가 있는 앱이 여러 개입니다. 목록에서 하나를 고르세요.",
+    "commandRequestHint": "{{app}}에 비공개로 전송되며 이 채널에 게시되지 않습니다",
+    "commandRequestUnavailable": "이 버전에서는 앱에 비공개 요청을 보낼 수 없습니다. 아무것도 게시되지 않았습니다.",
+    "commandRequestFailed": "이 명령어를 보내지 못했습니다. 아무것도 게시되지 않았습니다."
   },
   "mentions": {
     "listLabel": "멘션 제안",
@@ -104,5 +108,9 @@
     "version": "버전 {{version}}",
     "quit": "Pollis 종료",
     "unread_other": "Pollis — 읽지 않음 {{count}}개"
+  },
+  "commands": {
+    "listLabel": "명령어 제안",
+    "matching": "<hl>/{{query}}</hl>와(과) 일치하는 명령어"
   }
 }

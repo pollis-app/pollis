@@ -802,6 +802,7 @@ pub async fn purge_bot_rows_of(conn: &Connection, user_id: &str) -> anyhow::Resu
     conn.execute("DELETE FROM bot_pairing_request WHERE user_id = ?1 OR reviewed_by = ?1", uid())
         .await?;
     conn.execute("DELETE FROM bot_trigger_claim WHERE installation_id = ?1", uid()).await?;
+    conn.execute("DELETE FROM bot_app_state WHERE installation_id = ?1", uid()).await?;
     conn.execute("UPDATE bot SET created_by = NULL WHERE created_by = ?1", uid()).await?;
     Ok(())
 }
@@ -1137,6 +1138,237 @@ pub async fn apply_claim_trigger(
     )
     .await?;
     Ok(Ok(winner.first().is_some_and(|d| d == device_id)))
+}
+
+// ---------------------------------------------------------------- App state (#2004)
+
+/// The most sealed App state one installation may hold. The schema enforces it
+/// too (`000053_bot_app_state.sql`); the manifest's `state.quota` is enforced by
+/// the hosts on plaintext sizes, under this.
+pub const BOT_APP_STATE_MAX_BYTES: u64 = 1 << 20;
+/// The most sealed bytes one entry may hold (schema CHECK).
+pub const BOT_APP_STATE_MAX_ENTRY_BYTES: usize = 70_000;
+
+fn decode_key_ids(ids: &[String]) -> Option<Vec<Vec<u8>>> {
+    if ids.len() > APP_STATE_MAX_KEYS_PER_CALL {
+        return None;
+    }
+    ids.iter().map(|k| decode_exact(k, 32)).collect()
+}
+
+/// POST /v1/bots/app-state/read — device-signed by one of the bot's hosts.
+pub async fn app_state_read(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let (identity, parsed) = match gate_identity_and_parse::<AppStateReadBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    let (actor, _device) = match signed(identity) {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    if parsed.installation_id != actor {
+        return Ok(AuthRejection::Forbidden.into_response());
+    }
+    let conn = state.db.conn().await?;
+    match apply_app_state_read(&conn, &actor, &parsed.key_ids).await? {
+        Ok(resp) => Ok(ok_response::<AppStateReadBody>(resp)),
+        Err(WriteOutcome::Invalid(why)) => Ok(bad_request(why)),
+        Err(_) => Ok(AuthRejection::Forbidden.into_response()),
+    }
+}
+
+/// The entries for `key_ids` that exist, and the installation's usage.
+pub async fn apply_app_state_read(
+    conn: &Connection,
+    installation_id: &str,
+    key_ids: &[String],
+) -> anyhow::Result<Result<AppStateReadResponse, WriteOutcome>> {
+    let Some(ids) = decode_key_ids(key_ids) else {
+        return Ok(Err(WriteOutcome::Invalid("invalid key_ids")));
+    };
+    if !is_bot(conn, installation_id).await? {
+        return Ok(Err(WriteOutcome::Forbidden));
+    }
+    let mut entries = Vec::new();
+    for id in ids {
+        let mut rows = conn
+            .query(
+                "SELECT version, sealed FROM bot_app_state WHERE installation_id = ?1 AND key_id = ?2",
+                libsql::params![installation_id.to_string(), id.clone()],
+            )
+            .await?;
+        if let Some(row) = rows.next().await? {
+            let sealed: Vec<u8> = row.get(1)?;
+            entries.push(AppStateEntry {
+                key_id: crate::util::b64(&id),
+                version: row.get(0)?,
+                sealed: crate::util::b64(&sealed),
+            });
+        }
+    }
+    let mut rows = conn
+        .query(
+            "SELECT COALESCE(SUM(length(sealed)), 0), COUNT(*) FROM bot_app_state WHERE installation_id = ?1",
+            libsql::params![installation_id.to_string()],
+        )
+        .await?;
+    let (used_bytes, count) = match rows.next().await? {
+        Some(row) => (row.get::<i64>(0)?, row.get::<i64>(1)?),
+        None => (0, 0),
+    };
+    Ok(Ok(AppStateReadResponse {
+        entries,
+        used_bytes: used_bytes.max(0) as u64,
+        rows: count.max(0) as u64,
+    }))
+}
+
+/// POST /v1/bots/app-state/commit — device-signed by the host that won the
+/// claim on `trigger_key`.
+pub async fn app_state_commit(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let (identity, parsed) = match gate_identity_and_parse::<AppStateCommitBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    let (actor, device) = match signed(identity) {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    if parsed.installation_id != actor {
+        return Ok(AuthRejection::Forbidden.into_response());
+    }
+    let conn = state.db.conn().await?;
+    match apply_app_state_commit(&conn, &actor, &device, &parsed, crate::util::now_unix()).await? {
+        Ok(resp) => Ok(ok_response::<AppStateCommitBody>(resp)),
+        Err(WriteOutcome::Invalid(why)) => Ok(bad_request(why)),
+        Err(_) => Ok(AuthRejection::Forbidden.into_response()),
+    }
+}
+
+/// Apply a job's writes, all or none, once per claim, only for the device that
+/// won the claim, each only at the version the host read.
+pub async fn apply_app_state_commit(
+    conn: &Connection,
+    installation_id: &str,
+    device_id: &str,
+    body: &AppStateCommitBody,
+    now: u64,
+) -> anyhow::Result<Result<AppStateCommitResponse, WriteOutcome>> {
+    if body.trigger_key.is_empty() || body.trigger_key.len() > 256 {
+        return Ok(Err(WriteOutcome::Invalid("invalid trigger_key")));
+    }
+    if body.writes.is_empty() || body.writes.len() > APP_STATE_MAX_KEYS_PER_CALL {
+        return Ok(Err(WriteOutcome::Invalid("invalid writes")));
+    }
+    let mut writes = Vec::with_capacity(body.writes.len());
+    let mut seen = std::collections::HashSet::new();
+    for w in &body.writes {
+        let Some(key_id) = decode_exact(&w.key_id, 32) else {
+            return Ok(Err(WriteOutcome::Invalid("invalid key_id")));
+        };
+        if !seen.insert(key_id.clone()) || w.expected_version < 0 {
+            return Ok(Err(WriteOutcome::Invalid("invalid writes")));
+        }
+        let sealed = match &w.sealed {
+            None => None,
+            Some(b64) => match crate::util::b64_decode(b64) {
+                Ok(v) if (30..=BOT_APP_STATE_MAX_ENTRY_BYTES).contains(&v.len()) => Some(v),
+                _ => return Ok(Err(WriteOutcome::Invalid("invalid sealed value"))),
+            },
+        };
+        writes.push((key_id, w.expected_version, sealed, w.key_id.clone()));
+    }
+    if !is_bot(conn, installation_id).await? {
+        return Ok(Err(WriteOutcome::Forbidden));
+    }
+    let tx = crate::db::write_tx(conn).await?;
+    let mut rows = tx
+        .query(
+            "SELECT device_id, state_committed FROM bot_trigger_claim \
+             WHERE installation_id = ?1 AND trigger_key = ?2",
+            libsql::params![installation_id.to_string(), body.trigger_key.clone()],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        // No claim: state is only ever written under a won claim.
+        return Ok(Err(WriteOutcome::Forbidden));
+    };
+    let winner: String = row.get(0)?;
+    let committed: i64 = row.get(1)?;
+    drop(rows);
+    if winner != device_id {
+        return Ok(Err(WriteOutcome::Forbidden));
+    }
+    if committed == 1 {
+        return Ok(Ok(AppStateCommitResponse::AlreadyCommitted));
+    }
+    // Versions first, so a conflict changes nothing.
+    let mut current_total: i64 = {
+        let mut r = tx
+            .query(
+                "SELECT COALESCE(SUM(length(sealed)), 0) FROM bot_app_state WHERE installation_id = ?1",
+                libsql::params![installation_id.to_string()],
+            )
+            .await?;
+        match r.next().await? {
+            Some(row) => row.get(0)?,
+            None => 0,
+        }
+    };
+    let mut current = Vec::with_capacity(writes.len());
+    for (key_id, expected, sealed, key_b64) in &writes {
+        let mut r = tx
+            .query(
+                "SELECT version, length(sealed) FROM bot_app_state WHERE installation_id = ?1 AND key_id = ?2",
+                libsql::params![installation_id.to_string(), key_id.clone()],
+            )
+            .await?;
+        let (version, old_len) = match r.next().await? {
+            Some(row) => (row.get::<i64>(0)?, row.get::<i64>(1)?),
+            None => (0, 0),
+        };
+        if version != *expected {
+            return Ok(Ok(AppStateCommitResponse::Conflict { key_id: key_b64.clone() }));
+        }
+        current_total += sealed.as_ref().map_or(0, |s| s.len() as i64) - old_len;
+        current.push(version);
+    }
+    if current_total > BOT_APP_STATE_MAX_BYTES as i64 {
+        return Ok(Ok(AppStateCommitResponse::OverQuota { max_bytes: BOT_APP_STATE_MAX_BYTES }));
+    }
+    for ((key_id, _, sealed, _), version) in writes.iter().zip(current) {
+        let id = || libsql::params![installation_id.to_string(), key_id.clone()];
+        match (sealed, version) {
+            (None, 0) => {}
+            (None, _) => {
+                tx.execute("DELETE FROM bot_app_state WHERE installation_id = ?1 AND key_id = ?2", id())
+                    .await?;
+            }
+            (Some(s), 0) => {
+                tx.execute(
+                    "INSERT INTO bot_app_state (installation_id, key_id, sealed, version, updated_at) \
+                     VALUES (?1, ?2, ?3, 1, ?4)",
+                    libsql::params![installation_id.to_string(), key_id.clone(), s.clone(), now as i64],
+                )
+                .await?;
+            }
+            (Some(s), v) => {
+                tx.execute(
+                    "UPDATE bot_app_state SET sealed = ?3, version = ?4, updated_at = ?5 \
+                     WHERE installation_id = ?1 AND key_id = ?2",
+                    libsql::params![installation_id.to_string(), key_id.clone(), s.clone(), v + 1, now as i64],
+                )
+                .await?;
+            }
+        }
+    }
+    tx.execute(
+        "UPDATE bot_trigger_claim SET state_committed = 1 WHERE installation_id = ?1 AND trigger_key = ?2",
+        libsql::params![installation_id.to_string(), body.trigger_key.clone()],
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Ok(AppStateCommitResponse::Committed))
 }
 
 // ---------------------------------------------------------------- retention

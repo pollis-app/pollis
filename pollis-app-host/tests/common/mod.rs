@@ -166,7 +166,9 @@ pub fn manifest() -> Manifest {
             "read": { "channels": ["#general", "#ops"], "history": 7, "events": ["created", "edited"] },
             "actions": ["post", "reply", "react", "edit_own", "delete_own"],
             "state": { "quota": 64 },
-            "egress": ["api.x.com"]
+            "egress": ["api.x.com"],
+            "schedules": [{ "name": "now", "every": 60 }],
+            "commands": [{ "name": "run", "description": "Run a test script", "arg_hint": "<script>" }]
         }"##,
     )
     .unwrap()
@@ -239,6 +241,7 @@ pub fn host_with(limits: JobLimits) -> AppHost {
     AppHost::new(HostConfig {
         limits,
         cache_capacity: 8,
+        ..HostConfig::default()
     })
     .unwrap()
 }

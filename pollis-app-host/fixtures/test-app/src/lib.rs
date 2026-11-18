@@ -135,7 +135,20 @@ fn report<T>(step: &str, result: Result<T, String>, ok: impl FnOnce(T) -> String
     }
 }
 
+fn kv_text(key: &str) -> String {
+    match host::kv_get(key) {
+        Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
+        Ok(None) => "none".to_string(),
+        Err(e) => format!("error: {e}"),
+    }
+}
+
 fn run(trigger: &str, script: &str) -> Result<(), String> {
+    run_on(trigger, None, script)
+}
+
+fn run_on(trigger: &str, message: Option<&Message>, script: &str) -> Result<(), String> {
+    let message_id = message.map(|m| m.id.as_str());
     say(format!("trigger {trigger}"));
     for step in script.split(';') {
         let step = step.trim();
@@ -189,6 +202,32 @@ fn run(trigger: &str, script: &str) -> Result<(), String> {
                 }
                 say(format!("ok calls: {n}"));
             }
+            // Read a counter, add one, write it back (state shared across hosts).
+            "incr" => {
+                let n: u64 = kv_text(a).parse().unwrap_or(0) + 1;
+                report(step, host::kv_set(a, format!("{n}").as_bytes()), |_| format!("{n}"));
+            }
+            // Post "kv <key>=<value>" to a channel.
+            "post-kv" => {
+                let text = format!("kv {b}={}", kv_text(b));
+                report(step, host::post(a, &text), |_| text.clone());
+            }
+            // Post the trigger message's author as the App sees it.
+            "post-author" => match message {
+                Some(m) => {
+                    let text = format!("author {} bot={}", m.author.display_name, m.author.is_bot);
+                    report(step, host::post(a, &text), |_| text.clone());
+                }
+                None => say(format!("err {step}: no trigger message")),
+            },
+            // Reply to the trigger's own message.
+            "ack" => match message_id {
+                Some(id) => {
+                    let text = format!("{a} {b}").trim().to_string();
+                    report(step, host::reply(id, &text), |_| String::new());
+                }
+                None => say(format!("err {step}: no trigger message")),
+            },
             "static" => {
                 // SAFETY: single-threaded instance.
                 let value = unsafe {
@@ -218,11 +257,11 @@ struct TestApp;
 
 impl Guest for TestApp {
     fn on_message(message: Message) -> Result<(), String> {
-        run(&format!("message {}", message.id), &message.text)
+        run_on(&format!("message {}", message.id), Some(&message), &message.text)
     }
 
     fn on_mention(message: Message) -> Result<(), String> {
-        run(&format!("mention {}", message.id), &message.text)
+        run_on(&format!("mention {}", message.id), Some(&message), &message.text)
     }
 
     fn on_command(command: Command) -> Result<(), String> {
@@ -230,7 +269,8 @@ impl Guest for TestApp {
     }
 
     fn on_schedule(schedule: Schedule) -> Result<(), String> {
-        run(&format!("schedule {}", schedule.slot), &schedule.name)
+        // Schedule names cannot hold spaces: "incr-ticks" runs "incr ticks".
+        run(&format!("schedule {}", schedule.slot), &schedule.name.replace('-', " "))
     }
 
     fn on_request(request: Request) -> Result<(), String> {

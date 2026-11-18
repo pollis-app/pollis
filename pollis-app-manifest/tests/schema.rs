@@ -20,9 +20,10 @@ fn keys(v: &Value) -> BTreeSet<String> {
 fn full_manifest() -> Value {
     serde_json::to_value(
         Manifest::from_json(
-            br##"{"$schema":"x","name":"a","version":"1","description":"d","triggers":["webhook"],
+            br##"{"$schema":"x","name":"a","version":"1","description":"d","triggers":["webhook","schedule","commands"],"schedules":[{"name":"s","every":60,"offset":1}],
                 "read":{"channels":["*"],"history":1,"events":["created"]},
-                "actions":["post"],"state":{"quota":1},"egress":["a.example"]}"##,
+                "actions":["post"],"state":{"quota":1},"egress":["a.example"],
+                "commands":[{"name":"t","description":"d","arg_hint":"<x>","request":false}]}"##,
         )
         .unwrap(),
     )
@@ -42,6 +43,32 @@ fn schema_properties_match_the_rust_type() {
         keys(&schema["properties"]["state"]["properties"]),
         keys(&m["state"])
     );
+    assert_eq!(
+        keys(&schema["properties"]["schedules"]["items"]["properties"]),
+        keys(&m["schedules"][0])
+    );
+    // `request: false` is left out when serialized; the schema lists it.
+    let mut command = keys(&m["commands"][0]);
+    command.insert("request".to_string());
+    assert_eq!(
+        keys(&schema["properties"]["commands"]["items"]["properties"]),
+        command
+    );
+}
+
+/// The schema's command limits are the Rust ones (#2018).
+#[test]
+fn schema_command_limits_match_the_rust_ones() {
+    use pollis_app_manifest::commands::*;
+    let schema = schema();
+    let c = &schema["properties"]["commands"];
+    assert_eq!(c["maxItems"], MAX_COMMANDS);
+    assert_eq!(
+        c["items"]["properties"]["name"]["pattern"],
+        format!("^[a-z][a-z0-9_-]{{0,{}}}$", MAX_COMMAND_NAME_LEN - 1)
+    );
+    assert_eq!(c["items"]["properties"]["description"]["maxLength"], MAX_COMMAND_DESCRIPTION_LEN);
+    assert_eq!(c["items"]["properties"]["arg_hint"]["maxLength"], MAX_COMMAND_ARG_HINT_LEN);
 }
 
 #[test]
@@ -66,6 +93,16 @@ fn schema_enums_match_the_rust_enums() {
             let json = match field {
                 "events" => {
                     format!(r#"{{"name":"a","version":"1","read":{{"events":["{value}"]}}}}"#)
+                }
+                // The schedule trigger comes with its schedules.
+                _ if value == "schedule" => {
+                    r#"{"name":"a","version":"1","triggers":["schedule"],"schedules":[{"name":"s","every":60}]}"#
+                        .to_string()
+                }
+                // So does the commands trigger, with its commands.
+                _ if value == "commands" => {
+                    r#"{"name":"a","version":"1","triggers":["commands"],"commands":[{"name":"c","description":"d"}]}"#
+                        .to_string()
                 }
                 _ => format!(r#"{{"name":"a","version":"1","{field}":["{value}"]}}"#),
             };

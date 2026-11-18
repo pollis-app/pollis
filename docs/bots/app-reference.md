@@ -26,11 +26,13 @@ Every App exports all six. The runtime calls only the ones whose trigger is in y
 | Export | Called when | Manifest trigger | Gets |
 |---|---|---|---|
 | `on-message` | A message arrives in a granted channel | `messages` | `message` |
-| `on-mention` | A message mentions the bot | `mentions` | `message` |
-| `on-command` | A slash command is addressed to the App | `commands` | `command { name, args, message }` |
-| `on-schedule` | A schedule fires | `schedule` | `schedule { name, slot }` (`slot` = unix ms) |
-| `on-request` | A member sends the App a request | `requests` | `request { id, requester, body }` |
-| `on-webhook` | An HTTP call reaches the App's webhook | `webhook` | `webhook { delivery-id, headers, body }` |
+| `on-mention` | A message names the bot by `@username` | `mentions` | `message` |
+| `on-command` | A member sends one of the App's declared [commands](#commands) | `commands` | `command { name, args, message }` |
+| `on-schedule` | One of your [schedules](#schedules) reaches a slot | `schedule` | `schedule { name, slot }` (`slot` = unix ms) |
+| `on-request` | A member sends the App a request (arrives with the message log, #2008) | `requests` | `request { id, requester, body }` |
+| `on-webhook` | An HTTP call reaches the App's webhook | `webhook` | `webhook { delivery-id, headers, body }`: the request body as sent, its `content-type` and `user-agent`, and its `x-*` headers (never `authorization`, cookies or the signature) |
+
+A message is delivered once: a declared [command](#commands) goes to `on-command`; otherwise, if it mentions the bot and your App takes `mentions`, to `on-mention`; otherwise, if your App takes `messages`, to `on-message`. A mention is `@` plus the bot's username at the start of the message or after a space, any case, trailing punctuation ignored (the same rule that decides whom a channel message notifies). `@all` is not a mention of the bot.
 
 A message-carrying trigger (message, mention, command) is delivered only if **all** of these hold, otherwise your App is not run at all:
 
@@ -43,7 +45,7 @@ A message-carrying trigger (message, mention, command) is delivered only if **al
 ```
 message {
   id, channel,                     // opaque ids
-  author { id, display-name, is-bot },
+  author { id, display-name, is-bot },   // display-name: the member's username; is-bot: another bot
   text,
   attachments: list<attachment { name, mime-type, size }>,   // metadata only, no bytes
   reply-to: option<message-id>,
@@ -98,7 +100,7 @@ message-filter { channel: option<channel-id>, since: option<u64>, until: option<
 
 Returns messages from granted channels only (all of them when `channel` is absent), of granted event kinds, sent no earlier than `now - read.history days` (an earlier `since` is clamped). The trigger's own message is always returnable. At most `limit`, and never more than 500.
 
-Until the runtime keeps a message log (#2008), this returns the current trigger's context only.
+Until the runtime keeps a message log (#2008), this returns the trigger's own message only.
 
 | Refusal | When |
 |---|---|
@@ -106,9 +108,13 @@ Until the runtime keeps a message log (#2008), this returns the current trigger'
 
 ### `kv-get(key)` · `kv-set(key, value)` · `kv-delete(key)`
 
-Sealed key-value state for **this installation**. Two groups running the same App never see each other's state. Writes become durable only if the handler returns `ok`; within a job, `kv-get` sees the job's own writes.
+Key-value state for **this installation**, shared by every host of the bot and kept between jobs. Two groups running the same App never see each other's state.
 
-Usage is the sum of `key length + value length` over all keys, and must stay within `state.quota`.
+- It is stored on the Delivery Service, sealed with keys only the bot's hosts hold. The Delivery Service sees ciphertext and sizes, never your key names or values.
+- Within a job, `kv-get` sees the job's own writes. Writes are saved only if the handler returns `ok` and this host wins the trigger's claim.
+- If another host changed a key you read since you read it, your writes are not saved and the runtime runs your handler again on the new state (up to three times). Write handlers so that running them again is fine: read, compute, write.
+
+Usage is the sum of `key length + value length` over all keys, and must stay within `state.quota`. Independently, an installation can never hold more than 1 MiB of sealed state.
 
 | Refusal | When |
 |---|---|
@@ -199,7 +205,10 @@ Shipped beside the component. Unknown fields are an error.
   },
   "actions": ["reply", "react"],
   "state": { "quota": 65536 },
-  "egress": ["api.linear.app"]
+  "egress": ["api.linear.app"],
+  "commands": [
+    { "name": "bug", "description": "File a Linear issue", "arg_hint": "<title>" }
+  ]
 }
 ```
 
@@ -216,8 +225,73 @@ Shipped beside the component. Unknown fields are an error.
 | `actions` | list | `[]` | Any of `post`, `reply`, `react`, `edit_own`, `delete_own`, `transfer_history` (the last is reserved for #2008). |
 | `state.quota` | integer (bytes) | `0` | Key-value state allowance. 0 means no state. |
 | `egress` | list | `[]` | Exact lowercase host names. No `*`, scheme, port, path or IP. Empty means your App cannot send data outside the group, and admins see a mark saying so. |
+| `commands` | list | none | Required with the `commands` trigger and refused without it. Slash commands members can pick in the composer; see [Commands](#commands). |
+| `schedules` | list | none | Required with the `schedule` trigger and refused without it. Each `{ "name", "every", "offset" }`; see [Schedules](#schedules). |
+
+### Schedules
+
+```json
+"triggers": ["schedule"],
+"schedules": [
+  { "name": "daily-digest", "every": 86400, "offset": 32400 },
+  { "name": "poll-status", "every": 300 }
+]
+```
+
+- `name`: lowercase letters, digits and `-`, 1 to 32 characters; passed to `on-schedule`.
+- `every`: the period in seconds, 60 (one minute) to 604800 (one week).
+- `offset`: seconds after each period boundary, less than `every` (default 0). Slots fall at every Unix time `k × every + offset`, in UTC: `daily-digest` above runs at 09:00 UTC.
+
+Every host of the bot computes the same slots, and each slot runs once across them. The runtime sets one timer to the next slot; there is no polling. A host that was asleep at a slot runs it when it next wakes (a message, a webhook call, its next start or `run --once`), up to the **three most recent** missed slots of each schedule; older missed slots are skipped and logged. A schedule seen for the first time starts at the current slot: an App never receives slots from before it was installed.
 
 Ask for the least you need. Admins see every field in plain language before approving, and a later version that asks for more needs fresh approval.
+
+## Commands
+
+A command is how a member asks your App to do something: they type `/`, pick your command from the list, add any arguments and send. Declare each one in the manifest:
+
+```json
+"triggers": ["commands"],
+"commands": [
+  { "name": "bug", "description": "File a Linear issue", "arg_hint": "<title>" },
+  { "name": "standup", "description": "Post today's standup thread" }
+]
+```
+
+| Field | Required | Rules |
+|---|---|---|
+| `name` | yes | What members type after `/`. Lowercase letters, digits, `-` and `_`, starting with a letter, up to 32 characters. Unique within your manifest. |
+| `description` | yes | One line, up to 100 characters, shown beside the name in the composer. |
+| `arg_hint` | no | What to type after the name, shown greyed (`<title>`, `[days]`). Leave it out if the command takes no arguments. |
+| `request` | no, default `false` | Reserved for member requests (#2008): a `request` command is delivered privately to your bot's `on-request` and never posted in the channel. It needs the `requests` trigger instead of `commands`. |
+
+A manifest may declare up to 25 commands. Like `schedules`, `commands` and its trigger go together: a command needs `commands` in `triggers` (a `request` one needs `requests`), and the `commands` trigger needs at least one command that is not a `request`. The manifest is refused otherwise, with an error naming what is missing.
+
+### What arrives in `on-command`
+
+A member sends `/bug @linear_bot Printer is on fire`. Your handler gets:
+
+```
+command {
+  name: "bug",                    // as declared, lowercase
+  args: "Printer is on fire",     // everything after the name (and the bot's @handle), trimmed
+  message: message { ... },       // the message itself, for reply(), react() and its channel
+}
+```
+
+`args` is the raw text: split or parse it yourself. Reply with `reply(command.message.id, ...)` (needs the `reply` action) or `post(command.message.channel, ...)` (needs `post`).
+
+### How the runtime routes a command
+
+On the wire a command is an **ordinary message** whose text starts with `/<name>`. Members on any version of Pollis see it as a normal message, and a command sent while your bot is offline is handled when it catches up. The runtime, never your App, decides where each message goes; every message reaches exactly one of your handlers:
+
+1. `on-command`, if the message's first word is `/<name>`, `<name>` is declared in your **approved** manifest (not as a `request`), your App takes the `commands` trigger, and the next word is either not an `@mention` or is your bot's `@handle`;
+2. otherwise `on-mention`, if the message mentions your bot and your App takes `mentions`;
+3. otherwise `on-message`, if your App takes `messages`.
+
+The channel and event checks [above](#handlers-exports) apply to all three: a command in a channel your App is not granted reaches no handler, and the composer does not offer it there.
+
+**Two Apps with the same command name.** Names are yours to choose, so two Apps in one group may both declare `/ticket`. The composer then shows each with its App's name (`/ticket · linear`) and, when the member picks one, inserts that bot's `@handle` after the command: `/ticket @linear_bot ...`. A command that names a bot reaches only that bot, so the message reaches exactly the App the member picked. A command typed without a bot reaches every App in the group that declares it, which is why the composer does not send a shared name without one.
 
 ## Effective grants
 
@@ -357,4 +431,19 @@ cargo build --release --target wasm32-wasip2
 
 If the runtime refuses the component, the message names the import that caused it (usually a dependency using `std::net`; see [WASI](#wasi-what-std-gets)). The repo has two complete examples: [`fixtures/std-app`](../../pollis-app-host/fixtures/std-app/src/lib.rs) (ordinary `std`) and [`fixtures/test-app`](../../pollis-app-host/fixtures/test-app/src/lib.rs) (`no_std`, for the smallest possible component).
 
-**6. Run it.** The TypeScript SDK and the `pollis app` CLI (`new`, `test`, `dev`, `build`, `run`) are #2006. Until then, the host's own tests show how a job is driven end to end: [`pollis-app-host/tests/enforcement.rs`](../../pollis-app-host/tests/enforcement.rs) runs the fixture through every trigger and host function, [`tests/wasi.rs`](../../pollis-app-host/tests/wasi.rs) runs the `std` one, and `pollis-app-host/fixtures/build.sh` rebuilds them.
+**6. Run it.** Until App approvals and the `pollis app` CLI ship (#2005, #2006), a development build of `pollis-bot` runs an App on a paired bot:
+
+1. Pair the bot as usual (`pollis-bot pair`, see [Self-hosting](./self-hosting.md)).
+2. Put `pollis-app.json` and your `.wasm` in one directory, write the admin's grants to a file (the [format above](#effective-grants)), and install:
+
+   ```bash
+   export POLLIS_APP_DEV_GRANTS=/path/to/grants.json
+   pollis-bot app install --installation <bot id> --artifact ./dist
+   ```
+
+   This checks that the manifest is valid, the component compiles and imports only what the sandbox provides, and the grants are no wider than the manifest, then copies both files into the installation.
+3. Start (or restart) the runtime, with the same `POLLIS_APP_DEV_GRANTS`: `pollis-bot run`.
+
+A release build refuses `app install` and refuses to load an App until approvals ship. The first time a runtime loads an App it compiles it (well under a second for a typical Rust App; about 0.6 s for a 12 MB TypeScript App on a many-core machine) and keeps the result in `<data dir>/app-cache/`, so later starts, including `run --once`, load it in milliseconds. Deleting that directory is always safe.
+
+The repo's tests show the same path end to end: [`pollis-bot/tests/app_handler.rs`](../../pollis-bot/tests/app_handler.rs) runs the fixture App through the job loop, and the flows tests in `src-tauri/tests/flows/bot_runtime.rs` run it on real hosts of one bot.

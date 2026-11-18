@@ -72,7 +72,11 @@
     "removeAttachment": "Cire {{name}}",
     "send": "Aika saƙo",
     "markSensitive": "Yi wa {{name}} alama a matsayin mai muhimmanci na sirri",
-    "unmarkSensitive": "Cire alamar sirri daga {{name}}"
+    "unmarkSensitive": "Cire alamar sirri daga {{name}}",
+    "commandAmbiguous": "Manhajoji fiye da ɗaya suna da /{{command}}. Zaɓi ɗaya daga jerin.",
+    "commandRequestHint": "Ana aika shi a ɓoye zuwa {{app}}, ba a wallafa shi a wannan tasha ba",
+    "commandRequestUnavailable": "Ba a samun buƙatun sirri zuwa manhajoji a wannan sigar. Ba a wallafa komai ba.",
+    "commandRequestFailed": "An kasa aika wannan umarni. Ba a wallafa komai ba."
   },
   "mentions": {
     "listLabel": "Shawarwarin ambato",
@@ -112,5 +116,9 @@
     "quit": "Rufe Pollis",
     "unread_one": "Pollis — {{count}} ba a karanta ba",
     "unread_other": "Pollis — {{count}} ba a karanta ba"
+  },
+  "commands": {
+    "listLabel": "Shawarwarin umarni",
+    "matching": "Umarnin da suka dace da <hl>/{{query}}</hl>"
   }
 }

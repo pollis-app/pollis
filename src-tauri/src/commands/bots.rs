@@ -7,6 +7,7 @@ use tauri::State;
 use crate::error::Result;
 use crate::state::AppState;
 pub use pollis_core::commands::bots::{BotDetail, BotHost, BotSummary};
+pub use pollis_core::commands::bots::app_commands::GroupCommand;
 
 #[tauri::command]
 pub async fn list_group_bots(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<BotSummary>> {
@@ -41,4 +42,23 @@ pub async fn revoke_bot_host(bot_user_id: String, device_id: String, state: Stat
 #[tauri::command]
 pub async fn delete_bot(bot_user_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::bots::delete_bot(&state, bot_user_id).await
+}
+
+// #2018: slash commands in the composer.
+#[tauri::command]
+pub async fn list_group_commands(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<GroupCommand>> {
+    pollis_core::commands::bots::app_commands::list_group_commands(&state, group_id).await
+}
+
+#[tauri::command]
+pub async fn send_command_request(
+    group_id: String,
+    channel_id: String,
+    bot_user_id: String,
+    command: String,
+    args: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    pollis_core::commands::bots::app_commands::send_command_request(&state, group_id, channel_id, bot_user_id, command, args)
+        .await
 }

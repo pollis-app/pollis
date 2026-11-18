@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}} ہٹائیں",
     "send": "پیغام بھیجیں",
     "markSensitive": "{{name}} کو حساس نشان زد کریں",
-    "unmarkSensitive": "{{name}} سے حساس کا نشان ہٹائیں"
+    "unmarkSensitive": "{{name}} سے حساس کا نشان ہٹائیں",
+    "commandAmbiguous": "/{{command}} ایک سے زیادہ ایپس میں ہے۔ فہرست میں سے ایک منتخب کریں۔",
+    "commandRequestHint": "{{app}} کو نجی طور پر بھیجا جاتا ہے، اس چینل میں پوسٹ نہیں ہوتا",
+    "commandRequestUnavailable": "اس ورژن میں ایپس کو نجی درخواستیں دستیاب نہیں ہیں۔ کچھ بھی پوسٹ نہیں ہوا۔",
+    "commandRequestFailed": "یہ کمانڈ نہیں بھیجی جا سکی۔ کچھ بھی پوسٹ نہیں ہوا۔"
   },
   "mentions": {
     "listLabel": "مینشن کی تجاویز",
@@ -112,5 +116,9 @@
     "quit": "Pollis بند کریں",
     "unread_one": "Pollis — {{count}} غیر پڑھا",
     "unread_other": "Pollis — {{count}} غیر پڑھے"
+  },
+  "commands": {
+    "listLabel": "کمانڈ کی تجاویز",
+    "matching": "<hl>/{{query}}</hl> سے ملتی جلتی کمانڈز"
   }
 }

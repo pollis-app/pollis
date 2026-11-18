@@ -13,8 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+pub mod commands;
 #[cfg(debug_assertions)]
 pub mod dev_grants;
+
+pub use commands::{command_text, parse_command, route_command, CommandSpec, ParsedCommand, RoutedCommand};
 
 /// The file name a manifest is shipped under, beside the component.
 pub const MANIFEST_FILE_NAME: &str = "pollis-app.json";
@@ -181,6 +184,49 @@ pub struct Manifest {
     /// literals, no ports.
     #[serde(default)]
     pub egress: BTreeSet<String>,
+    /// #2018: slash commands members can pick in the composer. Each needs the
+    /// `commands` trigger (or `requests`, for a `request` command).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<CommandSpec>,
+    /// When the `schedule` trigger fires. Required with it, refused without it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub schedules: Vec<ScheduleSpec>,
+}
+
+/// Shortest and longest schedule period, in seconds.
+pub const MIN_SCHEDULE_SECS: u64 = 60;
+pub const MAX_SCHEDULE_SECS: u64 = 7 * 24 * 3600;
+
+/// One schedule: it fires at every Unix time `k * every + offset` (seconds,
+/// UTC), so every host of a bot computes the same slots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleSpec {
+    /// Lowercase letters, digits and '-', 1 to 32 characters; passed to `on-schedule`.
+    pub name: String,
+    /// Period in seconds, [`MIN_SCHEDULE_SECS`] to [`MAX_SCHEDULE_SECS`].
+    pub every: u64,
+    /// Seconds after each period boundary, less than `every`.
+    #[serde(default)]
+    pub offset: u64,
+}
+
+impl ScheduleSpec {
+    /// The latest slot at or before `now` (Unix seconds).
+    pub fn slot_at_or_before(&self, now: u64) -> Option<u64> {
+        if now < self.offset {
+            return None;
+        }
+        Some((now - self.offset) / self.every * self.every + self.offset)
+    }
+
+    /// The first slot strictly after `now`.
+    pub fn next_after(&self, now: u64) -> u64 {
+        match self.slot_at_or_before(now) {
+            Some(s) => s + self.every,
+            None => self.offset,
+        }
+    }
 }
 
 /// Why a manifest or a grant set was refused.
@@ -196,8 +242,12 @@ pub enum ManifestError {
     Channel(String),
     #[error("`egress` entry {0:?} is not valid: {1}")]
     Egress(String, &'static str),
+    #[error("`commands`: {0}")]
+    Command(String),
     #[error("grants are wider than the manifest: {0}")]
     Widening(String),
+    #[error("`schedules` is not valid: {0}")]
+    Schedule(String),
 }
 
 impl Manifest {
@@ -224,6 +274,40 @@ impl Manifest {
         }
         for host in &self.egress {
             validate_egress_host(host).map_err(|why| ManifestError::Egress(host.clone(), why))?;
+        }
+        commands::validate_commands(self)?;
+        self.validate_schedules()
+    }
+
+    fn validate_schedules(&self) -> Result<(), ManifestError> {
+        let bad = |why: String| Err(ManifestError::Schedule(why));
+        let declared = self.triggers.contains(&TriggerKind::Schedule);
+        if declared && self.schedules.is_empty() {
+            return bad("the `schedule` trigger needs at least one entry in `schedules`".into());
+        }
+        if !declared && !self.schedules.is_empty() {
+            return bad("`schedules` needs the `schedule` trigger in `triggers`".into());
+        }
+        let mut names = BTreeSet::new();
+        for s in &self.schedules {
+            let ok_name = !s.name.is_empty()
+                && s.name.len() <= 32
+                && s.name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+            if !ok_name {
+                return bad(format!("name {:?}: lowercase letters, digits and '-', 1 to 32 characters", s.name));
+            }
+            if !names.insert(&s.name) {
+                return bad(format!("name {:?} appears twice", s.name));
+            }
+            if !(MIN_SCHEDULE_SECS..=MAX_SCHEDULE_SECS).contains(&s.every) {
+                return bad(format!(
+                    "{:?}: `every` is {MIN_SCHEDULE_SECS} to {MAX_SCHEDULE_SECS} seconds",
+                    s.name
+                ));
+            }
+            if s.offset >= s.every {
+                return bad(format!("{:?}: `offset` must be less than `every`", s.name));
+            }
         }
         Ok(())
     }
@@ -456,7 +540,8 @@ mod tests {
                 "read": { "channels": ["#support", "#Ops"], "history": 30, "events": ["created", "edited"] },
                 "actions": ["reply", "react"],
                 "state": { "quota": 4096 },
-                "egress": ["api.linear.app"]
+                "egress": ["api.linear.app"],
+                "commands": [{ "name": "bug", "description": "File an issue" }]
             }"##,
         )
         .unwrap()
@@ -544,6 +629,26 @@ mod tests {
             assert!(validate_egress_host(bad).is_err(), "{bad} accepted");
         }
         assert!(validate_egress_host("api.x.com").is_ok());
+    }
+
+    #[test]
+    fn schedules_go_with_the_schedule_trigger_and_compute_the_same_slots_everywhere() {
+        let ok = br#"{"name":"a","version":"1","triggers":["schedule"],"schedules":[{"name":"daily","every":86400,"offset":3600}]}"#;
+        let m = Manifest::from_json(ok).unwrap();
+        let s = &m.schedules[0];
+        assert_eq!(s.slot_at_or_before(86_400 * 10 + 3_599), Some(86_400 * 9 + 3_600));
+        assert_eq!(s.slot_at_or_before(86_400 * 10 + 3_600), Some(86_400 * 10 + 3_600));
+        assert_eq!(s.next_after(86_400 * 10 + 3_600), 86_400 * 11 + 3_600);
+        for bad in [
+            &br#"{"name":"a","version":"1","triggers":["schedule"]}"#[..],
+            br#"{"name":"a","version":"1","schedules":[{"name":"x","every":60}]}"#,
+            br#"{"name":"a","version":"1","triggers":["schedule"],"schedules":[{"name":"x","every":59}]}"#,
+            br#"{"name":"a","version":"1","triggers":["schedule"],"schedules":[{"name":"x","every":60,"offset":60}]}"#,
+            br#"{"name":"a","version":"1","triggers":["schedule"],"schedules":[{"name":"X","every":60}]}"#,
+            br#"{"name":"a","version":"1","triggers":["schedule"],"schedules":[{"name":"x","every":60},{"name":"x","every":120}]}"#,
+        ] {
+            assert!(matches!(Manifest::from_json(bad), Err(ManifestError::Schedule(_))), "{}", String::from_utf8_lossy(bad));
+        }
     }
 
     #[test]

@@ -50,15 +50,54 @@ pub struct WebhookCall {
     /// posts the same alert to every host of a bot sends the same id to each,
     /// and the claim lets exactly one of them post it.
     pub delivery_id: String,
-    /// A channel id, or a channel name (with or without a leading `#`).
-    pub channel: String,
-    pub text: String,
+    pub payload: WebhookPayload,
+}
+
+/// What a webhook call carries, by the installation's handler kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebhookPayload {
+    /// The alerts handler's `{"channel", "text"}`.
+    Alert {
+        /// A channel id, or a channel name (with or without a leading `#`).
+        channel: String,
+        text: String,
+    },
+    /// #2004: an App's webhook receives the request as sent.
+    Raw(RawWebhook),
+}
+
+/// A webhook request for an App: its body, content type and the headers it
+/// may see (never the credential headers).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawWebhook {
+    pub content_type: Option<String>,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl WebhookCall {
+    /// An alerts call.
+    pub fn alert(delivery_id: impl Into<String>, channel: impl Into<String>, text: impl Into<String>) -> Self {
+        WebhookCall {
+            delivery_id: delivery_id.into(),
+            payload: WebhookPayload::Alert { channel: channel.into(), text: text.into() },
+        }
+    }
+}
+
+/// #2004: one slot of an App's manifest-declared schedule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleSlot {
+    pub name: String,
+    /// Unix seconds; the same on every host of the bot.
+    pub slot: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trigger {
     Message(IncomingMessage),
     Webhook(WebhookCall),
+    Schedule(ScheduleSlot),
 }
 
 impl Trigger {
@@ -67,6 +106,7 @@ impl Trigger {
         match self {
             Trigger::Message(m) => TriggerKey(format!("msg:{}", m.envelope_id)),
             Trigger::Webhook(w) => TriggerKey(format!("hook:{}", w.delivery_id)),
+            Trigger::Schedule(s) => TriggerKey(format!("slot:{}@{}", s.name, s.slot)),
         }
     }
 
@@ -74,6 +114,7 @@ impl Trigger {
         match self {
             Trigger::Message(_) => "message",
             Trigger::Webhook(_) => "webhook",
+            Trigger::Schedule(_) => "schedule",
         }
     }
 
@@ -83,6 +124,8 @@ impl Trigger {
         let id = match self {
             Trigger::Message(m) => &m.envelope_id,
             Trigger::Webhook(w) => &w.delivery_id,
+            // The slot's own time: every host derives the same message ids.
+            Trigger::Schedule(s) => return Some(ulid::Ulid::from_parts(s.slot.saturating_mul(1000), 0)),
         };
         ulid::Ulid::from_string(id).ok()
     }
@@ -103,11 +146,7 @@ mod tests {
             thread_id: None,
             sent_at: String::new(),
         });
-        let hook = Trigger::Webhook(WebhookCall {
-            delivery_id: "X".into(),
-            channel: "c".into(),
-            text: "t".into(),
-        });
+        let hook = Trigger::Webhook(WebhookCall::alert("X", "c", "t"));
         assert_eq!(msg.key().as_str(), "msg:X");
         assert_eq!(hook.key().as_str(), "hook:X");
         assert_ne!(msg.key(), hook.key());

@@ -3,7 +3,8 @@
 //!
 //! - [`trigger`]: what starts a job, and the key hosts claim it under.
 //! - [`job`]: the seven-step job loop and the per-installation lock.
-//! - [`handler`]: handlers (the built-in alerts handler; #2004 adds Apps).
+//! - [`handler`]: handlers (the built-in alerts handler) and [`app_handler`],
+//!   a sandboxed App (#2004) run through `pollis-app-host`.
 //! - [`action`]: actions and the grant check.
 //! - [`core`]: the narrow per-installation surface the loop needs from `pollis-core`.
 //! - [`runtime`]: many installations, event-driven wake-ups, webhook submission.
@@ -16,6 +17,7 @@
 
 pub mod action;
 pub mod app;
+pub mod app_handler;
 pub mod cli;
 pub mod config;
 pub mod core;
