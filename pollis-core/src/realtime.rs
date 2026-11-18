@@ -169,6 +169,10 @@ pub struct LiveKitState {
     /// Rooms mid-connect, so concurrent `connect_rooms` calls don't duplicate.
     pub connecting: HashSet<String>,
 
+    /// Report events only (#1182): never act on a membership wake here. The bot
+    /// runtime's wake source sets it, so MLS state changes only inside a job.
+    pub wake_only: bool,
+
     /// Held while a room's roster is read and reported, so a seed and a departure can't interleave.
     pub presence_lane: Arc<tokio::sync::Mutex<()>>,
 }
@@ -180,6 +184,7 @@ impl LiveKitState {
             #[cfg(feature = "realtime")]
             rooms: HashMap::new(),
             connecting: HashSet::new(),
+            wake_only: false,
             presence_lane: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
