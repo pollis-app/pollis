@@ -45,6 +45,11 @@
 //! [`trigger_cursor`] / [`set_trigger_cursor`] keep the job loop's per-channel
 //! position in the installation's encrypted store.
 //!
+//! **App state (runtime, #2004).** [`app_state`]: an App's key-value state,
+//! sealed under keys derived from the bot's account secret and stored on the
+//! DS, shared by every host; [`app_state::commit_app_state`] writes a job's
+//! changes once, under the claim the host won, at the versions it read.
+//!
 //! **Admin (bridge commands).** [`list_group_bots`], [`get_bot`], [`create_bot`],
 //! [`add_bot_host`], [`revoke_bot_host`], [`delete_bot`]. Error strings start
 //! with [`PAIRING_CODE_MISMATCH`], [`BOT_CAP_REACHED`] or [`PAIRING_REQUEST_EXPIRED`]
@@ -55,6 +60,7 @@
 //! enrollment SAS input rule.
 
 mod admin;
+pub mod app_state;
 pub mod approval;
 mod code;
 mod host;
