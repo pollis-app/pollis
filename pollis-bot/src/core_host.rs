@@ -7,7 +7,6 @@
 //! the normal durable send path; wake-ups are the normal realtime rooms (the
 //! group's room and the bot's inbox), behind the `realtime` feature.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,8 +19,6 @@ use pollis_core::commands::messages::{get_channel_messages, read_messages_after,
 use pollis_core::config::Config;
 use pollis_core::keystore::Keystore;
 use pollis_core::state::AppState;
-use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 
 use crate::action::ChannelInfo;
 use crate::core::{CoreError, InstallationCore};
@@ -38,8 +35,6 @@ pub const STORES_DIR: &str = "stores";
 const JOIN_WAIT: Duration = Duration::from_secs(60);
 /// On restart the group is already local; this only drains queued Welcomes.
 const REJOIN_WAIT: Duration = Duration::from_secs(5);
-/// Per-channel read cursors, beside the store. Ids and timestamps only.
-const CURSOR_FILE: &str = "bot-cursors.json";
 
 pub struct CoreHost {
     config: Config,
@@ -47,14 +42,18 @@ pub struct CoreHost {
 }
 
 impl CoreHost {
-    pub fn new() -> Result<Self> {
+    /// A host over `data_dir`. Its keystore entries are namespaced by the data
+    /// dir, so two runtimes on one machine (say, two hosts of one bot under one
+    /// user) never share a slot.
+    pub fn new(data_dir: &Path) -> Result<Self> {
         let config = Config::from_env().context(
             "reading the Delivery Service settings from the environment. Fix: set POLLIS_DELIVERY_URL (and the other variables the `pollis` CLI uses)",
         )?;
-        Ok(Self {
-            config,
-            keystore: pollis_core::keystore::default_os_keystore(),
-        })
+        let keystore: Arc<dyn Keystore> = Arc::new(ScopedKeystore::new(
+            pollis_core::keystore::default_os_keystore(),
+            data_dir,
+        ));
+        Ok(Self { config, keystore })
     }
 
     fn state_for(&self, store_dir: PathBuf) -> Result<Arc<AppState>> {
@@ -65,6 +64,48 @@ impl CoreHost {
             .set(store_dir)
             .map_err(|_| anyhow!("an installation's data dir was set twice"))?;
         Ok(Arc::new(state))
+    }
+}
+
+/// The OS keystore, with every entry this runtime writes prefixed by a hash of
+/// its data dir. A person's `pin_meta` slot is also read unprefixed, so the
+/// core's refusal of a human account on the unattended path still sees it.
+pub struct ScopedKeystore {
+    inner: Arc<dyn Keystore>,
+    prefix: String,
+}
+
+impl ScopedKeystore {
+    pub fn new(inner: Arc<dyn Keystore>, data_dir: &Path) -> Self {
+        use sha2::{Digest, Sha256};
+        let canonical = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+        let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
+        Self { inner, prefix: format!("pollis_bot_{}_", hex::encode(&digest[..8])) }
+    }
+
+    fn scoped(&self, key: &str) -> String {
+        format!("{}{key}", self.prefix)
+    }
+}
+
+#[async_trait]
+impl Keystore for ScopedKeystore {
+    async fn store(&self, key: &str, value: &[u8]) -> pollis_core::error::Result<()> {
+        Keystore::store(&*self.inner, &self.scoped(key), value).await
+    }
+
+    async fn load(&self, key: &str) -> pollis_core::error::Result<Option<Vec<u8>>> {
+        if let Some(v) = Keystore::load(&*self.inner, &self.scoped(key)).await? {
+            return Ok(Some(v));
+        }
+        if key.starts_with("pin_meta") {
+            return Keystore::load(&*self.inner, key).await;
+        }
+        Ok(None)
+    }
+
+    async fn delete(&self, key: &str) -> pollis_core::error::Result<()> {
+        Keystore::delete(&*self.inner, &self.scoped(key)).await
     }
 }
 
@@ -145,7 +186,7 @@ impl BotHost for CoreHost {
         realtime::connect(&state, &session, wake).await?;
         #[cfg(not(feature = "realtime"))]
         drop(wake);
-        let core = installation_core(state, session, &store);
+        let core = installation_core(state, session);
         Ok(OpenedInstallation {
             core,
             secrets: Arc::new(self.keystore.clone()),
@@ -211,53 +252,18 @@ fn handle_host_approvals(
 
 /// The job loop's view of one opened, unattended installation: `state` is
 /// signed in as the bot (after `start_unattended` or pairing) and has joined its
-/// group. Read cursors are kept in `store_dir`. Public so the flows harness can
-/// run the real loop over its in-process DS.
-pub fn installation_core(state: Arc<AppState>, session: BotSession, store_dir: &Path) -> Arc<dyn InstallationCore> {
-    Arc::new(CoreInstallation {
-        state,
-        session,
-        cursor_path: store_dir.join(CURSOR_FILE),
-        cursors: Mutex::new(None),
-    })
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct Cursors {
-    /// Channel id → the newest message handled.
-    channels: HashMap<String, StoredCursor>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct StoredCursor {
-    sent_at: String,
-    id: String,
+/// group. Read cursors live in its encrypted store (`bot_trigger_cursor`).
+/// Public so the flows harness can run the real loop over its in-process DS.
+pub fn installation_core(state: Arc<AppState>, session: BotSession) -> Arc<dyn InstallationCore> {
+    Arc::new(CoreInstallation { state, session })
 }
 
 struct CoreInstallation {
     state: Arc<AppState>,
     session: BotSession,
-    cursor_path: PathBuf,
-    /// Loaded on first use; the job lock serialises every access.
-    cursors: Mutex<Option<Cursors>>,
 }
 
 impl CoreInstallation {
-    fn load_cursors(&self) -> Cursors {
-        std::fs::read(&self.cursor_path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
-    }
-
-    fn save_cursors(&self, cursors: &Cursors) -> Result<(), CoreError> {
-        let tmp = self.cursor_path.with_extension("json.tmp");
-        let bytes = serde_json::to_vec(cursors).map_err(|e| CoreError(e.to_string()))?;
-        std::fs::write(&tmp, bytes)
-            .and_then(|_| std::fs::rename(&tmp, &self.cursor_path))
-            .map_err(|e| CoreError(format!("saving {}: {e}", self.cursor_path.display())))
-    }
-
     async fn text_channels(&self) -> Result<Vec<String>, CoreError> {
         Ok(self
             .channels()
@@ -288,36 +294,26 @@ impl InstallationCore for CoreInstallation {
         pollis_core::commands::mls::catch_up_all_mls_groups(&self.state, &user)
             .await
             .map_err(core_err)?;
-        let mut guard = self.cursors.lock().await;
-        let cursors = guard.get_or_insert_with(|| self.load_cursors());
         let mut fresh = Vec::new();
-        let mut changed = false;
         for channel_id in self.text_channels().await? {
             // Ingest + decrypt through the normal read path; the newest page seeds a new channel's cursor.
             let newest = get_channel_messages(user.clone(), channel_id.clone(), Some(1), None, &self.state)
                 .await
                 .map_err(core_err)?;
-            let Some(cursor) = cursors.channels.get(&channel_id).cloned() else {
+            let stored = bots::trigger_cursor(&self.state, &channel_id).await.map_err(core_err)?;
+            let Some((sent_at, id)) = stored else {
                 // First sight of this channel: start from now, never replay history.
-                let seed = newest
+                let (sent_at, id) = newest
                     .messages
                     .first()
-                    .map(|m| StoredCursor {
-                        sent_at: m.sent_at.clone(),
-                        id: m.id.clone(),
-                    })
-                    .unwrap_or(StoredCursor {
-                        sent_at: String::new(),
-                        id: String::new(),
-                    });
-                cursors.channels.insert(channel_id, seed);
-                changed = true;
+                    .map(|m| (m.sent_at.clone(), m.id.clone()))
+                    .unwrap_or_default();
+                bots::set_trigger_cursor(&self.state, &channel_id, &sent_at, &id)
+                    .await
+                    .map_err(core_err)?;
                 continue;
             };
-            let mut after = MessageCursor {
-                sent_at: cursor.sent_at,
-                id: cursor.id,
-            };
+            let mut after = MessageCursor { sent_at, id };
             loop {
                 let page = read_messages_after(
                     channel_id.clone(),
@@ -351,9 +347,6 @@ impl InstallationCore for CoreInstallation {
                 }
             }
         }
-        if changed {
-            self.save_cursors(cursors)?;
-        }
         fresh.sort_by(|a, b| {
             (a.sent_at.as_str(), a.envelope_id.as_str()).cmp(&(b.sent_at.as_str(), b.envelope_id.as_str()))
         });
@@ -361,16 +354,9 @@ impl InstallationCore for CoreInstallation {
     }
 
     async fn mark_handled(&self, message: &IncomingMessage) -> Result<(), CoreError> {
-        let mut guard = self.cursors.lock().await;
-        let cursors = guard.get_or_insert_with(|| self.load_cursors());
-        cursors.channels.insert(
-            message.channel_id.clone(),
-            StoredCursor {
-                sent_at: message.sent_at.clone(),
-                id: message.envelope_id.clone(),
-            },
-        );
-        self.save_cursors(cursors)
+        bots::set_trigger_cursor(&self.state, &message.channel_id, &message.sent_at, &message.envelope_id)
+            .await
+            .map_err(core_err)
     }
 
     async fn channels(&self) -> Result<Vec<ChannelInfo>, CoreError> {
