@@ -1,0 +1,265 @@
+//! The subcommands, over a [`BotHost`]. Every failure names one fix.
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::{Arc, OnceLock, Weak};
+use std::time::Instant;
+
+use anyhow::{anyhow, bail, Context, Result};
+
+use crate::config::{RuntimeConfig, WebhookConfig};
+use crate::host::{BotHost, PairOutcome, PairTarget, PairingProgress, WakeFn};
+use crate::installations::{check_capacity, InstallationRecord, Registry};
+use crate::job::Installation;
+use crate::log;
+use crate::ratelimit::TokenBucket;
+use crate::runtime::Runtime;
+use crate::secrets;
+use crate::status::{StatusBoard, StatusFile};
+use crate::webhook::{router, HookEntry, JobSubmitter, WebhookState};
+
+/// `pair` and `add-host`: file the request, show the code, wait, save the installation.
+pub async fn pair(
+    host: &dyn BotHost,
+    data_dir: &Path,
+    config: &RuntimeConfig,
+    target: PairTarget,
+    name: Option<String>,
+) -> Result<InstallationRecord> {
+    let registry = Registry::new(data_dir);
+    let existing = registry.list()?;
+    if let PairTarget::ExistingBot { bot_user_id } = &target {
+        if existing.iter().any(|r| &r.bot_user_id == bot_user_id) {
+            bail!("this host already runs bot {bot_user_id}. Fix: run `pollis-bot add-host` on a different machine");
+        }
+    }
+    check_capacity(existing.len() + 1, config.max_installations)?;
+
+    log::info("pairing", "filing a pairing request");
+    let progress = |p: PairingProgress| match p {
+        PairingProgress::WaitingForApproval(ticket) => {
+            let expires = chrono::DateTime::from_timestamp(ticket.expires_at, 0)
+                .map(|t| t.format("%H:%M UTC").to_string())
+                .unwrap_or_default();
+            let place = match &target {
+                PairTarget::NewBot => "the group's settings → Bots → Add a bot",
+                PairTarget::ExistingBot { .. } => "the bot's page → Add a host",
+            };
+            println!();
+            println!("    Pairing code:  {}", ticket.code);
+            println!();
+            println!("A group admin types this code in Pollis, in {place}. It expires at {expires}.");
+            log::info("pairing", "waiting for approval");
+        }
+        PairingProgress::JoiningGroup => log::info("pairing", "approved; joining the bot's group"),
+    };
+    match host.pair(data_dir, target.clone(), name, &progress).await? {
+        PairOutcome::Expired => Err(anyhow!(
+            "the code expired before an admin typed it. Fix: run `pollis-bot {}` again and type the new code before it expires",
+            match target {
+                PairTarget::NewBot => "pair",
+                PairTarget::ExistingBot { .. } => "add-host",
+            }
+        )),
+        PairOutcome::Paired(record) => {
+            registry.save(&record)?;
+            log::info(
+                &log::scope(&record.installation_id),
+                format!("paired: bot {} in group {}. Start it with `pollis-bot run`", record.bot_user_id, record.group_id),
+            );
+            Ok(record)
+        }
+    }
+}
+
+/// The effective webhook config for this run: the flag wins over the file.
+pub fn effective_webhook(config: &RuntimeConfig, flag: Option<Option<SocketAddr>>) -> Option<WebhookConfig> {
+    match flag {
+        None => config.webhook.clone(),
+        Some(addr) => {
+            let mut w = config.webhook.clone().unwrap_or_default();
+            if let Some(addr) = addr {
+                w.bind = addr;
+            }
+            Some(w)
+        }
+    }
+}
+
+/// `run`: open every installation, start the webhook if configured, catch up,
+/// then wait for events until stopped.
+pub async fn run(host: &dyn BotHost, data_dir: &Path, config: &RuntimeConfig, webhook: Option<WebhookConfig>) -> Result<()> {
+    let registry = Registry::new(data_dir);
+    let records = registry.list()?;
+    if records.is_empty() {
+        bail!("no installations on this host. Fix: run `pollis-bot pair` and have a group admin type the code");
+    }
+    check_capacity(records.len(), config.max_installations)?;
+
+    let status = Arc::new(StatusBoard::new(Some(data_dir), webhook.as_ref().map(|w| w.bind.to_string())));
+    // Wake-ups name the runtime, which exists only once every installation is open.
+    let runtime_slot: Arc<OnceLock<Weak<Runtime>>> = Arc::new(OnceLock::new());
+    let mut installations = Vec::new();
+    let mut slots = HashMap::new();
+    for record in &records {
+        let scope = log::scope(&record.installation_id);
+        log::info(&scope, format!("opening (bot {} in group {})", record.bot_user_id, record.group_id));
+        let dir = registry.dir_for(&record.installation_id)?;
+        let wake: WakeFn = {
+            let slot = runtime_slot.clone();
+            let id = record.installation_id.clone();
+            Arc::new(move || {
+                if let Some(runtime) = slot.get().and_then(Weak::upgrade) {
+                    runtime.wake(&id);
+                }
+            })
+        };
+        let opened = host.open(record, &dir, wake).await.with_context(|| {
+            format!("opening installation {}. Fix: check this host was not revoked on the bot's page; if it was, remove {} and pair again", record.installation_id, dir.display())
+        })?;
+        slots.insert(record.installation_id.clone(), opened.secrets);
+        installations.push(Arc::new(Installation::new(opened.core, record.handler.build())));
+    }
+    let runtime = Runtime::new(installations, config.max_installations, status)?;
+    let _ = runtime_slot.set(Arc::downgrade(&runtime));
+
+    if let Some(w) = &webhook {
+        let mut hooks = HashMap::new();
+        for (id, slot) in &slots {
+            let (secret, created) = secrets::ensure(slot.as_ref(), id).await?;
+            if created {
+                println!(
+                    "Webhook secret for installation {id} (shown once; give it to your alert sender):\n    {}",
+                    String::from_utf8_lossy(&secret)
+                );
+            }
+            hooks.insert(id.clone(), HookEntry::new(secret, TokenBucket::new(w.per_minute, w.burst, Instant::now())));
+        }
+        let submitter: Arc<dyn JobSubmitter> = Arc::new(runtime.clone());
+        let app = router(Arc::new(WebhookState::new(hooks, submitter)));
+        let listener = tokio::net::TcpListener::bind(w.bind).await.with_context(|| {
+            format!("binding the webhook listener to {}. Fix: choose a free address in config.json `webhook.bind` or `run --webhook ADDR`", w.bind)
+        })?;
+        if !w.bind.ip().is_loopback() {
+            log::info("webhook", format!("listening on {}, reachable beyond this machine: callers still need the secret", w.bind));
+        } else {
+            log::info("webhook", format!("listening on {}", w.bind));
+        }
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, app).await {
+                log::failure("webhook", format!("listener stopped: {e}"), "restart `pollis-bot run`");
+            }
+        });
+    } else {
+        log::info("webhook", "off (enable with config.json `webhook` or `run --webhook`)");
+    }
+
+    // A restart catches up on everything missed while it was down.
+    runtime.wake_all();
+    shutdown_signal().await;
+    log::info("runtime", "stopping");
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+                return;
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+/// `post`: send through the running runtime's own webhook endpoint.
+pub async fn post(
+    host: &dyn BotHost,
+    data_dir: &Path,
+    config: &RuntimeConfig,
+    installation_id: &str,
+    channel: &str,
+    text: &str,
+) -> Result<serde_json::Value> {
+    let registry = Registry::new(data_dir);
+    let record = registry
+        .get(installation_id)?
+        .ok_or_else(|| anyhow!("no installation {installation_id} on this host. Fix: use an id from `pollis-bot status`"))?;
+    // The running runtime's bind (it may come from `run --webhook`), else the file's.
+    let bind: SocketAddr = StatusFile::read(data_dir)
+        .and_then(|s| s.webhook_bind)
+        .and_then(|b| b.parse().ok())
+        .or_else(|| config.webhook.as_ref().map(|w| w.bind))
+        .ok_or_else(|| anyhow!("the webhook is off. Fix: add `\"webhook\": {{}}` to config.json (or `run --webhook`) and restart `pollis-bot run`"))?;
+    let dir = registry.dir_for(&record.installation_id)?;
+    let slot = host.secrets(&record, &dir).await?;
+    let secret = slot.load(installation_id).await?.ok_or_else(|| {
+        anyhow!("installation {installation_id} has no webhook secret yet. Fix: start `pollis-bot run` with the webhook on once")
+    })?;
+    let answer = crate::post::post(bind, installation_id, &secret, channel, text).await?;
+    if !answer.posted() {
+        let detail = answer.body.get("fix").or_else(|| answer.body.get("refused")).cloned().unwrap_or_default();
+        bail!("the runtime answered {} {}: {detail}", answer.status, answer.body.get("status").cloned().unwrap_or_default());
+    }
+    Ok(answer.body)
+}
+
+/// `rotate-secret`: a new secret, printed once. The running runtime picks it up on restart.
+pub async fn rotate_secret(host: &dyn BotHost, data_dir: &Path, installation_id: &str) -> Result<String> {
+    let registry = Registry::new(data_dir);
+    let record = registry
+        .get(installation_id)?
+        .ok_or_else(|| anyhow!("no installation {installation_id} on this host. Fix: use an id from `pollis-bot status`"))?;
+    let dir = registry.dir_for(&record.installation_id)?;
+    let slot = host.secrets(&record, &dir).await?;
+    let secret = secrets::rotate(slot.as_ref(), installation_id).await?;
+    Ok(String::from_utf8_lossy(&secret).into_owned())
+}
+
+/// `status`: the installations on disk and, if `run` has written one, its status.
+pub fn status(data_dir: &Path, config: &RuntimeConfig) -> Result<String> {
+    use std::fmt::Write as _;
+    let records = Registry::new(data_dir).list()?;
+    let running = StatusFile::read(data_dir);
+    let mut out = String::new();
+    let _ = writeln!(out, "data dir: {}", data_dir.display());
+    let _ = writeln!(out, "installations: {} of at most {}", records.len(), config.max_installations);
+    match &running {
+        Some(s) => {
+            let _ = writeln!(
+                out,
+                "runtime: last reported by pid {} (started {}); webhook {}",
+                s.pid,
+                s.started_at,
+                s.webhook_bind.as_deref().unwrap_or("off")
+            );
+        }
+        None => {
+            let _ = writeln!(out, "runtime: has not run yet (start it with `pollis-bot run`)");
+        }
+    }
+    if records.is_empty() {
+        let _ = writeln!(out, "\nno installations. Fix: `pollis-bot pair`");
+    }
+    for r in &records {
+        let _ = writeln!(out, "\n{}  bot {}  group {}  handler {:?}", r.installation_id, r.bot_user_id, r.group_id, r.handler);
+        if let Some(st) = running.as_ref().and_then(|s| s.installations.get(&r.installation_id)) {
+            let _ = writeln!(out, "    {} since {}", st.state.label(), st.since);
+            if let (Some(e), Some(f)) = (&st.last_error, &st.fix) {
+                let _ = writeln!(out, "    last error: {e}\n    fix: {f}");
+            }
+        }
+    }
+    Ok(out)
+}
