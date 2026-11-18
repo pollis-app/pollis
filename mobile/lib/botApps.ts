@@ -349,8 +349,11 @@ export function grantOptions(
     if (!a) {
       return null;
     }
+    // A granted channel is shown by its name in the group now (the approval stores the name it was
+    // matched by, e.g. "general" for "#General"), so it reads, and is addressed, like the update's.
+    const live = new Map(view.channels.map((c) => [c.id, c]));
     const channels = dedupeChannels([
-      ...a.grants.channels,
+      ...a.grants.channels.map((c) => live.get(c.id) ?? c),
       ...view.channels.filter((c) => requestsChannel(a.manifest, c.name)),
     ]);
     return {
