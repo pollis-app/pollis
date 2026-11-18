@@ -354,3 +354,76 @@ async fn a_command_in_a_channel_the_app_is_not_granted_runs_nothing() {
     assert_eq!(r.triggers[0].result, Ok(TriggerOutcome::NoActions));
     assert!(ds.posts().is_empty());
 }
+
+// ---------------------------------------------------------------- schedules
+
+const TICKER: &[u8] = br##"{
+    "name": "ticker", "version": "0.1.0",
+    "triggers": ["schedule"],
+    "schedules": [{ "name": "incr-ticks", "every": 60 }],
+    "state": { "quota": 4096 }
+}"##;
+
+fn ticker() -> Arc<dyn Handler> {
+    let wasm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm")).unwrap();
+    Arc::new(AppHandler::new(wasm, TICKER, grants_without_channels()).unwrap())
+}
+
+fn grants_without_channels() -> AdminGrants {
+    AdminGrants { events: [EventKind::Created].into(), ..Default::default() }
+}
+
+#[test]
+fn due_slots_seed_at_first_sight_and_run_at_most_the_newest_missed() {
+    use pollis_bot::job::{due_slots, DueSlots, MAX_MISSED_SLOTS};
+    let spec = pollis_app_manifest::ScheduleSpec { name: "s".into(), every: 60, offset: 0 };
+    assert_eq!(due_slots(&spec, None, 6_030), DueSlots { seed: Some(6_000), ..Default::default() });
+    assert_eq!(due_slots(&spec, Some(6_000), 6_059), DueSlots::default());
+    assert_eq!(due_slots(&spec, Some(5_940), 6_000), DueSlots { run: vec![6_000], ..Default::default() });
+    let late = due_slots(&spec, Some(5_400), 6_010);
+    assert_eq!(late.run, vec![5_880, 5_940, 6_000]);
+    assert_eq!(late.skipped, 10 - MAX_MISSED_SLOTS as u64);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn missed_slots_run_once_across_hosts_when_a_host_wakes() {
+    let ds = Arc::new(FakeDs::default());
+    let core1 = FakeCore::new("host-1", ds.clone());
+    let core2 = FakeCore::new("host-2", ds.clone());
+    let host1 = Installation::new(core1.clone(), ticker());
+    let host2 = Installation::new(core2.clone(), ticker());
+    // First sight: each host starts its cursor at the current slot, runs nothing.
+    host1.run_job(JobInput::Wake).await.unwrap();
+    host2.run_job(JobInput::Wake).await.unwrap();
+    assert!(ds.state.lock().unwrap().is_empty());
+    let seeded = *core1.schedule_cursors.lock().unwrap().get("incr-ticks").unwrap();
+
+    // Both hosts slept through five slots.
+    for core in [&core1, &core2] {
+        core.schedule_cursors.lock().unwrap().insert("incr-ticks".into(), seeded - 5 * 60);
+    }
+    let (r1, r2) = tokio::join!(host1.run_job(JobInput::Wake), host2.run_job(JobInput::Wake));
+    let (r1, r2) = (r1.unwrap(), r2.unwrap());
+    // Each ran the newest three (keys `slot:incr-ticks@<time>`), skipped two,
+    // and the claim let exactly one host apply each slot.
+    for r in [&r1, &r2] {
+        assert_eq!(r.triggers.len(), 3, "{:?}", r.triggers);
+        assert!(r.triggers.iter().all(|t| t.key.as_str().starts_with("slot:incr-ticks@")));
+        // Two, or more if a slot boundary passed during the test.
+        assert!(r.skipped_slots >= 2, "{}", r.skipped_slots);
+    }
+    assert_eq!(ds.state.lock().unwrap().get("ticks").map(|(_, v)| v.clone()), Some(b"3".to_vec()));
+    assert!(*core1.schedule_cursors.lock().unwrap().get("incr-ticks").unwrap() >= seeded);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_next_slot_is_the_one_timer_the_runtime_sets() {
+    let host = Installation::new(FakeCore::new("host-1", Arc::new(FakeDs::default())), ticker());
+    assert_eq!(host.next_slot(6_000), Some(6_060));
+    assert_eq!(host.next_slot(6_059), Some(6_060));
+    let alerts = Installation::new(
+        FakeCore::new("host-1", Arc::new(FakeDs::default())),
+        Arc::new(pollis_bot::handler::AlertsHandler),
+    );
+    assert_eq!(alerts.next_slot(6_000), None, "no schedules, no timer");
+}

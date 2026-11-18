@@ -74,6 +74,10 @@ async fn dispatch(data_dir: &std::path::Path, command: Command) -> anyhow::Resul
             app::forget(&host, data_dir, &installation_id).await?;
             println!("Installation {installation_id} removed from this host.");
         }
+        Command::AppInstall { installation_id, artifact } => {
+            app::app_install(data_dir, &installation_id, &artifact)?;
+            println!("App installed for installation {installation_id}. Restart `pollis-bot run` to start it.");
+        }
         Command::RotateSecret { installation_id } => {
             let secret = app::rotate_secret(&host, data_dir, &installation_id).await?;
             println!("New webhook secret for installation {installation_id} (shown once; restart `pollis-bot run` to use it):\n    {secret}");

@@ -67,6 +67,21 @@ pub async fn message_meta(state: &Arc<AppState>, message_id: &str) -> Result<Opt
     }
 }
 
+/// The last slot (Unix seconds) the job loop finished for an App schedule
+/// (#2004), kept in the installation's encrypted store beside the channel
+/// cursors (`bot_trigger_cursor`, keyed `schedule:<name>`). `None` for a
+/// schedule it has never seen.
+pub async fn schedule_cursor(state: &Arc<AppState>, name: &str) -> Result<Option<u64>> {
+    Ok(trigger_cursor(state, &format!("schedule:{name}"))
+        .await?
+        .and_then(|(slot, _)| slot.parse().ok()))
+}
+
+/// Record that the job loop has finished schedule `name` up to `slot`.
+pub async fn set_schedule_cursor(state: &Arc<AppState>, name: &str, slot: u64) -> Result<()> {
+    set_trigger_cursor(state, &format!("schedule:{name}"), &slot.to_string(), "").await
+}
+
 /// Whether `content` mentions `username` by `@username`, by the same rule
 /// that decides who a channel message wakes (#843): a whitespace- or
 /// string-initial `@`, case-insensitive, trailing punctuation ignored. `@all`

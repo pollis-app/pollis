@@ -34,7 +34,7 @@ impl Handler for Ack {
                 channel: m.channel_id.clone(),
                 text: format!("ack: {}", m.text.clone().unwrap_or_default()),
             }]),
-            Trigger::Webhook(_) => Ok(Vec::new()),
+            Trigger::Webhook(_) | Trigger::Schedule(_) => Ok(Vec::new()),
         }
     }
 }
@@ -292,4 +292,48 @@ async fn an_app_runs_on_asleep_hosts_that_share_its_state_beside_the_alerts_hand
         .expect("alerts job");
     assert_eq!(r.webhook().unwrap().result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
     assert!(contents(&alice, &general).await.contains(&"disk full".to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_cold_host_runs_the_schedule_slots_it_slept_through() {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let group = alice.create_group("Ops").await;
+    let (host, _) = pair_new_bot(&alice, &group, "Ticker").await;
+    let bot = host.bot_user_id().to_string();
+
+    let wasm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm"))
+        .expect("fixture App");
+    let manifest = br#"{
+        "name": "ticker", "version": "0.1.0",
+        "triggers": ["schedule"],
+        "schedules": [{ "name": "incr-ticks", "every": 60 }],
+        "state": { "quota": 4096 }
+    }"#;
+    let grants = AdminGrants { events: [EventKind::Created].into(), ..Default::default() };
+    let ticker: Arc<dyn Handler> = Arc::new(AppHandler::new(wasm, manifest, grants).expect("App handler"));
+    let job = asleep(&host, ticker).await;
+    // First sight seeds the cursor in the encrypted store and runs nothing.
+    let r = job.run_job(JobInput::Wake).await.expect("seed");
+    assert!(r.triggers.is_empty(), "{:?}", r.triggers);
+
+    // The host "slept" through two slots: move its cursor back two periods.
+    bots::start_unattended(&host.state, &bot).await.expect("open");
+    let seeded = bots::schedule_cursor(&host.state, "incr-ticks").await.unwrap().expect("seeded");
+    bots::set_schedule_cursor(&host.state, "incr-ticks", seeded - 120).await.unwrap();
+    bots::stop_unattended(&host.state).await;
+
+    let r = job.run_job(JobInput::Wake).await.expect("cold job");
+    let ran: Vec<&str> = r.triggers.iter().map(|t| t.key.as_str()).collect();
+    assert!(ran.len() >= 2 && ran.iter().all(|k| k.starts_with("slot:incr-ticks@")), "{ran:?}");
+    assert!(r.triggers.iter().all(|t| t.result == Ok(TriggerOutcome::Applied { posted: 0, refused: vec![] })));
+
+    // The App's counter, sealed on the DS, saw every slot that ran.
+    bots::start_unattended(&host.state, &bot).await.expect("open");
+    let keys = bots::app_state::app_state_keys(&host.state, &bot).await.unwrap();
+    let (ticks, _) = bots::app_state::read_app_state(&host.state, &keys, "ticks").await.unwrap();
+    bots::stop_unattended(&host.state).await;
+    assert_eq!(ticks.value, Some(ran.len().to_string().into_bytes()));
 }

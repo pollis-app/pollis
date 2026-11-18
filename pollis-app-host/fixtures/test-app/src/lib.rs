@@ -269,7 +269,8 @@ impl Guest for TestApp {
     }
 
     fn on_schedule(schedule: Schedule) -> Result<(), String> {
-        run(&format!("schedule {}", schedule.slot), &schedule.name)
+        // Schedule names cannot hold spaces: "incr-ticks" runs "incr ticks".
+        run(&format!("schedule {}", schedule.slot), &schedule.name.replace('-', " "))
     }
 
     fn on_request(request: Request) -> Result<(), String> {

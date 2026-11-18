@@ -55,6 +55,8 @@ pub struct AppHandler {
     /// Whether the effective grants deliver `mentions` (a mention of the bot
     /// then reaches `on-mention` instead of `on-message`).
     mentions: bool,
+    /// The manifest's schedules, when the effective grants deliver `schedule`.
+    schedules: Vec<pollis_app_manifest::ScheduleSpec>,
     http: PublicHttpClient,
 }
 
@@ -74,11 +76,16 @@ impl AppHandler {
         h.update((component.len() as u64).to_be_bytes());
         h.update(&component);
         h.update(manifest_json);
-        let mentions = pollis_app_manifest::effective_grants(&manifest, &grants)
-            .triggers
-            .contains(&TriggerKind::Mentions);
+        let triggers = pollis_app_manifest::effective_grants(&manifest, &grants).triggers;
+        let mentions = triggers.contains(&TriggerKind::Mentions);
+        let schedules = if triggers.contains(&TriggerKind::Schedule) {
+            manifest.schedules.clone()
+        } else {
+            Vec::new()
+        };
         Ok(AppHandler {
             mentions,
+            schedules,
             app_hash: h.finalize().into(),
             component: Arc::new(component),
             manifest,
@@ -187,6 +194,10 @@ impl Handler for AppHandler {
         ))
     }
 
+    fn schedules(&self) -> Vec<pollis_app_manifest::ScheduleSpec> {
+        self.schedules.clone()
+    }
+
     async fn handle_job(
         &self,
         trigger: &Trigger,
@@ -221,6 +232,13 @@ impl Handler for AppHandler {
                 };
                 (trigger, Some(msg))
             }
+            Trigger::Schedule(slot) => (
+                host::Trigger::Schedule(host::Schedule {
+                    name: slot.name.clone(),
+                    slot: slot.slot.saturating_mul(1000),
+                }),
+                None,
+            ),
             Trigger::Webhook(w) => {
                 let hook = match &w.payload {
                     WebhookPayload::Raw(raw) => {

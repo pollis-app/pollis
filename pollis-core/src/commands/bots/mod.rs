@@ -87,5 +87,7 @@ pub use host::{
 };
 #[cfg(feature = "test-harness")]
 pub use host::FixedAudit;
-pub use triggers::{claim_trigger, mentions_username, message_meta, set_trigger_cursor, trigger_cursor};
+pub use triggers::{
+    claim_trigger, mentions_username, message_meta, schedule_cursor, set_schedule_cursor, set_trigger_cursor, trigger_cursor,
+};
 pub use unattended::{forget_installation, has_installation, start_unattended, stop_unattended, BotSession, UNATTENDED_REFUSED};

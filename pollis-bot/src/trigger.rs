@@ -85,10 +85,19 @@ impl WebhookCall {
     }
 }
 
+/// #2004: one slot of an App's manifest-declared schedule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleSlot {
+    pub name: String,
+    /// Unix seconds; the same on every host of the bot.
+    pub slot: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trigger {
     Message(IncomingMessage),
     Webhook(WebhookCall),
+    Schedule(ScheduleSlot),
 }
 
 impl Trigger {
@@ -97,6 +106,7 @@ impl Trigger {
         match self {
             Trigger::Message(m) => TriggerKey(format!("msg:{}", m.envelope_id)),
             Trigger::Webhook(w) => TriggerKey(format!("hook:{}", w.delivery_id)),
+            Trigger::Schedule(s) => TriggerKey(format!("slot:{}@{}", s.name, s.slot)),
         }
     }
 
@@ -104,6 +114,7 @@ impl Trigger {
         match self {
             Trigger::Message(_) => "message",
             Trigger::Webhook(_) => "webhook",
+            Trigger::Schedule(_) => "schedule",
         }
     }
 
@@ -113,6 +124,8 @@ impl Trigger {
         let id = match self {
             Trigger::Message(m) => &m.envelope_id,
             Trigger::Webhook(w) => &w.delivery_id,
+            // The slot's own time: every host derives the same message ids.
+            Trigger::Schedule(s) => return Some(ulid::Ulid::from_parts(s.slot.saturating_mul(1000), 0)),
         };
         ulid::Ulid::from_string(id).ok()
     }
