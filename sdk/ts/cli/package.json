@@ -1,0 +1,30 @@
+{
+  "name": "@pollis/cli",
+  "version": "0.1.0",
+  "description": "The `pollis app` command: create, build and test Pollis Apps.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "pollis": "./dist/main.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm -s build && node --test --test-concurrency=1 test/*.test.ts"
+  },
+  "dependencies": {
+    "@bytecodealliance/componentize-js": "0.23.0",
+    "@pollis/app": "workspace:*",
+    "esbuild": "0.28.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "5.9.3"
+  }
+}

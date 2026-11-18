@@ -1,0 +1,7 @@
+{
+  "name": "@example/kitchen-sink",
+  "version": "1.2.3",
+  "description": "Every handler and host function, for the CLI's tests.",
+  "private": true,
+  "type": "module"
+}
