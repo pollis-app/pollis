@@ -6634,6 +6634,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "pollis-bot"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "hmac 0.12.1",
+ "http-body-util",
+ "pollis-api",
+ "pollis-core",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tower 0.5.3",
+ "ulid",
+ "zeroize",
+]
+
+[[package]]
 name = "pollis-capture-linux"
 version = "1.1.0"
 dependencies = [
