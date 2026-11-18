@@ -1016,6 +1016,28 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let group_id: String = arg(&args, "groupId")?;
             ok(crate::commands::bots::list_group_bots(&state()?, group_id).await?)
         }
+        // #2018: slash commands in the composer.
+        "list_group_commands" => {
+            let group_id: String = arg(&args, "groupId")?;
+            ok(crate::commands::bots::app_commands::list_group_commands(&state()?, group_id).await?)
+        }
+        "send_command_request" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let channel_id: String = arg(&args, "channelId")?;
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            let command: String = arg(&args, "command")?;
+            let cmd_args: String = arg(&args, "args")?;
+            crate::commands::bots::app_commands::send_command_request(
+                &state()?,
+                group_id,
+                channel_id,
+                bot_user_id,
+                command,
+                cmd_args,
+            )
+            .await?;
+            ok(())
+        }
         "get_bot" => {
             let bot_user_id: String = arg(&args, "botUserId")?;
             ok(crate::commands::bots::get_bot(&state()?, bot_user_id).await?)
@@ -1776,6 +1798,9 @@ mod tests {
             "approve_bot_app",
             "auto_approve_bot_app",
             "list_group_apps",
+            // #2018
+            "list_group_commands",
+            "send_command_request",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }
@@ -1819,6 +1844,11 @@ mod tests {
         assert_eq!(missing("add_bot_host", r#"{"botUserId":"b"}"#).await, "missing arg: code");
         assert_eq!(missing("revoke_bot_host", r#"{"botUserId":"b"}"#).await, "missing arg: deviceId");
         assert_eq!(missing("delete_bot", "{}").await, "missing arg: botUserId");
+        assert_eq!(missing("list_group_commands", "{}").await, "missing arg: groupId");
+        assert_eq!(
+            missing("send_command_request", r#"{"groupId":"g","channelId":"c","botUserId":"b","command":"x"}"#).await,
+            "missing arg: args"
+        );
     }
 
     #[tokio::test]

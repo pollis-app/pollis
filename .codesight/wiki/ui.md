@@ -733,26 +733,33 @@ handle is nearer to is the one that moves), so the same component works under
 `dir="rtl"`, where the sidebar is drawn on the right and grows leftwards, without
 knowing the reading direction.
 
-### Composer completions: `@mention` and `:shortcode:`
+### Composer completions: `/command`, `@mention` and `:shortcode:`
 
-`ChatInput` carries **two** autocomplete tracks and they are built to the same
+`ChatInput` carries **three** autocomplete tracks and they are built to the same
 shape, so learning one is learning the other:
 
-| | mentions (#843) | emoji shortcodes |
-| --- | --- | --- |
-| trigger | `@` at a word start | `:` at a word start |
-| parser | `utils/mentions.ts` → `mentionQueryAt` | `components/Emoji/emojiShortcodeQuery.ts` → `shortcodeQueryAt` |
-| Modern skin | `ui/MentionSuggestList` above the composer | `ui/EmojiSuggestList`, same anchoring |
-| terminal skin | ghost node inside `ui/RichTextInput`, Tab accepts | same ghost node, Tab accepts |
-| candidates | the conversation's roster | custom emoji the user may send, then the standard table |
+| | commands (#2018) | mentions (#843) | emoji shortcodes |
+| --- | --- | --- | --- |
+| trigger | `/` as the message's first character | `@` at a word start | `:` at a word start |
+| parser | `utils/slashCommands.ts` → `commandQueryAt` | `utils/mentions.ts` → `mentionQueryAt` | `components/Emoji/emojiShortcodeQuery.ts` → `shortcodeQueryAt` |
+| Modern skin | `ui/CommandSuggestList` above the composer | `ui/MentionSuggestList` above the composer | `ui/EmojiSuggestList`, same anchoring |
+| terminal skin | ghost node, Tab accepts | ghost node inside `ui/RichTextInput`, Tab accepts | same ghost node, Tab accepts |
+| candidates | the group's approved Apps' commands granted this channel (`list_group_commands`) | the conversation's roster | custom emoji the user may send, then the standard table |
+
+**Commands (#2018)** are ordinary messages. On send, `classifyCommandSend` decides: a name two
+Apps here declare without the bot's `@handle` is not sent (inline `command-notice`); a
+`request: true` command goes to `send_command_request` and is never posted; anything else,
+unknown commands included, is a normal send. Picking a shared name inserts `/name @bot `.
+`mobile/lib/slashCommands.ts` is a port held to the same text (`frontend/tests/slash-commands.test.ts`).
 
 **A trigger only opens at the start of the string or after whitespace.** That one
 rule is what keeps `http://example.com` and `10:30` from ever reading as a
 shortcode, and `a@b.com` from reading as a mention; both parsers share it and both
 have negative tests for it (`frontend/tests/emoji-shortcode-query.test.ts`).
 
-**Enter / Tab / Esc have exactly one owner.** `handleKeyDown` tests the mention
-track first and the emoji track second, and an open mention query suppresses the
+**Enter / Tab / Esc have exactly one owner.** `handleKeyDown` tests the command track
+first (it opens only on the message's first word, so it never overlaps the others), the
+mention track second and the emoji track third, and an open mention query suppresses the
 emoji one outright. The two cannot in fact both be open — neither body alphabet
 contains the other's trigger character — but the precedence is written down so a
 future widening of either alphabet has one place to be reasoned about.
@@ -894,7 +901,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**250 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**251 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1064,7 +1071,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 - **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
-### `components/ui` (51)
+### `components/ui` (52)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
@@ -1076,6 +1083,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **Checkbox** — props: label, checked, onChange, disabled, className — `frontend/src/components/ui/Checkbox.tsx`
 - **Chip** — props: children, onClick, selected, disabled, title, machine, style — `frontend/src/components/ui/Chip.tsx`
 - **CodeSnippet** — props: value, labels, ariaLabels, copyTestId — `frontend/src/components/ui/CodeSnippet.tsx`. A read-only value (shell command, link) with a copy `Button` beside it; the value wraps instead of scrolling. Copies through the clipboard bridge with the idle/copied/failed `data-copy-state` (#898). Used by the Software Update page's managed-install command and the created invite-link card.
+- **CommandSuggestList** — props: commands, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/CommandSuggestList.tsx`. The `/command` list (#2018) on the `SuggestList` shell: name, argument hint, description, and the App's name with the Bot badge when two Apps share the name.
 - **ComposerBarHeader** — props: heading, onCancel, cancelLabel, cancelTestId, focusCancel — `frontend/src/components/ui/ComposerBarHeader.tsx`. The heading row (and optional cancel `X`) of every bar that replaces the chat input: `EditMessageBar`, `ConfirmBar`, the DM-request bar.
 - **ConfirmBar** — props: testId, heading, body, cancelLabel, cancelTestId, onCancel, confirmLabel, confirmTestId, onConfirm, isPending, pendingLabel — `frontend/src/components/ui/ConfirmBar.tsx`. The one confirmation inside a conversation (#1968): replaces the chat input with the consequence and a `danger` action that holds focus (Enter confirms; Escape, handled by the caller, or the `X` cancels). Delete message / channel in `MainContent`, delete in the Vault.
 - **ConfirmBlock** — props: question, consequence, children, error, errorTestId, confirmLabel, onConfirm, isPending, pendingLabel, confirmDisabled, confirmTestId, cancel, testId — `frontend/src/components/ui/ConfirmBlock.tsx`. The one confirmation in a page column (#1968): the question naming its object, the consequence, an optional field (a typed name), the error, then the page's only `danger` button and a ghost Cancel, which is the default focus unless a field takes it. Used by `ConfirmPage`, Conversation settings, and the Security page's in-place revokes.

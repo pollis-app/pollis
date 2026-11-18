@@ -57,7 +57,11 @@
     "removeAttachment": "移除 {{name}}",
     "send": "发送消息",
     "markSensitive": "将 {{name}} 标记为敏感内容",
-    "unmarkSensitive": "取消将 {{name}} 标记为敏感内容"
+    "unmarkSensitive": "取消将 {{name}} 标记为敏感内容",
+    "commandAmbiguous": "有多个应用提供 /{{command}}。请从列表中选择一个。",
+    "commandRequestHint": "私下发送给 {{app}}，不会发布到此频道",
+    "commandRequestUnavailable": "此版本暂不支持向应用发送私密请求。未发布任何内容。",
+    "commandRequestFailed": "无法发送此命令。未发布任何内容。"
   },
   "mentions": {
     "listLabel": "提及建议",
@@ -89,5 +93,9 @@
     "version": "版本 {{version}}",
     "quit": "退出 Pollis",
     "unread_other": "Pollis — {{count}} 条未读"
+  },
+  "commands": {
+    "listLabel": "命令建议",
+    "matching": "匹配 <hl>/{{query}}</hl> 的命令"
   }
 }

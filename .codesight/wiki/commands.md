@@ -607,6 +607,8 @@ Admin commands, camelCase over Tauri and the mobile bridge (same arg names): `li
 
 App approvals (#2005), same transport: `get_bot_app(groupId, botUserId)` → `BotAppView` (admins: the approved App as verified on this device, the runtime's last report, the pending artifact with its diff against the approved manifest and suggested grants), `approve_bot_app(input: ApproveBotAppInput)` → `BotAppView` (signs the next `seq`; refuses grants wider than the manifest and anything that is not what the page showed: errors start with `app_approval_changed` or `app_approval_stale`), `auto_approve_bot_app(groupId, botUserId)` → `bool` (approves a waiting non-widening update from the pinned source of an installation set to update itself), and **`list_group_apps(groupId)`** → `GroupAppView[]` for **any member**: each installation's approved manifest (parsed and as JSON text), grants, `development` and `cannotSendOutside`, verified on the reader's device; #2018's slash commands read it. Implementation: `pollis-core/src/commands/bots/apps.rs`; see [Bots](./bots.md) "App approvals".
 
+Slash commands (#2018), any member: `list_group_commands(groupId)` → `GroupCommand[]` `{installationId, botUserId, botUsername, appName, command, description, argHint, request, channels, needsTarget}` (TS: `frontend/src/utils/slashCommands.ts`, port `mobile/lib/slashCommands.ts`) — every command of every bot's approved App in the group, `channels` = the App's granted channel ids, `needsTarget` when two Apps declare the name. The approved manifest comes through `bots::app_commands::approved_app`, the one seam to App approval (#2005). `send_command_request(groupId, channelId, botUserId, command, args)` delivers a `request: true` command sealed to the bot; the transport is #2008's, so today it refuses with `bot_requests_unavailable` and sends nothing. A command is otherwise an ordinary `send_message`.
+
 ## device_link (`commands/device_link.rs`) — QR device link (#1207, #1361)
 
 Sign a new device in by QR instead of the email OTP plus a typed SAS, in either direction: v1, an enrolled device shows the QR and the new device scans it (desktop pastes its code, having no scanner), or v2, the NEW device shows the QR and a signed-in phone scans it. Protocol, threat model and guardrails: `docs/qr-device-link-design.md`. Mobile no longer shows a v1 code; its Security screen is the v2 scanner.
@@ -857,7 +859,7 @@ than hand-edit.
 
 **`autolock`** (2) — `report_user_activity`, `set_auto_lock_timeout`
 
-**`bots`** (10) — `add_bot_host`, `approve_bot_app`, `auto_approve_bot_app`, `create_bot`, `delete_bot`, `get_bot`, `get_bot_app`, `list_group_apps`, `list_group_bots`, `revoke_bot_host`
+**`bots`** (12) — `add_bot_host`, `approve_bot_app`, `auto_approve_bot_app`, `create_bot`, `delete_bot`, `get_bot`, `get_bot_app`, `list_group_apps`, `list_group_bots`, `list_group_commands`, `revoke_bot_host`, `send_command_request`
 
 **`device_enrollment`** (9) — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 

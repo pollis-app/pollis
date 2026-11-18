@@ -7,6 +7,7 @@ use tauri::State;
 use crate::error::Result;
 use crate::state::AppState;
 pub use pollis_core::commands::bots::{ApproveBotAppInput, BotAppView, BotDetail, BotHost, BotSummary, GroupAppView};
+pub use pollis_core::commands::bots::app_commands::GroupCommand;
 
 #[tauri::command]
 pub async fn list_group_bots(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<BotSummary>> {
@@ -63,4 +64,24 @@ pub async fn auto_approve_bot_app(group_id: String, bot_user_id: String, state: 
 #[tauri::command]
 pub async fn list_group_apps(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<GroupAppView>> {
     pollis_core::commands::bots::list_group_apps(&state, group_id).await
+
+}
+
+// #2018: slash commands in the composer.
+#[tauri::command]
+pub async fn list_group_commands(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<GroupCommand>> {
+    pollis_core::commands::bots::app_commands::list_group_commands(&state, group_id).await
+}
+
+#[tauri::command]
+pub async fn send_command_request(
+    group_id: String,
+    channel_id: String,
+    bot_user_id: String,
+    command: String,
+    args: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    pollis_core::commands::bots::app_commands::send_command_request(&state, group_id, channel_id, bot_user_id, command, args)
+        .await
 }

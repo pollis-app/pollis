@@ -6,12 +6,14 @@ import type { BotDetail, BotHost, BotSummary } from "../../types";
 import { groupQueryKeys, useGroupMembers, useUserGroupsWithChannels } from "./useGroups";
 import { appStore } from "../../stores/appStore";
 import { botIdSet } from "../../utils/bots";
+import type { GroupCommand } from "../../utils/slashCommands";
 
 /** Bots (#1182). A bot is a group member too, so a change also refreshes the member list. */
 const botQueryKeys = {
   all: ["bots"] as const,
   group: (groupId: string) => ["bots", "group", groupId] as const,
   bot: (botUserId: string) => ["bots", "bot", botUserId] as const,
+  commands: (groupId: string | null) => ["bots", "commands", groupId] as const,
 };
 
 function invalidateBots(queryClient: QueryClient, groupId: string | undefined) {
@@ -28,6 +30,16 @@ export function useGroupBots(groupId: string, enabled: boolean) {
     queryFn: async () => (await invoke<BotSummary[]>("list_group_bots", { groupId })) ?? [],
     enabled,
     staleTime: 1000 * 30,
+  });
+}
+
+/** The slash commands of the group's approved Apps (#2018), for every member's composer. */
+export function useGroupCommands(groupId: string | null) {
+  return useQuery({
+    queryKey: botQueryKeys.commands(groupId),
+    queryFn: async () => (await invoke<GroupCommand[]>("list_group_commands", { groupId })) ?? [],
+    enabled: !!groupId,
+    staleTime: 1000 * 60,
   });
 }
 

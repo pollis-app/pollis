@@ -17,6 +17,8 @@ mod bots;
 mod bot_apps;
 #[path = "flows/bot_runtime.rs"]
 mod bot_runtime;
+#[path = "flows/bot_commands.rs"]
+mod bot_commands;
 #[path = "flows/channel_mute.rs"]
 mod channel_mute;
 #[path = "flows/cross_channel_ingest.rs"]

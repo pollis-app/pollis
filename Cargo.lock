@@ -6831,6 +6831,7 @@ dependencies = [
  "openmls",
  "openmls_traits",
  "pollis-api",
+ "pollis-app-manifest",
  "pollis-bot",
  "pollis-capture-proto",
  "pollis-core",

@@ -129,6 +129,12 @@
         "claims"
       ]
     },
+    "docs/bots/using-bots": {
+      "kind": "doc",
+      "about": "Bots for members: the Bot badge, slash commands, mentioning a bot (#2018)",
+      "source": "docs/bots/using-bots.md",
+      "checked_by": []
+    },
     "docs/bots/admin-guide": {
       "kind": "doc",
       "about": "Bots admin guide (source for website/bots.html)",

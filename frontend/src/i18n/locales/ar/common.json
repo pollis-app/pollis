@@ -57,7 +57,11 @@
     "removeAttachment": "إزالة {{name}}",
     "send": "إرسال الرسالة",
     "markSensitive": "وضع علامة حساس على {{name}}",
-    "unmarkSensitive": "إزالة علامة حساس عن {{name}}"
+    "unmarkSensitive": "إزالة علامة حساس عن {{name}}",
+    "commandAmbiguous": "يوجد الأمر /{{command}} في أكثر من تطبيق. اختر واحدًا من القائمة.",
+    "commandRequestHint": "يُرسَل بشكل خاص إلى {{app}}، ولا يُنشر في هذه القناة",
+    "commandRequestUnavailable": "الطلبات الخاصة إلى التطبيقات غير متاحة في هذا الإصدار. لم يُنشر شيء.",
+    "commandRequestFailed": "تعذّر إرسال هذا الأمر. لم يُنشر شيء."
   },
   "mentions": {
     "listLabel": "اقتراحات الإشارة",
@@ -129,5 +133,9 @@
     "unread_few": "Pollis — {{count}} غير مقروءة",
     "unread_many": "Pollis — {{count}} غير مقروءة",
     "unread_other": "Pollis — {{count}} غير مقروءة"
+  },
+  "commands": {
+    "listLabel": "اقتراحات الأوامر",
+    "matching": "الأوامر المطابقة لـ <hl>/{{query}}</hl>"
   }
 }

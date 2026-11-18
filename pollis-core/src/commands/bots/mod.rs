@@ -59,6 +59,11 @@
 //! (rollback protection), and reports to admins. Bridge commands:
 //! [`get_bot_app`], [`approve_bot_app`], [`auto_approve_bot_app`] (admins) and
 //! [`list_group_apps`] (any member: the approved manifests, the marks).
+//! **Slash commands (bridge commands, #2018).** [`app_commands::list_group_commands`]:
+//! the commands of the group's approved Apps, for any member's composer;
+//! [`app_commands::send_command_request`]: a `request: true` command, sealed to
+//! the bot and never posted (the transport is #2008's; until then it refuses).
+//! [`app_commands::approved_apps`] reads them from #2005's verified approvals.
 //!
 //! **Admin (bridge commands).** [`list_group_bots`], [`get_bot`], [`create_bot`],
 //! [`add_bot_host`], [`revoke_bot_host`], [`delete_bot`]. Error strings start
@@ -74,6 +79,7 @@ pub use pollis_app_manifest as manifest;
 
 mod admin;
 pub mod app_approval;
+pub mod app_commands;
 pub mod app_state;
 pub mod approval;
 pub mod apps;

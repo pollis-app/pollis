@@ -15,10 +15,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 pub mod app_hash;
+pub mod commands;
 pub mod diff;
 
 pub use app_hash::{app_hash, hex, manifest_hash, parse_hex_hash, Hash};
 pub use diff::{diff, widenings_between, ChangeField, ChangeKind, ManifestChange};
+
+pub use commands::{command_text, parse_command, route_command, CommandSpec, ParsedCommand, RoutedCommand};
 
 /// The file name a manifest is shipped under, beside the component.
 pub const MANIFEST_FILE_NAME: &str = "pollis-app.json";
@@ -185,6 +188,10 @@ pub struct Manifest {
     /// literals, no ports.
     #[serde(default)]
     pub egress: BTreeSet<String>,
+    /// #2018: slash commands members can pick in the composer. Each needs the
+    /// `commands` trigger (or `requests`, for a `request` command).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<CommandSpec>,
     /// When the `schedule` trigger fires. Required with it, refused without it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schedules: Vec<ScheduleSpec>,
@@ -239,6 +246,8 @@ pub enum ManifestError {
     Channel(String),
     #[error("`egress` entry {0:?} is not valid: {1}")]
     Egress(String, &'static str),
+    #[error("`commands`: {0}")]
+    Command(String),
     #[error("grants are wider than the manifest: {0}")]
     Widening(String),
     #[error("`schedules` is not valid: {0}")]
@@ -270,6 +279,7 @@ impl Manifest {
         for host in &self.egress {
             validate_egress_host(host).map_err(|why| ManifestError::Egress(host.clone(), why))?;
         }
+        commands::validate_commands(self)?;
         self.validate_schedules()
     }
 
@@ -534,7 +544,8 @@ mod tests {
                 "read": { "channels": ["#support", "#Ops"], "history": 30, "events": ["created", "edited"] },
                 "actions": ["reply", "react"],
                 "state": { "quota": 4096 },
-                "egress": ["api.linear.app"]
+                "egress": ["api.linear.app"],
+                "commands": [{ "name": "bug", "description": "File an issue" }]
             }"##,
         )
         .unwrap()

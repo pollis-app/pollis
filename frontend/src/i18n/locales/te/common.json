@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}}ను తీసివేయి",
     "send": "మెసేజ్ పంపు",
     "markSensitive": "{{name}}ను సున్నితమైనదిగా గుర్తించు",
-    "unmarkSensitive": "{{name}}ను సున్నితమైనది కాదని గుర్తించు"
+    "unmarkSensitive": "{{name}}ను సున్నితమైనది కాదని గుర్తించు",
+    "commandAmbiguous": "/{{command}} ఒకటి కంటే ఎక్కువ యాప్‌లలో ఉంది. జాబితా నుండి ఒకదాన్ని ఎంచుకోండి.",
+    "commandRequestHint": "{{app}}కు ప్రైవేట్‌గా పంపబడుతుంది, ఈ ఛానెల్‌లో పోస్ట్ చేయబడదు",
+    "commandRequestUnavailable": "ఈ వెర్షన్‌లో యాప్‌లకు ప్రైవేట్ అభ్యర్థనలు అందుబాటులో లేవు. ఏదీ పోస్ట్ చేయబడలేదు.",
+    "commandRequestFailed": "ఈ కమాండ్‌ను పంపడం సాధ్యం కాలేదు. ఏదీ పోస్ట్ చేయబడలేదు."
   },
   "mentions": {
     "listLabel": "ప్రస్తావన సూచనలు",
@@ -112,5 +116,9 @@
     "quit": "Pollis నుండి నిష్క్రమించు",
     "unread_one": "Pollis — {{count}} చదవనిది",
     "unread_other": "Pollis — {{count}} చదవనివి"
+  },
+  "commands": {
+    "listLabel": "కమాండ్ సూచనలు",
+    "matching": "<hl>/{{query}}</hl>కు సరిపోలే కమాండ్‌లు"
   }
 }

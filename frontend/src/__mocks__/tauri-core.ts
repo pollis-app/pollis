@@ -262,6 +262,8 @@ interface MockStore {
   bots: MockBot[];
   /** #2005: each bot's App, by bot user id. */
   botApps: Record<string, MockBotApp>;
+  /** #2018: each group's slash commands, as `list_group_commands` returns them. */
+  groupCommands: Record<string, unknown[]>;
   /** #2003: every alias the mock DS holds, of members past and present. */
   groupAliases: MockGroupAlias[];
   /** Bytes `upload_public_file` received, served back by `get_public_file_url`. */
@@ -432,6 +434,7 @@ function readPreferences(raw: unknown): Record<string, unknown> {
 const store: MockStore = {
   bots: (preload.bots as MockBot[] | undefined) ?? [],
   botApps: (preload.botApps as Record<string, MockBotApp> | undefined) ?? {},
+  groupCommands: (preload.groupCommands as Record<string, unknown[]> | undefined) ?? {},
   groupAliases: (preload.groupAliases as MockGroupAlias[] | undefined) ?? [],
   uploadedFiles: {},
   deviceRevoked: false,
@@ -1507,6 +1510,15 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       requireAdminMock(groupId);
       return store.bots.filter((b) => b.groupId === groupId).map(botSummaryMock);
     }
+
+    // #2018: any member reads the group's commands; a `request` command has no transport yet.
+    case 'list_group_commands': {
+      const { groupId } = args as { groupId: string };
+      return store.groupCommands[groupId] ?? [];
+    }
+
+    case 'send_command_request':
+      throw 'bot_requests_unavailable: this App\'s command is delivered privately to the bot, which this version cannot do yet; nothing was sent or posted';
 
     case 'get_bot': {
       const { botUserId } = args as { botUserId: string };

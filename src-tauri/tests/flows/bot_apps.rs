@@ -8,7 +8,6 @@ use serde_json::json;
 use serial_test::serial;
 
 use pollis_api::bot_apps::BotAppRunState;
-use pollis_core::commands::bots::manifest as pollis_app_manifest;
 use pollis_app_manifest::AdminGrants;
 use pollis_core::commands::bots::app_approval::{
     check_artifact, developer_key_public, sign_dev_build, AppApproval, AppApprovalRecord, AppApprovalRefusal, Artifact,

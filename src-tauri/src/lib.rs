@@ -579,6 +579,8 @@ pub fn run() {
             commands::bots::approve_bot_app,
             commands::bots::auto_approve_bot_app,
             commands::bots::list_group_apps,
+            commands::bots::list_group_commands,
+            commands::bots::send_command_request,
             commands::transparency::self_audit_account_key,
             commands::transparency::audit_peer_account_key,
             commands::transparency::verify_own_build,

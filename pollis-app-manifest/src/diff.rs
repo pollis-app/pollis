@@ -3,7 +3,12 @@
 //!
 //! A **widening** is anything that lets the App see or do more than before: a
 //! new trigger kind, a new channel selector, a longer history window, a new
-//! event kind, a new action, a new egress host or a larger state quota. The
+//! event kind, a new action, a new egress host, a larger state quota, a new
+//! slash command (or one switched between posted and private request), or a
+//! new schedule (or one that fires more often). A command or schedule is a new
+//! way for the App to be invoked: a member can reach it where they could not
+//! before, or it runs at times it did not; so additions count as widenings,
+//! though the grants that bound what it may then do are unchanged. The
 //! approval page always highlights widenings and never pre-accepts them; an
 //! update with none can be approved with one tap. A development build whose
 //! manifest widens the approved one is refused by the runtime.
@@ -25,6 +30,10 @@ pub enum ChangeField {
     Action,
     Egress,
     StateQuota,
+    /// A slash command (#2018), by name.
+    Command,
+    /// A schedule (#2004), by name.
+    Schedule,
 }
 
 /// Which way a change goes.
@@ -114,6 +123,59 @@ pub fn diff(old: &Manifest, new: &Manifest) -> Vec<ManifestChange> {
     set_changes(ChangeField::Action, &old.actions, &new.actions, |a| a.as_str().to_string(), &mut out);
     set_changes(ChangeField::Egress, &old.egress, &new.egress, Clone::clone, &mut out);
     number_change(ChangeField::StateQuota, old.state.quota, new.state.quota, &mut out);
+
+    // Commands by name: new ones, and ones switched between a posted command
+    // and a private request, widen; a reworded description does not.
+    for c in &new.commands {
+        match old.commands.iter().find(|o| o.name == c.name) {
+            None => out.push(ManifestChange {
+                field: ChangeField::Command,
+                kind: ChangeKind::Added,
+                value: c.name.clone(),
+                previous: None,
+                widening: true,
+            }),
+            Some(o) if o.request != c.request => out.push(ManifestChange {
+                field: ChangeField::Command,
+                kind: ChangeKind::Increased,
+                value: c.name.clone(),
+                previous: Some(if o.request { "request" } else { "command" }.to_string()),
+                widening: true,
+            }),
+            Some(_) => {}
+        }
+    }
+    for o in &old.commands {
+        if !new.commands.iter().any(|c| c.name == o.name) {
+            out.push(ManifestChange { field: ChangeField::Command, kind: ChangeKind::Removed, value: o.name.clone(), previous: None, widening: false });
+        }
+    }
+
+    // Schedules by name: a new one, or one that fires more often, widens.
+    for sch in &new.schedules {
+        match old.schedules.iter().find(|o| o.name == sch.name) {
+            None => out.push(ManifestChange {
+                field: ChangeField::Schedule,
+                kind: ChangeKind::Added,
+                value: sch.name.clone(),
+                previous: None,
+                widening: true,
+            }),
+            Some(o) if o.every != sch.every || o.offset != sch.offset => out.push(ManifestChange {
+                field: ChangeField::Schedule,
+                kind: if sch.every < o.every { ChangeKind::Increased } else { ChangeKind::Decreased },
+                value: format!("{} every {}s", sch.name, sch.every),
+                previous: Some(format!("every {}s", o.every)),
+                widening: sch.every < o.every,
+            }),
+            Some(_) => {}
+        }
+    }
+    for o in &old.schedules {
+        if !new.schedules.iter().any(|sch| sch.name == o.name) {
+            out.push(ManifestChange { field: ChangeField::Schedule, kind: ChangeKind::Removed, value: o.name.clone(), previous: None, widening: false });
+        }
+    }
     out
 }
 
@@ -197,6 +259,21 @@ mod tests {
         );
         assert!(w.iter().any(|c| c.field == ChangeField::Egress && c.value == "evil.example"));
         assert!(w.iter().any(|c| c.field == ChangeField::History && c.previous.as_deref() == Some("30")));
+    }
+
+    #[test]
+    fn a_new_command_or_schedule_is_a_widening_and_dropping_one_is_not() {
+        let base = m(r##"{"name":"t","version":"1","triggers":["commands","schedule"],
+            "commands":[{"name":"ticket","description":"File"}],
+            "schedules":[{"name":"digest","every":3600}]}"##);
+        let more = m(r##"{"name":"t","version":"2","triggers":["commands","schedule"],
+            "commands":[{"name":"ticket","description":"File an issue"},{"name":"close","description":"Close"}],
+            "schedules":[{"name":"digest","every":600}]}"##);
+        let w = widenings_between(&base, &more);
+        assert!(w.iter().any(|c| c.field == ChangeField::Command && c.value == "close"), "{w:?}");
+        assert!(w.iter().any(|c| c.field == ChangeField::Schedule && c.kind == ChangeKind::Increased), "{w:?}");
+        assert!(!w.iter().any(|c| c.field == ChangeField::Command && c.value == "ticket"), "a reworded description grants nothing");
+        assert!(widenings_between(&more, &base).iter().all(|c| c.field != ChangeField::Command), "dropping a command narrows");
     }
 
     #[test]

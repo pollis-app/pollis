@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}} ਹਟਾਓ",
     "send": "ਸੁਨੇਹਾ ਭੇਜੋ",
     "markSensitive": "{{name}} ਨੂੰ ਸੰਵੇਦਨਸ਼ੀਲ ਵਜੋਂ ਮਾਰਕ ਕਰੋ",
-    "unmarkSensitive": "{{name}} ਤੋਂ ਸੰਵੇਦਨਸ਼ੀਲ ਮਾਰਕ ਹਟਾਓ"
+    "unmarkSensitive": "{{name}} ਤੋਂ ਸੰਵੇਦਨਸ਼ੀਲ ਮਾਰਕ ਹਟਾਓ",
+    "commandAmbiguous": "/{{command}} ਇੱਕ ਤੋਂ ਵੱਧ ਐਪਾਂ ਵਿੱਚ ਹੈ। ਸੂਚੀ ਵਿੱਚੋਂ ਇੱਕ ਚੁਣੋ।",
+    "commandRequestHint": "{{app}} ਨੂੰ ਨਿੱਜੀ ਤੌਰ 'ਤੇ ਭੇਜੀ ਜਾਂਦੀ ਹੈ, ਇਸ ਚੈਨਲ ਵਿੱਚ ਪੋਸਟ ਨਹੀਂ ਹੁੰਦੀ",
+    "commandRequestUnavailable": "ਇਸ ਵਰਜਨ ਵਿੱਚ ਐਪਾਂ ਨੂੰ ਨਿੱਜੀ ਬੇਨਤੀਆਂ ਉਪਲਬਧ ਨਹੀਂ ਹਨ। ਕੁਝ ਵੀ ਪੋਸਟ ਨਹੀਂ ਹੋਇਆ।",
+    "commandRequestFailed": "ਇਹ ਕਮਾਂਡ ਭੇਜੀ ਨਹੀਂ ਜਾ ਸਕੀ। ਕੁਝ ਵੀ ਪੋਸਟ ਨਹੀਂ ਹੋਇਆ।"
   },
   "mentions": {
     "listLabel": "ਮੈਨਸ਼ਨ ਸੁਝਾਅ",
@@ -112,5 +116,9 @@
     "quit": "Pollis ਬੰਦ ਕਰੋ",
     "unread_one": "Pollis — {{count}} ਅਣਪੜ੍ਹਿਆ",
     "unread_other": "Pollis — {{count}} ਅਣਪੜ੍ਹੇ"
+  },
+  "commands": {
+    "listLabel": "ਕਮਾਂਡ ਸੁਝਾਅ",
+    "matching": "<hl>/{{query}}</hl> ਨਾਲ ਮੇਲ ਖਾਂਦੀਆਂ ਕਮਾਂਡਾਂ"
   }
 }

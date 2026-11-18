@@ -6,6 +6,7 @@ import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import type { BotDetail, BotHost, BotSummary } from "../../lib/bots";
+import type { GroupCommand } from "../../lib/slashCommands";
 import { groupInviteQueryKeys } from "./useGroupInvites";
 import { securityEventQueryKeys } from "./useSecurityEvents";
 
@@ -14,6 +15,7 @@ export const botQueryKeys = {
   all: ["groups", "bots"] as const,
   group: (groupId: string | null) => ["groups", "bots", "group", groupId] as const,
   bot: (botUserId: string | null) => ["groups", "bots", "bot", botUserId] as const,
+  commands: (groupId: string | null) => ["groups", "bots", "commands", groupId] as const,
 };
 
 /** The group's bots. Empty outside a group. */
@@ -29,6 +31,39 @@ export function useGroupBots(groupId: string | null) {
     },
     enabled: !!groupId && !!currentUser,
     staleTime: 1000 * 30,
+  });
+}
+
+/** The slash commands of the group's approved Apps (#2018), for every member's composer. Empty outside a group. */
+export function useGroupCommands(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useQuery({
+    queryKey: botQueryKeys.commands(groupId),
+    queryFn: async (): Promise<GroupCommand[]> => {
+      if (!groupId) {
+        return [];
+      }
+      return (await invoke<GroupCommand[]>("list_group_commands", { groupId })) ?? [];
+    },
+    enabled: !!groupId && !!currentUser,
+    staleTime: 1000 * 60,
+  });
+}
+
+/** Deliver a `request: true` command to its bot, sealed; it is never posted in the channel (#2018). */
+export function useSendCommandRequest() {
+  return useMutation({
+    // Tactile feedback (#1286): lib/queryClient.ts plays it; the same feel as a message send.
+    meta: { haptic: { mutate: "send" } },
+    mutationFn: async (vars: { groupId: string; channelId: string; command: GroupCommand; args: string }) => {
+      await invoke("send_command_request", {
+        groupId: vars.groupId,
+        channelId: vars.channelId,
+        botUserId: vars.command.botUserId,
+        command: vars.command.command,
+        args: vars.args,
+      });
+    },
   });
 }
 

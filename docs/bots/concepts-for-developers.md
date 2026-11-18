@@ -149,7 +149,7 @@ An installation runs exactly one App version, pinned by its App hash, with the g
 
 ## What comes next
 
-- **More triggers:** slash commands (#2018) and member requests (#2008) reach Apps once the runtime delivers them.
+- **More triggers:** member requests (#2008) reach Apps once the runtime delivers them. A message is routed to exactly one handler: `on-command` for a command the App declared ([App reference: Commands](./app-reference.md#commands)), else `on-mention` for a mention of the bot, else `on-message`.
 - **History:** `query-messages` returns the trigger's own message until the runtime keeps a message log.
 - **SDKs:** a TypeScript SDK and the `pollis app` CLI.
 

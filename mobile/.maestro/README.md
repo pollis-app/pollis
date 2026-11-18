@@ -430,7 +430,11 @@ admin types its code (`3-add-host.yaml`); the admin revokes it, sees the
 last-host warning when arming the remaining one, and deletes the bot
 (`4-revoke-delete.yaml`). The script passes only when the first host has
 stopped after the delete. The `pollis-bot` command lines are variables at the
-top of the script.
+top of the script. `5-commands.yaml` (#2018) types `/`, picks an installed
+App's command, sends it and waits for the App's reply with the Bot badge, then
+checks the bot in the mention picker; it needs an App installed on the host
+and approved by the admin (#2005), with `APP_COMMAND` and `APP_REPLY` passed
+to Maestro, so the script runs it once App installs and approvals are in it.
 
 **Unread for messages that arrived while away (automated, #1422):** `mobile/scripts/maestro-unread.sh <device>`
 — the lost-message shape with `pollis-tui`'s `unread_peer` example, which sends
