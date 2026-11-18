@@ -2,8 +2,8 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - two-client
 ---
-# BOTS, part 4b (#2005): the admin approves the App the bot's host now offers,
-# as is (the driver, scripts/maestro-bots.sh, installed it). The full approve,
+# BOTS, part 4b (#2005): the admin approves the App the bot's host now offers
+# (the driver, scripts/maestro-bots.sh, installed it), switching on what it newly asks for. The full approve,
 # narrow and update journey is flows/bot-app-approval.yaml; this only gets the
 # commands App of part 5 running.
 
@@ -53,14 +53,57 @@ tags:
       - back
       - tapOn: "${BOT_NAME}"
       - waitForAnimationToEnd
+# After part 4a it is an update of the approved App: switch on each new access it asks for (its
+# triggers, its command, and "*" so #General is granted again after 4a narrowed it off).
+- scrollUntilVisible:
+    element:
+      id: "row-bot-app-widening-trigger-commands"
+    direction: DOWN
+- tapOn:
+    id: "row-bot-app-widening-trigger-commands"
+- assertVisible:
+    id: "row-bot-app-widening-trigger-commands"
+    checked: true
+- scrollUntilVisible:
+    element:
+      id: "row-bot-app-widening-trigger-mentions"
+    direction: DOWN
+- tapOn:
+    id: "row-bot-app-widening-trigger-mentions"
+- assertVisible:
+    id: "row-bot-app-widening-trigger-mentions"
+    checked: true
+- scrollUntilVisible:
+    element:
+      id: "row-bot-app-widening-channel-.*"
+    direction: DOWN
+- tapOn:
+    id: "row-bot-app-widening-channel-.*"
+- assertVisible:
+    id: "row-bot-app-widening-channel-.*"
+    checked: true
+- scrollUntilVisible:
+    element:
+      id: "row-bot-app-widening-command-${APP_COMMAND}"
+    direction: DOWN
+- tapOn:
+    id: "row-bot-app-widening-command-${APP_COMMAND}"
+- assertVisible:
+    id: "row-bot-app-widening-command-${APP_COMMAND}"
+    checked: true
 - scrollUntilVisible:
     element:
       id: "btn-approve-bot-app"
     direction: DOWN
 - tapOn:
     id: "btn-approve-bot-app"
+# The page stays where it was scrolled.
 - extendedWaitUntil:
-    visible:
-      id: "bot-app-approved"
+    notVisible:
+      id: "btn-approve-bot-app"
     timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: "bot-app-approved"
+    direction: UP
 - takeScreenshot: bots-05b-commands-app-approved

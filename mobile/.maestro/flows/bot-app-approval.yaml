@@ -12,7 +12,7 @@ tags:
 #   Driver, before this flow: `pollis-bot app install --installation <bot> --artifact <v1>` where
 #     v1's pollis-app.json reads #general (30 days, new messages), may post and reply,
 #     and may send data to ${APP_HOST}.
-#   Driver, once `pollis-bot status` shows v1 running: install v2, which adds the host
+#   Driver, once the host runs v1 under the narrowed approval (stage 2): install v2, which adds the host
 #     ${APP_NEW_HOST} and the `schedule` trigger (both widenings).
 #   Driver, once v2 is approved: delete v2's artifact, so the runtime refuses with
 #     artifact_unavailable.
@@ -116,11 +116,15 @@ tags:
     direction: DOWN
 - tapOn:
     id: "btn-approve-bot-app"
-# Signing and storing the approval is a DS round trip.
+# Signing and storing the approval is a DS round trip; the page stays where it was scrolled.
 - extendedWaitUntil:
-    visible:
-      id: "bot-app-approved"
+    notVisible:
+      id: "btn-approve-bot-app"
     timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: "bot-app-approved"
+    direction: UP
 - assertVisible:
     id: "bot-app-approved-mark-noEgress"
 - assertVisible: "(?i).*Reads #general, the last 7 days.*"
@@ -130,6 +134,10 @@ tags:
 - scrollUntilVisible:
     element:
       id: "section-bot-app-grants"
+    direction: DOWN
+- scrollUntilVisible:
+    element:
+      id: "btn-save-bot-app-grants"
     direction: DOWN
 # Nothing changed yet: Save is off.
 - assertVisible:
@@ -163,9 +171,10 @@ tags:
           visible:
             id: "screen-bot"
           timeout: 15000
+# Both widened rows on screen (the list starts at the bottom edge when the page opens).
 - scrollUntilVisible:
     element:
-      id: "list-bot-app-changes"
+      id: "row-bot-app-widening-egress-${APP_NEW_HOST}"
     direction: DOWN
 # Widened rows are highlighted with "New access" and start OFF: never pre-accepted.
 - assertVisible:
@@ -197,6 +206,16 @@ tags:
 - assertVisible:
     id: "row-bot-app-widening-trigger-schedule"
     checked: true
+# v2's `digest` schedule is a new way to invoke it too: approving needs it switched on as well.
+- scrollUntilVisible:
+    element:
+      id: "row-bot-app-widening-schedule-.*"
+    direction: DOWN
+- tapOn:
+    id: "row-bot-app-widening-schedule-.*"
+- assertVisible:
+    id: "row-bot-app-widening-schedule-.*"
+    checked: true
 # The new host stays off.
 - scrollUntilVisible:
     element:
@@ -212,8 +231,10 @@ tags:
       id: "section-bot-app-pending"
     timeout: 60000
 # The new host was not accepted, so the App still can't send data outside the group.
-- assertVisible:
-    id: "bot-app-approved-mark-noEgress"
+- scrollUntilVisible:
+    element:
+      id: "bot-app-approved-mark-noEgress"
+    direction: UP
 - assertNotVisible: ".*${APP_NEW_HOST}.*"
 - takeScreenshot: bot-app-05-update-approved
 
