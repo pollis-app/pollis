@@ -31,6 +31,11 @@ tag date, UTC.
   messages included) you keep your main profile. Profile → Group aliases lists
   every group: change one, apply a name or picture to all of them at once, or
   go back to your main profile. Group admins can reset a member's alias.
+- **Link previews.** A link in a message shows a card with the page's title,
+  description and picture. Your app fetches the preview when you send, so the
+  people reading never contact the linked site, and the server only sees an
+  encrypted message. Editing the link updates the card; deleting the message
+  removes it for everyone.
 
 ## v1.19.16 — 2026-11-17
 
