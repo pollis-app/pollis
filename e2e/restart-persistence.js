@@ -11,7 +11,7 @@ function reapClientKeepVite() {
   for (const p of ["tauri-driver", "WebKitWebDriver"]) {
     spawnSync("pkill", ["-9", "-f", p], { stdio: "ignore" });
   }
-  spawnSync("pkill", ["-9", "-x", "pollis"], { stdio: "ignore" });
+  h.killAppBin();
 }
 
 const ARTIFACTS = path.join(__dirname, "artifacts");
