@@ -39,8 +39,6 @@ pub const EMOJI_MAX_BYTES: u64 = 48 * 1024;
 pub const EMOJI_MAX_PER_USER: i64 = 1000;
 
 pub use pollis_api::emoji::shortcode_is_valid;
-#[cfg(test)]
-use pollis_api::emoji::SHORTCODE_MAX;
 
 /// 64 LOWERCASE hex: the hash is a primary key, so two cases would defeat dedup.
 pub fn content_hash_is_valid(hash: &str) -> bool {
@@ -426,10 +424,10 @@ mod validation_tests {
     fn shortcodes_reject_anything_that_could_carry_markup() {
         assert!(shortcode_is_valid("party_parrot"));
         assert!(shortcode_is_valid("a1"));
-        assert!(shortcode_is_valid(&"a".repeat(SHORTCODE_MAX)));
+        assert!(shortcode_is_valid(&"a".repeat(pollis_api::emoji::SHORTCODE_MAX)));
 
         assert!(!shortcode_is_valid("a"), "too short");
-        assert!(!shortcode_is_valid(&"a".repeat(SHORTCODE_MAX + 1)), "too long");
+        assert!(!shortcode_is_valid(&"a".repeat(pollis_api::emoji::SHORTCODE_MAX + 1)), "too long");
         assert!(!shortcode_is_valid("Party"), "uppercase would alias");
         assert!(!shortcode_is_valid("a-b"), "hyphen not in charset");
         assert!(!shortcode_is_valid("a b"), "whitespace splits the token");
