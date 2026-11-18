@@ -330,6 +330,10 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
     }
     const componentPath = join(out, "app.wasm");
     writeFileSync(componentPath, component);
+    // A development signature from an earlier `pollis app dev` signs another App hash. Left beside
+    // this build it makes a development installation refuse the build as tampered instead of
+    // offering it to an admin; `pollis app dev` signs each new build itself.
+    rmSync(`${componentPath}.sig.json`, { force: true });
 
     // 4. The real host's verdict, and the App hash.
     try {

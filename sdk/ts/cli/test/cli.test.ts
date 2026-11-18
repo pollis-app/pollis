@@ -129,6 +129,13 @@ describe("pollis app build", () => {
     assert.deepEqual(readFileSync(a.component), readFileSync(b.component));
   });
 
+  test("drops a development signature left by `pollis app dev`, which signs another build", async () => {
+    const first = await buildApp({ dir: template("stale-sig"), quiet: true });
+    writeFileSync(`${first.component}.sig.json`, "{}");
+    const again = await buildApp({ dir: dirname(first.component).replace(/\/dist$/, ""), quiet: true });
+    assert.equal(existsSync(`${again.component}.sig.json`), false);
+  });
+
   test("emits the manifest from the code, with package.json defaults", async () => {
     const built = await buildApp({ dir: fixture("kitchen-sink", "manifest"), quiet: true });
     const written = JSON.parse(readFileSync(built.manifestPath, "utf8"));
