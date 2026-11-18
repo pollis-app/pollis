@@ -24,6 +24,8 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     // #1182: a bot's own row goes with its account (`bots::delete_bot_in_tx`);
     // a creating admin's `created_by` pointer is blanked.
     "bot",
+    // #2004: an installation's sealed App state goes with its bot.
+    "bot_app_state",
     "bot_pairing_request",
     "bot_trigger_claim",
     "history_transfer",

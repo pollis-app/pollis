@@ -494,6 +494,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<bots::PendingBotHostsBody as DsRequest>::PATH, post(bots::pending_bot_hosts))
         .route(<bots::WrapBotHostBody as DsRequest>::PATH, post(bots::wrap_bot_host))
         .route(<bots::ClaimTriggerBody as DsRequest>::PATH, post(bots::claim_trigger))
+        .route(<bots::AppStateReadBody as DsRequest>::PATH, post(bots::app_state_read))
+        .route(<bots::AppStateCommitBody as DsRequest>::PATH, post(bots::app_state_commit))
         // Failed-request log (#1305): a ROUTE layer (matched patterns only), inside the limiter.
         .route_layer(from_fn_with_state(state.clone(), error_log::record))
         // #1611: 426 a POST from a build below its platform's minimum, before any handler runs.
