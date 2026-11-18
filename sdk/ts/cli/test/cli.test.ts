@@ -5,7 +5,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +33,17 @@ function fixture(name: string, into: string): string {
   cpSync(join(here, "fixtures", name), dir, { recursive: true });
   linkSdk(dir);
   return dir;
+}
+
+/** A stand-in `pollis-bot` that records its arguments and exits 0 (its `run` returns at once). */
+function fakeBot(name: string): { bin: string; calls: () => string[] } {
+  const dir = join(scratch, "bots", name);
+  mkdirSync(dir, { recursive: true });
+  const log = join(dir, "calls.log");
+  const bin = join(dir, "pollis-bot");
+  writeFileSync(bin, `#!/bin/sh\necho "$*" >> "${log}"\n`);
+  chmodSync(bin, 0o755);
+  return { bin, calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
 }
 
 function template(parent: string): string {
@@ -63,11 +74,46 @@ describe("pollis app new + test", () => {
     assert.throws(() => newApp({ name: "x", lang: "go", parent: scratch }), /not available/);
   });
 
-  test("dev and run say why they are not available yet", () => {
+  test("run installs the build in pollis-bot, then runs it", () => {
+    const dir = template("run");
+    const { bin, calls } = fakeBot("run");
+    const run = spawnSync(process.execPath, [main, "app", "run", "--dir", dir, "--installation", "01I", "--data-dir", "/d"], {
+      encoding: "utf8",
+      env: { ...process.env, POLLIS_APP_DEV_BIN: findDevTool(), POLLIS_BOT_BIN: bin },
+    });
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.deepEqual(calls(), [
+      `--data-dir /d app install --installation 01I --artifact ${join(dir, "dist")}`,
+      "--data-dir /d run",
+    ]);
+    assert.match(run.stdout, /App hash [0-9a-f]{64}/);
+  });
+
+  test("dev prints the developer key, signs each build and runs the development installation", () => {
+    const dir = template("dev");
+    const { bin, calls } = fakeBot("dev");
+    const run = spawnSync(process.execPath, [main, "app", "dev", "--dir", dir, "--installation", "01I"], {
+      encoding: "utf8",
+      env: { ...process.env, POLLIS_APP_DEV_BIN: findDevTool(), POLLIS_BOT_BIN: bin },
+    });
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.deepEqual(calls(), [
+      "app dev-key",
+      `app sign --artifact ${join(dir, "dist")}`,
+      `app install --installation 01I --artifact ${join(dir, "dist")}`,
+      "run",
+    ]);
+    assert.match(run.stdout, /built and signed hello-bot/);
+  });
+
+  test("run and dev need an installation", () => {
     for (const cmd of ["dev", "run"]) {
-      const run = spawnSync(process.execPath, [main, "app", cmd], { encoding: "utf8" });
-      assert.equal(run.status, 2);
-      assert.match(run.stderr, /not available yet/);
+      const run = spawnSync(process.execPath, [main, "app", cmd, "--dir", scratch], {
+        encoding: "utf8",
+        env: { ...process.env, POLLIS_BOT_BIN: fakeBot(`need-${cmd}`).bin },
+      });
+      assert.equal(run.status, 1);
+      assert.match(run.stderr, /--installation/);
     }
   });
 });

@@ -5,8 +5,8 @@
  *   pollis app new <name> --lang ts   a new App: one handler, a test, a README
  *   pollis app build                  compile to dist/app.wasm + dist/pollis-app.json, print the App hash
  *   pollis app test                   build, then run the tests offline in the real sandbox
- *   pollis app dev                    (not yet available)
- *   pollis app run                    (not yet available)
+ *   pollis app dev --installation ID  development installation: rebuild and sign on save, in pollis-bot
+ *   pollis app run --installation ID  install the build in pollis-bot (prints the App hash) and run it
  */
 
 import { parseArgs } from "node:util";
@@ -14,6 +14,7 @@ import { parseArgs } from "node:util";
 import { BuildError, buildApp } from "./build.js";
 import { DevToolMissing } from "./devtool.js";
 import { NewError, newApp } from "./new.js";
+import { devApp, runApp } from "./runtime.js";
 import { testApp } from "./test.js";
 
 const HELP = `pollis app <command>
@@ -22,26 +23,20 @@ const HELP = `pollis app <command>
   build                  Compile the App to dist/app.wasm and write dist/pollis-app.json.
                          Prints the App hash an admin approves.
   test [files...]        Build, then run the App's tests offline in the real sandbox.
-  dev                    Run the App against a test group, rebuilding on save. Not yet available.
-  run                    Run an approved App for a real group. Not yet available.
+  dev --installation ID  Run the App in this machine's bot as a development installation:
+                         prints your developer key (an admin approves it once), then
+                         rebuilds and signs on every save. Needs pollis-bot.
+  run --installation ID  Hand the App to this machine's bot and run it. Prints the App hash
+                         an admin approves on the bot's page. Needs pollis-bot.
 
 Options:
   --dir <path>           The App's directory (default: the current directory).
   --no-build             test: use the existing dist/ instead of building first.
   --sdk <path>           new: use the SDK from a Pollis checkout (its sdk/ts directory).
+  --artifact <dir|url>   run: a built App (a directory or an https:// URL) instead of building this one.
+  --data-dir <path>      dev, run: pollis-bot's data directory, if not its default.
 
 Guide: https://github.com/pollis-app/pollis/blob/main/docs/bots/developer-guide.md`;
-
-const NOT_YET: Record<string, string> = {
-  dev:
-    "`pollis app dev` is not available yet. It runs your App in a local bot against a test group,\n" +
-    "rebuilding on save, as a development installation; that needs App approval in the Pollis apps,\n" +
-    "which is still being built. Until then, `pollis app test` runs your handlers offline in the real sandbox.",
-  run:
-    "`pollis app run` is not available yet. It runs an App for a real group once an admin approves its\n" +
-    "App hash in the Pollis app; that approval step is still being built. `pollis app build` already\n" +
-    "prints the App hash an admin will approve.",
-};
 
 async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -52,6 +47,9 @@ async function main(argv: string[]): Promise<number> {
       lang: { type: "string" },
       sdk: { type: "string" },
       "no-build": { type: "boolean" },
+      installation: { type: "string" },
+      artifact: { type: "string" },
+      "data-dir": { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -89,9 +87,9 @@ async function main(argv: string[]): Promise<number> {
     case "test":
       return testApp({ dir, build: !values["no-build"], patterns: rest });
     case "dev":
+      return devApp({ dir, installation: values.installation, dataDir: values["data-dir"] });
     case "run":
-      console.error(NOT_YET[command]);
-      return 2;
+      return runApp({ dir, installation: values.installation, dataDir: values["data-dir"], artifact: values.artifact });
     default:
       console.error(`unknown command \`pollis app ${command}\`\n\n${HELP}`);
       return 2;
