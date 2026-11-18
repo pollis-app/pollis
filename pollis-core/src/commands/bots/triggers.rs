@@ -67,6 +67,28 @@ pub async fn message_meta(state: &Arc<AppState>, message_id: &str) -> Result<Opt
     }
 }
 
+/// Whether `content` mentions `username` by `@username`, by the same rule
+/// that decides who a channel message wakes (#843): a whitespace- or
+/// string-initial `@`, case-insensitive, trailing punctuation ignored. `@all`
+/// is not a mention of the bot (#2004: an App's `on-mention`).
+pub fn mentions_username(content: &str, username: &str) -> bool {
+    !crate::commands::messages::direct_mentions(content, &[(String::new(), username.to_string())]).is_empty()
+}
+
 fn not_active() -> Error {
     Error::Other(anyhow::anyhow!("bot installation is not active"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mentions_username;
+
+    #[test]
+    fn a_bot_is_mentioned_by_its_username_only() {
+        assert!(mentions_username("hey @Triage_bot, look", "triage_bot"));
+        assert!(mentions_username("@triage_bot", "triage_bot"));
+        assert!(!mentions_username("@all please", "triage_bot"));
+        assert!(!mentions_username("mail@triage_bot", "triage_bot"));
+        assert!(!mentions_username("@triage_bots", "triage_bot"));
+    }
 }

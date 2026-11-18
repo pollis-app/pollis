@@ -206,3 +206,50 @@ async fn a_state_conflict_reruns_the_handler_on_the_new_state() {
     );
     const { assert!(STATE_CONFLICT_ATTEMPTS >= 2) };
 }
+
+fn roster(ds: &FakeDs) {
+    *ds.members.lock().unwrap() = vec![
+        pollis_bot::core::Member { user_id: "alice".into(), username: Some("alice".into()), is_bot: false },
+        pollis_bot::core::Member { user_id: "helper".into(), username: Some("helper_bot".into()), is_bot: true },
+        pollis_bot::core::Member { user_id: BOT.into(), username: Some("counter_bot".into()), is_bot: true },
+    ];
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_sees_authors_from_the_roster() {
+    let ds = Arc::new(FakeDs::default());
+    roster(&ds);
+    let host = Installation::new(FakeCore::new("host-1", ds.clone()), app());
+    ds.deliver("01MSG1", "alice", &format!("post-author {CHANNEL}"));
+    ds.deliver("01MSG2", "helper", &format!("post-author {CHANNEL}"));
+    ds.deliver("01MSG3", "gone", &format!("post-author {CHANNEL}"));
+    host.run_job(JobInput::Wake).await.unwrap();
+    assert_eq!(
+        texts(&ds),
+        vec!["author alice bot=false".to_string(), "author helper_bot bot=true".into(), "author gone bot=false".into()]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mention_of_the_bot_reaches_on_mention_only_when_the_app_takes_mentions() {
+    let mentions_only = br##"{
+        "name": "pager", "version": "0.1.0",
+        "triggers": ["mentions"],
+        "read": { "channels": ["#alerts"] },
+        "actions": ["post"]
+    }"##;
+    let wasm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm")).unwrap();
+    let mut post_only = grants();
+    post_only.actions = [ActionKind::Post].into();
+    let handler: Arc<dyn Handler> = Arc::new(AppHandler::new(wasm, mentions_only, post_only).unwrap());
+    let ds = Arc::new(FakeDs::default());
+    roster(&ds);
+    let host = Installation::new(FakeCore::new("host-1", ds.clone()), handler);
+    ds.deliver("01MSG1", "alice", &format!("post {CHANNEL} plain"));
+    ds.deliver("01MSG2", "alice", &format!("post {CHANNEL} everyone; @all"));
+    ds.deliver("01MSG3", "alice", &format!("post {CHANNEL} paged; @Counter_bot"));
+    let r = host.run_job(JobInput::Wake).await.unwrap();
+    assert_eq!(r.triggers[0].result, Ok(TriggerOutcome::NoActions), "a plain message is not a mention");
+    assert_eq!(r.triggers[1].result, Ok(TriggerOutcome::NoActions), "@all is not a mention of the bot");
+    assert_eq!(texts(&ds), vec!["paged".to_string()]);
+}

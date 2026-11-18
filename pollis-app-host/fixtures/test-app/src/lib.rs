@@ -147,7 +147,8 @@ fn run(trigger: &str, script: &str) -> Result<(), String> {
     run_on(trigger, None, script)
 }
 
-fn run_on(trigger: &str, message_id: Option<&str>, script: &str) -> Result<(), String> {
+fn run_on(trigger: &str, message: Option<&Message>, script: &str) -> Result<(), String> {
+    let message_id = message.map(|m| m.id.as_str());
     say(format!("trigger {trigger}"));
     for step in script.split(';') {
         let step = step.trim();
@@ -211,6 +212,14 @@ fn run_on(trigger: &str, message_id: Option<&str>, script: &str) -> Result<(), S
                 let text = format!("kv {b}={}", kv_text(b));
                 report(step, host::post(a, &text), |_| text.clone());
             }
+            // Post the trigger message's author as the App sees it.
+            "post-author" => match message {
+                Some(m) => {
+                    let text = format!("author {} bot={}", m.author.display_name, m.author.is_bot);
+                    report(step, host::post(a, &text), |_| text.clone());
+                }
+                None => say(format!("err {step}: no trigger message")),
+            },
             // Reply to the trigger's own message.
             "ack" => match message_id {
                 Some(id) => {
@@ -248,11 +257,11 @@ struct TestApp;
 
 impl Guest for TestApp {
     fn on_message(message: Message) -> Result<(), String> {
-        run_on(&format!("message {}", message.id), Some(&message.id), &message.text)
+        run_on(&format!("message {}", message.id), Some(&message), &message.text)
     }
 
     fn on_mention(message: Message) -> Result<(), String> {
-        run(&format!("mention {}", message.id), &message.text)
+        run_on(&format!("mention {}", message.id), Some(&message), &message.text)
     }
 
     fn on_command(command: Command) -> Result<(), String> {

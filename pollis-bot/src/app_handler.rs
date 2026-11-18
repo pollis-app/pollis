@@ -24,13 +24,13 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use pollis_app_host as host;
 use pollis_app_host::{AppHost, HostConfig, HostServices, PublicHttpClient, ServiceError};
-use pollis_app_manifest::Manifest;
+use pollis_app_manifest::{Manifest, TriggerKind};
 /// The admin's grants, as #2005 and the tests hand them to [`AppHandler::new`].
 pub use pollis_app_manifest::{ActionKind, AdminGrants, ChannelGrant, EventKind};
 use sha2::{Digest, Sha256};
 
 use crate::action::Action;
-use crate::core::{InstallationCore, StateWrite};
+use crate::core::{InstallationCore, Member, StateWrite};
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerOutput};
 use crate::trigger::{IncomingMessage, Trigger};
 
@@ -50,6 +50,9 @@ pub struct AppHandler {
     component: Arc<Vec<u8>>,
     manifest: Manifest,
     grants: AdminGrants,
+    /// Whether the effective grants deliver `mentions` (a mention of the bot
+    /// then reaches `on-mention` instead of `on-message`).
+    mentions: bool,
     http: PublicHttpClient,
 }
 
@@ -69,7 +72,11 @@ impl AppHandler {
         h.update((component.len() as u64).to_be_bytes());
         h.update(&component);
         h.update(manifest_json);
+        let mentions = pollis_app_manifest::effective_grants(&manifest, &grants)
+            .triggers
+            .contains(&TriggerKind::Mentions);
         Ok(AppHandler {
+            mentions,
             app_hash: h.finalize().into(),
             component: Arc::new(component),
             manifest,
@@ -104,9 +111,10 @@ fn dev_grants() -> Result<AdminGrants> {
     anyhow::bail!("an App installation needs an admin's signed approval, which this release cannot read yet (#2005); release builds never read development grants")
 }
 
-/// The App's view of a message the runtime decrypted. The runtime knows the
-/// author's id only; `display-name` carries it until the roster is mapped in.
-fn to_app_message(m: &IncomingMessage, text: &str) -> host::Message {
+/// The App's view of a message the runtime decrypted, with its author from
+/// the group's roster (an author no longer in the group is shown by id).
+fn to_app_message(m: &IncomingMessage, text: &str, members: &[Member]) -> host::Message {
+    let author = members.iter().find(|x| x.user_id == m.sender_id);
     let ms = |t: &str| {
         chrono::DateTime::parse_from_rfc3339(t)
             .map(|d| d.timestamp_millis().max(0) as u64)
@@ -117,8 +125,10 @@ fn to_app_message(m: &IncomingMessage, text: &str) -> host::Message {
         channel: m.channel_id.clone(),
         author: host::Author {
             id: m.sender_id.clone(),
-            display_name: m.sender_id.clone(),
-            is_bot: false,
+            display_name: author
+                .and_then(|a| a.username.clone())
+                .unwrap_or_else(|| m.sender_id.clone()),
+            is_bot: author.is_some_and(|a| a.is_bot),
         },
         text: text.to_string(),
         attachments: Vec::new(),
@@ -186,8 +196,21 @@ impl Handler for AppHandler {
                 let Some(text) = &m.text else {
                     return Ok(HandlerOutput::default());
                 };
-                let msg = to_app_message(m, text);
-                (host::Trigger::Message(msg.clone()), Some(msg))
+                let members = ctx.core.members().await.map_err(|e| HandlerError(e.0))?;
+                let msg = to_app_message(m, text, &members);
+                let own_name = members
+                    .iter()
+                    .find(|x| x.user_id == ctx.core.bot_user_id())
+                    .and_then(|x| x.username.clone());
+                let mentioned = own_name.is_some_and(|n| pollis_core::commands::bots::mentions_username(text, &n));
+                // One delivery per message: a mention of the bot reaches
+                // `on-mention` when the App takes mentions, else `on-message`.
+                let trigger = if mentioned && self.mentions {
+                    host::Trigger::Mention(msg.clone())
+                } else {
+                    host::Trigger::Message(msg.clone())
+                };
+                (trigger, Some(msg))
             }
             Trigger::Webhook(w) => {
                 let body = serde_json::to_vec(

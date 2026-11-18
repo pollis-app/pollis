@@ -26,7 +26,7 @@ use pollis_core::keystore::Keystore;
 use pollis_core::state::AppState;
 
 use crate::action::{ChannelInfo, CheckedAction};
-use crate::core::{CoreError, InstallationCore, StateCommit, StateValue, StateWrite};
+use crate::core::{CoreError, InstallationCore, Member, StateCommit, StateValue, StateWrite};
 use crate::host::{BotHost, OpenedInstallation, PairOutcome, PairTarget, PairingProgress, PairingTicket, Wakes};
 use crate::installations::InstallationRecord;
 use crate::secrets::SecretSlot;
@@ -532,6 +532,21 @@ impl InstallationCore for CoreInstallation {
                 R::OverQuota { max_bytes } => StateCommit::OverQuota { max_bytes },
             },
         )
+    }
+
+    async fn members(&self) -> Result<Vec<Member>, CoreError> {
+        let state = self.state().await?;
+        let members = pollis_core::commands::groups::get_group_members(
+            self.session.group_id.clone(),
+            self.session.bot_user_id.clone(),
+            &state,
+        )
+        .await
+        .map_err(core_err)?;
+        Ok(members
+            .into_iter()
+            .map(|m| Member { user_id: m.user_id, username: m.username, is_bot: m.is_bot })
+            .collect())
     }
 
     async fn message_meta(&self, message_id: &str) -> Result<Option<(String, String)>, CoreError> {

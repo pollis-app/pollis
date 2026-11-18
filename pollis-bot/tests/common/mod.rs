@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pollis_bot::action::{Action, ChannelInfo};
-use pollis_bot::core::{CoreError, InstallationCore, StateCommit, StateValue, StateWrite};
+use pollis_bot::core::{CoreError, InstallationCore, Member, StateCommit, StateValue, StateWrite};
 use pollis_bot::handler::{Handler, HandlerError};
 use pollis_bot::trigger::{IncomingMessage, Trigger, TriggerKey};
 
@@ -27,6 +27,8 @@ pub struct FakeDs {
     /// #2004: App state, key -> (version, value), and the claims whose state was committed.
     pub state: Mutex<HashMap<String, (i64, Vec<u8>)>>,
     pub state_committed: Mutex<Vec<String>>,
+    /// The group's roster.
+    pub members: Mutex<Vec<Member>>,
 }
 
 impl FakeDs {
@@ -179,6 +181,11 @@ impl InstallationCore for FakeCore {
             posts.push((message_id.into(), channel_id.into(), text.into()));
         }
         Ok(())
+    }
+
+    async fn members(&self) -> Result<Vec<Member>, CoreError> {
+        self.assert_open();
+        Ok(self.ds.members.lock().unwrap().clone())
     }
 
     async fn state_read(&self, key: &str) -> Result<(StateValue, u64), CoreError> {

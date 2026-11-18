@@ -93,10 +93,24 @@ pub trait InstallationCore: Send + Sync {
         Err(CoreError("this installation has no App state".into()))
     }
 
+    /// #2004: the bot's group's members, for an App's message data (author
+    /// name, is-bot) and for telling a mention of the bot. Empty by default.
+    async fn members(&self) -> Result<Vec<Member>, CoreError> {
+        Ok(Vec::new())
+    }
+
     /// #2004: the channel and author of a message this host has seen.
     async fn message_meta(&self, _message_id: &str) -> Result<Option<(String, String)>, CoreError> {
         Ok(None)
     }
+}
+
+/// A member of the bot's group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+    pub user_id: String,
+    pub username: Option<String>,
+    pub is_bot: bool,
 }
 
 /// One App state key as read.
