@@ -2,7 +2,7 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - two-client
 ---
-# LINK PREVIEWS (#1987), part 2 of 2 — driven by scripts/maestro-link-previews.sh.
+# LINK PREVIEWS (#1987), part 2 of 4 — driven by scripts/maestro-link-previews.sh.
 # The peer (the desktop's pollis-core, run by the script) sent a message whose
 # preview it built itself: the phone draws the card from the message alone and
 # opens nothing. Then the phone sends its own preview, which the peer must

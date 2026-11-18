@@ -2,7 +2,7 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - two-client
 ---
-# LINK PREVIEWS (#1987), part 1 of 2 — driven by scripts/maestro-link-previews.sh.
+# LINK PREVIEWS (#1987), part 1 of 4 — driven by scripts/maestro-link-previews.sh.
 # Sign up a fresh account and open a DM with the peer the script just signed up
 # (${MAESTRO_PEER_HANDLE}). The peer, a dev-DS client run by the script, accepts
 # it, then sends a message with a preview it built itself.

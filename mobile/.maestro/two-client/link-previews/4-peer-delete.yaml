@@ -1,0 +1,70 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# LINK PREVIEWS (#1987), part 4 of 4 — driven by scripts/maestro-link-previews.sh.
+# The peer deleted its message for everyone: its row says so and its card is
+# gone. Then the phone edits its own message to another link (the peer must
+# read the new preview) and deletes it for everyone (the peer must see it go).
+
+- extendedWaitUntil:
+    visible: "Message deleted"
+    timeout: 120000
+- assertNotVisible: ".*edited by the desktop core.*"
+- assertNotVisible: ".*Rust Programming Language.*"
+- takeScreenshot: link-previews-peer-04-peer-deleted
+
+# The one card left is the phone's own: its long press is the row's.
+- longPressOn:
+    id: "message-link-preview"
+- extendedWaitUntil:
+    visible:
+      id: "btn-edit"
+    timeout: 5000
+- tapOn:
+    id: "btn-edit"
+- assertVisible:
+    id: "input-edit-composer"
+- eraseText: 60
+- inputText: "phone edited https://www.rust-lang.org/"
+- extendedWaitUntil:
+    visible:
+      id: "composer-link-preview"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: ".*Rust Programming Language.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-edit-save"
+- extendedWaitUntil:
+    visible: ".*phone edited.*"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible:
+      id: "input-edit-composer"
+    timeout: 60000
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "message-link-preview"
+    timeout: 30000
+- takeScreenshot: link-previews-peer-05-device-edited
+
+- longPressOn:
+    id: "message-link-preview"
+- extendedWaitUntil:
+    visible:
+      id: "btn-delete"
+    timeout: 5000
+- tapOn:
+    id: "btn-delete"
+- extendedWaitUntil:
+    notVisible:
+      id: "message-link-preview"
+    timeout: 15000
+- assertNotVisible: ".*phone edited.*"
+- takeScreenshot: link-previews-peer-06-device-deleted

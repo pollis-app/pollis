@@ -8,7 +8,13 @@
 # fresh account, accepts the DM the device opens, builds a preview of
 # https://github.com/ itself and sends it. Part 2 asserts the device draws that
 # card, then sends its own preview, which the peer must read back before it
-# exits 0. The single-device half is .maestro/flows/link-previews.yaml.
+# moves on. Then edit and delete both ways: the peer edits its message to
+# another link (its replaced thumbnail is released on the DS and must stop
+# downloading), part 3 asserts the device shows the new card; the peer deletes
+# for everyone (the new thumbnail goes too), and part 4 asserts the card is gone,
+# then edits the device's own message to another link and deletes it, which the
+# peer must read back before it exits 0. The single-device half is
+# .maestro/flows/link-previews.yaml.
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled
 # in, and POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler
@@ -70,13 +76,13 @@ await_peer() {
 }
 
 echo "==> peer signs up ($PEER_EMAIL)"
-POLLIS_DATA_DIR="$PEER_DIR/data" "$PEER_BIN" "$PEER_EMAIL" >"$PEER_OUT" 2>"$PEER_DIR/peer.err" &
+POLLIS_PEER_GO_DELETE="$PEER_DIR/go-delete" POLLIS_DATA_DIR="$PEER_DIR/data" "$PEER_BIN" "$PEER_EMAIL" >"$PEER_OUT" 2>"$PEER_DIR/peer.err" &
 PEER_PID=$!
 await_peer PEER_HANDLE= 60
 HANDLE="$(sed -n 's/^PEER_HANDLE=//p' "$PEER_OUT")"
 echo "    peer handle: $HANDLE"
 
-echo "==> 1/2 device opens a DM with the peer"
+echo "==> 1/4 device opens a DM with the peer"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$PRIMARY_EMAIL" \
   -e MAESTRO_PEER_HANDLE="$HANDLE" "$FLOWS/1-open-dm.yaml"
 
@@ -84,12 +90,28 @@ echo "==> peer builds its preview and sends"
 await_peer PEER_SENT 300
 grep '^PEER_BUILT' "$PEER_OUT"
 
-echo "==> 2/2 device draws the peer's card, then sends its own"
+echo "==> 2/4 device draws the peer's card, then sends its own"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e MAESTRO_PEER_HANDLE="$HANDLE" \
   "$FLOWS/2-cards.yaml"
 
-echo "==> peer reads the device's preview"
+echo "==> peer reads the device's preview, edits its own message and checks the old thumbnail is released"
+await_peer PEER_SAW_DEVICE_PREVIEW 300
+await_peer PEER_RELEASED_OLD_THUMB 300
+grep -E '^PEER_(SAW|THUMB|EDITED|RELEASED)' "$PEER_OUT"
+
+echo "==> 3/4 device shows the peer's edited card"
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "$FLOWS/3-peer-edit.yaml"
+
+echo "==> peer deletes for everyone"
+touch "$PEER_DIR/go-delete"
+await_peer PEER_RELEASED_NEW_THUMB 300
+grep -E '^PEER_(DELETED|RELEASED_NEW)' "$PEER_OUT"
+
+echo "==> 4/4 device sees the delete, then edits and deletes its own"
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "$FLOWS/4-peer-delete.yaml"
+
+echo "==> peer reads the device's edit and delete"
 wait "$PEER_PID" || { cat "$PEER_DIR/peer.err" >&2; exit 1; }
 PEER_PID=""
-grep '^PEER_SAW' "$PEER_OUT"
+grep -E '^PEER_SAW_DEVICE_(EDIT|DELETE)' "$PEER_OUT"
 echo "==> link previews passed"
