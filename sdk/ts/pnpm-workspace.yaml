@@ -1,0 +1,16 @@
+# The TypeScript SDK for Pollis Apps (#2006): `@pollis-inc/app` and `@pollis-inc/cli`.
+# Its own pnpm workspace and lockfile, separate from the repo root's, so the
+# desktop app's install never pulls the WASM toolchain (ComponentizeJS ships
+# ~40 MB of engine builds).
+packages:
+  - app
+  - cli
+
+# Supply chain: a version must have been on the registry for 14 days before
+# it can enter the lockfile; every version is pinned in pnpm-lock.yaml.
+minimumReleaseAge: 20160
+
+# No install scripts run. esbuild ships its platform binary as an optional
+# dependency, so its postinstall (a self-check) is not needed.
+ignoredBuiltDependencies:
+  - esbuild

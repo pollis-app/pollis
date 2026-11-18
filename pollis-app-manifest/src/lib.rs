@@ -17,8 +17,10 @@ use serde::{Deserialize, Serialize};
 pub mod app_hash;
 pub mod commands;
 pub mod diff;
+pub mod mentions;
 
 pub use app_hash::{app_hash, hex, manifest_hash, parse_hex_hash, Hash};
+pub use mentions::{mention_tokens, mentions_username};
 pub use diff::{diff, widenings_between, ChangeField, ChangeKind, ManifestChange};
 
 pub use commands::{command_text, parse_command, route_command, CommandSpec, ParsedCommand, RoutedCommand};

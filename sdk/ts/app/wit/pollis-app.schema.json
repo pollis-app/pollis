@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pollis.com/schemas/pollis-app/0.1.0/pollis-app.schema.json",
+  "title": "Pollis App manifest (pollis-app.json)",
+  "description": "What a Pollis App asks for. An admin can narrow it when approving the App, never widen it; the runtime enforces the manifest intersected with the admin's grants. Pairs with the WIT package pollis:app@0.1.0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor hint; ignored."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "description": "Lowercase letters, digits and '-', 1 to 64 characters."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The App's own version, shown to admins."
+    },
+    "description": {
+      "type": "string",
+      "default": ""
+    },
+    "triggers": {
+      "type": "array",
+      "uniqueItems": true,
+      "default": [],
+      "description": "What can wake the App. Each maps to one exported handler.",
+      "items": {
+        "enum": ["messages", "mentions", "commands", "schedule", "requests", "webhook"]
+      }
+    },
+    "read": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "channels": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": [],
+          "description": "\"#name\" for one channel by name, or \"*\" for whichever channels the admin grants.",
+          "items": { "type": "string", "pattern": "^(\\*|#?[^\\s*#][^\\s*]*)$" }
+        },
+        "history": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Days of history query-messages may reach back. 0: none."
+        },
+        "events": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": ["created"],
+          "description": "Message event kinds the App may see.",
+          "items": { "enum": ["created", "edited"] }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "uniqueItems": true,
+      "default": [],
+      "description": "What the App may do in the group. There are no moderation actions.",
+      "items": {
+        "enum": ["post", "reply", "react", "edit_own", "delete_own", "transfer_history"]
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "quota": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Bytes of keys plus values in the installation's sealed key-value state. 0: no state."
+        }
+      }
+    },
+    "schedules": {
+      "type": "array",
+      "description": "When the `schedule` trigger fires; required with it and refused without it. Each fires at every Unix time k * every + offset (UTC seconds).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "every"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$", "description": "Passed to on-schedule." },
+          "every": { "type": "integer", "minimum": 60, "maximum": 604800, "description": "Period in seconds." },
+          "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "Seconds after each period boundary; less than every." }
+        }
+      }
+    },
+    "egress": {
+      "type": "array",
+      "uniqueItems": true,
+      "default": [],
+      "description": "Exact host names the App may reach over HTTPS. No wildcards, IP literals, ports or schemes. Empty: the App cannot send data outside the group.",
+      "items": {
+        "type": "string",
+        "pattern": "^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+      }
+    },
+    "commands": {
+      "type": "array",
+      "default": [],
+      "maxItems": 25,
+      "description": "Slash commands members can pick in the composer (#2018). A command is an ordinary message starting with /name; the runtime hands it to on-command only if it is declared here and the App takes the commands trigger. With request: true it is delivered to the bot as a sealed request (on-request) and never posted in the channel. Names are unique. The commands trigger needs at least one command that is not a request, and a command needs its trigger (commands, or requests for a request command).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "description"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "description": "Typed after the slash. Lowercase letters, digits, '-' and '_', starting with a letter, 1 to 32 characters."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[^\\n]*\\S[^\\n]*$",
+            "description": "One line shown beside the name in the composer."
+          },
+          "arg_hint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "pattern": "^[^\\n]*\\S[^\\n]*$",
+            "description": "What to type after the name, shown greyed (\"<title>\"). Leave it out for a command without arguments."
+          },
+          "request": {
+            "type": "boolean",
+            "default": false,
+            "description": "Deliver as a sealed request to the bot (on-request; needs the requests trigger) instead of posting in the channel (on-command; needs the commands trigger)."
+          }
+        }
+      }
+    }
+  }
+}

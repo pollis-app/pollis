@@ -2,6 +2,8 @@
 
 Everything an App can call, everything it can declare, and every way the runtime can say no. For how a job runs from trigger to applied action, read [concepts-for-developers.md](concepts-for-developers.md) first; this page does not repeat it.
 
+Writing in TypeScript? Start with [the developer guide](developer-guide.md). `@pollis-inc/app` wraps every function below as a promise on `ctx` (`reply` is `ctx.reply`, `http-fetch` is `ctx.fetch`, `kv-get` is `ctx.state.get`, and so on), and its refusals are the same strings.
+
 The sources of truth, if this page and the code ever disagree:
 
 - WIT interface: [`pollis-app-wit/wit/app.wit`](../../pollis-app-wit/wit/app.wit) (package `pollis:app@0.1.0`)
