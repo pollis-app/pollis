@@ -32,7 +32,7 @@ use sha2::{Digest, Sha256};
 use crate::action::Action;
 use crate::core::{InstallationCore, Member, StateWrite};
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerOutput};
-use crate::trigger::{IncomingMessage, Trigger};
+use crate::trigger::{IncomingMessage, Trigger, WebhookPayload};
 
 /// One sandbox host per process, so compiled components are shared by every
 /// installation running the same App.
@@ -213,14 +213,22 @@ impl Handler for AppHandler {
                 (trigger, Some(msg))
             }
             Trigger::Webhook(w) => {
-                let body = serde_json::to_vec(
-                    &serde_json::json!({ "channel": w.channel, "text": w.text }),
-                )
-                .map_err(|e| HandlerError(e.to_string()))?;
-                let hook = host::Webhook {
-                    delivery_id: w.delivery_id.clone(),
-                    headers: Vec::new(),
-                    body,
+                let hook = match &w.payload {
+                    WebhookPayload::Raw(raw) => {
+                        let mut headers = raw.headers.clone();
+                        if let Some(ct) = &raw.content_type {
+                            headers.insert(0, ("content-type".to_string(), ct.clone()));
+                        }
+                        host::Webhook { delivery_id: w.delivery_id.clone(), headers, body: raw.body.clone() }
+                    }
+                    // An App installation's listener always sends raw calls;
+                    // an alerts-shaped one (`pollis-bot post`) arrives as JSON.
+                    WebhookPayload::Alert { channel, text } => host::Webhook {
+                        delivery_id: w.delivery_id.clone(),
+                        headers: vec![("content-type".to_string(), "application/json".to_string())],
+                        body: serde_json::to_vec(&serde_json::json!({ "channel": channel, "text": text }))
+                            .map_err(|e| HandlerError(e.to_string()))?,
+                    },
                 };
                 (host::Trigger::Webhook(hook), None)
             }

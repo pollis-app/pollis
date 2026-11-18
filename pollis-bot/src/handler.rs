@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::action::Action;
 use crate::core::{InstallationCore, StateWrite};
-use crate::trigger::Trigger;
+use crate::trigger::{Trigger, WebhookPayload};
 
 /// A handler's failure. The loop discards every action of a job whose handler
 /// fails, so an error is never half-applied.
@@ -90,10 +90,14 @@ impl Handler for AlertsHandler {
 
     async fn handle(&self, trigger: &Trigger) -> Result<Vec<Action>, HandlerError> {
         match trigger {
-            Trigger::Webhook(call) => Ok(vec![Action::Post {
-                channel: call.channel.clone(),
-                text: call.text.clone(),
-            }]),
+            Trigger::Webhook(call) => match &call.payload {
+                WebhookPayload::Alert { channel, text } => Ok(vec![Action::Post {
+                    channel: channel.clone(),
+                    text: text.clone(),
+                }]),
+                // Only an App installation's webhook is raw.
+                WebhookPayload::Raw(_) => Ok(Vec::new()),
+            },
             Trigger::Message(_) => Ok(Vec::new()),
         }
     }
@@ -106,11 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_webhook_becomes_one_post_and_a_message_becomes_nothing() {
-        let hook = Trigger::Webhook(WebhookCall {
-            delivery_id: "d".into(),
-            channel: "alerts".into(),
-            text: "disk full".into(),
-        });
+        let hook = Trigger::Webhook(WebhookCall::alert("d", "alerts", "disk full"));
         assert_eq!(
             AlertsHandler.handle(&hook).await.unwrap(),
             vec![Action::Post { channel: "alerts".into(), text: "disk full".into() }]

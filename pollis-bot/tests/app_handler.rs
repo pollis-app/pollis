@@ -253,3 +253,31 @@ async fn a_mention_of_the_bot_reaches_on_mention_only_when_the_app_takes_mention
     assert_eq!(r.triggers[1].result, Ok(TriggerOutcome::NoActions), "@all is not a mention of the bot");
     assert_eq!(texts(&ds), vec!["paged".to_string()]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_apps_webhook_receives_the_raw_request() {
+    let hooks = br##"{
+        "name": "hooks", "version": "0.1.0",
+        "triggers": ["webhook"],
+        "read": { "channels": ["#alerts"] },
+        "actions": ["post"]
+    }"##;
+    let wasm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm")).unwrap();
+    let mut post_only = grants();
+    post_only.actions = [ActionKind::Post].into();
+    let handler: Arc<dyn Handler> = Arc::new(AppHandler::new(wasm, hooks, post_only).unwrap());
+    let ds = Arc::new(FakeDs::default());
+    let host = Installation::new(FakeCore::new("host-1", ds.clone()), handler);
+    // The fixture runs its webhook body as a script: plain text, not the alerts JSON.
+    let call = pollis_bot::trigger::WebhookCall {
+        delivery_id: "d-1".into(),
+        payload: pollis_bot::trigger::WebhookPayload::Raw(pollis_bot::trigger::RawWebhook {
+            content_type: Some("text/plain".into()),
+            headers: vec![("x-github-event".into(), "push".into())],
+            body: format!("post {CHANNEL} from the hook").into_bytes(),
+        }),
+    };
+    let r = host.run_job(JobInput::Webhook(call)).await.unwrap();
+    assert_eq!(r.webhook().unwrap().result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
+    assert_eq!(texts(&ds), vec!["from the hook".to_string()]);
+}

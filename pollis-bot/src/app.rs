@@ -177,7 +177,15 @@ pub async fn run(
                     String::from_utf8_lossy(&secret)
                 );
             }
-            hooks.insert(id.clone(), HookEntry::new(secret, TokenBucket::new(w.per_minute, w.burst, Instant::now())));
+            let mut entry = HookEntry::new(secret, TokenBucket::new(w.per_minute, w.burst, Instant::now()));
+            // An App's webhook gets the request as sent, not the alerts JSON.
+            if records
+                .iter()
+                .any(|r| &r.installation_id == id && matches!(r.handler, crate::handler::HandlerKind::App { .. }))
+            {
+                entry = entry.raw();
+            }
+            hooks.insert(id.clone(), entry);
         }
         let submitter: Arc<dyn JobSubmitter> = Arc::new(runtime.clone());
         let app = router(Arc::new(WebhookState::new(hooks, submitter)));

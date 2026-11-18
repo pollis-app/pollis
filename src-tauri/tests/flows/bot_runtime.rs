@@ -287,11 +287,7 @@ async fn an_app_runs_on_asleep_hosts_that_share_its_state_beside_the_alerts_hand
     let (alerts_host, _) = pair_new_bot(&alice, &group, "Alerts").await;
     let alerts = asleep(&alerts_host, Arc::new(AlertsHandler)).await;
     let r = alerts
-        .run_job(JobInput::Webhook(WebhookCall {
-            delivery_id: "01DELIVERY".into(),
-            channel: "general".into(),
-            text: "disk full".into(),
-        }))
+        .run_job(JobInput::Webhook(WebhookCall::alert("01DELIVERY", "general", "disk full")))
         .await
         .expect("alerts job");
     assert_eq!(r.webhook().unwrap().result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
