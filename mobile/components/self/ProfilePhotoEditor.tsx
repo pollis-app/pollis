@@ -1,37 +1,18 @@
 import { useState } from "react";
-import { ActivityIndicator, Linking, Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 import { Text } from "../Text";
 import { Image } from "expo-image";
-import * as ImagePicker from "expo-image-picker";
 import { useTranslation } from "react-i18next";
-import { Button, Group, ListRow } from "../ui";
+import { Button } from "../ui";
 import { UserAvatar } from "../UserAvatar";
-import { SheetOverlay, afterSheetClose } from "../chat/SheetOverlay";
 import { ErrorText } from "./SettingsField";
 import { Icon } from "../icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { useRemoveAvatar, useSetAvatar } from "../../hooks/queries";
 import { avatarHash } from "../../lib/avatarKey";
-import { COMPATIBLE_PICK } from "../../lib/pickerOptions";
+import { PhotoPickSheet, uriToPath } from "./PhotoPickSheet";
 
 const SIZE = 96;
-
-// What the picker returns is a `file://` URI; core reads a path.
-function uriToPath(uri: string): string {
-  if (uri.startsWith("file://")) {
-    return decodeURIComponent(uri.slice("file://".length));
-  }
-  return uri;
-}
-
-// Square crop in the system editor; core re-encodes and strips EXIF on upload.
-const PICK: ImagePicker.ImagePickerOptions = {
-  mediaTypes: "images",
-  allowsEditing: true,
-  aspect: [1, 1],
-  quality: 0.9,
-  ...COMPATIBLE_PICK,
-};
 
 /** Set, change or remove your own profile photo (Self → Account details). */
 export function ProfilePhotoEditor({
@@ -66,31 +47,6 @@ export function ProfilePhotoEditor({
     });
   };
 
-  const fromLibrary = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync(PICK);
-    if (!result.canceled && result.assets.length > 0) {
-      upload(result.assets[0].uri);
-    }
-  };
-
-  const fromCamera = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      setError(t("self.userSettings.photo.cameraDenied"));
-      if (!perm.canAskAgain) {
-        void Linking.openSettings();
-      }
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      ...PICK,
-      cameraType: ImagePicker.CameraType.front,
-    });
-    if (!result.canceled && result.assets.length > 0) {
-      upload(result.assets[0].uri);
-    }
-  };
-
   const remove = () => {
     setError(null);
     setDone(null);
@@ -98,11 +54,6 @@ export function ProfilePhotoEditor({
       onSuccess: () => setDone("removed"),
       onError: () => setError(t("self.userSettings.photo.removeFailed")),
     });
-  };
-
-  const choose = (fn: () => void) => {
-    setSheetOpen(false);
-    afterSheetClose(fn);
   };
 
   const status = setAvatar.isPending
@@ -190,36 +141,13 @@ export function ProfilePhotoEditor({
       {error ? <ErrorText>{error}</ErrorText> : null}
 
       {sheetOpen ? (
-        <SheetOverlay
+        <PhotoPickSheet
           title={t("self.userSettings.photo.heading")}
           onClose={() => setSheetOpen(false)}
-          testID="sheet-avatar"
-        >
-          <Group surface="high">
-            <ListRow
-              testID="btn-avatar-library"
-              glyph={<Icon.images size={22} color={semantic.dim} />}
-              name={t("self.userSettings.photo.library")}
-              onPress={() => choose(() => void fromLibrary())}
-            />
-            <ListRow
-              testID="btn-avatar-camera"
-              glyph={<Icon.camera size={22} color={semantic.dim} />}
-              name={t("self.userSettings.photo.camera")}
-              onPress={() => choose(() => void fromCamera())}
-            />
-          </Group>
-          {hasPhoto ? (
-            <Group surface="high" style={{ marginTop: space.lg }}>
-              <ListRow
-                testID="btn-avatar-remove"
-                glyph={<Icon.trash size={22} color={semantic.danger} />}
-                name={t("self.userSettings.photo.remove")}
-                onPress={() => choose(remove)}
-              />
-            </Group>
-          ) : null}
-        </SheetOverlay>
+          onPicked={upload}
+          onCameraDenied={() => setError(t("self.userSettings.photo.cameraDenied"))}
+          remove={hasPhoto ? { label: t("self.userSettings.photo.remove"), onPress: remove } : undefined}
+        />
       ) : null}
     </View>
   );

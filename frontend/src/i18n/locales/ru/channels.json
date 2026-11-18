@@ -124,7 +124,8 @@
       "revoking": "Отзыв…",
       "revokeLabel": "Отозвать приглашение для {{name}}",
       "revokeFailed": "Не удалось отозвать приглашение."
-    }
+    },
+    "resetAlias": "Сбросить псевдоним"
   },
   "kickMember": {
     "pageTitle": "Исключить участника",
@@ -230,5 +231,13 @@
     "inviteBodyToGroup": "{{name}} приглашает вас в {{group}}",
     "inviteBody": "{{name}} приглашает вас",
     "inviteBodyUnknown": "Вас пригласили в группу"
+  },
+  "resetAlias": {
+    "pageTitle": "Сбросить псевдоним",
+    "confirm": "Сбросить псевдоним <strong>{{name}}</strong> (@{{handle}}) в этой группе?",
+    "consequence": "Здесь снова будет показан основной профиль. Можно задать новый псевдоним.",
+    "confirmButton": "Да, сбросить",
+    "submitting": "Сброс…",
+    "failed": "Не удалось сбросить псевдоним"
   }
 }

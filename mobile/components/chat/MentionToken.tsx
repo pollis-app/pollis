@@ -1,12 +1,17 @@
 import { Text } from "../Text";
 import { fonts, semantic } from "../../theme/tokens";
 
-/** One resolved `@username` in a message body; self-mentions take the stronger tint. */
+/**
+ * One resolved `@username` in a message body; self-mentions take the stronger tint.
+ * `label`: the handle's alias in this group (#2003), shown in place of the handle.
+ */
 export function MentionToken({
   name,
+  label,
   isSelf,
 }: {
   name: string;
+  label?: string;
   isSelf: boolean;
 }) {
   return (
@@ -18,7 +23,7 @@ export function MentionToken({
         color: semantic.accent,
       }}
     >
-      @{name}
+      @{label ?? name}
     </Text>
   );
 }

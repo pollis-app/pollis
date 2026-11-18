@@ -357,3 +357,78 @@ test("a tagged photo reaches the screen probe until it unmounts", async () => {
   assert.deepEqual(avatarPhotosShowing(), []);
   assert.match(src("components/ui.tsx"), /<AvatarProbe \/>/);
 });
+
+// #2003: pictures are keyed by hash, so a main picture and alias pictures coexist.
+
+test("an alias picture draws in its group while the main picture stays everywhere else", async () => {
+  const f = fake([file("u1", H1, 128)]);
+  const store = createAvatarStore(f.deps);
+  await store.hydrate();
+  store.noteKey("u1", key("u1", H1));
+  const alias = key("u1", H2);
+  assert.equal(store.view("u1", 128, alias), null, "the alias is not on disk yet: letter, never the main");
+  store.ensure("u1", 128, alias);
+  await settle();
+  assert.deepEqual(f.resolves, [{ userId: "u1", key: alias, px: 128 }]);
+  assert.equal(store.view("u1", 128, alias), `${DIR}${file("u1", H2, 128)}`);
+  assert.equal(store.view("u1", 128), `${DIR}${file("u1", H1, 128)}`, "the main picture is untouched");
+  assert.deepEqual(f.deleted, [], "neither evicts the other");
+});
+
+test("an alias key never becomes the user's main key", async () => {
+  const f = fake();
+  f.profiles.set("u1", key("u1", H1));
+  const store = createAvatarStore(f.deps);
+  store.ensure("u1", 128, key("u1", H2));
+  await settle();
+  // The main picture is still unknown: one profile read decides it.
+  store.ensure("u1", 128);
+  f.flush();
+  await settle();
+  store.ensure("u1", 128);
+  await settle();
+  assert.equal(store.view("u1", 128), `${DIR}${file("u1", H1, 128)}`);
+  assert.equal(store.view("u1", 128, key("u1", H2)), `${DIR}${file("u1", H2, 128)}`);
+});
+
+test("a main-picture change never deletes a picture drawn as an alias", async () => {
+  const f = fake();
+  const store = createAvatarStore(f.deps);
+  // The same picture is the main one and an alias in some group.
+  store.noteKey("u1", key("u1", H1));
+  store.ensure("u1", 128);
+  store.ensure("u1", 128, key("u1", H1));
+  await settle();
+  store.noteKey("u1", key("u1", H2));
+  store.ensure("u1", 128);
+  await settle();
+  assert.equal(store.view("u1", 128), `${DIR}${file("u1", H2, 128)}`);
+  assert.equal(store.view("u1", 128, key("u1", H1)), `${DIR}${file("u1", H1, 128)}`, "still drawable as the alias");
+  assert.deepEqual(f.deleted, []);
+});
+
+test("with several pictures on disk, launch waits for the key instead of guessing", async () => {
+  const f = fake([file("u1", H1, 128), file("u1", H2, 128)]);
+  const store = createAvatarStore(f.deps);
+  await store.hydrate();
+  assert.equal(store.view("u1", 128), null);
+  assert.equal(store.view("u1", 128, key("u1", H2)), `${DIR}${file("u1", H2, 128)}`, "an alias draws from disk at once");
+  store.noteKey("u1", key("u1", H1));
+  assert.equal(store.view("u1", 128), `${DIR}${file("u1", H1, 128)}`);
+});
+
+test("our own alias upload is drawn at once and leaves the main picture alone", () => {
+  const f = fake();
+  const store = createAvatarStore(f.deps);
+  store.adopt("me", key("me", H1), `${DIR}${file("me", H1, 512)}`);
+  store.adopt("me", key("me", H2), `${DIR}${file("me", H2, 512)}`, { alias: true });
+  assert.equal(store.view("me", 128), `${DIR}${file("me", H1, 128)}`);
+  assert.equal(store.view("me", 128, key("me", H2)), `${DIR}${file("me", H2, 128)}`);
+  assert.deepEqual(f.deleted, []);
+});
+
+test("core keeps a user's other pictures when it writes one", () => {
+  const s = src("../pollis-core/src/commands/avatar.rs");
+  const write = s.slice(s.indexOf("async fn write_renditions"), s.indexOf("fn to_uri"));
+  assert.doesNotMatch(write, /remove_file\(dir\.join/, "write_renditions must not evict other hashes");
+});

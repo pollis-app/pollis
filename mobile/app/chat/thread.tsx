@@ -10,6 +10,8 @@ import { GROUP_WINDOW_MS, timeLabel } from "../../components/chat/dates";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
+import { aliasAvatar, aliasName } from "../../lib/groupAlias";
+import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { outgoingText } from "../../lib/messageText";
 import {
   useMessages,
@@ -71,6 +73,8 @@ function ThreadScreen() {
     conversationId,
     mentionGroupId,
   );
+  // Per-group aliases (#2003): the thread's group shows people as it does.
+  const aliases = useGroupAliases(mentionGroupId);
   const selfName = currentUser?.username?.toLowerCase() ?? null;
   const mentionNames = useMemo(() => {
     const set = new Set<string>(["all"]);
@@ -112,7 +116,7 @@ function ThreadScreen() {
       const retryId = retryTarget(m);
       const mine = currentUser?.id === m.sender_id;
       const name =
-        authorName(m.sender_id, m.sender_username, currentUser) ??
+        aliasName(aliases, m.sender_id, authorName(m.sender_id, m.sender_username, currentUser)) ??
         t("chat:list.unknownAuthor");
       return (
         <MessageRow
@@ -120,6 +124,7 @@ function ThreadScreen() {
           messageId={m.id}
           av={name.slice(0, 2)}
           senderId={m.sender_id}
+          senderAliasKey={aliasAvatar(aliases, m.sender_id, null)}
           amber={mine}
           name={name}
           time={timeLabel(m.created_at)}
@@ -149,11 +154,11 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent],
+    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases],
   );
 
   const rootName = root
-    ? authorName(root.sender_id, root.sender_username, currentUser)
+    ? aliasName(aliases, root.sender_id, authorName(root.sender_id, root.sender_username, currentUser))
     : null;
   const header = (
     <View>

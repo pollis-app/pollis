@@ -515,5 +515,29 @@
     "youDeclined": "O kọ̀ ọ́. A kò ṣe àdàkọ nǹkan kan.",
     "notOpen": "Ìbéèrè yìí kò ṣí sílẹ̀ mọ́.",
     "back": "Padà sí Ààbò"
+  },
+  "aliases": {
+    "heading": "Orúkọ àpèjẹ ẹgbẹ́",
+    "rowDescription": "Orúkọ àti fọ́tò mìíràn nínú ẹgbẹ́ kọ̀ọ̀kan",
+    "intro": "Fi orúkọ àti fọ́tò mìíràn hàn nínú ẹgbẹ́ kọ̀ọ̀kan. @orúkọ-olùmúlò rẹ kò yí padà níbikíbi.",
+    "empty": "O kò tíì sí nínú ẹgbẹ́ kankan.",
+    "mainProfile": "Profaili àkọ́kọ́",
+    "edit": "Ṣàtúnṣe",
+    "useMain": "Lo profaili àkọ́kọ́ mi",
+    "resetting": "Ń tún un ṣe…",
+    "pageTitle": "Orúkọ àpèjẹ nínú {{group}}",
+    "pageIntro": "Ẹgbẹ́ yìí nìkan ló ń rí orúkọ àti fọ́tò yìí. Ìfiránṣẹ́ àdáni máa ń lo profaili àkọ́kọ́ rẹ.",
+    "nameLabel": "Orúkọ nínú ẹgbẹ́ yìí",
+    "namePlaceholder": "Fi sílẹ̀ ní òfo láti lo {{name}}",
+    "nameInvalid": "Kò ju lẹ́tà 100 lọ, láìsí < tàbí >.",
+    "pictureLabel": "Fọ́tò nínú ẹgbẹ́ yìí",
+    "choosePicture": "Yan fọ́tò",
+    "mainPicture": "Lo fọ́tò àkọ́kọ́",
+    "applyAll": "Lò ó fún gbogbo ẹgbẹ́ mi",
+    "applyAllHint": "Ó ń kọ orúkọ tàbí fọ́tò tí o yí padà sí gbogbo ẹgbẹ́ tí o wà nínú rẹ̀ báyìí. Ẹgbẹ́ tí o bá dara pọ̀ mọ́ lẹ́yìn náà máa bẹ̀rẹ̀ pẹ̀lú profaili àkọ́kọ́ rẹ.",
+    "save": "Fi pamọ́",
+    "saving": "Ń fi pamọ́…",
+    "saved": "Ti fi pamọ́",
+    "saveFailed": "A kò lè fi orúkọ àpèjẹ rẹ pamọ́"
   }
 }

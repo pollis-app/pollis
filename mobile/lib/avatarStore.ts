@@ -1,12 +1,16 @@
 // Which picture to draw for a user, and when to fetch one (#avatars). Pure: lib/avatarCache.ts wires it.
 //
+// - Pictures are keyed by their content hash, not by user, so one user's main picture and
+//   their per-group alias pictures (#2003) are drawn side by side and never evict each other.
 // - Files on disk are the source of truth for "what can be drawn right now". One directory
 //   listing at launch maps every user to the picture last drawn for them, so a revisit
 //   draws the photo on its first frame — before any profile read, with no letter flash.
-// - A user's avatar KEY comes from whatever list already carries it (DM roster, members,
+// - A user's main avatar KEY comes from whatever list already carries it (DM roster, members,
 //   profile, search) or, failing that, one batched profile read for every unknown user.
-// - A changed key keeps the old picture on screen until the new one is on disk; a removed
-//   one drops the files at once.
+//   An alias key is passed by the group surface that draws it and never becomes the main key.
+// - A changed main key keeps the old picture on screen until the new one is on disk, then
+//   deletes the old files; a removed one drops them at once. A hash drawn as an alias this
+//   session is never deleted that way.
 
 import { avatarHash, parseRenditionFile, siblingUri, AVATAR_RENDITIONS } from "./avatarKey.ts";
 
@@ -31,23 +35,25 @@ export interface AvatarStoreDeps {
 export const PROFILE_BATCH_MAX = 100;
 
 interface Picture {
-  hash: string;
   // px → uri
   uris: Map<number, string>;
 }
 
 export interface AvatarStore {
   hydrate(): Promise<void>;
-  /** The URI to draw now for `userId` at `px`, or null for the letter avatar. */
-  view(userId: string, px: number): string | null;
-  /** Record a key a list carried. `undefined` = this list does not know. */
+  /**
+   * The URI to draw now for `userId` at `px`, or null for the letter avatar. `aliasKey`:
+   * the user's alias picture in the group being drawn (#2003); omitted for the main one.
+   */
+  view(userId: string, px: number, aliasKey?: string | null): string | null;
+  /** Record a main key a list carried. `undefined` = this list does not know. */
   noteKey(userId: string, key: string | null | undefined): void;
   /** Make `view` able to answer: fetch the key and/or the file if missing. */
-  ensure(userId: string, px: number): void;
+  ensure(userId: string, px: number, aliasKey?: string | null): void;
   /** `ensure` for a list's rows, then warm the decoder for what is on disk. */
-  prefetch(rows: Array<{ userId: string; key?: string | null }>, px: number): void;
-  /** Our own new picture, already written by `upload_avatar`. */
-  adopt(userId: string, key: string, uri: string | null): void;
+  prefetch(rows: Array<{ userId: string; key?: string | null; aliasKey?: string | null }>, px: number): void;
+  /** Our own new picture, already written by `upload_avatar` / `upload_avatar_image`. */
+  adopt(userId: string, key: string, uri: string | null, opts?: { alias?: boolean }): void;
   /** An image that would not draw (purged by the OS): forget it and fetch again. */
   forget(userId: string, uri: string): void;
   /** Let failed fetches try again (the app came back to the foreground). */
@@ -57,9 +63,14 @@ export interface AvatarStore {
 }
 
 export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
+  // hash → its renditions on disk.
   const pictures = new Map<string, Picture>();
-  // userId → key; null = known to have none.
+  // userId → main key; null = known to have none.
   const keys = new Map<string, string | null>();
+  // userId → hash of the main picture last drawn (from disk at launch, or a fetch that landed).
+  const shown = new Map<string, string>();
+  // Hashes drawn as an alias this session: a main-picture change never deletes them.
+  const aliasHashes = new Set<string>();
   const keyRequested = new Set<string>();
   const queued = new Set<string>();
   const inFlight = new Set<string>();
@@ -85,31 +96,50 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
     }
   };
 
-  const dropPicture = (userId: string) => {
-    const p = pictures.get(userId);
+  const uriOf = (hash: string | null | undefined, px: number): string | null => {
+    if (!hash) {
+      return null;
+    }
+    const p = pictures.get(hash);
+    if (!p) {
+      return null;
+    }
+    return p.uris.get(px) ?? [...p.uris.values()][0] ?? null;
+  };
+
+  // A main picture nobody draws any more: its files go, unless it is also an alias picture.
+  const dropPicture = (hash: string) => {
+    if (aliasHashes.has(hash)) {
+      return;
+    }
+    const p = pictures.get(hash);
     if (!p) {
       return;
     }
-    pictures.delete(userId);
+    pictures.delete(hash);
     deps.deleteFiles([...p.uris.values()]);
   };
 
-  const setPicture = (userId: string, hash: string, uri: string) => {
-    const current = pictures.get(userId);
-    if (current && current.hash !== hash) {
-      // Core already removed the old files; only the map is stale.
-      pictures.delete(userId);
-    }
+  const setPicture = (hash: string, uri: string) => {
     // Every rendition is written together, so name them all.
     const uris = new Map<number, string>();
     for (const px of AVATAR_RENDITIONS) {
       uris.set(px, siblingUri(uri, px));
     }
-    pictures.set(userId, { hash, uris });
+    pictures.set(hash, { uris });
   };
 
-  const fetchFile = (userId: string, key: string, hash: string, px: number) => {
-    const id = `${userId}|${hash}|${px}`;
+  // The main picture now drawn for `userId` is `hash`; the one before it goes.
+  const showMain = (userId: string, hash: string) => {
+    const before = shown.get(userId);
+    shown.set(userId, hash);
+    if (before && before !== hash) {
+      dropPicture(before);
+    }
+  };
+
+  const fetchFile = (userId: string, key: string, hash: string, px: number, alias: boolean) => {
+    const id = `${hash}|${px}`;
     if (inFlight.has(id) || failed.has(id)) {
       return;
     }
@@ -118,10 +148,16 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
     deps
       .resolve(userId, key, px)
       .then((uri) => {
-        if (at !== epoch || keys.get(userId) !== key) {
+        if (at !== epoch) {
           return;
         }
-        setPicture(userId, hash, uri);
+        if (!alias && keys.get(userId) !== key) {
+          return;
+        }
+        setPicture(hash, uri);
+        if (!alias) {
+          showMain(userId, hash);
+        }
         deps.warm([uri]);
         emit();
       })
@@ -175,19 +211,25 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
             if (at !== epoch) {
               return;
             }
+            const byUser = new Map<string, Set<string>>();
             for (const name of names) {
               const f = parseRenditionFile(name);
               if (!f) {
                 continue;
               }
-              const p = pictures.get(f.userId);
-              if (p && p.hash !== f.hash) {
-                // Two pictures for one user (a crash mid-swap): unknown which is newer.
-                continue;
-              }
-              const entry = p ?? { hash: f.hash, uris: new Map<number, string>() };
+              const entry = pictures.get(f.hash) ?? { uris: new Map<number, string>() };
               entry.uris.set(f.px, deps.fileUri(name));
-              pictures.set(f.userId, entry);
+              pictures.set(f.hash, entry);
+              const hashes = byUser.get(f.userId) ?? new Set<string>();
+              hashes.add(f.hash);
+              byUser.set(f.userId, hashes);
+            }
+            // One picture on disk is the one last drawn. Several (a main picture and alias
+            // pictures, #2003): unknown which is the main one until its key arrives.
+            for (const [userId, hashes] of byUser) {
+              if (hashes.size === 1 && !shown.has(userId)) {
+                shown.set(userId, [...hashes][0]);
+              }
             }
             emit();
           })
@@ -196,16 +238,18 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
       return hydrated;
     },
 
-    view(userId, px) {
+    view(userId, px, aliasKey) {
+      const aliasHash = avatarHash(aliasKey);
+      if (aliasHash) {
+        return uriOf(aliasHash, px);
+      }
       const key = keys.get(userId);
       if (key === null) {
         return null;
       }
-      const p = pictures.get(userId);
-      if (!p) {
-        return null;
-      }
-      return p.uris.get(px) ?? [...p.uris.values()][0] ?? null;
+      const want = key === undefined ? shown.get(userId) : avatarHash(key);
+      // A changed key that is not on disk yet keeps the last drawn picture up.
+      return uriOf(want, px) ?? uriOf(shown.get(userId), px);
     },
 
     noteKey(userId, key) {
@@ -220,16 +264,24 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
         return;
       }
       if (next === null) {
-        if (pictures.has(userId)) {
-          dropPicture(userId);
+        const before = shown.get(userId);
+        shown.delete(userId);
+        if (before) {
+          dropPicture(before);
         }
-        emit();
-        return;
       }
       emit();
     },
 
-    ensure(userId, px) {
+    ensure(userId, px, aliasKey) {
+      const aliasHash = avatarHash(aliasKey);
+      if (aliasHash && aliasKey) {
+        aliasHashes.add(aliasHash);
+        if (!pictures.get(aliasHash)?.uris.has(px)) {
+          fetchFile(userId, aliasKey, aliasHash, px, true);
+        }
+        return;
+      }
       const key = keys.get(userId);
       if (key === undefined) {
         if (!keyRequested.has(userId)) {
@@ -249,11 +301,11 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
       if (!hash) {
         return;
       }
-      const p = pictures.get(userId);
-      if (p && p.hash === hash && p.uris.has(px)) {
+      if (pictures.get(hash)?.uris.has(px)) {
+        shown.set(userId, hash);
         return;
       }
-      fetchFile(userId, key, hash, px);
+      fetchFile(userId, key, hash, px, false);
     },
 
     prefetch(rows, px) {
@@ -261,7 +313,7 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
       try {
         for (const row of rows) {
           store.noteKey(row.userId, row.key);
-          store.ensure(row.userId, px);
+          store.ensure(row.userId, px, row.aliasKey);
         }
       } finally {
         batching -= 1;
@@ -272,7 +324,7 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
       }
       const uris: string[] = [];
       for (const row of rows) {
-        const uri = store.view(row.userId, px);
+        const uri = store.view(row.userId, px, row.aliasKey);
         if (uri) {
           uris.push(uri);
         }
@@ -282,34 +334,42 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
       }
     },
 
-    adopt(userId, key, uri) {
+    adopt(userId, key, uri, opts) {
       const hash = avatarHash(key);
-      keys.set(userId, hash ? key : null);
+      if (opts?.alias) {
+        if (hash) {
+          aliasHashes.add(hash);
+        }
+      } else {
+        keys.set(userId, hash ? key : null);
+      }
       if (hash && uri) {
-        setPicture(userId, hash, uri);
+        setPicture(hash, uri);
+        if (!opts?.alias) {
+          showMain(userId, hash);
+        }
       }
       emit();
     },
 
-    forget(userId, uri) {
-      const p = pictures.get(userId);
-      if (!p) {
-        return;
-      }
-      const again = drawFailures.has(uri);
-      drawFailures.add(uri);
-      for (const [px, u] of p.uris) {
-        if (u === uri) {
-          p.uris.delete(px);
-          if (again) {
-            // Downloaded afresh and still undrawable: stop until retryFailed().
-            failed.add(`${userId}|${p.hash}|${px}`);
+    forget(_userId, uri) {
+      for (const [hash, p] of pictures) {
+        let hit = false;
+        for (const [px, u] of p.uris) {
+          if (u === uri) {
+            hit = true;
+            p.uris.delete(px);
+            if (drawFailures.has(uri)) {
+              // Downloaded afresh and still undrawable: stop until retryFailed().
+              failed.add(`${hash}|${px}`);
+            }
           }
         }
+        if (hit && p.uris.size === 0) {
+          pictures.delete(hash);
+        }
       }
-      if (p.uris.size === 0) {
-        pictures.delete(userId);
-      }
+      drawFailures.add(uri);
       // Core returns a file that exists without reading it, so delete it to refetch.
       deps.deleteFiles([uri]);
       emit();
@@ -325,6 +385,8 @@ export function createAvatarStore(deps: AvatarStoreDeps): AvatarStore {
       epoch += 1;
       pictures.clear();
       keys.clear();
+      shown.clear();
+      aliasHashes.clear();
       keyRequested.clear();
       queued.clear();
       inFlight.clear();

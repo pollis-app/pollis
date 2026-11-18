@@ -533,5 +533,29 @@
     "youDeclined": "Recusou. Nada foi copiado.",
     "notOpen": "Este pedido já não está aberto.",
     "back": "Voltar a Segurança"
+  },
+  "aliases": {
+    "heading": "Apelidos de grupo",
+    "rowDescription": "Outro nome e outra foto em cada grupo",
+    "intro": "Mostre outro nome e outra foto em cada grupo. Seu @usuário é o mesmo em todo lugar.",
+    "empty": "Você ainda não está em nenhum grupo.",
+    "mainProfile": "Perfil principal",
+    "edit": "Editar",
+    "useMain": "Usar meu perfil principal",
+    "resetting": "Redefinindo…",
+    "pageTitle": "Apelido em {{group}}",
+    "pageIntro": "Só este grupo vê este nome e esta foto. As mensagens diretas mantêm seu perfil principal.",
+    "nameLabel": "Nome neste grupo",
+    "namePlaceholder": "Deixe vazio para usar {{name}}",
+    "nameInvalid": "Use até 100 caracteres, sem < ou >.",
+    "pictureLabel": "Foto neste grupo",
+    "choosePicture": "Escolher foto",
+    "mainPicture": "Usar a foto principal",
+    "applyAll": "Aplicar a todos os meus grupos",
+    "applyAllHint": "Grava o nome ou a foto alterados em cada grupo em que você está agora. Grupos em que você entrar depois começam com seu perfil principal.",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "saved": "Salvo",
+    "saveFailed": "Não foi possível salvar seu apelido"
   }
 }

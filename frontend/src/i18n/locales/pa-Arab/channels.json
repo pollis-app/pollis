@@ -124,7 +124,8 @@
       "revoking": "واپس لے رہے آں…",
       "revokeLabel": "{{name}} لئی دعوت واپس لؤ",
       "revokeFailed": "دعوت واپس نہیں لئی جا سکی۔"
-    }
+    },
+    "resetAlias": "اُپ ناں ری سیٹ کرو"
   },
   "kickMember": {
     "pageTitle": "ممبر ہٹاؤ",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} نے تہانوں {{group}} وچ دعوت دتی",
     "inviteBody": "{{name}} نے تہانوں دعوت دتی",
     "inviteBodyUnknown": "تہانوں کسے گروپ وچ دعوت دتی گئی اے"
+  },
+  "resetAlias": {
+    "pageTitle": "اُپ ناں ری سیٹ کرو",
+    "confirm": "کی ایس گروپ وچ <strong>{{name}}</strong> (@{{handle}}) دا اُپ ناں ری سیٹ کرنا اے؟",
+    "consequence": "ایتھے فیر اوہناں دی مکھ پروفائل وکھے گی۔ اوہ نواں اُپ ناں رکھ سکدے نیں۔",
+    "confirmButton": "ہاں، ری سیٹ کرو",
+    "submitting": "ری سیٹ ہو رہیا اے…",
+    "failed": "اُپ ناں ری سیٹ نہیں ہو سکیا"
   }
 }

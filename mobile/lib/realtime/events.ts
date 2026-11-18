@@ -75,6 +75,11 @@ export type RealtimeEvent =
       type: "channel_mutes_changed";
     }
   | {
+      // DS-only (#2003): an alias in `group_id` changed, or (no group) one of our own.
+      type: "group_aliases_changed";
+      group_id?: string;
+    }
+  | {
       // DS-only (#1628): another of this account's devices pushed read cursors; converge.
       type: "read_cursors_changed";
     }
@@ -113,6 +118,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "device_revoked",
   "enrollment_requested",
   "channel_mutes_changed",
+  "group_aliases_changed",
   "read_cursors_changed",
   "typing",
   "history_transfer",
@@ -176,6 +182,7 @@ export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean):
   if (
     event.type === "enrollment_requested" ||
     event.type === "channel_mutes_changed" ||
+    event.type === "group_aliases_changed" ||
     event.type === "read_cursors_changed" ||
     event.type === "history_transfer"
   ) {

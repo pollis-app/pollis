@@ -19,6 +19,8 @@ import {
   type PinnedMessage,
 } from "../../hooks/queries";
 import { authorName } from "../../lib/authorName";
+import { aliasName } from "../../lib/groupAlias";
+import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { pinPreview } from "../../lib/pins";
 import { permalinkMissCopy } from "../../lib/permalinks";
 import { messageJumpStore } from "../../stores/messageJumpStore";
@@ -33,6 +35,8 @@ function PinnedMessagesScreen() {
   const conversationId = params.id ?? null;
   const name = typeof params.name === "string" ? params.name : undefined;
   const currentUser = appStore.currentUser;
+  // A channel's pins name authors as its group shows them (#2003); a DM's, by main profile.
+  const aliases = useGroupAliases(params.kind === "channel" ? appStore.selectedGroupId ?? null : null);
   const { data: pins = [], isLoading, isError } = usePinnedMessages(conversationId, {
     fresh: true,
   });
@@ -54,7 +58,7 @@ function PinnedMessagesScreen() {
 
   const renderRow = ({ item, index }: { item: PinnedMessage; index: number }) => {
     const author =
-      authorName(item.sender_id, item.sender_username ?? undefined, currentUser) ??
+      aliasName(aliases, item.sender_id, authorName(item.sender_id, item.sender_username ?? undefined, currentUser)) ??
       t("chat:list.unknownAuthor");
     const sent = new Date(item.sent_at).getTime();
     const when = Number.isFinite(sent) ? `${dayLabel(sent)} · ${timeLabel(sent)}` : "";
