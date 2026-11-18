@@ -10,6 +10,7 @@
   "audited_docs": [
     "docs/bots/README.md",
     "docs/bots/admin-guide.md",
+    "docs/bots/app-approval.md",
     "docs/bots/self-hosting.md",
     "docs/metadata-retention-policy.md",
     "docs/operational-continuity.md",
@@ -20854,6 +20855,74 @@
       ],
       "status": "verified",
       "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
+    },
+    {
+      "id": "bots-app-approval-01",
+      "doc": "docs/bots/app-approval.md",
+      "locator": {
+        "heading": "How it is checked",
+        "quote": "The Pollis server stores it but cannot make or change one, because it has no admin's key."
+      },
+      "also_rendered_in": [
+        "website/bots.html"
+      ],
+      "claim": "App approvals are signed by an admin's device ML-DSA-44 key and verified by every reader from its own MLS view and roster; the DS stores the record opaquely and holds no admin key.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/apps.rs",
+        "pollis-core/src/commands/bots/signer.rs",
+        "pollis-core/src/commands/bots/app_approval.rs",
+        "pollis-delivery/src/bot_apps.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/signer.rs:39",
+        "pollis-delivery/src/bot_apps.rs:65"
+      ],
+      "status": "verified",
+      "verified_sha": "c76753e71f835db897029b41d91d8d83f310a014"
+    },
+    {
+      "id": "bots-app-approval-02",
+      "doc": "docs/bots/app-approval.md",
+      "locator": {
+        "heading": "The short version",
+        "quote": "that the App it is about to run has exactly the approved hash, before every job"
+      },
+      "also_rendered_in": [
+        "website/bots.html"
+      ],
+      "claim": "The runtime re-reads and verifies the installation's approval and holds the artifact's App hash against it at the start of every job, before any trigger reaches the App.",
+      "kind": "security",
+      "anchors": [
+        "pollis-bot/src/job.rs",
+        "pollis-bot/src/app_approval.rs",
+        "pollis-core/src/commands/bots/app_approval.rs"
+      ],
+      "evidence": [
+        "pollis-bot/src/job.rs:275",
+        "pollis-core/src/commands/bots/app_approval.rs:397"
+      ],
+      "status": "verified",
+      "verified_sha": "c76753e71f835db897029b41d91d8d83f310a014"
+    },
+    {
+      "id": "bots-app-approval-03",
+      "doc": "docs/bots/app-approval.md",
+      "locator": {
+        "heading": "How it is checked",
+        "quote": "so the server cannot quietly bring back an older version"
+      },
+      "claim": "Each bot host keeps the highest accepted approval seq in the installation's encrypted store and refuses a lower one.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/apps.rs",
+        "pollis-core/src/db/local_schema.sql"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/apps.rs:109"
+      ],
+      "status": "verified",
+      "verified_sha": "c76753e71f835db897029b41d91d8d83f310a014"
     }
   ]
 }

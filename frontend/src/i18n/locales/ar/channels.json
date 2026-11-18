@@ -255,5 +255,143 @@
     "confirmButton": "نعم، أعد التعيين",
     "submitting": "جارٍ إعادة التعيين…",
     "failed": "تعذّرت إعادة تعيين الاسم المستعار"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "تعذّر تحميل App هذا البوت.",
+      "noApp": "لم يعرض مضيفه App بعد. شغّل البوت مع App وسيظهر هنا.",
+      "notice": {
+        "title": "هذا البوت لا يعمل",
+        "waiting": "بانتظار موافقتك."
+      },
+      "reasons": {
+        "not_approved": "لم تتم الموافقة على أي App له بعد.",
+        "hash_mismatch": "يشغّل مضيفه إصدارًا لم توافق عليه.",
+        "developer_key_mismatch": "إصداره موقّع بمفتاح مطوّر لم توافق عليه.",
+        "build_widens": "إصداره الجديد يطلب أكثر مما وافقت عليه.",
+        "malformed": "تعذّرت قراءة موافقته.",
+        "wrong_kind": "موافقته من نوع خاطئ.",
+        "wrong_installation": "موافقته صدرت لبوت آخر.",
+        "approver_not_in_group": "المشرف الذي وافق عليه لم يعد في هذه المجموعة.",
+        "uncertified_approver": "تعذّر التأكد من أن الجهاز الذي وافق عليه يخص مشرفًا.",
+        "bad_signature": "توقيع موافقته غير صالح.",
+        "transparency_alarm": "مفاتيح المشرف الموافق لا تطابق السجل العام للمفاتيح.",
+        "not_admin": "وافق عليه شخص ليس مشرفًا في هذه المجموعة.",
+        "manifest_mismatch": "App الخاص به لا يطابق الذي تمت الموافقة عليه.",
+        "widened_grants": "موافقته تمنح أكثر مما يطلبه App.",
+        "rolled_back": "أُعيدت موافقة أقدم مكان موافقة أحدث.",
+        "bad_build_signature": "توقيع المطوّر على إصداره غير صالح.",
+        "artifact_unavailable": "تعذّر على مضيفه تحميل App."
+      },
+      "approvedHeading": "App الموافق عليه",
+      "version": "الإصدار {{version}}",
+      "appHash": "بصمة App",
+      "developerKey": "مفتاح المطوّر",
+      "source": "المصدر",
+      "approvedBy": "وافق عليه {{name}} في {{date}}",
+      "seq": "الموافقة {{seq}}",
+      "marks": {
+        "development": "إصدار تطوير",
+        "noEgress": "لا يمكنه إرسال بيانات خارج هذه المجموعة",
+        "autoUpdate": "التحديثات تُعتمد تلقائيًا"
+      },
+      "canDoHeading": "ما يمكنه فعله",
+      "lines": {
+        "reads": "يقرأ {{events}} في {{channels}}، والسجل لآخر {{history}}",
+        "readsNoHistory": "يقرأ {{events}} في {{channels}}، دون سجل",
+        "readsNothing": "لا يقرأ أي قناة",
+        "eventsNew": "الرسائل الجديدة",
+        "eventsNewEdited": "الرسائل الجديدة والمعدّلة",
+        "wakes": "يعمل عند: {{triggers}}",
+        "can": "يمكنه: {{actions}}",
+        "sendsTo": "يمكنه إرسال بيانات إلى: {{hosts}}",
+        "keeps": "يحتفظ بما يصل إلى {{size}} من بياناته"
+      },
+      "triggers": {
+        "messages": "الرسائل الجديدة",
+        "mentions": "الإشارات",
+        "commands": "الأوامر",
+        "schedule": "جدول زمني",
+        "requests": "الطلبات",
+        "webhook": "استدعاءات webhook"
+      },
+      "actions": {
+        "post": "النشر",
+        "reply": "الرد",
+        "react": "التفاعل",
+        "edit_own": "تعديل رسائله",
+        "delete_own": "حذف رسائله",
+        "transfer_history": "تسليم سجل الرسائل"
+      },
+      "events": {
+        "created": "الرسائل الجديدة",
+        "edited": "الرسائل المعدّلة"
+      },
+      "anyChannel": "أي قناة تختارها",
+      "grants": {
+        "heading": "الوصول",
+        "description": "انزع منه ما لا يحتاجه. لن يحصل أبدًا على أكثر مما يطلبه App.",
+        "channels": "القنوات التي يقرأها",
+        "noChannels": "لا توجد في هذه المجموعة قناة يطلبها.",
+        "history": "أيام السجل التي يمكنه قراءتها (من 0 إلى {{max}})",
+        "egress": "المضيفون الذين يمكنه إرسال بيانات إليهم"
+      },
+      "changes": {
+        "heading": "ما الذي تغيّر",
+        "newAccess": "وصول جديد",
+        "needed": "مطلوب للموافقة",
+        "allow": "سماح",
+        "trigger_added": "يعمل عند {{value}}",
+        "trigger_removed": "لم يعد يعمل عند {{value}}",
+        "channel_added": "يقرأ {{value}}",
+        "channel_removed": "لم يعد يقرأ {{value}}",
+        "history_increased": "السجل: من {{previous}} إلى {{value}}",
+        "history_decreased": "السجل: من {{previous}} إلى {{value}}",
+        "event_added": "يرى {{value}}",
+        "event_removed": "لم يعد يرى {{value}}",
+        "action_added": "يمكنه {{value}}",
+        "action_removed": "لم يعد بإمكانه {{value}}",
+        "egress_added": "يمكنه إرسال بيانات إلى {{value}}",
+        "egress_removed": "لم يعد يرسل بيانات إلى {{value}}",
+        "state_quota_increased": "التخزين: من {{previous}} إلى {{value}}",
+        "state_quota_decreased": "التخزين: من {{previous}} إلى {{value}}",
+        "command_added": "أمر جديد: /{{value}}",
+        "command_removed": "لم يعد يوفّر /{{value}}",
+        "command_increased": "يتغيّر /{{value}} من {{previous}} إلى {{next}}",
+        "schedule_added": "يعمل وفق جدول زمني جديد: {{value}}",
+        "schedule_removed": "أُزيل الجدول الزمني {{value}}",
+        "schedule_increased": "يعمل الجدول الزمني {{value}} أكثر: كل {{next}}، وكان كل {{previous}}",
+        "schedule_decreased": "يعمل الجدول الزمني {{value}} أقل: كل {{next}}، وكان كل {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "الموافقة على هذا App",
+        "firstLead": "يعرض مضيف البوت هذا App. لا يعمل شيء حتى يوافق عليه مشرف.",
+        "updateHeading": "هناك تحديث بانتظار الموافقة",
+        "updateLead": "يعرض مضيفه إصدارًا جديدًا. راجع ما تغيّر قبل الموافقة.",
+        "nothingNew": "لا يطلب شيئًا جديدًا.",
+        "neededHint": "اسمح بكل وصول جديد مُعلَّم بأنه مطلوب للموافقة على هذا التحديث.",
+        "approve": "موافقة",
+        "approveUpdate": "الموافقة على التحديث",
+        "approving": "جارٍ الموافقة…",
+        "development": "تثبيت تطوير",
+        "developmentHint": "يشغّل أي إصدار موقّع بمفتاح المطوّر هذا لا يطلب أكثر مما وافقت عليه.",
+        "developmentUnavailable": "شغّل pollis app dev لعرض مفتاح مطوّر.",
+        "autoUpdate": "الموافقة تلقائيًا في المرة القادمة",
+        "autoUpdateHint": "التحديثات من المصدر نفسه التي لا تطلب شيئًا جديدًا تُعتمد تلقائيًا."
+      },
+      "edit": {
+        "save": "حفظ الوصول",
+        "saving": "جارٍ الحفظ…"
+      },
+      "errors": {
+        "stale": "وافق مشرف آخر على هذا البوت للتو. راجعه مرة أخرى قبل الموافقة.",
+        "changed": "تغيّر App منذ فتح هذه الصفحة. راجعه مرة أخرى قبل الموافقة.",
+        "failed": "تعذّر حفظ الموافقة."
+      },
+      "commandKinds": {
+        "command": "أمر يُنشر في القناة",
+        "request": "طلب خاص"
+      }
+    }
   }
 }

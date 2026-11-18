@@ -706,3 +706,22 @@ CREATE TABLE IF NOT EXISTS bot_trigger_cursor (
     sent_at    TEXT NOT NULL,
     message_id TEXT NOT NULL CHECK (length(message_id) <= 64)
 );
+
+-- App approvals this bot host accepted (#2005): the highest approval `seq` per
+-- installation, so a server that withholds a newer approval cannot roll the
+-- installation back to an older App, and the last report this host sent its
+-- group's admins (so a steady state sends nothing). Only bot installations
+-- write it; it stays empty for a person's device. `seq` never goes back.
+CREATE TABLE IF NOT EXISTS bot_app_accepted (
+    installation_id TEXT PRIMARY KEY CHECK (length(installation_id) BETWEEN 1 AND 128),
+    seq             INTEGER NOT NULL CHECK (seq >= 0),
+    last_report     TEXT
+);
+
+CREATE TRIGGER IF NOT EXISTS bot_app_accepted_seq_never_goes_back
+BEFORE UPDATE OF seq ON bot_app_accepted
+FOR EACH ROW
+WHEN NEW.seq < OLD.seq
+BEGIN
+    SELECT RAISE(ABORT, 'an accepted App approval seq never goes back');
+END;

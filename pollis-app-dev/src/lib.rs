@@ -4,12 +4,13 @@
 //!   real App host (`pollis-app-host`), for `pollis app test`;
 //! - [`wizer`]: the deterministic pre-initializer ComponentizeJS runs, so the
 //!   same source and lockfile build the same component;
-//! - [`app_hash`]: the App hash `pollis app build` prints.
+//! - `hash`: the App hash `pollis app build` prints, from
+//!   `pollis_app_manifest::app_hash` (the one function the runtime and the
+//!   apps use too).
 //!
 //! A library so the runtime can expose the same commands later
 //! (`pollis-bot app …`) without a second binary.
 
-pub mod app_hash;
 pub mod runner;
 pub mod wizer;
 

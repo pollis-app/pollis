@@ -307,19 +307,7 @@ The runtime enforces **effective grants = your manifest ∩ the admin's grants**
 
 An admin grant that is wider than your manifest (a channel, host or action you did not ask for) is refused outright, so the App does not run until the grant is fixed.
 
-During local development, before signed approvals exist (#2005), a debug build of the runtime reads the admin's grants from a JSON file named by `POLLIS_APP_DEV_GRANTS`:
-
-```json
-{
-  "channels": [{ "id": "<channel id>", "name": "support" }],
-  "history": 7,
-  "events": ["created"],
-  "actions": ["reply", "react"],
-  "egress": ["api.linear.app"]
-}
-```
-
-Release builds of the runtime cannot read this file at all.
+The admin's grants come from their signed approval and nothing else: an admin chooses them on the bot's page when approving your App ([Approving an App](./app-approval.md)), and can narrow them later. The runtime checks the approval before every job.
 
 ## Per-job limits
 
@@ -431,19 +419,28 @@ cargo build --release --target wasm32-wasip2
 
 If the runtime refuses the component, the message names the import that caused it (usually a dependency using `std::net`; see [WASI](#wasi-what-std-gets)). The repo has two complete examples: [`fixtures/std-app`](../../pollis-app-host/fixtures/std-app/src/lib.rs) (ordinary `std`) and [`fixtures/test-app`](../../pollis-app-host/fixtures/test-app/src/lib.rs) (`no_std`, for the smallest possible component).
 
-**6. Run it.** Until App approvals and the `pollis app` CLI ship (#2005, #2006), a development build of `pollis-bot` runs an App on a paired bot:
+**6. Run it.**
 
 1. Pair the bot as usual (`pollis-bot pair`, see [Self-hosting](./self-hosting.md)).
-2. Put `pollis-app.json` and your `.wasm` in one directory, write the admin's grants to a file (the [format above](#effective-grants)), and install:
+2. Put `pollis-app.json` and your `.wasm` in one directory (or publish both at an `https://` address) and point the installation at it:
 
    ```bash
-   export POLLIS_APP_DEV_GRANTS=/path/to/grants.json
    pollis-bot app install --installation <bot id> --artifact ./dist
+   # or: --artifact https://example.com/my-app/v1/my_app.wasm   (pollis-app.json beside it)
    ```
 
-   This checks that the manifest is valid, the component compiles and imports only what the sandbox provides, and the grants are no wider than the manifest, then copies both files into the installation.
-3. Start (or restart) the runtime, with the same `POLLIS_APP_DEV_GRANTS`: `pollis-bot run`.
+   This checks that the manifest is valid and the component compiles and imports only what the sandbox provides, and prints the **App hash**. Nothing is copied: the runtime reads the artifact where it is before every job.
+3. Start (or restart) the runtime: `pollis-bot run`. The bot's page in Pollis now shows **Waiting for your approval**; a group admin checks the App hash and approves ([Approving an App](./app-approval.md)). The App runs from the next message on.
 
-A release build refuses `app install` and refuses to load an App until approvals ship. The first time a runtime loads an App it compiles it (well under a second for a typical Rust App; about 0.6 s for a 12 MB TypeScript App on a many-core machine) and keeps the result in `<data dir>/app-cache/`, so later starts, including `run --once`, load it in milliseconds. Deleting that directory is always safe.
+**While you develop**, approving every build would be slow. Make a developer key once and sign each build with it; an admin approves the key once, as a **development installation**, in a test group:
+
+```bash
+pollis-bot app dev-key                          # creates <data dir>/developer-key, prints its public half
+pollis-bot app sign --artifact ./dist           # after every build: writes my_app.wasm.sig.json
+```
+
+After that, every build the key signs runs, as long as its manifest asks for no more than the approved one. Members of that group see a **Development build** mark on the bot.
+
+The first time a runtime loads an App it compiles it (well under a second for a typical Rust App; about 0.6 s for a 12 MB TypeScript App on a many-core machine) and keeps the result in `<data dir>/app-cache/`, so later starts, including `run --once`, load it in milliseconds. Deleting that directory is always safe.
 
 The repo's tests show the same path end to end: [`pollis-bot/tests/app_handler.rs`](../../pollis-bot/tests/app_handler.rs) runs the fixture App through the job loop, and the flows tests in `src-tauri/tests/flows/bot_runtime.rs` run it on real hosts of one bot.

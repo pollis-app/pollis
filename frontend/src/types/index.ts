@@ -62,6 +62,7 @@ export interface GroupMember {
 }
 
 export * from './bots';
+export * from './botApps';
 
 export interface Channel {
   id: string; // ULID

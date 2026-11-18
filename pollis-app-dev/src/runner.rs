@@ -630,7 +630,10 @@ impl TestHost {
             if !manifest.schedules.iter().any(|d| d.name == sched.name) {
                 return TestResult::failed(
                     "not_delivered",
-                    format!("not delivered: schedule `{}` is not in `schedules`", sched.name),
+                    format!(
+                        "not delivered: schedule `{}` is not in `schedules`",
+                        sched.name
+                    ),
                 );
             }
         }

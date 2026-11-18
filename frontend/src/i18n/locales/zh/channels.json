@@ -215,5 +215,143 @@
     "confirmButton": "是，重置",
     "submitting": "正在重置…",
     "failed": "无法重置别名"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "无法加载此机器人的 App。",
+      "noApp": "它的主机还没有提供 App。用 App 启动机器人后，它会显示在这里。",
+      "notice": {
+        "title": "此机器人未在运行",
+        "waiting": "等待你的批准。"
+      },
+      "reasons": {
+        "not_approved": "尚未为它批准任何 App。",
+        "hash_mismatch": "它的主机运行着一个你未批准的版本。",
+        "developer_key_mismatch": "它的版本由你未批准的开发者密钥签名。",
+        "build_widens": "它的新版本要求的权限超出了你的批准范围。",
+        "malformed": "无法读取它的批准。",
+        "wrong_kind": "它的批准类型不正确。",
+        "wrong_installation": "它的批准是为另一个机器人做的。",
+        "approver_not_in_group": "批准它的管理员已不在此群组中。",
+        "uncertified_approver": "无法确认批准它的设备属于管理员。",
+        "bad_signature": "它的批准签名校验未通过。",
+        "transparency_alarm": "批准者的密钥与公开密钥日志不符。",
+        "not_admin": "批准它的人不是此群组的管理员。",
+        "manifest_mismatch": "它的 App 与已批准的不一致。",
+        "widened_grants": "它的批准授予的权限超出了 App 的请求。",
+        "rolled_back": "一个较旧的批准取代了较新的批准。",
+        "bad_build_signature": "它的版本的开发者签名校验未通过。",
+        "artifact_unavailable": "它的主机无法加载 App。"
+      },
+      "approvedHeading": "已批准的 App",
+      "version": "版本 {{version}}",
+      "appHash": "App 哈希",
+      "developerKey": "开发者密钥",
+      "source": "来源",
+      "approvedBy": "由 {{name}} 于 {{date}} 批准",
+      "seq": "批准 {{seq}}",
+      "marks": {
+        "development": "开发版本",
+        "noEgress": "无法向此群组之外发送数据",
+        "autoUpdate": "更新会自动批准"
+      },
+      "canDoHeading": "它能做什么",
+      "lines": {
+        "reads": "读取 {{channels}} 中的{{events}}，以及最近 {{history}} 的历史记录",
+        "readsNoHistory": "读取 {{channels}} 中的{{events}}，不读取历史记录",
+        "readsNothing": "不读取任何频道",
+        "eventsNew": "新消息",
+        "eventsNewEdited": "新消息和已编辑的消息",
+        "wakes": "触发方式：{{triggers}}",
+        "can": "可以：{{actions}}",
+        "sendsTo": "可以向以下地址发送数据：{{hosts}}",
+        "keeps": "最多保存 {{size}} 的自有数据"
+      },
+      "triggers": {
+        "messages": "新消息",
+        "mentions": "提及",
+        "commands": "命令",
+        "schedule": "定时计划",
+        "requests": "请求",
+        "webhook": "webhook 调用"
+      },
+      "actions": {
+        "post": "发帖",
+        "reply": "回复",
+        "react": "添加表情回应",
+        "edit_own": "编辑自己的消息",
+        "delete_own": "删除自己的消息",
+        "transfer_history": "移交消息历史"
+      },
+      "events": {
+        "created": "新消息",
+        "edited": "已编辑的消息"
+      },
+      "anyChannel": "你选择的任意频道",
+      "grants": {
+        "heading": "访问权限",
+        "description": "拿掉它不需要的权限。它得到的永远不会超过其 App 的请求。",
+        "channels": "它读取的频道",
+        "noChannels": "此群组没有它请求的频道。",
+        "history": "它可以读取的历史天数（0 到 {{max}}）",
+        "egress": "它可以发送数据的主机"
+      },
+      "changes": {
+        "heading": "变更内容",
+        "newAccess": "新权限",
+        "needed": "批准所需",
+        "allow": "允许",
+        "trigger_added": "由 {{value}} 触发",
+        "trigger_removed": "不再由 {{value}} 触发",
+        "channel_added": "读取 {{value}}",
+        "channel_removed": "不再读取 {{value}}",
+        "history_increased": "历史记录：从 {{previous}} 改为 {{value}}",
+        "history_decreased": "历史记录：从 {{previous}} 改为 {{value}}",
+        "event_added": "可以看到{{value}}",
+        "event_removed": "不再看到{{value}}",
+        "action_added": "可以{{value}}",
+        "action_removed": "不再可以{{value}}",
+        "egress_added": "可以向 {{value}} 发送数据",
+        "egress_removed": "不再向 {{value}} 发送数据",
+        "state_quota_increased": "存储空间：从 {{previous}} 改为 {{value}}",
+        "state_quota_decreased": "存储空间：从 {{previous}} 改为 {{value}}",
+        "command_added": "新命令：/{{value}}",
+        "command_removed": "不再提供 /{{value}}",
+        "command_increased": "/{{value}} 从{{previous}}改为{{next}}",
+        "schedule_added": "按新的计划运行：{{value}}",
+        "schedule_removed": "计划 {{value}} 已移除",
+        "schedule_increased": "计划 {{value}} 运行更频繁：每 {{next}} 一次，之前每 {{previous}} 一次",
+        "schedule_decreased": "计划 {{value}} 运行更少：每 {{next}} 一次，之前每 {{previous}} 一次"
+      },
+      "pending": {
+        "firstHeading": "批准此 App",
+        "firstLead": "机器人的主机提供了此 App。在管理员批准之前，什么都不会运行。",
+        "updateHeading": "有一个更新在等待",
+        "updateLead": "它的主机提供了新版本。批准前请先查看变更内容。",
+        "nothingNew": "它没有请求任何新权限。",
+        "neededHint": "请允许每项标为批准所需的新权限，才能批准此更新。",
+        "approve": "批准",
+        "approveUpdate": "批准更新",
+        "approving": "正在批准…",
+        "development": "开发安装",
+        "developmentHint": "运行由此开发者密钥签名、且请求不超出你批准范围的任何版本。",
+        "developmentUnavailable": "启动 pollis app dev 以提供开发者密钥。",
+        "autoUpdate": "下次自动批准",
+        "autoUpdateHint": "来自同一来源、没有请求新权限的更新会自动批准。"
+      },
+      "edit": {
+        "save": "保存访问权限",
+        "saving": "正在保存…"
+      },
+      "errors": {
+        "stale": "另一位管理员刚刚批准了此机器人。请重新查看后再批准。",
+        "changed": "自此页面打开以来，App 已发生变化。请重新查看后再批准。",
+        "failed": "无法保存批准。"
+      },
+      "commandKinds": {
+        "command": "在频道中发布的命令",
+        "request": "私密请求"
+      }
+    }
   }
 }

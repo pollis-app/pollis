@@ -15,6 +15,8 @@ import { useGroupAliases } from "../hooks/queries/useGroupAliases";
 import { useGroupMembers, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { BotBadge } from "../components/ui/BotBadge";
 import { isBotUser } from "../utils/bots";
+import { AppMark } from "../components/Bots/AppMark";
+import { useGroupApps } from "../hooks/queries/useBotApps";
 
 export const UserProfilePage: React.FC = observer(() => {
   const { t } = useTranslation("dms");
@@ -38,6 +40,9 @@ export const UserProfilePage: React.FC = observer(() => {
   const member = groupMembers.find((m) => m.user_id === userId);
   const isBot = isBotUser(member) || isBotUser(profile);
   const mayManageBot = isBot && !!groupId && group?.current_user_role === "admin";
+  // #2005: the bot's approved App, for its "Development build" and egress marks.
+  const { data: groupApps = [] } = useGroupApps(isBot ? groupId : null);
+  const botApp = groupApps.find((a) => a.botUserId === userId);
 
   const handleBlock = async () => {
     try {
@@ -161,11 +166,25 @@ export const UserProfilePage: React.FC = observer(() => {
                   {isBot && (
                     <div className="flex items-center gap-2 pt-1">
                       <BotBadge groupName={group?.name} data-testid="user-profile-bot-badge" />
+                      {botApp?.development && (
+                        <AppMark
+                          label={t("channels:bots.app.marks.development")}
+                          data-testid="user-profile-bot-dev-mark"
+                        />
+                      )}
                       {group && (
                         <span data-testid="user-profile-bot-managed-by" className="text-secondary text-muted">
                           {t("channels:bots.badge.managedBy", { group: group.name })}
                         </span>
                       )}
+                    </div>
+                  )}
+                  {botApp?.cannotSendOutside && (
+                    <div className="flex pt-1">
+                      <AppMark
+                        label={t("channels:bots.app.marks.noEgress")}
+                        data-testid="user-profile-bot-no-egress-mark"
+                      />
                     </div>
                   )}
                   {shownName && profile.username && (

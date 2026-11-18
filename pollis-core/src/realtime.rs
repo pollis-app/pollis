@@ -149,6 +149,12 @@ pub enum RealtimeEvent {
     BotHostApproval {
         request_id: String,
     },
+    /// #2005: an admin approved an App for this bot (approval `seq`). Only a
+    /// wake-up: the runtime reads and verifies the approval itself at its next
+    /// job (`bots::apps::verify_installation_approval`). Never sent to a person's inbox.
+    BotAppApproval {
+        seq: i64,
+    },
     /// After a non-empty reconcile commit: refetch hint only; names no one (#1506).
     RosterChanged {
         conversation_id: String,

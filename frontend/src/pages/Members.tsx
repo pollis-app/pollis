@@ -21,6 +21,8 @@ import { useGroupAliases } from "../hooks/queries/useGroupAliases";
 import { aliasName, hasAlias } from "../utils/groupAlias";
 import { isBotUser } from "../utils/bots";
 import { BotBadge } from "../components/ui/BotBadge";
+import { AppMark } from "../components/Bots/AppMark";
+import { useGroupApps } from "../hooks/queries/useBotApps";
 
 interface MembersProps {
   groupId: string;
@@ -35,6 +37,10 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, groupName, i
   const { data: members = [], isLoading } = useGroupMembers(groupId);
   const setRoleMutation = useSetMemberRole();
   const aliases = useGroupAliases(groupId);
+  // #2005: which bots run a development build; read only when the group has a bot.
+  const hasBots = members.some((m) => isBotUser(m));
+  const { data: apps = [] } = useGroupApps(hasBots ? groupId : null);
+  const devBots = new Set(apps.filter((a) => a.development).map((a) => a.botUserId));
   // Same query as the DM sidebar, so badges agree everywhere.
   const verificationByPeer = usePeerVerificationMap();
 
@@ -98,6 +104,9 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, groupName, i
               )}
               {isBotUser(m) && (
                 <BotBadge groupName={groupName} data-testid={`member-bot-badge-${m.user_id}`} />
+              )}
+              {devBots.has(m.user_id) && (
+                <AppMark label={t("bots.app.marks.development")} data-testid={`member-bot-dev-mark-${m.user_id}`} />
               )}
               {badge}
               {isSelf && (

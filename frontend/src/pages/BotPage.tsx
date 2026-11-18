@@ -10,12 +10,13 @@ import { ConfirmBlock } from "../components/ui/ConfirmBlock";
 import { Button } from "../components/ui/Button";
 import { BotBadge } from "../components/ui/BotBadge";
 import { botErrorText } from "../components/Bots/botErrorText";
+import { BotAppSection } from "../components/Bots/BotAppSection";
 import { useBot, useBotGroup, useRevokeBotHost } from "../hooks/queries/useBots";
 import { formatDateTime } from "../utils/format";
 import type { BotHost } from "../types";
 
 /**
- * One bot (#1182): its hosts (name, last seen, revoke), "Add a host", and delete. Revoke confirms
+ * One bot (#1182): its App and its approval (#2005, `BotAppSection`), its hosts (name, last seen, revoke), "Add a host", and delete. Revoke confirms
  * in place of the list (the Security page's device pattern); delete is its own confirmation page.
  */
 export const BotPage: React.FC = () => {
@@ -68,6 +69,8 @@ export const BotPage: React.FC = () => {
           </bdi>
           <BotBadge groupName={group.name} data-testid="bot-page-badge" />
         </div>
+
+        <BotAppSection groupId={groupId} botUserId={botId} />
 
         <section className="flex flex-col gap-4" data-testid="bot-hosts">
           <FormLead title={t("bots.detail.hostsHeading")}>{t("bots.detail.hostsDescription")}</FormLead>

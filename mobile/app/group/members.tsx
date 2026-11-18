@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Screen, Header, Body, ListRow, Group, Chip, SectionTitle } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
 import { BotBadge } from "../../components/BotBadge";
+import { AppMark } from "../../components/bots/AppMark";
 import { isBotUser } from "../../lib/bots";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { space } from "../../theme/tokens";
@@ -16,6 +17,7 @@ import {
   useSetMemberRole,
   useUserGroupsWithChannels,
   useUserProfiles,
+  useGroupApps,
   sortMembersByRole,
 } from "../../hooks/queries";
 import { personName } from "../../lib/personName";
@@ -41,6 +43,9 @@ function Members() {
   const group = groups.find((g) => g.id === id);
   const groupName = group?.name ?? t("mobile:group.common.fallbackName");
   const removeMember = useRemoveMember(id);
+  // Bots running a development build carry a mark beside their badge for every member (#2005).
+  const { data: apps = [] } = useGroupApps(id);
+  const devBots = useMemo(() => new Set(apps.filter((a) => a.development).map((a) => a.botUserId)), [apps]);
   const setRole = useSetMemberRole(id);
   // Pending invites (#1506); the inviter and admins can revoke.
   const { data: invites = [] } = useGroupInvites(id);
@@ -165,9 +170,22 @@ function Members() {
                           ? `@${m.username} · ${role}`
                           : role
                     }
-                    end={isBot ? <BotBadge testID={`badge-bot-${m.user_id}`} /> : undefined}
+                    end={
+                      isBot ? (
+                        <>
+                          <BotBadge testID={`badge-bot-${m.user_id}`} />
+                          {devBots.has(m.user_id) ? (
+                            <AppMark kind="development" testID={`mark-bot-dev-${m.user_id}`} />
+                          ) : null}
+                        </>
+                      ) : undefined
+                    }
                     accessibilityLabel={
-                      isBot ? `${name}, ${t("mobile:bots.badgeA11y", { group: groupName })}` : undefined
+                      isBot
+                        ? devBots.has(m.user_id)
+                          ? `${name}, ${t("mobile:bots.badgeA11y", { group: groupName })}, ${t("mobile:bots.app.devMark")}`
+                          : `${name}, ${t("mobile:bots.badgeA11y", { group: groupName })}`
+                        : undefined
                     }
                     chevron={!isMe}
                     onPress={

@@ -20,6 +20,7 @@ Only the group's admins see the **Bots** page.
 - [If every host is lost](#if-every-host-is-lost)
 - [Limits](#limits)
 - [The Bot badge](#the-bot-badge)
+- [Approving an App](./app-approval.md) (its own page)
 
 ## What a bot is
 
@@ -39,7 +40,7 @@ A bot is a full member of its group, so:
 - It cannot read messages sent before it joined, your direct messages, or other groups.
 - Whoever controls a host machine can read what the bot reads. Run a bot only on a machine you trust with that.
 
-Today a bot posts the alerts it receives on its webhook ([Alerts webhook](./alerts-webhook.md)). It does not reply to messages.
+A bot runs either the built-in alerts handler, which posts the alerts it receives on its webhook ([Alerts webhook](./alerts-webhook.md)), or an **App** an admin approved. An App can read and do only what its approval allows, and runs only the exact version that was approved: see [Approving an App](./app-approval.md).
 
 ## Add a bot
 
@@ -116,3 +117,5 @@ To avoid this, give an important bot a second host.
 Everywhere members see a bot (the member list, its messages, and when someone mentions it) its name carries a **Bot** badge. The bot's profile, and its row in the member list on mobile, add "Managed by the admins of <group>". On desktop the same words show when you hover the badge.
 
 Apps and the terminal client that predate bots show a bot as an ordinary member, without the badge.
+
+A bot running a development build also carries a **Development build** mark, and a bot whose App may reach no internet address carries **Can't send data outside this group**. Every member sees both. See [Approving an App](./app-approval.md).

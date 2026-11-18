@@ -153,7 +153,7 @@ fn valid_device_id(id: &str) -> bool {
 }
 
 /// Record a DS-authored security event. Not counted against the client budget.
-async fn security_event(
+pub(crate) async fn security_event(
     conn: &Connection,
     user_id: &str,
     kind: &str,
@@ -803,6 +803,7 @@ pub async fn purge_bot_rows_of(conn: &Connection, user_id: &str) -> anyhow::Resu
         .await?;
     conn.execute("DELETE FROM bot_trigger_claim WHERE installation_id = ?1", uid()).await?;
     conn.execute("DELETE FROM bot_app_state WHERE installation_id = ?1", uid()).await?;
+    crate::bot_apps::purge_bot_app_rows_of(conn, user_id).await?;
     conn.execute("UPDATE bot SET created_by = NULL WHERE created_by = ?1", uid()).await?;
     Ok(())
 }

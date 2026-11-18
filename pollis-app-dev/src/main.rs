@@ -12,7 +12,7 @@
 use std::io::{BufRead, Read, Write};
 use std::process::ExitCode;
 
-use pollis_app_dev::{app_hash, wizer, TestHost, TestRequest, TestResult};
+use pollis_app_dev::{wizer, TestHost, TestRequest, TestResult};
 use pollis_app_manifest::Manifest;
 
 const USAGE: &str = "usage: pollis-app-dev check <app.wasm> [pollis-app.json] | hash <app.wasm> <pollis-app.json> | run | serve\n\
@@ -68,8 +68,10 @@ fn hash(args: &[String]) -> Result<(), String> {
     };
     let manifest = read(manifest)?;
     Manifest::from_json(&manifest).map_err(|e| e.to_string())?;
-    let hash = app_hash::app_hash(&read(component)?, &manifest)?;
-    println!("{}", app_hash::hex(&hash));
+    // The one App hash function, shared with the runtime and the apps (#2005).
+    let hash =
+        pollis_app_manifest::app_hash(&read(component)?, &manifest).map_err(|e| e.to_string())?;
+    println!("{}", pollis_app_manifest::hex(&hash));
     Ok(())
 }
 

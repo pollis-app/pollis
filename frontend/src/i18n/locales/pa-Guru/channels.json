@@ -230,5 +230,143 @@
     "confirmButton": "ਹਾਂ, ਰੀਸੈੱਟ ਕਰੋ",
     "submitting": "ਰੀਸੈੱਟ ਹੋ ਰਿਹਾ ਹੈ…",
     "failed": "ਉਪਨਾਮ ਰੀਸੈੱਟ ਨਹੀਂ ਹੋ ਸਕਿਆ"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "ਇਸ ਬੋਟ ਦੀ App ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੀ।",
+      "noApp": "ਇਸਦੇ ਹੋਸਟ ਨੇ ਅਜੇ ਤੱਕ ਕੋਈ App ਪੇਸ਼ ਨਹੀਂ ਕੀਤੀ। ਬੋਟ ਨੂੰ App ਨਾਲ ਚਲਾਓ, ਉਹ ਇੱਥੇ ਦਿਖੇਗੀ।",
+      "notice": {
+        "title": "ਇਹ ਬੋਟ ਨਹੀਂ ਚੱਲ ਰਿਹਾ",
+        "waiting": "ਤੁਹਾਡੀ ਮਨਜ਼ੂਰੀ ਦੀ ਉਡੀਕ ਹੈ।"
+      },
+      "reasons": {
+        "not_approved": "ਇਸਦੇ ਲਈ ਅਜੇ ਤੱਕ ਕੋਈ App ਮਨਜ਼ੂਰ ਨਹੀਂ ਹੋਈ।",
+        "hash_mismatch": "ਇਸਦਾ ਹੋਸਟ ਅਜਿਹਾ ਬਿਲਡ ਚਲਾ ਰਿਹਾ ਹੈ ਜੋ ਤੁਸੀਂ ਮਨਜ਼ੂਰ ਨਹੀਂ ਕੀਤਾ।",
+        "developer_key_mismatch": "ਇਸਦਾ ਬਿਲਡ ਅਜਿਹੀ ਡਿਵੈਲਪਰ ਕੁੰਜੀ ਨਾਲ ਦਸਤਖਤ ਕੀਤਾ ਹੈ ਜੋ ਤੁਸੀਂ ਮਨਜ਼ੂਰ ਨਹੀਂ ਕੀਤੀ।",
+        "build_widens": "ਇਸਦਾ ਨਵਾਂ ਬਿਲਡ ਤੁਹਾਡੀ ਮਨਜ਼ੂਰੀ ਤੋਂ ਵੱਧ ਮੰਗਦਾ ਹੈ।",
+        "malformed": "ਇਸਦੀ ਮਨਜ਼ੂਰੀ ਪੜ੍ਹੀ ਨਹੀਂ ਜਾ ਸਕੀ।",
+        "wrong_kind": "ਇਸਦੀ ਮਨਜ਼ੂਰੀ ਗਲਤ ਕਿਸਮ ਦੀ ਹੈ।",
+        "wrong_installation": "ਇਸਦੀ ਮਨਜ਼ੂਰੀ ਕਿਸੇ ਹੋਰ ਬੋਟ ਲਈ ਸੀ।",
+        "approver_not_in_group": "ਜਿਸ ਐਡਮਿਨ ਨੇ ਇਸਨੂੰ ਮਨਜ਼ੂਰ ਕੀਤਾ ਸੀ ਉਹ ਹੁਣ ਇਸ ਗਰੁੱਪ ਵਿੱਚ ਨਹੀਂ ਹੈ।",
+        "uncertified_approver": "ਪੁਸ਼ਟੀ ਨਹੀਂ ਹੋ ਸਕੀ ਕਿ ਮਨਜ਼ੂਰੀ ਦੇਣ ਵਾਲੀ ਡਿਵਾਈਸ ਕਿਸੇ ਐਡਮਿਨ ਦੀ ਹੈ।",
+        "bad_signature": "ਇਸਦੀ ਮਨਜ਼ੂਰੀ ਦਾ ਦਸਤਖਤ ਠੀਕ ਨਹੀਂ ਨਿਕਲਿਆ।",
+        "transparency_alarm": "ਮਨਜ਼ੂਰੀ ਦੇਣ ਵਾਲੇ ਐਡਮਿਨ ਦੀਆਂ ਕੁੰਜੀਆਂ ਜਨਤਕ ਕੁੰਜੀ ਲੌਗ ਨਾਲ ਮੇਲ ਨਹੀਂ ਖਾਂਦੀਆਂ।",
+        "not_admin": "ਇਸਨੂੰ ਕਿਸੇ ਅਜਿਹੇ ਵਿਅਕਤੀ ਨੇ ਮਨਜ਼ੂਰ ਕੀਤਾ ਜੋ ਇਸ ਗਰੁੱਪ ਦਾ ਐਡਮਿਨ ਨਹੀਂ ਹੈ।",
+        "manifest_mismatch": "ਇਸਦੀ App ਮਨਜ਼ੂਰ ਕੀਤੀ App ਨਾਲ ਮੇਲ ਨਹੀਂ ਖਾਂਦੀ।",
+        "widened_grants": "ਇਸਦੀ ਮਨਜ਼ੂਰੀ App ਦੀ ਮੰਗ ਤੋਂ ਵੱਧ ਦਿੰਦੀ ਹੈ।",
+        "rolled_back": "ਨਵੀਂ ਮਨਜ਼ੂਰੀ ਦੀ ਥਾਂ ਪੁਰਾਣੀ ਮਨਜ਼ੂਰੀ ਵਾਪਸ ਲਗਾ ਦਿੱਤੀ ਗਈ।",
+        "bad_build_signature": "ਇਸਦੇ ਬਿਲਡ ਦਾ ਡਿਵੈਲਪਰ ਦਸਤਖਤ ਠੀਕ ਨਹੀਂ ਨਿਕਲਿਆ।",
+        "artifact_unavailable": "ਇਸਦਾ ਹੋਸਟ App ਲੋਡ ਨਹੀਂ ਕਰ ਸਕਿਆ।"
+      },
+      "approvedHeading": "ਮਨਜ਼ੂਰ ਕੀਤੀ App",
+      "version": "ਵਰਜਨ {{version}}",
+      "appHash": "App ਹੈਸ਼",
+      "developerKey": "ਡਿਵੈਲਪਰ ਕੁੰਜੀ",
+      "source": "ਸਰੋਤ",
+      "approvedBy": "{{name}} ਨੇ {{date}} ਨੂੰ ਮਨਜ਼ੂਰ ਕੀਤਾ",
+      "seq": "ਮਨਜ਼ੂਰੀ {{seq}}",
+      "marks": {
+        "development": "ਡਿਵੈਲਪਮੈਂਟ ਬਿਲਡ",
+        "noEgress": "ਇਸ ਗਰੁੱਪ ਤੋਂ ਬਾਹਰ ਡਾਟਾ ਨਹੀਂ ਭੇਜ ਸਕਦਾ",
+        "autoUpdate": "ਅੱਪਡੇਟ ਆਪਣੇ-ਆਪ ਮਨਜ਼ੂਰ ਹੁੰਦੇ ਹਨ"
+      },
+      "canDoHeading": "ਇਹ ਕੀ ਕਰ ਸਕਦਾ ਹੈ",
+      "lines": {
+        "reads": "{{channels}} ਵਿੱਚ {{events}} ਪੜ੍ਹਦਾ ਹੈ, ਅਤੇ ਪਿਛਲੇ {{history}} ਦਾ ਇਤਿਹਾਸ",
+        "readsNoHistory": "{{channels}} ਵਿੱਚ {{events}} ਪੜ੍ਹਦਾ ਹੈ, ਕੋਈ ਇਤਿਹਾਸ ਨਹੀਂ",
+        "readsNothing": "ਕੋਈ ਚੈਨਲ ਨਹੀਂ ਪੜ੍ਹਦਾ",
+        "eventsNew": "ਨਵੇਂ ਸੁਨੇਹੇ",
+        "eventsNewEdited": "ਨਵੇਂ ਅਤੇ ਬਦਲੇ ਹੋਏ ਸੁਨੇਹੇ",
+        "wakes": "ਇਹਨਾਂ 'ਤੇ ਚੱਲਦਾ ਹੈ: {{triggers}}",
+        "can": "ਕਰ ਸਕਦਾ ਹੈ: {{actions}}",
+        "sendsTo": "ਇਹਨਾਂ ਨੂੰ ਡਾਟਾ ਭੇਜ ਸਕਦਾ ਹੈ: {{hosts}}",
+        "keeps": "ਆਪਣਾ {{size}} ਤੱਕ ਡਾਟਾ ਰੱਖਦਾ ਹੈ"
+      },
+      "triggers": {
+        "messages": "ਨਵੇਂ ਸੁਨੇਹੇ",
+        "mentions": "ਮੈਨਸ਼ਨ",
+        "commands": "ਕਮਾਂਡਾਂ",
+        "schedule": "ਸਮਾਂ-ਸਾਰਣੀ",
+        "requests": "ਬੇਨਤੀਆਂ",
+        "webhook": "webhook ਕਾਲਾਂ"
+      },
+      "actions": {
+        "post": "ਪੋਸਟ ਕਰਨਾ",
+        "reply": "ਜਵਾਬ ਦੇਣਾ",
+        "react": "ਪ੍ਰਤੀਕਿਰਿਆ ਦੇਣਾ",
+        "edit_own": "ਆਪਣੇ ਸੁਨੇਹੇ ਬਦਲਣਾ",
+        "delete_own": "ਆਪਣੇ ਸੁਨੇਹੇ ਮਿਟਾਉਣਾ",
+        "transfer_history": "ਸੁਨੇਹਿਆਂ ਦਾ ਇਤਿਹਾਸ ਸੌਂਪਣਾ"
+      },
+      "events": {
+        "created": "ਨਵੇਂ ਸੁਨੇਹੇ",
+        "edited": "ਬਦਲੇ ਹੋਏ ਸੁਨੇਹੇ"
+      },
+      "anyChannel": "ਤੁਹਾਡਾ ਚੁਣਿਆ ਕੋਈ ਵੀ ਚੈਨਲ",
+      "grants": {
+        "heading": "ਪਹੁੰਚ",
+        "description": "ਜੋ ਇਸਨੂੰ ਨਹੀਂ ਚਾਹੀਦਾ ਉਹ ਹਟਾ ਦਿਓ। ਇਸਨੂੰ ਕਦੇ ਵੀ ਆਪਣੀ App ਦੀ ਮੰਗ ਤੋਂ ਵੱਧ ਨਹੀਂ ਮਿਲਦਾ।",
+        "channels": "ਉਹ ਚੈਨਲ ਜੋ ਇਹ ਪੜ੍ਹਦਾ ਹੈ",
+        "noChannels": "ਇਸ ਗਰੁੱਪ ਵਿੱਚ ਅਜਿਹਾ ਕੋਈ ਚੈਨਲ ਨਹੀਂ ਜੋ ਇਹ ਮੰਗਦਾ ਹੈ।",
+        "history": "ਇਤਿਹਾਸ ਦੇ ਕਿੰਨੇ ਦਿਨ ਪੜ੍ਹ ਸਕਦਾ ਹੈ (0 ਤੋਂ {{max}})",
+        "egress": "ਹੋਸਟ ਜਿਨ੍ਹਾਂ ਨੂੰ ਇਹ ਡਾਟਾ ਭੇਜ ਸਕਦਾ ਹੈ"
+      },
+      "changes": {
+        "heading": "ਕੀ ਬਦਲਿਆ",
+        "newAccess": "ਨਵੀਂ ਪਹੁੰਚ",
+        "needed": "ਮਨਜ਼ੂਰੀ ਲਈ ਜ਼ਰੂਰੀ",
+        "allow": "ਇਜਾਜ਼ਤ ਦਿਓ",
+        "trigger_added": "{{value}} 'ਤੇ ਚੱਲਦਾ ਹੈ",
+        "trigger_removed": "ਹੁਣ {{value}} 'ਤੇ ਨਹੀਂ ਚੱਲਦਾ",
+        "channel_added": "{{value}} ਪੜ੍ਹਦਾ ਹੈ",
+        "channel_removed": "ਹੁਣ {{value}} ਨਹੀਂ ਪੜ੍ਹਦਾ",
+        "history_increased": "ਇਤਿਹਾਸ: {{previous}} ਤੋਂ {{value}}",
+        "history_decreased": "ਇਤਿਹਾਸ: {{previous}} ਤੋਂ {{value}}",
+        "event_added": "{{value}} ਦੇਖਦਾ ਹੈ",
+        "event_removed": "ਹੁਣ {{value}} ਨਹੀਂ ਦੇਖਦਾ",
+        "action_added": "{{value}} ਕਰ ਸਕਦਾ ਹੈ",
+        "action_removed": "ਹੁਣ {{value}} ਨਹੀਂ ਕਰ ਸਕਦਾ",
+        "egress_added": "{{value}} ਨੂੰ ਡਾਟਾ ਭੇਜ ਸਕਦਾ ਹੈ",
+        "egress_removed": "ਹੁਣ {{value}} ਨੂੰ ਡਾਟਾ ਨਹੀਂ ਭੇਜਦਾ",
+        "state_quota_increased": "ਸਟੋਰੇਜ: {{previous}} ਤੋਂ {{value}}",
+        "state_quota_decreased": "ਸਟੋਰੇਜ: {{previous}} ਤੋਂ {{value}}",
+        "command_added": "ਨਵੀਂ ਕਮਾਂਡ: /{{value}}",
+        "command_removed": "ਹੁਣ /{{value}} ਪੇਸ਼ ਨਹੀਂ ਕਰਦਾ",
+        "command_increased": "/{{value}} {{previous}} ਤੋਂ {{next}} ਵਿੱਚ ਬਦਲਦੀ ਹੈ",
+        "schedule_added": "ਨਵੀਂ ਸਮਾਂ-ਸਾਰਣੀ 'ਤੇ ਚੱਲਦਾ ਹੈ: {{value}}",
+        "schedule_removed": "ਸਮਾਂ-ਸਾਰਣੀ {{value}} ਹਟਾਈ ਗਈ",
+        "schedule_increased": "ਸਮਾਂ-ਸਾਰਣੀ {{value}} ਹੁਣ ਵੱਧ ਵਾਰ ਚੱਲਦੀ ਹੈ: ਹਰ {{next}}, ਪਹਿਲਾਂ ਹਰ {{previous}}",
+        "schedule_decreased": "ਸਮਾਂ-ਸਾਰਣੀ {{value}} ਹੁਣ ਘੱਟ ਵਾਰ ਚੱਲਦੀ ਹੈ: ਹਰ {{next}}, ਪਹਿਲਾਂ ਹਰ {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "ਇਹ App ਮਨਜ਼ੂਰ ਕਰੋ",
+        "firstLead": "ਬੋਟ ਦਾ ਹੋਸਟ ਇਹ App ਪੇਸ਼ ਕਰ ਰਿਹਾ ਹੈ। ਜਦੋਂ ਤੱਕ ਕੋਈ ਐਡਮਿਨ ਮਨਜ਼ੂਰ ਨਾ ਕਰੇ, ਕੁਝ ਨਹੀਂ ਚੱਲਦਾ।",
+        "updateHeading": "ਇੱਕ ਅੱਪਡੇਟ ਉਡੀਕ ਵਿੱਚ ਹੈ",
+        "updateLead": "ਇਸਦਾ ਹੋਸਟ ਨਵਾਂ ਬਿਲਡ ਪੇਸ਼ ਕਰ ਰਿਹਾ ਹੈ। ਮਨਜ਼ੂਰ ਕਰਨ ਤੋਂ ਪਹਿਲਾਂ ਦੇਖੋ ਕੀ ਬਦਲਿਆ।",
+        "nothingNew": "ਇਹ ਕੁਝ ਨਵਾਂ ਨਹੀਂ ਮੰਗਦਾ।",
+        "neededHint": "ਇਹ ਅੱਪਡੇਟ ਮਨਜ਼ੂਰ ਕਰਨ ਲਈ ਜ਼ਰੂਰੀ ਦੱਸੀ ਗਈ ਹਰ ਨਵੀਂ ਪਹੁੰਚ ਦੀ ਇਜਾਜ਼ਤ ਦਿਓ।",
+        "approve": "ਮਨਜ਼ੂਰ ਕਰੋ",
+        "approveUpdate": "ਅੱਪਡੇਟ ਮਨਜ਼ੂਰ ਕਰੋ",
+        "approving": "ਮਨਜ਼ੂਰ ਹੋ ਰਿਹਾ ਹੈ…",
+        "development": "ਡਿਵੈਲਪਮੈਂਟ ਇੰਸਟਾਲੇਸ਼ਨ",
+        "developmentHint": "ਇਸ ਡਿਵੈਲਪਰ ਕੁੰਜੀ ਨਾਲ ਦਸਤਖਤ ਕੀਤਾ ਹਰ ਉਹ ਬਿਲਡ ਚਲਾਉਂਦਾ ਹੈ ਜੋ ਤੁਹਾਡੀ ਮਨਜ਼ੂਰੀ ਤੋਂ ਵੱਧ ਨਾ ਮੰਗੇ।",
+        "developmentUnavailable": "ਡਿਵੈਲਪਰ ਕੁੰਜੀ ਪੇਸ਼ ਕਰਨ ਲਈ pollis app dev ਸ਼ੁਰੂ ਕਰੋ।",
+        "autoUpdate": "ਅਗਲੀ ਵਾਰ ਆਪਣੇ-ਆਪ ਮਨਜ਼ੂਰ ਕਰੋ",
+        "autoUpdateHint": "ਉਸੇ ਸਰੋਤ ਤੋਂ ਆਉਣ ਵਾਲੇ ਉਹ ਅੱਪਡੇਟ ਜੋ ਕੁਝ ਨਵਾਂ ਨਹੀਂ ਮੰਗਦੇ, ਆਪਣੇ-ਆਪ ਮਨਜ਼ੂਰ ਹੁੰਦੇ ਹਨ।"
+      },
+      "edit": {
+        "save": "ਪਹੁੰਚ ਸੇਵ ਕਰੋ",
+        "saving": "ਸੇਵ ਹੋ ਰਿਹਾ ਹੈ…"
+      },
+      "errors": {
+        "stale": "ਕਿਸੇ ਹੋਰ ਐਡਮਿਨ ਨੇ ਹੁਣੇ ਇਹ ਬੋਟ ਮਨਜ਼ੂਰ ਕੀਤਾ। ਮਨਜ਼ੂਰ ਕਰਨ ਤੋਂ ਪਹਿਲਾਂ ਦੁਬਾਰਾ ਦੇਖੋ।",
+        "changed": "ਇਹ ਪੰਨਾ ਖੁੱਲ੍ਹਣ ਤੋਂ ਬਾਅਦ App ਬਦਲ ਗਈ। ਮਨਜ਼ੂਰ ਕਰਨ ਤੋਂ ਪਹਿਲਾਂ ਦੁਬਾਰਾ ਦੇਖੋ।",
+        "failed": "ਮਨਜ਼ੂਰੀ ਸੇਵ ਨਹੀਂ ਹੋ ਸਕੀ।"
+      },
+      "commandKinds": {
+        "command": "ਚੈਨਲ ਵਿੱਚ ਪੋਸਟ ਹੋਣ ਵਾਲੀ ਕਮਾਂਡ",
+        "request": "ਨਿੱਜੀ ਬੇਨਤੀ"
+      }
+    }
   }
 }

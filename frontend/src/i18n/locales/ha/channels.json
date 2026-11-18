@@ -230,5 +230,143 @@
     "confirmButton": "E, sake saitawa",
     "submitting": "Ana sake saitawa…",
     "failed": "Ba a iya sake saita laƙabin ba"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "An kasa loda App ɗin wannan bot.",
+      "noApp": "Mai masaukinsa bai bayar da App ba tukuna. Fara bot ɗin da App kuma za ta bayyana a nan.",
+      "notice": {
+        "title": "Wannan bot ba ya aiki",
+        "waiting": "Yana jiran amincewarka."
+      },
+      "reasons": {
+        "not_approved": "Ba a amince da wata App ɗinsa ba tukuna.",
+        "hash_mismatch": "Mai masaukinsa yana gudanar da ginin da ba ka amince da shi ba.",
+        "developer_key_mismatch": "An sa hannu kan ginin sa da maɓallin mai haɓakawa da ba ka amince da shi ba.",
+        "build_widens": "Sabon ginin sa yana neman fiye da abin da ka amince.",
+        "malformed": "Ba a iya karanta amincewarsa ba.",
+        "wrong_kind": "Amincewarsa ba irin da ya dace ba ce.",
+        "wrong_installation": "An yi amincewarsa ne don wani bot daban.",
+        "approver_not_in_group": "Mai gudanarwa da ya amince da shi ba ya cikin wannan rukuni kuma.",
+        "uncertified_approver": "Ba a iya tantance cewa na'urar da ta amince ta mai gudanarwa ce ba.",
+        "bad_signature": "Sa hannun amincewarsa bai inganta ba.",
+        "transparency_alarm": "Maɓallan mai gudanarwa da ya amince ba su dace da rajistar maɓallai na jama'a ba.",
+        "not_admin": "Wani wanda ba mai gudanarwa na wannan rukuni ba ne ya amince da shi.",
+        "manifest_mismatch": "App ɗinsa ba ta dace da wadda aka amince da ita ba.",
+        "widened_grants": "Amincewarsa tana bayar da fiye da abin da App ke nema.",
+        "rolled_back": "An mayar da tsohuwar amincewa a madadin sabuwa.",
+        "bad_build_signature": "Sa hannun mai haɓakawa a kan ginin sa bai inganta ba.",
+        "artifact_unavailable": "Mai masaukinsa ya kasa loda App ɗin."
+      },
+      "approvedHeading": "App da aka amince",
+      "version": "Siga {{version}}",
+      "appHash": "Hash na App",
+      "developerKey": "Maɓallin mai haɓakawa",
+      "source": "Tushe",
+      "approvedBy": "{{name}} ya amince a {{date}}",
+      "seq": "Amincewa {{seq}}",
+      "marks": {
+        "development": "Ginin gwaji",
+        "noEgress": "Ba zai iya aika bayanai a wajen wannan rukuni ba",
+        "autoUpdate": "Sabuntawa suna amincewa da kansu"
+      },
+      "canDoHeading": "Abin da zai iya yi",
+      "lines": {
+        "reads": "Yana karanta {{events}} a {{channels}}, da tarihin {{history}} da suka wuce",
+        "readsNoHistory": "Yana karanta {{events}} a {{channels}}, ba tarihi",
+        "readsNothing": "Ba ya karanta kowace tasha",
+        "eventsNew": "sababbin saƙonni",
+        "eventsNewEdited": "sababbin saƙonni da waɗanda aka gyara",
+        "wakes": "Yana farkawa a kan: {{triggers}}",
+        "can": "Zai iya: {{actions}}",
+        "sendsTo": "Zai iya aika bayanai zuwa: {{hosts}}",
+        "keeps": "Yana adana har zuwa {{size}} na bayanansa"
+      },
+      "triggers": {
+        "messages": "sababbin saƙonni",
+        "mentions": "ambato",
+        "commands": "umarni",
+        "schedule": "jadawali",
+        "requests": "buƙatu",
+        "webhook": "kiran webhook"
+      },
+      "actions": {
+        "post": "wallafa",
+        "reply": "ba da amsa",
+        "react": "nuna martani",
+        "edit_own": "gyara saƙonninsa",
+        "delete_own": "goge saƙonninsa",
+        "transfer_history": "miƙa tarihin saƙonni"
+      },
+      "events": {
+        "created": "sababbin saƙonni",
+        "edited": "saƙonnin da aka gyara"
+      },
+      "anyChannel": "kowace tasha da ka zaɓa",
+      "grants": {
+        "heading": "Damar shiga",
+        "description": "Cire abin da ba ya buƙata. Ba zai taɓa samun fiye da abin da App ɗinsa ke nema ba.",
+        "channels": "Tashoshin da yake karantawa",
+        "noChannels": "Wannan rukuni ba shi da wata tasha da yake nema.",
+        "history": "Kwanakin tarihi da zai iya karantawa (0 zuwa {{max}})",
+        "egress": "Masaukai da zai iya aika musu bayanai"
+      },
+      "changes": {
+        "heading": "Abin da ya canza",
+        "newAccess": "Sabuwar damar shiga",
+        "needed": "Ana buƙata don amincewa",
+        "allow": "Ba da izini",
+        "trigger_added": "Yana farkawa a kan {{value}}",
+        "trigger_removed": "Ba ya farkawa a kan {{value}} kuma",
+        "channel_added": "Yana karanta {{value}}",
+        "channel_removed": "Ba ya karanta {{value}} kuma",
+        "history_increased": "Tarihi: daga {{previous}} zuwa {{value}}",
+        "history_decreased": "Tarihi: daga {{previous}} zuwa {{value}}",
+        "event_added": "Yana ganin {{value}}",
+        "event_removed": "Ba ya ganin {{value}} kuma",
+        "action_added": "Zai iya {{value}}",
+        "action_removed": "Ba zai iya {{value}} kuma ba",
+        "egress_added": "Zai iya aika bayanai zuwa {{value}}",
+        "egress_removed": "Ba ya aika bayanai zuwa {{value}} kuma",
+        "state_quota_increased": "Ma'aji: daga {{previous}} zuwa {{value}}",
+        "state_quota_decreased": "Ma'aji: daga {{previous}} zuwa {{value}}",
+        "command_added": "Sabon umarni: /{{value}}",
+        "command_removed": "Ba ya bayar da /{{value}} kuma",
+        "command_increased": "/{{value}} yana canzawa daga {{previous}} zuwa {{next}}",
+        "schedule_added": "Yana aiki a kan sabon jadawali: {{value}}",
+        "schedule_removed": "An cire jadawali {{value}}",
+        "schedule_increased": "Jadawali {{value}} yana aiki sau da yawa: kowane {{next}}, a da kowane {{previous}}",
+        "schedule_decreased": "Jadawali {{value}} yana aiki ƙasa da da: kowane {{next}}, a da kowane {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "Amince da wannan App",
+        "firstLead": "Mai masaukin bot ɗin yana bayar da wannan App. Babu abin da zai yi aiki har sai mai gudanarwa ya amince.",
+        "updateHeading": "Akwai sabuntawa da ke jira",
+        "updateLead": "Mai masaukinsa yana bayar da sabon gini. Duba abin da ya canza kafin ka amince.",
+        "nothingNew": "Ba ya neman wani sabon abu.",
+        "neededHint": "Ba da izini ga kowace sabuwar damar shiga da aka yi wa alama ana buƙata don amincewa da wannan sabuntawa.",
+        "approve": "Amince",
+        "approveUpdate": "Amince da sabuntawa",
+        "approving": "Ana amincewa…",
+        "development": "Shigarwar gwaji",
+        "developmentHint": "Yana gudanar da kowane gini da aka sa hannu da wannan maɓallin mai haɓakawa wanda bai nemi fiye da abin da ka amince ba.",
+        "developmentUnavailable": "Fara pollis app dev don bayar da maɓallin mai haɓakawa.",
+        "autoUpdate": "Amince kai tsaye a gaba",
+        "autoUpdateHint": "Sabuntawa daga tushe ɗaya da ba sa neman sabon abu suna amincewa da kansu."
+      },
+      "edit": {
+        "save": "Ajiye damar shiga",
+        "saving": "Ana ajiyewa…"
+      },
+      "errors": {
+        "stale": "Wani mai gudanarwa ya amince da wannan bot yanzu. Sake duba kafin ka amince.",
+        "changed": "App ta canza tun da aka buɗe wannan shafi. Sake duba kafin ka amince.",
+        "failed": "An kasa ajiye amincewar."
+      },
+      "commandKinds": {
+        "command": "umarnin da ake wallafawa a tasha",
+        "request": "buƙata ta sirri"
+      }
+    }
   }
 }

@@ -230,5 +230,143 @@
     "confirmButton": "ہاں، ری سیٹ کریں",
     "submitting": "ری سیٹ ہو رہا ہے…",
     "failed": "عرفی نام ری سیٹ نہیں ہو سکا"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "اس بوٹ کی App لوڈ نہیں ہو سکی۔",
+      "noApp": "اس کے ہوسٹ نے ابھی تک کوئی App پیش نہیں کی۔ بوٹ کو App کے ساتھ چلائیں، وہ یہاں نظر آئے گی۔",
+      "notice": {
+        "title": "یہ بوٹ نہیں چل رہا",
+        "waiting": "آپ کی منظوری کا انتظار ہے۔"
+      },
+      "reasons": {
+        "not_approved": "اس کے لیے ابھی تک کوئی App منظور نہیں ہوئی۔",
+        "hash_mismatch": "اس کا ہوسٹ ایسا بلڈ چلا رہا ہے جسے آپ نے منظور نہیں کیا۔",
+        "developer_key_mismatch": "اس کا بلڈ ایسی ڈویلپر کلید سے دستخط شدہ ہے جسے آپ نے منظور نہیں کیا۔",
+        "build_widens": "اس کا نیا بلڈ آپ کی منظوری سے زیادہ مانگتا ہے۔",
+        "malformed": "اس کی منظوری پڑھی نہیں جا سکی۔",
+        "wrong_kind": "اس کی منظوری غلط قسم کی ہے۔",
+        "wrong_installation": "اس کی منظوری کسی دوسرے بوٹ کے لیے تھی۔",
+        "approver_not_in_group": "جس ایڈمن نے اسے منظور کیا تھا وہ اب اس گروپ میں نہیں ہے۔",
+        "uncertified_approver": "تصدیق نہیں ہو سکی کہ منظوری دینے والی ڈیوائس کسی ایڈمن کی ہے۔",
+        "bad_signature": "اس کی منظوری کا دستخط درست نہیں نکلا۔",
+        "transparency_alarm": "منظوری دینے والے ایڈمن کی کلیدیں عوامی کلید لاگ سے میل نہیں کھاتیں۔",
+        "not_admin": "اسے کسی ایسے شخص نے منظور کیا جو اس گروپ کا ایڈمن نہیں ہے۔",
+        "manifest_mismatch": "اس کی App منظور شدہ App سے میل نہیں کھاتی۔",
+        "widened_grants": "اس کی منظوری App کی مانگ سے زیادہ دیتی ہے۔",
+        "rolled_back": "نئی منظوری کی جگہ پرانی منظوری واپس لگا دی گئی۔",
+        "bad_build_signature": "اس کے بلڈ کا ڈویلپر دستخط درست نہیں نکلا۔",
+        "artifact_unavailable": "اس کا ہوسٹ App لوڈ نہیں کر سکا۔"
+      },
+      "approvedHeading": "منظور شدہ App",
+      "version": "ورژن {{version}}",
+      "appHash": "App ہیش",
+      "developerKey": "ڈویلپر کلید",
+      "source": "ماخذ",
+      "approvedBy": "{{name}} نے {{date}} کو منظور کیا",
+      "seq": "منظوری {{seq}}",
+      "marks": {
+        "development": "ڈویلپمنٹ بلڈ",
+        "noEgress": "اس گروپ سے باہر ڈیٹا نہیں بھیج سکتا",
+        "autoUpdate": "اپ ڈیٹس خود بخود منظور ہوتی ہیں"
+      },
+      "canDoHeading": "یہ کیا کر سکتا ہے",
+      "lines": {
+        "reads": "{{channels}} میں {{events}} پڑھتا ہے، اور پچھلے {{history}} کی ہسٹری",
+        "readsNoHistory": "{{channels}} میں {{events}} پڑھتا ہے، کوئی ہسٹری نہیں",
+        "readsNothing": "کوئی چینل نہیں پڑھتا",
+        "eventsNew": "نئے پیغامات",
+        "eventsNewEdited": "نئے اور ترمیم شدہ پیغامات",
+        "wakes": "ان پر چلتا ہے: {{triggers}}",
+        "can": "کر سکتا ہے: {{actions}}",
+        "sendsTo": "ان کو ڈیٹا بھیج سکتا ہے: {{hosts}}",
+        "keeps": "اپنا {{size}} تک ڈیٹا رکھتا ہے"
+      },
+      "triggers": {
+        "messages": "نئے پیغامات",
+        "mentions": "مینشن",
+        "commands": "کمانڈز",
+        "schedule": "شیڈول",
+        "requests": "درخواستیں",
+        "webhook": "webhook کالز"
+      },
+      "actions": {
+        "post": "پوسٹ کرنا",
+        "reply": "جواب دینا",
+        "react": "ردعمل دینا",
+        "edit_own": "اپنے پیغامات میں ترمیم",
+        "delete_own": "اپنے پیغامات حذف کرنا",
+        "transfer_history": "پیغامات کی ہسٹری سونپنا"
+      },
+      "events": {
+        "created": "نئے پیغامات",
+        "edited": "ترمیم شدہ پیغامات"
+      },
+      "anyChannel": "آپ کا چنا ہوا کوئی بھی چینل",
+      "grants": {
+        "heading": "رسائی",
+        "description": "جو اسے نہیں چاہیے وہ ہٹا دیں۔ اسے کبھی اپنی App کی مانگ سے زیادہ نہیں ملتا۔",
+        "channels": "وہ چینل جو یہ پڑھتا ہے",
+        "noChannels": "اس گروپ میں ایسا کوئی چینل نہیں جو یہ مانگتا ہے۔",
+        "history": "ہسٹری کے کتنے دن پڑھ سکتا ہے (0 سے {{max}})",
+        "egress": "ہوسٹ جنہیں یہ ڈیٹا بھیج سکتا ہے"
+      },
+      "changes": {
+        "heading": "کیا بدلا",
+        "newAccess": "نئی رسائی",
+        "needed": "منظوری کے لیے ضروری",
+        "allow": "اجازت دیں",
+        "trigger_added": "{{value}} پر چلتا ہے",
+        "trigger_removed": "اب {{value}} پر نہیں چلتا",
+        "channel_added": "{{value}} پڑھتا ہے",
+        "channel_removed": "اب {{value}} نہیں پڑھتا",
+        "history_increased": "ہسٹری: {{previous}} سے {{value}}",
+        "history_decreased": "ہسٹری: {{previous}} سے {{value}}",
+        "event_added": "{{value}} دیکھتا ہے",
+        "event_removed": "اب {{value}} نہیں دیکھتا",
+        "action_added": "{{value}} کر سکتا ہے",
+        "action_removed": "اب {{value}} نہیں کر سکتا",
+        "egress_added": "{{value}} کو ڈیٹا بھیج سکتا ہے",
+        "egress_removed": "اب {{value}} کو ڈیٹا نہیں بھیجتا",
+        "state_quota_increased": "اسٹوریج: {{previous}} سے {{value}}",
+        "state_quota_decreased": "اسٹوریج: {{previous}} سے {{value}}",
+        "command_added": "نیا کمانڈ: /{{value}}",
+        "command_removed": "اب /{{value}} پیش نہیں کرتا",
+        "command_increased": "/{{value}} {{previous}} سے {{next}} میں بدلتا ہے",
+        "schedule_added": "نئے شیڈول پر چلتا ہے: {{value}}",
+        "schedule_removed": "شیڈول {{value}} ہٹا دیا گیا",
+        "schedule_increased": "شیڈول {{value}} اب زیادہ بار چلتا ہے: ہر {{next}}، پہلے ہر {{previous}}",
+        "schedule_decreased": "شیڈول {{value}} اب کم بار چلتا ہے: ہر {{next}}، پہلے ہر {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "یہ App منظور کریں",
+        "firstLead": "بوٹ کا ہوسٹ یہ App پیش کر رہا ہے۔ جب تک کوئی ایڈمن منظور نہ کرے، کچھ نہیں چلتا۔",
+        "updateHeading": "ایک اپ ڈیٹ انتظار میں ہے",
+        "updateLead": "اس کا ہوسٹ نیا بلڈ پیش کر رہا ہے۔ منظور کرنے سے پہلے دیکھیں کہ کیا بدلا۔",
+        "nothingNew": "یہ کچھ نیا نہیں مانگتا۔",
+        "neededHint": "یہ اپ ڈیٹ منظور کرنے کے لیے ضروری بتائی گئی ہر نئی رسائی کی اجازت دیں۔",
+        "approve": "منظور کریں",
+        "approveUpdate": "اپ ڈیٹ منظور کریں",
+        "approving": "منظور ہو رہا ہے…",
+        "development": "ڈویلپمنٹ انسٹالیشن",
+        "developmentHint": "اس ڈویلپر کلید سے دستخط شدہ ہر وہ بلڈ چلاتا ہے جو آپ کی منظوری سے زیادہ نہ مانگے۔",
+        "developmentUnavailable": "ڈویلپر کلید پیش کرنے کے لیے pollis app dev شروع کریں۔",
+        "autoUpdate": "اگلی بار خود بخود منظور کریں",
+        "autoUpdateHint": "اسی ماخذ سے آنے والی وہ اپ ڈیٹس جو کچھ نیا نہیں مانگتیں، خود بخود منظور ہوتی ہیں۔"
+      },
+      "edit": {
+        "save": "رسائی محفوظ کریں",
+        "saving": "محفوظ ہو رہا ہے…"
+      },
+      "errors": {
+        "stale": "کسی دوسرے ایڈمن نے ابھی یہ بوٹ منظور کیا۔ منظور کرنے سے پہلے دوبارہ دیکھیں۔",
+        "changed": "یہ صفحہ کھلنے کے بعد App بدل گئی۔ منظور کرنے سے پہلے دوبارہ دیکھیں۔",
+        "failed": "منظوری محفوظ نہیں ہو سکی۔"
+      },
+      "commandKinds": {
+        "command": "چینل میں پوسٹ ہونے والا کمانڈ",
+        "request": "نجی درخواست"
+      }
+    }
   }
 }

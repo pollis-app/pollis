@@ -1,6 +1,6 @@
 # Bots and Apps: threat model
 
-Started in #2004 (the App sandbox). #2005 adds the approval model (who approves an App, what the runtime verifies before loading it, rollback protection, development installations); #2009 adds Pollis Secure Cloud. Design: epic #872.
+Started in #2004 (the App sandbox). #2005 added the approval model ([App approval](#app-approval): who approves an App, what the runtime verifies before loading it, rollback protection, development installations); #2009 adds Pollis Secure Cloud. Design: epic #872.
 
 This document states trust boundaries and the guarantees each one gives, and names the test that pins each guarantee. It describes boundaries, not open issues; those are tracked as GitHub issues.
 
@@ -77,8 +77,40 @@ An App runs as a WebAssembly component in `pollis-app-host`. It has no system ca
 
 - The effective grants are never wider than the manifest or the admin's grants, and admin grants wider than the manifest are refused outright rather than silently narrowed.
   Pinned by `effective_grants_never_exceed_the_manifest`, `effective_grants_never_exceed_the_admin_grants`, `widenings_name_the_manifest_field` (pollis-app-manifest) and `grants_wider_than_the_manifest_are_refused` (pollis-app-host).
-- Until signed approvals land (#2005), a development build of the runtime reads admin grants from a local file. That path does not exist in release builds.
-  Pinned by `dev_grants_file_is_compiled_out_of_release_builds` (pollis-app-manifest `tests/dev_grants_release.rs`).
+- The runtime takes admin grants only from a verified approval (next section); there is no file, flag or environment variable that supplies them.
+  Pinned by `without_an_approval_nothing_runs_and_admins_see_the_artifact_to_approve` (`pollis-bot/tests/app_approval.rs`).
+
+## App approval
+
+An installation runs exactly the App an admin approved, with exactly the grants the admin chose, and the runtime proves both to itself without trusting the DS (#2005).
+
+**Who can approve.** A current admin of the bot's group, from one of their certified devices. The approval is a canonical (RFC 8785) record signed with that device's ML-DSA-44 key over a domain-separated message: `{v, installation_id, bot_user_id, group_id, seq, app_hash, manifest_hash, grants, approver_user_id, approver_device_id, issued_at, source, auto_update}`. The DS stores it as an opaque, append-only row keyed `(installation_id, seq)` and refuses a `seq` that is not exactly one more than the last; it holds no admin key, so it cannot forge or change one.
+Pinned by `only_a_current_admin_of_the_bots_group_stores_an_approval`, `seq_moves_by_exactly_one_and_a_stale_approval_stores_nothing`, `the_schema_refuses_a_skipped_seq_an_edit_a_delete_and_a_non_bot` (`pollis-delivery/tests/bot_apps.rs`), `a_production_record_round_trips_and_verifies_under_its_own_domain_only`, `a_non_canonical_record_is_refused` (`pollis-core/src/commands/bots/app_approval.rs`).
+
+**What the runtime verifies, before every job.** From its own state, with the same admin-signer rule as host approvals (`pollis-core/src/commands/bots/signer.rs`, shared with #1182):
+
+1. the record decodes as the kind its row says and names this installation, bot, group and row `seq`;
+2. the signature verifies under the approving device's leaf key, that device is a leaf in the runtime's own MLS view of the group, and its key is certified under the approver's account key (`IdentityDirectory`, and the transparency log does not alarm);
+3. the approver is a current admin in the roster read; the MLS view and the roster must both agree;
+4. the manifest served beside the record hashes to `manifest_hash`, and the grants ask for nothing the manifest did not;
+5. the artifact it is about to load hashes to `app_hash` (`SHA-256("pollis-app-v1" ‖ len(component) ‖ component ‖ JCS(manifest))`, one function in `pollis-app-manifest`, with a pinned test vector). The approval binds a hash, not a location: the artifact may come from a local path or an HTTPS URL, and a mismatch is never close enough.
+
+Any failure: the installation does not run that job, the runtime logs why with a fix, and reports it to the group's admins, who see it on the bot's page. A record that cannot be checked at all (the DS unreachable) stops the job without handling or skipping anything.
+Pinned by `the_runtime_refuses_every_approval_it_cannot_verify` (flows: non-admin signer, forged signature, a device that is no leaf, a swapped manifest, widened grants, a development record served as production, another bot's record, transparency alarm, a rolled-back `seq`, a demoted and a removed approver), `an_admin_approves_narrows_and_updates_an_app_and_the_runtime_runs_exactly_that` (flows: hash mismatch, grants wider than the manifest refused before signing), `one_changed_byte_is_a_hash_mismatch_never_close_enough`, `record_checks_refuse_another_installation_a_swapped_manifest_and_widened_grants`, `app_hash_vector` (`pollis-app-manifest`), and `a_changed_artifact_stops_running_until_it_is_approved`, `a_refused_approval_runs_nothing_and_is_reported_as_refused`, `an_approval_that_cannot_be_checked_stops_the_job_without_skipping_a_message` (`pollis-bot/tests/app_approval.rs`).
+
+**Rollback protection.** `seq` increases by one with every approval for an installation. Each host keeps the highest `seq` it accepted in the installation's encrypted store (a local trigger refuses lowering it), and refuses any record with a lower one, so the DS cannot roll an installation back to an older approved App by withholding the newer record.
+Pinned by the rolled-back case in `the_runtime_refuses_every_approval_it_cannot_verify`.
+
+**Updates and widening.** Any new App hash needs a new approval. The approval page diffs the new manifest against the approved one; a widening (a new trigger kind, channel, longer history, event kind, action, egress host, larger state quota, a new slash command or one switched between posted and private request, or a new or more frequent schedule: a command or schedule is a new way for the App to be invoked) is highlighted and never pre-accepted: a non-widening update carries the current grants over and drops what the new manifest no longer asks for. An installation may be set to approve non-widening updates from its pinned source automatically; that setting is in the signed record (every admin sees it), the approval is made by an admin's app, and each update still gets its own signed record of its exact hash.
+Pinned by `every_kind_of_widening_is_flagged`, `a_narrowing_update_has_no_widening`, `carried_grants_drop_what_the_new_manifest_no_longer_asks_for` (`pollis-app-manifest/src/diff.rs`), `an_installation_set_to_update_itself_takes_non_widening_updates_only` (flows).
+
+**Development installations.** A development approval is a separate record type with its own signature domain; it names a developer ML-DSA-44 key instead of an App hash. The runtime accepts any build whose App hash that key signed (domain `pollis-app-dev-build-v1`) and whose manifest does not widen the approved manifest; grants are the approved grants carried to the build's manifest. A production approval can never be read as a development one, or the reverse. Every member sees a persistent "Development build" mark on the bot.
+Pinned by `a_development_approval_can_never_be_read_as_production_or_back`, `a_development_installation_runs_any_build_its_key_signs_that_does_not_widen` (`app_approval.rs`), `a_development_installation_runs_its_developers_builds_and_members_see_the_mark` (flows), `a_development_installation_runs_builds_its_developer_signed` (`pollis-bot/tests/app_approval.rs`).
+
+**Stated limits.**
+
+- An approval stays valid only while its approver is an admin: when the approving admin is demoted or leaves, the bot stops until another admin approves again.
+- Whoever holds a development key can run any non-widening build in that installation. Development installations are for test groups.
 
 ## Stated limits
 

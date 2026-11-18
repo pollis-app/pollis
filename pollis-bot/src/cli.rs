@@ -23,8 +23,13 @@ pub enum Command {
     Status,
     RotateSecret { installation_id: String },
     Forget { installation_id: String },
-    /// #2004: run an App as an installation's handler.
-    AppInstall { installation_id: String, artifact: PathBuf },
+    /// #2004/#2005: run an App (a local directory or an https:// URL) as an
+    /// installation's handler, once an admin approves its App hash.
+    AppInstall { installation_id: String, artifact: String },
+    /// #2005: create (once) and print this developer's signing key.
+    AppDevKey { key: Option<PathBuf> },
+    /// #2005: sign the build in a directory for a development installation.
+    AppSign { artifact: PathBuf, key: Option<PathBuf> },
 }
 
 pub fn help_text() -> String {
@@ -55,20 +60,26 @@ COMMANDS
     forget --installation ID
         Remove an installation from this host (its record, store and keys),
         e.g. after an admin revoked this host or deleted the bot.
-    app install --installation ID --artifact DIR
-        Run the App in DIR (pollis-app.json and one .wasm component) as the
-        installation's handler. Development builds only, until App approvals
-        ship: it reads the admin's grants from POLLIS_APP_DEV_GRANTS.
+    app install --installation ID --artifact DIR|URL
+        Run the App in DIR (pollis-app.json and one .wasm component), or at an
+        https:// URL, as the installation's handler. Prints its App hash; it
+        runs once a group admin approves it on the bot's page, and is checked
+        against that approval before every job.
+    app dev-key [--key FILE]
+        Create (once) your developer signing key and print its public half,
+        for a development installation. Default FILE: DIR/developer-key.
+    app sign --artifact DIR [--key FILE]
+        Sign the build in DIR so a development installation runs it.
 
 FILES
     DIR/config.json      max_installations (default {max}), webhook {{bind, per_minute, burst}}
                          (default {per_minute}/minute, burst {burst}, per installation)
     DIR/installations/   one directory per installation
     DIR/status.json      written by `run`, read by `status`
+    DIR/developer-key    your developer signing key (`app dev-key`); keep it secret
 
 ENVIRONMENT
     POLLIS_BOT_DATA_DIR  data directory when --data-dir is not given
-    POLLIS_APP_DEV_GRANTS  development builds: the admin's grants for an App
 ",
         version = env!("CARGO_PKG_VERSION"),
         bind = DEFAULT_WEBHOOK_BIND,
@@ -184,10 +195,26 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Stri
                 positional.remove(0);
                 Command::AppInstall {
                     installation_id: take("installation").flatten().ok_or("app install needs --installation ID")?,
-                    artifact: PathBuf::from(take("artifact").flatten().ok_or("app install needs --artifact DIR")?),
+                    artifact: take("artifact").flatten().ok_or("app install needs --artifact DIR|URL")?,
                 }
             }
-            _ => return Err("`app` needs a subcommand: `app install --installation ID --artifact DIR`".into()),
+            Some("dev-key") => {
+                positional.remove(0);
+                Command::AppDevKey { key: take("key").flatten().map(PathBuf::from) }
+            }
+            Some("sign") => {
+                positional.remove(0);
+                Command::AppSign {
+                    artifact: PathBuf::from(take("artifact").flatten().ok_or("app sign needs --artifact DIR")?),
+                    key: take("key").flatten().map(PathBuf::from),
+                }
+            }
+            _ => {
+                return Err(
+                    "`app` needs a subcommand: `app install --installation ID --artifact DIR|URL`, `app dev-key` or `app sign --artifact DIR`"
+                        .into(),
+                )
+            }
         },
         other => return Err(format!("unknown command `{other}`")),
     };
@@ -238,6 +265,11 @@ mod tests {
         assert_eq!(
             p(&["app", "install", "--installation", "01I", "--artifact", "/apps/pager"]).unwrap().command,
             Command::AppInstall { installation_id: "01I".into(), artifact: "/apps/pager".into() }
+        );
+        assert_eq!(p(&["app", "dev-key"]).unwrap().command, Command::AppDevKey { key: None });
+        assert_eq!(
+            p(&["app", "sign", "--artifact", "dist", "--key", "k"]).unwrap().command,
+            Command::AppSign { artifact: "dist".into(), key: Some("k".into()) }
         );
         assert!(p(&["app"]).unwrap_err().contains("app install"));
         assert!(p(&["app", "install", "--installation", "01I"]).unwrap_err().contains("--artifact"));

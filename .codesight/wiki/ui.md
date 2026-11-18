@@ -901,7 +901,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**242 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**251 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -937,9 +937,18 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **PinField** — props: value, onChange, disabled — `frontend/src/components/Auth/PinField.tsx`. Masked 4-digit `InputOtp` + hidden e2e mirror input; shared by `PinCreateScreen`, `PinEntryScreen`, `ChangePinPage` (#1731).
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`
 
-### `components/Bots` (1)
+### `components/Bots` (10)
 
+- **AppCapabilities** — props: manifest, grants, testId — `frontend/src/components/Bots/AppCapabilities.tsx`
+- **AppChangeList** — props: changes, accepted, onToggle, disabled — `frontend/src/components/Bots/AppChangeList.tsx`
+- **AppMark** — props: label — `frontend/src/components/Bots/AppMark.tsx`
+- **AppNotice** — `frontend/src/components/Bots/AppNotice.tsx`
+- **ApprovedAppSection** — props: view, approved, approverName, editable — `frontend/src/components/Bots/ApprovedAppSection.tsx`
+- **AppSummary** — props: manifest, appHash, developerKey, source, marks, footer, testId — `frontend/src/components/Bots/AppSummary.tsx`
+- **BotAppSection** — props: groupId, botUserId — `frontend/src/components/Bots/BotAppSection.tsx`
 - **BotPairingForm** — props: leadTitle, lead, command, children, ready, submitLabel, submittingLabel, failedLabel, onSubmit, cancel, testId — `frontend/src/components/Bots/BotPairingForm.tsx`. Add a bot / Add a host (#1182): the `pollis-bot` command, the machine notice, a `SasCodeInput`, busy until the core answers.
+- **GrantControls** — props: ceiling, narrowing, onChange, disabled, testId — `frontend/src/components/Bots/GrantControls.tsx`
+- **PendingAppSection** — props: view, pending — `frontend/src/components/Bots/PendingAppSection.tsx`
 
 ### `components/Diagnostics` (2)
 
