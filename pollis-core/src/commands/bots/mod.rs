@@ -34,6 +34,10 @@
 //! **Restart.** [`start_unattended`] reopens an installation from the keystore,
 //! with no PIN; it refuses a human account. [`forget_installation`] removes one.
 //!
+//! **Trigger claims (runtime).** [`claim_trigger`]: before a host applies a
+//! job's actions it claims `(installation_id, trigger_key)` on the DS; the first
+//! claim wins, the winner's retry wins again, every other host discards.
+//!
 //! **Admin (bridge commands).** [`list_group_bots`], [`get_bot`], [`create_bot`],
 //! [`add_bot_host`], [`revoke_bot_host`], [`delete_bot`]. Error strings start
 //! with [`PAIRING_CODE_MISMATCH`], [`BOT_CAP_REACHED`] or [`PAIRING_REQUEST_EXPIRED`]
@@ -47,6 +51,7 @@ mod admin;
 pub mod approval;
 mod code;
 mod host;
+mod triggers;
 mod unattended;
 
 pub use admin::{
@@ -62,4 +67,5 @@ pub use host::{
 };
 #[cfg(feature = "test-harness")]
 pub use host::FixedAudit;
+pub use triggers::claim_trigger;
 pub use unattended::{forget_installation, has_installation, start_unattended, BotSession, UNATTENDED_REFUSED};

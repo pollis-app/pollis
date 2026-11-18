@@ -78,7 +78,8 @@ pollis-bot post --installation <id> --channel alerts "deploy finished"
 | Path | What |
 |---|---|
 | `config.json` | `max_installations`, `webhook {bind, per_minute, burst}` |
-| `installations/<id>/` | one installation: its record and its encrypted store |
+| `installations/<id>/` | one installation's record |
+| `stores/<device id>/` | that installation's encrypted store |
 | `status.json` | written by `run` on every state change, read by `status` |
 
 ## If something fails

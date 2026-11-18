@@ -18,10 +18,18 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[features]
+# Realtime wake-ups. pollis-core's realtime rooms (LiveKit data) live behind its
+# `media` feature, so this links the media stack although the runtime never
+# touches audio or video. Off, the runtime still catches up at start and runs
+# webhook jobs, but learns of new group messages only at its next start.
+default = ["realtime"]
+realtime = ["pollis-core/media"]
+
 [dependencies]
-# Media off: the runtime is headless. os-keystore on for the same reason as
-# pollis-tui (#879): a desktop host prefers the OS keychain, a bare server falls
-# back to the machine-bound encrypted file, never plaintext.
+# os-keystore on for the same reason as pollis-tui (#879): a desktop host
+# prefers the OS keychain, a bare server falls back to the machine-bound
+# encrypted file, never plaintext. Media comes only with `realtime`.
 pollis-core = { path = "../pollis-core", default-features = false, features = ["os-keystore"] }
 pollis-api = { path = "../pollis-api" }
 # Multi-thread runtime: pollis-core's DB and keystore paths use spawn_blocking.
