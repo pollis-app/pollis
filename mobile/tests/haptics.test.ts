@@ -96,8 +96,12 @@ test("the first tap of every two-tap confirm warns", () => {
 });
 
 test("copies confirm, and a failed copy says so", () => {
-  for (const f of ["app/chat/[id].tsx", "app/(auth)/emergency-kit.tsx", "components/CreatedInviteLinkCard.tsx"]) {
+  for (const f of ["app/chat/[id].tsx", "hooks/useCopyFeedback.ts"]) {
     assert.match(src(f), /haptic\(copied \? "success" : "error"\)/, f);
+  }
+  // Every other copy goes through the one hook, so it is felt the same way.
+  for (const f of ["app/(auth)/emergency-kit.tsx", "components/CreatedInviteLinkCard.tsx"]) {
+    assert.match(src(f), /useCopyFeedback\(\)/, f);
   }
 });
 

@@ -1,44 +1,19 @@
 // #847: the only view of a fresh invite link (the server keeps only `sha256(secret)`). Copy is VERIFIED (#897), never read back.
 
-import { useEffect, useRef, useState } from "react";
 import { View, Share } from "react-native";
 import { Text } from "./Text";
 import { useTranslation } from "react-i18next";
-import * as Clipboard from "expo-clipboard";
 import { Card, Button } from "./ui";
 import { Icon } from "./icons";
 import { semantic, type as ty, r, space, scriptLineHeight } from "../theme/tokens";
 import { activeLocale } from "../i18n";
 import type { CreatedInviteLink } from "../hooks/queries";
-import { haptic } from "../lib/haptics";
-
-type CopyState = "idle" | "copied" | "failed";
-
-const COPY_FEEDBACK_MS = 2000;
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
 
 export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
   const { t } = useTranslation("channels");
-  const [copyState, setCopyState] = useState<CopyState>("idle");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (copyState === "idle") {
-      return;
-    }
-    timer.current = setTimeout(() => setCopyState("idle"), COPY_FEEDBACK_MS);
-    return () => {
-      if (timer.current) {
-        clearTimeout(timer.current);
-      }
-    };
-  }, [copyState]);
-
-  const onCopy = async () => {
-    setCopyState("idle");
-    const copied = await Clipboard.setStringAsync(link.url).catch(() => false);
-    haptic(copied ? "success" : "error");
-    setCopyState(copied ? "copied" : "failed");
-  };
+  const { copyState, copy } = useCopyFeedback();
+  const onCopy = () => copy(link.url);
 
   const onShare = () => {
     Share.share({ message: link.url }).catch(() => {});
