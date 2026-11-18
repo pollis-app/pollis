@@ -1,0 +1,36 @@
+[package]
+name = "pollis-app-dev"
+version.workspace = true
+edition.workspace = true
+# Links pollis-app-host (wasmtime 49), which needs the repo's pinned 1.96.
+rust-version = "1.96"
+publish = false
+description = "Developer tooling behind the `pollis app` CLI (#2006): runs an App's handlers offline against fixtures through the real App host (pollis-app-host), pre-initializes ComponentizeJS builds deterministically so an App's hash is reproducible from source, and computes the App hash."
+
+[lib]
+name = "pollis_app_dev"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pollis-app-dev"
+path = "src/main.rs"
+
+[dependencies]
+pollis-app-host = { path = "../pollis-app-host" }
+pollis-app-manifest = { path = "../pollis-app-manifest" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+# The build-time pre-initializer (src/wizer.rs) only. Same wasmtime as the App
+# host, so no second engine enters the tree. `parallel-compilation` also speeds
+# up the host's own compile of a test App in this binary. These features unify
+# into pollis-app-host only in builds that include this crate (workspace-wide
+# builds); `cargo build -p pollis-bot` keeps the host's minimal feature set.
+wasmtime = { version = "49.0.6", default-features = false, features = ["runtime", "cranelift", "std", "async", "parallel-compilation"] }
+wasmtime-wasi = { version = "49.0.6", default-features = false, features = ["p1"] }
+# Without its `wasmtime` feature, which would add wasmtime's on-disk cache,
+# threads and GC; src/wizer.rs drives the snapshot itself.
+wasmtime-wizer = { version = "49.0.6", default-features = false }
+
+[lints]
+workspace = true

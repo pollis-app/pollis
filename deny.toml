@@ -260,6 +260,11 @@ name = "pollis-app-host"
 expression = "LicenseRef-proprietary"
 license-files = []
 
+[[licenses.clarify]]
+name = "pollis-app-dev"
+expression = "LicenseRef-proprietary"
+license-files = []
+
 [licenses.private]
 # Defense-in-depth: the clarify blocks above already mark every current
 # workspace crate proprietary. This additionally skips license checks for any
@@ -337,6 +342,10 @@ skip = [
     # gimli 0.33 (under Cranelift, for the App sandbox, #2004) is on 0.16; the
     # rest of the tree is on 0.17. Goes when gimli moves to hashbrown 0.17.
     { name = "hashbrown", version = "0.16.1" },
+    # fs-set-times 0.20 (under wasmtime-wasi's cap-std, used only by
+    # pollis-app-dev's build-time pre-initializer, #2006) is on io-lifetimes 2;
+    # cap-std itself is on 3. Goes when fs-set-times moves to io-lifetimes 3.
+    { name = "io-lifetimes", version = "2.0.4" },
     # libcrux-intrinsics 0.0.9 (under hpke-rs 0.8's libcrux-sha3, #1846) uses
     # hax-lib 0.4 itself and 0.3 through core-models.
     { name = "hax-lib", version = "0.3.7" },
