@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import { useGroupAliases } from "../hooks/queries/useGroupAliases";
 import { BellOff, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { BackMenu } from "../components/ui/BackMenu";
@@ -16,6 +17,7 @@ export const GroupPage: React.FC = observer(() => {
   const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId" });
+  const aliases = useGroupAliases(groupId);
   const { setSelectedGroupId, setSelectedChannelId, markRead, unreadCounts } = appStore;
 
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
@@ -63,7 +65,9 @@ export const GroupPage: React.FC = observer(() => {
     id: ch.id,
     label: ch.name,
     icon: <Hash size={14} />,
-    description: <LastMessagePreview message={lastMessages[ch.id]} isLoading={previewsLoading} />,
+    description: (
+      <LastMessagePreview message={lastMessages[ch.id]} isLoading={previewsLoading} aliases={aliases} />
+    ),
     action: () => {
       setSelectedChannelId(ch.id);
       markRead(ch.id);
