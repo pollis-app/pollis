@@ -245,6 +245,16 @@ name = "pollis-sqlcipher"
 expression = "LicenseRef-proprietary"
 license-files = []
 
+[[licenses.clarify]]
+name = "pollis-app-manifest"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-app-host"
+expression = "LicenseRef-proprietary"
+license-files = []
+
 [licenses.private]
 # Defense-in-depth: the clarify blocks above already mark every current
 # workspace crate proprietary. This additionally skips license checks for any

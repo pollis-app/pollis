@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pollis.com/schemas/pollis-app/0.1.0/pollis-app.schema.json",
+  "title": "Pollis App manifest (pollis-app.json)",
+  "description": "What a Pollis App asks for. An admin can narrow it when approving the App, never widen it; the runtime enforces the manifest intersected with the admin's grants. Pairs with the WIT package pollis:app@0.1.0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor hint; ignored."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "description": "Lowercase letters, digits and '-', 1 to 64 characters."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The App's own version, shown to admins."
+    },
+    "description": {
+      "type": "string",
+      "default": ""
+    },
+    "triggers": {
+      "type": "array",
+      "uniqueItems": true,
+      "default": [],
+      "description": "What can wake the App. Each maps to one exported handler.",
+      "items": {
+        "enum": ["messages", "mentions", "commands", "schedule", "requests", "webhook"]
+      }
+    },
+    "read": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "channels": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": [],
+          "description": "\"#name\" for one channel by name, or \"*\" for whichever channels the admin grants.",
+          "items": { "type": "string", "pattern": "^(\\*|#?[^\\s*#][^\\s*]*)$" }
+        },
+        "history": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Days of history query-messages may reach back. 0: none."
+        },
+        "events": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": ["created"],
+          "description": "Message event kinds the App may see.",
+          "items": { "enum": ["created", "edited"] }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "uniqueItems": true,
+      "default": [],
+      "description": "What the App may do in the group. There are no moderation actions.",
+      "items": {
+        "enum": ["post", "reply", "react", "edit_own", "delete_own", "transfer_history"]
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "quota": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Bytes of keys plus values in the installation's sealed key-value state. 0: no state."
+        }
+      }
+    },
+    "egress": {
+      "type": "array",
+      "uniqueItems": true,
+      "default": [],
+      "description": "Exact host names the App may reach over HTTPS. No wildcards, IP literals, ports or schemes. Empty: the App cannot send data outside the group.",
+      "items": {
+        "type": "string",
+        "pattern": "^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+      }
+    }
+  }
+}
