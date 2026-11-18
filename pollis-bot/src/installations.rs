@@ -1,7 +1,7 @@
-//! The installations this runtime hosts: one directory each under
-//! `<data dir>/installations/<installation_id>/`, holding its
-//! `installation.json` and its own encrypted store. Its keys sit in its own
-//! keystore slot. Nothing is shared between two installations.
+//! The installations this runtime hosts: one record each at
+//! `<data dir>/installations/<installation_id>/installation.json`. Its
+//! encrypted store is `<data dir>/stores/<device id>/` (`core_host`) and its
+//! keys sit in its own keystore slot. Nothing is shared between two installations.
 
 use std::path::{Path, PathBuf};
 
