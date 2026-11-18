@@ -188,3 +188,18 @@ impl Handler for MixedHandler {
     }
 }
 
+
+/// A secret slot in memory, shared by every "process" of one test.
+#[derive(Default)]
+pub struct MemorySlot(pub Mutex<HashMap<String, Vec<u8>>>);
+
+#[async_trait]
+impl pollis_bot::secrets::SecretSlot for MemorySlot {
+    async fn load(&self, id: &str) -> anyhow::Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        Ok(self.0.lock().unwrap().get(id).cloned().map(zeroize::Zeroizing::new))
+    }
+    async fn store(&self, id: &str, secret: &[u8]) -> anyhow::Result<()> {
+        self.0.lock().unwrap().insert(id.into(), secret.to_vec());
+        Ok(())
+    }
+}

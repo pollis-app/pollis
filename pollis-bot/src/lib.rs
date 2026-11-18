@@ -11,11 +11,17 @@
 //! - [`config`], [`installations`], [`status`], [`log`]: config, on-disk
 //!   installations, `pollis-bot status`, state logging.
 //! - [`post`]: `pollis-bot post`, a client of the local webhook.
+//! - [`cli`] + [`app`]: the subcommands, over a [`host::BotHost`]; [`core_host`]
+//!   is the real host on `pollis-core`.
 
 pub mod action;
+pub mod app;
+pub mod cli;
 pub mod config;
 pub mod core;
+pub mod core_host;
 pub mod handler;
+pub mod host;
 pub mod installations;
 pub mod job;
 pub mod log;
