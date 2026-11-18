@@ -20806,11 +20806,11 @@
       "anchors": [
         "sdk/ts/cli/src/build.ts",
         "pollis-app-dev/src/wizer.rs",
-        "pollis-app-dev/src/app_hash.rs"
+        "pollis-app-manifest/src/app_hash.rs"
       ],
       "evidence": [
         "sdk/ts/cli/test/cli.test.ts:76",
-        "pollis-app-dev/src/app_hash.rs:88"
+        "pollis-app-manifest/src/app_hash.rs:112"
       ],
       "status": "verified",
       "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"

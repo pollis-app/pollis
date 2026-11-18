@@ -217,7 +217,11 @@ curl -sS -X POST "$URL" \
         <code class="doc-cmd">import { app } from "@pollis/app";
 
 export default app({
-  manifest: { read: { channels: ["*"] }, actions: ["reply"] },
+  manifest: {
+    read: { channels: ["*"] },
+    actions: ["reply"],
+    commands: [{ name: "hello", description: "Say hello", arg_hint: "[name]" }],
+  },
   async onCommand(cmd, ctx) {
     await ctx.reply(cmd.message, `Hello, ${cmd.args || cmd.message.author.displayName}!`);
   },
@@ -229,10 +233,15 @@ export default app({
             uses, offline: a call the manifest does not allow fails in a test exactly as it would in a group.</li>
           <li><code>pollis app build</code> writes the component and <code>pollis-app.json</code> and prints the
             <strong>App hash</strong>. The same source and lockfile give the same hash on any machine.</li>
+          <li><code>pollis app run --installation &lt;id&gt;</code> hands the build to your bot and runs it once a
+            group admin approves that App hash on the bot's page.</li>
+          <li><code>pollis app dev --installation &lt;id&gt;</code> runs it in a test group as a development
+            installation: an admin approves your developer key once, and every build you save is signed and
+            picked up, as long as it asks for no more than was approved.</li>
         </ul>
         <p>
           <strong>The manifest is the contract.</strong> It lives in your code and is written out at build, so it
-          cannot drift: the channels the App reads, what it may do (<code>reply</code>, <code>post</code>,
+          cannot drift: the channels the App reads, its slash commands and schedules, what it may do (<code>reply</code>, <code>post</code>,
           <code>react</code>, editing or deleting its own messages), how much state it keeps, and the exact hosts
           <code>ctx.fetch</code> may reach. With no hosts listed, the App cannot send anything outside the group.
         </p>
