@@ -18,6 +18,7 @@ members = [
     "pollis-sqlcipher",
     "pollis-libsql-connector",
     "pollis-app-manifest",
+    "pollis-app-host",
     "patches/device-info",
 ]
 # Detached from this workspace on purpose: `fuzz/` is the Track-B cargo-fuzz crate

@@ -1,0 +1,21 @@
+# A component that reads an environment variable through WASI, as any guest
+# built with Rust's std would. pollis-app-host must refuse to load it (#2004).
+# Built to ../wasi-app.wasm by ../build.sh. No dependencies.
+[package]
+name = "pollis-wasi-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+panic = "abort"
+
+[workspace]
