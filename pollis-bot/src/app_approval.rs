@@ -10,9 +10,13 @@
 //!    approver's certified device and current admin role in this host's MLS
 //!    view and roster, manifest hash, grants, and a `seq` not lower than the
 //!    highest this host already accepted);
-//! 3. holds the artifact against it (`app_approval::check_artifact`): exactly
-//!    the approved App hash, or a development build signed by the approved
-//!    developer key that does not widen the approved manifest.
+//! 3. holds the artifact against it (`app_approval::check_artifact_from`):
+//!    exactly the approved App hash; or, when the approval allows automatic
+//!    updates, a newer artifact from exactly the pinned source that widens
+//!    nothing (accepted by the runtime itself, no admin online, and never
+//!    undone: `InstallationCore::app_accept_hash`); or a development build
+//!    signed by the approved developer key that does not widen the approved
+//!    manifest.
 //!
 //! Any failure: the installation does not run this job, the runtime logs why,
 //! and the group's admins see it on the bot's page (`InstallationCore::app_report`,
@@ -24,7 +28,7 @@ use std::time::{Duration, Instant};
 
 use pollis_app_manifest::{Manifest, TriggerKind};
 use pollis_core::commands::bots::app_approval::{
-    check_artifact, AppApprovalRefusal, Artifact, DevBuildSignature, LoadableApp, DEV_BUILD_SIGNATURE_SUFFIX,
+    check_artifact_from, AppApprovalRecord, AppApprovalRefusal, Artifact, DevBuildSignature, LoadableApp, DEV_BUILD_SIGNATURE_SUFFIX,
 };
 use pollis_core::commands::bots::apps::{AppRunReport, ArtifactFacts};
 use serde::{Deserialize, Serialize};
@@ -178,11 +182,13 @@ pub struct ApprovedApp {
     fetched: Mutex<Option<(Instant, FetchedArtifact)>>,
     /// This job's verdict, set by [`ApprovedApp::prepare`].
     current: Mutex<Option<Result<ReadyApp, String>>>,
+    /// The App hash the last job ran, so a change is logged once.
+    last_running: Mutex<Option<[u8; 32]>>,
 }
 
 impl ApprovedApp {
     pub fn new(component: ArtifactLocation, manifest: ArtifactLocation) -> ApprovedApp {
-        ApprovedApp { component, manifest, fetched: Mutex::new(None), current: Mutex::new(None) }
+        ApprovedApp { component, manifest, fetched: Mutex::new(None), current: Mutex::new(None), last_running: Mutex::new(None) }
     }
 
     async fn artifact(&self) -> anyhow::Result<FetchedArtifact> {
@@ -237,17 +243,32 @@ impl ApprovedApp {
         let facts = facts_of(&self.component, &artifact);
         let verdict = match core.app_approval().await? {
             Err(refusal) => Err(refusal),
-            Ok(approved) => check_artifact(
-                &approved,
-                &Artifact {
-                    component: &artifact.component,
-                    manifest_json: &artifact.manifest_json,
-                    dev_signature: artifact.dev_signature.as_ref(),
-                },
-            ),
+            Ok(approved) => {
+                let checked = check_artifact_from(
+                    &approved,
+                    &Artifact {
+                        component: &artifact.component,
+                        manifest_json: &artifact.manifest_json,
+                        dev_signature: artifact.dev_signature.as_ref(),
+                    },
+                    &self.component.0,
+                );
+                match (checked, &approved.record) {
+                    // A production App runs only at the newest hash this host ran under
+                    // this approval: an automatic update is never undone.
+                    (Ok(app), AppApprovalRecord::Production(a)) => {
+                        let hash = pollis_app_manifest::hex(&app.app_hash);
+                        match core.app_accept_hash(a.seq, &a.app_hash, &hash).await? {
+                            Ok(()) => Ok(app),
+                            Err(refusal) => Err(refusal),
+                        }
+                    }
+                    (other, _) => other,
+                }
+            }
         };
         let report = match &verdict {
-            Ok(_) => AppRunReport::running(facts),
+            Ok(app) => AppRunReport::running(facts, app.auto_updated),
             Err(refusal) => AppRunReport::refused(refusal, facts),
         };
         if let Err(e) = core.app_report(&report).await {
@@ -255,6 +276,11 @@ impl ApprovedApp {
         }
         match verdict {
             Ok(app) => {
+                let changed = self.last_running.lock().map(|mut g| g.replace(app.app_hash) != Some(app.app_hash)).unwrap_or(true);
+                if changed {
+                    let how = if app.auto_updated { " (updated automatically from the approved source)" } else { "" };
+                    crate::log::info(&scope, format!("running App {}{how}", pollis_app_manifest::hex(&app.app_hash)));
+                }
                 self.set(Ok(ready(app, artifact)));
             }
             Err(refusal) => {

@@ -1074,11 +1074,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let input: crate::commands::bots::ApproveBotAppInput = arg(&args, "input")?;
             ok(crate::commands::bots::approve_bot_app(&state()?, input).await?)
         }
-        "auto_approve_bot_app" => {
-            let group_id: String = arg(&args, "groupId")?;
-            let bot_user_id: String = arg(&args, "botUserId")?;
-            ok(crate::commands::bots::auto_approve_bot_app(&state()?, group_id, bot_user_id).await?)
-        }
         "list_group_apps" => {
             let group_id: String = arg(&args, "groupId")?;
             ok(crate::commands::bots::list_group_apps(&state()?, group_id).await?)
@@ -1796,7 +1791,6 @@ mod tests {
             // #2005
             "get_bot_app",
             "approve_bot_app",
-            "auto_approve_bot_app",
             "list_group_apps",
             // #2018
             "list_group_commands",

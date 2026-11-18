@@ -577,7 +577,6 @@ pub fn run() {
             commands::bots::delete_bot,
             commands::bots::get_bot_app,
             commands::bots::approve_bot_app,
-            commands::bots::auto_approve_bot_app,
             commands::bots::list_group_apps,
             commands::bots::list_group_commands,
             commands::bots::send_command_request,

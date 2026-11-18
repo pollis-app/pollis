@@ -14,6 +14,13 @@
 # host 2 and deletes the bot; the script then stops both hosts and removes
 # their installations (`pollis-bot forget`).
 #
+# Between parts 3 and 4 the hosts run Apps (#2005, #2018): the driver points
+# them at App v1 (`pollis-bot app install`), runs flows/bot-app-approval.yaml in
+# the background and, as the admin approves, swaps in v2 (a widening update) and
+# then removes the files (the refusal notice); `pollis-bot post` nudges a job so
+# the host re-checks and reports. Then a commands App is installed, approved
+# (4b-approve-app.yaml) and used from the composer (5-commands.yaml).
+#
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled
 # in, and POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler
 # `dev_personal` when unset). Builds `pollis-bot` from this checkout.
@@ -168,6 +175,117 @@ HOST2_BOT="$(await_paired HOST2 180)"
 "$BOT_BIN" --data-dir "$WORK/host2" "${BOT_RUN[@]}" >"$WORK/HOST2.out" 2>"$WORK/HOST2.err" &
 HOST2_PID=$!
 await_connected "$WORK/host2" "$BOT_ID" 120
+
+# ---------------------------------------------------------------- Apps (#2005, #2018)
+# The bot's hosts run an App from a directory on this machine. The fixture App
+# (pollis-app-host/fixtures/test-app.wasm) is the component; each version is
+# that component with a different pollis-app.json, so each has its own App hash.
+APP_HOST="api.example.com"
+APP_NEW_HOST="hooks.example.com"
+APP_COMMAND="echo"
+APP_REPLY="echo-$STAMP"
+APP_DIR="$WORK/app"
+FIXTURE="$REPO/pollis-app-host/fixtures/test-app.wasm"
+
+# Write version $1 of the App into $APP_DIR (component + manifest).
+app_version() {
+  mkdir -p "$APP_DIR"
+  cp "$FIXTURE" "$APP_DIR/app.wasm"
+  case "$1" in
+    v1) cat >"$APP_DIR/pollis-app.json" <<JSON
+{"name":"triage","version":"1.0.0","triggers":["messages"],
+ "read":{"channels":["#general"],"history":30},"actions":["post","reply"],"egress":["$APP_HOST"]}
+JSON
+    ;;
+    v2) cat >"$APP_DIR/pollis-app.json" <<JSON
+{"name":"triage","version":"2.0.0","triggers":["messages","schedule"],
+ "read":{"channels":["#general"],"history":30},"actions":["post","reply"],"egress":["$APP_HOST","$APP_NEW_HOST"],
+ "schedules":[{"name":"digest","every":3600}]}
+JSON
+    ;;
+    commands) cat >"$APP_DIR/pollis-app.json" <<JSON
+{"name":"echo","version":"1.0.0","triggers":["commands","mentions"],
+ "read":{"channels":["#general"]},"actions":["post","reply"],
+ "commands":[{"name":"$APP_COMMAND","description":"Echo for the e2e","arg_hint":"<text>"}]}
+JSON
+    ;;
+  esac
+}
+
+# The App hash `app install` prints for host $1.
+install_app() {
+  "$BOT_BIN" --data-dir "$WORK/$1" app install --installation "$BOT_ID" --artifact "$APP_DIR" \
+    | sed -n 's/^ *App hash: *//p' | head -1
+}
+
+# Restart both hosts' runtimes (a handler is built at start).
+restart_hosts() {
+  kill "$HOST1_PID" "$HOST2_PID" 2>/dev/null || true
+  wait "$HOST1_PID" "$HOST2_PID" 2>/dev/null || true
+  "$BOT_BIN" --data-dir "$WORK/host1" "${BOT_RUN_WEBHOOK[@]}" >"$WORK/HOST1.out" 2>"$WORK/HOST1.err" &
+  HOST1_PID=$!
+  "$BOT_BIN" --data-dir "$WORK/host2" "${BOT_RUN[@]}" >"$WORK/HOST2.out" 2>"$WORK/HOST2.err" &
+  HOST2_PID=$!
+  await_connected "$WORK/host1" "$BOT_ID" 120
+  await_connected "$WORK/host2" "$BOT_ID" 120
+}
+
+# Run one job on host 1 so it re-checks the App and reports (a webhook call is
+# a job; an App's webhook takes it raw, so nothing is posted).
+nudge() {
+  "$BOT_BIN" --data-dir "$WORK/host1" post --installation "$BOT_ID" --channel General "nudge" >/dev/null 2>&1 || true
+}
+
+# Wait (up to $2 seconds) until host 1 logs that it runs App hash $1.
+await_running() {
+  for _ in $(seq 1 "$2"); do
+    grep -q "running App $1" "$WORK/HOST1.err" 2>/dev/null && return 0
+    kill -0 "$MAESTRO_PID" 2>/dev/null || { echo "the approval flow ended before App $1 ran" >&2; return 1; }
+    nudge
+    sleep 2
+  done
+  echo "host 1 never ran App $1" >&2
+  cat "$WORK/HOST1.err" >&2
+  exit 1
+}
+
+echo "==> both hosts are pointed at App v1"
+app_version v1
+V1_HASH="$(install_app host1)"
+install_app host2 >/dev/null
+[ -n "$V1_HASH" ] || { echo "app install printed no App hash" >&2; exit 1; }
+echo "    v1: $V1_HASH"
+restart_hosts
+nudge
+
+echo "==> 4a admin approves, narrows and updates the App; the driver swaps versions on the host"
+A=(-e APP_HOST="$APP_HOST" -e APP_NEW_HOST="$APP_NEW_HOST")
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" "${A[@]}" -e MAESTRO_EMAIL="$ADMIN_EMAIL" \
+  "$HERE/.maestro/flows/bot-app-approval.yaml" &
+MAESTRO_PID=$!
+await_running "$V1_HASH" 300
+app_version v2
+V2_HASH="$(install_app host1)"
+install_app host2 >/dev/null
+echo "    v2: $V2_HASH"
+nudge
+await_running "$V2_HASH" 300
+# The refusal stage: the files are gone.
+rm -rf "$APP_DIR"
+nudge
+wait "$MAESTRO_PID"
+
+echo "==> 4b a commands App is approved, then a member picks its command (#2018)"
+app_version commands
+CMD_HASH="$(install_app host1)"
+install_app host2 >/dev/null
+restart_hosts
+nudge
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$ADMIN_EMAIL" \
+  "$FLOWS/4b-approve-app.yaml"
+for _ in $(seq 1 60); do grep -q "running App $CMD_HASH" "$WORK/HOST1.err" && break; nudge; sleep 2; done
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e APP_COMMAND="$APP_COMMAND" -e APP_REPLY="$APP_REPLY" \
+  "$FLOWS/5-commands.yaml"
 
 echo "==> 4/4 admin revokes host 2 and deletes the bot"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" "$FLOWS/4-revoke-delete.yaml"

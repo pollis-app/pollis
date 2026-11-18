@@ -435,7 +435,15 @@ top of the script. `5-commands.yaml` (#2018) types `/`, picks an installed
 App's command, sends it and waits for the App's reply with the Bot badge, then
 checks the bot in the mention picker; it needs an App installed on the host
 and approved by the admin (#2005), with `APP_COMMAND` and `APP_REPLY` passed
-to Maestro, so the script runs it once App installs and approvals are in it.
+to Maestro. Between parts 3 and 4 the script points both hosts at App v1
+(`pollis-bot app install`, the fixture component with its own manifest), runs
+`flows/bot-app-approval.yaml` in the background and swaps in v2 (a widening
+update) and then removes the files as the admin approves; it then installs a
+commands App, approves it (`4b-approve-app.yaml`) and runs `5-commands.yaml`.
+The fixture App's `on-command` runs its arguments as a script and has no way
+to reply to its own command without the channel's id, so `5-commands.yaml`'s
+reply step needs an App that echoes its command (the #2006 TypeScript
+template does) before it can pass.
 
 **Unread for messages that arrived while away (automated, #1422):** `mobile/scripts/maestro-unread.sh <device>`
 — the lost-message shape with `pollis-tui`'s `unread_peer` example, which sends

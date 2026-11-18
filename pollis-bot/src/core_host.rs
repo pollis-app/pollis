@@ -334,6 +334,18 @@ impl InstallationCore for CoreInstallation {
             .map_err(core_err)
     }
 
+    async fn app_accept_hash(
+        &self,
+        seq: i64,
+        approved_hash: &str,
+        hash: &str,
+    ) -> Result<Result<(), bots::app_approval::AppApprovalRefusal>, CoreError> {
+        let state = self.state().await?;
+        bots::apps::accept_app_hash(&state, &self.session.bot_user_id, seq, approved_hash, hash)
+            .await
+            .map_err(core_err)
+    }
+
     async fn app_report(&self, report: &bots::apps::AppRunReport) -> Result<(), CoreError> {
         let state = self.state().await?;
         bots::apps::report_app(&state, &self.session, report).await.map_err(core_err)

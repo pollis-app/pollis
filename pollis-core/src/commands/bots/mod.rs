@@ -57,7 +57,7 @@
 //! the reader's own state with the same admin-signer rule as host approvals
 //! (`signer.rs`), keeps the highest accepted `seq` in the installation's store
 //! (rollback protection), and reports to admins. Bridge commands:
-//! [`get_bot_app`], [`approve_bot_app`], [`auto_approve_bot_app`] (admins) and
+//! [`get_bot_app`], [`approve_bot_app`] (admins) and
 //! [`list_group_apps`] (any member: the approved manifests, the marks).
 //! **Slash commands (bridge commands, #2018).** [`app_commands::list_group_commands`]:
 //! the commands of the group's approved Apps, for any member's composer;
@@ -95,7 +95,7 @@ pub use admin::{
 };
 pub use approval::{HostApproval, HOST_APPROVAL_DOMAIN, HOST_APPROVAL_MAX_TTL_SECS, HOST_APPROVAL_VERSION};
 pub use apps::{
-    auto_approve_bot_app, approve_bot_app, get_bot_app, list_group_apps, ApproveBotAppInput, BotAppView, GroupAppView,
+    approve_bot_app, get_bot_app, list_group_apps, ApproveBotAppInput, BotAppView, GroupAppView,
     APP_APPROVAL_CHANGED, APP_APPROVAL_STALE,
 };
 pub use code::{code_lookup, derive_pairing_code, normalize_pairing_code, PAIRING_CODE_LEN};

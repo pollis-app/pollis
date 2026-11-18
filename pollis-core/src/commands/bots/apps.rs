@@ -31,6 +31,9 @@ use super::unattended::BotSession;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
+/// The report reason of a runtime running an automatic update.
+pub const AUTO_UPDATED: &str = "auto_updated";
+
 /// Error prefix: another admin approved first; reload and look again.
 pub const APP_APPROVAL_STALE: &str = "app_approval_stale";
 /// Error prefix: what the admin saw is no longer what the runtime reports.
@@ -142,6 +145,48 @@ async fn accept_seq(state: &Arc<AppState>, installation_id: &str, seq: i64) -> R
     Ok(())
 }
 
+/// The accepted-hash ledger for one approval: `hash` may run under approval
+/// `seq` if it is the newest hash this host ran under it, or a new one (then
+/// it becomes the newest). A hash this host already moved past (including the
+/// approved hash, once an automatic update replaced it) is refused, so an
+/// automatic update is never undone by serving the older file again.
+pub async fn accept_app_hash(
+    state: &Arc<AppState>,
+    installation_id: &str,
+    seq: i64,
+    approved_hash: &str,
+    hash: &str,
+) -> Result<std::result::Result<(), AppApprovalRefusal>> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(|| err("bot installation is not active"))?;
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT app_hash FROM bot_app_accepted_hash WHERE installation_id = ?1 AND seq = ?2 ORDER BY ordinal",
+    )?;
+    let mut ran: Vec<String> = stmt
+        .query_map(rusqlite::params![installation_id, seq], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    drop(stmt);
+    if ran.is_empty() {
+        ran.push(approved_hash.to_string());
+        conn.execute(
+            "INSERT INTO bot_app_accepted_hash (installation_id, seq, ordinal, app_hash) VALUES (?1, ?2, 0, ?3)",
+            rusqlite::params![installation_id, seq, approved_hash],
+        )?;
+    }
+    if ran.last().map(String::as_str) == Some(hash) {
+        return Ok(Ok(()));
+    }
+    if ran.iter().any(|h| h == hash) {
+        return Ok(Err(AppApprovalRefusal::ArtifactRolledBack));
+    }
+    conn.execute(
+        "INSERT INTO bot_app_accepted_hash (installation_id, seq, ordinal, app_hash) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![installation_id, seq, ran.len() as i64, hash],
+    )?;
+    Ok(Ok(()))
+}
+
 /// What the runtime found on its last check, for the group's admins.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppRunReport {
@@ -169,10 +214,10 @@ impl AppRunReport {
         }
     }
 
-    pub fn running(artifact: ArtifactFacts) -> AppRunReport {
+    pub fn running(artifact: ArtifactFacts, auto_updated: bool) -> AppRunReport {
         AppRunReport {
             state: BotAppRunState::Running,
-            reason: String::new(),
+            reason: if auto_updated { AUTO_UPDATED.to_string() } else { String::new() },
             detail: String::new(),
             app_hash: artifact.app_hash,
             manifest: artifact.manifest,
@@ -282,9 +327,6 @@ pub struct PendingAppView {
     /// carried to the new manifest), or everything the manifest asks for on a
     /// first approval.
     pub suggested_grants: AdminGrants,
-    /// A non-widening update from the pinned source of an installation set to
-    /// update itself: `auto_approve_bot_app` approves it.
-    pub auto_approvable: bool,
 }
 
 /// The runtime's last report.
@@ -295,6 +337,17 @@ pub struct AppReportView {
     pub reason: String,
     pub detail: String,
     pub updated_at: String,
+}
+
+/// What the runtime reports it runs, when that is not the approved App hash
+/// itself: a newer artifact from the pinned source it accepted under the
+/// approval's `auto_update`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningAppView {
+    pub app_hash: String,
+    pub version: String,
+    pub auto_updated: bool,
 }
 
 /// A refusal of the stored approval on this device.
@@ -316,6 +369,8 @@ pub struct BotAppView {
     pub approval_refusal: Option<RefusalView>,
     pub report: Option<AppReportView>,
     pub pending: Option<PendingAppView>,
+    /// The runtime's report says it runs this (set when it updated itself).
+    pub running: Option<RunningAppView>,
     /// The group's text channels the manifest (pending, else approved) asks for.
     pub channels: Vec<ChannelOption>,
     pub latest_seq: i64,
@@ -392,7 +447,8 @@ fn pending_view(
         None => false,
     };
     // Already approved: a report still naming it is from before the approval.
-    if current {
+    // Running: the runtime accepted it itself (an automatic update).
+    if current || report.state == BotAppRunState::Running {
         return None;
     }
     let (changes, suggested) = match approved {
@@ -400,17 +456,6 @@ fn pending_view(
         None => (Vec::new(), full_grants(&manifest, channels)),
     };
     let widens = changes.iter().any(|c| c.widening);
-    let auto_approvable = match approved.map(|v| &v.record) {
-        Some(AppApprovalRecord::Production(a)) => {
-            a.auto_update
-                && !widens
-                && report.developer_key.is_none()
-                && a.source.is_some()
-                && a.source == report.source
-                && a.app_hash != app_hash
-        }
-        _ => false,
-    };
     Some(PendingAppView {
         app_hash,
         manifest_hash,
@@ -420,7 +465,6 @@ fn pending_view(
         changes,
         widens,
         suggested_grants: suggested.normalized(),
-        auto_approvable,
     })
 }
 
@@ -472,6 +516,14 @@ async fn load(state: &Arc<AppState>, group_id: &str, bot_user_id: &str, audit: &
             updated_at: r.updated_at.clone(),
         }),
         pending,
+        running: app.report.as_ref().filter(|r| r.state == BotAppRunState::Running).and_then(|r| {
+            let manifest = r.manifest.as_deref().and_then(|m| Manifest::from_json(m.as_bytes()).ok())?;
+            Some(RunningAppView {
+                app_hash: r.app_hash.clone()?,
+                version: manifest.version,
+                auto_updated: r.reason == AUTO_UPDATED,
+            })
+        }),
         channels,
         latest_seq,
     };
@@ -621,30 +673,6 @@ pub async fn sign_app_approval(
     let provider = crate::commands::mls::PollisProvider::new(db.conn());
     let (key, _) = crate::commands::mls::load_device_pq_signing_key(&provider, user_id, device_id)?;
     Ok(record.sign(&key))
-}
-
-/// For an installation set to update itself: approve a waiting non-widening
-/// update from the pinned source with the current grants carried over. The
-/// apps call this when an admin's app shows the group's bots, so the update
-/// lands the next time any admin is in the app; each still gets its own
-/// signed record. `true` when it approved one.
-pub async fn auto_approve_bot_app(state: &Arc<AppState>, group_id: String, bot_user_id: String) -> Result<bool> {
-    let loaded = load(state, &group_id, &bot_user_id, &TransparencyLogAudit).await?;
-    let Some(pending) = loaded.view.pending.clone().filter(|p| p.auto_approvable) else {
-        return Ok(false);
-    };
-    let input = ApproveBotAppInput {
-        group_id,
-        bot_user_id,
-        development: false,
-        app_hash: Some(pending.app_hash),
-        developer_key: None,
-        manifest_hash: pending.manifest_hash,
-        grants: pending.suggested_grants,
-        auto_update: true,
-    };
-    submit_approval(state, &loaded, &input).await?;
-    Ok(true)
 }
 
 /// Every installation in the group with an approved App that verifies on

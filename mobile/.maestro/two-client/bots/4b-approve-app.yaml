@@ -1,0 +1,66 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# BOTS, part 4b (#2005): the admin approves the App the bot's host now offers,
+# as is (the driver, scripts/maestro-bots.sh, installed it). The full approve,
+# narrow and update journey is flows/bot-app-approval.yaml; this only gets the
+# commands App of part 5 running.
+
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP_NAME}, .*"
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: "row-group-settings"
+    direction: DOWN
+- tapOn:
+    id: "row-group-settings"
+- scrollUntilVisible:
+    element:
+      id: "row-group-bots"
+    direction: DOWN
+- tapOn:
+    id: "row-group-bots"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-bots"
+    timeout: 15000
+- tapOn: "${BOT_NAME}"
+# The host reports the new App on its next job; re-open until it shows.
+- repeat:
+    while:
+      notVisible:
+        id: "section-bot-app-pending"
+    times: 20
+    commands:
+      - back
+      - tapOn: "${BOT_NAME}"
+      - waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      id: "btn-approve-bot-app"
+    direction: DOWN
+- tapOn:
+    id: "btn-approve-bot-app"
+- extendedWaitUntil:
+    visible:
+      id: "bot-app-approved"
+    timeout: 60000
+- takeScreenshot: bots-05b-commands-app-approved

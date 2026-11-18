@@ -10,7 +10,7 @@ use serial_test::serial;
 use pollis_api::bot_apps::BotAppRunState;
 use pollis_app_manifest::AdminGrants;
 use pollis_core::commands::bots::app_approval::{
-    check_artifact, developer_key_public, sign_dev_build, AppApproval, AppApprovalRecord, AppApprovalRefusal, Artifact,
+    check_artifact, check_artifact_from, developer_key_public, sign_dev_build, AppApproval, AppApprovalRecord, AppApprovalRefusal, Artifact,
     DevApproval, VerifiedAppApproval, APP_APPROVAL_VERSION,
 };
 use pollis_core::commands::bots::apps::{self, AppRunReport, ArtifactFacts};
@@ -513,8 +513,9 @@ async fn a_development_installation_runs_its_developers_builds_and_members_see_t
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn an_installation_set_to_update_itself_takes_non_widening_updates_only() {
+async fn an_installation_set_to_update_itself_takes_non_widening_updates_from_its_source_with_no_admin_online() {
     let f = fixture().await;
+    let source = "https://apps.example/triage.wasm";
     f.runtime_has(&component("v1"), V1, None).await;
     let view = f.view(&f.alice).await;
     let pending = &view["pending"];
@@ -528,22 +529,40 @@ async fn an_installation_set_to_update_itself_takes_non_widening_updates_only() 
     )
     .await
     .expect("approve with auto-update");
-    let args = json!({ "groupId": f.group, "botUserId": f.bot() });
-    assert_eq!(f.alice.invoke_json("auto_approve_bot_app", args.clone()).await, false, "nothing waiting");
+    let approved_hash = hex_hash(&component("v1"), V1);
+    let (f, approved_hash) = (&f, approved_hash.as_str());
+    let run = |c: Vec<u8>, m: &'static str, from: &'static str| async move {
+        let v = f.check().await.expect("approval verifies");
+        let app = check_artifact_from(&v, &Artifact { component: &c, manifest_json: m.as_bytes(), dev_signature: None }, from)?;
+        let hash = pollis_app_manifest::hex(&app.app_hash);
+        apps::accept_app_hash(&f.host.state, f.bot(), v.seq(), approved_hash, &hash).await.expect("ledger")?;
+        Ok::<_, AppApprovalRefusal>(app)
+    };
 
-    // A narrowing update from the same source: approved by any admin's app, with its own record.
-    f.runtime_has(&component("v2"), V2, None).await;
-    assert_eq!(f.carol.invoke_json("auto_approve_bot_app", args.clone()).await, true);
-    let v = f.check().await.expect("auto-approved update verifies");
-    check_artifact(&v, &Artifact { component: &component("v2"), manifest_json: V2.as_bytes(), dev_signature: None })
-        .expect("the update loads");
-    assert_eq!(v.record.common().approver_user_id, f.carol.user_id());
+    // No admin does anything from here on.
+    run(component("v1"), V1, source).await.expect("the approved artifact runs");
+    // A narrowing v2 from the pinned source: the runtime takes it itself.
+    let app = run(component("v2"), V2, source).await.expect("a non-widening update runs");
+    assert!(app.auto_updated);
+    // The same v2 from anywhere else waits for an admin.
+    assert!(matches!(run(component("v2"), V2, "/opt/elsewhere/triage.wasm").await, Err(AppApprovalRefusal::HashMismatch { .. })));
+    // A widening v3 from the pinned source waits for an admin.
+    assert!(matches!(run(component("v3"), V3, source).await, Err(AppApprovalRefusal::BuildWidens(_))));
+    // Serving v1 again after v2 cannot undo the update.
+    assert_eq!(run(component("v1"), V1, source).await.unwrap_err(), AppApprovalRefusal::ArtifactRolledBack);
+    run(component("v2"), V2, source).await.expect("v2 still runs");
 
-    // A widening update waits for an admin.
-    f.runtime_has(&component("v3"), V3, None).await;
-    assert_eq!(f.alice.invoke_json("auto_approve_bot_app", args).await, false);
-    let view = f.view(&f.alice).await;
-    assert_eq!(view["pending"]["widens"], true);
-    assert_eq!(view["pending"]["autoApprovable"], false);
-    assert_eq!(view["report"]["state"], serde_json::to_value(BotAppRunState::AwaitingApproval).unwrap());
+    // Admins see what runs from the runtime's report; nothing is waiting.
+    let facts = ArtifactFacts {
+        app_hash: Some(hex_hash(&component("v2"), V2)),
+        manifest: Some(V2.to_string()),
+        source: Some(source.into()),
+        developer_key: None,
+    };
+    apps::report_app(&f.host.state, f.host.session(), &AppRunReport::running(facts, true)).await.expect("report");
+    let view = f.view(&f.carol).await;
+    assert!(view["pending"].is_null(), "{view}");
+    assert_eq!(view["running"]["autoUpdated"], true);
+    assert_eq!(view["running"]["version"], "1.1.0");
+    assert_eq!(view["report"]["state"], serde_json::to_value(BotAppRunState::Running).unwrap());
 }

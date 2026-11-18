@@ -725,3 +725,25 @@ WHEN NEW.seq < OLD.seq
 BEGIN
     SELECT RAISE(ABORT, 'an accepted App approval seq never goes back');
 END;
+
+-- The App hashes this bot host ran under each App approval (#2005), in order:
+-- the approved hash, then any newer artifact from the approval's pinned
+-- source it accepted under `auto_update`. Going back to a superseded hash
+-- under the same approval is refused, so an automatic update cannot be undone
+-- by serving the older file again. Append-only. Only bot installations write
+-- it; it stays empty for a person's device.
+CREATE TABLE IF NOT EXISTS bot_app_accepted_hash (
+    installation_id TEXT NOT NULL CHECK (length(installation_id) BETWEEN 1 AND 128),
+    seq             INTEGER NOT NULL CHECK (seq >= 1),
+    ordinal         INTEGER NOT NULL CHECK (ordinal >= 0),
+    app_hash        TEXT NOT NULL CHECK (length(app_hash) = 64),
+    PRIMARY KEY (installation_id, seq, ordinal),
+    UNIQUE (installation_id, seq, app_hash)
+);
+
+CREATE TRIGGER IF NOT EXISTS bot_app_accepted_hash_append_only
+BEFORE UPDATE ON bot_app_accepted_hash
+FOR EACH ROW
+BEGIN
+    SELECT RAISE(ABORT, 'accepted App hashes are append-only');
+END;
