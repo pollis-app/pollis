@@ -130,7 +130,7 @@ mobile/components/UserAvatar.tsx               profile-photo
 mobile/lib/avatar*                             profile-photo
 mobile/app/self/security.tsx                   security security-events export
 mobile/app/self/security-events.tsx            security-events
-mobile/app/self/diagnostics.tsx                diagnostics self-update
+mobile/app/self/diagnostics.tsx                diagnostics
 mobile/components/self/CopyDiagnostics*        diagnostics
 mobile/app/self/open-source/*                  open-source
 mobile/components/self/BuildRows.tsx           app-update

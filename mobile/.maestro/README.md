@@ -104,7 +104,7 @@ The order:
 
 1. the `fresh-account` flows: those that need an account nobody else has
    touched (`auth`, `sign-in-device`, `client-policy`, `diagnostics`, `tour`,
-   `empty-states`, `theme-startup`, `export`, `self-update`, `group-aliases`,
+   `empty-states`, `theme-startup`, `export`, `group-aliases`,
    the four `vault*` flows, `locale-smoke`). Each clears the app and signs up
    an address of its own: `subflows/fresh-email.yaml` adds `-<name>-<time>` to
    the run's address (`sign-in.yaml` does it when called with `FRESH`);
@@ -143,7 +143,6 @@ its `onFlowComplete`). Flows that cannot share the account and why:
 | `empty-states` | every screen it checks is empty only on a new account |
 | `theme-startup` | a new account must settle on the default accent |
 | `export` | the archive of an attachment-free account offers no download; the shared one has attachments |
-| `self-update` | counts exactly one self-update, for the one group it made; every group on the shared account is due |
 | `group-aliases` | "Apply to all my groups" changes every group of the account, and its list expects two |
 | `vault`, `vault-media-instant`, `vault-swipe`, `vault-retry` | there is one Vault per account, and each checks its empty state and exact contents |
 
@@ -168,7 +167,6 @@ A flow file still runs alone with a bare `maestro test`: `home.yaml` signs
 | `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch: a wrong PIN puts the pad back with `pin-error`, and the right one's fourth digit must, within a second, show `pin-busy` (the launch loader, with no keypad key left on screen) or have already left the pad (a fast unlock; never a frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
 | `group-aliases` | #2003 Self → Group aliases: two groups start on the main profile; a name and photo set in one group (photo picked through `subflows/pick-square-photo.yaml`, shared with `profile-photo`); "Apply to all my groups" writes the name to both, not the photo; own messages there carry the alias and its photo; "Use my main profile" in one group resets only that one | no |
-| `self-update` | #1880 a return to the foreground rotates this device's own leaf in a group where it is due (a group it just created): the newest `[mls-backstop]` line in Diagnostics counts `1 self-updated`; a second return counts `0`, so the rotation was recorded. Needs a binary with the core change | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `composer-draft` | unsent composer text survives backing out to another tab and returning (desktop's in-memory draft store, `mobile/lib/drafts.ts`); sending clears it | no |
 | `outbox` | #1335 a message whose send is killed mid-flight (`stopApp` right after Send in a fresh group) is still there after relaunch + unlock and is delivered by the outbox drain (no `btn-retry-message-*` left); Android only: a send made in airplane mode is kept as failed with `btn-retry-message-<id>` / `btn-discard-message-<id>`, and back online Retry settles it | no |
@@ -497,7 +495,12 @@ group of its own and posts there untagged, since a creator never carries the tag
 pending account and makes the device an admin; the device finds the pending
 invite under "Invited" on the member page (invitee, "invited by") and revokes it
 (`2-tags-and-revoke.yaml`). The script passes only when the creator has seen the
-invite listed and then gone.
+invite listed and then gone. Between the two, `1b-self-update.yaml` (#1880, #2027) checks
+that this device rotated its own leaf in the group it JOINED, by the join's
+`[mls] post-join self-update` or a foreground `[mls-backstop] …, 1 self-updated`,
+and that the next return to the foreground rotates nothing. It needs a joined
+group: since #1961 a group's founder owes no self-update, so the old one-device
+`self-update` flow (a group it created) could never see one.
 
 **Per-group aliases (automated, #2003):** `mobile/scripts/maestro-group-aliases.sh <device>`
 — `pollis-tui`'s `alias_peer` example creates a group, sets its own alias there

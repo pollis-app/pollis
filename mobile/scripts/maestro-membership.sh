@@ -10,8 +10,10 @@
 # for it to accept, invites the pending account and makes the device an admin.
 # Part 1 accepts and posts (the device's message carries the "new" tag, no
 # "joined" line), then creates a group of its own and posts there untagged (a
-# creator is never tagged); part 2 revokes the pending invite from the member
-# page's "Invited" section. The peer must see the invite listed and then gone
+# creator is never tagged); part 1b checks this device rotated its own leaf
+# in the group it joined, once (#1880, #2027: a founder owes no self-update
+# since #1961, so a joined group is the one this needs); part 2 revokes the
+# pending invite from the member page's "Invited" section. The peer must see the invite listed and then gone
 # before it exits 0.
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled
@@ -54,7 +56,7 @@ export POLLIS_GROUP_NAME="$GROUP_NAME"
 
 echo "==> building the peer"
 (cd "$REPO" && cargo build -q -p pollis-tui --example membership_peer)
-PEER_BIN="$REPO/target/debug/examples/membership_peer"
+PEER_BIN="${CARGO_TARGET_DIR:-$REPO/target}/debug/examples/membership_peer"
 PEER_DIR="$(mktemp -d)"
 PEER_OUT="$PEER_DIR/peer.out"
 # Set MEMBERSHIP_KEEP_LOGS=<dir> to keep the peer's output for a failed run.
@@ -90,6 +92,10 @@ G=(-e GROUP_NAME="$GROUP_NAME" -e MAESTRO_PEER_HANDLE="$HANDLE" -e MAESTRO_PENDI
 echo "==> 1/2 device accepts and posts (tagged new, no joined line); its own group untagged"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$PRIMARY_EMAIL" \
   "$FLOWS/1-accept-and-post.yaml"
+
+echo "==> 1b/2 device rotated its leaf in the joined group, once"
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$PRIMARY_EMAIL" \
+  "$FLOWS/1b-self-update.yaml"
 
 echo "==> creator invites the pending account, promotes the device"
 await_peer PEER_PROMOTED 300
