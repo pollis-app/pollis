@@ -15,25 +15,18 @@ use axum::{extract::State, response::IntoResponse, response::Response};
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate_and_parse, gate_identity_and_parse, ok_response, resolve_actor, RawRequest, WriteOutcome};
+use crate::writes::{bad_request, gate_and_parse, ok_response, resolve_actor, RawRequest, WriteOutcome};
+use crate::bots::signed_request;
 use crate::AppState;
 
 pub use pollis_api::bot_apps::*;
 
-#[allow(clippy::result_large_err)]
-fn signed(identity: Option<(String, String)>) -> Result<(String, String), Response> {
-    identity.ok_or_else(|| AuthRejection::Unauthorized.into_response())
-}
 
 // ---------------------------------------------------------------- approve
 
 /// POST /v1/bots/app/approve — device-signed by a current admin of the bot's group.
 pub async fn approve_bot_app(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<ApproveBotAppBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, device) = match signed(identity) {
+    let (parsed, actor, device) = match signed_request::<ApproveBotAppBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -245,11 +238,7 @@ async fn read_report(conn: &Connection, installation_id: &str) -> anyhow::Result
 
 /// POST /v1/bots/app/report — device-signed by one of the bot's hosts.
 pub async fn report_bot_app(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<BotAppReportBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, device) = match signed(identity) {
+    let (parsed, actor, device) = match signed_request::<BotAppReportBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };

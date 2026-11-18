@@ -303,11 +303,11 @@ impl std::fmt::Display for AppApprovalRefusal {
             Self::Malformed(why) => write!(f, "malformed approval: {why}"),
             Self::WrongKind => write!(f, "the approval is not of the kind it is stored as"),
             Self::WrongInstallation => write!(f, "the approval is for another installation"),
-            Self::ApproverNotInGroup => write!(f, "the approving device is not in this host's view of the group"),
-            Self::UncertifiedApprover(why) => write!(f, "the approving device is not certified: {why}"),
-            Self::BadSignature => write!(f, "the approval's signature does not verify"),
-            Self::TransparencyAlarm => write!(f, "the transparency log disagrees with the approver's account key"),
-            Self::NotAdmin(why) => write!(f, "the approver is not a current admin of the group ({why})"),
+            Self::ApproverNotInGroup => SignerRefusal::NotInGroup.fmt(f),
+            Self::UncertifiedApprover(why) => SignerRefusal::Uncertified(why.clone()).fmt(f),
+            Self::BadSignature => SignerRefusal::BadSignature.fmt(f),
+            Self::TransparencyAlarm => SignerRefusal::TransparencyAlarm.fmt(f),
+            Self::NotAdmin(why) => SignerRefusal::NotAdmin(why.clone()).fmt(f),
             Self::ManifestMismatch => write!(f, "the manifest served with the approval is not the approved one"),
             Self::WidenedGrants(why) => write!(f, "the approval grants more than the manifest asks for: {why}"),
             Self::RolledBack { accepted, served } => write!(
@@ -432,18 +432,24 @@ pub fn check_artifact(approved: &VerifiedAppApproval, artifact: &Artifact<'_>) -
             let signature = b64().decode(&sig.signature).map_err(|_| AppApprovalRefusal::BadBuildSignature)?;
             approval::verify_signature_in(APP_DEV_BUILD_DOMAIN, &key, &app_hash, &signature)
                 .map_err(|_| AppApprovalRefusal::BadBuildSignature)?;
-            let widens = pollis_app_manifest::widenings_between(&approved.manifest, &manifest);
-            if !widens.is_empty() {
-                let why = widens
-                    .iter()
-                    .map(|c| format!("{:?} {}", c.field, c.value).to_lowercase())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Err(AppApprovalRefusal::BuildWidens(why));
-            }
+            refuse_widening(&approved.manifest, &manifest)?;
             Ok(LoadableApp { app_hash, grants: d.grants.carried_to(&manifest), manifest, development: true, auto_updated: false })
         }
     }
+}
+
+/// Refuse a manifest that asks for anything `approved` did not, naming each widening.
+fn refuse_widening(approved: &Manifest, manifest: &Manifest) -> Result<(), AppApprovalRefusal> {
+    let widens = pollis_app_manifest::widenings_between(approved, manifest);
+    if widens.is_empty() {
+        return Ok(());
+    }
+    let why = widens
+        .iter()
+        .map(|c| format!("{:?} {}", c.field, c.value).to_lowercase())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(AppApprovalRefusal::BuildWidens(why))
 }
 
 /// [`check_artifact`], plus the record's standing permission for updates: a
@@ -473,15 +479,7 @@ pub fn check_artifact_from(
     }
     let malformed = |e: pollis_app_manifest::ManifestError| AppApprovalRefusal::Malformed(e.to_string());
     let manifest = Manifest::from_json(artifact.manifest_json).map_err(malformed)?;
-    let widens = pollis_app_manifest::widenings_between(&approved.manifest, &manifest);
-    if !widens.is_empty() {
-        let why = widens
-            .iter()
-            .map(|c| format!("{:?} {}", c.field, c.value).to_lowercase())
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(AppApprovalRefusal::BuildWidens(why));
-    }
+    refuse_widening(&approved.manifest, &manifest)?;
     let app_hash = pollis_app_manifest::app_hash(artifact.component, artifact.manifest_json).map_err(malformed)?;
     Ok(LoadableApp { app_hash, grants: a.grants.carried_to(&manifest), manifest, development: false, auto_updated: true })
 }
