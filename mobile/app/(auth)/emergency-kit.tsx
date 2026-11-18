@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { View, Share } from "react-native";
 import { Text } from "../../components/Text";
-import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { Screen, Body, Card, Button, BottomAction, CheckRow } from "../../components/ui";
@@ -11,12 +10,8 @@ import { semantic, type as ty, fonts, typeSize } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import i18n from "../../i18n";
-import { haptic } from "../../lib/haptics";
 import { useThemeRerender } from "../../components/theme";
-
-const COPY_FEEDBACK_MS = 2000;
-
-type CopyState = "idle" | "copied" | "failed";
+import { useCopyFeedback } from "../../hooks/useCopyFeedback";
 
 /** Byte-for-byte the text desktop writes (`auth:emergencyKit.document`). */
 function emergencyKitDocument(secretKey: string): string {
@@ -33,20 +28,7 @@ function EmergencyKit() {
   const pendingSecretKey = appStore.pendingSecretKey;
   const setPendingSecretKey = appStore.setPendingSecretKey;
   const [acknowledged, setAcknowledged] = useState(false);
-  const [copyState, setCopyState] = useState<CopyState>("idle");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (copyState === "idle") {
-      return;
-    }
-    timer.current = setTimeout(() => setCopyState("idle"), COPY_FEEDBACK_MS);
-    return () => {
-      if (timer.current) {
-        clearTimeout(timer.current);
-      }
-    };
-  }, [copyState]);
+  const { copyState, copy } = useCopyFeedback();
 
   if (!pendingSecretKey) {
     router.replace("/(auth)/initializing");
@@ -61,14 +43,7 @@ function EmergencyKit() {
   };
 
   // VERIFIED copy (#897): a false or rejected write shows as failure. Never read back (iOS paste banner).
-  const onCopy = async () => {
-    setCopyState("idle");
-    const copied = await Clipboard.setStringAsync(pendingSecretKey).catch(
-      () => false,
-    );
-    haptic(copied ? "success" : "error");
-    setCopyState(copied ? "copied" : "failed");
-  };
+  const onCopy = () => copy(pendingSecretKey);
 
   // Passed as `message`, never a file: the recovery key must not touch disk (#1001).
   const onShare = () => {

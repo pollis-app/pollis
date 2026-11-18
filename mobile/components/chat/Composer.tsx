@@ -4,6 +4,7 @@ import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Field, PressInPressable } from "../ui";
+import { BotBadge } from "../BotBadge";
 import { UserAvatar } from "../UserAvatar";
 import { fonts, layout, semantic, type as ty, r, typeSize } from "../../theme/tokens";
 import {
@@ -166,9 +167,11 @@ export function Composer({
                 key={candidate.userId}
                 testID={`row-mention-${candidate.username}`}
                 accessibilityRole="button"
-                accessibilityLabel={t("mobile:chat.mentionLabel", {
-                  name: candidate.username,
-                })}
+                accessibilityLabel={
+                  candidate.isBot
+                    ? `${t("mobile:chat.mentionLabel", { name: candidate.username })} (${t("mobile:bots.badge")})`
+                    : t("mobile:chat.mentionLabel", { name: candidate.username })
+                }
                 onPress={() => acceptMention(candidate)}
                 style={({ pressed }) => suggestionRow(pressed, i)}
               >
@@ -190,6 +193,9 @@ export function Composer({
                   >
                     {candidate.displayName}
                   </Text>
+                ) : null}
+                {candidate.isBot ? (
+                  <BotBadge testID={`badge-mention-bot-${candidate.username}`} />
                 ) : null}
               </Pressable>
             ))}
