@@ -157,6 +157,12 @@
       "source": "docs/bots/concepts-for-developers.md",
       "checked_by": []
     },
+    "docs/bots/developer-guide": {
+      "kind": "doc",
+      "about": "Writing an App in TypeScript: pollis app new/test/build, the manifest, handlers and ctx, the App hash, sandbox limits (source for website/bots-developers.html#apps)",
+      "source": "docs/bots/developer-guide.md",
+      "checked_by": []
+    },
     "docs/machine-checked-correctness-design": {
       "kind": "doc",
       "about": "Machine-checked correctness (linked from the website)",
@@ -705,10 +711,12 @@
     },
     "website/bots-developers": {
       "kind": "website-page",
-      "about": "Bots for developers: the alerts webhook and the job loop (from docs/bots/alerts-webhook.md and concepts-for-developers.md)",
+      "about": "Bots for developers: the alerts webhook, the job loop and writing an App in TypeScript (from docs/bots/alerts-webhook.md, concepts-for-developers.md and developer-guide.md)",
       "source": "website/bots-developers.html",
       "url": "https://pollis.com/bots-developers.html",
-      "checked_by": []
+      "checked_by": [
+        "claims"
+      ]
     },
     "website/continuity": {
       "kind": "website-page",

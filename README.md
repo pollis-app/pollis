@@ -50,6 +50,7 @@ Start with **[docs/bots/](docs/bots/README.md)**:
 - [Self-hosting](docs/bots/self-hosting.md): install and run `pollis-bot`, as a service.
 - [Alerts webhook](docs/bots/alerts-webhook.md): post into a channel with `curl`, Grafana or `pollis-bot post`.
 - [Concepts for developers](docs/bots/concepts-for-developers.md): the job loop, triggers, grants.
+- [Writing an App in TypeScript](docs/bots/developer-guide.md): `pollis app new`, test and build your own App.
 
 ## Security model
 

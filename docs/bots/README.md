@@ -16,6 +16,7 @@ A Pollis bot is a member of one group that is run by a program, not a person.
 | [Self-hosting](./self-hosting.md) | Whoever runs the bot's machine | Installing `pollis-bot`, pairing, running it as a service, logs, troubleshooting |
 | [Alerts webhook](./alerts-webhook.md) | Developers and operators | Posting alerts into a channel with `curl`, Grafana or `pollis-bot post` |
 | [Concepts for developers](./concepts-for-developers.md) | Developers | How a job runs, triggers and trigger keys, why only one host acts, grants |
+| [Writing an App in TypeScript](./developer-guide.md) | Developers | Quick start, the manifest, handlers and `ctx`, testing, building, the App hash, limits |
 
 Internals (schema, endpoints, protocol details) live in the contributor wiki: [`.codesight/wiki/bots.md`](../../.codesight/wiki/bots.md). The runtime's own reference is [`pollis-bot/README.md`](../../pollis-bot/README.md).
 
@@ -32,7 +33,7 @@ These words are kept apart everywhere in Pollis: in the apps, in these docs and 
 
 A bot is not the machine it runs on, and not the code it runs. Machines (hosts) can be added and removed, and the code can change, while the bot stays the same member.
 
-Today every bot has one installation, and that installation runs the runtime's built-in **alerts** handler: it posts the alerts it receives on its webhook into a channel. Writing your own App is coming in a later release; [Concepts for developers](./concepts-for-developers.md) describes the job loop it will plug into.
+Today every bot has one installation, and that installation runs the runtime's built-in **alerts** handler: it posts the alerts it receives on its webhook into a channel. You can already write an App in TypeScript and test it against the real sandbox ([Writing an App in TypeScript](./developer-guide.md)); running your own App in a group arrives with App approval. [Concepts for developers](./concepts-for-developers.md) describes the job loop it plugs into.
 
 ## Quick start
 

@@ -41,6 +41,7 @@
     "website/artifacts.js",
     "website/assurance.html",
     "website/assurance.js",
+    "website/bots-developers.html",
     "website/bots.html",
     "website/continuity.html",
     "website/device-security.html",
@@ -20770,6 +20771,89 @@
       ],
       "status": "verified",
       "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-apps-01",
+      "doc": "website/bots-developers.html",
+      "locator": {
+        "heading": "Write an App in TypeScript",
+        "quote": "a call the manifest does not allow fails in a test exactly as it would in a group."
+      },
+      "claim": "`pollis app test` runs the built component through pollis_app_host::AppHost::run_job, the runtime's own sandbox, grant checks and refusal strings; only the runtime's services are replaced by fixtures (#2006).",
+      "kind": "security",
+      "anchors": [
+        "pollis-app-dev/src/runner.rs",
+        "pollis-app-host/src/lib.rs",
+        "sdk/ts/app/src/testing.ts"
+      ],
+      "evidence": [
+        "pollis-app-dev/tests/runner.rs:98",
+        "sdk/ts/cli/test/cli.test.ts:179"
+      ],
+      "status": "verified",
+      "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
+    },
+    {
+      "id": "bots-apps-02",
+      "doc": "website/bots-developers.html",
+      "locator": {
+        "heading": "Write an App in TypeScript",
+        "quote": "The same source and lockfile give the same hash on any machine."
+      },
+      "claim": "The build stages in a fixed directory, seeds ComponentizeJS's work-dir name, strips install-path comments and pre-initializes with fixed randomness and clocks, so the component and App hash depend only on source and lockfile; a test builds in two directories and compares (#2006).",
+      "kind": "security",
+      "anchors": [
+        "sdk/ts/cli/src/build.ts",
+        "pollis-app-dev/src/wizer.rs",
+        "pollis-app-dev/src/app_hash.rs"
+      ],
+      "evidence": [
+        "sdk/ts/cli/test/cli.test.ts:76",
+        "pollis-app-dev/src/app_hash.rs:88"
+      ],
+      "status": "verified",
+      "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
+    },
+    {
+      "id": "bots-apps-03",
+      "doc": "website/bots-developers.html",
+      "locator": {
+        "heading": "Write an App in TypeScript",
+        "quote": "With no hosts listed, the App cannot send anything outside the group."
+      },
+      "claim": "http-fetch is the App's only network path (sockets and wasi:http imports are refused at load) and is refused for any host not in the effective egress list, so empty egress means no outbound request (#2004, exercised through the SDK in #2006).",
+      "kind": "security",
+      "anchors": [
+        "pollis-app-host/src/egress.rs",
+        "pollis-app-host/src/wasi.rs",
+        "sdk/ts/app/src/runtime.ts"
+      ],
+      "evidence": [
+        "pollis-app-host/src/egress.rs:65",
+        "pollis-app-dev/tests/runner.rs:181",
+        "sdk/ts/cli/test/cli.test.ts:173"
+      ],
+      "status": "verified",
+      "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
+    },
+    {
+      "id": "bots-apps-04",
+      "doc": "website/bots-developers.html",
+      "locator": {
+        "heading": "Write an App in TypeScript",
+        "quote": "are refused at build with the reason;"
+      },
+      "claim": "The build's esbuild plugin refuses every Node built-in (bare and node: prefixed) with a message naming the import and the alternative (#2006).",
+      "kind": "behaviour",
+      "anchors": [
+        "sdk/ts/cli/src/build.ts"
+      ],
+      "evidence": [
+        "sdk/ts/cli/src/build.ts:84",
+        "sdk/ts/cli/test/cli.test.ts:101"
+      ],
+      "status": "verified",
+      "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
     }
   ]
 }

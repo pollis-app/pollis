@@ -6,12 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pollis — Bots for developers</title>
   <meta name="description"
-    content="Post alerts into a Pollis channel through a bot's webhook, and how the bot runtime's job loop works." />
+    content="Post alerts into a Pollis channel through a bot's webhook, how the bot runtime's job loop works, and writing an App in TypeScript." />
   <meta name="theme-color" content="#0f1117" />
 
   <meta property="og:title" content="Pollis — Bots for developers" />
   <meta property="og:description"
-    content="Post alerts into a Pollis channel through a bot's webhook, and how the bot runtime's job loop works." />
+    content="Post alerts into a Pollis channel through a bot's webhook, how the bot runtime's job loop works, and writing an App in TypeScript." />
   <meta property="og:type" content="website" />
 
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
@@ -44,7 +44,7 @@
       <div class="doc-header">
         <h1 class="doc-title">Bots for developers</h1>
         <p class="doc-subtitle">
-          Post alerts into a channel, and how the bot runtime decides what happens.
+          Post alerts into a channel, how the bot runtime decides what happens, and writing your own App.
         </p>
       </div>
 
@@ -203,6 +203,52 @@ curl -sS -X POST "$URL" \
           <a href="https://github.com/pollis-app/pollis/blob/main/docs/bots/alerts-webhook.md" target="_blank"
             rel="noopener noreferrer"><code>docs/bots/alerts-webhook.md</code></a>, which this page is kept in step
           with.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section" id="apps">
+        <h2 class="doc-section-title">Write an App in TypeScript</h2>
+        <p>
+          An App is the code that decides what a bot does. You write it in TypeScript with
+          <code>@pollis/app</code>; the group's own runtime runs it in a sandbox, where it can do only what its
+          manifest asks for and an admin allows. You never run the bot or hold its keys.
+        </p>
+        <code class="doc-cmd">import { app } from "@pollis/app";
+
+export default app({
+  manifest: { read: { channels: ["*"] }, actions: ["reply"] },
+  async onCommand(cmd, ctx) {
+    await ctx.reply(cmd.message, `Hello, ${cmd.args || cmd.message.author.displayName}!`);
+  },
+});</code>
+        <ul>
+          <li><code>pollis app new hello-bot --lang ts</code> creates an App with one handler, a test and a
+            README.</li>
+          <li><code>pollis app test</code> runs your tests against the built App in the same sandbox the runtime
+            uses, offline: a call the manifest does not allow fails in a test exactly as it would in a group.</li>
+          <li><code>pollis app build</code> writes the component and <code>pollis-app.json</code> and prints the
+            <strong>App hash</strong>. The same source and lockfile give the same hash on any machine.</li>
+        </ul>
+        <p>
+          <strong>The manifest is the contract.</strong> It lives in your code and is written out at build, so it
+          cannot drift: the channels the App reads, what it may do (<code>reply</code>, <code>post</code>,
+          <code>react</code>, editing or deleting its own messages), how much state it keeps, and the exact hosts
+          <code>ctx.fetch</code> may reach. With no hosts listed, the App cannot send anything outside the group.
+        </p>
+        <p>
+          <strong>Limits.</strong> An App can send what it reads to the hosts its manifest lists. It has no files,
+          sockets or processes, so Node built-ins such as <code>fs</code>, <code>net</code> and
+          <code>child_process</code> are refused at build with the reason; plain-JavaScript npm packages work. It
+          sees attachments' names, types and sizes, not their bytes. Every job starts fresh, within 10 seconds and
+          64 MiB, and nothing it queued is applied unless it finishes without an error. No App can moderate.
+        </p>
+        <p>
+          The walkthrough, from an empty folder to a tested App, is
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/bots/developer-guide.md" target="_blank"
+            rel="noopener noreferrer"><code>docs/bots/developer-guide.md</code></a>; every function and limit is in
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/bots/app-reference.md" target="_blank"
+            rel="noopener noreferrer"><code>docs/bots/app-reference.md</code></a>.
         </p>
       </section>
     </div>
