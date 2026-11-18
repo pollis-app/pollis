@@ -16,6 +16,11 @@ tags:
 - tapOn:
     id: "btn-add-group"
     optional: true
+# The "+" sheet animates in (slower on iPad).
+- extendedWaitUntil:
+    visible:
+      id: "btn-create-group"
+    timeout: 10000
 - tapOn:
     id: "btn-create-group"
 - tapOn:
@@ -29,9 +34,18 @@ tags:
     file: ../subflows/group-created.yaml
     env:
       GROUP: "Alias Work"
+# Now there is a group: create lives in the "+" sheet at the end of the pill strip.
+- extendedWaitUntil:
+    visible:
+      id: "btn-add-group"
+    timeout: 15000
 - tapOn:
     id: "btn-add-group"
-    optional: true
+# The "+" sheet animates in (slower on iPad).
+- extendedWaitUntil:
+    visible:
+      id: "btn-create-group"
+    timeout: 10000
 - tapOn:
     id: "btn-create-group"
 - tapOn:
@@ -145,12 +159,22 @@ tags:
       id: "row-message-.*-avatar-photo"
     timeout: 30000
 - takeScreenshot: aliases-04-own-message
+# iPad shows the chat beside the group: no back there.
 - tapOn:
     id: "btn-back"
+    optional: true
 
-# "Use my main profile" in Club only.
+# "Use my main profile" in Club only. With the composer still focused (iPad
+# keeps the chat on screen), the first tap on the tab bar only closes the keyboard.
 - tapOn:
     id: "tab-self"
+- runFlow:
+    when:
+      notVisible:
+        id: "row-self-aliases"
+    commands:
+      - tapOn:
+          id: "tab-self"
 - tapOn:
     id: "row-self-aliases"
 - tapOn: "Alias Club, Mia everywhere"
