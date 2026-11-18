@@ -71,7 +71,7 @@ Pairing creates the bot and makes this machine its first host.
    ```text
        Pairing code:  7KQ2M9XD
 
-   A group admin types this code in Pollis, in the group's settings → Bots → Add a bot. It expires at 14:32 UTC.
+   A group admin types this code in Pollis: open the group, then Bots → Add a bot. It expires at 14:32 UTC.
    ```
 
 3. Give the code to a group admin. They type it on the **Add a bot** page with the bot's name.
@@ -239,10 +239,10 @@ Inside it:
 |---|---|
 | `config.json` | Optional settings: `max_installations`, and `webhook` with `bind`, `per_minute`, `burst`. Unknown fields are refused. |
 | `installations/<id>/installation.json` | One installation: its bot, group and this host's device id. |
-| `stores/<device id>/` | That installation's encrypted local store. |
+| `stores/<device id>/` | That installation's encrypted local store, including how far its job loop has read each channel. |
 | `status.json` | Written by `run` whenever an installation's state changes; read by `status`. |
 
-The bot's keys are not in these files; they are in the keystore. See also [`pollis-bot/README.md`](../../pollis-bot/README.md#files).
+The bot's keys are not in these files; they are in the keystore. To remove an installation from this machine (after an admin revoked the host or deleted the bot), run `pollis-bot forget --installation <id>`: it deletes the record, the store and the keys together. See also [`pollis-bot/README.md`](../../pollis-bot/README.md#files).
 
 ## Logs and status
 
@@ -275,8 +275,8 @@ During pairing the log shows `filing a pairing request`, then `waiting for appro
 | `this host already runs bot <id>` | Run `add-host` on a different machine. |
 | `this runtime is configured for at most N installations` | Raise `max_installations` in `config.json`, or run the extra bot on another machine. |
 | `no installations on this host` | Run `pollis-bot pair` and have an admin type the code. |
-| `opening installation <id>` | The host may have been revoked on the bot's page, or the bot deleted. If so, remove `installations/<id>` and pair again. The rest of the line says why it could not open. |
-| `unattended_refused: the account no longer exists` | The bot was deleted. Remove `installations/<id>`. |
+| `opening installation <id>` | The host may have been revoked on the bot's page, or the bot deleted. If so, run `pollis-bot forget --installation <id>`, then `pair` or `add-host` again if the bot should stay. The rest of the line says why it could not open. |
+| `unattended_refused: the account no longer exists` | The bot was deleted. Run `pollis-bot forget --installation <id>`. |
 | `unattended_refused: no bot installation for this account on this machine` | The keystore entry is missing: `run` is running as a different user than `pair` did, or the keystore was cleared. Run as the user who paired, or pair again. |
 | `installation.json is missing: remove the directory if its pairing never finished` | A pairing was interrupted. Remove that directory. |
 | `config.json is not valid config` / `max_installations must be at least 1` | Fix `config.json`; `pollis-bot --help` lists its fields. |
