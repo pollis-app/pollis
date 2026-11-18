@@ -11,9 +11,10 @@ use serial_test::serial;
 
 use pollis_bot::action::Action;
 use pollis_bot::core_host::installation_core;
+use pollis_bot::app_handler::{ActionKind, AdminGrants, AppHandler, ChannelGrant, EventKind};
 use pollis_bot::handler::{AlertsHandler, Handler, HandlerError};
 use pollis_bot::job::{Installation, JobInput, TriggerOutcome};
-use pollis_bot::trigger::Trigger;
+use pollis_bot::trigger::{Trigger, WebhookCall};
 use pollis_core::commands::bots;
 
 use crate::harness::{pair_new_bot, wipe, world, writable_remote, BotHostClient, TestClient};
@@ -197,4 +198,102 @@ async fn an_asleep_peer_that_ranks_first_never_blocks_the_wrap() {
     assert_eq!((report.approvals_error, report.approvals_retry_at), (None, None), "wraps at once");
     host4.finish_pairing(&handle4, Duration::from_secs(2)).await;
     assert_eq!(host4.bot_user_id(), bot);
+}
+
+// ---------------------------------------------------------------- #2004 Apps
+
+/// The fixture App (`pollis-app-host/fixtures/test-app`): its handlers run a
+/// script from the message, here `incr` (read, add one, write back the shared
+/// counter), `post-kv` (post the counter) and `ack` (reply to the trigger).
+fn counter_app(channel_id: &str) -> Arc<dyn Handler> {
+    let wasm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm"))
+        .expect("fixture App");
+    let manifest = br#"{
+        "name": "counter", "version": "0.1.0",
+        "triggers": ["messages"],
+        "read": { "channels": ["*"] },
+        "actions": ["post", "reply"],
+        "state": { "quota": 4096 }
+    }"#;
+    let grants = AdminGrants {
+        channels: vec![ChannelGrant { id: channel_id.to_string(), name: "general".into() }],
+        events: [EventKind::Created].into(),
+        actions: [ActionKind::Post, ActionKind::Reply].into(),
+        ..Default::default()
+    };
+    Arc::new(AppHandler::new(wasm, manifest, grants).expect("App handler"))
+}
+
+async fn contents(alice: &TestClient, channel: &str) -> Vec<String> {
+    alice
+        .fetch_channel_messages(channel)
+        .await
+        .into_iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_app_runs_on_asleep_hosts_that_share_its_state_beside_the_alerts_handler() {
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    let group = alice.create_group("Ops").await;
+    let general = alice.general_channel_id(&group).await;
+
+    let (host1, _) = pair_new_bot(&alice, &group, "Counter").await;
+    let bot = host1.bot_user_id().to_string();
+    let (mut host2, handle) = file_add_host(&bot, "host-2").await;
+    alice
+        .invoke_try("add_bot_host", serde_json::json!({ "botUserId": bot, "code": handle.code }))
+        .await
+        .expect("add_bot_host");
+    host1.handle_approvals().await;
+    host2.finish_pairing(&handle, Duration::from_secs(2)).await;
+
+    let a = asleep(&host1, counter_app(&general)).await;
+    let b = asleep(&host2, counter_app(&general)).await;
+    a.run_job(JobInput::Wake).await.expect("seed host 1");
+    b.run_job(JobInput::Wake).await.expect("seed host 2");
+
+    // Host 1 alone: the App counts, posts, and replies to the trigger.
+    alice
+        .send_channel_message(&general, &format!("incr n; post-kv {general} n; ack thanks"))
+        .await;
+    let r = a.run_job(JobInput::Wake).await.expect("host 1 job");
+    assert_eq!(
+        r.triggers.last().unwrap().result,
+        Ok(TriggerOutcome::Applied { posted: 2, refused: vec![] })
+    );
+
+    // Host 2 alone reads the state host 1 sealed on the DS.
+    alice.send_channel_message(&general, &format!("incr n; post-kv {general} n")).await;
+    b.run_job(JobInput::Wake).await.expect("host 2 job");
+
+    // Both at once: one claim, one commit, one post.
+    alice.send_channel_message(&general, &format!("incr n; post-kv {general} n")).await;
+    let (ra, rb) = tokio::join!(a.run_job(JobInput::Wake), b.run_job(JobInput::Wake));
+    ra.expect("host 1 job");
+    rb.expect("host 2 job");
+
+    let all = contents(&alice, &general).await;
+    let counts: Vec<&String> = all.iter().filter(|t| t.starts_with("kv n=")).collect();
+    // Newest first.
+    assert_eq!(counts, vec!["kv n=3", "kv n=2", "kv n=1"], "{all:?}");
+    assert_eq!(all.iter().filter(|t| *t == "thanks").count(), 1, "{all:?}");
+
+    // The built-in alerts handler, unchanged, beside it in the same group.
+    let (alerts_host, _) = pair_new_bot(&alice, &group, "Alerts").await;
+    let alerts = asleep(&alerts_host, Arc::new(AlertsHandler)).await;
+    let r = alerts
+        .run_job(JobInput::Webhook(WebhookCall {
+            delivery_id: "01DELIVERY".into(),
+            channel: "general".into(),
+            text: "disk full".into(),
+        }))
+        .await
+        .expect("alerts job");
+    assert_eq!(r.webhook().unwrap().result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
+    assert!(contents(&alice, &general).await.contains(&"disk full".to_string()));
 }

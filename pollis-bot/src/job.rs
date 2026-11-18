@@ -6,7 +6,9 @@
 //! 3. open (unseal) the installation's store, catch MLS up through the normal
 //!    ingest path; new messages become message triggers
 //! 4. hand each trigger to the installation's handler, which returns actions
-//! 5. claim (installation_id, trigger_key) on the DS; a lost claim discards the actions
+//!    (and, for an App, App state writes at the versions it read)
+//! 5. claim (installation_id, trigger_key) on the DS; a lost claim discards the actions;
+//!    a won one commits the App state writes (once; a conflict re-runs step 4)
 //! 6. check each action against the grants and apply what passes; a handler error discards all
 //! 7. seal the store and release the lock
 //! ```
@@ -15,7 +17,8 @@
 //! → seal" is the only way work happens, and nothing depends on a host having
 //! stayed up since the last job.
 //!
-//! A trigger with no actions is not claimed: there is nothing to deduplicate.
+//! A trigger with no actions and no state writes is not claimed: there is
+//! nothing to deduplicate.
 //! A message trigger's cursor advances once its outcome is final (applied,
 //! claimed elsewhere, refused or handler failed); a transient failure (the
 //! claim or the send could not reach the DS) leaves it unadvanced, so the next
@@ -28,9 +31,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
-use crate::action::{CheckedAction, Grants, Refusal};
-use crate::core::{CoreError, InstallationCore};
-use crate::handler::Handler;
+use crate::action::{Grants, Refusal};
+use crate::core::{CoreError, InstallationCore, StateCommit};
+use crate::handler::{Handler, HandlerContext};
 use crate::trigger::{Trigger, TriggerKey, WebhookCall};
 
 /// What woke a job.
@@ -68,9 +71,14 @@ pub enum JobError {
     CatchUp(CoreError),
     Channels(CoreError),
     Claim(CoreError),
+    /// #2004: committing an App's state writes.
+    State(CoreError),
     Post(CoreError),
     MarkHandled(CoreError),
 }
+
+/// How often a job re-runs an App whose state another host moved meanwhile.
+pub const STATE_CONFLICT_ATTEMPTS: usize = 3;
 
 impl JobError {
     pub fn fix(&self) -> &'static str {
@@ -86,6 +94,9 @@ impl JobError {
             }
             JobError::Claim(_) => {
                 "check this host can reach the Delivery Service and has not been revoked (pollis-bot status); the trigger is retried"
+            }
+            JobError::State(_) => {
+                "check this host can reach the Delivery Service; the trigger is retried under the same claim"
             }
             JobError::Post(_) => {
                 "check this host can reach the Delivery Service; the message is kept and retried under the same id"
@@ -104,6 +115,7 @@ impl std::fmt::Display for JobError {
             JobError::CatchUp(e) => ("catching up", e),
             JobError::Channels(e) => ("reading the group's channels", e),
             JobError::Claim(e) => ("claiming the trigger", e),
+            JobError::State(e) => ("saving the App's state", e),
             JobError::Post(e) => ("posting", e),
             JobError::MarkHandled(e) => ("saving progress", e),
         };
@@ -241,19 +253,50 @@ impl Installation {
         trigger: &Trigger,
         grants: &mut Option<Grants>,
     ) -> Result<TriggerOutcome, JobError> {
-        // Step 4.
-        let actions = match self.handler.handle(trigger).await {
-            Ok(actions) => actions,
-            Err(e) => return Ok(TriggerOutcome::HandlerFailed { error: e.0 }),
+        let key = trigger.key();
+        let ctx = HandlerContext { core: self.core.clone() };
+        let mut claimed = false;
+        let mut attempt = 0;
+        let actions = loop {
+            attempt += 1;
+            // Step 4.
+            let output = match self.handler.handle_job(trigger, &ctx).await {
+                Ok(output) => output,
+                Err(e) => return Ok(TriggerOutcome::HandlerFailed { error: e.0 }),
+            };
+            if output.actions.is_empty() && output.state.is_empty() {
+                return Ok(TriggerOutcome::NoActions);
+            }
+
+            // Step 5.
+            if !claimed {
+                if !self.core.claim(&key).await.map_err(JobError::Claim)? {
+                    return Ok(TriggerOutcome::ClaimedElsewhere);
+                }
+                claimed = true;
+            }
+            if output.state.is_empty() {
+                break output.actions;
+            }
+            match self.core.state_commit(&key, &output.state).await.map_err(JobError::State)? {
+                StateCommit::Committed | StateCommit::AlreadyCommitted => break output.actions,
+                StateCommit::Conflict if attempt < STATE_CONFLICT_ATTEMPTS => continue,
+                StateCommit::Conflict => {
+                    return Ok(TriggerOutcome::HandlerFailed {
+                        error: format!(
+                            "the App's state kept changing under it ({STATE_CONFLICT_ATTEMPTS} attempts); nothing was applied"
+                        ),
+                    })
+                }
+                StateCommit::OverQuota { max_bytes } => {
+                    return Ok(TriggerOutcome::HandlerFailed {
+                        error: format!("the App's state would pass the {max_bytes}-byte ceiling; nothing was applied"),
+                    })
+                }
+            }
         };
         if actions.is_empty() {
-            return Ok(TriggerOutcome::NoActions);
-        }
-
-        // Step 5.
-        let key = trigger.key();
-        if !self.core.claim(&key).await.map_err(JobError::Claim)? {
-            return Ok(TriggerOutcome::ClaimedElsewhere);
+            return Ok(TriggerOutcome::Applied { posted: 0, refused: Vec::new() });
         }
 
         // Step 6. The channel list is read once per job, and only when needed.
@@ -266,12 +309,9 @@ impl Installation {
         let mut refused = Vec::new();
         for (index, action) in actions.iter().enumerate() {
             match grants.check(action) {
-                Ok(CheckedAction::Post { channel_id, text }) => {
+                Ok(checked) => {
                     let message_id = action_message_id(self.id(), trigger, index);
-                    self.core
-                        .post(&channel_id, &text, &message_id)
-                        .await
-                        .map_err(JobError::Post)?;
+                    self.core.act(&checked, &message_id).await.map_err(JobError::Post)?;
                     posted += 1;
                 }
                 Err(refusal) => refused.push(refusal),

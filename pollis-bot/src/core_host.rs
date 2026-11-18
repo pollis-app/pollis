@@ -25,8 +25,8 @@ use pollis_core::config::Config;
 use pollis_core::keystore::Keystore;
 use pollis_core::state::AppState;
 
-use crate::action::ChannelInfo;
-use crate::core::{CoreError, InstallationCore};
+use crate::action::{ChannelInfo, CheckedAction};
+use crate::core::{CoreError, InstallationCore, StateCommit, StateValue, StateWrite};
 use crate::host::{BotHost, OpenedInstallation, PairOutcome, PairTarget, PairingProgress, PairingTicket, Wakes};
 use crate::installations::InstallationRecord;
 use crate::secrets::SecretSlot;
@@ -433,6 +433,110 @@ impl InstallationCore for CoreInstallation {
     async fn claim(&self, key: &TriggerKey) -> Result<bool, CoreError> {
         let state = self.state().await?;
         bots::claim_trigger(&state, &self.session.bot_user_id, key.as_str())
+            .await
+            .map_err(core_err)
+    }
+
+    async fn act(&self, action: &CheckedAction, message_id: &str) -> Result<(), CoreError> {
+        let state = self.state().await?;
+        let user = self.session.bot_user_id.clone();
+        match action.clone() {
+            CheckedAction::Post { channel_id, text } => {
+                self.post(&channel_id, &text, message_id).await
+            }
+            CheckedAction::Reply {
+                channel_id,
+                message_id: target,
+                text,
+            } => send_message_with_id(
+                Some(message_id.to_string()),
+                channel_id,
+                user,
+                text,
+                Vec::new(),
+                Some(target),
+                None,
+                None,
+                &state,
+            )
+            .await
+            .map(|_| ())
+            .map_err(core_err),
+            CheckedAction::React {
+                message_id: target,
+                emoji,
+                ..
+            } => pollis_core::commands::messages::add_reaction(target, user, emoji, &state)
+                .await
+                .map_err(core_err),
+            CheckedAction::EditOwn {
+                channel_id,
+                message_id: target,
+                text,
+            } => pollis_core::commands::messages::edit_message(
+                channel_id, target, user, text, &state,
+            )
+            .await
+            .map_err(core_err),
+            CheckedAction::DeleteOwn {
+                message_id: target, ..
+            } => pollis_core::commands::messages::delete_message(target, user, &state)
+                .await
+                .map_err(core_err),
+        }
+    }
+
+    async fn state_read(&self, key: &str) -> Result<(StateValue, u64), CoreError> {
+        let state = self.state().await?;
+        let keys = bots::app_state::app_state_keys(&state, &self.session.bot_user_id)
+            .await
+            .map_err(core_err)?;
+        let (v, usage) = bots::app_state::read_app_state(&state, &keys, key)
+            .await
+            .map_err(core_err)?;
+        Ok((
+            StateValue {
+                version: v.version,
+                value: v.value,
+            },
+            usage,
+        ))
+    }
+
+    async fn state_commit(
+        &self,
+        key: &TriggerKey,
+        writes: &[StateWrite],
+    ) -> Result<StateCommit, CoreError> {
+        use pollis_api::bots::AppStateCommitResponse as R;
+        let state = self.state().await?;
+        let keys = bots::app_state::app_state_keys(&state, &self.session.bot_user_id)
+            .await
+            .map_err(core_err)?;
+        let writes: Vec<bots::app_state::AppStateWriteIn> = writes
+            .iter()
+            .map(|w| bots::app_state::AppStateWriteIn {
+                key: w.key.clone(),
+                expected_version: w.expected_version,
+                value: w.value.clone(),
+            })
+            .collect();
+        Ok(
+            match bots::app_state::commit_app_state(&state, &keys, key.as_str(), &writes)
+                .await
+                .map_err(core_err)?
+            {
+                R::Committed => StateCommit::Committed,
+                R::AlreadyCommitted => StateCommit::AlreadyCommitted,
+                R::Conflict { .. } => StateCommit::Conflict,
+                R::OverQuota { max_bytes } => StateCommit::OverQuota { max_bytes },
+            },
+        )
+    }
+
+    async fn message_meta(&self, message_id: &str) -> Result<Option<(String, String)>, CoreError> {
+        let state = self.state().await?;
+        bots::message_meta(&state, message_id)
             .await
             .map_err(core_err)
     }

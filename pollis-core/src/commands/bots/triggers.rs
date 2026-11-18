@@ -50,6 +50,23 @@ pub async fn set_trigger_cursor(state: &Arc<AppState>, channel_id: &str, sent_at
     Ok(())
 }
 
+/// The channel (conversation) and author of a message in the installation's
+/// store, for checking an App's action on it (#2004). `None` when this host
+/// has never seen it, or it was deleted.
+pub async fn message_meta(state: &Arc<AppState>, message_id: &str) -> Result<Option<(String, String)>> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(not_active)?;
+    match db.conn().query_row(
+        "SELECT conversation_id, sender_id FROM message WHERE id = ?1 AND deleted_at IS NULL",
+        rusqlite::params![message_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    ) {
+        Ok(pair) => Ok(Some(pair)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 fn not_active() -> Error {
     Error::Other(anyhow::anyhow!("bot installation is not active"))
 }

@@ -119,7 +119,11 @@ pub async fn run(
             )
         })?;
         slots.insert(record.installation_id.clone(), opened.secrets);
-        installations.push(Arc::new(Installation::new(opened.core, record.handler.build())));
+        let handler = record
+            .handler
+            .build()
+            .with_context(|| format!("loading the handler of installation {}", record.installation_id))?;
+        installations.push(Arc::new(Installation::new(opened.core, handler)));
     }
     let runtime = Runtime::new(installations, config.max_installations, status)?;
 

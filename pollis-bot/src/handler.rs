@@ -9,7 +9,10 @@
 
 use async_trait::async_trait;
 
+use std::sync::Arc;
+
 use crate::action::Action;
+use crate::core::{InstallationCore, StateWrite};
 use crate::trigger::Trigger;
 
 /// A handler's failure. The loop discards every action of a job whose handler
@@ -29,21 +32,48 @@ pub trait Handler: Send + Sync {
     fn kind(&self) -> &'static str;
 
     async fn handle(&self, trigger: &Trigger) -> Result<Vec<Action>, HandlerError>;
+
+    /// What the job loop calls: the handler's actions and, for an App, the
+    /// App state writes to commit under the trigger's claim. The default wraps
+    /// [`Handler::handle`] with no state.
+    async fn handle_job(&self, trigger: &Trigger, _ctx: &HandlerContext) -> Result<HandlerOutput, HandlerError> {
+        Ok(HandlerOutput { actions: self.handle(trigger).await?, state: Vec::new() })
+    }
+}
+
+/// What a handler may use during a job: the open installation.
+pub struct HandlerContext {
+    pub core: Arc<dyn InstallationCore>,
+}
+
+/// A handler's result for one trigger. Nothing is applied until the loop has
+/// won the trigger's claim.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HandlerOutput {
+    pub actions: Vec<Action>,
+    pub state: Vec<StateWrite>,
 }
 
 /// Which handler an installation runs, as written in its `installation.json`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HandlerKind {
     #[default]
     Alerts,
+    /// #2004: a sandboxed App: its component and `pollis-app.json`. Until
+    /// signed approvals (#2005), a development build reads the admin's grants
+    /// from the file named by `POLLIS_APP_DEV_GRANTS`; a release build refuses.
+    App { component: std::path::PathBuf, manifest: std::path::PathBuf },
 }
 
 impl HandlerKind {
-    pub fn build(self) -> std::sync::Arc<dyn Handler> {
-        match self {
-            HandlerKind::Alerts => std::sync::Arc::new(AlertsHandler),
-        }
+    pub fn build(&self) -> anyhow::Result<Arc<dyn Handler>> {
+        Ok(match self {
+            HandlerKind::Alerts => Arc::new(AlertsHandler),
+            HandlerKind::App { component, manifest } => {
+                Arc::new(crate::app_handler::AppHandler::load(component, manifest)?)
+            }
+        })
     }
 }
 
