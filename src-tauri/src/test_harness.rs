@@ -420,7 +420,8 @@ pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) 
         .execute("DELETE FROM users WHERE kind = 'bot'", ())
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("wipe bot users: {e}")))?;
-    wipe_tables(remote, &["bot", "bot_pairing_request", "bot_trigger_claim"]).await?;
+    // #2005: approvals go only once their bot is gone (schema trigger).
+    wipe_tables(remote, &["bot", "bot_pairing_request", "bot_trigger_claim", "bot_app_approval", "bot_app_report"]).await?;
     let main_tables = [
         "history_transfer_chunk",
         "history_transfer",

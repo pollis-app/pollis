@@ -69,6 +69,9 @@
 //! id and the bot's account key (or bot id); [`normalize_pairing_code`] is the
 //! enrollment SAS input rule.
 
+/// The App manifest crate, for callers that hold approvals (#2005).
+pub use pollis_app_manifest as manifest;
+
 mod admin;
 pub mod app_approval;
 pub mod app_state;

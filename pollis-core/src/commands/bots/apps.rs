@@ -391,7 +391,8 @@ fn pending_view(
         Some(AppApprovalRecord::Development(d)) => report.developer_key.as_deref() == Some(d.developer_key.as_str()),
         None => false,
     };
-    if current && report.state != BotAppRunState::AwaitingApproval {
+    // Already approved: a report still naming it is from before the approval.
+    if current {
         return None;
     }
     let (changes, suggested) = match approved {
