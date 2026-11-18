@@ -8,6 +8,7 @@ import { useIngestConversation, type ConversationKind } from "./queries/useMessa
 import { groupQueryKeys } from "./queries/useUserGroups";
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
 import { aliasQueryKeys } from "./queries/useGroupAliases";
+import { botQueryKeys } from "./queries/useBots";
 import { dmQueryKeys } from "./queries/useDMChannels";
 import { appStore } from "../stores/appStore";
 import { typingStore } from "../stores/typingStore";
@@ -46,6 +47,11 @@ export function useConversationRealtime(
         void qcRef.current.invalidateQueries({
           queryKey: event.group_id ? aliasQueryKeys.group(event.group_id) : aliasQueryKeys.all,
         });
+        return;
+      }
+      if (event.type === "bots_changed") {
+        // #2005/#2018: an App was approved in this group; its commands and marks re-read.
+        void qcRef.current.invalidateQueries({ queryKey: botQueryKeys.all });
         return;
       }
       if (event.type === "member_role_changed") {

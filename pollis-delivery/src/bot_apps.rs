@@ -53,6 +53,8 @@ pub async fn approve_bot_app(State(state): State<AppState>, req: RawRequest) -> 
                 }
                 // Other admins' bot pages re-read it.
                 crate::bots::notify_admins_bots_changed(&state, &parsed.bot_user_id).await;
+                // Members' composers re-read the commands it brings.
+                crate::bots::notify_group_bots_changed(&state, &parsed.bot_user_id).await;
             }
             Ok(ok_response::<ApproveBotAppBody>(resp))
         }

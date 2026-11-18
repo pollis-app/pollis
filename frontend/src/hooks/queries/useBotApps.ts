@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import type { ApproveBotAppInput, BotAppView, GroupAppView } from "../../types";
+import { botQueryKeys } from "./useBots";
 
 /** Bot Apps (#2005): the admins' approval page and the members' marks. */
 export const botAppQueryKeys = {
@@ -37,6 +38,8 @@ export function useApproveBotApp() {
     onSuccess: (view, input) => {
       queryClient.setQueryData(botAppQueryKeys.app(input.groupId, input.botUserId), view);
       queryClient.invalidateQueries({ queryKey: botAppQueryKeys.group(input.groupId) });
+      // The approved App's slash commands (#2018) change with it; the composer re-reads them.
+      queryClient.invalidateQueries({ queryKey: botQueryKeys.commands(input.groupId) });
     },
   });
 }

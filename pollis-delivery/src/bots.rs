@@ -1029,6 +1029,25 @@ pub(crate) async fn notify_admins_bots_changed(state: &AppState, bot_user_id: &s
     }
 }
 
+/// Tell everyone in `bot_user_id`'s group (its realtime room) that its bots changed: an approval
+/// changes which slash commands members can pick (#2018) and the marks they see (#2005), so an
+/// open composer re-reads them. Content-free; best-effort.
+pub(crate) async fn notify_group_bots_changed(state: &AppState, bot_user_id: &str) {
+    if state.broker.livekit_ready().is_none() {
+        return;
+    }
+    let Ok(conn) = state.db.conn().await else {
+        return;
+    };
+    let Ok(Some(group_id)) = bot_group(&conn, bot_user_id).await else {
+        return;
+    };
+    let event = serde_json::json!({ "type": "bots_changed", "group_id": group_id });
+    if let Err(e) = crate::broker::room_send_data(state, &group_id, &event).await {
+        tracing::warn!("bots changed: group room notify failed (non-fatal): {e}");
+    }
+}
+
 /// Deliver the wrapped account key and register the new host as a device of
 /// the bot, in one transaction. The `status = 'pending'` CAS makes the first
 /// wrap win. The approver must still be an admin of the bot's group.
