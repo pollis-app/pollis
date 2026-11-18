@@ -227,8 +227,8 @@ export default app({
   },
 });</code>
         <ul>
-          <li><code>pollis app new hello-bot --lang ts</code> creates an App with one handler, a test and a
-            README.</li>
+          <li><code>npx pollis app new hello-bot --lang ts</code> creates an App with one handler, a test and a
+            README. Inside the App, <code>pnpm test</code> and <code>pnpm build</code> run the commands below.</li>
           <li><code>pollis app test</code> runs your tests against the built App in the same sandbox the runtime
             uses, offline: a call the manifest does not allow fails in a test exactly as it would in a group.</li>
           <li><code>pollis app build</code> writes the component and <code>pollis-app.json</code> and prints the
