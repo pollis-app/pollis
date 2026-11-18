@@ -55,6 +55,14 @@ pub struct FakeCore {
     pub fail_claim: AtomicBool,
     pub fail_post: AtomicBool,
     pub claim_calls: AtomicUsize,
+    /// Unsealed right now; every other call asserts it.
+    pub open: AtomicBool,
+    pub opens: AtomicUsize,
+    pub closes: AtomicUsize,
+    pub fail_open: AtomicBool,
+    /// What `host_approvals` answers, and the `wrap_now` flags it was called with.
+    pub approvals_retry_at: Mutex<Option<i64>>,
+    pub approval_calls: Mutex<Vec<bool>>,
 }
 
 impl FakeCore {
@@ -69,7 +77,17 @@ impl FakeCore {
             fail_claim: AtomicBool::new(false),
             fail_post: AtomicBool::new(false),
             claim_calls: AtomicUsize::new(0),
+            open: AtomicBool::new(false),
+            opens: AtomicUsize::new(0),
+            closes: AtomicUsize::new(0),
+            fail_open: AtomicBool::new(false),
+            approvals_retry_at: Mutex::new(None),
+            approval_calls: Mutex::new(Vec::new()),
         })
+    }
+
+    fn assert_open(&self) {
+        assert!(self.open.load(Ordering::SeqCst), "the store was used while sealed");
     }
 
     pub fn slow(device: &str, ds: Arc<FakeDs>) -> Arc<Self> {
@@ -89,7 +107,28 @@ impl InstallationCore for FakeCore {
         BOT
     }
 
+    async fn open(&self) -> Result<(), CoreError> {
+        if self.fail_open.load(Ordering::SeqCst) {
+            return Err(CoreError("unattended_refused: the account no longer exists".into()));
+        }
+        assert!(!self.open.swap(true, Ordering::SeqCst), "opened twice");
+        self.opens.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn close(&self) {
+        assert!(self.open.swap(false, Ordering::SeqCst), "closed while not open");
+        self.closes.fetch_add(1, Ordering::SeqCst);
+    }
+
+    async fn host_approvals(&self, wrap_now: bool) -> Result<Option<i64>, CoreError> {
+        self.assert_open();
+        self.approval_calls.lock().unwrap().push(wrap_now);
+        Ok(*self.approvals_retry_at.lock().unwrap())
+    }
+
     async fn catch_up(&self) -> Result<Vec<IncomingMessage>, CoreError> {
+        self.assert_open();
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_active.fetch_max(now, Ordering::SeqCst);
         tokio::time::sleep(self.catch_up_delay).await;
@@ -99,6 +138,7 @@ impl InstallationCore for FakeCore {
     }
 
     async fn mark_handled(&self, message: &IncomingMessage) -> Result<(), CoreError> {
+        self.assert_open();
         let log = self.ds.log.lock().unwrap();
         let pos = log.iter().position(|m| m.envelope_id == message.envelope_id).expect("in log");
         *self.cursor.lock().unwrap() = pos + 1;
@@ -106,6 +146,7 @@ impl InstallationCore for FakeCore {
     }
 
     async fn channels(&self) -> Result<Vec<ChannelInfo>, CoreError> {
+        self.assert_open();
         Ok(vec![
             ChannelInfo { id: CHANNEL.into(), name: "alerts".into(), is_text: true },
             ChannelInfo { id: "01VOICE".into(), name: "standup".into(), is_text: false },
@@ -113,6 +154,7 @@ impl InstallationCore for FakeCore {
     }
 
     async fn claim(&self, key: &TriggerKey) -> Result<bool, CoreError> {
+        self.assert_open();
         self.claim_calls.fetch_add(1, Ordering::SeqCst);
         if self.fail_claim.load(Ordering::SeqCst) {
             return Err(CoreError("DS unreachable".into()));
@@ -125,6 +167,7 @@ impl InstallationCore for FakeCore {
     }
 
     async fn post(&self, channel_id: &str, text: &str, message_id: &str) -> Result<(), CoreError> {
+        self.assert_open();
         if self.fail_post.load(Ordering::SeqCst) {
             return Err(CoreError("DS unreachable".into()));
         }

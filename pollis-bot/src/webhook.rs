@@ -284,6 +284,7 @@ mod tests {
                     kind: "webhook",
                     result: Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }),
                 }],
+                ..Default::default()
             }));
             rx
         }

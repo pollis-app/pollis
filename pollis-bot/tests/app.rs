@@ -13,12 +13,13 @@ use common::{FakeCore, FakeDs, MemorySlot, BOT, CHANNEL};
 use pollis_bot::app;
 use pollis_bot::config::{RuntimeConfig, WebhookConfig};
 use pollis_bot::handler::HandlerKind;
-use pollis_bot::host::{BotHost, OpenedInstallation, PairOutcome, PairTarget, PairingProgress, PairingTicket, WakeFn};
+use pollis_bot::host::{BotHost, OpenedInstallation, PairOutcome, PairTarget, PairingProgress, PairingTicket, Wakes};
 use pollis_bot::installations::{InstallationRecord, Registry};
 use pollis_bot::secrets::SecretSlot;
 
 struct FakeHost {
     ds: Arc<FakeDs>,
+    core: Arc<FakeCore>,
     secrets: Arc<MemorySlot>,
     next: Mutex<Option<PairOutcome>>,
     pair_calls: AtomicUsize,
@@ -27,8 +28,10 @@ struct FakeHost {
 
 impl FakeHost {
     fn new(next: Option<PairOutcome>) -> Self {
+        let ds = Arc::new(FakeDs::default());
         Self {
-            ds: Arc::new(FakeDs::default()),
+            core: FakeCore::new("01HOSTA", ds.clone()),
+            ds,
             secrets: Arc::new(MemorySlot::default()),
             next: Mutex::new(next),
             pair_calls: AtomicUsize::new(0),
@@ -54,8 +57,12 @@ impl BotHost for FakeHost {
         Ok(self.next.lock().unwrap().take().unwrap_or(PairOutcome::Expired))
     }
 
-    async fn open(&self, _record: &InstallationRecord, _dir: &Path, _wake: WakeFn) -> anyhow::Result<OpenedInstallation> {
-        Ok(OpenedInstallation { core: FakeCore::new("01HOSTA", self.ds.clone()), secrets: self.secrets.clone() })
+    async fn open(&self, _record: &InstallationRecord, _dir: &Path) -> anyhow::Result<OpenedInstallation> {
+        Ok(OpenedInstallation { core: self.core.clone(), secrets: self.secrets.clone() })
+    }
+
+    async fn watch(&self, _record: &InstallationRecord, _dir: &Path, _wakes: Wakes) -> anyhow::Result<()> {
+        Ok(())
     }
 
     async fn forget(&self, record: &InstallationRecord, _dir: &Path) -> anyhow::Result<()> {
@@ -125,14 +132,14 @@ async fn adding_a_host_for_a_bot_this_host_already_runs_is_refused() {
 async fn run_refuses_no_installations_and_too_many() {
     let dir = tempfile::tempdir().unwrap();
     let host = FakeHost::new(None);
-    let err = app::run(&host, dir.path(), &RuntimeConfig::default(), None).await.unwrap_err();
+    let err = app::run(&host, dir.path(), &RuntimeConfig::default(), None, false).await.unwrap_err();
     assert!(err.to_string().contains("pollis-bot pair"), "{err}");
 
     let registry = Registry::new(dir.path());
     registry.save(&record("01A")).unwrap();
     registry.save(&record("01B")).unwrap();
     let config = RuntimeConfig { max_installations: 1, webhook: None };
-    let err = app::run(&host, dir.path(), &config, None).await.unwrap_err();
+    let err = app::run(&host, dir.path(), &config, None, false).await.unwrap_err();
     assert!(err.to_string().contains("max_installations"), "{err}");
 }
 
@@ -150,7 +157,7 @@ async fn run_serves_the_webhook_and_post_goes_through_it() {
 
     let runner = {
         let (host, dir, config) = (host.clone(), dir.path().to_path_buf(), config.clone());
-        tokio::spawn(async move { app::run(host.as_ref(), &dir, &config, Some(webhook)).await })
+        tokio::spawn(async move { app::run(host.as_ref(), &dir, &config, Some(webhook), false).await })
     };
 
     // The secret is created on the first start; wait for the listener.
@@ -207,4 +214,17 @@ async fn forget_removes_the_installation_and_its_keys() {
     assert_eq!(left, ["01OTHER"]);
     assert!(host.secrets.load(BOT).await.unwrap().is_none());
     assert!(app::forget(&host, dir.path(), BOT).await.is_err(), "a second forget names the missing id");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_one_pass_run_catches_up_wraps_at_once_and_exits_sealed() {
+    let dir = tempfile::tempdir().unwrap();
+    Registry::new(dir.path()).save(&record(BOT)).unwrap();
+    let host = FakeHost::new(None);
+    // A peer ranks first: a long-running host would defer, a one-pass host must not.
+    *host.core.approvals_retry_at.lock().unwrap() = Some(i64::MAX);
+    app::run(&host, dir.path(), &RuntimeConfig::default(), None, true).await.unwrap();
+    assert_eq!(*host.core.approval_calls.lock().unwrap(), vec![true], "one pass wraps now");
+    assert_eq!(host.core.opens.load(Ordering::SeqCst), host.core.closes.load(Ordering::SeqCst));
+    assert!(!host.core.open.load(Ordering::SeqCst), "the store is sealed when the process exits");
 }

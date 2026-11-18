@@ -57,13 +57,13 @@ async fn dispatch(data_dir: &std::path::Path, command: Command) -> anyhow::Resul
         Command::AddHost { bot_user_id, name } => {
             app::pair(&host, data_dir, &config, PairTarget::ExistingBot { bot_user_id }, name).await?;
         }
-        Command::Run { webhook, max_installations } => {
+        Command::Run { webhook, max_installations, once } => {
             let mut config = config;
             if let Some(max) = max_installations {
                 config.max_installations = max;
             }
             let webhook = app::effective_webhook(&config, webhook);
-            app::run(&host, data_dir, &config, webhook).await?;
+            app::run(&host, data_dir, &config, webhook, once).await?;
         }
         Command::Post { installation_id, channel, text } => {
             let answer = app::post(&host, data_dir, &config, &installation_id, &channel, &text).await?;

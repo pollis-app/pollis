@@ -1,6 +1,6 @@
-//! The per-host surface the subcommands need from `pollis-core`: pairing, and
-//! opening an installation (its own state, keystore slot and store) with its
-//! realtime wake-ups wired to the job loop.
+//! The per-host surface the subcommands need from `pollis-core`: pairing,
+//! describing an installation to the job loop (whose store it unseals per job),
+//! and a separate wake source that only says when to run a job.
 //!
 //! The subcommands are written against [`BotHost`] so their flow (states
 //! printed, limits enforced, records saved) is tested with a fake; `CoreHost`
@@ -54,6 +54,15 @@ pub enum PairOutcome {
 /// Called when an installation should run a catch-up job.
 pub type WakeFn = Arc<dyn Fn() + Send + Sync>;
 
+/// What a wake source reports. It never runs a job itself.
+#[derive(Clone)]
+pub struct Wakes {
+    /// Something may have arrived for the group.
+    pub wake: WakeFn,
+    /// An admin approved another host for this bot.
+    pub approval: WakeFn,
+}
+
 /// An installation opened for `run`.
 pub struct OpenedInstallation {
     pub core: Arc<dyn InstallationCore>,
@@ -73,9 +82,14 @@ pub trait BotHost: Send + Sync {
         progress: &(dyn Fn(PairingProgress) + Send + Sync),
     ) -> Result<PairOutcome>;
 
-    /// Open one installation unattended (no PIN) from its keystore slot, and
-    /// wire its realtime wake-ups to `wake`.
-    async fn open(&self, record: &InstallationRecord, dir: &Path, wake: WakeFn) -> Result<OpenedInstallation>;
+    /// The job loop's handle on one installation. Its store stays sealed until
+    /// a job opens it; this only checks the installation can be opened.
+    async fn open(&self, record: &InstallationRecord, dir: &Path) -> Result<OpenedInstallation>;
+
+    /// Start the installation's wake source (realtime rooms), reporting to
+    /// `wakes` for as long as the process runs. A host without one still works:
+    /// it catches up whenever a job runs.
+    async fn watch(&self, record: &InstallationRecord, dir: &Path, wakes: Wakes) -> Result<()>;
 
     /// Remove the installation's store and keystore slots (its webhook secret
     /// included). The caller removes its record afterwards.

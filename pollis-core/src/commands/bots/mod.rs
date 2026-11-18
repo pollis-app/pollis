@@ -30,9 +30,14 @@
 //! the approver an admin in the roster read, own bot and group, unexpired, not
 //! consumed, ephemeral key byte-equal, transparency log not alarmed); the lowest
 //! online device id wraps first, the next after [`WRAP_STAGGER_SECS`], and so on.
+//! No host is assumed awake: the stagger is capped before the approval expires,
+//! a peer not seen recently is not waited for, and a host that will not be up
+//! at its `retry_at` calls [`handle_host_approvals_with`] with
+//! [`WrapTiming::Now`] (the DS's status CAS keeps a second wrap from landing).
 //!
 //! **Restart.** [`start_unattended`] reopens an installation from the keystore,
-//! with no PIN; it refuses a human account. [`forget_installation`] removes one.
+//! with no PIN, and [`stop_unattended`] seals it again (the runtime does both
+//! around every job); it refuses a human account. [`forget_installation`] removes one.
 //!
 //! **Trigger claims (runtime).** [`claim_trigger`]: before a host applies a
 //! job's actions it claims `(installation_id, trigger_key)` on the DS; the first
@@ -63,11 +68,11 @@ pub use admin::{
 pub use approval::{HostApproval, HOST_APPROVAL_DOMAIN, HOST_APPROVAL_MAX_TTL_SECS, HOST_APPROVAL_VERSION};
 pub use code::{code_lookup, derive_pairing_code, normalize_pairing_code, PAIRING_CODE_LEN};
 pub use host::{
-    await_pairing, handle_host_approvals, join_bot_group, start_add_host_pairing, start_new_bot_pairing,
+    await_pairing, handle_host_approvals, handle_host_approvals_with, join_bot_group, start_add_host_pairing, start_new_bot_pairing,
     verify_host_approval, AccountKeyAudit, ApprovalRefusal, HostApprovalOutcome, PairingHandle, PairingOutcome,
-    TransparencyLogAudit, WRAP_STAGGER_SECS,
+    TransparencyLogAudit, WrapTiming, WRAP_STAGGER_SECS,
 };
 #[cfg(feature = "test-harness")]
 pub use host::FixedAudit;
 pub use triggers::{claim_trigger, set_trigger_cursor, trigger_cursor};
-pub use unattended::{forget_installation, has_installation, start_unattended, BotSession, UNATTENDED_REFUSED};
+pub use unattended::{forget_installation, has_installation, start_unattended, stop_unattended, BotSession, UNATTENDED_REFUSED};

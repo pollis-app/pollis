@@ -599,10 +599,36 @@ pub async fn handle_host_approvals(
     session: &BotSession,
     audit: &dyn AccountKeyAudit,
 ) -> Result<Vec<HostApprovalOutcome>> {
+    handle_host_approvals_with(state, session, audit, WrapTiming::Staggered).await
+}
+
+/// When a verified host wraps.
+///
+/// No host is assumed to be up: a staggered host that defers is woken again at
+/// its `retry_at` by whoever runs it, and a host about to go back to sleep
+/// (a runtime started for one pass) uses [`WrapTiming::Now`]. Either way is
+/// safe, because the DS's status CAS lets exactly one wrap land and answers the
+/// rest 409.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WrapTiming {
+    /// Wait `rank × WRAP_STAGGER_SECS` behind recently seen peers, so one wrap
+    /// usually goes out; capped before the approval expires.
+    Staggered,
+    /// Wrap now: this host may not be awake at a later `retry_at`.
+    Now,
+}
+
+/// [`handle_host_approvals`] with an explicit [`WrapTiming`].
+pub async fn handle_host_approvals_with(
+    state: &Arc<AppState>,
+    session: &BotSession,
+    audit: &dyn AccountKeyAudit,
+    timing: WrapTiming,
+) -> Result<Vec<HostApprovalOutcome>> {
     let pending = crate::commands::mls::ds_post_json(state, &PendingBotHostsBody {}).await?.requests;
     let mut outcomes = Vec::with_capacity(pending.len());
     for request in pending {
-        outcomes.push(handle_one(state, session, &request, audit).await?);
+        outcomes.push(handle_one(state, session, &request, audit, timing).await?);
     }
     Ok(outcomes)
 }
@@ -612,6 +638,7 @@ async fn handle_one(
     session: &BotSession,
     pending: &PendingBotHostWire,
     audit: &dyn AccountKeyAudit,
+    timing: WrapTiming,
 ) -> Result<HostApprovalOutcome> {
     let request_id = pending.request_id.clone();
     let now = chrono::Utc::now().timestamp();
@@ -622,10 +649,15 @@ async fn handle_one(
             return Ok(HostApprovalOutcome::Refused { request_id, reason });
         }
     };
-    let rank = wrap_rank(state, session, now).await?;
-    let retry_at = approval.issued_at + rank as i64 * WRAP_STAGGER_SECS;
-    if now < retry_at {
-        return Ok(HostApprovalOutcome::Deferred { request_id, retry_at });
+    if timing == WrapTiming::Staggered {
+        let rank = wrap_rank(state, session, now).await?;
+        // A peer that ranks first but is asleep delays this host by a bounded
+        // stagger, never past the point where the approval could still be used.
+        let latest = approval.expires_at.min(pending.expires_at) - WRAP_STAGGER_SECS;
+        let retry_at = (approval.issued_at + rank as i64 * WRAP_STAGGER_SECS).min(latest);
+        if now < retry_at {
+            return Ok(HostApprovalOutcome::Deferred { request_id, retry_at });
+        }
     }
 
     // Re-checked just before the wrap: an approver demoted since must not get one.

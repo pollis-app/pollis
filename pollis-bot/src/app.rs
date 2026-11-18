@@ -3,13 +3,13 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 
 use crate::config::{RuntimeConfig, WebhookConfig};
-use crate::host::{BotHost, PairOutcome, PairTarget, PairingProgress, WakeFn};
+use crate::host::{BotHost, PairOutcome, PairTarget, PairingProgress, Wakes};
 use crate::installations::{check_capacity, InstallationRecord, Registry};
 use crate::job::Installation;
 use crate::log;
@@ -87,9 +87,17 @@ pub fn effective_webhook(config: &RuntimeConfig, flag: Option<Option<SocketAddr>
     }
 }
 
-/// `run`: open every installation, start the webhook if configured, catch up,
-/// then wait for events until stopped.
-pub async fn run(host: &dyn BotHost, data_dir: &Path, config: &RuntimeConfig, webhook: Option<WebhookConfig>) -> Result<()> {
+/// `run`: check every installation, start the webhook if configured and the
+/// wake sources, catch up, then wait for events until stopped. With `once`:
+/// catch up and handle everything pending, then return (a host that is woken,
+/// does its work and goes back to sleep).
+pub async fn run(
+    host: &dyn BotHost,
+    data_dir: &Path,
+    config: &RuntimeConfig,
+    webhook: Option<WebhookConfig>,
+    once: bool,
+) -> Result<()> {
     let registry = Registry::new(data_dir);
     let records = registry.list()?;
     if records.is_empty() {
@@ -98,24 +106,13 @@ pub async fn run(host: &dyn BotHost, data_dir: &Path, config: &RuntimeConfig, we
     check_capacity(records.len(), config.max_installations)?;
 
     let status = Arc::new(StatusBoard::new(Some(data_dir), webhook.as_ref().map(|w| w.bind.to_string())));
-    // Wake-ups name the runtime, which exists only once every installation is open.
-    let runtime_slot: Arc<OnceLock<Weak<Runtime>>> = Arc::new(OnceLock::new());
     let mut installations = Vec::new();
     let mut slots = HashMap::new();
     for record in &records {
         let scope = log::scope(&record.installation_id);
-        log::info(&scope, format!("opening (bot {} in group {})", record.bot_user_id, record.group_id));
+        log::info(&scope, format!("checking (bot {} in group {})", record.bot_user_id, record.group_id));
         let dir = registry.dir_for(&record.installation_id)?;
-        let wake: WakeFn = {
-            let slot = runtime_slot.clone();
-            let id = record.installation_id.clone();
-            Arc::new(move || {
-                if let Some(runtime) = slot.get().and_then(Weak::upgrade) {
-                    runtime.wake(&id);
-                }
-            })
-        };
-        let opened = host.open(record, &dir, wake).await.with_context(|| {
+        let opened = host.open(record, &dir).await.with_context(|| {
             format!(
                 "opening installation {id}. Fix: if this host was revoked or the bot deleted, run `pollis-bot forget --installation {id}` (then `pair` or `add-host` again if the bot should stay)",
                 id = record.installation_id
@@ -125,7 +122,46 @@ pub async fn run(host: &dyn BotHost, data_dir: &Path, config: &RuntimeConfig, we
         installations.push(Arc::new(Installation::new(opened.core, record.handler.build())));
     }
     let runtime = Runtime::new(installations, config.max_installations, status)?;
-    let _ = runtime_slot.set(Arc::downgrade(&runtime));
+
+    if once {
+        log::info("runtime", "one pass: catching up and handling what is pending");
+        let ok = runtime.run_once().await;
+        log::info("runtime", "one pass done");
+        if !ok {
+            bail!("a job failed (see above). Fix: the failure line above names what to do; the next run retries");
+        }
+        return Ok(());
+    }
+
+    // The wake source only says when to run a job; it never runs one.
+    for record in &records {
+        let dir = registry.dir_for(&record.installation_id)?;
+        let wakes = Wakes {
+            wake: {
+                let (rt, id) = (Arc::downgrade(&runtime), record.installation_id.clone());
+                Arc::new(move || {
+                    if let Some(rt) = rt.upgrade() {
+                        rt.wake(&id);
+                    }
+                })
+            },
+            approval: {
+                let (rt, id) = (Arc::downgrade(&runtime), record.installation_id.clone());
+                Arc::new(move || {
+                    if let Some(rt) = rt.upgrade() {
+                        rt.approvals(&id);
+                    }
+                })
+            },
+        };
+        if let Err(e) = host.watch(record, &dir, wakes).await {
+            log::failure(
+                &log::scope(&record.installation_id),
+                format!("starting realtime wake-ups: {e:#}"),
+                "check this host can reach the Delivery Service; until then it catches up on webhook calls and at the next start",
+            );
+        }
+    }
 
     if let Some(w) = &webhook {
         let mut hooks = HashMap::new();
@@ -158,8 +194,8 @@ pub async fn run(host: &dyn BotHost, data_dir: &Path, config: &RuntimeConfig, we
         log::info("webhook", "off (enable with config.json `webhook` or `run --webhook`)");
     }
 
-    // A restart catches up on everything missed while it was down.
-    runtime.wake_all();
+    // A host that was asleep catches up on everything missed, approvals included.
+    runtime.start_all();
     shutdown_signal().await;
     log::info("runtime", "stopping");
     Ok(())

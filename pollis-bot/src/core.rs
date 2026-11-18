@@ -4,6 +4,11 @@
 //! are tested with a fake; the real implementation is a thin adapter over one
 //! installation's `AppState` (its own identity, keystore slot and encrypted
 //! store). Nothing is shared between two installations' cores.
+//!
+//! The store is open only during a job: [`InstallationCore::open`] unseals it
+//! at the start (step 3) and [`InstallationCore::close`] seals it again at the
+//! end, whatever happened in between. Every other method is called only while
+//! it is open. Nothing assumes a host stays up between jobs.
 
 use async_trait::async_trait;
 
@@ -34,6 +39,19 @@ pub trait InstallationCore: Send + Sync {
 
     /// The bot's own user id. Its own messages are never triggers.
     fn bot_user_id(&self) -> &str;
+
+    /// Job loop step 3, first half: unseal the installation's store and keys.
+    async fn open(&self) -> Result<(), CoreError>;
+
+    /// Seal the store again (end of every job, success or not).
+    async fn close(&self);
+
+    /// Verify and act on approved add-host requests for this bot. With
+    /// `wrap_now`, a host about to go back to sleep wraps at once instead of
+    /// deferring to a peer that ranks first (a duplicate wrap is refused by the
+    /// DS, so this costs at most one redundant request). Returns the earliest
+    /// `retry_at` of any request it deferred.
+    async fn host_approvals(&self, wrap_now: bool) -> Result<Option<i64>, CoreError>;
 
     /// Job loop step 3: process Welcomes and pending commits through the
     /// normal ingest path, then return the decrypted messages of the bot's
