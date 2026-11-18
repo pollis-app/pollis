@@ -1192,7 +1192,8 @@ app/
   (auth)/              email → otp → pin → initializing (gestureEnabled: false)
   (tabs)/              groups · direct · self (custom <TabBar>; its 3rd cell is the shield shortcut, not a tab)
   group/[id].tsx       one group's channel panel (phones: pushed, no tab bar; iPad: redirects to the Groups tab)
-  group/*              new, invite, invite-links, members, settings, emoji, requests, discover
+  group/*              new, invite, invite-links, members, settings, emoji, requests, discover,
+                       bots · bot · add-bot (#1182: an admin's Bots pages; the code is typed in `SasCodeField`)
   chat/[id].tsx        conversation (Header + list + composer); chat/thread.tsx
   dm/{new,info,safety,requests}.tsx · conversation/{info,pins}.tsx · user/[id].tsx · report.tsx
   media.tsx            full-screen attachment viewer (#1248, #1492): zoom, swipe pager, swipe-down dismiss, video, audio, save/share
@@ -1204,6 +1205,9 @@ components/
                        Badge, Button, Toggle, Dot, Divider, BottomAction, Body,
                        EmptyState (every empty list, #1969)
   chat/SheetOverlay.tsx the one bottom sheet (every *Sheet is built on it)
+  Tag.tsx / BotBadge.tsx the name-side pill ("new" member tag) and the Bot badge (#1182: member rows,
+                       message rows, mentions; driven by the roster's `is_bot`)
+  SasCodeField.tsx     the one typed-code field (device approval, bot pairing; never pre-filled, #1096)
   icons.tsx            lucide wrapper (Icon.*, stroke 1.75)
   TabBar.tsx           custom bottom tab bar (accent active, unread badges, shield → self/link-device)
   search/GlobalSearchResults.tsx  the global search results Self shows under its field

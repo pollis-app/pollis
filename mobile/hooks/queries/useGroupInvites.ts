@@ -28,6 +28,8 @@ export interface GroupMember {
   avatar_url?: string | null;
   role: string;
   joined_at: string;
+  /** A bot (#1182): drives the Bot badge. Absent from an old core, which means human. */
+  is_bot?: boolean;
 }
 
 /** A pending invite as the member page's "Invited" section lists it (#1506). */

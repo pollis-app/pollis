@@ -262,6 +262,29 @@ function GroupSettings() {
           />
         </Group>
 
+        {iAmAdmin ? (
+          <>
+            <SectionTitle style={{ paddingHorizontal: 0 }}>{t("mobile:bots.title")}</SectionTitle>
+            <Group>
+              <ListRow
+                testID="row-group-bots"
+                glyph={<Icon.bot size={20} color={semantic.dim} />}
+                name={t("mobile:bots.title")}
+                sub={t("mobile:bots.settingsRowSub")}
+                chevron
+                onPress={() =>
+                  id
+                    ? router.push({
+                        pathname: "/group/bots",
+                        params: { groupId: id },
+                      })
+                    : undefined
+                }
+              />
+            </Group>
+          </>
+        ) : null}
+
         {/* Leave / delete: destructive, apart, two taps each. */}
         <View style={{ paddingTop: space.xxxl * 2, paddingBottom: space.xxl, gap: space.sm }}>
           <Group>

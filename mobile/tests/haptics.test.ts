@@ -86,6 +86,8 @@ test("the first tap of every two-tap confirm warns", () => {
     ["components/groups/GroupMenuSheet.tsx", "setArmed(true)"],
     ["app/dm/info.tsx", "setConfirmLeave(true)"],
     ["app/self/security.tsx", "setConfirmRevoke(deviceId)"],
+    ["app/group/bot.tsx", "setConfirmRevoke(deviceId)"],
+    ["app/group/bot.tsx", "setConfirmDelete(true)"],
   ];
   for (const [file, arm] of sites) {
     const s = src(file);
@@ -100,7 +102,7 @@ test("copies confirm, and a failed copy says so", () => {
     assert.match(src(f), /haptic\(copied \? "success" : "error"\)/, f);
   }
   // Every other copy goes through the one hook, so it is felt the same way.
-  for (const f of ["app/(auth)/emergency-kit.tsx", "components/CreatedInviteLinkCard.tsx"]) {
+  for (const f of ["app/(auth)/emergency-kit.tsx", "components/CreatedInviteLinkCard.tsx", "app/group/add-bot.tsx"]) {
     assert.match(src(f), /useCopyFeedback\(\)/, f);
   }
 });
