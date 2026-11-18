@@ -124,7 +124,8 @@
       "revoking": "ਵਾਪਸ ਲਿਆ ਜਾ ਰਿਹਾ ਹੈ…",
       "revokeLabel": "{{name}} ਲਈ ਸੱਦਾ ਵਾਪਸ ਲਓ",
       "revokeFailed": "ਸੱਦਾ ਵਾਪਸ ਨਹੀਂ ਲਿਆ ਜਾ ਸਕਿਆ।"
-    }
+    },
+    "resetAlias": "ਉਪਨਾਮ ਰੀਸੈੱਟ ਕਰੋ"
   },
   "kickMember": {
     "pageTitle": "ਮੈਂਬਰ ਹਟਾਓ",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} ਨੇ ਤੁਹਾਨੂੰ {{group}} ਵਿੱਚ ਸੱਦਾ ਦਿੱਤਾ",
     "inviteBody": "{{name}} ਨੇ ਤੁਹਾਨੂੰ ਸੱਦਾ ਦਿੱਤਾ",
     "inviteBodyUnknown": "ਤੁਹਾਨੂੰ ਇੱਕ ਗਰੁੱਪ ਵਿੱਚ ਸੱਦਾ ਦਿੱਤਾ ਗਿਆ ਹੈ"
+  },
+  "resetAlias": {
+    "pageTitle": "ਉਪਨਾਮ ਰੀਸੈੱਟ ਕਰੋ",
+    "confirm": "ਕੀ ਇਸ ਗਰੁੱਪ ਵਿੱਚ <strong>{{name}}</strong> (@{{handle}}) ਦਾ ਉਪਨਾਮ ਰੀਸੈੱਟ ਕਰਨਾ ਹੈ?",
+    "consequence": "ਇੱਥੇ ਫਿਰ ਉਹਨਾਂ ਦੀ ਮੁੱਖ ਪ੍ਰੋਫ਼ਾਈਲ ਦਿਖੇਗੀ। ਉਹ ਨਵਾਂ ਉਪਨਾਮ ਰੱਖ ਸਕਦੇ ਹਨ।",
+    "confirmButton": "ਹਾਂ, ਰੀਸੈੱਟ ਕਰੋ",
+    "submitting": "ਰੀਸੈੱਟ ਹੋ ਰਿਹਾ ਹੈ…",
+    "failed": "ਉਪਨਾਮ ਰੀਸੈੱਟ ਨਹੀਂ ਹੋ ਸਕਿਆ"
   }
 }

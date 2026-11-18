@@ -12,11 +12,13 @@ interface MemberRowProps {
   label: string;
   avatarKey?: string | null;
   isAdmin: boolean;
+  /** Set in a group: the profile opens as that group shows the member (#2003). */
+  groupId?: string;
 }
 
 /** One member; opens their profile. Modern shows the avatar, terminal a bare dot. */
 export const MemberRow: React.FC<MemberRowProps> = observer(
-  ({ userId, label, avatarKey, isAdmin }) => {
+  ({ userId, label, avatarKey, isAdmin, groupId }) => {
     const { t } = useTranslation("nav");
     const navigate = useNavigate();
     const isTerminal = useSkin() === "terminal";
@@ -28,7 +30,11 @@ export const MemberRow: React.FC<MemberRowProps> = observer(
     return (
       <PressButton
         activateOn="click"
-        onClick={() => navigate({ to: "/user/$userId", params: { userId } })}
+        onClick={() =>
+          groupId
+            ? navigate({ to: "/groups/$groupId/members/$userId", params: { groupId, userId } })
+            : navigate({ to: "/user/$userId", params: { userId } })
+        }
         className={rowClass}
         data-testid={`right-panel-member-${userId}`}
       >

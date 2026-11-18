@@ -79,6 +79,8 @@ export interface MentionCandidate {
   username: string;
   displayName?: string;
   avatarUrl?: string | null;
+  /** The member's alias picture in this group (#2003). */
+  aliasAvatarUrl?: string | null;
 }
 
 const MENTION_SUGGESTION_LIMIT = 8;

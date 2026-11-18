@@ -801,13 +801,20 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(crate::commands::avatar::get_avatar_path(user_id, key, px, dest_dir, &state()?)
                 .await?)
         }
-        "upload_avatar" => {
+        // `upload_avatar_image` (#2003): an alias picture, uploaded the same way but
+        // not saved on the profile.
+        "upload_avatar" | "upload_avatar_image" => {
             let user_id: String = arg(&args, "userId")?;
             let path: String = arg(&args, "path")?;
             let px: u32 = arg(&args, "px")?;
             let dest_dir: Option<String> = arg_opt(&args, "destDir")?;
-            ok(crate::commands::avatar::upload_avatar(user_id, path, px, dest_dir, &state()?)
-                .await?)
+            let state = state()?;
+            ok(if cmd == "upload_avatar" {
+                crate::commands::avatar::upload_avatar(user_id, path, px, dest_dir, &state).await?
+            } else {
+                crate::commands::avatar::upload_avatar_image(user_id, path, px, dest_dir, &state)
+                    .await?
+            })
         }
         "remove_avatar" => {
             let user_id: String = arg(&args, "userId")?;
@@ -870,6 +877,31 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let channel_id: String = arg(&args, "channelId")?;
             let muted: bool = arg(&args, "muted")?;
             groups::set_channel_muted(user_id, channel_id, muted, &state()?).await?;
+            ok(())
+        }
+        // Per-group aliases (#2003).
+        "list_group_aliases" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(groups::list_group_aliases(group_id, requester_id, &state()?).await?)
+        }
+        "list_my_aliases" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(groups::list_my_aliases(user_id, &state()?).await?)
+        }
+        "set_group_alias" => {
+            let user_id: String = arg(&args, "userId")?;
+            let group_id: Option<String> = arg_opt(&args, "groupId")?;
+            let display_name: Option<String> = arg_opt(&args, "displayName")?;
+            let avatar_url: Option<String> = arg_opt(&args, "avatarUrl")?;
+            groups::set_group_alias(user_id, group_id, display_name, avatar_url, &state()?).await?;
+            ok(())
+        }
+        "reset_group_alias" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::reset_group_alias(group_id, user_id, requester_id, &state()?).await?;
             ok(())
         }
         "create_group" => {
@@ -1674,6 +1706,12 @@ mod tests {
             "get_avatar_path",
             "upload_avatar",
             "remove_avatar",
+            // #2003
+            "upload_avatar_image",
+            "list_group_aliases",
+            "list_my_aliases",
+            "set_group_alias",
+            "reset_group_alias",
             // #1809
             "await_enrollment_approval",
         ] {

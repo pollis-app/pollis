@@ -533,5 +533,29 @@
     "youDeclined": "Kun ƙi. Ba a kwafi komai ba.",
     "notOpen": "Wannan buƙata ba ta buɗe kuma.",
     "back": "Koma Tsaro"
+  },
+  "aliases": {
+    "heading": "Laƙabin rukuni",
+    "rowDescription": "Suna da hoto daban a kowane rukuni",
+    "intro": "Nuna suna da hoto daban a kowane rukuni. @sunan-mai-amfani naka iri ɗaya ne a ko’ina.",
+    "empty": "Ba ka cikin wani rukuni tukuna.",
+    "mainProfile": "Babban bayani",
+    "edit": "Gyara",
+    "useMain": "Yi amfani da babban bayanina",
+    "resetting": "Ana sake saitawa…",
+    "pageTitle": "Laƙabi a {{group}}",
+    "pageIntro": "Wannan rukuni kaɗai ke ganin wannan suna da hoto. Saƙon kai tsaye na ci gaba da babban bayaninka.",
+    "nameLabel": "Suna a wannan rukuni",
+    "namePlaceholder": "Bar shi babu komai don amfani da {{name}}",
+    "nameInvalid": "Har haruffa 100, ba tare da < ko > ba.",
+    "pictureLabel": "Hoto a wannan rukuni",
+    "choosePicture": "Zaɓi hoto",
+    "mainPicture": "Yi amfani da babban hoto",
+    "applyAll": "Aiwatar ga dukkan rukunoni na",
+    "applyAllHint": "Yana rubuta sunan ko hoton da ka canza a kowane rukuni da kake ciki yanzu. Rukunoni da za ka shiga daga baya suna farawa da babban bayaninka.",
+    "save": "Ajiye",
+    "saving": "Ana ajiyewa…",
+    "saved": "An ajiye",
+    "saveFailed": "Ba a iya ajiye laƙabinka ba"
   }
 }

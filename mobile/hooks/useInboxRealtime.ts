@@ -13,6 +13,7 @@ import { catchUpTargets, roomCatchUpTarget } from "../lib/messageWake";
 import { dmQueryKeys, useDMChannels } from "./queries/useDMChannels";
 import { groupQueryKeys, useUserGroupsWithChannels } from "./queries/useUserGroups";
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
+import { aliasQueryKeys } from "./queries/useGroupAliases";
 import {
   flushOutbox,
   lastMessageQueryKeys,
@@ -152,6 +153,10 @@ export function useInboxRealtime() {
         }
         case "channel_mutes_changed":
           void qc.invalidateQueries({ queryKey: groupQueryKeys.mutedChannels(userId) });
+          break;
+        case "group_aliases_changed":
+          // #2003: one of our own aliases changed (another device, or an admin reset).
+          void qc.invalidateQueries({ queryKey: aliasQueryKeys.all });
           break;
         case "read_cursors_changed":
           // #1628: another device read something; converge, re-badge, clear its notifications.

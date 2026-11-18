@@ -179,6 +179,19 @@ pub async fn apply_update_profile(
             return Ok(ProfileOutcome::Invalid(DISPLAY_NAME_INVALID));
         }
     }
+    // #2003: a replaced picture is released; the reclaim pass deletes its object
+    // once no alias references it either.
+    if let Some(new_avatar) = body.avatar_url.as_deref() {
+        let old = crate::util::query_strings(
+            conn,
+            "SELECT avatar_url FROM users WHERE id = ?1 AND avatar_url IS NOT NULL",
+            libsql::params![user.clone()],
+        )
+        .await?;
+        for key in old.iter().filter(|k| k.as_str() != new_avatar) {
+            crate::aliases::release_avatar(conn, Some(key)).await?;
+        }
+    }
     conn.execute(
         "UPDATE users SET \
             username = COALESCE(?2, username), \
@@ -516,12 +529,8 @@ pub async fn read_channel_mutes(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: ChannelMutesBody = match serde_json::from_slice(&req.body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
-    };
-    let who = match crate::reads::authed_user(&state, &req, Some(parsed.user_id.as_str())).await? {
-        Ok(u) => u,
+    let who = match crate::reads::parse_user_read(&state, &req, |b: &ChannelMutesBody| &b.user_id).await? {
+        Ok((_, who)) => who,
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;

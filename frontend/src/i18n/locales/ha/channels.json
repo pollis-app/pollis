@@ -124,7 +124,8 @@
       "revoking": "Ana janyewa…",
       "revokeLabel": "Janye gayyatar {{name}}",
       "revokeFailed": "Ba a iya janye gayyatar ba."
-    }
+    },
+    "resetAlias": "Sake saita laƙabi"
   },
   "kickMember": {
     "pageTitle": "Cire Mamba",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "Gayyata daga {{name}} zuwa {{group}}",
     "inviteBody": "Gayyata daga {{name}}",
     "inviteBodyUnknown": "An gayyace ku zuwa wani rukuni"
+  },
+  "resetAlias": {
+    "pageTitle": "Sake saita laƙabi",
+    "confirm": "A sake saita laƙabin <strong>{{name}}</strong> (@{{handle}}) a wannan rukuni?",
+    "consequence": "Babban bayaninsa zai sake bayyana a nan. Zai iya saita sabon laƙabi.",
+    "confirmButton": "E, sake saitawa",
+    "submitting": "Ana sake saitawa…",
+    "failed": "Ba a iya sake saita laƙabin ba"
   }
 }

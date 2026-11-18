@@ -124,7 +124,8 @@
       "revoking": "A revogar…",
       "revokeLabel": "Revogar o convite de {{name}}",
       "revokeFailed": "Não foi possível revogar o convite."
-    }
+    },
+    "resetAlias": "Redefinir apelido"
   },
   "kickMember": {
     "pageTitle": "Remover membro",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} convidou-o para {{group}}",
     "inviteBody": "{{name}} convidou-o",
     "inviteBodyUnknown": "Foi convidado para um grupo"
+  },
+  "resetAlias": {
+    "pageTitle": "Redefinir apelido",
+    "confirm": "Redefinir o apelido de <strong>{{name}}</strong> (@{{handle}}) neste grupo?",
+    "consequence": "O perfil principal voltará a aparecer aqui. É possível definir um novo apelido.",
+    "confirmButton": "Sim, redefinir",
+    "submitting": "Redefinindo…",
+    "failed": "Não foi possível redefinir o apelido"
   }
 }

@@ -28,6 +28,7 @@ import {
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useThemeRerender } from "../../components/theme";
+import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 
 interface RawProfile {
   id: string;
@@ -41,8 +42,10 @@ function UserProfile() {
   const { t } = useTranslation("dms");
   const router = useNav();
   const { openConversation } = useOpenConversation();
-  const { id } = useRouteParams<{ id: string }>();
+  // `groupId`: opened from inside a group, which shows the person by their alias there (#2003).
+  const { id, groupId } = useRouteParams<{ id: string; groupId?: string }>();
   const peerId = id ?? null;
+  const alias = useGroupAliases(groupId ?? null).get(peerId ?? "");
   const currentUser = appStore.currentUser;
   const isSelf = currentUser?.id === peerId;
 
@@ -70,7 +73,7 @@ function UserProfile() {
 
   const handle =
     profile.data?.username ?? peerId ?? t("mobile:user.fallbackHandle");
-  const display = profile.data?.preferred_name || handle;
+  const display = alias?.display_name || profile.data?.preferred_name || handle;
 
   const onMessage = () => {
     if (!peerId) {
@@ -112,12 +115,13 @@ function UserProfile() {
             testID="avatar-user"
             userId={peerId}
             avatarKey={profile.data ? profile.data.avatar_url ?? null : undefined}
+            aliasKey={alias?.avatar_url}
             label={handle}
             size="lg"
             variant={isSelf ? "self" : "default"}
           />
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <Txt variant="title" accessibilityRole="header">
+            <Txt testID="text-user-name" variant="title" accessibilityRole="header">
               {display}
             </Txt>
             <Txt variant="secondary" style={{ color: semantic.muted }}>

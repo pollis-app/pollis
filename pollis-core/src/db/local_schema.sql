@@ -224,6 +224,19 @@ CREATE TABLE IF NOT EXISTS user_cache (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Per-group alias names (#2003) this device last read for each group, so a
+-- push for a group message names the sender as that group shows them without
+-- a network round trip. Refreshed whole on every read of the group's aliases
+-- (`commands::groups::aliases`); a miss falls back to the username, as before.
+-- Best-effort and disposable, like `user_cache`.
+CREATE TABLE IF NOT EXISTS group_alias_cache (
+    group_id     TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (group_id, user_id)
+);
+
 -- Delivery / read receipts for DM messages (#857).
 --
 -- PER MESSAGE, PER READER, PER KIND — never a boolean on the message. A DM can

@@ -34,6 +34,26 @@ pub async fn set_channel_muted(user_id: String, channel_id: String, muted: bool,
 }
 
 #[tauri::command]
+pub async fn list_group_aliases(group_id: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<pollis_core::commands::groups::GroupAlias>> {
+    pollis_core::commands::groups::list_group_aliases(group_id, requester_id, &state).await
+}
+
+#[tauri::command]
+pub async fn list_my_aliases(user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<pollis_core::commands::groups::GroupAlias>> {
+    pollis_core::commands::groups::list_my_aliases(user_id, &state).await
+}
+
+#[tauri::command]
+pub async fn set_group_alias(user_id: String, group_id: Option<String>, display_name: Option<String>, avatar_url: Option<String>, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::set_group_alias(user_id, group_id, display_name, avatar_url, &state).await
+}
+
+#[tauri::command]
+pub async fn reset_group_alias(group_id: String, user_id: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::reset_group_alias(group_id, user_id, requester_id, &state).await
+}
+
+#[tauri::command]
 pub async fn create_group(name: String, description: Option<String>, owner_id: String, create_default_text_channel: Option<bool>, create_default_voice_channel: Option<bool>, state: State<'_, Arc<AppState>>) -> Result<Group> {
     pollis_core::commands::groups::create_group(name, description, owner_id, create_default_text_channel, create_default_voice_channel, &state).await
 }

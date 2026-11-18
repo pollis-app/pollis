@@ -848,3 +848,7 @@ dismissal still work by `data.h`. Build, signing and portal details:
 - #1599 — rich push: the device decrypts and shows sender + preview (Android half above).
 - #1734 — a DM request pushes the phone once (created, then its first message), shows the requester's name, and a tap opens the request list.
 - #186 — original audit + dispatcher refactor (PR #202).
+
+## Per-group aliases in notifications (#2003)
+
+A group message names its sender as that group shows them. On mobile the rich-push fetch (`notify::fetch::alias_names`) looks up each channel row's group in `conversation_cache`, reads that group's aliases from the DS within the fetch's deadline (refreshing the local `group_alias_cache`), and falls back to the cache, then to the username. On desktop `useLiveKitRealtime` resolves the name through `channelAliasName` (the cached `list_group_aliases`, else one read) for new-message and `@mention` banners. DMs and everything outside a group keep the main profile.

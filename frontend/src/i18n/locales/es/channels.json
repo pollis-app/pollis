@@ -120,7 +120,8 @@
       "revoking": "Revocando…",
       "revokeLabel": "Revocar la invitación de {{name}}",
       "revokeFailed": "No se pudo revocar la invitación."
-    }
+    },
+    "resetAlias": "Restablecer alias"
   },
   "kickMember": {
     "pageTitle": "Expulsar miembro",
@@ -214,5 +215,13 @@
     "inviteBodyToGroup": "{{name}} te ha invitado a {{group}}",
     "inviteBody": "{{name}} te ha invitado",
     "inviteBodyUnknown": "Te han invitado a un grupo"
+  },
+  "resetAlias": {
+    "pageTitle": "Restablecer alias",
+    "confirm": "¿Restablecer el alias de <strong>{{name}}</strong> (@{{handle}}) en este grupo?",
+    "consequence": "Volverá a mostrar su perfil principal aquí. Puede definir un alias nuevo.",
+    "confirmButton": "Sí, restablecer",
+    "submitting": "Restableciendo…",
+    "failed": "No se pudo restablecer el alias"
   }
 }

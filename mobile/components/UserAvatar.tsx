@@ -17,28 +17,29 @@ function points(size: Size): number {
 function useAvatarUri(
   userId: string | null | undefined,
   avatarKey: string | null | undefined,
+  aliasKey: string | null | undefined,
   px: number,
 ): string | null {
   const uri = useSyncExternalStore(avatarStore.subscribe, () =>
-    userId ? avatarStore.view(userId, px) : null,
+    userId ? avatarStore.view(userId, px, aliasKey) : null,
   );
   useEffect(() => {
     if (!userId) {
       return;
     }
     avatarStore.noteKey(userId, avatarKey);
-    avatarStore.ensure(userId, px);
-  }, [userId, avatarKey, px]);
+    avatarStore.ensure(userId, px, aliasKey);
+  }, [userId, avatarKey, aliasKey, px]);
   return uri;
 }
 
 /** Warm a list's pictures before its rows mount. `size` in points, as the rows draw them. */
 export function usePrefetchAvatars(
-  rows: Array<{ userId: string; key?: string | null }>,
+  rows: Array<{ userId: string; key?: string | null; aliasKey?: string | null }>,
   size: Size,
 ): void {
   const px = renditionFor(points(size) * PixelRatio.get());
-  const sig = rows.map((r) => `${r.userId}:${r.key ?? ""}`).join(",");
+  const sig = rows.map((r) => `${r.userId}:${r.key ?? ""}:${r.aliasKey ?? ""}`).join(",");
   useEffect(() => {
     if (rows.length > 0) {
       avatarStore.prefetch(rows, px);
@@ -53,10 +54,13 @@ export function usePrefetchAvatars(
  * Once a picture has been drawn it is on disk, so later renders, screens and launches
  * draw it on their first frame instead of the letter.
  * `avatarKey`: pass what the list carries (`undefined` when it carries nothing).
+ * `aliasKey`: the user's alias picture in the group being drawn (#2003); it never
+ * replaces their main picture anywhere else.
  */
 export function UserAvatar({
   userId,
   avatarKey,
+  aliasKey,
   label,
   size = "md",
   variant = "default",
@@ -66,6 +70,7 @@ export function UserAvatar({
 }: {
   userId: string | null | undefined;
   avatarKey?: string | null;
+  aliasKey?: string | null;
   label?: string;
   size?: Size;
   variant?: "default" | "self" | "amber" | "solid";
@@ -75,7 +80,7 @@ export function UserAvatar({
 }) {
   const dim = points(size);
   const px = renditionFor(dim * PixelRatio.get());
-  const uri = useAvatarUri(userId, avatarKey, px);
+  const uri = useAvatarUri(userId, avatarKey, aliasKey, px);
   const radius = shape === "rounded" ? r.lg : dim / 2;
   const drawsPhoto = !!uri && !!userId;
 

@@ -259,7 +259,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                       />
                       {/* Who is in the room, under the row (Discord); the roster is only fetched for non-empty rooms. */}
                       {isVoice && (voiceCount > 0 || isActive) && (
-                        <VoiceChannelMembers channelId={ch.id} enabled={voiceCount > 0} />
+                        <VoiceChannelMembers channelId={ch.id} groupId={group.id} enabled={voiceCount > 0} />
                       )}
                       </React.Fragment>
                     );

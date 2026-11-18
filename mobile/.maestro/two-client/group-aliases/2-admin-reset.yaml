@@ -1,0 +1,56 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# GROUP ALIASES (#2003), part 2 of 2 — driven by scripts/maestro-group-aliases.sh.
+# The peer has made the phone an admin. The member page offers "Reset alias" on
+# the peer's row; two taps reset it, the row falls back to the main profile, and
+# the peer's old message does too. The peer must then see its alias gone.
+
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP_NAME}, .*"
+    timeout: 30000
+- tapOn:
+    id: "row-group-members"
+- extendedWaitUntil:
+    visible:
+      id: "btn-reset-alias-${MAESTRO_PEER_ID}"
+    timeout: 60000
+- takeScreenshot: aliases-two-06-reset-offered
+# Two taps: the first arms it.
+- tapOn:
+    id: "btn-reset-alias-${MAESTRO_PEER_ID}"
+- tapOn:
+    id: "btn-reset-alias-${MAESTRO_PEER_ID}"
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-reset-alias-${MAESTRO_PEER_ID}"
+    timeout: 30000
+- assertNotVisible: "${PEER_ALIAS}.*"
+- takeScreenshot: aliases-two-07-reset
+
+# Old messages fall back too: names resolve at render time.
+- tapOn:
+    id: "btn-back"
+- tapOn: "General"
+- extendedWaitUntil:
+    visible: "${MAESTRO_PEER_HANDLE}: roll call .*"
+    timeout: 30000
+- assertNotVisible: "${PEER_ALIAS}: roll call .*"
+- takeScreenshot: aliases-two-08-message-fallback

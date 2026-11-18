@@ -7,6 +7,7 @@ import type { RealtimeEvent } from "../lib/realtime/events";
 import { useIngestConversation, type ConversationKind } from "./queries/useMessages";
 import { groupQueryKeys } from "./queries/useUserGroups";
 import { groupInviteQueryKeys } from "./queries/useGroupInvites";
+import { aliasQueryKeys } from "./queries/useGroupAliases";
 import { dmQueryKeys } from "./queries/useDMChannels";
 import { appStore } from "../stores/appStore";
 import { typingStore } from "../stores/typingStore";
@@ -40,6 +41,13 @@ export function useConversationRealtime(
 
     const handleEvent = (event: RealtimeEvent) => {
       // Data refresh only: membership is never announced in the timeline (#1506).
+      if (event.type === "group_aliases_changed") {
+        // #2003: someone's alias in this group changed; rows re-render with it.
+        void qcRef.current.invalidateQueries({
+          queryKey: event.group_id ? aliasQueryKeys.group(event.group_id) : aliasQueryKeys.all,
+        });
+        return;
+      }
       if (event.type === "member_role_changed") {
         void qcRef.current.invalidateQueries({
           queryKey: groupInviteQueryKeys.members(event.group_id),

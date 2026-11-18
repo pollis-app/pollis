@@ -511,6 +511,31 @@ pub(crate) async fn channel_mutes(
     ds_post_json(state, &body).await
 }
 
+/// Every alias in `group_id` (#2003), members past and present;
+/// `authorized: false` when the caller is not a current member.
+pub(crate) async fn group_aliases(
+    state: &Arc<AppState>,
+    user_id: &str,
+    group_id: &str,
+) -> Result<pollis_api::profile::GroupAliasesResponse> {
+    let body = pollis_api::profile::GroupAliasesBody {
+        user_id: user_id.to_string(),
+        group_id: group_id.to_string(),
+    };
+    ds_post_json(state, &body).await
+}
+
+/// Every alias this account owns (#2003), in any group.
+pub(crate) async fn my_aliases(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<pollis_api::profile::MyAliasesResponse> {
+    let body = pollis_api::profile::MyAliasesBody {
+        user_id: user_id.to_string(),
+    };
+    ds_post_json(state, &body).await
+}
+
 /// The conversation's current wrapped pin key, or `None` when nobody has
 /// minted one. Deliberately no defaulting: a decode failure surfaces rather
 /// than reading as "no pins here".

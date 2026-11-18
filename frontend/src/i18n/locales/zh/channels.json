@@ -118,7 +118,8 @@
       "revoking": "正在撤销…",
       "revokeLabel": "撤销对 {{name}} 的邀请",
       "revokeFailed": "无法撤销邀请。"
-    }
+    },
+    "resetAlias": "重置别名"
   },
   "kickMember": {
     "pageTitle": "移除成员",
@@ -206,5 +207,13 @@
     "inviteBodyToGroup": "{{name}} 邀请你加入 {{group}}",
     "inviteBody": "{{name}} 邀请了你",
     "inviteBodyUnknown": "你收到了一个群组邀请"
+  },
+  "resetAlias": {
+    "pageTitle": "重置别名",
+    "confirm": "要重置 <strong>{{name}}</strong>（@{{handle}}）在此群组中的别名吗？",
+    "consequence": "这里将重新显示其主资料。对方可以重新设置别名。",
+    "confirmButton": "是，重置",
+    "submitting": "正在重置…",
+    "failed": "无法重置别名"
   }
 }
