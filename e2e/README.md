@@ -20,6 +20,13 @@ pnpm --filter @pollis/e2e e2e:ui                 # all Playwright UI specs
 pnpm --filter @pollis/e2e e2e:ui mentions        # just the mentions spec
 ```
 
+**Neither suite runs automatically in CI (#2022).** CI runs unit tests and
+smoke/build checks only. Before merging a change, run the specs and scenarios
+that cover it locally (and the Maestro flows on-device for anything mobile
+reaches) and state the results in the PR. Both suites have
+`workflow_dispatch`-only workflows for a full run on a CI runner — see
+[CI](#ci) below.
+
 Both `.spec.js` and `.spec.ts` are picked up by the one config.
 
 | spec | what it proves |
@@ -636,6 +643,10 @@ duplicated):
 
 ## CI
 
+Every workflow here is `workflow_dispatch`-only: nothing in this directory runs
+on a PR, push or schedule (#2022). `.github/workflows/e2e-browser.yml` runs the
+Playwright UI specs, sharded four ways; the rest drive the WebDriver scenarios.
+
 `.github/workflows/e2e-smoke.yml` runs `smoke.js` on Linux, triggered
 manually (`workflow_dispatch`) — not on every push, since it needs a real
 (virtual) display and a full `cargo build`, both slower than the rest of CI.
@@ -665,7 +676,7 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `two-client.js` | `e2e-two-client.yml` | — |
 | `two-client-dm-reply.js` | `e2e-two-client-dm-reply.yml` | — |
 | `two-client-delete.js` | `e2e-two-client-delete.yml` | — |
-| `two-client-link-preview.js` | `e2e-two-client-link-preview.yml` (also on a PR that changes the scenario) | network to example.com/.org/.net |
+| `two-client-link-preview.js` | `e2e-two-client-link-preview.yml` | network to example.com/.org/.net |
 | `two-client-channel.js` | `e2e-two-client-channel.yml` | — |
 | `two-client-voice-channel.js` | `e2e-two-client-voice-channel.yml` | LiveKit + audio |
 | `voice-removal-frame-keys.js` | `e2e-two-client-voice-channel.yml` (second step) | LiveKit + audio, `pollis/e2e-hooks` build |
@@ -675,6 +686,6 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `voice-channel-no-mic.js` | `e2e-voice-channel-no-mic.yml` | LiveKit + audio (`POLLIS_DISABLE_MIC=1`) |
 | `vault-search-style.spec.ts` | Vault, search and chrome style in BOTH skins, asserted on COMPUTED styles rather than class strings: the vault composer draws one border and adds no padding of its own, the Chat/Media toggle is rounded, the empty state takes the skin's own face (and therefore differs between skins), both vault placeholders resolve to the same face/size/weight, hover highlights carry no non-zero background transition, a search hit renders custom emoji as an image instead of its `<:name:hash>` source, the search box is the shared `TextInput`, the sidebar has no Search Messages row, and the voice bar names nobody when the only identities present are your own devices |
 
-None run automatically. Wiring a cheap PR tier + a nightly full tier is the
-remaining piece of #570 M4 (deferred on cost); until then, dispatch them from
-the Actions tab after touching MLS delivery, DMs, the DS, or media.
+None run automatically, by design (#2022): run the scenarios a change touches
+locally before merging it, or dispatch them from the Actions tab, after
+touching MLS delivery, DMs, the DS, or media.
