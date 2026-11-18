@@ -3,12 +3,17 @@
 //! ```text
 //! 1. a trigger arrives for an installation (a wake-up for new messages, or a webhook call)
 //! 2. take the installation's lock (one job per installation at a time)
-//! 3. catch MLS up through the normal ingest path; new messages become message triggers
+//! 3. open (unseal) the installation's store, catch MLS up through the normal
+//!    ingest path; new messages become message triggers
 //! 4. hand each trigger to the installation's handler, which returns actions
 //! 5. claim (installation_id, trigger_key) on the DS; a lost claim discards the actions
 //! 6. check each action against the grants and apply what passes; a handler error discards all
-//! 7. release the lock
+//! 7. seal the store and release the lock
 //! ```
+//!
+//! The store is open only for the length of a job, so "unseal → catch up → run
+//! → seal" is the only way work happens, and nothing depends on a host having
+//! stayed up since the last job.
 //!
 //! A trigger with no actions is not claimed: there is nothing to deduplicate.
 //! A message trigger's cursor advances once its outcome is final (applied,
@@ -35,6 +40,10 @@ pub enum JobInput {
     /// reconnect, or the start of the runtime). The job's catch-up finds out.
     Wake,
     Webhook(WebhookCall),
+    /// Check the bot's approved add-host requests (the `bot_host_approval`
+    /// nudge, the start of the runtime, or a deferred request's `retry_at`),
+    /// then catch up like a wake-up.
+    Approvals { wrap_now: bool },
 }
 
 /// How one trigger ended.
@@ -55,6 +64,7 @@ pub enum TriggerOutcome {
 /// A job that could not finish. Each names one concrete fix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobError {
+    Open(CoreError),
     CatchUp(CoreError),
     Channels(CoreError),
     Claim(CoreError),
@@ -65,6 +75,9 @@ pub enum JobError {
 impl JobError {
     pub fn fix(&self) -> &'static str {
         match self {
+            JobError::Open(_) => {
+                "check this host was not revoked and the bot still exists (`pollis-bot status`); if so, `pollis-bot forget` it"
+            }
             JobError::CatchUp(_) => {
                 "check this host can reach the Delivery Service; the next message or restart retries the catch-up"
             }
@@ -87,6 +100,7 @@ impl JobError {
 impl std::fmt::Display for JobError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (step, e) = match self {
+            JobError::Open(e) => ("opening the installation", e),
             JobError::CatchUp(e) => ("catching up", e),
             JobError::Channels(e) => ("reading the group's channels", e),
             JobError::Claim(e) => ("claiming the trigger", e),
@@ -109,6 +123,12 @@ pub struct TriggerResult {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JobReport {
     pub triggers: Vec<TriggerResult>,
+    /// An approvals job deferred to a peer: check again at this time (Unix s).
+    pub approvals_retry_at: Option<i64>,
+    /// An approvals job could not check; the job's other work still ran.
+    pub approvals_error: Option<String>,
+    /// How long unsealing and sealing the store took.
+    pub open_close: std::time::Duration,
 }
 
 impl JobReport {
@@ -157,8 +177,30 @@ impl Installation {
             // Wake-ups from here on need a new job: this catch-up may already be past them.
             self.wake_queued.store(false, Ordering::Release);
         }
+        // Step 3: unseal. Sealed again below on every path.
+        let started = std::time::Instant::now();
+        self.core.open().await.map_err(JobError::Open)?;
+        let opened_in = started.elapsed();
+        let result = self.run_open(input).await;
+        let sealing = std::time::Instant::now();
+        self.core.close().await;
+        let open_close = opened_in + sealing.elapsed();
+        result.map(|mut report| {
+            report.open_close = open_close;
+            report
+        })
+    }
 
-        // Step 3.
+    /// Steps 3–6 with the store open.
+    async fn run_open(&self, input: JobInput) -> Result<JobReport, JobError> {
+        let mut report = JobReport::default();
+        if let JobInput::Approvals { wrap_now } = input {
+            match self.core.host_approvals(wrap_now).await {
+                Ok(retry_at) => report.approvals_retry_at = retry_at,
+                Err(e) => report.approvals_error = Some(e.0),
+            }
+        }
+
         let messages = self.core.catch_up().await.map_err(JobError::CatchUp)?;
 
         let mut triggers: Vec<Trigger> = Vec::new();
@@ -174,7 +216,6 @@ impl Installation {
                 .map(Trigger::Message),
         );
 
-        let mut report = JobReport::default();
         let mut grants: Option<Grants> = None;
         for trigger in triggers {
             let key = trigger.key();

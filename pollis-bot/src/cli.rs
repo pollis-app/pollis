@@ -18,7 +18,7 @@ pub enum Command {
     Version,
     Pair { name: Option<String> },
     AddHost { bot_user_id: String, name: Option<String> },
-    Run { webhook: Option<Option<SocketAddr>>, max_installations: Option<usize> },
+    Run { webhook: Option<Option<SocketAddr>>, max_installations: Option<usize>, once: bool },
     Post { installation_id: String, channel: String, text: String },
     Status,
     RotateSecret { installation_id: String },
@@ -39,9 +39,11 @@ COMMANDS
     add-host --bot BOT_USER_ID [--name NAME]
         Make this host another host of an existing bot. Prints a code; an admin
         types it in Pollis: open the group, then Bots → the bot → Add a host.
-    run [--webhook [ADDR]] [--max-installations N]
+    run [--webhook [ADDR]] [--max-installations N] [--once]
         Run every installation on this host until stopped. --webhook turns the
-        alerts webhook on (default {bind}, loopback) for this run.
+        alerts webhook on (default {bind}, loopback) for this run. --once
+        catches up, handles everything pending and exits (for a host that is
+        started on a schedule or by a wake-up and goes back to sleep).
     post --installation ID --channel CHANNEL TEXT...
         Post TEXT through the running runtime's webhook endpoint.
     status
@@ -109,8 +111,12 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Stri
             continue;
         }
         if let Some(flag) = arg.strip_prefix("--") {
-            // `--webhook` alone takes no value; every other flag takes one.
-            let takes_value = flag != "webhook" || args.peek().is_some_and(|next| !next.starts_with('-') && next.contains(':'));
+            // `--once` takes no value, `--webhook` an optional one; every other flag takes one.
+            let takes_value = match flag {
+                "once" => false,
+                "webhook" => args.peek().is_some_and(|next| !next.starts_with('-') && next.contains(':')),
+                _ => true,
+            };
             let v = if takes_value { Some(value(&mut args, &arg)?) } else { None };
             flags.push((flag.to_string(), v));
         } else {
@@ -143,7 +149,11 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Stri
                     _ => return Err(format!("--max-installations `{n}` must be a number of at least 1")),
                 },
             };
-            Command::Run { webhook, max_installations }
+            let once = take("once").is_some();
+            if once && webhook.is_some() {
+                return Err("--once runs one pass and exits, so it cannot serve the webhook; drop --webhook".into());
+            }
+            Command::Run { webhook, max_installations, once }
         }
         "post" => {
             let installation_id = take("installation").flatten().ok_or("post needs --installation ID")?;
@@ -211,16 +221,24 @@ mod tests {
     }
 
     #[test]
+    fn run_once_is_a_flag() {
+        assert_eq!(
+            p(&["run", "--once"]).unwrap().command,
+            Command::Run { webhook: None, max_installations: None, once: true }
+        );
+    }
+
+    #[test]
     fn run_takes_an_optional_webhook_address() {
-        assert_eq!(p(&["run"]).unwrap().command, Command::Run { webhook: None, max_installations: None });
-        assert_eq!(p(&["run", "--webhook"]).unwrap().command, Command::Run { webhook: Some(None), max_installations: None });
+        assert_eq!(p(&["run"]).unwrap().command, Command::Run { webhook: None, max_installations: None, once: false });
+        assert_eq!(p(&["run", "--webhook"]).unwrap().command, Command::Run { webhook: Some(None), max_installations: None, once: false });
         assert_eq!(
             p(&["run", "--webhook", "0.0.0.0:9000", "--max-installations", "3"]).unwrap().command,
-            Command::Run { webhook: Some(Some("0.0.0.0:9000".parse().unwrap())), max_installations: Some(3) }
+            Command::Run { webhook: Some(Some("0.0.0.0:9000".parse().unwrap())), max_installations: Some(3), once: false }
         );
         assert_eq!(
             p(&["run", "--webhook", "--max-installations", "2"]).unwrap().command,
-            Command::Run { webhook: Some(None), max_installations: Some(2) }
+            Command::Run { webhook: Some(None), max_installations: Some(2), once: false }
         );
     }
 
@@ -230,6 +248,7 @@ mod tests {
         assert!(p(&["add-host"]).unwrap_err().contains("--bot"));
         assert!(p(&["post", "--installation", "01I", "--channel", "c"]).unwrap_err().contains("text"));
         assert!(p(&["run", "--max-installations", "0"]).is_err());
+        assert!(p(&["run", "--once", "--webhook"]).is_err());
         assert!(p(&["run", "--webhook", "nonsense:x"]).is_err());
         assert!(p(&["status", "--loud", "yes"]).unwrap_err().contains("--loud"));
         assert!(p(&["status", "extra"]).unwrap_err().contains("extra"));

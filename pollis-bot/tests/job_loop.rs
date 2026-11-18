@@ -206,3 +206,54 @@ fn a_triggers_message_ids_are_stable_valid_ulids() {
     assert_ne!(a, action_message_id("01OTHERBOT", &t, 0));
     assert!(ulid::Ulid::from_string(&a).is_ok());
 }
+
+#[tokio::test]
+async fn the_store_is_open_only_during_a_job_and_sealed_on_every_path() {
+    let ds = Arc::new(FakeDs::default());
+    let core = FakeCore::new("01HOSTA", ds.clone());
+    let inst = Installation::new(core.clone(), Arc::new(EchoHandler));
+    ds.deliver("01MSG1", "01ALICE", "hi");
+
+    // A transient failure mid-job still seals.
+    core.fail_claim.store(true, Ordering::SeqCst);
+    inst.run_job(JobInput::Wake).await.unwrap();
+    assert!(!core.open.load(Ordering::SeqCst));
+    core.fail_claim.store(false, Ordering::SeqCst);
+
+    // A handler failure seals too.
+    let failing = Installation::new(core.clone(), Arc::new(FailingHandler));
+    failing.run_job(JobInput::Wake).await.unwrap();
+    assert!(!core.open.load(Ordering::SeqCst));
+
+    inst.run_job(hook("d1", "alerts", "x")).await.unwrap();
+    assert!(!core.open.load(Ordering::SeqCst));
+    assert_eq!(core.opens.load(Ordering::SeqCst), 3);
+    assert_eq!(core.closes.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn a_store_that_will_not_open_runs_nothing() {
+    let ds = Arc::new(FakeDs::default());
+    let core = FakeCore::new("01HOSTA", ds.clone());
+    core.fail_open.store(true, Ordering::SeqCst);
+    let inst = Installation::new(core.clone(), Arc::new(AlertsHandler));
+    let err = inst.run_job(hook("d1", "alerts", "x")).await.unwrap_err();
+    assert!(matches!(err, JobError::Open(_)), "{err:?}");
+    assert!(err.fix().contains("forget"));
+    assert!(ds.posts().is_empty());
+    assert_eq!(core.claim_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn an_approvals_job_checks_approvals_then_catches_up() {
+    let ds = Arc::new(FakeDs::default());
+    let core = FakeCore::new("01HOSTA", ds.clone());
+    *core.approvals_retry_at.lock().unwrap() = Some(1_900_000_000);
+    let inst = Installation::new(core.clone(), Arc::new(EchoHandler));
+    ds.deliver("01MSG1", "01ALICE", "hi");
+    let report = inst.run_job(JobInput::Approvals { wrap_now: false }).await.unwrap();
+    assert_eq!(report.approvals_retry_at, Some(1_900_000_000));
+    assert_eq!(*core.approval_calls.lock().unwrap(), vec![false]);
+    assert_eq!(report.triggers.len(), 1, "the same job also caught up");
+    assert_eq!(ds.posts().len(), 1);
+}

@@ -4,8 +4,13 @@
 //!
 //! A thin adapter: pairing, unattended start and group join are
 //! `pollis_core::commands::bots`; catch-up is the normal ingest path; posting is
-//! the normal durable send path; wake-ups are the normal realtime rooms (the
-//! group's room and the bot's inbox), behind the `realtime` feature.
+//! the normal durable send path.
+//!
+//! A job unseals the installation (`start_unattended` on a fresh `AppState`) at
+//! its start and seals it (`stop_unattended`) at its end, so nothing is held
+//! open between jobs. The wake source (realtime rooms: the group's room and the
+//! bot's inbox, behind the `realtime` feature) is a separate adapter with its
+//! own state; it only reports wake-ups and never touches a job's state.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,7 +27,7 @@ use pollis_core::state::AppState;
 
 use crate::action::ChannelInfo;
 use crate::core::{CoreError, InstallationCore};
-use crate::host::{BotHost, OpenedInstallation, PairOutcome, PairTarget, PairingProgress, PairingTicket, WakeFn};
+use crate::host::{BotHost, OpenedInstallation, PairOutcome, PairTarget, PairingProgress, PairingTicket, Wakes};
 use crate::installations::InstallationRecord;
 use crate::secrets::SecretSlot;
 use crate::trigger::{IncomingMessage, TriggerKey};
@@ -33,8 +38,6 @@ use crate::trigger::{IncomingMessage, TriggerKey};
 pub const STORES_DIR: &str = "stores";
 /// How long a fresh host waits for the admin's Welcome before joining directly.
 const JOIN_WAIT: Duration = Duration::from_secs(60);
-/// On restart the group is already local; this only drains queued Welcomes.
-const REJOIN_WAIT: Duration = Duration::from_secs(5);
 
 pub struct CoreHost {
     config: Config,
@@ -57,14 +60,19 @@ impl CoreHost {
     }
 
     fn state_for(&self, store_dir: PathBuf) -> Result<Arc<AppState>> {
-        std::fs::create_dir_all(&store_dir).with_context(|| format!("creating {}", store_dir.display()))?;
-        let state = AppState::new_with_parts(self.config.clone(), self.keystore.clone());
-        state
-            .local_dir
-            .set(store_dir)
-            .map_err(|_| anyhow!("an installation's data dir was set twice"))?;
-        Ok(Arc::new(state))
+        fresh_state(&self.config, &self.keystore, store_dir).map_err(|e| anyhow!(e.0))
     }
+}
+
+/// A new, sealed `AppState` over one installation's store dir.
+fn fresh_state(config: &Config, keystore: &Arc<dyn Keystore>, store_dir: PathBuf) -> Result<Arc<AppState>, CoreError> {
+    std::fs::create_dir_all(&store_dir).map_err(|e| CoreError(format!("creating {}: {e}", store_dir.display())))?;
+    let state = AppState::new_with_parts(config.clone(), keystore.clone());
+    state
+        .local_dir
+        .set(store_dir)
+        .map_err(|_| CoreError("an installation's data dir was set twice".into()))?;
+    Ok(Arc::new(state))
 }
 
 /// The OS keystore, with every entry this runtime writes prefixed by a hash of
@@ -169,28 +177,36 @@ impl BotHost for CoreHost {
         }))
     }
 
-    async fn open(&self, record: &InstallationRecord, dir: &Path, wake: WakeFn) -> Result<OpenedInstallation> {
+    async fn open(&self, record: &InstallationRecord, dir: &Path) -> Result<OpenedInstallation> {
         let store = store_dir(data_dir_of(dir)?, &record.device_id)?;
-        let state = self.state_for(store.clone())?;
-        let session = bots::start_unattended(&state, &record.bot_user_id).await?;
-        if session.group_id != record.group_id || session.device_id != record.device_id {
-            return Err(anyhow!(
-                "installation.json disagrees with the keystore about this bot's group or device. Fix: run `pollis-bot forget --installation {}` and pair again",
-                record.installation_id
-            ));
-        }
-        bots::join_bot_group(&state, &session, REJOIN_WAIT).await?;
-        // Approvals that arrived while this host was down.
-        handle_host_approvals(state.clone(), session.clone()).await;
-        #[cfg(feature = "realtime")]
-        realtime::connect(&state, &session, wake).await?;
-        #[cfg(not(feature = "realtime"))]
-        drop(wake);
-        let core = installation_core(state, session);
+        let session = BotSession {
+            bot_user_id: record.bot_user_id.clone(),
+            group_id: record.group_id.clone(),
+            device_id: record.device_id.clone(),
+        };
+        let core = installation_core(self.config.clone(), self.keystore.clone(), store, session);
+        // Fail at start, with its fix, rather than at the first job.
+        core.open().await.map_err(|e| anyhow!(e.0))?;
+        core.close().await;
         Ok(OpenedInstallation {
             core,
             secrets: Arc::new(self.keystore.clone()),
         })
+    }
+
+    async fn watch(&self, record: &InstallationRecord, dir: &Path, wakes: Wakes) -> Result<()> {
+        #[cfg(feature = "realtime")]
+        {
+            let store = store_dir(data_dir_of(dir)?, &record.device_id)?;
+            let state = self.state_for(store)?;
+            let session = bots::start_unattended(&state, &record.bot_user_id).await?;
+            realtime::connect(&state, &session, wakes).await?;
+        }
+        #[cfg(not(feature = "realtime"))]
+        {
+            let _ = (record, dir, wakes);
+        }
+        Ok(())
     }
 
     async fn forget(&self, record: &InstallationRecord, dir: &Path) -> Result<()> {
@@ -213,57 +229,44 @@ impl BotHost for CoreHost {
     }
 }
 
-/// Verify and wrap any approved add-host requests for this bot. Failures are
-/// logged: they never stop the bot's own work. A `Deferred` outcome (another
-/// host ranks first to wrap) schedules exactly one re-check at its `retry_at`;
-/// approvals expire within minutes, so the chain ends.
-fn handle_host_approvals(
-    state: Arc<AppState>,
+/// The job loop's view of one installation. Sealed until a job calls
+/// [`InstallationCore::open`], which starts it unattended on a fresh `AppState`
+/// over `store_dir`; [`InstallationCore::close`] seals it again. Read cursors
+/// live in its encrypted store (`bot_trigger_cursor`). Public so the flows
+/// harness can run the real loop over its in-process DS.
+pub fn installation_core(
+    config: Config,
+    keystore: Arc<dyn Keystore>,
+    store_dir: PathBuf,
     session: BotSession,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
-    Box::pin(async move {
-        let scope = crate::log::scope(&session.bot_user_id);
-        match bots::handle_host_approvals(&state, &session, &bots::TransparencyLogAudit).await {
-            Ok(outcomes) => {
-                let mut retry_at: Option<i64> = None;
-                for o in outcomes {
-                    if let bots::HostApprovalOutcome::Deferred { retry_at: at, .. } = &o {
-                        retry_at = Some(retry_at.map_or(*at, |r| r.min(*at)));
-                    }
-                    crate::log::info(&scope, format!("host approval: {o:?}"));
-                }
-                if let Some(at) = retry_at {
-                    let wait = (at - chrono::Utc::now().timestamp()).max(1) as u64;
-                    let (state, session) = (state.clone(), session.clone());
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(wait)).await;
-                        handle_host_approvals(state, session).await;
-                    });
-                }
-            }
-            Err(e) => crate::log::failure(
-                &scope,
-                format!("checking host approvals: {e}"),
-                "check this host can reach the Delivery Service; approvals are checked again on the next start or approval",
-            ),
-        }
+) -> Arc<dyn InstallationCore> {
+    Arc::new(CoreInstallation {
+        config,
+        keystore,
+        store_dir,
+        session,
+        state: tokio::sync::Mutex::new(None),
     })
 }
 
-/// The job loop's view of one opened, unattended installation: `state` is
-/// signed in as the bot (after `start_unattended` or pairing) and has joined its
-/// group. Read cursors live in its encrypted store (`bot_trigger_cursor`).
-/// Public so the flows harness can run the real loop over its in-process DS.
-pub fn installation_core(state: Arc<AppState>, session: BotSession) -> Arc<dyn InstallationCore> {
-    Arc::new(CoreInstallation { state, session })
-}
-
 struct CoreInstallation {
-    state: Arc<AppState>,
+    config: Config,
+    keystore: Arc<dyn Keystore>,
+    store_dir: PathBuf,
     session: BotSession,
+    /// `Some` only while a job runs.
+    state: tokio::sync::Mutex<Option<Arc<AppState>>>,
 }
 
 impl CoreInstallation {
+    async fn state(&self) -> Result<Arc<AppState>, CoreError> {
+        self.state
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| CoreError("the installation is sealed: no job is running".into()))
+    }
+
     async fn text_channels(&self) -> Result<Vec<String>, CoreError> {
         Ok(self
             .channels()
@@ -289,18 +292,66 @@ impl InstallationCore for CoreInstallation {
         &self.session.bot_user_id
     }
 
+    async fn open(&self) -> Result<(), CoreError> {
+        let state = fresh_state(&self.config, &self.keystore, self.store_dir.clone())?;
+        let session = bots::start_unattended(&state, &self.session.bot_user_id)
+            .await
+            .map_err(core_err)?;
+        if session != self.session {
+            bots::stop_unattended(&state).await;
+            return Err(CoreError(format!(
+                "installation.json disagrees with the keystore about this bot's group or device; run `pollis-bot forget --installation {}` and pair again",
+                self.session.bot_user_id
+            )));
+        }
+        // A send a previous job could not finish goes out under its own id now.
+        if let Err(e) = pollis_core::commands::messages::flush_outbox(&state).await {
+            crate::log::failure(
+                &crate::log::scope(&self.session.bot_user_id),
+                format!("delivering an earlier post: {e}"),
+                "nothing to do; it is retried at the next job",
+            );
+        }
+        *self.state.lock().await = Some(state);
+        Ok(())
+    }
+
+    async fn close(&self) {
+        if let Some(state) = self.state.lock().await.take() {
+            bots::stop_unattended(&state).await;
+        }
+    }
+
+    async fn host_approvals(&self, wrap_now: bool) -> Result<Option<i64>, CoreError> {
+        let state = self.state().await?;
+        let timing = if wrap_now { bots::WrapTiming::Now } else { bots::WrapTiming::Staggered };
+        let outcomes = bots::handle_host_approvals_with(&state, &self.session, &bots::TransparencyLogAudit, timing)
+            .await
+            .map_err(core_err)?;
+        let scope = crate::log::scope(&self.session.bot_user_id);
+        let mut retry_at: Option<i64> = None;
+        for o in outcomes {
+            if let bots::HostApprovalOutcome::Deferred { retry_at: at, .. } = &o {
+                retry_at = Some(retry_at.map_or(*at, |r| r.min(*at)));
+            }
+            crate::log::info(&scope, format!("host approval: {o:?}"));
+        }
+        Ok(retry_at)
+    }
+
     async fn catch_up(&self) -> Result<Vec<IncomingMessage>, CoreError> {
+        let state = self.state().await?;
         let user = self.session.bot_user_id.clone();
-        pollis_core::commands::mls::catch_up_all_mls_groups(&self.state, &user)
+        pollis_core::commands::mls::catch_up_all_mls_groups(&state, &user)
             .await
             .map_err(core_err)?;
         let mut fresh = Vec::new();
         for channel_id in self.text_channels().await? {
             // Ingest + decrypt through the normal read path; the newest page seeds a new channel's cursor.
-            let newest = get_channel_messages(user.clone(), channel_id.clone(), Some(1), None, &self.state)
+            let newest = get_channel_messages(user.clone(), channel_id.clone(), Some(1), None, &state)
                 .await
                 .map_err(core_err)?;
-            let stored = bots::trigger_cursor(&self.state, &channel_id).await.map_err(core_err)?;
+            let stored = bots::trigger_cursor(&state, &channel_id).await.map_err(core_err)?;
             let Some((sent_at, id)) = stored else {
                 // First sight of this channel: start from now, never replay history.
                 let (sent_at, id) = newest
@@ -308,7 +359,7 @@ impl InstallationCore for CoreInstallation {
                     .first()
                     .map(|m| (m.sent_at.clone(), m.id.clone()))
                     .unwrap_or_default();
-                bots::set_trigger_cursor(&self.state, &channel_id, &sent_at, &id)
+                bots::set_trigger_cursor(&state, &channel_id, &sent_at, &id)
                     .await
                     .map_err(core_err)?;
                 continue;
@@ -322,7 +373,7 @@ impl InstallationCore for CoreInstallation {
                         id: after.id.clone(),
                     },
                     Some(200),
-                    &self.state,
+                    &state,
                 )
                 .await
                 .map_err(core_err)?;
@@ -354,16 +405,18 @@ impl InstallationCore for CoreInstallation {
     }
 
     async fn mark_handled(&self, message: &IncomingMessage) -> Result<(), CoreError> {
-        bots::set_trigger_cursor(&self.state, &message.channel_id, &message.sent_at, &message.envelope_id)
+        let state = self.state().await?;
+        bots::set_trigger_cursor(&state, &message.channel_id, &message.sent_at, &message.envelope_id)
             .await
             .map_err(core_err)
     }
 
     async fn channels(&self) -> Result<Vec<ChannelInfo>, CoreError> {
+        let state = self.state().await?;
         let channels = list_group_channels(
             self.session.group_id.clone(),
             self.session.bot_user_id.clone(),
-            &self.state,
+            &state,
         )
         .await
         .map_err(core_err)?;
@@ -378,12 +431,14 @@ impl InstallationCore for CoreInstallation {
     }
 
     async fn claim(&self, key: &TriggerKey) -> Result<bool, CoreError> {
-        bots::claim_trigger(&self.state, &self.session.bot_user_id, key.as_str())
+        let state = self.state().await?;
+        bots::claim_trigger(&state, &self.session.bot_user_id, key.as_str())
             .await
             .map_err(core_err)
     }
 
     async fn post(&self, channel_id: &str, text: &str, message_id: &str) -> Result<(), CoreError> {
+        let state = self.state().await?;
         send_message_with_id(
             Some(message_id.to_string()),
             channel_id.to_string(),
@@ -393,7 +448,7 @@ impl InstallationCore for CoreInstallation {
             None,
             None,
             None,
-            &self.state,
+            &state,
         )
         .await
         .map(|_| ())
@@ -412,14 +467,12 @@ mod realtime {
     use pollis_core::sink::EventSink;
     use pollis_core::state::AppState;
 
-    use crate::host::WakeFn;
+    use crate::host::Wakes;
 
-    /// Turns the installation's realtime events into job-loop wake-ups. A
-    /// wake-up is only a hint: the job's catch-up decides what is new.
+    /// Turns the installation's realtime events into wake-ups. A wake-up is
+    /// only a hint: the job's catch-up decides what is new.
     struct WakeSink {
-        state: Arc<AppState>,
-        session: BotSession,
-        wake: WakeFn,
+        wakes: Wakes,
     }
 
     impl EventSink<RealtimeEvent> for WakeSink {
@@ -429,16 +482,10 @@ mod realtime {
                 | RealtimeEvent::EditedMessage { .. }
                 | RealtimeEvent::DeletedMessage { .. }
                 | RealtimeEvent::MembershipChanged { .. }
-                | RealtimeEvent::RosterChanged { .. } => (self.wake)(),
-                RealtimeEvent::BotHostApproval { .. } => {
-                    let (state, session) = (self.state.clone(), self.session.clone());
-                    tokio::spawn(super::handle_host_approvals(state, session));
-                }
-                RealtimeEvent::RealtimeReconnected { .. } => {
-                    // Missed events are not replayed: catch up, and look for approvals.
-                    (self.wake)();
-                    let (state, session) = (self.state.clone(), self.session.clone());
-                    tokio::spawn(super::handle_host_approvals(state, session));
+                | RealtimeEvent::RosterChanged { .. } => (self.wakes.wake)(),
+                // Missed events are not replayed: catch up, and look for approvals too.
+                RealtimeEvent::BotHostApproval { .. } | RealtimeEvent::RealtimeReconnected { .. } => {
+                    (self.wakes.approval)()
                 }
                 _ => {}
             }
@@ -446,12 +493,13 @@ mod realtime {
         }
     }
 
-    pub(super) async fn connect(state: &Arc<AppState>, session: &BotSession, wake: WakeFn) -> Result<()> {
-        let sink = Arc::new(WakeSink {
-            state: state.clone(),
-            session: session.clone(),
-            wake,
-        });
+    /// The wake source's own state stays signed in for as long as the process
+    /// runs, because its rooms re-mint their LiveKit tokens with the device's
+    /// signature. It never runs a job and never touches a job's state.
+    pub(super) async fn connect(state: &Arc<AppState>, session: &BotSession, wakes: Wakes) -> Result<()> {
+        // Events only: MLS state changes inside a job, never here.
+        state.livekit.lock().await.wake_only = true;
+        let sink = Arc::new(WakeSink { wakes });
         subscribe_realtime(sink, state).await?;
         let rooms = vec![session.group_id.clone(), format!("inbox-{}", session.bot_user_id)];
         connect_rooms(rooms, session.bot_user_id.clone(), session.bot_user_id.clone(), state).await?;

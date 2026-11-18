@@ -1,13 +1,16 @@
 //! The runtime: many installations, one job loop each, driven by events.
 //!
-//! Jobs start from exactly three places, none of them a timer:
-//! - [`Runtime::wake_all`] once at start, so a restart catches up on what it missed;
-//! - [`Runtime::wake`] from a realtime wake-up for the installation's group
-//!   (a new message, a membership change, or a reconnect after which missed
-//!   events are not replayed);
+//! Jobs start from these places, none of them a periodic timer:
+//! - [`Runtime::start_all`] once at start (or [`Runtime::run_once`] for a
+//!   one-pass run), so a host that was asleep catches up on what it missed and
+//!   handles approvals that arrived meanwhile;
+//! - [`Runtime::wake`] from the wake source (a new message or membership change);
+//! - [`Runtime::approvals`] from the wake source (an approval nudge, a reconnect)
+//!   and, once, at a deferred approval's `retry_at`;
 //! - a webhook call ([`JobSubmitter`]).
 //!
-//! Each job runs on its own task; the installation's lock serialises them.
+//! Each job runs on its own task; the installation's lock serialises them, and
+//! each one unseals the installation's store at its start and seals it at its end.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,11 +51,60 @@ impl Runtime {
         ids
     }
 
-    /// Catch every installation up (start of the runtime).
+    /// Catch every installation up (used by tests and by a wake source that lost track).
     pub fn wake_all(self: &Arc<Self>) {
         for id in self.installation_ids() {
             self.wake(&id);
         }
+    }
+
+    /// Start of a long-running runtime: every installation catches up and
+    /// checks pending approvals.
+    pub fn start_all(self: &Arc<Self>) {
+        for id in self.installation_ids() {
+            self.approvals(&id);
+        }
+    }
+
+    /// Check `installation_id`'s pending add-host approvals (and catch up). A
+    /// request deferred to a peer that ranks first is checked again, once, at
+    /// its `retry_at`, so a peer that is asleep never blocks the wrap.
+    pub fn approvals(self: &Arc<Self>, installation_id: &str) {
+        let Some(inst) = self.installations.get(installation_id).cloned() else {
+            return;
+        };
+        let this = Arc::clone(self);
+        let id = installation_id.to_string();
+        tokio::spawn(async move {
+            let Ok(report) = this.run_logged(&inst, JobInput::Approvals { wrap_now: false }).await else {
+                return;
+            };
+            if let Some(at) = report.approvals_retry_at {
+                let wait = (at - chrono::Utc::now().timestamp()).max(1) as u64;
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                this.approvals(&id);
+            }
+        });
+    }
+
+    /// A one-pass run for a host that goes back to sleep afterwards: every
+    /// installation catches up, handles what is pending, and wraps approved
+    /// hosts at once rather than deferring to a peer. `true` when every job
+    /// finished.
+    pub async fn run_once(self: &Arc<Self>) -> bool {
+        let mut jobs = Vec::new();
+        for id in self.installation_ids() {
+            let inst = self.installations[&id].clone();
+            let this = Arc::clone(self);
+            jobs.push(tokio::spawn(async move {
+                this.run_logged(&inst, JobInput::Approvals { wrap_now: true }).await.is_ok()
+            }));
+        }
+        let mut all_ok = true;
+        for job in jobs {
+            all_ok &= job.await.unwrap_or(false);
+        }
+        all_ok
     }
 
     /// Something may have arrived for `installation_id`. Wake-ups that arrive
@@ -88,6 +140,13 @@ impl Runtime {
             }
             Ok(report) => {
                 let mut first_error = None;
+                if let Some(e) = &report.approvals_error {
+                    log::failure(
+                        &scope,
+                        format!("checking host approvals: {e}"),
+                        "check this host can reach the Delivery Service; approvals are checked again at the next start, nudge or reconnect",
+                    );
+                }
                 for t in &report.triggers {
                     match &t.result {
                         Ok(TriggerOutcome::NoActions) => {}
