@@ -29,7 +29,7 @@ const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const COMMAND_SUGGESTION_LIMIT = 8;
 
 /** A message's text read as a command, or null. */
-export interface ParsedCommand {
+interface ParsedCommand {
   /** Lowercased. */
   name: string;
   /** The `@handle` right after the name, without '@'. */
@@ -38,7 +38,7 @@ export interface ParsedCommand {
 }
 
 /** Read `text` as a command (leading whitespace ignored); null for anything else. */
-export function parseCommand(text: string): ParsedCommand | null {
+function parseCommand(text: string): ParsedCommand | null {
   const trimmed = text.replace(/^\s+/, "");
   if (!trimmed.startsWith("/")) {
     return null;

@@ -23,6 +23,15 @@ import {
   standardShortcodeEntries,
   type ShortcodeEntry,
 } from "../../lib/emojiShortcodes";
+import {
+  applyCommand,
+  commandKey,
+  commandQueryAt,
+  commandsForChannel,
+  pendingRequestCommand,
+  rankCommands,
+  type GroupCommand,
+} from "../../lib/slashCommands";
 import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
 import { EmojiPickerSheet } from "../emoji/EmojiPickerSheet";
 import type { CustomEmoji } from "../../hooks/queries/useEmoji";
@@ -30,7 +39,7 @@ import type { PickedAttachment } from "../../lib/attachments";
 import { ComposerAttachmentPreview } from "./ComposerAttachmentPreview";
 import { useOpenDraftMediaViewer } from "../../hooks/useOpenMediaViewer";
 
-/** Bottom composer bar. `@…` and `:…` open suggestions; shortcodes are substituted HERE, before send, so the wire format is unchanged. */
+/** Bottom composer bar. `/…`, `@…` and `:…` open suggestions; shortcodes are substituted HERE, before send, so the wire format is unchanged. */
 export function Composer({
   draft,
   onChangeDraft,
@@ -38,6 +47,9 @@ export function Composer({
   sendPending = false,
   editable,
   mentionCandidates,
+  commands,
+  channelId = null,
+  commandNotice = null,
   customEmoji,
   onAttach,
   pendingAttachments,
@@ -50,10 +62,15 @@ export function Composer({
   draft: string;
   onChangeDraft: (text: string) => void;
   onSend: () => void;
-  /** Holds the send button while a send is out. Chat never sets it: sends queue (#1636). */
+  /** Holds the send button while a send is out. Chat sets it only for a command request (#2018): messages queue (#1636). */
   sendPending?: boolean;
   editable: boolean;
   mentionCandidates?: MentionCandidate[];
+  /** #2018: every command of the group's Apps; the list offers those granted `channelId`. */
+  commands?: GroupCommand[];
+  channelId?: string | null;
+  /** Why the last send was held back (a shared command name, a request that failed). */
+  commandNotice?: string | null;
   customEmoji?: CustomEmoji[];
   onAttach?: () => void;
   pendingAttachments?: PickedAttachment[];
@@ -76,6 +93,23 @@ export function Composer({
       inputRef.current?.focus();
     }
   }, [focusRequest]);
+
+  // `/command` autocomplete (#2018): only the message's first word.
+  const commandQuery =
+    commands && commands.length > 0 ? commandQueryAt(draft, Math.min(caret, draft.length)) : null;
+  const commandSuggestions = commandQuery
+    ? rankCommands(commandsForChannel(commands ?? [], channelId), commandQuery.query)
+    : [];
+  const requestCommand = commands ? pendingRequestCommand(draft, commands, channelId) : null;
+
+  const acceptCommand = (picked: GroupCommand) => {
+    const next = applyCommand(draft, Math.min(caret, draft.length), picked);
+    if (next.text === draft) {
+      return;
+    }
+    onChangeDraft(next.text);
+    setCaret(next.caret);
+  };
 
   const mentionQuery =
     mentionCandidates && mentionCandidates.length > 0
@@ -101,7 +135,7 @@ export function Composer({
     [customEmoji],
   );
 
-  const emojiQuery = mentionQuery
+  const emojiQuery = mentionQuery || commandQuery
     ? null
     : shortcodeQueryAt(draft, Math.min(caret, draft.length));
   const emojiSuggestions = emojiQuery
@@ -156,6 +190,56 @@ export function Composer({
 
   return (
     <View>
+      {commandSuggestions.length > 0 ? (
+        <View testID="list-command-suggestions" style={suggestionBox()}>
+          <ScrollView keyboardShouldPersistTaps="always">
+            {commandSuggestions.map((c, i) => (
+              <Pressable
+                key={commandKey(c)}
+                testID={`row-command-${c.command}-${c.botUsername}`}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  c.needsTarget
+                    ? `/${c.command}, ${c.description}, ${c.appName} (${t("mobile:bots.badge")})`
+                    : `/${c.command}, ${c.description}`
+                }
+                onPress={() => acceptCommand(c)}
+                style={({ pressed }) => suggestionRow(pressed, i)}
+              >
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={[ty.body, { color: semantic.text }]}>
+                    /{c.command}
+                    {c.argHint ? <Text style={{ color: semantic.muted }}>{` ${c.argHint}`}</Text> : null}
+                  </Text>
+                  <Text numberOfLines={1} style={[ty.meta, { color: semantic.muted }]}>
+                    {c.description}
+                  </Text>
+                </View>
+                {c.needsTarget ? (
+                  <View testID={`tag-command-app-${c.command}-${c.botUsername}`} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text numberOfLines={1} style={[ty.meta, { color: semantic.muted }]}>
+                      {c.appName}
+                    </Text>
+                    <BotBadge testID={`badge-command-bot-${c.command}-${c.botUsername}`} />
+                  </View>
+                ) : null}
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+      {commandNotice || requestCommand ? (
+        <Text
+          testID={commandNotice ? "text-command-notice" : "text-command-request-hint"}
+          accessibilityLiveRegion={commandNotice ? "polite" : undefined}
+          style={[
+            ty.meta,
+            { marginHorizontal: 16, marginBottom: 6, color: commandNotice ? semantic.danger : semantic.muted },
+          ]}
+        >
+          {commandNotice ?? t("composer.commandRequestHint", { app: requestCommand!.appName })}
+        </Text>
+      ) : null}
       {suggestions.length > 0 ? (
         <View
           testID="list-mention-suggestions"

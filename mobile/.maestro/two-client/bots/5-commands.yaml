@@ -1,0 +1,77 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# BOTS (#2018), part 5 — slash commands and bot mentions in the composer. Runs
+# after the driver (scripts/maestro-bots.sh) has installed an App on the bot's
+# host and an admin has approved it (#2005), granted #General, with a command
+# ${APP_COMMAND} whose `on-command` replies ${APP_REPLY}. Same assertions as
+# desktop's e2e/bot-commands.spec.ts: typing `/` lists the App's command, the
+# pick fills the composer, the send is an ordinary message in its normal sent
+# state, the App replies with the Bot badge, and the mention picker lists the
+# bot with the badge.
+
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP_NAME}, .*"
+    timeout: 30000
+- tapOn: "General"
+
+# `/` lists the group's Apps' commands granted this channel.
+- tapOn:
+    id: "input-composer"
+- inputText: "/"
+- extendedWaitUntil:
+    visible:
+      id: "list-command-suggestions"
+    timeout: 30000
+- assertVisible:
+    id: "row-command-${APP_COMMAND}-.*"
+- takeScreenshot: bots-06-command-list
+- tapOn:
+    id: "row-command-${APP_COMMAND}-.*"
+- assertNotVisible:
+    id: "list-command-suggestions"
+- inputText: "from maestro"
+- tapOn:
+    id: "btn-send"
+
+# An ordinary message, then the App's reply with the Bot badge.
+- extendedWaitUntil:
+    visible: ".*/${APP_COMMAND}.*from maestro.*"
+    timeout: 30000
+- assertNotVisible:
+    id: "text-command-notice"
+- extendedWaitUntil:
+    visible: ".*${APP_REPLY}.*"
+    timeout: 120000
+- assertVisible:
+    id: "message-bot-badge"
+- takeScreenshot: bots-07-command-reply
+
+# The mention picker lists the bot with its badge.
+- tapOn:
+    id: "input-composer"
+- inputText: "@"
+- extendedWaitUntil:
+    visible:
+      id: "list-mention-suggestions"
+    timeout: 30000
+- assertVisible:
+    id: "badge-mention-bot-.*"
+- takeScreenshot: bots-08-mention-bot

@@ -105,7 +105,9 @@ test("a request command is never posted; a shared name without its bot is not se
 });
 
 test("mobile carries the same rules", () => {
-  const body = (src: string) => src.slice(src.indexOf("/** One command the group's Apps offer"));
+  // Whether each side exports a name is its own business (Knip drops unused exports); the rules are the text.
+  const body = (src: string) =>
+    src.slice(src.indexOf("/** One command the group's Apps offer")).replace(/^export /gm, "");
   const desktop = readFileSync(new URL("../src/utils/slashCommands.ts", import.meta.url), "utf8");
   const mobile = readFileSync(new URL("../../mobile/lib/slashCommands.ts", import.meta.url), "utf8");
   assert.equal(body(mobile), body(desktop), "mobile/lib/slashCommands.ts drifted from the desktop rules");
