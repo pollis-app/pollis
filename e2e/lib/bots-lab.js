@@ -68,7 +68,8 @@ function createBotsLab({ tag, work, artifacts, group, channel }) {
       const logFile = path.join(ARTIFACTS, `${this.name}-${tag}.log`);
       fs.mkdirSync(ARTIFACTS, { recursive: true });
       const out = fs.createWriteStream(logFile);
-      const p = spawn(cmd, args, { env: this.env, cwd, stdio: ["ignore", "pipe", "pipe"] });
+      // Its own process group, so a kill reaches what it started (the CLI runs pollis-bot).
+      const p = spawn(cmd, args, { env: this.env, cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
       const rec = { proc: p, text: "", logFile, exit: null };
       const take = (chunk) => {
         const s = chunk.toString();
@@ -117,7 +118,9 @@ function createBotsLab({ tag, work, artifacts, group, channel }) {
     }
 
     kill(rec, signal = "SIGKILL") {
-      try { rec.proc.kill(signal); } catch (_) {}
+      try { process.kill(-rec.proc.pid, signal); } catch (_) {
+        try { rec.proc.kill(signal); } catch (_) {}
+      }
     }
   }
 
