@@ -23,6 +23,15 @@ tag date, UTC.
 
 ---
 
+## v1.19.17 — 2026-11-18
+
+- **A different name and picture in each group.** You can now show a separate
+  display name and profile picture in any group. Your @handle stays the same
+  and is shown beside the name, and everywhere outside that group (direct
+  messages included) you keep your main profile. Profile → Group aliases lists
+  every group: change one, apply a name or picture to all of them at once, or
+  go back to your main profile. Group admins can reset a member's alias.
+
 ## v1.19.16 — 2026-11-17
 
 - **Real device names on Linux.** The microphone and speaker pickers list your
