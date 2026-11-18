@@ -248,7 +248,8 @@
         "widened_grants": "승인이 App이 요청한 것보다 더 많은 권한을 줍니다.",
         "rolled_back": "더 최신 승인 대신 이전 승인이 다시 적용되었습니다.",
         "bad_build_signature": "빌드의 개발자 서명이 맞지 않습니다.",
-        "artifact_unavailable": "호스트가 App을 불러오지 못했습니다."
+        "artifact_unavailable": "호스트가 App을 불러오지 못했습니다.",
+        "artifact_rolled_back": "머신이 봇이 이미 실행한 것보다 오래된 버전을 제공해서 봇이 계속 거부합니다."
       },
       "approvedHeading": "승인된 App",
       "version": "버전 {{version}}",
@@ -344,7 +345,7 @@
         "developmentHint": "이 개발자 키로 서명되고 승인한 범위를 넘지 않는 빌드라면 무엇이든 실행합니다.",
         "developmentUnavailable": "개발자 키를 제공하려면 pollis app dev를 시작하세요.",
         "autoUpdate": "다음부터 자동 승인",
-        "autoUpdateHint": "같은 출처에서 오고 새로 요청하는 것이 없는 업데이트는 자동으로 승인됩니다."
+        "autoUpdateHint": "같은 출처의 새 버전이 더 많은 것을 요청하지 않으면 관리자 없이 봇이 직접 실행합니다. 더 많은 것을 요청하는 버전은 계속 승인을 기다립니다."
       },
       "edit": {
         "save": "접근 권한 저장",
@@ -358,7 +359,8 @@
       "commandKinds": {
         "command": "채널에 게시되는 명령어",
         "request": "비공개 요청"
-      }
+      },
+      "runningAutoUpdated": "버전 {{version}} 실행 중, 승인된 출처에서 자동으로 업데이트됨"
     }
   }
 }

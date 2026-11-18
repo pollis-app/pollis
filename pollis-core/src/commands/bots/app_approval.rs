@@ -244,8 +244,11 @@ pub enum AppApprovalRefusal {
     DeveloperKeyMismatch,
     /// A development build whose signature does not verify.
     BadBuildSignature,
-    /// A development build whose manifest widens the approved one.
+    /// A development build, or an update under `auto_update`, whose manifest widens the approved one.
     BuildWidens(String),
+    /// An artifact this host already moved past under the same approval (an
+    /// automatic update cannot be undone by serving the older file again).
+    ArtifactRolledBack,
 }
 
 impl From<SignerRefusal> for AppApprovalRefusal {
@@ -280,6 +283,7 @@ impl AppApprovalRefusal {
             Self::DeveloperKeyMismatch => "developer_key_mismatch",
             Self::BadBuildSignature => "bad_build_signature",
             Self::BuildWidens(_) => "build_widens",
+            Self::ArtifactRolledBack => "artifact_rolled_back",
         }
     }
 
@@ -316,6 +320,9 @@ impl std::fmt::Display for AppApprovalRefusal {
             Self::DeveloperKeyMismatch => write!(f, "this build is not signed by the approved developer key"),
             Self::BadBuildSignature => write!(f, "this build's developer signature does not verify"),
             Self::BuildWidens(why) => write!(f, "this build's manifest asks for more than was approved: {why}"),
+            Self::ArtifactRolledBack => {
+                write!(f, "this artifact is older than one this host already ran under the same approval")
+            }
         }
     }
 }
@@ -378,6 +385,9 @@ pub struct LoadableApp {
     pub manifest: Manifest,
     pub grants: AdminGrants,
     pub development: bool,
+    /// A newer artifact from the approval's pinned source, accepted by the
+    /// runtime under the record's `auto_update` because it widens nothing.
+    pub auto_updated: bool,
 }
 
 /// The artifact the runtime is about to load.
@@ -409,7 +419,7 @@ pub fn check_artifact(approved: &VerifiedAppApproval, artifact: &Artifact<'_>) -
                 return Err(AppApprovalRefusal::ManifestMismatch);
             }
             a.grants.check_not_wider(&manifest).map_err(|e| AppApprovalRefusal::WidenedGrants(e.to_string()))?;
-            Ok(LoadableApp { app_hash, manifest, grants: a.grants.clone(), development: false })
+            Ok(LoadableApp { app_hash, manifest, grants: a.grants.clone(), development: false, auto_updated: false })
         }
         AppApprovalRecord::Development(d) => {
             let Some(sig) = artifact.dev_signature else {
@@ -431,9 +441,49 @@ pub fn check_artifact(approved: &VerifiedAppApproval, artifact: &Artifact<'_>) -
                     .join(", ");
                 return Err(AppApprovalRefusal::BuildWidens(why));
             }
-            Ok(LoadableApp { app_hash, grants: d.grants.carried_to(&manifest), manifest, development: true })
+            Ok(LoadableApp { app_hash, grants: d.grants.carried_to(&manifest), manifest, development: true, auto_updated: false })
         }
     }
+}
+
+/// [`check_artifact`], plus the record's standing permission for updates: a
+/// production approval with `auto_update` lets the runtime itself run a newer
+/// artifact from exactly the pinned `source` (the location the runtime loads
+/// from, compared as given) whose manifest widens nothing against the approved
+/// one, with the approved grants carried to it. No admin needs to be online;
+/// the admin's signed record already granted it. A widening update, or any
+/// other location, still waits for a new approval. The caller must also pass
+/// the result through the installation's accepted-hash ledger
+/// (`apps::accept_app_hash`), which refuses going back to a superseded hash.
+pub fn check_artifact_from(
+    approved: &VerifiedAppApproval,
+    artifact: &Artifact<'_>,
+    runtime_source: &str,
+) -> Result<LoadableApp, AppApprovalRefusal> {
+    let refusal = match check_artifact(approved, artifact) {
+        Ok(app) => return Ok(app),
+        Err(r @ AppApprovalRefusal::HashMismatch { .. }) => r,
+        Err(other) => return Err(other),
+    };
+    let AppApprovalRecord::Production(a) = &approved.record else {
+        return Err(refusal);
+    };
+    if !a.auto_update || a.source.as_deref() != Some(runtime_source) {
+        return Err(refusal);
+    }
+    let malformed = |e: pollis_app_manifest::ManifestError| AppApprovalRefusal::Malformed(e.to_string());
+    let manifest = Manifest::from_json(artifact.manifest_json).map_err(malformed)?;
+    let widens = pollis_app_manifest::widenings_between(&approved.manifest, &manifest);
+    if !widens.is_empty() {
+        let why = widens
+            .iter()
+            .map(|c| format!("{:?} {}", c.field, c.value).to_lowercase())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AppApprovalRefusal::BuildWidens(why));
+    }
+    let app_hash = pollis_app_manifest::app_hash(artifact.component, artifact.manifest_json).map_err(malformed)?;
+    Ok(LoadableApp { app_hash, grants: a.grants.carried_to(&manifest), manifest, development: false, auto_updated: true })
 }
 
 /// The checks on a decoded record that need no network: version, that it is
@@ -620,6 +670,37 @@ mod tests {
         assert!(matches!(
             check_record(&AppApprovalRecord::Production(wide), 1, "BOT", "GROUP", MANIFEST),
             Err(AppApprovalRefusal::WidenedGrants(_))
+        ));
+    }
+
+    #[test]
+    fn auto_update_takes_a_non_widening_artifact_from_the_pinned_source_only() {
+        let mut p = production();
+        p.auto_update = true;
+        let v = verified(AppApprovalRecord::Production(p));
+        let source = "https://apps.example/triage.wasm";
+        let newer = b"\0asm\x0d\0\x01\0 v2".to_vec();
+        let narrower = MANIFEST.replace("\"history\":30", "\"history\":3");
+        let app = check_artifact_from(&v, &Artifact { component: &newer, manifest_json: narrower.as_bytes(), dev_signature: None }, source)
+            .expect("a non-widening update from the pinned source runs");
+        assert!(app.auto_updated);
+        assert_eq!(app.grants.history, 3);
+        // Another location: waits for an admin.
+        assert!(matches!(
+            check_artifact_from(&v, &Artifact { component: &newer, manifest_json: MANIFEST.as_bytes(), dev_signature: None }, "/opt/elsewhere/app.wasm"),
+            Err(AppApprovalRefusal::HashMismatch { .. })
+        ));
+        // Widening: waits for an admin.
+        let wider = MANIFEST.replace("[\"reply\"]", "[\"reply\",\"post\"]");
+        assert!(matches!(
+            check_artifact_from(&v, &Artifact { component: &newer, manifest_json: wider.as_bytes(), dev_signature: None }, source),
+            Err(AppApprovalRefusal::BuildWidens(_))
+        ));
+        // Without auto_update: waits for an admin.
+        let v = verified(AppApprovalRecord::Production(production()));
+        assert!(matches!(
+            check_artifact_from(&v, &Artifact { component: &newer, manifest_json: MANIFEST.as_bytes(), dev_signature: None }, source),
+            Err(AppApprovalRefusal::HashMismatch { .. })
         ));
     }
 

@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import type { ActionKind, ManifestChange, TriggerKind } from "../../types";
 import { activeLocale, formatFileSize } from "../../utils/format";
 import { errorMessage } from "../../utils/errorMessage";
-import { appApprovalErrorKind, isAppReasonCode, scheduleChangeParts, type AppLine } from "../../utils/botApps";
+import { appApprovalErrorKind, isAppReasonCode, type AppLine } from "../../utils/botApps";
 
 type T = TFunction<"channels">;
 
@@ -121,17 +121,15 @@ export function changeText(t: T, c: ManifestChange): string {
         });
       }
       break;
-    case "schedule": {
-      const parts = c.kind === "increased" || c.kind === "decreased" ? scheduleChangeParts(c) : null;
-      if (parts) {
-        return t(`channels:bots.app.changes.schedule_${c.kind as "increased" | "decreased"}`, {
-          value: parts.name,
-          previous: parts.previousEvery === null ? c.previous ?? "" : formatPeriod(parts.previousEvery),
-          next: formatPeriod(parts.every),
+    case "schedule":
+      if ((c.kind === "increased" || c.kind === "decreased") && c.every_secs !== undefined) {
+        return t(`channels:bots.app.changes.schedule_${c.kind}`, {
+          value: c.value,
+          previous: c.previous_every_secs !== undefined ? formatPeriod(c.previous_every_secs) : "",
+          next: formatPeriod(c.every_secs),
         });
       }
       break;
-    }
     default:
       break;
   }

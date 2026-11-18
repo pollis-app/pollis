@@ -22,7 +22,7 @@ Everything here works the same in the desktop app and the mobile app: open the g
 - Every App has an **App hash**: a fingerprint of its code and its manifest together. Change one byte of either and the hash changes.
 - An admin approves one App hash, with the permissions (grants) they chose. The approval is signed by the admin's own device.
 - The bot's runtime checks that signature, that the signer is still an admin, and that the App it is about to run has exactly the approved hash, **before every job**. If anything does not match, the App does not run and the group's admins see why on the bot's page.
-- A new version needs a new approval. If it asks for more than before, the extra access is highlighted and is never switched on for you.
+- A new version needs a new approval, unless you let updates that ask for nothing more run by themselves. If it asks for more than before, the extra access is highlighted and is never switched on for you.
 
 ## Approve an App
 
@@ -69,9 +69,13 @@ If nothing in the update asks for more, **Approve update** takes one tap and kee
 
 ## Updates that approve themselves
 
-When approving, you can switch on **Approve updates automatically**. After that, an update from the same address that asks for nothing more is approved by the next admin who opens the group's **Bots** page or the bot's page, without asking. Every admin sees that the setting is on. Anything that asks for more still waits for you.
+When approving, you can switch on **Approve updates automatically**. Your signed approval then also says: "a newer version from this same address may run, as long as it asks for nothing more". The bot itself checks that before every job, so an update lands even when no admin is online:
 
-Each automatic approval is still a signed approval of one exact App hash.
+- a new version from exactly the approved address that asks for nothing more runs, with your choices carried over (anything it no longer asks for is dropped);
+- a version that asks for more, or one from anywhere else, waits for an admin as usual;
+- once the bot runs a newer version it never goes back to an older one under the same approval, even if the older file is served again.
+
+The bot's page shows which version is running and that it updated itself. Every admin sees that the setting is on.
 
 ## Development installations
 

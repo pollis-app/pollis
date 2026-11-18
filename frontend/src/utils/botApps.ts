@@ -149,18 +149,6 @@ export function requiredWidenings(changes: ReadonlyArray<ManifestChange>): Manif
   return changes.filter((c) => c.widening && UNGRANTABLE_FIELDS.includes(c.field));
 }
 
-/**
- * A changed schedule's parts: the core words it "digest every 600s" (was "every 3600s"), so the
- * page can say it in the app language. Null when the value isn't in that shape.
- */
-export function scheduleChangeParts(c: ManifestChange): { name: string; every: number; previousEvery: number | null } | null {
-  const m = /^(.*) every (\d+)s$/.exec(c.value);
-  if (!m) {
-    return null;
-  }
-  const prev = /every (\d+)s$/.exec(c.previous ?? "");
-  return { name: m[1], every: Number(m[2]), previousEvery: prev ? Number(prev[1]) : null };
-}
 
 /**
  * The most an approval of the waiting build may grant: the suggested grants plus each widening
@@ -331,6 +319,7 @@ const APP_REASON_CODES = [
   "rolled_back",
   "bad_build_signature",
   "artifact_unavailable",
+  "artifact_rolled_back",
 ] as const;
 export type AppReasonCode = (typeof APP_REASON_CODES)[number];
 

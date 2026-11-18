@@ -756,7 +756,8 @@
         "widened_grants": "its approval allows more than the App asks for",
         "rolled_back": "an older approval was replayed",
         "bad_build_signature": "the build isn't signed by the approved developer key",
-        "artifact_unavailable": "the App's files couldn't be read"
+        "artifact_unavailable": "the App's files couldn't be read",
+        "artifact_rolled_back": "the machine offered an older version than one the bot already ran, and the bot keeps refusing it"
       },
       "approvedHeading": "Approved App",
       "version": "Version {{version}}",
@@ -817,7 +818,7 @@
       "save": "Save",
       "saving": "Saving…",
       "autoUpdateLabel": "Approve automatically next time",
-      "autoUpdateHint": "Updates from the same source that don't ask for more are approved without asking.",
+      "autoUpdateHint": "The bot itself runs a newer version from the same source when it asks for nothing more; no admin needed. Anything that asks for more still waits for approval.",
       "firstHeading": "Waiting for approval",
       "updateHeading": "Update waiting",
       "changesHeading": "What changed",
@@ -860,7 +861,9 @@
         "stale": "Another admin approved this bot just now. Look again before approving.",
         "changed": "The App changed since you opened this page. Look again before approving.",
         "failed": "Couldn't approve the App."
-      }
+      },
+      "runningAuto": "Running version {{version}}, updated automatically from the approved source",
+      "runningHashLabel": "Running App hash"
     }
   }
 }

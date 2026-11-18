@@ -57,11 +57,14 @@ export interface ManifestChange {
   kind: ChangeKind;
   /**
    * The item added or removed ("#ops", "api.linear.app", "post", a command or schedule name), a
-   * number's new value, a switched command's name, or a changed schedule as "digest every 600s".
+   * number's new value, or a switched command's or changed schedule's name.
    */
   value: string;
-  /** A number's old value; a switched command's old kind ("command" | "request"); "every 3600s". */
+  /** A number's old value; a switched command's old kind ("command" | "request"). */
   previous?: string;
+  /** A changed schedule's period in seconds, after and before the change. */
+  every_secs?: number;
+  previous_every_secs?: number;
   /** The App may see or do more than before. */
   widening: boolean;
 }
@@ -100,7 +103,6 @@ export interface PendingAppView {
   widens: boolean;
   /** First approval: everything requested; update: the current grants carried over. */
   suggestedGrants: AdminGrants;
-  autoApprovable: boolean;
 }
 
 export interface BotAppView {
@@ -111,6 +113,8 @@ export interface BotAppView {
   approvalRefusal: { code: string; detail: string } | null;
   report: { state: BotAppRunState; reason: string; detail: string; updatedAt: string } | null;
   pending: PendingAppView | null;
+  /** What the runtime runs now, while it runs; `autoUpdated` when it took a newer build from the approved source itself. */
+  running: { appHash: string; version: string; autoUpdated: boolean } | null;
   /** The group's text channels the shown manifest asks for. */
   channels: ChannelGrant[];
   latestSeq: number;

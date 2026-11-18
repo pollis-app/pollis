@@ -327,7 +327,8 @@
         "widened_grants": "Its approval grants more than the App asks for.",
         "rolled_back": "An older approval was put back in place of a newer one.",
         "bad_build_signature": "Its build's developer signature doesn't check out.",
-        "artifact_unavailable": "Its host couldn't load the App."
+        "artifact_unavailable": "Its host couldn't load the App.",
+        "artifact_rolled_back": "Its machine offered an older version than one the bot already ran, so the bot keeps refusing it."
       },
       "approvedHeading": "Approved App",
       "version": "Version {{version}}",
@@ -423,7 +424,7 @@
         "developmentHint": "Runs any build signed by this developer key that doesn't ask for more than you approved.",
         "developmentUnavailable": "Start pollis app dev to offer a developer key.",
         "autoUpdate": "Approve automatically next time",
-        "autoUpdateHint": "Updates from the same source that ask for nothing new approve themselves."
+        "autoUpdateHint": "The bot runs a newer version from the same source by itself when it asks for nothing more, with no admin needed. Anything that asks for more still waits for approval."
       },
       "edit": {
         "save": "Save access",
@@ -437,7 +438,8 @@
       "commandKinds": {
         "command": "a command posted in the channel",
         "request": "a private request"
-      }
+      },
+      "runningAutoUpdated": "Running version {{version}}, updated automatically from the approved source"
     }
   }
 }

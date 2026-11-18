@@ -57,11 +57,6 @@ pub async fn approve_bot_app(input: ApproveBotAppInput, state: State<'_, Arc<App
 }
 
 #[tauri::command]
-pub async fn auto_approve_bot_app(group_id: String, bot_user_id: String, state: State<'_, Arc<AppState>>) -> Result<bool> {
-    pollis_core::commands::bots::auto_approve_bot_app(&state, group_id, bot_user_id).await
-}
-
-#[tauri::command]
 pub async fn list_group_apps(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<GroupAppView>> {
     pollis_core::commands::bots::list_group_apps(&state, group_id).await
 

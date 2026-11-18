@@ -50,6 +50,10 @@ export interface ManifestChange {
   kind: ChangeKind;
   value: string;
   previous?: string;
+  /** A schedule's period in seconds after the change (`value` is its name). */
+  every_secs?: number;
+  /** A changed schedule's period in seconds before the change. */
+  previous_every_secs?: number;
   widening: boolean;
 }
 
@@ -79,7 +83,13 @@ export interface PendingAppView {
   changes: ManifestChange[];
   widens: boolean;
   suggestedGrants: AdminGrants;
-  autoApprovable: boolean;
+}
+
+/** What the runtime runs when it is not the approved App hash itself: an automatic update. */
+interface RunningAppView {
+  appHash: string;
+  version: string;
+  autoUpdated: boolean;
 }
 
 export interface BotAppView {
@@ -89,6 +99,7 @@ export interface BotAppView {
   approvalRefusal: { code: string; detail: string } | null;
   report: { state: BotAppRunState; reason: string; detail: string; updatedAt: string } | null;
   pending: PendingAppView | null;
+  running: RunningAppView | null;
   channels: ChannelGrant[];
   latestSeq: number;
 }
@@ -136,6 +147,7 @@ const REFUSAL_REASONS = new Set([
   "rolled_back",
   "bad_build_signature",
   "artifact_unavailable",
+  "artifact_rolled_back",
 ]);
 
 /** The notice the bot page leads with, or null while the App runs and its approval verifies. */
@@ -493,12 +505,6 @@ export function formatInterval(seconds: number): string {
   return `${seconds} s`;
 }
 
-/** The core words a changed schedule as `"<name> every <secs>s"` (previous `"every <secs>s"`). */
-function parseSchedule(value: string): { name: string; every: number | null } {
-  const m = /^(.*) every (\d+)s$/.exec(value);
-  return m ? { name: m[1], every: Number(m[2]) } : { name: value, every: null };
-}
-
 /** "4 KB", "1.5 MB": units that read the same in every UI language. */
 export function formatQuota(bytes: number): string {
   const trim = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
@@ -679,15 +685,13 @@ export function changeText(t: Translate, c: ManifestChange): string {
       if (c.kind === "removed") {
         return t("mobile:bots.app.change.scheduleRemoved", { value: c.value });
       }
-      const now = parseSchedule(c.value);
-      const was = parseSchedule(`x ${c.previous ?? ""}`).every;
-      if (now.every === null || was === null) {
+      if (typeof c.every_secs !== "number" || typeof c.previous_every_secs !== "number") {
         return t("mobile:bots.app.change.scheduleChangedPlain", { value: c.value });
       }
       return t("mobile:bots.app.change.scheduleChanged", {
-        value: now.name,
-        every: formatInterval(now.every),
-        was: formatInterval(was),
+        value: c.value,
+        every: formatInterval(c.every_secs),
+        was: formatInterval(c.previous_every_secs),
       });
     }
     case "state_quota":

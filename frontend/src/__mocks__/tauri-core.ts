@@ -104,6 +104,7 @@ interface MockBotApp {
   approvalRefusal: { code: string; detail: string } | null;
   report: { state: 'running' | 'awaiting_approval' | 'refused'; reason: string; detail: string; updatedAt: string } | null;
   pending: Record<string, any> | null;
+  running?: { appHash: string; version: string; autoUpdated: boolean } | null;
   channels?: Array<{ id: string; name: string }>;
   latestSeq: number;
 }
@@ -662,6 +663,7 @@ function botAppViewMock(groupId: string, botUserId: string) {
       approvalRefusal: app.approvalRefusal,
       report: app.report,
       pending: app.pending,
+      running: app.running ?? null,
       channels,
       latestSeq: app.latestSeq,
     }),
@@ -716,6 +718,9 @@ function approveBotAppMock(input: Record<string, any>) {
   }
   app.approvalRefusal = null;
   app.report = { state: 'running', reason: '', detail: '', updatedAt: at };
+  app.running = input.development
+    ? null
+    : { appHash: input.appHash, version: manifest.version, autoUpdated: false };
 }
 
 function checkBotCodeMock(code: string): void {
@@ -1611,26 +1616,6 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       findBotMock(input.botUserId);
       approveBotAppMock(input);
       return botAppViewMock(input.groupId, input.botUserId);
-    }
-
-    case 'auto_approve_bot_app': {
-      const { groupId, botUserId } = args as { groupId: string; botUserId: string };
-      requireAdminMock(groupId);
-      const app = botAppMock(botUserId);
-      const p = app.pending;
-      if (!p?.autoApprovable) {
-        return false;
-      }
-      approveBotAppMock({
-        groupId,
-        botUserId,
-        development: false,
-        appHash: p.appHash,
-        manifestHash: p.manifestHash,
-        grants: p.suggestedGrants,
-        autoUpdate: true,
-      });
-      return true;
     }
 
     case 'list_group_apps': {

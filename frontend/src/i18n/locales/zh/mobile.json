@@ -627,7 +627,8 @@
         "widened_grants": "其批准允许的超出了应用的请求",
         "rolled_back": "重复使用了较早的批准",
         "bad_build_signature": "构建未使用已批准的开发者密钥签名",
-        "artifact_unavailable": "无法读取应用的文件"
+        "artifact_unavailable": "无法读取应用的文件",
+        "artifact_rolled_back": "该机器提供的版本比机器人已运行过的版本更旧，机器人会一直拒绝它"
       },
       "approvedHeading": "已批准的应用",
       "version": "版本 {{version}}",
@@ -687,7 +688,7 @@
       "save": "保存",
       "saving": "正在保存…",
       "autoUpdateLabel": "下次自动批准",
-      "autoUpdateHint": "来自同一来源且没有请求更多的更新会直接批准，不再询问。",
+      "autoUpdateHint": "来自同一来源的新版本如果没有请求更多，机器人会自行运行，无需管理员。请求更多的版本仍需等待批准。",
       "firstHeading": "等待批准",
       "updateHeading": "有更新待批准",
       "changesHeading": "变更内容",
@@ -730,7 +731,9 @@
         "stale": "另一位管理员刚刚批准了此机器人。请在批准前重新查看。",
         "changed": "自你打开此页面以来应用已更改。请在批准前重新查看。",
         "failed": "无法批准应用。"
-      }
+      },
+      "runningAuto": "正在运行版本 {{version}}，已从批准的来源自动更新",
+      "runningHashLabel": "正在运行的应用哈希"
     }
   }
 }

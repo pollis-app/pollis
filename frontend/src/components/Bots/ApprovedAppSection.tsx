@@ -15,6 +15,7 @@ import { activeLocale } from "../../utils/format";
 import { FormActions } from "../ui/FormActions";
 import { Button } from "../ui/Button";
 import { Switch } from "../ui/Switch";
+import { CodeSnippet } from "../ui/CodeSnippet";
 import { AppSummary } from "./AppSummary";
 import { AppMark } from "./AppMark";
 import { AppCapabilities } from "./AppCapabilities";
@@ -89,6 +90,18 @@ export const ApprovedAppSection: React.FC<ApprovedAppSectionProps> = ({ view, ap
           </p>
         }
       />
+      {view.running?.autoUpdated && (
+        <div className="flex flex-col gap-1" data-testid="bot-app-running">
+          <p data-testid="bot-app-running-version" className="text-body text-dim">
+            {t("bots.app.runningAutoUpdated", { version: view.running.version })}
+          </p>
+          <CodeSnippet
+            value={view.running.appHash}
+            data-testid="bot-app-running-hash"
+            copyTestId="bot-app-running-hash-copy"
+          />
+        </div>
+      )}
       <AppCapabilities testId="bot-app-approved-can" manifest={approved.manifest} grants={approved.grants} />
 
       {editable && (

@@ -15,11 +15,11 @@ import {
   effectiveGrants,
   fullGrants,
   grantCeiling,
+  isAppReasonCode,
   narrowingFrom,
   orderChanges,
   requestsChannel,
   requiredWidenings,
-  scheduleChangeParts,
 } from "../src/utils/botApps.ts";
 import type { AdminGrants, AppManifest, BotAppView, ManifestChange } from "../src/types/botApps.ts";
 
@@ -66,6 +66,7 @@ function view(over: Partial<BotAppView> = {}): BotAppView {
     approvalRefusal: null,
     report: null,
     pending: null,
+    running: null,
     channels: CHANNELS,
     latestSeq: 0,
     ...over,
@@ -178,7 +179,6 @@ test("approving the waiting build pins its hash; development names the developer
     changes: [],
     widens: false,
     suggestedGrants: fullGrants(V2, CHANNELS),
-    autoApprovable: false,
   };
   const grants = fullGrants(V2, CHANNELS);
   const prod = approveInput({ view: view({ pending }), of: "pending", development: false, autoUpdate: true, grants });
@@ -234,6 +234,18 @@ test("narrowing in place re-approves the approved build and manifest", () => {
   assert.deepEqual(input.grants.egress, []);
 });
 
+test("a newer build the runtime took itself needs no notice; a rolled-back artifact does", () => {
+  assert.equal(
+    appNotice(view({ report: { state: "running", reason: "auto_updated", detail: "", updatedAt: "" } })),
+    null,
+  );
+  assert.ok(isAppReasonCode("artifact_rolled_back"));
+  assert.deepEqual(
+    appNotice(view({ report: { state: "refused", reason: "artifact_rolled_back", detail: "d", updatedAt: "" } })),
+    { code: "artifact_rolled_back", detail: "d", waiting: false },
+  );
+});
+
 test("the notice: a refused approval, a waiting build, nothing while running", () => {
   assert.equal(appNotice(view()), null);
   assert.equal(
@@ -267,23 +279,16 @@ test("new or switched commands and more frequent schedules can't be held back, s
     { field: "command", kind: "increased", value: "ticket", previous: "request", widening: true },
     { field: "command", kind: "removed", value: "old", widening: false },
     { field: "schedule", kind: "added", value: "nightly", widening: true },
-    { field: "schedule", kind: "increased", value: "digest every 600s", previous: "every 3600s", widening: true },
-    { field: "schedule", kind: "decreased", value: "sweep every 7200s", previous: "every 3600s", widening: false },
+    { field: "schedule", kind: "increased", value: "digest", every_secs: 600, previous_every_secs: 3600, widening: true },
+    { field: "schedule", kind: "decreased", value: "sweep", every_secs: 7200, previous_every_secs: 3600, widening: false },
   ];
   assert.deepEqual(requiredWidenings(changes).map(changeKey), [
     "command:added:close",
     "command:increased:ticket",
     "schedule:added:nightly",
-    "schedule:increased:digest every 600s",
+    "schedule:increased:digest",
   ]);
   // Nothing grantable among them: the ceiling stays the carried-over grants.
   assert.deepEqual(grantCeiling(V1_GRANTS, changes, new Set(changes.map(changeKey)), V1, CHANNELS), V1_GRANTS);
 });
 
-test("a changed schedule is read back into its name and periods", () => {
-  assert.deepEqual(
-    scheduleChangeParts({ field: "schedule", kind: "increased", value: "daily digest every 600s", previous: "every 3600s", widening: true }),
-    { name: "daily digest", every: 600, previousEvery: 3600 },
-  );
-  assert.equal(scheduleChangeParts({ field: "schedule", kind: "added", value: "nightly", widening: true }), null);
-});

@@ -48,6 +48,11 @@ fn main() -> ExitCode {
 
 async fn dispatch(data_dir: &std::path::Path, command: Command) -> anyhow::Result<()> {
     let config = RuntimeConfig::load(data_dir)?;
+    // The core's own files (the keystore file, where there is no OS keychain) go in this data
+    // dir, never the `pollis` app's: that file has no cross-process lock, so a runtime and the
+    // desktop app, or two runtimes, must never share one.
+    std::fs::create_dir_all(data_dir)?;
+    pollis_core::set_data_dir_override(data_dir);
     let host = CoreHost::new(data_dir)?;
     match command {
         Command::Help | Command::Version => {}

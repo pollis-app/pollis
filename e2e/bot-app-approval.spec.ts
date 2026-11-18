@@ -1,7 +1,7 @@
 // Bot App approval (#2005), desktop, both skins: an admin approves a bot's first App with its
 // access narrowed, narrows an approved App in place, approves an update whose widened rows are
-// highlighted, listed first and never pre-accepted, and sees why a bot is not running. A waiting
-// update that may approve itself does so when an admin opens the bots list. Members see the
+// highlighted, listed first and never pre-accepted, and sees why a bot is not running. A build the
+// bot updated to by itself shows what runs. Members see the
 // "Development build" and "Can't send data outside this group" marks.
 
 import { test, expect, type Page } from "./lib/zero-loss";
@@ -88,7 +88,6 @@ const firstApproval = {
     changes: [],
     widens: false,
     suggestedGrants: V1_GRANTS,
-    autoApprovable: false,
   },
   latestSeq: 0,
 };
@@ -111,7 +110,6 @@ const updateWithWidening = {
     ],
     widens: true,
     suggestedGrants: { ...V1_GRANTS, actions: ["post", "reply"] },
-    autoApprovable: false,
   },
   latestSeq: 1,
 };
@@ -349,39 +347,36 @@ for (const skin of SKINS) {
       );
     });
 
-    agnosticTest("a waiting update that may approve itself does so when an admin opens the bots list", async ({ page }) => {
+    agnosticTest("a newer build the bot took itself from the approved source shows what runs, with no notice", async ({ page }) => {
       await boot(page, skin, {
         approved: approvedV1({ autoUpdate: true }),
         approvalRefusal: null,
-        report: { state: "awaiting_approval", reason: "hash_mismatch", detail: "new build", updatedAt: "2026-11-17T09:00:00Z" },
-        pending: {
-          appHash: HASH_V2,
-          manifestHash: "n".repeat(64),
-          manifest: { ...V1, version: "1.0.1" },
-          source: SOURCE,
-          developerKey: null,
-          changes: [],
-          widens: false,
-          suggestedGrants: V1_GRANTS,
-          autoApprovable: true,
-        },
+        report: { state: "running", reason: "auto_updated", detail: "", updatedAt: "2026-11-17T09:00:00Z" },
+        pending: null,
+        running: { appHash: HASH_V2, version: "1.0.1", autoUpdated: true },
         latestSeq: 1,
       });
-      await openGroup(page);
-      await page.getByTestId("menu-item-bots").click();
-      await expect(page.getByTestId("bots-page")).toBeVisible();
-      await expect
-        .poll(() =>
-          page.evaluate(
-            () =>
-              (window as unknown as { __tauriMock: { botApps: Record<string, { pending: unknown }> } }).__tauriMock
-                .botApps["u_bot_triage"].pending,
-          ),
-        )
-        .toBeNull();
-      await page.getByTestId(`bot-row-${BOT}`).click();
-      await expect(page.getByTestId("bot-app-approved-summary-version")).toHaveText("Version 1.0.1");
-      await expect(page.getByTestId("bot-app-auto-update-mark")).toHaveText("Updates approve themselves");
+      await openBotPage(page);
+      await expect(page.getByTestId("bot-app-notice")).toHaveCount(0);
+      await expect(page.getByTestId("bot-app-auto-update-mark")).toBeVisible();
+      await expect(page.getByTestId("bot-app-running-version")).toHaveText(
+        "Running version 1.0.1, updated automatically from the approved source",
+      );
+      await expect(page.getByTestId("bot-app-running-hash")).toHaveText(HASH_V2);
+    });
+
+    agnosticTest("a machine offering an older version than the bot already ran is refused and said so", async ({ page }) => {
+      await boot(page, skin, {
+        approved: approvedV1({ autoUpdate: true }),
+        approvalRefusal: null,
+        report: { state: "refused", reason: "artifact_rolled_back", detail: "older build", updatedAt: "2026-11-17T09:00:00Z" },
+        pending: null,
+        running: null,
+        latestSeq: 1,
+      });
+      await openBotPage(page);
+      await expect(page.getByTestId("bot-app-notice")).toHaveAttribute("data-reason", "artifact_rolled_back");
+      await expect(page.getByTestId("bot-app-notice-reason")).toContainText("older version");
     });
 
     test("members see the development build and no-egress marks", async ({ page }) => {

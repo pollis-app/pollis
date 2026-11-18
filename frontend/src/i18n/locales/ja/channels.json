@@ -248,7 +248,8 @@
         "widened_grants": "承認がAppの求める以上の権限を与えています。",
         "rolled_back": "新しい承認の代わりに古い承認が戻されました。",
         "bad_build_signature": "ビルドの開発者署名を検証できません。",
-        "artifact_unavailable": "ホストがAppを読み込めませんでした。"
+        "artifact_unavailable": "ホストがAppを読み込めませんでした。",
+        "artifact_rolled_back": "そのマシンが、ボットがすでに実行したものより古いバージョンを提示したため、ボットは拒否し続けます。"
       },
       "approvedHeading": "承認済みのApp",
       "version": "バージョン {{version}}",
@@ -344,7 +345,7 @@
         "developmentHint": "この開発者キーで署名され、承認した範囲を超えないビルドならどれでも実行します。",
         "developmentUnavailable": "開発者キーを提示するには pollis app dev を起動してください。",
         "autoUpdate": "次回から自動で承認",
-        "autoUpdateHint": "同じ入手元からの、新しく何も求めない更新は自動で承認されます。"
+        "autoUpdateHint": "同じ入手元からの新しいバージョンがそれ以上を求めない場合、ボットは管理者なしで自らそれを実行します。それ以上を求めるものは引き続き承認を待ちます。"
       },
       "edit": {
         "save": "アクセスを保存",
@@ -358,7 +359,8 @@
       "commandKinds": {
         "command": "チャンネルに投稿されるコマンド",
         "request": "非公開のリクエスト"
-      }
+      },
+      "runningAutoUpdated": "バージョン {{version}} を実行中（承認済みの入手元から自動更新）"
     }
   }
 }

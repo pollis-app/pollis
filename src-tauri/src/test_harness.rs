@@ -184,7 +184,6 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::bots::delete_bot,
             crate::commands::bots::get_bot_app,
             crate::commands::bots::approve_bot_app,
-            crate::commands::bots::auto_approve_bot_app,
             crate::commands::bots::list_group_apps,
             crate::commands::bots::list_group_commands,
             crate::commands::bots::send_command_request,

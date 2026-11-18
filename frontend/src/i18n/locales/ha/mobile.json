@@ -756,7 +756,8 @@
         "widened_grants": "amincewarta ta ba da izini fiye da abin da App ke nema",
         "rolled_back": "an sake amfani da tsohuwar amincewa",
         "bad_build_signature": "ba a sa hannu a build ɗin da makullin mai haɓakawa da aka amince ba",
-        "artifact_unavailable": "ba a iya karanta fayilolin App ba"
+        "artifact_unavailable": "ba a iya karanta fayilolin App ba",
+        "artifact_rolled_back": "na'urar ta bayar da siga mafi tsufa fiye da wadda bot ɗin ya riga ya gudanar, kuma bot ɗin yana ci gaba da ƙin ta"
       },
       "approvedHeading": "App da aka amince",
       "version": "Siga {{version}}",
@@ -817,7 +818,7 @@
       "save": "Ajiye",
       "saving": "Ana ajiyewa…",
       "autoUpdateLabel": "Amince kai tsaye a gaba",
-      "autoUpdateHint": "Sabuntawa daga tushe ɗaya da ba sa neman ƙari ana amincewa da su ba tare da tambaya ba.",
+      "autoUpdateHint": "Bot ɗin da kansa yana gudanar da sabuwar siga daga tushe ɗaya idan ba ta nemi ƙari ba; babu buƙatar mai gudanarwa. Duk abin da ya nemi ƙari yana jiran amincewa har yanzu.",
       "firstHeading": "Ana jiran amincewa",
       "updateHeading": "Sabuntawa na jira",
       "changesHeading": "Abin da ya canza",
@@ -860,7 +861,9 @@
         "stale": "Wani mai gudanarwa ya amince da wannan bot ɗin yanzun nan. Sake dubawa kafin ka amince.",
         "changed": "App ɗin ya canza tun da ka buɗe wannan shafin. Sake dubawa kafin ka amince.",
         "failed": "An kasa amincewa da App ɗin."
-      }
+      },
+      "runningAuto": "Tana gudanar da siga {{version}}, an sabunta ta kai tsaye daga tushen da aka amince",
+      "runningHashLabel": "Hash na App da ke aiki"
     }
   }
 }

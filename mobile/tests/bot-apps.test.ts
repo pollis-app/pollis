@@ -87,6 +87,7 @@ function view(over: Partial<BotAppView> = {}): BotAppView {
     approvalRefusal: null,
     report: null,
     pending: null,
+    running: null,
     channels: CHANNELS.slice(0, 2),
     latestSeq: 0,
     ...over,
@@ -225,16 +226,19 @@ test("slash commands and schedules read plainly and, widened, must be switched o
   const faster: ManifestChange = {
     field: "schedule",
     kind: "increased",
-    value: "digest every 600s",
-    previous: "every 3600s",
+    value: "digest",
+    every_secs: 600,
+    previous_every_secs: 3600,
     widening: true,
   };
-  const slower: ManifestChange = { ...faster, kind: "decreased", value: "digest every 7200s", widening: false };
+  const slower: ManifestChange = { ...faster, kind: "decreased", every_secs: 7200, widening: false };
+  const unknownPeriod: ManifestChange = { field: "schedule", kind: "increased", value: "digest", widening: true };
   assert.match(changeText(t, cmd), /commandAdded .*"value":"\/close"/);
   assert.match(changeText(t, toPosted), /commandToPosted/);
   assert.match(changeText(t, toRequest), /commandToRequest/);
   assert.match(changeText(t, faster), /scheduleChanged .*"value":"digest","every":"10 min","was":"1 h"/);
   assert.match(changeText(t, slower), /"every":"2 h"/);
+  assert.match(changeText(t, unknownPeriod), /scheduleChangedPlain .*"value":"digest"/);
   assert.equal(formatInterval(90), "90 s");
   assert.equal(formatInterval(86400), "1 d");
   for (const c of [cmd, toPosted, faster]) {
@@ -260,7 +264,6 @@ test("an update offers only carried-over access plus accepted widenings; control
       changes: [{ field: "history", kind: "increased", value: "60", previous: "30", widening: true }],
       widens: true,
       suggestedGrants: grants({ history: 14 }),
-      autoApprovable: false,
     },
   });
   assert.equal(pendingKind(v), "update");
@@ -305,7 +308,6 @@ test("a first approval offers everything the manifest asks for", () => {
       changes: [],
       widens: false,
       suggestedGrants: grants(),
-      autoApprovable: false,
     },
   });
   assert.equal(pendingKind(v), "first");
@@ -365,6 +367,12 @@ test("the notice: waiting codes read as waiting, refusals name their reason, unk
   }
   const refused = appNotice(view({ report: { state: "refused", reason: "bad_build_signature", detail: "d", updatedAt: "" } }));
   assert.deepEqual(refused, { waiting: false, reasonKey: "mobile:bots.app.reasons.bad_build_signature", detail: "d" });
+  // A runtime running an automatic update is running: no notice.
+  assert.equal(appNotice(view({ report: { state: "running", reason: "auto_updated", detail: "", updatedAt: "" } })), null);
+  assert.equal(
+    appNotice(view({ report: { state: "refused", reason: "artifact_rolled_back", detail: "", updatedAt: "" } }))?.reasonKey,
+    "mobile:bots.app.reasons.artifact_rolled_back",
+  );
   const unknown = appNotice(view({ report: { state: "refused", reason: "brand_new", detail: "core words", updatedAt: "" } }));
   assert.deepEqual(unknown, { waiting: false, reasonKey: null, detail: "core words" });
   // A stored approval that does not verify here outranks a running report.
@@ -393,7 +401,7 @@ test("every reason code and every key the rules use has English copy", () => {
   for (const code of [
     "malformed", "wrong_kind", "wrong_installation", "approver_not_in_group", "uncertified_approver",
     "bad_signature", "transparency_alarm", "not_admin", "manifest_mismatch", "widened_grants",
-    "rolled_back", "bad_build_signature", "artifact_unavailable",
+    "rolled_back", "bad_build_signature", "artifact_unavailable", "artifact_rolled_back",
   ]) {
     assert.equal(typeof app.reasons[code], "string", code);
   }
@@ -408,14 +416,14 @@ test("every reason code and every key the rules use has English copy", () => {
   }
 });
 
-test("the approval UI draws no modal and the bot page and bots list run the auto-approval", () => {
+test("the approval UI draws no modal, and no admin's app approves updates (the runtime does)", () => {
   for (const f of readdirSync(join(ROOT, "components/bots"))) {
     const src = read(`components/bots/${f}`);
     assert.doesNotMatch(src, /\bModal\b|Alert\.alert/, f);
   }
-  assert.match(read("app/group/bot.tsx"), /useAutoApproveBotApps\(/);
   assert.match(read("app/group/bot.tsx"), /<BotAppSection/);
-  assert.match(read("app/group/bots.tsx"), /useAutoApproveBotApps\(/);
-  // No timer: the auto-approval runs on open, never on an interval.
+  for (const f of ["app/group/bot.tsx", "app/group/bots.tsx", "hooks/queries/useBotApps.ts"]) {
+    assert.doesNotMatch(read(f), /auto_approve_bot_app|useAutoApprove/, f);
+  }
   assert.doesNotMatch(read("hooks/queries/useBotApps.ts"), /setInterval|refetchInterval/);
 });

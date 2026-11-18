@@ -215,6 +215,52 @@ async fn a_changed_artifact_stops_running_until_it_is_approved() {
     assert_eq!(report.app_hash, Some(hex_app_hash(&other, MANIFEST)));
 }
 
+fn auto_updating(source: &str) -> VerifiedAppApproval {
+    let mut v = production(hex_app_hash(&wasm(), MANIFEST));
+    if let AppApprovalRecord::Production(a) = &mut v.record {
+        a.auto_update = true;
+        a.source = Some(source.to_string());
+    }
+    v
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_non_widening_update_from_the_pinned_source_runs_with_no_admin_online() {
+    let s = setup();
+    let manifest_path = s.component.with_file_name("pollis-app.json");
+    s.core.set(Ok(Ok(auto_updating(&s.component.display().to_string()))));
+    // A new version at the pinned location that asks for less (a smaller quota).
+    let narrower = MANIFEST.replace("4096", "2048");
+    std::fs::write(&manifest_path, &narrower).unwrap();
+    s.ds.deliver("01MSG1", "alice", "ack thanks");
+    let r = s.inst.run_job(JobInput::Wake).await.unwrap();
+    assert_eq!(r.triggers[0].result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
+    let report = s.core.last_report();
+    assert_eq!((report.state, report.reason.as_str()), (BotAppRunState::Running, "auto_updated"));
+    assert_eq!(report.app_hash, Some(hex_app_hash(&wasm(), &narrower)), "admins see what runs");
+
+    // A widening version at the same location waits for an admin.
+    let wider = MANIFEST.replace("\"actions\": [\"post\", \"reply\"]", "\"actions\": [\"post\", \"reply\", \"react\"]");
+    assert_ne!(wider, MANIFEST);
+    std::fs::write(&manifest_path, &wider).unwrap();
+    s.ds.deliver("01MSG2", "alice", "ack again");
+    s.inst.run_job(JobInput::Wake).await.unwrap();
+    assert_eq!(posts(&s.ds), 1, "a widening update never runs by itself");
+    let report = s.core.last_report();
+    assert_eq!((report.state, report.reason.as_str()), (BotAppRunState::AwaitingApproval, "build_widens"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_update_from_another_source_waits_for_an_admin() {
+    let s = setup();
+    s.core.set(Ok(Ok(auto_updating("https://apps.example/triage.wasm"))));
+    std::fs::write(s.component.with_file_name("pollis-app.json"), MANIFEST.replace("4096", "2048")).unwrap();
+    s.ds.deliver("01MSG1", "alice", "ack thanks");
+    s.inst.run_job(JobInput::Wake).await.unwrap();
+    assert_eq!(posts(&s.ds), 0);
+    assert_eq!(s.core.last_report().reason, "hash_mismatch");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_approval_runs_nothing_and_is_reported_as_refused() {
     let s = setup();

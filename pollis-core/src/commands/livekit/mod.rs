@@ -300,6 +300,17 @@ pub(super) fn dispatch_data(
             let seq = data.get("seq").and_then(|v| v.as_i64()).unwrap_or(0);
             let _ = channel.send(RealtimeEvent::BotAppApproval { seq });
         }
+        Some("bots_changed") => {
+            // DS-originated only (#1182), like `group_aliases_changed`.
+            if sender.is_some() {
+                return None;
+            }
+            if let Some(group_id) = data.get("group_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::BotsChanged {
+                    group_id: group_id.to_owned(),
+                });
+            }
+        }
         Some("read_cursors_changed") => {
             // DS-originated only (#1628), like `channel_mutes_changed`.
             if sender.is_some() {
@@ -574,6 +585,19 @@ mod tests {
         let payload = serde_json::json!({ "type": "channel_mutes_changed" });
         let events = run(payload.clone(), None);
         assert!(matches!(events[..], [RealtimeEvent::ChannelMutesChanged]));
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #1182: the bots nudge is forwarded from the DS, with its group; dropped from a participant.
+    #[test]
+    fn bots_changed_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "bots_changed", "group_id": "g1" });
+        let events = run(payload.clone(), None);
+        assert!(matches!(&events[..], [RealtimeEvent::BotsChanged { group_id }] if group_id == "g1"));
         let someone = PacketSender {
             user_id: "alice".into(),
             username: None,

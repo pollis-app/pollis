@@ -241,7 +241,8 @@
         "widened_grants": "它的批准授予的权限超出了 App 的请求。",
         "rolled_back": "一个较旧的批准取代了较新的批准。",
         "bad_build_signature": "它的版本的开发者签名校验未通过。",
-        "artifact_unavailable": "它的主机无法加载 App。"
+        "artifact_unavailable": "它的主机无法加载 App。",
+        "artifact_rolled_back": "它的机器提供了比机器人已运行过的版本更旧的版本，因此机器人会一直拒绝它。"
       },
       "approvedHeading": "已批准的 App",
       "version": "版本 {{version}}",
@@ -337,7 +338,7 @@
         "developmentHint": "运行由此开发者密钥签名、且请求不超出你批准范围的任何版本。",
         "developmentUnavailable": "启动 pollis app dev 以提供开发者密钥。",
         "autoUpdate": "下次自动批准",
-        "autoUpdateHint": "来自同一来源、没有请求新权限的更新会自动批准。"
+        "autoUpdateHint": "当来自同一来源的新版本没有请求更多权限时，机器人会自行运行它，无需管理员。任何请求更多权限的版本仍需等待批准。"
       },
       "edit": {
         "save": "保存访问权限",
@@ -351,7 +352,8 @@
       "commandKinds": {
         "command": "在频道中发布的命令",
         "request": "私密请求"
-      }
+      },
+      "runningAutoUpdated": "正在运行版本 {{version}}，已从批准的来源自动更新"
     }
   }
 }

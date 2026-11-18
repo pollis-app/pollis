@@ -126,6 +126,18 @@ pub trait InstallationCore: Send + Sync {
         Ok(Err(AppApprovalRefusal::NotApproved))
     }
 
+    /// #2005: record that this host runs `hash` under production approval
+    /// `seq` (whose own hash is `approved_hash`); refuses a hash this host
+    /// already moved past under that approval. The default (fakes) accepts.
+    async fn app_accept_hash(
+        &self,
+        _seq: i64,
+        _approved_hash: &str,
+        _hash: &str,
+    ) -> Result<Result<(), AppApprovalRefusal>, CoreError> {
+        Ok(Ok(()))
+    }
+
     /// #2005: tell the group's admins what the last check found (sent only when it changed).
     async fn app_report(&self, _report: &AppRunReport) -> Result<(), CoreError> {
         Ok(())

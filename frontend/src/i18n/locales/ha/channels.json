@@ -256,7 +256,8 @@
         "widened_grants": "Amincewarsa tana bayar da fiye da abin da App ke nema.",
         "rolled_back": "An mayar da tsohuwar amincewa a madadin sabuwa.",
         "bad_build_signature": "Sa hannun mai haɓakawa a kan ginin sa bai inganta ba.",
-        "artifact_unavailable": "Mai masaukinsa ya kasa loda App ɗin."
+        "artifact_unavailable": "Mai masaukinsa ya kasa loda App ɗin.",
+        "artifact_rolled_back": "Na'urarsa ta bayar da sigar da ta girmi wadda bot ɗin ya riga ya gudanar, don haka bot ɗin yana ci gaba da ƙin ta."
       },
       "approvedHeading": "App da aka amince",
       "version": "Siga {{version}}",
@@ -352,7 +353,7 @@
         "developmentHint": "Yana gudanar da kowane gini da aka sa hannu da wannan maɓallin mai haɓakawa wanda bai nemi fiye da abin da ka amince ba.",
         "developmentUnavailable": "Fara pollis app dev don bayar da maɓallin mai haɓakawa.",
         "autoUpdate": "Amince kai tsaye a gaba",
-        "autoUpdateHint": "Sabuntawa daga tushe ɗaya da ba sa neman sabon abu suna amincewa da kansu."
+        "autoUpdateHint": "Bot ɗin yana gudanar da sabuwar siga daga tushe ɗaya da kansa idan ba ta nemi ƙari ba, ba tare da mai gudanarwa ba. Duk abin da ya nemi ƙari yana jiran amincewa har yanzu."
       },
       "edit": {
         "save": "Ajiye damar shiga",
@@ -366,7 +367,8 @@
       "commandKinds": {
         "command": "umarnin da ake wallafawa a tasha",
         "request": "buƙata ta sirri"
-      }
+      },
+      "runningAutoUpdated": "Yana gudanar da siga {{version}}, an sabunta ta kai tsaye daga tushen da aka amince"
     }
   }
 }

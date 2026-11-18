@@ -256,7 +256,8 @@
         "widened_grants": "Imvume yayo inika okungaphezu kwalokho i-App ekucelayo.",
         "rolled_back": "Imvume endala ibuyiselwe esikhundleni sentsha.",
         "bad_build_signature": "Isiginesha kanjiniyela yokwakhiwa kwayo ayilungile.",
-        "artifact_unavailable": "Umsingathi wayo akakwazanga ukulayisha i-App."
+        "artifact_unavailable": "Umsingathi wayo akakwazanga ukulayisha i-App.",
+        "artifact_rolled_back": "Umshini wayo unikeze inguqulo endala kuneyodwa ibhothi esivele iyisebenzisile, ngakho ibhothi iqhubeka iyenqaba."
       },
       "approvedHeading": "I-App evunyiwe",
       "version": "Inguqulo {{version}}",
@@ -352,7 +353,7 @@
         "developmentHint": "Isebenzisa noma yikuphi ukwakhiwa okusayinwe ngalo khiye kanjiniyela okungaceli okungaphezu kwalokho okuvumile.",
         "developmentUnavailable": "Qala i-pollis app dev ukuze unikeze ukhiye kanjiniyela.",
         "autoUpdate": "Vuma ngokuzenzakalelayo ngokuzayo",
-        "autoUpdateHint": "Izibuyekezo ezivela emthonjeni ofanayo ezingaceli lutho olusha ziyazivumela."
+        "autoUpdateHint": "Ibhothi isebenzisa ngokwayo inguqulo entsha evela emthonjeni ofanayo uma ingaceli lutho olwengeziwe, ngaphandle komphathi. Noma yini ecela okwengeziwe isalinde imvume."
       },
       "edit": {
         "save": "Londoloza ukufinyelela",
@@ -366,7 +367,8 @@
       "commandKinds": {
         "command": "umyalo othunyelwa eteshini",
         "request": "isicelo esiyimfihlo"
-      }
+      },
+      "runningAutoUpdated": "Isebenzisa inguqulo {{version}}, ebuyekezwe ngokuzenzakalelayo emthonjeni ovunyiwe"
     }
   }
 }

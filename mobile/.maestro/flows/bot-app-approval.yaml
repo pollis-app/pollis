@@ -10,7 +10,7 @@ tags:
 # (the page itself never polls).
 #
 #   Driver, before this flow: `pollis-bot app install --installation <bot> --artifact <v1>` where
-#     v1's pollis-app.json reads #alerts and #ops (30 days, new messages), may post and reply,
+#     v1's pollis-app.json reads #general (30 days, new messages), may post and reply,
 #     and may send data to ${APP_HOST}.
 #   Driver, once `pollis-bot status` shows v1 running: install v2, which adds the host
 #     ${APP_NEW_HOST} and the `schedule` trigger (both widenings).
@@ -90,17 +90,12 @@ tags:
     id: "list-bot-app-pending-plain-reads"
 - scrollUntilVisible:
     element:
-      id: "bot-app-pending-grants-toggle-channel-ops"
+      id: "bot-app-pending-grants-toggle-channel-General"
     direction: DOWN
-# Everything the App asks for starts on; switching #ops off narrows it.
+# Everything the App asks for starts on (a group made on mobile has only #General).
 - assertVisible:
-    id: "bot-app-pending-grants-toggle-channel-ops"
+    id: "bot-app-pending-grants-toggle-channel-General"
     checked: true
-- tapOn:
-    id: "bot-app-pending-grants-toggle-channel-ops"
-- assertVisible:
-    id: "bot-app-pending-grants-toggle-channel-ops"
-    checked: false
 # Shorten the history to 7 days.
 - tapOn:
     id: "bot-app-pending-grants-history"
@@ -128,8 +123,7 @@ tags:
     timeout: 60000
 - assertVisible:
     id: "bot-app-approved-mark-noEgress"
-- assertVisible: ".*Reads #alerts, the last 7 days.*"
-- assertNotVisible: ".*#ops.*"
+- assertVisible: "(?i).*Reads #general, the last 7 days.*"
 - takeScreenshot: bot-app-02-approved
 
 # --- 2. Narrow the approved App in place ----------------------------------------------------
@@ -142,7 +136,7 @@ tags:
     id: "btn-save-bot-app-grants"
     enabled: false
 - tapOn:
-    id: "bot-app-grants-toggle-channel-alerts"
+    id: "bot-app-grants-toggle-channel-General"
 - scrollUntilVisible:
     element:
       id: "btn-save-bot-app-grants"

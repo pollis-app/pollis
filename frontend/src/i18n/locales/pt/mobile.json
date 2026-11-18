@@ -756,7 +756,8 @@
         "widened_grants": "a aprovação permite mais do que a App pede",
         "rolled_back": "uma aprovação antiga foi reaproveitada",
         "bad_build_signature": "o build não está assinado pela chave de desenvolvedor aprovada",
-        "artifact_unavailable": "não foi possível ler os arquivos da App"
+        "artifact_unavailable": "não foi possível ler os arquivos da App",
+        "artifact_rolled_back": "a máquina ofereceu uma versão mais antiga do que uma que o bot já executou, e o bot continua a recusá-la"
       },
       "approvedHeading": "App aprovada",
       "version": "Versão {{version}}",
@@ -817,7 +818,7 @@
       "save": "Salvar",
       "saving": "Salvando…",
       "autoUpdateLabel": "Aprovar automaticamente da próxima vez",
-      "autoUpdateHint": "Atualizações da mesma origem que não pedem mais são aprovadas sem perguntar.",
+      "autoUpdateHint": "O próprio bot executa uma versão mais nova da mesma origem quando ela não pede nada a mais, sem precisar de um administrador. O que pedir mais continua aguardando aprovação.",
       "firstHeading": "Aguardando aprovação",
       "updateHeading": "Atualização pendente",
       "changesHeading": "O que mudou",
@@ -860,7 +861,9 @@
         "stale": "Outro administrador acabou de aprovar este bot. Confira de novo antes de aprovar.",
         "changed": "A App mudou desde que você abriu esta página. Confira de novo antes de aprovar.",
         "failed": "Não foi possível aprovar a App."
-      }
+      },
+      "runningAuto": "Executa a versão {{version}}, atualizada automaticamente a partir da origem aprovada",
+      "runningHashLabel": "Hash da App em execução"
     }
   }
 }

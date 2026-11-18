@@ -51,6 +51,8 @@ pub async fn approve_bot_app(State(state): State<AppState>, req: RawRequest) -> 
                 {
                     tracing::warn!("bot app approval: inbox notify failed (non-fatal): {e}");
                 }
+                // Other admins' bot pages re-read it.
+                crate::bots::notify_admins_bots_changed(&state, &parsed.bot_user_id).await;
             }
             Ok(ok_response::<ApproveBotAppBody>(resp))
         }
@@ -253,7 +255,12 @@ pub async fn report_bot_app(State(state): State<AppState>, req: RawRequest) -> R
         return Ok(AuthRejection::Forbidden.into_response());
     }
     let conn = state.db.conn().await?;
-    crate::writes::outcome_response::<BotAppReportBody>(apply_report_bot_app(&conn, &actor, &device, &parsed).await?)
+    let outcome = apply_report_bot_app(&conn, &actor, &device, &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) {
+        // The runtime reports only when its state changed: admins' bot pages re-read it.
+        crate::bots::notify_admins_bots_changed(&state, &actor).await;
+    }
+    crate::writes::outcome_response::<BotAppReportBody>(outcome)
 }
 
 fn state_str(state: BotAppRunState) -> &'static str {

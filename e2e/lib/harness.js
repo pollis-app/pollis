@@ -50,7 +50,12 @@ function reap() {
   for (const p of procs) {
     spawnSync("pkill", ["-9", "-f", p], { stdio: "ignore" });
   }
-  spawnSync("pkill", ["-9", "-x", "pollis"], { stdio: "ignore" });
+  killAppBin();
+}
+
+// Kill only the app binary this harness launches (APP_BIN), never an installed `pollis` the user is running.
+function killAppBin() {
+  spawnSync("pkill", ["-9", "-f", `^${APP_BIN}( |$)`], { stdio: "ignore" });
 }
 
 function waitPort(port, hosts, ms) {
@@ -318,7 +323,7 @@ async function dumpFailure(browser, artifactsDir, shot) {
 
 module.exports = {
   ROOT, UI_PORT, DS_PORT, DS_URL, DS_BIN, APP_BIN, TAURI_DRIVER,
-  sleep, reap, waitPort, curl, warmVite, spawnVite, waitViteReady,
+  sleep, reap, killAppBin, waitPort, curl, warmVite, spawnVite, waitViteReady,
   readEnvFile, tursoEnv,
   present, waitTestId, waitAppReadyAfterSignUp, clickTestId, setTestIdValue, setComposerText, typeCode,
   presentSelector, waitSelector, clickSelector, setSelectorValue, invokeApp,

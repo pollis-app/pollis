@@ -56,6 +56,12 @@ pub struct ManifestChange {
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous: Option<String>,
+    /// A schedule's period in seconds after the change (`value` is its name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub every_secs: Option<u64>,
+    /// A changed schedule's period in seconds before the change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_every_secs: Option<u64>,
     /// The App may see or do more than before.
     pub widening: bool,
 }
@@ -68,10 +74,10 @@ fn set_changes<T: Ord + Clone>(
     out: &mut Vec<ManifestChange>,
 ) {
     for added in new.difference(old) {
-        out.push(ManifestChange { field, kind: ChangeKind::Added, value: name(added), previous: None, widening: true });
+        out.push(ManifestChange { field, kind: ChangeKind::Added, value: name(added), previous: None, every_secs: None, previous_every_secs: None, widening: true });
     }
     for removed in old.difference(new) {
-        out.push(ManifestChange { field, kind: ChangeKind::Removed, value: name(removed), previous: None, widening: false });
+        out.push(ManifestChange { field, kind: ChangeKind::Removed, value: name(removed), previous: None, every_secs: None, previous_every_secs: None, widening: false });
     }
 }
 
@@ -85,6 +91,8 @@ fn number_change(field: ChangeField, old: u64, new: u64, out: &mut Vec<ManifestC
         kind,
         value: new.to_string(),
         previous: Some(old.to_string()),
+        every_secs: None,
+        previous_every_secs: None,
         widening: new > old,
     });
 }
@@ -105,6 +113,8 @@ pub fn diff(old: &Manifest, new: &Manifest) -> Vec<ManifestChange> {
             kind: ChangeKind::Added,
             value: added.clone(),
             previous: None,
+            every_secs: None,
+            previous_every_secs: None,
             widening: !old_any,
         });
     }
@@ -114,6 +124,8 @@ pub fn diff(old: &Manifest, new: &Manifest) -> Vec<ManifestChange> {
             kind: ChangeKind::Removed,
             value: removed.clone(),
             previous: None,
+            every_secs: None,
+            previous_every_secs: None,
             widening: false,
         });
     }
@@ -133,6 +145,8 @@ pub fn diff(old: &Manifest, new: &Manifest) -> Vec<ManifestChange> {
                 kind: ChangeKind::Added,
                 value: c.name.clone(),
                 previous: None,
+                every_secs: None,
+                previous_every_secs: None,
                 widening: true,
             }),
             Some(o) if o.request != c.request => out.push(ManifestChange {
@@ -140,6 +154,8 @@ pub fn diff(old: &Manifest, new: &Manifest) -> Vec<ManifestChange> {
                 kind: ChangeKind::Increased,
                 value: c.name.clone(),
                 previous: Some(if o.request { "request" } else { "command" }.to_string()),
+                every_secs: None,
+                previous_every_secs: None,
                 widening: true,
             }),
             Some(_) => {}
@@ -147,7 +163,7 @@ pub fn diff(old: &Manifest, new: &Manifest) -> Vec<ManifestChange> {
     }
     for o in &old.commands {
         if !new.commands.iter().any(|c| c.name == o.name) {
-            out.push(ManifestChange { field: ChangeField::Command, kind: ChangeKind::Removed, value: o.name.clone(), previous: None, widening: false });
+            out.push(ManifestChange { field: ChangeField::Command, kind: ChangeKind::Removed, value: o.name.clone(), previous: None, every_secs: None, previous_every_secs: None, widening: false });
         }
     }
 
@@ -159,13 +175,17 @@ pub fn diff(old: &Manifest, new: &Manifest) -> Vec<ManifestChange> {
                 kind: ChangeKind::Added,
                 value: sch.name.clone(),
                 previous: None,
+                every_secs: Some(sch.every),
+                previous_every_secs: None,
                 widening: true,
             }),
             Some(o) if o.every != sch.every || o.offset != sch.offset => out.push(ManifestChange {
                 field: ChangeField::Schedule,
                 kind: if sch.every < o.every { ChangeKind::Increased } else { ChangeKind::Decreased },
-                value: format!("{} every {}s", sch.name, sch.every),
-                previous: Some(format!("every {}s", o.every)),
+                value: sch.name.clone(),
+                previous: None,
+                every_secs: Some(sch.every),
+                previous_every_secs: Some(o.every),
                 widening: sch.every < o.every,
             }),
             Some(_) => {}
@@ -173,7 +193,7 @@ pub fn diff(old: &Manifest, new: &Manifest) -> Vec<ManifestChange> {
     }
     for o in &old.schedules {
         if !new.schedules.iter().any(|sch| sch.name == o.name) {
-            out.push(ManifestChange { field: ChangeField::Schedule, kind: ChangeKind::Removed, value: o.name.clone(), previous: None, widening: false });
+            out.push(ManifestChange { field: ChangeField::Schedule, kind: ChangeKind::Removed, value: o.name.clone(), previous: None, every_secs: None, previous_every_secs: None, widening: false });
         }
     }
     out
@@ -271,7 +291,14 @@ mod tests {
             "schedules":[{"name":"digest","every":600}]}"##);
         let w = widenings_between(&base, &more);
         assert!(w.iter().any(|c| c.field == ChangeField::Command && c.value == "close"), "{w:?}");
-        assert!(w.iter().any(|c| c.field == ChangeField::Schedule && c.kind == ChangeKind::Increased), "{w:?}");
+        assert!(
+            w.iter().any(|c| c.field == ChangeField::Schedule
+                && c.kind == ChangeKind::Increased
+                && c.value == "digest"
+                && c.every_secs == Some(600)
+                && c.previous_every_secs == Some(3600)),
+            "{w:?}"
+        );
         assert!(!w.iter().any(|c| c.field == ChangeField::Command && c.value == "ticket"), "a reworded description grants nothing");
         assert!(widenings_between(&more, &base).iter().all(|c| c.field != ChangeField::Command), "dropping a command narrows");
     }

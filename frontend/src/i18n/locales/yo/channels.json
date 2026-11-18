@@ -248,7 +248,8 @@
         "widened_grants": "Ìfọwọ́sí rẹ̀ fún un ju ohun tí App ń béèrè lọ.",
         "rolled_back": "Wọ́n dá ìfọwọ́sí àtijọ́ padà sípò èyí tuntun.",
         "bad_build_signature": "Ìbuwọ́lù olùgbéjáde lórí àkọ́kọ́ rẹ̀ kò tọ̀nà.",
-        "artifact_unavailable": "Agbàlejò rẹ̀ kò lè gbé App náà wọlé."
+        "artifact_unavailable": "Agbàlejò rẹ̀ kò lè gbé App náà wọlé.",
+        "artifact_rolled_back": "Ẹ̀rọ rẹ̀ pèsè ẹ̀dà tó ti pẹ́ ju èyí tí bọ́ọ̀tì náà ti ṣiṣẹ́ rí, nítorí náà bọ́ọ̀tì náà ń kọ̀ ọ́ ṣáá."
       },
       "approvedHeading": "App tí a fọwọ́ sí",
       "version": "Ẹ̀dà {{version}}",
@@ -344,7 +345,7 @@
         "developmentHint": "Ó ń ṣiṣẹ́ àkọ́kọ́ èyíkéyìí tí kọ́kọ́rọ́ olùgbéjáde yìí fọwọ́ sí, tí kò béèrè ju ohun tí o fọwọ́ sí lọ.",
         "developmentUnavailable": "Bẹ̀rẹ̀ pollis app dev láti pèsè kọ́kọ́rọ́ olùgbéjáde.",
         "autoUpdate": "Fọwọ́ sí i fúnra rẹ̀ nígbà míì",
-        "autoUpdateHint": "Àwọn àtúnṣe láti orísun kan náà tí kò béèrè ohunkóhun tuntun ń fọwọ́ sí ara wọn."
+        "autoUpdateHint": "Bọ́ọ̀tì náà ń ṣiṣẹ́ ẹ̀dà tuntun láti orísun kan náà fúnra rẹ̀ nígbà tí kò bá béèrè ohunkóhun mọ́, láìsí alábòójútó. Ohunkóhun tó bá béèrè jù bẹ́ẹ̀ lọ ṣì ń dúró de ìfọwọ́sí."
       },
       "edit": {
         "save": "Fi ààyè pamọ́",
@@ -358,7 +359,8 @@
       "commandKinds": {
         "command": "àṣẹ tí a fi ránṣẹ́ sí ìkànnì",
         "request": "ìbéèrè àdáni"
-      }
+      },
+      "runningAutoUpdated": "Ó ń ṣiṣẹ́ ẹ̀dà {{version}}, tí a ṣàtúnṣe fúnra rẹ̀ láti orísun tí a fọwọ́ sí"
     }
   }
 }

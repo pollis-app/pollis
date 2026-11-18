@@ -15,6 +15,8 @@ import { receiptQueryKeys } from './queries/useReceipts';
 import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipants';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useMutedChannels, useUserGroupsWithChannels } from './queries/useGroups';
+import { botQueryKeys } from './queries/useBots';
+import { botAppQueryKeys } from './queries/useBotApps';
 import { blocksQueryKeys } from './queries/useBlocks';
 import { aliasQueryKeys, channelAliasName } from './queries/useGroupAliases';
 import { notify, setNotifyPrefs, setMutedChannels, loadDeviceCallRingtone } from '../utils/notify';
@@ -96,6 +98,11 @@ type RealtimeEvent =
     // #2003: someone's alias in this group changed; with no group, one of our own did.
     type: 'group_aliases_changed';
     group_id?: string;
+  }
+  | {
+    // #1182: a host joined one of this admin's bots; DS-only.
+    type: 'bots_changed';
+    group_id: string;
   }
   | {
     type: 'join_requests_changed';
@@ -541,6 +548,13 @@ export function useLiveKitRealtime() {
 
       if (event.type === 'read_cursors_changed') {
         void refreshReadCursors(queryClientRef.current, currentUser.id);
+        return;
+      }
+
+      if (event.type === 'bots_changed') {
+        queryClientRef.current.invalidateQueries({ queryKey: botQueryKeys.all });
+        // #2005: an approval or the runtime's report changed; the bot's App section re-reads.
+        queryClientRef.current.invalidateQueries({ queryKey: botAppQueryKeys.all });
         return;
       }
 
