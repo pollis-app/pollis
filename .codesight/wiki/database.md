@@ -1298,6 +1298,23 @@ The payload is now `data: { h }` and nothing else, and `mobile/lib/push/routing.
 
 **Invalid states.** The row's existence is the mute, so a double mute is one row (PK) and an unmute deletes it. `profile::apply_set_channel_mute` writes a row only for a group channel the caller is a member of (a DM or group id is refused); leaving or being removed from a group drops the member's rows for its channels (`teardown::purge_member_channel_mutes`), an identity reset drops all of them, channel/group teardown drops the channel's rows, and account deletion drops the user's (`teardown::purge_user_rows`). The read (`list_channel_mutes`) also joins on current membership, so a row stranded by an older DS is never served.
 
+### group_alias _(migration 000051, #2003)_
+- `group_id` TEXT NOT NULL, `user_id` TEXT NOT NULL — PRIMARY KEY `(group_id, user_id)`
+- `display_name` TEXT NULL (1–100 characters), `avatar_url` TEXT NULL — CHECK at least one is set
+- `updated_at` TEXT NOT NULL DEFAULT `datetime('now')`
+- index `idx_group_alias_user(user_id)` — the owner's list and account deletion
+
+**What it is.** The name and picture a member shows in one group instead of their main profile. A `NULL` field, or no row, means "use the main profile" for that field; a row with neither is refused by the CHECK, so clearing the last field deletes the row. No backfill. Stored in the clear: every member of the group renders it, as they render `users.preferred_name`.
+
+**Who reads and writes.** `aliases::apply_set_group_alias` writes only the caller's own row, only in a group they are currently in ("apply to all" resolves those groups server-side, in one transaction, overwriting only the given fields); a name passes `is_valid_display_name`, an avatar must be the caller's own content-addressed `avatars/<user>/<sha>.<ext>` key. `list_group_aliases` answers only a CURRENT member, and includes rows of members who have left, so their old messages keep rendering the alias. `list_my_aliases` is the owner's own list. `apply_reset_group_alias` deletes one row for the owner, or for an admin of that group.
+
+**Lifecycle.** A row survives leave and removal (a rejoin restores it). It goes with an owner or admin reset, with the group (`teardown::purge_group`) and with the account or an identity reset (`teardown::purge_user_rows`).
+
+### avatar_release _(migration 000051, #2003)_
+- `r2_key` TEXT PRIMARY KEY, `released_at` TEXT NOT NULL DEFAULT `datetime('now')`
+
+Avatar objects (`avatars/<user>/<sha>.<ext>`) a write or a teardown stopped referencing: a replaced or cleared `users.avatar_url`, an alias picture replaced or reset, a group or account torn down. `aliases::reclaim_released_avatars`, kicked on every GC tick and single-flight (`AppState::avatar_reclaim`), takes rows older than `AVATAR_RELEASE_GRACE_SECS` (10 min, so re-choosing a just-dropped picture between upload and save keeps its bytes): a key still named by `users.avatar_url` or `group_alias.avatar_url` just loses its row; otherwise the DS deletes the R2 object, then the row. A failed delete keeps the row for the next pass. Only content-addressed avatar keys are ever deleted.
+
 ### history_transfer / history_transfer_chunk / history_transfer_budget _(migration 000045, #1735)_
 The DS's relay for copying message history between two of one account's devices (`docs/history-transfer-design.md`). `history_transfer`: one row per transfer — `user_id`, `src_device_id`, `dst_device_id` (CHECK different), `via` (`link`/`sibling`), `state` (`requested` → `accepted` → `completed`; or `declined`/`cancelled`), the opaque signed `req`/`req_sig` and `acc`/`acc_sig` (CHECK: an acceptance exists exactly from `accepted` on), `acked_through` (trigger: only moves forward), unix-second `created_at`/`updated_at`/`expires_at`. A partial UNIQUE index allows one OPEN transfer per receiving device. `history_transfer_chunk(transfer_id, idx, sealed ≤ 1 MiB)`: triggers refuse a chunk for a transfer that is not accepted, outside the 8-chunk window above the ack, or not contiguous, and refuse any UPDATE (a stored chunk is immutable). Ended rows are kept an hour (chunks deleted at once); the GC tick (`history_transfer::sweep_expired`) deletes everything past `expires_at` (requests 15 min, accepted 24 h after last activity). `history_transfer_budget(user_id, window_start, used)`: the durable per-account request budget (12/hour). All three are purged by account deletion; revocation and logout purge the device's transfers; identity reset purges the account's.
 
@@ -1608,6 +1625,9 @@ has `pv`, never sent anywhere; goes with the database on a wipe or reset.
 - `updated_at` TEXT NOT NULL DEFAULT now
 - Username lookup cache so the UI can render a sender without a remote round trip. Not authoritative — `users` in Turso is.
 
+
+### group_alias_cache _(#2003)_
+`(group_id, user_id)` PK → `display_name`. The alias names this device last read for each group (`commands::groups::aliases`), replaced whole on every read of the group's aliases, so a push for a group message names the sender as the group shows them (`notify::fetch::alias_names`, which also refreshes it within the fetch's deadline). Best-effort like `user_cache`: a miss renders the username.
 ### conversation_cache _(#850)_
 - `id` TEXT PK — a channel id or a DM conversation id
 - `kind` TEXT NOT NULL CHECK (`channel` | `dm`)
