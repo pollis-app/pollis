@@ -175,6 +175,43 @@
       </section>
 
       <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section" id="approve-an-app">
+        <h2 class="doc-section-title">Approving an App</h2>
+        <p>
+          A bot that runs an <strong>App</strong> runs exactly the App an admin approved, with exactly the
+          permissions the admin chose. Every App has an <strong>App hash</strong>, a fingerprint of its code and
+          its manifest together; change one byte and the hash changes.
+        </p>
+        <ol>
+          <li>Whoever runs the bot's machine points the bot at an App, from a file on that machine or an
+            <code>https://</code> address. The bot's page then shows <strong>Waiting for your approval</strong>
+            with the App's name, version, App hash and where it comes from.</li>
+          <li>Read what it can do, in plain language: which channels it reads and how far back, what it can do,
+            and which internet addresses it may reach, or <strong>Can't send data outside this group</strong>
+            when it may reach none.</li>
+          <li>Switch off anything you do not want (channels, history, addresses) and choose
+            <strong>Approve</strong>. You can only take things away, never add beyond what the App asked for.</li>
+        </ol>
+        <p>
+          The approval is signed by your own device. Before every job the bot checks that signature, that you are
+          still an admin, and that the App it is about to run has exactly the approved hash. If anything does not
+          match, the App does not run and the bot's page says why. The Pollis server stores approvals but cannot
+          make or change one.
+        </p>
+        <p>
+          <strong>Updates</strong> need a new approval. Anything a new version asks for beyond the last one is
+          highlighted and stays off until you switch it on; an update that asks for nothing more is one tap, or
+          can be set to approve itself. A <strong>development installation</strong> approves a developer's
+          signing key instead of one version, for test groups; every member then sees a
+          <strong>Development build</strong> mark on the bot.
+        </p>
+        <p>
+          Details: <a href="https://github.com/pollis-app/pollis/blob/main/docs/bots/app-approval.md"
+            target="_blank" rel="noopener noreferrer"><code>docs/bots/app-approval.md</code></a>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section">
         <h2 class="doc-section-title">Limits and the Bot badge</h2>
         <ul>

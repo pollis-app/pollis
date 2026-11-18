@@ -13,6 +13,7 @@ A Pollis bot is a member of one group that is run by a program, not a person.
 | Page | For | What it covers |
 |---|---|---|
 | [Admin guide](./admin-guide.md) | Group admins | What a bot can read, adding a bot, adding and revoking hosts, deleting a bot, limits |
+| [Approving an App](./app-approval.md) | Group admins, App developers | Approving exactly one App, narrowing what it can do, updates and new access, development installations, when a bot stops running |
 | [Self-hosting](./self-hosting.md) | Whoever runs the bot's machine | Installing `pollis-bot`, pairing, running it as a service, logs, troubleshooting |
 | [Alerts webhook](./alerts-webhook.md) | Developers and operators | Posting alerts into a channel with `curl`, Grafana or `pollis-bot post` |
 | [Concepts for developers](./concepts-for-developers.md) | Developers | How a job runs, triggers and trigger keys, why only one host acts, grants |
