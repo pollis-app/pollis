@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # SELF-UPDATE (#1880) — returning to the foreground runs the MLS backstops,
 # and they rotate this device's own leaf in a group where it is due, as the
@@ -13,7 +14,10 @@ tags:
 # The Diagnostics screen reads the log once as it opens, so each check
 # re-opens it until the pass has written its line. Self-contained (no peer).
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "self-update"
 - tapOn:
     id: "tab-groups"
 - tapOn:

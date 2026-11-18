@@ -26,7 +26,7 @@ onFlowComplete:
 # by a Language row. The list is its own page (#1944), reached from
 # Preferences' Language row and from the Self hub's.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 
 - tapOn:
     id: "tab-self"

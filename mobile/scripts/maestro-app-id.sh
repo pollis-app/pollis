@@ -24,7 +24,9 @@ maestro() {
   # Android flows that seed photos (#1769): clear earlier runs' copies first,
   # and keep the photo picker synced while the flow runs, or it never lists
   # what `addMedia` adds. See maestro-media.sh.
-  local seeds="" rc=0 watcher=""
+  # POLLIS_MEDIA_SEEDS=1: maestro-run.sh hands Maestro a workspace, not the
+  # flow files, so it says so itself when one of them seeds photos (#2029).
+  local seeds="${POLLIS_MEDIA_SEEDS:-}" rc=0 watcher=""
   for arg in "$@"; do
     if [ -f "$arg" ] && grep -q -- '- addMedia:' "$arg"; then
       seeds=1

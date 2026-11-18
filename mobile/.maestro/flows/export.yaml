@@ -1,12 +1,16 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # EXPORT (#856) — "Your data" on Security: write the on-device archive, see the
 # summary, reach the share button. The share sheet itself is OS chrome and is
 # not asserted; the flow stops at the button that opens it. Self-contained.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "export"
 - tapOn:
     id: "tab-self"
 - tapOn:

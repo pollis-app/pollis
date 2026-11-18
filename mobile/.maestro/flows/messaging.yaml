@@ -1,12 +1,13 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - gate
 ---
 # MESSAGING — send / edit / delete / react in a self-owned channel.
 # Self-contained: creates a group (→ #General channel) so there's a
 # conversation to post into without a peer.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 # Navigate explicitly: sign-in guarantees the tab navigator, not which tab,
 # and btn-create-group only exists on the groups screen.
 - tapOn:
@@ -15,11 +16,7 @@ tags:
     id: "screen-groups"
 
 # Make a group so we have a channel to post in.
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
     id: "toggle-general-channel"

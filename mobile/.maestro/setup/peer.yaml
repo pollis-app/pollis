@@ -1,0 +1,16 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - setup
+---
+# The DM peer for the `peer` flows (dms, dm-safety, report; #2029): a brand-new
+# account signed up on this same device and left on Self, where maestro-run.sh
+# reads its @handle off the screen and passes it on as MAESTRO_PEER_HANDLE. The
+# peer only has to exist on the DS; nothing signs in to it again.
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "peer"
+- tapOn:
+    id: "tab-self"
+- assertVisible:
+    id: "screen-self"

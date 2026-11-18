@@ -5,11 +5,7 @@ appId: ${MAESTRO_APP_ID}
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

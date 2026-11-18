@@ -10,7 +10,7 @@ tags:
 # Self-contained: posts into a fresh self-owned group's #General. Needs network
 # from the device to github.com (the preview is a real fetch).
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 
 # Self -> Preferences -> Link previews: on by default, and the switch turns it
 # off and on again (this device only).
@@ -44,11 +44,7 @@ tags:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

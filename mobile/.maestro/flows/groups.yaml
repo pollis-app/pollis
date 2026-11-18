@@ -1,12 +1,13 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - gate
 ---
 # GROUPS — create a group, open it, create/verify a channel, rename, leave.
 # Self-contained (no peer). Every action is tapped by testID; the one text
 # match is the "General" channel row, whose row-channel-<id> is not known ahead.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 # Navigate explicitly: sign-in guarantees the tab navigator, not which tab.
 - tapOn:
     id: "tab-groups"

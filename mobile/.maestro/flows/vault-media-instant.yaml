@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # VAULT CHAT ↔ MEDIA — a picture already on screen in one view is drawn on the
 # first frame of the other, every switch: the decrypted file is kept for a
@@ -13,7 +14,10 @@ tags:
 # 500 ms, well under a fresh decrypt + draw. Every step is mandatory.
 # Self-contained: a fresh disposable account, no peer.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "vault-media-instant"
 - tapOn:
     id: "tab-direct"
 - tapOn:

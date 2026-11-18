@@ -10,7 +10,7 @@ tags:
 # is in every build (the Rust bridge) and is MPL-2.0, so it proves the Rust half
 # of the list reached the bundle, not only the npm half.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-self"
 # Centre the row before tapping it. A plain scroll stops as soon as the row is

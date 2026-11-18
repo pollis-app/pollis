@@ -352,8 +352,9 @@ fail):
 - **The `flows` integration suite** for a `pollis-core` / DS / MLS change:
   `cargo test --features test-harness --test flows` (from `src-tauri/`), or
   dispatch `mls-flows.yml`.
-- **Maestro flows** for a mobile-reachable change: `mobile/scripts/maestro-run.sh <flow|all> <ios|android>`
-  on the simulator/emulator (`mobile/.maestro/README.md`). Maestro has no CI
+- **Maestro flows** for a mobile-reachable change: `mobile/scripts/maestro-run.sh area origin/main`
+  (the flows the change reaches, on all three devices at once; `gate`, `all` or
+  named flows too; `mobile/.maestro/README.md` → "Run"). Maestro has no CI
   workflow.
 - **WebDriver scenarios** (`e2e/*.js`) for a change to MLS delivery, DMs, the
   DS or media: `pnpm --filter @pollis/e2e e2e <scenario>` locally, or dispatch

@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - gate
 ---
 # MEDIA VIEWER (#1248) — send an image, prove it renders from R2, then tap it
 # in chat → the full-screen viewer (a pushed page): double-tap zoom, Save to
@@ -23,18 +24,14 @@ tags:
 # expo-image has drawn the decrypted file; `media-unavailable` is the "Image
 # unavailable" placeholder, which must not appear.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
 
 # A group with #General to post into.
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

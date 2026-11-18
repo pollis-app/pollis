@@ -19,18 +19,14 @@ tags:
 # switch, so the recovery is pinned there by mobile/tests/media-recovery.test.ts,
 # which drives the same `lib/media/tile.ts` both platforms run.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
 
 # A group with #General to post into.
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

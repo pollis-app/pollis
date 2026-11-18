@@ -15,14 +15,10 @@ tags:
 # fixture is a PNG (stored as lossless WebP), the animated one a GIF (stored as
 # GIF) — the two formats pollis-core emits.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:
