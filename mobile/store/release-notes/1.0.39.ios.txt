@@ -1,4 +1,5 @@
 New
+• Links in messages show a preview with the page title and picture. Turn it off in Preferences.
 • Choose a different name and picture for each group, in Self → Group aliases.
 • 17 more languages, including Korean, Japanese, Hindi, Urdu, Bengali, Portuguese and Swahili.
 • Language has its own page in Self.

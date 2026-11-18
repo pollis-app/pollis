@@ -1,4 +1,5 @@
 New
+• Links in messages show a preview with the page title and picture. Turn it off in Preferences.
 • Choose a different name and picture for each group, in Self → Group aliases.
 • An invite link shows the name of the group before you join.
 • Searching from a group searches only that group.
