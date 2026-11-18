@@ -256,7 +256,8 @@
         "widened_grants": "ማጽደቁ App ከሚጠይቀው በላይ ይሰጣል።",
         "rolled_back": "በአዲሱ ማጽደቅ ቦታ የቆየ ማጽደቅ ተመልሷል።",
         "bad_build_signature": "የግንባታው የገንቢ ፊርማ ትክክል አይደለም።",
-        "artifact_unavailable": "አስተናጋጁ App ን መጫን አልቻለም።"
+        "artifact_unavailable": "አስተናጋጁ App ን መጫን አልቻለም።",
+        "artifact_rolled_back": "ማሽኑ ቦቱ ከዚህ በፊት ካሄደው የቆየ ስሪት አቀረበ፣ ስለዚህ ቦቱ እምቢ ማለቱን ይቀጥላል።"
       },
       "approvedHeading": "የጸደቀ App",
       "version": "ስሪት {{version}}",
@@ -352,7 +353,7 @@
         "developmentHint": "በዚህ የገንቢ ቁልፍ የተፈረመና ካጸደቁት በላይ የማይጠይቅ ማንኛውንም ግንባታ ያሄዳል።",
         "developmentUnavailable": "የገንቢ ቁልፍ ለማቅረብ pollis app dev ያስጀምሩ።",
         "autoUpdate": "በሚቀጥለው ጊዜ በራስ-ሰር አጽድቅ",
-        "autoUpdateHint": "ከተመሳሳይ ምንጭ የሚመጡ ምንም አዲስ ነገር የማይጠይቁ ዝማኔዎች ራሳቸውን ያጸድቃሉ።"
+        "autoUpdateHint": "ከተመሳሳይ ምንጭ የመጣ አዲስ ስሪት ምንም ተጨማሪ ካልጠየቀ ቦቱ ያለ አስተዳዳሪ ራሱ ያሄደዋል። ተጨማሪ የሚጠይቅ ማንኛውም ነገር አሁንም ማጽደቅን ይጠብቃል።"
       },
       "edit": {
         "save": "መዳረሻን አስቀምጥ",
@@ -366,7 +367,8 @@
       "commandKinds": {
         "command": "በቻናሉ የሚለጠፍ ትዕዛዝ",
         "request": "የግል ጥያቄ"
-      }
+      },
+      "runningAutoUpdated": "ስሪት {{version}} እየሰራ ነው፣ ከጸደቀው ምንጭ በራስ-ሰር ተዘምኗል"
     }
   }
 }

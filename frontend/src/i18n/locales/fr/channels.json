@@ -249,7 +249,8 @@
         "widened_grants": "Son approbation accorde plus que ce que demande l'App.",
         "rolled_back": "Une approbation plus ancienne a été remise à la place d'une plus récente.",
         "bad_build_signature": "La signature de développeur de sa version n'est pas valide.",
-        "artifact_unavailable": "Son hôte n'a pas pu charger l'App."
+        "artifact_unavailable": "Son hôte n'a pas pu charger l'App.",
+        "artifact_rolled_back": "Sa machine a proposé une version plus ancienne qu'une version déjà exécutée par le bot ; le bot continue donc de la refuser."
       },
       "approvedHeading": "App approuvée",
       "version": "Version {{version}}",
@@ -345,7 +346,7 @@
         "developmentHint": "Exécute toute version signée par cette clé de développeur qui ne demande pas plus que ce que vous avez approuvé.",
         "developmentUnavailable": "Lancez pollis app dev pour proposer une clé de développeur.",
         "autoUpdate": "Approuver automatiquement la prochaine fois",
-        "autoUpdateHint": "Les mises à jour de la même source qui ne demandent rien de nouveau s'approuvent seules."
+        "autoUpdateHint": "Le bot exécute de lui-même une version plus récente de la même source si elle ne demande rien de plus, sans administrateur. Tout ce qui demande plus attend toujours une approbation."
       },
       "edit": {
         "save": "Enregistrer l'accès",
@@ -359,7 +360,8 @@
       "commandKinds": {
         "command": "une commande publiée dans le canal",
         "request": "une demande privée"
-      }
+      },
+      "runningAutoUpdated": "Exécute la version {{version}}, mise à jour automatiquement depuis la source approuvée"
     }
   }
 }

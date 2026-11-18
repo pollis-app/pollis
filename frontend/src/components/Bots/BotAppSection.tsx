@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { useAutoApproveBotApps, useBotApp } from "../../hooks/queries/useBotApps";
+import { useBotApp } from "../../hooks/queries/useBotApps";
 import { useGroupMembers } from "../../hooks/queries/useGroups";
 import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { aliasName } from "../../utils/groupAlias";
@@ -17,15 +17,14 @@ interface BotAppSectionProps {
 
 /**
  * A bot's App on its admin page (#2005), in order: why it isn't running, the approved App and
- * its access, then the build waiting for approval. Opening the page lets a waiting update that
- * may approve itself do so (once, no timers).
+ * its access, then the build waiting for approval. Updates set to approve themselves are taken
+ * by the bot's runtime from the approved source; the page only shows what runs.
  */
 export const BotAppSection: React.FC<BotAppSectionProps> = ({ groupId, botUserId }) => {
   const { t } = useTranslation("channels");
   const { data: view, isLoading, isError, error } = useBotApp(groupId, botUserId, true);
   const { data: members = [] } = useGroupMembers(groupId);
   const aliases = useGroupAliases(groupId);
-  useAutoApproveBotApps(groupId, [botUserId], true);
 
   if (isLoading) {
     return <EmptyState background={false}>{t("common:states.loading")}</EmptyState>;

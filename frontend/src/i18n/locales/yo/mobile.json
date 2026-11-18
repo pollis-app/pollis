@@ -735,7 +735,8 @@
         "widened_grants": "ìfọwọ́sí rẹ̀ gbà ju ohun tí App náà béèrè lọ",
         "rolled_back": "a tún lo ìfọwọ́sí àtijọ́ kan",
         "bad_build_signature": "a kò fi kọ́kọ́rọ́ olùgbéejáde tí a fọwọ́ sí buwọ́lu build náà",
-        "artifact_unavailable": "a kò lè ka àwọn fáìlì App náà"
+        "artifact_unavailable": "a kò lè ka àwọn fáìlì App náà",
+        "artifact_rolled_back": "ẹ̀rọ náà pèsè ẹ̀dà tó pẹ́ ju èyí tí bọ́ọ̀tì ti ṣiṣẹ́ rí, bọ́ọ̀tì sì ń kọ̀ ọ́ ṣáá"
       },
       "approvedHeading": "App tí a fọwọ́ sí",
       "version": "Ẹ̀dà {{version}}",
@@ -795,7 +796,7 @@
       "save": "Fi pamọ́",
       "saving": "Ó ń fi pamọ́…",
       "autoUpdateLabel": "Fọwọ́ sí i fúnra rẹ̀ nígbà míì",
-      "autoUpdateHint": "Àwọn ìmúdójúìwọ̀n láti orísun kan náà tí kò béèrè jù bẹ́ẹ̀ lọ ni a ó fọwọ́ sí láìbéèrè.",
+      "autoUpdateHint": "Bọ́ọ̀tì fúnra rẹ̀ ń ṣiṣẹ́ ẹ̀dà tuntun láti orísun kan náà tí kò bá béèrè jù bẹ́ẹ̀ lọ; kò nílò alábòójútó. Ohunkóhun tó bá béèrè jù bẹ́ẹ̀ lọ ṣì ń dúró de ìfọwọ́sí.",
       "firstHeading": "Ó ń dúró de ìfọwọ́sí",
       "updateHeading": "Ìmúdójúìwọ̀n ń dúró",
       "changesHeading": "Ohun tó yí padà",
@@ -838,7 +839,9 @@
         "stale": "Alábòójútó mìíràn ṣẹ̀ṣẹ̀ fọwọ́ sí bọ́ọ̀tì yìí. Tún wò ó kí o tó fọwọ́ sí i.",
         "changed": "App náà ti yí padà láti ìgbà tí o ṣí ojú-ìwé yìí. Tún wò ó kí o tó fọwọ́ sí i.",
         "failed": "A kò lè fọwọ́ sí App náà."
-      }
+      },
+      "runningAuto": "Ó ń ṣiṣẹ́ ẹ̀dà {{version}}, tí a mú dójúìwọ̀n fúnra rẹ̀ láti orísun tí a fọwọ́ sí",
+      "runningHashLabel": "Hash App tó ń ṣiṣẹ́"
     }
   }
 }

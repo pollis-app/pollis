@@ -756,7 +756,8 @@
         "widened_grants": "ukugunyazwa kwayo kuvumela okungaphezu kwalokho i-App ekucelayo",
         "rolled_back": "kusetshenziswe kabusha ukugunyazwa okudala",
         "bad_build_signature": "i-build ayisayinwanga ngokhiye wonjiniyela ogunyaziwe",
-        "artifact_unavailable": "amafayela e-App awakwazanga ukufundwa"
+        "artifact_unavailable": "amafayela e-App awakwazanga ukufundwa",
+        "artifact_rolled_back": "umshini unikeze inguqulo endala kunaleyo ibhothi esiyisebenzisile, futhi ibhothi iqhubeka iyenqaba"
       },
       "approvedHeading": "I-App egunyaziwe",
       "version": "Inguqulo {{version}}",
@@ -817,7 +818,7 @@
       "save": "Londoloza",
       "saving": "Iyalondoloza…",
       "autoUpdateLabel": "Gunyaza ngokuzenzakalela ngokuzayo",
-      "autoUpdateHint": "Izibuyekezo ezivela emthonjeni ofanayo ezingaceli okwengeziwe zigunyazwa ngaphandle kokubuza.",
+      "autoUpdateHint": "Ibhothi ngokwayo isebenzisa inguqulo entsha evela emthonjeni ofanayo uma ingaceli okwengeziwe; akudingeki mphathi. Noma yini ecela okwengeziwe isalinde ukugunyazwa.",
       "firstHeading": "Ilinde ukugunyazwa",
       "updateHeading": "Isibuyekezo silindile",
       "changesHeading": "Okushintshile",
@@ -860,7 +861,9 @@
         "stale": "Omunye umphathi usanda kugunyaza le bhothi. Phinda ubheke ngaphambi kokugunyaza.",
         "changed": "I-App ishintshile selokhu uvula leli khasi. Phinda ubheke ngaphambi kokugunyaza.",
         "failed": "Ayikwazanga ukugunyaza i-App."
-      }
+      },
+      "runningAuto": "Isebenzisa inguqulo {{version}}, ibuyekezwe ngokuzenzakalela emthonjeni ogunyaziwe",
+      "runningHashLabel": "I-hash ye-App esebenzayo"
     }
   }
 }

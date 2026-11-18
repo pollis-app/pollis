@@ -249,7 +249,8 @@
         "widened_grants": "Su aprobación concede más de lo que pide la App.",
         "rolled_back": "Se volvió a poner una aprobación anterior en lugar de una más reciente.",
         "bad_build_signature": "La firma de desarrollador de su compilación no es válida.",
-        "artifact_unavailable": "Su host no pudo cargar la App."
+        "artifact_unavailable": "Su host no pudo cargar la App.",
+        "artifact_rolled_back": "Su máquina ofreció una versión más antigua que una que el bot ya ejecutó, así que el bot la sigue rechazando."
       },
       "approvedHeading": "App aprobada",
       "version": "Versión {{version}}",
@@ -345,7 +346,7 @@
         "developmentHint": "Ejecuta cualquier compilación firmada con esta clave de desarrollador que no pida más de lo que aprobaste.",
         "developmentUnavailable": "Inicia pollis app dev para ofrecer una clave de desarrollador.",
         "autoUpdate": "Aprobar automáticamente la próxima vez",
-        "autoUpdateHint": "Las actualizaciones del mismo origen que no piden nada nuevo se aprueban solas."
+        "autoUpdateHint": "El bot ejecuta por sí solo una versión más nueva del mismo origen cuando no pide nada más, sin necesidad de un administrador. Lo que pida más sigue esperando aprobación."
       },
       "edit": {
         "save": "Guardar acceso",
@@ -359,7 +360,8 @@
       "commandKinds": {
         "command": "un comando publicado en el canal",
         "request": "una solicitud privada"
-      }
+      },
+      "runningAutoUpdated": "Ejecuta la versión {{version}}, actualizada automáticamente desde el origen aprobado"
     }
   }
 }

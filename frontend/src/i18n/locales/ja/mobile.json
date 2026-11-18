@@ -735,7 +735,8 @@
         "widened_grants": "承認がアプリの要求より多くを許可しています",
         "rolled_back": "古い承認が再利用されました",
         "bad_build_signature": "ビルドが承認済みの開発者キーで署名されていません",
-        "artifact_unavailable": "アプリのファイルを読み取れませんでした"
+        "artifact_unavailable": "アプリのファイルを読み取れませんでした",
+        "artifact_rolled_back": "マシンがボットの実行済みのものより古いバージョンを提示したため、ボットは拒否し続けます"
       },
       "approvedHeading": "承認済みのアプリ",
       "version": "バージョン {{version}}",
@@ -795,7 +796,7 @@
       "save": "保存",
       "saving": "保存中…",
       "autoUpdateLabel": "次回から自動で承認",
-      "autoUpdateHint": "同じソースからの更新で、要求が増えないものは確認なしで承認されます。",
+      "autoUpdateHint": "同じソースの新しいバージョンが要求を増やさない場合、ボット自身がそれを実行します。管理者は不要です。要求が増えるものは引き続き承認を待ちます。",
       "firstHeading": "承認待ち",
       "updateHeading": "更新待ち",
       "changesHeading": "変更点",
@@ -838,7 +839,9 @@
         "stale": "別の管理者がたった今このボットを承認しました。承認する前にもう一度確認してください。",
         "changed": "このページを開いてからアプリが変わりました。承認する前にもう一度確認してください。",
         "failed": "アプリを承認できませんでした。"
-      }
+      },
+      "runningAuto": "バージョン {{version}} を実行中（承認済みのソースから自動更新）",
+      "runningHashLabel": "実行中のアプリのハッシュ"
     }
   }
 }

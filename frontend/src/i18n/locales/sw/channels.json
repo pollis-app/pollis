@@ -256,7 +256,8 @@
         "widened_grants": "Idhini yake inatoa zaidi ya kile App inachoomba.",
         "rolled_back": "Idhini ya zamani ilirudishwa badala ya mpya.",
         "bad_build_signature": "Sahihi ya msanidi kwenye toleo lake si halali.",
-        "artifact_unavailable": "Mwenyeji wake hakuweza kupakia App."
+        "artifact_unavailable": "Mwenyeji wake hakuweza kupakia App.",
+        "artifact_rolled_back": "Mashine yake ilitoa toleo la zamani kuliko lile ambalo boti tayari imeendesha, kwa hiyo boti inaendelea kulikataa."
       },
       "approvedHeading": "App iliyoidhinishwa",
       "version": "Toleo {{version}}",
@@ -352,7 +353,7 @@
         "developmentHint": "Inaendesha toleo lolote lililosainiwa kwa ufunguo huu wa msanidi lisiloomba zaidi ya ulichoidhinisha.",
         "developmentUnavailable": "Anzisha pollis app dev ili kutoa ufunguo wa msanidi.",
         "autoUpdate": "Idhinisha kiotomatiki wakati ujao",
-        "autoUpdateHint": "Masasisho kutoka chanzo kilekile yasiyoomba kitu kipya hujiidhinisha yenyewe."
+        "autoUpdateHint": "Boti huendesha yenyewe toleo jipya kutoka chanzo kilekile lisipoomba zaidi, bila kuhitaji msimamizi. Chochote kinachoomba zaidi bado husubiri idhini."
       },
       "edit": {
         "save": "Hifadhi ufikiaji",
@@ -366,7 +367,8 @@
       "commandKinds": {
         "command": "amri inayochapishwa kwenye chaneli",
         "request": "ombi la faragha"
-      }
+      },
+      "runningAutoUpdated": "Inaendesha toleo {{version}}, lililosasishwa kiotomatiki kutoka chanzo kilichoidhinishwa"
     }
   }
 }

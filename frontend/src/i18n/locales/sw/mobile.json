@@ -756,7 +756,8 @@
         "widened_grants": "idhini yake inaruhusu zaidi ya kile App inachoomba",
         "rolled_back": "idhini ya zamani imetumiwa tena",
         "bad_build_signature": "build haijatiwa sahihi kwa ufunguo wa msanidi ulioidhinishwa",
-        "artifact_unavailable": "faili za App hazikuweza kusomwa"
+        "artifact_unavailable": "faili za App hazikuweza kusomwa",
+        "artifact_rolled_back": "mashine ilitoa toleo la zamani kuliko lile ambalo boti tayari iliendesha, na boti inaendelea kulikataa"
       },
       "approvedHeading": "App iliyoidhinishwa",
       "version": "Toleo {{version}}",
@@ -817,7 +818,7 @@
       "save": "Hifadhi",
       "saving": "Inahifadhi…",
       "autoUpdateLabel": "Idhinisha kiotomatiki wakati ujao",
-      "autoUpdateHint": "Masasisho kutoka chanzo kilekile yasiyoomba zaidi huidhinishwa bila kuuliza.",
+      "autoUpdateHint": "Boti yenyewe huendesha toleo jipya kutoka chanzo kilekile lisipoomba zaidi; hakuna msimamizi anayehitajika. Chochote kinachoomba zaidi bado kinasubiri idhini.",
       "firstHeading": "Inasubiri idhini",
       "updateHeading": "Sasisho linasubiri",
       "changesHeading": "Kilichobadilika",
@@ -860,7 +861,9 @@
         "stale": "Msimamizi mwingine ameidhinisha boti hii sasa hivi. Angalia tena kabla ya kuidhinisha.",
         "changed": "App imebadilika tangu ulipofungua ukurasa huu. Angalia tena kabla ya kuidhinisha.",
         "failed": "Imeshindikana kuidhinisha App."
-      }
+      },
+      "runningAuto": "Inaendesha toleo {{version}}, lililosasishwa kiotomatiki kutoka chanzo kilichoidhinishwa",
+      "runningHashLabel": "Hash ya App inayoendeshwa"
     }
   }
 }

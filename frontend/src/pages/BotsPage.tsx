@@ -7,7 +7,6 @@ import { NavigableList } from "../components/ui/NavigableList";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/Button";
 import { useBotGroup, useGroupBots } from "../hooks/queries/useBots";
-import { useAutoApproveBotApps } from "../hooks/queries/useBotApps";
 import { GROUP_BOT_CAP } from "../utils/bots";
 import { errorMessage } from "../utils/errorMessage";
 
@@ -18,8 +17,6 @@ export const BotsPage: React.FC = () => {
   const { groupId } = useParams({ from: "/groups/$groupId/bots" });
   const { group, isAdmin, isLoading: groupLoading } = useBotGroup(groupId);
   const { data: bots = [], isLoading, isError, error } = useGroupBots(groupId, isAdmin);
-  // #2005: a waiting update that may approve itself lands when an admin opens the list.
-  useAutoApproveBotApps(groupId, bots.map((b) => b.userId), isAdmin);
 
   if (groupLoading || !group) {
     return null;
