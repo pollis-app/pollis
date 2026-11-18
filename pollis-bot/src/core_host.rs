@@ -36,7 +36,7 @@ use crate::trigger::{IncomingMessage, TriggerKey};
 /// Keyed by the host's device id because pairing opens the store before the
 /// bot's id is known, and the device id is fixed when the request is filed.
 pub const STORES_DIR: &str = "stores";
-/// How long a fresh host waits for the admin's Welcome before joining directly.
+/// How long a new bot's first host waits for the admin's Welcome before joining directly.
 const JOIN_WAIT: Duration = Duration::from_secs(60);
 
 pub struct CoreHost {
@@ -166,7 +166,14 @@ impl BotHost for CoreHost {
             PairingOutcome::Paired(session) => session,
         };
         progress(PairingProgress::JoiningGroup);
-        bots::join_bot_group(&staging, &session, JOIN_WAIT).await?;
+        // A new bot's first host is added by the admin's reconcile, so its Welcome is on the way.
+        // Another host of an existing bot joins the way a person's new device does: an external
+        // join right away (nobody sends it a Welcome).
+        let wait = match target {
+            PairTarget::NewBot => JOIN_WAIT,
+            PairTarget::ExistingBot { .. } => Duration::ZERO,
+        };
+        bots::join_bot_group(&staging, &session, wait).await?;
         Ok(PairOutcome::Paired(InstallationRecord {
             installation_id: session.bot_user_id.clone(),
             bot_user_id: session.bot_user_id,
