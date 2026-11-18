@@ -124,7 +124,8 @@
       "revoking": "Revoking…",
       "revokeLabel": "Revoke the invite for {{name}}",
       "revokeFailed": "Couldn't revoke the invite."
-    }
+    },
+    "resetAlias": "Reset alias"
   },
   "kickMember": {
     "pageTitle": "Remove member",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} invited you to {{group}}",
     "inviteBody": "{{name}} invited you",
     "inviteBodyUnknown": "You have been invited to a group"
+  },
+  "resetAlias": {
+    "pageTitle": "Reset alias",
+    "confirm": "Reset <strong>{{name}}</strong>'s alias (@{{handle}}) in this group?",
+    "consequence": "They'll show their main profile here again. They can set a new alias.",
+    "confirmButton": "Yes, reset",
+    "submitting": "Resetting…",
+    "failed": "Couldn't reset the alias"
   }
 }

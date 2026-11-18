@@ -12,6 +12,7 @@
 //! Enforcement is **ON by default** (#921); see [`require_auth_from_value`]. Off is for local dev only.
 
 pub mod account;
+pub mod aliases;
 pub mod account_reads;
 pub mod auth;
 pub mod bootstrap;
@@ -113,6 +114,8 @@ pub struct AppState {
     pub log_purge_drain: util::SingleFlight,
     /// One attachment reclaim pass at a time (#1881); see [`messages::spawn_attachment_reclaim`].
     pub attachment_reclaim: util::SingleFlight,
+    /// One avatar reclaim pass at a time (#2003); see [`aliases::spawn_avatar_reclaim`].
+    pub avatar_reclaim: util::SingleFlight,
 }
 
 impl AppState {
@@ -147,6 +150,7 @@ impl AppState {
             livekit_health: livekit::LiveKitHealth::default(),
             log_purge_drain: util::SingleFlight::default(),
             attachment_reclaim: util::SingleFlight::default(),
+            avatar_reclaim: util::SingleFlight::default(),
         }
     }
 
@@ -363,6 +367,10 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // Per-channel mute (#1431), plaintext for the push fan-out.
         .route(<profile::SetChannelMuteBody as DsRequest>::PATH, post(profile::set_channel_mute))
         .route(<profile::ChannelMutesBody as DsRequest>::PATH, post(profile::read_channel_mutes))
+        .route(<aliases::SetGroupAliasBody as DsRequest>::PATH, post(aliases::set_group_alias))
+        .route(<aliases::ResetGroupAliasBody as DsRequest>::PATH, post(aliases::reset_group_alias))
+        .route(<aliases::GroupAliasesBody as DsRequest>::PATH, post(aliases::read_group_aliases))
+        .route(<aliases::MyAliasesBody as DsRequest>::PATH, post(aliases::read_my_aliases))
         // Pinned messages (#99): ciphertext only.
         .route(<pins::UpsertPinKeystateBody as DsRequest>::PATH, post(pins::upsert_keystate))
         .route(<pins::PinMessageBody as DsRequest>::PATH, post(pins::pin_message))

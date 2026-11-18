@@ -122,7 +122,8 @@
       "revoking": "取り消し中…",
       "revokeLabel": "{{name}}への招待を取り消す",
       "revokeFailed": "招待を取り消せませんでした。"
-    }
+    },
+    "resetAlias": "名前をリセット"
   },
   "kickMember": {
     "pageTitle": "メンバーを削除",
@@ -213,5 +214,13 @@
     "inviteBodyToGroup": "{{name}}があなたを{{group}}に招待しました",
     "inviteBody": "{{name}}があなたを招待しました",
     "inviteBodyUnknown": "グループに招待されました"
+  },
+  "resetAlias": {
+    "pageTitle": "名前をリセット",
+    "confirm": "このグループでの <strong>{{name}}</strong>（@{{handle}}）の名前をリセットしますか？",
+    "consequence": "ここでは再びメインのプロフィールが表示されます。本人は新しい名前を設定できます。",
+    "confirmButton": "はい、リセット",
+    "submitting": "リセット中…",
+    "failed": "名前をリセットできませんでした"
   }
 }

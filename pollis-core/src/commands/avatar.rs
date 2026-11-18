@@ -11,6 +11,9 @@
 //!   never download the same avatar twice.
 //! - A file is named `<user_id>_<sha256>_<px>.<ext>`, which lets the app map a user to
 //!   the picture it last drew with one directory listing, before any profile read.
+//!   Files are keyed by the picture's hash, so one user's main picture and their
+//!   per-group alias pictures (#2003) live side by side; the app's store decides
+//!   when a picture is no longer drawn and deletes its files.
 //! - Uploads are re-encoded here, which drops EXIF (location, camera) and applies the
 //!   photo's orientation.
 
@@ -218,31 +221,6 @@ pub fn prepare_upload(input: &[u8]) -> Result<(Vec<u8>, &'static str)> {
     Ok((bytes, content_type))
 }
 
-/// Files in `dir` for `user_id`: `(file name, hash, px)`.
-fn files_for_user(dir: &Path, user_id: &str) -> Vec<(String, String, u32)> {
-    let prefix = format!("{user_id}_");
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter_map(|name| {
-            let rest = name.strip_prefix(&prefix)?;
-            let (stem, ext) = rest.rsplit_once('.')?;
-            if !matches!(ext, "jpg" | "png") {
-                return None;
-            }
-            let (hash, px) = stem.split_once('_')?;
-            if !is_hex64(hash) {
-                return None;
-            }
-            let px: u32 = px.parse().ok()?;
-            Some((name.clone(), hash.to_string(), px))
-        })
-        .collect()
-}
-
 /// The written rendition of `hash` at `px`, if it is on disk.
 /// Two `stat`s, no directory listing: this is the hot path of every render.
 fn existing_rendition(dir: &Path, user_id: &str, hash: &str, px: u32) -> Option<PathBuf> {
@@ -252,7 +230,8 @@ fn existing_rendition(dir: &Path, user_id: &str, hash: &str, px: u32) -> Option<
         .find(|p| p.is_file())
 }
 
-/// Write every rendition atomically, then drop the user's older pictures.
+/// Write every rendition atomically. Other pictures of the same user stay: a
+/// main picture and alias pictures (#2003) are drawn side by side.
 /// Returns the path of the one at `want_px`.
 async fn write_renditions(
     dir: &Path,
@@ -277,11 +256,6 @@ async fn write_renditions(
         }
         if px == want_px {
             wanted = Some(path);
-        }
-    }
-    for (name, old_hash, _) in files_for_user(dir, user_id) {
-        if old_hash != hash {
-            let _ = std::fs::remove_file(dir.join(name));
         }
     }
     wanted.ok_or_else(|| Error::Other(anyhow::anyhow!("no avatar rendition at {want_px}px")))
@@ -364,6 +338,29 @@ pub async fn upload_avatar(
     dest_dir: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<AvatarUploadResult> {
+    let uploaded = upload_avatar_image(user_id.clone(), path, px, dest_dir, state).await?;
+    crate::commands::user::update_user_profile(
+        user_id,
+        None,
+        None,
+        None,
+        Some(uploaded.key.clone()),
+        state,
+    )
+    .await?;
+    Ok(uploaded)
+}
+
+/// [`upload_avatar`] without saving it on the profile: the picture a per-group
+/// alias (#2003) then names through `set_group_alias`. Same processing, same
+/// content-addressed key, so "apply to all" uploads once.
+pub async fn upload_avatar_image(
+    user_id: String,
+    path: String,
+    px: u32,
+    dest_dir: Option<String>,
+    state: &Arc<AppState>,
+) -> Result<AvatarUploadResult> {
     if !is_valid_file_user_id(&user_id) {
         return Err(Error::Other(anyhow::anyhow!("not a user id")));
     }
@@ -389,15 +386,6 @@ pub async fn upload_avatar(
         state,
     )
     .await?;
-    crate::commands::user::update_user_profile(
-        user_id.clone(),
-        None,
-        None,
-        None,
-        Some(uploaded.key.clone()),
-        state,
-    )
-    .await?;
 
     let mut uri = None;
     if let (Some(dest_dir), Some(parsed)) = (dest_dir, parse_avatar_key(&uploaded.key)) {
@@ -405,7 +393,7 @@ pub async fn upload_avatar(
         let rendered = tokio::task::spawn_blocking(move || render_renditions(&for_renditions))
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("render avatar: {e}")))?;
-        // Saved already; a local write failure only means the next render downloads it.
+        // Uploaded already; a local write failure only means the next render downloads it.
         match rendered {
             Ok(r) => match write_renditions(&dir, &user_id, &parsed.hash, r, rendition_for(px)).await
             {
@@ -527,20 +515,45 @@ mod tests {
         assert!(prepare_upload(&[]).is_err());
     }
 
+    /// Files in `dir` for `user_id`: `(file name, hash, px)`.
+    fn files_for_user(dir: &Path, user_id: &str) -> Vec<(String, String, u32)> {
+        let prefix = format!("{user_id}_");
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter_map(|name| {
+                let rest = name.strip_prefix(&prefix)?;
+                let (stem, ext) = rest.rsplit_once('.')?;
+                if !matches!(ext, "jpg" | "png") {
+                    return None;
+                }
+                let (hash, px) = stem.split_once('_')?;
+                if !is_hex64(hash) {
+                    return None;
+                }
+                let px: u32 = px.parse().ok()?;
+                Some((name.clone(), hash.to_string(), px))
+            })
+            .collect()
+    }
+
+    /// #2003: a user's main picture and an alias picture are both drawable at once.
     #[tokio::test]
-    async fn written_renditions_replace_the_users_older_picture() {
+    async fn a_users_pictures_coexist_by_hash() {
         let dir = tempfile::tempdir().unwrap();
-        let old = "f".repeat(64);
+        let main = "f".repeat(64);
         let r = render_renditions(&jpeg(300, 300)).unwrap();
-        write_renditions(dir.path(), "u1", &old, r.clone(), 128).await.unwrap();
-        write_renditions(dir.path(), "u2", &old, r.clone(), 128).await.unwrap();
+        write_renditions(dir.path(), "u1", &main, r.clone(), 128).await.unwrap();
+        write_renditions(dir.path(), "u2", &main, r.clone(), 128).await.unwrap();
         let p = write_renditions(dir.path(), "u1", H, r, 256).await.unwrap();
         assert!(p.ends_with(format!("u1_{H}_256.jpg")));
         let u1 = files_for_user(dir.path(), "u1");
-        assert_eq!(u1.len(), AVATAR_RENDITIONS.len());
-        assert!(u1.iter().all(|(_, h, _)| h == H));
+        assert_eq!(u1.len(), 2 * AVATAR_RENDITIONS.len(), "the alias picture did not evict the main one");
         assert_eq!(files_for_user(dir.path(), "u2").len(), AVATAR_RENDITIONS.len(), "others untouched");
         assert!(existing_rendition(dir.path(), "u1", H, 512).is_some());
-        assert!(existing_rendition(dir.path(), "u1", &old, 128).is_none());
+        assert!(existing_rendition(dir.path(), "u1", &main, 128).is_some());
     }
 }

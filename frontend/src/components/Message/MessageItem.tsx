@@ -21,6 +21,7 @@ import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
 import { PressButton } from "../ui/PressButton";
 import { sentBeforeJoin } from "../../utils/replyQuote";
+import { aliasAvatar, aliasName } from "../../utils/groupAlias";
 
 interface MessageItemProps {
   message: Message;
@@ -92,7 +93,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const isOwn = message.sender_id === currentUserId;
   // Not delivered yet (#1335): no reply/react/pin/edit until it is.
   const isUnsent = !!message.outbox_id || message.id.startsWith("pending-");
-  const displayName = authorUsername ?? t("message.unknownAuthor");
+  const displayName = aliasName(ctx.aliases, message.sender_id, authorUsername ?? t("message.unknownAuthor"));
   const authorColorKey = message.sender_username ?? message.sender_id;
   const authorColor = getUsernameColor(authorColorKey, isLightBg);
   // Admin chip (#1488): own keeps the accent, others their stable colour.
@@ -115,7 +116,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   ) : null;
 
   const replyToAuthor = replyTo
-    ? (replyTo.sender_username ?? replyTo.sender_id)
+    ? aliasName(ctx.aliases, replyTo.sender_id, replyTo.sender_username ?? replyTo.sender_id)
     : null;
   const replyToAuthorColor = replyTo
     ? getUsernameColor(replyTo.sender_username ?? replyTo.sender_id, isLightBg)
@@ -230,7 +231,12 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       >
         <div className="flex justify-center pt-0.5 select-none">
           {isGroupStart ? (
-            <MessageAvatar userId={message.sender_id} username={displayName} size={36} />
+            <MessageAvatar
+              userId={message.sender_id}
+              username={displayName}
+              aliasKey={aliasAvatar(ctx.aliases, message.sender_id, null)}
+              size={36}
+            />
           ) : (
             <bdi
               dir="ltr"

@@ -11,6 +11,9 @@ import { formatClockTime } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
 import { SectionHeader } from "../../ui/SectionHeader";
 import { IconButton } from "../../ui/IconButton";
+import { useGroupAliases } from "../../../hooks/queries/useGroupAliases";
+import { appStore } from "../../../stores/appStore";
+import { aliasName } from "../../../utils/groupAlias";
 
 interface PinnedPanelProps {
   channelId: string | null;
@@ -25,6 +28,8 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
     const activeConversationId = channelId ?? conversationId;
     const { data: pins = [], isLoading, isError } = usePinnedMessages(activeConversationId);
     const togglePin = useTogglePinnedMessage();
+    // A channel's pins name authors as its group shows them (#2003); a DM's, by main profile.
+    const aliases = useGroupAliases(channelId ? appStore.selectedGroupId : null);
 
     const gutter = isTerminal ? "px-2.5" : "px-2";
 
@@ -52,7 +57,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
         <ul className="flex flex-col">
           {pins.map((pin) => {
             const parsed = parseContent(pin.content, { conversationId: pin.conversation_id });
-            const author = pin.sender_username ?? pin.sender_id;
+            const author = aliasName(aliases, pin.sender_id, pin.sender_username ?? pin.sender_id);
             return (
               <li
                 key={pin.id}

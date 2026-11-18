@@ -124,7 +124,8 @@
       "revoking": "Відкликання…",
       "revokeLabel": "Відкликати запрошення для {{name}}",
       "revokeFailed": "Не вдалося відкликати запрошення."
-    }
+    },
+    "resetAlias": "Скинути псевдонім"
   },
   "kickMember": {
     "pageTitle": "Вилучити учасника",
@@ -230,5 +231,13 @@
     "inviteBodyToGroup": "Запрошення до {{group}} від {{name}}",
     "inviteBody": "Запрошення від {{name}}",
     "inviteBodyUnknown": "Вас запросили до групи"
+  },
+  "resetAlias": {
+    "pageTitle": "Скинути псевдонім",
+    "confirm": "Скинути псевдонім <strong>{{name}}</strong> (@{{handle}}) у цій групі?",
+    "consequence": "Тут знову показуватиметься основний профіль. Можна задати новий псевдонім.",
+    "confirmButton": "Так, скинути",
+    "submitting": "Скидання…",
+    "failed": "Не вдалося скинути псевдонім"
   }
 }

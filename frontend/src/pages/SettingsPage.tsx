@@ -15,6 +15,7 @@ import { Button } from "../components/ui/Button";
 import { invoke, readFile } from "../bridge";
 import { EmptyState } from "../components/ui/EmptyState";
 import { isValidUsername } from "../utils/username";
+import { GroupAliasesSection } from "../components/Profile/GroupAliasesSection";
 
 export const SettingsPage: React.FC = observer(() => {
   const { t } = useTranslation("settings");
@@ -557,6 +558,11 @@ export const SettingsPage: React.FC = observer(() => {
             </Button>
           )}
         </section>
+
+        <GroupAliasesSection
+          mainName={userData?.preferred_name || userData?.username || ""}
+          mainAvatarKey={userData?.avatar_url ?? null}
+        />
       </PageColumn>
     </PageShell>
   );

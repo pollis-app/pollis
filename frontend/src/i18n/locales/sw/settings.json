@@ -539,5 +539,29 @@
     "youDeclined": "Umekataa. Hakuna kilichonakiliwa.",
     "notOpen": "Ombi hili halipo wazi tena.",
     "back": "Rudi kwenye Usalama"
+  },
+  "aliases": {
+    "heading": "Majina bandia ya vikundi",
+    "rowDescription": "Jina na picha tofauti katika kila kikundi",
+    "intro": "Onyesha jina na picha tofauti katika kila kikundi. @jina-lako la mtumiaji linabaki lilelile kila mahali.",
+    "empty": "Bado hauko katika kikundi chochote.",
+    "mainProfile": "Wasifu mkuu",
+    "edit": "Hariri",
+    "useMain": "Tumia wasifu wangu mkuu",
+    "resetting": "Inarejesha…",
+    "pageTitle": "Jina bandia katika {{group}}",
+    "pageIntro": "Kikundi hiki pekee ndicho kinaona jina na picha hii. Ujumbe wa moja kwa moja unabaki na wasifu wako mkuu.",
+    "nameLabel": "Jina katika kikundi hiki",
+    "namePlaceholder": "Acha wazi kutumia {{name}}",
+    "nameInvalid": "Tumia hadi herufi 100, bila < wala >.",
+    "pictureLabel": "Picha katika kikundi hiki",
+    "choosePicture": "Chagua picha",
+    "mainPicture": "Tumia picha kuu",
+    "applyAll": "Tumia kwa vikundi vyangu vyote",
+    "applyAllHint": "Huandika jina au picha uliyobadilisha katika kila kikundi ulichomo sasa. Vikundi utakavyojiunga baadaye huanza na wasifu wako mkuu.",
+    "save": "Hifadhi",
+    "saving": "Inahifadhi…",
+    "saved": "Imehifadhiwa",
+    "saveFailed": "Imeshindwa kuhifadhi jina lako bandia"
   }
 }

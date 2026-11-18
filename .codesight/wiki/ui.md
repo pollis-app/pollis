@@ -925,7 +925,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**234 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**237 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1012,7 +1012,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 ### `components/Layout/RightPanel` (8)
 
 - **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
-- **MemberRow** — props: userId, label, avatarKey, isAdmin — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
+- **MemberRow** — props: userId, label, avatarKey, isAdmin, groupId — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
 - **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
 - **PinnedPanel** — props: channelId, conversationId — `frontend/src/components/Layout/RightPanel/PinnedPanel.tsx`. Mobile counterpart (#1315): `mobile/app/conversation/pins.tsx`, a pushed page (iPad: a detail-pane page) behind the chat header's pin button — same rows (author, time, snapshot text + attachments, Unpin), plus a row tap that returns to the conversation scrolled to the message via `resolve_message_permalink` + `mobile/stores/messageJumpStore.ts`.
 - **RightPanel** — `frontend/src/components/Layout/RightPanel/RightPanel.tsx`. The generic slot.
@@ -1032,15 +1032,15 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **AttachmentDisplay** — props: attachment, tile, testId, roll — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **DownloadStatusIcon** — props: status — `frontend/src/components/Message/DownloadStatusIcon.tsx`. Download / spinner / check glyph of `AttachmentDisplay`'s download buttons (#1731).
 - **KeyChangeNoticeRow** — props: noticeId, peerUserId, peerLabel, at, skin, onVerify — `frontend/src/components/Message/KeyChangeNoticeRow.tsx`
-- **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
+- **LastMessagePreview** — props: message, isLoading, aliases — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **LightboxActions** — props: status, downloadDisabled, onDownload, onClose — `frontend/src/components/Message/LightboxActions.tsx`
 - **LightboxDownloadLabel** — `frontend/src/components/Message/LightboxDownloadLabel.tsx`
 - **LinkPreviewCard** — props: host, title, description, thumb, href, onOpen, onRemove, loading, testId — `frontend/src/components/Message/LinkPreviewCard.tsx`. The one link-preview card (#1987), composer and timeline: fixed height (host, one title line, two description lines) so a late thumbnail never moves the log; a received card is an anchor opening the body link, a composer card carries ×. Mobile: `mobile/components/chat/LinkPreviewCard.tsx`.
 - **MediaLinkUnfurl** — props: text, exceptHref — `frontend/src/components/Message/MediaLinkUnfurl.tsx`. Inline previews for image/video URLs found in message text. **Every host is click-to-load, with no allowlist.** Painting `<img src>` from message text makes merely opening a message fetch from a host the SENDER chose — a read receipt and an IP disclosure in one, from any message including an unaccepted DM request. There was an exception for `cdn.pollis.com`; it is gone, because the hostname comes out of the message (so the sender picks what the check is run against, and the path was never checked at all) and because a webview image request is the renderer's own, not `http_client`'s, so it cannot ride the relay overlay. The reveal is per-URL and deliberately not remembered.
 - **MediaSpotlight** — props: items, startIndex, openedUrl, onClose — `frontend/src/components/Message/MediaSpotlight.tsx`. The image/video lightbox `AttachmentDisplay` opens (#1788). A card given `roll` (the message's attachments, passed by `MessageItem`, `ThreadMessageRow` and `PinnedPanel`) steps through that message's images and videos: prev/next buttons, ← / → (direction-aware, `horizontalArrowStep`) and an `n / total` position, wrapping at both ends. The roll is `spotlightRoll` in `utils/mediaRoll.ts`, mobile's `collectViewerItems` scoped to one message — same kinds (audio and files open alone), same attachment order, same wrap; `frontend/tests/media-roll.test.ts` runs both on the same message. The arrow listener exists only while a spotlight with more than one item is open, on the window's capture phase, so the log's arrow navigation never also moves. Each item mounts fresh (keyed by id): its URL resolves on arrival, and a still-covered sensitive neighbour shows its cover, revealed by a click. One difference is deliberate: mobile's roll carries on across the whole conversation, while desktop's stops at the message, as #1788 asks. The root carries `data-window-viewer` (as do the audio viewer in `AttachmentDisplay` and the Vault's `MediaGalleryView` viewer): while one is in the document, `index.css` makes every scrollbar transparent, because the Linux webview draws thin overlay scrollbars in a last pass above every stacking order and the chat's would otherwise show over the viewer (#1915). Any new full-window viewer needs the attribute. Coverage: `e2e/media-spotlight.spec.ts`.
-- **MentionToken** — props: name, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`
+- **MentionToken** — props: name, label, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`
 - **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, isPinned, copyLinkState, onReply, onOpenThread, onToggleSave, onTogglePin, onCopyLink, onEdit, onDelete, onReport — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut. Keyboard selection **inverts** the focused control (`focus:bg-accent focus:text-bg`; menu rows too, with Delete inverting to `bg-danger` instead of borrowing the affirmative accent) — a recolor alone was invisible in the terminal skin, and it replaces the browser's default focus ring on the menu rows. The inversion is on plain `focus:`, not `focus-visible:`, because `MessageList` projects nav state with a programmatic `.focus()` that WebKitGTK does not reliably treat as focus-visible — the row's own `focus-within:bg-hover` is plain-focus for the same reason. The one row that does **not** take the plain inversion is Copy link: it keeps focus after the click (the menu stays open so the copied/failed feedback lands where the pointer is, #897), so a solid accent fill would paint over its tone (#1059). Copied, the row steps its focus fill down to the selected-row tint (`focus:bg-active focus:text-accent`) so the accent text shows — a pressed button releasing; failed, it inverts to `bg-danger` like Delete. Focus never moves off the row: a keyboard user would lose their place in the menu. The "more" trigger rests one step brighter (`text-dim`) than Reply/Edit: three dots carry less ink than the arrow or pencil, so at a shared `text-muted` it read as disabled.
-- **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
+- **MessageAvatar** — props: userId, username, aliasKey, size — `frontend/src/components/Message/MessageAvatar.tsx`
 - **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, isAuthorNew, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, onReport, onTogglePin, copyLinkState, isSaved, isPinned, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed. The row's `hover:bg-hover focus-within:bg-hover` is its pointer/keyboard feedback; mobile's counterpart (`mobile/components/chat/MessageRow.tsx`, #1282) fades a touched row from `bg` to `raised` (`accentFaint` to `accentSoft` on a mention or jump-to tint) after a 100 ms delay, held through the long press and cleared on release, scroll or swipe, on the UI thread (timings in `mobile/lib/pressFeedback.ts`). The long press that opens the sheet also plays a haptic (#1286). Mobile gives tactile feedback for every significant non-navigation action — mutations through one `MutationCache` keyed on `meta.haptic` (`mobile/lib/queryClient.ts`), plus gestures, switches, two-tap confirms and copies; the rules are in `mobile/CLAUDE.md` → Haptics (desktop has no haptic surface). Layout parity (#1970, rule in `docs/design/README.md` → "Message rows"): mobile's header is one non-wrapping line, name in `semantic.text` then the time, as here; its attachments go through `mobile/components/chat/MessageAttachments.tsx` (also the Vault's entry rows), which puts several pictures and videos in a 2-up grid of equal squares (this component's wrapping 96px thumbs) ahead of the files list (`mobile/lib/media/messageAttachments.ts`), and a failed send's `UnsentActions` sit under the attachments.
 - **MessageLinkPreview** — props: text, preview — `frontend/src/components/Message/MessageLinkPreview.tsx`. A received sender preview (#1987), drawn only through `matchPreviewLink`; thumbnail via `getMediaUrl` like an image attachment, blurhash until then. Modern look only (`MessageItem`, `ThreadMessageRow`). Mobile: `mobile/components/chat/MessageLinkPreview.tsx` (thumbnail through `MediaImage`).
@@ -1063,6 +1063,10 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **LinkPreviewsSection** — props: overlayMode — `frontend/src/components/Preferences/LinkPreviewsSection.tsx`. "Generate link previews" (#1987), per device; shown off and disabled with a note under `strict` network privacy.
 - **RelayServingSection** — props: config, status, applyError, onChange — `frontend/src/components/Preferences/RelayServingSection.tsx`
 - **SkinPicker** — props: value, onChange — `frontend/src/components/Preferences/SkinPicker.tsx`. The Terminal / Modern `RadioList`, shared by Preferences and the first-run step; row test ids carry the skin (`pref-skin-modern`, `pref-skin-terminal`), Modern first.
+
+### `components/Profile` (1)
+
+- **GroupAliasesSection** — props: mainName, mainAvatarKey — `frontend/src/components/Profile/GroupAliasesSection.tsx`
 
 ### `components/Saved` (1)
 
@@ -1148,7 +1152,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SourceCard** — props: disabled, onPick, testId, title, subtitle, thumbnail, icon — `frontend/src/components/Voice/SourceCard.tsx`
 - **SpeakingAnnouncer** — `frontend/src/components/Voice/SpeakingAnnouncer.tsx`
 - **VoiceBar** — props: channelId, channelName — `frontend/src/components/Voice/VoiceBar.tsx`
-- **VoiceChannelMembers** — props: channelId, enabled — `frontend/src/components/Voice/VoiceChannelMembers.tsx`
+- **VoiceChannelMembers** — props: channelId, groupId, enabled — `frontend/src/components/Voice/VoiceChannelMembers.tsx`
 - **VoiceInputModeSelect** — props: value, onChange — `frontend/src/components/Voice/VoiceInputModeSelect.tsx`
 
 ### `components/Voice/stage` (3)
@@ -1157,7 +1161,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (59)
+### `pages` (61)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -1174,6 +1178,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **DMPage** — `frontend/src/pages/DM.tsx`
 - **DMSettingsPage** — `frontend/src/pages/DMSettings.tsx`
 - **DMsPage** — `frontend/src/pages/DMs.tsx`
+- **GroupAliasPage** — `frontend/src/pages/GroupAliasPage.tsx`
 - **GroupEmoji** — props: groupId — `frontend/src/pages/GroupEmoji.tsx`. Add/list/remove a group's custom emoji. Adding is image-first: an `EmojiDropZone` takes the file, the shortcode is auto-filled from the filename sanitised to `[a-z0-9_]`, and a field the user has already typed in is never clobbered — either order works. Preview is a blob URL of the source file (gifs animate), shown both at 4rem and at the 1.375rem it renders at inline; the size shown before upload is the SOURCE size, since the 48 KB re-encode runs in Rust during `upload_group_emoji`. Empty/invalid/duplicate shortcodes and unsupported files are validated inline and disable the add button.
 - **GroupEmojiPage** — `frontend/src/pages/GroupEmojiPage.tsx`
 - **GroupPage** — `frontend/src/pages/Group.tsx`
@@ -1203,6 +1208,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **RenameGroupPage** — `frontend/src/pages/RenameGroupPage.tsx`
 - **ReportPage** — `frontend/src/pages/ReportPage.tsx`
 - **RequestsPage** — `frontend/src/pages/RequestsPage.tsx`
+- **ResetAliasPage** — `frontend/src/pages/ResetAliasPage.tsx`
 - **RootPage** — `frontend/src/pages/Root.tsx`
 - **SavedPage** — `frontend/src/pages/SavedPage.tsx`
 - **SearchGroupPage** — `frontend/src/pages/SearchGroupPage.tsx`

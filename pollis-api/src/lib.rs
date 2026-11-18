@@ -230,6 +230,11 @@ endpoints! {
     Client   profile::SetChannelMuteBody        => "/v1/channel-mutes/set",              StatusOk;
     Client   profile::ChannelMutesBody          => "/v1/read/channel-mutes",             profile::ChannelMutesResponse;
 
+    Client   profile::SetGroupAliasBody         => "/v1/group-aliases/set",              StatusOk;
+    Client   profile::ResetGroupAliasBody       => "/v1/group-aliases/reset",            StatusOk;
+    Client   profile::GroupAliasesBody          => "/v1/read/group-aliases",             profile::GroupAliasesResponse;
+    Client   profile::MyAliasesBody             => "/v1/read/my-aliases",                profile::MyAliasesResponse;
+
     Client   devices::PublishKeyPackagesBody    => "/v1/key-packages",                   StatusOk;
     Client   devices::ClaimKeyPackageBody       => "/v1/key-packages/claim",             devices::ClaimKeyPackageResponse;
     Client   devices::ReplenishKeyPackagesBody  => "/v1/key-packages/replenish",         StatusOk;

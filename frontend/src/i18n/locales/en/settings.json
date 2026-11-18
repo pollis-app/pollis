@@ -540,5 +540,29 @@
     "youDeclined": "You declined. Nothing was copied.",
     "notOpen": "This request is no longer open.",
     "back": "Back to Security"
+  },
+  "aliases": {
+    "heading": "Group aliases",
+    "rowDescription": "A different name and picture in each group",
+    "intro": "Show a different name and picture in each group. Your @handle stays the same everywhere.",
+    "empty": "You're not in any groups yet.",
+    "mainProfile": "Main profile",
+    "edit": "Edit",
+    "useMain": "Use my main profile",
+    "resetting": "Resetting…",
+    "pageTitle": "Alias in {{group}}",
+    "pageIntro": "Only this group sees this name and picture. Direct messages keep your main profile.",
+    "nameLabel": "Name in this group",
+    "namePlaceholder": "Leave empty to use {{name}}",
+    "nameInvalid": "Use up to 100 characters, without < or >.",
+    "pictureLabel": "Picture in this group",
+    "choosePicture": "Choose picture",
+    "mainPicture": "Use main picture",
+    "applyAll": "Apply to all my groups",
+    "applyAllHint": "Writes the changed name or picture to every group you're in now. Groups you join later start on your main profile.",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "saveFailed": "Couldn't save your alias"
   }
 }

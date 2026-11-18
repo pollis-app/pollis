@@ -14,6 +14,8 @@ import {
 } from "./messageWindow";
 import { useBlockedUsers } from "../../hooks/queries";
 import { useGroupMembers, useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
+import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
+import { mentionLabels } from "../../utils/groupAlias";
 import { observer } from "mobx-react-lite";
 import { formatDayDivider, toMs } from "../../utils/format";
 import { useSkin } from "../../hooks/queries/usePreferences";
@@ -176,6 +178,12 @@ export const MessageList: React.FC<MessageListProps> = observer(({
 
   // The "new" member tag (#1506): tagged for a week after `joined_at`.
   const { data: groupMembers = [] } = useGroupMembers(groupIdForNames ?? null);
+  // Per-group aliases (#2003): only inside a group; a DM shows main profiles.
+  const aliases = useGroupAliases(groupIdForNames ?? null);
+  const aliasMentionLabels = useMemo(
+    () => mentionLabels(aliases, groupMembers),
+    [aliases, groupMembers],
+  );
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const groupCreatorId = groupIdForNames
     ? groupsWithChannels?.find((g) => g.id === groupIdForNames)?.created_by
@@ -230,8 +238,10 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       selfName,
       viewerJoinedAtMs,
       linkPreviews,
+      aliases,
+      mentionLabels: aliasMentionLabels,
     }),
-    [skin, isLightBg, currentUser?.id, mentionNames, selfName, viewerJoinedAtMs, linkPreviews],
+    [skin, isLightBg, currentUser?.id, mentionNames, selfName, viewerJoinedAtMs, linkPreviews, aliases, aliasMentionLabels],
   );
 
   // One tick per DM (#1637), on the newest own message with a receipt. A window

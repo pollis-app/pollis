@@ -413,5 +413,29 @@
     "sourceLabel": "来源",
     "cargo": "Rust crate",
     "npm": "npm 软件包"
+  },
+  "aliases": {
+    "heading": "群组别名",
+    "rowDescription": "在每个群组使用不同的名字和头像",
+    "intro": "在每个群组显示不同的名字和头像。你的 @用户名在所有地方都不变。",
+    "empty": "你还没有加入任何群组。",
+    "mainProfile": "主资料",
+    "edit": "编辑",
+    "useMain": "使用我的主资料",
+    "resetting": "正在重置…",
+    "pageTitle": "在 {{group}} 的别名",
+    "pageIntro": "只有这个群组能看到这个名字和头像。私信仍使用你的主资料。",
+    "nameLabel": "在此群组中的名字",
+    "namePlaceholder": "留空则使用 {{name}}",
+    "nameInvalid": "最多 100 个字符，不能包含 < 或 >。",
+    "pictureLabel": "在此群组中的头像",
+    "choosePicture": "选择头像",
+    "mainPicture": "使用主头像",
+    "applyAll": "应用到我的所有群组",
+    "applyAllHint": "把修改过的名字或头像写入你现在所在的每个群组。之后加入的群组从主资料开始。",
+    "save": "保存",
+    "saving": "正在保存…",
+    "saved": "已保存",
+    "saveFailed": "无法保存你的别名"
   }
 }

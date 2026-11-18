@@ -54,6 +54,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "user_device",
     "user_preferences",
     "users",
+    "group_alias",
     "vault_attachment_ref",
     "vault_message",
     "user_report",
@@ -65,6 +66,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
 /// them.
 pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "channel_mute",
+    "group_alias",
     "channels",
     "conversation_membership_version",
     "conversation_seq",
@@ -319,6 +321,19 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     conn.execute("DELETE FROM read_cursor_sync WHERE user_id = ?1", uid()).await?;
     // Channel mutes (#1431).
     conn.execute("DELETE FROM channel_mute WHERE user_id = ?1", uid()).await?;
+    // Per-group aliases (#2003), in every group, and the profile picture: their
+    // avatar objects are released for the reclaim pass, which keeps any that
+    // are still referenced (an identity reset keeps the `users` row).
+    crate::aliases::purge_aliases_where(conn, "user_id = ?1", &[user_id.to_string()]).await?;
+    let main_avatar = crate::util::query_strings(
+        conn,
+        "SELECT avatar_url FROM users WHERE id = ?1 AND avatar_url IS NOT NULL",
+        uid(),
+    )
+    .await?;
+    for key in &main_avatar {
+        crate::aliases::release_avatar(conn, Some(key)).await?;
+    }
     // The vault (#107): references first, while the subquery can still see the
     // entries. The vault is this account's alone, so deleting it deletes that
     // history, and the files only it held are released (#1881).
@@ -485,6 +500,8 @@ pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Ve
     conn.execute("DELETE FROM group_invite WHERE group_id = ?1", gid()).await?;
     conn.execute("DELETE FROM group_join_request WHERE group_id = ?1", gid()).await?;
     conn.execute("DELETE FROM group_member WHERE group_id = ?1", gid()).await?;
+    // Every alias in the group (#2003), current and former members'.
+    crate::aliases::purge_aliases_where(conn, "group_id = ?1", &[group_id.to_string()]).await?;
 
     // The group's pin key (#99), keyed by the group id.
     conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", gid()).await?;

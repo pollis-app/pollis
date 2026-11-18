@@ -178,12 +178,22 @@ export function Composer({
                 <UserAvatar
                   userId={candidate.userId}
                   avatarKey={candidate.avatarUrl}
+                  aliasKey={candidate.aliasAvatarUrl}
                   label={candidate.username}
                   size="sm"
                 />
                 <Text style={[ty.body, { color: semantic.text }]}>
                   @{candidate.username}
                 </Text>
+                {candidate.displayName ? (
+                  <Text
+                    testID={`text-mention-alias-${candidate.username}`}
+                    numberOfLines={1}
+                    style={[ty.body, { color: semantic.muted, flexShrink: 1 }]}
+                  >
+                    {candidate.displayName}
+                  </Text>
+                ) : null}
               </Pressable>
             ))}
           </ScrollView>

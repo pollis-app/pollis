@@ -194,6 +194,14 @@ function Self() {
               onPress={() => router.push("/self/user-settings")}
             />
             <ListRow
+              testID="row-self-aliases"
+              glyph={<Icon.users size={GLYPH} color={semantic.text} />}
+              name={t("settings:aliases.heading")}
+              sub={t("settings:aliases.rowDescription")}
+              chevron
+              onPress={() => router.push("/self/aliases")}
+            />
+            <ListRow
               testID="row-self-security"
               glyph={<Icon.shield size={GLYPH} color={semantic.text} />}
               name={t("mobile:self.hub.securityDevices")}

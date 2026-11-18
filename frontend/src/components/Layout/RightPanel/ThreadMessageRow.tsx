@@ -8,6 +8,8 @@ import { MessageLinkPreview } from "../../Message/MessageLinkPreview";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { formatClockTime, toMs } from "../../../utils/format";
 import type { Message } from "../../../types";
+import { useSelectedGroupAliases } from "../../../hooks/queries/useGroupAliases";
+import { aliasAvatar, aliasName } from "../../../utils/groupAlias";
 
 interface ThreadMessageRowProps {
   message: Message;
@@ -20,7 +22,8 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     const { t } = useTranslation("nav");
     const skin = useSkin();
     const isTerminal = skin !== "modern";
-    const author = message.sender_username ?? message.sender_id;
+    const aliases = useSelectedGroupAliases();
+    const author = aliasName(aliases, message.sender_id, message.sender_username ?? message.sender_id);
     // App language; `toMs` or seconds-precision timestamps render as 1970 (#874).
     const time = formatClockTime(toMs(message.created_at));
     const testid = isRoot ? "thread-root" : "thread-reply";
@@ -77,6 +80,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
       <div className="flex gap-2" data-testid={testid}>
         <PresenceAvatar
           userId={message.sender_id}
+          avatarKey={aliasAvatar(aliases, message.sender_id, undefined)}
           size={24}
           alt={author}
           variant="list"

@@ -425,5 +425,29 @@
     "sourceLabel": "Source",
     "cargo": "Crate Rust",
     "npm": "Paquet npm"
+  },
+  "aliases": {
+    "heading": "Alias de groupe",
+    "rowDescription": "Un autre nom et une autre photo dans chaque groupe",
+    "intro": "Affichez un autre nom et une autre photo dans chaque groupe. Votre @identifiant reste le même partout.",
+    "empty": "Vous n'êtes encore dans aucun groupe.",
+    "mainProfile": "Profil principal",
+    "edit": "Modifier",
+    "useMain": "Utiliser mon profil principal",
+    "resetting": "Réinitialisation…",
+    "pageTitle": "Alias dans {{group}}",
+    "pageIntro": "Seul ce groupe voit ce nom et cette photo. Les messages directs gardent votre profil principal.",
+    "nameLabel": "Nom dans ce groupe",
+    "namePlaceholder": "Laissez vide pour utiliser {{name}}",
+    "nameInvalid": "Jusqu’à 100 caractères, sans < ni >.",
+    "pictureLabel": "Photo dans ce groupe",
+    "choosePicture": "Choisir une photo",
+    "mainPicture": "Utiliser la photo principale",
+    "applyAll": "Appliquer à tous mes groupes",
+    "applyAllHint": "Applique le nom ou la photo modifiés à chaque groupe dont vous faites partie. Les groupes rejoints plus tard commencent avec votre profil principal.",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Enregistré",
+    "saveFailed": "Impossible d'enregistrer votre alias"
   }
 }

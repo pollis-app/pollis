@@ -122,7 +122,8 @@
       "revoking": "Ó ń fagilé…",
       "revokeLabel": "Fagilé ìkésíni fún {{name}}",
       "revokeFailed": "Kò ṣeé ṣe láti fagilé ìkésíni náà."
-    }
+    },
+    "resetAlias": "Tún orúkọ àpèjẹ ṣe"
   },
   "kickMember": {
     "pageTitle": "Yọ Ọmọ ẹgbẹ́ Kúrò",
@@ -213,5 +214,13 @@
     "inviteBodyToGroup": "{{name}} ké sí ọ wá sí {{group}}",
     "inviteBody": "{{name}} ké sí ọ",
     "inviteBodyUnknown": "Wọ́n ti ké sí ọ wá sí ẹgbẹ́ kan"
+  },
+  "resetAlias": {
+    "pageTitle": "Tún orúkọ àpèjẹ ṣe",
+    "confirm": "Ṣé kí a tún orúkọ àpèjẹ <strong>{{name}}</strong> (@{{handle}}) ṣe nínú ẹgbẹ́ yìí?",
+    "consequence": "Profaili àkọ́kọ́ rẹ̀ máa hàn níbí lẹ́ẹ̀kan sí i. Ó lè ṣètò orúkọ àpèjẹ tuntun.",
+    "confirmButton": "Bẹ́ẹ̀ni, tún un ṣe",
+    "submitting": "Ń tún un ṣe…",
+    "failed": "A kò lè tún orúkọ àpèjẹ náà ṣe"
   }
 }

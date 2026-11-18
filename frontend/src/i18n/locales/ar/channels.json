@@ -128,7 +128,8 @@
       "revoking": "جارٍ الإلغاء…",
       "revokeLabel": "إلغاء دعوة {{name}}",
       "revokeFailed": "تعذّر إلغاء الدعوة."
-    }
+    },
+    "resetAlias": "إعادة تعيين الاسم المستعار"
   },
   "kickMember": {
     "pageTitle": "إزالة عضو",
@@ -246,5 +247,13 @@
     "inviteBodyToGroup": "دعاك {{name}} إلى {{group}}",
     "inviteBody": "دعاك {{name}}",
     "inviteBodyUnknown": "تمت دعوتك إلى مجموعة"
+  },
+  "resetAlias": {
+    "pageTitle": "إعادة تعيين الاسم المستعار",
+    "confirm": "إعادة تعيين الاسم المستعار لـ <strong>{{name}}</strong> (@{{handle}}) في هذه المجموعة؟",
+    "consequence": "سيظهر ملفه الرئيسي هنا من جديد. يمكنه تعيين اسم مستعار جديد.",
+    "confirmButton": "نعم، أعد التعيين",
+    "submitting": "جارٍ إعادة التعيين…",
+    "failed": "تعذّرت إعادة تعيين الاسم المستعار"
   }
 }

@@ -304,6 +304,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "attachment_reclaim",
         include_str!("../migrations/000050_attachment_reclaim.sql"),
     ),
+    (
+        51,
+        "group_alias",
+        include_str!("../migrations/000051_group_alias.sql"),
+    ),
 ];
 
 /// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.

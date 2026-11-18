@@ -122,7 +122,8 @@
       "revoking": "취소하는 중…",
       "revokeLabel": "{{name}} 님에 대한 초대 취소",
       "revokeFailed": "초대를 취소하지 못했습니다."
-    }
+    },
+    "resetAlias": "별칭 초기화"
   },
   "kickMember": {
     "pageTitle": "멤버 제거",
@@ -213,5 +214,13 @@
     "inviteBodyToGroup": "{{name}} 님이 {{group}}에 초대했습니다",
     "inviteBody": "{{name}} 님이 초대했습니다",
     "inviteBodyUnknown": "그룹에 초대되었습니다"
+  },
+  "resetAlias": {
+    "pageTitle": "별칭 초기화",
+    "confirm": "이 그룹에서 <strong>{{name}}</strong>(@{{handle}})님의 별칭을 초기화할까요?",
+    "consequence": "여기에서 다시 기본 프로필이 표시됩니다. 새 별칭을 설정할 수 있습니다.",
+    "confirmButton": "네, 초기화",
+    "submitting": "초기화 중…",
+    "failed": "별칭을 초기화하지 못했습니다"
   }
 }

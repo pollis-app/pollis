@@ -90,6 +90,12 @@ pub enum RealtimeEvent {
     },
     /// This account's channel mutes changed (#1431); re-read them over the signed channel.
     ChannelMutesChanged,
+    /// Aliases changed (#2003): someone's in `group_id`, or (no group) one of this
+    /// account's own. DS-originated and content-free; re-read over the signed channel.
+    GroupAliasesChanged {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        group_id: Option<String>,
+    },
     /// Another of this account's devices pushed read cursors (#1628); converge them
     /// (`refresh_read_cursors`). DS-originated and content-free.
     ReadCursorsChanged,

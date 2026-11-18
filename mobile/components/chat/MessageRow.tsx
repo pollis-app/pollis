@@ -49,6 +49,7 @@ export function MessageRow({
   av,
   senderId,
   senderAvatarKey,
+  senderAliasKey,
   amber,
   name,
   time,
@@ -73,6 +74,7 @@ export function MessageRow({
   onOpenThread,
   mentionNames,
   selfName,
+  mentionLabels,
   attachments,
   linkPreview,
   onOpenAttachment,
@@ -92,6 +94,8 @@ export function MessageRow({
   // The sender's picture; `senderAvatarKey` undefined = the roster does not say.
   senderId?: string;
   senderAvatarKey?: string | null;
+  // The sender's alias picture in this group (#2003); their main one when absent.
+  senderAliasKey?: string | null;
   amber?: boolean;
   name: string;
   time: string;
@@ -120,6 +124,7 @@ export function MessageRow({
   onOpenThread?: () => void;
   mentionNames?: ReadonlySet<string>;
   selfName?: string | null;
+  mentionLabels?: ReadonlyMap<string, string>;
   attachments?: MessageAttachment[];
   // The sender's link preview (#1987); pass null where it must not show (an unaccepted request).
   linkPreview?: LinkPreview | null;
@@ -324,6 +329,7 @@ export function MessageRow({
               <UserAvatar
                 userId={senderId}
                 avatarKey={senderAvatarKey}
+                aliasKey={senderAliasKey}
                 label={av}
                 size={AVATAR}
                 variant={amber ? "self" : "default"}
@@ -402,6 +408,7 @@ export function MessageRow({
                   text={text}
                   mentionNames={mentionNames}
                   selfName={selfName}
+                  mentionLabels={mentionLabels}
                 />
                 {edited ? (
                   <Text style={ty.meta} testID={editUnsent ? "text-edit-unsent" : undefined}>

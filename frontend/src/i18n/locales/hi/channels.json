@@ -124,7 +124,8 @@
       "revoking": "वापस लिया जा रहा है…",
       "revokeLabel": "{{name}} का आमंत्रण वापस लें",
       "revokeFailed": "आमंत्रण वापस नहीं लिया जा सका।"
-    }
+    },
+    "resetAlias": "उपनाम रीसेट करें"
   },
   "kickMember": {
     "pageTitle": "सदस्य हटाएं",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} ने आपको {{group}} में आमंत्रित किया",
     "inviteBody": "{{name}} ने आपको आमंत्रित किया",
     "inviteBodyUnknown": "आपको एक ग्रुप में आमंत्रित किया गया है"
+  },
+  "resetAlias": {
+    "pageTitle": "उपनाम रीसेट करें",
+    "confirm": "इस ग्रुप में <strong>{{name}}</strong> (@{{handle}}) का उपनाम रीसेट करें?",
+    "consequence": "यहाँ फिर से उनकी मुख्य प्रोफ़ाइल दिखेगी। वे नया उपनाम रख सकते हैं।",
+    "confirmButton": "हाँ, रीसेट करें",
+    "submitting": "रीसेट हो रहा है…",
+    "failed": "उपनाम रीसेट नहीं हो सका"
   }
 }

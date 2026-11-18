@@ -66,6 +66,8 @@ mod read_sync;
 mod rejoin;
 #[path = "flows/rich_push.rs"]
 mod rich_push;
+#[path = "flows/group_aliases.rs"]
+mod group_aliases;
 #[path = "flows/reports.rs"]
 mod reports;
 #[path = "flows/sealed_sender.rs"]

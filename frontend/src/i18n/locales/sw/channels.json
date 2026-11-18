@@ -124,7 +124,8 @@
       "revoking": "Inabatilisha…",
       "revokeLabel": "Batilisha mwaliko wa {{name}}",
       "revokeFailed": "Imeshindwa kubatilisha mwaliko."
-    }
+    },
+    "resetAlias": "Rejesha jina bandia"
   },
   "kickMember": {
     "pageTitle": "Ondoa mwanachama",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} amekualika kwenye {{group}}",
     "inviteBody": "{{name}} amekualika",
     "inviteBodyUnknown": "Umealikwa kwenye kikundi"
+  },
+  "resetAlias": {
+    "pageTitle": "Rejesha jina bandia",
+    "confirm": "Rejesha jina bandia la <strong>{{name}}</strong> (@{{handle}}) katika kikundi hiki?",
+    "consequence": "Wasifu wake mkuu utaonekana hapa tena. Anaweza kuweka jina bandia jipya.",
+    "confirmButton": "Ndiyo, rejesha",
+    "submitting": "Inarejesha…",
+    "failed": "Imeshindwa kurejesha jina bandia"
   }
 }

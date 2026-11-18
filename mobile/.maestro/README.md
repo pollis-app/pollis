@@ -92,6 +92,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | --- | --- | --- |
 | `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch: a wrong PIN puts the pad back with `pin-error`, and the right one's fourth digit must, within a second, show `pin-busy` (the launch loader, with no keypad key left on screen) or have already left the pad (a fast unlock; never a frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
+| `group-aliases` | #2003 Self → Group aliases: two groups start on the main profile; a name and photo set in one group (photo picked through `subflows/pick-square-photo.yaml`, shared with `profile-photo`); "Apply to all my groups" writes the name to both, not the photo; own messages there carry the alias and its photo; "Use my main profile" in one group resets only that one | no |
 | `self-update` | #1880 a return to the foreground rotates this device's own leaf in a group where it is due (a group it just created): the newest `[mls-backstop]` line in Diagnostics counts `1 self-updated`; a second return counts `0`, so the rotation was recorded. Needs a binary with the core change | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `composer-draft` | unsent composer text survives backing out to another tab and returning (desktop's in-memory draft store, `mobile/lib/drafts.ts`); sending clears it | no |
@@ -413,6 +414,17 @@ pending account and makes the device an admin; the device finds the pending
 invite under "Invited" on the member page (invitee, "invited by") and revokes it
 (`2-tags-and-revoke.yaml`). The script passes only when the creator has seen the
 invite listed and then gone.
+
+**Per-group aliases (automated, #2003):** `mobile/scripts/maestro-group-aliases.sh <device>`
+— `pollis-tui`'s `alias_peer` example creates a group, sets its own alias there
+(`Captain Peer`) and invites the device's fresh account. The device accepts and
+finds the alias on the peer's message row and on its mention of its own
+`@handle`, in the mention picker (which still inserts the handle), in the member
+list with the handle beside it, and on the profile opened from the group
+(`two-client/group-aliases/1-see-alias.yaml`). The peer then makes the device an
+admin; the device resets the alias from the member page, and both the row and
+the peer's old message fall back to the main profile (`2-admin-reset.yaml`). The
+script passes only when the peer has seen its alias gone.
 
 **Unread for messages that arrived while away (automated, #1422):** `mobile/scripts/maestro-unread.sh <device>`
 — the lost-message shape with `pollis-tui`'s `unread_peer` example, which sends

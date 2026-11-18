@@ -37,6 +37,8 @@ import { ResolutionPanel } from "./ResolutionPanel";
 import { probeRender } from "../../../utils/renderProbe";
 import "./voice-stage.css";
 import { EmptyState } from "../../ui/EmptyState";
+import { useSelectedGroupAliases } from "../../../hooks/queries/useGroupAliases";
+import { aliasAvatar, aliasName, EMPTY_ALIASES } from "../../../utils/groupAlias";
 
 /** True when two models would draw identically, so the previous reference can be reused (`React.memo`). */
 function sameTileModel(a: StageTileModel, b: StageTileModel): boolean {
@@ -105,6 +107,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
   }) => {
     probeRender("VoiceStage");
     const { t } = useTranslation("voice");
+    const aliases = useSelectedGroupAliases();
     const {
       voiceParticipants,
       voiceActiveSpeakerIds,
@@ -186,6 +189,12 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const speakingUsers = new Set(voiceActiveSpeakerIds.map(userIdFromVoiceIdentity));
 
     const displayNames = disambiguateVoiceNames(mergedParticipants);
+    // A group voice room names people as the group shows them (#2003); a DM call by main profile.
+    const roomAliases = callMode ? EMPTY_ALIASES : aliases;
+    const nameOf = (p: VoiceParticipant) =>
+      aliasName(roomAliases, userIdFromVoiceIdentity(p.identity), displayNames.get(p.identity) ?? p.name);
+    const avatarOf = (p: VoiceParticipant) =>
+      aliasAvatar(roomAliases, userIdFromVoiceIdentity(p.identity), p.avatarKey) ?? null;
 
     // Up to two tiles per participant, camera then screenshare (#394).
     const tilesFor = (p: VoiceParticipant): StageTileModel[] => {
@@ -211,8 +220,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
       const base = {
         identity: p.identity,
-        name: displayNames.get(p.identity) ?? p.name,
-        avatarKey: p.avatarKey ?? null,
+        name: nameOf(p),
+        avatarKey: avatarOf(p),
         isMuted: isMuted(p.audio),
         isLocal: p.isLocal,
         isSpeaking: speakingUsers.has(userIdFromVoiceIdentity(p.identity)) && !isMuted(p.audio),
@@ -284,8 +293,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const previewPeople: StageTileModel[] = observerParticipants.map((p) => ({
       tileKey: p.identity,
       identity: p.identity,
-      name: p.name,
-      avatarKey: p.avatarKey ?? null,
+      name: aliasName(roomAliases, userIdFromVoiceIdentity(p.identity), p.name),
+      avatarKey: aliasAvatar(roomAliases, userIdFromVoiceIdentity(p.identity), p.avatarKey) ?? null,
       isMuted: false,
       isLocal: false,
       isSpeaking: false,

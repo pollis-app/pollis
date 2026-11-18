@@ -539,5 +539,29 @@
     "youDeclined": "Wenqabile. Akukho okukopishiwe.",
     "notOpen": "Lesi sicelo asisavuliwe.",
     "back": "Buyela ku-Ukuphepha"
+  },
+  "aliases": {
+    "heading": "Amagama okuzisholo eqembu",
+    "rowDescription": "Igama nesithombe esihlukile eqenjini ngalinye",
+    "intro": "Bonisa igama nesithombe esihlukile eqenjini ngalinye. I-@gama lakho lomsebenzisi lihlala lifana yonke indawo.",
+    "empty": "Awukabi kunoma yiliphi iqembu.",
+    "mainProfile": "Iphrofayela eyinhloko",
+    "edit": "Hlela",
+    "useMain": "Sebenzisa iphrofayela yami eyinhloko",
+    "resetting": "Iyasetha kabusha…",
+    "pageTitle": "Igama lokuzisholo ku-{{group}}",
+    "pageIntro": "Yileli qembu kuphela elibona leli gama nalesi sithombe. Imilayezo eqondile igcina iphrofayela yakho eyinhloko.",
+    "nameLabel": "Igama kuleli qembu",
+    "namePlaceholder": "Shiya kungenalutho ukuze usebenzise u-{{name}}",
+    "nameInvalid": "Kuze kufike ezinhlamvwini eziyi-100, ngaphandle kuka-< noma u->.",
+    "pictureLabel": "Isithombe kuleli qembu",
+    "choosePicture": "Khetha isithombe",
+    "mainPicture": "Sebenzisa isithombe esiyinhloko",
+    "applyAll": "Faka kuwo wonke amaqembu ami",
+    "applyAllHint": "Ibhala igama noma isithombe osishintshile kulo lonke iqembu okulo manje. Amaqembu ozojoyina kamuva aqala ngephrofayela yakho eyinhloko.",
+    "save": "Londoloza",
+    "saving": "Iyalondoloza…",
+    "saved": "Kulondoloziwe",
+    "saveFailed": "Ayikwazanga ukulondoloza igama lakho lokuzisholo"
   }
 }

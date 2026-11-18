@@ -5,6 +5,8 @@ import { appStore } from "../../../stores/appStore";
 import { presenceStore } from "../../../stores/presenceStore";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { useGroupMembers } from "../../../hooks/queries/useGroups";
+import { useGroupAliases } from "../../../hooks/queries/useGroupAliases";
+import { aliasAvatar, aliasName } from "../../../utils/groupAlias";
 import { useMessages, useDMConversations } from "../../../hooks/queries/useMessages";
 import { MemberRow } from "./MemberRow";
 import { MediaGrid } from "./MediaGrid";
@@ -41,6 +43,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const { t: tDms } = useTranslation("dms");
     const { setSafety } = useRightPanel();
     const { data: groupMembers = [] } = useGroupMembers(groupId);
+    const aliases = useGroupAliases(groupId);
     const { messages } = useMessages(channelId, conversationId);
     const isTerminal = useSkin() === "terminal";
     const currentUser = appStore.currentUser;
@@ -98,8 +101,8 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           .filter((m) => m.user_id !== currentUser?.id && presenceStore.isOnline(m.user_id))
           .map((m) => ({
             userId: m.user_id,
-            label: m.display_name || m.username || m.user_id,
-            avatarKey: m.avatar_url ?? null,
+            label: aliasName(aliases, m.user_id, m.display_name || m.username || m.user_id),
+            avatarKey: aliasAvatar(aliases, m.user_id, m.avatar_url) ?? null,
             isAdmin: m.role === "admin",
           }))
           .sort((a, b) => a.label.localeCompare(b.label));
@@ -128,6 +131,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
       dmConversations,
       currentUser,
       groupMembers,
+      aliases,
       // `byUser` is replaced, not mutated, so identity is a sound dep.
       presenceStore.byUser,
     ]);
@@ -182,6 +186,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
                 label={person.label}
                 avatarKey={person.avatarKey}
                 isAdmin={person.isAdmin}
+                groupId={conversationId ? undefined : groupId ?? undefined}
               />
             ))
           )}
