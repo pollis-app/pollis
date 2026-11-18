@@ -50,6 +50,16 @@
 //! DS, shared by every host; [`app_state::commit_app_state`] writes a job's
 //! changes once, under the claim the host won, at the versions it read.
 //!
+//! **App approvals (#2005).** [`app_approval`] holds the two signed record
+//! types (production pins an App hash, development names a developer key; never
+//! interchangeable) and the pure checks before every load
+//! ([`app_approval::check_artifact`]). [`apps`] verifies a stored record from
+//! the reader's own state with the same admin-signer rule as host approvals
+//! (`signer.rs`), keeps the highest accepted `seq` in the installation's store
+//! (rollback protection), and reports to admins. Bridge commands:
+//! [`get_bot_app`], [`approve_bot_app`], [`auto_approve_bot_app`] (admins) and
+//! [`list_group_apps`] (any member: the approved manifests, the marks).
+//!
 //! **Admin (bridge commands).** [`list_group_bots`], [`get_bot`], [`create_bot`],
 //! [`add_bot_host`], [`revoke_bot_host`], [`delete_bot`]. Error strings start
 //! with [`PAIRING_CODE_MISMATCH`], [`BOT_CAP_REACHED`] or [`PAIRING_REQUEST_EXPIRED`]
@@ -60,10 +70,13 @@
 //! enrollment SAS input rule.
 
 mod admin;
+pub mod app_approval;
 pub mod app_state;
 pub mod approval;
+pub mod apps;
 mod code;
 mod host;
+mod signer;
 mod triggers;
 mod unattended;
 
@@ -72,6 +85,10 @@ pub use admin::{
     BotHost, BotSummary, BOT_CAP_REACHED, PAIRING_CODE_MISMATCH, PAIRING_REQUEST_EXPIRED,
 };
 pub use approval::{HostApproval, HOST_APPROVAL_DOMAIN, HOST_APPROVAL_MAX_TTL_SECS, HOST_APPROVAL_VERSION};
+pub use apps::{
+    auto_approve_bot_app, approve_bot_app, get_bot_app, list_group_apps, ApproveBotAppInput, BotAppView, GroupAppView,
+    APP_APPROVAL_CHANGED, APP_APPROVAL_STALE,
+};
 pub use code::{code_lookup, derive_pairing_code, normalize_pairing_code, PAIRING_CODE_LEN};
 pub use host::{
     await_pairing, handle_host_approvals, handle_host_approvals_with, join_bot_group, start_add_host_pairing, start_new_bot_pairing,

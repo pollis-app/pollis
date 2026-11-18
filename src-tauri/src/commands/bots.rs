@@ -6,7 +6,7 @@ use tauri::State;
 
 use crate::error::Result;
 use crate::state::AppState;
-pub use pollis_core::commands::bots::{BotDetail, BotHost, BotSummary};
+pub use pollis_core::commands::bots::{ApproveBotAppInput, BotAppView, BotDetail, BotHost, BotSummary, GroupAppView};
 
 #[tauri::command]
 pub async fn list_group_bots(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<BotSummary>> {
@@ -41,4 +41,26 @@ pub async fn revoke_bot_host(bot_user_id: String, device_id: String, state: Stat
 #[tauri::command]
 pub async fn delete_bot(bot_user_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::bots::delete_bot(&state, bot_user_id).await
+}
+
+// #2005: App approvals.
+
+#[tauri::command]
+pub async fn get_bot_app(group_id: String, bot_user_id: String, state: State<'_, Arc<AppState>>) -> Result<BotAppView> {
+    pollis_core::commands::bots::get_bot_app(&state, group_id, bot_user_id).await
+}
+
+#[tauri::command]
+pub async fn approve_bot_app(input: ApproveBotAppInput, state: State<'_, Arc<AppState>>) -> Result<BotAppView> {
+    pollis_core::commands::bots::approve_bot_app(&state, input).await
+}
+
+#[tauri::command]
+pub async fn auto_approve_bot_app(group_id: String, bot_user_id: String, state: State<'_, Arc<AppState>>) -> Result<bool> {
+    pollis_core::commands::bots::auto_approve_bot_app(&state, group_id, bot_user_id).await
+}
+
+#[tauri::command]
+pub async fn list_group_apps(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<GroupAppView>> {
+    pollis_core::commands::bots::list_group_apps(&state, group_id).await
 }

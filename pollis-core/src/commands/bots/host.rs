@@ -18,7 +18,8 @@ use pollis_api::bots::{
     PendingBotHostsBody, WrapBotHostBody,
 };
 
-use super::approval::{self, ApprovalDecodeError, HostApproval, HOST_APPROVAL_MAX_TTL_SECS, HOST_APPROVAL_VERSION};
+use super::approval::{self, ApprovalDecodeError, HostApproval, HOST_APPROVAL_DOMAIN, HOST_APPROVAL_MAX_TTL_SECS, HOST_APPROVAL_VERSION};
+use super::signer::{self, SignerRefusal};
 use super::code::{code_lookup, derive_pairing_code};
 use super::unattended::{self, BotSession, Installation};
 use crate::commands::transparency::AuditStatus;
@@ -392,6 +393,18 @@ pub enum ApprovalRefusal {
     Tampered,
 }
 
+impl From<SignerRefusal> for ApprovalRefusal {
+    fn from(r: SignerRefusal) -> Self {
+        match r {
+            SignerRefusal::NotInGroup => ApprovalRefusal::ApproverNotInGroup,
+            SignerRefusal::Uncertified(why) => ApprovalRefusal::UncertifiedApprover(why),
+            SignerRefusal::BadSignature => ApprovalRefusal::BadSignature,
+            SignerRefusal::TransparencyAlarm => ApprovalRefusal::TransparencyAlarm,
+            SignerRefusal::NotAdmin(why) => ApprovalRefusal::NotAdmin(why),
+        }
+    }
+}
+
 impl std::fmt::Display for ApprovalRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -454,35 +467,22 @@ pub async fn verify_host_approval(
         return Ok(Err(R::RequestMismatch));
     }
 
-    // The signer: a leaf in OUR view of the group, certified by its account key.
-    let Some((leaf_key, scheme)) = crate::commands::mls::local_leaf_signature_key(
+    // The signer: a leaf in OUR view of the group, certified by its account key,
+    // and the signature under that leaf key (`signer::verify_signer`).
+    match signer::verify_signer(
         state,
         &session.group_id,
+        &session.bot_user_id,
         &approval.approver_user_id,
         &approval.approver_device_id,
+        HOST_APPROVAL_DOMAIN,
+        &payload,
+        &signature,
     )
-    .await
-    else {
-        return Ok(Err(R::ApproverNotInGroup));
-    };
-    if scheme != openmls::prelude::SignatureScheme::MLDSA44 {
-        return Ok(Err(R::UncertifiedApprover(format!(
-            "the group signs with {scheme:?}, not ML-DSA-44"
-        ))));
-    }
-    let directory = crate::commands::mls::load_pinned_identities(
-        state,
-        std::slice::from_ref(&approval.approver_user_id),
-        &session.bot_user_id,
-    )
-    .await?;
-    match directory.leaf_verdict(&approval.approver_user_id, &approval.approver_device_id, &leaf_key, scheme) {
-        crate::commands::mls::LeafVerdict::Certified => {}
-        crate::commands::mls::LeafVerdict::Unverifiable(why) => return Ok(Err(R::UncertifiedApprover(why.to_string()))),
-        crate::commands::mls::LeafVerdict::Uncertified(why) => return Ok(Err(R::UncertifiedApprover(why))),
-    }
-    if approval::verify_signature(&leaf_key, &payload, &signature).is_err() {
-        return Ok(Err(R::BadSignature));
+    .await?
+    {
+        Ok(()) => {}
+        Err(refusal) => return Ok(Err(refusal.into())),
     }
 
     // What it approves.
@@ -511,27 +511,15 @@ pub async fn verify_host_approval(
         return Ok(Err(R::Tampered));
     }
 
-    if audit.audit(state, &approval.approver_user_id).await == AuditStatus::Alarm {
-        return Ok(Err(R::TransparencyAlarm));
-    }
-    // Admin in the roster read too; the MLS view above said they are in the group.
-    if let Some(why) = not_admin_in_roster(state, session, &approval.approver_user_id).await? {
-        return Ok(Err(R::NotAdmin(why)));
+    // Not alarmed in the log, and an admin in the roster read too; the MLS view
+    // above said they are in the group.
+    if let Err(refusal) =
+        signer::verify_signer_is_admin(state, &session.group_id, &session.bot_user_id, &approval.approver_user_id, audit)
+            .await?
+    {
+        return Ok(Err(refusal.into()));
     }
     Ok(Ok(approval))
-}
-
-/// `Some(reason)` unless the roster read lists `user_id` as an admin of the group.
-async fn not_admin_in_roster(state: &Arc<AppState>, session: &BotSession, user_id: &str) -> Result<Option<String>> {
-    let resp = crate::commands::ds_reads::group(state, &session.group_id, &session.bot_user_id, false).await?;
-    if !resp.authorized {
-        return Ok(Some("this host cannot read its group's roster".to_string()));
-    }
-    Ok(match resp.members.iter().find(|m| m.user_id == user_id) {
-        Some(m) if m.role == "admin" => None,
-        Some(_) => Some("roster: member, not admin".to_string()),
-        None => Some("roster: not a member".to_string()),
-    })
 }
 
 /// This host's rank among the bot's online hosts (lowest device id first), so
@@ -661,7 +649,9 @@ async fn handle_one(
     }
 
     // Re-checked just before the wrap: an approver demoted since must not get one.
-    if let Some(why) = not_admin_in_roster(state, session, &approval.approver_user_id).await? {
+    if let Some(why) =
+        signer::not_admin_in_roster(state, &session.group_id, &session.bot_user_id, &approval.approver_user_id).await?
+    {
         return Ok(HostApprovalOutcome::Refused { request_id, reason: ApprovalRefusal::NotAdmin(why) });
     }
     let ephemeral = crate::commands::ds_reads::decode_b64("ephemeral_pub", &pending.ephemeral_pub)?;

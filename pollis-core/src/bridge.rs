@@ -1042,6 +1042,25 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             crate::commands::bots::delete_bot(&state()?, bot_user_id).await?;
             ok(())
         }
+        // #2005: App approvals.
+        "get_bot_app" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            ok(crate::commands::bots::get_bot_app(&state()?, group_id, bot_user_id).await?)
+        }
+        "approve_bot_app" => {
+            let input: crate::commands::bots::ApproveBotAppInput = arg(&args, "input")?;
+            ok(crate::commands::bots::approve_bot_app(&state()?, input).await?)
+        }
+        "auto_approve_bot_app" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            ok(crate::commands::bots::auto_approve_bot_app(&state()?, group_id, bot_user_id).await?)
+        }
+        "list_group_apps" => {
+            let group_id: String = arg(&args, "groupId")?;
+            ok(crate::commands::bots::list_group_apps(&state()?, group_id).await?)
+        }
         "get_group_members" => {
             let group_id: String = arg(&args, "groupId")?;
             let requester_id: String = arg(&args, "requesterId")?;
@@ -1752,6 +1771,11 @@ mod tests {
             "add_bot_host",
             "revoke_bot_host",
             "delete_bot",
+            // #2005
+            "get_bot_app",
+            "approve_bot_app",
+            "auto_approve_bot_app",
+            "list_group_apps",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }
