@@ -142,6 +142,13 @@ pub enum RealtimeEvent {
         transfer_id: String,
         event: String,
     },
+    /// An admin approved another host for this bot (#1182), sent to the bot's
+    /// inbox. DS-originated, content-free: a running host re-reads the pending
+    /// requests over the signed API and verifies each one itself
+    /// (`bots::handle_host_approvals`). Never sent to a person's inbox.
+    BotHostApproval {
+        request_id: String,
+    },
     /// After a non-empty reconcile commit: refetch hint only; names no one (#1506).
     RosterChanged {
         conversation_id: String,
