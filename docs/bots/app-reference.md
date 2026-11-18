@@ -11,7 +11,7 @@ The sources of truth, if this page and the code ever disagree:
 
 ## The short version
 
-- Your App is a WebAssembly component. It exports six handlers and can import only `pollis:app/host`. No files, no sockets, no environment variables, no WASI at all.
+- Your App is a WebAssembly component. It exports six handlers and reaches the world only through `pollis:app/host`. Ordinary `std` Rust (and ComponentizeJS) works: the runtime provides the WASI basics as harmless stubs. There are no files, no sockets and no environment variables (see [WASI](#wasi-what-std-gets)).
 - Every job gets a fresh instance. Globals do not survive between jobs; use `kv-*` for anything that must.
 - Nothing you do is applied until your handler returns `ok`. Return `err`, trap, run out of time or memory, and everything the job queued is thrown away.
 - Your manifest says what you want. The admin can narrow it, never widen it. The runtime enforces the overlap.
@@ -125,6 +125,7 @@ One HTTPS request to a host in your effective `egress`. Rules:
 
 - `https://` only, default port only, exact host match (`api.x.com` does not allow `x.com` or `eu.api.x.com`).
 - No IP addresses in any spelling (`127.0.0.1`, `2130706433`, `[::1]`).
+- The host name must resolve to a public address. Names that resolve only to loopback, private, link-local (including cloud metadata such as `169.254.169.254`), CGNAT, unique-local or reserved addresses are refused, and the runtime connects to the address it checked, so a changed DNS answer cannot redirect the request inward.
 - No `user:pass@` in the URL.
 - You may not set `Host`, `Connection`, `Transfer-Encoding`, `Upgrade`, `TE`, `Trailer`, `Keep-Alive` or `Proxy-*` headers.
 - Methods: GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS.
@@ -143,7 +144,8 @@ One HTTPS request to a host in your effective `egress`. Rules:
 | ``"`http-fetch` redirect from `<a>` to `<b>` refused: redirects may not leave the requested host"`` | off-host redirect |
 | ``"`http-fetch` to `<host>` refused: more than 3 redirects"`` | redirect loop |
 | ``"`http-fetch` to `<host>` refused: response exceeds 1048576 bytes"`` | body too large |
-| ``"`http-fetch` to `<host>` failed: <reason>"`` | network error |
+| ``"`http-fetch` to `<host>` failed: ... `<host>` resolves only to non-public addresses (loopback, private, link-local or metadata)"`` | the name points inside a private network |
+| ``"`http-fetch` to `<host>` failed: <reason>"`` | network error or timeout |
 
 ### `log(level, text)`
 
@@ -152,6 +154,30 @@ Writes to the runtime's log (levels `trace`, `debug`, `info`, `warn`, `error`). 
 ### `now() -> u64` · `random() -> u64`
 
 Unix milliseconds, and a cryptographically random 64-bit value.
+
+## WASI: what `std` gets
+
+So that ordinary `std` Rust and ComponentizeJS components load, the runtime provides these WASI 0.2 interfaces (any 0.2.x version). None of them reaches anything outside the sandbox:
+
+| Interface | What your App sees |
+|---|---|
+| `wasi:cli/environment` | No environment variables, no arguments. `std::env::current_dir()` reports `/`, which contains nothing. |
+| `wasi:cli/stdout`, `stderr` | `println!` / `eprintln!` / `console.log` go to the runtime log at debug level, one entry per line, 64 KiB per job. Never to the group. |
+| `wasi:cli/stdin` | Always at end of input. |
+| `wasi:cli/exit` | `std::process::exit` ends the job like a trap: nothing is applied. Return from the handler instead. |
+| `wasi:clocks/wall-clock` | The runtime's time (same as `now()`). |
+| `wasi:clocks/monotonic-clock` | Works, including sleeps and timers; a sleep past the job deadline ends the job. |
+| `wasi:random/*` | Cryptographically random bytes. |
+| `wasi:filesystem/*` | No directories are opened for you, so every file operation fails (`std::fs::read` returns an error). |
+| `wasi:io/*` | Streams and pollables backing the above. |
+
+Anything else is refused when the App is loaded, before any of your code runs:
+
+```
+import `wasi:sockets/tcp@0.2.6` refused: Apps have no sockets or direct network access; use `http-fetch` with hosts listed in `egress`
+```
+
+That covers `std::net`, `wasi:sockets` and `wasi:http`. Reach the network through `http-fetch`.
 
 ## The manifest: `pollis-app.json`
 
@@ -239,7 +265,7 @@ Release builds of the runtime cannot read this file at all.
 
 ## Your first App (Rust)
 
-The repo's fixture App is a complete, working example: [`pollis-app-host/fixtures/test-app/src/lib.rs`](../../pollis-app-host/fixtures/test-app/src/lib.rs). Here is the smallest useful App in the same style: it replies "pong" to any message that says "ping".
+The smallest useful App: it replies "pong" to any message that says "ping". Ordinary `std` Rust, nothing special.
 
 **1. Install the target** (once):
 
@@ -266,30 +292,17 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = { version = "0.61", default-features = false, features = ["macros"] }
+wit-bindgen = "0.61"
 
 [profile.release]
 opt-level = "s"
 lto = true
 strip = true
-panic = "abort"
 ```
 
-**3. Write it** (`src/lib.rs`). The handler is at the top; everything below the `no_std plumbing` line is boilerplate every `no_std` App copies unchanged.
-
-Why `no_std`: Rust's standard library on `wasm32-wasip2` always imports WASI interfaces (stdio, environment, exit), even from a crate that never prints, and the runtime refuses any component that imports anything but `pollis:app/host`. Without `std` you need an allocator, a panic handler, and two small functions the standard library would otherwise supply.
+**3. Write it** (`src/lib.rs`):
 
 ```rust
-// No standard library: a std build on wasm32-wasip2 imports WASI
-// (stdio, environment, exit), and the runtime refuses those.
-#![no_std]
-
-extern crate alloc;
-
-use alloc::string::String;
-use core::alloc::{GlobalAlloc, Layout};
-use core::cell::Cell;
-
 wit_bindgen::generate!({ path: "wit", world: "app" });
 
 use pollis::app::host;
@@ -299,6 +312,8 @@ struct PingApp;
 impl Guest for PingApp {
     fn on_message(message: Message) -> Result<(), String> {
         if message.text.trim() == "ping" {
+            // Goes to the runtime's log at debug level, never to the group.
+            println!("ping from {}", message.author.display_name);
             // A refusal comes back as Err with the reason; pass it on.
             host::reply(&message.id, "pong")?;
         }
@@ -314,66 +329,6 @@ impl Guest for PingApp {
 }
 
 export!(PingApp);
-
-// --- no_std plumbing: copy as is ---------------------------------------
-
-// A bump allocator. Never frees, which is fine: the instance lives for one job.
-struct Bump(Cell<usize>, Cell<usize>);
-unsafe impl Sync for Bump {}
-
-unsafe impl GlobalAlloc for Bump {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let start = (self.0.get() + layout.align() - 1) & !(layout.align() - 1);
-        let end = start + layout.size();
-        if self.0.get() == 0 || end > self.1.get() {
-            let pages = layout.size().div_ceil(65536) + 1;
-            let prev = core::arch::wasm32::memory_grow(0, pages);
-            if prev == usize::MAX {
-                return core::ptr::null_mut();
-            }
-            let base = (prev * 65536 + layout.align() - 1) & !(layout.align() - 1);
-            self.0.set(base + layout.size());
-            self.1.set((prev + pages) * 65536);
-            return base as *mut u8;
-        }
-        self.0.set(end);
-        start as *mut u8
-    }
-    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
-}
-
-#[global_allocator]
-static ALLOC: Bump = Bump(Cell::new(0), Cell::new(0));
-
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    core::arch::wasm32::unreachable()
-}
-
-// The canonical ABI's allocator entry point.
-#[no_mangle]
-unsafe extern "C" fn cabi_realloc(old: *mut u8, old_len: usize, align: usize, new_len: usize) -> *mut u8 {
-    if new_len == 0 {
-        return align as *mut u8;
-    }
-    let new = ALLOC.alloc(Layout::from_size_align_unchecked(new_len, align));
-    if !old.is_null() {
-        core::ptr::copy_nonoverlapping(old, new, old_len.min(new_len));
-    }
-    new
-}
-
-// No libc is linked, so provide the one routine the compiler still calls.
-#[no_mangle]
-unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
-    for i in 0..n {
-        let (x, y) = (*a.add(i), *b.add(i));
-        if x != y {
-            return x as i32 - y as i32;
-        }
-    }
-    0
-}
 ```
 
 **4. Declare what it needs** (`pollis-app.json`):
@@ -398,12 +353,6 @@ cargo build --release --target wasm32-wasip2
 # -> target/wasm32-wasip2/release/ping_app.wasm
 ```
 
-**If the runtime refuses your component**, check its imports. Anything other than `pollis:app/host` is refused before your code runs:
+If the runtime refuses the component, the message names the import that caused it (usually a dependency using `std::net`; see [WASI](#wasi-what-std-gets)). The repo has two complete examples: [`fixtures/std-app`](../../pollis-app-host/fixtures/std-app/src/lib.rs) (ordinary `std`) and [`fixtures/test-app`](../../pollis-app-host/fixtures/test-app/src/lib.rs) (`no_std`, for the smallest possible component).
 
-```
-import `wasi:cli/environment@0.2.6` refused: an App may import only `pollis:app/host@0.1.0` (no WASI filesystem, sockets or environment)
-```
-
-The usual cause is a dependency that needs `std`. Use `host::log` instead of printing, and pick `no_std` crates (most of `alloc` works: `String`, `Vec`, `format!`, `BTreeMap`). The fixture App in the repo is a larger `no_std` example.
-
-**6. Run it.** The TypeScript SDK and the `pollis app` CLI (`new`, `test`, `dev`, `build`, `run`) are #2006. Until then, the host's own tests show how a job is driven end to end: [`pollis-app-host/tests/enforcement.rs`](../../pollis-app-host/tests/enforcement.rs) runs the fixture through every trigger and host function, and `pollis-app-host/fixtures/build.sh` rebuilds it.
+**6. Run it.** The TypeScript SDK and the `pollis app` CLI (`new`, `test`, `dev`, `build`, `run`) are #2006. Until then, the host's own tests show how a job is driven end to end: [`pollis-app-host/tests/enforcement.rs`](../../pollis-app-host/tests/enforcement.rs) runs the fixture through every trigger and host function, [`tests/wasi.rs`](../../pollis-app-host/tests/wasi.rs) runs the `std` one, and `pollis-app-host/fixtures/build.sh` rebuilds them.

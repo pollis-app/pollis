@@ -28,8 +28,8 @@ This document states trust boundaries and the guarantees each one gives, and nam
 
 An App runs as a WebAssembly component in `pollis-app-host`. It has no system calls and no access to host memory; it can call only the functions the host imports into it.
 
-1. **No ambient authority.** The only interface an App may import is `pollis:app/host@0.1.0` (plus its types). There is no WASI filesystem, sockets or environment; a component that imports anything else is refused before it runs. Clock and randomness come from the host's `now` and `random`.
-   Pinned by `a_component_importing_wasi_is_refused`, `the_fixture_app_imports_only_the_pollis_host` (pollis-app-host `tests/enforcement.rs`).
+1. **No ambient authority.** An App may import `pollis:app/host@0.1.0` and a fixed subset of WASI 0.2, so that ordinary `std` Rust and ComponentizeJS components load. Each WASI interface is a stub that grants nothing: the environment and arguments are empty, stdin is closed, stdout and stderr go to the runtime log (never the group), `exit` ends the job with nothing applied, clocks and randomness come from the host, and the filesystem has no preopened directories, so no file can be opened. Sockets and `wasi:http` are not provided; a component that imports them, or anything else outside the subset, is refused before it runs.
+   Pinned by `a_component_importing_sockets_is_refused`, `only_the_listed_wasi_interfaces_are_importable`, `an_ordinary_std_rust_app_loads_and_runs`, `the_filesystem_is_empty`, `exit_traps_the_job_and_discards_everything` (pollis-app-host `tests/enforcement.rs`, `tests/wasi.rs`).
 2. **Fresh instance per job.** Each job gets a new `Store` and instance; nothing in App memory survives from one job to the next. Compiled code is cached by App hash and shared, but compiled code holds no state, and a cached entry is used only for the exact bytes it was compiled from.
    Pinned by `two_installations_of_the_same_app_share_nothing`, `different_bytes_under_a_cached_app_hash_are_refused`.
 3. **Per-job limits.** A CPU deadline (epoch interruption, one-shot per job), a linear-memory cap, and caps on host calls, HTTP fetches, queries and actions. Exceeding any of them traps the job.
@@ -57,6 +57,8 @@ An App runs as a WebAssembly component in `pollis-app-host`. It has no system ca
   Pinned by `state_beyond_the_quota_is_refused`, `state_without_a_quota_is_refused`.
 - **Network**: `http-fetch` to hosts in the granted egress list only: HTTPS, default port, exact host match, no IP literals, no credentials in the URL, no `Host` or connection-level headers, redirects followed only within the requested host, response size capped. An App with empty egress cannot send data outside the group.
   Pinned by `http_fetch_refusals_never_reach_the_network`, `http_fetch_with_no_egress_is_refused`, `http_redirect_off_host_is_refused_and_same_host_is_followed`, `http_response_over_the_cap_is_refused`, and the unit tests in `pollis-app-host/src/egress.rs`.
+- **Never into the runtime's own network.** A granted host name must resolve to a public address. The runtime's client (`PublicHttpClient`, which `HostServices::http_fetch` delegates to) resolves the name once, drops loopback, private, link-local (including cloud metadata), CGNAT, unique-local and reserved addresses (also when embedded in IPv6), refuses the request if none remain, and connects only to the addresses it checked, so a second DNS answer is never used. It follows no redirects and uses no proxy from the environment.
+  Pinned by `non_public_addresses_are_refused`, `a_mixed_answer_keeps_only_public_addresses_and_looks_up_once`, `a_granted_name_that_resolves_inside_is_refused_without_connecting` (`pollis-app-host/src/http.rs`).
 - **Logging** to the runtime's log, never to the group.
 
 ## Grants
@@ -71,6 +73,6 @@ An App runs as a WebAssembly component in `pollis-app-host`. It has no system ca
 These are properties of the design, stated in developer docs and install copy:
 
 - **An App can send what it reads to the hosts the admin approved.** Egress is the boundary; inside it, the App decides what to send. An App with no egress cannot send data outside the group.
-- **The sandbox engine is in the trusted base.** Isolation rests on wasmtime and Cranelift being correct. The runtime keeps the engine's feature set minimal (no WASI, no async, no GC proposals, no threads) to keep that base small.
+- **The sandbox engine is in the trusted base.** Isolation rests on wasmtime and Cranelift being correct. The runtime keeps the engine's feature set minimal (no async, no GC proposals, no threads) and implements its WASI stubs itself rather than linking a general-purpose WASI implementation, to keep that base small.
 - **Jobs that share a CPU can observe timing.** The sandbox isolates memory and capabilities, not microarchitectural side channels between jobs running on the same machine. Installations that must not share hardware run on separate hosts.
 - **The host machine is trusted like any device of the bot.** Whoever controls the machine the runtime runs on can read what the bot can read. That is the admin's own machine for self-hosted bots; #2009 covers attested hosting.
