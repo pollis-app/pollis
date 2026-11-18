@@ -1,0 +1,23 @@
+[package]
+name = "pollis-import"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Parse chat-platform exports (Discord first) into a normalised model and a dry-run import plan. Pure: no network, no crypto, no Pollis state, so pollis-core (which applies a plan) and the pollis-import CLI (which only reports one) share one parser."
+
+[lib]
+name = "pollis_import"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pollis-import"
+path = "src/main.rs"
+
+[dependencies]
+pollis-api = { path = "../pollis-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

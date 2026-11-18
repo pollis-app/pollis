@@ -69,16 +69,8 @@ pub struct EncodedEmoji {
 
 // Validation (mirrors the DS, which is authoritative).
 
-/// `[a-z0-9_]{2,32}`. Mirrors `pollis_delivery::emoji::shortcode_is_valid`; the DS re-validates.
-pub fn shortcode_is_valid(shortcode: &str) -> bool {
-    let len = shortcode.len();
-    if !(2..=32).contains(&len) {
-        return false;
-    }
-    shortcode
-        .bytes()
-        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-}
+/// `[a-z0-9_]{2,32}`, the DS's own rule (it re-validates).
+pub use pollis_api::emoji::shortcode_is_valid;
 
 /// 64 lowercase hex chars. Case-sensitive so one image cannot occupy two rows.
 pub fn content_hash_is_valid(hash: &str) -> bool {

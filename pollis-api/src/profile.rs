@@ -4,6 +4,33 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Upper bound on a human display name (preferred or group name, #1095).
+pub const DISPLAY_NAME_MAX_LEN: usize = 100;
+
+/// Whether `s` is acceptable as a human display name. The one definition: the
+/// DS enforces it, and `pollis-import` fits foreign names to it.
+///
+/// NOT the username charset (display names are rendered, never resolved). Refused:
+///
+/// * longer than [`DISPLAY_NAME_MAX_LEN`] (#1095);
+/// * control characters, newlines included;
+/// * bidi overrides/isolates and LRM/RLM (display-order spoofing);
+/// * `<` and `>` (the sink escapes them too); `&` is allowed.
+pub fn is_valid_display_name(s: &str) -> bool {
+    !s.trim().is_empty()
+        && s.chars().count() <= DISPLAY_NAME_MAX_LEN
+        && !s.chars().any(is_refused_display_char)
+}
+
+/// A character [`is_valid_display_name`] refuses anywhere in a name.
+pub fn is_refused_display_char(c: char) -> bool {
+    c.is_control()
+        || matches!(c,
+            '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}')
+        || c == '<'
+        || c == '>'
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct UpdateProfileBody {
     /// The profile being edited; when signed it must equal the authenticated

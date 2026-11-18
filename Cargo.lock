@@ -6782,6 +6782,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pollis-import"
+version = "1.1.0"
+dependencies = [
+ "pollis-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "pollis-libsql-connector"
 version = "1.1.0"
 dependencies = [

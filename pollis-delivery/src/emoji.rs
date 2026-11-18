@@ -38,20 +38,9 @@ pub const EMOJI_MAX_BYTES: u64 = 48 * 1024;
 /// every group.
 pub const EMOJI_MAX_PER_USER: i64 = 1000;
 
-/// Shortest / longest permitted shortcode.
-const SHORTCODE_MIN: usize = 2;
-const SHORTCODE_MAX: usize = 32;
-
-/// `[a-z0-9_]{2,32}`, hand-rolled (no regex dependency).
-pub fn shortcode_is_valid(shortcode: &str) -> bool {
-    let len = shortcode.len();
-    if !(SHORTCODE_MIN..=SHORTCODE_MAX).contains(&len) {
-        return false;
-    }
-    shortcode
-        .bytes()
-        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-}
+pub use pollis_api::emoji::shortcode_is_valid;
+#[cfg(test)]
+use pollis_api::emoji::SHORTCODE_MAX;
 
 /// 64 LOWERCASE hex: the hash is a primary key, so two cases would defeat dedup.
 pub fn content_hash_is_valid(hash: &str) -> bool {

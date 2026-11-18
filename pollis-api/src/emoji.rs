@@ -5,6 +5,24 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Shortest permitted shortcode.
+pub const SHORTCODE_MIN: usize = 2;
+/// Longest permitted shortcode.
+pub const SHORTCODE_MAX: usize = 32;
+
+/// `[a-z0-9_]{2,32}`, hand-rolled (no regex dependency). The one definition:
+/// the DS enforces it, the apps pre-check with it, and `pollis-import`
+/// normalises foreign emoji names to it.
+pub fn shortcode_is_valid(shortcode: &str) -> bool {
+    let len = shortcode.len();
+    if !(SHORTCODE_MIN..=SHORTCODE_MAX).contains(&len) {
+        return false;
+    }
+    shortcode
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct CreateEmojiBody {
     pub group_id: String,
