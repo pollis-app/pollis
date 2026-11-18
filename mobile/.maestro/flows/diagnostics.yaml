@@ -53,10 +53,13 @@ tags:
       FRESH: "diagnostics"
 - tapOn:
     id: "tab-self"
+# centerElement: with the Group aliases row (#2017) the scroll can stop with the
+# row under the tab bar, and the tap then lands on the Link shortcut.
 - scrollUntilVisible:
     element:
       id: "row-self-diagnostics"
     direction: DOWN
+    centerElement: true
 - tapOn:
     id: "row-self-diagnostics"
 - assertVisible:
