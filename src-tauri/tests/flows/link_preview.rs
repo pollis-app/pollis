@@ -160,6 +160,25 @@ async fn a_preview_of_a_link_not_in_the_text_is_never_sent() {
     drop(bob);
 }
 
+/// A bare `www.` link is previewed as its `https://` form (the renderers'
+/// `parseLink`); that preview is sent, stored and received.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_bare_www_link_keeps_its_preview() {
+    let (alice, bob, channel_id) = pair().await;
+    let _stub = StubbedUploads::on();
+    let content = "take a look www.pollis.com it's neat";
+    let id = send(&alice, &channel_id, content, draft("https://www.pollis.com", "Pollis", false)).await;
+    let mine = row(&alice, &channel_id, &id).await;
+    assert_eq!(mine["link_preview"]["url"], "https://www.pollis.com", "the sender's stored copy keeps it");
+    assert_eq!(mine["link_preview"]["title"], "Pollis");
+    let theirs = row(&bob, &channel_id, &id).await;
+    assert_eq!(theirs["content"], content);
+    assert_eq!(theirs["link_preview"], mine["link_preview"], "the recipient gets the same preview");
+    drop(alice);
+    drop(bob);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn deleting_a_message_takes_its_preview_and_thumbnail() {

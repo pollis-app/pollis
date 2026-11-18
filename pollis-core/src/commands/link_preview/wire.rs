@@ -139,7 +139,9 @@ const LEADING: &str = "([<\"'";
 const TRAILING: &str = ".,;:!?)]>\"'";
 
 /// Some whitespace-separated token of `body`, without the punctuation around
-/// it, parses to the same URL as `url`.
+/// it, parses to the same URL as `url`. A bare `www.` token counts as its
+/// `https://` form, the way the renderers' `ensureProtocol` links it: the
+/// composer previews `www.pollis.com` as `https://www.pollis.com`.
 fn body_has_normalized(body: &str, url: &str) -> bool {
     let Ok(want) = url::Url::parse(url) else {
         return false;
@@ -148,9 +150,17 @@ fn body_has_normalized(body: &str, url: &str) -> bool {
         let token = token
             .trim_start_matches(|c| LEADING.contains(c))
             .trim_end_matches(|c| TRAILING.contains(c));
-        token.len() <= MAX_URL_LEN
-            && token.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://"))
-            && url::Url::parse(token).is_ok_and(|got| got == want)
+        if token.len() > MAX_URL_LEN {
+            return false;
+        }
+        let parsed = if token.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")) {
+            url::Url::parse(token)
+        } else if token.get(..4).is_some_and(|s| s.eq_ignore_ascii_case("www.")) {
+            url::Url::parse(&format!("https://{token}"))
+        } else {
+            return false;
+        };
+        parsed.is_ok_and(|got| got == want)
     })
 }
 
@@ -267,6 +277,20 @@ mod tests {
         assert!(!body_contains_link("https://github.com/x", "https://github.com/"));
         assert!(!body_contains_link("xhttps://github.com/", "https://github.com/"));
         assert!(!body_contains_link("http://github.com/", "https://github.com/"));
+    }
+
+    /// A bare `www.` link is linked (and previewed) as its `https://` form, so
+    /// the preview the composer built for it must survive the send.
+    #[test]
+    fn a_bare_www_link_matches_its_https_form() {
+        assert!(body_contains_link("check www.pollis.com out", "https://www.pollis.com"));
+        assert!(body_contains_link("(WWW.Pollis.com/learn).", "https://www.pollis.com/learn"));
+        assert!(!body_contains_link("www.pollis.com.evil.example", "https://www.pollis.com"));
+        assert!(!body_contains_link("xwww.pollis.com", "https://www.pollis.com"));
+        assert!(!body_contains_link("www.pollis.com/x", "https://www.pollis.com"));
+        let mut p = sample();
+        p.url = "https://www.pollis.com".into();
+        assert!(decode(&encode(&p), "see www.pollis.com").is_some());
     }
 
     #[test]
