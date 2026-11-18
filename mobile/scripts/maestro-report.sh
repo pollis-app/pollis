@@ -36,13 +36,7 @@ echo "==> 1/4 peer signs up ($PEER_EMAIL); the reporter signs up ($REPORTER_EMAI
 maestro --device "$PEER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$PEER_EMAIL" "$HERE/.maestro/two-client/report/1-peer-signup.yaml"
 maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$REPORTER_EMAIL" "$HERE/.maestro/setup/setup.yaml"
 
-if [[ "$PEER" == emulator-* || "$PEER" == *:* ]]; then
-  adb -s "$PEER" shell uiautomator dump /sdcard/report-ui.xml >/dev/null
-  TREE="$(adb -s "$PEER" exec-out cat /sdcard/report-ui.xml)"
-else
-  TREE="$(maestro --device "$PEER" hierarchy 2>/dev/null)"
-fi
-HANDLE="$(printf '%s' "$TREE" | grep -oE '@[a-z0-9][a-z0-9_.-]{2,}' | head -1 | tr -d '@')"
+HANDLE="$(maestro_read_handle "$PEER")"
 [ -n "$HANDLE" ] || { echo "could not read the peer's handle" >&2; exit 1; }
 echo "    peer handle: $HANDLE"
 

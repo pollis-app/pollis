@@ -56,18 +56,7 @@ tags:
 - extendedWaitUntil:
     visible: ".*ob1335 killed.*"
     timeout: 10000
-- stopApp
-- launchApp
-- runFlow:
-    when:
-      visible:
-        id: "screen-auth-pin"
-    commands:
-      - runFlow: ../subflows/enter-pin.yaml
-- extendedWaitUntil:
-    visible:
-      id: "tab-groups"
-    timeout: 30000
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - tapOn:

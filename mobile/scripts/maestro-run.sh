@@ -313,17 +313,6 @@ failed_in() {
   awk -v n="$1" -v a="$2" '$1 == n && $4 == a && $2 == "pass" { ok = 1 } END { exit ok ? 1 : 0 }' "$LOG/results.txt"
 }
 
-# The peer's @handle, off the Self screen setup/peer.yaml left up.
-read_handle() {
-  local tree
-  if [[ "$DEVICE_ID" == emulator-* ]]; then
-    adb -s "$DEVICE_ID" shell uiautomator dump /sdcard/peer-ui.xml >/dev/null 2>&1 || true
-    tree="$(adb -s "$DEVICE_ID" exec-out cat /sdcard/peer-ui.xml 2>/dev/null || true)"
-  else
-    tree="$(maestro --device "$DEVICE_ID" hierarchy 2>/dev/null || true)"
-  fi
-  printf '%s' "$tree" | grep -oE '@[a-z0-9][a-z0-9_.-]{2,}' | grep -v '^@example\.' | head -1 | tr -d '@' || true
-}
 
 # One `maestro test` over several flows, in the given order: a workspace
 # config whose executionOrder lists them (a flow's name is its file name).
@@ -411,7 +400,7 @@ run_plan() {
   if [ -n "${peer// /}" ] && [ -z "$PEER_HANDLE" ]; then
     # shellcheck disable=SC2086
     invoke "$attempt" "a${attempt}-1" $fresh peer
-    PEER_HANDLE="$(read_handle)"
+    PEER_HANDLE="$(maestro_read_handle "$DEVICE_ID")"
     echo "    [$DEVICE_LABEL] peer handle: ${PEER_HANDLE:-<none>}"
     if [ -z "$PEER_HANDLE" ]; then
       for n in $peer; do
