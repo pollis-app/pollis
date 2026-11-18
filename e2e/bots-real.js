@@ -411,6 +411,11 @@ async function main() {
     check(/wrap/i.test(run1.text), "host1 logged the wrap");
     const inst2 = h2.installation();
     check(inst2.bot_user_id === botId && inst2.device_id !== inst1.device_id, `host2 is a second device (${inst2.device_id}) of the same bot`);
+    // The page the admin left open lists the new host without a reload (the DS's bots_changed nudge).
+    await h.waitTestId(browser, "bot-hosts", 15000);
+    await h.waitTestId(browser, `bot-host-revoke-${inst2.device_id}`, 60000);
+    await shot(browser, "3-host2-listed-live.png");
+    check(true, "the open bot page lists host2 without a reload");
 
     let run2 = h2.spawn(["run", "--webhook", HOOK2], "run2");
     hostRecs.push([h2, run2]);
@@ -452,7 +457,11 @@ async function main() {
     await h.clickTestId(browser, `bot-host-revoke-${inst2.device_id}`);
     await h.waitTestId(browser, "revoke-host-submit", 10000);
     await h.clickTestId(browser, "revoke-host-submit");
-    await browser.waitUntil(async () => !(await h.present(browser, `bot-host-revoke-${inst2.device_id}`)), { timeout: 30000, timeoutMsg: "revoked host still listed" });
+    // The confirmation stands in for the host list until the revoke lands.
+    await browser.waitUntil(
+      async () => !(await h.present(browser, "revoke-host-confirm")) && !(await h.present(browser, `bot-host-revoke-${inst2.device_id}`)),
+      { timeout: 60000, timeoutMsg: "revoke never landed, or the revoked host is still listed" },
+    );
     await shot(browser, "3-host2-revoked.png");
     check(await count(turso.TURSO_URL, "SELECT count(*) FROM user_device WHERE device_id = ? AND revoked_at IS NOT NULL", [inst2.device_id]) === 1
       || await count(turso.TURSO_URL, "SELECT count(*) FROM user_device WHERE device_id = ?", [inst2.device_id]) === 0,
