@@ -26,7 +26,7 @@ const CHANNEL = "alerts";
 const HOOK1 = "127.0.0.1:18787";
 const HOOK2 = "127.0.0.1:18788";
 
-const log = (m) => console.log(`[bots-real] ${m}`);
+const log = (m) => console.log(`[bots-real] ${new Date().toISOString().slice(11, 23)} ${m}`);
 
 function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   fs.rmSync(dataDir, { recursive: true, force: true });
@@ -350,7 +350,10 @@ async function main() {
     await typeCodeInto(browser, code1);
     await shot(browser, "1-add-bot-code-typed.png");
     await h.clickTestId(browser, "bot-pair-submit");
+    const tPair = Date.now();
+    log("admin: submitted the bot code");
     const paired = await h1.waitFor(pair1, /paired: bot (\S+) in group (\S+)\./, 120000, "paired");
+    log(`timing: bot code submitted -> host paired in ${Date.now() - tPair} ms`);
     const botId = paired[1];
     const groupId = paired[2];
     const pairExit = await h1.exitOf(pair1, 30000, "pair");
@@ -397,7 +400,10 @@ async function main() {
     await typeCodeInto(browser, code2);
     await shot(browser, "3-add-host-code-typed.png");
     await h.clickTestId(browser, "bot-pair-submit");
+    const tAdd = Date.now();
+    log("admin: submitted the host code");
     await h2.waitFor(add2, /paired: bot/, 180000, "add-host paired (host1 wraps the key)");
+    log(`timing: host code submitted -> second host paired in ${Date.now() - tAdd} ms`);
     check((await h2.exitOf(add2, 30000, "add-host")).code === 0, "add-host exited 0");
     check(/wrap/i.test(run1.text), "host1 logged the wrap");
     const inst2 = h2.installation();
