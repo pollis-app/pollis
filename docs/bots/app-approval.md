@@ -62,7 +62,7 @@ You can only take things away. Nothing can be added beyond what the App's manife
 
 When the machine has a new version of the App (a new file, or new content at the same address), the bot stops running the old approval and waits. The bot's page shows **Waiting for your approval** with a list of what changed:
 
-- **New access** is highlighted at the top: a new channel, a longer history, a new kind of message it reads, a new action, a new internet address, a larger data allowance, or a new way to wake it. Each one has its own switch, **off** until you switch it on. Approving without switching it on approves the update without that access.
+- **New access** is highlighted at the top: a new channel, a longer history, a new kind of message it reads, a new action, a new internet address, a larger data allowance, a new way to wake it, a new slash command, or a new or more frequent schedule. Each one has its own switch, **off** until you switch it on. Approving without switching it on approves the update without that access. A new way to wake it, a new command, a new schedule and a larger data allowance come with the version itself, so the update can only be approved once you switch them on.
 - Everything else (things it no longer asks for) is listed below.
 
 If nothing in the update asks for more, **Approve update** takes one tap and keeps your current choices.
