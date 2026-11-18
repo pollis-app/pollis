@@ -76,6 +76,11 @@ tags:
 - tapOn:
     id: "input-bot-name"
 - inputText: "${BOT_NAME}"
+# On a small screen the keyboard covers the code field below the name.
+- scrollUntilVisible:
+    element:
+      id: "input-bot-code"
+    direction: DOWN
 - tapOn:
     id: "input-bot-code"
 # A code that is not the one the host printed is refused, and nothing is created.

@@ -3,7 +3,7 @@ import { invoke } from "../../bridge";
 import type { ApproveBotAppInput, BotAppView, GroupAppView } from "../../types";
 
 /** Bot Apps (#2005): the admins' approval page and the members' marks. */
-const botAppQueryKeys = {
+export const botAppQueryKeys = {
   all: ["botApps"] as const,
   app: (groupId: string, botUserId: string) => ["botApps", "app", groupId, botUserId] as const,
   group: (groupId: string) => ["botApps", "group", groupId] as const,
