@@ -24,7 +24,7 @@ use libsql::Connection;
 
 use crate::error::AppError;
 use crate::profile::{is_valid_display_name, profile_outcome_response, ProfileOutcome, DISPLAY_NAME_INVALID};
-use crate::writes::{bad_request, gate_and_parse, outcome_response, resolve_actor, RawRequest, WriteOutcome};
+use crate::writes::{gate_and_parse, outcome_response, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
 
 pub use pollis_api::profile::{

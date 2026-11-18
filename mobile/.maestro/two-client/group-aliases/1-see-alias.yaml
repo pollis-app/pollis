@@ -76,7 +76,6 @@ tags:
 - assertVisible:
     id: "input-composer"
     text: "thanks @${MAESTRO_PEER_HANDLE} "
-- hideKeyboard
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:

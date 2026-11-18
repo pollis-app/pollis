@@ -66,7 +66,8 @@ tags:
 - tapOn:
     id: "input-alias-name"
 - inputText: "Mia at Work"
-- hideKeyboard
+# Return dismisses a single-line field (hideKeyboard finds no action here).
+- pressKey: Enter
 - addMedia:
     - "../fixtures/profile-photo.png"
 - tapOn:
@@ -95,7 +96,8 @@ tags:
     id: "input-alias-name"
 - eraseText: 20
 - inputText: "Mia everywhere"
-- hideKeyboard
+# Return dismisses a single-line field (hideKeyboard finds no action here).
+- pressKey: Enter
 - tapOn:
     id: "toggle-alias-apply-all"
 - tapOn:
@@ -116,6 +118,8 @@ tags:
 
 # Your own messages in that group carry the alias and its photo.
 - tapOn:
+    id: "btn-back"
+- tapOn:
     id: "tab-groups"
 - tapOn: "Alias Work"
 - extendedWaitUntil:
@@ -131,7 +135,6 @@ tags:
 - tapOn:
     id: "input-composer"
 - inputText: "hello under an alias"
-- hideKeyboard
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:
