@@ -13,7 +13,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { spawn, spawnSync } = require("child_process");
+const { spawn } = require("child_process");
 const h = require("./lib/harness");
 
 const ARTIFACTS = process.env.BOTS_ARTIFACTS || path.join(__dirname, "artifacts", "bots-real");
@@ -159,15 +159,6 @@ async function settle(host, rec, r) {
 // ── DS rows (the local sqld) ─────────────────────────────────────────────────────────────────
 
 async function sql(tursoUrl, q, args = []) {
-  // A DS on a local file (`TURSO_URL=file:<path>`): read it directly.
-  if (tursoUrl.startsWith("file:")) {
-    const py = "import json,sqlite3,sys; a=json.loads(sys.argv[3]); c=sqlite3.connect(sys.argv[1]); print(json.dumps([list(r) for r in c.execute(sys.argv[2], a)]))";
-    const r = spawnSync("python3", ["-I", "-c", py, tursoUrl.slice(5), q, JSON.stringify(args.map(String))], { encoding: "utf8" });
-    if (r.status !== 0) {
-      throw new Error(`sql ${q}: ${r.stderr}`);
-    }
-    return JSON.parse(r.stdout);
-  }
   const res = await fetch(`${tursoUrl}/v2/pipeline`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
