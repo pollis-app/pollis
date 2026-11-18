@@ -47,10 +47,12 @@ Every trigger has a **trigger key**: a string that every host of the bot derives
 
 | Trigger | When | Trigger key |
 |---|---|---|
-| Message | A new message in the bot's group | `msg:<envelope id>` |
-| Webhook | A call to the alerts webhook | `hook:<delivery id>` (the `X-Pollis-Delivery` header, or a fresh id) |
+| Message | A new message in the bot's group (for an App, a mention of the bot reaches `on-mention`) | `msg:<envelope id>` |
+| Webhook | A call to the installation's webhook | `hook:<delivery id>` (the `X-Pollis-Delivery` header, or a fresh id) |
+| Schedule | An App's schedule reaches a slot | `slot:<schedule name>@<slot time>` |
 | Request | Coming in a later release | `req:<request id>` |
-| Schedule | Coming in a later release | `slot:<slot time>` |
+
+Schedules have no timer loop: after each job the runtime sets one timer to the installation's next slot. A host that was asleep at a slot runs it when it next wakes, up to the three most recent missed slots per schedule (older ones are skipped and logged), and the claim makes each slot run on one host only.
 
 The kind prefix keeps keys from different kinds apart, so a delivery id a sender chooses can never collide with a message's envelope id.
 
@@ -144,7 +146,7 @@ Today an installation id is the bot's user id, because each bot has exactly one 
 ## What comes next
 
 - **Approval:** an admin approves exactly one App version (pinned by hash) with the grants they chose, and approves again when an update asks for more.
-- **More triggers:** mentions, slash commands, schedules and member requests reach Apps as their handlers once the runtime delivers them.
+- **More triggers:** slash commands (#2018) and member requests (#2008) reach Apps once the runtime delivers them.
 - **History:** `query-messages` returns the trigger's own message until the runtime keeps a message log.
 - **SDKs:** a TypeScript SDK and the `pollis app` CLI.
 
