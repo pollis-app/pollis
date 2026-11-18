@@ -47,6 +47,8 @@ const MISMATCHED = {
   link_preview: { url: GITHUB, title: "Not this one", description: null, image: null },
 };
 
+const DANA_ALIAS = "Dana (Links)";
+
 type Opts = {
   skin?: "modern" | "terminal";
   messages?: unknown[];
@@ -74,6 +76,8 @@ async function boot(page: Page, opts: Opts = {}) {
         { user_id: "u_dana", username: "dana", role: "member", joined_at: "2026-01-01T00:00:00Z" },
       ],
     },
+    // Dana has an alias in this group (#2003): her rows carry the alias and the card together.
+    groupAliases: [{ group_id: GROUP_ID, user_id: "u_dana", display_name: DANA_ALIAS, avatar_url: null }],
     messages: { [CHANNEL_ID]: opts.messages ?? [] },
     mediaUrls: { [THUMB_KEY]: `${MEDIA_ORIGIN}/thumb.jpg` },
     linkPreviews: { [GITHUB]: DRAFT },
@@ -173,6 +177,8 @@ test.describe("link previews — Modern", () => {
     await expect(card).toContainText(DRAFT.title);
     await expect(card).toContainText("github.com");
     await expect(card.locator("img")).toBeVisible();
+    // The sender's group alias (#2003) heads the row that carries the card.
+    await expect(page.getByTestId("message-m_dana")).toContainText(DANA_ALIAS);
     // Fixed height: the card is the same box before and after its thumbnail.
     const box = await card.boundingBox();
     expect(box!.height).toBeGreaterThan(60);
@@ -204,6 +210,19 @@ test.describe("link previews — Modern", () => {
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("message-m_dana")).toContainText("no link any more");
     await expect(page.getByTestId("message-link-preview")).toHaveCount(0);
+  });
+
+  test("delete for everyone takes the card with the text", async ({ page }) => {
+    await boot(page, { messages: [{ ...RECEIVED, sender_id: ME.id, sender_username: ME.username }] });
+    const row = page.getByTestId("message-m_dana");
+    await expect(row.getByTestId("message-link-preview")).toHaveCount(1);
+    await row.hover();
+    await row.getByTestId("message-actions-more").click();
+    await page.getByTestId("delete-button").click();
+    await expect(page.getByTestId("delete-message-bar")).toBeVisible();
+    await page.getByTestId("delete-message-confirm").click();
+    await expect(page.getByTestId("message-link-preview")).toHaveCount(0);
+    await expect(row).not.toContainText(GITHUB);
   });
 
   test("with Generate link previews off, the composer fetches nothing; received cards still render", async ({ page }) => {
@@ -289,11 +308,13 @@ test("an image link keeps its click-to-load unfurl and gets no card", async ({ p
 test("Terminal look: no card on messages and no fetch in the composer", async ({ page }) => {
   await boot(page, { skin: "terminal", messages: [RECEIVED] });
   await expect(page.getByTestId("message-m_dana")).toContainText(GITHUB);
+  await expect(page.getByTestId("message-m_dana")).toContainText(DANA_ALIAS);
   await expect(page.getByTestId("message-link-preview")).toHaveCount(0);
   await paste(page, GITHUB);
   await page.waitForTimeout(900);
   await expect(page.getByTestId("composer-link-preview")).toHaveCount(0);
   expect(await fetches(page)).toEqual([]);
+  await shot(page, "desktop-terminal");
 });
 
 // Review screenshots: light ground and a large font size.

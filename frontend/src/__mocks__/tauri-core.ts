@@ -38,6 +38,8 @@ interface MockMessage {
   edit_state?: 'pending' | 'failed';
   /** The sender's link preview (#1987), as the core reads it from the trailer. */
   link_preview?: Record<string, unknown> | null;
+  /** Deleted for everyone: a tombstone with no text. */
+  deleted_at?: string;
 }
 
 /** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
@@ -1929,6 +1931,17 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
           throw new Error('network unreachable');
         }
         delete message.edit_state;
+      }
+      return null;
+    }
+
+    // Delete for everyone: the row keeps a tombstone; the core's trigger clears the preview with the text (#1987).
+    case 'delete_message': {
+      const message = findMessage((args as { messageId: string }).messageId);
+      if (message) {
+        delete message.content;
+        message.link_preview = null;
+        message.deleted_at = nowIso();
       }
       return null;
     }
