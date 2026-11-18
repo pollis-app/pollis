@@ -5,7 +5,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,6 +106,33 @@ describe("pollis app build", () => {
       assert.match(e.message, /src\/app\.ts/);
       return true;
     });
+  });
+});
+
+describe("npm dependencies", () => {
+  test("resolve to their browser build, which needs no Node built-ins", async () => {
+    const dir = template("deps");
+    const pkg = join(dir, "node_modules", "dual");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({ name: "dual", type: "module", exports: { browser: "./web.js", default: "./node.js" } }),
+    );
+    writeFileSync(join(pkg, "node.js"), 'import { randomUUID } from "node:crypto";\nexport const where = () => randomUUID() && "node";\n');
+    writeFileSync(join(pkg, "web.js"), 'export const where = () => "web";\n');
+    writeFileSync(
+      join(dir, "src", "app.ts"),
+      'import { app } from "@pollis/app";\nimport { where } from "dual";\n' +
+        'export default app({ manifest: { read: { channels: ["*"] }, actions: ["reply"] },\n' +
+        '  async onCommand(cmd, ctx) { await ctx.reply(cmd.message, where()); } });\n',
+    );
+    const built = await buildApp({ dir, quiet: true });
+    const app = await testApp({ component: built.component, manifest: built.manifestPath, bin: findDevTool() });
+    try {
+      assert.deepEqual((await app.command("x")).replies, ["web"]);
+    } finally {
+      app.close();
+    }
   });
 });
 

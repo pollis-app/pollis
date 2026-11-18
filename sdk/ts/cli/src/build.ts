@@ -44,6 +44,14 @@ export interface BuildResult {
 
 export class BuildError extends Error {}
 
+/**
+ * Packages are resolved as for a browser: the sandbox has web basics
+ * (`crypto.getRandomValues`, TextEncoder, timers) and no Node built-ins, so a
+ * package's browser build is usually the one that works. HTTP is ctx.fetch.
+ */
+const MAIN_FIELDS = ["browser", "module", "main"];
+const CONDITIONS = ["browser", "import", "default"];
+
 const BUILTINS = new Set(builtinModules.flatMap((m) => [m, `node:${m}`]));
 
 /** What each Node built-in is usually reached for, and what to use instead. */
@@ -116,7 +124,8 @@ async function loadDefinition(dir: string, entry: string, scratch: string): Prom
       entryPoints: [entry],
       bundle: true,
       platform: "neutral",
-      mainFields: ["module", "main"],
+      mainFields: MAIN_FIELDS,
+      conditions: CONDITIONS,
       format: "esm",
       target: "es2022",
       outfile,
@@ -285,8 +294,8 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
         bundle: true,
         write: false,
         platform: "neutral",
-        mainFields: ["module", "main"],
-        conditions: ["import", "default"],
+        mainFields: MAIN_FIELDS,
+        conditions: CONDITIONS,
         format: "esm",
         target: "es2022",
         charset: "utf8",
