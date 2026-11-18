@@ -18,7 +18,7 @@ export const MembersPage: React.FC = () => {
   return (
     <PageShell title={t("members.pageTitle")} scrollable>
       <div className="pt-8 flex-1 flex flex-col overflow-hidden">
-        <Members groupId={groupId} isAdmin={group.current_user_role === "admin"} />
+        <Members groupId={groupId} groupName={group.name} isAdmin={group.current_user_role === "admin"} />
       </div>
     </PageShell>
   );
