@@ -20,7 +20,7 @@ Triggers, so no DS code is in the path (tests: `pollis-delivery/tests/bot_schema
 | `/v1/bots/delete` | device-signed admin | Account deletion of the bot, then leave wake-ups and the owed commit-log purge |
 | `/v1/bots/hosts/approve` | device-signed current admin of the bot's group | Store the admin's signed host approval (opaque to the DS) on the bot's open add-host request; inbox nudge `bot_host_approval` |
 | `/v1/bots/hosts/pending` | device-signed bot host | Approved, unwrapped add-host requests for the signer's bot |
-| `/v1/bots/hosts/wrap` | device-signed bot host | First wrap wins (status CAS); approver re-checked as a current admin; registers the new host's `user_device` row |
+| `/v1/bots/hosts/wrap` | device-signed bot host | First wrap wins (status CAS); approver re-checked as a current admin; registers the new host's `user_device` row; nudges the group's admins' inboxes with `bots_changed {group_id}` (DS-only, content-free) so an open Bots page re-reads |
 | `/v1/bots/triggers/claim` | device-signed bot host, own installation | `(installation_id, trigger_key)` PK: first claim wins, the winner's retry wins again; kept 7 days |
 
 After `created`/`wrapped` the host publishes its cert through `/v1/auth/publish-device-cert` (cert-validity gate, `user_id` in the body) and then its key packages, device-signed.

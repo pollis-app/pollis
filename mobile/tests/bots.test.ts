@@ -16,6 +16,7 @@ import {
   isLastHost,
   type BotHost,
 } from "../lib/bots.ts";
+import { decodeRealtimeEvent, isTrustedOrigin } from "../lib/realtime/events.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
@@ -102,4 +103,13 @@ test("every Bots page is a registered route and opens in the iPad pane", () => {
     assert.match(pane, new RegExp(`"/${route}"`), route);
     assert.match(md, new RegExp(`"/${route}": `), route);
   }
+});
+
+test("the DS's bots nudge decodes, only from the DS, and an open Bots page re-reads", () => {
+  const event = decodeRealtimeEvent(JSON.stringify({ type: "bots_changed", group_id: "g1" }));
+  assert.ok(event, "bots_changed must decode");
+  assert.equal(event.type, "bots_changed");
+  assert.ok(isTrustedOrigin(event, false));
+  assert.ok(!isTrustedOrigin(event, true), "a participant cannot fake the DS nudge");
+  assert.match(read("hooks/useInboxRealtime.ts"), /case "bots_changed":[\s\S]*?botQueryKeys\.all/);
 });

@@ -8,7 +8,7 @@ import { appStore } from "../../stores/appStore";
 import { botIdSet } from "../../utils/bots";
 
 /** Bots (#1182). A bot is a group member too, so a change also refreshes the member list. */
-const botQueryKeys = {
+export const botQueryKeys = {
   all: ["bots"] as const,
   group: (groupId: string) => ["bots", "group", groupId] as const,
   bot: (botUserId: string) => ["bots", "bot", botUserId] as const,
