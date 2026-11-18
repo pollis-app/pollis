@@ -21,7 +21,7 @@ name: Dead code
 
 on:
   pull_request:
-    branches: [main, feature/bots]
+    branches: [main]
     paths:
       - "frontend/**"
       - "mobile/**"
