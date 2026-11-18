@@ -15,7 +15,7 @@ name: Scripts check
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/bots]
     paths:
       - "scripts/**"
       # #945: every surface that hard-codes the transparency log's pinned

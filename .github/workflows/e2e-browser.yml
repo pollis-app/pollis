@@ -27,7 +27,7 @@ name: Browser UI specs
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/bots]
   push:
     branches: [main]
     # Same list as the `ui` filter below; keep the two in step.
