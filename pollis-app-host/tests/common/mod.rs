@@ -240,6 +240,7 @@ pub fn host_with(limits: JobLimits) -> AppHost {
     AppHost::new(HostConfig {
         limits,
         cache_capacity: 8,
+        ..HostConfig::default()
     })
     .unwrap()
 }
