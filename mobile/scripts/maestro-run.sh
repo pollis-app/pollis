@@ -281,6 +281,11 @@ plan_for() {
 
 DATE="$(date +%Y-%m-%d)"
 STAMP="$(date +%H%M%S)"
+# A run inside maestro-locale-smoke.sh can start in the same second as the
+# run that called it; it must not share (and truncate) that run's log dir.
+if [ -n "${LOCALE:-}" ]; then
+  STAMP="$STAMP-$LOCALE"
+fi
 EMAIL_BASE="$(sed -n 's/^MAESTRO_EMAIL=//p' "$ENV_FILE" 2>/dev/null | head -1 || true)"
 EMAIL_BASE="${EMAIL_BASE:-pollis-e2e+primary@example.com}"
 
