@@ -331,6 +331,10 @@ pub struct GroupMemberWire {
     pub avatar_url: Option<String>,
     pub role: String,
     pub joined_at: String,
+    /// #1182: the account is a bot (`users.kind = 'bot'`); the client shows a
+    /// Bot badge. Absent from a DS that predates bots, so it defaults to false.
+    #[serde(default)]
+    pub is_bot: bool,
 }
 
 /// An invite link, minus its token.
@@ -439,6 +443,10 @@ pub struct UserWire {
     pub preferred_name: Option<String>,
     #[serde(default)]
     pub avatar_url: Option<String>,
+    /// #1182: the account is a bot (`users.kind = 'bot'`); the client shows a
+    /// Bot badge. Absent from a DS that predates bots, so it defaults to false.
+    #[serde(default)]
+    pub is_bot: bool,
 }
 
 /// Slug discovery — the join flow's first step.
