@@ -1,0 +1,21 @@
+# A component that opens a TCP socket through WASI, as any std Rust guest
+# using std::net would. pollis-app-host must refuse to load it (#2004).
+# Built to ../net-app.wasm by ../build.sh. No dependencies.
+[package]
+name = "pollis-net-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+panic = "abort"
+
+[workspace]

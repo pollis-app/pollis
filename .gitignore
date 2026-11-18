@@ -12,7 +12,6 @@ pollis
 !verifiable-log-builder/src/bin/
 !verifiable-log-serve/src/bin/
 !pollis-relay/src/bin/
-!pollis-core/src/bin/
 
 # Test binary
 *.test

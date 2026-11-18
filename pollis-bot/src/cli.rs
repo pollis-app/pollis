@@ -23,6 +23,8 @@ pub enum Command {
     Status,
     RotateSecret { installation_id: String },
     Forget { installation_id: String },
+    /// #2004: run an App as an installation's handler.
+    AppInstall { installation_id: String, artifact: PathBuf },
 }
 
 pub fn help_text() -> String {
@@ -53,6 +55,10 @@ COMMANDS
     forget --installation ID
         Remove an installation from this host (its record, store and keys),
         e.g. after an admin revoked this host or deleted the bot.
+    app install --installation ID --artifact DIR
+        Run the App in DIR (pollis-app.json and one .wasm component) as the
+        installation's handler. Development builds only, until App approvals
+        ship: it reads the admin's grants from POLLIS_APP_DEV_GRANTS.
 
 FILES
     DIR/config.json      max_installations (default {max}), webhook {{bind, per_minute, burst}}
@@ -62,6 +68,7 @@ FILES
 
 ENVIRONMENT
     POLLIS_BOT_DATA_DIR  data directory when --data-dir is not given
+    POLLIS_APP_DEV_GRANTS  development builds: the admin's grants for an App
 ",
         version = env!("CARGO_PKG_VERSION"),
         bind = DEFAULT_WEBHOOK_BIND,
@@ -172,6 +179,16 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Stri
         "forget" => Command::Forget {
             installation_id: take("installation").flatten().ok_or("forget needs --installation ID")?,
         },
+        "app" => match positional.first().map(String::as_str) {
+            Some("install") => {
+                positional.remove(0);
+                Command::AppInstall {
+                    installation_id: take("installation").flatten().ok_or("app install needs --installation ID")?,
+                    artifact: PathBuf::from(take("artifact").flatten().ok_or("app install needs --artifact DIR")?),
+                }
+            }
+            _ => return Err("`app` needs a subcommand: `app install --installation ID --artifact DIR`".into()),
+        },
         other => return Err(format!("unknown command `{other}`")),
     };
     if let Some((flag, _)) = flags.first() {
@@ -218,6 +235,12 @@ mod tests {
             p(&["forget", "--installation", "01I"]).unwrap().command,
             Command::Forget { installation_id: "01I".into() }
         );
+        assert_eq!(
+            p(&["app", "install", "--installation", "01I", "--artifact", "/apps/pager"]).unwrap().command,
+            Command::AppInstall { installation_id: "01I".into(), artifact: "/apps/pager".into() }
+        );
+        assert!(p(&["app"]).unwrap_err().contains("app install"));
+        assert!(p(&["app", "install", "--installation", "01I"]).unwrap_err().contains("--artifact"));
     }
 
     #[test]

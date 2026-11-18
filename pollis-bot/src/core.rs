@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 
-use crate::action::ChannelInfo;
+use crate::action::{ChannelInfo, CheckedAction};
 use crate::trigger::{IncomingMessage, TriggerKey};
 
 /// A failed call into the core, with the step it failed in.
@@ -72,4 +72,81 @@ pub trait InstallationCore: Send + Sync {
     /// Post through the normal (durable) send path under `message_id`, so a
     /// retried job never posts twice.
     async fn post(&self, channel_id: &str, text: &str, message_id: &str) -> Result<(), CoreError>;
+
+    /// Apply one checked action. The default handles `post` only; the real
+    /// core applies every kind (#2004).
+    async fn act(&self, action: &CheckedAction, message_id: &str) -> Result<(), CoreError> {
+        match action {
+            CheckedAction::Post { channel_id, text } => self.post(channel_id, text, message_id).await,
+            other => Err(CoreError(format!("this core cannot apply {other:?}"))),
+        }
+    }
+
+    /// #2004: one App state key as the DS holds it (version 0 when absent),
+    /// and the installation's usage in plaintext bytes.
+    async fn state_read(&self, _key: &str) -> Result<(StateValue, u64), CoreError> {
+        Err(CoreError("this installation has no App state".into()))
+    }
+
+    /// #2004: write a job's App state under the claim this host won on `key`.
+    async fn state_commit(&self, _key: &TriggerKey, _writes: &[StateWrite]) -> Result<StateCommit, CoreError> {
+        Err(CoreError("this installation has no App state".into()))
+    }
+
+    /// #2004: the bot's group's members, for an App's message data (author
+    /// name, is-bot) and for telling a mention of the bot. Empty by default.
+    async fn members(&self) -> Result<Vec<Member>, CoreError> {
+        Ok(Vec::new())
+    }
+
+    /// #2004: the last slot (Unix seconds) this host finished for schedule
+    /// `name`, from the installation's store. `None` at first sight.
+    async fn schedule_cursor(&self, _name: &str) -> Result<Option<u64>, CoreError> {
+        Ok(None)
+    }
+
+    /// #2004: record that schedule `name` is finished up to `slot`.
+    async fn mark_schedule(&self, _name: &str, _slot: u64) -> Result<(), CoreError> {
+        Ok(())
+    }
+
+    /// #2004: the channel and author of a message this host has seen.
+    async fn message_meta(&self, _message_id: &str) -> Result<Option<(String, String)>, CoreError> {
+        Ok(None)
+    }
+}
+
+/// A member of the bot's group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+    pub user_id: String,
+    pub username: Option<String>,
+    pub is_bot: bool,
+}
+
+/// One App state key as read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateValue {
+    pub version: i64,
+    pub value: Option<Vec<u8>>,
+}
+
+/// One write of a job's App state, at the version the job read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateWrite {
+    pub key: String,
+    pub expected_version: i64,
+    pub value: Option<Vec<u8>>,
+}
+
+/// How a state commit went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StateCommit {
+    Committed,
+    /// A retried job: this claim's state was written before.
+    AlreadyCommitted,
+    /// Another host moved a key since this job read it: re-run the job.
+    Conflict,
+    /// The DS's per-installation ceiling.
+    OverQuota { max_bytes: u64 },
 }

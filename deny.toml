@@ -250,6 +250,16 @@ name = "pollis-sqlcipher"
 expression = "LicenseRef-proprietary"
 license-files = []
 
+[[licenses.clarify]]
+name = "pollis-app-manifest"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-app-host"
+expression = "LicenseRef-proprietary"
+license-files = []
+
 [licenses.private]
 # Defense-in-depth: the clarify blocks above already mark every current
 # workspace crate proprietary. This additionally skips license checks for any
@@ -324,6 +334,9 @@ skip = [
     { name = "ghash", version = "0.5.1" },
     { name = "hashbrown", version = "0.12.3" },
     { name = "hashbrown", version = "0.15.5" },
+    # gimli 0.33 (under Cranelift, for the App sandbox, #2004) is on 0.16; the
+    # rest of the tree is on 0.17. Goes when gimli moves to hashbrown 0.17.
+    { name = "hashbrown", version = "0.16.1" },
     # libcrux-intrinsics 0.0.9 (under hpke-rs 0.8's libcrux-sha3, #1846) uses
     # hax-lib 0.4 itself and 0.3 through core-models.
     { name = "hax-lib", version = "0.3.7" },

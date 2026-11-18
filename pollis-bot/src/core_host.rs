@@ -25,8 +25,8 @@ use pollis_core::config::Config;
 use pollis_core::keystore::Keystore;
 use pollis_core::state::AppState;
 
-use crate::action::ChannelInfo;
-use crate::core::{CoreError, InstallationCore};
+use crate::action::{ChannelInfo, CheckedAction};
+use crate::core::{CoreError, InstallationCore, Member, StateCommit, StateValue, StateWrite};
 use crate::host::{BotHost, OpenedInstallation, PairOutcome, PairTarget, PairingProgress, PairingTicket, Wakes};
 use crate::installations::InstallationRecord;
 use crate::secrets::SecretSlot;
@@ -444,6 +444,156 @@ impl InstallationCore for CoreInstallation {
             .map_err(core_err)
     }
 
+    async fn act(&self, action: &CheckedAction, message_id: &str) -> Result<(), CoreError> {
+        let state = self.state().await?;
+        let user = self.session.bot_user_id.clone();
+        use pollis_core::commands::livekit_signalling as wake;
+        let (result, payload) = match action.clone() {
+            CheckedAction::Post { channel_id, text } => (
+                self.post(&channel_id, &text, message_id).await,
+                wake::new_message_payload(Some(&channel_id), None),
+            ),
+            CheckedAction::Reply {
+                channel_id,
+                message_id: target,
+                text,
+            } => (
+                send_message_with_id(
+                    Some(message_id.to_string()),
+                    channel_id.clone(),
+                    user,
+                    text,
+                    Vec::new(),
+                    Some(target),
+                    None,
+                    None,
+                    &state,
+                )
+                .await
+                .map(|_| ())
+                .map_err(core_err),
+                wake::new_message_payload(Some(&channel_id), None),
+            ),
+            CheckedAction::React {
+                channel_id,
+                message_id: target,
+                emoji,
+            } => (
+                pollis_core::commands::messages::add_reaction(target, user, emoji, &state)
+                    .await
+                    .map_err(core_err),
+                wake::new_message_payload(Some(&channel_id), None),
+            ),
+            CheckedAction::EditOwn {
+                channel_id,
+                message_id: target,
+                text,
+            } => (
+                pollis_core::commands::messages::edit_message(channel_id.clone(), target.clone(), user, text, &state)
+                    .await
+                    .map_err(core_err),
+                wake::edited_message_payload(Some(&channel_id), None, &target),
+            ),
+            CheckedAction::DeleteOwn {
+                channel_id,
+                message_id: target,
+            } => (
+                pollis_core::commands::messages::delete_message(target.clone(), user, &state)
+                    .await
+                    .map_err(core_err),
+                wake::deleted_message_payload(Some(&channel_id), None, &target),
+            ),
+        };
+        result?;
+        // A job's store is not joined to the group's realtime room, so the core's own wake-up
+        // after a send reaches no one; tell the room through the DS, as any member's client would
+        // (#1182). Content-free, best-effort: members also see it on their next catch-up.
+        if let Err(e) = bots::wake_group_room(&state, &self.session.group_id, payload).await {
+            crate::log::info(&crate::log::scope(&self.session.bot_user_id), format!("could not wake the group's members: {e}"));
+        }
+        Ok(())
+    }
+
+    async fn state_read(&self, key: &str) -> Result<(StateValue, u64), CoreError> {
+        let state = self.state().await?;
+        let keys = bots::app_state::app_state_keys(&state, &self.session.bot_user_id)
+            .await
+            .map_err(core_err)?;
+        let (v, usage) = bots::app_state::read_app_state(&state, &keys, key)
+            .await
+            .map_err(core_err)?;
+        Ok((
+            StateValue {
+                version: v.version,
+                value: v.value,
+            },
+            usage,
+        ))
+    }
+
+    async fn state_commit(
+        &self,
+        key: &TriggerKey,
+        writes: &[StateWrite],
+    ) -> Result<StateCommit, CoreError> {
+        use pollis_api::bots::AppStateCommitResponse as R;
+        let state = self.state().await?;
+        let keys = bots::app_state::app_state_keys(&state, &self.session.bot_user_id)
+            .await
+            .map_err(core_err)?;
+        let writes: Vec<bots::app_state::AppStateWriteIn> = writes
+            .iter()
+            .map(|w| bots::app_state::AppStateWriteIn {
+                key: w.key.clone(),
+                expected_version: w.expected_version,
+                value: w.value.clone(),
+            })
+            .collect();
+        Ok(
+            match bots::app_state::commit_app_state(&state, &keys, key.as_str(), &writes)
+                .await
+                .map_err(core_err)?
+            {
+                R::Committed => StateCommit::Committed,
+                R::AlreadyCommitted => StateCommit::AlreadyCommitted,
+                R::Conflict { .. } => StateCommit::Conflict,
+                R::OverQuota { max_bytes } => StateCommit::OverQuota { max_bytes },
+            },
+        )
+    }
+
+    async fn members(&self) -> Result<Vec<Member>, CoreError> {
+        let state = self.state().await?;
+        let members = pollis_core::commands::groups::get_group_members(
+            self.session.group_id.clone(),
+            self.session.bot_user_id.clone(),
+            &state,
+        )
+        .await
+        .map_err(core_err)?;
+        Ok(members
+            .into_iter()
+            .map(|m| Member { user_id: m.user_id, username: m.username, is_bot: m.is_bot })
+            .collect())
+    }
+
+    async fn schedule_cursor(&self, name: &str) -> Result<Option<u64>, CoreError> {
+        let state = self.state().await?;
+        bots::schedule_cursor(&state, name).await.map_err(core_err)
+    }
+
+    async fn mark_schedule(&self, name: &str, slot: u64) -> Result<(), CoreError> {
+        let state = self.state().await?;
+        bots::set_schedule_cursor(&state, name, slot).await.map_err(core_err)
+    }
+
+    async fn message_meta(&self, message_id: &str) -> Result<Option<(String, String)>, CoreError> {
+        let state = self.state().await?;
+        bots::message_meta(&state, message_id)
+            .await
+            .map_err(core_err)
+    }
+
     async fn post(&self, channel_id: &str, text: &str, message_id: &str) -> Result<(), CoreError> {
         let state = self.state().await?;
         send_message_with_id(
@@ -458,15 +608,8 @@ impl InstallationCore for CoreInstallation {
             &state,
         )
         .await
-        .map_err(core_err)?;
-        // A job's store is not joined to the group's realtime room, so the core's own wake-up
-        // after a send reaches no one; tell the room through the DS, as any member's client would
-        // (#1182). Content-free, best-effort: members also see it on their next catch-up.
-        let payload = pollis_core::commands::livekit_signalling::new_message_payload(Some(channel_id), None);
-        if let Err(e) = bots::wake_group_room(&state, &self.session.group_id, payload).await {
-            crate::log::info(&crate::log::scope(&self.session.bot_user_id), format!("could not wake the group's members: {e}"));
-        }
-        Ok(())
+        .map(|_| ())
+        .map_err(core_err)
     }
 }
 

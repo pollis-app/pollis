@@ -323,6 +323,9 @@ endpoints! {
     Client   bots::PendingBotHostsBody          => "/v1/bots/hosts/pending",             bots::PendingBotHostsResponse;
     Client   bots::WrapBotHostBody              => "/v1/bots/hosts/wrap",                StatusOk;
     Client   bots::ClaimTriggerBody             => "/v1/bots/triggers/claim",            bots::ClaimTriggerResponse, idempotent;
+    // #2004: App key-value state, sealed by the bot's hosts.
+    Client   bots::AppStateReadBody             => "/v1/bots/app-state/read",            bots::AppStateReadResponse;
+    Client   bots::AppStateCommitBody           => "/v1/bots/app-state/commit",          bots::AppStateCommitResponse, idempotent;
 }
 
 /// The guarantee, executable: a body missing a field does not compile.

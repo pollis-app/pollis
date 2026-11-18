@@ -135,9 +135,6 @@ mod seam_tests {
         // the client-policy fetch (#1612): one request per launch through a
         // per-call proxy plan, so a pooled client would save no handshake
         "pollis-core/src/client_policy.rs",
-        // `pollis-bot post` (#1182): one loopback request to the local runtime's
-        // webhook per process, so a pooled client would save no handshake
-        "pollis-bot/src/post.rs",
     ];
 
     fn workspace_root() -> PathBuf {

@@ -1,0 +1,24 @@
+# An ordinary std Rust App (#2004): wit-bindgen with default features,
+# println!, std::env, std::time, std::fs, std::process::exit. Proves such a
+# guest loads against the host's WASI stubs while the filesystem stays empty.
+# Built to ../std-app.wasm by ../build.sh.
+[package]
+name = "pollis-std-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "=0.61.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+
+[workspace]

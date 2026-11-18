@@ -33,13 +33,17 @@ pub async fn claim_trigger(state: &Arc<AppState>, installation_id: &str, trigger
 /// finished with, as `(sent_at, message_id)`. Kept in the installation's
 /// encrypted store. `None` for a channel it has never seen.
 pub async fn trigger_cursor(state: &Arc<AppState>, channel_id: &str) -> Result<Option<(String, String)>> {
+    query_pair(state, "SELECT sent_at, message_id FROM bot_trigger_cursor WHERE channel_id = ?1", channel_id).await
+}
+
+/// One row of two text columns from the installation's store, keyed by `key`;
+/// `None` when there is no such row.
+async fn query_pair(state: &Arc<AppState>, sql: &str, key: &str) -> Result<Option<(String, String)>> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(not_active)?;
-    match db.conn().query_row(
-        "SELECT sent_at, message_id FROM bot_trigger_cursor WHERE channel_id = ?1",
-        rusqlite::params![channel_id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    ) {
+    match db.conn().query_row(sql, rusqlite::params![key], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
         Ok(pair) => Ok(Some(pair)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
@@ -59,6 +63,55 @@ pub async fn set_trigger_cursor(state: &Arc<AppState>, channel_id: &str, sent_at
     Ok(())
 }
 
+/// The channel (conversation) and author of a message in the installation's
+/// store, for checking an App's action on it (#2004). `None` when this host
+/// has never seen it, or it was deleted.
+pub async fn message_meta(state: &Arc<AppState>, message_id: &str) -> Result<Option<(String, String)>> {
+    query_pair(
+        state,
+        "SELECT conversation_id, sender_id FROM message WHERE id = ?1 AND deleted_at IS NULL",
+        message_id,
+    )
+    .await
+}
+
+/// The last slot (Unix seconds) the job loop finished for an App schedule
+/// (#2004), kept in the installation's encrypted store beside the channel
+/// cursors (`bot_trigger_cursor`, keyed `schedule:<name>`). `None` for a
+/// schedule it has never seen.
+pub async fn schedule_cursor(state: &Arc<AppState>, name: &str) -> Result<Option<u64>> {
+    Ok(trigger_cursor(state, &format!("schedule:{name}"))
+        .await?
+        .and_then(|(slot, _)| slot.parse().ok()))
+}
+
+/// Record that the job loop has finished schedule `name` up to `slot`.
+pub async fn set_schedule_cursor(state: &Arc<AppState>, name: &str, slot: u64) -> Result<()> {
+    set_trigger_cursor(state, &format!("schedule:{name}"), &slot.to_string(), "").await
+}
+
+/// Whether `content` mentions `username` by `@username`, by the same rule
+/// that decides who a channel message wakes (#843): a whitespace- or
+/// string-initial `@`, case-insensitive, trailing punctuation ignored. `@all`
+/// is not a mention of the bot (#2004: an App's `on-mention`).
+pub fn mentions_username(content: &str, username: &str) -> bool {
+    !crate::commands::messages::direct_mentions(content, &[(String::new(), username.to_string())]).is_empty()
+}
+
 fn not_active() -> Error {
     Error::Other(anyhow::anyhow!("bot installation is not active"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mentions_username;
+
+    #[test]
+    fn a_bot_is_mentioned_by_its_username_only() {
+        assert!(mentions_username("hey @Triage_bot, look", "triage_bot"));
+        assert!(mentions_username("@triage_bot", "triage_bot"));
+        assert!(!mentions_username("@all please", "triage_bot"));
+        assert!(!mentions_username("mail@triage_bot", "triage_bot"));
+        assert!(!mentions_username("@triage_bots", "triage_bot"));
+    }
 }

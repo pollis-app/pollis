@@ -33,6 +33,9 @@ realtime = ["pollis-core/realtime"]
 # encrypted file, never plaintext. Media comes only with `realtime`.
 pollis-core = { path = "../pollis-core", default-features = false, features = ["os-keystore"] }
 pollis-api = { path = "../pollis-api" }
+# #2004: the App sandbox and its manifest and grants.
+pollis-app-host = { path = "../pollis-app-host" }
+pollis-app-manifest = { path = "../pollis-app-manifest" }
 # Multi-thread runtime: pollis-core's DB and keystore paths use spawn_blocking.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal", "fs"] }
 async-trait = "0.1"

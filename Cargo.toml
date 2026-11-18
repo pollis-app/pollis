@@ -18,6 +18,8 @@ members = [
     "pollis-schema",
     "pollis-sqlcipher",
     "pollis-libsql-connector",
+    "pollis-app-manifest",
+    "pollis-app-host",
     "patches/device-info",
 ]
 # Detached from this workspace on purpose: `fuzz/` is the Track-B cargo-fuzz crate
@@ -33,6 +35,9 @@ exclude = [
     "patches/openmls-sqlite-storage",
     "patches/libsql",
     "patches/cpal",
+    # The fixture App's guest source (#2004): a wasm32-wasip2 component with its
+    # own [workspace] and lockfile, built by pollis-app-host/fixtures/build.sh.
+    "pollis-app-host/fixtures/test-app",
 ]
 
 [workspace.package]

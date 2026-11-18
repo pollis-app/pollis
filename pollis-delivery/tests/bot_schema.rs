@@ -265,3 +265,37 @@ async fn a_pairing_request_has_exactly_its_kinds_shape() {
          VALUES ('r1', 'create', {key}, {key}, {key}, 'd', {account}, 1)"
     )).await;
 }
+
+#[tokio::test]
+async fn app_state_is_a_bots_versioned_and_within_the_quota() {
+    let c = conn().await;
+    with_bot(&c).await;
+    let row = |inst: &str, key: u8, len: usize, version: i64| {
+        format!(
+            "INSERT INTO bot_app_state (installation_id, key_id, sealed, version, updated_at) \
+             VALUES ('{inst}', x'{}', zeroblob({len}), {version}, 1)",
+            format!("{key:02x}").repeat(32)
+        )
+    };
+    refused(&c, &row("alice", 1, 40, 1)).await;
+    refused(&c, &row("B1", 1, 40, 2)).await;
+    refused(&c, &row("B1", 1, 29, 1)).await;
+    refused(&c, &row("B1", 1, 70_001, 1)).await;
+    ok(&c, &row("B1", 1, 40, 1)).await;
+    refused(&c, "UPDATE bot_app_state SET version = 3 WHERE installation_id = 'B1'").await;
+    ok(&c, "UPDATE bot_app_state SET version = 2, sealed = zeroblob(50) WHERE installation_id = 'B1'").await;
+    // 50 + 14 x 70,000 = 980,050 bytes fit; one more 70,000 would pass 1 MiB.
+    for n in 2..16u8 {
+        ok(&c, &row("B1", n, 70_000, 1)).await;
+    }
+    refused(&c, &row("B1", 99, 70_000, 1)).await;
+}
+
+#[tokio::test]
+async fn a_claims_state_commit_cannot_be_undone() {
+    let c = conn().await;
+    with_bot(&c).await;
+    ok(&c, "INSERT INTO bot_trigger_claim (installation_id, trigger_key, device_id, claimed_at) VALUES ('B1', 'k', 'd1', 1)").await;
+    ok(&c, "UPDATE bot_trigger_claim SET state_committed = 1 WHERE trigger_key = 'k'").await;
+    refused(&c, "UPDATE bot_trigger_claim SET state_committed = 0 WHERE trigger_key = 'k'").await;
+}

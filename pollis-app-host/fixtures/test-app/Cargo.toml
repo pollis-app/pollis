@@ -1,0 +1,25 @@
+# The fixture App the pollis-app-host tests run (#2004). Built to
+# ../test-app.wasm by ../build.sh; both this source and the built component are
+# checked in. Its own workspace, so its dependencies never enter the root
+# lockfile, cargo-deny or cargo-vet: nothing here ships.
+[package]
+name = "pollis-test-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.61.1", default-features = false, features = ["macros"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+panic = "abort"
+
+[workspace]

@@ -15,7 +15,7 @@ use pollis_bot::job::{action_message_id, Installation, JobError, JobInput, Trigg
 use pollis_bot::trigger::{IncomingMessage, Trigger, WebhookCall};
 
 fn hook(delivery: &str, channel: &str, text: &str) -> JobInput {
-    JobInput::Webhook(WebhookCall { delivery_id: delivery.into(), channel: channel.into(), text: text.into() })
+    JobInput::Webhook(WebhookCall::alert(delivery, channel, text))
 }
 
 fn webhook_outcome(report: &pollis_bot::job::JobReport) -> TriggerOutcome {
