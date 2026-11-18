@@ -176,6 +176,13 @@ pub(crate) async fn confirm_is_bot(state: &Arc<AppState>, user_id: &str) -> Resu
     }
 }
 
+/// Seal an installation again after [`start_unattended`]: close its local DB
+/// and drop its keys from memory. The bot runtime calls this at the end of
+/// every job, so an installation's state is unsealed only while a job runs.
+pub async fn stop_unattended(state: &AppState) {
+    deactivate(state).await;
+}
+
 /// Remove an installation from this machine: its keystore slot and its local DB.
 /// For a bot that was deleted or a host that was revoked.
 pub async fn forget_installation(state: &Arc<AppState>, bot_user_id: &str) -> Result<()> {
