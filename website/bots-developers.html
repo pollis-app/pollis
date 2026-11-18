@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Bots for developers</title>
+  <meta name="description"
+    content="Post alerts into a Pollis channel through a bot's webhook, and how the bot runtime's job loop works." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Bots for developers" />
+  <meta property="og:description"
+    content="Post alerts into a Pollis channel through a bot's webhook, and how the bot runtime's job loop works." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <header class="site-nav">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <a href="index.html#download">Download</a>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQ</a>
+        <a href="learn.html">Learn</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="doc-main reading-surface">
+
+      <div class="doc-header">
+        <h1 class="doc-title">Bots for developers</h1>
+        <p class="doc-subtitle">
+          Post alerts into a channel, and how the bot runtime decides what happens.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        Each bot's runtime, <code>pollis-bot</code>, listens for alerts on a small HTTP endpoint on its own machine.
+        It encrypts each alert and posts it into the bot's group as the bot.
+        <br /><br />
+        Setting up a bot first: <a href="bots.html">Bots</a> and <a href="bots-self-hosting.html">Self-hosting a
+        bot</a>.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section" id="webhook">
+        <h2 class="doc-section-title">The alerts webhook</h2>
+        <p>Turn it on with <code>pollis-bot run --webhook</code>, or in <code>config.json</code>:</p>
+        <code class="doc-cmd">{ "webhook": { "bind": "127.0.0.1:8787" } }</code>
+        <p>
+          The first start with the webhook on prints each installation's <strong>secret</strong> once
+          (<code>pbw_…</code>). Lost it? <code>pollis-bot rotate-secret --installation &lt;id&gt;</code> prints a
+          new one; restart <code>pollis-bot run</code> to use it. The installation id is the first column of
+          <code>pollis-bot status</code>.
+        </p>
+        <code class="doc-cmd">POST http://&lt;bind address&gt;/hooks/&lt;installation id&gt;
+Content-Type: application/json
+
+{"channel": "alerts", "text": "disk 91% on db-1"}</code>
+        <ul>
+          <li><code>channel</code>: a text channel of the bot's group, by name (with or without <code>#</code>,
+            any case) or by id.</li>
+          <li><code>text</code>: up to 4,000 characters.</li>
+          <li>The listener binds to <code>127.0.0.1:8787</code> by default. To take alerts from another machine on
+            your network, set <code>bind</code> to that interface's address; callers still need the secret. It
+            speaks plain HTTP, so keep it on networks you trust or put a TLS reverse proxy in front.</li>
+        </ul>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Authenticate and send</h2>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>Header</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td><code>Authorization</code></td><td class="doc-td-dim"><code>Bearer &lt;secret&gt;</code></td></tr>
+              <tr><td><code>X-Pollis-Signature</code></td>
+                <td class="doc-td-dim"><code>sha256=&lt;hex HMAC-SHA256 of the raw body, keyed with the
+                    secret&gt;</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Use one. A request carrying a signature must have a correct one; a bearer header cannot make up for it.</p>
+        <code class="doc-cmd">SECRET='pbw_…'
+URL="http://127.0.0.1:8787/hooks/&lt;installation id&gt;"
+
+curl -sS -X POST "$URL" \
+  -H "Authorization: Bearer $SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"channel": "alerts", "text": "disk 91% on db-1"}'</code>
+        <code class="doc-cmd">BODY='{"channel": "alerts", "text": "deploy finished"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')
+curl -sS -X POST "$URL" \
+  -H "X-Pollis-Signature: sha256=$SIG" \
+  -H "Content-Type: application/json" \
+  --data-binary "$BODY"</code>
+        <p>On the bot's machine, <code>pollis-bot post</code> sends through the running webhook for you, signed
+          with the installation's secret:</p>
+        <code class="doc-cmd">pollis-bot post --installation &lt;id&gt; --channel alerts "backup finished"</code>
+        <p>
+          <strong>Several hosts:</strong> send the same alert to each of a bot's hosts with the same
+          <code>X-Pollis-Delivery</code> header (1 to 128 characters of <code>A-Z a-z 0-9 . _ : -</code>), and
+          exactly one host posts it; the others answer <code>claimed_elsewhere</code>.
+        </p>
+        <p>
+          <strong>Rate limit</strong>, per installation: a burst of <strong>10</strong>, refilled at
+          <strong>30 a minute</strong> (<code>webhook.burst</code>, <code>webhook.per_minute</code>). Over it:
+          <code>429</code> with <code>Retry-After</code>, and nothing is posted.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Answers</h2>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>HTTP</th><th><code>status</code></th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td>200</td><td><code>posted</code></td><td class="doc-td-dim">Posted.</td></tr>
+              <tr><td>200</td><td><code>claimed_elsewhere</code></td><td class="doc-td-dim">Another host of the bot posted it.</td></tr>
+              <tr><td>202</td><td><code>accepted</code></td><td class="doc-td-dim">The job took over 30 seconds; it still finishes.</td></tr>
+              <tr><td>400</td><td><code>bad_request</code></td><td class="doc-td-dim">Not <code>{"channel", "text"}</code> JSON, or a malformed <code>X-Pollis-Delivery</code>.</td></tr>
+              <tr><td>401</td><td><code>unauthorized</code></td><td class="doc-td-dim">Wrong or missing secret or signature.</td></tr>
+              <tr><td>404</td><td><code>unknown_installation</code></td><td class="doc-td-dim">No such installation on this machine.</td></tr>
+              <tr><td>413</td><td></td><td class="doc-td-dim">Body over 64 KiB.</td></tr>
+              <tr><td>422</td><td><code>refused</code></td><td class="doc-td-dim">Not a text channel of the bot's group, empty text, or over 4,000 characters.</td></tr>
+              <tr><td>429</td><td><code>rate_limited</code></td><td class="doc-td-dim">Over the rate limit; wait <code>Retry-After</code> seconds.</td></tr>
+              <tr><td>500 / 503</td><td><code>failed</code></td><td class="doc-td-dim">The job could not finish; <code>fix</code> says what to do. Retry with the same <code>X-Pollis-Delivery</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">How a job runs</h2>
+        <p>Every trigger goes through the same seven steps:</p>
+        <ol>
+          <li><strong>Trigger.</strong> Something arrives for an installation: new messages in the group may be
+            waiting, or a webhook call comes in.</li>
+          <li><strong>Lock.</strong> One job per installation at a time; installations run in parallel.</li>
+          <li><strong>Catch up.</strong> The bot's view of the group is brought up to date through the normal
+            message path. New messages become message triggers, oldest first; the bot's own never do.</li>
+          <li><strong>Handle.</strong> The installation's handler returns a list of actions. It holds no keys,
+            opens no connections and sends nothing itself.</li>
+          <li><strong>Claim.</strong> If there are actions, the host claims the trigger on the Delivery Service.
+            If another host of the bot claimed it first, this host drops its actions.</li>
+          <li><strong>Check and apply.</strong> Each action is checked against the installation's grants; what
+            passes is sent through the normal send path, what doesn't is reported and never sent.</li>
+          <li><strong>Unlock.</strong></li>
+        </ol>
+        <p>There are no timers: a job starts when the runtime starts, when a realtime event says the group may
+          have changed, or when a webhook call arrives.</p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Triggers, claims and grants</h2>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>Trigger</th><th>Trigger key</th></tr></thead>
+            <tbody>
+              <tr><td>A new message in the bot's group</td><td class="doc-td-dim"><code>msg:&lt;envelope id&gt;</code></td></tr>
+              <tr><td>A webhook call</td><td class="doc-td-dim"><code>hook:&lt;delivery id&gt;</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          <strong>Why only one host acts.</strong> A bot with several hosts sees every message on each of them.
+          Before acting, a host claims <code>(installation id, trigger key)</code> on the Delivery Service, which
+          keeps it under a uniqueness constraint: the first claim wins, the others discard their actions, and the
+          winner's own retry wins again. A trigger with no actions is never claimed.
+        </p>
+        <p>
+          <strong>Retries never double-post.</strong> If the claim or the send cannot reach the Delivery Service,
+          the job stops at that message and retries it, in order, on the next wake-up. The message it posts has an
+          id derived from the installation, the trigger key and the action's position, so a retry re-sends the
+          same message.
+        </p>
+        <p>
+          <strong>Grants.</strong> Every action is checked against what the installation is allowed to do. Today
+          that is <code>post</code> to the text channels of the bot's own group; anything else is refused.
+        </p>
+        <p>
+          The full write-up is in
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/bots/concepts-for-developers.md"
+            target="_blank" rel="noopener noreferrer"><code>docs/bots/concepts-for-developers.md</code></a> and
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/bots/alerts-webhook.md" target="_blank"
+            rel="noopener noreferrer"><code>docs/bots/alerts-webhook.md</code></a>, which this page is kept in step
+          with.
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Get Pollis</h2>
+        <ul>
+          <li><a href="index.html#download">Desktop</a></li>
+          <li><a href="android.html">Android</a></li>
+          <li><a href="index.html#terminal">Terminal client</a></li>
+          <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">How it works</h2>
+        <ul>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="learn.html">Learn</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="transparency.html">Key transparency</a></li>
+          <li><a href="artifacts.html">Release artifacts</a></li>
+          <li><a href="assurance.html">Assurance</a></li>
+          <li><a href="open-source.html">Open source</a></li>
+          <li><a href="bots.html">Bots</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Policies</h2>
+        <ul>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
+          <li><a href="retention.html">Retention</a></li>
+          <li><a href="subprocessors.html">Subprocessors</a></li>
+          <li><a href="legal-requests.html">Legal requests</a></li>
+          <li><a href="continuity.html">Continuity</a></li>
+          <li><a href="device-security.html">Lost device</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="site-footer-copy" id="year-copyright">© 2026 Pollis. All rights reserved.</p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>

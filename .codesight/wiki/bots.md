@@ -2,6 +2,8 @@
 
 A bot is a **user** (`users.kind = 'bot'`) scoped to **one group** for its whole life; its **hosts are its devices** (`user_device` rows under the bot, each with its own cert, leaf and key-package pool). Epic and settled design: #872. Schema: `pollis-schema/migrations/000052_bots.sql` (see [Database](./database.md)). DS: `pollis-delivery/src/bots.rs`. Wire types: `pollis-api/src/bots.rs`.
 
+This article is the internal layer. User and developer docs (admin guide, self-hosting, alerts webhook, job-loop concepts) are in [`docs/bots/`](../../docs/bots/README.md), mirrored on the website as `website/bots*.html`; update them alongside behaviour changes.
+
 ## What the schema refuses
 Triggers, so no DS code is in the path (tests: `pollis-delivery/tests/bot_schema.rs`): a bot user without its `bot` row, its membership or its exact address `bot-<id lowercased>@bot.invalid`; a human with a bot row or any `bot.invalid` address; `kind` changing; a bot in another group, as admin, as group owner, in a DM, invited, asking to join, or holding a push token; a bot's membership or `bot` row deleted while the bot exists; a group deleted while it has bots; a trigger claim for a non-bot.
 
