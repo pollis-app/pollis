@@ -508,6 +508,11 @@ pub async fn apply_create_bot(
     };
 
     let tx = crate::db::write_tx(conn).await?;
+    // The schema's insert order (bot, membership, user, device) lets the triggers refuse a bot user
+    // without its row and membership; the membership names its user before that row exists, so
+    // reference checks wait for COMMIT, where every one holds. Lasts to the end of this
+    // transaction; a no-op where foreign keys are not enforced.
+    tx.execute("PRAGMA defer_foreign_keys = ON", ()).await?;
     if !crate::groups::is_admin(&tx, &body.group_id, actor).await? {
         return Ok(CreateBotOutcome::Forbidden);
     }

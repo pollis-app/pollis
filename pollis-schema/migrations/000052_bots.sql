@@ -19,18 +19,24 @@
 -- into the account. The DS emails nothing but the sign-in OTP and the email
 -- change challenge, and refuses both for these addresses.
 --
--- INSERT ORDER (SQLite has no deferred constraints, and triggers fire per row):
--- the `bot` row is the claim, so it comes FIRST and every other row is checked
--- against it. The DS creates a bot in one transaction, in this order:
+-- INSERT ORDER (triggers fire per row and cannot be deferred): the `bot` row is
+-- the claim, so it comes FIRST and every other row is checked against it. The
+-- DS creates a bot in one transaction, in this order:
 --
 --     bot  ->  group_member (role 'member')  ->  users (kind 'bot')  ->  user_device ...
 --
 -- so by the time a `kind = 'bot'` user exists, its `bot` row and its
 -- membership already do, and the users trigger can require both.
 --
+-- FOREIGN KEYS: the membership names its user before that row exists, so the
+-- creating transaction sets `PRAGMA defer_foreign_keys = ON` and every
+-- reference is checked at COMMIT, where all of them hold. Nothing here relies
+-- on foreign keys being off: create, delete and teardown are tested with them
+-- enforced (pollis-delivery/tests/bots.rs).
+--
 -- DELETE ORDER is the reverse, users first: the `bot` row may not be deleted
--- while its user exists, and the bot's membership may not be deleted while its
--- `bot` row exists. Account deletion of a bot therefore runs
+-- while its user exists, and the bot's membership may not be deleted while the
+-- bot user exists. Account deletion of a bot therefore runs
 --
 --     users  ->  bot  ->  group_member, user_device, ... (teardown.rs)
 --
@@ -39,7 +45,7 @@
 -- teardown delete them first, through the same account-deletion path.
 --
 -- Validators, not claimers (as in 000017): no trigger writes a row, it only
--- refuses one. Production runs with foreign_keys=OFF; triggers fire regardless.
+-- refuses one. Triggers fire whether or not foreign keys are enforced.
 --
 -- Additive and backward-compatible: one defaulted column with an already
 -- satisfied CHECK (every existing row is 'human'), three new tables, triggers
@@ -239,10 +245,14 @@ BEGIN
     SELECT RAISE(ABORT, 'a bot is a non-admin member of its own group only');
 END;
 
+-- Keyed on the bot USER, not its row: deleting the user comes first, and where
+-- foreign keys are enforced its ON DELETE CASCADE removes the membership while
+-- the `bot` row still exists.
 CREATE TRIGGER IF NOT EXISTS group_member_bot_delete_guard
 BEFORE DELETE ON group_member
 FOR EACH ROW
-WHEN EXISTS (SELECT 1 FROM bot WHERE user_id = OLD.user_id AND group_id = OLD.group_id)
+WHEN EXISTS (SELECT 1 FROM bot b JOIN users u ON u.id = b.user_id
+             WHERE b.user_id = OLD.user_id AND b.group_id = OLD.group_id)
 BEGIN
     SELECT RAISE(ABORT, 'a bot leaves its group only by being deleted');
 END;
