@@ -11,5 +11,5 @@ export function useBotRoute() {
   const bid = botId ?? null;
   const { group, members, iAmAdmin } = useGroupAccess(gid);
   const groupName = group?.name ?? t("group.common.fallbackName");
-  return { t, router, gid, bid, group, groupName, members, iAmAdmin };
+  return { router, gid, bid, group, groupName, members, iAmAdmin };
 }

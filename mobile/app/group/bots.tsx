@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { observer } from "mobx-react-lite";
 import {
@@ -21,7 +22,8 @@ import { useThemeRerender } from "../../components/theme";
 /** Group settings → Bots (#1182): the group's bots, and "Add a bot". Admins only. */
 function GroupBots() {
   useThemeRerender();
-  const { t, router, gid: id, group, groupName, iAmAdmin } = useBotRoute();
+  const { t } = useTranslation("mobile");
+  const { router, gid: id, group, groupName, iAmAdmin } = useBotRoute();
 
   const { data: bots = [], isLoading, isError } = useGroupBots(iAmAdmin ? id : null);
   // The cap rides on `get_bot`; any one bot of the group answers it, and the list is cached.

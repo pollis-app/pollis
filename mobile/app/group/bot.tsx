@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { observer } from "mobx-react-lite";
 import {
@@ -32,7 +33,8 @@ import { useThemeRerender } from "../../components/theme";
  */
 function BotPage() {
   useThemeRerender();
-  const { t, router, gid, bid, groupName } = useBotRoute();
+  const { t } = useTranslation("mobile");
+  const { router, gid, bid, groupName } = useBotRoute();
   const { data: bot, isLoading, isError } = useBot(bid);
   const revokeHost = useRevokeBotHost(bid, gid);
   const deleteBot = useDeleteBot(gid);
