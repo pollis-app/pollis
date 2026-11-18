@@ -39,7 +39,7 @@ You need:
 
 - **Node.js 22.18 or newer** (`node --version`). Your tests are TypeScript, which Node runs directly from 22.18.
 - **pnpm** (`npm install -g pnpm`), or npm if you prefer.
-- A checkout of the Pollis repository, and **Rust** ([rustup.rs](https://rustup.rs)), to build `pollis-app-dev`: the small program that runs your App in the real sandbox. The SDK packages are not on npm yet, so they come from the checkout too.
+- A checkout of the Pollis repository, and **Rust** ([rustup.rs](https://rustup.rs)), to build `pollis-app-dev`: the small program that runs your App in the real sandbox.
 - Later, to run the App in a group: `pollis-bot`, paired with that group ([Self-hosting](./self-hosting.md)).
 
 **1. Build the tools** (once):
@@ -49,20 +49,17 @@ git clone https://github.com/pollis-app/pollis.git
 cd pollis
 cargo build --release -p pollis-app-dev
 export PATH="$PWD/target/release:$PATH"      # puts pollis-app-dev on your PATH
-(cd sdk/ts && pnpm install && pnpm build)    # @pollis-inc/app and @pollis-inc/cli
-alias pollis="node $PWD/sdk/ts/cli/dist/main.js"
 ```
 
-**2. Create an App** next to the checkout:
+**2. Create an App** in a new folder (anywhere; not inside the checkout):
 
 ```sh
-cd ..
-pollis app new hello-bot --lang ts --sdk pollis/sdk/ts
+npx pollis app new hello-bot --lang ts
 cd hello-bot
 pnpm install
 ```
 
-`--sdk` points the new App at the SDK in your checkout. Once the packages are on npm you will leave it out.
+The App depends on `@pollis-inc/app` and, for the `pollis` command, `@pollis-inc/cli`. Inside it, `pnpm test`, `pnpm build` and `pnpm pollis app <command>` use that copy. To work against the SDK in your checkout instead, add `--sdk <checkout>/sdk/ts`.
 
 **3. Run its tests:**
 
@@ -357,7 +354,7 @@ You need a bot paired with the group, on your machine ([Self-hosting](./self-hos
 **While you develop: a test group and `pollis app dev`.**
 
 ```sh
-pollis app dev --installation <installation id>
+pnpm pollis app dev --installation <installation id>
 ```
 
 1. It prints your **developer key**, created the first time and kept in the bot's data directory.
@@ -370,8 +367,8 @@ A development installation runs any build signed by your key, as long as the bui
 **For real: `pollis app build`, `pollis app run`, approve.**
 
 ```sh
-pollis app build
-pollis app run --installation <installation id>
+pnpm pollis app build
+pnpm pollis app run --installation <installation id>
 ```
 
 `run` builds the App (or takes `--artifact <dir or https:// URL>`, e.g. a release you published), hands it to the bot with `pollis-bot app install`, which prints the **App hash**, and runs the bot. An admin of the group opens the bot's page, checks the hash and the permissions in plain language, narrows them if they like, and approves. The bot runs that exact build and nothing else; until the approval arrives, it waits.
