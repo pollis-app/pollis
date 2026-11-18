@@ -19,12 +19,13 @@ path = "src/lib.rs"
 workspace = true
 
 [features]
-# Realtime wake-ups. pollis-core's realtime rooms (LiveKit data) live behind its
-# `media` feature, so this links the media stack although the runtime never
-# touches audio or video. Off, the runtime still catches up at start and runs
-# webhook jobs, but learns of new group messages only at its next start.
+# Realtime wake-ups: pollis-core's `realtime` rooms (LiveKit data), without its
+# audio stack (no cpal, rodio, PulseAudio or AudioProcessing). Receiving LiveKit
+# data needs a WebRTC peer connection, so libwebrtc is linked. Off, the runtime
+# still catches up at start and runs webhook jobs, but learns of new group
+# messages only at its next start.
 default = ["realtime"]
-realtime = ["pollis-core/media"]
+realtime = ["pollis-core/realtime"]
 
 [dependencies]
 # os-keystore on for the same reason as pollis-tui (#879): a desktop host
