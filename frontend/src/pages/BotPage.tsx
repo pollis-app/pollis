@@ -154,7 +154,6 @@ export const BotPage: React.FC = () => {
             <Button
               variant="danger"
               data-testid="bot-delete"
-              activateOn="press"
               disabled={!!confirming}
               onClick={() => navigate({ to: "/groups/$groupId/bots/$botId/delete", params: { groupId, botId } })}
             >

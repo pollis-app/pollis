@@ -140,7 +140,7 @@ for (const skin of SKINS) {
     test("an admin creates a bot by typing its host's code; wrong and expired codes are refused", async ({ page }) => {
       await boot(page, skin);
       await openBots(page);
-      await expect(page.getByTestId("bots-list")).toContainText("No bots yet.");
+      await expect(page.getByTestId("bots-list-empty")).toHaveText("No bots yet.");
       await page.getByTestId("bots-add").click();
 
       const form = page.getByTestId("add-bot-page");
@@ -246,7 +246,7 @@ for (const skin of SKINS) {
       await page.screenshot({ path: `${SHOTS}/${skin}-delete-bot.png` });
       await page.getByTestId("delete-bot-confirm").click();
       await expect(page.getByTestId("bots-page")).toBeVisible();
-      await expect(page.getByTestId("bots-list")).toContainText("No bots yet.");
+      await expect(page.getByTestId("bots-list-empty")).toHaveText("No bots yet.");
       expect(await mockBots(page)).toEqual([]);
     });
 
