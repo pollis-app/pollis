@@ -83,6 +83,7 @@ pollis-bot post --installation <id> --channel alerts "deploy finished"
 | `installations/<id>/` | one installation's record |
 | `stores/<device id>/` | that installation's encrypted store, including how far it has read each channel |
 | `status.json` | written by `run` on every state change, read by `status` |
+| `keystore.pks` | where the machine has no OS keychain: the bots' keys, encrypted and bound to this machine |
 
 ## If something fails
 
