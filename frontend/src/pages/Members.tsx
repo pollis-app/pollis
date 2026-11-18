@@ -17,6 +17,8 @@ import { usePeerVerificationMap } from "../hooks/queries/useUserProfile";
 import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
+import { useGroupAliases } from "../hooks/queries/useGroupAliases";
+import { aliasName, hasAlias } from "../utils/groupAlias";
 
 interface MembersProps {
   groupId: string;
@@ -29,6 +31,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
   const currentUser = appStore.currentUser;
   const { data: members = [], isLoading } = useGroupMembers(groupId);
   const setRoleMutation = useSetMemberRole();
+  const aliases = useGroupAliases(groupId);
   // Same query as the DM sidebar, so badges agree everywhere.
   const verificationByPeer = usePeerVerificationMap();
 
@@ -47,14 +50,14 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
           if (isSelf) {
             return;
           }
-          navigate({ to: "/user/$userId", params: { userId: m.user_id } });
+          navigate({ to: "/groups/$groupId/members/$userId", params: { groupId, userId: m.user_id } });
         }}
         onEnterRow={(m) => {
           const isSelf = m.user_id === currentUser?.id;
           if (isSelf) {
             return;
           }
-          navigate({ to: "/user/$userId", params: { userId: m.user_id } });
+          navigate({ to: "/groups/$groupId/members/$userId", params: { groupId, userId: m.user_id } });
         }}
         renderRow={(m) => {
           const isSelf = m.user_id === currentUser?.id;
@@ -81,7 +84,15 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
             <span
               className="flex-1 truncate flex items-center gap-2 text-fg"
             >
-              <span className="truncate">{m.username ?? m.user_id}</span>
+              <bdi data-testid={`member-name-${m.user_id}`} className="truncate">
+                {aliasName(aliases, m.user_id, m.username ?? m.user_id)}
+              </bdi>
+              {/* The handle beside an alias (#2003), so who is who stays clear. */}
+              {hasAlias(aliases, m.user_id) && aliases.get(m.user_id)?.display_name && m.username && (
+                <bdi data-testid={`member-handle-${m.user_id}`} className="truncate text-muted">
+                  @{m.username}
+                </bdi>
+              )}
               {badge}
               {isSelf && (
                 <span className="ms-1 text-muted">
@@ -106,6 +117,23 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
                 setRoleMutation.mutate({ groupId, userId: m.user_id, role: newRole });
               }}
             />,
+            ...(hasAlias(aliases, m.user_id)
+              ? [
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    data-testid={`member-reset-alias-${m.user_id}`}
+                    onClick={() =>
+                      navigate({
+                        to: "/groups/$groupId/members/$userId/reset-alias",
+                        params: { groupId, userId: m.user_id },
+                      })
+                    }
+                  >
+                    {t("members.resetAlias")}
+                  </Button>,
+                ]
+              : []),
             <Button size="sm"
               data-testid={`member-kick-${m.user_id}`}
               variant="danger"

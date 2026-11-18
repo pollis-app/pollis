@@ -11,9 +11,13 @@ import { Avatar } from "../ui/Avatar";
 import { isMuted, isSpeaking } from "../../voice/participantAudio";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { voiceChannelId } from "../../types/voice-state";
+import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
+import { aliasAvatar, aliasName } from "../../utils/groupAlias";
 
 interface VoiceChannelMembersProps {
   channelId: string;
+  /** The channel's group: members show as it shows them (#2003). */
+  groupId: string;
   /** Fetch the roster; false when the room-count says the room is empty, so empty rooms cost no IPC. */
   enabled: boolean;
 }
@@ -28,11 +32,12 @@ interface MemberRow {
 }
 
 /** One row per user; the local session's live state wins over the fetched roster for the room we are in. */
-export const VoiceChannelMembers: React.FC<VoiceChannelMembersProps> = observer(({ channelId, enabled }) => {
+export const VoiceChannelMembers: React.FC<VoiceChannelMembersProps> = observer(({ channelId, groupId, enabled }) => {
   const { t } = useTranslation("voice");
   const { voiceState, voiceParticipants } = appStore;
   const inThisRoom = voiceChannelId(voiceState) === channelId && voiceState.kind !== "idle";
   const { data: roster = [] } = useVoiceParticipants(enabled && !inThisRoom ? channelId : null);
+  const aliases = useGroupAliases(groupId);
 
   const rows = new Map<string, MemberRow>();
   if (inThisRoom) {
@@ -41,8 +46,8 @@ export const VoiceChannelMembers: React.FC<VoiceChannelMembersProps> = observer(
       const prev = rows.get(userId);
       const row: MemberRow = {
         userId,
-        name: p.name,
-        avatarKey: p.avatarKey ?? null,
+        name: aliasName(aliases, userId, p.name),
+        avatarKey: aliasAvatar(aliases, userId, p.avatarKey) ?? null,
         speaking: (prev?.speaking ?? false) || isSpeaking(p.audio),
         muted: prev ? prev.muted && isMuted(p.audio) : isMuted(p.audio),
         sharing: (prev?.sharing ?? false) || p.video.kind === "screenshare",
@@ -55,8 +60,8 @@ export const VoiceChannelMembers: React.FC<VoiceChannelMembersProps> = observer(
       if (!rows.has(userId)) {
         rows.set(userId, {
           userId,
-          name: p.name,
-          avatarKey: p.avatar_url ?? null,
+          name: aliasName(aliases, userId, p.name),
+          avatarKey: aliasAvatar(aliases, userId, p.avatar_url) ?? null,
           speaking: false,
           muted: false,
           sharing: false,

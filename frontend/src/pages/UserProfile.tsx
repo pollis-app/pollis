@@ -11,11 +11,14 @@ import { useBlockUser, usePeerAuditAccountKey } from "../hooks/queries";
 import { useCreateOrGetDMConversation } from "../hooks/queries/useMessages";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useGroupAliases } from "../hooks/queries/useGroupAliases";
 
 export const UserProfilePage: React.FC = observer(() => {
   const { t } = useTranslation("dms");
   const navigate = useNavigate();
-  const { userId } = useParams({ from: "/user/$userId" });
+  // `/user/$userId`, or `/groups/$groupId/members/$userId` for the group's view of them (#2003).
+  const { userId, groupId } = useParams({ strict: false }) as { userId: string; groupId?: string };
+  const alias = useGroupAliases(groupId ?? null).get(userId);
   const currentUser = appStore.currentUser;
 
   const { data: profile, isLoading } = useOtherUserProfile(userId);
@@ -46,18 +49,23 @@ export const UserProfilePage: React.FC = observer(() => {
     }
   };
 
+  const shownName = alias?.display_name || profile?.preferred_name;
   const headlineName =
-    profile?.preferred_name
+    shownName
     || (profile?.username ? `@${profile.username}` : t("profile.fallbackName"));
   const title =
-    profile?.preferred_name
+    shownName
     || (profile?.username ? `@${profile.username}` : t("profile.fallbackTitle"));
+  const back = () =>
+    groupId
+      ? navigate({ to: "/groups/$groupId/members", params: { groupId } })
+      : navigate({ to: "/dms" });
 
   const backItem: TerminalMenuItem = {
     id: "back",
     label: t("common:actions.goBack"),
     icon: <ArrowLeft size={14} className="rtl-mirror" />,
-    action: () => navigate({ to: "/dms" }),
+    action: back,
     type: "system",
     testId: "user-profile-back",
     activateOn: "press",
@@ -123,7 +131,7 @@ export const UserProfilePage: React.FC = observer(() => {
                   >
                     {headlineName}
                   </div>
-                  {profile.preferred_name && profile.username && (
+                  {shownName && profile.username && (
                     <div
                       data-testid="user-profile-username"
                       className="font-mono text-secondary truncate text-muted"
@@ -134,7 +142,7 @@ export const UserProfilePage: React.FC = observer(() => {
                 </div>
                 <PresenceAvatar
                   userId={profile.id}
-                  avatarKey={profile.avatar_url}
+                  avatarKey={alias?.avatar_url || profile.avatar_url}
                   size={72}
                   alt={t("profile.avatarAlt", { name: headlineName })}
                   testId="user-profile-avatar"
@@ -153,7 +161,7 @@ export const UserProfilePage: React.FC = observer(() => {
               )}
 
               <div className="border-t border-line">
-                <TerminalMenu items={items} onEsc={() => navigate({ to: "/dms" })} />
+                <TerminalMenu items={items} onEsc={back} />
               </div>
             </>
           )}

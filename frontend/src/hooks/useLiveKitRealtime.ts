@@ -16,6 +16,7 @@ import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipa
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useMutedChannels, useUserGroupsWithChannels } from './queries/useGroups';
 import { blocksQueryKeys } from './queries/useBlocks';
+import { aliasQueryKeys, channelAliasName } from './queries/useGroupAliases';
 import { notify, setNotifyPrefs, setMutedChannels, loadDeviceCallRingtone } from '../utils/notify';
 import { logIgnored } from '../utils/log';
 import { runMessageWake, type WakeFresh } from '../utils/messageWake';
@@ -90,6 +91,11 @@ type RealtimeEvent =
   | {
     type: 'member_role_changed';
     group_id: string;
+  }
+  | {
+    // #2003: someone's alias in this group changed; with no group, one of our own did.
+    type: 'group_aliases_changed';
+    group_id?: string;
   }
   | {
     type: 'join_requests_changed';
@@ -533,6 +539,13 @@ export function useLiveKitRealtime() {
         return;
       }
 
+      if (event.type === 'group_aliases_changed') {
+        queryClientRef.current.invalidateQueries({
+          queryKey: event.group_id ? aliasQueryKeys.group(event.group_id) : aliasQueryKeys.all,
+        });
+        return;
+      }
+
       if (event.type === 'channel_mutes_changed') {
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.mutedChannels(currentUserIdRef.current),
@@ -668,7 +681,14 @@ export function useLiveKitRealtime() {
         if (event.sender_id === currentUserIdRef.current) {
           return;
         }
-        const senderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
+        // Named as the channel's group shows the sender (#2003).
+        const senderUsername = await channelAliasName(
+          queryClientRef.current,
+          currentUser.id,
+          event.channel_id,
+          event.sender_id,
+          event.sender_username ?? i18n.t('nav:statusBar.someone'),
+        );
         const title = roomNameMapRef.current.get(event.channel_id) ?? i18n.t('chat:notify.mentionTitle');
         const bodyKey = event.type === 'all_mention' ? 'chat:notify.allMentionBody' : 'chat:notify.userMentionBody';
         notify(event.type, {
@@ -699,8 +719,12 @@ export function useLiveKitRealtime() {
         selfId: currentUserIdRef.current,
         isSelected: (id) =>
           id === selectedChannelIdRef.current || id === selectedConversationIdRef.current,
-        announce: (m) => {
-          const senderUsername = m.sender_username ?? i18n.t('nav:statusBar.someone');
+        announce: async (m) => {
+          const handle = m.sender_username ?? i18n.t('nav:statusBar.someone');
+          // A channel message names the sender as its group shows them (#2003); a DM, by main profile.
+          const senderUsername = channelId
+            ? await channelAliasName(queryClientRef.current, currentUser.id, m.conversation_id, m.sender_id, handle)
+            : handle;
           const title =
             roomNameMapRef.current.get(m.conversation_id) ?? i18n.t('chat:notify.newMessageTitle');
           const body = i18n.t('chat:notify.newMessageBody', { name: senderUsername });

@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import { useObserver } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { useGroupMembers } from "./useGroups";
+import { useGroupAliases } from "./useGroupAliases";
+import { aliasAvatar, aliasName } from "../../utils/groupAlias";
 import { useDMConversations } from "./useMessages";
 import type { MentionCandidate } from "../../utils/mentions";
 
@@ -13,6 +15,8 @@ export function useMentionCandidates(): MentionCandidate[] {
   const selectedConversationId = useObserver(() => appStore.selectedConversationId);
 
   const groupMembers = useGroupMembers(selectedChannelId ? selectedGroupId : null);
+  // The picker shows each member as this group does (#2003); it still inserts `@handle`.
+  const aliases = useGroupAliases(selectedChannelId ? selectedGroupId : null);
   const dmConversations = useDMConversations();
 
   const members = groupMembers.data;
@@ -25,8 +29,8 @@ export function useMentionCandidates(): MentionCandidate[] {
         .map((m) => ({
           userId: m.user_id,
           username: m.username!,
-          displayName: m.display_name,
-          avatarUrl: m.avatar_url,
+          displayName: aliasName(aliases, m.user_id, m.display_name) ?? undefined,
+          avatarUrl: aliasAvatar(aliases, m.user_id, m.avatar_url) ?? undefined,
         }));
     }
 
@@ -45,5 +49,5 @@ export function useMentionCandidates(): MentionCandidate[] {
     }
 
     return [];
-  }, [selectedChannelId, selectedConversationId, members, conversations, currentUser?.id]);
+  }, [selectedChannelId, selectedConversationId, members, conversations, currentUser?.id, aliases]);
 }

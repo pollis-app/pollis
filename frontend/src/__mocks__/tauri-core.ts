@@ -207,7 +207,19 @@ interface MockPendingTransferRequest {
   created_at: string;
 }
 
+/** A per-group alias (#2003), as `list_group_aliases` returns it. */
+interface MockGroupAlias {
+  group_id: string;
+  user_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
 interface MockStore {
+  /** #2003: every alias the mock DS holds, of members past and present. */
+  groupAliases: MockGroupAlias[];
+  /** Bytes `upload_public_file` received, served back by `get_public_file_url`. */
+  uploadedFiles: Record<string, string>;
   /** #1338: the DS has called this device revoked; every command refuses. */
   deviceRevoked: boolean;
   /** `logout`'s last `deleteData`, so a spec can see what the app asked for. */
@@ -372,6 +384,8 @@ function readPreferences(raw: unknown): Record<string, unknown> {
 }
 
 const store: MockStore = {
+  groupAliases: (preload.groupAliases as MockGroupAlias[] | undefined) ?? [],
+  uploadedFiles: {},
   deviceRevoked: false,
   lastLogoutDeleteData: null,
   session: preload.session ?? null,
@@ -1332,6 +1346,63 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_muted_channels':
       return [...store.mutedChannels];
 
+    // Per-group aliases (#2003), with the DS's rules: members read a group's
+    // aliases (former members' included), only the owner or a group admin resets.
+    case 'list_group_aliases': {
+      const { groupId, requesterId } = args as { groupId: string; requesterId: string };
+      const member = (store.groupMembers[groupId] ?? []).some((m) => m.user_id === requesterId);
+      if (!member) {
+        return [];
+      }
+      return store.groupAliases.filter((a) => a.group_id === groupId);
+    }
+
+    case 'list_my_aliases': {
+      const { userId } = args as { userId: string };
+      return store.groupAliases.filter((a) => a.user_id === userId);
+    }
+
+    case 'set_group_alias': {
+      const { userId, groupId, displayName, avatarUrl } = args as {
+        userId: string;
+        groupId: string | null;
+        displayName?: string;
+        avatarUrl?: string;
+      };
+      const groupIds = groupId
+        ? [groupId]
+        : store.groups
+            .map((g) => g.id)
+            .filter((id) => (store.groupMembers[id] ?? []).some((m) => m.user_id === userId));
+      for (const gid of groupIds) {
+        if (!(store.groupMembers[gid] ?? []).some((m) => m.user_id === userId)) {
+          throw new Error('Forbidden');
+        }
+        const current = store.groupAliases.find((a) => a.group_id === gid && a.user_id === userId);
+        const pick = (next: string | undefined, prev: string | null | undefined) =>
+          next === undefined ? prev ?? null : next === '' ? null : next;
+        const nextName = pick(displayName, current?.display_name);
+        const nextAvatar = pick(avatarUrl, current?.avatar_url);
+        store.groupAliases = store.groupAliases.filter((a) => !(a.group_id === gid && a.user_id === userId));
+        if (nextName || nextAvatar) {
+          store.groupAliases.push({ group_id: gid, user_id: userId, display_name: nextName, avatar_url: nextAvatar });
+        }
+      }
+      return null;
+    }
+
+    case 'reset_group_alias': {
+      const { groupId, userId, requesterId } = args as { groupId: string; userId: string; requesterId: string };
+      const admin = (store.groupMembers[groupId] ?? []).some(
+        (m) => m.user_id === requesterId && m.role === 'admin',
+      );
+      if (requesterId !== userId && !admin) {
+        throw new Error('Forbidden');
+      }
+      store.groupAliases = store.groupAliases.filter((a) => !(a.group_id === groupId && a.user_id === userId));
+      return null;
+    }
+
     case 'set_channel_muted': {
       const { channelId, muted } = args as { channelId: string; muted: boolean };
       store.mutedChannels = store.mutedChannels.filter((id) => id !== channelId);
@@ -1430,7 +1501,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // The "use the byte path" sentinel (#874); a spec may serve a key via `publicFileUrls`.
     case 'get_public_file_url': {
       const { key } = args as { key: string };
-      return (preload.publicFileUrls as Record<string, string> | undefined)?.[key] ?? '';
+      return (
+        store.uploadedFiles[key] ??
+        (preload.publicFileUrls as Record<string, string> | undefined)?.[key] ??
+        ''
+      );
     }
 
     // Explicit no-ops so they don't log as unhandled.
@@ -2409,7 +2484,20 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_prekey_bundle':
     case 'rotate_signed_prekey':
     case 'replenish_one_time_prekeys':
-    case 'upload_public_file':
+    // Content-addressed like the real one: the same bytes give the same key.
+    case 'upload_public_file': {
+      const { prefix, data, contentType } = args as { prefix: string; data: number[]; contentType: string };
+      let h = 2166136261;
+      for (const b of data) {
+        h = Math.imul(h ^ b, 16777619) >>> 0;
+      }
+      const hex = h.toString(16).padStart(8, '0').repeat(8);
+      const ext = contentType === 'image/png' ? 'png' : 'jpg';
+      const key = `${prefix}/${hex}.${ext}`;
+      store.uploadedFiles[key] = URL.createObjectURL(new Blob([new Uint8Array(data)], { type: contentType }));
+      return { key, url: store.uploadedFiles[key] };
+    }
+
     case 'download_file':
       return null;
 
