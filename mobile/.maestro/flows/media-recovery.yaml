@@ -97,11 +97,10 @@ tags:
     visible:
       id: "tab-groups"
     timeout: 20000
-- tapOn:
-    id: "tab-groups"
-- tapOn:
-    text: "E2E Recover Group.*"
-    index: 0
+- runFlow:
+    file: ../subflows/open-group.yaml
+    env:
+      GROUP: "E2E Recover Group"
 
 # ── iOS / iPad: no network switch; prove the online render and stop ─────────
 - runFlow:

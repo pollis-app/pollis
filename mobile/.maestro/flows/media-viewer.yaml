@@ -109,11 +109,10 @@ tags:
     visible:
       id: "tab-groups"
     timeout: 20000
-- tapOn:
-    id: "tab-groups"
-- tapOn:
-    text: "E2E Media Group.*"
-    index: 0
+- runFlow:
+    file: ../subflows/open-group.yaml
+    env:
+      GROUP: "E2E Media Group"
 - tapOn:
     text: "General"
     optional: true

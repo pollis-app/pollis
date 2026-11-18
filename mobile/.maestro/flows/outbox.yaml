@@ -57,11 +57,10 @@ tags:
     visible: ".*ob1335 killed.*"
     timeout: 10000
 - runFlow: ../subflows/home.yaml
-- tapOn:
-    id: "tab-groups"
-- tapOn:
-    text: "E2E Outbox Group.*"
-    index: 0
+- runFlow:
+    file: ../subflows/open-group.yaml
+    env:
+      GROUP: "E2E Outbox Group"
 - tapOn:
     text: "General"
     optional: true
