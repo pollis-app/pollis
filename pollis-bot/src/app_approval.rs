@@ -183,7 +183,7 @@ pub struct ApprovedApp {
     /// This job's verdict, set by [`ApprovedApp::prepare`].
     current: Mutex<Option<Result<ReadyApp, String>>>,
     /// The App hash the last job ran, so a change is logged once.
-    last_running: Mutex<Option<[u8; 32]>>,
+    last_running: Mutex<Option<([u8; 32], i64)>>,
 }
 
 impl ApprovedApp {
@@ -241,9 +241,14 @@ impl ApprovedApp {
             }
         };
         let facts = facts_of(&self.component, &artifact);
+        let mut approval_seq = 0;
         let verdict = match core.app_approval().await? {
             Err(refusal) => Err(refusal),
             Ok(approved) => {
+                approval_seq = match &approved.record {
+                    AppApprovalRecord::Production(a) => a.seq,
+                    AppApprovalRecord::Development(d) => d.seq,
+                };
                 let checked = check_artifact_from(
                     &approved,
                     &Artifact {
@@ -276,10 +281,15 @@ impl ApprovedApp {
         }
         match verdict {
             Ok(app) => {
-                let changed = self.last_running.lock().map(|mut g| g.replace(app.app_hash) != Some(app.app_hash)).unwrap_or(true);
+                // Logged when the App or the approval it runs under changes (a narrowing keeps the hash).
+                let now = (app.app_hash, approval_seq);
+                let changed = self.last_running.lock().map(|mut g| g.replace(now) != Some(now)).unwrap_or(true);
                 if changed {
                     let how = if app.auto_updated { " (updated automatically from the approved source)" } else { "" };
-                    crate::log::info(&scope, format!("running App {}{how}", pollis_app_manifest::hex(&app.app_hash)));
+                    crate::log::info(
+                        &scope,
+                        format!("running App {} under approval {approval_seq}{how}", pollis_app_manifest::hex(&app.app_hash)),
+                    );
                 }
                 self.set(Ok(ready(app, artifact)));
             }
