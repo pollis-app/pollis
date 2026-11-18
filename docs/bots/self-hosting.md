@@ -42,14 +42,12 @@ A bot reads every message in its group. Use a machine you would trust with that.
    install -m 755 target/release/pollis-bot ~/.local/bin/
    ```
 
-3. Tell it which Delivery Service to use. These are the same variables the `pollis` terminal client reads:
+3. Tell it which Delivery Service to use. These are the same variables the `pollis` terminal client reads; `R2_S3_ENDPOINT` and `R2_PUBLIC_URL` must be set but can be empty:
 
    ```bash
    export POLLIS_DELIVERY_URL=https://api.pollis.com
    export R2_S3_ENDPOINT= R2_PUBLIC_URL=
    ```
-
-   TODO(#1182): confirm the full list of variables a self-built `pollis-bot` needs at run time (realtime wake-ups may also need `LIVEKIT_URL`), and replace this step once a released binary compiles them in.
 
 4. Check it runs:
 
@@ -241,9 +239,10 @@ Inside it:
 |---|---|
 | `config.json` | Optional settings: `max_installations`, and `webhook` with `bind`, `per_minute`, `burst`. Unknown fields are refused. |
 | `installations/<id>/installation.json` | One installation: its bot, group and this host's device id. |
+| `stores/<device id>/` | That installation's encrypted local store. |
 | `status.json` | Written by `run` whenever an installation's state changes; read by `status`. |
 
-The bot's keys are not in these files; they are in the keystore. The full layout, including where each encrypted store lives, is in [`pollis-bot/README.md`](../../pollis-bot/README.md#files).
+The bot's keys are not in these files; they are in the keystore. See also [`pollis-bot/README.md`](../../pollis-bot/README.md#files).
 
 ## Logs and status
 

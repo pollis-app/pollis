@@ -65,7 +65,8 @@
 cd pollis
 cargo build --release -p pollis-bot
 install -m 755 target/release/pollis-bot ~/.local/bin/</code>
-        <p>Tell it which Delivery Service to use, then check it runs:</p>
+        <p>Tell it which Delivery Service to use (<code>R2_S3_ENDPOINT</code> and <code>R2_PUBLIC_URL</code> must be
+          set but can be empty), then check it runs:</p>
         <code class="doc-cmd">export POLLIS_DELIVERY_URL=https://api.pollis.com
 export R2_S3_ENDPOINT= R2_PUBLIC_URL=
 pollis-bot --version</code>
@@ -219,7 +220,8 @@ journalctl -u pollis-bot -f</code>
         <p>The data directory is <code>--data-dir</code>, else <code>POLLIS_BOT_DATA_DIR</code>, else
           <code>~/.local/share/pollis-bot</code> (Linux), <code>~/Library/Application Support/com.pollis.bot</code>
           (macOS) or <code>%APPDATA%\pollis-bot</code> (Windows). It holds <code>config.json</code>,
-          <code>installations/&lt;id&gt;/installation.json</code> and <code>status.json</code>. The bot's keys are
+          <code>installations/&lt;id&gt;/installation.json</code>, each installation's encrypted store in
+          <code>stores/&lt;device id&gt;/</code>, and <code>status.json</code>. The bot's keys are
           in the keystore, not in these files.</p>
         <p>
           <code>pollis-bot</code> logs to standard error, one line per event. Every failure reads
