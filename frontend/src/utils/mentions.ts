@@ -97,6 +97,8 @@ export interface MentionCandidate {
   username: string;
   displayName?: string;
   avatarUrl?: string;
+  /** A bot account (#1182): the picker shows the Bot badge. */
+  isBot?: boolean;
 }
 
 /** Max suggestions shown at once, matching Slack's composer list depth. */
