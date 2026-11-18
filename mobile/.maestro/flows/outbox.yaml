@@ -2,6 +2,14 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - parity
   - gate
+# Back online whatever happened: a failure while offline must not leave the
+# device in airplane mode for the flows after this one (#2029).
+onFlowComplete:
+  - runFlow:
+      when:
+        platform: Android
+      commands:
+        - setAirplaneMode: disabled
 ---
 # OUTBOX (#1335) — a message the user saw accepted is either delivered or
 # visibly unsent, never silently gone.

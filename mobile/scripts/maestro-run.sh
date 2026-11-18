@@ -349,6 +349,12 @@ invoke() {
   } > "$cfg"
   cp "$cfg" "$LOG/$label.config.yaml"
   echo "==> [$DEVICE_LABEL] $label: ${names[*]}"
+  # Flows switch airplane mode on Android; one that failed offline must not
+  # take the network from the next invocation (the flows' home.yaml and
+  # onFlowComplete do the same inside one).
+  if [[ "$DEVICE_ID" == emulator-* ]]; then
+    adb -s "$DEVICE_ID" shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true
+  fi
   t0="$(date +%s)"
   maestro --device "$DEVICE_ID" test --no-ansi --config "$cfg" --format JUNIT --output "$junit" \
     --debug-output "$dbg" ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} \

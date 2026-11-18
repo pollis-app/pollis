@@ -8,6 +8,13 @@ appId: ${MAESTRO_APP_ID}
 #
 # A signed-out app (a flow run with a bare `maestro test` and no setup) signs
 # MAESTRO_EMAIL up here instead, so every flow file still runs on its own.
+# A flow that failed while offline (outbox, media-recovery, vault-retry switch
+# airplane mode on Android) must not take the network from the ones after it.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - setAirplaneMode: disabled
 - launchApp:
     stopApp: true
 - extendedWaitUntil:

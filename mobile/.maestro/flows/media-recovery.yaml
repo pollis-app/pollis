@@ -1,6 +1,14 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+# Back online whatever happened: a failure while offline must not leave the
+# device in airplane mode for the flows after this one (#2029).
+onFlowComplete:
+  - runFlow:
+      when:
+        platform: Android
+      commands:
+        - setAirplaneMode: disabled
 ---
 # MEDIA RECOVERY (#1826) — an image that failed to load is never stuck on
 # "Image unavailable": the moment the same file is fetched anywhere else (here,
