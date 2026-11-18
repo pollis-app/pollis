@@ -20788,8 +20788,8 @@
         "sdk/ts/app/src/testing.ts"
       ],
       "evidence": [
-        "pollis-app-dev/tests/runner.rs:98",
-        "sdk/ts/cli/test/cli.test.ts:179"
+        "pollis-app-dev/tests/runner.rs:99",
+        "sdk/ts/cli/test/cli.test.ts:236"
       ],
       "status": "verified",
       "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
@@ -20809,7 +20809,7 @@
         "pollis-app-manifest/src/app_hash.rs"
       ],
       "evidence": [
-        "sdk/ts/cli/test/cli.test.ts:76",
+        "sdk/ts/cli/test/cli.test.ts:122",
         "pollis-app-manifest/src/app_hash.rs:112"
       ],
       "status": "verified",
@@ -20831,8 +20831,8 @@
       ],
       "evidence": [
         "pollis-app-host/src/egress.rs:65",
-        "pollis-app-dev/tests/runner.rs:181",
-        "sdk/ts/cli/test/cli.test.ts:173"
+        "pollis-app-dev/tests/runner.rs:182",
+        "sdk/ts/cli/test/cli.test.ts:230"
       ],
       "status": "verified",
       "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
@@ -20851,7 +20851,7 @@
       ],
       "evidence": [
         "sdk/ts/cli/src/build.ts:84",
-        "sdk/ts/cli/test/cli.test.ts:101"
+        "sdk/ts/cli/test/cli.test.ts:158"
       ],
       "status": "verified",
       "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
