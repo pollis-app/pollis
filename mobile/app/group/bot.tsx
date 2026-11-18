@@ -20,7 +20,7 @@ import { BotAppSection } from "../../components/bots/BotAppSection";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, space } from "../../theme/tokens";
 import { Text } from "../../components/Text";
-import { useAutoApproveBotApps, useBot, useDeleteBot, useRevokeBotHost } from "../../hooks/queries";
+import { useBot, useDeleteBot, useRevokeBotHost } from "../../hooks/queries";
 import { useBotRoute } from "../../hooks/useBotRoute";
 import { isLastHost } from "../../lib/bots";
 import { formatRelative } from "../../lib/relativeTime";
@@ -35,10 +35,8 @@ import { useThemeRerender } from "../../components/theme";
 function BotPage() {
   useThemeRerender();
   const { t } = useTranslation("mobile");
-  const { router, gid, bid, groupName, members, iAmAdmin } = useBotRoute();
+  const { router, gid, bid, groupName, members } = useBotRoute();
   const { data: bot, isLoading, isError } = useBot(bid);
-  // An update an admin set to approve itself lands when an admin opens the page (#2005); no timer.
-  useAutoApproveBotApps(gid, bid ? [bid] : [], iAmAdmin);
   const approverName = (userId: string) => {
     const m = members.find((x) => x.user_id === userId);
     return m?.username ? `@${m.username}` : userId.slice(0, 8);

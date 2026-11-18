@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { View } from "react-native";
+import { Text } from "../Text";
 import { Card, SectionTitle } from "../ui";
 import { Hint, ErrorText } from "../groups/FormBits";
 import { AppNoticeBlock } from "./AppNoticeBlock";
@@ -8,7 +9,7 @@ import { AppPlainList } from "./AppPlainList";
 import { AppPendingForm } from "./AppPendingForm";
 import { AppApprovedForm } from "./AppApprovedForm";
 import type { AppMarkKind } from "./AppMark";
-import { space } from "../../theme/tokens";
+import { fonts, semantic, type as ty, space } from "../../theme/tokens";
 import { useBotApp } from "../../hooks/queries";
 import { activeLocale } from "../../i18n";
 import { appNotice, type ApprovedAppView } from "../../lib/botApps";
@@ -76,6 +77,21 @@ export function BotAppSection({
                 seq: approved.seq,
               })}
             />
+            {view.running?.autoUpdated ? (
+              <View testID="bot-app-running-auto" style={{ gap: space.xs }}>
+                <Text style={[ty.secondary, { color: semantic.text }]}>
+                  {t("bots.app.runningAuto", { version: view.running.version })}
+                </Text>
+                <Text style={ty.section}>{t("bots.app.runningHashLabel")}</Text>
+                <Text
+                  testID="bot-app-running-hash"
+                  selectable
+                  style={[ty.secondary, { fontFamily: fonts.mono400, color: semantic.text }]}
+                >
+                  {view.running.appHash}
+                </Text>
+              </View>
+            ) : null}
           </Card>
           <SectionTitle style={{ paddingHorizontal: 0 }}>{t("bots.app.canDoHeading")}</SectionTitle>
           <Card>

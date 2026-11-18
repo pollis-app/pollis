@@ -1,8 +1,7 @@
-// Bot Apps (#2005): a bot's App as its admins see it, the approval, the auto-approval an admin's app
-// runs when it shows the group's bots, and the members' read of the group's approved Apps. Desktop
-// calls the same four bridge commands; the core refuses what the caller may not do.
+// Bot Apps (#2005): a bot's App as its admins see it, the approval, and the members' read of the
+// group's approved Apps. Desktop calls the same three bridge commands; the core refuses what the
+// caller may not do. Automatic updates happen in the bot's runtime, never in an admin's app.
 
-import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../lib/native";
@@ -78,36 +77,3 @@ export function useApproveBotApp(groupId: string | null, botUserId: string | nul
   });
 }
 
-/**
- * When an admin opens the group's bots or a bot's page: approve any waiting non-widening update an
- * admin set to approve itself (the core decides; it answers false when there is nothing to do), then
- * refetch what changed. Once per bot per mount; no timer.
- */
-export function useAutoApproveBotApps(groupId: string | null, botUserIds: readonly string[], enabled: boolean) {
-  const queryClient = useQueryClient();
-  const done = useRef(new Set<string>());
-  const key = botUserIds.join(",");
-  useEffect(() => {
-    if (!enabled || !groupId) {
-      return;
-    }
-    for (const botUserId of botUserIds) {
-      const id = `${groupId}:${botUserId}`;
-      if (done.current.has(id)) {
-        continue;
-      }
-      done.current.add(id);
-      invoke<boolean>("auto_approve_bot_app", { groupId, botUserId })
-        .then((approved) => {
-          if (approved) {
-            queryClient.invalidateQueries({ queryKey: botAppQueryKeys.app(groupId, botUserId) });
-            queryClient.invalidateQueries({ queryKey: botAppQueryKeys.group(groupId) });
-          }
-        })
-        // Best effort: the page shows the update for a manual approval if this did not land.
-        .catch(() => undefined);
-    }
-    // `key` stands for the ids' contents.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, groupId, key, queryClient]);
-}
