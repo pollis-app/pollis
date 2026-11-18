@@ -49,7 +49,13 @@
     "set_channel_muted": "Per-channel mute (#1431) silences pushes and OS notifications; the terminal client raises neither and has no channel-settings surface. A mute set on desktop or mobile applies to the whole account.",
     "check_client_policy": "The CLI runs the same check (#1611) as pollis_core::client_policy::check before it opens AppState — earlier than any command could — and exits with code 3; see pollis-tui/src/main.rs.",
     "get_client_policy_status": "The CLI reads pollis_core::client_policy::current after each action to leave the UI on a DS 426 (#1611); it does not go through the command layer.",
-    "peek_client_policy": "The CLI calls pollis_core::client_policy::peek directly before it opens AppState (#1611), cache-first like the apps; it does not go through the command layer."
+    "peek_client_policy": "The CLI calls pollis_core::client_policy::peek directly before it opens AppState (#1611), cache-first like the apps; it does not go through the command layer.",
+    "list_group_bots": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
+    "get_bot": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
+    "create_bot": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
+    "add_bot_host": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
+    "revoke_bot_host": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
+    "delete_bot": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages."
   },
   "patterns": [
     {

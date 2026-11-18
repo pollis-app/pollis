@@ -1,3 +1,5 @@
+export * from "./bots";
+
 // Mobile types mirroring `frontend/src/types/index.ts` and pollis-core (no voice).
 
 export interface User {
