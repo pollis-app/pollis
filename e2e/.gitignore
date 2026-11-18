@@ -2,6 +2,7 @@ artifacts/
 # Per-run scratch: local SQLite + MLS state + keystore for each client instance.
 .tmp-data*/
 .tmp-bots-real/
+.tmp-bots-milestone/
 # Backend fixture state (start-backend.sh: DS log/pid) + captured fixture env.
 .backend/
 .e2e-env.sh
