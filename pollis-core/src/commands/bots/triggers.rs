@@ -33,13 +33,17 @@ pub async fn claim_trigger(state: &Arc<AppState>, installation_id: &str, trigger
 /// finished with, as `(sent_at, message_id)`. Kept in the installation's
 /// encrypted store. `None` for a channel it has never seen.
 pub async fn trigger_cursor(state: &Arc<AppState>, channel_id: &str) -> Result<Option<(String, String)>> {
+    query_pair(state, "SELECT sent_at, message_id FROM bot_trigger_cursor WHERE channel_id = ?1", channel_id).await
+}
+
+/// One row of two text columns from the installation's store, keyed by `key`;
+/// `None` when there is no such row.
+async fn query_pair(state: &Arc<AppState>, sql: &str, key: &str) -> Result<Option<(String, String)>> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(not_active)?;
-    match db.conn().query_row(
-        "SELECT sent_at, message_id FROM bot_trigger_cursor WHERE channel_id = ?1",
-        rusqlite::params![channel_id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    ) {
+    match db.conn().query_row(sql, rusqlite::params![key], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
         Ok(pair) => Ok(Some(pair)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
@@ -63,17 +67,12 @@ pub async fn set_trigger_cursor(state: &Arc<AppState>, channel_id: &str, sent_at
 /// store, for checking an App's action on it (#2004). `None` when this host
 /// has never seen it, or it was deleted.
 pub async fn message_meta(state: &Arc<AppState>, message_id: &str) -> Result<Option<(String, String)>> {
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(not_active)?;
-    match db.conn().query_row(
+    query_pair(
+        state,
         "SELECT conversation_id, sender_id FROM message WHERE id = ?1 AND deleted_at IS NULL",
-        rusqlite::params![message_id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    ) {
-        Ok(pair) => Ok(Some(pair)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
+        message_id,
+    )
+    .await
 }
 
 /// The last slot (Unix seconds) the job loop finished for an App schedule

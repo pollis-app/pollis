@@ -668,11 +668,7 @@ pub async fn sign_app_approval(
     device_id: &str,
     record: &AppApprovalRecord,
 ) -> Result<String> {
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(|| err("not signed in"))?;
-    let provider = crate::commands::mls::PollisProvider::new(db.conn());
-    let (key, _) = crate::commands::mls::load_device_pq_signing_key(&provider, user_id, device_id)?;
-    Ok(record.sign(&key))
+    Ok(record.sign(&super::admin::device_signing_key(state, user_id, device_id).await?))
 }
 
 /// Every installation in the group with an approved App that verifies on

@@ -33,6 +33,18 @@ pub enum SignerRefusal {
     NotAdmin(String),
 }
 
+impl std::fmt::Display for SignerRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotInGroup => write!(f, "the approving device is not in this host's view of the group"),
+            Self::Uncertified(why) => write!(f, "the approving device is not certified: {why}"),
+            Self::BadSignature => write!(f, "the approval's signature does not verify"),
+            Self::TransparencyAlarm => write!(f, "the transparency log disagrees with the approver's account key"),
+            Self::NotAdmin(why) => write!(f, "the approver is not a current admin of the group ({why})"),
+        }
+    }
+}
+
 /// Step 1: the signer's device is a certified leaf in `viewer`'s view of
 /// `group_id`, and `signature` verifies under its leaf key.
 #[allow(clippy::too_many_arguments)]
