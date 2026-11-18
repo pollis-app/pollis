@@ -11,6 +11,8 @@ mod publish;
 mod realtime;
 mod sfu_gate;
 
+// The voice and call paths are their users; a realtime-only build has neither.
+#[cfg_attr(not(feature = "media"), allow(unused_imports))]
 pub(crate) use identity::{
     is_view_identity, lookup_avatar_url_for_identity, lookup_avatar_urls_for_identities,
     pin_local_identity, resolve_participant, resolve_participants,

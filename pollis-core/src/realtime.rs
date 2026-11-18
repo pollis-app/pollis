@@ -1,10 +1,10 @@
 use std::collections::HashSet;
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 use tokio::task::JoinHandle;
 
 use crate::sink::EventSink;
@@ -163,7 +163,7 @@ pub struct LiveKitState {
     pub channel: Option<Arc<dyn EventSink<RealtimeEvent>>>,
 
     /// Arc so a Room can be cloned out without holding the lock across an await. Desktop only.
-    #[cfg(feature = "media")]
+    #[cfg(feature = "realtime")]
     pub rooms: HashMap<String, (Arc<livekit::Room>, JoinHandle<()>)>,
 
     /// Rooms mid-connect, so concurrent `connect_rooms` calls don't duplicate.
@@ -177,7 +177,7 @@ impl LiveKitState {
     pub fn new() -> Self {
         Self {
             channel: None,
-            #[cfg(feature = "media")]
+            #[cfg(feature = "realtime")]
             rooms: HashMap::new(),
             connecting: HashSet::new(),
             presence_lane: Arc::new(tokio::sync::Mutex::new(())),
