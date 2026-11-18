@@ -605,6 +605,8 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 ## bots (`commands/bots/`) — bots (#1182)
 Admin commands, camelCase over Tauri and the mobile bridge (same arg names): `list_group_bots(groupId)` → `BotSummary[]`, `get_bot(botUserId)` → `BotDetail` (`BotSummary` + live `hosts` + `groupBotCap`), `create_bot(groupId, code, displayName)` → `BotSummary`, `add_bot_host(botUserId, code)` → `BotHost`, `revoke_bot_host(botUserId, deviceId)`, `delete_bot(botUserId)`. TS: `frontend/src/types/bots.ts`, twin `mobile/types/bots.ts`. Errors the pages tell apart start with `pairing_code_mismatch`, `bot_cap_reached`, `pairing_request_expired`. The typed code is re-derived from what the lookup served (ephemeral key, device id, and the new bot's account key or the existing bot's id) and compared in constant time, never against a DS copy (#1096). `create_bot` waits (backing off, at most two minutes) for the host's key packages and then reconciles the group, so the host arrives by Welcome; a host slower than that external-joins by itself. `revoke_bot_host` and `delete_bot` reconcile the bot's leaves out at once. The host-side library (`pollis-bot` calls it): pairing, `await_pairing`, `join_bot_group`, `handle_host_approvals`, `start_unattended`; its summary heads `commands/bots/mod.rs`, and [Bots](./bots.md) has the protocol. `GroupMember` and `UserProfile` carry `is_bot` (from the DS, default false).
 
+Slash commands (#2018), any member: `list_group_commands(groupId)` → `GroupCommand[]` `{installationId, botUserId, botUsername, appName, command, description, argHint, request, channels, needsTarget}` (TS: `frontend/src/utils/slashCommands.ts`, port `mobile/lib/slashCommands.ts`) — every command of every bot's approved App in the group, `channels` = the App's granted channel ids, `needsTarget` when two Apps declare the name. The approved manifest comes through `bots::app_commands::approved_app`, the one seam to App approval (#2005). `send_command_request(groupId, channelId, botUserId, command, args)` delivers a `request: true` command sealed to the bot; the transport is #2008's, so today it refuses with `bot_requests_unavailable` and sends nothing. A command is otherwise an ordinary `send_message`.
+
 ## device_link (`commands/device_link.rs`) — QR device link (#1207, #1361)
 
 Sign a new device in by QR instead of the email OTP plus a typed SAS, in either direction: v1, an enrolled device shows the QR and the new device scans it (desktop pastes its code, having no scanner), or v2, the NEW device shows the QR and a signed-in phone scans it. Protocol, threat model and guardrails: `docs/qr-device-link-design.md`. Mobile no longer shows a v1 code; its Security screen is the v2 scanner.
@@ -855,7 +857,7 @@ than hand-edit.
 
 **`autolock`** (2) — `report_user_activity`, `set_auto_lock_timeout`
 
-**`bots`** (6) — `add_bot_host`, `create_bot`, `delete_bot`, `get_bot`, `list_group_bots`, `revoke_bot_host`
+**`bots`** (8) — `add_bot_host`, `create_bot`, `delete_bot`, `get_bot`, `list_group_bots`, `list_group_commands`, `revoke_bot_host`, `send_command_request`
 
 **`device_enrollment`** (9) — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 

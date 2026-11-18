@@ -144,7 +144,7 @@ Today an installation id is the bot's user id, because each bot has exactly one 
 ## What comes next
 
 - **Approval:** an admin approves exactly one App version (pinned by hash) with the grants they chose, and approves again when an update asks for more.
-- **More triggers:** mentions, slash commands, schedules and member requests reach Apps as their handlers once the runtime delivers them.
+- **More triggers:** schedules and member requests reach Apps as their handlers once the runtime delivers them. Messages, mentions and slash commands already do: a message is routed to exactly one handler, `on-command` for a command the App declared ([App reference: Commands](./app-reference.md#commands)), else `on-mention` for a mention of the bot, else `on-message`.
 - **History:** `query-messages` returns the trigger's own message until the runtime keeps a message log.
 - **SDKs:** a TypeScript SDK and the `pollis app` CLI.
 

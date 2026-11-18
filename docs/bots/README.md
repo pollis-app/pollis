@@ -12,10 +12,12 @@ A Pollis bot is a member of one group that is run by a program, not a person.
 
 | Page | For | What it covers |
 |---|---|---|
+| [Using bots](./using-bots.md) | Everyone in a group | The Bot badge, slash commands, mentioning a bot, what happens when it is offline |
 | [Admin guide](./admin-guide.md) | Group admins | What a bot can read, adding a bot, adding and revoking hosts, deleting a bot, limits |
 | [Self-hosting](./self-hosting.md) | Whoever runs the bot's machine | Installing `pollis-bot`, pairing, running it as a service, logs, troubleshooting |
 | [Alerts webhook](./alerts-webhook.md) | Developers and operators | Posting alerts into a channel with `curl`, Grafana or `pollis-bot post` |
 | [Concepts for developers](./concepts-for-developers.md) | Developers | How a job runs, triggers and trigger keys, why only one host acts, grants |
+| [App reference](./app-reference.md) | App developers | Handlers, host functions, the manifest, slash commands and how they are routed, limits |
 
 Internals (schema, endpoints, protocol details) live in the contributor wiki: [`.codesight/wiki/bots.md`](../../.codesight/wiki/bots.md). The runtime's own reference is [`pollis-bot/README.md`](../../pollis-bot/README.md).
 
