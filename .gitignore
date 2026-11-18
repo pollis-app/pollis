@@ -12,6 +12,9 @@ pollis
 !verifiable-log-builder/src/bin/
 !verifiable-log-serve/src/bin/
 !pollis-relay/src/bin/
+# The npm package `pollis` (npx pollis app new) and its bin script are source.
+!sdk/ts/pollis/
+!sdk/ts/pollis/bin/
 
 # Test binary
 *.test
