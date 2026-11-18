@@ -1,0 +1,7 @@
+appId: ${MAESTRO_APP_ID}
+---
+# A brand-new sign-up address for a flow that needs an account of its own
+# (tag `fresh-account`, #2029): the run's MAESTRO_EMAIL with "-<FRESH>-<time>"
+# added to its local part, in output.freshEmail. MAESTRO_EMAIL itself is the
+# run's shared account (setup/setup.yaml), so it is never signed up twice.
+- evalScript: ${output.freshEmail = MAESTRO_EMAIL.replace('@', '-' + FRESH + '-' + Date.now().toString(36) + '@')}

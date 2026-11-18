@@ -10,7 +10,7 @@ appId: ${MAESTRO_APP_ID}
 # plain route link; pollis://m/… permalinks and pollis://invite/… ride the same
 # delivery.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 
 # --- Warm: the app is running and foregrounded ---
 - openLink: "pollis://self/preferences"

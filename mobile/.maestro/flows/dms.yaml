@@ -1,14 +1,15 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
-  - two-client
+  - peer
+  - gate
 ---
-# DMs — start a DM with the seeded peer, send a message. The ACCEPT + REPLY
-# side runs on a SECOND device (see README "Two-client flows"); this file drives
-# the initiator. scripts/maestro-report.sh runs it: it signs up a fresh peer
-# and passes its handle as ${MAESTRO_PEER_HANDLE} (#1950).
+# DMs — start a DM with a peer, send a message; this file drives the initiator.
+# Tag `peer`: maestro-run.sh signs a fresh peer up on the same device first
+# (setup/peer.yaml) and passes its handle as ${MAESTRO_PEER_HANDLE} (#1950,
+# #2029); scripts/maestro-report.sh does the same with a second device.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-direct"
 - assertVisible:

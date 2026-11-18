@@ -13,7 +13,7 @@ cargo test --features test-harness --test flows   # integration suite — real d
                                                   # headless: -p pollis --no-default-features --features test-harness
 cargo test -p pollis-delivery                     # DS endpoint tests
 cd mobile && pnpm install --ignore-workspace && pnpm typecheck && pnpm test   # mobile (EVERY pnpm call in mobile/ needs --ignore-workspace)
-mobile/scripts/maestro-run.sh <flow|all> <ios|android>  # mobile e2e on simulator/emulator (Release build vs dev DS; see mobile/.maestro/README.md)
+mobile/scripts/maestro-run.sh <gate|all|area <ref>|flow…> [ios] [ipad] [android]  # mobile e2e, devices in parallel (Release build vs dev DS; see mobile/.maestro/README.md)
 ```
 
 Secrets: Doppler → GH Actions; locally `.env.development` (scripts source it automatically; see `docs/run-it-yourself.md`).

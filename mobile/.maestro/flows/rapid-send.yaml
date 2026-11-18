@@ -16,7 +16,7 @@ tags:
 # On Android, scripts/maestro-rapid-send.sh holds the first send in flight on
 # a slowed network instead, which reproduces the race regardless of timing.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 
 # ── Part 1: a burst while the first send is out ─────────────────────────────
 - runFlow:

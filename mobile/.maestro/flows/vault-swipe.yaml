@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # VAULT SWIPE (#1492) — the Vault's media view opens a full-screen viewer that
 # swipes left/right through every image in grid order, Google Photos style,
@@ -14,7 +15,10 @@ tags:
 # media-viewer.yaml's header for why). Every step is mandatory.
 # Self-contained: a fresh disposable account, no peer.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "vault-swipe"
 - tapOn:
     id: "tab-direct"
 - tapOn:

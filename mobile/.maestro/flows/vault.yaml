@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # VAULT (#1316, desktop #107) — the personal encrypted space, end to end
 # against the dev DS on a Release build:
@@ -15,7 +16,10 @@ tags:
 # so entries are matched by `.*…*` regexes on that label, and actions are
 # reached through the long-press entry sheet.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "vault"
 - tapOn:
     id: "tab-direct"
 - assertVisible:

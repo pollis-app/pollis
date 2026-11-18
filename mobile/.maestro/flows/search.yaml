@@ -12,7 +12,7 @@ tags:
 # swaps the Self menu for results in place, Cancel (or the clear button, or a
 # second tap on the Self tab) brings the menu back.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-self"
 - assertVisible:
@@ -46,11 +46,7 @@ tags:
 # Seed a message to find.
 - tapOn:
     id: "tab-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
     id: "toggle-general-channel"

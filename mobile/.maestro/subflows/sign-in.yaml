@@ -21,9 +21,15 @@ appId: ${MAESTRO_APP_ID}
 # --- Email ---
 - assertVisible:
     id: "screen-auth-email"
+# FRESH=<name> signs up a brand-new address (fresh-email.yaml) instead of
+# MAESTRO_EMAIL, which maestro-run.sh keeps for the run's shared account (#2029).
+- runFlow:
+    when:
+      true: ${typeof FRESH !== 'undefined' && FRESH !== ''}
+    file: fresh-email.yaml
 - tapOn:
     id: "input-email"
-- inputText: "${MAESTRO_EMAIL}"
+- inputText: "${(typeof FRESH !== 'undefined' && FRESH !== '') ? output.freshEmail : MAESTRO_EMAIL}"
 - tapOn:
     id: "btn-submit-email"
 

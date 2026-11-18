@@ -15,7 +15,7 @@ tags:
 # `pollis-delivery/tests/email_change.rs` and the flows suite. What this covers
 # is the tier-specific half — that the mobile screen asks for both.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 
 - tapOn:
     id: "tab-self"

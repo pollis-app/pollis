@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - ipad
+  - gate
 ---
 # iPad TWO-PANE (#622) — on regular width the DMs/Groups tabs render list +
 # detail side by side. RUN THIS ON AN iPad SIMULATOR (regular width). On a
@@ -12,7 +13,7 @@ tags:
 # pane, so the placeholder only shows for a group without channels (or an
 # account with no groups, which gets the centred empty state instead).
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 # Navigate explicitly: sign-in guarantees the tab navigator, not which tab.
 - tapOn:
     id: "tab-groups"
@@ -26,11 +27,7 @@ tags:
     optional: true
 # Creating a group lands on the Groups tab with it selected, its member count
 # in the panel header, and — on iPad — its #General open in the right pane.
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

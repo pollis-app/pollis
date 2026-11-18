@@ -1,6 +1,15 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - gate
+# Back online whatever happened: a failure while offline must not leave the
+# device in airplane mode for the flows after this one (#2029).
+onFlowComplete:
+  - runFlow:
+      when:
+        platform: Android
+      commands:
+        - setAirplaneMode: disabled
 ---
 # OUTBOX (#1335) — a message the user saw accepted is either delivered or
 # visibly unsent, never silently gone.
@@ -21,16 +30,12 @@ tags:
 #
 # Self-contained, like messaging.yaml: creates its own group.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:
@@ -59,23 +64,11 @@ tags:
 - extendedWaitUntil:
     visible: ".*ob1335 killed.*"
     timeout: 10000
-- stopApp
-- launchApp
+- runFlow: ../subflows/home.yaml
 - runFlow:
-    when:
-      visible:
-        id: "screen-auth-pin"
-    commands:
-      - runFlow: ../subflows/enter-pin.yaml
-- extendedWaitUntil:
-    visible:
-      id: "tab-groups"
-    timeout: 30000
-- tapOn:
-    id: "tab-groups"
-- tapOn:
-    text: "E2E Outbox Group.*"
-    index: 0
+    file: ../subflows/open-group.yaml
+    env:
+      GROUP: "E2E Outbox Group"
 - tapOn:
     text: "General"
     optional: true

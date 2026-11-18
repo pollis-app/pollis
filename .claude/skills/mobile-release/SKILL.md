@@ -50,24 +50,31 @@ build's worktree must never hold a `.env`. Build the Rust core with
 `uniffi-bindgen-react-native build <ios|android> --config ubrn.config.yaml --and-generate --release`;
 for iOS, leave out `--no-sim`, because the simulator needs that slice.
 
-- **iOS:**
-  1. `scripts/build-release-sims.sh ios`, then `xcrun simctl install` the app on the iPad too.
-  2. `scripts/maestro-run.sh all ios` and `scripts/maestro-run.sh all ipad`.
-  3. The two-client flows: `scripts/maestro-report.sh <iphone> <ipad>` and `scripts/maestro-approval-prompt.sh <iphone>`.
-- **Android:**
-  1. `scripts/build-release-sims.sh android` on the `pollis_e2e` emulator.
-  2. `scripts/maestro-run.sh all android`.
-  3. The two-client scripts that run on Android.
+Build both platforms (the gate runs on all three devices at once, whichever
+store this release is for):
+
+1. `scripts/build-release-sims.sh ios`, then `xcrun simctl install` the app on
+   the iPad too; `scripts/build-release-sims.sh android` on the `pollis_e2e`
+   emulator.
+2. `scripts/maestro-run.sh gate` — the gate tier on iPhone 18 Pro, iPad Pro
+   13-inch (M5) and `pollis_e2e` in parallel (one Maestro session and one
+   shared account per device, each failed flow retried once; see
+   `mobile/.maestro/README.md` → "Run"). It ends with each device's time and
+   its pass / flake / fail flows.
+3. On demand only, when the release touches them: `scripts/maestro-run.sh area <last release commit>`
+   for the flows outside the gate that its changes reach, and the two-client
+   scripts it names (e.g. `scripts/maestro-approval-prompt.sh <iphone>`).
 
 Triage every failure before going on:
 - **A real bug:** fix it in a PR, merge it, and go back to step 1, since the commit moved.
-- **A flake:** re-run that flow alone. It must pass.
+- **A flake** (the runner's `flake` list: it passed on its retry): note it in
+  the report. A flow that failed twice is not a flake.
 - **A harness gap:** fix the flow in a PR. If it cannot be fixed now, file an issue
   and say so in the report. Only do this for failures that do not touch the app
   (the same failure on `origin/main`'s copy of the flow, for example).
 
-Do not upload until the suite is clean or every remaining failure is filed and
-explained. Report the pass counts per device. Shut the simulators and emulator
+Do not upload until the gate is clean or every remaining failure is filed and
+explained. Report the pass / flake / fail counts and the time per device. Shut the simulators and emulator
 down afterwards.
 
 ## 4. Store build

@@ -1,0 +1,146 @@
+# Path → flow map for `maestro-run.sh area` (#2029).
+#
+# One rule per line: a repo-relative bash pattern (`*` also crosses `/`), then
+# the flows a change under it should run. `gate` stands for every flow tagged
+# `gate`. A changed file may match several lines; the flows add up. On top of
+# these lines the runner itself maps:
+#   mobile/.maestro/flows/<f>.yaml       → <f>
+#   mobile/.maestro/subflows/<s>.yaml    → every flow that runs <s>
+#   mobile/.maestro/two-client/<d>/…,
+#   pollis-tui/examples/<x>.rs           → the two-client scripts that use them
+#                                          (named, not run: they need a peer)
+# A line with no flows marks a path that needs none (docs). A changed file
+# under mobile/ that matches no line at all runs the gate; one elsewhere in the
+# repo that matches nothing runs nothing.
+
+# --- the harness itself ---
+mobile/scripts/maestro-run.sh                  gate
+mobile/scripts/maestro-app-id.sh               gate
+mobile/scripts/maestro-media.sh                gate media-viewer media-recovery message-media-grid composer-attachments sensitive-media
+mobile/scripts/maestro-locale-smoke.sh         locale-smoke
+mobile/.maestro/setup/*                        gate
+mobile/.maestro/areas.txt                      gate
+mobile/.maestro/fixtures/*                     media-viewer media-recovery message-media-grid composer-attachments sensitive-media vault-swipe custom-emoji profile-photo
+mobile/.maestro/README.md
+mobile/.maestro/SELECTORS.md
+
+# --- shared layers: everything rides on them ---
+pollis-core/*                                  gate
+pollis-api/*                                   gate
+pollis-delivery/*                              gate
+pollis-schema/*                                gate
+mobile/modules/*                               gate
+mobile/package.json                            gate app-update
+mobile/pnpm-lock.yaml                          gate
+mobile/patches/*                               gate keyboard-recovery message-actions-keyboard deep-link
+mobile/plugins/*                               gate app-update
+mobile/app.json                                gate app-update deep-link
+mobile/app.config.js                           gate app-update client-policy
+mobile/app/_layout.tsx                         gate deep-link theme-startup i18n
+mobile/app/index.tsx                           gate
+mobile/stores/*                                gate
+mobile/hooks/queries/*                         gate
+mobile/lib/native/*                            gate
+mobile/lib/session/*                           gate auth
+design/*                                       theme-startup profile-prefs tour
+mobile/theme/*                                 theme-startup profile-prefs tour
+mobile/components/theme.tsx                    theme-startup profile-prefs
+mobile/components/ThemeProbe.tsx               theme-startup
+mobile/components/ui.tsx                       gate empty-states tour
+mobile/components/Text.tsx                     gate locale-smoke
+
+# --- sign-in, PIN, device linking ---
+mobile/app/(auth)/*                            auth sign-in-device diagnostics client-policy locale-smoke tour
+mobile/components/auth/*                       auth sign-in-device keyboard-recovery
+mobile/app/self/link-device.tsx                sign-in-device keyboard-recovery
+mobile/components/TabBar.tsx                   sign-in-device ipad-two-pane groups
+mobile/components/KeyboardProbe.tsx            keyboard-recovery message-actions-keyboard
+mobile/lib/keyboard*                           keyboard-recovery message-actions-keyboard long-history
+mobile/app/dev/*                               client-policy
+mobile/components/ClientBlockedScreen.tsx      client-policy
+mobile/lib/clientPolicy*                       client-policy
+
+# --- groups and channels ---
+mobile/app/(tabs)/groups.tsx                   groups ipad-two-pane empty-states channel-menu
+mobile/components/groups/*                     groups ipad-two-pane channel-menu channel-mute copy-state group-aliases
+mobile/app/group/*                             groups channel-menu channel-mute custom-emoji copy-state empty-states
+mobile/components/MasterDetail.tsx             ipad-two-pane
+mobile/components/pane/*                       ipad-two-pane
+mobile/app/self/alias*                         group-aliases
+mobile/app/self/aliases.tsx                    group-aliases
+
+# --- conversations ---
+mobile/app/chat/*                              messaging reply outbox composer-draft long-history message-links message-actions-keyboard rapid-send channel-menu
+mobile/components/chat/*                       messaging reply outbox composer-attachments composer-draft message-links message-actions-keyboard message-media-grid sensitive-media pins channel-menu
+mobile/components/chat/*Link*                  link-previews message-links
+mobile/components/chat/ReplyBar.tsx            reply
+mobile/components/chat/SwipeToReply.tsx        reply
+mobile/components/chat/ChannelMenuSheet.tsx    channel-menu channel-mute
+mobile/components/chat/SensitiveCover.tsx      sensitive-media
+mobile/components/chat/UnsentActions.tsx       outbox
+mobile/lib/drafts.ts                           composer-draft
+mobile/hooks/useDraft.ts                       composer-draft
+mobile/lib/composerAttachments*                composer-attachments
+mobile/lib/sensitiveMedia*                     sensitive-media
+mobile/lib/links.ts                            message-links link-previews
+mobile/lib/openLink.ts                         message-links
+mobile/lib/linkPreview*                        link-previews
+mobile/lib/replyPreview*                       reply
+mobile/lib/swipeReply*                         reply
+mobile/lib/mentions*                           messaging
+mobile/app/conversation/*                      pins channel-menu
+mobile/lib/messageJump*                        pins search
+mobile/components/emoji/*                      custom-emoji copy-state messaging
+mobile/lib/emoji*                              custom-emoji
+
+# --- DMs and people ---
+mobile/app/(tabs)/direct.tsx                   dms empty-states ipad-two-pane
+mobile/components/direct/*                     dms dm-safety empty-states
+mobile/app/dm/*                                dms dm-safety
+mobile/app/user/*                              report
+mobile/app/report.tsx                          report
+mobile/app/self/blocked.tsx                    security report empty-states
+
+# --- media ---
+mobile/app/media.tsx                           media-viewer media-recovery vault-swipe
+mobile/components/media/*                      media-viewer media-recovery vault-swipe
+mobile/components/Media.tsx                    media-viewer media-recovery message-media-grid sensitive-media vault-media-instant
+mobile/lib/media/*                             media-viewer media-recovery vault-media-instant message-media-grid
+mobile/lib/attachments*                        composer-attachments media-viewer outbox
+mobile/hooks/useVideoPoster.ts                 composer-attachments
+
+# --- Vault ---
+mobile/app/vault.tsx                           vault vault-media-instant vault-swipe vault-retry
+mobile/components/vault/*                      vault vault-media-instant vault-swipe vault-retry
+mobile/lib/vault*                              vault vault-retry
+mobile/hooks/queries/useVault.ts               vault vault-retry
+
+# --- Self, settings, search ---
+mobile/app/(tabs)/self.tsx                     search app-update security open-source
+mobile/components/search/*                     search copy-state
+mobile/app/self/preferences.tsx                profile-prefs notification-content i18n theme-startup
+mobile/app/self/language.tsx                   i18n locale-smoke
+mobile/components/LanguagePicker.tsx           i18n locale-smoke
+mobile/i18n/*                                  i18n locale-smoke
+frontend/src/i18n/locales/*                    i18n locale-smoke
+mobile/app/self/user-settings.tsx              profile-prefs profile-photo change-email
+mobile/app/self/change-email.tsx               change-email
+mobile/components/self/ProfilePhoto*           profile-photo
+mobile/components/UserAvatar.tsx               profile-photo
+mobile/lib/avatar*                             profile-photo
+mobile/app/self/security.tsx                   security security-events export
+mobile/app/self/security-events.tsx            security-events
+mobile/app/self/diagnostics.tsx                diagnostics
+mobile/components/self/CopyDiagnostics*        diagnostics
+mobile/app/self/open-source/*                  open-source
+mobile/components/self/BuildRows.tsx           app-update
+mobile/lib/installChannel*                     app-update
+mobile/lib/buildInfo*                          app-update
+mobile/components/ExportArchive.tsx            export
+mobile/app/self/saved.tsx                      empty-states
+mobile/app/approve-device.tsx                  copy-state
+mobile/app/invite/*                            copy-state deep-link
+mobile/app/m/*                                 deep-link
+mobile/lib/push/*                              notification-content
+mobile/lib/outbox*                             outbox rapid-send
+mobile/hooks/queries/pendingMessages.ts        outbox rapid-send messaging

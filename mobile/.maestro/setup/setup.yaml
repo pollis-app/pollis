@@ -1,0 +1,16 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - setup
+---
+# The run's shared account (#2029). maestro-run.sh runs this once per device,
+# after the `fresh-account` flows and before every flow that starts with
+# subflows/home.yaml: it clears the app and signs up MAESTRO_EMAIL, which the
+# runner makes new for each device run. The later flows reuse this session
+# (relaunch + PIN) and create their own groups in it, each under a name no
+# other flow uses.
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- assertVisible:
+    id: "screen-self"
+- takeScreenshot: setup-01-shared-account

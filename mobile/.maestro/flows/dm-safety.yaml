@@ -1,17 +1,17 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
-  - two-client
+  - peer
 ---
 # SAFETY NUMBER IN THE DM (#1563) — a safety number belongs to a pair (your
 # key with theirs), so it lives in the conversation: DM info → "Verify safety
 # number" opens "You & @<peer>" with the 60 digits in 5-digit blocks (#1278's
 # field-drift guard), and Mark verified flips to Verified and back. The chat
 # header's members button reaches the same row. The peer's profile no longer
-# shows the number. Run via scripts/maestro-report.sh, which signs up a fresh
-# peer on a second device and passes its handle as ${MAESTRO_PEER_HANDLE}.
+# shows the number. Tag `peer`: maestro-run.sh (or scripts/maestro-report.sh)
+# signs a fresh peer up and passes its handle as ${MAESTRO_PEER_HANDLE}.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-direct"
 - tapOn:

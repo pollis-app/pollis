@@ -4,7 +4,9 @@
 # reads its @handle off the screen, and the REPORTER device runs
 # flows/report.yaml against that handle, then flows/dm-safety.yaml (#1563: the
 # safety number in a DM with that peer) and flows/dms.yaml (start a DM with it),
-# each as another fresh account.
+# all three on one reporter account that setup/setup.yaml signs up first (#2029).
+# maestro-run.sh runs the same three flows on ONE device (tag `peer`, the peer
+# signed up on that device); this script is the two-device version.
 #
 #   mobile/scripts/maestro-report.sh <reporter-device-id> <peer-device-id>
 #
@@ -29,19 +31,12 @@ BASE="${BASE:-pollis-e2e+primary@example.com}"
 STAMP="$(date +%Y%m%d%H%M%S)"
 PEER_EMAIL="${BASE%@*}-peer-$STAMP@${BASE#*@}"
 REPORTER_EMAIL="${BASE%@*}-rep-$STAMP@${BASE#*@}"
-SAFETY_EMAIL="${BASE%@*}-safety-$STAMP@${BASE#*@}"
-DM_EMAIL="${BASE%@*}-dm-$STAMP@${BASE#*@}"
 
-echo "==> 1/4 peer signs up ($PEER_EMAIL)"
+echo "==> 1/4 peer signs up ($PEER_EMAIL); the reporter signs up ($REPORTER_EMAIL)"
 maestro --device "$PEER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$PEER_EMAIL" "$HERE/.maestro/two-client/report/1-peer-signup.yaml"
+maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$REPORTER_EMAIL" "$HERE/.maestro/setup/setup.yaml"
 
-if [[ "$PEER" == emulator-* || "$PEER" == *:* ]]; then
-  adb -s "$PEER" shell uiautomator dump /sdcard/report-ui.xml >/dev/null
-  TREE="$(adb -s "$PEER" exec-out cat /sdcard/report-ui.xml)"
-else
-  TREE="$(maestro --device "$PEER" hierarchy 2>/dev/null)"
-fi
-HANDLE="$(printf '%s' "$TREE" | grep -oE '@[a-z0-9][a-z0-9_.-]{2,}' | head -1 | tr -d '@')"
+HANDLE="$(maestro_read_handle "$PEER")"
 [ -n "$HANDLE" ] || { echo "could not read the peer's handle" >&2; exit 1; }
 echo "    peer handle: $HANDLE"
 
@@ -49,11 +44,11 @@ echo "==> 2/4 reporter reports the peer"
 maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$REPORTER_EMAIL" -e MAESTRO_PEER_HANDLE="$HANDLE" "$HERE/.maestro/flows/report.yaml"
 echo "==> report passed"
 
-# A fresh account again: sign-in clears state, and an existing account on a
-# cleared device would land on new-device enrollment instead of the tabs.
+# The same reporter account: each flow starts from subflows/home.yaml (relaunch +
+# PIN), so it reuses the session setup.yaml signed up.
 echo "==> 3/4 safety number in a DM with the peer"
-maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$SAFETY_EMAIL" -e MAESTRO_PEER_HANDLE="$HANDLE" "$HERE/.maestro/flows/dm-safety.yaml"
+maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$REPORTER_EMAIL" -e MAESTRO_PEER_HANDLE="$HANDLE" "$HERE/.maestro/flows/dm-safety.yaml"
 echo "==> dm-safety passed"
 echo "==> 4/4 start a DM with the peer"
-maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$DM_EMAIL" -e MAESTRO_PEER_HANDLE="$HANDLE" "$HERE/.maestro/flows/dms.yaml"
+maestro --device "$REPORTER" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$REPORTER_EMAIL" -e MAESTRO_PEER_HANDLE="$HANDLE" "$HERE/.maestro/flows/dms.yaml"
 echo "==> dms passed"

@@ -12,7 +12,7 @@ tags:
 # from the on-disk rendition on the first frames, not from a fresh download.
 # The fixture is a synthetic 900x600 drawing, so the crop is exercised too.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-self"
 - assertVisible:
@@ -52,11 +52,7 @@ tags:
 # And so do your message rows.
 - tapOn:
     id: "tab-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # DIAGNOSTICS (#1305) — the on-device log, end to end on a real build.
 #
@@ -13,13 +14,17 @@ tags:
 # Self-contained: part 2 signs up the disposable account via the subflow.
 
 # --- 1. Wrong code: the error offers the log ---
+- runFlow:
+    file: ../subflows/fresh-email.yaml
+    env:
+      FRESH: "diagnostics-otp"
 - clearState
 - launchApp
 - assertVisible:
     id: "screen-auth-email"
 - tapOn:
     id: "input-email"
-- inputText: "${MAESTRO_EMAIL}"
+- inputText: "${output.freshEmail}"
 - tapOn:
     id: "btn-submit-email"
 - extendedWaitUntil:
@@ -42,7 +47,10 @@ tags:
 - assertVisible: "Copied"
 
 # --- 2. Signed in: the Diagnostics screen shows the core's log ---
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "diagnostics"
 - tapOn:
     id: "tab-self"
 # centerElement: with the Group aliases row (#2017) the scroll can stop with the

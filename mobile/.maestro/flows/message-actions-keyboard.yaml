@@ -12,16 +12,12 @@ tags:
 # Also: a long press on a link opens its sheet the same way, and a plain tap on
 # a row still dismisses the keyboard. Self-contained: a fresh self-owned group.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

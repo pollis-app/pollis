@@ -1,6 +1,14 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+# Back online whatever happened: a failure while offline must not leave the
+# device in airplane mode for the flows after this one (#2029).
+onFlowComplete:
+  - runFlow:
+      when:
+        platform: Android
+      commands:
+        - setAirplaneMode: disabled
 ---
 # MEDIA RECOVERY (#1826) — an image that failed to load is never stuck on
 # "Image unavailable": the moment the same file is fetched anywhere else (here,
@@ -19,18 +27,14 @@ tags:
 # switch, so the recovery is pinned there by mobile/tests/media-recovery.test.ts,
 # which drives the same `lib/media/tile.ts` both platforms run.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
 
 # A group with #General to post into.
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:
@@ -101,11 +105,10 @@ tags:
     visible:
       id: "tab-groups"
     timeout: 20000
-- tapOn:
-    id: "tab-groups"
-- tapOn:
-    text: "E2E Recover Group.*"
-    index: 0
+- runFlow:
+    file: ../subflows/open-group.yaml
+    env:
+      GROUP: "E2E Recover Group"
 
 # ── iOS / iPad: no network switch; prove the online render and stop ─────────
 - runFlow:

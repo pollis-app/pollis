@@ -24,7 +24,8 @@ form factors.
    ```
 2. **A RELEASE build of the app, pointed at the dev DS.** Both halves matter.
 
-   *Release, not dev-client.* Every flow opens with `clearState`, which wipes
+   *Release, not dev-client.* Every run starts with `clearState` (the
+   `fresh-account` flows and `setup/setup.yaml`), which wipes
    expo-dev-client's stored dev-server URL — so a Debug (dev-client) build
    boots to the **dev-client launcher menu** and the app never loads. The suite
    cannot drive that build at all. A Release build embeds the JS bundle and has
@@ -67,24 +68,97 @@ form factors.
 ## Run
 
 ```bash
-# one flow on the iPhone simulator
-mobile/scripts/maestro-run.sh auth ios
-# the whole suite on the iPad simulator (exercises the #622 two-pane)
-mobile/scripts/maestro-run.sh all ipad
-# on Android
-mobile/scripts/maestro-run.sh messaging android
+# the release gate on all three devices at once
+mobile/scripts/maestro-run.sh gate
+# the flows a branch's changes reach (.maestro/areas.txt), on the iPhone only
+mobile/scripts/maestro-run.sh area origin/main ios
+# every flow on every device
+mobile/scripts/maestro-run.sh all
+# named flows; the original `<flow|all> <ios|ipad|android>` form still works
+mobile/scripts/maestro-run.sh messaging reply android
+DRY_RUN=1 mobile/scripts/maestro-run.sh gate        # print each device's plan only
 ```
-Screenshots land in `mobile/.maestro/artifacts/<date>/<platform>/` — that's the
-gallery the visual evaluator reviews. Override device names with `IOS_DEVICE=…`,
-`IPAD_DEVICE=…`, `ANDROID_AVD=…`. The defaults are Xcode 27's `iPhone 18 Pro`
-and `iPad Pro 13-inch (M5)`, and the `pollis_e2e` AVD (Pixel 8, API 36
-`google_apis` arm64 — see `mobile/CLAUDE.md` for creating it). Simulator names change with each Xcode, so the
-script resolves the name among *available* simulators and, if none matches,
-exits printing the ones that exist rather than running with no `--device` at
-all:
+
+**Tiers.** The flow's own header says which tier it is in (`tags:`):
+
+| Tier | What runs |
+| --- | --- |
+| `gate` | flows tagged `gate`: `auth`, `sign-in-device`, `messaging`, `dms`, `groups`, `reply`, `outbox`, `composer-attachments`, `media-viewer`, `notification-content`, `app-update`, `locale-smoke` on every device, plus `ipad-two-pane` (tag `ipad`) on the iPad. The `mobile-release` skill runs this on all three devices. |
+| `area <base-ref \| path…>` | the flows `areas.txt` maps the changed files to (with a ref: `git diff <ref>...HEAD` plus uncommitted and untracked files). A changed flow runs itself, a changed subflow every flow that uses it; `gate` in the map stands for the gate set; a file under `mobile/` that no line matches runs the gate. Touched two-client flows or peers are named, not run. Every flow outside the gate (`group-aliases`, `link-previews`, …) is reached this way or by `all`. |
+| `all` | every flow under `flows/` except the `two-client` ones |
+| `<flow> …` | those flows |
+
+**Devices** default to all three (`ios ipad android`) and run **concurrently**,
+each with its own output under `artifacts/<date>/<device>/` (gallery) and
+`artifacts/<date>/<device>/logs/<HHMMSS>/` (Maestro logs, JUnit, the config it
+ran, `final.txt` with one `<flow> <pass|flake|fail> <seconds>` line per flow,
+`times.txt`). A device that is not booted yet boots only when
+`~/.claude/scripts/device-headroom.sh` says GO; while it says NO-GO and other
+devices are running, it waits for one of them to finish (`NO_HEADROOM=1`
+skips the check).
+
+**One Maestro session per device (#2029).** Each device's flows go to ONE
+`maestro test` (a generated workspace config whose `executionOrder` lists
+them), so the iOS XCTest driver installs and starts once, not once per flow.
+The order:
+
+1. the `fresh-account` flows: those that need an account nobody else has
+   touched (`auth`, `sign-in-device`, `client-policy`, `diagnostics`, `tour`,
+   `empty-states`, `theme-startup`, `export`, `group-aliases`,
+   the four `vault*` flows, `locale-smoke`). Each clears the app and signs up
+   an address of its own: `subflows/fresh-email.yaml` adds `-<name>-<time>` to
+   the run's address (`sign-in.yaml` does it when called with `FRESH`);
+2. `setup/peer.yaml`, when a `peer` flow is selected (`dms`, `dm-safety`,
+   `report`): a fresh account on the same device, whose `@handle` the runner
+   reads off Self and passes as `MAESTRO_PEER_HANDLE`. Reading it ends the
+   first invocation;
+3. `setup/setup.yaml`: the run's **shared account**. The runner makes a new
+   `MAESTRO_EMAIL` for every device run (`<.env address>-<device>-<time>-a1`);
+   setup clears the app and signs it up once;
+4. every other flow, `groups` first. Each starts with `subflows/home.yaml`:
+   relaunch WITHOUT `clearState`, the PIN, the tab bar, no sheet. Nothing signs
+   up again. A flow creates its own data under a name no other flow uses
+   (`E2E Msg Group`, `E2E Reply Group`, …), so flows never see each other's
+   groups. They open "Create group" by its route
+   (`subflows/open-create-group.yaml`): the pill strip's "+" ends up past the
+   screen edge once the account holds a few groups, and `groups`, which runs
+   first, still drives the "+" sheet itself;
+5. **retries:** every failed flow runs once more, all in one more invocation,
+   on a new shared account (and setup again). A flow that passes then is a
+   **flake**; one that fails twice **fails** the run (`RETRIES=0` turns it
+   off);
+6. `locale-smoke`, when selected, through `scripts/maestro-locale-smoke.sh`
+   with `LOCALES` (default `ar zh hi`: right-to-left, CJK, an Indic script;
+   `LOCALES=all` runs every catalogue). It sets the device language per
+   locale, so it cannot share the session.
+
+Flows that change account-wide settings put them back: `profile-prefs`
+(accent, reduced motion), `notification-content`, `i18n` (English, also in
+its `onFlowComplete`). Flows that cannot share the account and why:
+
+| Flow | Why it keeps a fresh account |
+| --- | --- |
+| `auth`, `sign-in-device` | they are the sign-up and first-run checks (settled in #2029) |
+| `client-policy`, `diagnostics`, `tour`, `locale-smoke` | they drive the signed-out screens (email, OTP, a blocked build, the device language at first launch) |
+| `empty-states` | every screen it checks is empty only on a new account |
+| `theme-startup` | a new account must settle on the default accent |
+| `export` | the archive of an attachment-free account offers no download; the shared one has attachments |
+| `group-aliases` | "Apply to all my groups" changes every group of the account, and its list expects two |
+| `vault`, `vault-media-instant`, `vault-swipe`, `vault-retry` | there is one Vault per account, and each checks its empty state and exact contents |
+
+The run ends with one line per device: wall clock, the first pass's time,
+and the pass / flake / fail counts with the flows named. Override device
+names with `IOS_DEVICE=…`, `IPAD_DEVICE=…`, `ANDROID_AVD=…`. The defaults are
+Xcode 27's `iPhone 18 Pro` and `iPad Pro 13-inch (M5)`, and the `pollis_e2e`
+AVD (Pixel 8, API 36 `google_apis` arm64 — see `mobile/CLAUDE.md` for creating
+it). Simulator names change with each Xcode, so the script resolves the name
+among *available* simulators and, if none matches, stops with the ones that
+exist rather than running with no `--device` at all:
 ```bash
 IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 26 machine
 ```
+A flow file still runs alone with a bare `maestro test`: `home.yaml` signs
+`MAESTRO_EMAIL` up when it finds the app signed out.
 
 ## Flow matrix (`flows/`)
 
@@ -93,7 +167,6 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch: a wrong PIN puts the pad back with `pin-error`, and the right one's fourth digit must, within a second, show `pin-busy` (the launch loader, with no keypad key left on screen) or have already left the pad (a fast unlock; never a frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
 | `group-aliases` | #2003 Self → Group aliases: two groups start on the main profile; a name and photo set in one group (photo picked through `subflows/pick-square-photo.yaml`, shared with `profile-photo`); "Apply to all my groups" writes the name to both, not the photo; own messages there carry the alias and its photo; "Use my main profile" in one group resets only that one | no |
-| `self-update` | #1880 a return to the foreground rotates this device's own leaf in a group where it is due (a group it just created): the newest `[mls-backstop]` line in Diagnostics counts `1 self-updated`; a second return counts `0`, so the rotation was recorded. Needs a binary with the core change | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `composer-draft` | unsent composer text survives backing out to another tab and returning (desktop's in-memory draft store, `mobile/lib/drafts.ts`); sending clears it | no |
 | `outbox` | #1335 a message whose send is killed mid-flight (`stopApp` right after Send in a fresh group) is still there after relaunch + unlock and is delivered by the outbox drain (no `btn-retry-message-*` left); Android only: a send made in airplane mode is kept as failed with `btn-retry-message-<id>` / `btn-discard-message-<id>`, and back online Retry settles it | no |
@@ -121,7 +194,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `vault` | #1316 Direct → Vault: empty state, save two entries, pin, edit (pin survives), search filters, media view, a best-effort image entry opening the viewer from the grid, delete asks first (cancel keeps it, confirm removes it), re-open re-syncs from the DS | no |
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
-| `dms` | start a DM with a freshly signed-up peer (initiator side; run by `scripts/maestro-report.sh`) | yes |
+| `dms` | start a DM with a freshly signed-up peer (initiator side). Tag `peer`: `maestro-run.sh` signs the peer up on the same device first (`setup/peer.yaml`); `scripts/maestro-report.sh` uses a second device | same device |
 | `custom-emoji` | #1562 add a static and an animated custom emoji, see both as images (never the `:shortcode:` text) in the group's list, the composer's suggestions, a sent message and again after a cold restart | no |
 | `deep-link` | #1223 a `pollis://` link routes both warm (scene `openURLContexts`) and cold (scene `connectionOptions` → `Linking.getInitialURL`) under the UIScene life cycle | no |
 | `i18n` | Preferences shows one Language row; the Language page (from that row and from the Self hub) switches language (copy re-renders), the choice persists across relaunch, Arabic mirrors the layout after relaunch (#1074, #1944) | no |
@@ -133,8 +206,10 @@ Two-client / special flows (`enrollment-approval`, `realtime`, `blocking`,
 `push-tap`, and the DM accept/reply side) are scaffolded in `_two-client.md` —
 they need the two-device setup below and a Mac shakedown. `maestro-run.sh all`
 skips every flow tagged `two-client` (on one device they can only fail) and
-names them at the end: `report`, `dm-safety` and `dms` run in
-`scripts/maestro-report.sh`, device approval in `scripts/maestro-approval-prompt.sh`.
+names them at the end; device approval runs in `scripts/maestro-approval-prompt.sh`.
+`report`, `dm-safety` and `dms` are tagged `peer` instead: `maestro-run.sh` runs
+them with a peer it signs up on the same device, and `scripts/maestro-report.sh`
+runs them across two devices.
 
 ## Screen tour (visual audit)
 
@@ -420,7 +495,12 @@ group of its own and posts there untagged, since a creator never carries the tag
 pending account and makes the device an admin; the device finds the pending
 invite under "Invited" on the member page (invitee, "invited by") and revokes it
 (`2-tags-and-revoke.yaml`). The script passes only when the creator has seen the
-invite listed and then gone.
+invite listed and then gone. Between the two, `1b-self-update.yaml` (#1880, #2027) checks
+that this device rotated its own leaf in the group it JOINED, by the join's
+`[mls] post-join self-update` or a foreground `[mls-backstop] …, 1 self-updated`,
+and that the next return to the foreground rotates nothing. It needs a joined
+group: since #1961 a group's founder owes no self-update, so the old one-device
+`self-update` flow (a group it created) could never see one.
 
 **Per-group aliases (automated, #2003):** `mobile/scripts/maestro-group-aliases.sh <device>`
 — `pollis-tui`'s `alias_peer` example creates a group, sets its own alias there
@@ -619,14 +699,16 @@ Layout changes that flows depend on (see `SELECTORS.md` for the ids):
 
 The suite had never been executed anywhere before this. Fixed here:
 
-- **Non-idempotent accounts.** Every flow `clearState`s and then signs UP, so a
+- **Non-idempotent accounts.** Every flow `clearState`d and then signed UP, so a
   single fixed `MAESTRO_EMAIL` only worked on its first use ever — after that
   the account existed, auth took the returning-device enrollment path, no
   create-PIN screen appeared, and the flow died on `screen-auth-pin`. Seven of
-  eight flows failed for this one reason. `maestro-run.sh` now mints a fresh
-  disposable address per flow and runs each flow as its own invocation.
-  (Enrollment needs the recovery key, which the harness cannot hold, so
-  re-signing-up is the only self-contained option.)
+  eight flows failed for this one reason. The runner then minted a fresh
+  disposable address per flow and ran each flow as its own invocation; since
+  #2029 it mints one shared address per device run (signed up once by
+  `setup/setup.yaml`) and one per `fresh-account` flow, all within one
+  invocation. (Enrollment needs the recovery key, which the harness cannot
+  hold, so a new device always signs up.)
 - **`dms.yaml` had a step that could not fail.** It tapped
   `row-user-${MAESTRO_PEER_HANDLE}`, but the app emits `row-user-<userId>`.
   With `optional: true` the flow walked straight past and "sent" a message into

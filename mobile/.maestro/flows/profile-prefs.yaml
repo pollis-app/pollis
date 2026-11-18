@@ -5,7 +5,7 @@ tags:
 # PROFILE + PREFERENCES — accent re-theme, a behavior toggle, and a
 # display-name edit. Self-contained.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 
 # Self tab.
 - tapOn:
@@ -45,3 +45,18 @@ tags:
 - tapOn:
     id: "btn-save"
 - takeScreenshot: prefs-05-saved
+
+# The account is shared with the run's later flows (#2029): put the accent and
+# the motion setting back to their defaults.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-self-preferences"
+- tapOn:
+    id: "chip-accent-amber"
+- scrollUntilVisible:
+    element:
+      id: "toggle-reduce-motion"
+    direction: DOWN
+- tapOn:
+    id: "toggle-reduce-motion"

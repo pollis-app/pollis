@@ -14,7 +14,7 @@ tags:
 # (`scripts/seed-security-events.js`). Without it (the dev DS) the flow checks
 # what an unseeded account shows and skips the paging assertions.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - runScript:
     file: ../scripts/seed-security-events.js
     env:
