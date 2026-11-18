@@ -1,0 +1,110 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# GROUP ALIASES (#2003), part 1 of 2 — driven by scripts/maestro-group-aliases.sh.
+# Sign up a fresh account. The peer created ${GROUP_NAME}, set its alias there
+# to ${PEER_ALIAS} and invites this account; accept, open #General. The peer's
+# message names it by the alias, and its mention of its own @handle renders the
+# alias. The mention picker offers the alias and still inserts the handle; the
+# member list shows the alias with the handle beside it; the profile opened
+# from the group shows the alias.
+
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "row-invite-.*"
+    timeout: 60000
+    optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "row-invite-.*"
+    commands:
+      - stopApp
+      - launchApp
+      - runFlow:
+          when:
+            visible:
+              id: "screen-auth-pin"
+          commands:
+            - runFlow: ../../subflows/enter-pin.yaml
+      - extendedWaitUntil:
+          visible:
+            id: "tab-groups"
+          timeout: 30000
+      - tapOn:
+          id: "tab-groups"
+      - extendedWaitUntil:
+          visible:
+            id: "row-invite-.*"
+          timeout: 60000
+- tapOn:
+    id: "btn-accept-invite-.*"
+- extendedWaitUntil:
+    visible: "General"
+    timeout: 30000
+- tapOn: "General"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+
+# The peer's message: the row names the alias, never the handle.
+- extendedWaitUntil:
+    visible: "${PEER_ALIAS}: roll call .*"
+    timeout: 120000
+- assertNotVisible: "${MAESTRO_PEER_HANDLE}: roll call .*"
+- takeScreenshot: aliases-two-01-message
+
+# The picker offers the alias, and inserting writes the handle.
+- tapOn:
+    id: "input-composer"
+- inputText: "thanks @"
+- extendedWaitUntil:
+    visible:
+      id: "row-mention-${MAESTRO_PEER_HANDLE}"
+    timeout: 15000
+- assertVisible:
+    id: "text-mention-alias-${MAESTRO_PEER_HANDLE}"
+    text: "${PEER_ALIAS}"
+- takeScreenshot: aliases-two-02-mention-picker
+- tapOn:
+    id: "row-mention-${MAESTRO_PEER_HANDLE}"
+- assertVisible:
+    id: "input-composer"
+    text: "thanks @${MAESTRO_PEER_HANDLE} "
+- hideKeyboard
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: thanks @${MAESTRO_PEER_HANDLE}.*"
+    timeout: 30000
+- takeScreenshot: aliases-two-03-mention-rendered
+- tapOn:
+    id: "btn-back"
+
+# The member list: the alias, with the handle beside it.
+- tapOn:
+    id: "row-group-members"
+- extendedWaitUntil:
+    visible:
+      id: "row-member-${MAESTRO_PEER_ID}"
+    timeout: 30000
+- assertVisible:
+    id: "row-member-${MAESTRO_PEER_ID}"
+    text: "${PEER_ALIAS}, @${MAESTRO_PEER_HANDLE} · .*"
+- takeScreenshot: aliases-two-04-members
+
+# Their profile, opened from the group, shows the alias and the handle.
+- tapOn:
+    id: "row-member-${MAESTRO_PEER_ID}"
+- assertVisible:
+    id: "screen-user"
+- assertVisible:
+    id: "text-user-name"
+    text: "${PEER_ALIAS}"
+- assertVisible: "@${MAESTRO_PEER_HANDLE}"
+- takeScreenshot: aliases-two-05-profile
