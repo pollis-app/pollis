@@ -9,6 +9,15 @@ use pollis_api::bots::ClaimTriggerBody;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
+/// Wake the members watching `group_id`'s realtime room after a job applied an
+/// action: a job's store is not joined to that room, so the wake-up `send` makes
+/// after a post reaches no one. Content-free (`payload` is a routing-only
+/// `new_message` / `edited_message` / `deleted_message`), through the DS's
+/// `SendData`, as any member's client sends it (#1182).
+pub async fn wake_group_room(state: &Arc<AppState>, group_id: &str, payload: serde_json::Value) -> Result<()> {
+    crate::commands::mls::ds_livekit_send_data(state, group_id, payload).await
+}
+
 /// Claim `(installation_id, trigger_key)` for this host, device-signed.
 /// `true` when this host won; a retry by the winner answers `true` again, so
 /// a job that failed after winning can run again without losing its claim.

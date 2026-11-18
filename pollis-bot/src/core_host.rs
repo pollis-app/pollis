@@ -458,8 +458,15 @@ impl InstallationCore for CoreInstallation {
             &state,
         )
         .await
-        .map(|_| ())
-        .map_err(core_err)
+        .map_err(core_err)?;
+        // A job's store is not joined to the group's realtime room, so the core's own wake-up
+        // after a send reaches no one; tell the room through the DS, as any member's client would
+        // (#1182). Content-free, best-effort: members also see it on their next catch-up.
+        let payload = pollis_core::commands::livekit_signalling::new_message_payload(Some(channel_id), None);
+        if let Err(e) = bots::wake_group_room(&state, &self.session.group_id, payload).await {
+            crate::log::info(&crate::log::scope(&self.session.bot_user_id), format!("could not wake the group's members: {e}"));
+        }
+        Ok(())
     }
 }
 
