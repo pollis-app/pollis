@@ -2281,3 +2281,167 @@ impl TestClient {
             .map_err(|e| e.to_string())
     }
 }
+
+/// One bot host (#1182): its own `AppState`, keystore and data dir, like a
+/// `pollis-bot` installation. No webview: hosts call the `pollis_core::commands::bots`
+/// library API, not bridge commands. Lane C's runtime tests build on this.
+pub(crate) struct BotHostClient {
+    pub(crate) state: Arc<AppState>,
+    pub(crate) keystore: Arc<dyn Keystore>,
+    pub(crate) dir: std::path::PathBuf,
+    pub(crate) session: Option<pollis_core::commands::bots::BotSession>,
+}
+
+impl BotHostClient {
+    pub(crate) async fn new() -> Self {
+        static NEXT_HOST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT_HOST.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = pollis_core::db::local::dirs_path().join(format!("bot-host-{n}"));
+        Self::with_parts(Arc::new(InMemoryKeystore::new()), dir).await
+    }
+
+    /// The same keystore and data dir in a fresh state: a host process restarted.
+    pub(crate) async fn restarted(&self) -> Self {
+        Self::with_parts(self.keystore.clone(), self.dir.clone()).await
+    }
+
+    async fn with_parts(keystore: Arc<dyn Keystore>, dir: std::path::PathBuf) -> Self {
+        let state = Arc::new(AppState::new_with_parts(world().await.config.clone(), keystore.clone()));
+        state.local_dir.set(dir.clone()).expect("a fresh state has no local dir");
+        Self { state, keystore, dir, session: None }
+    }
+
+    pub(crate) fn session(&self) -> &pollis_core::commands::bots::BotSession {
+        self.session.as_ref().expect("bot host not paired")
+    }
+
+    pub(crate) fn bot_user_id(&self) -> &str {
+        &self.session().bot_user_id
+    }
+
+    pub(crate) fn device_id(&self) -> &str {
+        &self.session().device_id
+    }
+
+    /// Await the pairing, keep the session, and join the bot's group (waiting
+    /// up to `wait` for a Welcome before external-joining).
+    pub(crate) async fn finish_pairing(
+        &mut self,
+        handle: &pollis_core::commands::bots::PairingHandle,
+        wait: std::time::Duration,
+    ) {
+        match pollis_core::commands::bots::await_pairing(&self.state, handle)
+            .await
+            .expect("await_pairing")
+        {
+            pollis_core::commands::bots::PairingOutcome::Paired(session) => self.session = Some(session),
+            other => panic!("pairing did not complete: {other:?}"),
+        }
+        self.join(wait).await;
+    }
+
+    pub(crate) async fn join(&self, wait: std::time::Duration) {
+        pollis_core::commands::bots::join_bot_group(&self.state, self.session(), wait)
+            .await
+            .expect("join_bot_group");
+    }
+
+    /// Ingest a channel and return the decrypted bodies this host holds for it.
+    pub(crate) async fn read_channel(&self, channel_id: &str) -> Result<Vec<String>, String> {
+        let user = self.bot_user_id().to_string();
+        pollis_core::commands::messages::ingest_channel_envelopes(user.clone(), channel_id.to_string(), &self.state)
+            .await
+            .map_err(|e| e.to_string())?;
+        let page = pollis_core::commands::messages::get_channel_messages(
+            user,
+            channel_id.to_string(),
+            Some(200),
+            None,
+            &self.state,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(page.messages.into_iter().filter_map(|m| m.content).collect())
+    }
+
+    /// Handle the bot's approved add-host requests with no transparency log.
+    pub(crate) async fn handle_approvals(&self) -> Vec<pollis_core::commands::bots::HostApprovalOutcome> {
+        self.handle_approvals_with(pollis_lib::commands::transparency::AuditStatus::Unavailable).await
+    }
+
+    pub(crate) async fn handle_approvals_with(
+        &self,
+        log_says: pollis_lib::commands::transparency::AuditStatus,
+    ) -> Vec<pollis_core::commands::bots::HostApprovalOutcome> {
+        pollis_core::commands::bots::handle_host_approvals(
+            &self.state,
+            self.session(),
+            &pollis_core::commands::bots::FixedAudit(log_says),
+        )
+        .await
+        .expect("handle_host_approvals")
+    }
+}
+
+/// Pair a new bot into `group_id`: the host files a request, `admin` types its
+/// code into `create_bot` while the host awaits, and the host joins the group.
+pub(crate) async fn pair_new_bot(admin: &TestClient, group_id: &str, name: &str) -> (BotHostClient, serde_json::Value) {
+    let mut host = BotHostClient::new().await;
+    let handle = pollis_core::commands::bots::start_new_bot_pairing(&host.state, Some("host-1".to_string()))
+        .await
+        .expect("start_new_bot_pairing");
+    let (created, outcome) = tokio::join!(
+        admin.invoke_try(
+            "create_bot",
+            json!({ "groupId": group_id, "code": handle.code, "displayName": name }),
+        ),
+        pollis_core::commands::bots::await_pairing(&host.state, &handle),
+    );
+    let created = created.unwrap_or_else(|e| panic!("create_bot: {e}"));
+    match outcome.expect("await_pairing") {
+        pollis_core::commands::bots::PairingOutcome::Paired(session) => host.session = Some(session),
+        other => panic!("pairing did not complete: {other:?}"),
+    }
+    host.join(std::time::Duration::from_secs(5)).await;
+    (host, created)
+}
+
+/// The DS row of a pairing request: `(status, has_wrap, ephemeral_pub)`.
+pub(crate) async fn pairing_row(request_id: &str) -> (String, bool, Vec<u8>) {
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT status, wrapped_account_key IS NOT NULL, ephemeral_pub FROM bot_pairing_request WHERE id = ?1",
+            libsql::params![request_id.to_string()],
+        )
+        .await
+        .expect("query pairing row");
+    let row = rows.next().await.expect("pairing row").expect("pairing row exists");
+    (row.get(0).unwrap(), row.get::<i64>(1).unwrap() != 0, row.get(2).unwrap())
+}
+
+/// Server-side: store `host_approval` on an add-host request as if `approver`
+/// had approved it — the model of a DS relaying whatever it was given.
+pub(crate) async fn plant_host_approval(request_id: &str, host_approval: &str, approver_user: &str, approver_device: &str) {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(host_approval).expect("approval b64");
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE bot_pairing_request SET host_approval = ?1, reviewed_by = ?2, approver_device_id = ?3, \
+         status = 'pending', wrapped_account_key = NULL, wrapped_by_device_id = NULL WHERE id = ?4",
+        libsql::params![bytes, approver_user.to_string(), approver_device.to_string(), request_id.to_string()],
+    )
+    .await
+    .expect("plant host approval");
+}
+
+/// Server-side: swap a pairing request's ephemeral key (a tampering DS).
+pub(crate) async fn swap_pairing_ephemeral(request_id: &str, key: [u8; 32]) {
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE bot_pairing_request SET ephemeral_pub = ?1 WHERE id = ?2",
+        libsql::params![key.to_vec(), request_id.to_string()],
+    )
+    .await
+    .expect("swap ephemeral key");
+}

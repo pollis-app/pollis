@@ -137,6 +137,11 @@ type RealtimeEvent =
     type: 'read_cursors_changed';
   }
   | {
+    // #1182: an admin approved another host for a bot; sent only to a bot's inbox, so the app never sees it.
+    type: 'bot_host_approval';
+    request_id: string;
+  }
+  | {
     type: 'realtime_reconnected';
     room_id: string;
   }

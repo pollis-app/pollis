@@ -760,7 +760,7 @@ where
 /// The roster's cross-signing material, with the account keys pinned locally.
 ///
 /// One DS read, then two local substitutions: our own account key from the keystore, and any peer key differing from its TOFU pin is DROPPED (so `Unverifiable`).
-pub(super) async fn load_pinned_identities(
+pub(crate) async fn load_pinned_identities(
     state: &Arc<AppState>,
     roster_user_ids: &[String],
     actor_user_id: &str,
@@ -850,6 +850,32 @@ pub async fn local_epoch_and_pending(
     let db = guard.as_ref()?;
     let group = load_stored_group(db.conn(), conversation_id)?;
     Some((group.epoch().as_u64(), group.pending_commit().is_some()))
+}
+
+/// The signature key and scheme of `(user_id, device_id)`'s leaf in this
+/// device's local tree for `conversation_id`, or `None` when it has no leaf
+/// there (or there is no local group).
+///
+/// A bot host checks a host approval's signer against it (#1182): the signer
+/// must be in the host's own MLS view of the group, not only the DS's.
+pub(crate) async fn local_leaf_signature_key(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    device_id: &str,
+) -> Option<(Vec<u8>, openmls::prelude::SignatureScheme)> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref()?;
+    let group = load_stored_group(db.conn(), conversation_id)?;
+    let scheme = group.ciphersuite().signature_algorithm();
+    let key = group
+        .members()
+        .find(|m| {
+            parse_credential_user_id(&m.credential) == user_id
+                && parse_credential_device_id(&m.credential).as_deref() == Some(device_id)
+        })
+        .map(|m| m.signature_key.clone())?;
+    Some((key, scheme))
 }
 
 /// Test-harness only: the `(user_id, device_id)` leaves of this device's local

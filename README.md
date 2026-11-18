@@ -37,6 +37,20 @@ history lives in a local SQLite database encrypted at rest.
 - **Real-time**: LiveKit (voice via the Rust `livekit` crate, presence)
 - **File storage**: Cloudflare R2
 
+## Bots and Apps
+
+A group can have **bots**: members run by a program on a machine one of the group's
+admins controls, never on Pollis's servers. A bot belongs to one group, carries a
+**Bot** badge, and posts alerts from your monitoring or scripts into a channel. No
+developer and no Pollis server holds its keys.
+
+Start with **[docs/bots/](docs/bots/README.md)**:
+
+- [Admin guide](docs/bots/admin-guide.md): add a bot, add or revoke its hosts, delete it.
+- [Self-hosting](docs/bots/self-hosting.md): install and run `pollis-bot`, as a service.
+- [Alerts webhook](docs/bots/alerts-webhook.md): post into a channel with `curl`, Grafana or `pollis-bot post`.
+- [Concepts for developers](docs/bots/concepts-for-developers.md): the job loop, triggers, grants.
+
 ## Security model
 
 Message text, file contents and voice audio are encrypted on your device. The
@@ -215,6 +229,7 @@ and [ARCHITECTURE.md](ARCHITECTURE.md); subsystem docs are in
 | **MLS Delivery Service** | `pollis-delivery/` | Dockerized axum service at `api.pollis.com`; the only writer, it serializes MLS commits; crypto stays client-side |
 | **LiveKit stack** | `livekit/` | docker-compose + nginx config for the self-hostable voice/screenshare SFU |
 | **Transparency log** | `verifiable-log*/` + `transparency-publish.yml` | The daily signed Merkle log, built and signed in CI and served from R2 at `verify.pollis.com` |
+| **Bot runtime** | `pollis-bot/` | `pollis-bot`, which hosts a group's bots on an admin's machine ([docs/bots/](docs/bots/README.md)) |
 | **CLI tools** | `verifiable-log*/` | `pollis-verify` (public log verifier), plus the lower-level `monitor`, `builder` and `serve` |
 | **Website** | `website/` | Static marketing and docs site (Cloudflare Pages), including the transparency explorer |
 | **AUR package** | `aur/` | `PKGBUILD` for Arch Linux |
@@ -229,6 +244,7 @@ src-tauri/        # Tauri desktop host: commands, tray, window lifecycle; expose
 frontend/         # React app: Vite, TypeScript, TailwindCSS, runtime-host bridge at src/bridge/
 mobile/           # React Native / Expo client (iOS + Android)
 pollis-delivery/  # MLS Delivery Service: axum, sole writer that serializes commits
+pollis-bot/       # Bot runtime: hosts bots on an admin's machine and runs their job loop
 verifiable-log*/  # Transparency log core, builder, serve, and the pollis-verify CLI
 livekit/          # Self-host config for the LiveKit SFU (docker-compose + nginx)
 website/          # Static marketing site: plain HTML/CSS/JS on Cloudflare Pages

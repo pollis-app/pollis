@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Self-hosting a bot</title>
+  <meta name="description"
+    content="Install pollis-bot, pair it with a group, run it as a service, and fix what goes wrong." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Self-hosting a bot" />
+  <meta property="og:description"
+    content="Install pollis-bot, pair it with a group, run it as a service, and fix what goes wrong." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <header class="site-nav">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <a href="index.html#download">Download</a>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQ</a>
+        <a href="learn.html">Learn</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="doc-main reading-surface">
+
+      <div class="doc-header">
+        <h1 class="doc-title">Self-hosting a bot</h1>
+        <p class="doc-subtitle">
+          Install <code>pollis-bot</code>, pair it with a group, and keep it running. For whoever runs the machine.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        A bot runs on a machine you control: a home server, a VM, a small Linux box or a Mac. It needs outbound
+        internet access to the Pollis Delivery Service and opens no port of its own, except the optional alerts
+        webhook. A bot reads every message in its group, so use a machine you would trust with that.
+        <br /><br />
+        For group admins: <a href="bots.html">Bots</a>. The full reference is <code>pollis-bot --help</code>.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section" id="install">
+        <h2 class="doc-section-title">Install</h2>
+        <p><code>pollis-bot</code> is built from the Pollis repository with Rust (stable, from
+          <a href="https://rustup.rs" target="_blank" rel="noopener noreferrer">rustup.rs</a>).</p>
+        <code class="doc-cmd">git clone https://github.com/pollis-app/pollis.git
+cd pollis
+cargo build --release -p pollis-bot
+install -m 755 target/release/pollis-bot ~/.local/bin/</code>
+        <p>Tell it which Delivery Service to use (<code>R2_S3_ENDPOINT</code> and <code>R2_PUBLIC_URL</code> must be
+          set but can be empty), then check it runs:</p>
+        <code class="doc-cmd">export POLLIS_DELIVERY_URL=https://api.pollis.com
+export R2_S3_ENDPOINT= R2_PUBLIC_URL=
+pollis-bot --version</code>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Pair</h2>
+        <p>Pairing creates the bot and makes this machine its first host.</p>
+        <ol>
+          <li>Run <code>pollis-bot pair --name "monitoring box"</code>. <code>--name</code> names this machine
+            on the bot's page; it is optional.</li>
+          <li>It prints an eight-character pairing code and when it expires (ten minutes later).</li>
+          <li>A group admin types the code on the group's <strong>Bots → Add a bot</strong> page.</li>
+          <li><code>pair</code> prints <code>paired: bot … in group …</code> and exits.</li>
+        </ol>
+        <p>Run <code>pair</code> as the same user, on the same machine, that will run the service: the bot's keys
+          are stored for that user.</p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Run</h2>
+        <code class="doc-cmd">pollis-bot run                 # every bot on this machine, until stopped
+pollis-bot run --webhook       # also listen for alerts on 127.0.0.1:8787
+pollis-bot status              # what each bot is doing</code>
+        <p>
+          <code>run</code> catches up on anything it missed, then waits for events. Nothing is lost while it is
+          stopped, and a host does not have to stay up: <code>pollis-bot run --once</code> catches up, handles
+          everything pending (including approving another host) and exits, for a machine that sleeps. The first time the webhook is on, it prints each installation's webhook secret once; see
+          <a href="bots-developers.html#webhook">the alerts webhook</a>. To keep the webhook on, put
+          <code>{ "webhook": { "bind": "127.0.0.1:8787" } }</code> in <code>config.json</code> in the data
+          directory.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Run as a service</h2>
+        <p>Run <code>pollis-bot run</code> under your service manager, as the user who ran <code>pair</code>.</p>
+
+        <h3 class="doc-sub-title">Linux (systemd), on a server</h3>
+        <p><code>/etc/systemd/system/pollis-bot.service</code>:</p>
+        <code class="doc-cmd">[Unit]
+Description=Pollis bot runtime
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=pollis-bot
+Environment=HOME=/var/lib/pollis-bot
+Environment=POLLIS_DELIVERY_URL=https://api.pollis.com
+Environment=R2_S3_ENDPOINT=
+Environment=R2_PUBLIC_URL=
+ExecStart=/usr/local/bin/pollis-bot --data-dir /var/lib/pollis-bot run
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target</code>
+        <code class="doc-cmd">sudo useradd --system --home-dir /var/lib/pollis-bot --create-home pollis-bot
+sudo install -m 755 target/release/pollis-bot /usr/local/bin/
+sudo -u pollis-bot -H env POLLIS_DELIVERY_URL=https://api.pollis.com R2_S3_ENDPOINT= R2_PUBLIC_URL= \
+  pollis-bot --data-dir /var/lib/pollis-bot pair --name "$(hostname)"
+sudo systemctl daemon-reload
+sudo systemctl enable --now pollis-bot
+journalctl -u pollis-bot -f</code>
+        <p>On a desktop Linux machine where you paired from your own session, use a user unit instead
+          (<code>~/.config/systemd/user/pollis-bot.service</code>, without <code>User=</code> and
+          <code>HOME=</code>, <code>WantedBy=default.target</code>) and
+          <code>systemctl --user enable --now pollis-bot</code>.</p>
+
+        <h3 class="doc-sub-title">macOS (launchd)</h3>
+        <p>A LaunchAgent for the user who paired, in <code>~/Library/LaunchAgents/com.pollis.bot.plist</code>. It
+          starts when that user logs in, because the keychain it uses is unlocked at login.</p>
+        <code class="doc-cmd">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;com.pollis.bot&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;
+  &lt;array&gt;
+    &lt;string&gt;/usr/local/bin/pollis-bot&lt;/string&gt;
+    &lt;string&gt;run&lt;/string&gt;
+  &lt;/array&gt;
+  &lt;key&gt;EnvironmentVariables&lt;/key&gt;
+  &lt;dict&gt;
+    &lt;key&gt;POLLIS_DELIVERY_URL&lt;/key&gt;&lt;string&gt;https://api.pollis.com&lt;/string&gt;
+    &lt;key&gt;R2_S3_ENDPOINT&lt;/key&gt;&lt;string&gt;&lt;/string&gt;
+    &lt;key&gt;R2_PUBLIC_URL&lt;/key&gt;&lt;string&gt;&lt;/string&gt;
+  &lt;/dict&gt;
+  &lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;
+  &lt;key&gt;KeepAlive&lt;/key&gt;&lt;true/&gt;
+  &lt;key&gt;StandardErrorPath&lt;/key&gt;&lt;string&gt;/tmp/pollis-bot.log&lt;/string&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;</code>
+        <code class="doc-cmd">launchctl load ~/Library/LaunchAgents/com.pollis.bot.plist</code>
+
+        <h3 class="doc-sub-title">Windows</h3>
+        <p>Start <code>pollis-bot run</code> from Task Scheduler with the trigger <strong>At log on</strong> for the
+          user who paired, and <strong>Restart if the task fails</strong> turned on.</p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">How the keys are kept</h2>
+        <p>
+          A bot starts with nobody present, so it has no PIN. Each bot's keys and the key to its encrypted local
+          store sit in the machine's keystore: the OS keychain where there is one, otherwise an encrypted file
+          bound to this machine. They are never stored in plain text. This protects against someone who copies
+          the disk or a backup to another machine. It does not protect against someone who can run programs as
+          the same user on this machine, or who has a full image of it. Keep the machine, and the account the bot
+          runs as, as private as the conversations the bot can read.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section" id="several">
+        <h2 class="doc-section-title">Several bots on one machine</h2>
+        <p>
+          One runtime can host several bots, in one group or several. Each is a separate
+          <strong>installation</strong> with its own keys, keystore entry and encrypted store; nothing is shared
+          between them. Run <code>pollis-bot pair</code> once per bot; <code>run</code> runs them all.
+        </p>
+        <p>
+          The runtime refuses to host more than <code>max_installations</code>, <strong>8</strong> by default, so
+          a machine is not overloaded by accident. Raise it in <code>config.json</code>
+          (<code>{ "max_installations": 12 }</code>) or for one run with
+          <code>run --max-installations N</code>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Add this machine as another host, or upgrade</h2>
+        <p>
+          To add this machine to an existing bot, copy the command from the bot's <strong>Add a host</strong>
+          page (<code>pollis-bot add-host --bot &lt;bot id&gt;</code>), run it here, and have the admin type the
+          code. One of the bot's running hosts hands this machine the bot's keys. Then start it with
+          <code>pollis-bot run</code>. To move a bot to a new machine, add the new one, check it runs, then revoke
+          the old one; copying the data directory to another machine does not work, by design.
+        </p>
+        <p>
+          To upgrade, stop the service, rebuild and replace the binary, and start it again. Installations, keys
+          and settings stay; the first job catches up on what was sent meanwhile.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Files, logs and status</h2>
+        <p>The data directory is <code>--data-dir</code>, else <code>POLLIS_BOT_DATA_DIR</code>, else
+          <code>~/.local/share/pollis-bot</code> (Linux), <code>~/Library/Application Support/com.pollis.bot</code>
+          (macOS) or <code>%APPDATA%\pollis-bot</code> (Windows). It holds <code>config.json</code>,
+          <code>installations/&lt;id&gt;/installation.json</code>, each installation's encrypted store in
+          <code>stores/&lt;device id&gt;/</code> (including how far its job loop has read each channel),
+          and <code>status.json</code>. The bot's keys are in the keystore, not in these files.
+          <code>pollis-bot forget --installation &lt;id&gt;</code> removes an installation's record, store
+          and keys together.</p>
+        <p>
+          <code>pollis-bot</code> logs to standard error, one line per event. Every failure reads
+          <code>FAILED: &lt;what happened&gt;. Fix: &lt;one thing to do&gt;</code>.
+          <code>pollis-bot status</code> shows each installation as <code>starting</code>,
+          <code>catching up</code>, <code>connected</code> or <code>job failed</code> (with the error and the
+          fix).
+        </p>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>The message says</th><th>Do this</th></tr></thead>
+            <tbody>
+              <tr><td><code>the code expired before an admin typed it</code></td>
+                <td class="doc-td-dim">Run <code>pair</code> or <code>add-host</code> again; type the new code
+                  within ten minutes.</td></tr>
+              <tr><td><code>this host already runs bot …</code></td>
+                <td class="doc-td-dim">Run <code>add-host</code> on a different machine.</td></tr>
+              <tr><td><code>configured for at most N installations</code></td>
+                <td class="doc-td-dim">Raise <code>max_installations</code>, or use another machine.</td></tr>
+              <tr><td><code>no installations on this host</code></td>
+                <td class="doc-td-dim">Run <code>pollis-bot pair</code>.</td></tr>
+              <tr><td><code>opening installation …</code></td>
+                <td class="doc-td-dim">The host may have been revoked or the bot deleted. If so, run
+                  <code>pollis-bot forget --installation &lt;id&gt;</code>, then pair again if the bot
+                  should stay.</td></tr>
+              <tr><td><code>unattended_refused: no bot installation for this account on this machine</code></td>
+                <td class="doc-td-dim">Run as the user who paired, or pair again.</td></tr>
+              <tr><td><code>binding the webhook listener to …</code></td>
+                <td class="doc-td-dim">Pick a free address in <code>webhook.bind</code> or
+                  <code>run --webhook ADDR</code>.</td></tr>
+              <tr><td><code>job failed while catching up</code> / <code>claiming the trigger</code> /
+                  <code>posting</code></td>
+                <td class="doc-td-dim">Check the machine reaches the Delivery Service. It retries without
+                  posting twice.</td></tr>
+              <tr><td><code>job failed while saving progress</code></td>
+                <td class="doc-td-dim">Check the data directory is writable and has space.</td></tr>
+              <tr><td><code>webhook call with a wrong secret or signature</code></td>
+                <td class="doc-td-dim">Give the sender the current secret (<code>rotate-secret</code> makes a new
+                  one).</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Every message and its fix:
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/bots/self-hosting.md" target="_blank"
+            rel="noopener noreferrer"><code>docs/bots/self-hosting.md</code></a>, which this page is kept in step
+          with.
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Get Pollis</h2>
+        <ul>
+          <li><a href="index.html#download">Desktop</a></li>
+          <li><a href="android.html">Android</a></li>
+          <li><a href="index.html#terminal">Terminal client</a></li>
+          <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">How it works</h2>
+        <ul>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="learn.html">Learn</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="transparency.html">Key transparency</a></li>
+          <li><a href="artifacts.html">Release artifacts</a></li>
+          <li><a href="assurance.html">Assurance</a></li>
+          <li><a href="open-source.html">Open source</a></li>
+          <li><a href="bots.html">Bots</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Policies</h2>
+        <ul>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
+          <li><a href="retention.html">Retention</a></li>
+          <li><a href="subprocessors.html">Subprocessors</a></li>
+          <li><a href="legal-requests.html">Legal requests</a></li>
+          <li><a href="continuity.html">Continuity</a></li>
+          <li><a href="device-security.html">Lost device</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="site-footer-copy" id="year-copyright">© 2026 Pollis. All rights reserved.</p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>

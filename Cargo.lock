@@ -1098,12 +1098,12 @@ dependencies = [
 
 [[package]]
 name = "cfg-expr"
-version = "0.20.11"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd44d82755fb9210fb10d9daf8dd7e522da0efe1d5f263cffc5db07725663ff"
+checksum = "8d4ba6e40bd1184518716a6e1a781bf9160e286d219ccdb8ab2612e74cfe4789"
 dependencies = [
  "smallvec",
- "target-lexicon 0.13.5",
+ "target-lexicon 0.12.16",
 ]
 
 [[package]]
@@ -1671,7 +1671,7 @@ dependencies = [
  "serde_derive",
  "sha2 0.10.9",
  "smallvec",
- "target-lexicon 0.13.5",
+ "target-lexicon 0.13.6",
  "wasmtime-internal-core",
 ]
 
@@ -1725,7 +1725,7 @@ dependencies = [
  "hashbrown 0.17.0",
  "log",
  "smallvec",
- "target-lexicon 0.13.5",
+ "target-lexicon 0.13.6",
 ]
 
 [[package]]
@@ -1742,7 +1742,7 @@ checksum = "5fa10df59e776c42dae5b6ba5216ba5321707a2136abd2219e615c54b234fc1b"
 dependencies = [
  "cranelift-codegen",
  "libc",
- "target-lexicon 0.13.5",
+ "target-lexicon 0.13.6",
 ]
 
 [[package]]
@@ -6816,6 +6816,7 @@ dependencies = [
  "aho-corasick",
  "anyhow",
  "arboard",
+ "async-trait",
  "axum 0.7.9",
  "base64 0.22.1",
  "chrono",
@@ -6830,6 +6831,7 @@ dependencies = [
  "openmls",
  "openmls_traits",
  "pollis-api",
+ "pollis-bot",
  "pollis-capture-proto",
  "pollis-core",
  "pollis-delivery",
@@ -6894,6 +6896,33 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "pollis-bot"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "hmac 0.12.1",
+ "http-body-util",
+ "pollis-api",
+ "pollis-core",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tower 0.5.3",
+ "ulid",
+ "zeroize",
 ]
 
 [[package]]
@@ -9273,7 +9302,7 @@ version = "7.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "396a35feb67335377e0251fcbc1092fc85c484bd4e3a7a54319399da127796e7"
 dependencies = [
- "cfg-expr 0.20.11",
+ "cfg-expr 0.17.2",
  "heck 0.5.0",
  "pkg-config",
  "toml 1.1.2+spec-1.1.0",
@@ -9349,9 +9378,9 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "target-lexicon"
-version = "0.13.5"
+version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
+checksum = "8c447be3a2abfa84b2d91680c56600bd6b2873866de27b36ec911be705e291da"
 
 [[package]]
 name = "tauri"
@@ -11009,7 +11038,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "smallvec",
- "target-lexicon 0.13.5",
+ "target-lexicon 0.13.6",
  "wasmparser 0.258.3",
  "wasmtime-environ",
  "wasmtime-internal-component-macro",
@@ -11047,7 +11076,7 @@ dependencies = [
  "serde_derive",
  "sha2 0.10.9",
  "smallvec",
- "target-lexicon 0.13.5",
+ "target-lexicon 0.13.6",
  "wasm-encoder 0.258.3",
  "wasmparser 0.258.3",
  "wasmprinter",
@@ -11104,7 +11133,7 @@ dependencies = [
  "object",
  "pulley-interpreter",
  "smallvec",
- "target-lexicon 0.13.5",
+ "target-lexicon 0.13.6",
  "thiserror 2.0.21",
  "wasmparser 0.258.3",
  "wasmtime-environ",

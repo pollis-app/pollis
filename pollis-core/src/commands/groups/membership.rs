@@ -27,6 +27,7 @@ pub async fn get_group_members(
             avatar_url: m.avatar_url,
             role: m.role,
             joined_at: m.joined_at,
+            is_bot: m.is_bot,
         })
         .collect())
 }

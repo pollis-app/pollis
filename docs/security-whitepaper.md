@@ -176,6 +176,8 @@ The PIN is not mixed into the file KEK. It cannot be: the keystore is read befor
 
 Mobile uses the same file format, sealed under a key held by the Android Keystore or iOS Keychain.
 
+**Bot hosts (#1182)** start with nobody present, so they have no PIN layer. A host keeps one keystore slot per bot (`bot_installation_<bot id>`, `pollis-core/src/commands/bots/unattended.rs`) holding the bot's account seed and its local-DB key, sealed by the backend above and by nothing else. Such a host resists a copied disk or volume (and, with the OS keychain, more), but not a same-UID local attacker or a full-disk image. Only the pairing path writes that slot, after the server confirms the account is a bot, and the unattended start refuses any account with a PIN, without a slot, or not reported as a bot, so a person's account never runs this way.
+
 ### 3.6 Migrating an existing plaintext keystore
 
 Installs older than #882 have a plaintext keystore. It stays readable (locking a user out of their identity key is unrecoverable), and the first read or write re-encrypts it in place via tempfile + fsync + rename. Encoding completes before the old file is touched, so an interruption leaves either the whole old file or the whole new one.

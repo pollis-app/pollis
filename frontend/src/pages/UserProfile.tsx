@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, MessageCircle, Ban, Flag } from "lucide-react";
+import { ArrowLeft, MessageCircle, Ban, Flag, Bot } from "lucide-react";
 import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
@@ -12,6 +12,9 @@ import { useCreateOrGetDMConversation } from "../hooks/queries/useMessages";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useGroupAliases } from "../hooks/queries/useGroupAliases";
+import { useGroupMembers, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
+import { BotBadge } from "../components/ui/BotBadge";
+import { isBotUser } from "../utils/bots";
 
 export const UserProfilePage: React.FC = observer(() => {
   const { t } = useTranslation("dms");
@@ -27,6 +30,14 @@ export const UserProfilePage: React.FC = observer(() => {
   const dmMutation = useCreateOrGetDMConversation();
 
   const isSelf = currentUser?.id === userId;
+
+  // A bot (#1182): no DMs, and in its group the admins may manage it from here.
+  const { data: groupMembers = [] } = useGroupMembers(groupId ?? null);
+  const { data: groupsWithChannels } = useUserGroupsWithChannels();
+  const group = groupId ? groupsWithChannels?.find((g) => g.id === groupId) : undefined;
+  const member = groupMembers.find((m) => m.user_id === userId);
+  const isBot = isBotUser(member) || isBotUser(profile);
+  const mayManageBot = isBot && !!groupId && group?.current_user_role === "admin";
 
   const handleBlock = async () => {
     try {
@@ -76,14 +87,30 @@ export const UserProfilePage: React.FC = observer(() => {
         backItem,
       ]
     : [
-        {
-          id: "send-message",
-          label: t("profile.sendMessage"),
-          icon: <MessageCircle size={14} />,
-          action: handleDM,
-          disabled: dmMutation.isPending,
-          testId: "user-profile-dm",
-        },
+        ...(mayManageBot && groupId
+          ? [
+              {
+                id: "manage-bot",
+                label: t("channels:bots.manage"),
+                icon: <Bot size={14} />,
+                action: () =>
+                  navigate({ to: "/groups/$groupId/bots/$botId", params: { groupId, botId: userId } }),
+                testId: "user-profile-manage-bot",
+              },
+            ]
+          : []),
+        ...(isBot
+          ? []
+          : [
+              {
+                id: "send-message",
+                label: t("profile.sendMessage"),
+                icon: <MessageCircle size={14} />,
+                action: handleDM,
+                disabled: dmMutation.isPending,
+                testId: "user-profile-dm",
+              },
+            ]),
         {
           id: "block",
           label: t("profile.block"),
@@ -131,6 +158,16 @@ export const UserProfilePage: React.FC = observer(() => {
                   >
                     {headlineName}
                   </div>
+                  {isBot && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <BotBadge groupName={group?.name} data-testid="user-profile-bot-badge" />
+                      {group && (
+                        <span data-testid="user-profile-bot-managed-by" className="text-secondary text-muted">
+                          {t("channels:bots.badge.managedBy", { group: group.name })}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {shownName && profile.username && (
                     <div
                       data-testid="user-profile-username"

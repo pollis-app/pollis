@@ -198,7 +198,7 @@ where
 /// Spawn fire-and-forget work (a LiveKit wake hint). Spawned from deferred work, it is kept for
 /// [`settle`], so the push foreground service is not released while it is still in flight.
 /// True when it was kept. Only the mobile LiveKit stub sends hints this way.
-#[cfg_attr(feature = "media", allow(dead_code))]
+#[cfg_attr(feature = "realtime", allow(dead_code))]
 pub(crate) fn spawn_in_tail<F>(work: F) -> bool
 where
     F: Future<Output = ()> + Send + 'static,

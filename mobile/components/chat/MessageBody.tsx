@@ -35,6 +35,7 @@ export function MessageBodyInline({
   mentionNames,
   selfName,
   mentionLabels,
+  botMentions,
   emojiSize = 18,
   linkify = true,
 }: {
@@ -43,6 +44,8 @@ export function MessageBodyInline({
   selfName?: string | null;
   /** Alias names by lowercased handle (#2003): a mention renders the alias, keeps the handle. */
   mentionLabels?: ReadonlyMap<string, string>;
+  /** Lowercased handles of the bots in this roster (#1182): their mentions carry the Bot badge. */
+  botMentions?: ReadonlySet<string>;
   emojiSize?: number;
   linkify?: boolean;
 }) {
@@ -66,7 +69,13 @@ export function MessageBodyInline({
     }
     const isSelf = m.name === "all" || m.name === selfName;
     nodes.push(
-      <MentionToken key={`m-${i}`} name={m.raw} label={mentionLabels?.get(m.name)} isSelf={isSelf} />,
+      <MentionToken
+        key={`m-${i}`}
+        name={m.raw}
+        label={mentionLabels?.get(m.name)}
+        isSelf={isSelf}
+        isBot={botMentions?.has(m.name) ?? false}
+      />,
     );
     cursor = m.end;
   });

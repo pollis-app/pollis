@@ -20,6 +20,7 @@ import type { Message, MessageReceipts } from "../../types";
 import { PressButton } from "../ui/PressButton";
 import { sentBeforeJoin } from "../../utils/replyQuote";
 import { aliasAvatar, aliasName } from "../../utils/groupAlias";
+import { BotBadge } from "../ui/BotBadge";
 
 interface MessageItemProps {
   message: Message;
@@ -101,6 +102,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     : { background: getUsernameChipColor(authorColorKey) };
 
   const replyTo = replyToMessage ?? null;
+
+  // A bot's messages carry the Bot badge (#1182).
+  const botBadge = ctx.botIds?.has(message.sender_id) ? (
+    <BotBadge groupName={ctx.groupName} data-testid="message-bot-badge" />
+  ) : null;
 
   // The "new" tag (#1506): Modern skin only.
   const newTag = isAuthorNew ? (
@@ -281,6 +287,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               >
                 {displayName}
               </bdi>
+              {botBadge}
               {newTag}
               <bdi
                 data-testid="message-timestamp"
@@ -386,6 +393,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         >
           {displayName}
         </bdi>
+        {botBadge && <span className="me-1 flex-shrink-0 self-center">{botBadge}</span>}
 
         <span
           className="font-mono text-body select-none me-1 flex-shrink-0 text-muted"

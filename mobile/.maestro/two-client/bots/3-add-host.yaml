@@ -1,0 +1,38 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# BOTS (#1182), part 3 of 4 — driven by scripts/maestro-bots.sh. A second
+# `pollis-bot pair` for the existing bot printed ${HOST_CODE}. The admin opens
+# the bot from the member list, adds a host by TYPING that code, and the page
+# lists two hosts once the first host has verified the approval and wrapped the
+# bot's key to the new one.
+
+# The badge sits inside the bot's member row, so tapping it opens the row (the bot's page, for an admin).
+- tapOn:
+    id: "badge-bot-.*"
+- extendedWaitUntil:
+    visible:
+      id: "screen-bot"
+    timeout: 15000
+- tapOn:
+    id: "btn-add-bot-host"
+- assertVisible:
+    id: "screen-add-bot"
+- assertNotVisible:
+    id: "input-bot-name"
+- tapOn:
+    id: "input-bot-code"
+- inputText: "${HOST_CODE}"
+- tapOn:
+    id: "btn-submit-bot"
+- extendedWaitUntil:
+    visible:
+      id: "screen-bot"
+    timeout: 120000
+- extendedWaitUntil:
+    visible:
+      id: "row-bot-host-.*"
+      index: 1
+    timeout: 120000
+- takeScreenshot: bots-06-two-hosts

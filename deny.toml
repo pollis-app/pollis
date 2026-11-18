@@ -193,6 +193,11 @@ expression = "LicenseRef-proprietary"
 license-files = []
 
 [[licenses.clarify]]
+name = "pollis-bot"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
 name = "pollis-capture-proto"
 expression = "LicenseRef-proprietary"
 license-files = []

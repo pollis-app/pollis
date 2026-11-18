@@ -394,6 +394,18 @@
       </div>
 
       <div class="faq-item">
+        <div class="faq-question">Can a group have bots, like alerts from our monitoring?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Yes. A bot is a member of one group that runs on a machine one of the group's admins controls, never on Pollis's servers. It posts alerts from your monitoring or scripts into a channel, and carries a Bot badge. No developer and no Pollis server holds its keys. See <a href="bots.html">Bots</a>.</p>
+          </div>
+          <div class="dev">
+            <p>A bot is its own user (<code>kind = bot</code>), a full MLS member of exactly one group; its hosts are its devices, each running <code>pollis-bot</code>. The bot's keys are generated on the host and reach a further host only wrapped by an existing host, after it verifies an admin's signed approval. Alerts arrive on a local webhook (<code>POST /hooks/&lt;installation id&gt;</code>, bearer secret or HMAC). See <a href="bots-developers.html">Bots for developers</a>.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
         <div class="faq-question">What happens if the server goes down?</div>
         <div class="faq-answer">
           <div class="plain">
@@ -453,6 +465,7 @@
           <li><a href="artifacts.html">Release artifacts</a></li>
           <li><a href="assurance.html">Assurance</a></li>
           <li><a href="open-source.html">Open source</a></li>
+          <li><a href="bots.html">Bots</a></li>
         </ul>
       </div>
       <div class="site-footer-col">

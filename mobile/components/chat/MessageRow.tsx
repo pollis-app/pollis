@@ -12,13 +12,15 @@ import { useTranslation } from "react-i18next";
 import { KeyboardController } from "react-native-keyboard-controller";
 import { UserAvatar } from "../UserAvatar";
 import { Icon } from "../icons";
-import { fonts, r, semantic, type as ty, typeSize } from "../../theme/tokens";
+import { fonts, semantic, type as ty, typeSize } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator, receiptLabel } from "./ReceiptIndicator";
 import { MessageAttachments } from "./MessageAttachments";
 import { SwipeToReply } from "./SwipeToReply";
 import { UnsentActions } from "./UnsentActions";
+import { Tag } from "../Tag";
+import { BotBadge } from "../BotBadge";
 import { findMentions } from "../../lib/mentions";
 import {
   LONG_PRESS_MS,
@@ -74,6 +76,7 @@ export function MessageRow({
   mentionNames,
   selfName,
   mentionLabels,
+  botMentions,
   attachments,
   onOpenAttachment,
   onPressAvatar,
@@ -85,6 +88,8 @@ export function MessageRow({
   highlighted = false,
   continued = false,
   isNew = false,
+  isBot = false,
+  botGroup,
   testID,
   messageId,
 }: {
@@ -123,6 +128,8 @@ export function MessageRow({
   mentionNames?: ReadonlySet<string>;
   selfName?: string | null;
   mentionLabels?: ReadonlyMap<string, string>;
+  // Lowercased handles of the roster's bots (#1182): their mentions carry the Bot badge.
+  botMentions?: ReadonlySet<string>;
   attachments?: MessageAttachment[];
   onOpenAttachment?: (attachment: MessageAttachment) => void;
   onPressAvatar?: () => void;
@@ -137,6 +144,9 @@ export function MessageRow({
   continued?: boolean;
   // Joined within a week of this message (#1506); group channels only.
   isNew?: boolean;
+  // The sender is a bot (#1182): the Bot badge, and "managed by the admins of <botGroup>" spoken.
+  isBot?: boolean;
+  botGroup?: string;
   testID?: string;
   messageId?: string;
 }) {
@@ -228,7 +238,13 @@ export function MessageRow({
     ? `${t("mobile:chat.replyQuoteLabel", { name: replyTo?.name ?? "", text: quoteText })}. `
     : "";
 
-  const spokenName = isNew ? `${name} (${t("message.newMember")})` : name;
+  const spokenName = [
+    name,
+    isBot ? `(${botGroup ? t("mobile:bots.badgeA11y", { group: botGroup }) : t("mobile:bots.badge")})` : null,
+    isNew ? `(${t("message.newMember")})` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
   // The row is one element on iOS, so the tick's state is spoken with it (#1637).
   const spokenReceipt =
     showReceipt && !pending && !failed ? receiptLabel(t, receipt, peerCount) : null;
@@ -358,23 +374,9 @@ export function MessageRow({
                 >
                   {name}
                 </Text>
+                {isBot ? <BotBadge testID="message-bot-badge" /> : null}
                 {isNew ? (
-                  <View
-                    testID="message-new-tag"
-                    importantForAccessibility="no-hide-descendants"
-                    accessibilityElementsHidden
-                    style={{
-                      alignSelf: "center",
-                      flexShrink: 0,
-                      backgroundColor: semantic.accentFaint,
-                      borderRadius: r.pill,
-                      paddingHorizontal: 6,
-                    }}
-                  >
-                    <Text style={[ty.meta, { fontFamily: fonts.medium, color: semantic.accent }]}>
-                      {t("message.newMember")}
-                    </Text>
-                  </View>
+                  <Tag testID="message-new-tag" tone="accent" label={t("message.newMember")} />
                 ) : null}
                 {/* A pending row looks sent: only a failure is labelled, as on desktop. */}
                 <Text
@@ -405,6 +407,7 @@ export function MessageRow({
                   mentionNames={mentionNames}
                   selfName={selfName}
                   mentionLabels={mentionLabels}
+                  botMentions={botMentions}
                 />
                 {edited ? (
                   <Text style={ty.meta} testID={editUnsent ? "text-edit-unsent" : undefined}>

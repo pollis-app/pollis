@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Bots</title>
+  <meta name="description"
+    content="Pollis bots: group members run by a program on a machine an admin controls. What a bot can read, adding a bot, hosts, limits." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Bots" />
+  <meta property="og:description"
+    content="Pollis bots: group members run by a program on a machine an admin controls. What a bot can read, adding a bot, hosts, limits." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <header class="site-nav">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-nav-brand" aria-label="Pollis home"><img src="wordmark.svg" alt="Pollis" width="72" height="27" /></a>
+      <nav class="site-nav-links" aria-label="Primary">
+        <a href="index.html#download">Download</a>
+        <a href="security.html">Security</a>
+        <a href="faq.html">FAQ</a>
+        <a href="learn.html">Learn</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="doc-main reading-surface">
+
+      <div class="doc-header">
+        <h1 class="doc-title">Bots</h1>
+        <p class="doc-subtitle">
+          Members of a group that are run by a program on a machine an admin controls. For group admins.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        A Pollis bot is a member of one group that is run by a program, not a person. It runs on a machine that
+        one of the group's admins controls, <strong>never on Pollis's servers</strong>. It decrypts the group's
+        messages and posts into its channels with its own keys, like any member.
+        <br /><br />
+        The bot runs on your admin's machine; no developer and no Pollis server holds its keys.
+        <br /><br />
+        Running the machine: <a href="bots-self-hosting.html">Self-hosting a bot</a>.
+        Posting alerts and how the runtime works: <a href="bots-developers.html">Bots for developers</a>.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Four words, four different things</h2>
+        <p>These words are kept apart in the apps, in these docs and in the code.</p>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>Word</th><th>What it is</th></tr></thead>
+            <tbody>
+              <tr><td><strong>App</strong></td>
+                <td class="doc-td-dim">The code that decides what a bot does. It runs only inside the runtime.</td></tr>
+              <tr><td><strong>Installation</strong></td>
+                <td class="doc-td-dim">One App set up in one group, with the permissions (grants) an admin chose.</td></tr>
+              <tr><td><strong>Bot</strong></td>
+                <td class="doc-td-dim">The installation's user: the member everyone in the group sees.</td></tr>
+              <tr><td><strong>Runtime</strong></td>
+                <td class="doc-td-dim">Pollis's <code>pollis-bot</code> program. The only thing that ever holds a
+                  bot's keys or talks to the network for it.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          A bot is not the machine it runs on, and not the code it runs. Machines (hosts) can be added and
+          removed while the bot stays the same member. Today every bot runs the runtime's built-in
+          <strong>alerts</strong> handler: it posts the alerts it receives on its webhook into a channel.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What a bot is, and what it can read</h2>
+        <ul>
+          <li>It belongs to <strong>one group only</strong>, for its whole life. Any admin of the group can add
+            it, change its hosts and delete it.</li>
+          <li>It runs on a machine an admin controls, called a <strong>host</strong>. A bot can have several
+            hosts, so it keeps running when one machine goes down.</li>
+          <li>It is not in user search. Nobody can send it a direct message, and it cannot send one. It can never
+            be an admin or the owner of the group, and it cannot join other groups.</li>
+          <li>It can read <strong>every message sent in the group's channels after it joined</strong>, like a
+            person who joined at that moment. It cannot read earlier messages, your direct messages, or other
+            groups.</li>
+          <li>Whoever controls a host machine can read what the bot reads. Run a bot only on a machine you trust
+            with that.</li>
+        </ul>
+        <p>
+          The <strong>Bots</strong> page is where admins manage them. On desktop, open the group, then choose
+          <strong>Bots</strong>. On mobile, open the group's settings, then <strong>Bots</strong>. Only the group's
+          admins see it.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Add a bot</h2>
+        <ol>
+          <li>On the <strong>Bots</strong> page, choose <strong>Add a bot</strong>. The page shows the command to
+            run on the machine.</li>
+          <li>On the machine, install <code>pollis-bot</code> (<a href="bots-self-hosting.html#install">how</a>)
+            and run:
+            <code class="doc-cmd">pollis-bot pair</code>
+            It prints an eight-character <strong>pairing code</strong> and the time it expires, ten minutes
+            later.</li>
+          <li>On the <strong>Add a bot</strong> page, type a <strong>bot name</strong> (members see it on the
+            bot's messages) and the code. The code is never filled in for you: typing it is how you confirm you
+            are adding the machine in front of you.</li>
+          <li>Choose <strong>Add bot</strong>. The bot joins the group and <code>pollis-bot pair</code> finishes.
+            The machine then starts it with <code>pollis-bot run</code>.</li>
+        </ol>
+        <p>
+          If the page says the code doesn't match, read it again from the machine and retype it. If it says the
+          code has expired, run <code>pollis-bot pair</code> again for a new one.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Add a host</h2>
+        <p>A second host keeps the bot running when one machine is down. Each host holds the bot's keys.</p>
+        <ol>
+          <li>Open the bot from the <strong>Bots</strong> page and choose <strong>Add a host</strong>. The page
+            shows the command for the new machine, with the bot's id filled in:
+            <code class="doc-cmd">pollis-bot add-host --bot &lt;bot id&gt;</code></li>
+          <li>Run it on the new machine. It prints a pairing code.</li>
+          <li>Type the code on the <strong>Add a host</strong> page and choose <strong>Add host</strong>.</li>
+        </ol>
+        <p>
+          One of the bot's running hosts checks your approval and hands the new machine the bot's keys, so at
+          least one existing host must be running. When a bot has several hosts, all of them see every message,
+          and for each alert exactly one of them posts.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Revoke a host, delete a bot</h2>
+        <p>
+          <strong>Revoke a host</strong> when the machine is retired, lost or no longer trusted: open the bot,
+          choose <strong>Revoke</strong> next to the host, and confirm. That machine stops running the bot and
+          cannot read the group's new messages. The bot's other hosts keep it running.
+        </p>
+        <p>
+          <strong>Delete a bot</strong>: open the bot, choose <strong>Delete bot</strong>, and confirm. It leaves
+          the group and stops running on every host. This cannot be undone. Deleting a group deletes its bots
+          too.
+        </p>
+        <div class="doc-limit">
+          <span class="doc-limit-title">If every host is lost</span>
+          <p>
+            A bot's keys exist only on its hosts. Pollis keeps no copy and has no recovery for them, so that
+            nothing but the bot's own machines can ever act as the bot. If every host is gone, the bot cannot be
+            recovered: delete it and add a new one. The <strong>Bots</strong> page warns you before you revoke a
+            last host. Give an important bot a second host.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Limits and the Bot badge</h2>
+        <ul>
+          <li><strong>25 bots per group.</strong> When a group has 25, the <strong>Bots</strong> page says so;
+            delete one to add another.</li>
+          <li><strong>Bots per machine:</strong> set by whoever runs it, 8 by default
+            (<a href="bots-self-hosting.html#several">details</a>).</li>
+        </ul>
+        <p>
+          Everywhere members see a bot (the member list, its messages, mentions) its name carries a
+          <strong>Bot</strong> badge, with "Managed by the admins of &lt;group&gt;" on its profile. Apps that
+          predate bots show a bot as an ordinary member.
+        </p>
+        <p>
+          This page is kept in step with
+          <a href="https://github.com/pollis-app/pollis/blob/main/docs/bots/admin-guide.md" target="_blank"
+            rel="noopener noreferrer"><code>docs/bots/admin-guide.md</code></a>.
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Get Pollis</h2>
+        <ul>
+          <li><a href="index.html#download">Desktop</a></li>
+          <li><a href="android.html">Android</a></li>
+          <li><a href="index.html#terminal">Terminal client</a></li>
+          <li><a href="https://status.pollis.com/" target="_blank" rel="noopener noreferrer">Status</a></li>
+          <li><a href="https://github.com/pollis-app/pollis" target="_blank" rel="noopener noreferrer">Source code</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">How it works</h2>
+        <ul>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="learn.html">Learn</a></li>
+          <li><a href="faq.html">FAQ</a></li>
+          <li><a href="transparency.html">Key transparency</a></li>
+          <li><a href="artifacts.html">Release artifacts</a></li>
+          <li><a href="assurance.html">Assurance</a></li>
+          <li><a href="open-source.html">Open source</a></li>
+          <li><a href="bots.html" aria-current="page">Bots</a></li>
+        </ul>
+      </div>
+      <div class="site-footer-col">
+        <h2 class="site-footer-title">Policies</h2>
+        <ul>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms</a></li>
+          <li><a href="retention.html">Retention</a></li>
+          <li><a href="subprocessors.html">Subprocessors</a></li>
+          <li><a href="legal-requests.html">Legal requests</a></li>
+          <li><a href="continuity.html">Continuity</a></li>
+          <li><a href="device-security.html">Lost device</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="site-footer-copy" id="year-copyright">© 2026 Pollis. All rights reserved.</p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>

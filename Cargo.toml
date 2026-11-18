@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "pollis-core",
     "pollis-tui",
+    "pollis-bot",
     "pollis-capture-proto",
     "pollis-capture-linux",
     "pollis-capture-macos",

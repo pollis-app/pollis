@@ -49,10 +49,18 @@ fuzzing = []
 # build has no MSVC/NDK path). `dep:` referencing a target-scoped optional dep
 # is a no-op on excluded targets, so a Windows/mobile `media` build still omits
 # it — preserving today's platform matrix exactly.
-media = [
+# The realtime rooms alone (#1182): the LiveKit data channel the desktop app
+# and the bot runtime receive wake-ups on, without any audio stack (no cpal,
+# rodio, PulseAudio or AudioProcessing). Receiving LiveKit data needs a WebRTC
+# peer connection, so libwebrtc stays. `media` is a superset, so the desktop
+# build is unchanged; mobile enables neither.
+realtime = [
     "dep:livekit",
     "dep:livekit-signaling",
     "dep:libwebrtc",
+]
+media = [
+    "realtime",
     "dep:cpal",
     "dep:rtrb",
     "dep:rodio",

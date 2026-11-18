@@ -81,6 +81,8 @@ export interface MentionCandidate {
   avatarUrl?: string | null;
   /** The member's alias picture in this group (#2003). */
   aliasAvatarUrl?: string | null;
+  /** A bot (#1182): the picker shows the Bot badge on its row. */
+  isBot?: boolean;
 }
 
 const MENTION_SUGGESTION_LIMIT = 8;

@@ -4,6 +4,8 @@ import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { Screen, Header, Body, ListRow, Group, Chip, SectionTitle } from "../../components/ui";
 import { UserAvatar } from "../../components/UserAvatar";
+import { BotBadge } from "../../components/BotBadge";
+import { isBotUser } from "../../lib/bots";
 import { Hint, ErrorText } from "../../components/groups/FormBits";
 import { space } from "../../theme/tokens";
 import {
@@ -37,6 +39,7 @@ function Members() {
   const { data: members = [], isLoading } = useGroupMembers(id);
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === id);
+  const groupName = group?.name ?? t("mobile:group.common.fallbackName");
   const removeMember = useRemoveMember(id);
   const setRole = useSetMemberRole(id);
   // Pending invites (#1506); the inviter and admins can revoke.
@@ -128,6 +131,9 @@ function Members() {
               const aliased = hasAlias(aliases, m.user_id);
               const resetArmed = confirmReset === m.user_id;
               const name = isMe ? `${handle} ${t("members.self")}` : handle;
+              // A bot (#1182): badged, managed by the group's admins, never given a role.
+              const isBot = isBotUser(m);
+              const managedBy = t("mobile:bots.managedBy", { group: groupName });
               const role = isOwner
                 ? t("mobile:group.members.roleOwner")
                 : isAdmin
@@ -152,20 +158,36 @@ function Members() {
                     }
                     name={name}
                     nameIsHandle={label.isHandle}
-                    sub={aliasDisplay && m.username ? `@${m.username} · ${role}` : role}
+                    sub={
+                      isBot
+                        ? managedBy
+                        : aliasDisplay && m.username
+                          ? `@${m.username} · ${role}`
+                          : role
+                    }
+                    end={isBot ? <BotBadge testID={`badge-bot-${m.user_id}`} /> : undefined}
+                    accessibilityLabel={
+                      isBot ? `${name}, ${t("mobile:bots.badgeA11y", { group: groupName })}` : undefined
+                    }
                     chevron={!isMe}
                     onPress={
                       isMe
                         ? undefined
-                        : () =>
-                            router.push({
-                              pathname: "/user/[id]",
-                              params: id ? { id: m.user_id, groupId: id } : { id: m.user_id },
-                            })
+                        : isBot && iAmAdmin && id
+                          ? () =>
+                              router.push({
+                                pathname: "/group/bot",
+                                params: { groupId: id, botId: m.user_id },
+                              })
+                          : () =>
+                              router.push({
+                                pathname: "/user/[id]",
+                                params: id ? { id: m.user_id, groupId: id } : { id: m.user_id },
+                              })
                     }
                   />
-                  {/* Under the member, so the row stays one control. */}
-                  {iAmAdmin && !isMe && !isOwner ? (
+                  {/* Under the member, so the row stays one control. A bot is managed on its own page. */}
+                  {iAmAdmin && !isMe && !isOwner && !isBot ? (
                     <View
                       style={{
                         flexDirection: "row",

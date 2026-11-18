@@ -167,6 +167,8 @@ pub struct OpenConversation {
     pub selected: Option<String>,
     /// `Some` while a thread is open in the pane.
     pub thread: Option<ThreadView>,
+    /// The group's bots (#1182): their messages carry the Bot badge. Empty in a DM.
+    pub bots: HashSet<String>,
 }
 
 impl OpenConversation {

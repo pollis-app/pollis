@@ -8,6 +8,9 @@
     "scripts/check-claims.mjs (CI) fails on a deleted anchor or a reworded quote; scripts/claims-impact.mjs --since <ref> lists claims whose anchors changed; /sweep-claims re-verifies them."
   ],
   "audited_docs": [
+    "docs/bots/README.md",
+    "docs/bots/admin-guide.md",
+    "docs/bots/self-hosting.md",
     "docs/metadata-retention-policy.md",
     "docs/operational-continuity.md",
     "docs/reproducible-builds-residuals.md",
@@ -38,6 +41,7 @@
     "website/artifacts.js",
     "website/assurance.html",
     "website/assurance.js",
+    "website/bots.html",
     "website/continuity.html",
     "website/device-security.html",
     "website/faq.html",
@@ -20612,6 +20616,160 @@
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
+    },
+    {
+      "id": "bots-keys-01",
+      "doc": "website/bots.html",
+      "locator": {
+        "heading": "Bots",
+        "quote": "The bot runs on your admin's machine; no developer and no Pollis server holds its keys."
+      },
+      "claim": "A self-hosted bot's account and device keys are generated on its host and reach another host only wrapped to that host's ephemeral key; the DS stores the public key and opaque wrapped blobs, and no developer is in the path (epic #872 'What we claim', self-hosted).",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/host.rs",
+        "pollis-core/src/commands/bots/approval.rs",
+        "pollis-core/src/commands/device_enrollment.rs",
+        "pollis-delivery/src/bots.rs",
+        "pollis-api/src/bots.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/host.rs:105",
+        "pollis-core/src/commands/bots/host.rs:642",
+        "pollis-delivery/src/bots.rs:256",
+        "pollis-delivery/src/bots.rs:997"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-keys-02",
+      "doc": "docs/bots/README.md",
+      "locator": {
+        "heading": "Pollis bots",
+        "quote": "No developer and no Pollis server holds its keys."
+      },
+      "also_rendered_in": [
+        "README.md",
+        "website/faq.html"
+      ],
+      "claim": "Same as bots-keys-01: a bot's private keys exist only on its hosts.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/host.rs",
+        "pollis-core/src/commands/bots/approval.rs",
+        "pollis-core/src/commands/device_enrollment.rs",
+        "pollis-delivery/src/bots.rs",
+        "pollis-api/src/bots.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/host.rs:105",
+        "pollis-core/src/commands/bots/host.rs:642",
+        "pollis-delivery/src/bots.rs:256",
+        "pollis-delivery/src/bots.rs:997"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-keys-03",
+      "doc": "docs/bots/admin-guide.md",
+      "locator": {
+        "heading": "If every host is lost",
+        "quote": "A bot's keys exist only on its hosts."
+      },
+      "also_rendered_in": [
+        "website/bots.html"
+      ],
+      "claim": "There is no server-side copy or recovery blob for a bot's account key; losing every host makes the bot unrecoverable.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/host.rs",
+        "pollis-core/src/commands/bots/approval.rs",
+        "pollis-core/src/commands/device_enrollment.rs",
+        "pollis-delivery/src/bots.rs",
+        "pollis-api/src/bots.rs",
+        "pollis-core/src/commands/bots/unattended.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/host.rs:105",
+        "pollis-core/src/commands/bots/host.rs:642",
+        "pollis-delivery/src/bots.rs:256",
+        "pollis-delivery/src/bots.rs:997",
+        "pollis-core/src/commands/bots/unattended.rs:87"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-keystore-01",
+      "doc": "docs/bots/self-hosting.md",
+      "locator": {
+        "heading": "How the keys are kept",
+        "quote": "They are never stored in plain text."
+      },
+      "also_rendered_in": [
+        "website/bots-self-hosting.html"
+      ],
+      "claim": "An unattended bot host keeps the bot's account seed and local-DB key in the device keystore (OS keychain, else the machine-bound encrypted file), never a plaintext backend.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/keystore.rs",
+        "pollis-core/src/commands/bots/unattended.rs",
+        "pollis-bot/src/secrets.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/keystore.rs:2223",
+        "pollis-core/src/commands/bots/unattended.rs:87"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-keystore-02",
+      "doc": "docs/bots/self-hosting.md",
+      "locator": {
+        "heading": "How the keys are kept",
+        "quote": "It does not protect against someone who can run programs as the same user on this machine, or who has a full image of it."
+      },
+      "also_rendered_in": [
+        "website/bots-self-hosting.html"
+      ],
+      "claim": "The unattended keystore path has no PIN layer, so it resists a copied disk but not a same-UID local attacker or a full-disk image (whitepaper §3.5, 'Bot hosts').",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/keystore.rs",
+        "pollis-core/src/commands/bots/unattended.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/unattended.rs:87"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-scope-01",
+      "doc": "docs/bots/admin-guide.md",
+      "locator": {
+        "heading": "What a bot is",
+        "quote": "Nobody can send it a direct message, and it cannot send one."
+      },
+      "also_rendered_in": [
+        "website/bots.html"
+      ],
+      "claim": "The DS and the schema refuse DM creation and DM requests with a bot in either direction, and directory lookups never return a bot.",
+      "kind": "behaviour",
+      "anchors": [
+        "pollis-delivery/src/bots.rs",
+        "pollis-delivery/src/directory.rs",
+        "pollis-schema/migrations/000052_bots.sql"
+      ],
+      "evidence": [
+        "pollis-delivery/src/directory.rs:1158",
+        "pollis-delivery/tests/bots.rs:677"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
     }
   ]
 }

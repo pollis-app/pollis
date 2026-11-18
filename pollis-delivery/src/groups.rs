@@ -154,6 +154,10 @@ pub async fn apply_create_group(
         Ok(o) => o,
         Err(o) => return Ok(o),
     };
+    // #1182: a bot creates no group (the schema refuses it as owner, too).
+    if crate::bots::is_bot(conn, &owner).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
     // All these ids are attacker-chosen (#879, #880).
     let mut claims: Vec<(&str, ConversationKind)> =
         vec![(body.id.as_str(), ConversationKind::Group)];
@@ -311,12 +315,15 @@ pub async fn delete_group(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
+    // #1182: the group's bots go with it.
+    let bots = crate::bots::bots_of_group(&conn, &parsed.group_id).await?;
     let (outcome, dead_conversations) =
         apply_delete_group(&conn, authed.as_deref(), &parsed).await?;
     if matches!(outcome, WriteOutcome::Ok) && !dead_conversations.is_empty() {
         let log_conn = state.log_db.conn().await?;
         crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
     }
+    crate::account::evict_deleted_bots(&state, &conn, &bots).await?;
     outcome_response::<DeleteGroupBody>(outcome)
 }
 
@@ -355,8 +362,11 @@ pub async fn leave_group(
     let conn = state.db.conn().await?;
     // Read rooms BEFORE the leave: an empty group's teardown deletes its `channels` rows.
     let rooms = crate::broker::group_rooms(&conn, &parsed.group_id).await?;
+    // #1182: the last person out takes the group's bots with it.
+    let bots = crate::bots::bots_of_group(&conn, &parsed.group_id).await?;
     let (outcome, dead_conversations) =
         apply_leave_group(&conn, authed.as_deref(), &parsed).await?;
+    crate::account::evict_deleted_bots(&state, &conn, &bots).await?;
     if matches!(outcome, WriteOutcome::Ok) && !dead_conversations.is_empty() {
         let log_conn = state.log_db.conn().await?;
         crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
@@ -386,6 +396,10 @@ pub async fn apply_leave_group(
     if authed.is_some() && group_role(conn, &body.group_id, &user).await?.is_none() {
         return Ok((WriteOutcome::Forbidden, Vec::new()));
     }
+    // #1182: a bot leaves its group only by being deleted.
+    if crate::bots::is_bot(conn, &user).await? {
+        return Ok((WriteOutcome::Forbidden, Vec::new()));
+    }
     let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
@@ -396,9 +410,11 @@ pub async fn apply_leave_group(
     crate::directory::bump_membership_version(&tx, &body.group_id).await?;
     // The leaver's channel mutes (#1431) go with the membership they hung on.
     crate::teardown::purge_member_channel_mutes(&tx, &body.group_id, &user).await?;
+    // People only (#1182): a group left with nothing but its bots goes too.
     let mut survivors = tx
         .query(
-            "SELECT 1 FROM group_member WHERE group_id = ?1 LIMIT 1",
+            "SELECT 1 FROM group_member gm WHERE gm.group_id = ?1 \
+             AND NOT EXISTS (SELECT 1 FROM bot b WHERE b.user_id = gm.user_id) LIMIT 1",
             libsql::params![body.group_id.clone()],
         )
         .await?;
@@ -631,6 +647,10 @@ pub async fn apply_remove_member(
     {
         return Ok(WriteOutcome::Forbidden);
     }
+    // #1182: a bot leaves its group only by being deleted (`/v1/bots/delete`).
+    if crate::bots::is_bot(conn, &body.user_id).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
     let tx = crate::db::write_tx(conn).await?;
     tx.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
@@ -678,6 +698,10 @@ pub async fn apply_set_member_role(
         .await?
         .is_none()
     {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    // #1182: a bot is never an admin (the schema refuses it, too).
+    if body.role == "admin" && crate::bots::is_bot(conn, &body.user_id).await? {
         return Ok(WriteOutcome::Forbidden);
     }
     conn.execute(
@@ -880,6 +904,10 @@ pub async fn apply_accept_invite(
         Ok(u) => u,
         Err(o) => return Ok(o),
     };
+    // #1182: a bot is never invited (the schema refuses the invite row, too).
+    if crate::bots::is_bot(conn, &user).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
     let mut rows = conn
         .query(
             "SELECT group_id FROM group_invite WHERE id = ?1 AND invitee_id = ?2",
@@ -1048,6 +1076,10 @@ pub async fn apply_create_join_request(
         Ok(r) => r,
         Err(_) => return Ok(JoinRequestOutcome::Forbidden),
     };
+    // #1182: a bot joins no group but its own, which it is in from creation.
+    if crate::bots::is_bot(conn, &requester).await? {
+        return Ok(JoinRequestOutcome::Forbidden);
+    }
 
     if !group_exists(conn, &body.group_id).await? {
         return Ok(JoinRequestOutcome::NoSuchGroup);
@@ -1509,6 +1541,10 @@ pub async fn apply_redeem_invite_link(
         Ok(u) => u,
         Err(_) => return Ok(RedeemOutcome::Rejected),
     };
+    // #1182: a bot joins no group but its own.
+    if crate::bots::is_bot(conn, &user).await? {
+        return Ok(RedeemOutcome::Rejected);
+    }
 
     let (link_id, group_id) = match check_link(conn, &user, &body.attempt_id, &body.token).await? {
         LinkCheck::Live { link_id, group_id } => (link_id, group_id),
