@@ -23,10 +23,20 @@ pub fn component() -> Vec<u8> {
     .unwrap()
 }
 
-pub fn wasi_component() -> Vec<u8> {
+/// Imports wasi:sockets; must be refused.
+pub fn net_component() -> Vec<u8> {
     std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/fixtures/wasi-app.wasm"
+        "/fixtures/net-app.wasm"
+    ))
+    .unwrap()
+}
+
+/// An ordinary std Rust App; must load.
+pub fn std_component() -> Vec<u8> {
+    std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fixtures/std-app.wasm"
     ))
     .unwrap()
 }
@@ -262,6 +272,26 @@ impl Run {
             .find(|l| l.starts_with(prefix))
             .unwrap_or_else(|| panic!("no log line starting {prefix:?}: {:?}", self.lines()))
     }
+}
+
+pub fn run_component(
+    component: &[u8],
+    app_hash: AppHash,
+    host: &AppHost,
+    fake: Arc<Fake>,
+    trigger: Trigger,
+) -> Run {
+    let ctx = ctx("inst-a");
+    let result = host.run_job(Job {
+        installation: &ctx,
+        app_hash,
+        component,
+        manifest: &manifest(),
+        admin_grants: &admin(),
+        trigger,
+        services: fake.clone(),
+    });
+    Run { result, fake }
 }
 
 pub fn run_on(

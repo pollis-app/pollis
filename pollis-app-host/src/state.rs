@@ -126,11 +126,13 @@ struct Kv {
 }
 
 pub struct JobState {
-    ctx: InstallationContext,
+    pub(crate) ctx: InstallationContext,
     grants: EffectiveGrants,
-    limits: JobLimits,
-    services: Arc<dyn HostServices>,
-    deadline: Instant,
+    pub(crate) limits: JobLimits,
+    pub(crate) services: Arc<dyn HostServices>,
+    pub(crate) deadline: Instant,
+    /// WASI stub state (see `crate::wasi`).
+    pub(crate) wasi: crate::wasi::WasiState,
     counters: Counters,
     actions: Vec<Action>,
     kv: Kv,
@@ -169,6 +171,7 @@ impl JobState {
             limits,
             services,
             deadline,
+            wasi: crate::wasi::WasiState::new(),
             counters: Counters::default(),
             actions: Vec::new(),
             kv: Kv {
@@ -195,7 +198,7 @@ impl JobState {
     }
 
     /// Every host call starts here: the deadline and the total call cap.
-    fn enter(&mut self, op: &str) -> wasmtime::Result<()> {
+    pub(crate) fn enter(&mut self, op: &str) -> wasmtime::Result<()> {
         if Instant::now() >= self.deadline {
             return Err(wasmtime::Error::new(DeadlineHit));
         }
@@ -449,7 +452,7 @@ impl JobState {
     }
 }
 
-fn cap_hit(op: &str, what: &str, cap: u32) -> wasmtime::Error {
+pub(crate) fn cap_hit(op: &str, what: &str, cap: u32) -> wasmtime::Error {
     wasmtime::Error::new(HostCallLimitHit(format!(
         "`{op}` exceeded the per-job limit of {cap} {what}"
     )))

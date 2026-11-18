@@ -798,14 +798,14 @@ fn there_is_no_moderation_host_function() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_component_importing_wasi_is_refused() {
+fn a_component_importing_sockets_is_refused() {
     let host = host();
-    let err = host.prepare([9; 32], &wasi_component()).unwrap_err();
+    let err = host.prepare([9; 32], &net_component()).unwrap_err();
     match err {
         JobError::ImportRefused(msg) => {
-            assert!(msg.starts_with("import `wasi:"), "{msg}");
+            assert!(msg.starts_with("import `wasi:sockets/"), "{msg}");
             assert!(
-                msg.contains("no WASI filesystem, sockets or environment"),
+                msg.contains("use `http-fetch` with hosts listed in `egress`"),
                 "{msg}"
             );
         }
@@ -823,7 +823,7 @@ fn the_fixture_app_imports_only_the_pollis_host() {
 fn different_bytes_under_a_cached_app_hash_are_refused() {
     let host = host();
     host.prepare(APP_HASH, &component()).unwrap();
-    let err = host.prepare(APP_HASH, &wasi_component()).unwrap_err();
+    let err = host.prepare(APP_HASH, &net_component()).unwrap_err();
     assert!(matches!(err, JobError::AppHashMismatch(_)), "{err:?}");
 }
 

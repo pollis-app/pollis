@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "pollis-wasi-app"
+name = "pollis-net-app"
 version = "0.1.0"

@@ -9,8 +9,10 @@
 //! 2. refuses to deliver a trigger outside them (undeclared trigger kind,
 //!    ungranted channel or event kind, the bot's own message);
 //! 3. takes the compiled component from a cache keyed by App hash (compiling
-//!    on a miss, and refusing any import other than `pollis:app/host` — there
-//!    is no WASI filesystem, sockets or environment);
+//!    on a miss, and refusing any import other than `pollis:app/host` and the
+//!    stubbed WASI 0.2 subset in [`wasi`](crate::check_import): empty
+//!    environment, stdio to the runtime log, `exit` traps, host clocks and
+//!    randomness, a filesystem with no preopens, and no sockets or wasi:http);
 //! 4. instantiates it in a fresh `Store` with a memory cap, a CPU deadline
 //!    (epoch interruption) and host-call caps, and calls one handler;
 //! 5. returns the queued actions and state writes only if the handler returned
@@ -23,6 +25,7 @@
 mod egress;
 mod state;
 mod types;
+mod wasi;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -38,12 +41,10 @@ use wasmtime::{Config, Engine, Store, Trap, UpdateDeadline};
 
 pub use state::HOST_IMPORTS;
 pub use types::*;
+pub use wasi::check_import;
 
 /// The WIT package this host implements.
 pub const WIT_PACKAGE: &str = "pollis:app@0.1.0";
-
-/// The only component imports an App may have.
-const ALLOWED_IMPORTS: [&str; 2] = ["pollis:app/types@0.1.0", "pollis:app/host@0.1.0"];
 
 #[allow(clippy::all)]
 mod bindings {
@@ -121,6 +122,8 @@ impl AppHost {
         let mut linker = Linker::new(&engine);
         App::add_to_linker::<_, HasSelf<_>>(&mut linker, |state: &mut JobState| state)
             .map_err(|e| JobError::InvalidComponent(format!("linker: {e}")))?;
+        wasi::add_to_linker(&mut linker)
+            .map_err(|e| JobError::InvalidComponent(format!("linker: {e}")))?;
         Ok(AppHost {
             engine,
             linker,
@@ -164,11 +167,7 @@ impl AppHost {
         let compiled = Component::new(&self.engine, component)
             .map_err(|e| JobError::InvalidComponent(format!("does not compile: {e}")))?;
         for (name, _) in compiled.component_type().imports(&self.engine) {
-            if !ALLOWED_IMPORTS.contains(&name) {
-                return Err(JobError::ImportRefused(format!(
-                    "import `{name}` refused: an App may import only `pollis:app/host@0.1.0` (no WASI filesystem, sockets or environment)"
-                )));
-            }
+            wasi::check_import(name).map_err(JobError::ImportRefused)?;
         }
         let instance_pre = self.linker.instantiate_pre(&compiled).map_err(|e| {
             JobError::InvalidComponent(format!("does not match `{WIT_PACKAGE}`: {e}"))
@@ -251,6 +250,7 @@ impl AppHost {
 
         drop(done);
         let _ = watchdog.join();
+        store.data_mut().flush_stdio();
 
         match result {
             Ok(Ok(())) => Ok(store.into_data().into_outcome()),
@@ -276,6 +276,9 @@ fn call_handler(
 }
 
 fn classify(error: wasmtime::Error, state: &JobState, limits: &JobLimits) -> JobError {
+    if state.wasi.exited {
+        return JobError::Trap(wasi::ExitCalled.to_string());
+    }
     if let Some(hit) = error.downcast_ref::<HostCallLimitHit>() {
         return JobError::HostCallLimit(hit.0.clone());
     }
