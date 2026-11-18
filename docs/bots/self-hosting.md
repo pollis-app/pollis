@@ -89,7 +89,7 @@ pollis-bot run --webhook       # also listen for alerts on 127.0.0.1:8787
 pollis-bot status              # what each bot is doing
 ```
 
-`run` opens every installation on this machine, catches up on anything it missed, and then waits for events. It stops on Ctrl-C (and on `SIGTERM` on Linux and macOS). Nothing is lost while it is stopped: the next start catches up.
+`run` opens every installation on this machine, catches up on anything it missed, and then waits for events. A host does not have to stay up: `pollis-bot run --once` catches up, handles everything pending (including approving another host) and exits, so a machine that sleeps can run it on a schedule or at wake. Each installation's store is unlocked only while a job runs. It stops on Ctrl-C (and on `SIGTERM` on Linux and macOS). Nothing is lost while it is stopped: the next start catches up.
 
 To keep the webhook on without the flag, add it to `config.json` in the data directory (see [Files](#files)):
 

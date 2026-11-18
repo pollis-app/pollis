@@ -36,6 +36,7 @@ An admin opens the group, then **Bots** → the bot → **Add a host**, and type
 ```bash
 pollis-bot run                 # every installation on this host, until stopped
 pollis-bot run --webhook       # also the alerts webhook on 127.0.0.1:8787
+pollis-bot run --once          # catch up, handle what is pending, exit (scheduled or woken hosts)
 pollis-bot status              # installations and what each is doing
 pollis-bot forget --installation <id>   # remove a revoked host's or deleted bot's installation
 ```

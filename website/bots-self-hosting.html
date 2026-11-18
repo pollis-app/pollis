@@ -95,7 +95,8 @@ pollis-bot run --webhook       # also listen for alerts on 127.0.0.1:8787
 pollis-bot status              # what each bot is doing</code>
         <p>
           <code>run</code> catches up on anything it missed, then waits for events. Nothing is lost while it is
-          stopped. The first time the webhook is on, it prints each installation's webhook secret once; see
+          stopped, and a host does not have to stay up: <code>pollis-bot run --once</code> catches up, handles
+          everything pending (including approving another host) and exits, for a machine that sleeps. The first time the webhook is on, it prints each installation's webhook secret once; see
           <a href="bots-developers.html#webhook">the alerts webhook</a>. To keep the webhook on, put
           <code>{ "webhook": { "bind": "127.0.0.1:8787" } }</code> in <code>config.json</code> in the data
           directory.
