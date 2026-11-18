@@ -575,6 +575,8 @@ pub fn run() {
             commands::bots::add_bot_host,
             commands::bots::revoke_bot_host,
             commands::bots::delete_bot,
+            commands::bots::list_group_commands,
+            commands::bots::send_command_request,
             commands::transparency::self_audit_account_key,
             commands::transparency::audit_peer_account_key,
             commands::transparency::verify_own_build,
