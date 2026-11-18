@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}} ہٹاؤ",
     "send": "سنیہا بھیجو",
     "markSensitive": "{{name}} نوں حساس نشان لاؤ",
-    "unmarkSensitive": "{{name}} توں حساس نشان ہٹاؤ"
+    "unmarkSensitive": "{{name}} توں حساس نشان ہٹاؤ",
+    "commandAmbiguous": "/{{command}} اک توں ودھ ایپاں وچ اے۔ لسٹ وچوں اک چنو۔",
+    "commandRequestHint": "{{app}} نوں نجی طور تے گھلیا جاندا اے، ایس چینل وچ پوسٹ نہیں ہوندا",
+    "commandRequestUnavailable": "ایس ورژن وچ ایپاں نوں نجی درخواستاں دستیاب نہیں۔ کجھ وی پوسٹ نہیں ہویا۔",
+    "commandRequestFailed": "ایہہ کمانڈ نہیں گھلی جا سکی۔ کجھ وی پوسٹ نہیں ہویا۔"
   },
   "mentions": {
     "listLabel": "مینشن دیاں تجویزاں",
@@ -112,5 +116,9 @@
     "quit": "Pollis بند کرو",
     "unread_one": "Pollis — {{count}} ان پڑھیا",
     "unread_other": "Pollis — {{count}} ان پڑھے"
+  },
+  "commands": {
+    "listLabel": "کمانڈ دے سجھاء",
+    "matching": "<hl>/{{query}}</hl> نال ملدیاں کمانڈاں"
   }
 }

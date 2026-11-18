@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}} काढा",
     "send": "मेसेज पाठवा",
     "markSensitive": "{{name}} संवेदनशील म्हणून चिन्हांकित करा",
-    "unmarkSensitive": "{{name}} वरील संवेदनशील चिन्ह काढा"
+    "unmarkSensitive": "{{name}} वरील संवेदनशील चिन्ह काढा",
+    "commandAmbiguous": "/{{command}} एकापेक्षा जास्त ॲपमध्ये आहे. यादीतून एक निवडा.",
+    "commandRequestHint": "{{app}} ला खाजगीरित्या पाठवले जाते, या चॅनेलमध्ये पोस्ट होत नाही",
+    "commandRequestUnavailable": "या आवृत्तीत ॲपला खाजगी विनंत्या उपलब्ध नाहीत. काहीही पोस्ट झाले नाही.",
+    "commandRequestFailed": "ही कमांड पाठवता आली नाही. काहीही पोस्ट झाले नाही."
   },
   "mentions": {
     "listLabel": "उल्लेख सूचवणी",
@@ -112,5 +116,9 @@
     "quit": "Pollis मधून बाहेर पडा",
     "unread_one": "Pollis — {{count}} न वाचलेला",
     "unread_other": "Pollis — {{count}} न वाचलेले"
+  },
+  "commands": {
+    "listLabel": "कमांड सूचना",
+    "matching": "<hl>/{{query}}</hl> शी जुळणाऱ्या कमांड"
   }
 }

@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}} সরান",
     "send": "মেসেজ পাঠান",
     "markSensitive": "{{name}}-কে সংবেদনশীল হিসেবে চিহ্নিত করুন",
-    "unmarkSensitive": "{{name}}-কে সংবেদনশীল চিহ্ন থেকে সরান"
+    "unmarkSensitive": "{{name}}-কে সংবেদনশীল চিহ্ন থেকে সরান",
+    "commandAmbiguous": "একাধিক অ্যাপে /{{command}} আছে। তালিকা থেকে একটি বেছে নিন।",
+    "commandRequestHint": "{{app}}-কে ব্যক্তিগতভাবে পাঠানো হয়, এই চ্যানেলে পোস্ট হয় না",
+    "commandRequestUnavailable": "এই সংস্করণে অ্যাপকে ব্যক্তিগত অনুরোধ পাঠানো যায় না। কিছুই পোস্ট হয়নি।",
+    "commandRequestFailed": "এই কমান্ড পাঠানো যায়নি। কিছুই পোস্ট হয়নি।"
   },
   "mentions": {
     "listLabel": "মেনশন সাজেশন",
@@ -112,5 +116,9 @@
     "quit": "Pollis বন্ধ করুন",
     "unread_one": "Pollis — {{count}}টি অপঠিত",
     "unread_other": "Pollis — {{count}}টি অপঠিত"
+  },
+  "commands": {
+    "listLabel": "কমান্ডের পরামর্শ",
+    "matching": "<hl>/{{query}}</hl>-এর সাথে মেলে এমন কমান্ড"
   }
 }

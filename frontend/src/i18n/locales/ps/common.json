@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}} لرې کړئ",
     "send": "پیغام ولېږئ",
     "markSensitive": "{{name}} حساس په نښه کړئ",
-    "unmarkSensitive": "د {{name}} حساس نښه لرې کړئ"
+    "unmarkSensitive": "د {{name}} حساس نښه لرې کړئ",
+    "commandAmbiguous": "/{{command}} په څو اپونو کې شته. له لیست څخه یو وټاکئ.",
+    "commandRequestHint": "{{app}} ته په پټه لېږل کېږي، په دې چینل کې نه خپرېږي",
+    "commandRequestUnavailable": "په دې نسخه کې اپونو ته پټې غوښتنې شتون نه لري. هېڅ نه دي خپاره شوي.",
+    "commandRequestFailed": "دا کمانډ ونه لېږل شو. هېڅ نه دي خپاره شوي."
   },
   "mentions": {
     "listLabel": "د یادونې وړاندیزونه",
@@ -112,5 +116,9 @@
     "quit": "له Pollis څخه ووځئ",
     "unread_one": "Pollis — {{count}} نالوستی",
     "unread_other": "Pollis — {{count}} نالوستي"
+  },
+  "commands": {
+    "listLabel": "د کمانډ وړاندیزونه",
+    "matching": "هغه کمانډونه چې له <hl>/{{query}}</hl> سره سمون لري"
   }
 }

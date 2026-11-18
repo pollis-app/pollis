@@ -72,7 +72,11 @@
     "removeAttachment": "Susa {{name}}",
     "send": "Thumela umlayezo",
     "markSensitive": "Maka u-{{name}} njengokuzwelayo",
-    "unmarkSensitive": "Susa uphawu lokuzwelayo ku-{{name}}"
+    "unmarkSensitive": "Susa uphawu lokuzwelayo ku-{{name}}",
+    "commandAmbiguous": "Ama-app angaphezu kwelilodwa ane-/{{command}}. Khetha elilodwa ohlwini.",
+    "commandRequestHint": "Kuthunyelwa ngasese ku-{{app}}, akuthunyelwa kulesi siteshi",
+    "commandRequestUnavailable": "Izicelo ezingasese kuma-app azitholakali kule nguqulo. Akukho okuthunyelwe.",
+    "commandRequestFailed": "Ayikwazanga ukuthumela lo myalo. Akukho okuthunyelwe."
   },
   "mentions": {
     "listLabel": "Iziphakamiso zokubalula",
@@ -112,5 +116,9 @@
     "quit": "Phuma ku-Pollis",
     "unread_one": "Pollis — {{count}} engafundiwe",
     "unread_other": "Pollis — {{count}} ezingafundiwe"
+  },
+  "commands": {
+    "listLabel": "Iziphakamiso zemiyalo",
+    "matching": "Imiyalo efana no-<hl>/{{query}}</hl>"
   }
 }
