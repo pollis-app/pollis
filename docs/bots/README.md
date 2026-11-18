@@ -36,7 +36,7 @@ These words are kept apart everywhere in Pollis: in the apps, in these docs and 
 
 A bot is not the machine it runs on, and not the code it runs. Machines (hosts) can be added and removed, and the code can change, while the bot stays the same member.
 
-Today every bot has one installation, and that installation runs the runtime's built-in **alerts** handler: it posts the alerts it receives on its webhook into a channel. You can already write an App in TypeScript and test it against the real sandbox ([Writing an App in TypeScript](./developer-guide.md)); running your own App in a group arrives with App approval. [Concepts for developers](./concepts-for-developers.md) describes the job loop it plugs into.
+Every bot has one installation. It runs the runtime's built-in **alerts** handler (it posts the alerts it receives on its webhook into a channel) until it is given an App, which runs once an admin approves it ([Approving an App](./app-approval.md)). To write one, start with [Writing an App in TypeScript](./developer-guide.md); [Concepts for developers](./concepts-for-developers.md) describes the job loop it plugs into.
 
 ## Quick start
 
