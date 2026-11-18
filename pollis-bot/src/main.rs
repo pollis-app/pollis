@@ -6,7 +6,7 @@ use pollis_bot::cli::{self, Command};
 use pollis_bot::config::{self, RuntimeConfig};
 use pollis_bot::core_host::CoreHost;
 use pollis_bot::host::PairTarget;
-use pollis_bot::{app, log};
+use pollis_bot::{app, app_cli, log};
 
 fn main() -> ExitCode {
     let invocation = match cli::parse(std::env::args().skip(1)) {
@@ -73,6 +73,19 @@ async fn dispatch(data_dir: &std::path::Path, command: Command) -> anyhow::Resul
         Command::Forget { installation_id } => {
             app::forget(&host, data_dir, &installation_id).await?;
             println!("Installation {installation_id} removed from this host.");
+        }
+        Command::AppInstall { installation_id, artifact } => {
+            let (_, hash) = app_cli::app_install(data_dir, &installation_id, &artifact).await?;
+            println!("App set for installation {installation_id}.\n    App hash:  {hash}\nA group admin approves it on the bot's page in Pollis (Bots → the bot). Restart `pollis-bot run`; it runs once approved.");
+        }
+        Command::AppDevKey { key } => {
+            let path = key.unwrap_or_else(|| app_cli::default_dev_key(data_dir));
+            println!("Developer key: {}\n(kept in {}; an admin approves it for a development installation)", app_cli::dev_key(&path)?, path.display());
+        }
+        Command::AppSign { artifact, key } => {
+            let key = key.unwrap_or_else(|| app_cli::default_dev_key(data_dir));
+            let (sig, hash) = app_cli::sign(&artifact, &key)?;
+            println!("Signed App hash {hash}: {}", sig.display());
         }
         Command::RotateSecret { installation_id } => {
             let secret = app::rotate_secret(&host, data_dir, &installation_id).await?;

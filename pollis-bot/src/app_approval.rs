@@ -31,6 +31,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::{CoreError, InstallationCore};
 
+/// The developer key `pollis-bot app dev-key` creates, in the data dir.
+pub const DEV_KEY_FILE: &str = "developer-key";
+
 /// The largest component the runtime fetches or reads.
 pub const MAX_COMPONENT_BYTES: usize = 64 * 1024 * 1024;
 /// The largest manifest or build signature it reads.
@@ -152,6 +155,8 @@ pub struct ReadyApp {
     pub development: bool,
     /// The effective grants deliver `mentions`.
     pub mentions: bool,
+    /// The manifest's schedules, when the effective grants deliver `schedule`.
+    pub schedules: Vec<pollis_app_manifest::ScheduleSpec>,
 }
 
 /// The facts about an artifact the runtime reports to admins.
@@ -271,10 +276,11 @@ impl ApprovedApp {
 }
 
 fn ready(app: LoadableApp, artifact: FetchedArtifact) -> ReadyApp {
-    let mentions = pollis_app_manifest::effective_grants(&app.manifest, &app.grants)
-        .triggers
-        .contains(&TriggerKind::Mentions);
+    let triggers = pollis_app_manifest::effective_grants(&app.manifest, &app.grants).triggers;
+    let mentions = triggers.contains(&TriggerKind::Mentions);
+    let schedules = if triggers.contains(&TriggerKind::Schedule) { app.manifest.schedules.clone() } else { Vec::new() };
     ReadyApp {
+        schedules,
         app_hash: app.app_hash,
         component: artifact.component,
         manifest: app.manifest,

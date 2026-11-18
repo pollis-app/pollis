@@ -102,6 +102,17 @@ pub trait InstallationCore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// #2004: the last slot (Unix seconds) this host finished for schedule
+    /// `name`, from the installation's store. `None` at first sight.
+    async fn schedule_cursor(&self, _name: &str) -> Result<Option<u64>, CoreError> {
+        Ok(None)
+    }
+
+    /// #2004: record that schedule `name` is finished up to `slot`.
+    async fn mark_schedule(&self, _name: &str, _slot: u64) -> Result<(), CoreError> {
+        Ok(())
+    }
+
     /// #2004: the channel and author of a message this host has seen.
     async fn message_meta(&self, _message_id: &str) -> Result<Option<(String, String)>, CoreError> {
         Ok(None)

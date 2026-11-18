@@ -32,6 +32,16 @@ use crate::core::{InstallationCore, Member, StateWrite};
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerOutput};
 use crate::trigger::{IncomingMessage, Trigger, WebhookPayload};
 
+static COMPILED_CACHE_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// Where compiled App components are kept between processes
+/// (`<data dir>/app-cache`), so a cold start (`run --once`) loads an App in
+/// milliseconds instead of compiling it. Set once, before the first job; a
+/// runtime that never sets it compiles in memory only.
+pub fn set_compiled_cache_dir(dir: std::path::PathBuf) {
+    let _ = COMPILED_CACHE_DIR.set(dir);
+}
+
 /// One sandbox host per process, so compiled components are shared by every
 /// installation running the same App.
 fn app_host() -> Result<Arc<AppHost>, HandlerError> {
@@ -39,7 +49,11 @@ fn app_host() -> Result<Arc<AppHost>, HandlerError> {
     if let Some(h) = HOST.get() {
         return Ok(h.clone());
     }
-    let h = Arc::new(AppHost::new(HostConfig::default()).map_err(|e| HandlerError(e.to_string()))?);
+    let config = HostConfig {
+        compiled_cache_dir: COMPILED_CACHE_DIR.get().cloned(),
+        ..HostConfig::default()
+    };
+    let h = Arc::new(AppHost::new(config).map_err(|e| HandlerError(e.to_string()))?);
     Ok(HOST.get_or_init(|| h).clone())
 }
 
@@ -69,9 +83,9 @@ impl AppHandler {
     ) -> Result<AppHandler> {
         let manifest = Manifest::from_json(manifest_json)?;
         grants.check_not_wider(&manifest)?;
-        let mentions = pollis_app_manifest::effective_grants(&manifest, &grants)
-            .triggers
-            .contains(&TriggerKind::Mentions);
+        let triggers = pollis_app_manifest::effective_grants(&manifest, &grants).triggers;
+        let mentions = triggers.contains(&TriggerKind::Mentions);
+        let schedules = if triggers.contains(&TriggerKind::Schedule) { manifest.schedules.clone() } else { Vec::new() };
         Ok(AppHandler {
             source: AppSource::Fixed(ReadyApp {
                 app_hash: pollis_app_manifest::app_hash(&component, manifest_json)?,
@@ -80,6 +94,7 @@ impl AppHandler {
                 grants,
                 development: false,
                 mentions,
+                schedules,
             }),
             http: PublicHttpClient::new(),
         })
@@ -181,6 +196,10 @@ impl Handler for AppHandler {
         }
     }
 
+    fn schedules(&self) -> Vec<pollis_app_manifest::ScheduleSpec> {
+        self.ready().map(|app| app.schedules).unwrap_or_default()
+    }
+
     async fn handle_job(
         &self,
         trigger: &Trigger,
@@ -209,6 +228,13 @@ impl Handler for AppHandler {
                 };
                 (trigger, Some(msg))
             }
+            Trigger::Schedule(slot) => (
+                host::Trigger::Schedule(host::Schedule {
+                    name: slot.name.clone(),
+                    slot: slot.slot.saturating_mul(1000),
+                }),
+                None,
+            ),
             Trigger::Webhook(w) => {
                 let hook = match &w.payload {
                     WebhookPayload::Raw(raw) => {

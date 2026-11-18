@@ -46,6 +46,12 @@ pub trait Handler: Send + Sync {
     async fn handle_job(&self, trigger: &Trigger, _ctx: &HandlerContext) -> Result<HandlerOutput, HandlerError> {
         Ok(HandlerOutput { actions: self.handle(trigger).await?, state: Vec::new() })
     }
+
+    /// #2004: the schedules this handler fires on (an App's manifest-declared
+    /// ones, when its grants include the `schedule` trigger). None by default.
+    fn schedules(&self) -> Vec<pollis_app_manifest::ScheduleSpec> {
+        Vec::new()
+    }
 }
 
 /// What a handler may use during a job: the open installation.
@@ -109,7 +115,7 @@ impl Handler for AlertsHandler {
                 // Only an App installation's webhook is raw.
                 WebhookPayload::Raw(_) => Ok(Vec::new()),
             },
-            Trigger::Message(_) => Ok(Vec::new()),
+            Trigger::Message(_) | Trigger::Schedule(_) => Ok(Vec::new()),
         }
     }
 }

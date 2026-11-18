@@ -68,6 +68,8 @@ An App runs as a WebAssembly component in `pollis-app-host`. It has no system ca
 - **Never into the runtime's own network.** A granted host name must resolve to a public address. The runtime's client (`PublicHttpClient`, which `HostServices::http_fetch` delegates to) resolves the name once, drops loopback, private, link-local (including cloud metadata), CGNAT, unique-local and reserved addresses (also when embedded in IPv6), refuses the request if none remain, and connects only to the addresses it checked, so a second DNS answer is never used. It follows no redirects and uses no proxy from the environment.
   Pinned by `non_public_addresses_are_refused`, `a_mixed_answer_keeps_only_public_addresses_and_looks_up_once`, `a_granted_name_that_resolves_inside_is_refused_without_connecting` (`pollis-app-host/src/http.rs`).
 - **Logging** to the runtime's log, never to the group.
+- **Webhooks** reach an App with their body, content type, user agent and `x-*` headers, never the credentials that authenticated the call (`authorization`, the signature) or cookies.
+  Pinned by `an_app_installation_gets_the_raw_request_without_credentials` (`pollis-bot/src/webhook.rs`).
 
 ## Grants
 
@@ -113,6 +115,8 @@ Pinned by `a_development_approval_can_never_be_read_as_production_or_back`, `a_d
 These are properties of the design, stated in developer docs and install copy:
 
 - **An App can send what it reads to the hosts the admin approved.** Egress is the boundary; inside it, the App decides what to send. An App with no egress cannot send data outside the group.
+- **Compiled Apps are cached on the host.** To keep cold starts fast, a host keeps each App's compiled code in its data directory and loads it only when the entry names the same App, the same engine build and settings, and its checksum holds; anything else is recompiled. The cache is as trusted as the rest of the runtime's data directory and is optional: a runtime without one compiles every App itself.
+  Pinned by `a_cold_host_loads_what_an_earlier_one_compiled`, `a_corrupt_or_mismatched_entry_is_recompiled_never_loaded` (`pollis-app-host/tests/disk_cache.rs`).
 - **The sandbox engine is in the trusted base.** Isolation rests on wasmtime and Cranelift being correct. The runtime keeps the engine's feature set minimal (no async, no GC proposals, no threads) and implements its WASI stubs itself rather than linking a general-purpose WASI implementation, to keep that base small.
 - **Jobs that share a CPU can observe timing.** The sandbox isolates memory and capabilities, not microarchitectural side channels between jobs running on the same machine. Installations that must not share hardware run on separate hosts.
 - **The host machine is trusted like any device of the bot.** Whoever controls the machine the runtime runs on can read what the bot can read. That is the admin's own machine for self-hosted bots; #2009 covers attested hosting.

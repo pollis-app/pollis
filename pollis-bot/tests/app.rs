@@ -228,3 +228,47 @@ async fn a_one_pass_run_catches_up_wraps_at_once_and_exits_sealed() {
     assert_eq!(host.core.opens.load(Ordering::SeqCst), host.core.closes.load(Ordering::SeqCst));
     assert!(!host.core.open.load(Ordering::SeqCst), "the store is sealed when the process exits");
 }
+
+// ---------------------------------------------------------------- app install (#2004, #2005)
+
+#[tokio::test]
+async fn app_install_points_the_installation_at_a_checked_app_and_prints_its_hash() {
+    use pollis_bot::handler::HandlerKind;
+    use pollis_bot::installations::{InstallationRecord, Registry};
+
+    let data = tempfile::tempdir().unwrap();
+    let registry = Registry::new(data.path());
+    registry
+        .save(&InstallationRecord {
+            installation_id: "01BOT".into(),
+            bot_user_id: "01BOT".into(),
+            group_id: "01GROUP".into(),
+            device_id: "01DEVICE".into(),
+            handler: HandlerKind::Alerts,
+            created_at: "2026-11-18T00:00:00Z".into(),
+        })
+        .unwrap();
+    let artifact = tempfile::tempdir().unwrap();
+    let wasm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm")).unwrap();
+    std::fs::write(artifact.path().join("pager.wasm"), &wasm).unwrap();
+    let manifest = br##"{"name":"pager","version":"0.1.0","triggers":["webhook"],"read":{"channels":["*"]},"actions":["post"]}"##;
+    std::fs::write(artifact.path().join("pollis-app.json"), manifest).unwrap();
+    let dir = artifact.path().display().to_string();
+
+    let (record, hash) = pollis_bot::app_cli::app_install(data.path(), "01BOT", &dir).await.unwrap();
+    assert_eq!(hash, pollis_app_manifest::hex(&pollis_app_manifest::app_hash(&wasm, manifest).unwrap()));
+    let HandlerKind::App { component, .. } = &record.handler else {
+        panic!("not an App: {:?}", record.handler);
+    };
+    // Not copied: the runtime reads it where it is, and checks it against the approval each job.
+    assert!(component.0.starts_with(&artifact.path().canonicalize().unwrap().display().to_string()));
+    assert_eq!(registry.get("01BOT").unwrap().unwrap().handler, record.handler);
+    record.handler.build().unwrap();
+
+    // A second component is ambiguous; nothing changes.
+    std::fs::write(artifact.path().join("other.wasm"), b"x").unwrap();
+    let err = pollis_bot::app_cli::app_install(data.path(), "01BOT", &dir).await.unwrap_err();
+    assert!(err.to_string().contains("exactly one .wasm"), "{err}");
+    // An unknown installation is refused.
+    assert!(pollis_bot::app_cli::app_install(data.path(), "01NOPE", &dir).await.is_err());
+}

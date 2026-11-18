@@ -34,7 +34,7 @@ use tokio::sync::Mutex;
 use crate::action::{Grants, Refusal};
 use crate::core::{CoreError, InstallationCore, StateCommit};
 use crate::handler::{Handler, HandlerContext};
-use crate::trigger::{Trigger, TriggerKey, WebhookCall};
+use crate::trigger::{ScheduleSlot, Trigger, TriggerKey, WebhookCall};
 
 /// What woke a job.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +81,40 @@ pub enum JobError {
 
 /// How often a job re-runs an App whose state another host moved meanwhile.
 pub const STATE_CONFLICT_ATTEMPTS: usize = 3;
+
+/// The most missed slots of one schedule a job runs. A host that was asleep
+/// through more runs only the newest ones; the older are skipped (counted in
+/// [`JobReport::skipped_slots`]), never run late in a burst.
+pub const MAX_MISSED_SLOTS: usize = 3;
+
+/// Which slots of `spec` a job should run, given the slot this host last
+/// finished (`cursor`) and the time now (Unix seconds).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DueSlots {
+    /// Oldest first, at most [`MAX_MISSED_SLOTS`].
+    pub run: Vec<u64>,
+    /// Due slots older than those, not run.
+    pub skipped: u64,
+    /// First sight of the schedule: start the cursor here and run nothing,
+    /// so an installation never replays slots from before it existed.
+    pub seed: Option<u64>,
+}
+
+pub fn due_slots(spec: &pollis_app_manifest::ScheduleSpec, cursor: Option<u64>, now: u64) -> DueSlots {
+    let Some(latest) = spec.slot_at_or_before(now) else {
+        return DueSlots::default();
+    };
+    let Some(cursor) = cursor else {
+        return DueSlots { seed: Some(latest), ..Default::default() };
+    };
+    if latest <= cursor {
+        return DueSlots::default();
+    }
+    let due = (latest - cursor) / spec.every;
+    let run_n = due.min(MAX_MISSED_SLOTS as u64);
+    let run = (0..run_n).rev().map(|k| latest - k * spec.every).collect();
+    DueSlots { run, skipped: due - run_n, seed: None }
+}
 
 impl JobError {
     pub fn fix(&self) -> &'static str {
@@ -147,6 +181,8 @@ pub struct JobReport {
     pub approvals_error: Option<String>,
     /// How long unsealing and sealing the store took.
     pub open_close: std::time::Duration,
+    /// Missed schedule slots past [`MAX_MISSED_SLOTS`] that were skipped.
+    pub skipped_slots: u64,
 }
 
 impl JobReport {
@@ -165,11 +201,19 @@ pub struct Installation {
     /// A wake job is queued and has not started catching up yet; further
     /// wake-ups fold into it.
     wake_queued: AtomicBool,
+    /// The schedule slot the runtime's one timer for this installation is set for.
+    pub(crate) armed_for: std::sync::Mutex<Option<u64>>,
 }
 
 impl Installation {
     pub fn new(core: Arc<dyn InstallationCore>, handler: Arc<dyn Handler>) -> Self {
-        Self { core, handler, lock: Mutex::new(()), wake_queued: AtomicBool::new(false) }
+        Self {
+            core,
+            handler,
+            lock: Mutex::new(()),
+            wake_queued: AtomicBool::new(false),
+            armed_for: std::sync::Mutex::new(None),
+        }
     }
 
     pub fn id(&self) -> &str {
@@ -178,6 +222,11 @@ impl Installation {
 
     pub fn handler_kind(&self) -> &'static str {
         self.handler.kind()
+    }
+
+    /// The next schedule slot after `now` (Unix seconds), if the handler has schedules.
+    pub fn next_slot(&self, now: u64) -> Option<u64> {
+        self.handler.schedules().iter().map(|s| s.next_after(now)).min()
     }
 
     /// Marks a wake job queued. `false` when one already is, and the caller
@@ -237,6 +286,23 @@ impl Installation {
                 .filter(|m| m.sender_id != own_id)
                 .map(Trigger::Message),
         );
+        // Schedules: the slots due since this host last ran each one, so a
+        // host that slept through a slot runs it when it next wakes, and the
+        // claim lets one host of the bot run each slot.
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
+        for spec in self.handler.schedules() {
+            let cursor = self.core.schedule_cursor(&spec.name).await.map_err(JobError::CatchUp)?;
+            let due = due_slots(&spec, cursor, now);
+            if let Some(seed) = due.seed {
+                self.core.mark_schedule(&spec.name, seed).await.map_err(JobError::MarkHandled)?;
+            }
+            report.skipped_slots += due.skipped;
+            triggers.extend(
+                due.run
+                    .into_iter()
+                    .map(|slot| Trigger::Schedule(ScheduleSlot { name: spec.name.clone(), slot })),
+            );
+        }
 
         let mut grants: Option<Grants> = None;
         for trigger in triggers {
@@ -244,13 +310,19 @@ impl Installation {
             let kind = trigger.kind();
             let result = self.run_trigger(&trigger, &mut grants).await;
             let failed = result.is_err();
-            if let (Trigger::Message(m), Ok(_)) = (&trigger, &result) {
-                self.core.mark_handled(m).await.map_err(JobError::MarkHandled)?;
+            match (&trigger, &result) {
+                (Trigger::Message(m), Ok(_)) => {
+                    self.core.mark_handled(m).await.map_err(JobError::MarkHandled)?;
+                }
+                (Trigger::Schedule(s), Ok(_)) => {
+                    self.core.mark_schedule(&s.name, s.slot).await.map_err(JobError::MarkHandled)?;
+                }
+                _ => {}
             }
             report.triggers.push(TriggerResult { key, kind, result });
             // Messages are handled in order: stop at a transient failure so the
             // cursor never skips past one that still needs another attempt.
-            if failed && kind == "message" {
+            if failed && (kind == "message" || kind == "schedule") {
                 break;
             }
         }

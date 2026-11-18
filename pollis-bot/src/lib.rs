@@ -19,6 +19,7 @@
 pub mod action;
 pub mod app;
 pub mod app_approval;
+pub mod app_cli;
 pub mod app_handler;
 pub mod cli;
 pub mod config;

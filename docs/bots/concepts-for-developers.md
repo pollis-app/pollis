@@ -47,10 +47,12 @@ Every trigger has a **trigger key**: a string that every host of the bot derives
 
 | Trigger | When | Trigger key |
 |---|---|---|
-| Message | A new message in the bot's group | `msg:<envelope id>` |
-| Webhook | A call to the alerts webhook | `hook:<delivery id>` (the `X-Pollis-Delivery` header, or a fresh id) |
+| Message | A new message in the bot's group (for an App, a mention of the bot reaches `on-mention`) | `msg:<envelope id>` |
+| Webhook | A call to the installation's webhook | `hook:<delivery id>` (the `X-Pollis-Delivery` header, or a fresh id) |
+| Schedule | An App's schedule reaches a slot | `slot:<schedule name>@<slot time>` |
 | Request | Coming in a later release | `req:<request id>` |
-| Schedule | Coming in a later release | `slot:<slot time>` |
+
+Schedules have no timer loop: after each job the runtime sets one timer to the installation's next slot. A host that was asleep at a slot runs it when it next wakes, up to the three most recent missed slots per schedule (older ones are skipped and logged), and the claim makes each slot run on one host only.
 
 The kind prefix keeps keys from different kinds apart, so a delivery id a sender chooses can never collide with a message's envelope id.
 
@@ -101,7 +103,7 @@ If a handler returns an error (for an App: returns `err`, traps, runs out of tim
 
 For the alerts handler the grant is fixed: `post` to the text channels of the bot's own group. A `post` to any other channel is refused, reported in the log and in the webhook's answer, and never sent.
 
-For an App, the grants are its manifest intersected with what the admin approved: which triggers wake it, which channels and how much history it reads, which actions it may take, how much state it keeps and which hosts it may reach. The sandbox refuses anything outside them, and the job loop checks every action's channel against the group again before carrying it out. Until App approvals ship, a development build of the runtime reads the admin's grants from a local file (`POLLIS_APP_DEV_GRANTS`); release builds cannot.
+For an App, the grants are its manifest intersected with what the admin approved: which triggers wake it, which channels and how much history it reads, which actions it may take, how much state it keeps and which hosts it may reach. The sandbox refuses anything outside them, and the job loop checks every action's channel against the group again before carrying it out. The admin's grants come only from their signed approval, which the runtime checks before every job, together with the App's exact hash ([Approving an App](./app-approval.md)).
 
 ## Failures and retries
 
@@ -141,10 +143,13 @@ Nothing is shared between two installations: a job works only with its own insta
 
 Today an installation id is the bot's user id, because each bot has exactly one installation.
 
+## Approval
+
+An installation runs exactly one App version, pinned by its App hash, with the grants an admin chose; an update needs a new approval, and anything it asks for beyond the last one is shown as new access and never switched on for the admin. The runtime re-checks the approval and the artifact's hash at the start of every job. See [Approving an App](./app-approval.md).
+
 ## What comes next
 
-- **Approval:** an admin approves exactly one App version (pinned by hash) with the grants they chose, and approves again when an update asks for more.
-- **More triggers:** mentions, slash commands, schedules and member requests reach Apps as their handlers once the runtime delivers them.
+- **More triggers:** slash commands (#2018) and member requests (#2008) reach Apps once the runtime delivers them.
 - **History:** `query-messages` returns the trigger's own message until the runtime keeps a message log.
 - **SDKs:** a TypeScript SDK and the `pollis app` CLI.
 

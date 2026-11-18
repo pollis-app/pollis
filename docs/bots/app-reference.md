@@ -24,11 +24,13 @@ Every App exports all six. The runtime calls only the ones whose trigger is in y
 | Export | Called when | Manifest trigger | Gets |
 |---|---|---|---|
 | `on-message` | A message arrives in a granted channel | `messages` | `message` |
-| `on-mention` | A message mentions the bot | `mentions` | `message` |
-| `on-command` | A slash command is addressed to the App | `commands` | `command { name, args, message }` |
-| `on-schedule` | A schedule fires | `schedule` | `schedule { name, slot }` (`slot` = unix ms) |
-| `on-request` | A member sends the App a request | `requests` | `request { id, requester, body }` |
-| `on-webhook` | An HTTP call reaches the App's webhook | `webhook` | `webhook { delivery-id, headers, body }`; today the body is the alerts webhook's JSON `{"channel", "text"}` |
+| `on-mention` | A message names the bot by `@username` | `mentions` | `message` |
+| `on-command` | A slash command is addressed to the App (arrives with composer commands, #2018) | `commands` | `command { name, args, message }` |
+| `on-schedule` | One of your [schedules](#schedules) reaches a slot | `schedule` | `schedule { name, slot }` (`slot` = unix ms) |
+| `on-request` | A member sends the App a request (arrives with the message log, #2008) | `requests` | `request { id, requester, body }` |
+| `on-webhook` | An HTTP call reaches the App's webhook | `webhook` | `webhook { delivery-id, headers, body }`: the request body as sent, its `content-type` and `user-agent`, and its `x-*` headers (never `authorization`, cookies or the signature) |
+
+A message is delivered once: if it mentions the bot and your App takes `mentions`, it goes to `on-mention`; otherwise, if your App takes `messages`, to `on-message`. A mention is `@` plus the bot's username at the start of the message or after a space, any case, trailing punctuation ignored (the same rule that decides whom a channel message notifies). `@all` is not a mention of the bot.
 
 A message-carrying trigger (message, mention, command) is delivered only if **all** of these hold, otherwise your App is not run at all:
 
@@ -41,7 +43,7 @@ A message-carrying trigger (message, mention, command) is delivered only if **al
 ```
 message {
   id, channel,                     // opaque ids
-  author { id, display-name, is-bot },
+  author { id, display-name, is-bot },   // display-name: the member's username; is-bot: another bot
   text,
   attachments: list<attachment { name, mime-type, size }>,   // metadata only, no bytes
   reply-to: option<message-id>,
@@ -218,6 +220,23 @@ Shipped beside the component. Unknown fields are an error.
 | `actions` | list | `[]` | Any of `post`, `reply`, `react`, `edit_own`, `delete_own`, `transfer_history` (the last is reserved for #2008). |
 | `state.quota` | integer (bytes) | `0` | Key-value state allowance. 0 means no state. |
 | `egress` | list | `[]` | Exact lowercase host names. No `*`, scheme, port, path or IP. Empty means your App cannot send data outside the group, and admins see a mark saying so. |
+| `schedules` | list | none | Required with the `schedule` trigger and refused without it. Each `{ "name", "every", "offset" }`; see [Schedules](#schedules). |
+
+### Schedules
+
+```json
+"triggers": ["schedule"],
+"schedules": [
+  { "name": "daily-digest", "every": 86400, "offset": 32400 },
+  { "name": "poll-status", "every": 300 }
+]
+```
+
+- `name`: lowercase letters, digits and `-`, 1 to 32 characters; passed to `on-schedule`.
+- `every`: the period in seconds, 60 (one minute) to 604800 (one week).
+- `offset`: seconds after each period boundary, less than `every` (default 0). Slots fall at every Unix time `k × every + offset`, in UTC: `daily-digest` above runs at 09:00 UTC.
+
+Every host of the bot computes the same slots, and each slot runs once across them. The runtime sets one timer to the next slot; there is no polling. A host that was asleep at a slot runs it when it next wakes (a message, a webhook call, its next start or `run --once`), up to the **three most recent** missed slots of each schedule; older missed slots are skipped and logged. A schedule seen for the first time starts at the current slot: an App never receives slots from before it was installed.
 
 Ask for the least you need. Admins see every field in plain language before approving, and a later version that asks for more needs fresh approval.
 
@@ -235,19 +254,7 @@ The runtime enforces **effective grants = your manifest ∩ the admin's grants**
 
 An admin grant that is wider than your manifest (a channel, host or action you did not ask for) is refused outright, so the App does not run until the grant is fixed.
 
-During local development, before signed approvals exist (#2005), a debug build of the runtime reads the admin's grants from a JSON file named by `POLLIS_APP_DEV_GRANTS`:
-
-```json
-{
-  "channels": [{ "id": "<channel id>", "name": "support" }],
-  "history": 7,
-  "events": ["created"],
-  "actions": ["reply", "react"],
-  "egress": ["api.linear.app"]
-}
-```
-
-Release builds of the runtime cannot read this file at all.
+The admin's grants come from their signed approval and nothing else: an admin chooses them on the bot's page when approving your App ([Approving an App](./app-approval.md)), and can narrow them later. The runtime checks the approval before every job.
 
 ## Per-job limits
 
@@ -359,19 +366,28 @@ cargo build --release --target wasm32-wasip2
 
 If the runtime refuses the component, the message names the import that caused it (usually a dependency using `std::net`; see [WASI](#wasi-what-std-gets)). The repo has two complete examples: [`fixtures/std-app`](../../pollis-app-host/fixtures/std-app/src/lib.rs) (ordinary `std`) and [`fixtures/test-app`](../../pollis-app-host/fixtures/test-app/src/lib.rs) (`no_std`, for the smallest possible component).
 
-**6. Run it.** Until App approvals and the `pollis app` CLI ship (#2005, #2006), a development build of `pollis-bot` runs an App on a paired bot:
+**6. Run it.**
 
 1. Pair the bot as usual (`pollis-bot pair`, see [Self-hosting](./self-hosting.md)).
-2. In `<data dir>/installations/<bot id>/installation.json`, set the handler:
-
-   ```json
-   "handler": { "app": { "component": "/path/to/ping_app.wasm", "manifest": "/path/to/pollis-app.json" } }
-   ```
-
-3. Write the admin's grants to a file (the [format above](#effective-grants)) and start the runtime with it:
+2. Put `pollis-app.json` and your `.wasm` in one directory (or publish both at an `https://` address) and point the installation at it:
 
    ```bash
-   POLLIS_APP_DEV_GRANTS=/path/to/grants.json pollis-bot run
+   pollis-bot app install --installation <bot id> --artifact ./dist
+   # or: --artifact https://example.com/my-app/v1/my_app.wasm   (pollis-app.json beside it)
    ```
 
-A release build refuses to load an App until approvals ship. The repo's tests show the same path end to end: [`pollis-bot/tests/app_handler.rs`](../../pollis-bot/tests/app_handler.rs) runs the fixture App through the job loop, and the flows test `an_app_runs_on_asleep_hosts_that_share_its_state_beside_the_alerts_handler` runs it on two real hosts of one bot.
+   This checks that the manifest is valid and the component compiles and imports only what the sandbox provides, and prints the **App hash**. Nothing is copied: the runtime reads the artifact where it is before every job.
+3. Start (or restart) the runtime: `pollis-bot run`. The bot's page in Pollis now shows **Waiting for your approval**; a group admin checks the App hash and approves ([Approving an App](./app-approval.md)). The App runs from the next message on.
+
+**While you develop**, approving every build would be slow. Make a developer key once and sign each build with it; an admin approves the key once, as a **development installation**, in a test group:
+
+```bash
+pollis-bot app dev-key                          # creates <data dir>/developer-key, prints its public half
+pollis-bot app sign --artifact ./dist           # after every build: writes my_app.wasm.sig.json
+```
+
+After that, every build the key signs runs, as long as its manifest asks for no more than the approved one. Members of that group see a **Development build** mark on the bot.
+
+The first time a runtime loads an App it compiles it (well under a second for a typical Rust App; about 0.6 s for a 12 MB TypeScript App on a many-core machine) and keeps the result in `<data dir>/app-cache/`, so later starts, including `run --once`, load it in milliseconds. Deleting that directory is always safe.
+
+The repo's tests show the same path end to end: [`pollis-bot/tests/app_handler.rs`](../../pollis-bot/tests/app_handler.rs) runs the fixture App through the job loop, and the flows tests in `src-tauri/tests/flows/bot_runtime.rs` run it on real hosts of one bot.

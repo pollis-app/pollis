@@ -7,7 +7,11 @@
 //! - [`Runtime::wake`] from the wake source (a new message or membership change);
 //! - [`Runtime::approvals`] from the wake source (an approval nudge, a reconnect)
 //!   and, once, at a deferred approval's `retry_at`;
-//! - a webhook call ([`JobSubmitter`]).
+//! - a webhook call ([`JobSubmitter`]);
+//! - an App's next schedule slot (#2004): after every job, [`Runtime::arm`]
+//!   sets one timer per installation to the next slot, which wakes it. A host
+//!   that was asleep at a slot runs it at its next wake-up instead (the job's
+//!   catch-up rule, `job::due_slots`).
 //!
 //! Each job runs on its own task; the installation's lock serialises them, and
 //! each one unseals the installation's store at its start and seals it at its end.
@@ -76,7 +80,9 @@ impl Runtime {
         let this = Arc::clone(self);
         let id = installation_id.to_string();
         tokio::spawn(async move {
-            let Ok(report) = this.run_logged(&inst, JobInput::Approvals { wrap_now: false }).await else {
+            let result = this.run_logged(&inst, JobInput::Approvals { wrap_now: false }).await;
+            this.arm(&inst);
+            let Ok(report) = result else {
                 return;
             };
             if let Some(at) = report.approvals_retry_at {
@@ -119,6 +125,33 @@ impl Runtime {
         let this = Arc::clone(self);
         tokio::spawn(async move {
             let _ = this.run_logged(&inst, JobInput::Wake).await;
+            this.arm(&inst);
+        });
+    }
+
+    /// Set the installation's one schedule timer to its next slot, unless a
+    /// timer for that slot or an earlier one is already set. When it fires it
+    /// wakes the installation; the wake job runs the slot and arms the next.
+    pub fn arm(self: &Arc<Self>, inst: &Arc<Installation>) {
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
+        let Some(next) = inst.next_slot(now) else {
+            return;
+        };
+        {
+            let mut armed = inst.armed_for.lock().unwrap_or_else(|p| p.into_inner());
+            if armed.is_some_and(|at| at <= next) {
+                return;
+            }
+            *armed = Some(next);
+        }
+        let this = Arc::clone(self);
+        let inst = Arc::clone(inst);
+        tokio::spawn(async move {
+            // Fire just after the slot, so the job's clock has reached it.
+            let wait = next.saturating_sub(chrono::Utc::now().timestamp().max(0) as u64) + 1;
+            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+            *inst.armed_for.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            this.wake(inst.id());
         });
     }
 
@@ -140,6 +173,16 @@ impl Runtime {
             }
             Ok(report) => {
                 let mut first_error = None;
+                if report.skipped_slots > 0 {
+                    log::info(
+                        &scope,
+                        format!(
+                            "skipped {} schedule slots missed while this host was asleep (only the newest {} of each schedule run)",
+                            report.skipped_slots,
+                            crate::job::MAX_MISSED_SLOTS
+                        ),
+                    );
+                }
                 if let Some(e) = &report.approvals_error {
                     log::failure(
                         &scope,
@@ -194,6 +237,7 @@ impl JobSubmitter for Arc<Runtime> {
             tokio::spawn(async move {
                 let result = this.run_logged(&inst, JobInput::Webhook(call)).await;
                 let _ = tx.send(result);
+                this.arm(&inst);
             });
         }
         // Unknown id: the sender is dropped and the caller sees the runtime as unavailable.
