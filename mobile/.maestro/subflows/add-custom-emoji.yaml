@@ -14,7 +14,20 @@ appId: ${MAESTRO_APP_ID}
 - tapOn:
     id: "input-emoji-shortcode"
 - inputText: "${EMOJI_SHORTCODE}"
-- hideKeyboard
+# iOS: hideKeyboard's gesture lands mid-screen, which since the empty-state
+# layout (#1981) is btn-upload-emoji, so it opened the picker and then failed.
+# The return key closes the single-line field's keyboard without touching the
+# screen.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - pressKey: Enter
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
 - tapOn:
     id: "btn-upload-emoji"
 - waitForAnimationToEnd:

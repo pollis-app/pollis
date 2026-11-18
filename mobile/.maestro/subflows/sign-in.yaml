@@ -76,17 +76,27 @@ appId: ${MAESTRO_APP_ID}
 # own btn-continue is still on screen: without this wait the conditional below
 # matches the OUTGOING button and its tap lands on the incoming tab bar (on
 # iPad, bottom centre is the sign-in-device shield). Settle first.
+# The settle alone stopped being enough on iPad once unlock got faster
+# (#1982): wait for the kit screen to be gone, and only ever tap the
+# Continue that belongs to the initializing screen.
 - waitForAnimationToEnd:
     timeout: 5000
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-auth-emergency-kit"
+    timeout: 10000
+    optional: true
 - runFlow:
     when:
       visible:
-        id: "btn-continue"
+        id: "screen-auth-initializing"
     commands:
       # optional: initializing often auto-advances between the visibility
       # check and the tap, and a vanished button is not a failed sign-in.
       - tapOn:
           id: "btn-continue"
+          childOf:
+            id: "screen-auth-initializing"
           optional: true
 
 # --- Landed on the tabs ---
