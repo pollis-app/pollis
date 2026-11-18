@@ -1,0 +1,19 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Leave the DM and open it again: opening a conversation ingests it. The peer
+# runs without LiveKit, so its edit and delete send no realtime wake-up; the
+# desktop app, which is in the room, does.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 15000
+- tapOn:
+    id: "row-dm-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000

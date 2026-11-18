@@ -9,7 +9,15 @@ tags:
 
 - extendedWaitUntil:
     visible: "Message deleted"
-    timeout: 120000
+    timeout: 10000
+    optional: true
+- runFlow:
+    when:
+      notVisible: "Message deleted"
+    file: reopen-dm.yaml
+- extendedWaitUntil:
+    visible: "Message deleted"
+    timeout: 60000
 - assertNotVisible: ".*edited by the desktop core.*"
 - assertNotVisible: ".*Rust Programming Language.*"
 - takeScreenshot: link-previews-peer-04-peer-deleted
@@ -43,11 +51,8 @@ tags:
     notVisible:
       id: "input-edit-composer"
     timeout: 60000
-- runFlow:
-    when:
-      platform: Android
-    commands:
-      - hideKeyboard
+# No hideKeyboard here: the edit bar is gone and the keyboard with it, so on
+# Android it would be a Back press and leave the conversation.
 - extendedWaitUntil:
     visible:
       id: "message-link-preview"

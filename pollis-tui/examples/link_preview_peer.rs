@@ -172,7 +172,8 @@ async fn main() -> Result<()> {
 
     // The phone edits its message to the edit link, then deletes it.
     let device_edit = wait_for(&state, &me.id, &dm_id, "the phone's edit", |m| {
-        m.id == device_msg.id && m.link_preview.as_ref().is_some_and(|p| p.url.contains("rust-lang.org"))
+        m.id == device_msg.id
+            && m.link_preview.as_ref().is_some_and(|p| p.url.to_lowercase().contains("rust-lang.org"))
     })
     .await?;
     let p = device_edit.link_preview.as_ref().expect("checked");

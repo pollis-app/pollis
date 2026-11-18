@@ -8,7 +8,15 @@ tags:
 
 - extendedWaitUntil:
     visible: ".*edited by the desktop core.*"
-    timeout: 120000
+    timeout: 10000
+    optional: true
+- runFlow:
+    when:
+      notVisible: ".*edited by the desktop core.*"
+    file: reopen-dm.yaml
+- extendedWaitUntil:
+    visible: ".*edited by the desktop core.*"
+    timeout: 60000
 - extendedWaitUntil:
     visible: ".*Rust Programming Language.*"
     timeout: 30000
