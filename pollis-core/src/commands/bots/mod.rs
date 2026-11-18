@@ -20,7 +20,8 @@
 //!
 //! **Adding a host (new host).** [`start_add_host_pairing`] for an existing bot,
 //! then [`await_pairing`] (the account key arrives wrapped to this host's
-//! ephemeral key) and [`join_bot_group`].
+//! ephemeral key) and [`join_bot_group`] with no wait: nobody sends this host a
+//! Welcome, so it external-joins at once, as a person's new device does.
 //!
 //! **Adding a host (existing hosts).** On a `bot_host_approval` inbox wake-up, on
 //! start, and at a [`HostApprovalOutcome::Deferred`]'s `retry_at`, call

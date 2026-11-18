@@ -223,7 +223,8 @@ journalctl -u pollis-bot -f</code>
           (macOS) or <code>%APPDATA%\pollis-bot</code> (Windows). It holds <code>config.json</code>,
           <code>installations/&lt;id&gt;/installation.json</code>, each installation's encrypted store in
           <code>stores/&lt;device id&gt;/</code> (including how far its job loop has read each channel),
-          and <code>status.json</code>. The bot's keys are in the keystore, not in these files.
+          and <code>status.json</code>. The bot's keys are in the keystore: the OS keychain, or where there is none,
+          <code>keystore.pks</code> in this same directory, encrypted and bound to the machine.
           <code>pollis-bot forget --installation &lt;id&gt;</code> removes an installation's record, store
           and keys together.</p>
         <p>
