@@ -1,7 +1,11 @@
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../bridge";
 import type { BotDetail, BotHost, BotSummary } from "../../types";
-import { groupQueryKeys, useUserGroupsWithChannels } from "./useGroups";
+import { groupQueryKeys, useGroupMembers, useUserGroupsWithChannels } from "./useGroups";
+import { appStore } from "../../stores/appStore";
+import { botIdSet } from "../../utils/bots";
 
 /** Bots (#1182). A bot is a group member too, so a change also refreshes the member list. */
 const botQueryKeys = {
@@ -85,4 +89,14 @@ export function useBotGroup(groupId: string) {
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);
   return { group, isAdmin: group?.current_user_role === "admin", isLoading };
+}
+
+/** The open channel's group's bots and its name, for Bot badges outside the message list. */
+export function useSelectedGroupBots(): { botIds: ReadonlySet<string>; groupName?: string } {
+  const groupId = useObserver(() => (appStore.selectedChannelId ? appStore.selectedGroupId : null));
+  const { data: members } = useGroupMembers(groupId);
+  const { data: groupsWithChannels } = useUserGroupsWithChannels();
+  const botIds = useMemo(() => botIdSet(members ?? []), [members]);
+  const groupName = groupId ? groupsWithChannels?.find((g) => g.id === groupId)?.name : undefined;
+  return { botIds, groupName };
 }
