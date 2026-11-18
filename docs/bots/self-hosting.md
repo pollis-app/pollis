@@ -241,8 +241,9 @@ Inside it:
 | `installations/<id>/installation.json` | One installation: its bot, group and this host's device id. |
 | `stores/<device id>/` | That installation's encrypted local store, including how far its job loop has read each channel. |
 | `status.json` | Written by `run` whenever an installation's state changes; read by `status`. |
+| `keystore.pks` | Only where the machine has no OS keychain: the keystore itself, encrypted and bound to this machine. |
 
-The bot's keys are not in these files; they are in the keystore. To remove an installation from this machine (after an admin revoked the host or deleted the bot), run `pollis-bot forget --installation <id>`: it deletes the record, the store and the keys together. See also [`pollis-bot/README.md`](../../pollis-bot/README.md#files).
+The bot's keys are not in the other files; they are in the keystore (the OS keychain, or `keystore.pks`). Two runtimes on one machine need two data directories. To remove an installation from this machine (after an admin revoked the host or deleted the bot), run `pollis-bot forget --installation <id>`: it deletes the record, the store and the keys together. See also [`pollis-bot/README.md`](../../pollis-bot/README.md#files).
 
 ## Logs and status
 

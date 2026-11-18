@@ -52,7 +52,6 @@ function abortAndGrep(phase, pid, needles) {
 
 async function main() {
   h.reap();
-  try { execSync("pkill -x pollis || true"); } catch (_) {}
   const devEnv = h.readEnvFile(".env.development");
   const TURSO_URL = process.env.TURSO_URL || devEnv.TURSO_URL;
   const TURSO_TOKEN = process.env.TURSO_TOKEN || devEnv.TURSO_TOKEN;

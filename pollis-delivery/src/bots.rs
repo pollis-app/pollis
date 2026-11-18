@@ -508,6 +508,11 @@ pub async fn apply_create_bot(
     };
 
     let tx = crate::db::write_tx(conn).await?;
+    // The schema's insert order (bot, membership, user, device) lets the triggers refuse a bot user
+    // without its row and membership; the membership names its user before that row exists, so
+    // reference checks wait for COMMIT, where every one holds. Lasts to the end of this
+    // transaction; a no-op where foreign keys are not enforced.
+    tx.execute("PRAGMA defer_foreign_keys = ON", ()).await?;
     if !crate::groups::is_admin(&tx, &body.group_id, actor).await? {
         return Ok(CreateBotOutcome::Forbidden);
     }
@@ -978,11 +983,49 @@ pub async fn wrap_bot_host(State(state): State<AppState>, req: RawRequest) -> Re
     };
     let conn = state.db.conn().await?;
     Ok(match apply_wrap_bot_host(&conn, &actor, &device, &parsed, crate::util::now_unix()).await? {
-        WrapOutcome::Wrapped => ok_response::<WrapBotHostBody>(pollis_api::StatusOk::Ok),
+        WrapOutcome::Wrapped => {
+            notify_admins_bots_changed(&state, &actor).await;
+            ok_response::<WrapBotHostBody>(pollis_api::StatusOk::Ok)
+        }
         WrapOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
         WrapOutcome::Gone => conflict("pairing request is not open"),
         WrapOutcome::Invalid(why) => bad_request(why),
     })
+}
+
+/// Tell the current admins of `bot_user_id`'s group (their inboxes) that its bots changed: a host
+/// was added by a wrap the admin's own client did not do, so a Bots page left open refetches.
+/// Content-free; best-effort (the page also reads afresh on its next visit).
+async fn notify_admins_bots_changed(state: &AppState, bot_user_id: &str) {
+    if state.broker.livekit_ready().is_none() {
+        return;
+    }
+    let Ok(conn) = state.db.conn().await else {
+        return;
+    };
+    let Ok(Some(group_id)) = bot_group(&conn, bot_user_id).await else {
+        return;
+    };
+    let mut admins = Vec::new();
+    if let Ok(mut rows) = conn
+        .query(
+            "SELECT user_id FROM group_member WHERE group_id = ?1 AND role = 'admin'",
+            libsql::params![group_id.clone()],
+        )
+        .await
+    {
+        while let Ok(Some(row)) = rows.next().await {
+            if let Ok(id) = row.get::<String>(0) {
+                admins.push(id);
+            }
+        }
+    }
+    let event = serde_json::json!({ "type": "bots_changed", "group_id": group_id });
+    for admin in admins {
+        if let Err(e) = crate::broker::room_send_data(state, &format!("inbox-{admin}"), &event).await {
+            tracing::warn!("bots changed: inbox notify failed (non-fatal): {e}");
+        }
+    }
 }
 
 /// Deliver the wrapped account key and register the new host as a device of

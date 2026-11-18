@@ -149,6 +149,12 @@ pub enum RealtimeEvent {
     BotHostApproval {
         request_id: String,
     },
+    /// A group's bots changed without this client doing it (#1182: another host
+    /// of a bot was added). Sent to the group's admins' inboxes by the DS,
+    /// content-free; re-read over the signed channel.
+    BotsChanged {
+        group_id: String,
+    },
     /// After a non-empty reconcile commit: refetch hint only; names no one (#1506).
     RosterChanged {
         conversation_id: String,

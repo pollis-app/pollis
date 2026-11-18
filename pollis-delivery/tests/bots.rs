@@ -978,3 +978,46 @@ async fn app_state_goes_with_its_bot() {
     assert!(matches!(bots::apply_delete_bot(&w.c, "alice", "alice-d", &bot).await.unwrap(), WriteOutcome::Ok));
     assert_eq!(count(&w.c, "SELECT COUNT(*) FROM bot_app_state").await, 0);
 }
+
+/// Every violation `PRAGMA foreign_key_check` reports, as `table` names.
+async fn fk_violations(c: &Connection) -> Vec<String> {
+    let mut rows = c.query("PRAGMA foreign_key_check", ()).await.unwrap();
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.unwrap() {
+        out.push(row.get::<String>(0).unwrap());
+    }
+    out
+}
+
+/// The bot schema never leans on foreign keys being off: create, delete and
+/// group teardown all hold with them enforced, and leave no dangling row.
+#[tokio::test]
+async fn create_delete_and_teardown_hold_with_foreign_keys_enforced() {
+    let w = world().await;
+    exec(&w.c, "PRAGMA foreign_keys=ON").await;
+    assert_eq!(count(&w.c, "PRAGMA foreign_keys").await, 1, "this connection enforces foreign keys");
+
+    let (bot, host) = make_bot(&w).await;
+    assert_eq!(count(&w.c, &format!("SELECT COUNT(*) FROM users WHERE id = '{bot}' AND kind = 'bot'")).await, 1);
+    assert_eq!(count(&w.c, &format!("SELECT COUNT(*) FROM group_member WHERE user_id = '{bot}'")).await, 1);
+    assert_eq!(count(&w.c, &format!("SELECT COUNT(*) FROM user_device WHERE device_id = '{host}'")).await, 1);
+    assert!(fk_violations(&w.c).await.is_empty(), "creation leaves no dangling reference");
+
+    match bots::apply_delete_bot(&w.c, "alice", "alice-d", &bot).await.unwrap() {
+        WriteOutcome::Ok => {}
+        other => panic!("delete refused: {other:?}"),
+    }
+    for table in ["users WHERE id", "bot WHERE user_id", "group_member WHERE user_id", "user_device WHERE user_id"] {
+        assert_eq!(count(&w.c, &format!("SELECT COUNT(*) FROM {table} = '{bot}'")).await, 0, "{table}");
+    }
+    assert!(fk_violations(&w.c).await.is_empty(), "deletion leaves no dangling reference");
+
+    let (bot2, _) = make_bot(&w).await;
+    let tx = pollis_delivery::db::write_tx(&w.c).await.unwrap();
+    pollis_delivery::teardown::purge_group(&tx, "g1").await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(count(&w.c, "SELECT COUNT(*) FROM groups WHERE id = 'g1'").await, 0);
+    assert_eq!(count(&w.c, &format!("SELECT COUNT(*) FROM users WHERE id = '{bot2}'")).await, 0);
+    assert_eq!(count(&w.c, &format!("SELECT COUNT(*) FROM bot WHERE user_id = '{bot2}'")).await, 0);
+    assert!(fk_violations(&w.c).await.is_empty(), "teardown leaves no dangling reference");
+}
