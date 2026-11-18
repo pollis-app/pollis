@@ -32,7 +32,7 @@ A Pollis client is configured, at build time, with exactly these network destina
 | `livekit_url` / `livekit_api_*` | **LiveKit** | WebSocket signalling + WebRTC (DTLS-SRTP) | SFU for realtime events + voice frames. |
 | `pollis_delivery_url` (optional) | **`pollis-delivery` Delivery Service** | HTTPS (axum, `pollis-delivery/src/lib.rs`) | Sole writer to the MLS commit log; also the secrets broker (LiveKit token mint + R2 presign, `docs/secrets-broker.md`). |
 
-That is the **entire** set. There is no user-supplied URL, no federation, no "connect to your friend's server," no link-preview fetcher reaching arbitrary origins, no third-party CDN in the data plane. Note the trajectory here is *toward* consolidation, not away from it: the secrets-broker work (#393/#437) is actively **removing** the last few cases where the client held long-lived secrets and reaching those services *through* the Delivery Service instead (`docs/secrets-broker.md`, "The problem"). The endpoint set is getting smaller and more first-party over time, not larger.
+That is the **entire** set. There is no user-supplied URL, no federation, no "connect to your friend's server," no third-party CDN in the data plane. (Sender-generated link previews, #1987, are the one fetch to an arbitrary origin: the sender's own device, building a preview of a link it is sending, always direct and never through the overlay, and not at all in `strict`. They are outside the overlay's scope by design, since giving a relay an open-internet exit is exactly what this closed design avoids.) Note the trajectory here is *toward* consolidation, not away from it: the secrets-broker work (#393/#437) is actively **removing** the last few cases where the client held long-lived secrets and reaching those services *through* the Delivery Service instead (`docs/secrets-broker.md`, "The problem"). The endpoint set is getting smaller and more first-party over time, not larger.
 
 ### 1.2 Why this is categorically easier and safer than onion routing
 
@@ -507,6 +507,7 @@ Every outbound path in `pollis-core` (+ shells), from the surface audit:
 | LiveKit signaling (WS) + media (RTP) | `livekit` crate | ❌ none | **direct** — plane split (§6.4) |
 | Auto-update manifest + artifact (`cdn.pollis.com`) | `tauri-plugin-updater`'s own `reqwest` | `.proxy()` on `check` ✅ | **overlay**, or skipped — see below |
 | Remote media in an unfurled link | the WEBVIEW's own `<img>` / `<video>` | ❌ none possible | **click-to-load only** — see below |
+| Link-preview fetch (#1987, sender only) | `reqwest`, `link_preview::fetch` | `.no_proxy()` on purpose | **direct**; skipped entirely in `strict` |
 
 The 10 bare `reqwest::Client::new()` sites confirm there is **no shared HTTP client builder** today.
 v0's first refactor is a `state`-aware `http_client()` helper that all sites call; it applies the

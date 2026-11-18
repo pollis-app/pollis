@@ -119,6 +119,12 @@
     "itemStrict": "<mode>Tsantsa</mode> — Haɗa ta hanyar relay kawai. Idan babu relay da za a iya isa gare shi, ana dakatar da aikawa maimakon bayyana IP ɗinku.",
     "applyError": "Ba a iya amfani da yanayin relay ba: {{error}} — a yanzu {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Samfotin mahaɗi",
+    "label": "Ƙirƙiri samfotin mahaɗi",
+    "description": "Idan ka aika mahaɗi, Pollis yana ɗauko shafin daga wannan na'urar don ƙirƙirar samfoti. Shafin yana ganin adireshin IP ɗinka, kamar ka buɗe shi da kanka. Mutanen da ka aika wa ba sa taɓa tuntuɓar shafin.",
+    "strictNote": "Tsantsar sirrin hanyar sadarwa yana kashe samfotin mahaɗi."
+  },
   "relayServing": {
     "heading": "Gudanar da relay don wasu",
     "intro": "Zaɓi ne dabam da saitin da ke sama. Wancan yana yanke ko zirga-zirgar <dim>ku</dim> za ta bi ta relay. Wannan yana yanke ko zirga-zirgar <dim>wasu mutane</dim> za ta bi ta <dim>na'urarku</dim>. Kunna ɗaya ba ya taɓa kunna ɗayan.",

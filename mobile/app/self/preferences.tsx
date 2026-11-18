@@ -15,7 +15,11 @@ import { useSectionScroll } from "../../components/self/useSectionScroll";
 import { useTheme } from "../../components/theme";
 import { type as ty, semantic, space, ACCENT_PRESETS } from "../../theme/tokens";
 import { languageOption } from "../../i18n/languages";
-import { usePreferences, useNotificationContent } from "../../hooks/queries";
+import {
+  usePreferences,
+  useNotificationContent,
+  useLinkPreviewsEnabled,
+} from "../../hooks/queries";
 import {
   NOTIFICATION_CONTENT_OPTIONS,
   type NotificationContent,
@@ -147,6 +151,23 @@ function NotificationContentSetting() {
   );
 }
 
+// #1987: this device's own sends only; received previews always render.
+function LinkPreviewsSetting() {
+  const { t } = useTranslation("settings");
+  const { enabled, set } = useLinkPreviewsEnabled();
+  return (
+    <Group title={t("linkPreviews.heading")}>
+      <ToggleRow
+        testID="toggle-link-previews"
+        label={t("linkPreviews.label")}
+        sub={t("linkPreviews.description")}
+        on={enabled}
+        onToggle={() => set.mutate(!enabled)}
+      />
+    </Group>
+  );
+}
+
 export default function Preferences() {
   const { t, i18n } = useTranslation("settings");
   const router = useRouter();
@@ -248,6 +269,10 @@ export default function Preferences() {
               onToggle={() => update({ send_read_receipts: !sendReadReceipts })}
             />
           </Group>
+        </View>
+
+        <View onLayout={sectionLayout("linkPreviews")}>
+          <LinkPreviewsSetting />
         </View>
 
         <View onLayout={sectionLayout("notifications")} style={{ gap: space.xxxl }}>

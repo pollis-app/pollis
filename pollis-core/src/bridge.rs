@@ -1135,12 +1135,16 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
                         a
                     })
                     .collect();
-            ok(messages::send_message_with_id(
+            // #1987: the composer's link preview, checked against `content` in core.
+            let link_preview: Option<crate::commands::link_preview::LinkPreviewDraft> =
+                arg_opt(&args, "linkPreview")?;
+            ok(messages::send_message_with_preview(
                 message_id,
                 conversation_id,
                 sender_id,
                 content,
                 attachments,
+                link_preview,
                 reply_to_id,
                 thread_id,
                 sender_username,
@@ -1240,15 +1244,36 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let message_id: String = arg(&args, "messageId")?;
             let user_id: String = arg(&args, "userId")?;
             let new_content: String = arg(&args, "newContent")?;
-            messages::edit_message(
+            let link_preview: Option<crate::commands::link_preview::LinkPreviewDraft> =
+                arg_opt(&args, "linkPreview")?;
+            messages::edit_message_with_preview(
                 conversation_id,
                 message_id,
                 user_id,
                 new_content,
+                link_preview,
                 &state()?,
             )
             .await?;
             ok(())
+        }
+        // Sender-generated link previews (#1987).
+        "fetch_link_preview" => {
+            let url: String = arg(&args, "url")?;
+            ok(crate::commands::link_preview::fetch_link_preview(url, &state()?).await?)
+        }
+        "get_link_previews_enabled" => {
+            ok(crate::commands::link_preview::get_link_previews_enabled(&state()?).await?)
+        }
+        "set_link_previews_enabled" => {
+            let enabled: bool = arg(&args, "enabled")?;
+            crate::commands::link_preview::set_link_previews_enabled(enabled, &state()?).await?;
+            ok(())
+        }
+        // Release a staged thumbnail the composer no longer needs (#1987).
+        "discard_staged_attachment" => {
+            let staged_id: String = arg(&args, "stagedId")?;
+            ok(crate::commands::staging::discard_staged(&staged_id))
         }
         "delete_message" => {
             let message_id: String = arg(&args, "messageId")?;

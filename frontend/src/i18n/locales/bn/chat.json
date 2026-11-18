@@ -134,6 +134,10 @@
     "loadDescription": "{{url}} থেকে মিডিয়া লোড করুন। এতে ওই সাইটের সাথে সরাসরি যোগাযোগ হবে এবং সাইটটি আপনার IP ঠিকানা জেনে যাবে।",
     "openLabel": "{{url}} খুলুন"
   },
+  "linkPreview": {
+    "loading": "প্রিভিউ লোড হচ্ছে…",
+    "remove": "লিংক প্রিভিউ সরান"
+  },
   "notify": {
     "newMessageTitle": "নতুন মেসেজ",
     "newMessageBody": "{{name}}: নতুন মেসেজ",

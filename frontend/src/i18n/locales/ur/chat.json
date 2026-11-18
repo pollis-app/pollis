@@ -134,6 +134,10 @@
     "loadDescription": "{{url}} سے میڈیا لوڈ کریں۔ اس سے اس سائٹ سے براہ راست رابطہ ہوتا ہے اور آپ کا IP ایڈریس اس پر ظاہر ہو جاتا ہے۔",
     "openLabel": "{{url}} کھولیں"
   },
+  "linkPreview": {
+    "loading": "پیش منظر لوڈ ہو رہا ہے…",
+    "remove": "لنک کا پیش منظر ہٹائیں"
+  },
   "notify": {
     "newMessageTitle": "نیا پیغام",
     "newMessageBody": "{{name}}: نیا پیغام",

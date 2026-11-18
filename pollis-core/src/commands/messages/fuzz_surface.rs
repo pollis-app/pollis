@@ -59,6 +59,7 @@ impl Outbox {
             reply_to_id: None,
             thread_id: None,
             sent_at: sent_at.to_string(),
+            link_preview: None,
         };
         Ok(matches!(
             super::outbox::enqueue_on(&self.conn, &queued, &[])?,

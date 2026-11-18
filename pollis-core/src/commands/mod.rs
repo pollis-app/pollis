@@ -31,6 +31,8 @@ pub mod livekit;
 #[cfg(not(feature = "media"))]
 #[path = "livekit_stub.rs"]
 pub mod livekit;
+// Sender-generated link previews (#1987).
+pub mod link_preview;
 // Pure wire-payload builders, outside the media gate so they test on every target.
 pub mod livekit_signalling;
 // Participant-identity grammar (#836); pure, outside the media gate.

@@ -4,6 +4,7 @@ import { observer } from "mobx-react-lite";
 import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { UnsentMessageActions } from "../../Message/UnsentMessageActions";
+import { MessageLinkPreview } from "../../Message/MessageLinkPreview";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { formatClockTime, toMs } from "../../../utils/format";
 import type { Message } from "../../../types";
@@ -50,6 +51,10 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
           >
             {t("chat:message.undecryptable.body_one")}
           </p>
+        ) : null}
+        {/* A sender's link preview (#1987): Modern look only. */}
+        {!isTerminal && message.content_decrypted ? (
+          <MessageLinkPreview text={message.content_decrypted} preview={message.link_preview} />
         ) : null}
         {(message.attachments ?? []).map((attachment) => (
           <div key={attachment.id} className="mt-1">

@@ -71,6 +71,9 @@ pub(super) struct Queued {
     pub thread_id: Option<String>,
     /// Refreshed each attempt until the first seal, then fixed so a replayed post matches recipients' copies.
     pub sent_at: String,
+    /// The link preview (#1987) as stored: `LinkPreview` JSON, its `image` filled
+    /// in once the thumbnail is uploaded. Travels as the `0xF9` trailer.
+    pub link_preview: Option<String>,
 }
 
 /// One attachment a send hands to the outbox before it is uploaded (#1335).
@@ -377,7 +380,7 @@ fn caption_of(content: &str) -> String {
 pub(super) fn attachment_metas_on(conn: &rusqlite::Connection, id: &str) -> Result<Vec<AttMeta>> {
     let mut stmt = conn.prepare(
         "SELECT filename, content_type, length(data), blurhash, width, height, sensitive, poster
-         FROM outbox_attachment WHERE message_id = ?1 ORDER BY position",
+         FROM outbox_attachment WHERE message_id = ?1 AND link_preview = 0 ORDER BY position",
     )?;
     let rows = stmt
         .query_map(rusqlite::params![id], |row| {
@@ -400,11 +403,106 @@ pub(super) fn attachment_metas_on(conn: &rusqlite::Connection, id: &str) -> Resu
 /// time, so an upload never holds a whole message's files in memory.
 fn attachment_data_on(conn: &rusqlite::Connection, id: &str, n: usize) -> Result<Vec<u8>> {
     Ok(conn.query_row(
-        "SELECT data FROM outbox_attachment WHERE message_id = ?1
+        "SELECT data FROM outbox_attachment WHERE message_id = ?1 AND link_preview = 0
          ORDER BY position LIMIT 1 OFFSET ?2",
         rusqlite::params![id, n as i64],
         |row| row.get(0),
     )?)
+}
+
+/// Where a link-preview thumbnail (#1987) sits in `outbox_attachment`: one per
+/// message, past any position an attachment can take, flagged `link_preview`.
+const PREVIEW_POSITION: i64 = i32::MAX as i64;
+
+/// Store `id`'s link-preview thumbnail, replacing any earlier one; `None` removes it.
+pub(super) fn store_preview_thumbnail_on(
+    conn: &rusqlite::Connection,
+    id: &str,
+    thumbnail: Option<&crate::commands::link_preview::OutgoingThumbnail>,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM outbox_attachment WHERE message_id = ?1 AND link_preview = 1",
+        rusqlite::params![id],
+    )?;
+    if let Some(t) = thumbnail {
+        conn.execute(
+            "INSERT INTO outbox_attachment
+               (message_id, position, filename, content_type, data, blurhash, width, height, link_preview)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
+            rusqlite::params![
+                id,
+                PREVIEW_POSITION,
+                crate::commands::link_preview::THUMBNAIL_FILENAME,
+                crate::commands::link_preview::THUMBNAIL_CONTENT_TYPE,
+                t.jpeg,
+                t.blurhash,
+                t.width,
+                t.height,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// A stored link-preview thumbnail: bytes, width, height, blurhash.
+type StoredThumbnail = (Vec<u8>, u32, u32, Option<String>);
+
+/// `id`'s stored link-preview thumbnail.
+fn preview_thumbnail_on(conn: &rusqlite::Connection, id: &str) -> Result<Option<StoredThumbnail>> {
+    Ok(conn
+        .query_row(
+            "SELECT data, width, height, blurhash FROM outbox_attachment
+             WHERE message_id = ?1 AND link_preview = 1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?)
+}
+
+/// Upload `id`'s stored link-preview thumbnail, if it has one, through the
+/// attachment path, and return `preview_json` with the image filled in. Errors
+/// like an attachment upload, so the message stays queued and retryable.
+pub(super) async fn upload_preview_thumbnail(
+    state: &Arc<AppState>,
+    id: &str,
+    conversation_id: &str,
+    preview_json: &str,
+) -> Result<Option<String>> {
+    let thumb = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        preview_thumbnail_on(db.conn(), id)?
+    };
+    let Some((data, width, height, blurhash)) = thumb else {
+        return Ok(None);
+    };
+    let Ok(mut preview) =
+        serde_json::from_str::<crate::commands::link_preview::LinkPreview>(preview_json)
+    else {
+        return Ok(None);
+    };
+    crate::commands::r2::check_outbox_upload_key(conversation_id, state).await?;
+    let up = crate::commands::r2::upload_outbox_bytes(
+        data,
+        crate::commands::link_preview::THUMBNAIL_FILENAME.to_string(),
+        crate::commands::link_preview::THUMBNAIL_CONTENT_TYPE.to_string(),
+        conversation_id,
+        state,
+    )
+    .await?;
+    preview.image = Some(crate::commands::link_preview::PreviewImage {
+        key: up.key,
+        url: up.url,
+        hash: up.content_hash,
+        kv: up.key_version,
+        sha: up.sha256,
+        ct: crate::commands::link_preview::THUMBNAIL_CONTENT_TYPE.to_string(),
+        size: up.size_bytes,
+        w: up.width.unwrap_or(width),
+        h: up.height.unwrap_or(height),
+        bh: up.blurhash.or(blurhash),
+    });
+    Ok(Some(crate::commands::link_preview::wire::to_stored(&preview)))
 }
 
 /// Remove an unsent message together with any bytes it still holds.
@@ -505,8 +603,8 @@ pub(super) fn enqueue_on(
         provisional_content(&queued.content, attachments)
     };
     conn.execute(
-        "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at, send_state)
-         VALUES (?1, ?2, ?3, X'', ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at, send_state, link_preview)
+         VALUES (?1, ?2, ?3, X'', ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![
             queued.id,
             queued.conversation_id,
@@ -516,6 +614,7 @@ pub(super) fn enqueue_on(
             queued.thread_id,
             queued.sent_at,
             PENDING,
+            queued.link_preview,
         ],
     )?;
     Ok(Enqueued::Unsent)
@@ -525,6 +624,7 @@ pub(super) async fn enqueue(
     state: &Arc<AppState>,
     queued: &Queued,
     attachments: Vec<OutgoingAttachment>,
+    preview_thumbnail: Option<&crate::commands::link_preview::OutgoingThumbnail>,
 ) -> Result<Enqueued> {
     // An id already stored is adopted as it stands.
     {
@@ -536,6 +636,12 @@ pub(super) async fn enqueue(
     }
     // Sized, then stored one at a time, then the row (the commit point); a kill leaves only bytes.
     let metas = plan_attachments(&attachments).await?;
+    // The preview's thumbnail is stored like an attachment's bytes, before the row.
+    if preview_thumbnail.is_some() {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        store_preview_thumbnail_on(db.conn(), &queued.id, preview_thumbnail)?;
+    }
     for (position, (att, meta)) in attachments.iter().zip(&metas).enumerate() {
         if let Err(e) = store_attachment(state, &queued.id, position, att, meta).await {
             let guard = state.local_db.lock().await;
@@ -1010,6 +1116,15 @@ async fn deliver_locked(
                 .optional()?
                 .flatten(),
         };
+        let link_preview: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT link_preview FROM message WHERE id = ?1",
+                rusqlite::params![row.id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
         (
             Queued {
                 id: row.id,
@@ -1019,6 +1134,7 @@ async fn deliver_locked(
                 reply_to_id: row.reply_to_id,
                 thread_id: row.thread_id,
                 sent_at: row.sent_at,
+                link_preview,
             },
             sender_username,
         )
@@ -1083,9 +1199,38 @@ async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Que
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
         attachment_metas_on(db.conn(), &queued.id)?
     };
-    if metas.is_empty() {
-        return Ok(queued);
+    if !metas.is_empty() {
+        queued = finish_attachment_uploads(state, queued, &metas).await?;
     }
+    // The link preview's thumbnail (#1987), same path and same failure handling.
+    if let Some(json) = queued.link_preview.clone() {
+        if let Some(updated) =
+            upload_preview_thumbnail(state, &queued.id, &queued.conversation_id, &json).await?
+        {
+            let guard = state.local_db.lock().await;
+            let db = guard.as_ref().ok_or_else(not_signed_in)?;
+            let tx = db.conn().unchecked_transaction()?;
+            tx.execute(
+                "UPDATE message SET link_preview = ?1 WHERE id = ?2",
+                rusqlite::params![updated, queued.id],
+            )?;
+            tx.execute(
+                "DELETE FROM outbox_attachment WHERE message_id = ?1 AND link_preview = 1",
+                rusqlite::params![queued.id],
+            )?;
+            tx.commit()?;
+            queued.link_preview = Some(updated);
+        }
+    }
+    Ok(queued)
+}
+
+/// The attachment half of [`finish_uploads`].
+async fn finish_attachment_uploads(
+    state: &Arc<AppState>,
+    mut queued: Queued,
+    metas: &[AttMeta],
+) -> Result<Queued> {
     // The key before any bytes (#1636): a row still waiting for it must not read its
     // attachments out of the database on every attempt.
     crate::commands::r2::check_outbox_upload_key(&queued.conversation_id, state).await?;
@@ -1107,7 +1252,7 @@ async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Que
             .await?,
         );
     }
-    let content = final_content(&caption_of(&queued.content), &metas, &uploaded);
+    let content = final_content(&caption_of(&queued.content), metas, &uploaded);
     {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
@@ -1117,7 +1262,7 @@ async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Que
             rusqlite::params![content, queued.id],
         )?;
         tx.execute(
-            "DELETE FROM outbox_attachment WHERE message_id = ?1",
+            "DELETE FROM outbox_attachment WHERE message_id = ?1 AND link_preview = 0",
             rusqlite::params![queued.id],
         )?;
         tx.commit()?;
@@ -1343,6 +1488,7 @@ mod tests {
             reply_to_id: None,
             thread_id: Some("root".to_string()),
             sent_at: super::super::envelope_sent_at(),
+            link_preview: None,
         }
     }
 

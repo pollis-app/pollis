@@ -65,6 +65,10 @@ pub struct ChannelMessage {
     /// Edit outbox state (#1555), `content` then being the edited text: `pending`, `failed` or `rejected`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_state: Option<String>,
+    /// The sender-built preview of the first link (#1987), already checked
+    /// against `content`; `None` when there is none or the message is deleted.
+    #[serde(default)]
+    pub link_preview: Option<crate::commands::link_preview::LinkPreview>,
 }
 
 /// Opaque pagination cursor — the (sent_at, id) of the oldest row on the

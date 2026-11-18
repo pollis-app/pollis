@@ -1,0 +1,24 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# LINK PREVIEWS (#1987), part 3 of 4 — driven by scripts/maestro-link-previews.sh.
+# The peer edited its message to another link with a new preview: the phone's
+# row takes the new text and the new card, and the old card is gone.
+
+- extendedWaitUntil:
+    visible: ".*edited by the desktop core.*"
+    timeout: 10000
+    optional: true
+- runFlow:
+    when:
+      notVisible: ".*edited by the desktop core.*"
+    file: reopen-dm.yaml
+- extendedWaitUntil:
+    visible: ".*edited by the desktop core.*"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: ".*Rust Programming Language.*"
+    timeout: 30000
+- assertNotVisible: ".*from the desktop core.*"
+- takeScreenshot: link-previews-peer-03-peer-edited

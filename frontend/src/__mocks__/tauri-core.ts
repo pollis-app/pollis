@@ -36,6 +36,10 @@ interface MockMessage {
   send_state?: 'pending' | 'failed';
   /** The edit outbox (#1555): our edit, not confirmed yet; `content` holds it. */
   edit_state?: 'pending' | 'failed';
+  /** The sender's link preview (#1987), as the core reads it from the trailer. */
+  link_preview?: Record<string, unknown> | null;
+  /** Deleted for everyone: a tombstone with no text. */
+  deleted_at?: string;
 }
 
 /** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
@@ -1058,6 +1062,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_dm_requests':
       return store.dmRequests;
 
+    // Accepting a request makes it an ordinary DM (#1987's card then draws).
+    case 'accept_dm_request': {
+      const { dmChannelId } = args as { dmChannelId: string };
+      store.dmRequests = store.dmRequests.filter((r) => r.id !== dmChannelId);
+      return null;
+    }
+
     case 'list_pending_invites':
     case 'list_join_requests':
     case 'get_join_requests':
@@ -1835,6 +1846,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
           thread_id: threadId ?? undefined,
           sent_at: nowIso(),
           send_state: 'pending',
+          link_preview: mockWirePreview(args.linkPreview),
         };
         if (!store.messages[conversationId]) {
           store.messages[conversationId] = [];
@@ -1911,12 +1923,25 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message) {
         message.content = newContent;
         message.edited_at = nowIso();
+        // An edit rebuilds the message, preview included (#1987).
+        message.link_preview = mockWirePreview(args.linkPreview);
         // A failed post keeps the edit for the drain (#1555).
         if (store.failSends) {
           message.edit_state = 'failed';
           throw new Error('network unreachable');
         }
         delete message.edit_state;
+      }
+      return null;
+    }
+
+    // Delete for everyone: the row keeps a tombstone; the core's trigger clears the preview with the text (#1987).
+    case 'delete_message': {
+      const message = findMessage((args as { messageId: string }).messageId);
+      if (message) {
+        delete message.content;
+        message.link_preview = null;
+        message.deleted_at = nowIso();
       }
       return null;
     }
@@ -2465,6 +2490,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'discard_staged_attachment':
       return true;
 
+    // Link previews (#1987): `linkPreviews` maps a URL to the draft the core would build, after
+    // `linkPreviewDelayMs`; any other URL has none. Every call lands in `window.__linkPreviewFetches`.
+    case 'fetch_link_preview': {
+      const url = args.url as string;
+      const w = window as unknown as { __linkPreviewFetches?: string[] };
+      w.__linkPreviewFetches = [...(w.__linkPreviewFetches ?? []), url];
+      const draft = ((preload.linkPreviews ?? {}) as Record<string, unknown>)[url] ?? null;
+      const delay = (preload.linkPreviewDelayMs as number | undefined) ?? 0;
+      return delay > 0 ? new Promise((resolve) => setTimeout(() => resolve(draft), delay)) : draft;
+    }
+
+    case 'get_link_previews_enabled':
+      return linkPreviewsEnabled;
+
+    case 'set_link_previews_enabled':
+      linkPreviewsEnabled = args.enabled !== false;
+      return null;
+
     // The OS clipboard the paste fallback reads (#1794); `window.__setOsClipboard` fills it.
     case 'read_clipboard_files':
       return [...osClipboard.files];
@@ -2515,6 +2558,17 @@ function unreadIn(conversationId: string): MockMessage[] {
 }
 
 let stagedAttachmentCount = 0;
+
+/** A sent draft as the core stores it (#1987): the thumbnail is not uploaded in the mock, so none. */
+function mockWirePreview(draft: unknown): Record<string, unknown> | null {
+  if (!draft || typeof draft !== 'object') {
+    return null;
+  }
+  const { url, title, description } = draft as { url: string; title: string; description?: string | null };
+  return { url, title, description: description ?? null, image: null };
+}
+// "Generate link previews" (#1987), per device; on by default.
+let linkPreviewsEnabled = true;
 
 const verifiedPeers = new Set<string>((preload.verifiedPeers as string[] | undefined) ?? []);
 

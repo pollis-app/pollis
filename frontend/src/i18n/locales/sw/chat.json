@@ -134,6 +134,10 @@
     "loadDescription": "Pakia midia kutoka {{url}}. Hii inawasiliana na tovuti hiyo moja kwa moja na kuifichulia anwani yako ya IP.",
     "openLabel": "Fungua {{url}}"
   },
+  "linkPreview": {
+    "loading": "Inapakia onyesho la kukagua…",
+    "remove": "Ondoa onyesho la kukagua kiungo"
+  },
   "notify": {
     "newMessageTitle": "Ujumbe mpya",
     "newMessageBody": "{{name}}: Ujumbe mpya",

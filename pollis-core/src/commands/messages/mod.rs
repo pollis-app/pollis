@@ -127,7 +127,7 @@ pub use types::{
     SearchCorpus, SearchCursor, SearchPage, SearchResult, SearchSnippet, SearchSort, ThreadSummary,
 };
 
-pub use send::{send_message, send_message_with_id};
+pub use send::{send_message, send_message_with_id, send_message_with_preview};
 pub use send::test_hooks;
 pub(crate) use send::direct_mentions;
 
@@ -167,7 +167,7 @@ pub use ingest_guard::{decrypt_attempts, forget_decrypt_attempts};
 // The committer's pre-merge sweep (#1041), for the MLS publish path only.
 pub(crate) use ingest::{sweep_current_epoch, SweptEnvelopes};
 
-pub use edit_delete::{delete_message, edit_message};
+pub use edit_delete::{delete_message, edit_message, edit_message_with_preview};
 // Shared with the vault (#107): one attachment-ref parser.
 pub(crate) use edit_delete::{parse_attachment_refs, spawn_attachment_ref_backfill, AttachmentRef};
 #[cfg(feature = "test-harness")]

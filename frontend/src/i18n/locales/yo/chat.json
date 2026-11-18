@@ -123,6 +123,10 @@
     "loadDescription": "Gbé mídíà wọlé láti {{url}}. Èyí ń kàn sí ojú òpó náà tààrà, ó sì ń fi àdírẹ́sì IP rẹ hàn án.",
     "openLabel": "Ṣí {{url}}"
   },
+  "linkPreview": {
+    "loading": "Ń gbé àkọ́wò wọlé…",
+    "remove": "Yọ àkọ́wò ìjápọ̀ kúrò"
+  },
   "notify": {
     "newMessageTitle": "Ìfiránṣẹ́ tuntun",
     "newMessageBody": "{{name}}: Ìfiránṣẹ́ tuntun",

@@ -100,6 +100,8 @@ export interface Message {
   retryable?: boolean;
   // The DS refused it for good; the outbox will not resend it.
   rejected?: boolean;
+  // The sender's link preview (#1987); drawn only for a link in the body (`utils/linkPreview.ts`).
+  link_preview?: MessageLinkPreview | null;
 }
 
 export interface DMConversation {
@@ -168,6 +170,21 @@ export type AttachmentKeyScope =
 
 /** Where a content string came from, which decides its attachments' key scope. */
 export type ContentOrigin = { conversationId: string } | "vault";
+
+/** Wire shapes of a link preview (#1987), shared with mobile through `utils/linkPreview.ts`. */
+export type {
+  LinkPreviewDraft,
+  LinkPreviewWire,
+} from "../utils/linkPreview";
+
+/** A received link preview: plain text only, its thumbnail loaded like an image attachment. */
+export interface MessageLinkPreview {
+  url: string;
+  title: string;
+  description: string | null;
+  // Null while the sender's upload is pending, or when the page had none.
+  image: MessageAttachment | null;
+}
 
 export interface MessageAttachment {
   id: string;

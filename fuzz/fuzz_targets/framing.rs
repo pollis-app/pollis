@@ -82,7 +82,7 @@ fuzz_target!(|input: Input| {
             assert!(padded.len() >= t.len() + HEADER, "padding shrank the message");
             assert_eq!(strip(&padded), t, "strip(pad(t)) != t");
             match run_classify(&padded) {
-                Frame::Text { text, thread_id } => {
+                Frame::Text { text, thread_id, .. } => {
                     assert_eq!(text, t);
                     assert_eq!(thread_id, None);
                 }
@@ -90,7 +90,7 @@ fuzz_target!(|input: Input| {
             }
         }
         Input::Threaded(t, tid) => match run_classify(&pad_threaded(&t, &tid)) {
-            Frame::Text { text, thread_id } => {
+            Frame::Text { text, thread_id, .. } => {
                 assert_eq!(text, t);
                 assert_eq!(thread_id.as_deref(), Some(tid.as_str()));
             }
