@@ -47,6 +47,14 @@ An App runs as a WebAssembly component in `pollis-app-host`. It has no system ca
 - **State** only its own installation's: the key-value store is addressed by installation, never by App, so two installations of the same App share nothing.
   Pinned by `two_installations_of_the_same_app_share_nothing`.
 
+## App state at rest
+
+- An installation's App state is stored on the Delivery Service, shared by the bot's hosts, and sealed on the hosts with keys derived from the bot's account secret, which only the bot's hosts hold. Each key name becomes an HMAC under one derived key; each key and value is sealed (ChaCha20-Poly1305) under another, bound to the installation and the key, so an entry moved to another key, installation or bot does not open. The DS stores ciphertext, sizes, versions and write times.
+  Pinned by `every_host_derives_the_same_keys_and_only_from_the_account_secret`, `a_sealed_value_opens_only_under_its_own_key_and_installation`, `the_key_name_never_reaches_the_wire_in_the_clear` (`pollis-core/src/commands/bots/app_state.rs`).
+- State is written only by the host that won the trigger's claim, all of a job's writes or none, once per claim, and only at the versions the job read, so two hosts never overwrite each other and a retried job never writes twice. Only a bot's own hosts can read or write it; it is capped per installation and deleted with the bot.
+  Pinned by `app_state_is_written_only_under_a_claim_the_writer_won_and_only_once`, `two_hosts_cannot_clobber_each_other`, `app_state_stays_under_the_ds_quota`, `app_state_endpoints_are_device_signed_for_the_signers_own_installation`, `app_state_goes_with_its_bot` (`pollis-delivery/tests/bots.rs`), `app_state_is_a_bots_versioned_and_within_the_quota`, `a_claims_state_commit_cannot_be_undone` (`bot_schema.rs`), `a_state_conflict_reruns_the_handler_on_the_new_state` (`pollis-bot/tests/app_handler.rs`) and the flows test `an_app_runs_on_asleep_hosts_that_share_its_state_beside_the_alerts_handler`.
+- Nothing about an App's run is kept on a host between jobs: each job opens the installation, runs a fresh sandbox, and seals the installation again.
+
 ## What an App can do
 
 - **In the group**: `post`, `reply`, `react`, `edit-own`, `delete-own`, each only if the action is granted (`actions`) and only in granted channels; `edit-own` and `delete-own` only on messages the bot itself sent. A refused call returns an error to the App naming the manifest field and is never applied.

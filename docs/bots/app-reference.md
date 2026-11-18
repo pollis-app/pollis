@@ -28,7 +28,7 @@ Every App exports all six. The runtime calls only the ones whose trigger is in y
 | `on-command` | A slash command is addressed to the App | `commands` | `command { name, args, message }` |
 | `on-schedule` | A schedule fires | `schedule` | `schedule { name, slot }` (`slot` = unix ms) |
 | `on-request` | A member sends the App a request | `requests` | `request { id, requester, body }` |
-| `on-webhook` | An HTTP call reaches the App's webhook | `webhook` | `webhook { delivery-id, headers, body }` |
+| `on-webhook` | An HTTP call reaches the App's webhook | `webhook` | `webhook { delivery-id, headers, body }`; today the body is the alerts webhook's JSON `{"channel", "text"}` |
 
 A message-carrying trigger (message, mention, command) is delivered only if **all** of these hold, otherwise your App is not run at all:
 
@@ -96,7 +96,7 @@ message-filter { channel: option<channel-id>, since: option<u64>, until: option<
 
 Returns messages from granted channels only (all of them when `channel` is absent), of granted event kinds, sent no earlier than `now - read.history days` (an earlier `since` is clamped). The trigger's own message is always returnable. At most `limit`, and never more than 500.
 
-Until the runtime keeps a message log (#2008), this returns the current trigger's context only.
+Until the runtime keeps a message log (#2008), this returns the trigger's own message only.
 
 | Refusal | When |
 |---|---|
@@ -104,9 +104,13 @@ Until the runtime keeps a message log (#2008), this returns the current trigger'
 
 ### `kv-get(key)` · `kv-set(key, value)` · `kv-delete(key)`
 
-Sealed key-value state for **this installation**. Two groups running the same App never see each other's state. Writes become durable only if the handler returns `ok`; within a job, `kv-get` sees the job's own writes.
+Key-value state for **this installation**, shared by every host of the bot and kept between jobs. Two groups running the same App never see each other's state.
 
-Usage is the sum of `key length + value length` over all keys, and must stay within `state.quota`.
+- It is stored on the Delivery Service, sealed with keys only the bot's hosts hold. The Delivery Service sees ciphertext and sizes, never your key names or values.
+- Within a job, `kv-get` sees the job's own writes. Writes are saved only if the handler returns `ok` and this host wins the trigger's claim.
+- If another host changed a key you read since you read it, your writes are not saved and the runtime runs your handler again on the new state (up to three times). Write handlers so that running them again is fine: read, compute, write.
+
+Usage is the sum of `key length + value length` over all keys, and must stay within `state.quota`. Independently, an installation can never hold more than 1 MiB of sealed state.
 
 | Refusal | When |
 |---|---|
@@ -355,4 +359,19 @@ cargo build --release --target wasm32-wasip2
 
 If the runtime refuses the component, the message names the import that caused it (usually a dependency using `std::net`; see [WASI](#wasi-what-std-gets)). The repo has two complete examples: [`fixtures/std-app`](../../pollis-app-host/fixtures/std-app/src/lib.rs) (ordinary `std`) and [`fixtures/test-app`](../../pollis-app-host/fixtures/test-app/src/lib.rs) (`no_std`, for the smallest possible component).
 
-**6. Run it.** The TypeScript SDK and the `pollis app` CLI (`new`, `test`, `dev`, `build`, `run`) are #2006. Until then, the host's own tests show how a job is driven end to end: [`pollis-app-host/tests/enforcement.rs`](../../pollis-app-host/tests/enforcement.rs) runs the fixture through every trigger and host function, [`tests/wasi.rs`](../../pollis-app-host/tests/wasi.rs) runs the `std` one, and `pollis-app-host/fixtures/build.sh` rebuilds them.
+**6. Run it.** Until App approvals and the `pollis app` CLI ship (#2005, #2006), a development build of `pollis-bot` runs an App on a paired bot:
+
+1. Pair the bot as usual (`pollis-bot pair`, see [Self-hosting](./self-hosting.md)).
+2. In `<data dir>/installations/<bot id>/installation.json`, set the handler:
+
+   ```json
+   "handler": { "app": { "component": "/path/to/ping_app.wasm", "manifest": "/path/to/pollis-app.json" } }
+   ```
+
+3. Write the admin's grants to a file (the [format above](#effective-grants)) and start the runtime with it:
+
+   ```bash
+   POLLIS_APP_DEV_GRANTS=/path/to/grants.json pollis-bot run
+   ```
+
+A release build refuses to load an App until approvals ship. The repo's tests show the same path end to end: [`pollis-bot/tests/app_handler.rs`](../../pollis-bot/tests/app_handler.rs) runs the fixture App through the job loop, and the flows test `an_app_runs_on_asleep_hosts_that_share_its_state_beside_the_alerts_handler` runs it on two real hosts of one bot.
