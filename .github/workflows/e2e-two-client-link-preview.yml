@@ -5,17 +5,13 @@
 # takes the card in both; then the same from B to A.
 #
 # Backend-only (no media) — same fixtures + composite action as
-# e2e-two-client-dm-reply.yml. Manual trigger (workflow_dispatch): heavy
-# (two WebKitGTK windows + a two-binary cargo build + a libsql container); it
-# also runs on a pull request that changes the scenario itself.
+# e2e-two-client-dm-reply.yml. Manual trigger only (workflow_dispatch), like
+# every WebDriver scenario (#2022): heavy (two WebKitGTK windows + a two-binary
+# cargo build + a libsql container).
 name: E2E two-client link previews
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - e2e/two-client-link-preview.js
-      - .github/workflows/e2e-two-client-link-preview.yml
 
 permissions:
   contents: read
