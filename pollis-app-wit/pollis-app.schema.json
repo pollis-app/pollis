@@ -106,6 +106,43 @@
         "type": "string",
         "pattern": "^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
       }
+    },
+    "commands": {
+      "type": "array",
+      "default": [],
+      "maxItems": 25,
+      "description": "Slash commands members can pick in the composer (#2018). A command is an ordinary message starting with /name; the runtime hands it to on-command only if it is declared here and the App takes the commands trigger. With request: true it is delivered to the bot as a sealed request (on-request) and never posted in the channel. Names are unique. The commands trigger needs at least one command that is not a request, and a command needs its trigger (commands, or requests for a request command).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "description"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+            "description": "Typed after the slash. Lowercase letters, digits, '-' and '_', starting with a letter, 1 to 32 characters."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[^\\n]*\\S[^\\n]*$",
+            "description": "One line shown beside the name in the composer."
+          },
+          "arg_hint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "pattern": "^[^\\n]*\\S[^\\n]*$",
+            "description": "What to type after the name, shown greyed (\"<title>\"). Leave it out for a command without arguments."
+          },
+          "request": {
+            "type": "boolean",
+            "default": false,
+            "description": "Deliver as a sealed request to the bot (on-request; needs the requests trigger) instead of posting in the channel (on-command; needs the commands trigger)."
+          }
+        }
+      }
     }
   }
 }

@@ -8,6 +8,7 @@ import {
   readClipboardImage,
   stageAttachment,
   discardStagedAttachment,
+  invoke,
 } from "../../bridge";
 import { ChevronRight, Plus, X, Film, Music, Eye, EyeOff } from "lucide-react";
 import { EmojiPickerButton } from "../Emoji/EmojiPickerButton";
@@ -26,6 +27,17 @@ import {
   type MentionCandidate,
 } from "../../utils/mentions";
 import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
+import { useCommandCandidates } from "../../hooks/queries/useCommandCandidates";
+import {
+  applyCommand,
+  BOT_REQUESTS_UNAVAILABLE,
+  classifyCommandSend,
+  commandQueryAt,
+  commandsForChannel,
+  pendingRequestCommand,
+  rankCommands,
+  type GroupCommand,
+} from "../../utils/slashCommands";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import {
   applyShortcode,
@@ -38,6 +50,7 @@ import {
 import { useShortcodeEntries } from "../Emoji/useShortcodeEntries";
 import { RichTextInput, type RichTextInputHandle } from "./RichTextInput";
 import { MentionSuggestList } from "./MentionSuggestList";
+import { CommandSuggestList } from "./CommandSuggestList";
 import { EmojiSuggestList } from "./EmojiSuggestList";
 import { probeRender } from "../../utils/renderProbe";
 import { usePressActivation } from "../../hooks/usePressActivation";
@@ -471,10 +484,31 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   const showSuggestList = skin === "modern" && suggestions.length > 0;
 
-  // :shortcode: autocomplete. Mentions take precedence for Enter/Tab/Esc.
+  // /command autocomplete (#2018): the group's Apps' commands granted this channel.
+  const commandCandidates = useCommandCandidates();
+  const [commandDismissed, setCommandDismissed] = useState(false);
+  const commandQuery =
+    commandDismissed || commandCandidates.all.length === 0 ? null : commandQueryAt(message, caret);
+  const commandSuggestions = commandQuery
+    ? rankCommands(commandsForChannel(commandCandidates.all, commandCandidates.channelId), commandQuery.query)
+    : [];
+  const commandGhostTarget =
+    skin === "terminal" && commandQuery && caret === message.length
+      ? commandSuggestions.find((c) => c.command.startsWith(commandQuery.query))
+      : undefined;
+  const commandGhostText = commandGhostTarget
+    ? commandGhostTarget.command.slice(commandQuery!.query.length)
+    : "";
+  const showCommandList = skin === "modern" && commandSuggestions.length > 0;
+  // A `request` command goes privately to its bot; the composer says so before send.
+  const requestCommand = pendingRequestCommand(message, commandCandidates.all, commandCandidates.channelId);
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const [requestSending, setRequestSending] = useState(false);
+
+  // :shortcode: autocomplete. Mentions and commands take precedence for Enter/Tab/Esc.
   const [emojiDismissed, setEmojiDismissed] = useState(false);
   const emojiQuery =
-    emojiDismissed || mentionQuery ? null : shortcodeQueryAt(message, caret);
+    emojiDismissed || mentionQuery || commandQuery ? null : shortcodeQueryAt(message, caret);
   // Loaded on focus, so `:tada:` resolves on the first try without joining the startup chunk (#874).
   const shortcodeEntries = useShortcodeEntries(isFocused || emojiQuery !== null);
   const emojiSuggestions = emojiQuery
@@ -491,7 +525,11 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   const showEmojiList = skin === "modern" && emojiSuggestions.length > 0;
 
-  const activeListLength = showSuggestList ? suggestions.length : emojiSuggestions.length;
+  const activeListLength = showCommandList
+    ? commandSuggestions.length
+    : showSuggestList
+      ? suggestions.length
+      : emojiSuggestions.length;
 
   useEffect(() => {
     setActiveIndex((prev) => (prev < activeListLength ? prev : 0));
@@ -525,6 +563,14 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     commitCompletion(next);
   }, [message, caret, draftKey, onValueChange]);
 
+  const acceptCommand = useCallback((picked: GroupCommand) => {
+    const next = applyCommand(message, caret, picked);
+    if (next.text === message) {
+      return;
+    }
+    commitCompletion(next);
+  }, [message, caret, draftKey, onValueChange]);
+
   // List/ghost accept adds a trailing space; typing the closing ':' does not.
   const acceptEmoji = useCallback((entry: ShortcodeEntry) => {
     const query = shortcodeQueryAt(message, caret);
@@ -535,13 +581,58 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     commitCompletion(next);
   }, [message, caret, draftKey, onValueChange]);
 
-  const handleSend = () => {
-    if (!message.trim() && attachments.length === 0) { return; }
-    if (hasLoadingAttachments) { return; }
-    onSend(message.trim(), attachments);
+  const clearAfterSend = () => {
     setMessage("");
     setDraft(draftKey, "");
     onValueChange?.("");
+  };
+
+  // A `request: true` command is never posted (#2018): it goes to the bot sealed, and on
+  // failure the text stays in the composer with the reason.
+  const sendRequestCommand = (command: GroupCommand, args: string) => {
+    if (requestSending || !commandCandidates.groupId || !commandCandidates.channelId) {
+      return;
+    }
+    setRequestSending(true);
+    setCommandNotice(null);
+    invoke("send_command_request", {
+      groupId: commandCandidates.groupId,
+      channelId: commandCandidates.channelId,
+      botUserId: command.botUserId,
+      command: command.command,
+      args,
+    })
+      .then(() => {
+        clearAfterSend();
+      })
+      .catch((err: unknown) => {
+        const text = err instanceof Error ? err.message : String(err);
+        setCommandNotice(
+          text.startsWith(BOT_REQUESTS_UNAVAILABLE)
+            ? t("composer.commandRequestUnavailable")
+            : t("composer.commandRequestFailed"),
+        );
+      })
+      .finally(() => {
+        setRequestSending(false);
+      });
+  };
+
+  const handleSend = () => {
+    if (!message.trim() && attachments.length === 0) { return; }
+    if (hasLoadingAttachments || requestSending) { return; }
+    const routed = classifyCommandSend(message.trim(), commandCandidates.all, commandCandidates.channelId);
+    if (routed.kind === "ambiguous") {
+      setCommandNotice(t("composer.commandAmbiguous", { command: routed.name }));
+      setCommandDismissed(false);
+      return;
+    }
+    if (routed.kind === "request") {
+      sendRequestCommand(routed.command, routed.args);
+      return;
+    }
+    onSend(message.trim(), attachments);
+    clearAfterSend();
     // Don't revoke previews: optimistic stubs may still reference them.
     setAttachments([]);
     inputRef.current?.focus();
@@ -550,6 +641,44 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Before Enter-sends: Enter accepts a suggestion.
+    if (showCommandList) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIndex((i) => (i + 1) % commandSuggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIndex((i) => (i - 1 + commandSuggestions.length) % commandSuggestions.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        acceptCommand(commandSuggestions[activeIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setCommandDismissed(true);
+        return;
+      }
+    }
+
+    if (commandGhostTarget) {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        acceptCommand(commandGhostTarget);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setCommandDismissed(true);
+        return;
+      }
+    }
+
     if (showSuggestList) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -716,6 +845,16 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       className={`relative border-t border-line bg-bg ${className}`}
     >
       {/* Anchored with `absolute`, never a portal. */}
+      {showCommandList && commandQuery && (
+        <CommandSuggestList
+          commands={commandSuggestions}
+          activeIndex={activeIndex}
+          query={commandQuery.query}
+          onSelect={acceptCommand}
+          onHover={setActiveIndex}
+        />
+      )}
+
       {showSuggestList && mentionQuery && (
         <MentionSuggestList
           candidates={suggestions}
@@ -766,6 +905,17 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         </div>
       )}
 
+      {/* A request command stays private (#2018); a refused send says why. Inline rows, not modals. */}
+      {(commandNotice || requestCommand) && (
+        <div
+          data-testid={commandNotice ? "command-notice" : "command-request-hint"}
+          role={commandNotice ? "alert" : undefined}
+          className={`px-3 py-1 text-secondary border-b border-line ${commandNotice ? "text-danger" : "text-muted"}`}
+        >
+          {commandNotice ?? t("composer.commandRequestHint", { app: requestCommand!.appName })}
+        </div>
+      )}
+
       {/* Single-line height is `--composer-h`, shared with the Close bars so borders align. */}
       <div className="flex items-start gap-1 px-2 py-1 min-h-composer">
         <button
@@ -794,6 +944,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             onChange={(next, nextCaret) => {
               setMentionDismissed(false);
               setEmojiDismissed(false);
+              setCommandDismissed(false);
+              setCommandNotice(null);
               // Slack-style direct substitution on typing the closing ':' (single-char inserts only).
               if (next.length === message.length + 1 && next[nextCaret - 1] === ":") {
                 const closed = completedShortcodeAt(next, nextCaret);
@@ -830,8 +982,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             placeholder={resolvedPlaceholder}
             disabled={disabled}
             autoFocus={autoFocus}
-            ghost={ghostText || emojiGhostText}
-            ghostTestId={ghostText ? "mention-ghost" : "emoji-ghost"}
+            ghost={commandGhostText || ghostText || emojiGhostText}
+            ghostTestId={commandGhostText ? "command-ghost" : ghostText ? "mention-ghost" : "emoji-ghost"}
             ghostClassName={isFocused ? "text-bg opacity-60" : "text-muted"}
             className={`chat-input-textarea w-full px-2 py-1 rounded-control font-mono text-body transition-colors border-0 whitespace-pre-wrap break-words overflow-y-auto${isFocused ? " is-focused" : ""}`}
             style={{
@@ -850,7 +1002,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
         <button
           onClick={handleSend}
-          disabled={disabled || (!message.trim() && attachments.length === 0) || hasLoadingAttachments}
+          disabled={disabled || (!message.trim() && attachments.length === 0) || hasLoadingAttachments || requestSending}
+          aria-busy={requestSending || undefined}
           data-testid="message-send-button"
           aria-label={t("composer.send")}
           className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-muted enabled:hover:text-accent"

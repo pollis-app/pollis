@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}}を削除",
     "send": "メッセージを送信",
     "markSensitive": "{{name}}をセンシティブとしてマーク",
-    "unmarkSensitive": "{{name}}のセンシティブ指定を解除"
+    "unmarkSensitive": "{{name}}のセンシティブ指定を解除",
+    "commandAmbiguous": "複数のアプリに /{{command}} があります。一覧から選んでください。",
+    "commandRequestHint": "{{app}}に非公開で送信され、このチャンネルには投稿されません",
+    "commandRequestUnavailable": "このバージョンではアプリへの非公開リクエストは使えません。何も投稿されていません。",
+    "commandRequestFailed": "このコマンドを送信できませんでした。何も投稿されていません。"
   },
   "mentions": {
     "listLabel": "メンションの候補",
@@ -104,5 +108,9 @@
     "version": "バージョン {{version}}",
     "quit": "Pollisを終了",
     "unread_other": "Pollis — 未読{{count}}件"
+  },
+  "commands": {
+    "listLabel": "コマンドの候補",
+    "matching": "<hl>/{{query}}</hl>に一致するコマンド"
   }
 }

@@ -72,7 +72,11 @@
     "removeAttachment": "{{name}}ን አስወግድ",
     "send": "መልዕክት ላክ",
     "markSensitive": "{{name}}ን እንደ ስሱ ምልክት አድርግ",
-    "unmarkSensitive": "የ{{name}}ን ስሱ ምልክት አንሳ"
+    "unmarkSensitive": "የ{{name}}ን ስሱ ምልክት አንሳ",
+    "commandAmbiguous": "ከአንድ በላይ መተግበሪያ /{{command}} አለው። ከዝርዝሩ አንዱን ይምረጡ።",
+    "commandRequestHint": "ለ{{app}} በግል ይላካል፣ በዚህ ቻናል ውስጥ አይለጠፍም",
+    "commandRequestUnavailable": "በዚህ ስሪት ለመተግበሪያዎች የግል ጥያቄዎች አይገኙም። ምንም አልተለጠፈም።",
+    "commandRequestFailed": "ይህን ትዕዛዝ መላክ አልተቻለም። ምንም አልተለጠፈም።"
   },
   "mentions": {
     "listLabel": "የጥቀሳ አስተያየቶች",
@@ -112,5 +116,9 @@
     "quit": "ከPollis ውጣ",
     "unread_one": "Pollis — {{count}} ያልተነበበ",
     "unread_other": "Pollis — {{count}} ያልተነበቡ"
+  },
+  "commands": {
+    "listLabel": "የትዕዛዝ ጥቆማዎች",
+    "matching": "ከ<hl>/{{query}}</hl> ጋር የሚዛመዱ ትዕዛዞች"
   }
 }

@@ -182,6 +182,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::bots::add_bot_host,
             crate::commands::bots::revoke_bot_host,
             crate::commands::bots::delete_bot,
+            crate::commands::bots::list_group_commands,
+            crate::commands::bots::send_command_request,
             crate::commands::overlay::get_overlay_mode,
             crate::commands::overlay::set_overlay_mode,
         ])

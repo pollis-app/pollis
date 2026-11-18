@@ -3,7 +3,9 @@
 //!
 //! For each trigger the job loop calls [`AppHandler::handle_job`], which:
 //!
-//! 1. maps the trigger into the App's terms (a message, or a webhook delivery);
+//! 1. maps the trigger into the App's terms: a message is a command (#2018,
+//!    `pollis_app_manifest::route_command`), a mention or a plain message; a
+//!    webhook call is a webhook delivery;
 //! 2. runs the App on a blocking thread in a fresh sandbox, with
 //!    [`AppServices`] as its host services: App state read from the DS through
 //!    the open installation, the reference public-address HTTP client, the
@@ -24,7 +26,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use pollis_app_host as host;
 use pollis_app_host::{AppHost, HostConfig, HostServices, PublicHttpClient, ServiceError};
-use pollis_app_manifest::{Manifest, TriggerKind};
+use pollis_app_manifest::{route_command, Manifest, TriggerKind};
 /// The admin's grants, as #2005 and the tests hand them to [`AppHandler::new`].
 pub use pollis_app_manifest::{ActionKind, AdminGrants, ChannelGrant, EventKind};
 use sha2::{Digest, Sha256};
@@ -227,10 +229,17 @@ impl Handler for AppHandler {
                     .iter()
                     .find(|x| x.user_id == ctx.core.bot_user_id())
                     .and_then(|x| x.username.clone());
-                let mentioned = own_name.is_some_and(|n| pollis_core::commands::bots::mentions_username(text, &n));
-                // One delivery per message: a mention of the bot reaches
-                // `on-mention` when the App takes mentions, else `on-message`.
-                let trigger = if mentioned && self.mentions {
+                let mentioned = own_name
+                    .as_deref()
+                    .is_some_and(|n| pollis_core::commands::bots::mentions_username(text, n));
+                // One delivery per message, decided here and never by the App:
+                // a command declared in the approved manifest (#2018) reaches
+                // `on-command`; else a mention of the bot reaches `on-mention`
+                // when the App takes mentions; else `on-message`. The sandbox
+                // host still refuses any of them outside the granted channels.
+                let trigger = if let Some(cmd) = route_command(&self.manifest, text, own_name.as_deref()) {
+                    host::Trigger::Command(host::Command { name: cmd.name, args: cmd.args, message: msg.clone() })
+                } else if mentioned && self.mentions {
                     host::Trigger::Mention(msg.clone())
                 } else {
                     host::Trigger::Message(msg.clone())

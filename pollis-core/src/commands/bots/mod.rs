@@ -51,6 +51,12 @@
 //! DS, shared by every host; [`app_state::commit_app_state`] writes a job's
 //! changes once, under the claim the host won, at the versions it read.
 //!
+//! **Slash commands (bridge commands, #2018).** [`app_commands::list_group_commands`]:
+//! the commands of the group's approved Apps, for any member's composer;
+//! [`app_commands::send_command_request`]: a `request: true` command, sealed to
+//! the bot and never posted (the transport is #2008's; until then it refuses).
+//! [`app_commands::approved_app`] is the one seam to App approval (#2005).
+//!
 //! **Admin (bridge commands).** [`list_group_bots`], [`get_bot`], [`create_bot`],
 //! [`add_bot_host`], [`revoke_bot_host`], [`delete_bot`]. Error strings start
 //! with [`PAIRING_CODE_MISMATCH`], [`BOT_CAP_REACHED`] or [`PAIRING_REQUEST_EXPIRED`]
@@ -61,6 +67,7 @@
 //! enrollment SAS input rule.
 
 mod admin;
+pub mod app_commands;
 pub mod app_state;
 pub mod approval;
 mod code;

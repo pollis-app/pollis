@@ -57,7 +57,11 @@
     "removeAttachment": "Убрать {{name}}",
     "send": "Отправить сообщение",
     "markSensitive": "Отметить {{name}} как деликатное",
-    "unmarkSensitive": "Снять отметку «деликатное» с {{name}}"
+    "unmarkSensitive": "Снять отметку «деликатное» с {{name}}",
+    "commandAmbiguous": "Команда /{{command}} есть у нескольких приложений. Выберите одно из списка.",
+    "commandRequestHint": "Отправляется лично {{app}}, не публикуется в этом канале",
+    "commandRequestUnavailable": "Личные запросы к приложениям недоступны в этой версии. Ничего не опубликовано.",
+    "commandRequestFailed": "Не удалось отправить команду. Ничего не опубликовано."
   },
   "mentions": {
     "listLabel": "Подсказки упоминаний",
@@ -113,5 +117,9 @@
     "unread_few": "Pollis — {{count}} непрочитанных",
     "unread_many": "Pollis — {{count}} непрочитанных",
     "unread_other": "Pollis — {{count}} непрочитанного"
+  },
+  "commands": {
+    "listLabel": "Подсказки команд",
+    "matching": "Команды по запросу <hl>/{{query}}</hl>"
   }
 }
