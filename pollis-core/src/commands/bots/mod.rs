@@ -37,6 +37,8 @@
 //! **Trigger claims (runtime).** [`claim_trigger`]: before a host applies a
 //! job's actions it claims `(installation_id, trigger_key)` on the DS; the first
 //! claim wins, the winner's retry wins again, every other host discards.
+//! [`trigger_cursor`] / [`set_trigger_cursor`] keep the job loop's per-channel
+//! position in the installation's encrypted store.
 //!
 //! **Admin (bridge commands).** [`list_group_bots`], [`get_bot`], [`create_bot`],
 //! [`add_bot_host`], [`revoke_bot_host`], [`delete_bot`]. Error strings start
@@ -67,5 +69,5 @@ pub use host::{
 };
 #[cfg(feature = "test-harness")]
 pub use host::FixedAudit;
-pub use triggers::claim_trigger;
+pub use triggers::{claim_trigger, set_trigger_cursor, trigger_cursor};
 pub use unattended::{forget_installation, has_installation, start_unattended, BotSession, UNATTENDED_REFUSED};
