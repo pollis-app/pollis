@@ -75,6 +75,21 @@ export interface MessageAttachment {
   localPreviewUri?: string;
 }
 
+/** Wire shapes of a link preview (#1987), shared with desktop through `lib/linkPreview.ts`. */
+export type {
+  LinkPreviewDraft,
+  LinkPreviewWire,
+} from "../lib/linkPreview";
+
+/** A received link preview: plain text only, its thumbnail loaded like an image attachment. */
+export interface MessageLinkPreview {
+  url: string;
+  title: string;
+  description: string | null;
+  // Null while the sender's upload is pending, or when the page had none.
+  image: MessageAttachment | null;
+}
+
 export interface MessageQueueItem {
   id: string;
   message_id: string;

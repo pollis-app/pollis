@@ -100,19 +100,30 @@ fn encode_poster(img: &DynamicImage) -> Option<PosterJpeg> {
     while edge >= MIN_EDGE {
         // JPEG has no alpha; flatten onto RGB.
         let small = DynamicImage::ImageRgb8(img.thumbnail(edge, edge).to_rgb8());
-        for quality in QUALITIES {
-            let mut out = Vec::new();
-            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
-            if small.write_with_encoder(encoder).is_err() {
-                return None;
-            }
-            if out.len() <= POSTER_MAX_JPEG_BYTES {
-                return Some(PosterJpeg(base64::engine::general_purpose::STANDARD.encode(out)));
-            }
+        if let Some(out) = jpeg_within(&small, &QUALITIES, POSTER_MAX_JPEG_BYTES).ok()? {
+            return Some(PosterJpeg(base64::engine::general_purpose::STANDARD.encode(out)));
         }
         edge /= 2;
     }
     None
+}
+
+/// The JPEG of `img` at the first of `qualities` that fits in `max_bytes`;
+/// `Ok(None)` when none does. Shared with link-preview thumbnails (#1987).
+pub(crate) fn jpeg_within(
+    img: &DynamicImage,
+    qualities: &[u8],
+    max_bytes: usize,
+) -> std::result::Result<Option<Vec<u8>>, image::ImageError> {
+    for &quality in qualities {
+        let mut out = Vec::new();
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
+        img.write_with_encoder(encoder)?;
+        if out.len() <= max_bytes {
+            return Ok(Some(out));
+        }
+    }
+    Ok(None)
 }
 
 /// Keep posters in order until the message's [`POSTER_ENVELOPE_BUDGET`] is spent;

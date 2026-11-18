@@ -134,6 +134,10 @@
     "loadDescription": "Layisha imidiya esuka ku-{{url}}. Lokhu kuxhumana naleyo sayithi ngqo futhi kuyembulela ikheli lakho le-IP.",
     "openLabel": "Vula {{url}}"
   },
+  "linkPreview": {
+    "loading": "Ilayisha ukubuka kuqala…",
+    "remove": "Susa ukubuka kuqala kwesixhumanisi"
+  },
   "notify": {
     "newMessageTitle": "Umlayezo omusha",
     "newMessageBody": "{{name}}: Umlayezo omusha",

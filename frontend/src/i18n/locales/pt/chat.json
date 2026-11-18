@@ -134,6 +134,10 @@
     "loadDescription": "Carregar multimédia de {{url}}. Isto contacta esse site diretamente e revela-lhe o seu endereço IP.",
     "openLabel": "Abrir {{url}}"
   },
+  "linkPreview": {
+    "loading": "A carregar pré-visualização…",
+    "remove": "Remover pré-visualização da ligação"
+  },
   "notify": {
     "newMessageTitle": "Nova mensagem",
     "newMessageBody": "{{name}}: Nova mensagem",

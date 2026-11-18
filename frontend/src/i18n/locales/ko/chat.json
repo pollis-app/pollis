@@ -123,6 +123,10 @@
     "loadDescription": "{{url}}에서 미디어를 불러옵니다. 해당 사이트에 직접 연결하므로 사이트에 IP 주소가 노출됩니다.",
     "openLabel": "{{url}} 열기"
   },
+  "linkPreview": {
+    "loading": "미리보기 불러오는 중…",
+    "remove": "링크 미리보기 제거"
+  },
   "notify": {
     "newMessageTitle": "새 메시지",
     "newMessageBody": "{{name}}: 새 메시지",

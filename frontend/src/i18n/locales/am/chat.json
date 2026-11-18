@@ -134,6 +134,10 @@
     "loadDescription": "ሚዲያ ከ{{url}} ጫን። ይህ ያንን ጣቢያ በቀጥታ ያገናኛል፤ የIP አድራሻዎንም ለጣቢያው ይገልጣል።",
     "openLabel": "{{url}}ን ክፈት"
   },
+  "linkPreview": {
+    "loading": "ቅድመ እይታ በመጫን ላይ…",
+    "remove": "የአገናኝ ቅድመ እይታን አስወግድ"
+  },
   "notify": {
     "newMessageTitle": "አዲስ መልዕክት",
     "newMessageBody": "{{name}}፦ አዲስ መልዕክት",

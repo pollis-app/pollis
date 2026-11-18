@@ -134,6 +134,10 @@
     "loadDescription": "{{url}} توں میڈیا لوڈ کرو۔ ایہہ اوس سائٹ نال سدھا رابطہ کردا اے تے تہاڈا IP ایڈریس اوہنوں دس دیندا اے۔",
     "openLabel": "{{url}} کھولو"
   },
+  "linkPreview": {
+    "loading": "پیش منظر لوڈ ہو رہیا اے…",
+    "remove": "لنک دا پیش منظر ہٹاؤ"
+  },
   "notify": {
     "newMessageTitle": "نواں سنیہا",
     "newMessageBody": "{{name}}: نواں سنیہا",

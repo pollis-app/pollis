@@ -324,6 +324,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<messages::EnvelopeGcBody as DsRequest>::PATH, post(messages::envelope_gc))
         .route(<messages::AttachmentRegisterBody as DsRequest>::PATH, post(messages::register_attachment))
         .route(<messages::AttachmentDeleteBody as DsRequest>::PATH, post(messages::delete_attachment))
+        .route(<messages::AttachmentReleaseBody as DsRequest>::PATH, post(messages::release_attachment))
         // Domain B (#419) — groups / channels / membership / invites / join-requests.
         .route(<groups::CreateGroupBody as DsRequest>::PATH, post(groups::create_group))
         .route(<groups::UpdateGroupBody as DsRequest>::PATH, post(groups::update_group))

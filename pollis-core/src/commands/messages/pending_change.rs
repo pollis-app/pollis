@@ -230,7 +230,7 @@ pub(crate) fn apply(
             .map(|t| t.and_utc().to_rfc3339())
             .unwrap_or_else(|_| now.clone());
         let n = conn.execute(
-            "UPDATE message SET content = ?1, edited_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+            "UPDATE message SET content = ?1, edited_at = ?2, link_preview = NULL WHERE id = ?3 AND deleted_at IS NULL",
             rusqlite::params![text, edited_at, message_id],
         )?;
         if n > 0 {

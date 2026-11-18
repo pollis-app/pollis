@@ -109,6 +109,23 @@ fn decode_err(e: image::ImageError) -> Error {
 
 /// Decode untrusted bytes under limits and turn them upright.
 fn decode_upright(input: &[u8]) -> Result<image::DynamicImage> {
+    decode_upright_limited(
+        input,
+        AVATAR_MAX_SOURCE_DIM,
+        AVATAR_MAX_DECODE_ALLOC,
+        "a profile picture must be a PNG, JPEG, GIF or WebP",
+    )
+}
+
+/// Decode untrusted PNG/JPEG/GIF/WebP bytes under explicit limits, upright
+/// (EXIF orientation applied, which is the only EXIF a re-encode keeps).
+/// Shared with link-preview thumbnails (#1987).
+pub(crate) fn decode_upright_limited(
+    input: &[u8],
+    max_dim: u32,
+    max_alloc: u64,
+    unsupported: &'static str,
+) -> Result<image::DynamicImage> {
     use image::{ImageDecoder as _, ImageFormat};
 
     let format = image::guess_format(input)
@@ -117,14 +134,12 @@ fn decode_upright(input: &[u8]) -> Result<image::DynamicImage> {
         format,
         ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Gif | ImageFormat::WebP
     ) {
-        return Err(Error::Other(anyhow::anyhow!(
-            "a profile picture must be a PNG, JPEG, GIF or WebP"
-        )));
+        return Err(Error::Other(anyhow::anyhow!(unsupported)));
     }
     let mut limits = image::Limits::default();
-    limits.max_image_width = Some(AVATAR_MAX_SOURCE_DIM);
-    limits.max_image_height = Some(AVATAR_MAX_SOURCE_DIM);
-    limits.max_alloc = Some(AVATAR_MAX_DECODE_ALLOC);
+    limits.max_image_width = Some(max_dim);
+    limits.max_image_height = Some(max_dim);
+    limits.max_alloc = Some(max_alloc);
 
     let mut reader = image::ImageReader::new(Cursor::new(input));
     reader.set_format(format);
@@ -139,7 +154,6 @@ fn decode_upright(input: &[u8]) -> Result<image::DynamicImage> {
     Ok(img)
 }
 
-/// The centred square of `img`.
 fn square(img: &image::DynamicImage) -> image::DynamicImage {
     let side = img.width().min(img.height());
     let x = (img.width() - side) / 2;

@@ -1,0 +1,30 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Background the app and bring it back, then open the DM again: resuming and
+# opening a conversation both ingest it. The peer runs without LiveKit, so its
+# edit and delete send no realtime wake-up; the desktop app, which is in the
+# room, does. No btn-back on a split-view iPad, hence optional.
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 15000
+- tapOn:
+    id: "row-dm-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000

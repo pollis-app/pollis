@@ -118,6 +118,8 @@ interface MessageListProps {
   windowEpoch?: number;
   /** Opts into arrow-key log navigation; only the main composer's list passes it. */
   focusComposer?: () => void;
+  /** Draw senders' link previews (#1987); off while the conversation is an unaccepted DM request. */
+  linkPreviews?: boolean;
   /** Channel or DM id pins are recorded against (#99), not the MLS group id. */
   pinsConversationId?: string | null;
   /** Opens a peer's safety number from a key-change line (#1605). */
@@ -147,6 +149,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   windowEpoch = 0,
   focusComposer,
   onVerifyKeyChange,
+  linkPreviews = true,
 }) => {
   probeRender("MessageList");
   const { t } = useTranslation("chat");
@@ -234,10 +237,11 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       mentionNames,
       selfName,
       viewerJoinedAtMs,
+      linkPreviews,
       aliases,
       mentionLabels: aliasMentionLabels,
     }),
-    [skin, isLightBg, currentUser?.id, mentionNames, selfName, viewerJoinedAtMs, aliases, aliasMentionLabels],
+    [skin, isLightBg, currentUser?.id, mentionNames, selfName, viewerJoinedAtMs, linkPreviews, aliases, aliasMentionLabels],
   );
 
   // One tick per DM (#1637), on the newest own message with a receipt. A window

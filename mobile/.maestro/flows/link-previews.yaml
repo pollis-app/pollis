@@ -1,0 +1,184 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# LINK PREVIEWS (#1987) — the sender's device fetches the first https link of a
+# draft and the card travels inside the message. The composer shows the card
+# (× keeps that link unpreviewed for the rest of the draft), the sent message
+# carries it, a long press on the card opens the row's sheet, an edit that
+# drops the link drops the card, and a tap on the card leaves for the browser.
+# Self-contained: posts into a fresh self-owned group's #General. Needs network
+# from the device to github.com (the preview is a real fetch).
+
+- runFlow: ../subflows/sign-in.yaml
+
+# Self -> Preferences -> Link previews: on by default, and the switch turns it
+# off and on again (this device only).
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- assertVisible:
+    id: "screen-self-preferences"
+- scrollUntilVisible:
+    element:
+      id: "toggle-link-previews"
+    direction: DOWN
+- assertVisible:
+    id: "toggle-link-previews"
+    checked: true
+- takeScreenshot: link-previews-00-setting
+- tapOn:
+    id: "toggle-link-previews"
+- assertVisible:
+    id: "toggle-link-previews"
+    checked: false
+- tapOn:
+    id: "toggle-link-previews"
+- assertVisible:
+    id: "toggle-link-previews"
+    checked: true
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Previews Group"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Previews Group"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# The composer card: a link in the draft gets its card, × takes it away and
+# it does not come back while the link stays in the draft.
+- tapOn:
+    id: "input-composer"
+- inputText: "https://github.com/"
+- extendedWaitUntil:
+    visible:
+      id: "composer-link-preview"
+    timeout: 5000
+- extendedWaitUntil:
+    visible: ".*GitHub.*"
+    timeout: 15000
+- takeScreenshot: link-previews-01-composer
+- tapOn:
+    id: "btn-link-preview-remove"
+- extendedWaitUntil:
+    notVisible:
+      id: "composer-link-preview"
+    timeout: 5000
+- inputText: " no card"
+- extendedWaitUntil:
+    visible:
+      id: "composer-link-preview"
+    timeout: 3000
+    optional: true
+- assertNotVisible:
+    id: "composer-link-preview"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*no card.*"
+    timeout: 10000
+- runFlow: ../subflows/message-settled.yaml
+- assertNotVisible:
+    id: "message-link-preview"
+
+# A fresh draft previews again, and the sent message carries the card.
+- tapOn:
+    id: "input-composer"
+- inputText: "look https://github.com/"
+- extendedWaitUntil:
+    visible: ".*GitHub.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-send"
+- runFlow: ../subflows/message-settled.yaml
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "message-link-preview"
+    timeout: 30000
+- takeScreenshot: link-previews-02-sent
+
+# A long press on the card is the row's long press: the message sheet opens.
+- longPressOn:
+    id: "message-link-preview"
+- extendedWaitUntil:
+    visible:
+      id: "btn-edit"
+    timeout: 5000
+- tapOn:
+    id: "btn-edit"
+- assertVisible:
+    id: "input-edit-composer"
+# The edit bar previews the edited text's link.
+- extendedWaitUntil:
+    visible:
+      id: "composer-link-preview"
+    timeout: 15000
+- takeScreenshot: link-previews-03-edit-bar
+- eraseText: 40
+- inputText: "no link here"
+- extendedWaitUntil:
+    notVisible:
+      id: "composer-link-preview"
+    timeout: 5000
+- tapOn:
+    id: "btn-edit-save"
+- extendedWaitUntil:
+    visible: ".*no link here.*"
+    timeout: 15000
+- assertNotVisible:
+    id: "message-link-preview"
+# The edit bar stays until the core has stored the edit; the composer is back after.
+- extendedWaitUntil:
+    notVisible:
+      id: "input-edit-composer"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 10000
+
+# Last, so nothing has to come back from the browser: a tap on a card opens
+# its link and Pollis leaves the foreground.
+- tapOn:
+    id: "input-composer"
+- inputText: "again https://github.com/"
+- extendedWaitUntil:
+    visible: ".*GitHub.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-send"
+- runFlow: ../subflows/message-settled.yaml
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "message-link-preview"
+    timeout: 30000
+- tapOn:
+    id: "message-link-preview"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-chat"
+    timeout: 10000
+- takeScreenshot: link-previews-04-browser

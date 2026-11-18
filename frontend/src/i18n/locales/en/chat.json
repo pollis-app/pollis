@@ -134,6 +134,10 @@
     "loadDescription": "Load media from {{url}}. This contacts that site directly and reveals your IP address to it.",
     "openLabel": "Open {{url}}"
   },
+  "linkPreview": {
+    "loading": "Loading preview…",
+    "remove": "Remove link preview"
+  },
   "notify": {
     "newMessageTitle": "New message",
     "newMessageBody": "{{name}}: New message",

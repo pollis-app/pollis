@@ -100,6 +100,7 @@ IOS_DEVICE="iPhone 17 Pro" mobile/scripts/maestro-run.sh auth ios   # an Xcode 2
 | `long-history` | #1432 seeds a channel with more messages than one screen holds (each send made with the keyboard up, so a composer left behind the keyboard fails the tap), then re-opens it: `input-composer` and `btn-send` must be on screen | no |
 | `keyboard-recovery` | #1641/#1642 the layout comes back after every keyboard hide: navigating away with it up, backgrounding with it up (Android hides it with no animation), and the scan-to-sign-in PIN step that unmounts the focused field. After each, the `keyboard-closed` probe and a point tap at 50%,92% that must land on the bottom `btn-scan-toggle-manual` (tune the point from shot 01 if a device's inset moves it). The PIN step, which opts out of keyboard avoidance (`<Screen avoidKeyboard={false}>`), must take a point tap at 50%,90% on its bottom-row `0` key. Then (#1662, #1687) a focused chat composer across Home, the link sheet's Open in browser, the browser opened with the keyboard up, and Home then the browser: each time Send is tapped by id and the message must land, so a composer left under the keyboard fails. Proves the native keyboard-controller patch, so it needs a fresh binary | no |
 | `message-links` | #1682 a long press on a URL in a message opens the link sheet (not the message sheet) with its host, Copy link copies (checked by pasting the system clipboard back into the composer, not only by the 2 s "Copied" label, #1813), Open in browser leaves the app for the system browser; a tap on an `xn--` host opens the confirm sheet showing the ASCII host; a `javascript:` URL stays plain text. Each message is one long wrapping link, because a nested `<Text>` span has no id and a text selector taps the row's centre | no |
+| `link-previews` | #1987 sender-generated link previews: Self → Preferences' Link previews switch is on by default and turns off and on, a link in the draft shows `composer-link-preview` (a real fetch of github.com from the device), × removes it and it stays off for that draft (the message goes out with no card), a fresh draft previews again and the sent message carries `message-link-preview`, a long press on the card opens the row's sheet, an edit that drops the link drops the card, and a tap on a card leaves for the browser | no |
 | `message-actions-keyboard` | #1859 with the composer focused and the keyboard up, ONE long press on a message opens its action sheet (`btn-edit`) and the keyboard goes down with it (`keyboard-closed` after Close); Edit works from such a press; a plain tap on a row still dismisses the keyboard; one long press on a link opens `sheet-link`. Single attempts on purpose: the retrying long-press subflows would hide a regression | no |
 | `reply` | #1270 swipe a message toward the start edge → reply bar (not the message sheet), send, the row quotes the original; double tap does the same; dismiss cancels; tapping a quote jumps to the original | no |
 | `message-media-grid` | #1970 a channel of text, a quoted reply and a captioned message of three pictures: the pictures sit in the 2-up `message-media-grid` (two squares, then one), and its shot is the gallery for the row's one-line header (name, then time) | no |
@@ -373,6 +374,22 @@ then long-presses the pill: the sheet opens on the 👍 tab (and the message
 sheet does not), lists both accounts there — the device's own row marked
 "(you)" — only the peer under 🎉, and both on All. The peer exits once it sees
 the device's 👍. `SHOTS_DIR=<dir>` keeps the screenshots.
+
+**Link previews across platforms (automated, #1987):** `mobile/scripts/maestro-link-previews.sh <device>`
+— the same shape with `pollis-tui`'s `link_preview_peer` example, which runs the
+desktop app's `pollis-core`: the device opens a DM with a fresh peer
+(`two-client/link-previews/1-open-dm.yaml`), the peer builds a preview of
+github.com itself (a real fetch from the Mac) and sends it, the device must draw
+that card from the message, then send its own (`2-cards.yaml`). Then edit and
+delete, both ways: the peer edits its message to another link with a new
+preview and checks its replaced thumbnail stops downloading (released through
+`/v1/attachments/release`, then reclaimed by the DS), and the device must show
+the new card (`3-peer-edit.yaml`); the peer deletes for everyone and checks the
+new thumbnail goes too, and the device must show the tombstone with no card,
+then edits its own message to another link and deletes it
+(`4-peer-delete.yaml`). The script passes only when the peer has read the
+device's preview, its edit and its delete back. The one-device half is
+`flows/link-previews.yaml`.
 
 **Pins across members (automated, #1315):** `mobile/scripts/maestro-pins.sh <device>`
 — the lost-message shape with `pollis-tui`'s `pins_peer` example: the device

@@ -50,6 +50,12 @@ pub async fn apply_overlay_mode(state: &Arc<AppState>, mode: OverlayMode) -> Res
     }
 }
 
+/// Whether this device is in strict mode, live or as configured: strict means
+/// nothing leaves the device directly, so link previews (#1987) are not built.
+pub(crate) fn is_strict(state: &Arc<AppState>) -> bool {
+    current_mode(state) == OverlayMode::Strict || state.config.overlay_mode == OverlayMode::Strict
+}
+
 /// The live mode: the running shim's, or `Off` when no shim is up.
 fn current_mode(state: &Arc<AppState>) -> OverlayMode {
     state
