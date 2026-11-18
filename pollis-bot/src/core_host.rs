@@ -476,50 +476,71 @@ impl InstallationCore for CoreInstallation {
     async fn act(&self, action: &CheckedAction, message_id: &str) -> Result<(), CoreError> {
         let state = self.state().await?;
         let user = self.session.bot_user_id.clone();
-        match action.clone() {
-            CheckedAction::Post { channel_id, text } => {
-                self.post(&channel_id, &text, message_id).await
-            }
+        use pollis_core::commands::livekit_signalling as wake;
+        let (result, payload) = match action.clone() {
+            CheckedAction::Post { channel_id, text } => (
+                self.post(&channel_id, &text, message_id).await,
+                wake::new_message_payload(Some(&channel_id), None),
+            ),
             CheckedAction::Reply {
                 channel_id,
                 message_id: target,
                 text,
-            } => send_message_with_id(
-                Some(message_id.to_string()),
-                channel_id,
-                user,
-                text,
-                Vec::new(),
-                Some(target),
-                None,
-                None,
-                &state,
-            )
-            .await
-            .map(|_| ())
-            .map_err(core_err),
+            } => (
+                send_message_with_id(
+                    Some(message_id.to_string()),
+                    channel_id.clone(),
+                    user,
+                    text,
+                    Vec::new(),
+                    Some(target),
+                    None,
+                    None,
+                    &state,
+                )
+                .await
+                .map(|_| ())
+                .map_err(core_err),
+                wake::new_message_payload(Some(&channel_id), None),
+            ),
             CheckedAction::React {
+                channel_id,
                 message_id: target,
                 emoji,
-                ..
-            } => pollis_core::commands::messages::add_reaction(target, user, emoji, &state)
-                .await
-                .map_err(core_err),
+            } => (
+                pollis_core::commands::messages::add_reaction(target, user, emoji, &state)
+                    .await
+                    .map_err(core_err),
+                wake::new_message_payload(Some(&channel_id), None),
+            ),
             CheckedAction::EditOwn {
                 channel_id,
                 message_id: target,
                 text,
-            } => pollis_core::commands::messages::edit_message(
-                channel_id, target, user, text, &state,
-            )
-            .await
-            .map_err(core_err),
+            } => (
+                pollis_core::commands::messages::edit_message(channel_id.clone(), target.clone(), user, text, &state)
+                    .await
+                    .map_err(core_err),
+                wake::edited_message_payload(Some(&channel_id), None, &target),
+            ),
             CheckedAction::DeleteOwn {
-                message_id: target, ..
-            } => pollis_core::commands::messages::delete_message(target, user, &state)
-                .await
-                .map_err(core_err),
+                channel_id,
+                message_id: target,
+            } => (
+                pollis_core::commands::messages::delete_message(target.clone(), user, &state)
+                    .await
+                    .map_err(core_err),
+                wake::deleted_message_payload(Some(&channel_id), None, &target),
+            ),
+        };
+        result?;
+        // A job's store is not joined to the group's realtime room, so the core's own wake-up
+        // after a send reaches no one; tell the room through the DS, as any member's client would
+        // (#1182). Content-free, best-effort: members also see it on their next catch-up.
+        if let Err(e) = bots::wake_group_room(&state, &self.session.group_id, payload).await {
+            crate::log::info(&crate::log::scope(&self.session.bot_user_id), format!("could not wake the group's members: {e}"));
         }
+        Ok(())
     }
 
     async fn state_read(&self, key: &str) -> Result<(StateValue, u64), CoreError> {
