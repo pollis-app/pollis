@@ -82,13 +82,10 @@ pub async fn set_schedule_cursor(state: &Arc<AppState>, name: &str, slot: u64) -
     set_trigger_cursor(state, &format!("schedule:{name}"), &slot.to_string(), "").await
 }
 
-/// Whether `content` mentions `username` by `@username`, by the same rule
-/// that decides who a channel message wakes (#843): a whitespace- or
-/// string-initial `@`, case-insensitive, trailing punctuation ignored. `@all`
-/// is not a mention of the bot (#2004: an App's `on-mention`).
-pub fn mentions_username(content: &str, username: &str) -> bool {
-    !crate::commands::messages::direct_mentions(content, &[(String::new(), username.to_string())]).is_empty()
-}
+/// Whether `content` mentions `username` by `@username` (#843, #2004). The
+/// rule lives in pollis-app-manifest, shared with `direct_mentions` and with
+/// `pollis-app-dev`'s offline routing (#2006).
+pub use pollis_app_manifest::mentions_username;
 
 fn not_active() -> Error {
     Error::Other(anyhow::anyhow!("bot installation is not active"))

@@ -435,51 +435,9 @@ fn mentions_all(content: &str) -> bool {
     })
 }
 
-/// Characters that may appear INSIDE a username after the leading `@`. Kept
-/// deliberately wide (the `users.username` column has no charset constraint)
-/// but closed over the punctuation that normally ends a sentence, so
-/// "@dana." and "@dana," yield the token `dana`.
-fn is_mention_body_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '-' || c == '.'
-}
-
-/// Extract the `@`-prefixed mention tokens from `content`, lowercased and
-/// stripped of the leading `@`.
-///
-/// Only a string-initial or whitespace-preceded `@` counts; `@all` is excluded.
-///
-/// MIRROR: `mentionTokens()` in `frontend/src/utils/mentions.ts`. The two must
-/// agree or the composer will promise a ping the backend does not send.
-fn mention_tokens(content: &str) -> Vec<String> {
-    let chars: Vec<char> = content.chars().collect();
-    let mut tokens = Vec::new();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] != '@' {
-            i += 1;
-            continue;
-        }
-        // Only a string-initial or whitespace-preceded `@` opens a mention.
-        if i > 0 && !chars[i - 1].is_whitespace() {
-            i += 1;
-            continue;
-        }
-        let mut j = i + 1;
-        while j < chars.len() && is_mention_body_char(chars[j]) {
-            j += 1;
-        }
-        let token: String = chars[i + 1..j]
-            .iter()
-            .collect::<String>()
-            .trim_end_matches(['.', '-', '_'])
-            .to_lowercase();
-        if !token.is_empty() && token != "all" {
-            tokens.push(token);
-        }
-        i = j.max(i + 1);
-    }
-    tokens
-}
+/// The mention rule lives in pollis-app-manifest (#2006), shared with the
+/// bot runtime's `on-mention` routing.
+use pollis_app_manifest::mention_tokens;
 
 /// Who should be woken for a message — i.e. who gets an inbox ping and a
 /// background push, over and above the unread badge every recipient gets.

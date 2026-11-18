@@ -410,34 +410,9 @@ fn message(m: WireMessage) -> host::Message {
     }
 }
 
-/// Whether `text` mentions `username`, by the rule the runtime uses
-/// (`pollis_core::commands::bots::mentions_username`, #843): an `@` at the
-/// start or after whitespace, then letters, digits, `_`, `-` or `.`, trailing
-/// `.`, `-` and `_` dropped, case-insensitive; `@all` names nobody. Mirrored
-/// here because this crate does not link pollis-core.
-pub fn mentions(text: &str, username: &str) -> bool {
-    let want = username.to_lowercase();
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] != '@' || (i > 0 && !chars[i - 1].is_whitespace()) {
-            i += 1;
-            continue;
-        }
-        let mut j = i + 1;
-        while j < chars.len() && (chars[j].is_alphanumeric() || matches!(chars[j], '_' | '-' | '.'))
-        {
-            j += 1;
-        }
-        let token: String = chars[i + 1..j].iter().collect::<String>();
-        let token = token.trim_end_matches(['.', '-', '_']).to_lowercase();
-        if !token.is_empty() && token != "all" && token == want {
-            return true;
-        }
-        i = j.max(i + 1);
-    }
-    false
-}
+/// Whether `text` mentions `username`: the runtime's own rule
+/// (`pollis_app_manifest::mentions_username`).
+pub use pollis_app_manifest::mentions_username as mentions;
 
 /// Route a channel message as the runtime's App handler does.
 pub fn route(manifest: &Manifest, m: host::Message, username: &str) -> host::Trigger {
