@@ -281,3 +281,76 @@ async fn an_apps_webhook_receives_the_raw_request() {
     assert_eq!(r.webhook().unwrap().result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
     assert_eq!(texts(&ds), vec!["from the hook".to_string()]);
 }
+
+// ------------------------------------------------------------- #2018 commands
+
+/// The fixture App's `on-command` runs the command's arguments as its script,
+/// so `/ticket post <channel> filed` posts "filed" only if the arguments
+/// reached `on-command`.
+fn commands_app() -> Arc<dyn Handler> {
+    let manifest = br##"{
+        "name": "tickets", "version": "0.1.0",
+        "triggers": ["commands", "requests"],
+        "read": { "channels": ["#alerts"] },
+        "actions": ["post"],
+        "commands": [
+            { "name": "ticket", "description": "File a ticket", "arg_hint": "<title>" },
+            { "name": "forget-me", "description": "Ask for your data", "request": true }
+        ]
+    }"##;
+    let wasm = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-app-host/fixtures/test-app.wasm")).unwrap();
+    let mut post_only = grants();
+    post_only.actions = [ActionKind::Post].into();
+    Arc::new(AppHandler::new(wasm, manifest, post_only).unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declared_command_reaches_on_command_with_its_arguments() {
+    let ds = Arc::new(FakeDs::default());
+    roster(&ds);
+    let host = Installation::new(FakeCore::new("host-1", ds.clone()), commands_app());
+    ds.deliver("01MSG1", "alice", &format!("/ticket post {CHANNEL} filed"));
+    ds.deliver("01MSG2", "alice", &format!("/Ticket @counter_bot post {CHANNEL} targeted"));
+    let r = host.run_job(JobInput::Wake).await.unwrap();
+    assert_eq!(r.triggers[0].result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
+    assert_eq!(texts(&ds), vec!["filed".to_string(), "targeted".into()]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_the_app_did_not_declare_or_aimed_at_another_bot_runs_nothing() {
+    let ds = Arc::new(FakeDs::default());
+    roster(&ds);
+    let host = Installation::new(FakeCore::new("host-1", ds.clone()), commands_app());
+    // Undeclared; another bot's (the duplicate-name case); a request command
+    // typed into the channel; a plain message; a command-looking mid-text slash.
+    ds.deliver("01MSG1", "alice", &format!("/deploy post {CHANNEL} undeclared"));
+    ds.deliver("01MSG2", "alice", &format!("/ticket @helper_bot post {CHANNEL} not-mine"));
+    ds.deliver("01MSG3", "alice", &format!("/forget-me post {CHANNEL} request"));
+    ds.deliver("01MSG4", "alice", &format!("post {CHANNEL} plain"));
+    ds.deliver("01MSG5", "alice", &format!("please /ticket post {CHANNEL} inline"));
+    let r = host.run_job(JobInput::Wake).await.unwrap();
+    for t in &r.triggers {
+        assert_eq!(t.result, Ok(TriggerOutcome::NoActions), "{t:?}");
+    }
+    assert!(ds.posts().is_empty(), "{:?}", ds.posts());
+    assert!(ds.claims.lock().unwrap().is_empty(), "nothing to claim");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_in_a_channel_the_app_is_not_granted_runs_nothing() {
+    let ds = Arc::new(FakeDs::default());
+    roster(&ds);
+    let host = Installation::new(FakeCore::new("host-1", ds.clone()), commands_app());
+    ds.log.lock().unwrap().push(pollis_bot::trigger::IncomingMessage {
+        envelope_id: "01ELSEWHERE".into(),
+        channel_id: "01RANDOM".into(),
+        sender_id: "alice".into(),
+        text: Some(format!("/ticket post {CHANNEL} leak")),
+        reply_to_id: None,
+        thread_id: None,
+        sent_at: String::new(),
+    });
+    let r = host.run_job(JobInput::Wake).await.unwrap();
+    assert_eq!(r.triggers[0].result, Ok(TriggerOutcome::NoActions));
+    assert!(ds.posts().is_empty());
+}
