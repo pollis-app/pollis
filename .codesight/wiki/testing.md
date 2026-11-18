@@ -8,6 +8,8 @@ Pollis has four tiers of automated tests:
 4. **Playwright UI specs** (`e2e/*.spec.js`) — front-end interaction only, against the browser build with `VITE_PLAYWRIGHT=true` (Tauri IPC mocked in `frontend/src/__mocks__/`). No backend, seconds to run. See [Playwright UI specs](#playwright-ui-specs-e2especjs) below.
 5. **Renderer unit tests** (`frontend/tests/*.test.ts`, `pnpm --filter frontend test`) — plain `node --test` over the renderer's pure functions, plus the source-scan guards. Milliseconds, no browser, no build step; Node's type stripping runs the TypeScript directly, so imports need the `.ts` extension.
 
+**What CI runs (#2022).** Automatic CI runs unit tests (tiers 1 and 5, `mobile/`'s `pnpm test`) and smoke/build checks only. Tiers 2-4 and the Maestro mobile flows are on demand: their workflows (`mls-flows.yml`, `e2e-*.yml`, `e2e-browser.yml`) are `workflow_dispatch`-only, and before merging a change its author runs the suites that cover it — the relevant Playwright specs, `cargo test --features test-harness --test flows`, and the Maestro flows (`mobile/scripts/maestro-run.sh`) — locally or on-device, and states the results in the PR. See `docs/deployments.md` → "On-demand E2E and integration".
+
 ### Source-scan guards, and when one is honest
 
 Several of the renderer's tests read source files instead of driving the app.
@@ -127,13 +129,13 @@ data-dir section](#the-process-wide-data-dir--never-set_var)).
    PRNG assertions get the same treatment: `fortuna_writes_every_byte_it_reports` pre-fills a sentinel and proves every reported byte was written (a partial fill leaves a non-zero prefix that carries the older, weaker assertions), and `fortuna_does_not_merely_count` scores each byte *position* across 64 reads, because a counter varies only in its low-order bytes.
 6. `cargo test -p pollis-tui` — see below.
    - `cd mobile && pnpm test` — Node's own runner over the pure modules in the Expo app (`mobile/tests/`). Mobile is a standalone project, not a workspace member, so it is its own command; it runs in CI inside `mobile-core-check.yml`'s cheap `expo-doctor` job rather than behind the 3-ABI `android-build`, on any PR touching `mobile/**`, the native closure, or a file outside `mobile/` the tests read (`tests/ci-paths.test.ts` fails when a test starts reading one the workflow's `changes` filters miss). Today it covers `applyReactionToggle`, the optimistic reaction reducer — whose whole job is to predict what `useConversationReactions` will report, so the cases that matter are the ones where the two could disagree (pill ordering, a message dropping out of the map, `count` tracking `user_ids`, an already-true toggle).
-7. `cargo test --features test-harness --test flows` — the integration harness. **Not in this job any more:** it runs in the parallel `flows` job, sharded four ways across runners (shard 0 = the `model::` module, shards 1-3 = every other test round-robin, each taken from the built binary's own `--list` and run with `--exact`, so the union is the whole suite by construction). Sharding is sound because the harness's shared world is per process. `tests` still builds the flows binary on `main`, as the single writer of the cache the shards restore.
+7. `cargo test --features test-harness --test flows` — the integration harness. **Not in this workflow:** it is on demand in `mls-flows.yml` (#2022), sharded four ways across runners (shard 0 = the `model::` module, shards 1-3 = every other test round-robin, each taken from the built binary's own `--list` and run with `--exact`, so the union is the whole suite by construction). Sharding is sound because the harness's shared world is per process. `tests` still builds (does not run) the flows binary on `main`, as the single writer of the cache those dispatched jobs restore. Run it locally before merging a change it covers.
 8. `cargo clippy --workspace --all-targets -- -D warnings` — the Rust lint gate (#912). Runs last so the test signal lands first, and inside this job because the toolchain, apt deps and cargo cache are already there. `rust-toolchain.toml` lists `components = ["clippy"]`, so `cargo clippy` works on a dev box with no extra step; the job pins `dtolnay/rust-toolchain@1.96.0` (the action exports `RUSTUP_TOOLCHAIN` and would otherwise override the pin) so a new stable's new lints cannot turn an untouched PR red.
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so one failure still lets the rest report.
 
-**Where the PR wall-clock actually goes (measured Oct 2026, last ~30 PRs).** Not
-in test execution: the whole flows harness runs in ~3 min of test time (the
+**Where the PR wall-clock actually goes (measured Oct 2026, last ~30 PRs, when
+the flows harness still ran on PRs).** Not in test execution: the whole flows harness runs in ~3 min of test time (the
 longest test is `model_based_convergence_is_bulletproof` at ~56 s), the DS suite
 in ~2 s, and every other Rust step is compile. A warm `tests` job is ~8 min, a
 cold one ~28 — and 22 of 27 PR runs were cold, because rust-cache hashed every
@@ -143,12 +145,11 @@ the one `main` saved on got "No cache found". Every Rust PR-gate cache
 (`mls-tests`, `windows-link`, `mobile-core-check`) now sets
 `add-rust-environment-hash-key: false` (the pinned toolchain is in
 `rust-toolchain.toml`, which is already in the lockfile hash), and `mls-tests`
-also runs on Rust pushes to `main` so its cache is rewritten on merge rather than
-once a night. The other fixed sinks: the unconditional "Free disk space" step
+also runs on Rust pushes to `main` so its cache is rewritten on merge. The other fixed sinks: the unconditional "Free disk space" step
 (2-6 min per Linux job; `scripts/ci-free-disk.sh` now cleans only below 40 GB
 free, and the runners have ~90 GB), stalled apt mirror fetches (33 min on one
 flows shard; `scripts/ci-apt-retries.sh` sets a 30 s timeout with retries) and
-trickling ones (39 min on the 2026-11-06 nightly at 10-40 KB/s, which no
+trickling ones (39 min on a 2026-11-06 run at 10-40 KB/s, which no
 timeout catches; `scripts/ci-apt-install.sh` bounds the download at 5 min and
 then moves the job's apt sources to `archive.ubuntu.com`, #1803), and
 PRs that cannot affect a suite running it anyway — `mobile/**`, the root
@@ -904,22 +905,16 @@ with the headless build above, so the soak runs on any headless Linux box.
 MLS keygen uses the OS RNG and is not seedable — on failure the printed **op
 sequence** is the repro of record, not a proptest seed.
 
-**Nightly CI (#452 M3).** `.github/workflows/mls-tests.yml` runs the marathon at a
-meaningful size (`MARATHON_OPS=500`, `MARATHON_ACTORS=8`) on a schedule. On
-failure it distils the failing op sequence out of the teed log into
+**In CI, on demand (#452 M3, #2022).** The `marathon` job of
+`.github/workflows/mls-flows.yml` runs the soak on `workflow_dispatch`
+(`marathon_ops` / `marathon_actors` inputs; 500/8 is the size the old nightly
+used). On failure it distils the failing op sequence out of the teed log into
 `marathon-failing-op-sequence.txt` and uploads it as an artifact — the op sequence
 being the only repro of record for a non-seedable run. A failure raised outside
 `run_case` (the zero-loss check on client drop) prints no `op sequence` line, so
 the step falls back to proptest's `minimal failing input` block, the same Op
-vector. A red scheduled run also opens a `Nightly MLS tests failing` issue
-assigned to the owner, or comments on it while it is open (#1765): the nightly
-was red for a week before anyone noticed. Since #1803 that is
-`mls-nightly-triage.yml` (`scripts/ci-nightly-triage.sh`), which runs after the
-run finishes: a job that never got a runner (the 11-04 and 11-10 `macos-at-rest`
-losses) is re-run up to three attempts instead of filed, and the issue names
-each non-green job with its failure annotation (timeout, runner loss, error).
-The nightly's concurrency group is keyed on the event, so a push to `main` no
-longer cancels it (11-07).
+vector. It ran nightly from `mls-tests.yml` (with `mls-nightly-triage.yml`
+filing red runs) until #2022 made automatic CI unit and smoke checks only.
 
 ## Vault media soak (#1491)
 
@@ -1245,19 +1240,13 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 pnpm --filter @pollis/e2e e2e:ui bookmarks                   # one file (substring match)
 ```
 
-**CI:** `.github/workflows/e2e-browser.yml` runs the whole tier on every PR
-and every push to `main` that touches `frontend/**`, `e2e/**`, the root
-`package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml`,
-`scripts/ci-apt-retries.sh` or the workflow itself (#1059). The IPC is mocked, so nothing else can change a result; on
-any other PR a `changes` job skips the shards and the `playwright` check still
-reports green (fail-closed on anything but a genuine pass or a genuine skip). It ran nowhere from #843 until then, which is how
-the bookmarks copy-link paint assertion sat red on `main` from #990 onward
-without anyone noticing — the WebDriver tier's `e2e-*.yml` are dispatch-only
-by design, but this tier is seconds-per-spec and needs no backend, so there is
-no reason for it not to gate. It is sharded four ways across runners
-(`--shard=N/4`, by spec file), each runner keeping the config's `workers: 1`;
-a `playwright` job aggregates the shards into one check. Failure screenshots +
-traces upload per shard as the `playwright-artifacts-N` workflow artifacts.
+**CI:** `.github/workflows/e2e-browser.yml` runs the whole tier on
+`workflow_dispatch` only (#2022); before merging a renderer change, run the
+specs it touches locally with the commands above and state the result in the
+PR. The workflow is sharded four ways across runners (`--shard=N/4`, by spec
+file), each runner keeping the config's `workers: 1`. Failure screenshots +
+traces upload per shard as the `playwright-artifacts-N` workflow artifacts. It
+ran on every renderer PR from #1059 until #2022.
 
 | spec | what it proves |
 |---|---|

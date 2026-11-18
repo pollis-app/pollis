@@ -42,8 +42,10 @@ than assumed.
 - **Required status checks**, at minimum: `gate` (`mls-tests.yml`), `windows-gate`
   (`windows-link.yml`), `shell-scripts` (`scripts-check.yml` — the action-pin,
   workflow-parse and build-recipe gates all live in that job), `frontend-check`,
-  `e2e-browser`, `supply-chain`. A check that is not marked required is advisory: a red
-  one merges.
+  `supply-chain`. A check that is not marked required is advisory: a red one merges.
+  E2E and integration suites (`e2e-browser.yml`, `mls-flows.yml`, the `e2e-*.yml`
+  WebDriver scenarios) are dispatch-only (#2022) and report no PR check, so none of
+  them can be required.
 - **Block force pushes** and **restrict deletions** on `main`.
 - **Do not** grant bypass to any actor beyond what is strictly needed. The
   `rebuild-ledger` bot needs PR *creation* (the "Allow GitHub Actions to create and
