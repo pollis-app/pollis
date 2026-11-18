@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useGroupAliases } from "../hooks/queries/useGroupAliases";
-import { BellOff, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
+import { BellOff, Bot, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { BackMenu } from "../components/ui/BackMenu";
 import { appStore } from "../stores/appStore";
@@ -178,6 +178,16 @@ export const GroupPage: React.FC = observer(() => {
         badge: joinRequests.length > 0 ? joinRequests.length : undefined,
         type: "system" as const,
         testId: "menu-item-join-requests",
+        activateOn: "press" as const,
+      },
+      // Bots (#1182): admins create and manage them.
+      {
+        id: "bots",
+        label: t("group.bots"),
+        icon: <Bot size={14} />,
+        action: () => navigate({ to: "/groups/$groupId/bots", params: { groupId } }),
+        type: "system" as const,
+        testId: "menu-item-bots",
         activateOn: "press" as const,
       },
     ] : []),

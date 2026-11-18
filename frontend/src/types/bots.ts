@@ -1,30 +1,25 @@
-// Bots (#1182): the bridge types of `list_group_bots`, `get_bot`, `create_bot`,
-// `add_bot_host`. Twin: `mobile/types/bots.ts`; Rust: `pollis-core/src/commands/bots/admin.rs`.
+// Bots (#1182): a bot is a user scoped to one group; its hosts are its devices.
+// Mirrors the bot command types in pollis-core (serde `rename_all = "camelCase"`).
 
-export type BotSummary = {
+export interface BotSummary {
   userId: string;
   groupId: string;
   displayName: string;
   username: string;
-  /** Empty once the creating admin's account is gone. */
   createdBy: string;
   createdAt: string;
-  /** Hosts not revoked. */
   hostCount: number;
-};
+}
 
-export type BotHost = {
+/** One machine the bot runs on (a `user_device` row under the bot). */
+export interface BotHost {
   deviceId: string;
   name: string;
   lastSeenAt: string | null;
   createdAt: string;
-};
+}
 
-export type BotDetail = BotSummary & { hosts: BotHost[]; groupBotCap: number };
-
-/** Error-string prefixes the Bots pages tell apart. */
-export const BOT_ERROR_PREFIX = {
-  codeMismatch: "pairing_code_mismatch",
-  capReached: "bot_cap_reached",
-  requestExpired: "pairing_request_expired",
-} as const;
+export interface BotDetail extends BotSummary {
+  hosts: BotHost[];
+  groupBotCap: number;
+}
