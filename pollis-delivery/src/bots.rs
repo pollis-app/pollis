@@ -195,6 +195,29 @@ fn signed(identity: Option<(String, String)>) -> Result<(String, String), Respon
     identity.ok_or_else(|| AuthRejection::Unauthorized.into_response())
 }
 
+/// Gate and parse a device-signed request: `(body, actor, device)`, or the
+/// refusal to send back.
+async fn signed_request<B: serde::de::DeserializeOwned>(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(B, String, String), Response>, AppError> {
+    let (identity, parsed) = match gate_identity_and_parse::<B>(state, req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(Err(resp)),
+    };
+    Ok(signed(identity).map(|(actor, device)| (parsed, actor, device)))
+}
+
+/// The response for a host endpoint's outcome: its body, a 400 naming what was
+/// invalid, or 403 for anything the host may not do.
+fn host_outcome<B: pollis_api::DsRequest>(outcome: Result<B::Response, WriteOutcome>) -> Response {
+    match outcome {
+        Ok(body) => ok_response::<B>(body),
+        Err(WriteOutcome::Invalid(why)) => bad_request(why),
+        Err(_) => AuthRejection::Forbidden.into_response(),
+    }
+}
+
 // ---------------------------------------------------------------- pairing request
 
 /// What [`apply_pairing_request`] did.
@@ -462,11 +485,7 @@ pub enum CreateBotOutcome {
 
 /// POST /v1/bots/create — device-signed by an admin of the group.
 pub async fn create_bot(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<CreateBotBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, device) = match signed(identity) {
+    let (parsed, actor, device) = match signed_request::<CreateBotBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -720,11 +739,7 @@ pub async fn apply_list_bots(
 
 /// POST /v1/bots/delete — device-signed by an admin of the bot's group.
 pub async fn delete_bot(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<DeleteBotBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, device) = match signed(identity) {
+    let (parsed, actor, device) = match signed_request::<DeleteBotBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -832,11 +847,7 @@ pub async fn purge_group_bots(tx: &Connection, group_id: &str) -> anyhow::Result
 
 /// POST /v1/bots/hosts/approve — device-signed by a current admin of the bot's group.
 pub async fn approve_bot_host(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<ApproveBotHostBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, device) = match signed(identity) {
+    let (parsed, actor, device) = match signed_request::<ApproveBotHostBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -906,11 +917,7 @@ pub async fn apply_approve_bot_host(
 
 /// POST /v1/bots/hosts/pending — device-signed by one of a bot's hosts.
 pub async fn pending_bot_hosts(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, _parsed) = match gate_identity_and_parse::<PendingBotHostsBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, _device) = match signed(identity) {
+    let (_parsed, actor, _device) = match signed_request::<PendingBotHostsBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -973,11 +980,7 @@ pub enum WrapOutcome {
 
 /// POST /v1/bots/hosts/wrap — device-signed by one of the bot's hosts.
 pub async fn wrap_bot_host(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<WrapBotHostBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, device) = match signed(identity) {
+    let (parsed, actor, device) = match signed_request::<WrapBotHostBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -1125,11 +1128,7 @@ pub async fn apply_wrap_bot_host(
 
 /// POST /v1/bots/triggers/claim — device-signed by one of the bot's hosts.
 pub async fn claim_trigger(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<ClaimTriggerBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, device) = match signed(identity) {
+    let (parsed, actor, device) = match signed_request::<ClaimTriggerBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -1137,11 +1136,8 @@ pub async fn claim_trigger(State(state): State<AppState>, req: RawRequest) -> Re
         return Ok(AuthRejection::Forbidden.into_response());
     }
     let conn = state.db.conn().await?;
-    match apply_claim_trigger(&conn, &actor, &device, &parsed.trigger_key, crate::util::now_unix()).await? {
-        Ok(won) => Ok(ok_response::<ClaimTriggerBody>(ClaimTriggerResponse { won })),
-        Err(WriteOutcome::Invalid(why)) => Ok(bad_request(why)),
-        Err(_) => Ok(AuthRejection::Forbidden.into_response()),
-    }
+    let outcome = apply_claim_trigger(&conn, &actor, &device, &parsed.trigger_key, crate::util::now_unix()).await?;
+    Ok(host_outcome::<ClaimTriggerBody>(outcome.map(|won| ClaimTriggerResponse { won })))
 }
 
 /// Claim `(installation, trigger_key)`: the `PRIMARY KEY` makes the first insert
@@ -1201,11 +1197,7 @@ fn decode_key_ids(ids: &[String]) -> Option<Vec<Vec<u8>>> {
 
 /// POST /v1/bots/app-state/read — device-signed by one of the bot's hosts.
 pub async fn app_state_read(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<AppStateReadBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, _device) = match signed(identity) {
+    let (parsed, actor, _device) = match signed_request::<AppStateReadBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -1213,11 +1205,7 @@ pub async fn app_state_read(State(state): State<AppState>, req: RawRequest) -> R
         return Ok(AuthRejection::Forbidden.into_response());
     }
     let conn = state.db.conn().await?;
-    match apply_app_state_read(&conn, &actor, &parsed.key_ids).await? {
-        Ok(resp) => Ok(ok_response::<AppStateReadBody>(resp)),
-        Err(WriteOutcome::Invalid(why)) => Ok(bad_request(why)),
-        Err(_) => Ok(AuthRejection::Forbidden.into_response()),
-    }
+    Ok(host_outcome::<AppStateReadBody>(apply_app_state_read(&conn, &actor, &parsed.key_ids).await?))
 }
 
 /// The entries for `key_ids` that exist, and the installation's usage.
@@ -1269,11 +1257,7 @@ pub async fn apply_app_state_read(
 /// POST /v1/bots/app-state/commit — device-signed by the host that won the
 /// claim on `trigger_key`.
 pub async fn app_state_commit(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
-    let (identity, parsed) = match gate_identity_and_parse::<AppStateCommitBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
-    let (actor, device) = match signed(identity) {
+    let (parsed, actor, device) = match signed_request::<AppStateCommitBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
@@ -1281,11 +1265,8 @@ pub async fn app_state_commit(State(state): State<AppState>, req: RawRequest) ->
         return Ok(AuthRejection::Forbidden.into_response());
     }
     let conn = state.db.conn().await?;
-    match apply_app_state_commit(&conn, &actor, &device, &parsed, crate::util::now_unix()).await? {
-        Ok(resp) => Ok(ok_response::<AppStateCommitBody>(resp)),
-        Err(WriteOutcome::Invalid(why)) => Ok(bad_request(why)),
-        Err(_) => Ok(AuthRejection::Forbidden.into_response()),
-    }
+    let outcome = apply_app_state_commit(&conn, &actor, &device, &parsed, crate::util::now_unix()).await?;
+    Ok(host_outcome::<AppStateCommitBody>(outcome))
 }
 
 /// Apply a job's writes, all or none, once per claim, only for the device that
