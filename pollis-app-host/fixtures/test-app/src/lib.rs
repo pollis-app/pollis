@@ -265,7 +265,8 @@ impl Guest for TestApp {
     }
 
     fn on_command(command: Command) -> Result<(), String> {
-        run(&format!("command {} {}", command.name, command.message.id), &command.args)
+        // The command's own message, so `ack` replies to it.
+        run_on(&format!("command {} {}", command.name, command.message.id), Some(&command.message), &command.args)
     }
 
     fn on_schedule(schedule: Schedule) -> Result<(), String> {
