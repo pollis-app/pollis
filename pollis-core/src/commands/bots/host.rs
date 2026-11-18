@@ -138,7 +138,7 @@ async fn file_pairing_request(
         let code = derive_pairing_code(ephemeral_pub.as_bytes(), &device_id, &target)?;
         let body = BotPairingRequestBody {
             code_lookup: b64().encode(code_lookup(&code)),
-            poll_verifier: b64().encode(Sha256::digest(&*poll_secret)),
+            poll_verifier: b64().encode(Sha256::digest(poll_secret.as_slice())),
             ephemeral_pub: b64().encode(ephemeral_pub.as_bytes()),
             device_id: device_id.clone(),
             device_name: device_name.clone(),
@@ -174,7 +174,7 @@ async fn file_pairing_request(
 async fn pairing_status(state: &Arc<AppState>, handle: &PairingHandle) -> Result<Option<BotPairingStatus>> {
     let body = BotPairingStatusBody {
         request_id: handle.request_id.clone(),
-        poll_secret: b64().encode(*handle.poll_secret),
+        poll_secret: b64().encode(handle.poll_secret.as_slice()),
     };
     let resp = crate::commands::mls::ds_post_plain(state, &body).await?;
     let status = resp.status();
