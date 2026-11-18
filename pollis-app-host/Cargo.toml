@@ -20,6 +20,9 @@ pollis-app-manifest = { path = "../pollis-app-manifest" }
 # no WAT parser, no parallel compilation.
 wasmtime = { version = "49.0.6", default-features = false, features = ["runtime", "cranelift", "component-model", "std"] }
 url = "2"
+# The reference http-fetch client (src/http.rs): rustls + webpki roots, already
+# in the tree through verifiable-log-serve.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 sha2 = "0.11"
 getrandom = "0.4"
 thiserror = "2"

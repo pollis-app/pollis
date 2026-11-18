@@ -23,6 +23,7 @@
 //! a refusal to the App as an error that names the manifest field.
 
 mod egress;
+mod http;
 mod state;
 mod types;
 mod wasi;
@@ -39,6 +40,7 @@ use sha2::{Digest, Sha256};
 use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store, Trap, UpdateDeadline};
 
+pub use http::{is_public_ip, PublicHttpClient, PublicResolver};
 pub use state::HOST_IMPORTS;
 pub use types::*;
 pub use wasi::check_import;

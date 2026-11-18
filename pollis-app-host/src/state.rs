@@ -358,7 +358,11 @@ impl JobState {
                 body: body.clone(),
             };
             let max = self.limits.max_http_response_bytes;
-            let response = match self.services.http_fetch(&outbound, max) {
+            let response = match self.services.http_fetch(
+                &outbound,
+                max,
+                self.deadline.saturating_duration_since(Instant::now()),
+            ) {
                 Ok(r) => r,
                 Err(e) => return Ok(Err(format!("`http-fetch` to `{host}` failed: {}", e.0))),
             };

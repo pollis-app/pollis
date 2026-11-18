@@ -107,6 +107,7 @@ impl HostServices for Fake {
         &self,
         request: &OutboundRequest,
         _max: usize,
+        _timeout: std::time::Duration,
     ) -> Result<HttpResponse, ServiceError> {
         self.fetched.lock().unwrap().push(request.clone());
         self.http

@@ -246,13 +246,23 @@ pub trait HostServices: Send + Sync {
         message_id: &str,
     ) -> Result<Option<MessageMeta>, ServiceError>;
 
-    /// Perform exactly one HTTPS request. Must not follow redirects (the host
-    /// checks and follows same-host ones itself) and must stop reading the
-    /// body after `max_body_bytes + 1` bytes.
+    /// Perform exactly one HTTPS request, within `timeout`. The contract:
+    ///
+    /// - connect only to **public** addresses: resolve the host once, refuse
+    ///   loopback, private, link-local (cloud metadata), CGNAT, unique-local
+    ///   and reserved addresses, and connect to the address that was checked,
+    ///   never a second DNS answer (DNS rebinding);
+    /// - do not follow redirects (the host checks and follows same-host ones
+    ///   itself) and use no proxy from the environment;
+    /// - stop reading the body after `max_body_bytes + 1` bytes.
+    ///
+    /// [`crate::PublicHttpClient::fetch`] does exactly this; a runtime should
+    /// delegate to it.
     fn http_fetch(
         &self,
         request: &OutboundRequest,
         max_body_bytes: usize,
+        timeout: std::time::Duration,
     ) -> Result<HttpResponse, ServiceError>;
 
     /// The runtime's log. Never the group.
