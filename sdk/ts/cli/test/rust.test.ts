@@ -82,7 +82,7 @@ describe("pollis app new --lang rust", () => {
   test("without --sdk the App depends on the released crate", () => {
     mkdirSync(join(scratch, "released"), { recursive: true });
     const dir = newApp({ name: "hello-bot", lang: "rust", parent: join(scratch, "released") });
-    assert.match(readFileSync(join(dir, "Cargo.toml"), "utf8"), /^pollis-app = "\^0\.1\.0"$/m);
+    assert.match(readFileSync(join(dir, "Cargo.toml"), "utf8"), /^pollis-app = "0\.1"$/m);
     assert.equal(existsSync(join(dir, "vendor")), false);
   });
 

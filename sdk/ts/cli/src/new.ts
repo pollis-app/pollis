@@ -41,7 +41,10 @@ function sdkVersion(): string {
  */
 function rustDependency(target: string, sdk: string | undefined): string {
   if (!sdk) {
-    return JSON.stringify(sdkVersion());
+    // The crate shares the CLI's major.minor; its patch releases are its own,
+    // so a CLI patch release never asks for a crate version that does not exist.
+    const [major, minor] = sdkVersion().slice(1).split(".");
+    return JSON.stringify(`${major}.${minor}`);
   }
   const crate = join(resolve(sdk), "..", "rust", "pollis-app");
   if (!existsSync(join(crate, "Cargo.toml"))) {
