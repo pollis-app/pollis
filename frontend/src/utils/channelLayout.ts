@@ -26,7 +26,7 @@ export interface ChannelBlock<C extends LayoutChannel, K extends LayoutCategory>
 }
 
 /** The category a channel renders under: `null` when it has none or names one not listed. */
-export function blockOf<C extends LayoutChannel>(channel: C, categoryIds: ReadonlySet<string>): string | null {
+function blockOf<C extends LayoutChannel>(channel: C, categoryIds: ReadonlySet<string>): string | null {
   const id = channel.category_id ?? null;
   return id !== null && categoryIds.has(id) ? id : null;
 }

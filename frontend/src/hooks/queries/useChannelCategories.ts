@@ -69,7 +69,7 @@ function useArrangement<V extends { groupId: string }, R>(
 }
 
 /** A temporary id for a category shown before the DS has answered: nothing may act on it yet. */
-export const PENDING_CATEGORY_PREFIX = "pending-category-";
+const PENDING_CATEGORY_PREFIX = "pending-category-";
 
 export const isPendingCategory = (id: string) => id.startsWith(PENDING_CATEGORY_PREFIX);
 

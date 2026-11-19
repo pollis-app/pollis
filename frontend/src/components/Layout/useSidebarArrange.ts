@@ -28,7 +28,7 @@ type Slot =
   | { kind: "channel"; categoryId: string | null; index: number }
   | { kind: "category"; index: number };
 
-export interface ArrangeHandlers {
+interface ArrangeHandlers {
   onMoveChannel: (channelId: string, categoryId: string | null, position: number) => void;
   onMoveCategory: (categoryId: string, position: number) => void;
 }

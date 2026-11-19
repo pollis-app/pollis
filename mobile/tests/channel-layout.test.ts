@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { channelBlocks, stepCategory, stepChannel } from "../lib/channelLayout.ts";
+import { appendChannel, channelBlocks, dropPosition, flattenBlocks, stepCategory, stepChannel } from "../lib/channelLayout.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p: string) => readFileSync(join(here, p), "utf8");
@@ -72,4 +72,14 @@ test("collapse state stays on the device", () => {
   const store = read("../lib/categoryCollapse.ts");
   assert.match(store, /documentDirectory/);
   assert.doesNotMatch(store, /invoke\(|save_preferences/);
+});
+
+test("a new channel lands at the bottom of its block, and a drop slot counts the lifted row out", () => {
+  const next = appendChannel([ch("a"), ch("c", "k1")], cats, ch("n", "k1"));
+  assert.deepEqual(next.map((c) => c.id), ["a", "c", "n"]);
+  assert.deepEqual(
+    flattenBlocks(channelBlocks(next, cats)).map((c) => [c.id, c.category_id]),
+    [["a", null], ["c", "k1"], ["n", "k1"]],
+  );
+  assert.equal(dropPosition([ch("a"), ch("b"), ch("c")], "a", 2), 1);
 });

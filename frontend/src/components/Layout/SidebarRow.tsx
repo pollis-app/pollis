@@ -13,7 +13,7 @@ export const sidebarIconProps = {
 export const indentPadClass = (indent: number): string =>
   indent >= 2 ? "ps-[2.8rem]" : "ps-[1.733rem]";
 
-export interface RowChevron {
+interface RowChevron {
   isCollapsed: boolean;
   onToggle: () => void;
   ariaLabel: string;
