@@ -1,25 +1,31 @@
-//! `pollis-import plan <export-dir> [--json | --sheet]`
+//! `pollis-import plan [--slack] <export> [--json | --sheet] [--include-archived]`
 //!
-//! Reads a DiscordChatExporter JSON export and prints what an import would
-//! create and drop. Read-only: it writes nothing and makes no network calls,
-//! so it is safe to point at a real export before any Pollis import exists.
+//! Reads a DiscordChatExporter JSON export or a Slack workspace export and
+//! prints what an import would create and drop. Read-only: it writes nothing
+//! and makes no network calls, so it is safe to point at a real export before
+//! any Pollis import exists.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use pollis_import::discord;
 use pollis_import::plan::{plan, ImportOptions};
-use pollis_import::report;
+use pollis_import::{read_export, report, SourceKind};
 
-const USAGE: &str = "usage: pollis-import plan <export-dir> [--json | --sheet]
+const USAGE: &str = "usage: pollis-import plan [--slack] <export> [--json | --sheet] [--include-archived]
 
-Reads every DiscordChatExporter JSON file in <export-dir> (one server), and
-a discord-guild.json snapshot if there is one, and prints a dry-run import
-plan (--json: the plan as JSON; --sheet: the invite sheet as CSV). Nothing is
-written and nothing leaves this machine. The Pollis desktop app applies it.
+Reads an export and prints a dry-run import plan (--json: the plan as JSON;
+--sheet: the invite sheet as CSV). Nothing is written and nothing leaves this
+machine. The Pollis desktop app applies it.
 
-Export with DiscordChatExporter using a bot token, --format Json and --media,
-so images and emoji are saved beside the JSON (Discord's links expire).";
+Discord (the default): <export> is a folder of DiscordChatExporter JSON
+files, and a discord-guild.json snapshot if there is one. Export with a bot
+token, --format Json and --media, so images and emoji are saved beside the
+JSON (Discord's links expire).
+
+Slack (--slack, or any .zip): <export> is a workspace export as downloaded
+(the .zip) or the folder it unpacks to, with a slack-workspace.json snapshot
+beside it if there is one. Archived channels are left out unless
+--include-archived.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -27,14 +33,17 @@ fn main() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     }
-    let mut dir: Option<PathBuf> = None;
+    let mut path: Option<PathBuf> = None;
     let mut json = false;
     let mut sheet = false;
-    let options = ImportOptions::default();
+    let mut slack = false;
+    let mut options = ImportOptions::default();
     for arg in &args[1..] {
         match arg.as_str() {
             "--json" => json = true,
             "--sheet" => sheet = true,
+            "--slack" => slack = true,
+            "--include-archived" => options.include_archived = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;
@@ -43,18 +52,20 @@ fn main() -> ExitCode {
                 eprintln!("unknown option {other}\n\n{USAGE}");
                 return ExitCode::from(2);
             }
-            other => dir = Some(PathBuf::from(other)),
+            other => path = Some(PathBuf::from(other)),
         }
     }
-    let Some(dir) = dir else {
+    let Some(path) = path else {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
+    let zipped = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
+    let kind = if slack || zipped { SourceKind::Slack } else { SourceKind::Discord };
 
-    let export = match discord::read_export_dir(&dir) {
+    let export = match read_export(kind, &path) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("could not read {}: {e}", dir.display());
+            eprintln!("could not read {}: {e}", path.display());
             return ExitCode::FAILURE;
         }
     };

@@ -253,6 +253,9 @@ fn merge(dir: &Path, s: Snapshot, export: &mut Export) {
             parent_id: None,
             position: Some(api.position),
             overwrites,
+            private: false,
+            archived: false,
+            members: Vec::new(),
             messages: Vec::new(),
             file: None,
         });
@@ -283,6 +286,7 @@ fn merge(dir: &Path, s: Snapshot, export: &mut Export) {
             animated: e.animated,
             image: None,
             uses: 0,
+            alias_of: None,
         });
         let image_present = matches!(&entry.image, Some(Media::Local(p)) if p.is_file());
         if !image_present && local.is_some() {
@@ -302,6 +306,9 @@ fn merge(dir: &Path, s: Snapshot, export: &mut Export) {
             avatar: None,
             role_ids: Vec::new(),
             listed_member: false,
+            email: None,
+            source_admin: false,
+            deactivated: false,
         });
         person.listed_member = true;
         person.role_ids = m.roles.clone();

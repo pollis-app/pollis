@@ -1,0 +1,27 @@
+[
+  {
+    "type": "message",
+    "user": "U03CHO",
+    "text": "new logo options :nw-logo:",
+    "ts": "1706781600.000100",
+    "reactions": [
+      {
+        "name": "party_parrot",
+        "users": [
+          "U07JO"
+        ],
+        "count": 1
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "user": "U07JO",
+    "text": "option B :ship-it:",
+    "ts": "1706785200.000200",
+    "edited": {
+      "user": "U07JO",
+      "ts": "1706785300.000000"
+    }
+  }
+]

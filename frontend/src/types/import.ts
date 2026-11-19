@@ -1,4 +1,7 @@
-// Mirrors `pollis_import::plan` and `pollis_core::commands::import` (#1180). Keep in sync.
+// Mirrors `pollis_import::plan` and `pollis_core::commands::import` (#1180 Discord, #1179 Slack). Keep in sync.
+
+/** `pollis_import::SourceKind`: which platform an export comes from. */
+export type ImportSource = "discord" | "slack";
 
 type Media = { Local: string } | { Remote: string };
 
@@ -6,22 +9,29 @@ export type ChannelNote =
   | { kind: "announcement" }
   | { kind: "forum" }
   | { kind: "stage" }
-  | { kind: "renamed"; from: string };
+  | { kind: "renamed"; from: string }
+  | { kind: "archived" };
 
 export type EmojiNote =
   | { kind: "renamed"; collided_with: string }
   | { kind: "no_valid_shortcode" }
   | { kind: "image_remote" }
-  | { kind: "image_missing" };
+  | { kind: "image_missing" }
+  | { kind: "alias_target_missing" };
 
 export type SkipReason =
   | { kind: "orphan_thread" }
   | { kind: "direct" }
-  | { kind: "unsupported"; source_type: string };
+  | { kind: "unsupported"; source_type: string }
+  | { kind: "archived" };
 
 export type PlanNote =
   | { kind: "no_emails" }
+  | { kind: "email_invites"; with_email: number; without_email: number }
   | { kind: "no_snapshot" }
+  | { kind: "no_workspace_snapshot" }
+  | { kind: "archived_skipped"; count: number }
+  | { kind: "user_groups_not_imported"; count: number }
   | { kind: "private_channels"; count: number }
   | { kind: "roles_collapsed"; discarded: number }
   | { kind: "history_not_imported"; messages: number };
@@ -69,12 +79,13 @@ export interface ChannelPlan {
   description: string | null;
   exists: boolean;
   private: boolean;
+  archived: boolean;
   overwrites: OverwritePlan[];
   history: HistorySummary;
   notes: ChannelNote[];
 }
 
-interface EmojiPlan {
+export interface EmojiPlan {
   source_id: string;
   source_name: string;
   shortcode: string | null;
@@ -82,6 +93,7 @@ interface EmojiPlan {
   animated: boolean;
   uses: number;
   image: Media | null;
+  alias_of: string | null;
   note: EmojiNote | null;
 }
 
@@ -92,15 +104,24 @@ export interface RolePlan {
   holders: number;
 }
 
-interface PersonPlan {
+export interface PersonPlan {
   source_id: string;
   username: string;
   display_name: string;
   is_bot: boolean;
   admin: boolean;
   roles: string[];
+  email: string | null;
   channels: string[];
   messages: number;
+}
+
+interface UserGroupPlan {
+  source_id: string;
+  handle: string;
+  name: string;
+  description: string | null;
+  members: string[];
 }
 
 interface ImportTotals {
@@ -114,9 +135,13 @@ interface ImportTotals {
   messages: number;
   overwrites: number;
   private_channels: number;
+  archived_skipped: number;
+  people_with_email: number;
+  user_groups: number;
 }
 
 export interface ImportPlan {
+  source: ImportSource;
   group: { name: string; icon: Media | null };
   categories: CategoryPlan[];
   channels: ChannelPlan[];
@@ -125,6 +150,7 @@ export interface ImportPlan {
   roles: RolePlan[];
   permissions_known: boolean;
   people: PersonPlan[];
+  user_groups: UserGroupPlan[];
   totals: ImportTotals;
   notes: PlanNote[];
   warnings: string[];
@@ -135,21 +161,38 @@ interface ImportTarget {
   name: string;
 }
 
-export interface DiscordImportPreview {
-  dir: string;
+export interface ImportPreview {
+  source: ImportSource;
+  path: string;
   plan: ImportPlan;
   invite_sheet: string;
   target: ImportTarget | null;
   candidates: ImportTarget[];
+  include_archived: boolean;
+}
+
+/** `pollis_core::commands::import::ImportApplyOptions`. */
+export interface ImportApplyOptions {
+  include_archived: boolean;
+  invite_by_email: boolean;
 }
 
 interface ImportFailure {
-  kind: "category" | "channel" | "emoji" | "icon" | "order" | "invite_link";
+  kind: "category" | "channel" | "emoji" | "icon" | "order" | "invite_link" | "invite";
   name: string;
   error: string;
 }
 
-export interface DiscordImportResult {
+export type EmailInviteOutcome = "invited" | "already_invited" | "already_member" | "you" | "no_account" | "failed";
+
+interface EmailInvite {
+  username: string;
+  display_name: string;
+  email: string;
+  outcome: EmailInviteOutcome;
+}
+
+export interface ImportResult {
   group_id: string;
   group_name: string;
   created_group: boolean;
@@ -164,6 +207,7 @@ export interface DiscordImportResult {
   failures: ImportFailure[];
   invite_link: { id: string; token: string; url: string; expires_at: string | null; max_uses: number | null } | null;
   invite_link_existing: boolean;
+  email_invites: EmailInvite[];
 }
 
 /** The `target` argument meaning "a new group" (`pollis_core::commands::import::TARGET_NEW`). */

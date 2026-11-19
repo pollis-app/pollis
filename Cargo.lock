@@ -6804,9 +6804,11 @@ dependencies = [
 name = "pollis-import"
 version = "1.1.0"
 dependencies = [
+ "flate2",
  "pollis-api",
  "serde",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

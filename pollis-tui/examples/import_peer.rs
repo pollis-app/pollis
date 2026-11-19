@@ -1,36 +1,45 @@
-//! Dev-DS check for the Discord structure import (#1180).
+//! Dev-DS check for the structure import: Discord (#1180) and Slack (#1179).
 //!
 //! Signs up (or signs in) `<email>` on the DS named by `POLLIS_DELIVERY_URL`
-//! (the dev DS — it fixes the OTP), imports `<export-dir>` with the same
+//! (the dev DS — it fixes the OTP), imports `<export>` with the same
 //! `pollis_core::commands::import` calls the desktop page makes, then runs it a
 //! second time against the group the first run made and reads the group back:
-//! categories and channels in order, the emoji, the invite links. Prints the
-//! lines the PR quotes; exits non-zero if the second run created anything or
-//! the layout differs from the plan.
+//! categories and channels in order, the emoji, the invite links and, with
+//! `--invite-by-email`, what became of each planned email. Prints the lines the
+//! PR quotes; exits non-zero if the second run created anything, invited
+//! anyone again, or the layout differs from the plan.
+//!
+//! `signup <email>` only signs an account up (an invitee for the email check).
+//! Email invites refuse to run unless every planned address is `@pollis.test`.
 //!
 //! The flows suite covers the same path against the in-process DS, which has
 //! no object storage; this is where the emoji and icon uploads are real.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
-//!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --example discord_import_peer -- \
-//!   <email> pollis-import/tests/fixtures/dragons-den
+//!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --example import_peer -- \
+//!   slack <email> pollis-import/tests/fixtures/northwind --invite-by-email
 
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
-use pollis_core::commands::{emoji, groups, import};
+use pollis_core::commands::import::{self, EmailInviteOutcome, ImportApplyOptions, SourceKind};
+use pollis_core::commands::{emoji, groups};
 use pollis_core::config::Config;
 use pollis_core::state::AppState;
 
 /// The dev DS's fixed OTP (`DEV_OTP`); override with `POLLIS_DEV_OTP`.
 const DEFAULT_OTP: &str = "000000";
 
+const USAGE: &str = "usage: import_peer <discord|slack> <email> <export> [--invite-by-email] | import_peer signup <email>";
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
-    let email = args.next().context("usage: discord_import_peer <email> <export-dir>")?;
-    let dir = args.next().context("usage: discord_import_peer <email> <export-dir>")?;
-    let dir = std::fs::canonicalize(&dir)?.to_string_lossy().into_owned();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mode = args.first().context(USAGE)?.as_str();
+    let email = args.get(1).context(USAGE)?.clone();
+    if !email.ends_with("@pollis.test") {
+        bail!("refusing {email:?}: only @pollis.test addresses");
+    }
     let otp = std::env::var("POLLIS_DEV_OTP").unwrap_or_else(|_| DEFAULT_OTP.to_string());
     let config = Config::from_env().context("POLLIS_DELIVERY_URL (the dev DS) is required")?;
     let ds = config.pollis_delivery_url.clone().unwrap_or_default();
@@ -38,35 +47,64 @@ async fn main() -> Result<()> {
         bail!("refusing to run against {ds:?} — dev DS only");
     }
     let state = Arc::new(AppState::new(config).await.context("AppState")?);
-
     pollis_tui::auth::request_otp(&state, &email).await?;
     let me = pollis_tui::auth::verify_otp(&state, &email, &otp).await?;
     pollis_tui::auth::set_pin_and_init(&state, &me.id, "0000").await?;
+    if mode == "signup" {
+        println!("SIGNED_UP={} ({})", me.username, me.id);
+        return Ok(());
+    }
+
+    let source = match mode {
+        "discord" => SourceKind::Discord,
+        "slack" => SourceKind::Slack,
+        _ => bail!("{USAGE}"),
+    };
+    let path = args.get(2).context(USAGE)?;
+    let path = std::fs::canonicalize(path)?.to_string_lossy().into_owned();
+    let invite_by_email = args.iter().any(|a| a == "--invite-by-email");
     println!("IMPORTER={} ({})", me.username, me.id);
 
-    let preview = import::discord_import_preview(dir.clone(), me.id.clone(), None, &state).await?;
+    let preview = import::import_preview(source, path.clone(), me.id.clone(), None, None, &state).await?;
     println!(
-        "PREVIEW target={:?} create: {} categories, {} channels, {} emoji",
+        "PREVIEW {} target={:?} create: {} categories, {} channels, {} emoji; {} people, {} with email",
+        source.name(),
         preview.target.as_ref().map(|t| &t.name),
         preview.plan.totals.to_create_categories,
         preview.plan.totals.to_create_channels,
-        preview.plan.totals.to_upload_emoji
+        preview.plan.totals.to_upload_emoji,
+        preview.plan.totals.people,
+        preview.plan.totals.people_with_email,
     );
+    if invite_by_email {
+        // Never invite a real address, even on the dev DS.
+        for p in &preview.plan.people {
+            if let Some(e) = &p.email {
+                if !e.ends_with("@pollis.test") {
+                    bail!("refusing to invite {e:?}: only @pollis.test addresses");
+                }
+            }
+        }
+    }
+    let options = Some(ImportApplyOptions { include_archived: false, invite_by_email });
     let target = preview.target.as_ref().map(|t| t.group_id.clone()).or(Some(import::TARGET_NEW.to_string()));
-    let first = import::discord_import_apply(dir.clone(), me.id.clone(), target, &state).await?;
+    let first = import::import_apply(source, path.clone(), me.id.clone(), target, options.clone(), &state).await?;
     report("FIRST", &first);
 
-    let again = import::discord_import_preview(dir.clone(), me.id.clone(), None, &state).await?;
+    let again = import::import_preview(source, path.clone(), me.id.clone(), None, None, &state).await?;
     let Some(t) = again.target.clone() else {
         bail!("the re-run did not find the imported group");
     };
     if t.group_id != first.group_id {
         bail!("the re-run picked another group");
     }
-    let second = import::discord_import_apply(dir.clone(), me.id.clone(), Some(t.group_id.clone()), &state).await?;
+    let second = import::import_apply(source, path.clone(), me.id.clone(), Some(t.group_id.clone()), options, &state).await?;
     report("SECOND", &second);
     if second.categories_created + second.channels_created + second.emoji_uploaded > 0 || second.invite_link.is_some() {
         bail!("the second run created something");
+    }
+    if second.email_invites.iter().any(|i| i.outcome == EmailInviteOutcome::Invited) {
+        bail!("the second run invited someone again");
     }
 
     // Read the group back from the DS.
@@ -97,8 +135,9 @@ async fn main() -> Result<()> {
         })
         .collect();
     println!("CATEGORIES {:?}", g.categories.iter().map(|k| k.name.as_str()).collect::<Vec<_>>());
-    for line in &layout {
-        println!("CHANNEL {line}");
+    for (line, c) in layout.iter().zip(&g.channels) {
+        let desc = c.description.as_deref().map(|d| format!(" — {}", d.replace('\n', " / "))).unwrap_or_default();
+        println!("CHANNEL {line}{desc}");
     }
     if preview.target.is_none() && layout != planned {
         bail!("the group's order differs from the plan");
@@ -114,7 +153,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn report(label: &str, r: &import::DiscordImportResult) {
+fn report(label: &str, r: &import::ImportResult) {
     println!(
         "{label} group={} created_group={} icon={} +{} categories +{} channels (moved {}) +{} emoji; existing {}/{}/{}; invite_link={} existing_link={}",
         r.group_name,
@@ -130,6 +169,9 @@ fn report(label: &str, r: &import::DiscordImportResult) {
         r.invite_link.is_some(),
         r.invite_link_existing
     );
+    for i in &r.email_invites {
+        println!("{label} EMAIL_INVITE {} <{}> {:?}", i.username, i.email, i.outcome);
+    }
     for f in &r.failures {
         println!("{label} FAILURE {} {}: {}", f.kind, f.name, f.error);
     }

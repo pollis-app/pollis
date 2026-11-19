@@ -266,6 +266,9 @@ impl Builder {
             parent_id,
             position: file.channel.position,
             overwrites: Vec::new(),
+            private: false,
+            archived: false,
+            members: Vec::new(),
             messages,
             file: Some(path.to_path_buf()),
         });
@@ -283,6 +286,9 @@ impl Builder {
             avatar: None,
             role_ids: Vec::new(),
             listed_member: false,
+            email: None,
+            source_admin: false,
+            deactivated: false,
         });
         // Later messages win: the newest nickname and avatar are the ones the
         // group knows them by now.
@@ -319,6 +325,7 @@ impl Builder {
             animated: emoji.is_animated,
             image: emoji.image_url.as_deref().and_then(|u| media(base, u)),
             uses: 0,
+            alias_of: None,
         });
         entry.uses += uses;
         Some(id.clone())
@@ -404,6 +411,7 @@ impl Builder {
             emoji: self.emoji,
             roles: self.roles.into_values().collect(),
             owner_id: None,
+            user_groups: Vec::new(),
             has_snapshot: false,
             warnings: self.warnings,
         }

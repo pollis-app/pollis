@@ -1018,7 +1018,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 ### `components/Import` (2)
 
 - **ImportPlanView** — props: plan, inviteSheet — `frontend/src/components/Import/ImportPlanView.tsx`
-- **ImportResultView** — props: result, onOpenGroup — `frontend/src/components/Import/ImportResultView.tsx`
+- **ImportResultView** — props: result, withCategories, onOpenGroup — `frontend/src/components/Import/ImportResultView.tsx`
 
 ### `components/Invites` (3)
 
@@ -1212,7 +1212,6 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **CreateGroup** — props: onSuccess — `frontend/src/pages/CreateGroup.tsx`
 - **CreateGroupPage** — `frontend/src/pages/CreateGroupPage.tsx`
 - **DiagnosticsPage** — `frontend/src/pages/DiagnosticsPage.tsx`
-- **DiscordImportPage** — `frontend/src/pages/DiscordImportPage.tsx`
 - **DMPage** — `frontend/src/pages/DM.tsx`
 - **DMSettingsPage** — `frontend/src/pages/DMSettings.tsx`
 - **DMsPage** — `frontend/src/pages/DMs.tsx`
@@ -1222,6 +1221,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **GroupPage** — `frontend/src/pages/Group.tsx`
 - **GroupsPage** — `frontend/src/pages/Groups.tsx`
 - **HistoryTransferApprovalPage** — `frontend/src/pages/HistoryTransferApprovalPage.tsx`
+- **ImportPage** — props: source — `frontend/src/pages/ImportPage.tsx`
 - **IncomingCallPage** — `frontend/src/pages/IncomingCallPage.tsx`
 - **InviteLinkLandingPage** — `frontend/src/pages/InviteLinkLandingPage.tsx`
 - **InviteMember** — props: groupId, groupName — `frontend/src/pages/InviteMember.tsx`

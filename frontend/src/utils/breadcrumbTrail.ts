@@ -50,6 +50,8 @@ export function breadcrumbTrail(pathname: string, ctx: TrailContext, t: T): Segm
       out.push({ label: t("nav:breadcrumb.createGroup"), to: "/groups/new" });
     } else if (groupId === "search") {
       out.push({ label: t("nav:breadcrumb.findGroup"), to: "/groups/search" });
+    } else if (groupId === "import" && pathname.startsWith("/groups/import/slack")) {
+      out.push({ label: t("nav:breadcrumb.importSlack"), to: "/groups/import/slack" });
     } else if (groupId === "import") {
       out.push({ label: t("nav:breadcrumb.importDiscord"), to: "/groups/import" });
     } else if (groupId) {

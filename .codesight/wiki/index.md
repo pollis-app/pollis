@@ -28,7 +28,7 @@ Start here. Navigate to the article you need.
 - [Terminal Client (pollis-tui)](./pollis-tui.md) — Headless ratatui/crossterm client on `pollis-core` (no Tauri/IPC): architecture, run headless, the auth-order gotcha
 - [Client Minimum Version](./client-policy.md) — Retiring old builds: the published policy, the launch check on every client, the blocked page, the DS 426 (#1611)
 - [Mobile OTA Updates](./ota-updates.md) — Signed over-the-air JS updates: app config, fingerprint runtime version, publish pipeline, update Worker, transparency leaves (#1250)
-- [Importing from Discord and Slack](./import.md) — `pollis-import` (DiscordChatExporter files + a guild snapshot → a dry-run plan, `pollis-import plan <dir>`), the apply step in `pollis-core` (`discord_import_preview` / `_apply`, idempotent), the desktop page `/groups/import`, the shortcode collision policy, and the history design pending a decision (#1180, #1179)
+- [Importing from Discord and Slack](./import.md) — `pollis-import` (DiscordChatExporter files + a guild snapshot, or a Slack workspace export ZIP + a workspace snapshot → a dry-run plan, `pollis-import plan [--slack] <export>`), the apply step in `pollis-core` (`import_preview` / `import_apply`, idempotent, Slack email invites), the desktop pages `/groups/import` and `/groups/import/slack`, the shortcode collision policy, and the history design pending a decision (#1180, #1179)
 
 ## Quick Reference
 

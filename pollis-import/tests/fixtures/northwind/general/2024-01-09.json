@@ -1,0 +1,15 @@
+[
+  {
+    "type": "message",
+    "user": "U07JO",
+    "text": "Travel booked :partyparrot: :party-parrot:",
+    "ts": "1704790800.000100"
+  },
+  {
+    "type": "message",
+    "user": "U01ANA",
+    "text": "set the channel topic: Offsite is 12 March",
+    "ts": "1704794400.000200",
+    "subtype": "channel_topic"
+  }
+]

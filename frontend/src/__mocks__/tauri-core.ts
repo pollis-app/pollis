@@ -761,12 +761,24 @@ function findMessage(messageId: string): MockMessage | undefined {
   return undefined;
 }
 
-/** #1180: what a Discord import plan becomes against `groupId`'s current state (or a new group). */
-function discordImportPlanFor(groupId: string | null): any {
-  const base = (preload.discordImport?.preview ?? null) as any;
-  if (!base) {
-    throw new Error('no Discord export found in that folder');
+/** #1180/#1179: an import's preload (`discordImport` / `slackImport`): `preview` is real `pollis-import`
+ *  output, the Slack one with `preview_archived` (archived channels included) beside it. */
+function importPreload(source: string): any {
+  const data = (preload as any)[`${source}Import`];
+  if (!data?.preview) {
+    throw new Error(`no ${source === 'slack' ? 'Slack' : 'Discord'} export found there`);
   }
+  return data;
+}
+
+function importBase(source: string, includeArchived: boolean): any {
+  const data = importPreload(source);
+  return includeArchived && data.preview.preview_archived ? data.preview.preview_archived : data.preview;
+}
+
+/** What an import plan becomes against `groupId`'s current state (or a new group). */
+function importPlanFor(source: string, groupId: string | null, includeArchived: boolean): any {
+  const base = importBase(source, includeArchived);
   const plan = JSON.parse(JSON.stringify(base.plan));
   if (groupId) {
     const cats = store.categories[groupId] ?? [];
@@ -789,37 +801,48 @@ function discordImportPlanFor(groupId: string | null): any {
   return plan;
 }
 
-function discordImportCandidates(name: string) {
+function importCandidates(name: string) {
   return store.groups
     .filter((g) => g.name.toLowerCase() === name.toLowerCase() && roleInGroup(g.id) === 'admin')
     .map((g) => ({ group_id: g.id, name: g.name }));
 }
 
-function discordImportPreview(target: string | null) {
-  const base = preload.discordImport?.preview as any;
-  const candidates = discordImportCandidates(base?.plan?.group?.name ?? '');
+function importPreview(source: string, target: string | null, includeArchived: boolean) {
+  const base = importBase(source, includeArchived);
+  const candidates = importCandidates(base?.plan?.group?.name ?? '');
   let chosen: string | null = null;
   if (target && target !== 'new') {
     chosen = target;
   } else if (target === null && candidates.length === 1) {
     chosen = candidates[0].group_id;
   }
-  const plan = discordImportPlanFor(chosen);
+  const plan = importPlanFor(source, chosen, includeArchived);
   const group = chosen ? store.groups.find((g) => g.id === chosen) : null;
   return {
-    dir: base.dir,
+    source,
+    path: base.path,
     plan,
     invite_sheet: base.invite_sheet,
     target: group ? { group_id: group.id, name: group.name } : null,
     candidates,
+    include_archived: includeArchived,
   };
 }
 
-function discordImportApply(target: string | null) {
-  if (preload.discordImport?.failApply) {
-    throw new Error(String(preload.discordImport.failApply));
+/** Email invites already sent by an import, as `groupId|email` (the DS's pending invites). */
+const importInvited = new Set<string>();
+
+function importApply(
+  source: string,
+  target: string | null,
+  options: { include_archived?: boolean; invite_by_email?: boolean } | null,
+) {
+  const data = importPreload(source);
+  if (data.failApply) {
+    throw new Error(String(data.failApply));
   }
-  const base = preload.discordImport.preview as any;
+  const includeArchived = !!options?.include_archived;
+  const base = importBase(source, includeArchived);
   let groupId = target && target !== 'new' ? target : null;
   const created = !groupId;
   if (!groupId) {
@@ -834,7 +857,7 @@ function discordImportApply(target: string | null) {
     store.channels[groupId] = [];
     store.categories[groupId] = [];
   }
-  const plan = discordImportPlanFor(groupId);
+  const plan = importPlanFor(source, groupId, includeArchived);
   const result = {
     group_id: groupId,
     group_name: store.groups.find((g) => g.id === groupId)!.name,
@@ -850,6 +873,7 @@ function discordImportApply(target: string | null) {
     failures: [] as { kind: string; name: string; error: string }[],
     invite_link: null as unknown,
     invite_link_existing: false,
+    email_invites: [] as { username: string; display_name: string; email: string; outcome: string }[],
   };
   for (const k of plan.categories) {
     if (k.exists) {
@@ -916,6 +940,21 @@ function discordImportApply(target: string | null) {
       revoked_at: null,
     });
     result.invite_link = { id, token, url: `https://pollis.com/invite/${token}`, expires_at: expiresAt, max_uses: null };
+  }
+  // Email invites: `slackImport.accounts` are the emails with Pollis accounts.
+  if (options?.invite_by_email) {
+    const accounts: string[] = data.accounts ?? [];
+    for (const p of plan.people.filter((x: any) => !x.is_bot && x.email)) {
+      const key = `${groupId}|${p.email}`;
+      let outcome = 'no_account';
+      if (p.email === store.session?.email) {
+        outcome = 'you';
+      } else if (accounts.includes(p.email)) {
+        outcome = importInvited.has(key) ? 'already_invited' : 'invited';
+        importInvited.add(key);
+      }
+      result.email_invites.push({ username: p.username, display_name: p.display_name, email: p.email, outcome });
+    }
   }
   return result;
 }
@@ -1637,17 +1676,21 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'pick_open_paths':
       return (preload.openPaths as string[] | undefined) ?? [];
 
-    // Discord import (#1180): the plan is `preload.discordImport.preview` (real `pollis-import`
-    // output for the dragons-den fixture); the mock marks what a target group already holds and
-    // applies it the way `pollis_core::commands::import` does, through the same store.
-    case 'discord_import_preview': {
-      const { target } = args as { dir: string; target: string | null };
-      return discordImportPreview(target);
+    // Import (#1180 Discord, #1179 Slack): the plan is `preload.<source>Import.preview` (real
+    // `pollis-import` output for the dragons-den and northwind fixtures); the mock marks what a target
+    // group already holds and applies it the way `pollis_core::commands::import` does, through the same store.
+    case 'import_preview': {
+      const { source, target, includeArchived } = args as { source: string; target: string | null; includeArchived?: boolean };
+      return importPreview(source, target, !!includeArchived);
     }
 
-    case 'discord_import_apply': {
-      const { target } = args as { dir: string; target: string | null };
-      return discordImportApply(target);
+    case 'import_apply': {
+      const { source, target, options } = args as {
+        source: string;
+        target: string | null;
+        options: { include_archived?: boolean; invite_by_email?: boolean } | null;
+      };
+      return importApply(source, target, options);
     }
 
     // Export (#856): no media cache, so every attachment is "missing".
