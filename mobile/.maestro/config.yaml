@@ -4,9 +4,11 @@
 # an iPad Simulator, and an Android emulator. This box (headless Linux) can
 # only AUTHOR these flows — it cannot run them. See README.md.
 #
-# `maestro test mobile/.maestro/flows` runs the whole suite; a single file
-# runs one flow. The runner script (`mobile/scripts/maestro-run.sh`) wraps
-# this to boot the right device and collect the screenshot gallery.
+# Run the suite through `mobile/scripts/maestro-run.sh` (#2029): it writes its
+# own config per device run, whose executionOrder puts the fresh-account flows
+# first, then setup/setup.yaml (the shared account), then the rest, and boots
+# the devices in parallel. A bare `maestro test <flow file>` still runs one
+# flow (subflows/home.yaml signs up if the app is signed out).
 
 # Run every flow under flows/ (subflows/ are included via runFlow, never run
 # directly).

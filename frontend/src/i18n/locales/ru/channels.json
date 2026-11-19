@@ -113,7 +113,7 @@
     "empty": "Участников нет.",
     "self": "(вы)",
     "adminToggle": "админ",
-    "kick": "исключить",
+    "kick": "Исключить",
     "verified": "Проверенный контакт",
     "keyChanged": "Ключ идентификации изменился — проверьте заново",
     "invited": {
@@ -124,7 +124,8 @@
       "revoking": "Отзыв…",
       "revokeLabel": "Отозвать приглашение для {{name}}",
       "revokeFailed": "Не удалось отозвать приглашение."
-    }
+    },
+    "resetAlias": "Сбросить псевдоним"
   },
   "kickMember": {
     "pageTitle": "Исключить участника",
@@ -138,12 +139,12 @@
     "pageTitle": "Приглашения",
     "empty": "Приглашений нет.",
     "invitedBy": "Приглашение от {{name}}",
-    "accept": "принять",
-    "decline": "отклонить",
+    "accept": "Принять",
+    "decline": "Отклонить",
     "acceptFailed": "Не удалось принять приглашение. Попробуйте ещё раз."
   },
   "inviteMember": {
-    "pageTitle": "Пригласить участника :: {{group}}",
+    "pageTitle": "Пригласить участника — {{group}}",
     "intro": "Пригласить кого-нибудь в <accent>{{name}}</accent>",
     "identifierLabel": "Имя пользователя или эл. почта",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,13 +154,13 @@
     "sendFailed": "Не удалось отправить приглашение"
   },
   "joinRequests": {
-    "pageTitle": "Запросы на вступление :: {{group}}",
+    "pageTitle": "Запросы на вступление — {{group}}",
     "allPageTitle": "Запросы на вступление",
     "pendingFor": "Запросы на вступление в <accent>{{name}}</accent>",
     "empty": "Запросов нет.",
     "allEmpty": "Запросов на вступление нет.",
-    "approve": "одобрить",
-    "reject": "отклонить"
+    "approve": "Одобрить",
+    "reject": "Отклонить"
   },
   "joinByInvite": {
     "pageTitle": "Вступить в группу",
@@ -230,5 +231,13 @@
     "inviteBodyToGroup": "{{name}} приглашает вас в {{group}}",
     "inviteBody": "{{name}} приглашает вас",
     "inviteBodyUnknown": "Вас пригласили в группу"
+  },
+  "resetAlias": {
+    "pageTitle": "Сбросить псевдоним",
+    "confirm": "Сбросить псевдоним <strong>{{name}}</strong> (@{{handle}}) в этой группе?",
+    "consequence": "Здесь снова будет показан основной профиль. Можно задать новый псевдоним.",
+    "confirmButton": "Да, сбросить",
+    "submitting": "Сброс…",
+    "failed": "Не удалось сбросить псевдоним"
   }
 }

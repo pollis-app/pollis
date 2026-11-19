@@ -113,7 +113,7 @@
     "empty": "Учасників немає.",
     "self": "(ви)",
     "adminToggle": "адмін",
-    "kick": "виключити",
+    "kick": "Виключити",
     "verified": "Перевірений контакт",
     "keyChanged": "Ключ ідентичності змінився — перевірте ще раз",
     "invited": {
@@ -124,7 +124,8 @@
       "revoking": "Відкликання…",
       "revokeLabel": "Відкликати запрошення для {{name}}",
       "revokeFailed": "Не вдалося відкликати запрошення."
-    }
+    },
+    "resetAlias": "Скинути псевдонім"
   },
   "kickMember": {
     "pageTitle": "Вилучити учасника",
@@ -138,12 +139,12 @@
     "pageTitle": "Запрошення",
     "empty": "Немає запрошень в очікуванні.",
     "invitedBy": "Запрошення від {{name}}",
-    "accept": "прийняти",
-    "decline": "відхилити",
+    "accept": "Прийняти",
+    "decline": "Відхилити",
     "acceptFailed": "Не вдалося прийняти запрошення. Спробуйте ще раз."
   },
   "inviteMember": {
-    "pageTitle": "Запросити учасника :: {{group}}",
+    "pageTitle": "Запросити учасника — {{group}}",
     "intro": "Запросіть когось до <accent>{{name}}</accent>",
     "identifierLabel": "Ім'я користувача або пошта",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,13 +154,13 @@
     "sendFailed": "Не вдалося надіслати запрошення"
   },
   "joinRequests": {
-    "pageTitle": "Запити на приєднання :: {{group}}",
+    "pageTitle": "Запити на приєднання — {{group}}",
     "allPageTitle": "Запити на приєднання",
     "pendingFor": "Запити на приєднання до <accent>{{name}}</accent>",
     "empty": "Немає запитів в очікуванні.",
     "allEmpty": "Немає запитів на приєднання в очікуванні.",
-    "approve": "схвалити",
-    "reject": "відхилити"
+    "approve": "Схвалити",
+    "reject": "Відхилити"
   },
   "joinByInvite": {
     "pageTitle": "Приєднатися до групи",
@@ -230,5 +231,13 @@
     "inviteBodyToGroup": "Запрошення до {{group}} від {{name}}",
     "inviteBody": "Запрошення від {{name}}",
     "inviteBodyUnknown": "Вас запросили до групи"
+  },
+  "resetAlias": {
+    "pageTitle": "Скинути псевдонім",
+    "confirm": "Скинути псевдонім <strong>{{name}}</strong> (@{{handle}}) у цій групі?",
+    "consequence": "Тут знову показуватиметься основний профіль. Можна задати новий псевдонім.",
+    "confirmButton": "Так, скинути",
+    "submitting": "Скидання…",
+    "failed": "Не вдалося скинути псевдонім"
   }
 }

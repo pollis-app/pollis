@@ -9,6 +9,7 @@ import {
   setTrayEnabled,
 } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
+import { PageColumn } from "../components/ui/PageColumn";
 import {
   usePreferences,
   applyPreferences,
@@ -33,6 +34,7 @@ import {
 } from "../hooks/queries/useRelayServing";
 import { RelayServingSection } from "../components/Preferences/RelayServingSection";
 import { LanguageSection } from "../components/Preferences/LanguageSection";
+import { LinkPreviewsSection } from "../components/Preferences/LinkPreviewsSection";
 import { HexColorField } from "../components/Preferences/HexColorField";
 import {
   applyAccentColor,
@@ -65,6 +67,7 @@ import { isMac } from "../utils/platform";
 import { useShortcutLabel } from "../keyboard";
 import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 import { SkinPicker } from "../components/Preferences/SkinPicker";
+import { Chip } from "../components/ui/Chip";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -467,432 +470,428 @@ export const PreferencesPage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("preferences.title")} scrollable>
-      <div
-        data-testid="preferences-page"
-        className="flex-1 flex flex-col overflow-auto bg-bg"
-      >
-        <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
-          <div className="w-full max-w-md flex flex-col gap-8">
+      <PageColumn spacing="sections" paneTestId="preferences-page">
+        {/* Language (this device). Deliberately first: someone who cannot
+            read the UI needs the way to fix that at the top. One row; the
+            list is its own page (#1944). */}
+        <LanguageSection />
 
-            {/* Language (this device). Deliberately first: someone who cannot
-                read the UI needs the way to fix that at the top. One row; the
-                list is its own page (#1944). */}
-            <LanguageSection />
+        {/* Appearance — UI skin (synced across devices) */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("appearance.heading")}
+          </h2>
+          <SkinPicker
+            data-testid="pref-skin"
+            value={skin}
+            onChange={(val) => {
+              if (skin !== val) {
+                handleSkin(val);
+              }
+            }}
+          />
+          <p className="text-secondary font-mono text-muted">
+            {t("appearance.description")}
+          </p>
+        </section>
 
-            {/* Appearance — UI skin (synced across devices) */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("appearance.heading")}
-              </h2>
-              <SkinPicker
-                data-testid="pref-skin"
-                value={skin}
-                onChange={(val) => {
-                  if (skin !== val) {
-                    handleSkin(val);
-                  }
+        {/* Accent Color */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("accent.heading")}
+          </h2>
+
+          <HexColorField
+            color={accentHex}
+            hexInput={accentHexInput}
+            onHexInputChange={setAccentHexInput}
+            onColor={handleAccentColor}
+            title={t("accent.pickTitle")}
+          />
+
+          {/* Quick presets: the same list mobile offers (design/theme.ts). */}
+          <div className="flex gap-2 flex-wrap">
+            {ACCENT_PRESETS.map((preset) => (
+              <Chip
+                key={preset.n}
+                data-testid={`pref-accent-${preset.n.toLowerCase()}`}
+                selected={accentHex === preset.c}
+                aria-pressed={accentHex === preset.c}
+                onClick={() => handleAccentColor(preset.c)}
+                // Each preset previews its own colour, a runtime value.
+                style={{
+                  background: `${preset.c}26`,
+                  borderColor: accentHex === preset.c ? preset.c : `${preset.c}66`,
+                  color: preset.c,
                 }}
-              />
-              <p className="text-secondary font-mono text-muted">
-                {t("appearance.description")}
-              </p>
-            </section>
-
-            {/* Accent Color */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
               >
-                {t("accent.heading")}
-              </h2>
-
-              <HexColorField
-                color={accentHex}
-                hexInput={accentHexInput}
-                onHexInputChange={setAccentHexInput}
-                onColor={handleAccentColor}
-                title={t("accent.pickTitle")}
-                swatchStyle={{ width: 40, height: 40, borderRadius: 8, padding: 0 }}
-              />
-
-              {/* Quick presets: the same list mobile offers (design/theme.ts). */}
-              <div className="flex gap-2 flex-wrap">
-                {ACCENT_PRESETS.map((preset) => (
-                  <button
-                    key={preset.n}
-                    data-testid={`pref-accent-${preset.n.toLowerCase()}`}
-                    aria-pressed={accentHex === preset.c}
-                    onClick={() => handleAccentColor(preset.c)}
-                    className="px-2 py-0.5 text-secondary font-mono rounded-chip border transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
-                    style={{
-                      background: `${preset.c}26`,
-                      borderColor: accentHex === preset.c ? preset.c : `${preset.c}66`,
-                      color: preset.c,
-                    }}
-                  >
-                    {accentPresetLabel(preset.n)}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            {/* Background Color */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("background.heading")}
-              </h2>
-
-              <HexColorField
-                color={bgHex}
-                hexInput={bgHexInput}
-                onHexInputChange={setBgHexInput}
-                onColor={handleBgColor}
-                title={t("background.pickTitle")}
-                swatchStyle={{ width: 40, height: 40, padding: 0, borderRadius: "0.5rem", outline: "2px solid var(--c-accent)", outlineOffset: "-1px" }}
-              />
-
-              {/* Quick presets (design/theme.ts); every one passes the contrast test. */}
-              <div className="flex gap-2 flex-wrap">
-                {BACKGROUND_PRESETS.map((preset) => (
-                  <button
-                    key={preset.n}
-                    data-testid={`pref-background-${preset.n.toLowerCase()}`}
-                    aria-pressed={bgHex === preset.c}
-                    onClick={() => handleBgColor(preset.c)}
-                    className={`px-2 py-0.5 text-secondary font-mono rounded-chip border text-fg transition-colors focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black ${bgHex === preset.c ? "border-accent" : "border-line-strong"}`}
-                    style={{ background: preset.c }}
-                  >
-                    {backgroundPresetLabel(preset.n)}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-
-            {/* Display (this device) — settings here are stored on this device only,
-                not synced across the user's account. Future device-specific items
-                should slot in here. */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("display.heading")}
-              </h2>
-              <div className="flex flex-col gap-1.5">
-                <RangeSlider
-                  id="pref-font-size"
-                  label={t("display.fontSizeLabel")}
-                  value={fontSize}
-                  min={12}
-                  max={20}
-                  step={1}
-                  onChange={handleFontSize}
-                />
-                <div className="flex justify-between text-secondary font-mono text-muted">
-                  <span>{t("display.fontSizeSmall")}</span>
-                  <span>{t("display.fontSizeNormal")}</span>
-                  <span>{t("display.fontSizeLarge")}</span>
-                </div>
-                <p className="text-secondary font-mono mt-1 text-muted">
-                  {t("display.fontSizeNote")}
-                </p>
-              </div>
-              <p
-                className="font-mono text-dim"
-                style={{ fontSize }}
-              >
-                {t("display.fontSizeSample")}
-              </p>
-              <div className="flex flex-col gap-1.5 mt-4">
-                <Switch
-                  id="pref-call-ringtone"
-                  label={t("display.callRingtoneLabel")}
-                  checked={allowCallRingtone}
-                  onChange={handleAllowCallRingtone}
-                />
-                <p className="text-secondary font-mono text-muted">
-                  {t("display.callRingtoneDescription")}
-                </p>
-              </div>
-            </section>
-
-            {/* Layout */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("layout.heading")}
-              </h2>
-              <div className="flex flex-col gap-1.5">
-                <Switch
-                  id="pref-sidebar-default"
-                  label={t("layout.sidebarLabel")}
-                  checked={sidebarOpenByDefault}
-                  onChange={handleSidebarOpenByDefault}
-                />
-                <p className="text-secondary font-mono text-muted">
-                  {t("layout.sidebarDescription", { shortcut: toggleSidebarLabel })}
-                </p>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Switch
-                  id="pref-right-panel-default"
-                  label={t("layout.rightPanelLabel")}
-                  checked={isRightPanelOpen}
-                  onChange={handleRightPanelOpenByDefault}
-                />
-                <p className="text-secondary font-mono text-muted">
-                  {t("layout.rightPanelDescription", { shortcut: toggleRightPanelLabel })}
-                </p>
-              </div>
-              {!isMac && (
-                <div className="flex flex-col gap-1.5">
-                  <Switch
-                    id="pref-close-to-tray"
-                    label={t("layout.closeToTrayLabel")}
-                    checked={closeToTray}
-                    onChange={handleCloseToTray}
-                  />
-                  <p className="text-secondary font-mono text-muted">
-                    {t("layout.closeToTrayDescription")}
-                  </p>
-                </div>
-              )}
-              {isMac && (
-                <div className="flex flex-col gap-1.5">
-                  <Switch
-                    id="pref-menubar-icon"
-                    label={t("layout.menubarIconLabel")}
-                    checked={menubarIcon}
-                    onChange={handleMenubarIcon}
-                  />
-                  <p className="text-secondary font-mono text-muted">
-                    {t("layout.menubarIconDescription")}
-                  </p>
-                </div>
-              )}
-            </section>
-
-            {/* Notifications */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("notifications.heading")}
-              </h2>
-              <Switch
-                id="pref-notifications"
-                label={t("notifications.desktopLabel")}
-                checked={allowDesktopNotifications}
-                onChange={handleAllowDesktopNotifications}
-              />
-              <Switch
-                id="pref-sound-effects"
-                label={t("notifications.soundEffectsLabel")}
-                checked={allowSoundEffects}
-                onChange={handleAllowSoundEffects}
-              />
-              <div className="flex flex-col gap-1.5">
-                <Switch
-                  id="pref-incoming-call-takeover"
-                  label={t("notifications.callTakeoverLabel")}
-                  checked={incomingCallTakeover}
-                  onChange={handleIncomingCallTakeover}
-                />
-                <p className="text-secondary font-mono text-muted">
-                  {t("notifications.callTakeoverDescription")}
-                </p>
-              </div>
-            </section>
-
-            {/* Read receipts (#857) — DMs only. */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("readReceipts.heading")}
-              </h2>
-              <Switch
-                id="pref-read-receipts"
-                label={t("readReceipts.toggleLabel")}
-                checked={sendReadReceipts}
-                onChange={handleSendReadReceipts}
-              />
-              <p className="text-secondary font-mono text-muted">
-                <Trans
-                  t={t}
-                  i18nKey="readReceipts.description"
-                  components={{ em: <em /> }}
-                />
-              </p>
-            </section>
-
-            {/* Local message history (this device) — device-local retention
-                window stored in the local DB, not synced across the account. */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("retention.heading")}
-              </h2>
-              <div
-                role="radiogroup"
-                aria-label={t("retention.ariaLabel")}
-                className="flex gap-2 flex-wrap"
-              >
-                {MESSAGE_RETENTION_OPTIONS.map((option) => {
-                  const selected = retentionDays === option.days;
-                  const label = retentionLabel(option.days);
-                  return (
-                    <Button
-                      key={option.days}
-                      variant={selected ? "primary" : "secondary"}
-                      size="sm"
-                      aria-label={label}
-                      data-testid={`pref-retention-${option.days}`}
-                      onClick={() => {
-                        if (selected) {
-                          return;
-                        }
-                        setRetention.mutate(option.days);
-                      }}
-                    >
-                      {label}
-                    </Button>
-                  );
-                })}
-              </div>
-              <p className="text-secondary font-mono text-muted">
-                {t("retention.description")}
-              </p>
-            </section>
-
-            {/* Message search index (#850) — device-local, inside the encrypted
-                database. The button is the escape hatch for the one failure a
-                contentless FTS5 index can have that nothing else repairs;
-                startup already rebuilds silently when `integrity-check` catches
-                it, so nobody should ever need this. It exists for when the
-                automatic repair is the thing that is wrong. */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line">
-                {t("searchIndex.heading")}
-              </h2>
-              <div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  data-testid="pref-rebuild-search-index"
-                  disabled={rebuildSearchIndex.isPending}
-                  onClick={() => rebuildSearchIndex.mutate()}
-                >
-                  {rebuildSearchIndex.isPending
-                    ? t("searchIndex.rebuilding")
-                    : t("searchIndex.rebuild")}
-                </Button>
-              </div>
-              <p className="text-secondary font-mono text-muted">
-                {rebuildSearchIndex.isSuccess
-                  ? t("searchIndex.rebuilt")
-                  : t("searchIndex.description")}
-              </p>
-            </section>
-
-            {/* Network privacy — relay overlay (#455). Synced across devices and
-                applied live via set_overlay_mode. */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("overlay.heading")}
-              </h2>
-              <div
-                role="radiogroup"
-                aria-label={t("overlay.ariaLabel")}
-                className="flex gap-2 flex-wrap"
-              >
-                {(["off", "prefer", "strict"] as const).map((value) => (
-                  <Button
-                    key={value}
-                    variant={overlayMode === value ? "primary" : "secondary"}
-                    size="sm"
-                    aria-label={overlayModeLabels[value]}
-                    data-testid={`pref-overlay-mode-${value}`}
-                    onClick={() => handleOverlayMode(value)}
-                  >
-                    {overlayModeLabels[value]}
-                  </Button>
-                ))}
-              </div>
-              <p className="text-secondary font-mono text-muted">
-                {t("overlay.description")}
-              </p>
-              <ul className="flex flex-col gap-1 text-secondary font-mono text-muted">
-                <li>
-                  <Trans
-                    t={t}
-                    i18nKey="overlay.itemOff"
-                    components={{ mode: <span className="text-dim" /> }}
-                  />
-                </li>
-                <li>
-                  <Trans
-                    t={t}
-                    i18nKey="overlay.itemPrefer"
-                    components={{ mode: <span className="text-dim" /> }}
-                  />
-                </li>
-                <li>
-                  <Trans
-                    t={t}
-                    i18nKey="overlay.itemStrict"
-                    components={{ mode: <span className="text-dim" /> }}
-                  />
-                </li>
-              </ul>
-              {overlayStatus !== null && (
-                <p
-                  data-testid="pref-overlay-status"
-                  className="text-secondary font-mono text-danger"
-                >
-                  {t("overlay.applyError", {
-                    error: overlayStatus,
-                    mode: overlayModeLabels[overlayMode],
-                  })}
-                </p>
-              )}
-            </section>
-
-            {/* Run a relay for others (#813 §10.2) — a SEPARATE consent from
-                the mode control above. Never implied by turning the overlay
-                on; off by default; conditions default to Wi-Fi + power. */}
-            <RelayServingSection
-              config={relayServing}
-              status={relayStatusQuery.data ?? null}
-              applyError={relayServingError}
-              onChange={handleRelayServing}
-            />
-
-            {/* Voice */}
-            <section className="flex flex-col gap-4 mb-12">
-              <h2
-                className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
-              >
-                {t("voice.heading")}
-              </h2>
-              <div className="self-start">
-                <Button variant="secondary" size="sm" activateOn="press" onClick={() => navigate({ to: "/voice-settings" })}>
-                  {t("voice.openButton")}
-                </Button>
-              </div>
-            </section>
-
+                {accentPresetLabel(preset.n)}
+              </Chip>
+            ))}
           </div>
-        </div>
-      </div>
+        </section>
+
+        {/* Background Color */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("background.heading")}
+          </h2>
+
+          <HexColorField
+            color={bgHex}
+            hexInput={bgHexInput}
+            onHexInputChange={setBgHexInput}
+            onColor={handleBgColor}
+            title={t("background.pickTitle")}
+            outlined
+          />
+
+          {/* Quick presets (design/theme.ts); every one passes the contrast test. */}
+          <div className="flex gap-2 flex-wrap">
+            {BACKGROUND_PRESETS.map((preset) => (
+              <Chip
+                key={preset.n}
+                data-testid={`pref-background-${preset.n.toLowerCase()}`}
+                selected={bgHex === preset.c}
+                aria-pressed={bgHex === preset.c}
+                onClick={() => handleBgColor(preset.c)}
+                // Each preset previews its own colour, a runtime value.
+                style={{ background: preset.c }}
+              >
+                {backgroundPresetLabel(preset.n)}
+              </Chip>
+            ))}
+          </div>
+        </section>
+
+
+        {/* Display (this device) — settings here are stored on this device only,
+            not synced across the user's account. Future device-specific items
+            should slot in here. */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("display.heading")}
+          </h2>
+          <div className="flex flex-col gap-1.5">
+            <RangeSlider
+              id="pref-font-size"
+              label={t("display.fontSizeLabel")}
+              value={fontSize}
+              min={12}
+              max={20}
+              step={1}
+              onChange={handleFontSize}
+            />
+            <div className="flex justify-between text-secondary font-mono text-muted">
+              <span>{t("display.fontSizeSmall")}</span>
+              <span>{t("display.fontSizeNormal")}</span>
+              <span>{t("display.fontSizeLarge")}</span>
+            </div>
+            <p className="text-secondary font-mono mt-1 text-muted">
+              {t("display.fontSizeNote")}
+            </p>
+          </div>
+          <p
+            className="font-mono text-dim"
+            style={{ fontSize }}
+          >
+            {t("display.fontSizeSample")}
+          </p>
+          <div className="flex flex-col gap-1.5 mt-4">
+            <Switch
+              id="pref-call-ringtone"
+              label={t("display.callRingtoneLabel")}
+              checked={allowCallRingtone}
+              onChange={handleAllowCallRingtone}
+            />
+            <p className="text-secondary font-mono text-muted">
+              {t("display.callRingtoneDescription")}
+            </p>
+          </div>
+        </section>
+
+        {/* Layout */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("layout.heading")}
+          </h2>
+          <div className="flex flex-col gap-1.5">
+            <Switch
+              id="pref-sidebar-default"
+              label={t("layout.sidebarLabel")}
+              checked={sidebarOpenByDefault}
+              onChange={handleSidebarOpenByDefault}
+            />
+            <p className="text-secondary font-mono text-muted">
+              {t("layout.sidebarDescription", { shortcut: toggleSidebarLabel })}
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Switch
+              id="pref-right-panel-default"
+              label={t("layout.rightPanelLabel")}
+              checked={isRightPanelOpen}
+              onChange={handleRightPanelOpenByDefault}
+            />
+            <p className="text-secondary font-mono text-muted">
+              {t("layout.rightPanelDescription", { shortcut: toggleRightPanelLabel })}
+            </p>
+          </div>
+          {!isMac && (
+            <div className="flex flex-col gap-1.5">
+              <Switch
+                id="pref-close-to-tray"
+                label={t("layout.closeToTrayLabel")}
+                checked={closeToTray}
+                onChange={handleCloseToTray}
+              />
+              <p className="text-secondary font-mono text-muted">
+                {t("layout.closeToTrayDescription")}
+              </p>
+            </div>
+          )}
+          {isMac && (
+            <div className="flex flex-col gap-1.5">
+              <Switch
+                id="pref-menubar-icon"
+                label={t("layout.menubarIconLabel")}
+                checked={menubarIcon}
+                onChange={handleMenubarIcon}
+              />
+              <p className="text-secondary font-mono text-muted">
+                {t("layout.menubarIconDescription")}
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Notifications */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("notifications.heading")}
+          </h2>
+          <Switch
+            id="pref-notifications"
+            label={t("notifications.desktopLabel")}
+            checked={allowDesktopNotifications}
+            onChange={handleAllowDesktopNotifications}
+          />
+          <Switch
+            id="pref-sound-effects"
+            label={t("notifications.soundEffectsLabel")}
+            checked={allowSoundEffects}
+            onChange={handleAllowSoundEffects}
+          />
+          <div className="flex flex-col gap-1.5">
+            <Switch
+              id="pref-incoming-call-takeover"
+              label={t("notifications.callTakeoverLabel")}
+              checked={incomingCallTakeover}
+              onChange={handleIncomingCallTakeover}
+            />
+            <p className="text-secondary font-mono text-muted">
+              {t("notifications.callTakeoverDescription")}
+            </p>
+          </div>
+        </section>
+
+        {/* Read receipts (#857) — DMs only. */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("readReceipts.heading")}
+          </h2>
+          <Switch
+            id="pref-read-receipts"
+            label={t("readReceipts.toggleLabel")}
+            checked={sendReadReceipts}
+            onChange={handleSendReadReceipts}
+          />
+          <p className="text-secondary font-mono text-muted">
+            <Trans
+              t={t}
+              i18nKey="readReceipts.description"
+              components={{ em: <em /> }}
+            />
+          </p>
+        </section>
+
+        {/* Local message history (this device) — device-local retention
+            window stored in the local DB, not synced across the account. */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("retention.heading")}
+          </h2>
+          <div
+            role="radiogroup"
+            aria-label={t("retention.ariaLabel")}
+            className="flex gap-2 flex-wrap"
+          >
+            {MESSAGE_RETENTION_OPTIONS.map((option) => {
+              const selected = retentionDays === option.days;
+              const label = retentionLabel(option.days);
+              return (
+                <Button
+                  key={option.days}
+                  variant={selected ? "primary" : "secondary"}
+                  size="sm"
+                  aria-label={label}
+                  data-testid={`pref-retention-${option.days}`}
+                  onClick={() => {
+                    if (selected) {
+                      return;
+                    }
+                    setRetention.mutate(option.days);
+                  }}
+                >
+                  {label}
+                </Button>
+              );
+            })}
+          </div>
+          <p className="text-secondary font-mono text-muted">
+            {t("retention.description")}
+          </p>
+        </section>
+
+        {/* Message search index (#850) — device-local, inside the encrypted
+            database. The button is the escape hatch for the one failure a
+            contentless FTS5 index can have that nothing else repairs;
+            startup already rebuilds silently when `integrity-check` catches
+            it, so nobody should ever need this. It exists for when the
+            automatic repair is the thing that is wrong. */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line">
+            {t("searchIndex.heading")}
+          </h2>
+          <div>
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="pref-rebuild-search-index"
+              disabled={rebuildSearchIndex.isPending}
+              onClick={() => rebuildSearchIndex.mutate()}
+            >
+              {rebuildSearchIndex.isPending
+                ? t("searchIndex.rebuilding")
+                : t("searchIndex.rebuild")}
+            </Button>
+          </div>
+          <p className="text-secondary font-mono text-muted">
+            {rebuildSearchIndex.isSuccess
+              ? t("searchIndex.rebuilt")
+              : t("searchIndex.description")}
+          </p>
+        </section>
+
+        {/* Network privacy — relay overlay (#455). Synced across devices and
+            applied live via set_overlay_mode. */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("overlay.heading")}
+          </h2>
+          <div
+            role="radiogroup"
+            aria-label={t("overlay.ariaLabel")}
+            className="flex gap-2 flex-wrap"
+          >
+            {(["off", "prefer", "strict"] as const).map((value) => (
+              <Button
+                key={value}
+                variant={overlayMode === value ? "primary" : "secondary"}
+                size="sm"
+                aria-label={overlayModeLabels[value]}
+                data-testid={`pref-overlay-mode-${value}`}
+                onClick={() => handleOverlayMode(value)}
+              >
+                {overlayModeLabels[value]}
+              </Button>
+            ))}
+          </div>
+          <p className="text-secondary font-mono text-muted">
+            {t("overlay.description")}
+          </p>
+          <ul className="flex flex-col gap-1 text-secondary font-mono text-muted">
+            <li>
+              <Trans
+                t={t}
+                i18nKey="overlay.itemOff"
+                components={{ mode: <span className="text-dim" /> }}
+              />
+            </li>
+            <li>
+              <Trans
+                t={t}
+                i18nKey="overlay.itemPrefer"
+                components={{ mode: <span className="text-dim" /> }}
+              />
+            </li>
+            <li>
+              <Trans
+                t={t}
+                i18nKey="overlay.itemStrict"
+                components={{ mode: <span className="text-dim" /> }}
+              />
+            </li>
+          </ul>
+          {overlayStatus !== null && (
+            <p
+              data-testid="pref-overlay-status"
+              className="text-secondary font-mono text-danger"
+            >
+              {t("overlay.applyError", {
+                error: overlayStatus,
+                mode: overlayModeLabels[overlayMode],
+              })}
+            </p>
+          )}
+        </section>
+
+        {/* Link previews (#1987), this device only: right after network
+            privacy, since strict mode turns them off. */}
+        <LinkPreviewsSection overlayMode={overlayMode} />
+
+        {/* Run a relay for others (#813 §10.2) — a SEPARATE consent from
+            the mode control above. Never implied by turning the overlay
+            on; off by default; conditions default to Wi-Fi + power. */}
+        <RelayServingSection
+          config={relayServing}
+          status={relayStatusQuery.data ?? null}
+          applyError={relayServingError}
+          onChange={handleRelayServing}
+        />
+
+        {/* Voice */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-secondary font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
+          >
+            {t("voice.heading")}
+          </h2>
+          <div className="self-start">
+            <Button variant="secondary" size="sm" activateOn="press" onClick={() => navigate({ to: "/voice-settings" })}>
+              {t("voice.openButton")}
+            </Button>
+          </div>
+        </section>
+      </PageColumn>
     </PageShell>
   );
 });

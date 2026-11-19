@@ -117,6 +117,12 @@
     "itemStrict": "<mode>Múná</mode> — Sopọ̀ gba relay nìkan. Bí kò bá sí relay tí a lè dé, a máa dá fífi ránṣẹ́ dúró dípò kí a fi IP rẹ hàn.",
     "applyError": "A kò lè lo ipò relay: {{error}} — ó wà ní {{mode}} báyìí."
   },
+  "linkPreviews": {
+    "heading": "Àwọn àkọ́wò ìjápọ̀",
+    "label": "Ṣẹ̀dá àwọn àkọ́wò ìjápọ̀",
+    "description": "Nígbà tí o bá fi ìjápọ̀ ránṣẹ́, Pollis máa ń mú ojú-ìwé náà wá láti ẹ̀rọ yìí láti ṣẹ̀dá àkọ́wò. Ojú òpó náà máa rí àdírẹ́sì IP rẹ, bí ẹni pé ìwọ fúnra rẹ ló ṣí i. Àwọn tí o fi ránṣẹ́ sí kì í kàn sí ojú òpó náà rárá.",
+    "strictNote": "Àṣírí nẹ́tíwọ́ọ̀kì múná máa ń pa àwọn àkọ́wò ìjápọ̀."
+  },
   "relayServing": {
     "heading": "Ṣiṣẹ́ relay fún àwọn ẹlòmíì",
     "intro": "Ìpinnu kan tó yàtọ̀ sí ètò tó wà lókè. Èyí tó wà lókè ń pinnu bóyá ìrìnnà <dim>tìrẹ</dim> máa gba relay kọjá. Èyí ń pinnu bóyá ìrìnnà <dim>àwọn ẹlòmíì</dim> máa gba <dim>ẹ̀rọ rẹ</dim> kọjá. Títan ọ̀kan kì í tan èkejì láé.",
@@ -363,7 +369,7 @@
     "capturing": "Tẹ àwọn bọ́tìnnì…",
     "rebindLabel": "Yí bọ́tìnnì {{name}} padà",
     "resetLabel": "Dá {{name}} padà sí bí ó ṣe wà ní àkọ́kọ́",
-    "resetButton": "dá padà",
+    "resetButton": "Dá padà",
     "appToggleSidebar": "Ṣí/pa ọ̀pá ẹ̀gbẹ́",
     "appToggleRightPanel": "Ṣí/pa pánẹ́ẹ̀lì àlàyé",
     "appToggleTerminal": "Ṣí/pa tẹ́mínàlì",
@@ -515,5 +521,29 @@
     "youDeclined": "O kọ̀ ọ́. A kò ṣe àdàkọ nǹkan kan.",
     "notOpen": "Ìbéèrè yìí kò ṣí sílẹ̀ mọ́.",
     "back": "Padà sí Ààbò"
+  },
+  "aliases": {
+    "heading": "Orúkọ àpèjẹ ẹgbẹ́",
+    "rowDescription": "Orúkọ àti fọ́tò mìíràn nínú ẹgbẹ́ kọ̀ọ̀kan",
+    "intro": "Fi orúkọ àti fọ́tò mìíràn hàn nínú ẹgbẹ́ kọ̀ọ̀kan. @orúkọ-olùmúlò rẹ kò yí padà níbikíbi.",
+    "empty": "O kò tíì sí nínú ẹgbẹ́ kankan.",
+    "mainProfile": "Profaili àkọ́kọ́",
+    "edit": "Ṣàtúnṣe",
+    "useMain": "Lo profaili àkọ́kọ́ mi",
+    "resetting": "Ń tún un ṣe…",
+    "pageTitle": "Orúkọ àpèjẹ nínú {{group}}",
+    "pageIntro": "Ẹgbẹ́ yìí nìkan ló ń rí orúkọ àti fọ́tò yìí. Ìfiránṣẹ́ àdáni máa ń lo profaili àkọ́kọ́ rẹ.",
+    "nameLabel": "Orúkọ nínú ẹgbẹ́ yìí",
+    "namePlaceholder": "Fi sílẹ̀ ní òfo láti lo {{name}}",
+    "nameInvalid": "Kò ju lẹ́tà 100 lọ, láìsí < tàbí >.",
+    "pictureLabel": "Fọ́tò nínú ẹgbẹ́ yìí",
+    "choosePicture": "Yan fọ́tò",
+    "mainPicture": "Lo fọ́tò àkọ́kọ́",
+    "applyAll": "Lò ó fún gbogbo ẹgbẹ́ mi",
+    "applyAllHint": "Ó ń kọ orúkọ tàbí fọ́tò tí o yí padà sí gbogbo ẹgbẹ́ tí o wà nínú rẹ̀ báyìí. Ẹgbẹ́ tí o bá dara pọ̀ mọ́ lẹ́yìn náà máa bẹ̀rẹ̀ pẹ̀lú profaili àkọ́kọ́ rẹ.",
+    "save": "Fi pamọ́",
+    "saving": "Ń fi pamọ́…",
+    "saved": "Ti fi pamọ́",
+    "saveFailed": "A kò lè fi orúkọ àpèjẹ rẹ pamọ́"
   }
 }

@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
+import { PageColumn } from "../components/ui/PageColumn";
+import { FormLead } from "../components/ui/FormLead";
+import { FormActions } from "../components/ui/FormActions";
 import { useSkin } from "../hooks/queries/usePreferences";
 import { errorMessage } from "../utils/errorMessage";
 import { completeInviteToken } from "../utils/inviteToken";
@@ -49,8 +52,26 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   // #1094: a deep link never redeems on arrival; joining discloses your identity, so it takes a press.
   const isModern = skin === "modern";
 
-  const body = (
-    <>
+  const heading = groupName
+    ? isModern
+      ? t("joinByInvite.headingNamed", { name: groupName })
+      : t("joinByInvite.headingNamedTerminal", { name: groupName })
+    : isModern
+      ? t("joinByInvite.heading")
+      : t("joinByInvite.headingTerminal");
+
+  return (
+    <PageColumn
+      as="form"
+      paneTestId="join-by-invite-page"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void handleRedeem(token);
+      }}
+    >
+      <FormLead titleTestId="join-by-invite-heading" title={heading}>
+        {t("joinByInvite.blurb")}
+      </FormLead>
       <TextInput
         label={
           isModern
@@ -67,12 +88,12 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
       />
 
       {(error || showPreviewError) && (
-        <p data-testid="invite-redeem-error" className="mt-3 text-body text-danger">
+        <p data-testid="invite-redeem-error" className="text-body text-danger">
           {error ?? errorMessage(preview.error)}
         </p>
       )}
 
-      <div className="mt-4">
+      <FormActions>
         <Button
           type="submit"
           disabled={!token.trim()}
@@ -86,45 +107,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
         >
           {isModern ? t("joinByInvite.submit") : t("joinByInvite.submitTerminal")}
         </Button>
-      </div>
-    </>
-  );
-
-  return (
-    <div
-      data-testid="join-by-invite-page"
-      className="flex flex-1 flex-col overflow-auto bg-bg"
-    >
-      <div className="flex flex-1 justify-center overflow-auto px-6 py-8">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void handleRedeem(token);
-          }}
-          className={
-            isModern
-              ? "w-full max-w-[32rem] rounded-lg border border-line bg-surface p-6"
-              : "w-full max-w-[32rem] border border-line bg-surface p-5"
-          }
-        >
-          <h2
-            data-testid="join-by-invite-heading"
-            className={
-              isModern ? "text-row font-semibold text-fg" : "text-row text-accent"
-            }
-          >
-            {groupName
-              ? isModern
-                ? t("joinByInvite.headingNamed", { name: groupName })
-                : t("joinByInvite.headingNamedTerminal", { name: groupName })
-              : isModern
-                ? t("joinByInvite.heading")
-                : t("joinByInvite.headingTerminal")}
-          </h2>
-          <p className="mt-1 mb-4 text-secondary text-dim">{t("joinByInvite.blurb")}</p>
-          {body}
-        </form>
-      </div>
-    </div>
+      </FormActions>
+    </PageColumn>
   );
 };

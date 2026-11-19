@@ -1,5 +1,6 @@
 //! Group / channel / membership commands — split into cohesive submodules.
 
+mod aliases;
 pub mod authz;
 mod channels;
 // `groups::groups` holds the group CRUD proper, the others its neighbours;
@@ -13,7 +14,7 @@ mod membership;
 mod types;
 
 pub use types::{
-    Channel, CreatedInviteLink, Group, GroupInvite, GroupMember, GroupPreview,
+    Channel, ChannelCategory, CreatedInviteLink, Group, GroupInvite, GroupMember, GroupPreview,
     GroupWithChannels, InviteLinkSummary, InvitePreview, JoinRequest, PendingInvite,
     RedeemedInvite,
 };
@@ -23,9 +24,15 @@ pub use groups::{
     search_group_by_slug, update_group,
 };
 
+pub use aliases::{
+    list_group_aliases, list_my_aliases, reset_group_alias, set_group_alias, GroupAlias,
+};
+pub(crate) use aliases::{cache_group_aliases, cached_alias_name};
+
 pub use channels::{
-    create_channel, delete_channel, list_group_channels, list_muted_channels, set_channel_muted,
-    update_channel,
+    create_channel, create_channel_category, delete_channel, delete_channel_category,
+    list_group_channels, list_muted_channels, move_channel,
+    move_channel_category, rename_channel_category, set_channel_muted, update_channel,
 };
 
 pub use membership::{

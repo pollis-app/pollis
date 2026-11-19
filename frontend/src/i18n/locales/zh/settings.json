@@ -115,6 +115,12 @@
     "itemStrict": "<mode>严格</mode> — 只通过中继连接。如果没有可用的中继，则暂停发送，而不是暴露你的 IP。",
     "applyError": "无法应用中继模式：{{error}} — 当前为 {{mode}}。"
   },
+  "linkPreviews": {
+    "heading": "链接预览",
+    "label": "生成链接预览",
+    "description": "发送链接时，Pollis 会从这台设备获取该网页来生成预览。该网站会看到你的 IP 地址，就像你自己打开了它一样。接收者永远不会访问该网站。",
+    "strictNote": "严格的网络隐私模式会关闭链接预览。"
+  },
   "relayServing": {
     "heading": "为他人运行中继",
     "intro": "这与上面的设置是两回事。上面那项决定<dim>你自己的</dim>流量是否经过中继，而这一项决定<dim>其他人的</dim>流量是否经过<dim>你的设备</dim>。开启其中任何一项都不会连带开启另一项。",
@@ -407,5 +413,29 @@
     "sourceLabel": "来源",
     "cargo": "Rust crate",
     "npm": "npm 软件包"
+  },
+  "aliases": {
+    "heading": "群组别名",
+    "rowDescription": "在每个群组使用不同的名字和头像",
+    "intro": "在每个群组显示不同的名字和头像。你的 @用户名在所有地方都不变。",
+    "empty": "你还没有加入任何群组。",
+    "mainProfile": "主资料",
+    "edit": "编辑",
+    "useMain": "使用我的主资料",
+    "resetting": "正在重置…",
+    "pageTitle": "在 {{group}} 的别名",
+    "pageIntro": "只有这个群组能看到这个名字和头像。私信仍使用你的主资料。",
+    "nameLabel": "在此群组中的名字",
+    "namePlaceholder": "留空则使用 {{name}}",
+    "nameInvalid": "最多 100 个字符，不能包含 < 或 >。",
+    "pictureLabel": "在此群组中的头像",
+    "choosePicture": "选择头像",
+    "mainPicture": "使用主头像",
+    "applyAll": "应用到我的所有群组",
+    "applyAllHint": "把修改过的名字或头像写入你现在所在的每个群组。之后加入的群组从主资料开始。",
+    "save": "保存",
+    "saving": "正在保存…",
+    "saved": "已保存",
+    "saveFailed": "无法保存你的别名"
   }
 }

@@ -8,7 +8,8 @@
     "permalinkResolving": "Ana buɗe saƙo…",
     "noMatches": "Ba a sami abin da ya dace ba",
     "emptyHint": "Je zuwa tasha, tashar murya, DM, mai amfani, ko shafin saituna",
-    "live": "[kai tsaye]",
+    "live": "Kai tsaye",
+    "liveTerminal": "[kai tsaye]",
     "searchMessagesFor": "Bincika saƙonni don \"{{query}}\""
   },
   "pages": {

@@ -62,13 +62,17 @@ class TypingStore {
   }
 
   /** Sorted usernames typing in the room. */
-  typists(roomKey: TypingRoomKey | null): string[] {
+  /** Names typing in the room; `nameOf` maps a typist to the name shown (a group alias, #2003). */
+  typists(
+    roomKey: TypingRoomKey | null,
+    nameOf?: (userId: string, username: string) => string,
+  ): string[] {
     const room = roomKey ? this.byRoom[roomKey] : undefined;
     if (!room) {
       return [];
     }
-    return Object.values(room)
-      .map((e) => e.username)
+    return Object.entries(room)
+      .map(([userId, e]) => (nameOf ? nameOf(userId, e.username) : e.username))
       .sort((a, b) => a.localeCompare(b));
   }
 

@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # THEME AT STARTUP (#1447) — a non-default palette must paint the FIRST frame
 # of a cold start (the PIN screen included), not arrive after the synced
@@ -14,7 +15,10 @@ tags:
 #                               preferences round trip lands".
 # Lilac (#bda3e0) is the purple preset; amber (#fabf5a) is the default.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "theme-startup"
 
 # A brand-new account has no saved accent, so it settles on the default — even
 # if an earlier run left lilac in the device store (iOS keeps the keychain

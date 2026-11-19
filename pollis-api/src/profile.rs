@@ -202,3 +202,80 @@ pub struct ChannelMutesResponse {
     /// Every channel the caller has muted and is still a member of, sorted.
     pub channel_ids: Vec<String>,
 }
+
+/// `POST /v1/group-aliases/set` — write the caller's per-group alias (#2003).
+///
+/// Each field: absent leaves it as it is, `""` clears it (that field falls back
+/// to the main profile), anything else sets it. Clearing the last field deletes
+/// the row. Stored in the clear: every member of the group renders it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetGroupAliasBody {
+    /// The owner; when signed it must equal the authenticated user (you set
+    /// only your OWN alias).
+    pub user_id: String,
+    /// The group to write, which the caller must currently be a member of.
+    /// `None` writes the given fields to EVERY group the caller is currently in
+    /// ("apply to all"), overwriting only those fields.
+    #[serde(default)]
+    pub group_id: Option<String>,
+    /// Same rules as `preferred_name`; no uniqueness.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// A content-addressed `avatars/<user_id>/<sha256>.<ext>` key of the
+    /// caller's own.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+}
+
+/// `POST /v1/group-aliases/reset` — delete one member's alias in one group, so
+/// they show their main profile there again (#2003).
+///
+/// The owner may reset their own alias at any time, including in a group they
+/// have left; an admin of the group may reset anyone's.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetGroupAliasBody {
+    /// The caller; when signed it must equal the authenticated user.
+    pub requester_id: String,
+    pub group_id: String,
+    /// Whose alias goes.
+    pub user_id: String,
+}
+
+/// `POST /v1/read/group-aliases` — every alias in one group, including those of
+/// members who have left. Only a current member may read them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupAliasesBody {
+    /// Must equal the authenticated user; a mismatch is a 403.
+    pub user_id: String,
+    pub group_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupAliasesResponse {
+    /// `false` → the caller is not a current member; `aliases` is empty.
+    pub authorized: bool,
+    pub aliases: Vec<GroupAliasWire>,
+}
+
+/// One alias. `None` fields fall back to the user's main profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupAliasWire {
+    pub group_id: String,
+    pub user_id: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+}
+
+/// `POST /v1/read/my-aliases` — every alias the caller owns, in any group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MyAliasesBody {
+    /// Must equal the authenticated user; a mismatch is a 403.
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MyAliasesResponse {
+    pub aliases: Vec<GroupAliasWire>,
+}

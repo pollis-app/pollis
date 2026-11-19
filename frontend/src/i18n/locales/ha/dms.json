@@ -39,13 +39,13 @@
     "unknownSender": "Ba a sani ba",
     "others_one": "(+{{count}} wani)",
     "others_other": "(+{{count}} wasu)",
-    "accept": "karɓa",
-    "block": "toshe"
+    "accept": "Karɓa",
+    "block": "Toshe"
   },
   "blocked": {
     "pageTitle": "Masu amfani da aka toshe",
     "empty": "Babu masu amfani da aka toshe.",
-    "unblock": "cire toshewa"
+    "unblock": "Cire toshewa"
   },
   "profile": {
     "fallbackName": "Mai amfani",

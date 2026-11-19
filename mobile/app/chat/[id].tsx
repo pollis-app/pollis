@@ -23,6 +23,8 @@ import { usePrefetchAvatars } from "../../components/UserAvatar";
 import { isNewMemberMessage, newMemberJoins } from "../../lib/newMember";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
+import { aliasAvatar, aliasName, mentionLabels } from "../../lib/groupAlias";
+import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { outgoingText } from "../../lib/messageText";
 import { EditBar } from "../../components/chat/EditBar";
 import { ReplyBar } from "../../components/chat/ReplyBar";
@@ -54,6 +56,8 @@ import {
   useUserGroupsWithChannels,
   useGroupMembers,
   useDMChannel,
+  useDMRequests,
+  useLinkPreviewsEnabled,
   useKeyChangeNotices,
   usePeerVerifications,
   type KeyChangeNotice,
@@ -88,6 +92,8 @@ import { nextJumpStep } from "../../lib/messageJump";
 import { useTheme, useThemeRerender } from "../../components/theme";
 import { COMPATIBLE_PICK } from "../../lib/pickerOptions";
 import { conversationDraftKey, useDraft } from "../../hooks/useDraft";
+import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
+import { ComposerLinkPreview } from "../../components/chat/ComposerLinkPreview";
 
 // Props embed this screen in the iPad right pane; route usage passes none.
 type ChatViewProps = {
@@ -216,6 +222,22 @@ function TextChat(props: ChatViewProps = {}) {
     },
     [dmPeers],
   );
+  // Link previews (#1987): never drawn in a request not yet accepted; generated per the device setting.
+  const { data: dmRequests } = useDMRequests();
+  const isPendingRequest =
+    isDm && !!conversationId && (dmRequests ?? []).some((d) => d.id === conversationId);
+  const { enabled: linkPreviewsEnabled } = useLinkPreviewsEnabled();
+  const draftKey = conversationDraftKey(kind, conversationId);
+  const composerPreview = useLinkPreviewDraft(
+    draft,
+    linkPreviewsEnabled && !isPendingRequest,
+    draftKey,
+  );
+  const editPreview = useLinkPreviewDraft(
+    editTarget ? editDraft : "",
+    linkPreviewsEnabled && !!editTarget,
+    editTarget?.id ?? null,
+  );
   const sendMessage = useSendMessage(conversationId, kind);
   const retryMessage = useRetryMessage(conversationId, kind);
   const discardUnsent = useDiscardUnsent(conversationId, kind);
@@ -310,6 +332,8 @@ function TextChat(props: ChatViewProps = {}) {
     if (!text && pendingAttachments.length === 0) {
       return;
     }
+    // Never waits for a fetch still running: the message goes without it.
+    const linkPreview = composerPreview.takeForSend(text);
     setDraft("");
     typing.stop();
     setPendingAttachments([]);
@@ -318,6 +342,7 @@ function TextChat(props: ChatViewProps = {}) {
       content: text,
       attachments: pendingAttachments,
       replyToId: replyTarget?.id,
+      linkPreview,
     });
   };
 
@@ -341,7 +366,7 @@ function TextChat(props: ChatViewProps = {}) {
       return;
     }
     editMessage.mutate(
-      { messageId: editTarget.id, newContent: text },
+      { messageId: editTarget.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
       {
         onSuccess: () => {
           setEditTarget(null);
@@ -583,6 +608,18 @@ function TextChat(props: ChatViewProps = {}) {
     [groupMembers, group?.owner_id],
   );
 
+  // Per-group aliases (#2003): inside a group, people show as it shows them; a DM, by main profile.
+  const aliases = useGroupAliases(kind === "channel" ? groupId ?? null : null);
+  const groupAuthor = useCallback(
+    (senderId: string, senderUsername: string | undefined) =>
+      aliasName(aliases, senderId, authorName(senderId, senderUsername, currentUser)),
+    [aliases, currentUser],
+  );
+  const aliasMentionLabels = useMemo(
+    () => mentionLabels(aliases, groupMembers ?? []),
+    [aliases, groupMembers],
+  );
+
   // Senders' pictures: the roster already carries every member's key. A member
   // row without the field (the create-group seed) is "not known", never "none".
   const avatarKeyById = useMemo(() => {
@@ -597,8 +634,13 @@ function TextChat(props: ChatViewProps = {}) {
   }, [dmChannel, groupMembers]);
   usePrefetchAvatars(
     useMemo(
-      () => [...avatarKeyById].map(([userId, key]) => ({ userId, key })),
-      [avatarKeyById],
+      () =>
+        [...avatarKeyById].map(([userId, key]) => ({
+          userId,
+          key,
+          aliasKey: aliasAvatar(aliases, userId, null),
+        })),
+      [avatarKeyById, aliases],
     ),
     40,
   );
@@ -716,15 +758,13 @@ function TextChat(props: ChatViewProps = {}) {
       }
       const mine = currentUser?.id === m.sender_id;
       const summary = threadSummaries?.get(m.id);
-      const name =
-        authorName(m.sender_id, m.sender_username, currentUser) ??
-        t("chat:list.unknownAuthor");
+      const name = groupAuthor(m.sender_id, m.sender_username) ?? t("chat:list.unknownAuthor");
       const original = m.reply_to_id ? repliedTo.get(m.reply_to_id) : undefined;
       const replyTo = m.reply_to_id
         ? original
           ? {
               name:
-                authorName(original.sender_id, original.sender_username, currentUser) ??
+                groupAuthor(original.sender_id, original.sender_username) ??
                 t("chat:list.unknownAuthor"),
               snippet: original.deleted_at
                 ? t("chat:message.deleted")
@@ -742,12 +782,14 @@ function TextChat(props: ChatViewProps = {}) {
           av={name.slice(0, 2)}
           senderId={m.sender_id}
           senderAvatarKey={avatarKeyById.get(m.sender_id)}
+          senderAliasKey={aliasAvatar(aliases, m.sender_id, null)}
           amber={mine}
           name={name}
           time={timeLabel(m.created_at)}
           text={m.content}
           deleted={!!m.deleted_at}
           attachments={m.attachments}
+          linkPreview={isPendingRequest ? null : m.link_preview}
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
@@ -772,6 +814,7 @@ function TextChat(props: ChatViewProps = {}) {
           onOpenThread={() => openThread(m.id)}
           mentionNames={mentionNames}
           selfName={selfName}
+          mentionLabels={aliasMentionLabels}
           onToggleReaction={(emoji, reacted) =>
             toggleReaction.mutate({
               messageId: m.id,
@@ -786,7 +829,8 @@ function TextChat(props: ChatViewProps = {}) {
               : () =>
                   router.push({
                     pathname: "/user/[id]",
-                    params: { id: m.sender_id },
+                    // In a group, the profile shows the group's view of them (#2003).
+                    params: kind === "channel" && groupId ? { id: m.sender_id, groupId } : { id: m.sender_id },
                   })
           }
           onLongPress={settled ? () => setActionTarget(m) : undefined}
@@ -822,6 +866,7 @@ function TextChat(props: ChatViewProps = {}) {
       viewerJoinedAtMs,
       peerLabel,
       avatarKeyById,
+      isPendingRequest,
       t,
     ],
   );
@@ -985,13 +1030,16 @@ function TextChat(props: ChatViewProps = {}) {
           }}
           onSave={onSaveEdit}
           savePending={editMessage.isPending}
+          linkPreview={
+            <ComposerLinkPreview state={editPreview.state} onRemove={editPreview.remove} />
+          }
         />
       ) : (
         <>
           {replyTarget ? (
             <ReplyBar
               name={
-                authorName(replyTarget.sender_id, replyTarget.sender_username, currentUser) ??
+                groupAuthor(replyTarget.sender_id, replyTarget.sender_username) ??
                 t("chat:list.unknownAuthor")
               }
               snippet={replySnippet(replyTarget) || t("chat:message.undecryptable.title")}
@@ -1002,6 +1050,7 @@ function TextChat(props: ChatViewProps = {}) {
           <TypingIndicator
             channelId={kind === "channel" ? conversationId : null}
             conversationId={kind === "dm" ? conversationId : null}
+            groupId={kind === "channel" ? groupId ?? null : null}
           />
           <Composer
             focusRequest={composerFocus}
@@ -1020,6 +1069,12 @@ function TextChat(props: ChatViewProps = {}) {
               setPendingAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)))
             }
             canSendEmptyText={pendingAttachments.length > 0}
+            linkPreview={
+              <ComposerLinkPreview
+                state={composerPreview.state}
+                onRemove={composerPreview.remove}
+              />
+            }
           />
         </>
       )}
@@ -1028,11 +1083,8 @@ function TextChat(props: ChatViewProps = {}) {
         <MessageActionsSheet
           target={actionTarget}
           quoteName={
-            authorName(
-              actionTarget.sender_id,
-              actionTarget.sender_username,
-              currentUser,
-            ) ?? t("chat:list.unknownAuthor")
+            groupAuthor(actionTarget.sender_id, actionTarget.sender_username) ??
+            t("chat:list.unknownAuthor")
           }
           quoteTime={timeLabel(actionTarget.created_at)}
           isOwn={actionTarget.sender_id === currentUser?.id}

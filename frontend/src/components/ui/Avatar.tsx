@@ -34,10 +34,11 @@ export const Avatar: React.FC<AvatarProps> = ({
   const dim = `${size}px`;
   const isProfile = variant === "profile";
 
+  // A person is a circle; the profile page's large avatar is a panel-cornered tile.
+  const shapeClass = isProfile ? "rounded-panel" : "rounded-full";
   const containerStyle: React.CSSProperties = {
     width: dim,
     height: dim,
-    borderRadius: isProfile ? "0.65rem" : "50%",
     overflow: "hidden",
     display: "inline-flex",
     alignItems: "center",
@@ -61,7 +62,6 @@ export const Avatar: React.FC<AvatarProps> = ({
     bottom: -2,
     width: dotSize,
     height: dotSize,
-    borderRadius: "50%",
     background: presence ? PRESENCE_COLORS[presence] : "transparent",
     border:
       presence === "offline"
@@ -71,7 +71,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   };
 
   const inner = blobUrl ? (
-    <span style={containerStyle} data-testid={testId}>
+    <span style={containerStyle} className={shapeClass} data-testid={testId}>
       <img
         src={blobUrl}
         alt={resolvedAlt}
@@ -79,7 +79,7 @@ export const Avatar: React.FC<AvatarProps> = ({
       />
     </span>
   ) : (
-    <span style={containerStyle} data-testid={testId} aria-label={resolvedAlt}>
+    <span style={containerStyle} className={shapeClass} data-testid={testId} aria-label={resolvedAlt}>
       <User
         size={Math.round(size * 0.6)}
         aria-hidden="true"
@@ -98,6 +98,7 @@ export const Avatar: React.FC<AvatarProps> = ({
       <span
         data-testid={testId ? `${testId}-presence` : undefined}
         aria-label={t("presence.label", { status: t(`presence.${presence}`) })}
+        className="rounded-full"
         style={dotStyle}
       />
     </span>

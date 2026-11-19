@@ -570,24 +570,24 @@ pub async fn bootstrap(
     ))
 }
 
-/// Every group the caller belongs to, each carrying its channels and the
-/// caller's role. One `LEFT JOIN` so a group with no channels still appears.
+/// Every group the caller belongs to, each carrying its channels (in display
+/// order, #2031), its categories and the caller's role. One `LEFT JOIN` so a
+/// group with no channels still appears.
 pub async fn groups_with_channels(
     conn: &Connection,
     user_id: &str,
 ) -> anyhow::Result<Vec<GroupWithChannelsWire>> {
-    let mut rows = conn
-        .query(
-            "SELECT g.id, g.name, g.description, g.owner_id, g.created_at, \
-                    c.id, c.group_id, c.name, c.description, c.channel_type, gm.role \
-             FROM groups g \
-             JOIN group_member gm ON gm.group_id = g.id \
-             LEFT JOIN channels c ON c.group_id = g.id \
-             WHERE gm.user_id = ?1 \
-             ORDER BY g.created_at, c.name",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
+    let sql = format!(
+        "SELECT g.id, g.name, g.description, g.owner_id, g.created_at, \
+                c.id, c.group_id, c.name, c.description, c.channel_type, gm.role, cc.id \
+         FROM groups g \
+         JOIN group_member gm ON gm.group_id = g.id \
+         LEFT JOIN channels c ON c.group_id = g.id \
+         LEFT JOIN channel_category cc ON {CATEGORY_JOIN} \
+         WHERE gm.user_id = ?1 \
+         ORDER BY g.created_at, g.id, {CHANNEL_ORDER_SQL}"
+    );
+    let mut rows = conn.query(&sql, libsql::params![user_id.to_string()]).await?;
 
     let mut out: Vec<GroupWithChannelsWire> = Vec::new();
     while let Some(row) = rows.next().await? {
@@ -602,6 +602,7 @@ pub async fn groups_with_channels(
                 channel_type: row
                     .get::<Option<String>>(9)?
                     .unwrap_or_else(|| "text".to_string()),
+                category_id: row.get(11)?,
             }),
             None => None,
         };
@@ -621,7 +622,29 @@ pub async fn groups_with_channels(
                 },
                 channels: channel.into_iter().collect(),
                 role: row.get(10)?,
+                categories: Vec::new(),
             }),
+        }
+    }
+
+    // Every category of every one of those groups, in one read.
+    let mut rows = conn
+        .query(
+            "SELECT cc.id, cc.group_id, cc.name FROM channel_category cc \
+             JOIN group_member gm ON gm.group_id = cc.group_id \
+             WHERE gm.user_id = ?1 \
+             ORDER BY cc.group_id, cc.position",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    while let Some(row) = rows.next().await? {
+        let category = ChannelCategoryWire {
+            id: row.get(0)?,
+            group_id: row.get(1)?,
+            name: row.get(2)?,
+        };
+        if let Some(g) = out.iter_mut().find(|g| g.group.id == category.group_id) {
+            g.categories.push(category);
         }
     }
     Ok(out)
@@ -829,6 +852,7 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
                 role: None,
                 group: None,
                 channels: Vec::new(),
+                categories: Vec::new(),
                 members: Vec::new(),
                 invite_links: Vec::new(),
                 join_requests: Vec::new(),
@@ -847,6 +871,7 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
             role: None,
             group: None,
             channels: Vec::new(),
+            categories: Vec::new(),
             members: Vec::new(),
             invite_links: Vec::new(),
             join_requests: Vec::new(),
@@ -863,6 +888,7 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
             role: Some(role),
             group: None,
             channels: Vec::new(),
+            categories: Vec::new(),
             members: Vec::new(),
             invite_links: Vec::new(),
             join_requests: Vec::new(),
@@ -877,6 +903,7 @@ pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Res
         group: group_row(&conn, &group_id).await?,
         group_id: group_id.clone(),
         channels: channels_of(&conn, &group_id).await?,
+        categories: categories_of(&conn, &group_id).await?,
         members: group_members(&conn, &group_id).await?,
         invite_links: if admin {
             invite_links(&conn, &group_id).await?
@@ -921,13 +948,29 @@ pub async fn group_row(conn: &Connection, group_id: &str) -> anyhow::Result<Opti
     }
 }
 
+/// The `ORDER BY` that puts a group's channels in display order (#2031), over
+/// `channels c LEFT JOIN channel_category cc ON` [`CATEGORY_JOIN`]:
+/// uncategorised first, then category by category in category order; inside a
+/// block by `position`, then any channel without one by creation time (so a
+/// group nobody has arranged keeps its creation order, and a new channel lands
+/// at the bottom of its block). The id breaks a creation-time tie.
+pub const CHANNEL_ORDER_SQL: &str =
+    "(cc.id IS NOT NULL), cc.position, (c.position IS NULL), c.position, c.created_at, c.id";
+
+/// The join [`CHANNEL_ORDER_SQL`] reads. A category of another group never
+/// matches, so a channel naming one sorts (and reports) as uncategorised.
+pub const CATEGORY_JOIN: &str = "cc.id = c.category_id AND cc.group_id = c.group_id";
+
+/// One group's channels, in display order (#2031).
 async fn channels_of(conn: &Connection, group_id: &str) -> anyhow::Result<Vec<ChannelWire>> {
-    let mut rows = conn
-        .query(
-            "SELECT id, group_id, name, description, channel_type FROM channels WHERE group_id = ?1",
-            libsql::params![group_id.to_string()],
-        )
-        .await?;
+    let sql = format!(
+        "SELECT c.id, c.group_id, c.name, c.description, c.channel_type, cc.id \
+         FROM channels c \
+         LEFT JOIN channel_category cc ON {CATEGORY_JOIN} \
+         WHERE c.group_id = ?1 \
+         ORDER BY {CHANNEL_ORDER_SQL}"
+    );
+    let mut rows = conn.query(&sql, libsql::params![group_id.to_string()]).await?;
     let mut out = Vec::new();
     while let Some(row) = rows.next().await? {
         out.push(ChannelWire {
@@ -938,6 +981,29 @@ async fn channels_of(conn: &Connection, group_id: &str) -> anyhow::Result<Vec<Ch
             channel_type: row
                 .get::<Option<String>>(4)?
                 .unwrap_or_else(|| "text".to_string()),
+            category_id: row.get(5)?,
+        });
+    }
+    Ok(out)
+}
+
+/// One group's categories, in display order (#2031).
+pub async fn categories_of(
+    conn: &Connection,
+    group_id: &str,
+) -> anyhow::Result<Vec<ChannelCategoryWire>> {
+    let mut rows = conn
+        .query(
+            "SELECT id, group_id, name FROM channel_category WHERE group_id = ?1 ORDER BY position",
+            libsql::params![group_id.to_string()],
+        )
+        .await?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        out.push(ChannelCategoryWire {
+            id: row.get(0)?,
+            group_id: row.get(1)?,
+            name: row.get(2)?,
         });
     }
     Ok(out)

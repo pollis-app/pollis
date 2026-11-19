@@ -37,6 +37,26 @@ const REDACT_FRAMING_V1: u8 = 0xF6;
 /// A trailer, not a new frame version, so an old client's `strip` still returns the plaintext.
 const THREAD_TRAILER_V1: u8 = 0xF7;
 
+/// Marker for the optional **link-preview trailer** (#1987): a sender-built
+/// preview of the message's first link, written after the text and after any
+/// thread trailer, inside an otherwise ordinary [`PAD_FRAMING_V1`] text frame:
+///
+/// ```text
+///  byte 0          : PAD_FRAMING_V1 (0xF5)
+///  bytes 1..5      : u32 LE real-plaintext length      <- unchanged
+///  bytes 5..N      : real plaintext                    <- unchanged
+///  [thread trailer : 0xF7, u32 LE len, id]             <- optional, always first
+///  byte P          : LINK_PREVIEW_TRAILER_V1 (0xF9)
+///  bytes P+1..P+5  : u32 LE preview length
+///  bytes P+5..Q    : preview (JSON, see `link_preview::wire`)
+///  bytes Q..       : zero padding up to the bucket size
+/// ```
+///
+/// After the thread trailer, never before it: a client that predates previews
+/// looks for `0xF7` right after the text, so the thread still reads there, and its
+/// `strip` returns the text alone, so the preview is simply not shown.
+const LINK_PREVIEW_TRAILER_V1: u8 = 0xF9;
+
 /// First byte of the v1 **receipt control frame** (#857, DMs only).
 ///
 /// A delivery/read receipt is an ordinary MLS application message whose
@@ -166,6 +186,9 @@ pub enum Frame {
         text: Vec<u8>,
         /// Thread root ULID from a thread trailer (#825); `None` otherwise.
         thread_id: Option<String>,
+        /// The raw link-preview trailer (#1987); `None` otherwise. Untrusted bytes:
+        /// `link_preview::wire::decode` validates them.
+        link_preview: Option<Vec<u8>>,
     },
     Redaction(String),
     Receipt {
@@ -278,6 +301,7 @@ pub fn classify(buf: &[u8]) -> Frame {
     Frame::Text {
         text: strip(buf),
         thread_id: thread_of(buf),
+        link_preview: link_preview_of(buf).map(<[u8]>::to_vec),
     }
 }
 
@@ -286,18 +310,76 @@ pub fn classify(buf: &[u8]) -> Frame {
 ///
 /// Identical to [`pad`] up to the end of the plaintext — which is exactly what
 /// makes a thread reply readable on a client that has never heard of threads.
+#[cfg(any(test, feature = "fuzzing"))]
 pub fn pad_threaded(plaintext: &[u8], thread_id: &str) -> Vec<u8> {
-    let id = thread_id.as_bytes();
-    let mut buf = Vec::with_capacity(HEADER + plaintext.len() + HEADER + id.len());
+    pad_with_trailers(plaintext, Some(thread_id), None)
+}
+
+/// Wrap `plaintext` in the v1 framing with whichever trailers apply, then
+/// zero-pad to the size bucket: the thread trailer (#825) first, then the
+/// link-preview trailer (#1987). With neither, this is exactly [`pad`].
+pub fn pad_with_trailers(
+    plaintext: &[u8],
+    thread_id: Option<&str>,
+    link_preview: Option<&[u8]>,
+) -> Vec<u8> {
+    let trailers = thread_id.map_or(0, |t| HEADER + t.len())
+        + link_preview.map_or(0, |p| HEADER + p.len());
+    let mut buf = Vec::with_capacity(HEADER + plaintext.len() + trailers);
     buf.push(PAD_FRAMING_V1);
     buf.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
     buf.extend_from_slice(plaintext);
-    buf.push(THREAD_TRAILER_V1);
-    buf.extend_from_slice(&(id.len() as u32).to_le_bytes());
-    buf.extend_from_slice(id);
+    if let Some(thread_id) = thread_id {
+        let id = thread_id.as_bytes();
+        buf.push(THREAD_TRAILER_V1);
+        buf.extend_from_slice(&(id.len() as u32).to_le_bytes());
+        buf.extend_from_slice(id);
+    }
+    if let Some(preview) = link_preview {
+        buf.push(LINK_PREVIEW_TRAILER_V1);
+        buf.extend_from_slice(&(preview.len() as u32).to_le_bytes());
+        buf.extend_from_slice(preview);
+    }
     let target = padded_len(buf.len());
     buf.resize(target, 0u8);
     buf
+}
+
+/// Offset just past the real plaintext of a v1 text frame, or `None` for
+/// anything that is not one (or whose length prefix overruns the buffer).
+fn text_end(buf: &[u8]) -> Option<usize> {
+    if buf.first() != Some(&PAD_FRAMING_V1) || buf.len() < HEADER {
+        return None;
+    }
+    let len = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+    // `checked_add`: `len` comes from an untrusted buffer.
+    let end = HEADER.checked_add(len)?;
+    (end <= buf.len()).then_some(end)
+}
+
+/// The trailer marked `marker` at `at`: its payload and the offset just past
+/// it. `None` unless a well-formed trailer with that marker starts exactly there.
+fn trailer_at(buf: &[u8], at: usize, marker: u8) -> Option<(&[u8], usize)> {
+    if buf.get(at) != Some(&marker) {
+        return None;
+    }
+    let (len, body) = read_u32(buf, at.checked_add(1)?)?;
+    let end = body.checked_add(len)?;
+    if end > buf.len() {
+        return None;
+    }
+    Some((&buf[body..end], end))
+}
+
+/// The raw link-preview trailer of a decrypted buffer (#1987), if the sender
+/// wrote one: right after the text, or right after the thread trailer.
+/// `None` for anything malformed; losing a preview beats failing to decode.
+pub fn link_preview_of(buf: &[u8]) -> Option<&[u8]> {
+    let mut at = text_end(buf)?;
+    if let Some((_, after_thread)) = trailer_at(buf, at, THREAD_TRAILER_V1) {
+        at = after_thread;
+    }
+    trailer_at(buf, at, LINK_PREVIEW_TRAILER_V1).map(|(preview, _)| preview)
 }
 
 /// Recover the thread id from a decrypted buffer, if the sender wrote one.
@@ -502,7 +584,7 @@ mod tests {
         let framed = pad_threaded(b"in a thread", THREAD);
         assert_eq!(thread_of(&framed).as_deref(), Some(THREAD));
         match classify(&framed) {
-            Frame::Text { text, thread_id } => {
+            Frame::Text { text, thread_id, .. } => {
                 assert_eq!(text, b"in a thread");
                 assert_eq!(thread_id.as_deref(), Some(THREAD));
             }
@@ -727,5 +809,83 @@ mod tests {
             );
             assert_eq!(framed.len(), MIN_BUCKET, "short replies must collapse");
         }
+    }
+
+    const PREVIEW: &[u8] = br#"{"v":1,"url":"https://example.com/a","title":"A"}"#;
+
+    /// Back-compat (#1987): a client that predates previews recovers the text
+    /// exactly, and still finds a thread trailer written alongside a preview.
+    #[test]
+    fn old_client_reads_text_and_thread_past_a_preview() {
+        for text in ["".as_bytes(), "see https://example.com/a".as_bytes(), "héllo → 🔗".as_bytes()] {
+            let plain = pad_with_trailers(text, None, Some(PREVIEW));
+            assert_eq!(strip(&plain), text, "strip must return the text alone");
+            assert_eq!(thread_of(&plain), None, "a preview is not a thread");
+
+            let threaded = pad_with_trailers(text, Some(THREAD), Some(PREVIEW));
+            assert_eq!(strip(&threaded), text);
+            assert_eq!(thread_of(&threaded).as_deref(), Some(THREAD), "the thread must still read where old clients look");
+        }
+    }
+
+    #[test]
+    fn link_preview_trailer_roundtrips() {
+        for thread in [None, Some(THREAD)] {
+            let framed = pad_with_trailers(b"see https://example.com/a", thread, Some(PREVIEW));
+            assert_eq!(link_preview_of(&framed), Some(PREVIEW));
+            match classify(&framed) {
+                Frame::Text { text, thread_id, link_preview } => {
+                    assert_eq!(text, b"see https://example.com/a");
+                    assert_eq!(thread_id.as_deref(), thread);
+                    assert_eq!(link_preview.as_deref(), Some(PREVIEW));
+                }
+                _ => panic!("a text frame with a preview misclassified"),
+            }
+            assert_eq!(framed.len(), padded_len(framed.len()), "a preview must not escape its bucket");
+        }
+    }
+
+    /// With no trailers, `pad_with_trailers` is byte-identical to the older writers.
+    #[test]
+    fn pad_with_trailers_matches_the_older_writers() {
+        assert_eq!(pad_with_trailers(b"hello", None, None), pad(b"hello"));
+        let mut old = vec![PAD_FRAMING_V1];
+        old.extend_from_slice(&2u32.to_le_bytes());
+        old.extend_from_slice(b"hi");
+        old.push(THREAD_TRAILER_V1);
+        old.extend_from_slice(&(THREAD.len() as u32).to_le_bytes());
+        old.extend_from_slice(THREAD.as_bytes());
+        old.resize(padded_len(old.len()), 0);
+        assert_eq!(pad_threaded(b"hi", THREAD), old);
+    }
+
+    #[test]
+    fn no_preview_where_none_was_written() {
+        assert_eq!(link_preview_of(&pad(b"plain")), None);
+        assert_eq!(link_preview_of(&pad_threaded(b"t", THREAD)), None);
+        assert_eq!(link_preview_of(&pad(&[LINK_PREVIEW_TRAILER_V1])), None, "the marker inside the text is text");
+        assert_eq!(link_preview_of(br#"{"_att":[]}"#), None);
+        assert_eq!(link_preview_of(&pad_redaction(MSG_A)), None);
+        assert_eq!(link_preview_of(&[]), None);
+    }
+
+    /// A truncated or hostile preview trailer degrades to "no preview", never a panic.
+    #[test]
+    fn malformed_preview_trailer_degrades_to_none() {
+        let good = pad_with_trailers(b"hi", None, Some(PREVIEW));
+        let text_end = HEADER + 2;
+        assert_eq!(link_preview_of(&good[..text_end + 1]), None, "length prefix truncated");
+        let mut overrun = good[..text_end + 1].to_vec();
+        overrun.extend_from_slice(&9_999u32.to_le_bytes());
+        overrun.extend_from_slice(b"short");
+        assert_eq!(link_preview_of(&overrun), None);
+        let mut huge = good[..text_end + 1].to_vec();
+        huge.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(link_preview_of(&huge), None);
+        // A broken thread trailer before it hides the preview rather than misreading it.
+        let mut bad_thread = good[..text_end].to_vec();
+        bad_thread.push(THREAD_TRAILER_V1);
+        bad_thread.extend_from_slice(&9_999u32.to_le_bytes());
+        assert_eq!(link_preview_of(&bad_thread), None);
     }
 }

@@ -12,7 +12,12 @@ import { invoke } from "../../lib/native";
 import i18n from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
-import type { MessageAttachment } from "../../types";
+import type {
+  LinkPreviewDraft,
+  LinkPreviewWire,
+  MessageAttachment,
+  MessageLinkPreview,
+} from "../../types";
 import { searchQueryKeys } from "./useSearch";
 import { refreshUnread } from "./useUnread";
 import { keyChangeNoticeKeys } from "./useSafety";
@@ -31,7 +36,11 @@ import {
   withoutOutboxRows,
   type SendState,
 } from "./pendingMessages";
-import { parseContent } from "../../lib/messageContent";
+import {
+  linkPreviewFromWire,
+  optimisticLinkPreview,
+  parseContent,
+} from "../../lib/messageContent";
 import { createSingleFlight } from "../../lib/singleFlight";
 
 export type ConversationKind = "channel" | "dm";
@@ -55,6 +64,8 @@ export interface RawChannelMessage {
    *  Absent once delivered, and on everything received. */
   send_state?: SendState;
   edit_state?: SendState;
+  /** The sender's link preview (#1987), from the message's own trailer. */
+  link_preview?: LinkPreviewWire | null;
 }
 
 interface OutboxReport {
@@ -105,6 +116,8 @@ export interface Message {
   outboxId?: string;
   /** False when the send failed before the core stored it: only discard. */
   retryable?: boolean;
+  /** The sender's link preview (#1987); drawn only for a link in the body (`lib/linkPreview.ts`). */
+  link_preview?: MessageLinkPreview | null;
 }
 
 export interface DecodedPage {
@@ -123,6 +136,7 @@ function transform(raw: RawChannelMessage): Message {
     sender_username: raw.sender_username,
     content: parsed.text,
     attachments: parsed.attachments,
+    link_preview: linkPreviewFromWire(raw.link_preview, { conversationId: raw.conversation_id }),
     reply_to_id: raw.reply_to_id ?? null,
     thread_id: raw.thread_id ?? null,
     created_at: new Date(raw.sent_at).getTime(),
@@ -348,6 +362,8 @@ export function useSendMessage(
       replyToId?: string;
       threadId?: string;
       attachments?: PickedAttachment[];
+      // A finished composer preview (#1987); the core consumes its staged thumbnail.
+      linkPreview?: LinkPreviewDraft | null;
     }) => {
       if (!conversationId || !currentUser) {
         throw new NotQueuedError("No active conversation");
@@ -376,6 +392,7 @@ export function useSendMessage(
         senderId: currentUser.id,
         content: vars.content,
         attachments: outgoingAttachments(vars.attachments ?? []),
+        linkPreview: vars.linkPreview ?? null,
         replyToId: vars.replyToId ?? null,
         threadId: vars.threadId ?? null,
         senderUsername: currentUser.username ?? null,
@@ -409,6 +426,7 @@ export function useSendMessage(
         thread_id: vars.threadId ?? null,
         created_at: Date.now(),
         pending: true,
+        link_preview: optimisticLinkPreview(vars.linkPreview),
       };
       const previous = queryClient.getQueryData<MessagesData>(key);
       if (previous && previous.pages.length > 0) {
@@ -446,6 +464,10 @@ export function useSendMessage(
         ...confirmed,
         sender_username: confirmed.sender_username ?? currentUser?.username,
       };
+      // The thumbnail uploads after the send (#1987): keep the composer's copy until it has.
+      if (vars.linkPreview && !settled.link_preview?.image) {
+        settled.link_preview = optimisticLinkPreview(vars.linkPreview);
+      }
       (vars.attachments ?? []).forEach((att, i) => {
         const to = confirmed.attachments?.[i]?.id;
         if (to) {
@@ -664,7 +686,12 @@ export function useEditMessage(
   return useMutation({
     // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
-    mutationFn: async (vars: { messageId: string; newContent: string }) => {
+    mutationFn: async (vars: {
+      messageId: string;
+      newContent: string;
+      // An edit rebuilds the message (#1987): no preview here means none after it.
+      linkPreview?: LinkPreviewDraft | null;
+    }) => {
       if (!currentUser || !conversationId) {
         throw new Error("No active conversation");
       }
@@ -673,6 +700,7 @@ export function useEditMessage(
         messageId: vars.messageId,
         userId: currentUser.id,
         newContent: vars.newContent,
+        linkPreview: vars.linkPreview ?? null,
       });
       return vars;
     },
@@ -687,7 +715,12 @@ export function useEditMessage(
         mapPages(cache, (msgs) =>
           msgs.map((m) =>
             m.id === vars.messageId
-              ? { ...m, content: vars.newContent, edited_at: Date.now() }
+              ? {
+                  ...m,
+                  content: vars.newContent,
+                  edited_at: Date.now(),
+                  link_preview: optimisticLinkPreview(vars.linkPreview),
+                }
               : m,
           ),
         ),

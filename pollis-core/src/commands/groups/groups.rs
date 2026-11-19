@@ -4,7 +4,7 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::types::{Channel, Group, GroupPreview, GroupWithChannels};
+use super::types::{Channel, ChannelCategory, Group, GroupPreview, GroupWithChannels};
 use super::authz;
 
 /// The sidebar tree: every group the user belongs to, each carrying its
@@ -25,6 +25,7 @@ pub async fn list_user_groups_with_channels(
             owner_id: g.group.owner_id,
             created_at: g.group.created_at,
             channels: g.channels.into_iter().map(channel_from_wire).collect(),
+            categories: g.categories.into_iter().map(category_from_wire).collect(),
             current_user_role: g.role,
         })
         .collect();
@@ -77,6 +78,15 @@ pub(super) fn channel_from_wire(c: pollis_api::directory::ChannelWire) -> Channe
         name: c.name,
         description: c.description,
         channel_type: c.channel_type,
+        category_id: c.category_id,
+    }
+}
+
+pub(super) fn category_from_wire(c: pollis_api::directory::ChannelCategoryWire) -> ChannelCategory {
+    ChannelCategory {
+        id: c.id,
+        group_id: c.group_id,
+        name: c.name,
     }
 }
 

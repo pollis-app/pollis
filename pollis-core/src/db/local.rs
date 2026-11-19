@@ -564,6 +564,14 @@ const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
         "poster",
         "ALTER TABLE outbox_attachment ADD COLUMN poster TEXT",
     ),
+    // Link previews (#1987). Must match `local_schema.sql`.
+    ("message", "link_preview", "ALTER TABLE message ADD COLUMN link_preview TEXT"),
+    (
+        "outbox_attachment",
+        "link_preview",
+        "ALTER TABLE outbox_attachment ADD COLUMN link_preview INTEGER NOT NULL DEFAULT 0 CHECK (link_preview IN (0, 1))",
+    ),
+    ("outbox_edit", "link_preview", "ALTER TABLE outbox_edit ADD COLUMN link_preview TEXT"),
 ];
 
 /// Apply [`ADDITIVE_COLUMNS`] to a database that predates them.

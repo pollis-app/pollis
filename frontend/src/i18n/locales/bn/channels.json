@@ -124,7 +124,8 @@
       "revoking": "প্রত্যাহার করা হচ্ছে…",
       "revokeLabel": "{{name}}-এর আমন্ত্রণ প্রত্যাহার করুন",
       "revokeFailed": "আমন্ত্রণ প্রত্যাহার করা যায়নি।"
-    }
+    },
+    "resetAlias": "ছদ্মনাম রিসেট করুন"
   },
   "kickMember": {
     "pageTitle": "সদস্য সরান",
@@ -143,7 +144,7 @@
     "acceptFailed": "আমন্ত্রণ গ্রহণ করা যায়নি। আবার চেষ্টা করুন।"
   },
   "inviteMember": {
-    "pageTitle": "সদস্যকে আমন্ত্রণ জানান :: {{group}}",
+    "pageTitle": "সদস্যকে আমন্ত্রণ জানান — {{group}}",
     "intro": "<accent>{{name}}</accent>-এ কাউকে আমন্ত্রণ জানান",
     "identifierLabel": "ইউজারনেম বা ইমেল",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +154,7 @@
     "sendFailed": "আমন্ত্রণ পাঠানো যায়নি"
   },
   "joinRequests": {
-    "pageTitle": "যোগদানের অনুরোধ :: {{group}}",
+    "pageTitle": "যোগদানের অনুরোধ — {{group}}",
     "allPageTitle": "যোগদানের অনুরোধ",
     "pendingFor": "<accent>{{name}}</accent>-এ যোগদানের অপেক্ষমাণ অনুরোধ",
     "empty": "কোনো অপেক্ষমাণ অনুরোধ নেই।",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} আপনাকে {{group}}-এ আমন্ত্রণ জানিয়েছেন",
     "inviteBody": "{{name}} আপনাকে আমন্ত্রণ জানিয়েছেন",
     "inviteBodyUnknown": "আপনাকে একটি গ্রুপে আমন্ত্রণ জানানো হয়েছে"
+  },
+  "resetAlias": {
+    "pageTitle": "ছদ্মনাম রিসেট করুন",
+    "confirm": "এই গ্রুপে <strong>{{name}}</strong> (@{{handle}})-এর ছদ্মনাম রিসেট করবেন?",
+    "consequence": "এখানে আবার তাঁর মূল প্রোফাইল দেখা যাবে। তিনি নতুন ছদ্মনাম দিতে পারবেন।",
+    "confirmButton": "হ্যাঁ, রিসেট করুন",
+    "submitting": "রিসেট হচ্ছে…",
+    "failed": "ছদ্মনাম রিসেট করা যায়নি"
   }
 }

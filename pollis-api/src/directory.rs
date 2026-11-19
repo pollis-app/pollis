@@ -206,15 +206,31 @@ pub struct ChannelWire {
     #[serde(default)]
     pub description: Option<String>,
     pub channel_type: String,
+    /// The category it sits in (#2031), `None` for the uncategorised block. A
+    /// DS that predates categories omits it.
+    #[serde(default)]
+    pub category_id: Option<String>,
+}
+
+/// A group's channel category (#2031). Lists carry them in display order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelCategoryWire {
+    pub id: String,
+    pub group_id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupWithChannelsWire {
     #[serde(flatten)]
     pub group: GroupWire,
+    /// In display order (#2031): uncategorised first, then category by category.
     pub channels: Vec<ChannelWire>,
     /// The CALLER's role in this group (`admin` / `member`).
     pub role: String,
+    /// In display order (#2031). Absent from a DS that predates categories.
+    #[serde(default)]
+    pub categories: Vec<ChannelCategoryWire>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -295,7 +311,11 @@ pub struct DirectoryGroupResponse {
     pub role: Option<String>,
     #[serde(default)]
     pub group: Option<GroupWire>,
+    /// In display order (#2031): uncategorised first, then category by category.
     pub channels: Vec<ChannelWire>,
+    /// In display order (#2031); empty when not a member.
+    #[serde(default)]
+    pub categories: Vec<ChannelCategoryWire>,
     pub members: Vec<GroupMemberWire>,
     /// Admin-only; empty for a plain member.
     pub invite_links: Vec<InviteLinkWire>,

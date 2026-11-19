@@ -108,6 +108,9 @@ pub enum VoiceEvent {
     Reconnecting { attempt: u32 },
     /// The session recovered on a live link; the roster was re-seeded just before.
     Reconnected,
+    /// The audio devices changed (one plugged in or removed, or the system
+    /// default moved): refetch `list_audio_devices` (#1989).
+    AudioDevicesChanged,
     /// The session is over. `error` is set when it ended on a failure the
     /// in-session reconnect could not fix; absent when the user left.
     Disconnected {
@@ -130,6 +133,18 @@ pub struct AudioDevice {
     pub kind: String, // "input" | "output"
 }
 
+/// The device an open voice stream is on, for the hot-plug reconcile
+/// (`device_watch.rs`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenedDevice {
+    /// The cpal id of the device the stream opened on (the default's id when
+    /// the choice was "Default" or fell back to it).
+    pub id: Option<String>,
+    /// The stream's generation; an error from a replaced stream carries an
+    /// older one and is ignored.
+    pub generation: u64,
+}
+
 // All remote audio mixes into one cpal stream: the single AEC render tap.
 
 pub struct PlaybackState {
@@ -140,7 +155,10 @@ pub struct PlaybackState {
     pub output_stream: Option<SendableStream>,
     pub output_channels: u32,
     pub output_sample_rate: u32,
+    /// The user's speaker choice for this session (`None` = the default).
     pub output_device_name: Option<String>,
+    /// The device the output stream is actually on.
+    pub output_device: OpenedDevice,
     /// Per-track NativeAudioStream drain tasks, keyed by `"{identity}-{sid}"`.
     pub drain_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
     /// Per-user gain keyed by bare `user_id`; absent = unity. Tracks that
@@ -159,6 +177,7 @@ impl PlaybackState {
             output_channels: 0,
             output_sample_rate: 0,
             output_device_name: None,
+            output_device: OpenedDevice::default(),
             drain_tasks: HashMap::new(),
             user_volumes: HashMap::new(),
         }
@@ -171,6 +190,7 @@ impl PlaybackState {
         self.output_sample_rate = 0;
         self.output_channels = 0;
         self.output_device_name = None;
+        self.output_device = OpenedDevice::default();
         self.output_stream.take()
     }
 
@@ -234,7 +254,10 @@ pub struct VoiceState {
     pub joining: Arc<AtomicBool>,
     /// Raised by `leave_voice_channel` to abort the join `joining` guards.
     pub join_cancel: Option<Arc<super::join::JoinCancel>>,
+    /// The user's mic choice for this session (`None` = the default).
     pub current_input_device: Option<String>,
+    /// The device the mic stream is actually on.
+    pub input_device: OpenedDevice,
     /// APM stage for the current session; `None` outside a call.
     pub apm: Option<voice_apm::ApmStage>,
     /// RNNoise ahead of APM; `None` outside a call or when disabled.
@@ -289,6 +312,7 @@ impl VoiceState {
             joining: Arc::new(AtomicBool::new(false)),
             join_cancel: None,
             current_input_device: None,
+            input_device: OpenedDevice::default(),
             apm: None,
             denoiser: Arc::new(Mutex::new(None)),
             levels: Arc::new(LevelsHub::new()),

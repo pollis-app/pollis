@@ -41,13 +41,13 @@
     "others_few": "(+ещё {{count}})",
     "others_many": "(+ещё {{count}})",
     "others_other": "(+ещё {{count}})",
-    "accept": "принять",
-    "block": "заблокировать"
+    "accept": "Принять",
+    "block": "Заблокировать"
   },
   "blocked": {
     "pageTitle": "Заблокированные пользователи",
     "empty": "Заблокированных пользователей нет.",
-    "unblock": "разблокировать"
+    "unblock": "Разблокировать"
   },
   "profile": {
     "fallbackName": "Пользователь",

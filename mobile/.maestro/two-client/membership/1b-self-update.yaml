@@ -1,0 +1,78 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# SELF-UPDATE (#1880, #2027) — driven by scripts/maestro-membership.sh after
+# part 1, while the peer (the group's creator) waits.
+#
+# This device JOINED the peer's group in part 1, so its leaf there was never
+# rotated here: the join's own follow-up (`[mls] post-join self-update`) or,
+# if that was deferred, the next foreground backstop (`[mls-backstop] …,
+# 1 self-updated`) must rotate it. The group this device created in part 1 is
+# never due: since #1961 a founder's leaf counts as rotated at creation. Then
+# a return to the foreground finds nothing due: the newest backstop line
+# rotates nothing, so the rotation was recorded and is not repeated.
+#
+# The Diagnostics screen reads the log once as it opens, so each check
+# re-opens it until the line is there.
+
+# A cold start (open + PIN) runs the backstops too.
+- runFlow: ../../subflows/home.yaml
+- tapOn:
+    id: "tab-self"
+- scrollUntilVisible:
+    element:
+      id: "row-self-diagnostics"
+    direction: DOWN
+    centerElement: true
+- tapOn:
+    id: "row-self-diagnostics"
+
+# --- 1. The joined group's leaf was rotated, by the join or the backstop ---
+- repeat:
+    times: 15
+    while:
+      notVisible:
+        id: "text-diagnostics-preview"
+        text: "(?s).*(\\[mls\\] post-join self-update: merged own leaf|\\[mls-backstop\\] [^\\n]*, [1-9] self-updated).*"
+    commands:
+      - tapOn:
+          id: "btn-back"
+      - scrollUntilVisible:
+          element:
+            id: "row-self-diagnostics"
+          direction: DOWN
+          centerElement: true
+      - tapOn:
+          id: "row-self-diagnostics"
+- assertVisible:
+    id: "text-diagnostics-preview"
+    text: "(?s).*(\\[mls\\] post-join self-update: merged own leaf|\\[mls-backstop\\] [^\\n]*, [1-9] self-updated).*"
+- takeScreenshot: membership-self-update-01-rotated
+
+# --- 2. Back to the foreground: nothing is due, the newest line rotates nothing ---
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "screen-self-diagnostics"
+- repeat:
+    times: 15
+    while:
+      notVisible:
+        id: "text-diagnostics-preview"
+        text: "(?s).*\\[mls-backstop\\] [^\\n]*, 0 self-updated(?:(?!\\[mls-backstop\\]).)*"
+    commands:
+      - tapOn:
+          id: "btn-back"
+      - scrollUntilVisible:
+          element:
+            id: "row-self-diagnostics"
+          direction: DOWN
+          centerElement: true
+      - tapOn:
+          id: "row-self-diagnostics"
+- assertVisible:
+    id: "text-diagnostics-preview"
+    text: "(?s).*\\[mls-backstop\\] [^\\n]*, 0 self-updated(?:(?!\\[mls-backstop\\]).)*"
+- takeScreenshot: membership-self-update-02-not-due

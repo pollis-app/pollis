@@ -12,10 +12,12 @@
 //! Enforcement is **ON by default** (#921); see [`require_auth_from_value`]. Off is for local dev only.
 
 pub mod account;
+pub mod aliases;
 pub mod account_reads;
 pub mod auth;
 pub mod bootstrap;
 pub mod broker;
+pub mod channel_order;
 pub mod cert;
 pub mod client_policy;
 pub mod commit;
@@ -113,6 +115,8 @@ pub struct AppState {
     pub log_purge_drain: util::SingleFlight,
     /// One attachment reclaim pass at a time (#1881); see [`messages::spawn_attachment_reclaim`].
     pub attachment_reclaim: util::SingleFlight,
+    /// One avatar reclaim pass at a time (#2003); see [`aliases::spawn_avatar_reclaim`].
+    pub avatar_reclaim: util::SingleFlight,
 }
 
 impl AppState {
@@ -147,6 +151,7 @@ impl AppState {
             livekit_health: livekit::LiveKitHealth::default(),
             log_purge_drain: util::SingleFlight::default(),
             attachment_reclaim: util::SingleFlight::default(),
+            avatar_reclaim: util::SingleFlight::default(),
         }
     }
 
@@ -320,6 +325,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<messages::EnvelopeGcBody as DsRequest>::PATH, post(messages::envelope_gc))
         .route(<messages::AttachmentRegisterBody as DsRequest>::PATH, post(messages::register_attachment))
         .route(<messages::AttachmentDeleteBody as DsRequest>::PATH, post(messages::delete_attachment))
+        .route(<messages::AttachmentReleaseBody as DsRequest>::PATH, post(messages::release_attachment))
         // Domain B (#419) — groups / channels / membership / invites / join-requests.
         .route(<groups::CreateGroupBody as DsRequest>::PATH, post(groups::create_group))
         .route(<groups::UpdateGroupBody as DsRequest>::PATH, post(groups::update_group))
@@ -328,6 +334,12 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<groups::CreateChannelBody as DsRequest>::PATH, post(groups::create_channel))
         .route(<groups::UpdateChannelBody as DsRequest>::PATH, post(groups::update_channel))
         .route(<groups::DeleteChannelBody as DsRequest>::PATH, post(groups::delete_channel))
+        // Channel categories and order (#2031).
+        .route(<channel_order::MoveChannelBody as DsRequest>::PATH, post(channel_order::move_channel))
+        .route(<channel_order::CreateChannelCategoryBody as DsRequest>::PATH, post(channel_order::create_category))
+        .route(<channel_order::RenameChannelCategoryBody as DsRequest>::PATH, post(channel_order::rename_category))
+        .route(<channel_order::DeleteChannelCategoryBody as DsRequest>::PATH, post(channel_order::delete_category))
+        .route(<channel_order::MoveChannelCategoryBody as DsRequest>::PATH, post(channel_order::move_category))
         .route(<groups::RemoveMemberBody as DsRequest>::PATH, post(groups::remove_member))
         .route(<groups::SetMemberRoleBody as DsRequest>::PATH, post(groups::set_member_role))
         .route(<groups::CreateInviteBody as DsRequest>::PATH, post(groups::create_invite))
@@ -362,6 +374,10 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // Per-channel mute (#1431), plaintext for the push fan-out.
         .route(<profile::SetChannelMuteBody as DsRequest>::PATH, post(profile::set_channel_mute))
         .route(<profile::ChannelMutesBody as DsRequest>::PATH, post(profile::read_channel_mutes))
+        .route(<aliases::SetGroupAliasBody as DsRequest>::PATH, post(aliases::set_group_alias))
+        .route(<aliases::ResetGroupAliasBody as DsRequest>::PATH, post(aliases::reset_group_alias))
+        .route(<aliases::GroupAliasesBody as DsRequest>::PATH, post(aliases::read_group_aliases))
+        .route(<aliases::MyAliasesBody as DsRequest>::PATH, post(aliases::read_my_aliases))
         // Pinned messages (#99): ciphertext only.
         .route(<pins::UpsertPinKeystateBody as DsRequest>::PATH, post(pins::upsert_keystate))
         .route(<pins::PinMessageBody as DsRequest>::PATH, post(pins::pin_message))

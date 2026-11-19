@@ -24,7 +24,9 @@ maestro() {
   # Android flows that seed photos (#1769): clear earlier runs' copies first,
   # and keep the photo picker synced while the flow runs, or it never lists
   # what `addMedia` adds. See maestro-media.sh.
-  local seeds="" rc=0 watcher=""
+  # POLLIS_MEDIA_SEEDS=1: maestro-run.sh hands Maestro a workspace, not the
+  # flow files, so it says so itself when one of them seeds photos (#2029).
+  local seeds="${POLLIS_MEDIA_SEEDS:-}" rc=0 watcher=""
   for arg in "$@"; do
     if [ -f "$arg" ] && grep -q -- '- addMedia:' "$arg"; then
       seeds=1
@@ -41,4 +43,18 @@ maestro() {
     wait "$watcher" 2>/dev/null || true
   fi
   return "$rc"
+}
+
+# The first @handle on a device's screen (a Self page a flow left up), for the
+# scripts that sign a peer up and pass its handle on: maestro-run.sh (#2029)
+# and maestro-report.sh. Empty when none is found.
+maestro_read_handle() {
+  local device="$1" tree
+  if [[ "$device" == emulator-* || "$device" == *:* ]]; then
+    adb -s "$device" shell uiautomator dump /sdcard/peer-ui.xml >/dev/null 2>&1 || true
+    tree="$(adb -s "$device" exec-out cat /sdcard/peer-ui.xml 2>/dev/null || true)"
+  else
+    tree="$(maestro --device "$device" hierarchy 2>/dev/null || true)"
+  fi
+  printf '%s' "$tree" | grep -oE '@[a-z0-9][a-z0-9_.-]{2,}' | grep -v '^@example\.' | head -1 | tr -d '@' || true
 }

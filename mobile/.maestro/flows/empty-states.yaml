@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # EMPTY STATES (#1969) — desktop parity with e2e/empty-states.spec.ts: every
 # empty list is the one `EmptyState` (components/ui.tsx), one centred sentence
@@ -8,7 +9,10 @@ tags:
 # so each screen below is empty by construction: Groups, Direct, Saved,
 # Blocked, then a new group's #General and its custom emoji.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "empty-states"
 
 # --- Groups: the sentence, then Create / Find under it ---
 - tapOn:

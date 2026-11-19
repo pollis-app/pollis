@@ -13,6 +13,7 @@ import {
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
+import { IconButton } from "../components/ui/IconButton";
 import { CustomEmojiImage } from "../components/Emoji/CustomEmojiImage";
 import { EmojiDropZone } from "../components/Emoji/EmojiDropZone";
 import {
@@ -314,15 +315,15 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
                       : formatBytes(item.size_bytes)}
                   </span>
                   {isAdmin && (
-                    <button
-                      type="button"
+                    <IconButton
+                      destructive
                       onClick={() => handleRemove(item.shortcode)}
-                      className="icon-btn-sm shrink-0"
+                      className="shrink-0"
                       aria-label={t("manage.remove", { shortcode: item.shortcode })}
                       data-testid={`group-emoji-remove-${item.shortcode}`}
                     >
                       <Trash2 size={14} className="size-[0.933rem]" />
-                    </button>
+                    </IconButton>
                   )}
                 </li>
               );

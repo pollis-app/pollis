@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
 ---
 # MINIMUM APP VERSION (#1611) — a build below the published minimum shows one
 # full-screen "Update required" page, before any sign-in or PIN screen, with

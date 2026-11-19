@@ -38,6 +38,8 @@ mod history_transfer;
 // Tests the harness's own sqlite3, not the product.
 #[path = "flows/linked_sqlite.rs"]
 mod linked_sqlite;
+#[path = "flows/link_preview.rs"]
+mod link_preview;
 #[path = "flows/lost_messages.rs"]
 mod lost_messages;
 #[path = "flows/messages.rs"]
@@ -64,6 +66,8 @@ mod read_sync;
 mod rejoin;
 #[path = "flows/rich_push.rs"]
 mod rich_push;
+#[path = "flows/group_aliases.rs"]
+mod group_aliases;
 #[path = "flows/reports.rs"]
 mod reports;
 #[path = "flows/sealed_sender.rs"]

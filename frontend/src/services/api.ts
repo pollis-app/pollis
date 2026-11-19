@@ -1,5 +1,5 @@
 import { invoke, type Channel as ChannelOf } from '../bridge';
-import type { User, Group, Channel, AccountsIndex } from '../types';
+import type { User, Group, Channel, ChannelCategory, AccountsIndex } from '../types';
 
 export async function requestOTP(email: string): Promise<void> {
   await invoke('request_otp', { email });
@@ -455,7 +455,7 @@ export async function updateUserProfile(
 import { deriveSlug } from '../utils/urlRouting';
 
 type RawGroup = { id: string; name: string; description?: string; owner_id: string; created_at: string };
-type RawChannel = { id: string; group_id: string; name: string; description?: string; channel_type?: string };
+type RawChannel = { id: string; group_id: string; name: string; description?: string; channel_type?: string; category_id?: string | null };
 
 function toGroup(g: RawGroup): Group {
   const ts = new Date(g.created_at).getTime();
@@ -478,16 +478,24 @@ function toChannel(c: RawChannel): Channel {
     name: c.name,
     description: c.description || '',
     channel_type: (c.channel_type === 'voice' ? 'voice' : 'text'),
+    category_id: c.category_id ?? null,
     created_by: '',
     created_at: 0,
     updated_at: 0,
   };
 }
 
-type RawGroupWithChannels = RawGroup & { channels: RawChannel[]; current_user_role: string };
+type RawGroupWithChannels = RawGroup & {
+  channels: RawChannel[];
+  current_user_role: string;
+  categories?: ChannelCategory[];
+};
 
 export interface GroupWithChannels extends Group {
+  /** In display order (#2031): uncategorised first, then category by category. */
   channels: Channel[];
+  /** In display order (#2031). */
+  categories: ChannelCategory[];
   current_user_role: 'admin' | 'member';
 }
 
@@ -496,6 +504,7 @@ export async function listUserGroupsWithChannels(userId: string): Promise<GroupW
   return (groups || []).map((g) => ({
     ...toGroup(g),
     channels: (g.channels || []).map(toChannel),
+    categories: g.categories ?? [],
     current_user_role: (g.current_user_role === 'admin' ? 'admin' : 'member') as 'admin' | 'member',
   }));
 }

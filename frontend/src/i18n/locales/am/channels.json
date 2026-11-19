@@ -124,7 +124,8 @@
       "revoking": "በመሻር ላይ…",
       "revokeLabel": "ለ{{name}} የተላከውን ግብዣ ሻር",
       "revokeFailed": "ግብዣውን መሻር አልተቻለም።"
-    }
+    },
+    "resetAlias": "ቅጽል ስም ዳግም አስጀምር"
   },
   "kickMember": {
     "pageTitle": "አባል አስወግድ",
@@ -143,7 +144,7 @@
     "acceptFailed": "ግብዣውን መቀበል አልተቻለም። እንደገና ይሞክሩ።"
   },
   "inviteMember": {
-    "pageTitle": "አባል ጋብዝ :: {{group}}",
+    "pageTitle": "አባል ጋብዝ — {{group}}",
     "intro": "አንድን ሰው ወደ <accent>{{name}}</accent> ይጋብዙ",
     "identifierLabel": "የተጠቃሚ ስም ወይም ኢሜይል",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +154,7 @@
     "sendFailed": "ግብዣውን መላክ አልተሳካም"
   },
   "joinRequests": {
-    "pageTitle": "የመቀላቀል ጥያቄዎች :: {{group}}",
+    "pageTitle": "የመቀላቀል ጥያቄዎች — {{group}}",
     "allPageTitle": "የመቀላቀል ጥያቄዎች",
     "pendingFor": "<accent>{{name}}</accent>ን ለመቀላቀል በመጠባበቅ ላይ ያሉ ጥያቄዎች",
     "empty": "በመጠባበቅ ላይ ያሉ ጥያቄዎች የሉም።",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} ወደ {{group}} ጋብዞዎታል",
     "inviteBody": "{{name}} ጋብዞዎታል",
     "inviteBodyUnknown": "ወደ አንድ ቡድን ተጋብዘዋል"
+  },
+  "resetAlias": {
+    "pageTitle": "ቅጽል ስም ዳግም አስጀምር",
+    "confirm": "በዚህ ቡድን ውስጥ የ<strong>{{name}}</strong> (@{{handle}}) ቅጽል ስም ዳግም ይጀመር?",
+    "consequence": "እዚህ እንደገና ዋና መገለጫቸው ይታያል። አዲስ ቅጽል ስም ማዘጋጀት ይችላሉ።",
+    "confirmButton": "አዎ፣ ዳግም አስጀምር",
+    "submitting": "ዳግም በማስጀመር ላይ…",
+    "failed": "ቅጽል ስሙን ዳግም ማስጀመር አልተቻለም"
   }
 }

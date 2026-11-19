@@ -5,16 +5,12 @@ tags:
 # COMPOSER DRAFT: unsent text survives leaving the conversation for another
 # tab and coming back, as on desktop (mobile/lib/drafts.ts, desktop's store).
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

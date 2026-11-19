@@ -2,6 +2,8 @@ import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { shellOpen } from "../../bridge";
 import { findUrls, parseLink } from "../../utils/links";
+import { PressButton } from "../ui/PressButton";
+import { FOCUS_RING } from "../ui/focusRing";
 
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg"];
 const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v", "ogv"];
@@ -36,7 +38,7 @@ function classify(href: string): MediaKind | null {
   return null;
 }
 
-function extractMediaLinks(text: string): MediaLink[] {
+function extractMediaLinks(text: string, exceptHref: string | null): MediaLink[] {
   const out: MediaLink[] = [];
   const seen = new Set<string>();
   for (const { url } of findUrls(text) ?? []) {
@@ -45,7 +47,7 @@ function extractMediaLinks(text: string): MediaLink[] {
     }
     seen.add(url);
     const target = parseLink(url);
-    if (!target) {
+    if (!target || target.href === exceptHref) {
       continue;
     }
     const kind = classify(target.href);
@@ -58,11 +60,13 @@ function extractMediaLinks(text: string): MediaLink[] {
 
 interface MediaLinkUnfurlProps {
   text: string;
+  /** A link the sender's preview card already shows (#1987): no second tile for it. */
+  exceptHref?: string | null;
 }
 
-export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
+export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text, exceptHref = null }) => {
   const { t } = useTranslation("chat");
-  const links = useMemo(() => extractMediaLinks(text), [text]);
+  const links = useMemo(() => extractMediaLinks(text, exceptHref), [text, exceptHref]);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   // Remote media loads only on a per-URL click, every host: an automatic fetch leaks the reader's IP to a sender-chosen host.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
@@ -81,7 +85,6 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
     height: 96,
     objectFit: "cover",
     display: "block",
-    borderRadius: "0.5rem",
     background: "transparent",
   };
 
@@ -92,21 +95,21 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
         const show = revealed.has(link.url);
         if (!show) {
           return (
-            <button
+            <PressButton
               key={link.url}
-              type="button"
+              activateOn="click"
               data-testid="media-link-reveal"
               onClick={() =>
                 setRevealed((prev) => new Set(prev).add(link.url))
               }
               title={t("unfurl.loadTitle", { url: href })}
               aria-label={t("unfurl.loadDescription", { url: href })}
-              className="flex h-24 w-24 shrink-0 items-center justify-center rounded-control border border-line bg-surface-raised px-2 text-center text-meta text-muted hover:bg-hover hover:text-fg"
+              className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-control border border-line bg-surface-raised px-2 text-center text-meta text-muted hover:bg-hover hover:text-fg ${FOCUS_RING}`}
             >
               {link.kind === "image"
                 ? t("unfurl.loadImage")
                 : t("unfurl.loadVideo")}
-            </button>
+            </PressButton>
           );
         }
         const onError = () =>
@@ -117,16 +120,16 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
           });
         if (link.kind === "image") {
           return (
-            <button
+            <PressButton
               key={link.url}
-              type="button"
+              activateOn="click"
               onClick={() => handleClick(link.href)}
-              className="p-0 bg-transparent border-0 cursor-pointer flex-shrink-0"
+              className={`p-0 bg-transparent border-0 cursor-pointer flex-shrink-0 rounded-control ${FOCUS_RING}`}
               title={href}
               aria-label={t("unfurl.openLabel", { url: href })}
             >
-              <img src={href} alt="" onError={onError} className="border-0" style={thumbStyle} />
-            </button>
+              <img src={href} alt="" onError={onError} className="border-0 rounded-control" style={thumbStyle} />
+            </PressButton>
           );
         }
         return (
@@ -136,7 +139,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
             controls
             preload="metadata"
             onError={onError}
-            className="border-0"
+            className="border-0 rounded-control"
             style={{ ...thumbStyle, objectFit: "cover" }}
           />
         );

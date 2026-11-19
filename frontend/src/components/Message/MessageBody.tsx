@@ -17,7 +17,7 @@ const renderLinkified = (text: string, key: string | number) => (
 
 /** `@mentions` that resolve become tokens (#843); the rest goes to `LinkifiedText`. */
 export const MessageBody: React.FC<MessageBodyProps> = React.memo(({ text, ctx }) => {
-  const { skin, mentionNames, selfName } = ctx;
+  const { skin, mentionNames, selfName, mentionLabels } = ctx;
 
   const parts = useMemo(() => {
     const mentions = findMentions(text).filter((m) => mentionNames.has(m.name));
@@ -38,7 +38,13 @@ export const MessageBody: React.FC<MessageBodyProps> = React.memo(({ text, ctx }
       }
       const isSelf = m.name === "all" || m.name === selfName;
       nodes.push(
-        <MentionToken key={`m${m.start}`} name={m.raw} isSelf={isSelf} skin={skin} />,
+        <MentionToken
+          key={`m${m.start}`}
+          name={m.raw}
+          label={mentionLabels?.get(m.name)}
+          isSelf={isSelf}
+          skin={skin}
+        />,
       );
       cursor = m.end;
     }
@@ -48,7 +54,7 @@ export const MessageBody: React.FC<MessageBodyProps> = React.memo(({ text, ctx }
       );
     }
     return nodes;
-  }, [text, mentionNames, selfName, skin]);
+  }, [text, mentionNames, selfName, skin, mentionLabels]);
 
   if (parts === null) {
     return <EmojiText text={text} renderText={renderLinkified} />;

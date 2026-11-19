@@ -48,7 +48,9 @@ type VoiceEvent =
   /** Once after join when the speaker failed to open (mirror of `mic_availability`). */
   | { type: 'speaker_availability'; identity: string; available: boolean }
   /** `error` is present when the session ended on a failure (reconnect gave up, SFU evicted us); absent on a normal leave. */
-  | { type: 'disconnected'; error?: { kind: string; detail?: string } | null };
+  | { type: 'disconnected'; error?: { kind: string; detail?: string } | null }
+  /** A device was plugged in or removed, or the system default moved (#1989): refetch `list_audio_devices`. */
+  | { type: 'audio_devices_changed' };
 
 /** Mirrors `JoinTimings` in `pollis-core/src/commands/voice.rs`. */
 interface JoinTimings {
@@ -117,6 +119,7 @@ export interface LeftEvent {
 type ManagerEventMap = {
   joined: JoinedEvent;
   left: LeftEvent;
+  audioDevicesChanged: undefined;
 };
 
 type Listener = () => void;
@@ -778,6 +781,11 @@ class VoiceSessionManager {
         this.setState({ participants });
         break;
       }
+      case 'audio_devices_changed': {
+        // Rust already moved a live call; the settings page refetches its pickers.
+        this.emit('audioDevicesChanged', undefined);
+        break;
+      }
       case 'voice_e2ee_key_rotated': {
         // Rust re-keys all media; nothing to rotate here.
         break;
@@ -878,7 +886,7 @@ export function readDevicePrefs(): { input: string | null; output: string | null
   }
 }
 
-function persistDevicePref(kind: 'input' | 'output', deviceName: string): void {
+export function persistDevicePref(kind: 'input' | 'output', deviceName: string): void {
   try {
     const prefs: Record<string, string> = JSON.parse(
       localStorage.getItem(VOICE_DEVICES_KEY) || '{}',

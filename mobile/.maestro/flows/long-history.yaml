@@ -8,17 +8,13 @@ tags:
 # list, so it never caught the Android composer being pushed off the screen.
 # Self-contained: creates a group (→ #General) and seeds the history itself.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
 
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

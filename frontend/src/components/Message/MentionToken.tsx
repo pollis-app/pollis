@@ -1,13 +1,16 @@
 import React from "react";
 
 interface MentionTokenProps {
+  /** The `@handle` as written. */
   name: string;
+  /** The handle's alias in this group (#2003), shown in place of the handle. */
+  label?: string;
   isSelf: boolean;
   skin: "terminal" | "modern";
 }
 
 /** A resolved `@mention` (#843): a filled block for you, a quiet chip for others. */
-export const MentionToken: React.FC<MentionTokenProps> = ({ name, isSelf, skin }) => {
+export const MentionToken: React.FC<MentionTokenProps> = ({ name, label, isSelf, skin }) => {
   const shared = "rounded-chip px-1";
   const font = skin === "terminal" ? "font-mono" : "";
 
@@ -20,9 +23,10 @@ export const MentionToken: React.FC<MentionTokenProps> = ({ name, isSelf, skin }
     <bdi
       data-testid={isSelf ? "mention-self" : "mention-other"}
       data-mention={name}
+      title={label ? `@${name}` : undefined}
       className={`${shared} ${font} ${tone}`}
     >
-      @{name}
+      @{label ?? name}
     </bdi>
   );
 };

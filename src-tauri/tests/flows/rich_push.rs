@@ -937,3 +937,40 @@ async fn a_pending_welcome_is_drained_fresh_and_the_message_shows() {
         "the message after the Welcome shows: {out:?}"
     );
 }
+
+/// #2003: a group message's push names the sender as that group shows them.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_group_push_names_the_sender_by_their_alias_in_that_group() {
+    wipe().await;
+    let _mobile = MobileBuild::on();
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    set_content(&bob, "full").await;
+
+    let group_id = alice.create_group("Alias Push").await;
+    alice.invite(&group_id, &bob_p.username).await;
+    let invite = bob.first_pending_invite().await.expect("pending invite");
+    bob.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    bob.poll().await;
+    alice.poll().await;
+    let general = alice.general_channel_id(&group_id).await;
+    bob.ingest_channel(&general).await;
+    // Bob's app lists his groups, which fills the conversation cache the fetch reads.
+    bob.invoke_json("list_user_groups_with_channels", serde_json::json!({ "userId": bob_p.id }))
+        .await;
+
+    alice
+        .invoke_json(
+            "set_group_alias",
+            serde_json::json!({ "userId": alice_p.id, "groupId": group_id, "displayName": "Captain A" }),
+        )
+        .await;
+
+    alice.send_channel_message(&general, "aliased hello").await;
+    let out = headless(&bob, Some(handle_for(&bob_p.id, &general, "channel").await), Duration::from_secs(20)).await;
+    let item = items(&out).into_iter().find(|i| i.body == "aliased hello").expect("decrypted");
+    assert_eq!(item.sender_name, "Captain A", "{item:?}");
+}

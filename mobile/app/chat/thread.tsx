@@ -10,6 +10,8 @@ import { GROUP_WINDOW_MS, timeLabel } from "../../components/chat/dates";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
+import { aliasAvatar, aliasName } from "../../lib/groupAlias";
+import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { outgoingText } from "../../lib/messageText";
 import {
   useMessages,
@@ -17,6 +19,7 @@ import {
   useRetryMessage,
   useDiscardUnsent,
   useThreadMessages,
+  useLinkPreviewsEnabled,
   flattenPages,
   type ConversationKind,
   type Message,
@@ -28,6 +31,8 @@ import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useTheme } from "../../components/theme";
 import { useDraft } from "../../hooks/useDraft";
+import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
+import { ComposerLinkPreview } from "../../components/chat/ComposerLinkPreview";
 
 /** Slack-style thread screen (#831); state is isolated per thread (#837). */
 function ThreadScreen() {
@@ -48,6 +53,9 @@ function ThreadScreen() {
     typeof params.name === "string" ? params.name : t("panel.thread");
 
   const [draft, setDraft] = useDraft(threadId ? `thread:${threadId}` : null);
+  // Link previews (#1987), as in the conversation's composer.
+  const { enabled: linkPreviewsEnabled } = useLinkPreviewsEnabled();
+  const linkPreview = useLinkPreviewDraft(draft, linkPreviewsEnabled, threadId);
   const listRef = useRef<FlatList<Message>>(null);
   const currentUser = appStore.currentUser;
 
@@ -71,6 +79,8 @@ function ThreadScreen() {
     conversationId,
     mentionGroupId,
   );
+  // Per-group aliases (#2003): the thread's group shows people as it does.
+  const aliases = useGroupAliases(mentionGroupId);
   const selfName = currentUser?.username?.toLowerCase() ?? null;
   const mentionNames = useMemo(() => {
     const set = new Set<string>(["all"]);
@@ -88,8 +98,10 @@ function ThreadScreen() {
     if (!text || !threadId) {
       return;
     }
+    // Never waits for a fetch still running: the reply goes without it.
+    const preview = linkPreview.takeForSend(text);
     setDraft("");
-    sendMessage.mutate({ content: text, threadId });
+    sendMessage.mutate({ content: text, threadId, linkPreview: preview });
   };
 
   const newestId = replies[replies.length - 1]?.id;
@@ -112,7 +124,7 @@ function ThreadScreen() {
       const retryId = retryTarget(m);
       const mine = currentUser?.id === m.sender_id;
       const name =
-        authorName(m.sender_id, m.sender_username, currentUser) ??
+        aliasName(aliases, m.sender_id, authorName(m.sender_id, m.sender_username, currentUser)) ??
         t("chat:list.unknownAuthor");
       return (
         <MessageRow
@@ -120,12 +132,14 @@ function ThreadScreen() {
           messageId={m.id}
           av={name.slice(0, 2)}
           senderId={m.sender_id}
+          senderAliasKey={aliasAvatar(aliases, m.sender_id, null)}
           amber={mine}
           name={name}
           time={timeLabel(m.created_at)}
           text={m.content}
           deleted={!!m.deleted_at}
           attachments={m.attachments}
+          linkPreview={m.link_preview}
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
@@ -149,11 +163,11 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent],
+    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases],
   );
 
   const rootName = root
-    ? authorName(root.sender_id, root.sender_username, currentUser)
+    ? aliasName(aliases, root.sender_id, authorName(root.sender_id, root.sender_username, currentUser))
     : null;
   const header = (
     <View>
@@ -169,6 +183,7 @@ function ThreadScreen() {
           text={root.content}
           deleted={!!root.deleted_at}
           attachments={root.attachments}
+          linkPreview={root.link_preview}
           onOpenAttachment={openMedia}
           edited={!!root.edited_at}
           editUnsent={root.edit_unsent}
@@ -236,6 +251,9 @@ function ThreadScreen() {
         onSend={onSend}
         editable={!!threadId && !!conversationId && !!kind}
         mentionCandidates={mentionCandidates}
+        linkPreview={
+          <ComposerLinkPreview state={linkPreview.state} onRemove={linkPreview.remove} />
+        }
       />
     </Screen>
   );

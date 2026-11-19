@@ -86,7 +86,7 @@ export const OfferCode: React.FC<OfferCodeProps> = ({ deviceName, onSignedIn }) 
         </div>
       ) : handle ? (
         <>
-          <div className="self-start p-3 rounded-lg bg-accent" data-testid="link-offer-qr">
+          <div className="self-start p-3 rounded-panel bg-accent" data-testid="link-offer-qr">
             {/* Dark on accent: themed, still normal polarity for decoders. */}
             <QRCodeSVG
               value={handle.qr_payload}

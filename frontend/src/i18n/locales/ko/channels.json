@@ -122,7 +122,8 @@
       "revoking": "취소하는 중…",
       "revokeLabel": "{{name}} 님에 대한 초대 취소",
       "revokeFailed": "초대를 취소하지 못했습니다."
-    }
+    },
+    "resetAlias": "별칭 초기화"
   },
   "kickMember": {
     "pageTitle": "멤버 제거",
@@ -141,7 +142,7 @@
     "acceptFailed": "초대를 수락하지 못했습니다. 다시 시도하세요."
   },
   "inviteMember": {
-    "pageTitle": "멤버 초대 :: {{group}}",
+    "pageTitle": "멤버 초대 — {{group}}",
     "intro": "<accent>{{name}}</accent>에 초대하기",
     "identifierLabel": "사용자 이름 또는 이메일",
     "identifierPlaceholder": "friend@pollis.com",
@@ -151,7 +152,7 @@
     "sendFailed": "초대를 보내지 못했습니다"
   },
   "joinRequests": {
-    "pageTitle": "가입 요청 :: {{group}}",
+    "pageTitle": "가입 요청 — {{group}}",
     "allPageTitle": "가입 요청",
     "pendingFor": "<accent>{{name}}</accent>에 대한 대기 중인 가입 요청",
     "empty": "대기 중인 요청이 없습니다.",
@@ -213,5 +214,13 @@
     "inviteBodyToGroup": "{{name}} 님이 {{group}}에 초대했습니다",
     "inviteBody": "{{name}} 님이 초대했습니다",
     "inviteBodyUnknown": "그룹에 초대되었습니다"
+  },
+  "resetAlias": {
+    "pageTitle": "별칭 초기화",
+    "confirm": "이 그룹에서 <strong>{{name}}</strong>(@{{handle}})님의 별칭을 초기화할까요?",
+    "consequence": "여기에서 다시 기본 프로필이 표시됩니다. 새 별칭을 설정할 수 있습니다.",
+    "confirmButton": "네, 초기화",
+    "submitting": "초기화 중…",
+    "failed": "별칭을 초기화하지 못했습니다"
   }
 }

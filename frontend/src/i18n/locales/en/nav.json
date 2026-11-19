@@ -1,16 +1,16 @@
 {
   "sidebar": {
-    "groups": "groups",
-    "dms": "dms",
-    "account": "account",
+    "groups": "Groups",
+    "dms": "DMs",
+    "account": "Account",
     "saved": "Saved",
     "preferences": "Preferences",
     "language": "Language",
-    "userSettings": "User Settings",
-    "voiceAndVideo": "Voice & Video",
+    "userSettings": "User settings",
+    "voiceAndVideo": "Voice & video",
     "security": "Security",
-    "keyBindings": "Key Bindings",
-    "softwareUpdate": "Software Update",
+    "keyBindings": "Key bindings",
+    "softwareUpdate": "Software update",
     "expandGroup": "Expand {{name}}",
     "collapseGroup": "Collapse {{name}}",
     "keyChanged": "Identity key changed — re-verify",
@@ -18,10 +18,10 @@
     "dmAvatarAlt": "{{name}} avatar",
     "close": "Close sidebar ({{shortcut}})",
     "resize": "Resize sidebar (drag; double-click to reset)",
-    "searchMessages": "Search Messages",
+    "searchMessages": "Search messages",
     "vault": "Vault",
-    "securityEvents": "Security Events",
-    "copyHistory": "Copy History"
+    "securityEvents": "Security events",
+    "copyHistory": "Copy history"
   },
   "profile": {
     "you": "You",

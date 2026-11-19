@@ -1,6 +1,8 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - locale-smoke
+  - fresh-account
+  - gate
 ---
 # LOCALE SMOKE (#1725) — the mobile counterpart of e2e/locale-smoke.spec.ts.
 # Runs once per shipped locale: `mobile/scripts/maestro-run.sh locale-smoke
@@ -40,6 +42,7 @@ tags:
     file: ../subflows/sign-in.yaml
     env:
       KEEP_STATE: "true"
+      FRESH: "locale-${LOCALE}"
 
 # --- Chat list ---
 - tapOn:

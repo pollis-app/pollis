@@ -6,7 +6,7 @@ tags:
 # (revoke needs a second device; captured visually here). Safety numbers are
 # per pair and live in the DM since #1563, not here: flows/dm-safety.yaml.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-self"
 - tapOn:

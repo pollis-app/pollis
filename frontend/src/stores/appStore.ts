@@ -23,6 +23,8 @@ class AppStore implements AppState {
 
   selectedGroupId: string | null = null;
   selectedChannelId: string | null = null;
+  /** The category a "+" on its label asked the next new channel to land in (#2031). */
+  newChannelCategoryId: string | null = null;
   selectedConversationId: string | null = null;
 
   groups: Group[] = [];
@@ -100,6 +102,10 @@ class AppStore implements AppState {
   setSelectedGroupId(groupId: string | null) {
     this.selectedGroupId = groupId;
     this.selectedChannelId = null;
+  }
+
+  setNewChannelCategoryId(categoryId: string | null) {
+    this.newChannelCategoryId = categoryId;
   }
 
   setSelectedChannelId(channelId: string | null) {

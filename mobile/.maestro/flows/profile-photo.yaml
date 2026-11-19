@@ -12,7 +12,7 @@ tags:
 # from the on-disk rendition on the first frames, not from a fresh download.
 # The fixture is a synthetic 900x600 drawing, so the crop is exercised too.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-self"
 - assertVisible:
@@ -33,56 +33,7 @@ tags:
 - assertVisible:
     id: "sheet-avatar"
 - takeScreenshot: profile-photo-02-sheet
-- tapOn:
-    id: "btn-avatar-library"
-- waitForAnimationToEnd:
-    timeout: 5000
-# With editing on, iOS 27 runs the picker AND its square crop out of process:
-# neither its cells nor its "Use" button are in the accessibility hierarchy, so
-# on iOS this is the one place a point tap is the only way in. Pass the two
-# points per device: PICK_POINT is the grid's first cell (the photo `addMedia`
-# just seeded, newest first), USE_POINT the crop's confirm ("Use" on iPad,
-# "Choose" on iPhone). scripts/maestro-run.sh passes them per platform:
-#   iPhone 18 Pro:         PICK_POINT=16%,24% USE_POINT=89%,92%
-#   iPad Pro 13-inch (M5): PICK_POINT=39%,35% USE_POINT=61%,35%
-# Android's picker labels its cells as everywhere else, and its cropper's
-# confirm is found by text or id.
-- runFlow:
-    when:
-      platform: iOS
-    commands:
-      # The out-of-process sheets take input only once they have settled, and
-      # are invisible to waitForAnimationToEnd: wait on an id that never
-      # appears (optional, so its timeout is just the settle time).
-      - extendedWaitUntil:
-          visible:
-            id: "settle-picker"
-          timeout: 4000
-          optional: true
-      - tapOn:
-          point: ${PICK_POINT}
-      - extendedWaitUntil:
-          visible:
-            id: "settle-crop"
-          timeout: 4000
-          optional: true
-      - tapOn:
-          point: ${USE_POINT}
-- runFlow:
-    when:
-      platform: Android
-    commands:
-      - tapOn:
-          text: "Photo(,| taken on) .*"
-          index: 0
-      - waitForAnimationToEnd:
-          timeout: 3000
-      - tapOn:
-          text: "(?i)(crop|done|save)"
-          optional: true
-      - tapOn:
-          id: "(?i).*crop.*"
-          optional: true
+- runFlow: ../subflows/pick-square-photo.yaml
 - extendedWaitUntil:
     visible:
       id: "text-avatar-saved"
@@ -101,11 +52,7 @@ tags:
 # And so do your message rows.
 - tapOn:
     id: "tab-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

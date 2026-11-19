@@ -60,7 +60,8 @@
     "empty": "Kò sí ìfiránṣẹ́ síbẹ̀. Bẹ̀rẹ̀ ìjíròrò.",
     "unknownAuthor": "Àìmọ̀",
     "blockedAuthor": "olùmúlò tí a dènà",
-    "blockedBody": "[a ti dènà]"
+    "blockedBody": "A ti dènà",
+    "blockedBodyTerminal": "[a ti dènà]"
   },
   "replyBar": {
     "replyingTo": "ò ń fèsì sí <name>{{name}}</name>",
@@ -69,7 +70,8 @@
   },
   "queue": {
     "heading": "Ìlà ìdúró",
-    "pendingPlaceholder": "[Ìfiránṣẹ́ tó ń dúró]",
+    "pendingPlaceholder": "Ìfiránṣẹ́ tó ń dúró",
+    "pendingPlaceholderTerminal": "[Ìfiránṣẹ́ tó ń dúró]",
     "cancel": "Fagilé ìfiránṣẹ́",
     "retry": "tún gbìyànjú",
     "failedCount_other": "kò ṣeé ṣe ×{{count}}"
@@ -93,7 +95,8 @@
   "preview": {
     "noMessages": "Kò sí ìfiránṣẹ́ síbẹ̀",
     "withSender": "{{name}}: {{text}}",
-    "attachments_other": "[àsomọ́ {{count}}]",
+    "attachments_other": "Àsomọ́ {{count}}",
+    "attachmentsTerminal_other": "[àsomọ́ {{count}}]",
     "undecryptable": "A kò lè ṣí ìpàrokò ìfiránṣẹ́ kan lórí ẹ̀rọ yìí"
   },
   "attachment": {
@@ -105,9 +108,11 @@
     "failedToLoad": "Kò ṣeé gbé wọlé",
     "failedToDownload": "Kò ṣeé ṣe ìgbàsílẹ̀",
     "lightboxFetch": "mú wá",
-    "lightboxDone": "[ parí ]",
-    "lightboxDownload": "[ìgbàsílẹ̀]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "Parí",
+    "lightboxDoneTerminal": "[ parí ]",
+    "lightboxDownload": "Ìgbàsílẹ̀",
+    "lightboxDownloadTerminal": "[ìgbàsílẹ̀]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Fi mídíà ẹlẹgẹ́ hàn: {{filename}}",
     "sensitiveHide": "Fi {{filename}} pamọ́ kúrò lójú"
   },
@@ -117,6 +122,10 @@
     "loadTitle": "Gbé mídíà wọlé láti {{url}} — èyí ń kàn sí ojú òpó náà tààrà",
     "loadDescription": "Gbé mídíà wọlé láti {{url}}. Èyí ń kàn sí ojú òpó náà tààrà, ó sì ń fi àdírẹ́sì IP rẹ hàn án.",
     "openLabel": "Ṣí {{url}}"
+  },
+  "linkPreview": {
+    "loading": "Ń gbé àkọ́wò wọlé…",
+    "remove": "Yọ àkọ́wò ìjápọ̀ kúrò"
   },
   "notify": {
     "newMessageTitle": "Ìfiránṣẹ́ tuntun",

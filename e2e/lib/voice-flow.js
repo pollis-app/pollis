@@ -160,6 +160,67 @@ async function joinVoice(browser, joinTimeoutMs, who, tag) {
   console.log(`[${tag}] ${who}: joined the voice channel`);
 }
 
+// The join that started at or after `sinceMs` opened a mic (not listen-only): once Rust's join has returned (its timing
+// record exists, so its `mic_availability` event is already sent), the tray shows a live mute toggle and the listen-only
+// indicator does not appear (#1989; the listen-only case shows it within a few seconds, voice-channel-no-mic.js).
+async function expectJoinedWithMic(browser, sinceMs, timeoutMs, who, tag) {
+  const end = Date.now() + timeoutMs;
+  let timings = null;
+  while (Date.now() < end) {
+    timings = await h.invokeApp(browser, "get_last_join_timings").catch(() => null);
+    if (timings && timings.join_started_at_ms >= sinceMs) {
+      break;
+    }
+    timings = null;
+    await h.sleep(500);
+  }
+  if (!timings) {
+    throw new Error(`${who}: no join record after ${sinceMs}`);
+  }
+  await h.waitSelector(browser, '[data-testid="voice-tray-mute"]', 15000);
+  const watchUntil = Date.now() + 5000;
+  while (Date.now() < watchUntil) {
+    if (await h.presentSelector(browser, '[data-testid="voice-tray-listen-only"]')) {
+      throw new Error(`${who}: joined listen-only`);
+    }
+    await h.sleep(500);
+  }
+  console.log(`[${tag}] ${who}: joined with a mic (opened in ${timings.mic_init_ms} ms)`);
+}
+
+// Store mic/speaker choices as an older release would have (`pollis:voice-devices`).
+async function saveDevicePrefs(browser, prefs) {
+  await browser.execute((p) => localStorage.setItem("pollis:voice-devices", JSON.stringify(p)), prefs);
+}
+
+// Open Voice & video settings and read the Microphone / Speaker picker labels.
+async function readAudioPickers(browser) {
+  await h.clickTestId(browser, "sidebar-row-voice-settings");
+  await h.waitTestId(browser, "voice-settings-page", 20000);
+  // The list arrives from Rust after the page mounts; the default entry is there from the start.
+  const end = Date.now() + 20000;
+  while (Date.now() < end) {
+    const lists = await browser.execute(() => {
+      const labels = (id) =>
+        Array.from(document.querySelectorAll(`[data-testid="${id}"] option`)).map((o) => [o.value, o.textContent]);
+      return { inputs: labels("voice-input-select"), outputs: labels("voice-output-select") };
+    });
+    if (lists.inputs.length > 1 && lists.outputs.length > 1) {
+      return lists;
+    }
+    await h.sleep(400);
+  }
+  throw new Error("audio pickers never listed a device");
+}
+
+// Pick a device by its label in one of the pickers; returns the id it saved.
+async function chooseAudioDevice(browser, testId, label) {
+  const select = await browser.$(`[data-testid="${testId}"]`);
+  await select.selectByVisibleText(label);
+  const kind = testId === "voice-input-select" ? "input" : "output";
+  return browser.execute((k) => JSON.parse(localStorage.getItem("pollis:voice-devices") || "{}")[k], kind);
+}
+
 // Distinct user IDs from the roster; .vs-tile keeps voice-tile-<sub>-* from matching.
 async function participantUserIds(browser) {
   return browser.execute(() => {
@@ -211,6 +272,10 @@ module.exports = {
   openGroup,
   openVoiceChannel,
   joinVoice,
+  expectJoinedWithMic,
+  saveDevicePrefs,
+  readAudioPickers,
+  chooseAudioDevice,
   waitForParticipantCount,
   dumpClient,
 };

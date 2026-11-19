@@ -119,6 +119,12 @@
     "itemStrict": "<mode>Tsantsa</mode> — Haɗa ta hanyar relay kawai. Idan babu relay da za a iya isa gare shi, ana dakatar da aikawa maimakon bayyana IP ɗinku.",
     "applyError": "Ba a iya amfani da yanayin relay ba: {{error}} — a yanzu {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Samfotin mahaɗi",
+    "label": "Ƙirƙiri samfotin mahaɗi",
+    "description": "Idan ka aika mahaɗi, Pollis yana ɗauko shafin daga wannan na'urar don ƙirƙirar samfoti. Shafin yana ganin adireshin IP ɗinka, kamar ka buɗe shi da kanka. Mutanen da ka aika wa ba sa taɓa tuntuɓar shafin.",
+    "strictNote": "Tsantsar sirrin hanyar sadarwa yana kashe samfotin mahaɗi."
+  },
   "relayServing": {
     "heading": "Gudanar da relay don wasu",
     "intro": "Zaɓi ne dabam da saitin da ke sama. Wancan yana yanke ko zirga-zirgar <dim>ku</dim> za ta bi ta relay. Wannan yana yanke ko zirga-zirgar <dim>wasu mutane</dim> za ta bi ta <dim>na'urarku</dim>. Kunna ɗaya ba ya taɓa kunna ɗayan.",
@@ -375,7 +381,7 @@
     "capturing": "Danna maɓallai…",
     "rebindLabel": "Canja maɓallin {{name}}",
     "resetLabel": "Mayar da {{name}} zuwa na asali",
-    "resetButton": "maido",
+    "resetButton": "Maido",
     "appToggleSidebar": "Nuna/ɓoye labarun gefe",
     "appToggleRightPanel": "Nuna/ɓoye allon cikakkun bayanai",
     "appToggleTerminal": "Nuna/ɓoye tasha-umarni",
@@ -533,5 +539,29 @@
     "youDeclined": "Kun ƙi. Ba a kwafi komai ba.",
     "notOpen": "Wannan buƙata ba ta buɗe kuma.",
     "back": "Koma Tsaro"
+  },
+  "aliases": {
+    "heading": "Laƙabin rukuni",
+    "rowDescription": "Suna da hoto daban a kowane rukuni",
+    "intro": "Nuna suna da hoto daban a kowane rukuni. @sunan-mai-amfani naka iri ɗaya ne a ko’ina.",
+    "empty": "Ba ka cikin wani rukuni tukuna.",
+    "mainProfile": "Babban bayani",
+    "edit": "Gyara",
+    "useMain": "Yi amfani da babban bayanina",
+    "resetting": "Ana sake saitawa…",
+    "pageTitle": "Laƙabi a {{group}}",
+    "pageIntro": "Wannan rukuni kaɗai ke ganin wannan suna da hoto. Saƙon kai tsaye na ci gaba da babban bayaninka.",
+    "nameLabel": "Suna a wannan rukuni",
+    "namePlaceholder": "Bar shi babu komai don amfani da {{name}}",
+    "nameInvalid": "Har haruffa 100, ba tare da < ko > ba.",
+    "pictureLabel": "Hoto a wannan rukuni",
+    "choosePicture": "Zaɓi hoto",
+    "mainPicture": "Yi amfani da babban hoto",
+    "applyAll": "Aiwatar ga dukkan rukunoni na",
+    "applyAllHint": "Yana rubuta sunan ko hoton da ka canza a kowane rukuni da kake ciki yanzu. Rukunoni da za ka shiga daga baya suna farawa da babban bayaninka.",
+    "save": "Ajiye",
+    "saving": "Ana ajiyewa…",
+    "saved": "An ajiye",
+    "saveFailed": "Ba a iya ajiye laƙabinka ba"
   }
 }

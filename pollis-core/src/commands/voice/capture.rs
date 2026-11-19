@@ -32,7 +32,7 @@ use crate::{
 
 use super::levels::{BandAnalyzer, LevelsHub};
 use super::resampler::{FrameResampler, MIX_FRAME_SAMPLES, MIX_RATE_HZ};
-use super::streams::build_mic_stream;
+use super::streams::{build_mic_stream, StreamErrorHook};
 use super::types::{SendableStream, VoiceEvent};
 
 /// Ring capacity in mono samples; 400 ms at 48 kHz, more at lower rates.
@@ -84,7 +84,11 @@ pub(crate) struct MicSource {
 }
 
 /// Open the mic on `device` and return its stream plus the ring's consumer.
-pub(crate) fn open_mic(device: &cpal::Device) -> Result<(SendableStream, MicSource)> {
+/// `on_error` hears the stream's errors (a lost device; see `device_watch.rs`).
+pub(crate) fn open_mic(
+    device: &cpal::Device,
+    on_error: Option<StreamErrorHook>,
+) -> Result<(SendableStream, MicSource)> {
     let (producer, consumer) = rtrb::RingBuffer::<i16>::new(MIC_RING_SAMPLES);
     let shared = Arc::new(MicShared {
         waker: Mutex::new(None),
@@ -94,7 +98,7 @@ pub(crate) fn open_mic(device: &cpal::Device) -> Result<(SendableStream, MicSour
         producer,
         shared: Arc::clone(&shared),
     };
-    let (stream, sample_rate) = build_mic_stream(device, move |mono, _rate| feed.push(mono))?;
+    let (stream, sample_rate) = build_mic_stream(device, move |mono, _rate| feed.push(mono), on_error)?;
     Ok((
         stream,
         MicSource {

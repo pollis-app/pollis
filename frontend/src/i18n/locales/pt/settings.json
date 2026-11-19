@@ -119,6 +119,12 @@
     "itemStrict": "<mode>Estrito</mode> — Liga apenas através do relay. Se nenhum relay estiver acessível, o envio fica em pausa em vez de revelar o seu IP.",
     "applyError": "Não foi possível aplicar o modo de relay: {{error}} — atualmente {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Pré-visualizações de ligações",
+    "label": "Gerar pré-visualizações de ligações",
+    "description": "Quando envias uma ligação, o Pollis obtém a página a partir deste dispositivo para criar uma pré-visualização. O site vê o teu endereço IP, como se a tivesses aberto. As pessoas a quem a envias nunca contactam o site.",
+    "strictNote": "A privacidade de rede estrita desativa as pré-visualizações de ligações."
+  },
   "relayServing": {
     "heading": "Ser relay para outras pessoas",
     "intro": "Uma escolha separada da definição acima. Essa decide se o <dim>seu</dim> tráfego passa por um relay. Esta decide se o tráfego de <dim>outras pessoas</dim> passa pelo <dim>seu dispositivo</dim>. Ativar uma nunca ativa a outra.",
@@ -375,7 +381,7 @@
     "capturing": "Prima as teclas…",
     "rebindLabel": "Alterar atalho de {{name}}",
     "resetLabel": "Repor {{name}} para a predefinição",
-    "resetButton": "repor",
+    "resetButton": "Repor",
     "appToggleSidebar": "Mostrar/ocultar barra lateral",
     "appToggleRightPanel": "Mostrar/ocultar painel de detalhes",
     "appToggleTerminal": "Mostrar/ocultar terminal",
@@ -533,5 +539,29 @@
     "youDeclined": "Recusou. Nada foi copiado.",
     "notOpen": "Este pedido já não está aberto.",
     "back": "Voltar a Segurança"
+  },
+  "aliases": {
+    "heading": "Apelidos de grupo",
+    "rowDescription": "Outro nome e outra foto em cada grupo",
+    "intro": "Mostre outro nome e outra foto em cada grupo. Seu @usuário é o mesmo em todo lugar.",
+    "empty": "Você ainda não está em nenhum grupo.",
+    "mainProfile": "Perfil principal",
+    "edit": "Editar",
+    "useMain": "Usar meu perfil principal",
+    "resetting": "Redefinindo…",
+    "pageTitle": "Apelido em {{group}}",
+    "pageIntro": "Só este grupo vê este nome e esta foto. As mensagens diretas mantêm seu perfil principal.",
+    "nameLabel": "Nome neste grupo",
+    "namePlaceholder": "Deixe vazio para usar {{name}}",
+    "nameInvalid": "Use até 100 caracteres, sem < ou >.",
+    "pictureLabel": "Foto neste grupo",
+    "choosePicture": "Escolher foto",
+    "mainPicture": "Usar a foto principal",
+    "applyAll": "Aplicar a todos os meus grupos",
+    "applyAllHint": "Grava o nome ou a foto alterados em cada grupo em que você está agora. Grupos em que você entrar depois começam com seu perfil principal.",
+    "save": "Salvar",
+    "saving": "Salvando…",
+    "saved": "Salvo",
+    "saveFailed": "Não foi possível salvar seu apelido"
   }
 }

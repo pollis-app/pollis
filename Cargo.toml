@@ -32,6 +32,7 @@ exclude = [
     # own lints and tests.
     "patches/openmls-sqlite-storage",
     "patches/libsql",
+    "patches/cpal",
 ]
 
 [workspace.package]
@@ -145,6 +146,11 @@ device-info = { path = "patches/device-info" }
 # patches/libsql/Cargo.toml for the provenance check; delete it once a libsql
 # release moves to hyper 1.x or drops hyper's `http2` feature.
 libsql = { path = "patches/libsql" }
+# #1989: crates.io cpal 0.18.2 plus the unreleased upstream fix for PulseAudio
+# record streams with a fixed buffer size (RustAudio/cpal#1387), which the voice
+# mic uses. See patches/cpal/Cargo.toml for the provenance check; delete it once
+# a cpal release includes that fix.
+cpal = { path = "patches/cpal" }
 
 # openmls's own SQLite storage provider is an OPTIONAL dependency of openmls
 # (`sqlite-provider`, which nothing here enables), but cargo resolves it anyway,

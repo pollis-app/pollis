@@ -4,6 +4,7 @@ import { Play, Pause } from "lucide-react";
 import { formatDuration } from "../../utils/format";
 import { useAudioPlayback } from "../../hooks/useAudioPlayback";
 import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivation";
+import { FOCUS_RING } from "./focusRing";
 
 interface InlineAudioPlayerProps {
   src: string;
@@ -41,7 +42,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
 
   return (
     <div
-      className={`flex items-center gap-3 p-2 rounded-lg border-2 border-line bg-surface-high ${className}`}
+      className={`flex items-center gap-3 p-2 rounded-panel border-2 border-line bg-surface-high ${className}`}
       style={{
         cursor: onClick ? "pointer" : "default",
       }}
@@ -53,7 +54,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
 
       <button
         onClick={togglePlay}
-        className="p-1 rounded transition-colors duration-200 text-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+        className={`p-1 rounded-control transition-colors duration-200 text-accent ${FOCUS_RING}`}
         aria-label={isPlaying ? t("media.pause") : t("media.play")}
       >
         {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -72,7 +73,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         value={currentTime}
         onChange={handleSeek}
         onClick={(e) => e.stopPropagation()}
-        className="flex-1 h-1 rounded appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
+        className={`flex-1 h-1 rounded-full appearance-none cursor-pointer accent-slider ${FOCUS_RING}`}
         disabled={!duration}
         aria-label={t("media.seek")}
       />

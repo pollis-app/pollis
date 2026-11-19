@@ -96,14 +96,70 @@ share is running, so the cost is one uncontended lock per frame.
   (so later tracks of that user inherit it) and writes the atomic on every live slot.
   No map is cloned per tick.
 
+### Devices (#1989)
+
+cpal 0.18 (patched with one unreleased upstream PulseAudio fix, `patches/cpal/`).
+`voice/devices.rs` keeps **one** shared `cpal::Host` per process (`devices::host()`;
+`warm_host` connects it during `prepare_voice_connection`). On Linux it is cpal's
+**PulseAudio host** when a server socket exists — the native protocol in pure Rust,
+no libpulse, and it serves PipeWire desktops through pipewire-pulse — else ALSA.
+The PipeWire host is deliberately not used: libpipewire in the main binary breaks
+`pw_init` next to libwebrtc ([capture-split.md](./capture-split.md)).
+
+- **Ids**: a device is saved and passed by its cpal `DeviceId` string
+  (`pulseaudio:<sink/source name>`, `coreaudio:<UID>`, `wasapi:<endpoint>`,
+  `alsa:<pcm>`); `"default"` / none means the OS default. Labels are the host's
+  descriptions (what `pactl list sources|sinks` and the OS sound settings show).
+- **Listing** (`pickable`): PulseAudio lists every sink/source except monitors
+  (`*.monitor`); the no-server ALSA fallback lists one `plughw:` PCM per physical
+  device by its card description, no plugin PCMs; CoreAudio/WASAPI list
+  everything (macOS adds HFP AirPods missing from `output_devices()`). The picker's
+  first entry is always "Default", added by the renderer.
+- **Resolving a saved choice** (`pick` → `open_device`): its id if present; a
+  pre-#1989 value (a cpal 0.15 name) is matched against descriptions on
+  macOS/Windows, where those names were the same human names; on Linux they were
+  ALSA PCM names (`pulse`, `pipewire`, `hw:…`) and land on the default. Anything
+  else, or a device that refuses to open, falls back to the default device —
+  **a saved choice never fails an open**, so a stale id can no longer make a join
+  listen-only (only a failing default does, or `MIC_OPEN_BUDGET`). The renderer
+  rewrites a pre-#1989 value in storage when the settings page lists devices
+  (`frontend/src/voice/devicePrefs.ts`); an id whose device is away stays saved.
+- **Default override**: on PulseAudio, `PULSE_SOURCE` / `PULSE_SINK` name this
+  client's defaults, as libpulse treats them; the e2e lab pins each test client
+  with them (`e2e/scripts/start-audio.sh`).
+- **Hot-plug** (`voice/device_watch.rs`, event-driven): a thread subscribed to the
+  server (`SINK | SOURCE | SERVER`; sink/source `Changed` ignored, those are volume
+  and stream-state noise) and every voice stream's error callback (device lost)
+  feed one supervisor. After a 250 ms settle it sends
+  `VoiceEvent::AudioDevicesChanged` (the settings page refetches) and makes the open
+  mic and speaker match what the choice resolves to now: a call on "Default" moves
+  to the new default (AirPods connected), a lost device falls back to the default,
+  a chosen device that returns is picked up again. Each stream carries a
+  generation so an old stream's error is ignored, and a device that fails again
+  within 2 s of its reopen is left alone. Sound effects (`sfx.rs`) close their
+  output when the default output changes and reopen on the next sound. The
+  subscription ends if the server restarts and comes back on the next device
+  listing (no retry timer). The ALSA fallback has no notifications: lost streams
+  only, plus the settings page's refetch on open and focus.
+- **Blocking**: host construction (PulseAudio: a handshake of up to 2 s),
+  enumeration, `open_device`, stream build, `play()` and stream drop all run on
+  `spawn_blocking`, never on a tokio worker or under the voice lock.
+
 ### Device buffers
 
-`streams::buffer_candidates` asks cpal for a 10 ms period — Linux
-`BufferSize::Fixed(rate/25)` (ALSA: 40 ms buffer, 10 ms period; PipeWire's ALSA
-plugin accepts it, measured 10.7 ms callbacks versus 42.7 ms with `Default`),
-macOS `Fixed(rate/100)`, Windows `Fixed(rate/50)` — and falls back to `Default`
-if the device refuses. The chosen configuration is logged at open. No
-environment variables are set.
+`streams::buffer_candidates` asks cpal for a short period and falls back to
+`Default` if the device refuses:
+- PulseAudio: mic `Fixed(rate/100)` (10 ms record fragments); speaker
+  `Fixed(rate/50)` (20 ms requests against a 40 ms target).
+- Linux ALSA fallback: `Fixed(rate/25)` (40 ms buffer, 10 ms period; PipeWire's
+  ALSA plugin measured 10.7 ms callbacks versus 42.7 ms with `Default`).
+- macOS `Fixed(rate/100)`, Windows `Fixed(rate/50)`.
+
+Callback sizes therefore differ per host; the mic ring and the 10 ms re-chunking
+in `capture.rs` are size-agnostic. The format is the device default when the
+openers convert it, else f32 (a PulseAudio source on S24 hardware reports I24;
+the server converts). The chosen configuration is logged at open. No environment
+variables are set.
 
 ### Gating and mute
 
@@ -162,7 +218,9 @@ FEC plus DTX silence.
 
 - `pollis-core/src/commands/voice_apm.rs` — `ApmStage`, `ApmConfig`, helpers (`run_capture_into`, `analyze_render`).
 - `pollis-core/src/commands/voice_denoiser.rs` — `DenoiserStage` wrapping `nnnoiseless::DenoiseState`. 48 kHz, which the pipeline always is.
-- `pollis-core/src/commands/voice/streams.rs` — cpal openers (`build_mic_stream`, `build_output_stream`, the buffer-size candidates) plus the ring-fed wrappers the Voice Settings test harness uses.
+- `pollis-core/src/commands/voice/streams.rs` — cpal openers (`build_mic_stream`, `build_output_stream`, the buffer-size candidates, format/rate choice, the error hook) plus the ring-fed wrappers the Voice Settings test harness uses.
+- `pollis-core/src/commands/voice/devices.rs` — the shared host, `list_audio_devices`, saved-choice resolution (`open_device`, `resolved_id`).
+- `pollis-core/src/commands/voice/device_watch.rs` — hot-plug: the server subscription, lost-stream signals, the reconcile.
 - `pollis-core/src/commands/voice/capture.rs` — the mic ring + DSP thread (`open_mic`, `spawn_capture_task`, `CaptureTask`), shared by join and `set_voice_input_device`.
 - `pollis-core/src/commands/voice/resampler.rs` — `FrameResampler` (10 ms frames over libwebrtc's sinc `PushResampler`), `MIX_RATE_HZ`.
 - `pollis-core/src/commands/voice/mixer.rs` — `MixerShared`, `TrackSlot`, `TrackFeed`, `OutputMixer`.

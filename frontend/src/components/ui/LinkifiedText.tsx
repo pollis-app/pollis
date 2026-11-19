@@ -6,16 +6,20 @@ interface LinkifiedTextProps {
   text: string;
 }
 
+/** Opens a message link in the system browser, re-vetted at the moment of opening, never trusted from the render. */
+export function openMessageLink(url: string): void {
+  const target = parseLink(url);
+  if (target) {
+    void shellOpen(target.href);
+  }
+}
+
 /** Linkifies URLs (opened in the system browser); memoised on `text`. `utils/links.ts` decides what may open. */
 export const LinkifiedText: React.FC<LinkifiedTextProps> = React.memo(({ text }) => {
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>, url: string) => {
       e.preventDefault();
-      // Re-vetted at the moment of opening, never trusted from the render.
-      const target = parseLink(url);
-      if (target) {
-        void shellOpen(target.href);
-      }
+      openMessageLink(url);
     },
     [],
   );

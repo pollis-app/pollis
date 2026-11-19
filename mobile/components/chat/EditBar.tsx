@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { View, Pressable } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
@@ -13,6 +14,7 @@ export function EditBar({
   onSave,
   savePending,
   canSaveEmpty = false,
+  linkPreview,
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
@@ -21,6 +23,8 @@ export function EditBar({
   savePending: boolean;
   // A Vault entry with files may drop its caption.
   canSaveEmpty?: boolean;
+  // The edited text's link preview card (#1987); an edit rebuilds the message.
+  linkPreview?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const saveDisabled = (!draft.trim() && !canSaveEmpty) || savePending;
@@ -41,6 +45,7 @@ export function EditBar({
         <Icon.pencil size={14} color={semantic.dim} />
         <Text style={[ty.section, { color: semantic.dim }]}>{t("actions.edit")}</Text>
       </View>
+      {linkPreview}
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
         <Pressable
           onPress={onCancel}

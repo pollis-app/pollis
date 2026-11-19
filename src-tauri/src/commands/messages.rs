@@ -15,7 +15,7 @@ pub async fn list_messages(conversation_id: String, limit: Option<i64>, before_i
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn send_message(conversation_id: String, sender_id: String, content: String, reply_to_id: Option<String>, thread_id: Option<String>, sender_username: Option<String>, message_id: Option<String>, attachments: Option<Vec<OutgoingAttachment>>, scope: State<'_, crate::pathscope::PathScope>, state: State<'_, Arc<AppState>>) -> Result<Message> {
+pub async fn send_message(conversation_id: String, sender_id: String, content: String, reply_to_id: Option<String>, thread_id: Option<String>, sender_username: Option<String>, message_id: Option<String>, attachments: Option<Vec<OutgoingAttachment>>, link_preview: Option<pollis_core::commands::link_preview::LinkPreviewDraft>, scope: State<'_, crate::pathscope::PathScope>, state: State<'_, Arc<AppState>>) -> Result<Message> {
     // The outbox reads attachment files itself (#1335), so gate them like `upload_media`.
     let attachments = attachments.unwrap_or_default();
     for att in &attachments {
@@ -23,7 +23,7 @@ pub async fn send_message(conversation_id: String, sender_id: String, content: S
             scope.require(std::path::Path::new(path), "send_message")?;
         }
     }
-    pollis_core::commands::messages::send_message_with_id(message_id, conversation_id, sender_id, content, attachments, reply_to_id, thread_id, sender_username, &state).await
+    pollis_core::commands::messages::send_message_with_preview(message_id, conversation_id, sender_id, content, attachments, link_preview, reply_to_id, thread_id, sender_username, &state).await
 }
 
 #[tauri::command]
@@ -157,8 +157,8 @@ pub async fn delete_message(message_id: String, user_id: String, state: State<'_
 }
 
 #[tauri::command]
-pub async fn edit_message(conversation_id: String, message_id: String, user_id: String, new_content: String, state: State<'_, Arc<AppState>>) -> Result<()> {
-    pollis_core::commands::messages::edit_message(conversation_id, message_id, user_id, new_content, &state).await
+pub async fn edit_message(conversation_id: String, message_id: String, user_id: String, new_content: String, link_preview: Option<pollis_core::commands::link_preview::LinkPreviewDraft>, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::messages::edit_message_with_preview(conversation_id, message_id, user_id, new_content, link_preview, &state).await
 }
 
 #[tauri::command]

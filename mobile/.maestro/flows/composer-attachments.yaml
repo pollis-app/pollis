@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - gate
 ---
 # COMPOSER ATTACHMENT PREVIEWS (#1585) — desktop's composer preview on the
 # phone: a thumbnail card per pending attachment, the filename under it, a
@@ -16,16 +17,12 @@ tags:
 # coordinate (see media-viewer.yaml). iOS sorts by date added first, as
 # subflows/pick-newest-photo.yaml explains.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

@@ -109,7 +109,7 @@
     "empty": "Aucun membre.",
     "self": "(vous)",
     "adminToggle": "admin",
-    "kick": "exclure",
+    "kick": "Exclure",
     "verified": "Contact vérifié",
     "keyChanged": "Clé d'identité modifiée — à revérifier",
     "invited": {
@@ -120,7 +120,8 @@
       "revoking": "Révocation…",
       "revokeLabel": "Révoquer l’invitation de {{name}}",
       "revokeFailed": "Impossible de révoquer l’invitation."
-    }
+    },
+    "resetAlias": "Réinitialiser l'alias"
   },
   "kickMember": {
     "pageTitle": "Retirer un membre",
@@ -134,12 +135,12 @@
     "pageTitle": "Invitations",
     "empty": "Aucune invitation en attente.",
     "invitedBy": "Invité par {{name}}",
-    "accept": "accepter",
-    "decline": "refuser",
+    "accept": "Accepter",
+    "decline": "Refuser",
     "acceptFailed": "Impossible d'accepter l'invitation. Réessayez."
   },
   "inviteMember": {
-    "pageTitle": "Inviter un membre :: {{group}}",
+    "pageTitle": "Inviter un membre — {{group}}",
     "intro": "Inviter quelqu'un dans <accent>{{name}}</accent>",
     "identifierLabel": "Nom d'utilisateur ou e-mail",
     "identifierPlaceholder": "ami@pollis.com",
@@ -149,13 +150,13 @@
     "sendFailed": "Échec de l'envoi de l'invitation"
   },
   "joinRequests": {
-    "pageTitle": "Demandes d'adhésion :: {{group}}",
+    "pageTitle": "Demandes d'adhésion — {{group}}",
     "allPageTitle": "Demandes d'adhésion",
     "pendingFor": "Demandes en attente pour rejoindre <accent>{{name}}</accent>",
     "empty": "Aucune demande en attente.",
     "allEmpty": "Aucune demande d'adhésion en attente.",
-    "approve": "approuver",
-    "reject": "refuser"
+    "approve": "Approuver",
+    "reject": "Refuser"
   },
   "joinByInvite": {
     "pageTitle": "Rejoindre un groupe",
@@ -214,5 +215,13 @@
     "inviteBodyToGroup": "{{name}} vous a invité dans {{group}}",
     "inviteBody": "{{name}} vous a invité",
     "inviteBodyUnknown": "Vous avez été invité dans un groupe"
+  },
+  "resetAlias": {
+    "pageTitle": "Réinitialiser l'alias",
+    "confirm": "Réinitialiser l'alias de <strong>{{name}}</strong> (@{{handle}}) dans ce groupe ?",
+    "consequence": "Son profil principal s'affichera de nouveau ici. Ce membre peut définir un nouvel alias.",
+    "confirmButton": "Oui, réinitialiser",
+    "submitting": "Réinitialisation…",
+    "failed": "Impossible de réinitialiser l'alias"
   }
 }

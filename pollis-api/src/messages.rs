@@ -193,6 +193,20 @@ impl AttachmentRegisterBody {
     }
 }
 
+/// `POST /v1/attachments/release` — the author of `message_id` stops
+/// referencing `content_hash` without deleting the message: an edit replaced
+/// its link-preview thumbnail (#1987).
+///
+/// Proof is the message's deletion capability, matched against the hash copied
+/// onto the reference when it was registered, so it works after envelope GC
+/// and releases nothing for anyone without it.
+#[derive(Serialize, Deserialize)]
+pub struct AttachmentReleaseBody {
+    pub content_hash: String,
+    pub message_id: String,
+    pub delete_token: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct AttachmentDeleteBody {
     pub content_hash: String,

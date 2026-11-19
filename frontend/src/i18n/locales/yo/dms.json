@@ -38,13 +38,13 @@
     "noMessageYet": "(kò sí ìfiránṣẹ́ síbẹ̀)",
     "unknownSender": "Àìmọ̀",
     "others_other": "(+{{count}} míì)",
-    "accept": "gbà",
-    "block": "dènà"
+    "accept": "Gbà",
+    "block": "Dènà"
   },
   "blocked": {
     "pageTitle": "Àwọn Olùmúlò Tí A Dènà",
     "empty": "Kò sí olùmúlò tí a dènà.",
-    "unblock": "mú ìdènà kúrò"
+    "unblock": "Mú ìdènà kúrò"
   },
   "profile": {
     "fallbackName": "Olùmúlò",

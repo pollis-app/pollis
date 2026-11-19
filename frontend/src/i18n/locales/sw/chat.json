@@ -64,7 +64,8 @@
     "empty": "Bado hakuna ujumbe. Anzisha mazungumzo.",
     "unknownAuthor": "Haijulikani",
     "blockedAuthor": "mtumiaji aliyezuiwa",
-    "blockedBody": "[ujumbe umezuiwa]"
+    "blockedBody": "Ujumbe umezuiwa",
+    "blockedBodyTerminal": "[ujumbe umezuiwa]"
   },
   "replyBar": {
     "replyingTo": "unamjibu <name>{{name}}</name>",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "Foleni",
-    "pendingPlaceholder": "[Ujumbe unaosubiri]",
+    "pendingPlaceholder": "Ujumbe unaosubiri",
+    "pendingPlaceholderTerminal": "[Ujumbe unaosubiri]",
     "cancel": "Ghairi ujumbe",
     "retry": "jaribu tena",
     "failedCount_one": "imeshindwa ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "Bado hakuna ujumbe",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[kiambatisho]",
-    "attachments_other": "[viambatisho {{count}}]",
+    "attachments_one": "Kiambatisho",
+    "attachments_other": "Viambatisho {{count}}",
+    "attachmentsTerminal_one": "[kiambatisho]",
+    "attachmentsTerminal_other": "[viambatisho {{count}}]",
     "undecryptable": "Ujumbe mmoja haukuweza kusimbuliwa kwenye kifaa hiki"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "Imeshindwa kupakia",
     "failedToDownload": "Imeshindwa kupakua",
     "lightboxFetch": "leta",
-    "lightboxDone": "[ imekamilika ]",
-    "lightboxDownload": "[pakua]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "Imekamilika",
+    "lightboxDoneTerminal": "[ imekamilika ]",
+    "lightboxDownload": "Pakua",
+    "lightboxDownloadTerminal": "[pakua]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Onyesha midia nyeti: {{filename}}",
     "sensitiveHide": "Ficha {{filename}}"
   },
@@ -127,6 +133,10 @@
     "loadTitle": "Pakia midia kutoka {{url}} — hii inawasiliana na tovuti hiyo moja kwa moja",
     "loadDescription": "Pakia midia kutoka {{url}}. Hii inawasiliana na tovuti hiyo moja kwa moja na kuifichulia anwani yako ya IP.",
     "openLabel": "Fungua {{url}}"
+  },
+  "linkPreview": {
+    "loading": "Inapakia onyesho la kukagua…",
+    "remove": "Ondoa onyesho la kukagua kiungo"
   },
   "notify": {
     "newMessageTitle": "Ujumbe mpya",

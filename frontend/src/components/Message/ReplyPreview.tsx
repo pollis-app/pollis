@@ -4,6 +4,9 @@ import { X } from 'lucide-react';
 import type { Message } from '../../types';
 import { getUsernameColor, useBackgroundIsLight } from '../../utils/usernameColor';
 import { PressButton } from "../ui/PressButton";
+import { IconButton } from "../ui/IconButton";
+import { useSelectedGroupAliases } from '../../hooks/queries/useGroupAliases';
+import { aliasName } from '../../utils/groupAlias';
 
 interface ReplyPreviewProps {
   messageId: string;
@@ -20,12 +23,14 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
 }) => {
   const { t } = useTranslation('chat');
   const isLightBg = useBackgroundIsLight();
+  const aliases = useSelectedGroupAliases();
   const message = allMessages.find((m) => m.id === messageId);
   if (!message) {
     return null;
   }
-  const author = message.sender_username ?? message.sender_id;
-  const authorColor = getUsernameColor(author, isLightBg);
+  const handle = message.sender_username ?? message.sender_id;
+  const author = aliasName(aliases, message.sender_id, handle);
+  const authorColor = getUsernameColor(handle, isLightBg);
   // The text, else the first file's name, else (no text on this device) that it could not be decrypted.
   const content =
     message.content_decrypted ||
@@ -60,14 +65,14 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
           <p className="text-secondary font-mono truncate text-accent-dim">{snippet}</p>
         </PressButton>
       </div>
-      <button
+      <IconButton
         data-testid="dismiss-reply-button"
         onClick={onDismiss}
         aria-label={t('replyBar.dismiss')}
-        className="icon-btn-sm flex-shrink-0"
+        className="flex-shrink-0"
       >
         <X size={17} aria-hidden="true" />
-      </button>
+      </IconButton>
     </div>
   );
 };

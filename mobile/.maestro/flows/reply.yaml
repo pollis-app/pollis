@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - gate
 ---
 # REPLY (#1270) — swipe a message toward the start edge to reply, Discord's
 # gesture, and the double-tap fallback. Self-contained: creates a group (→
@@ -13,17 +14,13 @@ tags:
 # the same; the bar's dismiss cancels a reply; a long press still opens the
 # message sheet with its pressed-state fade (#1282) in place.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
 
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

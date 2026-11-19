@@ -8,7 +8,8 @@
     "permalinkResolving": "Ouverture du message…",
     "noMatches": "Aucun résultat",
     "emptyHint": "Aller à un canal, un canal vocal, un MP, un utilisateur ou une page de paramètres",
-    "live": "[direct]"
+    "live": "Direct",
+    "liveTerminal": "[direct]"
   },
   "pages": {
     "userName": "Utilisateur",

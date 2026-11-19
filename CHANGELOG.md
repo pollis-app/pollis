@@ -23,6 +23,51 @@ tag date, UTC.
 
 ---
 
+## v1.19.18 — 2026-11-18
+
+- **Link previews for www. links.** A link written without `https://`, such as
+  `www.example.com`, now keeps its preview card when you send it and when
+  others receive it.
+
+## v1.19.17 — 2026-11-18
+
+- **A different name and picture in each group.** You can now show a separate
+  display name and profile picture in any group. Your @handle stays the same
+  and is shown beside the name, and everywhere outside that group (direct
+  messages included) you keep your main profile. Profile → Group aliases lists
+  every group: change one, apply a name or picture to all of them at once, or
+  go back to your main profile. Group admins can reset a member's alias.
+- **Link previews.** A link in a message shows a card with the page's title,
+  description and picture. Your app fetches the preview when you send, so the
+  people reading never contact the linked site, and the server only sees an
+  encrypted message. Editing the link updates the card; deleting the message
+  removes it for everyone.
+
+## v1.19.16 — 2026-11-17
+
+- **Real device names on Linux.** The microphone and speaker pickers list your
+  devices by name ("AirPods Pro", a USB microphone) instead of "PulseAudio",
+  "PipeWire" or "JACK", Bluetooth headsets included. A call on the default
+  device follows a headset you connect mid-call, and a device you unplug falls
+  back to the default.
+- **Approving a join request is quick.** Approve answers in about a second;
+  adding the person to the group's encryption finishes in the background.
+- **Faster unlock after you join a group.** The app no longer waits on the
+  group's follow-up key rotation before showing your groups.
+- **Sign-in looks like your app.** The sign-in, code and PIN screens use your
+  last look (Modern or Terminal, and your colours) instead of the defaults.
+- **A tidier Modern look.** One focus ring on every control; buttons, fields
+  and corners match across the app; page titles are headings; every page has a
+  full breadcrumb; terminal-style brackets, spinners and spaced capitals stay in
+  Terminal; selections use a tint instead of a solid colour.
+- Confirmations look the same everywhere: the question, what it will do, then
+  the action and Cancel. Cancel has the focus, so Enter never deletes by
+  accident.
+- Empty lists say so in one centred sentence, with the action that fills them.
+- An invite link names the group before you join it, and a few labels and
+  counts read correctly (approving a device, the open-source list, group
+  search, emoji order).
+
 ## v1.19.15 — 2026-11-17
 
 - **Adding a Windows computer to your account works.** Signing in on a new

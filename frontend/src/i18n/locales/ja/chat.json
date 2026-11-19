@@ -60,7 +60,8 @@
     "empty": "まだメッセージはありません。会話を始めましょう。",
     "unknownAuthor": "不明",
     "blockedAuthor": "ブロックしたユーザー",
-    "blockedBody": "[ブロック済み]"
+    "blockedBody": "ブロック済み",
+    "blockedBodyTerminal": "[ブロック済み]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name>に返信中",
@@ -69,7 +70,8 @@
   },
   "queue": {
     "heading": "キュー",
-    "pendingPlaceholder": "[保留中のメッセージ]",
+    "pendingPlaceholder": "保留中のメッセージ",
+    "pendingPlaceholderTerminal": "[保留中のメッセージ]",
     "cancel": "メッセージをキャンセル",
     "retry": "再試行",
     "failedCount_other": "失敗 ×{{count}}"
@@ -93,7 +95,8 @@
   "preview": {
     "noMessages": "まだメッセージはありません",
     "withSender": "{{name}}：{{text}}",
-    "attachments_other": "[添付ファイル{{count}}件]",
+    "attachments_other": "添付ファイル{{count}}件",
+    "attachmentsTerminal_other": "[添付ファイル{{count}}件]",
     "undecryptable": "このデバイスで復号できなかったメッセージがあります"
   },
   "attachment": {
@@ -105,9 +108,11 @@
     "failedToLoad": "読み込みに失敗しました",
     "failedToDownload": "ダウンロードに失敗しました",
     "lightboxFetch": "取得",
-    "lightboxDone": "[ 完了 ]",
-    "lightboxDownload": "[ダウンロード]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "完了",
+    "lightboxDoneTerminal": "[ 完了 ]",
+    "lightboxDownload": "ダウンロード",
+    "lightboxDownloadTerminal": "[ダウンロード]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "センシティブなメディアを表示：{{filename}}",
     "sensitiveHide": "{{filename}}を非表示"
   },
@@ -117,6 +122,10 @@
     "loadTitle": "{{url}}からメディアを読み込む — このサイトに直接接続します",
     "loadDescription": "{{url}}からメディアを読み込みます。このサイトに直接接続するため、あなたのIPアドレスがサイトに知られます。",
     "openLabel": "{{url}}を開く"
+  },
+  "linkPreview": {
+    "loading": "プレビューを読み込み中…",
+    "remove": "リンクプレビューを削除"
   },
   "notify": {
     "newMessageTitle": "新しいメッセージ",

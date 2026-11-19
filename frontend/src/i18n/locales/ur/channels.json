@@ -124,7 +124,8 @@
       "revoking": "منسوخ ہو رہی ہے…",
       "revokeLabel": "{{name}} کی دعوت منسوخ کریں",
       "revokeFailed": "دعوت منسوخ نہیں ہو سکی۔"
-    }
+    },
+    "resetAlias": "عرفی نام ری سیٹ کریں"
   },
   "kickMember": {
     "pageTitle": "رکن ہٹائیں",
@@ -143,7 +144,7 @@
     "acceptFailed": "دعوت قبول نہیں ہو سکی۔ دوبارہ کوشش کریں۔"
   },
   "inviteMember": {
-    "pageTitle": "رکن کو دعوت دیں :: {{group}}",
+    "pageTitle": "رکن کو دعوت دیں — {{group}}",
     "intro": "کسی کو <accent>{{name}}</accent> میں دعوت دیں",
     "identifierLabel": "صارف نام یا ای میل",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +154,7 @@
     "sendFailed": "دعوت نہیں بھیجی جا سکی"
   },
   "joinRequests": {
-    "pageTitle": "شمولیت کی درخواستیں :: {{group}}",
+    "pageTitle": "شمولیت کی درخواستیں — {{group}}",
     "allPageTitle": "شمولیت کی درخواستیں",
     "pendingFor": "<accent>{{name}}</accent> میں شمولیت کی زیر التواء درخواستیں",
     "empty": "کوئی زیر التواء درخواست نہیں۔",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} نے آپ کو {{group}} میں دعوت دی",
     "inviteBody": "{{name}} نے آپ کو دعوت دی",
     "inviteBodyUnknown": "آپ کو ایک گروپ میں شامل ہونے کی دعوت دی گئی ہے"
+  },
+  "resetAlias": {
+    "pageTitle": "عرفی نام ری سیٹ کریں",
+    "confirm": "کیا اس گروپ میں <strong>{{name}}</strong> (@{{handle}}) کا عرفی نام ری سیٹ کریں؟",
+    "consequence": "یہاں پھر ان کی مرکزی پروفائل دکھے گی۔ وہ نیا عرفی نام رکھ سکتے ہیں۔",
+    "confirmButton": "ہاں، ری سیٹ کریں",
+    "submitting": "ری سیٹ ہو رہا ہے…",
+    "failed": "عرفی نام ری سیٹ نہیں ہو سکا"
   }
 }

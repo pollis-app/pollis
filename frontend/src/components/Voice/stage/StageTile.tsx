@@ -7,6 +7,7 @@ import { Mic, MicOff, Maximize, Pin } from "lucide-react";
 import type { VoiceConnectionQuality } from "../../../types";
 import { Avatar } from "../../ui/Avatar";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
+import { IconButton } from "../../ui/IconButton";
 import { RemoteUserVolumeSlider } from "../RemoteUserVolumeSlider";
 import { SignalBars } from "../SignalBars";
 import { RemoteVideoTile } from "../RemoteVideoTile";
@@ -263,23 +264,23 @@ const StageTileImpl: React.FC<Props> = ({
 
       {isVideo && !preview && videoTrack && (
         <div className="vs-hover">
-          <button
+          <IconButton
             className="vs-hbtn"
             title={t("tile.fullscreenTitle")}
             aria-label={t("tile.fullscreenLabel")}
             onClick={(e) => { e.stopPropagation(); onView?.(videoTrack.trackKey); }}
           >
             <Maximize size={17} />
-          </button>
+          </IconButton>
           {focusable && (
-            <button
+            <IconButton
               className="vs-hbtn"
               title={t("tile.spotlightTitle")}
               aria-label={t("tile.spotlightLabel")}
               onClick={(e) => { e.stopPropagation(); onFocus?.(p.tileKey); }}
             >
               <Pin size={17} />
-            </button>
+            </IconButton>
           )}
         </div>
       )}

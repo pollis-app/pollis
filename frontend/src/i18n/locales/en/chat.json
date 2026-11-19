@@ -64,7 +64,8 @@
     "empty": "No messages yet. Start the conversation.",
     "unknownAuthor": "Unknown",
     "blockedAuthor": "blocked user",
-    "blockedBody": "[blocked]"
+    "blockedBody": "Blocked",
+    "blockedBodyTerminal": "[blocked]"
   },
   "replyBar": {
     "replyingTo": "replying to <name>{{name}}</name>",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "Queue",
-    "pendingPlaceholder": "[Pending message]",
+    "pendingPlaceholder": "Pending message",
+    "pendingPlaceholderTerminal": "[Pending message]",
     "cancel": "Cancel message",
     "retry": "retry",
     "failedCount_one": "failed ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "No messages yet",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[attachment]",
-    "attachments_other": "[{{count}} attachments]",
+    "attachments_one": "Attachment",
+    "attachments_other": "{{count}} attachments",
+    "attachmentsTerminal_one": "[attachment]",
+    "attachmentsTerminal_other": "[{{count}} attachments]",
     "undecryptable": "A message couldn't be decrypted on this device"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "Failed to load",
     "failedToDownload": "Failed to download",
     "lightboxFetch": "fetch",
-    "lightboxDone": "[ done ]",
-    "lightboxDownload": "[download]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "Done",
+    "lightboxDoneTerminal": "[ done ]",
+    "lightboxDownload": "Download",
+    "lightboxDownloadTerminal": "[download]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Show sensitive media: {{filename}}",
     "sensitiveHide": "Hide {{filename}}"
   },
@@ -127,6 +133,10 @@
     "loadTitle": "Load media from {{url}} — this contacts that site directly",
     "loadDescription": "Load media from {{url}}. This contacts that site directly and reveals your IP address to it.",
     "openLabel": "Open {{url}}"
+  },
+  "linkPreview": {
+    "loading": "Loading preview…",
+    "remove": "Remove link preview"
   },
   "notify": {
     "newMessageTitle": "New message",

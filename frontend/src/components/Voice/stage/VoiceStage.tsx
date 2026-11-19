@@ -24,6 +24,7 @@ import { disambiguateVoiceNames } from "../../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity, voiceUserKey } from "../../../voice/identity";
 import { voiceSession } from "../../../voice";
 import { Button } from "../../ui/Button";
+import { IconButton } from "../../ui/IconButton";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { IconSpinner } from "../../ui/IconSpinner";
 import { NavigableGrid } from "../../ui/NavigableGrid";
@@ -36,6 +37,8 @@ import { ResolutionPanel } from "./ResolutionPanel";
 import { probeRender } from "../../../utils/renderProbe";
 import "./voice-stage.css";
 import { EmptyState } from "../../ui/EmptyState";
+import { useSelectedGroupAliases } from "../../../hooks/queries/useGroupAliases";
+import { aliasAvatar, aliasName, EMPTY_ALIASES } from "../../../utils/groupAlias";
 
 /** True when two models would draw identically, so the previous reference can be reused (`React.memo`). */
 function sameTileModel(a: StageTileModel, b: StageTileModel): boolean {
@@ -104,6 +107,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
   }) => {
     probeRender("VoiceStage");
     const { t } = useTranslation("voice");
+    const aliases = useSelectedGroupAliases();
     const {
       voiceParticipants,
       voiceActiveSpeakerIds,
@@ -185,6 +189,12 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const speakingUsers = new Set(voiceActiveSpeakerIds.map(userIdFromVoiceIdentity));
 
     const displayNames = disambiguateVoiceNames(mergedParticipants);
+    // A group voice room names people as the group shows them (#2003); a DM call by main profile.
+    const roomAliases = callMode ? EMPTY_ALIASES : aliases;
+    const nameOf = (p: VoiceParticipant) =>
+      aliasName(roomAliases, userIdFromVoiceIdentity(p.identity), displayNames.get(p.identity) ?? p.name);
+    const avatarOf = (p: VoiceParticipant) =>
+      aliasAvatar(roomAliases, userIdFromVoiceIdentity(p.identity), p.avatarKey) ?? null;
 
     // Up to two tiles per participant, camera then screenshare (#394).
     const tilesFor = (p: VoiceParticipant): StageTileModel[] => {
@@ -210,8 +220,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
       const base = {
         identity: p.identity,
-        name: displayNames.get(p.identity) ?? p.name,
-        avatarKey: p.avatarKey ?? null,
+        name: nameOf(p),
+        avatarKey: avatarOf(p),
         isMuted: isMuted(p.audio),
         isLocal: p.isLocal,
         isSpeaking: speakingUsers.has(userIdFromVoiceIdentity(p.identity)) && !isMuted(p.audio),
@@ -283,8 +293,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const previewPeople: StageTileModel[] = observerParticipants.map((p) => ({
       tileKey: p.identity,
       identity: p.identity,
-      name: p.name,
-      avatarKey: p.avatarKey ?? null,
+      name: aliasName(roomAliases, userIdFromVoiceIdentity(p.identity), p.name),
+      avatarKey: aliasAvatar(roomAliases, userIdFromVoiceIdentity(p.identity), p.avatarKey) ?? null,
       isMuted: false,
       isLocal: false,
       isSpeaking: false,
@@ -317,8 +327,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
     // Shared by the tray and the connecting footer, so a call can always end.
     const leaveButton = (
-      <button
-        className="vs-tray-leave"
+      <Button
+        variant="danger"
+        size="sm"
         data-testid={callMode ? "call-hang-up" : "voice-tray-leave"}
         title={callMode ? t("stage.hangUp") : t("stage.leaveTitle")}
         aria-label={callMode ? t("stage.hangUp") : t("controls.leaveChannel")}
@@ -331,7 +342,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           <LogOut size={14} className="rtl-unmirror" />
         )}
         {callMode ? t("stage.hangUp") : t("stage.leave")}
-      </button>
+      </Button>
     );
 
     return (
@@ -341,13 +352,13 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           <div
             className="flex items-center px-4 flex-shrink-0 h-bar border-b border-line text-muted"
           >
-            <button
+            <IconButton
               onClick={onBack}
               aria-label={t("common:actions.back")}
-              className="me-3 inline-flex items-center gap-1 leading-none transition-colors text-muted hover:text-accent"
+              className="me-3 transition-colors"
             >
               <ArrowLeft size={12} className="rtl-mirror" />
-            </button>
+            </IconButton>
             <span style={{ flex: 1 }} className="flex items-center gap-1.5 text-accent">
               {callMode ? <Phone size={12} /> : <Volume2 size={12} />}
               {channelName}
@@ -468,7 +479,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               {isInCall || callMode ? (
                 <div className="vs-tray">
                   {micAvailable ? (
-                    <button
+                    <IconButton
                       // `armed` (PTT idle) is not the red `on` state.
                       className={
                         "vs-tray-btn danger" +
@@ -487,9 +498,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                       ) : (
                         <MicOff size={15} />
                       )}
-                    </button>
+                    </IconButton>
                   ) : (
-                    <button
+                    <IconButton
                       className="vs-tray-btn on"
                       data-testid="voice-tray-listen-only"
                       title={t("controls.listenOnly")}
@@ -497,10 +508,10 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                       disabled
                     >
                       <MicOff size={15} />
-                    </button>
+                    </IconButton>
                   )}
                   {/* Deafen, shown even listen-only. */}
-                  <button
+                  <IconButton
                     className={"vs-tray-btn danger" + (gate.deafened ? " on" : "")}
                     data-testid="voice-tray-deafen"
                     data-deafened={gate.deafened}
@@ -510,8 +521,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     onClick={() => voiceSession.toggleDeafen()}
                   >
                     {gate.deafened ? <VolumeX size={15} /> : <Volume2 size={15} />}
-                  </button>
-                  <button
+                  </IconButton>
+                  <IconButton
                     className={"vs-tray-btn" + (shareActive ? " on" : "")}
                     data-testid="voice-tray-screenshare"
                     data-busy={shareBusy || undefined}
@@ -522,8 +533,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     onClick={() => toggleScreenShare(share)}
                   >
                     {shareBusy ? <IconSpinner size={15} /> : shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
-                  </button>
-                  <button
+                  </IconButton>
+                  <IconButton
                     className={"vs-tray-btn" + (cameraActive ? " on" : "")}
                     data-testid="voice-tray-camera"
                     data-busy={cameraBusy || undefined}
@@ -534,7 +545,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     onClick={() => toggleCamera(camera)}
                   >
                     {cameraBusy ? <IconSpinner size={15} /> : cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
-                  </button>
+                  </IconButton>
                   <div className="vs-tray-sep" />
                   {leaveButton}
                 </div>
@@ -547,7 +558,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
             <div className="vs-foot-side right">
               {/* Grid ↔ spotlight only matters while someone streams. */}
               {stageLive && streamers.length > 0 && !focusView && (
-                <button
+                <IconButton
                   className={"vs-tray-btn" + (layout === "grid" ? " on" : "")}
                   data-testid="voice-layout-toggle"
                   data-layout={layout === "grid" ? "grid" : "spotlight"}
@@ -557,7 +568,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   onClick={() => setLayout(layout === "grid" ? "auto" : "grid")}
                 >
                   {layout === "grid" ? <Focus size={15} /> : <LayoutGrid size={15} />}
-                </button>
+                </IconButton>
               )}
               {sending && (isInCall || callMode) && (
                 <Button
@@ -572,13 +583,14 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   <Ratio size={15} /> {t("stage.resolution")}
                 </Button>
               )}
-              <button
-                className="flex items-center gap-2 text-secondary transition-colors text-muted hover:text-fg"
+              <Button
+                variant="ghost"
+                size="md"
                 data-testid="voice-settings-link"
                 onClick={onOpenSettings}
               >
                 <SlidersHorizontal size={15} /> {t("stage.settingsLink")}
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}

@@ -36,7 +36,7 @@
     "muteDescription": "Muted channels don't notify you, except when someone mentions you by name."
   },
   "createChannel": {
-    "pageTitle": "New Channel",
+    "pageTitle": "New channel",
     "nameLabel": "Channel Name",
     "namePlaceholder": "general",
     "slugLabel": "Slug",
@@ -55,7 +55,7 @@
     "createFailed": "Failed to create channel"
   },
   "renameChannel": {
-    "pageTitle": "Rename Channel",
+    "pageTitle": "Rename channel",
     "nameLabel": "Channel Name",
     "namePlaceholder": "general",
     "descriptionLabel": "Description",
@@ -67,7 +67,7 @@
     "notAdmin": "You don't have admin permissions for this group."
   },
   "createGroup": {
-    "pageTitle": "Create Group",
+    "pageTitle": "Create group",
     "nameLabel": "Group Name",
     "namePlaceholder": "Engineering",
     "slugLabel": "Slug",
@@ -85,7 +85,7 @@
     "createFailed": "Failed to create group"
   },
   "renameGroup": {
-    "pageTitle": "Rename Group",
+    "pageTitle": "Rename group",
     "nameLabel": "Group Name",
     "namePlaceholder": "My Group",
     "descriptionLabel": "Description",
@@ -97,10 +97,10 @@
     "notAdmin": "You don't have admin permissions for this group."
   },
   "leaveGroup": {
-    "pageTitle": "Leave Group",
+    "pageTitle": "Leave group",
     "confirm": "Are you sure you want to leave <strong>{{name}}</strong>?",
     "rejoinNotice": "You will need a new invite to rejoin.",
-    "confirmButton": "Yes, Leave",
+    "confirmButton": "Yes, leave",
     "submitting": "Leaving…",
     "leaveFailed": "Failed to leave group"
   },
@@ -113,7 +113,7 @@
       "member": "member"
     },
     "adminToggle": "admin",
-    "kick": "kick",
+    "kick": "Kick",
     "verified": "Verified contact",
     "keyChanged": "Identity key changed — re-verify",
     "invited": {
@@ -124,13 +124,14 @@
       "revoking": "Revoking…",
       "revokeLabel": "Revoke the invite for {{name}}",
       "revokeFailed": "Couldn't revoke the invite."
-    }
+    },
+    "resetAlias": "Reset alias"
   },
   "kickMember": {
-    "pageTitle": "Remove Member",
+    "pageTitle": "Remove member",
     "confirm": "Remove <strong>{{name}}</strong> from this group?",
     "rejoinNotice": "They will need a new invite to rejoin.",
-    "confirmButton": "Yes, Remove",
+    "confirmButton": "Yes, remove",
     "submitting": "Removing…",
     "removeFailed": "Failed to remove member"
   },
@@ -138,12 +139,12 @@
     "pageTitle": "Invites",
     "empty": "No pending invites.",
     "invitedBy": "Invited by {{name}}",
-    "accept": "accept",
-    "decline": "decline",
+    "accept": "Accept",
+    "decline": "Decline",
     "acceptFailed": "Couldn't accept the invite. Try again."
   },
   "inviteMember": {
-    "pageTitle": "Invite Member :: {{group}}",
+    "pageTitle": "Invite member — {{group}}",
     "intro": "Invite someone to <accent>{{name}}</accent>",
     "identifierLabel": "Username or Email",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,16 +154,16 @@
     "sendFailed": "Failed to send invite"
   },
   "joinRequests": {
-    "pageTitle": "Join Requests :: {{group}}",
-    "allPageTitle": "Join Requests",
+    "pageTitle": "Join requests — {{group}}",
+    "allPageTitle": "Join requests",
     "pendingFor": "Pending requests to join <accent>{{name}}</accent>",
     "empty": "No pending requests.",
     "allEmpty": "No pending join requests.",
-    "approve": "approve",
-    "reject": "reject"
+    "approve": "Approve",
+    "reject": "Reject"
   },
   "joinByInvite": {
-    "pageTitle": "Join a Group",
+    "pageTitle": "Join a group",
     "heading": "Join a group",
     "headingTerminal": "> JOIN A GROUP",
     "headingNamed": "Join {{name}}?",
@@ -221,5 +222,50 @@
     "inviteBodyToGroup": "{{name}} invited you to {{group}}",
     "inviteBody": "{{name}} invited you",
     "inviteBodyUnknown": "You have been invited to a group"
+  },
+  "resetAlias": {
+    "pageTitle": "Reset alias",
+    "confirm": "Reset <strong>{{name}}</strong>'s alias (@{{handle}}) in this group?",
+    "consequence": "They'll show their main profile here again. They can set a new alias.",
+    "confirmButton": "Yes, reset",
+    "submitting": "Resetting…",
+    "failed": "Couldn't reset the alias"
+  },
+  "categories": {
+    "newCategory": "New category",
+    "newChannel": "New channel",
+    "nameLabel": "Category name",
+    "namePlaceholder": "Category name",
+    "create": "Create",
+    "creating": "Creating…",
+    "rename": "Rename",
+    "renaming": "Saving…",
+    "renameCategory": "Rename category",
+    "deleteCategory": "Delete category",
+    "deleteQuestion": "Delete {{name}}?",
+    "deleteConsequence_one": "Its {{count}} channel moves to the top of the group.",
+    "deleteConsequence_other": "Its {{count}} channels move to the top of the group.",
+    "deleteConsequenceEmpty": "It has no channels.",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "expand": "Expand {{name}}",
+    "collapse": "Collapse {{name}}",
+    "options": "Options for {{name}}",
+    "newChannelIn": "New channel in {{name}}",
+    "createIn": "It goes at the bottom of {{name}}.",
+    "addToGroup": "Add to {{name}}",
+    "unread_one": "{{name}}, {{count}} unread message",
+    "unread_other": "{{name}}, {{count}} unread messages",
+    "move": "Move {{name}}",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "edit": "Edit",
+    "editChannels": "Edit channels",
+    "done": "Done",
+    "editHint": "Drag the handles to reorder. Channels can go in any category.",
+    "createFailed": "Couldn't create the category.",
+    "renameFailed": "Couldn't rename the category.",
+    "deleteFailed": "Couldn't delete the category.",
+    "moveFailed": "Couldn't move it. The list is back as it was."
   }
 }

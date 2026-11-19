@@ -124,7 +124,8 @@
       "revoking": "ਵਾਪਸ ਲਿਆ ਜਾ ਰਿਹਾ ਹੈ…",
       "revokeLabel": "{{name}} ਲਈ ਸੱਦਾ ਵਾਪਸ ਲਓ",
       "revokeFailed": "ਸੱਦਾ ਵਾਪਸ ਨਹੀਂ ਲਿਆ ਜਾ ਸਕਿਆ।"
-    }
+    },
+    "resetAlias": "ਉਪਨਾਮ ਰੀਸੈੱਟ ਕਰੋ"
   },
   "kickMember": {
     "pageTitle": "ਮੈਂਬਰ ਹਟਾਓ",
@@ -143,7 +144,7 @@
     "acceptFailed": "ਸੱਦਾ ਸਵੀਕਾਰ ਨਹੀਂ ਹੋ ਸਕਿਆ। ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
   },
   "inviteMember": {
-    "pageTitle": "ਮੈਂਬਰ ਨੂੰ ਸੱਦਾ ਦਿਓ :: {{group}}",
+    "pageTitle": "ਮੈਂਬਰ ਨੂੰ ਸੱਦਾ ਦਿਓ — {{group}}",
     "intro": "ਕਿਸੇ ਨੂੰ <accent>{{name}}</accent> ਵਿੱਚ ਸੱਦਾ ਦਿਓ",
     "identifierLabel": "ਵਰਤੋਂਕਾਰ ਨਾਮ ਜਾਂ ਈਮੇਲ",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +154,7 @@
     "sendFailed": "ਸੱਦਾ ਭੇਜਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ"
   },
   "joinRequests": {
-    "pageTitle": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ :: {{group}}",
+    "pageTitle": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ — {{group}}",
     "allPageTitle": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ",
     "pendingFor": "<accent>{{name}}</accent> ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬਕਾਇਆ ਬੇਨਤੀਆਂ",
     "empty": "ਕੋਈ ਬਕਾਇਆ ਬੇਨਤੀ ਨਹੀਂ।",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} ਨੇ ਤੁਹਾਨੂੰ {{group}} ਵਿੱਚ ਸੱਦਾ ਦਿੱਤਾ",
     "inviteBody": "{{name}} ਨੇ ਤੁਹਾਨੂੰ ਸੱਦਾ ਦਿੱਤਾ",
     "inviteBodyUnknown": "ਤੁਹਾਨੂੰ ਇੱਕ ਗਰੁੱਪ ਵਿੱਚ ਸੱਦਾ ਦਿੱਤਾ ਗਿਆ ਹੈ"
+  },
+  "resetAlias": {
+    "pageTitle": "ਉਪਨਾਮ ਰੀਸੈੱਟ ਕਰੋ",
+    "confirm": "ਕੀ ਇਸ ਗਰੁੱਪ ਵਿੱਚ <strong>{{name}}</strong> (@{{handle}}) ਦਾ ਉਪਨਾਮ ਰੀਸੈੱਟ ਕਰਨਾ ਹੈ?",
+    "consequence": "ਇੱਥੇ ਫਿਰ ਉਹਨਾਂ ਦੀ ਮੁੱਖ ਪ੍ਰੋਫ਼ਾਈਲ ਦਿਖੇਗੀ। ਉਹ ਨਵਾਂ ਉਪਨਾਮ ਰੱਖ ਸਕਦੇ ਹਨ।",
+    "confirmButton": "ਹਾਂ, ਰੀਸੈੱਟ ਕਰੋ",
+    "submitting": "ਰੀਸੈੱਟ ਹੋ ਰਿਹਾ ਹੈ…",
+    "failed": "ਉਪਨਾਮ ਰੀਸੈੱਟ ਨਹੀਂ ਹੋ ਸਕਿਆ"
   }
 }

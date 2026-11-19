@@ -1,5 +1,14 @@
 /** Browser mock for @tauri-apps/api/core (VITE_PLAYWRIGHT); state seeds from window.__POLLIS_PRELOAD__. */
 
+import {
+  appendChannel,
+  channelBlocks,
+  deleteCategory,
+  flattenBlocks,
+  moveCategory,
+  moveChannel,
+} from '../utils/channelLayout';
+
 interface MockUser {
   id: string;
   email: string;
@@ -20,6 +29,16 @@ interface MockChannel {
   group_id: string;
   name: string;
   description?: string;
+  channel_type?: string;
+  /** #2031: the category it sits in; absent = the uncategorised block. */
+  category_id?: string | null;
+}
+
+/** #2031: a group's channel category. */
+interface MockCategory {
+  id: string;
+  group_id: string;
+  name: string;
 }
 
 interface MockMessage {
@@ -36,6 +55,10 @@ interface MockMessage {
   send_state?: 'pending' | 'failed';
   /** The edit outbox (#1555): our edit, not confirmed yet; `content` holds it. */
   edit_state?: 'pending' | 'failed';
+  /** The sender's link preview (#1987), as the core reads it from the trailer. */
+  link_preview?: Record<string, unknown> | null;
+  /** Deleted for everyone: a tombstone with no text. */
+  deleted_at?: string;
 }
 
 /** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
@@ -207,7 +230,19 @@ interface MockPendingTransferRequest {
   created_at: string;
 }
 
+/** A per-group alias (#2003), as `list_group_aliases` returns it. */
+interface MockGroupAlias {
+  group_id: string;
+  user_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
 interface MockStore {
+  /** #2003: every alias the mock DS holds, of members past and present. */
+  groupAliases: MockGroupAlias[];
+  /** Bytes `upload_public_file` received, served back by `get_public_file_url`. */
+  uploadedFiles: Record<string, string>;
   /** #1338: the DS has called this device revoked; every command refuses. */
   deviceRevoked: boolean;
   /** `logout`'s last `deleteData`, so a spec can see what the app asked for. */
@@ -215,7 +250,12 @@ interface MockStore {
   session: MockUser | null;
   profile: MockProfile | null;
   groups: MockGroup[];
+  /** Per group, in display order (#2031): uncategorised first, then category by category. */
   channels: Record<string, MockChannel[]>;
+  /** #2031: per group, in order. */
+  categories: Record<string, MockCategory[]>;
+  /** #2031: refuse every arrangement write, as the DS does a non-admin. */
+  failArrange: boolean;
   messages: Record<string, MockMessage[]>;
   // Thread replies (#825), keyed by the ROOT message's id.
   threadMessages: Record<string, MockMessage[]>;
@@ -372,6 +412,8 @@ function readPreferences(raw: unknown): Record<string, unknown> {
 }
 
 const store: MockStore = {
+  groupAliases: (preload.groupAliases as MockGroupAlias[] | undefined) ?? [],
+  uploadedFiles: {},
   deviceRevoked: false,
   lastLogoutDeleteData: null,
   session: preload.session ?? null,
@@ -421,6 +463,8 @@ const store: MockStore = {
   savedDiagnosticsPath: null,
   failSends: preload.failSends === true,
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
+  categories: (preload.categories as Record<string, MockCategory[]> | undefined) ?? {},
+  failArrange: preload.failArrange === true,
   readCursors:
     (preload.readCursors as Record<string, string> | undefined) ??
     Object.fromEntries(
@@ -734,6 +778,14 @@ function roleInGroup(groupId: string): string | null {
 }
 
 /** Mock `authz::require_member` (#917), worded as `NOT_A_MEMBER`. */
+/** #2031: the DS refuses an arrangement from anyone but an admin of the group. */
+function requireArrangeMock(groupId: string): void {
+  const group = store.groups.find((g) => g.id === groupId);
+  if (store.failArrange || !group || (group.current_user_role ?? 'admin') !== 'admin') {
+    throw new Error('forbidden');
+  }
+}
+
 function requireMemberMock(groupId: string): void {
   if (roleInGroup(groupId) === null) {
     throw new Error('you are not a member of this group');
@@ -1044,15 +1096,25 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_dm_requests':
       return store.dmRequests;
 
+    // Accepting a request makes it an ordinary DM (#1987's card then draws).
+    case 'accept_dm_request': {
+      const { dmChannelId } = args as { dmChannelId: string };
+      store.dmRequests = store.dmRequests.filter((r) => r.id !== dmChannelId);
+      return null;
+    }
+
     case 'list_pending_invites':
     case 'list_join_requests':
     case 'get_join_requests':
     case 'get_group_join_requests':
     case 'list_devices':
     case 'list_user_devices':
-    case 'list_blocked_users':
     case 'get_pinned_messages':
       return [];
+
+    // Seeded by a spec that shows a blocked author's message (#1965); none by default.
+    case 'list_blocked_users':
+      return (preload.blockedUsers ?? []) as unknown[];
 
     case 'list_security_events':
       return securityEventsPage(
@@ -1329,6 +1391,63 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_muted_channels':
       return [...store.mutedChannels];
 
+    // Per-group aliases (#2003), with the DS's rules: members read a group's
+    // aliases (former members' included), only the owner or a group admin resets.
+    case 'list_group_aliases': {
+      const { groupId, requesterId } = args as { groupId: string; requesterId: string };
+      const member = (store.groupMembers[groupId] ?? []).some((m) => m.user_id === requesterId);
+      if (!member) {
+        return [];
+      }
+      return store.groupAliases.filter((a) => a.group_id === groupId);
+    }
+
+    case 'list_my_aliases': {
+      const { userId } = args as { userId: string };
+      return store.groupAliases.filter((a) => a.user_id === userId);
+    }
+
+    case 'set_group_alias': {
+      const { userId, groupId, displayName, avatarUrl } = args as {
+        userId: string;
+        groupId: string | null;
+        displayName?: string;
+        avatarUrl?: string;
+      };
+      const groupIds = groupId
+        ? [groupId]
+        : store.groups
+            .map((g) => g.id)
+            .filter((id) => (store.groupMembers[id] ?? []).some((m) => m.user_id === userId));
+      for (const gid of groupIds) {
+        if (!(store.groupMembers[gid] ?? []).some((m) => m.user_id === userId)) {
+          throw new Error('Forbidden');
+        }
+        const current = store.groupAliases.find((a) => a.group_id === gid && a.user_id === userId);
+        const pick = (next: string | undefined, prev: string | null | undefined) =>
+          next === undefined ? prev ?? null : next === '' ? null : next;
+        const nextName = pick(displayName, current?.display_name);
+        const nextAvatar = pick(avatarUrl, current?.avatar_url);
+        store.groupAliases = store.groupAliases.filter((a) => !(a.group_id === gid && a.user_id === userId));
+        if (nextName || nextAvatar) {
+          store.groupAliases.push({ group_id: gid, user_id: userId, display_name: nextName, avatar_url: nextAvatar });
+        }
+      }
+      return null;
+    }
+
+    case 'reset_group_alias': {
+      const { groupId, userId, requesterId } = args as { groupId: string; userId: string; requesterId: string };
+      const admin = (store.groupMembers[groupId] ?? []).some(
+        (m) => m.user_id === requesterId && m.role === 'admin',
+      );
+      if (requesterId !== userId && !admin) {
+        throw new Error('Forbidden');
+      }
+      store.groupAliases = store.groupAliases.filter((a) => !(a.group_id === groupId && a.user_id === userId));
+      return null;
+    }
+
     case 'set_channel_muted': {
       const { channelId, muted } = args as { channelId: string; muted: boolean };
       store.mutedChannels = store.mutedChannels.filter((id) => id !== channelId);
@@ -1427,7 +1546,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // The "use the byte path" sentinel (#874); a spec may serve a key via `publicFileUrls`.
     case 'get_public_file_url': {
       const { key } = args as { key: string };
-      return (preload.publicFileUrls as Record<string, string> | undefined)?.[key] ?? '';
+      return (
+        store.uploadedFiles[key] ??
+        (preload.publicFileUrls as Record<string, string> | undefined)?.[key] ??
+        ''
+      );
     }
 
     // Explicit no-ops so they don't log as unhandled.
@@ -1538,9 +1661,62 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_user_groups_with_channels':
       return store.groups.map((g) => ({
         ...g,
-        channels: store.channels[g.id] ?? [],
+        channels: flattenBlocks(channelBlocks(store.channels[g.id] ?? [], store.categories[g.id] ?? [])),
+        categories: (store.categories[g.id] ?? []).map((k) => ({ ...k })),
         current_user_role: g.current_user_role ?? 'admin',
       }));
+
+    // #2031: arranging a group's channels, as the DS does it (pollis-delivery `channel_order`).
+    case 'create_channel_category': {
+      const { groupId, name } = args as { groupId: string; name: string };
+      requireArrangeMock(groupId);
+      const category: MockCategory = { id: generateId(), group_id: groupId, name: name.trim() };
+      store.categories[groupId] = [...(store.categories[groupId] ?? []), category];
+      return category;
+    }
+
+    case 'rename_channel_category': {
+      const { groupId, categoryId, name } = args as { groupId: string; categoryId: string; name: string };
+      requireArrangeMock(groupId);
+      store.categories[groupId] = (store.categories[groupId] ?? []).map((k) =>
+        k.id === categoryId ? { ...k, name: name.trim() } : k,
+      );
+      return null;
+    }
+
+    case 'delete_channel_category': {
+      const { groupId, categoryId } = args as { groupId: string; categoryId: string };
+      requireArrangeMock(groupId);
+      const next = deleteCategory(store.channels[groupId] ?? [], store.categories[groupId] ?? [], categoryId);
+      store.channels[groupId] = next.channels;
+      store.categories[groupId] = next.categories;
+      return null;
+    }
+
+    case 'move_channel_category': {
+      const { groupId, categoryId, position } = args as { groupId: string; categoryId: string; position: number };
+      requireArrangeMock(groupId);
+      store.categories[groupId] = moveCategory(store.categories[groupId] ?? [], categoryId, position);
+      return null;
+    }
+
+    case 'move_channel': {
+      const { groupId, channelId, categoryId, position } = args as {
+        groupId: string;
+        channelId: string;
+        categoryId: string | null;
+        position: number;
+      };
+      requireArrangeMock(groupId);
+      store.channels[groupId] = moveChannel(
+        store.channels[groupId] ?? [],
+        store.categories[groupId] ?? [],
+        channelId,
+        categoryId ?? null,
+        position,
+      );
+      return null;
+    }
 
     case 'create_group': {
       const { name, description, ownerId } = args as {
@@ -1562,7 +1738,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_group_channels': {
       const { groupId } = args as { groupId: string; requesterId?: string };
       requireMemberMock(groupId);
-      return store.channels[groupId] ?? [];
+      return flattenBlocks(channelBlocks(store.channels[groupId] ?? [], store.categories[groupId] ?? []));
     }
 
     case 'get_group_members': {
@@ -1572,22 +1748,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'create_channel': {
-      const { groupId, name, description } = args as {
+      const { groupId, name, description, channelType, categoryId } = args as {
         groupId: string;
         name: string;
         description?: string | null;
         creatorId?: string;
+        channelType?: string;
+        categoryId?: string | null;
       };
       const channel: MockChannel = {
         id: generateId(),
         group_id: groupId,
         name,
         description: description ?? undefined,
+        channel_type: channelType ?? 'text',
+        category_id: categoryId ?? null,
       };
-      if (!store.channels[groupId]) {
-        store.channels[groupId] = [];
-      }
-      store.channels[groupId].push(channel);
+      // #2031: at the bottom of its block.
+      store.channels[groupId] = appendChannel(store.channels[groupId] ?? [], store.categories[groupId] ?? [], channel);
       return channel;
     }
 
@@ -1757,6 +1935,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
           thread_id: threadId ?? undefined,
           sent_at: nowIso(),
           send_state: 'pending',
+          link_preview: mockWirePreview(args.linkPreview),
         };
         if (!store.messages[conversationId]) {
           store.messages[conversationId] = [];
@@ -1833,12 +2012,25 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message) {
         message.content = newContent;
         message.edited_at = nowIso();
+        // An edit rebuilds the message, preview included (#1987).
+        message.link_preview = mockWirePreview(args.linkPreview);
         // A failed post keeps the edit for the drain (#1555).
         if (store.failSends) {
           message.edit_state = 'failed';
           throw new Error('network unreachable');
         }
         delete message.edit_state;
+      }
+      return null;
+    }
+
+    // Delete for everyone: the row keeps a tombstone; the core's trigger clears the preview with the text (#1987).
+    case 'delete_message': {
+      const message = findMessage((args as { messageId: string }).messageId);
+      if (message) {
+        delete message.content;
+        message.link_preview = null;
+        message.deleted_at = nowIso();
       }
       return null;
     }
@@ -2241,8 +2433,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'list_voice_participants':
     case 'list_voice_room_counts':
-    case 'list_audio_devices':
       return [];
+
+    // cpal device ids and server descriptions, as the PulseAudio host lists them (#1989).
+    case 'list_audio_devices':
+      return [
+        { id: 'pulseaudio:alsa_input.pci-0000_00_1f.3.analog-stereo', name: 'Built-in Audio Analog Stereo', kind: 'input' },
+        { id: 'pulseaudio:alsa_input.usb-Blue_Microphones_Yeti-00.analog-stereo', name: 'Yeti Stereo Microphone', kind: 'input' },
+        { id: 'pulseaudio:alsa_output.pci-0000_00_1f.3.analog-stereo', name: 'Built-in Audio Analog Stereo', kind: 'output' },
+        { id: 'pulseaudio:bluez_output.AA_BB_CC_DD_EE_FF.1', name: 'AirPods Pro', kind: 'output' },
+      ];
 
     // Session lifecycle: a join succeeds instantly, so a spec can drive `VoiceSessionManager` itself.
     case 'join_voice_channel':
@@ -2379,6 +2579,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'discard_staged_attachment':
       return true;
 
+    // Link previews (#1987): `linkPreviews` maps a URL to the draft the core would build, after
+    // `linkPreviewDelayMs`; any other URL has none. Every call lands in `window.__linkPreviewFetches`.
+    case 'fetch_link_preview': {
+      const url = args.url as string;
+      const w = window as unknown as { __linkPreviewFetches?: string[] };
+      w.__linkPreviewFetches = [...(w.__linkPreviewFetches ?? []), url];
+      const draft = ((preload.linkPreviews ?? {}) as Record<string, unknown>)[url] ?? null;
+      const delay = (preload.linkPreviewDelayMs as number | undefined) ?? 0;
+      return delay > 0 ? new Promise((resolve) => setTimeout(() => resolve(draft), delay)) : draft;
+    }
+
+    case 'get_link_previews_enabled':
+      return linkPreviewsEnabled;
+
+    case 'set_link_previews_enabled':
+      linkPreviewsEnabled = args.enabled !== false;
+      return null;
+
     // The OS clipboard the paste fallback reads (#1794); `window.__setOsClipboard` fills it.
     case 'read_clipboard_files':
       return [...osClipboard.files];
@@ -2398,7 +2616,20 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_prekey_bundle':
     case 'rotate_signed_prekey':
     case 'replenish_one_time_prekeys':
-    case 'upload_public_file':
+    // Content-addressed like the real one: the same bytes give the same key.
+    case 'upload_public_file': {
+      const { prefix, data, contentType } = args as { prefix: string; data: number[]; contentType: string };
+      let h = 2166136261;
+      for (const b of data) {
+        h = Math.imul(h ^ b, 16777619) >>> 0;
+      }
+      const hex = h.toString(16).padStart(8, '0').repeat(8);
+      const ext = contentType === 'image/png' ? 'png' : 'jpg';
+      const key = `${prefix}/${hex}.${ext}`;
+      store.uploadedFiles[key] = URL.createObjectURL(new Blob([new Uint8Array(data)], { type: contentType }));
+      return { key, url: store.uploadedFiles[key] };
+    }
+
     case 'download_file':
       return null;
 
@@ -2416,6 +2647,17 @@ function unreadIn(conversationId: string): MockMessage[] {
 }
 
 let stagedAttachmentCount = 0;
+
+/** A sent draft as the core stores it (#1987): the thumbnail is not uploaded in the mock, so none. */
+function mockWirePreview(draft: unknown): Record<string, unknown> | null {
+  if (!draft || typeof draft !== 'object') {
+    return null;
+  }
+  const { url, title, description } = draft as { url: string; title: string; description?: string | null };
+  return { url, title, description: description ?? null, image: null };
+}
+// "Generate link previews" (#1987), per device; on by default.
+let linkPreviewsEnabled = true;
 
 const verifiedPeers = new Set<string>((preload.verifiedPeers as string[] | undefined) ?? []);
 

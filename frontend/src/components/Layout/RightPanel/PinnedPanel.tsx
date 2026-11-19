@@ -9,6 +9,11 @@ import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { formatClockTime } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
+import { SectionHeader } from "../../ui/SectionHeader";
+import { IconButton } from "../../ui/IconButton";
+import { useGroupAliases } from "../../../hooks/queries/useGroupAliases";
+import { appStore } from "../../../stores/appStore";
+import { aliasName } from "../../../utils/groupAlias";
 
 interface PinnedPanelProps {
   channelId: string | null;
@@ -23,6 +28,8 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
     const activeConversationId = channelId ?? conversationId;
     const { data: pins = [], isLoading, isError } = usePinnedMessages(activeConversationId);
     const togglePin = useTogglePinnedMessage();
+    // A channel's pins name authors as its group shows them (#2003); a DM's, by main profile.
+    const aliases = useGroupAliases(channelId ? appStore.selectedGroupId : null);
 
     const gutter = isTerminal ? "px-2.5" : "px-2";
 
@@ -50,7 +57,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
         <ul className="flex flex-col">
           {pins.map((pin) => {
             const parsed = parseContent(pin.content, { conversationId: pin.conversation_id });
-            const author = pin.sender_username ?? pin.sender_id;
+            const author = aliasName(aliases, pin.sender_id, pin.sender_username ?? pin.sender_id);
             return (
               <li
                 key={pin.id}
@@ -68,9 +75,8 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
                   <span className="shrink-0 text-meta text-muted">
                     {formatClockTime(new Date(pin.sent_at).getTime())}
                   </span>
-                  <button
-                    type="button"
-                    className="icon-btn-sm shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                  <IconButton
+                    className="shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
                     aria-label={t("pins.unpin")}
                     title={t("pins.unpin")}
                     data-testid="pinned-panel-unpin"
@@ -83,7 +89,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
                     }
                   >
                     <PinOff size={14} aria-hidden="true" />
-                  </button>
+                  </IconButton>
                 </div>
                 {parsed.text ? (
                   <p
@@ -110,16 +116,10 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
 
     return (
       <div className="h-full overflow-y-auto" data-testid="pinned-panel">
-        <div
-          className={
-            isTerminal
-              ? "sticky top-0 z-[1] flex h-bar w-full items-center gap-2 border-b border-line bg-surface px-2.5 text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none"
-              : "flex items-center gap-2 px-2 pt-3 pb-1 text-secondary font-medium uppercase tracking-widest text-muted"
-          }
-        >
+        <SectionHeader>
           <Pin size={12} aria-hidden="true" />
           {t("pins.heading")}
-        </div>
+        </SectionHeader>
         {body}
       </div>
     );

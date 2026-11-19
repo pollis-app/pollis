@@ -6,6 +6,8 @@ import { appStore } from "../stores/appStore";
 import { useGroupMembers, useDMChannels } from "./queries";
 import type { ConversationKind } from "./queries";
 import type { MentionCandidate } from "../lib/mentions";
+import { useGroupAliases } from "./queries/useGroupAliases";
+import { aliasAvatar } from "../lib/groupAlias";
 
 export function useMentionCandidates(
   kind: ConversationKind | null,
@@ -17,6 +19,8 @@ export function useMentionCandidates(
     kind === "channel" ? groupId : null,
   );
   const { data: dms = [] } = useDMChannels();
+  // The picker shows each member as this group does (#2003); it still inserts `@handle`.
+  const aliases = useGroupAliases(kind === "channel" ? groupId : null);
 
   return useMemo(() => {
     if (kind === "channel") {
@@ -25,7 +29,9 @@ export function useMentionCandidates(
         .map((m) => ({
           userId: m.user_id,
           username: m.username!,
+          displayName: aliases.get(m.user_id)?.display_name ?? undefined,
           avatarUrl: m.avatar_url,
+          aliasAvatarUrl: aliasAvatar(aliases, m.user_id, null),
         }));
     }
     if (kind === "dm" && conversationId) {
@@ -41,5 +47,5 @@ export function useMentionCandidates(
       }
     }
     return [];
-  }, [kind, conversationId, members, dms, currentUser?.id]);
+  }, [kind, conversationId, members, dms, currentUser?.id, aliases]);
 }

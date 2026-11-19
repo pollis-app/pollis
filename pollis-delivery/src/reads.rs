@@ -98,6 +98,25 @@ pub(crate) async fn authed_user(
     }
 }
 
+/// Parse a read's JSON body and authenticate it with [`authed_user`] against the
+/// user the body names: the body and the authenticated user, or the response to
+/// send (a 400 for a bad body, a 401/403 from the gate).
+#[allow(clippy::result_large_err)]
+pub(crate) async fn parse_user_read<B: serde::de::DeserializeOwned>(
+    state: &AppState,
+    req: &RawRequest,
+    user_of: impl Fn(&B) -> &str,
+) -> Result<Result<(B, String), Response>, AppError> {
+    let parsed: B = match serde_json::from_slice(&req.body) {
+        Ok(b) => b,
+        Err(_) => return Ok(Err(bad_request("invalid body"))),
+    };
+    Ok(match authed_user(state, req, Some(user_of(&parsed))).await? {
+        Ok(who) => Ok((parsed, who)),
+        Err(resp) => Err(resp),
+    })
+}
+
 /// [`authed_user`], also accepting a verified OTP session (`X-Pollis-Session`)
 /// for a device that is not enrolled yet (#1616).
 ///

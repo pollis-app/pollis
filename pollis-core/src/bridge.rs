@@ -801,13 +801,20 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(crate::commands::avatar::get_avatar_path(user_id, key, px, dest_dir, &state()?)
                 .await?)
         }
-        "upload_avatar" => {
+        // `upload_avatar_image` (#2003): an alias picture, uploaded the same way but
+        // not saved on the profile.
+        "upload_avatar" | "upload_avatar_image" => {
             let user_id: String = arg(&args, "userId")?;
             let path: String = arg(&args, "path")?;
             let px: u32 = arg(&args, "px")?;
             let dest_dir: Option<String> = arg_opt(&args, "destDir")?;
-            ok(crate::commands::avatar::upload_avatar(user_id, path, px, dest_dir, &state()?)
-                .await?)
+            let state = state()?;
+            ok(if cmd == "upload_avatar" {
+                crate::commands::avatar::upload_avatar(user_id, path, px, dest_dir, &state).await?
+            } else {
+                crate::commands::avatar::upload_avatar_image(user_id, path, px, dest_dir, &state)
+                    .await?
+            })
         }
         "remove_avatar" => {
             let user_id: String = arg(&args, "userId")?;
@@ -870,6 +877,31 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let channel_id: String = arg(&args, "channelId")?;
             let muted: bool = arg(&args, "muted")?;
             groups::set_channel_muted(user_id, channel_id, muted, &state()?).await?;
+            ok(())
+        }
+        // Per-group aliases (#2003).
+        "list_group_aliases" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(groups::list_group_aliases(group_id, requester_id, &state()?).await?)
+        }
+        "list_my_aliases" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(groups::list_my_aliases(user_id, &state()?).await?)
+        }
+        "set_group_alias" => {
+            let user_id: String = arg(&args, "userId")?;
+            let group_id: Option<String> = arg_opt(&args, "groupId")?;
+            let display_name: Option<String> = arg_opt(&args, "displayName")?;
+            let avatar_url: Option<String> = arg_opt(&args, "avatarUrl")?;
+            groups::set_group_alias(user_id, group_id, display_name, avatar_url, &state()?).await?;
+            ok(())
+        }
+        "reset_group_alias" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::reset_group_alias(group_id, user_id, requester_id, &state()?).await?;
             ok(())
         }
         "create_group" => {
@@ -1037,15 +1069,58 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let description: Option<String> = arg_opt(&args, "description")?;
             let channel_type: Option<String> = arg_opt(&args, "channelType")?;
             let creator_id: String = arg(&args, "creatorId")?;
+            let category_id: Option<String> = arg_opt(&args, "categoryId")?;
             ok(groups::create_channel(
                 group_id,
                 name,
                 description,
                 channel_type,
                 creator_id,
+                category_id,
                 &state()?,
             )
             .await?)
+        }
+        "create_channel_category" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let name: String = arg(&args, "name")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(groups::create_channel_category(group_id, name, requester_id, &state()?).await?)
+        }
+        "rename_channel_category" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let category_id: String = arg(&args, "categoryId")?;
+            let name: String = arg(&args, "name")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::rename_channel_category(group_id, category_id, name, requester_id, &state()?)
+                .await?;
+            ok(())
+        }
+        "delete_channel_category" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let category_id: String = arg(&args, "categoryId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::delete_channel_category(group_id, category_id, requester_id, &state()?).await?;
+            ok(())
+        }
+        "move_channel_category" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let category_id: String = arg(&args, "categoryId")?;
+            let position: u32 = arg(&args, "position")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::move_channel_category(group_id, category_id, position, requester_id, &state()?)
+                .await?;
+            ok(())
+        }
+        "move_channel" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let channel_id: String = arg(&args, "channelId")?;
+            let category_id: Option<String> = arg_opt(&args, "categoryId")?;
+            let position: u32 = arg(&args, "position")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::move_channel(group_id, channel_id, category_id, position, requester_id, &state()?)
+                .await?;
+            ok(())
         }
         "create_group_invite_link" => {
             let group_id: String = arg(&args, "groupId")?;
@@ -1103,12 +1178,16 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
                         a
                     })
                     .collect();
-            ok(messages::send_message_with_id(
+            // #1987: the composer's link preview, checked against `content` in core.
+            let link_preview: Option<crate::commands::link_preview::LinkPreviewDraft> =
+                arg_opt(&args, "linkPreview")?;
+            ok(messages::send_message_with_preview(
                 message_id,
                 conversation_id,
                 sender_id,
                 content,
                 attachments,
+                link_preview,
                 reply_to_id,
                 thread_id,
                 sender_username,
@@ -1208,15 +1287,36 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let message_id: String = arg(&args, "messageId")?;
             let user_id: String = arg(&args, "userId")?;
             let new_content: String = arg(&args, "newContent")?;
-            messages::edit_message(
+            let link_preview: Option<crate::commands::link_preview::LinkPreviewDraft> =
+                arg_opt(&args, "linkPreview")?;
+            messages::edit_message_with_preview(
                 conversation_id,
                 message_id,
                 user_id,
                 new_content,
+                link_preview,
                 &state()?,
             )
             .await?;
             ok(())
+        }
+        // Sender-generated link previews (#1987).
+        "fetch_link_preview" => {
+            let url: String = arg(&args, "url")?;
+            ok(crate::commands::link_preview::fetch_link_preview(url, &state()?).await?)
+        }
+        "get_link_previews_enabled" => {
+            ok(crate::commands::link_preview::get_link_previews_enabled(&state()?).await?)
+        }
+        "set_link_previews_enabled" => {
+            let enabled: bool = arg(&args, "enabled")?;
+            crate::commands::link_preview::set_link_previews_enabled(enabled, &state()?).await?;
+            ok(())
+        }
+        // Release a staged thumbnail the composer no longer needs (#1987).
+        "discard_staged_attachment" => {
+            let staged_id: String = arg(&args, "stagedId")?;
+            ok(crate::commands::staging::discard_staged(&staged_id))
         }
         "delete_message" => {
             let message_id: String = arg(&args, "messageId")?;
@@ -1674,6 +1774,18 @@ mod tests {
             "get_avatar_path",
             "upload_avatar",
             "remove_avatar",
+            // #2003
+            "upload_avatar_image",
+            "list_group_aliases",
+            "list_my_aliases",
+            "set_group_alias",
+            "reset_group_alias",
+            // #2031
+            "create_channel_category",
+            "rename_channel_category",
+            "delete_channel_category",
+            "move_channel_category",
+            "move_channel",
             // #1809
             "await_enrollment_approval",
         ] {

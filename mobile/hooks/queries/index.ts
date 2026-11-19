@@ -2,6 +2,7 @@
 
 export * from "./useUserProfile";
 export * from "./useUserGroups";
+export * from "./useChannelCategories";
 export * from "./useDMChannels";
 export * from "./useMessages";
 export * from "./useAuth";
@@ -27,3 +28,4 @@ export * from "./useUnread";
 export * from "./useNotificationContent";
 export * from "./useHistoryTransfer";
 export * from "./useDeviceUnlock";
+export * from "./useLinkPreviews";

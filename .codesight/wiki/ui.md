@@ -25,9 +25,24 @@
 - Reusable components live in **their own files**, never inlined in a parent.
 - Use the shared primitives in `frontend/src/components/ui/` (`Button`, `Switch`,
   `TextInput`, …) — never a hand-rolled styled equivalent.
-- **No modals.** Confirmation and input flows replace the chat input bar (the
-  edit/delete bar pattern in `MainContent`) or navigate to a page. The sole exception
-  is the Cmd+K search menu.
+- **No raw `<button>` outside `ui/` (#1967).** Text action → `Button`; icon-only → `IconButton`
+  (`aria-label` required; its look is the `.icon-btn` / `.icon-btn-sm` component class in
+  `index.css`, so a state colour passed as a utility wins); link-styled → `LinkButton`; preset /
+  account / key-combo chip → `Chip`; shortcut hint → `Kbd`; a side panel's footer close →
+  `PanelCloseRow`; a whole row, grid cell or tile → `PressButton` (`activateOn="click"` unless
+  the action is free to undo). The voice stage keeps its tray look by re-skinning `IconButton`
+  from `voice-stage.css`. Corners are `rounded-chip` / `rounded-control` / `rounded-panel` /
+  `rounded-full` by role, never an inline `borderRadius` (rule: `docs/design/README.md` →
+  "Space, radius, size"; `e2e/buttons-radii.spec.ts` checks both skins).
+- **No modals.** Confirmation and input flows replace the chat input bar or navigate to a page.
+  The sole exception is the Cmd+K search menu.
+- **One confirmation, one form (#1968).** In a conversation a confirmation is a `ConfirmBar`
+  (replaces the composer); everywhere else it is a `ConfirmBlock` in the page column, as its own
+  page (`ConfirmPage`) or in place of the control it confirms on a settings page. Every form,
+  settings and confirmation page is one `PageColumn` (top-aligned, at most 420px, no card), a
+  `FormLead` when a step needs a heading, and one `FormActions` row (action first, ghost Cancel
+  last). Rule: `docs/design/README.md` → "Confirmations and forms"; both skins checked by
+  `e2e/confirm-form-patterns.spec.ts`.
 - **People in rows (#1971):** the display name when set, else the handle; one line, never
   wrapped mid-word. Desktop rows truncate the name at the end and keep their controls at full
   width (`e2e/long-handles.spec.ts`); mobile truncates a handle in the middle
@@ -141,11 +156,42 @@ What becomes a link, and why:
   the trimmer (linear in the token anyway). Long links wrap: desktop's
   `.message-link` has `overflow-wrap: anywhere`; React Native breaks a word too
   long for its line.
-- **No network until the tap.** Rendering a link fetches nothing: no previews,
-  unfurls, favicons or prefetch, which would tell the sender's chosen host the
-  reader's IP and that the message was read. Desktop's image/video unfurl
-  (`MediaLinkUnfurl`) stays click-to-load and now takes its `href` from
-  `parseLink` too. Mobile has no unfurl.
+- **No network until the tap.** Rendering a link fetches nothing: no
+  recipient-side previews, unfurls, favicons or prefetch, which would tell the
+  sender's chosen host the reader's IP and that the message was read. Desktop's
+  image/video unfurl (`MediaLinkUnfurl`) stays click-to-load and now takes its
+  `href` from `parseLink` too. Mobile has no unfurl. Sender-generated link
+  previews (#1987) do not break this: the SENDER's own device fetches the page
+  while composing (its IP, its choice, and only with "Generate link previews"
+  on), and the title, description and thumbnail travel inside the encrypted
+  message. A reader's device draws them from that message and the thumbnail
+  through the attachment path; it never contacts the linked site.
+
+**Link previews (#1987).** Sender-generated, never recipient-fetched. The rules
+are `frontend/src/utils/linkPreview.ts`, a byte copy at
+`mobile/lib/linkPreview.ts` (`tests/link-preview.test.ts` on both sides):
+- **Which link.** Only the first link `parseLink` accepts whose `href` is https
+  (`previewCandidate`). `pollis-core` fetches it (`fetch_link_preview`); a null
+  answer, for any reason, is simply no card.
+- **Composer.** `LinkPreviewComposer` (driven by `useLinkPreviewDraft` on each
+  platform): a paste fetches at once, typing after a 600 ms pause; the same URL
+  is never fetched twice; a new first link discards the old draft's staged
+  thumbnail (`discard_staged_attachment`); × suppresses that URL for the rest of
+  the draft. Send never waits: `takeForSend` returns the finished preview only if
+  its URL is still a link in the text, else the message goes without one. The
+  edit bar runs the same logic, since an edit rebuilds the message. Not in the
+  Vault, and not in the desktop Terminal look.
+- **Received.** Drawn only when `link_preview.url` is exactly the `href` of a
+  body link (`matchPreviewLink`); the domain line is that body link's host and a
+  click opens it through the ordinary link path (`openMessageLink` /
+  `tapLink`). Title and description are plain text. The thumbnail is an
+  `_att`-shaped reference, loaded like an image attachment of the conversation.
+  Not in an unaccepted DM request, the Terminal look, search, reply quotes,
+  notifications or thread previews. `MediaLinkUnfurl` skips a URL the card
+  already shows.
+- **Setting.** "Generate link previews" (per device, on by default): desktop
+  Preferences after Network privacy (off and locked under `strict`), mobile
+  Preferences. It governs only this device's sends.
 - **The system browser, never a WebView.** Desktop: `shellOpen` (the
   `shell:allow-open` http(s) scope). Mobile: `Linking.openURL` in
   `mobile/lib/openLink.ts` — no in-app browser, so no shared cookies or JS bridge.
@@ -376,6 +422,34 @@ channel). All of them read `appStore.voiceState` / `voiceParticipants`, which
 - **Cues and shortcuts.** Mute/unmute/deafen/undeafen request `play_sfx` names that Rust
   does not ship yet (dormant until the assets land). `voice.toggleCamera` (mod+shift+v) and
   `voice.toggleScreenShare` (mod+shift+s) live in `keyboard/commands.ts`.
+
+### Channel categories (#2031)
+
+A group's channel list is blocks: the uncategorised channels first with no header (a group with no
+categories looks exactly as before), then each category as a section label. Group-wide and
+admin-managed; the only per-person state is whether a category is collapsed, kept per device
+(desktop `localStorage` key `pollis.sidebar.collapsedCategories`, mobile
+`lib/categoryCollapse.ts`'s sandbox file), never synced. The DS returns channels in display order,
+so both apps bucket the list without sorting: `utils/channelLayout.ts`, byte-copied to
+`mobile/lib/channelLayout.ts` (`mobile/tests/channel-layout.test.ts`), which also holds the
+optimistic moves that mirror the DS and the one-slot steps for keyboard and screen readers.
+
+- **Desktop** (`Sidebar` → `SidebarGroupChannels`): a label is a `SidebarRow` with
+  `variant="label"` at the channels' indent; channels under it are not indented further. Collapsed,
+  it shows the summed unread of its text channels and keeps the open channel and a joined voice
+  room. Admins only: rows are dragged with the pointer (`useSidebarArrange`, pointer events rather
+  than HTML5 drag and drop; the slot is a 2px accent line, never an edge stripe), Alt+↑/↓ moves a
+  focused row a slot, the group row's "+" opens New channel / New category in place, and a
+  label's "+" and ⋯ (Rename inline with `InlineInput`; Delete as an inline confirmation that
+  replaces the label, Cancel focused). No modal. An admin's channel rows open on click, not press,
+  so a drag never navigates. Playwright: `e2e/channel-categories.spec.ts`.
+- **Mobile** (`GroupPanel` → `GroupChannelList`): the same blocks, replacing the old fixed "Text
+  channels" header; a label taps to collapse. Admins get Edit / Done and "+" in the panel header.
+  Edit mode (the iOS Mail / Discord pattern) gives every row a ≡ handle (a Gesture Handler pan on
+  the handle only, so a scroll starting on a row is still a scroll; screen readers get Move up /
+  Move down), shows voice rooms so they can be arranged, puts "+" and ⋯ on labels, and ends with a
+  "New category" row. Rename / delete / create are `CategorySheet` steps; delete is the sheet
+  confirmation pattern. Maestro: `.maestro/flows/channel-categories.yaml`.
 
 ### The windowed log (#874)
 
@@ -879,7 +953,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**212 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**241 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -947,16 +1021,21 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **InviteLinkManager** — props: groupId — `frontend/src/components/Invites/InviteLinkManager.tsx`
 - **InviteLinkRow** — props: link, onRevoke, isRevoking — `frontend/src/components/Invites/InviteLinkRow.tsx`
 
-### `components/Layout` (11)
+### `components/Layout` (16)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`. The bar under the TitleBar: a back/forward chevron pair, then the clickable trail, then search + settings. The chevrons walk **router history**, one entry per click, the way a browser (and Slack, and Discord) does — there is no hierarchical "up one level" navigation any more; the trail's own segments are what jump up the tree. **Both are always rendered**, root included: a control that vanishes at the root shifts everything beside it sideways on the way home. When a direction has nowhere to go it is greyed out and truly `disabled` (a `ui/Button` `variant="ghost"`), so assistive tech is told what the grey says. Enablement comes from `stores/historyNavStore`, which subscribes to `router.history` (event-driven, never polled) and keeps a cursor plus a ceiling — `canGoBack` is `index > 0`, `canGoForward` is `index < maxIndex`, and a PUSH resets the ceiling to the new entry because it discards whatever was ahead. That arithmetic is pure in `utils/historyNav.ts` and pinned by `frontend/tests/history-nav.test.ts`; it exists because no browser API answers "can I go forward?" — `history.length` counts a session, not a direction, and never shrinks on a truncating push. The `nav.back` shortcut (Escape, handled in `AppShell`) routes through the same `historyNavStore.goBack()`, so the key and the chevron cannot land in different places.
+- **ConfirmPage** — props: title, paneTestId — `frontend/src/components/Layout/ConfirmPage.tsx`. A confirmation that is its own page (#1968): `PageShell` + `PageColumn` + `ConfirmBlock`. Leave group and Remove member; `e2e/confirm-form-patterns.spec.ts`.
 - **ConversationHeader** — props: title, children — `frontend/src/components/Layout/ConversationHeader.tsx`. The `h-bar` top bar of the channel and DM pages (#1640): title on the start side, every action in one `flex items-center gap-2` row on the end side. Spacing and vertical centring live here only — actions carry no `me-*` margins and nothing is absolutely positioned (the DM call button used to be, and sat on top of the pin). In the DM header the call slot becomes a "Return to call" `PillButton` (same target as the voice bar's channel pill, via `activeCallIdOf` in `types/voice-state.ts`) while any 1:1 call is joining or joined. Pinned by `frontend/tests/conversation-header.test.ts` and `e2e/dm-header-actions.spec.ts`.
 - **MainContent** — props: pendingDmRequest — `frontend/src/components/Layout/MainContent.tsx`
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
 - **ResizeHandle** — props: panelRef, edge, label, maxPx, onCommit, onCollapse, onReset — `frontend/src/components/Layout/ResizeHandle.tsx`. Shared by both side panels; drags write `style.width` straight to the panel and never through React. See [Resizable side panels](#resizable-side-panels-985).
 - **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`. Its settings rows carry `sidebar-row-*` testids like `SectionHeader`'s, so navigation tests never match on a translated label (#932).
+- **SidebarCategoryLabel** — props: category, channelCount, isCollapsed, onToggle, unread, isAdmin, drag, onNewChannel, onRename, onDelete, isDeleting — `frontend/src/components/Layout/SidebarCategoryLabel.tsx`. A category's label (#2031): chevron, name, the collapsed unread roll-up; for admins "+" and ⋯, whose Rename and Delete replace the label in place.
+- **SidebarGroupChannels** — props: group, isAdmin, collapsedCategories, toggleCategory, activeChannelId, activeVoiceId, connectedVoiceId, unreadCounts, voiceCounts, mutedChannels, creatingCategory, onCreatingCategoryDone — `frontend/src/components/Layout/SidebarGroupChannels.tsx`. One group's blocks of channels in the sidebar (#2031); see "Channel categories".
 - **SidebarProfilePanel** — `frontend/src/components/Layout/SidebarProfilePanel.tsx`. Modern skin only; identity row + the persistent voice strip (channel, mic, deafen, screenshare, disconnect) that replaces terminal's `VoiceBar`. The status/channel text is a button that navigates back to the connected room (same targets as `VoiceBar`'s channel pill), and the strip floors on `min-h-composer` so it lines up with the composer across the sidebar edge.
+- **SidebarRow** — props: indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed, activateOn, onIntent, actions, actionsPinned, drag, variant, danger — `frontend/src/components/Layout/SidebarRow.tsx`. Every sidebar row (group, channel, category label, settings): its own button, an optional chevron, admin `actions` beside it, and the drag wiring an admin's row carries (#2031).
+- **StatusBarDismissButton** — props: ariaLabel, onClick — `frontend/src/components/Layout/StatusBarDismissButton.tsx`
 - **StatusBarSummary** — props: color — `frontend/src/components/Layout/StatusBarSummary.tsx`
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
 - **WindowResizeEdges** — `frontend/src/components/Layout/WindowResizeEdges.tsx`
@@ -964,7 +1043,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 ### `components/Layout/RightPanel` (8)
 
 - **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
-- **MemberRow** — props: userId, label, avatarKey, isAdmin — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
+- **MemberRow** — props: userId, label, avatarKey, isAdmin, groupId — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
 - **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
 - **PinnedPanel** — props: channelId, conversationId — `frontend/src/components/Layout/RightPanel/PinnedPanel.tsx`. Mobile counterpart (#1315): `mobile/app/conversation/pins.tsx`, a pushed page (iPad: a detail-pane page) behind the chat header's pin button — same rows (author, time, snapshot text + attachments, Unpin), plus a row tap that returns to the conversation scrolled to the message via `resolve_message_permalink` + `mobile/stores/messageJumpStore.ts`.
 - **RightPanel** — `frontend/src/components/Layout/RightPanel/RightPanel.tsx`. The generic slot.
@@ -979,20 +1058,24 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SensitiveCover** — `frontend/src/components/Media/SensitiveCover.tsx`
 - **SensitiveHideButton** — `frontend/src/components/Media/SensitiveHideButton.tsx`
 
-### `components/Message` (22)
+### `components/Message` (26)
 
 - **AttachmentDisplay** — props: attachment, tile, testId, roll — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **DownloadStatusIcon** — props: status — `frontend/src/components/Message/DownloadStatusIcon.tsx`. Download / spinner / check glyph of `AttachmentDisplay`'s download buttons (#1731).
 - **KeyChangeNoticeRow** — props: noticeId, peerUserId, peerLabel, at, skin, onVerify — `frontend/src/components/Message/KeyChangeNoticeRow.tsx`
-- **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
-- **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`. Inline previews for image/video URLs found in message text. **Every host is click-to-load, with no allowlist.** Painting `<img src>` from message text makes merely opening a message fetch from a host the SENDER chose — a read receipt and an IP disclosure in one, from any message including an unaccepted DM request. There was an exception for `cdn.pollis.com`; it is gone, because the hostname comes out of the message (so the sender picks what the check is run against, and the path was never checked at all) and because a webview image request is the renderer's own, not `http_client`'s, so it cannot ride the relay overlay. The reveal is per-URL and deliberately not remembered.
+- **LastMessagePreview** — props: message, isLoading, aliases — `frontend/src/components/Message/LastMessagePreview.tsx`
+- **LightboxActions** — props: status, downloadDisabled, onDownload, onClose — `frontend/src/components/Message/LightboxActions.tsx`
+- **LightboxDownloadLabel** — `frontend/src/components/Message/LightboxDownloadLabel.tsx`
+- **LinkPreviewCard** — props: host, title, description, thumb, href, onOpen, onRemove, loading, testId — `frontend/src/components/Message/LinkPreviewCard.tsx`. The one link-preview card (#1987), composer and timeline: fixed height (host, one title line, two description lines) so a late thumbnail never moves the log; a received card is an anchor opening the body link, a composer card carries ×. Mobile: `mobile/components/chat/LinkPreviewCard.tsx`.
+- **MediaLinkUnfurl** — props: text, exceptHref — `frontend/src/components/Message/MediaLinkUnfurl.tsx`. Inline previews for image/video URLs found in message text. **Every host is click-to-load, with no allowlist.** Painting `<img src>` from message text makes merely opening a message fetch from a host the SENDER chose — a read receipt and an IP disclosure in one, from any message including an unaccepted DM request. There was an exception for `cdn.pollis.com`; it is gone, because the hostname comes out of the message (so the sender picks what the check is run against, and the path was never checked at all) and because a webview image request is the renderer's own, not `http_client`'s, so it cannot ride the relay overlay. The reveal is per-URL and deliberately not remembered.
 - **MediaSpotlight** — props: items, startIndex, openedUrl, onClose — `frontend/src/components/Message/MediaSpotlight.tsx`. The image/video lightbox `AttachmentDisplay` opens (#1788). A card given `roll` (the message's attachments, passed by `MessageItem`, `ThreadMessageRow` and `PinnedPanel`) steps through that message's images and videos: prev/next buttons, ← / → (direction-aware, `horizontalArrowStep`) and an `n / total` position, wrapping at both ends. The roll is `spotlightRoll` in `utils/mediaRoll.ts`, mobile's `collectViewerItems` scoped to one message — same kinds (audio and files open alone), same attachment order, same wrap; `frontend/tests/media-roll.test.ts` runs both on the same message. The arrow listener exists only while a spotlight with more than one item is open, on the window's capture phase, so the log's arrow navigation never also moves. Each item mounts fresh (keyed by id): its URL resolves on arrival, and a still-covered sensitive neighbour shows its cover, revealed by a click. One difference is deliberate: mobile's roll carries on across the whole conversation, while desktop's stops at the message, as #1788 asks. The root carries `data-window-viewer` (as do the audio viewer in `AttachmentDisplay` and the Vault's `MediaGalleryView` viewer): while one is in the document, `index.css` makes every scrollbar transparent, because the Linux webview draws thin overlay scrollbars in a last pass above every stacking order and the chat's would otherwise show over the viewer (#1915). Any new full-window viewer needs the attribute. Coverage: `e2e/media-spotlight.spec.ts`.
-- **MentionToken** — props: name, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`
+- **MentionToken** — props: name, label, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`
 - **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, isPinned, copyLinkState, onReply, onOpenThread, onToggleSave, onTogglePin, onCopyLink, onEdit, onDelete, onReport — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut. Keyboard selection **inverts** the focused control (`focus:bg-accent focus:text-bg`; menu rows too, with Delete inverting to `bg-danger` instead of borrowing the affirmative accent) — a recolor alone was invisible in the terminal skin, and it replaces the browser's default focus ring on the menu rows. The inversion is on plain `focus:`, not `focus-visible:`, because `MessageList` projects nav state with a programmatic `.focus()` that WebKitGTK does not reliably treat as focus-visible — the row's own `focus-within:bg-hover` is plain-focus for the same reason. The one row that does **not** take the plain inversion is Copy link: it keeps focus after the click (the menu stays open so the copied/failed feedback lands where the pointer is, #897), so a solid accent fill would paint over its tone (#1059). Copied, the row steps its focus fill down to the selected-row tint (`focus:bg-active focus:text-accent`) so the accent text shows — a pressed button releasing; failed, it inverts to `bg-danger` like Delete. Focus never moves off the row: a keyboard user would lose their place in the menu. The "more" trigger rests one step brighter (`text-dim`) than Reply/Edit: three dots carry less ink than the arrow or pencil, so at a shared `text-muted` it read as disabled.
-- **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
+- **MessageAvatar** — props: userId, username, aliasKey, size — `frontend/src/components/Message/MessageAvatar.tsx`
 - **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, isAuthorNew, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, onReport, onTogglePin, copyLinkState, isSaved, isPinned, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed. The row's `hover:bg-hover focus-within:bg-hover` is its pointer/keyboard feedback; mobile's counterpart (`mobile/components/chat/MessageRow.tsx`, #1282) fades a touched row from `bg` to `raised` (`accentFaint` to `accentSoft` on a mention or jump-to tint) after a 100 ms delay, held through the long press and cleared on release, scroll or swipe, on the UI thread (timings in `mobile/lib/pressFeedback.ts`). The long press that opens the sheet also plays a haptic (#1286). Mobile gives tactile feedback for every significant non-navigation action — mutations through one `MutationCache` keyed on `meta.haptic` (`mobile/lib/queryClient.ts`), plus gestures, switches, two-tap confirms and copies; the rules are in `mobile/CLAUDE.md` → Haptics (desktop has no haptic surface). Layout parity (#1970, rule in `docs/design/README.md` → "Message rows"): mobile's header is one non-wrapping line, name in `semantic.text` then the time, as here; its attachments go through `mobile/components/chat/MessageAttachments.tsx` (also the Vault's entry rows), which puts several pictures and videos in a 2-up grid of equal squares (this component's wrapping 96px thumbs) ahead of the files list (`mobile/lib/media/messageAttachments.ts`), and a failed send's `UnsentActions` sit under the attachments.
-- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, hasNewer, isFetchingNewer, onLoadNewer, windowEpoch, focusComposer, pinsConversationId, onVerifyKeyChange — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).
+- **MessageLinkPreview** — props: text, preview — `frontend/src/components/Message/MessageLinkPreview.tsx`. A received sender preview (#1987), drawn only through `matchPreviewLink`; thumbnail via `getMediaUrl` like an image attachment, blurhash until then. Modern look only (`MessageItem`, `ThreadMessageRow`). Mobile: `mobile/components/chat/MessageLinkPreview.tsx` (thumbnail through `MediaImage`).
+- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, hasNewer, isFetchingNewer, onLoadNewer, windowEpoch, focusComposer, linkPreviews, pinsConversationId, onVerifyKeyChange — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
 - **MessageReactions** — props: messageId, className — `frontend/src/components/Message/MessageReactions.tsx`. The reaction pills, rendered by **both** skins from `MessageItem` and gated on `!isDeleted`. Placement is the row's: both skins render them **inside** the body column. Terminal's body column is the flex column after `name :`, which also holds the media unfurl and the attachment strip/file rows, so pictures, files and pills line up with the message text rather than the timestamp (#1489; they used to start at the far left, pills at `ms-20`). Modern needs the same: as a third child of the `[3.5rem_minmax(0,1fr)]` grid they fell into the avatar gutter of the next row and stacked one per line. Writes are optimistic (`useReactions.ts`): `add_reaction` / `remove_reaction` patch the `["reactions", id]` cache in `onMutate`, roll back on error, and refetch on settle, so a pill appears the instant the emoji is picked; `useToggleReaction` decides add-vs-remove from the cache at click time, so a second quick click takes the reaction back rather than adding it twice. Returns `null` — no wrapper, no reserved height — until the message has a reaction: the previous permanent row with a hover-revealed `+` put a blank line under every message. Adding a reaction is `ReactionAddButton` in the hover bar. Restored in #931 after #874 deleted it as a dead path: the Rust commands survived and mobile still called them, so the feature was live with no desktop UI. A pill toggles — clicking one you are already in removes your reaction, keyed on `(message, user, emoji)` so it never touches anyone else's (`useToggleReaction`, shared with the bar). The emoji is run through `splitEmojiSegments` and a custom one renders via `CustomEmojiImage`, which is what lets a `<:name:hash>` reaction display as an image for a viewer who is not in the group that owns it (#848); reactions are stored as opaque strings, so a custom reaction simply *is* its wire token. **Who reacted (#1684):** hovering a pill names who reacted in its native tooltip ("Ann, Bo and You reacted with 👍", the first three named and the rest counted) and right-clicking it — or the context-menu key / Shift+F10 on a focused pill — opens `ReactionBreakdownPanel` anchored above the row (below when there is no room; outside click or Escape closes). Names come from ONE batched `get_user_profiles` read (`useUserProfiles`, a Tauri shim over the core command mobile's avatars already use), fired only once a pill is hovered/focused or the panel opens; it also seeds each `otherProfile` cache entry. The reactor ids were always on the wire (`get_reactions` → `user_ids`, oldest first, since the DS reads `message_reaction ORDER BY created_at`), so no core or DS change. Grouping is `utils/reactionBreakdown.ts`, which `mobile/lib/reactionBreakdown.ts` copies verbatim (pinned by `frontend/tests/reaction-breakdown.test.ts`). Mobile's counterpart is a long press on a pill (`mobile/components/chat/ReactionPills.tsx` → `ReactionBreakdownSheet.tsx`): a half-height `SheetOverlay` with the same tabs and rows, draggable up to expand and down to collapse or close by its tab strip; a short tap still toggles, the pill is the touch responder so the row's long press (message sheet) never fires, and the row offers "View reactions" as an accessibility action. The chat screen's senders and roster name the first frame, then the same one batched read fills in display names.
 - **ReactionAddButton** — props: messageId, iconSize, className, onOpenChange — `frontend/src/components/Message/ReactionAddButton.tsx`. The add-reaction trigger in the message hover bar, second from the left (reply, **react**, edit, more — the Discord order). A thin skin over `EmojiPickerButton`, so the panel is lazy-loaded, anchored, non-modal, and flipped to whichever side of the row has room (a row at the top of the log opens downward). `onOpenChange` lets `MessageActions` hold the bar visible while the panel is up, exactly as it does for its own menu; `data-nav-action="react"` puts it on the arrow-key path.
@@ -1004,12 +1087,17 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **UndecryptableMessage** — props: message, skin — `frontend/src/components/Message/UndecryptableMessage.tsx`
 - **UnsentMessageActions** — props: message — `frontend/src/components/Message/UnsentMessageActions.tsx`. "[Not sent]", one line on why (`unsentReason`: the outbox will resend a `failed` row; a `rejected` or never-stored one "couldn't be delivered", #1668), then Retry / Discard beside an own message the durable outbox has not delivered (#1335), rendered by both skins' `MessageItem` and by the thread panel's `ThreadMessageRow`; Retry is absent when the send failed before the core stored it (an upload). Mobile's counterpart is `mobile/components/chat/UnsentActions.tsx`.
 
-### `components/Preferences` (4)
+### `components/Preferences` (5)
 
-- **HexColorField** — props: color, hexInput, onHexInputChange, onColor, title, swatchStyle — `frontend/src/components/Preferences/HexColorField.tsx`. Swatch + hex box of the accent and background rows in `PreferencesPage` (#1731).
+- **HexColorField** — props: color, hexInput, onHexInputChange, onColor, title, outlined — `frontend/src/components/Preferences/HexColorField.tsx`. Swatch + hex box of the accent and background rows in `PreferencesPage` (#1731).
 - **LanguageSection** — `frontend/src/components/Preferences/LanguageSection.tsx`. Preferences' Language heading and one `NavRow` (`pref-language-row`) naming the current language by its endonym; opens `LanguagePage` (#1944).
+- **LinkPreviewsSection** — props: overlayMode — `frontend/src/components/Preferences/LinkPreviewsSection.tsx`. "Generate link previews" (#1987), per device; shown off and disabled with a note under `strict` network privacy.
 - **RelayServingSection** — props: config, status, applyError, onChange — `frontend/src/components/Preferences/RelayServingSection.tsx`
 - **SkinPicker** — props: value, onChange — `frontend/src/components/Preferences/SkinPicker.tsx`. The Terminal / Modern `RadioList`, shared by Preferences and the first-run step; row test ids carry the skin (`pref-skin-modern`, `pref-skin-terminal`), Modern first.
+
+### `components/Profile` (1)
+
+- **GroupAliasesSection** — props: mainName, mainAvatarKey — `frontend/src/components/Profile/GroupAliasesSection.tsx`
 
 ### `components/Saved` (1)
 
@@ -1028,29 +1116,42 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 - **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
-### `components/ui` (36)
+### `components/ui` (51)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
 - **BackMenu** — props: items, onBack — `frontend/src/components/ui/BackMenu.tsx`. `TerminalMenu` ending in "Go back" (Esc too); `DMs`, `Groups`, `Group` (#1731).
-- **Button** — props: children, onClick, disabled, isLoading, loadingText, className, variant, size, type, onKeyDown, onPointerEnter, onFocus, autoFocus, activateOn — `frontend/src/components/ui/Button.tsx`. Mobile's `Button` (`mobile/components/ui.tsx`) takes `loading`: disabled, spinner in place of its icons (`<testID>-busy`), announced busy. Slow submits pair it with `mobile/hooks/useSubmitLock.ts`, which claims the action synchronously so a double tap cannot submit twice (pinned by `mobile/tests/busy-feedback.test.ts`).
+- **Button** — props: children, onClick, disabled, isLoading, loadingText, className, variant, size, type, onKeyDown, onPointerEnter, onFocus, autoFocus, title, activateOn — `frontend/src/components/ui/Button.tsx`. Mobile's `Button` (`mobile/components/ui.tsx`) takes `loading`: disabled, spinner in place of its icons (`<testID>-busy`), announced busy. Slow submits pair it with `mobile/hooks/useSubmitLock.ts`, which claims the action synchronously so a double tap cannot submit twice (pinned by `mobile/tests/busy-feedback.test.ts`).
 - **Card** — props: children, className, style, padding — `frontend/src/components/ui/Card.tsx`
-- **ChatInput** — props: onSend, placeholder, disabled, autoFocus, className, maxAttachments, onValueChange, draftKey, canNotifyAll, onHistoryUp — `frontend/src/components/ui/ChatInput.tsx`
+- **ChatInput** — props: onSend, placeholder, disabled, autoFocus, className, maxAttachments, onValueChange, draftKey, canNotifyAll, onHistoryUp, linkPreviews — `frontend/src/components/ui/ChatInput.tsx`
 - **Checkbox** — props: label, checked, onChange, disabled, className — `frontend/src/components/ui/Checkbox.tsx`
+- **Chip** — props: children, onClick, selected, disabled, title, machine, style — `frontend/src/components/ui/Chip.tsx`
 - **CodeSnippet** — props: value, labels, ariaLabels, copyTestId — `frontend/src/components/ui/CodeSnippet.tsx`. A read-only value (shell command, link) with a copy `Button` beside it; the value wraps instead of scrolling. Copies through the clipboard bridge with the idle/copied/failed `data-copy-state` (#898). Used by the Software Update page's managed-install command and the created invite-link card.
+- **ComposerBarHeader** — props: heading, onCancel, cancelLabel, cancelTestId, focusCancel — `frontend/src/components/ui/ComposerBarHeader.tsx`. The heading row (and optional cancel `X`) of every bar that replaces the chat input: `EditMessageBar`, `ConfirmBar`, the DM-request bar.
+- **ComposerLinkPreview** — props: state, onRemove — `frontend/src/components/ui/ComposerLinkPreview.tsx`. The draft's preview above `ChatInput` and inside `EditMessageBar` (#1987): loading on the same frame as a paste, then the card with ×. Mobile: `mobile/components/chat/ComposerLinkPreview.tsx`.
+- **ConfirmBar** — props: testId, heading, body, cancelLabel, cancelTestId, onCancel, confirmLabel, confirmTestId, onConfirm, isPending, pendingLabel — `frontend/src/components/ui/ConfirmBar.tsx`. The one confirmation inside a conversation (#1968): replaces the chat input with the consequence and a `danger` action that holds focus (Enter confirms; Escape, handled by the caller, or the `X` cancels). Delete message / channel in `MainContent`, delete in the Vault.
+- **ConfirmBlock** — props: question, consequence, children, error, errorTestId, confirmLabel, onConfirm, isPending, pendingLabel, confirmDisabled, confirmTestId, cancel, testId — `frontend/src/components/ui/ConfirmBlock.tsx`. The one confirmation in a page column (#1968): the question naming its object, the consequence, an optional field (a typed name), the error, then the page's only `danger` button and a ghost Cancel, which is the default focus unless a field takes it. Used by `ConfirmPage`, Conversation settings, and the Security page's in-place revokes.
 - **DotMatrix** — props: algorithm, dotSize, spacing, speed, className, style — `frontend/src/components/ui/DotMatrix.tsx`
-- **EditMessageBar** — props: heading, cancelLabel, hint, value, onChange, onSave, onCancel, isSaving, testId, inputTestId, cancelTestId — `frontend/src/components/ui/EditMessageBar.tsx`. The bar that replaces the composer while a message is being edited: heading row with a cancel `X`, a textarea that inverts to accent-on-focus like the composer (`is-focused`), and the Enter/Shift+Enter/Esc hint. The channel/DM log (`MainContent`) and the Vault both render it — they used to carry two divergent inline copies (the Vault's had a Save button and no focus inversion). Enter saves; Escape is the caller's, handled at page level in capture phase. Mounting focuses with the caret at the end, so callers `key` it by the edited message id.
+- **EditMessageBar** — props: heading, cancelLabel, hint, value, onChange, onSave, onCancel, isSaving, testId, inputTestId, cancelTestId, preview — `frontend/src/components/ui/EditMessageBar.tsx`. The bar that replaces the composer while a message is being edited: heading row with a cancel `X`, a textarea that inverts to accent-on-focus like the composer (`is-focused`), and the Enter/Shift+Enter/Esc hint. The channel/DM log (`MainContent`) and the Vault both render it — they used to carry two divergent inline copies (the Vault's had a Save button and no focus inversion). Enter saves; Escape is the caller's, handled at page level in capture phase. Mounting focuses with the caret at the end, so callers `key` it by the edited message id.
 - **EmojiSuggestList** — props: entries, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/EmojiSuggestList.tsx`
 - **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The one "nothing here" treatment for every empty list (#874, #1969): one centred sentence in `text-muted`, and the action that fills the space under it when there is one (Join on an empty voice room; the reasons under search's no-results). Not a loading or error state. `NavigableList`/`NavigableGrid` render it for their `emptyLabel`, so every list page gets it, and `PageShell`'s body is a flex column so a page's `flex-1` list (and the sentence) fills and centres in the pane. Sets `data-empty-state` (`e2e/empty-states.spec.ts`). Mobile twin: `EmptyState` in `mobile/components/ui.tsx` (one sentence, an optional `icon` only where the list is the whole screen, an `action`); the copy key is the same wherever the screens match (`dms:blocked.empty`, `nav:pins.empty`, `nav:thread.empty`, `settings:security.eventsEmpty`, `emoji:manage.empty`, `settings:historyTransfer.noSources`, …). Maestro: `flows/empty-states.yaml`.
+- **FormActions** — props: children, cancel — `frontend/src/components/ui/FormActions.tsx`. The one actions row (#1968): left-aligned, natural-width buttons, the action first, an optional ghost Cancel (`cancel` prop) last.
+- **FormLead** — props: title, children, testId, titleTestId — `frontend/src/components/ui/FormLead.tsx`. A form step's heading (`<h2>`, `text-title`) and its sentence (#1968); never a second page title. Join a group, Change PIN, Report, Copy history, Link device.
+- **IconButton** — props: size, activateOn, destructive — `frontend/src/components/ui/IconButton.tsx`
 - **IconSpinner** — `frontend/src/components/ui/IconSpinner.tsx`
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick, activateOn — `frontend/src/components/ui/InlineAudioPlayer.tsx`
+- **InlineInput** — props: value, onChange, onSubmit, onCancel, ariaLabel, placeholder, disabled, maxLength — `frontend/src/components/ui/InlineInput.tsx`. A one-line field edited in place in a list row (a category name, #2031): no label, no border, the raised fill; focused and selected on mount, Enter submits, Escape cancels. A form's field is `TextInput`.
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
+- **Kbd** — props: children — `frontend/src/components/ui/Kbd.tsx`
+- **LinkButton** — props: children, onClick, tone, size, color — `frontend/src/components/ui/LinkButton.tsx`
 - **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874). `href`, `title` and the click all go through `parseLink`; the rules are under "Message links" above (#1682). Mobile's counterpart is `mobile/components/chat/MessageLink.tsx`.
 - **LoadingSpinner** — props: size, className, tone — `frontend/src/components/ui/LoaderSpinner.tsx`
 - **MentionSuggestList** — props: candidates, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/MentionSuggestList.tsx`
 - **NavigableGrid** — props: items, getKey, renderCell, onActivate, minCellWidth, maxCellWidth, aspect, gap, autoFocus, emptyLabel, testId — `frontend/src/components/ui/NavigableGrid.tsx`
 - **NavigableList** — props: items, getKey, renderRow, controls, trailing, onEnterRow, onClickRow, activateRowOn, isLoading, loadingLabel, emptyLabel, rowTestId, testId, autoFocus, cursorOnlyWhenFocused — `frontend/src/components/ui/NavigableList.tsx`
 - **NavRow** — props: children, onClick, lang, textId — `frontend/src/components/ui/NavRow.tsx`. A filled, unbordered row with a trailing chevron (mirrored under RTL) that opens another page; acts on press (#1529). Styled as an unselected `RadioList` row so a setting's row and its page's list read as one family.
+- **PageColumn** — props: children, as, spacing, paneTestId, onSubmit, className — `frontend/src/components/ui/PageColumn.tsx`. The one page column (#1968): a scrolling pane with a top-aligned column at most 420px (`max-w-md`), centred, no card. `as="form"` when the column is the form; `spacing` `fields` (gap-5) or `sections` (gap-8). Every form, settings and confirmation page.
+- **PanelCloseRow** — props: label, shortcut, ariaLabel, onClick, activateOn — `frontend/src/components/ui/PanelCloseRow.tsx`
 - **PillButton** — props: accent, onClick, title, square, children — `frontend/src/components/ui/PillButton.tsx`
 - **PollisLogo** — props: size, color — `frontend/src/components/ui/PollisLogo.tsx`
 - **PresenceAvatar** — props: userId, avatarKey, size, alt, testId, variant — `frontend/src/components/ui/PresenceAvatar.tsx`
@@ -1060,6 +1161,8 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
 - **RichTextInput** — props: value, onChange, onSelectionChange, onKeyDown, onPaste, onFocus, onBlur, placeholder, disabled, autoFocus, className, style, ariaLabel, testId, ghost, ghostTestId, ghostClassName — `frontend/src/components/ui/RichTextInput.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
+- **SectionHeader** — props: children, bordered — `frontend/src/components/ui/SectionHeader.tsx`. A panel section's title (#1964): Terminal's sticky sidebar-style bar in spaced capitals, Modern a sentence-case `text-muted` label. Members, Pinned.
+- **Select** — props: value, onChange, options, label, disabled — `frontend/src/components/ui/Select.tsx`. A pick-one dropdown with its `<label>` (#1964), drawn like `TextInput`: the UI face, `border-line-strong`, `rounded-control`, the shared focus ring (`ui/focusRing.ts`).
 - **SuggestList** — props: items, activeIndex, query, testId, label, matchingKey, itemKey, optionTestId, renderItem, onSelect, onHover — `frontend/src/components/ui/SuggestList.tsx`. Generic composer autocomplete shell behind `EmojiSuggestList` and `MentionSuggestList` (#1731).
 - **Switch** — props: label, checked, onChange, disabled, className, id, description — `frontend/src/components/ui/Switch.tsx`
 - **TerminalMenu** — props: items, onEsc, className, autoFocus — `frontend/src/components/ui/TerminalMenu.tsx`
@@ -1067,7 +1170,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TextInput** — props: label, ariaLabel, value, onChange, placeholder, description, error, disabled, type, className, id, required, autoFocus, autoComplete — `frontend/src/components/ui/TextInput.tsx`
 - **ThemedQr** — props: value, size, title — `frontend/src/components/ui/ThemedQr.tsx`
 
-### `components/Voice` (13)
+### `components/Voice` (14)
 
 - **CameraPicker** — `frontend/src/components/Voice/CameraPicker.tsx`
 - **MicLevelMeter** — props: subscribe, label, testId — `frontend/src/components/Voice/MicLevelMeter.tsx`
@@ -1078,9 +1181,10 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ScreenShareViewer** — props: tile, onClose — `frontend/src/components/Voice/ScreenShareViewer.tsx`
 - **SidebarVoiceControls** — `frontend/src/components/Voice/SidebarVoiceControls.tsx`. Mic (four-state) + deafen for Modern's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage`.
 - **SignalBars** — props: quality, testId, className — `frontend/src/components/Voice/SignalBars.tsx`
+- **SourceCard** — props: disabled, onPick, testId, title, subtitle, thumbnail, icon — `frontend/src/components/Voice/SourceCard.tsx`
 - **SpeakingAnnouncer** — `frontend/src/components/Voice/SpeakingAnnouncer.tsx`
 - **VoiceBar** — props: channelId, channelName — `frontend/src/components/Voice/VoiceBar.tsx`
-- **VoiceChannelMembers** — props: channelId, enabled — `frontend/src/components/Voice/VoiceChannelMembers.tsx`
+- **VoiceChannelMembers** — props: channelId, groupId, enabled — `frontend/src/components/Voice/VoiceChannelMembers.tsx`
 - **VoiceInputModeSelect** — props: value, onChange — `frontend/src/components/Voice/VoiceInputModeSelect.tsx`
 
 ### `components/Voice/stage` (3)
@@ -1089,7 +1193,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (59)
+### `pages` (61)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -1106,6 +1210,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **DMPage** — `frontend/src/pages/DM.tsx`
 - **DMSettingsPage** — `frontend/src/pages/DMSettings.tsx`
 - **DMsPage** — `frontend/src/pages/DMs.tsx`
+- **GroupAliasPage** — `frontend/src/pages/GroupAliasPage.tsx`
 - **GroupEmoji** — props: groupId — `frontend/src/pages/GroupEmoji.tsx`. Add/list/remove a group's custom emoji. Adding is image-first: an `EmojiDropZone` takes the file, the shortcode is auto-filled from the filename sanitised to `[a-z0-9_]`, and a field the user has already typed in is never clobbered — either order works. Preview is a blob URL of the source file (gifs animate), shown both at 4rem and at the 1.375rem it renders at inline; the size shown before upload is the SOURCE size, since the 48 KB re-encode runs in Rust during `upload_group_emoji`. Empty/invalid/duplicate shortcodes and unsupported files are validated inline and disable the add button.
 - **GroupEmojiPage** — `frontend/src/pages/GroupEmojiPage.tsx`
 - **GroupPage** — `frontend/src/pages/Group.tsx`
@@ -1135,6 +1240,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **RenameGroupPage** — `frontend/src/pages/RenameGroupPage.tsx`
 - **ReportPage** — `frontend/src/pages/ReportPage.tsx`
 - **RequestsPage** — `frontend/src/pages/RequestsPage.tsx`
+- **ResetAliasPage** — `frontend/src/pages/ResetAliasPage.tsx`
 - **RootPage** — `frontend/src/pages/Root.tsx`
 - **SavedPage** — `frontend/src/pages/SavedPage.tsx`
 - **SearchGroupPage** — `frontend/src/pages/SearchGroupPage.tsx`

@@ -56,7 +56,8 @@
     "empty": "Todavía no hay mensajes. Empieza la conversación.",
     "unknownAuthor": "Desconocido",
     "blockedAuthor": "usuario bloqueado",
-    "blockedBody": "[bloqueado]"
+    "blockedBody": "Bloqueado",
+    "blockedBodyTerminal": "[bloqueado]"
   },
   "replyBar": {
     "replyingTo": "respondiendo a <name>{{name}}</name>",
@@ -65,7 +66,8 @@
   },
   "queue": {
     "heading": "Cola",
-    "pendingPlaceholder": "[Mensaje pendiente]",
+    "pendingPlaceholder": "Mensaje pendiente",
+    "pendingPlaceholderTerminal": "[Mensaje pendiente]",
     "cancel": "Cancelar mensaje",
     "retry": "reintentar",
     "failedCount_one": "fallido ×{{count}}",
@@ -97,8 +99,10 @@
   "preview": {
     "noMessages": "Todavía no hay mensajes",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[adjunto]",
-    "attachments_other": "[{{count}} adjuntos]"
+    "attachments_one": "Adjunto",
+    "attachments_other": "{{count}} adjuntos",
+    "attachmentsTerminal_one": "[adjunto]",
+    "attachmentsTerminal_other": "[{{count}} adjuntos]"
   },
   "attachment": {
     "viewLabel": "Ver {{filename}}",
@@ -109,9 +113,11 @@
     "failedToLoad": "No se pudo cargar",
     "failedToDownload": "No se pudo descargar",
     "lightboxFetch": "cargar",
-    "lightboxDone": "[ hecho ]",
-    "lightboxDownload": "[descargar]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "Hecho",
+    "lightboxDoneTerminal": "[ hecho ]",
+    "lightboxDownload": "Descargar",
+    "lightboxDownloadTerminal": "[descargar]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Mostrar contenido sensible: {{filename}}",
     "sensitiveHide": "Ocultar {{filename}}"
   },
@@ -121,6 +127,10 @@
     "loadTitle": "Cargar contenido de {{url}}: esto contacta directamente con ese sitio",
     "loadDescription": "Cargar contenido de {{url}}. Esto contacta directamente con ese sitio y le revela tu dirección IP.",
     "openLabel": "Abrir {{url}}"
+  },
+  "linkPreview": {
+    "loading": "Cargando vista previa…",
+    "remove": "Quitar la vista previa del enlace"
   },
   "notify": {
     "newMessageTitle": "Mensaje nuevo",

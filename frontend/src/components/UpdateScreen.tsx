@@ -211,12 +211,11 @@ export const UpdateScreen: React.FC<Props> = ({ onContinue }) => {
 
         {phase === "downloading" && progress !== null && (
           <div
-            className="bg-line"
+            className="bg-line rounded-full"
             style={{
               width: "100%",
               maxWidth: 280,
               height: 4,
-              borderRadius: 2,
               overflow: "hidden",
             }}
           >

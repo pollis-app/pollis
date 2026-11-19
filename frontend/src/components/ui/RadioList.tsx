@@ -1,4 +1,5 @@
 import React from "react";
+import { FOCUS_RING } from "./focusRing";
 
 export interface RadioOption {
   value: string;
@@ -50,8 +51,9 @@ export const RadioList: React.FC<RadioListProps> = ({
         // Only the chosen row (or the first, before any choice) is in the tab order.
         const tabbable = selected || (value === null && option.value === enabled[0]?.value);
         let rowClass = "bg-surface-raised text-fg enabled:hover:bg-hover";
+        // Selection is the `active` tint and the filled dot, never a solid accent row (#1965).
         if (selected) {
-          rowClass = "bg-accent text-bg";
+          rowClass = "bg-active text-fg";
         } else if (option.disabled) {
           rowClass = "bg-surface text-muted cursor-not-allowed";
         }
@@ -75,18 +77,18 @@ export const RadioList: React.FC<RadioListProps> = ({
                 move(e.currentTarget, option.value, -1);
               }
             }}
-            className={`flex items-center gap-3 w-full text-start rounded-lg px-4 py-3 border-0 font-mono ${rowClass}`}
+            className={`flex items-center gap-3 w-full text-start rounded-control px-4 py-3 border-0 font-mono ${rowClass} ${FOCUS_RING}`}
           >
             <span
               aria-hidden
-              className={`flex items-center justify-center shrink-0 w-4 h-4 rounded-full ${selected ? "bg-bg" : "bg-line-strong"}`}
+              className={`flex items-center justify-center shrink-0 w-4 h-4 rounded-full ${selected ? "border-2 border-accent" : "bg-line-strong"}`}
             >
               {selected && <span className="w-2 h-2 rounded-full bg-accent" />}
             </span>
             <span className="min-w-0 flex flex-col">
               <span className="truncate text-body" lang={option.lang}>{option.label}</span>
               {option.detail && (
-                <span className={`text-secondary ${selected ? "text-bg" : "text-dim"}`}>{option.detail}</span>
+                <span className="text-secondary text-dim">{option.detail}</span>
               )}
             </span>
           </button>

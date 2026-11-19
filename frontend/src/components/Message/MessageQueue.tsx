@@ -4,9 +4,13 @@ import { X, Clock, Send, AlertCircle } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { appStore } from '../../stores/appStore';
 import { Button } from '../ui/Button';
+import { IconButton } from '../ui/IconButton';
+import { useSkin } from "../../hooks/queries/usePreferences";
 
 export const MessageQueue: React.FC = observer(() => {
   const { t } = useTranslation('chat');
+  // Bracketed forms are Terminal's (#1965).
+  const isTerminal = useSkin() === 'terminal';
   const {
     messageQueue,
     removeFromMessageQueue,
@@ -24,7 +28,7 @@ export const MessageQueue: React.FC = observer(() => {
   }
 
   const getMessageContent = (_messageId: string): string => {
-    return t('queue.pendingPlaceholder');
+    return t(isTerminal ? 'queue.pendingPlaceholderTerminal' : 'queue.pendingPlaceholder');
   };
 
   const snippetFor = (messageId: string): string => {
@@ -75,14 +79,13 @@ export const MessageQueue: React.FC = observer(() => {
                 {t(`status.${item.status}`)}
               </span>
               <p className="text-secondary font-mono flex-1 truncate text-dim">{snippet}</p>
-              <button
+              <IconButton
                 data-testid={`cancel-queue-item-${item.id}`}
                 onClick={() => handleCancel(item.id, item.message_id)}
                 aria-label={t('queue.cancel')}
-                className="icon-btn-sm"
               >
                 <X size={14} aria-hidden="true" />
-              </button>
+              </IconButton>
             </div>
           );
         })}
@@ -110,14 +113,13 @@ export const MessageQueue: React.FC = observer(() => {
                 >
                   {t('queue.retry')}
                 </Button>
-                <button
+                <IconButton
                   data-testid={`cancel-queue-item-${item.id}`}
                   onClick={() => handleCancel(item.id, item.message_id)}
                   aria-label={t('queue.cancel')}
-                  className="icon-btn-sm"
                 >
                   <X size={14} aria-hidden="true" />
-                </button>
+                </IconButton>
               </div>
             </div>
           );

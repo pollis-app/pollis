@@ -119,6 +119,12 @@
     "itemStrict": "<mode>Madhubuti</mode> — Unganisha kupitia relay pekee. Ikiwa hakuna relay inayofikika, utumaji husitishwa badala ya kufichua IP yako.",
     "applyError": "Imeshindwa kutumia hali ya relay: {{error}} — kwa sasa ni {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Maonyesho ya kukagua viungo",
+    "label": "Tengeneza maonyesho ya kukagua viungo",
+    "description": "Unapotuma kiungo, Pollis huleta ukurasa kutoka kifaa hiki ili kutengeneza onyesho la kukagua. Tovuti huona anwani yako ya IP, kana kwamba umeifungua mwenyewe. Watu unaowatumia hawawasiliani kamwe na tovuti.",
+    "strictNote": "Faragha madhubuti ya mtandao huzima maonyesho ya kukagua viungo."
+  },
   "relayServing": {
     "heading": "Endesha relay kwa ajili ya wengine",
     "intro": "Hili ni chaguo tofauti na mpangilio ulio hapo juu. Ule huamua iwapo trafiki <dim>yako</dim> inapita kupitia relay. Huu huamua iwapo trafiki ya <dim>watu wengine</dim> inapita kupitia <dim>kifaa chako</dim>. Kuwasha kimoja hakuwashi kingine kamwe.",
@@ -375,7 +381,7 @@
     "capturing": "Bonyeza vitufe…",
     "rebindLabel": "Badilisha mkato wa {{name}}",
     "resetLabel": "Rejesha {{name}} kwenye chaguomsingi",
-    "resetButton": "rejesha",
+    "resetButton": "Rejesha",
     "appToggleSidebar": "Onyesha/ficha upau wa pembeni",
     "appToggleRightPanel": "Onyesha/ficha paneli ya maelezo",
     "appToggleTerminal": "Onyesha/ficha terminal",
@@ -533,5 +539,29 @@
     "youDeclined": "Umekataa. Hakuna kilichonakiliwa.",
     "notOpen": "Ombi hili halipo wazi tena.",
     "back": "Rudi kwenye Usalama"
+  },
+  "aliases": {
+    "heading": "Majina bandia ya vikundi",
+    "rowDescription": "Jina na picha tofauti katika kila kikundi",
+    "intro": "Onyesha jina na picha tofauti katika kila kikundi. @jina-lako la mtumiaji linabaki lilelile kila mahali.",
+    "empty": "Bado hauko katika kikundi chochote.",
+    "mainProfile": "Wasifu mkuu",
+    "edit": "Hariri",
+    "useMain": "Tumia wasifu wangu mkuu",
+    "resetting": "Inarejesha…",
+    "pageTitle": "Jina bandia katika {{group}}",
+    "pageIntro": "Kikundi hiki pekee ndicho kinaona jina na picha hii. Ujumbe wa moja kwa moja unabaki na wasifu wako mkuu.",
+    "nameLabel": "Jina katika kikundi hiki",
+    "namePlaceholder": "Acha wazi kutumia {{name}}",
+    "nameInvalid": "Tumia hadi herufi 100, bila < wala >.",
+    "pictureLabel": "Picha katika kikundi hiki",
+    "choosePicture": "Chagua picha",
+    "mainPicture": "Tumia picha kuu",
+    "applyAll": "Tumia kwa vikundi vyangu vyote",
+    "applyAllHint": "Huandika jina au picha uliyobadilisha katika kila kikundi ulichomo sasa. Vikundi utakavyojiunga baadaye huanza na wasifu wako mkuu.",
+    "save": "Hifadhi",
+    "saving": "Inahifadhi…",
+    "saved": "Imehifadhiwa",
+    "saveFailed": "Imeshindwa kuhifadhi jina lako bandia"
   }
 }

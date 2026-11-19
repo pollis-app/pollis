@@ -124,7 +124,8 @@
       "revoking": "मागे घेत आहे…",
       "revokeLabel": "{{name}} यांचे आमंत्रण मागे घ्या",
       "revokeFailed": "आमंत्रण मागे घेता आले नाही."
-    }
+    },
+    "resetAlias": "टोपणनाव रीसेट करा"
   },
   "kickMember": {
     "pageTitle": "सदस्याला काढा",
@@ -143,7 +144,7 @@
     "acceptFailed": "आमंत्रण स्वीकारता आले नाही. पुन्हा प्रयत्न करा."
   },
   "inviteMember": {
-    "pageTitle": "सदस्याला आमंत्रित करा :: {{group}}",
+    "pageTitle": "सदस्याला आमंत्रित करा — {{group}}",
     "intro": "<accent>{{name}}</accent> मध्ये एखाद्याला आमंत्रित करा",
     "identifierLabel": "युझरनेम किंवा ईमेल",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +154,7 @@
     "sendFailed": "आमंत्रण पाठवता आले नाही"
   },
   "joinRequests": {
-    "pageTitle": "सामील होण्याच्या विनंत्या :: {{group}}",
+    "pageTitle": "सामील होण्याच्या विनंत्या — {{group}}",
     "allPageTitle": "सामील होण्याच्या विनंत्या",
     "pendingFor": "<accent>{{name}}</accent> मध्ये सामील होण्याच्या प्रलंबित विनंत्या",
     "empty": "कोणत्याही प्रलंबित विनंत्या नाहीत.",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} यांनी तुम्हाला {{group}} मध्ये आमंत्रित केले",
     "inviteBody": "{{name}} यांनी तुम्हाला आमंत्रित केले",
     "inviteBodyUnknown": "तुम्हाला एका ग्रुपमध्ये आमंत्रित केले आहे"
+  },
+  "resetAlias": {
+    "pageTitle": "टोपणनाव रीसेट करा",
+    "confirm": "या ग्रुपमधील <strong>{{name}}</strong> (@{{handle}}) यांचे टोपणनाव रीसेट करायचे?",
+    "consequence": "इथे पुन्हा त्यांचे मुख्य प्रोफाइल दिसेल. ते नवीन टोपणनाव ठेवू शकतात.",
+    "confirmButton": "हो, रीसेट करा",
+    "submitting": "रीसेट होत आहे…",
+    "failed": "टोपणनाव रीसेट झाले नाही"
   }
 }

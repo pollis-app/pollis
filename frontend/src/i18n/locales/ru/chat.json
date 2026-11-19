@@ -62,7 +62,8 @@
     "empty": "Сообщений пока нет. Начните разговор.",
     "unknownAuthor": "Неизвестно",
     "blockedAuthor": "заблокированный пользователь",
-    "blockedBody": "[заблокировано]"
+    "blockedBody": "Заблокировано",
+    "blockedBodyTerminal": "[заблокировано]"
   },
   "replyBar": {
     "replyingTo": "ответ для <name>{{name}}</name>",
@@ -71,7 +72,8 @@
   },
   "queue": {
     "heading": "Очередь",
-    "pendingPlaceholder": "[Сообщение в очереди]",
+    "pendingPlaceholder": "Сообщение в очереди",
+    "pendingPlaceholderTerminal": "[Сообщение в очереди]",
     "cancel": "Отменить отправку",
     "retry": "повторить",
     "failedCount_one": "ошибка ×{{count}}",
@@ -110,10 +112,14 @@
   "preview": {
     "noMessages": "Сообщений пока нет",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} вложение]",
-    "attachments_few": "[{{count}} вложения]",
-    "attachments_many": "[{{count}} вложений]",
-    "attachments_other": "[{{count}} вложения]"
+    "attachments_one": "{{count}} вложение",
+    "attachments_few": "{{count}} вложения",
+    "attachments_many": "{{count}} вложений",
+    "attachments_other": "{{count}} вложения",
+    "attachmentsTerminal_one": "[{{count}} вложение]",
+    "attachmentsTerminal_few": "[{{count}} вложения]",
+    "attachmentsTerminal_many": "[{{count}} вложений]",
+    "attachmentsTerminal_other": "[{{count}} вложения]"
   },
   "attachment": {
     "viewLabel": "Посмотреть {{filename}}",
@@ -124,9 +130,11 @@
     "failedToLoad": "Не удалось загрузить",
     "failedToDownload": "Не удалось скачать",
     "lightboxFetch": "загрузить",
-    "lightboxDone": "[ готово ]",
-    "lightboxDownload": "[скачать]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "Готово",
+    "lightboxDoneTerminal": "[ готово ]",
+    "lightboxDownload": "Скачать",
+    "lightboxDownloadTerminal": "[скачать]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Показать деликатный контент: {{filename}}",
     "sensitiveHide": "Скрыть {{filename}}"
   },
@@ -136,6 +144,10 @@
     "loadTitle": "Загрузить медиа с {{url}} — это прямое обращение к тому сайту",
     "loadDescription": "Загрузить медиа с {{url}}. Это прямое обращение к тому сайту, и он увидит ваш IP-адрес.",
     "openLabel": "Открыть {{url}}"
+  },
+  "linkPreview": {
+    "loading": "Загрузка предпросмотра…",
+    "remove": "Убрать предпросмотр ссылки"
   },
   "notify": {
     "newMessageTitle": "Новое сообщение",

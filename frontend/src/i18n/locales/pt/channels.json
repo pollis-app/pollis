@@ -113,7 +113,7 @@
       "member": "membro"
     },
     "adminToggle": "administrador",
-    "kick": "expulsar",
+    "kick": "Expulsar",
     "verified": "Contacto verificado",
     "keyChanged": "A chave de identidade mudou — verifique novamente",
     "invited": {
@@ -124,7 +124,8 @@
       "revoking": "A revogar…",
       "revokeLabel": "Revogar o convite de {{name}}",
       "revokeFailed": "Não foi possível revogar o convite."
-    }
+    },
+    "resetAlias": "Redefinir apelido"
   },
   "kickMember": {
     "pageTitle": "Remover membro",
@@ -138,12 +139,12 @@
     "pageTitle": "Convites",
     "empty": "Sem convites pendentes.",
     "invitedBy": "Convidado por {{name}}",
-    "accept": "aceitar",
-    "decline": "recusar",
+    "accept": "Aceitar",
+    "decline": "Recusar",
     "acceptFailed": "Não foi possível aceitar o convite. Tente novamente."
   },
   "inviteMember": {
-    "pageTitle": "Convidar membro :: {{group}}",
+    "pageTitle": "Convidar membro — {{group}}",
     "intro": "Convidar alguém para <accent>{{name}}</accent>",
     "identifierLabel": "Nome de utilizador ou email",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,13 +154,13 @@
     "sendFailed": "Não foi possível enviar o convite"
   },
   "joinRequests": {
-    "pageTitle": "Pedidos de adesão :: {{group}}",
+    "pageTitle": "Pedidos de adesão — {{group}}",
     "allPageTitle": "Pedidos de adesão",
     "pendingFor": "Pedidos pendentes para aderir a <accent>{{name}}</accent>",
     "empty": "Sem pedidos pendentes.",
     "allEmpty": "Sem pedidos de adesão pendentes.",
-    "approve": "aprovar",
-    "reject": "rejeitar"
+    "approve": "Aprovar",
+    "reject": "Rejeitar"
   },
   "joinByInvite": {
     "pageTitle": "Aderir a um grupo",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} convidou-o para {{group}}",
     "inviteBody": "{{name}} convidou-o",
     "inviteBodyUnknown": "Foi convidado para um grupo"
+  },
+  "resetAlias": {
+    "pageTitle": "Redefinir apelido",
+    "confirm": "Redefinir o apelido de <strong>{{name}}</strong> (@{{handle}}) neste grupo?",
+    "consequence": "O perfil principal voltará a aparecer aqui. É possível definir um novo apelido.",
+    "confirmButton": "Sim, redefinir",
+    "submitting": "Redefinindo…",
+    "failed": "Não foi possível redefinir o apelido"
   }
 }

@@ -233,6 +233,20 @@ async function setSelectorValue(browser, selector, value) {
   await el.setValue(value);
 }
 
+// Call a Tauri command from the page (the app's own IPC, as the renderer would).
+async function invokeApp(browser, cmd, args = {}) {
+  const res = await browser.executeAsync((c, a, done) => {
+    window.__TAURI_INTERNALS__.invoke(c, a).then(
+      (r) => done({ ok: true, r }),
+      (e) => done({ ok: false, e: typeof e === "string" ? e : JSON.stringify(e) }),
+    );
+  }, cmd, args);
+  if (!res.ok) {
+    throw new Error(`${cmd}: ${res.e}`);
+  }
+  return res.r;
+}
+
 // Multi-client: each client gets its own (port, native-port); client 0 keeps 4444/4445 for single-client scripts.
 function clientPorts(index = 0) {
   return { driverPort: 4444 + index * 2, nativePort: 4445 + index * 2 };
@@ -241,11 +255,18 @@ function clientPorts(index = 0) {
 // Spawn tauri-driver + a webdriverio session for one client; `appEnv` is the app's full env.
 async function startClient({ index = 0, appEnv, settleMs = 6000, label = `client${index}` }) {
   const { driverPort, nativePort } = clientPorts(index);
-  // On a PipeWire host start-audio.sh pins each client's ALSA devices through its own
-  // $XDG_CONFIG_HOME (see that script); without it a client opens the host's real mic/speaker.
-  const xdg = process.env[index === 0 ? "POLLIS_E2E_XDG_A" : "POLLIS_E2E_XDG_B"];
-  const env = xdg ? { ...appEnv, XDG_CONFIG_HOME: xdg } : appEnv;
-  console.log(`[e2e] ${label}: tauri-driver :${driverPort} (native :${nativePort})${xdg ? ` audio via ${xdg}` : ""}`);
+  // On a PipeWire host start-audio.sh pins each client to its own virtual devices (see that script): PULSE_SINK /
+  // PULSE_SOURCE for cpal's PulseAudio host, $XDG_CONFIG_HOME's asoundrc for its ALSA fallback. Without them a client
+  // opens the host's real mic/speaker.
+  const side = index === 0 ? "A" : "B";
+  const xdg = process.env[`POLLIS_E2E_XDG_${side}`];
+  const pin = {
+    ...(xdg ? { XDG_CONFIG_HOME: xdg } : {}),
+    ...(process.env[`POLLIS_E2E_PULSE_SINK_${side}`] ? { PULSE_SINK: process.env[`POLLIS_E2E_PULSE_SINK_${side}`] } : {}),
+    ...(process.env[`POLLIS_E2E_PULSE_SOURCE_${side}`] ? { PULSE_SOURCE: process.env[`POLLIS_E2E_PULSE_SOURCE_${side}`] } : {}),
+  };
+  const env = { ...appEnv, ...pin };
+  console.log(`[e2e] ${label}: tauri-driver :${driverPort} (native :${nativePort})${pin.PULSE_SOURCE ? ` audio pinned to ${pin.PULSE_SOURCE} / ${pin.PULSE_SINK}` : ""}`);
   const tauriDriver = spawn(
     TAURI_DRIVER,
     ["--port", String(driverPort), "--native-port", String(nativePort)],
@@ -300,7 +321,7 @@ module.exports = {
   sleep, reap, waitPort, curl, warmVite, spawnVite, waitViteReady,
   readEnvFile, tursoEnv,
   present, waitTestId, waitAppReadyAfterSignUp, clickTestId, setTestIdValue, setComposerText, typeCode,
-  presentSelector, waitSelector, clickSelector, setSelectorValue,
+  presentSelector, waitSelector, clickSelector, setSelectorValue, invokeApp,
   clientPorts, startClient,
   makeShot, dumpFailure,
 };

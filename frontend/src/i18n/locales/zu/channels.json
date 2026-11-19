@@ -113,7 +113,7 @@
       "member": "ilungu"
     },
     "adminToggle": "umphathi",
-    "kick": "susa",
+    "kick": "Susa",
     "verified": "Oxhumana naye oqinisekisiwe",
     "keyChanged": "Ukhiye womazisi ushintshile — qinisekisa futhi",
     "invited": {
@@ -124,7 +124,8 @@
       "revoking": "Iyahoxisa…",
       "revokeLabel": "Hoxisa isimemo sika-{{name}}",
       "revokeFailed": "Ayikwazanga ukuhoxisa isimemo."
-    }
+    },
+    "resetAlias": "Setha kabusha igama lokuzisholo"
   },
   "kickMember": {
     "pageTitle": "Susa Ilungu",
@@ -138,12 +139,12 @@
     "pageTitle": "Izimemo",
     "empty": "Azikho izimemo ezilindile.",
     "invitedBy": "Umenywe ngu-{{name}}",
-    "accept": "yamukela",
-    "decline": "yenqaba",
+    "accept": "Yamukela",
+    "decline": "Yenqaba",
     "acceptFailed": "Ayikwazanga ukwamukela isimemo. Zama futhi."
   },
   "inviteMember": {
-    "pageTitle": "Mema Ilungu :: {{group}}",
+    "pageTitle": "Mema Ilungu — {{group}}",
     "intro": "Mema othile ku-<accent>{{name}}</accent>",
     "identifierLabel": "Igama lomsebenzisi noma i-imeyili",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,13 +154,13 @@
     "sendFailed": "Yehlulekile ukuthumela isimemo"
   },
   "joinRequests": {
-    "pageTitle": "Izicelo Zokujoyina :: {{group}}",
+    "pageTitle": "Izicelo Zokujoyina — {{group}}",
     "allPageTitle": "Izicelo Zokujoyina",
     "pendingFor": "Izicelo ezilindile zokujoyina <accent>{{name}}</accent>",
     "empty": "Azikho izicelo ezilindile.",
     "allEmpty": "Azikho izicelo zokujoyina ezilindile.",
-    "approve": "vuma",
-    "reject": "yenqaba"
+    "approve": "Vuma",
+    "reject": "Yenqaba"
   },
   "joinByInvite": {
     "pageTitle": "Joyina Iqembu",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} ukumeme ku-{{group}}",
     "inviteBody": "{{name}} ukumemile",
     "inviteBodyUnknown": "Umenywe eqenjini"
+  },
+  "resetAlias": {
+    "pageTitle": "Setha kabusha igama lokuzisholo",
+    "confirm": "Setha kabusha igama lokuzisholo lika-<strong>{{name}}</strong> (@{{handle}}) kuleli qembu?",
+    "consequence": "Iphrofayela yakhe eyinhloko izobonakala lapha futhi. Angasetha igama lokuzisholo elisha.",
+    "confirmButton": "Yebo, setha kabusha",
+    "submitting": "Iyasetha kabusha…",
+    "failed": "Ayikwazanga ukusetha kabusha igama lokuzisholo"
   }
 }

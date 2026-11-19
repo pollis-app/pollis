@@ -31,6 +31,8 @@ import { AllJoinRequestsPage } from "./pages/AllJoinRequestsPage";
 import { InviteMemberPage } from "./pages/InviteMemberPage";
 import { MembersPage } from "./pages/MembersPage";
 import { KickMemberPage } from "./pages/KickMemberPage";
+import { ResetAliasPage } from "./pages/ResetAliasPage";
+import { GroupAliasPage } from "./pages/GroupAliasPage";
 import { SearchPage } from "./pages/Search";
 import { RequestsPage } from "./pages/RequestsPage";
 import { BlockedPage } from "./pages/BlockedPage";
@@ -119,6 +121,19 @@ const kickMemberRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/$groupId/members/$userId/kick",
   component: KickMemberPage,
+});
+
+// #2003: an admin resets a member's alias; a member's profile as this group shows them.
+const resetAliasRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/members/$userId/reset-alias",
+  component: ResetAliasPage,
+});
+
+const memberProfileRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/members/$userId",
+  component: UserProfilePage,
 });
 
 const joinRequestsRoute = createRoute({
@@ -217,6 +232,13 @@ const userProfileRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/user/$userId",
   component: UserProfilePage,
+});
+
+// #2003: the signed-in user's alias in one group (parameterized, so no nav entry).
+const groupAliasRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/user/aliases/$groupId",
+  component: GroupAliasPage,
 });
 
 const securityRoute = createRoute({
@@ -381,6 +403,8 @@ const routeTree = rootRoute.addChildren([
   groupEmojiRoute,
   membersRoute,
   kickMemberRoute,
+  resetAliasRoute,
+  memberProfileRoute,
   joinRequestsRoute,
   inviteMemberRoute,
   leaveGroupRoute,
@@ -397,6 +421,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
   userRoute,
   userProfileRoute,
+  groupAliasRoute,
   securityRoute,
   securityEventsRoute,
   changePinRoute,

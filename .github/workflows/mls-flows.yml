@@ -1,0 +1,236 @@
+# On-demand MLS integration suites (#2022): the multi-client flows harness
+# (`src-tauri/tests/flows`, `cargo test --features test-harness --test flows`)
+# and the marathon soak. Both used to run inside mls-tests.yml — the flows
+# shards on every Rust-touching PR and push, the marathon nightly — and both
+# are integration suites, not unit tests. CI runs unit tests and smoke/build
+# checks only; these run here when someone dispatches them, and the author runs
+# the flows suite locally before merging a change it covers (docs/deployments.md
+# → "On-demand E2E").
+#
+# The two jobs need the same native stack as a desktop build (Tauri/webkit,
+# libwebrtc, cpal), so their setup mirrors mls-tests.yml's `tests` job, and they
+# restore that job's cache (`shared-key: tests`, written on `main`).
+name: MLS flows (on demand)
+
+on:
+  workflow_dispatch:
+    inputs:
+      flows:
+        description: "Run the flows harness (4 shards)"
+        type: boolean
+        required: false
+        default: true
+      marathon:
+        description: "Run the marathon soak"
+        type: boolean
+        required: false
+        default: true
+      marathon_ops:
+        description: "Marathon soak: number of ops in the single long sequence"
+        required: false
+        default: "300"
+      marathon_actors:
+        description: "Marathon soak: actor pool size"
+        required: false
+        default: "6"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mls-flows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The flows harness, sharded across runners. Serially it is ~29 minutes, and
+  # it is a suite whose wall time is test EXECUTION, not compilation (the
+  # binary builds in ~1 min on a warm cache).
+  #
+  # Why sharding is sound: every test in the binary shares ONE process-wide
+  # world — one in-process DS, one pair of libsql files, one armed-fault slot —
+  # which is why the tests are `#[serial]`. That world is per PROCESS
+  # (`OnceCell` in harness.rs, a fresh tempdir, the DS on an ephemeral port), so
+  # separate runners are as isolated from each other as two `cargo test`
+  # invocations on a laptop. Within a shard nothing changes: same binary, same
+  # features, same libtest scheduling.
+  #
+  # Completeness is by construction: each shard asks the BUILT binary for its
+  # full test list and takes a disjoint slice of it — shard 0 the `model::`
+  # module (its property test alone is ~9 of the 29 minutes), shards 1-3 the
+  # rest round-robin — then runs those names with `--exact`. A new test lands
+  # in some shard automatically; a renamed `model` module fails shard 0 loudly
+  # (empty slice) rather than silently dropping anything.
+  flows:
+    if: ${{ inputs.flows }}
+    name: flows (shard ${{ matrix.shard }})
+    # 24.04: src-tauri/build.rs compiles pollis-capture-linux, whose libspa 0.9
+    # bindgen needs PipeWire >= 1.0 headers.
+    runs-on: ubuntu-24.04
+    # A cold shard is ~24 min (build ~18, tests ~2).
+    timeout-minutes: 40
+    strategy:
+      # Every shard reports, so one red test doesn't hide another.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      # The flows binary links the whole native stack; full DWARF once crashed
+      # the runner's linker. Tests don't need debuginfo.
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The flows binary links the whole native stack, and that link can
+      # exhaust a stock runner's disk.
+      - name: Free disk space (only if short)
+        run: bash scripts/ci-free-disk.sh
+
+      # The pinned toolchain, exactly as mls-tests.yml's `tests` job.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
+
+      # Restores mls-tests.yml's `tests` cache: `shared-key: tests` produces the
+      # very key that job writes on `main` (rust-cache builds
+      # `v0-rust-<shared-key|job>-…`), given the same `workspaces`, toolchain
+      # and CARGO_* env. Never saves — `tests` is the single writer (#759
+      # budget).
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: tests
+          workspaces: |
+            .
+            src-tauri
+          # Must match the `tests` job's key exactly (see its comment).
+          add-rust-environment-hash-key: false
+          save-if: false
+
+      # apt packages, clang 21 and meson (see the action for the why of each).
+      - name: Native build dependencies
+        uses: ./.github/actions/native-build-deps
+
+      - name: Build the flows harness
+        working-directory: src-tauri
+        run: cargo test --features test-harness --test flows --no-run
+
+      - name: MLS integration flows harness (shard ${{ matrix.shard }})
+        working-directory: src-tauri
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          # The binary's own inventory, not a hand-kept list.
+          cargo test --features test-harness --test flows -- --list --format terse 2>/dev/null \
+            | sed -n 's/: test$//p' | sort > "$RUNNER_TEMP/all-tests.txt"
+          total=$(wc -l < "$RUNNER_TEMP/all-tests.txt")
+          if [ "$total" -eq 0 ]; then
+            echo "::error::The flows binary listed no tests."
+            exit 1
+          fi
+          if [ "$SHARD" -eq 0 ]; then
+            grep '^model::' "$RUNNER_TEMP/all-tests.txt" > "$RUNNER_TEMP/mine.txt" || true
+          else
+            grep -v '^model::' "$RUNNER_TEMP/all-tests.txt" \
+              | awk -v n=3 -v s=$((SHARD - 1)) '(NR - 1) % n == s' > "$RUNNER_TEMP/mine.txt" || true
+          fi
+          mine=$(wc -l < "$RUNNER_TEMP/mine.txt")
+          echo "shard $SHARD: $mine of $total tests"
+          if [ "$mine" -eq 0 ]; then
+            echo "::error::Shard $SHARD selected no tests (was the model:: module renamed? update the partition in mls-flows.yml)."
+            exit 1
+          fi
+          mapfile -t names < "$RUNNER_TEMP/mine.txt"
+          cargo test --features test-harness --test flows -- --exact "${names[@]}"
+
+  # Marathon soak: ONE long generated sequence (hundreds of ops, a larger actor
+  # pool, messages + churn + faults) through the shadow-oracle convergence
+  # check (docs/machine-checked-correctness-design.md §5.4). The test is
+  # `#[ignore]`d so a normal flows run skips it.
+  #
+  # `set -o pipefail` so a marathon failure survives the `tee` and the job goes
+  # RED. The full output is teed to a log so the panic's embedded failing op
+  # sequence (the repro of record — MLS RNG isn't seedable, so the op sequence,
+  # not a seed, is what replays) can be uploaded and promoted to a deterministic
+  # regression.
+  marathon:
+    if: ${{ inputs.marathon }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Free disk space (only if short)
+        run: bash scripts/ci-free-disk.sh
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.96.0
+        with:
+          # Explicit, so the toolchain does not depend on which branch the pinned SHA is (#1353).
+          toolchain: 1.96.0
+
+      # Same cache restore as the `flows` job above.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: tests
+          workspaces: |
+            .
+            src-tauri
+          add-rust-environment-hash-key: false
+          save-if: false
+
+      # apt packages, clang 21 and meson (see the action for the why of each).
+      - name: Native build dependencies
+        uses: ./.github/actions/native-build-deps
+
+      - name: MLS marathon soak
+        id: marathon
+        working-directory: src-tauri
+        env:
+          MARATHON_OPS: ${{ inputs.marathon_ops }}
+          MARATHON_ACTORS: ${{ inputs.marathon_actors }}
+        run: |
+          set -o pipefail
+          cargo test --features test-harness --test flows -- \
+            --ignored --nocapture model_marathon_convergence 2>&1 \
+            | tee marathon-soak.log
+
+      # On a marathon FAILURE, distil the failing op sequence out of the teed log
+      # into its own file (the panic message embeds it as `op sequence (N ops):
+      # [...]`). Both the raw log and the distilled sequence are uploaded below.
+      # Promotion runbook: docs/machine-checked-correctness-design.md §5.4.
+      - name: Extract failing op sequence
+        if: ${{ failure() && steps.marathon.outcome == 'failure' }}
+        working-directory: src-tauri
+        run: |
+          {
+            echo "# Marathon soak failure — failing op sequence (the repro of record)."
+            echo "# Promote per docs/machine-checked-correctness-design.md §5.4:"
+            echo "# paste the Op vector below into a fixed-sequence regression in"
+            echo "# src-tauri/tests/flows/model.rs (or adversarial.rs)."
+            echo
+            # A failure raised outside `run_case` (the zero-loss check on client
+            # drop, #1524) carries no `op sequence` line; proptest's own
+            # `minimal failing input` block is the same Op vector (#1765).
+            grep -F 'op sequence' marathon-soak.log || \
+              sed -n '/^minimal failing input/,/^]/p' marathon-soak.log | grep . || \
+              echo "(no op sequence found — see marathon-soak.log for the raw failure)"
+          } > marathon-failing-op-sequence.txt
+          cat marathon-failing-op-sequence.txt
+
+      # Durable artifact so the failing sequence outlives the runner. Gated on
+      # the marathon step specifically, so an unrelated earlier-step failure
+      # doesn't upload a stale/empty log.
+      - name: Upload marathon failure artifact
+        if: ${{ failure() && steps.marathon.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: marathon-failing-op-sequence
+          path: |
+            src-tauri/marathon-failing-op-sequence.txt
+            src-tauri/marathon-soak.log
+          retention-days: 90
+          if-no-files-found: warn

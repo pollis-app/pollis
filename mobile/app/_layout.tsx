@@ -312,6 +312,14 @@ export default function RootLayout() {
                 options={drillIn}
               />
               <Stack.Screen
+                name="self/aliases"
+                options={drillIn}
+              />
+              <Stack.Screen
+                name="self/alias"
+                options={drillIn}
+              />
+              <Stack.Screen
                 name="self/security"
                 options={drillIn}
               />

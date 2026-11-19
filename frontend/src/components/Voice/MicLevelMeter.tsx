@@ -26,7 +26,7 @@ export const MicLevelMeter: React.FC<MicLevelMeterProps> = ({ subscribe, label, 
       data-testid={testId}
       role="meter"
       aria-label={label}
-      className="h-3 overflow-hidden rounded bg-surface border border-line"
+      className="h-3 overflow-hidden rounded-chip bg-surface border border-line"
     >
       <div
         ref={fill}

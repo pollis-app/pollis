@@ -5,6 +5,8 @@ import { appStore } from "../../../stores/appStore";
 import { presenceStore } from "../../../stores/presenceStore";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { useGroupMembers } from "../../../hooks/queries/useGroups";
+import { useGroupAliases } from "../../../hooks/queries/useGroupAliases";
+import { aliasAvatar, aliasName } from "../../../utils/groupAlias";
 import { useMessages, useDMConversations } from "../../../hooks/queries/useMessages";
 import { MemberRow } from "./MemberRow";
 import { MediaGrid } from "./MediaGrid";
@@ -12,6 +14,8 @@ import { useRightPanel } from "./useRightPanel";
 import { ShieldCheck } from "lucide-react";
 import type { MessageAttachment } from "../../../types";
 import { EmptyState } from "../../ui/EmptyState";
+import { SectionHeader } from "../../ui/SectionHeader";
+import { PressButton } from "../../ui/PressButton";
 
 /** Caps per-tile media fetches when the panel opens. */
 const MEDIA_LIMIT = 30;
@@ -39,6 +43,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const { t: tDms } = useTranslation("dms");
     const { setSafety } = useRightPanel();
     const { data: groupMembers = [] } = useGroupMembers(groupId);
+    const aliases = useGroupAliases(groupId);
     const { messages } = useMessages(channelId, conversationId);
     const isTerminal = useSkin() === "terminal";
     const currentUser = appStore.currentUser;
@@ -96,8 +101,8 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           .filter((m) => m.user_id !== currentUser?.id && presenceStore.isOnline(m.user_id))
           .map((m) => ({
             userId: m.user_id,
-            label: m.display_name || m.username || m.user_id,
-            avatarKey: m.avatar_url ?? null,
+            label: aliasName(aliases, m.user_id, m.display_name || m.username || m.user_id),
+            avatarKey: aliasAvatar(aliases, m.user_id, m.avatar_url) ?? null,
             isAdmin: m.role === "admin",
           }))
           .sort((a, b) => a.label.localeCompare(b.label));
@@ -126,6 +131,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
       dmConversations,
       currentUser,
       groupMembers,
+      aliases,
       // `byUser` is replaced, not mutated, so identity is a sound dep.
       presenceStore.byUser,
     ]);
@@ -163,14 +169,11 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     return (
       <div className={rootClass}>
         <section className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}>
-          <SectionHeader
-            label={
+          <SectionHeader>{
               listsEveryone
                 ? t("members.count", { count: people.length })
                 : t("members.onlineCount", { count: people.length })
-            }
-            isTerminal={isTerminal}
-          />
+            }</SectionHeader>
           {people.length === 0 ? (
             <EmptyState background={false} testId="right-panel-members-empty">
               {listsEveryone ? t("members.empty") : t("members.noneOnline")}
@@ -183,6 +186,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
                 label={person.label}
                 avatarKey={person.avatarKey}
                 isAdmin={person.isAdmin}
+                groupId={conversationId ? undefined : groupId ?? undefined}
               />
             ))
           )}
@@ -193,24 +197,20 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
             className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}
             data-testid="right-panel-safety"
           >
-            <SectionHeader
-              label={
+            <SectionHeader bordered>{
                 dmPeers.length === 1
                   ? tDms("profile.safetyNumber")
                   : tDms("safety.headingMany")
-              }
-              isTerminal={isTerminal}
-              bordered
-            />
+              }</SectionHeader>
             {dmPeers.map((p) => (
-              <button
+              <PressButton
                 key={p.userId}
-                type="button"
+                activateOn="click"
                 onClick={() => setSafety(p.userId)}
                 className={
                   isTerminal
                     ? "flex w-full items-center gap-1.5 px-2.5 py-0.5 text-start text-row text-fg hover:bg-hover"
-                    : "flex w-full items-center gap-2 rounded px-2 py-1 text-start text-body text-fg hover:bg-hover"
+                    : "flex w-full items-center gap-2 rounded-control px-2 py-1 text-start text-body text-fg hover:bg-hover"
                 }
                 data-testid={`right-panel-verify-safety-${p.userId}`}
               >
@@ -220,7 +220,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
                     ? tDms("safety.verify")
                     : tDms("safety.title", { name: `@${p.label}` })}
                 </bdi>
-              </button>
+              </PressButton>
             ))}
           </section>
         )}
@@ -229,7 +229,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           <section
             className={isTerminal ? "flex flex-col gap-1 pb-2" : "flex flex-col gap-2"}
           >
-            <SectionHeader label={t("media.heading")} isTerminal={isTerminal} bordered />
+            <SectionHeader bordered>{t("media.heading")}</SectionHeader>
             <MediaGrid attachments={attachments} />
           </section>
         )}
@@ -238,32 +238,3 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
   },
 );
 
-interface SectionHeaderProps {
-  label: string;
-  isTerminal: boolean;
-  /** Hairline above the header too, for every section after the first. */
-  bordered?: boolean;
-}
-
-/** Terminal borrows the left sidebar's `SectionHeader` chrome. */
-const SectionHeader: React.FC<SectionHeaderProps> = ({
-  label,
-  isTerminal,
-  bordered,
-}) => {
-  if (!isTerminal) {
-    return (
-      <h2 className="px-2 text-secondary font-medium uppercase tracking-widest text-muted">
-        {label}
-      </h2>
-    );
-  }
-  const cls = [
-    "sticky top-0 z-[1] flex h-bar w-full items-center border-b border-line",
-    "bg-surface px-2.5 text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none",
-    bordered ? "mt-1 border-t" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return <h2 className={cls}>{label}</h2>;
-};

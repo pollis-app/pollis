@@ -27,6 +27,10 @@ import {
 } from "../../utils/mentions";
 import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { useLinkPreviewsEnabled } from "../../hooks/queries/useLinkPreviews";
+import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
+import type { LinkPreviewDraft } from "../../utils/linkPreview";
+import { ComposerLinkPreview } from "./ComposerLinkPreview";
 import {
   applyShortcode,
   completedShortcodeAt,
@@ -41,6 +45,8 @@ import { MentionSuggestList } from "./MentionSuggestList";
 import { EmojiSuggestList } from "./EmojiSuggestList";
 import { probeRender } from "../../utils/renderProbe";
 import { usePressActivation } from "../../hooks/usePressActivation";
+import { IconButton } from "./IconButton";
+import { Button } from "./Button";
 
 /** Where a queued attachment's bytes are: a user's own file (never delete) or bytes staged in backend memory (no temp file). */
 type AttachmentSource =
@@ -76,7 +82,8 @@ export interface ChatInputHandle {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, attachments: Attachment[]) => void;
+  /** `linkPreview`: the draft's finished preview (#1987), only when `linkPreviews` is on. */
+  onSend: (message: string, attachments: Attachment[], linkPreview: LinkPreviewDraft | null) => void;
   placeholder?: string;
   disabled?: boolean;
   autoFocus?: boolean;
@@ -90,6 +97,8 @@ interface ChatInputProps {
   canNotifyAll?: boolean;
   // ArrowUp on an empty/first line; return true to claim it.
   onHistoryUp?: () => boolean;
+  // Builds a sender-generated link preview for the draft's first https link (#1987).
+  linkPreviews?: boolean;
 }
 
 function typeFromMime(mime: string): Attachment["type"] {
@@ -102,8 +111,8 @@ function typeFromMime(mime: string): Attachment["type"] {
 // Card size (#1568).
 const PREVIEW_SIZE = 120;
 
-const TOOLBAR_BUTTON =
-  "flex h-6 w-6 items-center justify-center rounded bg-black/60 text-white hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+// Over the picture: a solid raised chip, so the icon reads on any image.
+const TOOLBAR_BUTTON = "bg-surface-high text-fg hover:bg-surface-raised";
 
 const AttachmentPreview: React.FC<{
   attachment: Attachment;
@@ -129,11 +138,10 @@ const AttachmentPreview: React.FC<{
       data-sensitive={sensitive ? "true" : "false"}
     >
       <div
-        className="relative flex items-center justify-center overflow-hidden bg-surface-high"
+        className="relative flex items-center justify-center overflow-hidden bg-surface-high rounded-panel"
         style={{
           width: PREVIEW_SIZE,
           height: PREVIEW_SIZE,
-          borderRadius: 8,
           cursor: canExpand ? "zoom-in" : "default",
         }}
         {...expandPress}
@@ -143,7 +151,7 @@ const AttachmentPreview: React.FC<{
         ) : attachment.loading ? (
           <span className="text-body font-mono text-muted" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>…</span>
         ) : attachment.preview ? (
-          <img src={attachment.preview} alt={attachment.name} className="w-full h-full object-cover" style={{ borderRadius: 8 }} />
+          <img src={attachment.preview} alt={attachment.name} className="w-full h-full object-cover rounded-panel" />
         ) : attachment.type === "video" ? (
           <Film size={32} className="text-dim" />
         ) : attachment.type === "audio" ? (
@@ -163,8 +171,7 @@ const AttachmentPreview: React.FC<{
       {/* The eye shows the current state. Pictures and videos only. */}
       <div className="absolute flex items-center gap-1" style={{ top: 4, insetInlineEnd: 4 }}>
         {hasVisualPreview && (
-          <button
-            type="button"
+          <IconButton
             data-testid="attachment-sensitive-toggle"
             onClick={() => onToggleSensitive(attachment.id)}
             aria-pressed={sensitive}
@@ -173,16 +180,15 @@ const AttachmentPreview: React.FC<{
             className={TOOLBAR_BUTTON}
           >
             {sensitive ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          </button>
+          </IconButton>
         )}
-        <button
-          type="button"
+        <IconButton
           onClick={() => onRemove(attachment.id)}
           aria-label={t("composer.removeAttachment", { name: attachment.name })}
           className={TOOLBAR_BUTTON}
         >
           <X className="w-3.5 h-3.5" />
-        </button>
+        </IconButton>
       </div>
     </div>
   );
@@ -199,6 +205,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   draftKey = null,
   canNotifyAll = false,
   onHistoryUp,
+  linkPreviews = false,
 }, ref) => {
   probeRender("ChatInput");
   const { t } = useTranslation("common");
@@ -447,6 +454,13 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   // @mention autocomplete (#843): candidates from this conversation's roster only.
   const skin = useSkin();
+  // Link previews (#1987): never in the Terminal look, nor with the device setting off.
+  const linkPreviewsEnabled = useLinkPreviewsEnabled();
+  const linkPreview = useLinkPreviewDraft(
+    message,
+    linkPreviews && skin === "modern" && linkPreviewsEnabled,
+    draftKey,
+  );
   const mentionCandidates = useMentionCandidates();
   // Async `selectionchange` caret; the ArrowUp hand-off reads the selection directly.
   const [caret, setCaret] = useState(0);
@@ -539,7 +553,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   const handleSend = () => {
     if (!message.trim() && attachments.length === 0) { return; }
     if (hasLoadingAttachments) { return; }
-    onSend(message.trim(), attachments);
+    // Never waits for a fetch still running: the message goes without it.
+    onSend(message.trim(), attachments, linkPreview.takeForSend(message.trim()));
     setMessage("");
     setDraft(draftKey, "");
     onValueChange?.("");
@@ -753,6 +768,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         </div>
       )}
 
+      <ComposerLinkPreview state={linkPreview.state} onRemove={linkPreview.remove} />
+
       {/* @all hint — appears live while the message contains a standalone
           @all in a group channel, telling the sender the send will ping
           everyone. Not a modal: an inline row in the composer. */}
@@ -834,14 +851,14 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             ghost={ghostText || emojiGhostText}
             ghostTestId={ghostText ? "mention-ghost" : "emoji-ghost"}
             ghostClassName={isFocused ? "text-bg opacity-60" : "text-muted"}
-            className={`chat-input-textarea w-full px-2 py-1 font-mono text-body transition-colors border-0 whitespace-pre-wrap break-words overflow-y-auto${isFocused ? " is-focused" : ""}`}
+            className={`chat-input-textarea w-full px-2 py-1 rounded-control font-mono text-body transition-colors border-0 whitespace-pre-wrap break-words overflow-y-auto${isFocused ? " is-focused" : ""}`}
             style={{
               lineHeight: "1.5rem",
               minHeight: "1.5rem",
               maxHeight: "9rem",
-              borderRadius: "4px",
-              background: isFocused ? "var(--c-accent)" : "var(--c-hover)",
-              color: isFocused ? "var(--c-bg)" : "var(--c-text)",
+              // Focus is the `active` tint, never a solid accent fill (#1965).
+              background: isFocused ? "var(--c-active)" : "var(--c-hover)",
+              color: "var(--c-text)",
               outline: "none",
               opacity: disabled ? 0.5 : 1,
             }}
@@ -883,24 +900,25 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
               autoFocus
               src={expandedPreview.url}
               controls
-              style={{ maxWidth: "90vw", maxHeight: "85vh", cursor: "default", borderRadius: "1rem" }}
+              className="rounded-panel"
+              style={{ maxWidth: "90vw", maxHeight: "85vh", cursor: "default" }}
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
             <img
               src={expandedPreview.url}
               alt={t("composer.previewAlt")}
-              style={{ maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain", cursor: "default", borderRadius: "1rem" }}
+              className="rounded-panel"
+              style={{ maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain", cursor: "default" }}
               onClick={(e) => e.stopPropagation()}
             />
           )}
-          <button
-            onClick={() => setExpandedPreview(null)}
-            className="mt-3 text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
-            style={{ border: "1px solid transparent", borderRadius: 4, cursor: "pointer" }}
-          >
-            [{t("keys.escape")}]
-          </button>
+          <div className="mt-3">
+            <Button variant="ghost" size="sm" onClick={() => setExpandedPreview(null)}>
+              {/* The bracketed key is Terminal's (#1965); Modern names the action. */}
+              {skin === "terminal" ? `[${t("keys.escape")}]` : t("actions.close")}
+            </Button>
+          </div>
         </div>
       )}
     </div>

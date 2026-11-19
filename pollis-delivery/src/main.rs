@@ -132,6 +132,8 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle, state: 
                         // delete has not succeeded yet. Kicked, not awaited, so a slow
                         // R2 never holds up the sweeps below.
                         pollis_delivery::messages::spawn_attachment_reclaim(&state);
+                        // #2003: avatar objects no profile or alias references any more.
+                        pollis_delivery::aliases::spawn_avatar_reclaim(&state);
                         // #762: aged-out audit rows and dead push tokens; logged so the GC result isn't lost.
                         match pollis_delivery::messages::sweep_aged_records(
                             &conn,

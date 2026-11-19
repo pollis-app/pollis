@@ -167,13 +167,14 @@ pub async fn delete_message(
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        let content: Option<String> = db.conn()
+        let (content, link_preview): (Option<String>, Option<String>) = db.conn()
             .query_row(
-                "SELECT content FROM message WHERE id = ?1 AND sender_id = ?2",
+                "SELECT content, link_preview FROM message WHERE id = ?1 AND sender_id = ?2",
                 rusqlite::params![message_id, user_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()?;
+            .optional()?
+            .unwrap_or((None, None));
 
         // Display-only field, so not `envelope_sent_at`.
         let now = chrono::Utc::now().to_rfc3339();
@@ -189,7 +190,15 @@ pub async fn delete_message(
             )));
         }
 
-        parse_attachment_refs(&content.unwrap_or_default())
+        let mut refs = parse_attachment_refs(&content.unwrap_or_default());
+        // The link preview's thumbnail goes with the message (#1987).
+        refs.extend(
+            link_preview
+                .and_then(|j| serde_json::from_str::<crate::commands::link_preview::LinkPreview>(&j).ok())
+                .and_then(|p| p.image)
+                .map(|image| preview_ref(&image)),
+        );
+        refs
     };
 
     // The delete released the message's references; the DS removes each file
@@ -462,7 +471,24 @@ pub(crate) async fn register_attachment_refs(
     message_id: &str,
     content: &str,
 ) -> usize {
-    let refs = parse_attachment_refs(content);
+    register_refs(state, message_id, parse_attachment_refs(content)).await
+}
+
+/// A link-preview thumbnail (#1987) as a reference, so it is counted and
+/// released with its message exactly like an attachment.
+pub(crate) fn preview_ref(image: &crate::commands::link_preview::PreviewImage) -> AttachmentRef {
+    AttachmentRef {
+        content_hash: image.hash.clone(),
+        r2_key: image.key.clone(),
+    }
+}
+
+/// Declare `refs` as held by `message_id`. Best-effort; returns how many failed.
+pub(crate) async fn register_refs(
+    state: &Arc<AppState>,
+    message_id: &str,
+    refs: Vec<AttachmentRef>,
+) -> usize {
     if refs.is_empty() {
         return 0;
     }
@@ -604,6 +630,69 @@ async fn cleanup_attachment(state: &Arc<AppState>, message_id: &str, att: &Attac
     }
 }
 
+/// Upload a queued edit's link-preview thumbnail (#1987), if it still has one
+/// waiting, and store the edit with the image filled in. Conditional on the
+/// envelope id, so a newer edit made meanwhile is left as it is.
+async fn upload_edit_preview(
+    state: &Arc<AppState>,
+    edit: super::edit_outbox::QueuedEdit,
+) -> Result<super::edit_outbox::QueuedEdit> {
+    let Some(json) = edit.link_preview.clone() else {
+        return Ok(edit);
+    };
+    let Some(updated) = super::outbox::upload_preview_thumbnail(
+        state,
+        &edit.target_message_id,
+        &edit.conversation_id,
+        &json,
+    )
+    .await?
+    else {
+        return Ok(edit);
+    };
+    {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let tx = db.conn().unchecked_transaction()?;
+        tx.execute(
+            "UPDATE outbox_edit SET link_preview = ?1 WHERE target_message_id = ?2 AND envelope_id = ?3",
+            rusqlite::params![updated, edit.target_message_id, edit.envelope_id],
+        )?;
+        super::outbox::store_preview_thumbnail_on(&tx, &edit.target_message_id, None)?;
+        tx.commit()?;
+    }
+    Ok(super::edit_outbox::QueuedEdit {
+        link_preview: Some(updated),
+        ..edit
+    })
+}
+
+/// Ask the DS to stop counting `image` as held by `message_id` (#1987): an edit
+/// replaced it. Best-effort; a failure leaves the file until the message is deleted.
+async fn release_preview_ref(
+    state: &Arc<AppState>,
+    message_id: &str,
+    image: &crate::commands::link_preview::PreviewImage,
+) {
+    let Some(delete_token) = super::delete_capability::envelope_delete_token(state, message_id).await
+    else {
+        return;
+    };
+    let body = pollis_api::messages::AttachmentReleaseBody {
+        content_hash: image.hash.clone(),
+        message_id: message_id.to_string(),
+        delete_token,
+    };
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
+        crate::diag!(
+            "[edit_message] failed to release replaced preview thumbnail {} (msg {message_id}): {e}",
+            image.hash
+        );
+    }
+}
+
 /// Edit a message through the edit outbox (#1555).
 ///
 /// Stored first; the row takes the new text only once the DS holds the envelope. Failures stay queued.
@@ -616,20 +705,43 @@ pub async fn edit_message(
     new_content: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    edit_message_with_preview(conversation_id, message_id, user_id, new_content, None, state).await
+}
+
+/// [`edit_message`] carrying the edit bar's link preview (#1987).
+///
+/// An edit rebuilds the message: the new preview (checked against the new
+/// text) replaces the old one, and no preview means the edited message has
+/// none. The replaced thumbnail is released at the DS once the edit lands.
+pub async fn edit_message_with_preview(
+    conversation_id: String,
+    message_id: String,
+    user_id: String,
+    new_content: String,
+    link_preview: Option<crate::commands::link_preview::LinkPreviewDraft>,
+    state: &Arc<AppState>,
+) -> Result<()> {
     // Finished before the app is suspended, if iOS gives it the time (`notify::lock::suspend`).
     let _sending = crate::notify::lock::suspend::send_started(None);
+    let outgoing = link_preview
+        .as_ref()
+        .and_then(|draft| crate::commands::link_preview::outgoing(draft, &new_content));
     {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        super::edit_outbox::enqueue_edit_on(
+        super::edit_outbox::enqueue_edit_with_preview_on(
             db.conn(),
             &conversation_id,
             &message_id,
             &user_id,
             &new_content,
+            outgoing.as_ref(),
         )?;
+    }
+    if let Some(draft) = &link_preview {
+        crate::commands::link_preview::release_draft(draft);
     }
     // Test-harness only: the process dies with the edit stored and nothing
     // posted (#1555) — the drain after restart must deliver it everywhere.
@@ -665,6 +777,9 @@ pub(super) async fn post_edit(
 
     // The custom-emoji use rule (#848, #1808); text it changes is posted as a new edit.
     let ruled = super::edit_outbox::apply_emoji_rule(state, edit).await?;
+    // The edit's preview thumbnail (#1987), uploaded like a send's: a failure
+    // leaves the edit queued and retryable.
+    let ruled = upload_edit_preview(state, ruled).await?;
     let edit = &ruled;
     let new_content = &edit.content;
     let envelope_id = &edit.envelope_id;
@@ -706,13 +821,13 @@ pub(super) async fn post_edit(
     ))
     .await;
 
-    // Size padding (issue #331 v2, §4.1) — same scheme as the send path:
-    // pad TEXT edits to a size bucket; leave attachment edits unpadded.
-    let plaintext: Vec<u8> = if is_attachment_content(new_content) {
-        new_content.as_bytes().to_vec()
-    } else {
-        super::framing::pad(new_content.as_bytes())
-    };
+    // Size padding (issue #331 v2, §4.1) and the link-preview trailer (#1987):
+    // the same framing as the send path.
+    let preview = edit
+        .link_preview
+        .as_deref()
+        .and_then(|json| crate::commands::link_preview::wire::from_stored(json, new_content));
+    let plaintext = super::send::frame_plaintext(new_content, None, preview.as_ref());
 
     // #1079: serialize behind any committer before sealing (see `seal::seal_under_lock`).
     let sealed =
@@ -755,10 +870,17 @@ pub(super) async fn post_edit(
     }
 
     // Delivered: the row takes the new text now, and only now.
-    {
+    let replaced = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        super::edit_outbox::confirm_edit_on(db.conn(), edit, &sealed.sent_at)?;
+        super::edit_outbox::confirm_edit_on(db.conn(), edit, &sealed.sent_at)?
+    };
+    // #1987: the new thumbnail is held by the message; the one it replaced is not. Best-effort.
+    if let Some(image) = preview.as_ref().and_then(|p| p.image.as_ref()) {
+        let _ = register_refs(state, message_id, vec![preview_ref(image)]).await;
+    }
+    if let Some(old) = replaced {
+        release_preview_ref(state, message_id, &old).await;
     }
 
     // Notify via LiveKit; non-fatal.

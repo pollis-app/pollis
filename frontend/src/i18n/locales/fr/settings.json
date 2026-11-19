@@ -117,6 +117,12 @@
     "itemStrict": "<mode>Strict</mode> — Ne se connecter qu'à travers le relais. Si aucun relais n'est joignable, l'envoi est suspendu plutôt que de révéler votre IP.",
     "applyError": "Impossible d'appliquer le mode relais : {{error}} — actuellement {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Aperçus de liens",
+    "label": "Générer des aperçus de liens",
+    "description": "Quand vous envoyez un lien, Pollis récupère la page depuis cet appareil pour créer un aperçu. Le site voit votre adresse IP, comme si vous l'aviez ouvert. Les personnes à qui vous l'envoyez ne contactent jamais le site.",
+    "strictNote": "La confidentialité réseau stricte désactive les aperçus de liens."
+  },
   "relayServing": {
     "heading": "Faire tourner un relais pour les autres",
     "intro": "Un choix distinct du réglage ci-dessus. Ce dernier décide si <dim>votre</dim> trafic passe par un relais. Celui-ci décide si le trafic <dim>d'autres personnes</dim> passe par <dim>votre appareil</dim>. Activer l'un n'active jamais l'autre.",
@@ -354,7 +360,7 @@
     "capturing": "Appuyez sur des touches…",
     "rebindLabel": "Réassigner {{name}}",
     "resetLabel": "Rétablir {{name}} par défaut",
-    "resetButton": "rétablir",
+    "resetButton": "Rétablir",
     "appToggleSidebar": "Afficher/masquer la barre latérale",
     "appToggleRightPanel": "Afficher/masquer le panneau de détails",
     "appToggleTerminal": "Afficher/masquer le terminal",
@@ -419,5 +425,29 @@
     "sourceLabel": "Source",
     "cargo": "Crate Rust",
     "npm": "Paquet npm"
+  },
+  "aliases": {
+    "heading": "Alias de groupe",
+    "rowDescription": "Un autre nom et une autre photo dans chaque groupe",
+    "intro": "Affichez un autre nom et une autre photo dans chaque groupe. Votre @identifiant reste le même partout.",
+    "empty": "Vous n'êtes encore dans aucun groupe.",
+    "mainProfile": "Profil principal",
+    "edit": "Modifier",
+    "useMain": "Utiliser mon profil principal",
+    "resetting": "Réinitialisation…",
+    "pageTitle": "Alias dans {{group}}",
+    "pageIntro": "Seul ce groupe voit ce nom et cette photo. Les messages directs gardent votre profil principal.",
+    "nameLabel": "Nom dans ce groupe",
+    "namePlaceholder": "Laissez vide pour utiliser {{name}}",
+    "nameInvalid": "Jusqu’à 100 caractères, sans < ni >.",
+    "pictureLabel": "Photo dans ce groupe",
+    "choosePicture": "Choisir une photo",
+    "mainPicture": "Utiliser la photo principale",
+    "applyAll": "Appliquer à tous mes groupes",
+    "applyAllHint": "Applique le nom ou la photo modifiés à chaque groupe dont vous faites partie. Les groupes rejoints plus tard commencent avec votre profil principal.",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Enregistré",
+    "saveFailed": "Impossible d'enregistrer votre alias"
   }
 }

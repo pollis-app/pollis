@@ -124,7 +124,8 @@
       "revoking": "باطلېږي…",
       "revokeLabel": "د {{name}} بلنه باطل کړئ",
       "revokeFailed": "بلنه باطل نه شوه."
-    }
+    },
+    "resetAlias": "مستعار نوم بیا تنظیم کړئ"
   },
   "kickMember": {
     "pageTitle": "غړی لرې کړئ",
@@ -143,7 +144,7 @@
     "acceptFailed": "بلنه ونه منل شوه. بیا هڅه وکړئ."
   },
   "inviteMember": {
-    "pageTitle": "غړي ته بلنه :: {{group}}",
+    "pageTitle": "غړي ته بلنه — {{group}}",
     "intro": "یو څوک <accent>{{name}}</accent> ته بلنه ورکړئ",
     "identifierLabel": "کارن نوم یا برېښنالیک",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +154,7 @@
     "sendFailed": "بلنه ونه لېږل شوه"
   },
   "joinRequests": {
-    "pageTitle": "د ګډون غوښتنې :: {{group}}",
+    "pageTitle": "د ګډون غوښتنې — {{group}}",
     "allPageTitle": "د ګډون غوښتنې",
     "pendingFor": "<accent>{{name}}</accent> کې د ګډون پاتې غوښتنې",
     "empty": "هېڅ پاتې غوښتنه نشته.",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} تاسو {{group}} ته بلنه درکړه",
     "inviteBody": "{{name}} تاسو ته بلنه درکړه",
     "inviteBodyUnknown": "تاسو یوه ګروپ ته بلنه لرئ"
+  },
+  "resetAlias": {
+    "pageTitle": "مستعار نوم بیا تنظیم کړئ",
+    "confirm": "په دې ګروپ کې د <strong>{{name}}</strong> (@{{handle}}) مستعار نوم بیا تنظیم کړو؟",
+    "consequence": "دلته به بیا د هغوی اصلي پروفایل ښکاري. هغوی کولی شي نوی مستعار نوم وټاکي.",
+    "confirmButton": "هو، بیا یې تنظیم کړئ",
+    "submitting": "بیا تنظیمیږي…",
+    "failed": "مستعار نوم بیا تنظیم نه شو"
   }
 }

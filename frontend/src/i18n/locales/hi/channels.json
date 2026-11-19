@@ -124,7 +124,8 @@
       "revoking": "वापस लिया जा रहा है…",
       "revokeLabel": "{{name}} का आमंत्रण वापस लें",
       "revokeFailed": "आमंत्रण वापस नहीं लिया जा सका।"
-    }
+    },
+    "resetAlias": "उपनाम रीसेट करें"
   },
   "kickMember": {
     "pageTitle": "सदस्य हटाएं",
@@ -143,7 +144,7 @@
     "acceptFailed": "आमंत्रण स्वीकार नहीं हो सका। फिर से कोशिश करें।"
   },
   "inviteMember": {
-    "pageTitle": "सदस्य को आमंत्रित करें :: {{group}}",
+    "pageTitle": "सदस्य को आमंत्रित करें — {{group}}",
     "intro": "किसी को <accent>{{name}}</accent> में आमंत्रित करें",
     "identifierLabel": "यूज़रनेम या ईमेल",
     "identifierPlaceholder": "friend@pollis.com",
@@ -153,7 +154,7 @@
     "sendFailed": "आमंत्रण नहीं भेजा जा सका"
   },
   "joinRequests": {
-    "pageTitle": "शामिल होने के अनुरोध :: {{group}}",
+    "pageTitle": "शामिल होने के अनुरोध — {{group}}",
     "allPageTitle": "शामिल होने के अनुरोध",
     "pendingFor": "<accent>{{name}}</accent> में शामिल होने के बाकी अनुरोध",
     "empty": "कोई अनुरोध बाकी नहीं है।",
@@ -221,5 +222,13 @@
     "inviteBodyToGroup": "{{name}} ने आपको {{group}} में आमंत्रित किया",
     "inviteBody": "{{name}} ने आपको आमंत्रित किया",
     "inviteBodyUnknown": "आपको एक ग्रुप में आमंत्रित किया गया है"
+  },
+  "resetAlias": {
+    "pageTitle": "उपनाम रीसेट करें",
+    "confirm": "इस ग्रुप में <strong>{{name}}</strong> (@{{handle}}) का उपनाम रीसेट करें?",
+    "consequence": "यहाँ फिर से उनकी मुख्य प्रोफ़ाइल दिखेगी। वे नया उपनाम रख सकते हैं।",
+    "confirmButton": "हाँ, रीसेट करें",
+    "submitting": "रीसेट हो रहा है…",
+    "failed": "उपनाम रीसेट नहीं हो सका"
   }
 }

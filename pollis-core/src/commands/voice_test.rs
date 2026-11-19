@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 
 use crate::commands::voice::{
-    get_device, start_mic_stream, start_speaker_stream, SendableStream,
+    open_device, start_mic_stream, start_speaker_stream, SendableStream, DEFAULT_DEVICE,
 };
 use crate::error::Result;
 use crate::state::AppState;
@@ -101,28 +101,15 @@ async fn ensure_output(
         }
     }
 
-    // Fall back to the OS default output if the device won't open.
+    // A device that is gone or will not open falls back to the OS default.
     let dev_name = device_name.to_string();
     let (stream, sample_rate, channels, buf, opened_name) = tokio::task::spawn_blocking(move || -> Result<_> {
-        let host = cpal::default_host();
-        let try_open = |name: Option<&str>| -> Result<_> {
-            let dev = get_device(&host, name, false)?;
-            start_speaker_stream(&dev, TEST_SPEAKER_RATE_HZ)
-        };
-        match try_open(Some(&dev_name)) {
-            Ok((s, sr, ch, buf)) => Ok((s, sr, ch, buf, dev_name)),
-            Err(e) => {
-                let was_explicit = !dev_name.is_empty() && dev_name != "default";
-                if !was_explicit {
-                    return Err(e);
-                }
-                crate::diag!(
-                    "[voice-test] speaker open failed for the selected device: {e} — falling back to OS default"
-                );
-                let (s, sr, ch, buf) = try_open(None)?;
-                Ok((s, sr, ch, buf, String::from("default")))
-            }
-        }
+        let opened = open_device(Some(&dev_name), false, |dev| start_speaker_stream(dev, TEST_SPEAKER_RATE_HZ))?;
+        let (s, sr, ch, buf) = opened.value;
+        // Remember the choice only when it is what opened, so a retry after a
+        // fallback reopens rather than reusing the default.
+        let fell_back = dev_name != DEFAULT_DEVICE && opened.device_id.as_deref() != Some(dev_name.as_str());
+        Ok((s, sr, ch, buf, if fell_back { DEFAULT_DEVICE.to_string() } else { dev_name }))
     })
     .await
     .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
@@ -188,9 +175,10 @@ pub async fn start_mic_test(
 
     let input_id = input_device_id.clone();
     let (mic_stream, _mic_rate) = tokio::task::spawn_blocking(move || {
-        let host = cpal::default_host();
-        let dev = get_device(&host, Some(&input_id), true)?;
-        start_mic_stream(&dev, frame_tx, is_muted)
+        open_device(Some(&input_id), true, |dev| {
+            start_mic_stream(dev, frame_tx.clone(), Arc::clone(&is_muted))
+        })
+        .map(|opened| opened.value)
     })
     .await
     .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;
@@ -329,9 +317,10 @@ pub async fn record_and_play_back(
 
     let input_id = input_device_id.clone();
     let (mic_stream, mic_rate) = tokio::task::spawn_blocking(move || {
-        let host = cpal::default_host();
-        let dev = get_device(&host, Some(&input_id), true)?;
-        start_mic_stream(&dev, frame_tx, is_muted)
+        open_device(Some(&input_id), true, |dev| {
+            start_mic_stream(dev, frame_tx.clone(), Arc::clone(&is_muted))
+        })
+        .map(|opened| opened.value)
     })
     .await
     .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;

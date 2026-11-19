@@ -56,7 +56,8 @@
     "empty": "Aucun message pour l'instant. Lancez la conversation.",
     "unknownAuthor": "Inconnu",
     "blockedAuthor": "utilisateur bloqué",
-    "blockedBody": "[bloqué]"
+    "blockedBody": "Bloqué",
+    "blockedBodyTerminal": "[bloqué]"
   },
   "replyBar": {
     "replyingTo": "en réponse à <name>{{name}}</name>",
@@ -65,7 +66,8 @@
   },
   "queue": {
     "heading": "File d'attente",
-    "pendingPlaceholder": "[Message en attente]",
+    "pendingPlaceholder": "Message en attente",
+    "pendingPlaceholderTerminal": "[Message en attente]",
     "cancel": "Annuler le message",
     "retry": "réessayer",
     "failedCount_one": "échec ×{{count}}",
@@ -97,8 +99,10 @@
   "preview": {
     "noMessages": "Aucun message pour l'instant",
     "withSender": "{{name}} : {{text}}",
-    "attachments_one": "[{{count}} pièce jointe]",
-    "attachments_other": "[{{count}} pièces jointes]"
+    "attachments_one": "{{count}} pièce jointe",
+    "attachments_other": "{{count}} pièces jointes",
+    "attachmentsTerminal_one": "[{{count}} pièce jointe]",
+    "attachmentsTerminal_other": "[{{count}} pièces jointes]"
   },
   "attachment": {
     "viewLabel": "Voir {{filename}}",
@@ -109,9 +113,11 @@
     "failedToLoad": "Échec du chargement",
     "failedToDownload": "Échec du téléchargement",
     "lightboxFetch": "charger",
-    "lightboxDone": "[ ok ]",
-    "lightboxDownload": "[télécharger]",
-    "lightboxClose": "[échap]",
+    "lightboxDone": "Ok",
+    "lightboxDoneTerminal": "[ ok ]",
+    "lightboxDownload": "Télécharger",
+    "lightboxDownloadTerminal": "[télécharger]",
+    "lightboxCloseTerminal": "[échap]",
     "sensitiveReveal": "Afficher le contenu sensible : {{filename}}",
     "sensitiveHide": "Masquer {{filename}}"
   },
@@ -121,6 +127,10 @@
     "loadTitle": "Charger le média depuis {{url}} — cela contacte directement ce site",
     "loadDescription": "Charger le média depuis {{url}}. Cela contacte directement ce site et lui révèle votre adresse IP.",
     "openLabel": "Ouvrir {{url}}"
+  },
+  "linkPreview": {
+    "loading": "Chargement de l'aperçu…",
+    "remove": "Retirer l'aperçu du lien"
   },
   "notify": {
     "newMessageTitle": "Nouveau message",

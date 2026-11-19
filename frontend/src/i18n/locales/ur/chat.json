@@ -64,7 +64,8 @@
     "empty": "ابھی کوئی پیغام نہیں۔ گفتگو شروع کریں۔",
     "unknownAuthor": "نامعلوم",
     "blockedAuthor": "بلاک کردہ صارف",
-    "blockedBody": "[بلاک کردہ]"
+    "blockedBody": "بلاک کردہ",
+    "blockedBodyTerminal": "[بلاک کردہ]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> کو جواب",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "قطار",
-    "pendingPlaceholder": "[زیر التواء پیغام]",
+    "pendingPlaceholder": "زیر التواء پیغام",
+    "pendingPlaceholderTerminal": "[زیر التواء پیغام]",
     "cancel": "پیغام منسوخ کریں",
     "retry": "دوبارہ کوشش کریں",
     "failedCount_one": "ناکام ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "ابھی کوئی پیغام نہیں",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} اٹیچمنٹ]",
-    "attachments_other": "[{{count}} اٹیچمنٹس]",
+    "attachments_one": "{{count}} اٹیچمنٹ",
+    "attachments_other": "{{count}} اٹیچمنٹس",
+    "attachmentsTerminal_one": "[{{count}} اٹیچمنٹ]",
+    "attachmentsTerminal_other": "[{{count}} اٹیچمنٹس]",
     "undecryptable": "ایک پیغام اس ڈیوائس پر ڈی کرپٹ نہیں ہو سکا"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "لوڈ نہیں ہو سکا",
     "failedToDownload": "ڈاؤن لوڈ نہیں ہو سکا",
     "lightboxFetch": "حاصل کریں",
-    "lightboxDone": "[ ہو گیا ]",
-    "lightboxDownload": "[ڈاؤن لوڈ]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "ہو گیا",
+    "lightboxDoneTerminal": "[ ہو گیا ]",
+    "lightboxDownload": "ڈاؤن لوڈ",
+    "lightboxDownloadTerminal": "[ڈاؤن لوڈ]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "حساس میڈیا دکھائیں: {{filename}}",
     "sensitiveHide": "{{filename}} چھپائیں"
   },
@@ -127,6 +133,10 @@
     "loadTitle": "{{url}} سے میڈیا لوڈ کریں — اس سے اس سائٹ سے براہ راست رابطہ ہوتا ہے",
     "loadDescription": "{{url}} سے میڈیا لوڈ کریں۔ اس سے اس سائٹ سے براہ راست رابطہ ہوتا ہے اور آپ کا IP ایڈریس اس پر ظاہر ہو جاتا ہے۔",
     "openLabel": "{{url}} کھولیں"
+  },
+  "linkPreview": {
+    "loading": "پیش منظر لوڈ ہو رہا ہے…",
+    "remove": "لنک کا پیش منظر ہٹائیں"
   },
   "notify": {
     "newMessageTitle": "نیا پیغام",

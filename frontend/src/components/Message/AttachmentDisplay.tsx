@@ -27,13 +27,8 @@ import { BlurhashCanvas } from "../Media/BlurhashCanvas";
 import { SensitiveCover } from "../Media/SensitiveCover";
 import { SensitiveHideButton } from "../Media/SensitiveHideButton";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
-
-const lightboxBtnStyle: React.CSSProperties = {
-  border: "2px solid transparent",
-  borderRadius: 4,
-  cursor: "pointer",
-  padding: "2px 8px",
-};
+import { IconButton } from "../ui/IconButton";
+import { LightboxActions } from "./LightboxActions";
 
 interface AttachmentDisplayProps {
   attachment: MessageAttachment;
@@ -106,13 +101,12 @@ export const AttachmentDisplay = observer(({
       onClick={sensitivity.reveal}
       aria-label={t("attachment.sensitiveReveal", { filename: attachment.filename })}
       title={attachment.filename}
-      className="border-0"
+      className="border-0 rounded-panel"
       style={{
         width: "100%",
         height: "100%",
         padding: 0,
         background: "transparent",
-        borderRadius: "0.5rem",
         overflow: "hidden",
         position: "relative",
         cursor: "pointer",
@@ -292,6 +286,18 @@ export const AttachmentDisplay = observer(({
     }
   };
 
+  // The file card's and the audio card's download: its icon follows the save's progress.
+  const downloadButton = (
+    <IconButton
+      onClick={() => void handleDownload()}
+      disabled={downloadStatus !== "idle"}
+      aria-label={t("attachment.downloadLabel", { filename: attachment.filename })}
+      className={`flex-shrink-0 ${downloadStatus === "done" ? "text-accent" : "text-dim"}`}
+    >
+      <DownloadStatusIcon status={downloadStatus} />
+    </IconButton>
+  );
+
   const renderLightboxBar = () => (
     <div
       className="flex items-center gap-3 mt-3"
@@ -306,27 +312,11 @@ export const AttachmentDisplay = observer(({
           {formatFileSize(attachment.file_size)}
         </span>
       )}
-      <button
-        onClick={handleDownload}
-        disabled={downloadStatus !== "idle"}
-        className="text-secondary font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
-        style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
-      >
-        {downloadStatus === "downloading" ? (
-          <>[ {t("attachment.lightboxFetch")} <LoadingSpinner size="sm" /> ]</>
-        ) : downloadStatus === "done" ? (
-          t("attachment.lightboxDone")
-        ) : (
-          t("attachment.lightboxDownload")
-        )}
-      </button>
-      <button
-        onClick={() => setViewerOpen(false)}
-        className="text-secondary font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
-        style={lightboxBtnStyle}
-      >
-        {t("attachment.lightboxClose")}
-      </button>
+      <LightboxActions
+        status={downloadStatus}
+        onDownload={() => void handleDownload()}
+        onClose={() => setViewerOpen(false)}
+      />
     </div>
   );
 
@@ -357,17 +347,7 @@ export const AttachmentDisplay = observer(({
           {formatFileSize(attachment.file_size)}
         </span>
       )}
-      {!isPending && (
-        <button
-          onClick={handleDownload}
-          disabled={downloadStatus !== "idle"}
-          aria-label={t("attachment.downloadLabel", { filename: attachment.filename })}
-          className={`flex-shrink-0 p-1 ${downloadStatus === "done" ? "text-accent" : "text-dim"}`}
-          style={{ lineHeight: 0 }}
-        >
-          <DownloadStatusIcon status={downloadStatus} />
-        </button>
-      )}
+      {!isPending && downloadButton}
     </div>
   );
 
@@ -383,12 +363,11 @@ export const AttachmentDisplay = observer(({
           disabled={!downloadUrl}
           aria-label={t("attachment.viewLabel", { filename: attachment.filename })}
           title={attachment.filename}
-          className="border-0"
+          className="border-0 rounded-panel"
           style={{
             ...cardBox,
             padding: 0,
             background: "transparent",
-            borderRadius: "0.5rem",
             overflow: "hidden",
             cursor: downloadUrl ? "zoom-in" : "default",
             display: "flex",
@@ -440,8 +419,8 @@ export const AttachmentDisplay = observer(({
       <>
         <div
           data-testid={cardTestId}
+          className="rounded-panel"
           style={{
-            borderRadius: 8,
             overflow: "hidden",
             width: "100%",
             maxWidth: 600,
@@ -455,12 +434,7 @@ export const AttachmentDisplay = observer(({
               onClick={() => setViewerOpen(true)}
             />
           ) : (
-            <div
-              className="flex items-center gap-2 px-3 py-2 bg-surface-high"
-              style={{
-                borderRadius: 8,
-              }}
-            >
+            <div className="flex items-center gap-2 px-3 py-2 bg-surface-high rounded-panel">
               <span className="text-secondary font-mono text-muted">
                 {isLoading ? t("attachment.loading") : error ? error : "…"}
               </span>
@@ -529,7 +503,7 @@ export const AttachmentDisplay = observer(({
           aria-label={t("attachment.openLabel", { filename: attachment.filename })}
           title={attachment.filename}
           // Filled, so a video with no frame is still a visible tile (#1837).
-          className="border-0 bg-surface-high"
+          className="border-0 bg-surface-high rounded-panel"
           style={{
             display: "flex",
             alignItems: "center",
@@ -539,7 +513,6 @@ export const AttachmentDisplay = observer(({
             cursor: isPending || isLoading ? "default" : "pointer",
             position: "relative",
             overflow: "hidden",
-            borderRadius: "0.5rem",
             flexShrink: 0,
           }}
         >
@@ -557,39 +530,15 @@ export const AttachmentDisplay = observer(({
               )}
             </div>
           )}
-          <div style={{
-            position: "relative",
-            zIndex: 1,
-            width: 28,
-            height: 28,
-            borderRadius: "50%",
-            background: "rgba(0,0,0,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}>
+          <div className="relative z-[1] flex h-7 w-7 items-center justify-center rounded-full bg-surface-high text-fg">
             {isLoading ? (
               <LoadingSpinner size="sm" />
             ) : (
-              <Play size={14} aria-hidden="true" fill="white" style={{ color: "white", marginInlineStart: 2 }} />
+              <Play size={14} aria-hidden="true" fill="currentColor" className="ms-0.5" />
             )}
           </div>
           {duration != null && (
-            <span
-              className="font-mono"
-              style={{
-                position: "absolute",
-                bottom: 4,
-                insetInlineEnd: 4,
-                zIndex: 2,
-                fontSize: 10,
-                lineHeight: 1,
-                padding: "2px 4px",
-                borderRadius: 2,
-                background: "rgba(0,0,0,0.65)",
-                color: "white",
-              }}
-            >
+            <span className="absolute bottom-1 end-1 z-[2] font-machine text-meta leading-none px-1 py-0.5 rounded-chip bg-surface-high text-fg">
               {formatDuration(duration)}
             </span>
           )}
@@ -605,10 +554,9 @@ export const AttachmentDisplay = observer(({
   return (
     <div
       data-testid={cardTestId}
-      className="flex items-center gap-2 px-2.5 py-1.5 min-w-0 border-2 border-line bg-surface-high"
+      className="flex items-center gap-2 px-2.5 py-1.5 min-w-0 border-2 border-line bg-surface-high rounded-panel"
       style={{
         maxWidth: 360,
-        borderRadius: 8,
       }}
     >
       <FileTypeIcon size={14} aria-hidden="true" className="text-dim" style={{ flexShrink: 0 }} />
@@ -636,21 +584,7 @@ export const AttachmentDisplay = observer(({
         <span className="text-body font-mono flex-shrink-0 text-muted">{t("attachment.error")}</span>
       ) : isPending ? (
         <span className="text-body font-mono flex-shrink-0 text-muted">…</span>
-      ) : (
-        <button
-          onClick={handleDownload}
-          disabled={downloadStatus !== "idle"}
-          aria-label={t("attachment.downloadLabel", { filename: attachment.filename })}
-          className={`flex-shrink-0 border-0 ${downloadStatus === "done" ? "text-accent" : "text-dim"}`}
-          style={{
-            lineHeight: 0,
-            background: "none",
-            padding: 0,
-          }}
-        >
-          <DownloadStatusIcon status={downloadStatus} />
-        </button>
-      )}
+      ) : downloadButton}
     </div>
   );
 });

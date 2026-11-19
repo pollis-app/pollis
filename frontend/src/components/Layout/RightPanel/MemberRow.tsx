@@ -5,29 +5,36 @@ import { useNavigate } from "@tanstack/react-router";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { PresenceDot } from "../../ui/PresenceDot";
+import { PressButton } from "../../ui/PressButton";
 
 interface MemberRowProps {
   userId: string;
   label: string;
   avatarKey?: string | null;
   isAdmin: boolean;
+  /** Set in a group: the profile opens as that group shows the member (#2003). */
+  groupId?: string;
 }
 
 /** One member; opens their profile. Modern shows the avatar, terminal a bare dot. */
 export const MemberRow: React.FC<MemberRowProps> = observer(
-  ({ userId, label, avatarKey, isAdmin }) => {
+  ({ userId, label, avatarKey, isAdmin, groupId }) => {
     const { t } = useTranslation("nav");
     const navigate = useNavigate();
     const isTerminal = useSkin() === "terminal";
 
     const rowClass = isTerminal
       ? "flex w-full items-center gap-1.5 border-s-2 border-transparent px-2.5 py-0.5 text-start text-row text-fg hover:bg-hover"
-      : "flex w-full items-center gap-2 rounded px-2 py-1 text-start hover:bg-hover";
+      : "flex w-full items-center gap-2 rounded-control px-2 py-1 text-start hover:bg-hover";
 
     return (
-      <button
-        type="button"
-        onClick={() => navigate({ to: "/user/$userId", params: { userId } })}
+      <PressButton
+        activateOn="click"
+        onClick={() =>
+          groupId
+            ? navigate({ to: "/groups/$groupId/members/$userId", params: { groupId, userId } })
+            : navigate({ to: "/user/$userId", params: { userId } })
+        }
         className={rowClass}
         data-testid={`right-panel-member-${userId}`}
       >
@@ -61,7 +68,7 @@ export const MemberRow: React.FC<MemberRowProps> = observer(
             {t("members.admin")}
           </span>
         )}
-      </button>
+      </PressButton>
     );
   },
 );

@@ -64,7 +64,8 @@
     "empty": "ਹਾਲੇ ਕੋਈ ਸੁਨੇਹਾ ਨਹੀਂ। ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਕਰੋ।",
     "unknownAuthor": "ਅਣਜਾਣ",
     "blockedAuthor": "ਬਲੌਕ ਕੀਤਾ ਵਰਤੋਂਕਾਰ",
-    "blockedBody": "[ਬਲੌਕ ਕੀਤਾ]"
+    "blockedBody": "ਬਲੌਕ ਕੀਤਾ",
+    "blockedBodyTerminal": "[ਬਲੌਕ ਕੀਤਾ]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> ਨੂੰ ਜਵਾਬ ਦੇ ਰਹੇ ਹੋ",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "ਕਤਾਰ",
-    "pendingPlaceholder": "[ਬਕਾਇਆ ਸੁਨੇਹਾ]",
+    "pendingPlaceholder": "ਬਕਾਇਆ ਸੁਨੇਹਾ",
+    "pendingPlaceholderTerminal": "[ਬਕਾਇਆ ਸੁਨੇਹਾ]",
     "cancel": "ਸੁਨੇਹਾ ਰੱਦ ਕਰੋ",
     "retry": "ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ",
     "failedCount_one": "ਅਸਫਲ ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "ਹਾਲੇ ਕੋਈ ਸੁਨੇਹਾ ਨਹੀਂ",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} ਅਟੈਚਮੈਂਟ]",
-    "attachments_other": "[{{count}} ਅਟੈਚਮੈਂਟਾਂ]",
+    "attachments_one": "{{count}} ਅਟੈਚਮੈਂਟ",
+    "attachments_other": "{{count}} ਅਟੈਚਮੈਂਟਾਂ",
+    "attachmentsTerminal_one": "[{{count}} ਅਟੈਚਮੈਂਟ]",
+    "attachmentsTerminal_other": "[{{count}} ਅਟੈਚਮੈਂਟਾਂ]",
     "undecryptable": "ਇੱਕ ਸੁਨੇਹਾ ਇਸ ਡਿਵਾਈਸ 'ਤੇ ਡੀਕ੍ਰਿਪਟ ਨਹੀਂ ਹੋ ਸਕਿਆ"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ",
     "failedToDownload": "ਡਾਊਨਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ",
     "lightboxFetch": "ਲਿਆਓ",
-    "lightboxDone": "[ ਹੋ ਗਿਆ ]",
-    "lightboxDownload": "[ਡਾਊਨਲੋਡ]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "ਹੋ ਗਿਆ",
+    "lightboxDoneTerminal": "[ ਹੋ ਗਿਆ ]",
+    "lightboxDownload": "ਡਾਊਨਲੋਡ",
+    "lightboxDownloadTerminal": "[ਡਾਊਨਲੋਡ]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "ਸੰਵੇਦਨਸ਼ੀਲ ਮੀਡੀਆ ਦਿਖਾਓ: {{filename}}",
     "sensitiveHide": "{{filename}} ਲੁਕਾਓ"
   },
@@ -127,6 +133,10 @@
     "loadTitle": "{{url}} ਤੋਂ ਮੀਡੀਆ ਲੋਡ ਕਰੋ — ਇਹ ਉਸ ਸਾਈਟ ਨਾਲ ਸਿੱਧਾ ਸੰਪਰਕ ਕਰਦਾ ਹੈ",
     "loadDescription": "{{url}} ਤੋਂ ਮੀਡੀਆ ਲੋਡ ਕਰੋ। ਇਹ ਉਸ ਸਾਈਟ ਨਾਲ ਸਿੱਧਾ ਸੰਪਰਕ ਕਰਦਾ ਹੈ ਅਤੇ ਤੁਹਾਡਾ IP ਪਤਾ ਉਸਨੂੰ ਦੱਸ ਦਿੰਦਾ ਹੈ।",
     "openLabel": "{{url}} ਖੋਲ੍ਹੋ"
+  },
+  "linkPreview": {
+    "loading": "ਝਲਕ ਲੋਡ ਹੋ ਰਹੀ ਹੈ…",
+    "remove": "ਲਿੰਕ ਦੀ ਝਲਕ ਹਟਾਓ"
   },
   "notify": {
     "newMessageTitle": "ਨਵਾਂ ਸੁਨੇਹਾ",

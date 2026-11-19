@@ -1,0 +1,199 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+  - fresh-account
+---
+# GROUP ALIASES (#2003) — Self → Group aliases: set a name and a photo in one
+# group, see them on your own message rows there, apply a name to every group,
+# and go back to the main profile in one group. Self-contained (two groups of
+# your own). Other people's aliases, mentions, the member list and an admin's
+# reset are the two-client `group-aliases` flow.
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "group-aliases"
+- tapOn:
+    id: "tab-groups"
+
+# Two groups, each with #General.
+- tapOn:
+    id: "btn-add-group"
+    optional: true
+# The "+" sheet animates in (slower on iPad).
+- extendedWaitUntil:
+    visible:
+      id: "btn-create-group"
+    timeout: 10000
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "Alias Work"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "Alias Work"
+# Now there is a group: create lives in the "+" sheet at the end of the pill strip.
+- extendedWaitUntil:
+    visible:
+      id: "btn-add-group"
+    timeout: 15000
+- tapOn:
+    id: "btn-add-group"
+# The "+" sheet animates in (slower on iPad).
+- extendedWaitUntil:
+    visible:
+      id: "btn-create-group"
+    timeout: 10000
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "Alias Club"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "Alias Club"
+
+# No backfill: every group starts on the main profile.
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-aliases"
+- assertVisible:
+    id: "screen-self-aliases"
+- extendedWaitUntil:
+    visible: "Alias Work, Main profile"
+    timeout: 30000
+- assertVisible: "Alias Club, Main profile"
+- takeScreenshot: aliases-01-list
+
+# Work: a name and a photo, shown only there.
+- tapOn: "Alias Work, Main profile"
+- assertVisible:
+    id: "screen-self-alias"
+- tapOn:
+    id: "input-alias-name"
+- inputText: "Mia at Work"
+# Return dismisses a single-line field (hideKeyboard finds no action here).
+- pressKey: Enter
+- addMedia:
+    - "../fixtures/profile-photo.png"
+- tapOn:
+    id: "btn-alias-photo-change"
+- assertVisible:
+    id: "sheet-avatar"
+- runFlow: ../subflows/pick-square-photo.yaml
+- extendedWaitUntil:
+    visible:
+      id: "avatar-alias-preview"
+    timeout: 15000
+- tapOn:
+    id: "btn-alias-save"
+- extendedWaitUntil:
+    visible:
+      id: "text-alias-saved"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "avatar-alias-editor-photo"
+    timeout: 30000
+- takeScreenshot: aliases-02-work-saved
+
+# Apply to all: the name lands in every group you are in; Club gets no photo.
+- tapOn:
+    id: "input-alias-name"
+- eraseText: 20
+- inputText: "Mia everywhere"
+# Return dismisses a single-line field (hideKeyboard finds no action here).
+- pressKey: Enter
+- tapOn:
+    id: "toggle-alias-apply-all"
+- tapOn:
+    id: "btn-alias-save"
+- extendedWaitUntil:
+    visible:
+      id: "text-alias-saved"
+    timeout: 60000
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible: "Alias Club, Mia everywhere"
+    timeout: 30000
+- assertVisible: "Alias Work, Mia everywhere"
+- assertVisible:
+    id: "avatar-alias-.*-photo"
+- takeScreenshot: aliases-03-applied-to-all
+
+# Your own messages in that group carry the alias and its photo.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-groups"
+- tapOn: "Alias Work"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "Alias Work, .*"
+    timeout: 30000
+- tapOn: "General"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "input-composer"
+- inputText: "hello under an alias"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: "Mia everywhere: hello under an alias, .*"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "row-message-.*-avatar-photo"
+    timeout: 30000
+- takeScreenshot: aliases-04-own-message
+# iPad shows the chat beside the group: no back there.
+- tapOn:
+    id: "btn-back"
+    optional: true
+
+# "Use my main profile" in Club only. With the composer still focused (iPad
+# keeps the chat on screen), the first tap on the tab bar only closes the keyboard.
+- tapOn:
+    id: "tab-self"
+- runFlow:
+    when:
+      notVisible:
+        id: "row-self-aliases"
+    commands:
+      - tapOn:
+          id: "tab-self"
+- tapOn:
+    id: "row-self-aliases"
+- tapOn: "Alias Club, Mia everywhere"
+- assertVisible:
+    id: "screen-self-alias"
+- tapOn:
+    id: "btn-alias-use-main"
+- extendedWaitUntil:
+    visible:
+      id: "text-alias-saved"
+    timeout: 60000
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible: "Alias Club, Main profile"
+    timeout: 30000
+- assertVisible: "Alias Work, Mia everywhere"
+- takeScreenshot: aliases-05-club-reset

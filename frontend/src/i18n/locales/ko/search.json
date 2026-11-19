@@ -8,7 +8,8 @@
     "permalinkResolving": "메시지 여는 중…",
     "noMatches": "일치하는 항목이 없습니다",
     "emptyHint": "채널, 음성 채널, DM, 사용자 또는 설정 페이지로 이동",
-    "live": "[라이브]",
+    "live": "라이브",
+    "liveTerminal": "[라이브]",
     "searchMessagesFor": "\"{{query}}\"(으)로 메시지 검색"
   },
   "pages": {

@@ -64,7 +64,8 @@
     "empty": "Babu saƙonni tukuna. Fara tattaunawar.",
     "unknownAuthor": "Ba a sani ba",
     "blockedAuthor": "mai amfani da aka toshe",
-    "blockedBody": "[an toshe]"
+    "blockedBody": "An toshe",
+    "blockedBodyTerminal": "[an toshe]"
   },
   "replyBar": {
     "replyingTo": "ana amsa wa <name>{{name}}</name>",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "Layin jira",
-    "pendingPlaceholder": "[Saƙo mai jira]",
+    "pendingPlaceholder": "Saƙo mai jira",
+    "pendingPlaceholderTerminal": "[Saƙo mai jira]",
     "cancel": "Soke saƙo",
     "retry": "sake gwadawa",
     "failedCount_one": "ya kasa ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "Babu saƙonni tukuna",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[abin haɗawa]",
-    "attachments_other": "[abubuwan haɗawa {{count}}]",
+    "attachments_one": "Abin haɗawa",
+    "attachments_other": "Abubuwan haɗawa {{count}}",
+    "attachmentsTerminal_one": "[abin haɗawa]",
+    "attachmentsTerminal_other": "[abubuwan haɗawa {{count}}]",
     "undecryptable": "Ba a iya buɗe ɓoyewar wani saƙo a wannan na'ura ba"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "Ba a iya lodawa ba",
     "failedToDownload": "Ba a iya saukewa ba",
     "lightboxFetch": "ɗauko",
-    "lightboxDone": "[ an gama ]",
-    "lightboxDownload": "[sauke]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "An gama",
+    "lightboxDoneTerminal": "[ an gama ]",
+    "lightboxDownload": "Sauke",
+    "lightboxDownloadTerminal": "[sauke]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "Nuna kafar sirri: {{filename}}",
     "sensitiveHide": "Ɓoye {{filename}}"
   },
@@ -127,6 +133,10 @@
     "loadTitle": "Loda kafa daga {{url}} — wannan yana tuntuɓar shafin kai tsaye",
     "loadDescription": "Loda kafa daga {{url}}. Wannan yana tuntuɓar shafin kai tsaye kuma yana bayyana masa adireshin IP ɗinku.",
     "openLabel": "Buɗe {{url}}"
+  },
+  "linkPreview": {
+    "loading": "Ana loda samfoti…",
+    "remove": "Cire samfotin mahaɗi"
   },
   "notify": {
     "newMessageTitle": "Sabon saƙo",

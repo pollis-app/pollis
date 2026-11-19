@@ -64,7 +64,8 @@
     "empty": "अभी कोई मैसेज नहीं है। बातचीत शुरू करें।",
     "unknownAuthor": "अनजान",
     "blockedAuthor": "ब्लॉक किया गया यूज़र",
-    "blockedBody": "[ब्लॉक किया गया]"
+    "blockedBody": "ब्लॉक किया गया",
+    "blockedBodyTerminal": "[ब्लॉक किया गया]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name> को जवाब दे रहे हैं",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "कतार",
-    "pendingPlaceholder": "[बाकी मैसेज]",
+    "pendingPlaceholder": "बाकी मैसेज",
+    "pendingPlaceholderTerminal": "[बाकी मैसेज]",
     "cancel": "मैसेज रद्द करें",
     "retry": "फिर से कोशिश करें",
     "failedCount_one": "नहीं भेजा जा सका ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "अभी कोई मैसेज नहीं",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} अटैचमेंट]",
-    "attachments_other": "[{{count}} अटैचमेंट]",
+    "attachments_one": "{{count}} अटैचमेंट",
+    "attachments_other": "{{count}} अटैचमेंट",
+    "attachmentsTerminal_one": "[{{count}} अटैचमेंट]",
+    "attachmentsTerminal_other": "[{{count}} अटैचमेंट]",
     "undecryptable": "एक मैसेज इस डिवाइस पर डिक्रिप्ट नहीं हो सका"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "लोड नहीं हो सका",
     "failedToDownload": "डाउनलोड नहीं हो सका",
     "lightboxFetch": "लाएं",
-    "lightboxDone": "[ हो गया ]",
-    "lightboxDownload": "[डाउनलोड]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "हो गया",
+    "lightboxDoneTerminal": "[ हो गया ]",
+    "lightboxDownload": "डाउनलोड",
+    "lightboxDownloadTerminal": "[डाउनलोड]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "संवेदनशील मीडिया दिखाएं: {{filename}}",
     "sensitiveHide": "{{filename}} छिपाएं"
   },
@@ -127,6 +133,10 @@
     "loadTitle": "{{url}} से मीडिया लोड करें — यह उस साइट से सीधे कनेक्ट करता है",
     "loadDescription": "{{url}} से मीडिया लोड करें। यह उस साइट से सीधे कनेक्ट करता है और उसे आपका IP पता दिखा देता है।",
     "openLabel": "{{url}} खोलें"
+  },
+  "linkPreview": {
+    "loading": "प्रीव्यू लोड हो रहा है…",
+    "remove": "लिंक प्रीव्यू हटाएँ"
   },
   "notify": {
     "newMessageTitle": "नया मैसेज",

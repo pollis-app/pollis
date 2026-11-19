@@ -64,7 +64,8 @@
     "empty": "இன்னும் செய்திகள் இல்லை. உரையாடலைத் தொடங்குங்கள்.",
     "unknownAuthor": "தெரியாதவர்",
     "blockedAuthor": "தடுக்கப்பட்ட பயனர்",
-    "blockedBody": "[தடுக்கப்பட்டது]"
+    "blockedBody": "தடுக்கப்பட்டது",
+    "blockedBodyTerminal": "[தடுக்கப்பட்டது]"
   },
   "replyBar": {
     "replyingTo": "<name>{{name}}</name>-க்குப் பதிலளிக்கிறீர்கள்",
@@ -73,7 +74,8 @@
   },
   "queue": {
     "heading": "வரிசை",
-    "pendingPlaceholder": "[நிலுவையில் உள்ள செய்தி]",
+    "pendingPlaceholder": "நிலுவையில் உள்ள செய்தி",
+    "pendingPlaceholderTerminal": "[நிலுவையில் உள்ள செய்தி]",
     "cancel": "செய்தியை ரத்துசெய்",
     "retry": "மீண்டும் முயல்க",
     "failedCount_one": "தோல்வி ×{{count}}",
@@ -102,8 +104,10 @@
   "preview": {
     "noMessages": "இன்னும் செய்திகள் இல்லை",
     "withSender": "{{name}}: {{text}}",
-    "attachments_one": "[{{count}} இணைப்பு]",
-    "attachments_other": "[{{count}} இணைப்புகள்]",
+    "attachments_one": "{{count}} இணைப்பு",
+    "attachments_other": "{{count}} இணைப்புகள்",
+    "attachmentsTerminal_one": "[{{count}} இணைப்பு]",
+    "attachmentsTerminal_other": "[{{count}} இணைப்புகள்]",
     "undecryptable": "இந்தச் சாதனத்தில் ஒரு செய்தியை மறைவிலக்க முடியவில்லை"
   },
   "attachment": {
@@ -115,9 +119,11 @@
     "failedToLoad": "ஏற்ற முடியவில்லை",
     "failedToDownload": "பதிவிறக்க முடியவில்லை",
     "lightboxFetch": "பெறு",
-    "lightboxDone": "[ முடிந்தது ]",
-    "lightboxDownload": "[பதிவிறக்கு]",
-    "lightboxClose": "[esc]",
+    "lightboxDone": "முடிந்தது",
+    "lightboxDoneTerminal": "[ முடிந்தது ]",
+    "lightboxDownload": "பதிவிறக்கு",
+    "lightboxDownloadTerminal": "[பதிவிறக்கு]",
+    "lightboxCloseTerminal": "[esc]",
     "sensitiveReveal": "உணர்திறன் மிக்க மீடியாவைக் காட்டு: {{filename}}",
     "sensitiveHide": "{{filename}}-ஐ மறை"
   },
@@ -127,6 +133,10 @@
     "loadTitle": "{{url}}-இலிருந்து மீடியாவை ஏற்று — இது அந்தத் தளத்தை நேரடியாகத் தொடர்புகொள்ளும்",
     "loadDescription": "{{url}}-இலிருந்து மீடியாவை ஏற்று. இது அந்தத் தளத்தை நேரடியாகத் தொடர்புகொண்டு உங்கள் IP முகவரியை அதற்கு வெளிப்படுத்தும்.",
     "openLabel": "{{url}}-ஐத் திற"
+  },
+  "linkPreview": {
+    "loading": "முன்னோட்டம் ஏற்றப்படுகிறது…",
+    "remove": "இணைப்பு முன்னோட்டத்தை அகற்று"
   },
   "notify": {
     "newMessageTitle": "புதிய செய்தி",

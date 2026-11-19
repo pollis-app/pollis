@@ -1,11 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import {
-  ChevronDown,
-  ChevronRight,
-  BellOff,
-  Hash,
+  FolderPlus,
+  Plus,
   Volume2,
   Settings as SettingsIcon,
   Users,
@@ -25,7 +23,6 @@ import {
 import { useMutedChannels, useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
-import { warmVoiceChannel } from "../../utils/voiceWarmup";
 import { usePeerVerificationMap } from "../../hooks/queries/useUserProfile";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
@@ -35,22 +32,19 @@ import { useSkin } from "../../hooks/queries/usePreferences";
 import { probeRender } from "../../utils/renderProbe";
 import { PresenceAvatar } from "../ui/PresenceAvatar";
 import { SidebarProfilePanel } from "./SidebarProfilePanel";
-import { VoiceChannelMembers } from "../Voice/VoiceChannelMembers";
 import { ResizeHandle } from "./ResizeHandle";
 import { usePanelWidth } from "./usePanelWidth";
-import { usePressActivation, type ActivateOn } from "../../hooks/usePressActivation";
+import type { ActivateOn } from "../../hooks/usePressActivation";
+import { PressButton } from "../ui/PressButton";
+import { PanelCloseRow } from "../ui/PanelCloseRow";
+import { IconButton } from "../ui/IconButton";
+import { usePersistentIdSet } from "../../hooks/usePersistentIdSet";
+import { SidebarRow as Row, SidebarUnreadBadge as UnreadBadge, sidebarIconProps as iconProps } from "./SidebarRow";
+import { SidebarGroupChannels } from "./SidebarGroupChannels";
 
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
-
-// Sized in rem to track the font preference; the rem `size-[…]` class beats the SVG attribute.
-const iconProps = {
-  size: 14,
-  className: "size-[0.933rem] shrink-0",
-} as const;
-
-// Logical `ps-` indent, so RTL nests from the right.
-const indentPadClass = (indent: number): string =>
-  indent >= 2 ? "ps-[2.8rem]" : "ps-[1.733rem]";
+// Per device, like collapsed groups; never synced (#2031).
+const COLLAPSED_CATEGORIES_KEY = "pollis.sidebar.collapsedCategories";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -70,7 +64,6 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
     onToggle,
   );
 
-  const closePress = usePressActivation(onToggle, "press");
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: mutedChannels } = useMutedChannels();
@@ -88,33 +81,13 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   );
   const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
 
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
-    try {
-      const raw = localStorage.getItem(COLLAPSED_GROUPS_KEY);
-      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-    } catch {
-      return new Set();
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...collapsedGroups]));
-    } catch {
-      /* localStorage unavailable — non-fatal */
-    }
-  }, [collapsedGroups]);
-
-  const toggleGroup = (id: string) => {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+  const [collapsedGroups, toggleGroup] = usePersistentIdSet(COLLAPSED_GROUPS_KEY);
+  const [collapsedCategories, toggleCategory] = usePersistentIdSet(COLLAPSED_CATEGORIES_KEY);
+  // The admin "+" on a group row (#2031): its in-place menu, and the inline new-category field.
+  const [addMenuGroupId, setAddMenuGroupId] = useState<string | null>(null);
+  const [newCategoryGroupId, setNewCategoryGroupId] = useState<string | null>(null);
+  const voiceState = appStore.voiceState;
+  const connectedVoiceId = voiceState.kind === "idle" ? null : voiceState.channelId;
 
   const totalDmUnread = useMemo(
     () => appStore.unreadFor(dmConversations),
@@ -188,6 +161,8 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
             const isCollapsed = collapsedGroups.has(group.id);
             const groupUnread = appStore.unreadFor(group.channels);
             const isGroupActive = activeGroupId === group.id;
+            const isAdmin = group.current_user_role === "admin";
+            const addMenuOpen = addMenuGroupId === group.id;
             return (
               <li key={group.id}>
                 <Row
@@ -204,65 +179,68 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                   }}
                   label={group.name}
                   badge={isCollapsed && groupUnread > 0 ? groupUnread : null}
+                  testId={`group-${group.id}`}
+                  actionsPinned={addMenuOpen}
+                  actions={
+                    isAdmin ? (
+                      <IconButton
+                        aria-label={t("channels:categories.addToGroup", { name: group.name })}
+                        aria-expanded={addMenuOpen}
+                        data-testid={`sidebar-group-add-${group.id}`}
+                        onClick={() => setAddMenuGroupId(addMenuOpen ? null : group.id)}
+                      >
+                        <Plus {...iconProps} />
+                      </IconButton>
+                    ) : undefined
+                  }
                 />
-                {!isCollapsed &&
-                  group.channels.map((ch) => {
-                    const isVoice = ch.channel_type === "voice";
-                    const unread = unreadCounts[ch.id] ?? 0;
-                    const voiceCount = isVoice ? voiceCounts[ch.id] ?? 0 : 0;
-                    const isActive = isVoice ? activeVoiceId === ch.id : activeChannelId === ch.id;
-                    // Muted (#1431): dimmed plus a bell-off mark, not colour alone.
-                    const isMuted = mutedChannels?.has(ch.id) ?? false;
-                    const badge = isVoice
-                      ? voiceCount > 0
-                        ? voiceCount
-                        : null
-                      : unread > 0
-                        ? unread
-                        : null;
-                    return (
-                      <React.Fragment key={ch.id}>
-                      {/* Voice can auto-join (others see it), so stays on click (#1529). */}
-                      <Row
-                        activateOn={isVoice ? "click" : "press"}
-                        indent={2}
-                        isActive={isActive}
-                        onClick={() =>
-                          isVoice
-                            ? router.navigate({
-                              to: "/groups/$groupId/voice/$channelId",
-                              params: { groupId: group.id, channelId: ch.id },
-                            })
-                            : router.navigate({
-                              to: "/groups/$groupId/channels/$channelId",
-                              params: { groupId: group.id, channelId: ch.id },
-                            })
+                {addMenuOpen && (
+                  <div data-testid={`sidebar-group-add-menu-${group.id}`}>
+                    <Row
+                      indent={2}
+                      isActive={false}
+                      leading={<Plus {...iconProps} />}
+                      label={t("channels:categories.newChannel")}
+                      testId={`group-${group.id}-new-channel`}
+                      onClick={() => {
+                        setAddMenuGroupId(null);
+                        appStore.setSelectedGroupId(group.id);
+                        appStore.setNewChannelCategoryId(null);
+                        router.navigate({ to: "/groups/$groupId/channels/new", params: { groupId: group.id } });
+                      }}
+                    />
+                    <Row
+                      indent={2}
+                      isActive={false}
+                      leading={<FolderPlus {...iconProps} />}
+                      label={t("channels:categories.newCategory")}
+                      testId={`group-${group.id}-new-category`}
+                      onClick={() => {
+                        setAddMenuGroupId(null);
+                        if (isCollapsed) {
+                          toggleGroup(group.id);
                         }
-                        onIntent={isVoice ? () => warmVoiceChannel(ch.id) : undefined}
-                        leading={isVoice ? <Volume2 {...iconProps} /> : <Hash {...iconProps} />}
-                        label={ch.name}
-                        badge={badge}
-                        dimmed={isMuted}
-                        trailing={
-                          isMuted ? (
-                            <span
-                              data-testid={`sidebar-channel-muted-${ch.id}`}
-                              title={t("channels:channel.mutedHint")}
-                              aria-label={t("channels:channel.mutedHint")}
-                              className="inline-flex shrink-0"
-                            >
-                              <BellOff {...iconProps} />
-                            </span>
-                          ) : null
-                        }
-                      />
-                      {/* Who is in the room, under the row (Discord); the roster is only fetched for non-empty rooms. */}
-                      {isVoice && (voiceCount > 0 || isActive) && (
-                        <VoiceChannelMembers channelId={ch.id} enabled={voiceCount > 0} />
-                      )}
-                      </React.Fragment>
-                    );
-                  })}
+                        setNewCategoryGroupId(group.id);
+                      }}
+                    />
+                  </div>
+                )}
+                {!isCollapsed && (
+                  <SidebarGroupChannels
+                    group={group}
+                    isAdmin={isAdmin}
+                    collapsedCategories={collapsedCategories}
+                    toggleCategory={toggleCategory}
+                    activeChannelId={activeChannelId}
+                    activeVoiceId={activeVoiceId}
+                    connectedVoiceId={connectedVoiceId}
+                    unreadCounts={unreadCounts}
+                    voiceCounts={voiceCounts}
+                    mutedChannels={mutedChannels}
+                    creatingCategory={newCategoryGroupId === group.id}
+                    onCreatingCategoryDone={() => setNewCategoryGroupId(null)}
+                  />
+                )}
               </li>
             );
           })}
@@ -371,22 +349,13 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
       {skin === "modern" ? (
         <SidebarProfilePanel />
       ) : (
-        <button
-          type="button"
+        <PanelCloseRow
           data-testid="sidebar-close"
-          {...closePress}
-          aria-label={t("sidebar.close", { shortcut: toggleSidebarLabel })}
-          title={t("sidebar.close", { shortcut: toggleSidebarLabel })}
-          className="flex shrink-0 items-center gap-2 px-2.5 min-h-composer-flush border-t border-line text-secondary text-start cursor-pointer transition-colors text-muted hover:text-fg"
-        >
-          <span className="flex-1">{t("common:actions.close")}</span>
-          <kbd
-            aria-hidden="true"
-            className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-meta leading-[1.2]"
-          >
-            {toggleSidebarLabel}
-          </kbd>
-        </button>
+          onClick={onToggle}
+          label={t("common:actions.close")}
+          shortcut={toggleSidebarLabel}
+          ariaLabel={t("sidebar.close", { shortcut: toggleSidebarLabel })}
+        />
       )}
 
       <ResizeHandle edge="end" label={t("sidebar.resize")} {...handleProps} />
@@ -408,7 +377,6 @@ interface SectionHeaderProps {
 }
 
 const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isActive, onClick, badge, bordered, borderedBottom, activateOn }) => {
-  const press = usePressActivation(onClick, activateOn);
   const cls = [
     "sticky top-0 z-[1] flex w-full h-bar items-center gap-1.5 px-2.5",
     "uppercase tracking-[0.08em] text-start cursor-pointer",
@@ -420,106 +388,15 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isAc
     .filter(Boolean)
     .join(" ");
   return (
-    <button
-      type="button"
-      {...press}
+    <PressButton
+      activateOn={activateOn ?? "click"}
+      onClick={onClick}
       className={cls}
       data-testid={`sidebar-row-${testId}`}
     >
       {icon}
       <span className="flex-1 leading-[100%] text-[0.8rem]">{label}</span>
       {badge != null && <UnreadBadge count={badge} muted />}
-    </button>
+    </PressButton>
   );
 };
-
-interface RowChevron {
-  isCollapsed: boolean;
-  onToggle: () => void;
-  ariaLabel: string;
-}
-
-interface RowProps {
-  indent: number;
-  isActive: boolean;
-  onClick: () => void;
-  leading?: React.ReactNode;
-  chevron?: RowChevron;
-  label: string;
-  badge?: number | null;
-  trailing?: React.ReactNode;
-  /** `data-testid` (`sidebar-row-*`, #932), separate from the translated label (#855). */
-  testId?: string;
-  /** A muted channel (#1431). */
-  dimmed?: boolean;
-  /** `"press"`: pointer-down (#1529). */
-  activateOn?: ActivateOn;
-  /** Hover or keyboard focus: the user is about to act on this row (voice warmup, #176). */
-  onIntent?: () => void;
-}
-
-const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed, activateOn, onIntent }) => {
-  const press = usePressActivation(onClick, activateOn);
-  const chevronPress = usePressActivation(
-    chevron
-      ? (e: React.MouseEvent<HTMLButtonElement>) => {
-          e.stopPropagation();
-          chevron.onToggle();
-        }
-      : undefined,
-    activateOn,
-  );
-  return (
-    <div
-      data-active={isActive ? "true" : "false"}
-      data-muted={dimmed ? "true" : undefined}
-      onMouseEnter={onIntent}
-      onFocus={onIntent}
-      className={`sidebar-row flex w-full items-stretch border-s-2 transition-colors ${
-        isActive
-          ? "bg-hover border-accent text-accent"
-          : `bg-transparent border-transparent hover:bg-hover ${dimmed ? "text-muted" : "text-fg"}`
-      }`}
-    >
-      {chevron && (
-        <button
-          type="button"
-          tabIndex={-1}
-          {...chevronPress}
-          aria-label={chevron.ariaLabel}
-          className={`inline-flex items-center pe-0 cursor-pointer text-inherit ${indentPadClass(indent)}`}
-        >
-          {chevron.isCollapsed ? (
-            <ChevronRight {...iconProps} className={`${iconProps.className} rtl-mirror`} />
-          ) : (
-            <ChevronDown {...iconProps} />
-          )}
-        </button>
-      )}
-      <button
-        type="button"
-        {...press}
-        data-testid={testId ? `sidebar-row-${testId}` : undefined}
-        className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pe-2.5 text-row text-start cursor-pointer text-inherit ${
-          chevron ? "ps-[0.4rem]" : indentPadClass(indent)
-        }`}
-      >
-        {leading}
-        {/* Isolated: user-generated names must not drag the badge in mixed-direction text. */}
-        <bdi className="flex-1 truncate">{label}</bdi>
-        {trailing}
-        {badge != null && <UnreadBadge count={badge} muted={dimmed} />}
-      </button>
-    </div>
-  );
-};
-
-const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
-  <span
-    className={`shrink-0 rounded px-1.5 py-0.5 text-meta leading-none text-bg ${
-      muted ? "bg-muted" : "bg-accent"
-    }`}
-  >
-    {count > 99 ? "99+" : count}
-  </span>
-);

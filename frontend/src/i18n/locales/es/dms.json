@@ -39,13 +39,13 @@
     "unknownSender": "Desconocido",
     "others_one": "(+{{count}} más)",
     "others_other": "(+{{count}} más)",
-    "accept": "aceptar",
-    "block": "bloquear"
+    "accept": "Aceptar",
+    "block": "Bloquear"
   },
   "blocked": {
     "pageTitle": "Usuarios bloqueados",
     "empty": "No hay usuarios bloqueados.",
-    "unblock": "desbloquear"
+    "unblock": "Desbloquear"
   },
   "profile": {
     "fallbackName": "Usuario",

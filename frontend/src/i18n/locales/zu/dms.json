@@ -39,13 +39,13 @@
     "unknownSender": "Akaziwa",
     "others_one": "(+{{count}} omunye)",
     "others_other": "(+{{count}} abanye)",
-    "accept": "yamukela",
-    "block": "vimba"
+    "accept": "Yamukela",
+    "block": "Vimba"
   },
   "blocked": {
     "pageTitle": "Abasebenzisi Abavinjiwe",
     "empty": "Abekho abasebenzisi abavinjiwe.",
-    "unblock": "susa ukuvimba"
+    "unblock": "Susa ukuvimba"
   },
   "profile": {
     "fallbackName": "Umsebenzisi",

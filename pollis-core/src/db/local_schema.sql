@@ -62,8 +62,25 @@ CREATE TABLE IF NOT EXISTS message (
     -- notification never previews a transferred row (`notify::fetch`). Also
     -- added to existing DBs by `add_missing_columns`; must stay identical to
     -- its `ADDITIVE_COLUMNS` entry.
-    origin TEXT CHECK (origin IS NULL OR origin = 'transfer')
+    origin TEXT CHECK (origin IS NULL OR origin = 'transfer'),
+    -- The sender-built preview of the message's first link (#1987), as
+    -- `link_preview::wire::LinkPreview` JSON. Written only after
+    -- `wire::decode`/`from_stored` accepted it against this row's text; never
+    -- carried by history transfer. Cleared with `content` by the trigger below,
+    -- so a deleted message can never keep a preview. Also added to existing
+    -- DBs by `add_missing_columns`; must stay identical to its entry there.
+    link_preview TEXT
 );
+
+-- A message without text has no preview (#1987): every path that clears
+-- `content` (delete, redaction, retention, transfer merge) clears this too,
+-- without each having to remember it.
+CREATE TRIGGER IF NOT EXISTS message_link_preview_follows_content
+AFTER UPDATE OF content ON message
+WHEN NEW.content IS NULL AND NEW.link_preview IS NOT NULL
+BEGIN
+    UPDATE message SET link_preview = NULL WHERE id = NEW.id;
+END;
 
 -- Envelopes this device has already accounted for, that leave no `message`
 -- row of their own (#1312): ones it POSTED ('own') — under sealed sender
@@ -121,6 +138,11 @@ CREATE TABLE IF NOT EXISTS outbox_attachment (
     -- A video's bounded poster JPEG, base64 (#1837); written into the envelope
     -- as `pv`. Must stay identical to its `ADDITIVE_COLUMNS` entry in local.rs.
     poster       TEXT,
+    -- 1 for a link-preview thumbnail (#1987) rather than an attachment: it
+    -- uploads in the same pass but goes into the preview trailer, never `_att`,
+    -- so it is in no gallery, search result or export. Must stay identical to
+    -- its `ADDITIVE_COLUMNS` entry in local.rs.
+    link_preview INTEGER NOT NULL DEFAULT 0 CHECK (link_preview IN (0, 1)),
     PRIMARY KEY (message_id, position)
 );
 
@@ -147,6 +169,10 @@ CREATE TABLE IF NOT EXISTS outbox_edit (
     content           TEXT NOT NULL,
     send_state        TEXT NOT NULL DEFAULT 'pending'
                       CHECK (send_state IN ('pending', 'failed', 'rejected')),
+    -- The edit's link preview (#1987), `LinkPreview` JSON; NULL = the edited
+    -- message has none. Its thumbnail, until uploaded, is the target's
+    -- `outbox_attachment` row with `link_preview = 1`. Also in `ADDITIVE_COLUMNS`.
+    link_preview      TEXT,
     created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -222,6 +248,19 @@ CREATE TABLE IF NOT EXISTS user_cache (
     id         TEXT PRIMARY KEY,
     username   TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Per-group alias names (#2003) this device last read for each group, so a
+-- push for a group message names the sender as that group shows them without
+-- a network round trip. Refreshed whole on every read of the group's aliases
+-- (`commands::groups::aliases`); a miss falls back to the username, as before.
+-- Best-effort and disposable, like `user_cache`.
+CREATE TABLE IF NOT EXISTS group_alias_cache (
+    group_id     TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (group_id, user_id)
 );
 
 -- Delivery / read receipts for DM messages (#857).

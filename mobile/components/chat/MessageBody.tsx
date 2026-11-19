@@ -34,12 +34,15 @@ export function MessageBodyInline({
   text,
   mentionNames,
   selfName,
+  mentionLabels,
   emojiSize = 18,
   linkify = true,
 }: {
   text: string;
   mentionNames?: ReadonlySet<string>;
   selfName?: string | null;
+  /** Alias names by lowercased handle (#2003): a mention renders the alias, keeps the handle. */
+  mentionLabels?: ReadonlyMap<string, string>;
   emojiSize?: number;
   linkify?: boolean;
 }) {
@@ -62,7 +65,9 @@ export function MessageBodyInline({
       );
     }
     const isSelf = m.name === "all" || m.name === selfName;
-    nodes.push(<MentionToken key={`m-${i}`} name={m.raw} isSelf={isSelf} />);
+    nodes.push(
+      <MentionToken key={`m-${i}`} name={m.raw} label={mentionLabels?.get(m.name)} isSelf={isSelf} />,
+    );
     cursor = m.end;
   });
   if (cursor < text.length) {

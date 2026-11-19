@@ -74,6 +74,8 @@ pub async fn create_channel(
         description,
         channel_type,
         creator_id.to_string(),
+        // The TUI lists channels flat, in the DS's display order (#2031).
+        None,
         state,
     )
     .await?;

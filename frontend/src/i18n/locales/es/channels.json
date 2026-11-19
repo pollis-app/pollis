@@ -109,7 +109,7 @@
     "empty": "No hay miembros.",
     "self": "(tú)",
     "adminToggle": "admin",
-    "kick": "expulsar",
+    "kick": "Expulsar",
     "verified": "Contacto verificado",
     "keyChanged": "La clave de identidad ha cambiado: vuelve a verificar",
     "invited": {
@@ -120,7 +120,8 @@
       "revoking": "Revocando…",
       "revokeLabel": "Revocar la invitación de {{name}}",
       "revokeFailed": "No se pudo revocar la invitación."
-    }
+    },
+    "resetAlias": "Restablecer alias"
   },
   "kickMember": {
     "pageTitle": "Expulsar miembro",
@@ -134,12 +135,12 @@
     "pageTitle": "Invitaciones",
     "empty": "No hay invitaciones pendientes.",
     "invitedBy": "Invitación de {{name}}",
-    "accept": "aceptar",
-    "decline": "rechazar",
+    "accept": "Aceptar",
+    "decline": "Rechazar",
     "acceptFailed": "No se pudo aceptar la invitación. Inténtalo de nuevo."
   },
   "inviteMember": {
-    "pageTitle": "Invitar miembro :: {{group}}",
+    "pageTitle": "Invitar miembro — {{group}}",
     "intro": "Invita a alguien a <accent>{{name}}</accent>",
     "identifierLabel": "Nombre de usuario o correo",
     "identifierPlaceholder": "amigo@pollis.com",
@@ -149,13 +150,13 @@
     "sendFailed": "No se pudo enviar la invitación"
   },
   "joinRequests": {
-    "pageTitle": "Solicitudes de acceso :: {{group}}",
+    "pageTitle": "Solicitudes de acceso — {{group}}",
     "allPageTitle": "Solicitudes de acceso",
     "pendingFor": "Solicitudes pendientes para entrar en <accent>{{name}}</accent>",
     "empty": "No hay solicitudes pendientes.",
     "allEmpty": "No hay solicitudes de acceso pendientes.",
-    "approve": "aprobar",
-    "reject": "rechazar"
+    "approve": "Aprobar",
+    "reject": "Rechazar"
   },
   "joinByInvite": {
     "pageTitle": "Unirse a un grupo",
@@ -214,5 +215,13 @@
     "inviteBodyToGroup": "{{name}} te ha invitado a {{group}}",
     "inviteBody": "{{name}} te ha invitado",
     "inviteBodyUnknown": "Te han invitado a un grupo"
+  },
+  "resetAlias": {
+    "pageTitle": "Restablecer alias",
+    "confirm": "¿Restablecer el alias de <strong>{{name}}</strong> (@{{handle}}) en este grupo?",
+    "consequence": "Volverá a mostrar su perfil principal aquí. Puede definir un alias nuevo.",
+    "confirmButton": "Sí, restablecer",
+    "submitting": "Restableciendo…",
+    "failed": "No se pudo restablecer el alias"
   }
 }

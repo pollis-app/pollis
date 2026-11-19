@@ -6,6 +6,8 @@ import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { MessageBody } from "./MessageBody";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
+import { MessageLinkPreview } from "./MessageLinkPreview";
+import { matchPreviewLink } from "../../utils/linkPreview";
 import { getUsernameColor, getUsernameChipColor } from "../../utils/usernameColor";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
@@ -19,6 +21,7 @@ import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
 import { PressButton } from "../ui/PressButton";
 import { sentBeforeJoin } from "../../utils/replyQuote";
+import { aliasAvatar, aliasName } from "../../utils/groupAlias";
 
 interface MessageItemProps {
   message: Message;
@@ -90,7 +93,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const isOwn = message.sender_id === currentUserId;
   // Not delivered yet (#1335): no reply/react/pin/edit until it is.
   const isUnsent = !!message.outbox_id || message.id.startsWith("pending-");
-  const displayName = authorUsername ?? t("message.unknownAuthor");
+  const displayName = aliasName(ctx.aliases, message.sender_id, authorUsername ?? t("message.unknownAuthor"));
   const authorColorKey = message.sender_username ?? message.sender_id;
   const authorColor = getUsernameColor(authorColorKey, isLightBg);
   // Admin chip (#1488): own keeps the accent, others their stable colour.
@@ -113,7 +116,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   ) : null;
 
   const replyToAuthor = replyTo
-    ? (replyTo.sender_username ?? replyTo.sender_id)
+    ? aliasName(ctx.aliases, replyTo.sender_id, replyTo.sender_username ?? replyTo.sender_id)
     : null;
   const replyToAuthorColor = replyTo
     ? getUsernameColor(replyTo.sender_username ?? replyTo.sender_id, isLightBg)
@@ -141,6 +144,12 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const content = isDeleted
     ? t("message.deleted")
     : (message.content_decrypted ?? t("message.undecryptable.body_one"));
+
+  // A sender's preview (#1987): Modern look only, never in an unaccepted request, only for a body link.
+  const previewLink =
+    !isDeleted && skin === "modern" && ctx.linkPreviews
+      ? matchPreviewLink(content, message.link_preview)
+      : null;
 
   const isVisualMedia = (ct: string) =>
     ct.startsWith("image/") || ct.startsWith("video/");
@@ -222,7 +231,12 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       >
         <div className="flex justify-center pt-0.5 select-none">
           {isGroupStart ? (
-            <MessageAvatar userId={message.sender_id} username={displayName} size={36} />
+            <MessageAvatar
+              userId={message.sender_id}
+              username={displayName}
+              aliasKey={aliasAvatar(ctx.aliases, message.sender_id, null)}
+              size={36}
+            />
           ) : (
             <bdi
               dir="ltr"
@@ -304,7 +318,13 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             />
           </div>
 
-          {!isDeleted && <MediaLinkUnfurl text={content} />}
+          {previewLink && (
+            <MessageLinkPreview text={content} preview={message.link_preview} />
+          )}
+
+          {!isDeleted && (
+            <MediaLinkUnfurl text={content} exceptHref={previewLink?.href ?? null} />
+          )}
 
           {attachmentBlocks}
 
@@ -373,7 +393,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
         <bdi
           data-testid="message-author"
-          className={`flex-shrink-0 font-mono text-body font-semibold me-1 ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-sm` : ""}`}
+          className={`flex-shrink-0 font-mono text-body font-semibold me-1 ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : ""}`}
           style={isAuthorAdmin ? adminChipStyle : {
             color: isOwn ? "var(--c-accent)" : authorColor,
           }}

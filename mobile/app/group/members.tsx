@@ -17,6 +17,8 @@ import {
   sortMembersByRole,
 } from "../../hooks/queries";
 import { personName } from "../../lib/personName";
+import { aliasAvatar, hasAlias } from "../../lib/groupAlias";
+import { useGroupAliases, useResetGroupAlias } from "../../hooks/queries/useGroupAliases";
 import { activeLocale } from "../../i18n";
 import { parseServerTimestamp } from "../../lib/newMember";
 import { appStore } from "../../stores/appStore";
@@ -54,6 +56,21 @@ function Members() {
     [members, invites],
   );
   const { data: profiles } = useUserProfiles(personIds);
+  // Per-group aliases (#2003): the alias headlines, the handle stays beside it.
+  const aliases = useGroupAliases(id);
+  const resetAlias = useResetGroupAlias();
+  const [confirmReset, setConfirmReset] = useState<string | null>(null);
+  const onResetAlias = (memberId: string) => {
+    if (!id) {
+      return;
+    }
+    if (confirmReset !== memberId) {
+      haptic("confirmArm");
+      setConfirmReset(memberId);
+      return;
+    }
+    resetAlias.mutate({ groupId: id, userId: memberId }, { onSettled: () => setConfirmReset(null) });
+  };
 
   const myRole = useMemo(
     () => members.find((m) => m.user_id === currentUser?.id)?.role,
@@ -100,11 +117,16 @@ function Members() {
               const isOwner = m.role === "owner";
               const isAdmin = m.role === "admin";
               const armed = confirmRemove === m.user_id;
-              const label = personName(
-                { username: m.username, preferred_name: profiles?.get(m.user_id)?.preferred_name },
-                m.user_id.slice(0, 8),
-              );
+              const aliasDisplay = aliases.get(m.user_id)?.display_name;
+              const label = aliasDisplay
+                ? { name: aliasDisplay, isHandle: false }
+                : personName(
+                    { username: m.username, preferred_name: profiles?.get(m.user_id)?.preferred_name },
+                    m.user_id.slice(0, 8),
+                  );
               const handle = label.name;
+              const aliased = hasAlias(aliases, m.user_id);
+              const resetArmed = confirmReset === m.user_id;
               const name = isMe ? `${handle} ${t("members.self")}` : handle;
               const role = isOwner
                 ? t("mobile:group.members.roleOwner")
@@ -123,13 +145,14 @@ function Members() {
                         testID={`avatar-member-${m.user_id}`}
                         userId={m.user_id}
                         avatarKey={m.avatar_url}
+                        aliasKey={aliasAvatar(aliases, m.user_id, null)}
                         label={m.username || m.user_id}
                         variant={isMe ? "self" : "default"}
                       />
                     }
                     name={name}
                     nameIsHandle={label.isHandle}
-                    sub={role}
+                    sub={aliasDisplay && m.username ? `@${m.username} · ${role}` : role}
                     chevron={!isMe}
                     onPress={
                       isMe
@@ -137,7 +160,7 @@ function Members() {
                         : () =>
                             router.push({
                               pathname: "/user/[id]",
-                              params: { id: m.user_id },
+                              params: id ? { id: m.user_id, groupId: id } : { id: m.user_id },
                             })
                     }
                   />
@@ -170,6 +193,25 @@ function Members() {
                             ? t("mobile:group.members.removeAdmin")
                             : t("mobile:group.members.makeAdmin")}
                       </Chip>
+                      {aliased ? (
+                        <Chip
+                          variant="outline"
+                          selected={resetArmed}
+                          testID={`btn-reset-alias-${m.user_id}`}
+                          accessibilityLabel={
+                            resetArmed
+                              ? t("mobile:group.settings.tapAgainToConfirm")
+                              : `${t("members.resetAlias")}, ${handle}`
+                          }
+                          onPress={() => onResetAlias(m.user_id)}
+                        >
+                          {resetAlias.isPending && resetArmed
+                            ? "…"
+                            : resetArmed
+                              ? t("mobile:group.common.confirm")
+                              : t("members.resetAlias")}
+                        </Chip>
+                      ) : null}
                       <Chip
                         variant="danger"
                         selected={armed}

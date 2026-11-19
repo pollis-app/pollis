@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - audit
+  - fresh-account
 ---
 # TOUR — one screenshot of every reachable screen, in a fixed order with
 # numbered names, for a visual-density audit (before/after comparisons).
@@ -9,6 +10,10 @@ tags:
 # assertion suite; each step is optional where a screen may legitimately be
 # absent, so one missing screen never hides the rest.
 
+- runFlow:
+    file: ../subflows/fresh-email.yaml
+    env:
+      FRESH: "tour"
 - clearState
 - launchApp
 - extendedWaitUntil:
@@ -38,7 +43,7 @@ tags:
 
 - tapOn:
     id: "input-email"
-- inputText: "${MAESTRO_EMAIL}"
+- inputText: "${output.freshEmail}"
 - tapOn:
     id: "btn-submit-email"
 - extendedWaitUntil:
