@@ -1,28 +1,34 @@
-//! Importing a community's structure from another platform (#1180: Discord).
+//! Importing a community's structure from another platform: Discord (#1180)
+//! and Slack (#1179), through one pipeline.
 //!
 //! `pollis-import` reads an export from disk and plans; this module points
 //! the plan at a target group and applies it, every write a device-signed DS
-//! call through the ordinary group commands. Nothing Discord-shaped reaches
-//! the DS, and no Discord credential is ever held: the export was made on
-//! the user's own machine.
+//! call through the ordinary group commands. Nothing Discord- or
+//! Slack-shaped reaches the DS, and no platform credential is ever held: the
+//! export was made by the user (DiscordChatExporter on their machine, or the
+//! workspace export Slack's admin pages hand out).
 //!
-//! - **Dry run first.** [`discord_import_preview`] reads, plans against the
-//!   target's current state and returns the plan; it writes nothing.
-//! - **Idempotent.** [`discord_import_apply`] re-plans against the target
-//!   (never trusting a plan from the renderer) and creates only what is
-//!   missing: categories by name, channels by (category, name), emoji by
-//!   picture (the same re-encode the upload does, so the same content hash).
-//!   A second run creates nothing.
+//! - **Dry run first.** [`import_preview`] reads, plans against the target's
+//!   current state and returns the plan; it writes nothing.
+//! - **Idempotent.** [`import_apply`] re-plans against the target (never
+//!   trusting a plan from the renderer) and creates only what is missing:
+//!   categories by name, channels by (category, name), emoji by picture (the
+//!   same re-encode the upload does, so the same content hash). A second run
+//!   creates nothing.
 //! - **Structure only.** Message history is measured and reported, never
-//!   imported. Membership is planned (an invite link and a sheet), never
-//!   imported: Discord gives no emails, and an MLS leaf needs an enrolled device.
+//!   imported. Membership is planned, never imported: an MLS leaf needs an
+//!   enrolled device. The plan becomes an invite link, a sheet, and (where
+//!   the source shares emails, as Slack does) an ordinary group invite to
+//!   each email that belongs to a Pollis account.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use pollis_api::groups::InviteCreated;
 use pollis_import::model::Media;
 use pollis_import::plan::{ExistingChannel, ImportOptions, ImportPlan};
+pub use pollis_import::SourceKind;
 use serde::{Deserialize, Serialize};
 
 use crate::commands::groups::{self, CreatedInviteLink, GroupWithChannels};
@@ -42,21 +48,36 @@ pub struct ImportTarget {
 }
 
 #[derive(Debug, Serialize)]
-pub struct DiscordImportPreview {
-    /// The folder read, as given.
-    pub dir: String,
+pub struct ImportPreview {
+    pub source: SourceKind,
+    /// The folder or ZIP read, as given.
+    pub path: String,
     pub plan: ImportPlan,
     /// The invite sheet (CSV) for this plan.
     pub invite_sheet: String,
     /// The group the plan was made against; `None` = a new group.
     pub target: Option<ImportTarget>,
-    /// Groups this user administers whose name matches the server's: where a
+    /// Groups this user administers whose name matches the source's: where a
     /// re-run should go.
     pub candidates: Vec<ImportTarget>,
+    /// Whether archived channels are in this plan (Slack; opt-in).
+    pub include_archived: bool,
+}
+
+/// The admin's choices for an apply, beyond the target.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImportApplyOptions {
+    /// Bring archived channels too (Slack).
+    #[serde(default)]
+    pub include_archived: bool,
+    /// Send a group invite to every planned email that belongs to a Pollis
+    /// account (Slack). Off unless asked.
+    #[serde(default)]
+    pub invite_by_email: bool,
 }
 
 #[derive(Debug, Serialize)]
-pub struct DiscordImportResult {
+pub struct ImportResult {
     pub group_id: String,
     pub group_name: String,
     pub created_group: bool,
@@ -76,27 +97,59 @@ pub struct DiscordImportResult {
     /// live one, which is not minted again.
     pub invite_link: Option<CreatedInviteLink>,
     pub invite_link_existing: bool,
+    /// One entry per planned email, when invites by email were asked for.
+    pub email_invites: Vec<EmailInvite>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ImportFailure {
-    /// `category`, `channel`, `emoji`, `icon`, `order` or `invite_link`.
+    /// `category`, `channel`, `emoji`, `icon`, `order`, `invite_link` or `invite`.
     pub kind: String,
     pub name: String,
     pub error: String,
 }
 
-/// Read the export in `dir` and plan it against `target`: `None` picks the
+/// What became of one planned email invite.
+#[derive(Debug, Serialize)]
+pub struct EmailInvite {
+    pub username: String,
+    pub display_name: String,
+    pub email: String,
+    pub outcome: EmailInviteOutcome,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmailInviteOutcome {
+    /// A Pollis account has this email: it got an ordinary group invite.
+    Invited,
+    /// Invited by an earlier run; still pending.
+    AlreadyInvited,
+    AlreadyMember,
+    /// The admin's own email.
+    You,
+    /// No Pollis account answers to this email (or the DS declined to say
+    /// more): they join through the invite link.
+    NoAccount,
+    /// The invite request itself failed (listed in `failures`); a re-run retries it.
+    Failed,
+}
+
+/// Read the export at `path` and plan it against `target`: `None` picks the
 /// one admin-held group whose name matches (a re-run) or else a new group;
 /// [`TARGET_NEW`] forces a new group; anything else is a group id.
-pub async fn discord_import_preview(
-    dir: String,
+pub async fn import_preview(
+    source: SourceKind,
+    path: String,
     user_id: String,
     target: Option<String>,
+    include_archived: Option<bool>,
     state: &Arc<AppState>,
-) -> Result<DiscordImportPreview> {
-    let export = read_export(&dir).await?;
-    let base_plan = pollis_import::plan::plan(&export, &ImportOptions::default());
+) -> Result<ImportPreview> {
+    let include_archived = include_archived.unwrap_or(false);
+    let export = read_export(source, &path).await?;
+    let fresh = ImportOptions { include_archived, ..ImportOptions::default() };
+    let base_plan = pollis_import::plan::plan(&export, &fresh);
     let groups = groups::list_user_groups_with_channels(user_id.clone(), state).await?;
     let candidates: Vec<ImportTarget> = groups
         .iter()
@@ -111,27 +164,32 @@ pub async fn discord_import_preview(
         None => None,
     };
     let plan = match chosen {
-        Some(g) => plan_against(&export, g, &user_id, state).await?,
+        Some(g) => plan_against(&export, g, include_archived, &user_id, state).await?,
         None => base_plan,
     };
-    Ok(DiscordImportPreview {
-        dir,
+    Ok(ImportPreview {
+        source,
+        path,
         invite_sheet: pollis_import::report::invite_sheet(&plan),
         plan,
         target: chosen.map(|g| ImportTarget { group_id: g.id.clone(), name: g.name.clone() }),
         candidates,
+        include_archived,
     })
 }
 
-/// Apply the import in `dir` to `target` (as for the preview, except `None`
+/// Apply the import at `path` to `target` (as for the preview, except `None`
 /// means a new group: the renderer always passes what it previewed).
-pub async fn discord_import_apply(
-    dir: String,
+pub async fn import_apply(
+    source: SourceKind,
+    path: String,
     user_id: String,
     target: Option<String>,
+    options: Option<ImportApplyOptions>,
     state: &Arc<AppState>,
-) -> Result<DiscordImportResult> {
-    let export = read_export(&dir).await?;
+) -> Result<ImportResult> {
+    let options = options.unwrap_or_default();
+    let export = read_export(source, &path).await?;
     let mut failures = Vec::new();
 
     let target_id = target.filter(|t| t != TARGET_NEW);
@@ -139,11 +197,12 @@ pub async fn discord_import_apply(
         Some(id) => {
             let groups = groups::list_user_groups_with_channels(user_id.clone(), state).await?;
             let g = admin_group(&groups, &id)?;
-            let plan = plan_against(&export, g, &user_id, state).await?;
+            let plan = plan_against(&export, g, options.include_archived, &user_id, state).await?;
             (g.id.clone(), g.name.clone(), false, plan)
         }
         None => {
-            let plan = pollis_import::plan::plan(&export, &ImportOptions::default());
+            let fresh = ImportOptions { include_archived: options.include_archived, ..ImportOptions::default() };
+            let plan = pollis_import::plan::plan(&export, &fresh);
             let g = groups::create_group(plan.group.name.clone(), None, user_id.clone(), Some(false), Some(false), state)
                 .await?;
             (g.id, g.name, true, plan)
@@ -271,12 +330,44 @@ pub async fn discord_import_apply(
         }
     };
 
+    // Invites by email: an ordinary group invite to each planned email. The
+    // DS resolves the email; one that matches no account answers "no such
+    // user" and that person joins through the link. Idempotent: a re-run
+    // finds them already invited or already in.
+    let mut email_invites = Vec::new();
+    if options.invite_by_email {
+        for p in plan.people.iter().filter(|p| !p.is_bot) {
+            let Some(email) = &p.email else {
+                continue;
+            };
+            let outcome = match groups::invite_to_group(&group_id, &user_id, email, state).await {
+                Ok(InviteCreated::Ok { .. }) => EmailInviteOutcome::Invited,
+                Ok(InviteCreated::AlreadyInvited) => EmailInviteOutcome::AlreadyInvited,
+                Ok(InviteCreated::AlreadyMember) => EmailInviteOutcome::AlreadyMember,
+                Ok(InviteCreated::SelfInvite) => EmailInviteOutcome::You,
+                Ok(InviteCreated::NoSuchUser | InviteCreated::Blocked) => EmailInviteOutcome::NoAccount,
+                Err(e) => {
+                    failures.push(failure("invite", &p.display_name, e));
+                    EmailInviteOutcome::Failed
+                }
+            };
+            email_invites.push(EmailInvite {
+                username: p.username.clone(),
+                display_name: p.display_name.clone(),
+                email: email.clone(),
+                outcome,
+            });
+        }
+    }
+
+    let invited = email_invites.iter().filter(|i| i.outcome == EmailInviteOutcome::Invited).count();
     crate::diag!(
-        "[import] discord into {group_id}: +{categories_created} categories, +{channels_created} channels, \
-         +{emoji_uploaded} emoji, {} failures",
+        "[import] {} into {group_id}: +{categories_created} categories, +{channels_created} channels, \
+         +{emoji_uploaded} emoji, +{invited} invites, {} failures",
+        source.name(),
         failures.len()
     );
-    Ok(DiscordImportResult {
+    Ok(ImportResult {
         group_id,
         group_name,
         created_group,
@@ -291,19 +382,22 @@ pub async fn discord_import_apply(
         failures,
         invite_link,
         invite_link_existing: live,
+        email_invites,
     })
 }
 
-async fn read_export(dir: &str) -> Result<pollis_import::model::Export> {
-    let path = PathBuf::from(dir);
-    let export = tokio::task::spawn_blocking(move || pollis_import::discord::read_export_dir(&path))
+async fn read_export(source: SourceKind, path: &str) -> Result<pollis_import::model::Export> {
+    let at = PathBuf::from(path);
+    let export = tokio::task::spawn_blocking(move || pollis_import::read_export(source, &at))
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("read export: {e}")))?
-        .map_err(|e| Error::Other(anyhow::anyhow!("could not read {dir}: {e}")))?;
+        .map_err(|e| Error::Other(anyhow::anyhow!("could not read {path}: {e}")))?;
     if export.community.id.is_empty() {
-        return Err(Error::Other(anyhow::anyhow!(
-            "no Discord export found in that folder (DiscordChatExporter JSON files or discord-guild.json)"
-        )));
+        return Err(Error::Other(anyhow::anyhow!(match source {
+            SourceKind::Discord =>
+                "no Discord export found in that folder (DiscordChatExporter JSON files or discord-guild.json)",
+            SourceKind::Slack => "no Slack workspace export found there (channels.json, users.json)",
+        })));
     }
     Ok(export)
 }
@@ -344,6 +438,7 @@ fn channel_keys(g: &GroupWithChannels) -> BTreeSet<(Option<String>, String)> {
 async fn plan_against(
     export: &pollis_import::model::Export,
     g: &GroupWithChannels,
+    include_archived: bool,
     user_id: &str,
     state: &Arc<AppState>,
 ) -> Result<ImportPlan> {
@@ -357,45 +452,77 @@ async fn plan_against(
         })
         .collect();
     let emoji = crate::commands::emoji::list_group_emoji(g.id.clone(), user_id.to_string(), state).await?;
-    let by_hash: BTreeMap<String, String> =
-        emoji.iter().map(|e| (e.content_hash.clone(), e.shortcode.clone())).collect();
+    let mut by_hash: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for e in &emoji {
+        by_hash.entry(e.content_hash.clone()).or_default().push(e.shortcode.clone());
+    }
     let imported_emoji = match_emoji_by_picture(export, by_hash).await;
     let options = ImportOptions {
         existing_categories: g.categories.iter().map(|k| k.name.clone()).collect(),
         existing_channels,
         existing_shortcodes: emoji.into_iter().map(|e| e.shortcode).collect(),
         imported_emoji,
+        include_archived,
     };
     Ok(pollis_import::plan::plan(export, &options))
 }
 
 /// Source emoji whose picture the group already holds, re-encoded exactly as
 /// an upload would be, so the content hash matches the stored one.
+///
+/// One picture can sit under several shortcodes (a Slack alias is its own
+/// shortcode for its target's picture), so each source emoji claims the
+/// shortcode that is its own name, or its name with the collision suffix
+/// (`party_parrot_2`). A picture under some other name still counts for an
+/// ordinary emoji (an admin renamed it), never for an alias: the alias then
+/// gets its own shortcode on the next run.
 async fn match_emoji_by_picture(
     export: &pollis_import::model::Export,
-    by_hash: BTreeMap<String, String>,
+    by_hash: BTreeMap<String, Vec<String>>,
 ) -> BTreeMap<String, String> {
     if by_hash.is_empty() {
         return BTreeMap::new();
     }
-    let candidates: Vec<(String, PathBuf)> = export
+    let candidates: Vec<(String, String, bool, PathBuf)> = export
         .emoji
         .values()
         .filter_map(|e| match &e.image {
-            Some(Media::Local(p)) if p.is_file() => Some((e.id.clone(), p.clone())),
+            Some(Media::Local(p)) if p.is_file() => Some((e.id.clone(), e.name.clone(), e.alias_of.is_some(), p.clone())),
             _ => None,
         })
         .collect();
     tokio::task::spawn_blocking(move || {
-        candidates
-            .into_iter()
-            .filter_map(|(id, path)| {
-                let raw = std::fs::read(&path).ok()?;
-                let encoded = crate::commands::emoji::encode_emoji(&raw).ok()?;
-                let hash = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&encoded.bytes));
-                by_hash.get(&hash).map(|code| (id, code.clone()))
-            })
-            .collect()
+        let mut hashes: BTreeMap<PathBuf, Option<String>> = BTreeMap::new();
+        let mut out = BTreeMap::new();
+        for (id, name, alias, path) in candidates {
+            let hash = hashes
+                .entry(path.clone())
+                .or_insert_with(|| {
+                    let raw = std::fs::read(&path).ok()?;
+                    let encoded = crate::commands::emoji::encode_emoji(&raw).ok()?;
+                    Some(hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&encoded.bytes)))
+                })
+                .clone();
+            let Some(codes) = hash.and_then(|h| by_hash.get(&h)) else {
+                continue;
+            };
+            let own = pollis_import::shortcode::normalise(&name);
+            let named = codes.iter().find(|c| {
+                c.as_str() == own
+                    || c.strip_prefix(&own)
+                        .and_then(|rest| rest.strip_prefix('_'))
+                        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            });
+            let code = match (named, alias) {
+                (Some(c), _) => Some(c.clone()),
+                (None, false) => codes.first().cloned(),
+                (None, true) => None,
+            };
+            if let Some(code) = code {
+                out.insert(id, code);
+            }
+        }
+        out
     })
     .await
     .unwrap_or_default()

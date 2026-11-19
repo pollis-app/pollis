@@ -17,49 +17,62 @@ pub async fn send_group_invite(
     invitee_identifier: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    match invite_to_group(&group_id, &inviter_id, &invitee_identifier, state).await? {
+        pollis_api::groups::InviteCreated::Ok { .. } => Ok(()),
+        pollis_api::groups::InviteCreated::NoSuchUser => {
+            Err(Error::Other(anyhow::anyhow!(
+                "user '{}' not found",
+                invitee_identifier
+            )))
+        }
+        pollis_api::groups::InviteCreated::SelfInvite => {
+            Err(Error::Other(anyhow::anyhow!(
+                "cannot invite yourself to a group"
+            )))
+        }
+        // Generic block error so neither side can infer why the invite failed.
+        pollis_api::groups::InviteCreated::Blocked => {
+            Err(Error::Other(anyhow::anyhow!(
+                crate::commands::dm::BLOCK_ERR
+            )))
+        }
+        pollis_api::groups::InviteCreated::AlreadyMember => {
+            Err(Error::Other(anyhow::anyhow!(
+                "that user is already a member of this group"
+            )))
+        }
+        pollis_api::groups::InviteCreated::AlreadyInvited => {
+            Err(Error::Other(anyhow::anyhow!(
+                "a pending invite already exists for this user"
+            )))
+        }
+    }
+}
+
+/// Invite by username or email and say what happened, without turning the
+/// DS's answers into errors: a batch (an import's email invites, #1179)
+/// reports each one. Only `Ok` grafts the invitee's devices and notifies them.
+pub async fn invite_to_group(
+    group_id: &str,
+    inviter_id: &str,
+    invitee_identifier: &str,
+    state: &Arc<AppState>,
+) -> Result<pollis_api::groups::InviteCreated> {
+    let group_id = group_id.to_string();
+    let inviter_id = inviter_id.to_string();
     // One request (#987); the DS decides every outcome inside the write.
     let id = Ulid::new().to_string();
     let body = pollis_api::groups::CreateInviteBody {
         id,
         group_id: group_id.clone(),
         inviter_id: Some(inviter_id.clone()),
-        invitee_identifier: invitee_identifier.clone(),
+        invitee_identifier: invitee_identifier.to_string(),
     };
-    let (invitee_id, inviter_username, group_name) =
-        match crate::commands::mls::ds_post_json(state, &body).await? {
-            pollis_api::groups::InviteCreated::Ok {
-                invitee_id,
-                inviter_username,
-                group_name,
-            } => (invitee_id, inviter_username, group_name),
-            pollis_api::groups::InviteCreated::NoSuchUser => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "user '{}' not found",
-                    invitee_identifier
-                )));
-            }
-            pollis_api::groups::InviteCreated::SelfInvite => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "cannot invite yourself to a group"
-                )));
-            }
-            // Generic block error so neither side can infer why the invite failed.
-            pollis_api::groups::InviteCreated::Blocked => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    crate::commands::dm::BLOCK_ERR
-                )));
-            }
-            pollis_api::groups::InviteCreated::AlreadyMember => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "that user is already a member of this group"
-                )));
-            }
-            pollis_api::groups::InviteCreated::AlreadyInvited => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "a pending invite already exists for this user"
-                )));
-            }
-        };
+    let answer: pollis_api::groups::InviteCreated = crate::commands::mls::ds_post_json(state, &body).await?;
+    let pollis_api::groups::InviteCreated::Ok { invitee_id, inviter_username, group_name } = &answer else {
+        return Ok(answer);
+    };
+    let (invitee_id, inviter_username, group_name) = (invitee_id.clone(), inviter_username.clone(), group_name.clone());
 
     // Ingest-before-advance (#440): catch up before reconcile, which holds `mls_group_lock` (re-acquired by the catch-up).
     if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
@@ -88,7 +101,7 @@ pub async fn send_group_invite(
         crate::diag!("[inbox] send_group_invite: notify {invitee_id} failed: {e}");
     }
 
-    Ok(())
+    Ok(answer)
 }
 
 /// Get all pending invites for the given user.

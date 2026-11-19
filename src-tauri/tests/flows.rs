@@ -76,6 +76,8 @@ mod reports;
 mod sealed_sender;
 #[path = "flows/security.rs"]
 mod security;
+#[path = "flows/slack_import.rs"]
+mod slack_import;
 #[path = "flows/vault.rs"]
 mod vault;
 #[path = "flows/zero_loss.rs"]

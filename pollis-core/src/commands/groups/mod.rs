@@ -40,7 +40,7 @@ pub use membership::{
 };
 
 pub use invites::{
-    accept_group_invite, create_group_invite_link, decline_group_invite, get_pending_invites,
+    accept_group_invite, create_group_invite_link, decline_group_invite, get_pending_invites, invite_to_group,
     list_group_invite_links, list_group_invites, preview_group_invite_link,
     redeem_group_invite_link, revoke_group_invite,
     revoke_group_invite_link, send_group_invite, INVITE_LINK_ERR,

@@ -11,8 +11,26 @@
 use std::path::PathBuf;
 
 use crate::harness::{wipe, TestClient};
-use pollis_core::commands::import::{discord_import_apply, discord_import_preview, TARGET_NEW};
+use pollis_core::commands::import::{import_apply, import_preview, ImportApplyOptions, ImportPreview, ImportResult, SourceKind, TARGET_NEW};
 use serial_test::serial;
+
+async fn discord_import_preview(
+    dir: String,
+    user_id: String,
+    target: Option<String>,
+    state: &std::sync::Arc<pollis_core::state::AppState>,
+) -> pollis_core::error::Result<ImportPreview> {
+    import_preview(SourceKind::Discord, dir, user_id, target, None, state).await
+}
+
+async fn discord_import_apply(
+    dir: String,
+    user_id: String,
+    target: Option<String>,
+    state: &std::sync::Arc<pollis_core::state::AppState>,
+) -> pollis_core::error::Result<ImportResult> {
+    import_apply(SourceKind::Discord, dir, user_id, target, Some(ImportApplyOptions::default()), state).await
+}
 
 fn fixture() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -144,8 +162,8 @@ async fn only_an_admin_imports_into_a_group_and_only_from_a_picked_folder() {
     // The shim reads only a folder chosen in this device's picker.
     let err = admin
         .invoke_try(
-            "discord_import_preview",
-            serde_json::json!({ "dir": fixture(), "userId": admin.user_id(), "target": null }),
+            "import_preview",
+            serde_json::json!({ "source": "discord", "path": fixture(), "userId": admin.user_id(), "target": null }),
         )
         .await
         .expect_err("an unpicked folder");
