@@ -59,8 +59,34 @@ pub async fn create_group(name: String, description: Option<String>, owner_id: S
 }
 
 #[tauri::command]
-pub async fn create_channel(group_id: String, name: String, description: Option<String>, channel_type: Option<String>, _creator_id: String, state: State<'_, Arc<AppState>>) -> Result<Channel> {
-    pollis_core::commands::groups::create_channel(group_id, name, description, channel_type, _creator_id, &state).await
+#[allow(clippy::too_many_arguments)]
+pub async fn create_channel(group_id: String, name: String, description: Option<String>, channel_type: Option<String>, _creator_id: String, category_id: Option<String>, state: State<'_, Arc<AppState>>) -> Result<Channel> {
+    pollis_core::commands::groups::create_channel(group_id, name, description, channel_type, _creator_id, category_id, &state).await
+}
+
+#[tauri::command]
+pub async fn create_channel_category(group_id: String, name: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<ChannelCategory> {
+    pollis_core::commands::groups::create_channel_category(group_id, name, requester_id, &state).await
+}
+
+#[tauri::command]
+pub async fn rename_channel_category(group_id: String, category_id: String, name: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::rename_channel_category(group_id, category_id, name, requester_id, &state).await
+}
+
+#[tauri::command]
+pub async fn delete_channel_category(group_id: String, category_id: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::delete_channel_category(group_id, category_id, requester_id, &state).await
+}
+
+#[tauri::command]
+pub async fn move_channel_category(group_id: String, category_id: String, position: u32, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::move_channel_category(group_id, category_id, position, requester_id, &state).await
+}
+
+#[tauri::command]
+pub async fn move_channel(group_id: String, channel_id: String, category_id: Option<String>, position: u32, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::move_channel(group_id, channel_id, category_id, position, requester_id, &state).await
 }
 
 #[tauri::command]

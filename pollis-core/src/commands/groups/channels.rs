@@ -4,7 +4,7 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::types::Channel;
+use super::types::{Channel, ChannelCategory};
 use super::authz;
 
 /// Every channel in a group.
@@ -25,6 +25,9 @@ pub async fn list_group_channels(
         .collect())
 }
 
+/// Create a channel at the bottom of its block (#2031): of `category_id` when
+/// given (admins only), else of the uncategorised block.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_channel(
     group_id: String,
     name: String,
@@ -32,6 +35,7 @@ pub async fn create_channel(
     // 'text' (default) or 'voice' — stored in the channel_type column.
     channel_type: Option<String>,
     _creator_id: String,
+    category_id: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<Channel> {
     let id = Ulid::new().to_string();
@@ -44,18 +48,123 @@ pub async fn create_channel(
         description: description.clone(),
         channel_type: channel_type.clone(),
         creator_id: Some(_creator_id),
+        category_id: category_id.clone(),
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // Tell other members a channel appeared (#874).
-    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
-        state,
-        &group_id,
-    ).await {
-        crate::diag!("[realtime] create_channel: notify group {group_id}: {e}");
-    }
+    notify_group(state, &group_id, "create_channel").await;
 
-    Ok(Channel { id, group_id, name, description, channel_type })
+    Ok(Channel { id, group_id, name, description, channel_type, category_id })
+}
+
+/// Tell the group's other members (and this account's other devices) that its
+/// channel list changed, through the group-change event (#874). Best effort.
+async fn notify_group(state: &Arc<AppState>, group_id: &str, what: &str) {
+    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(state, group_id).await {
+        crate::diag!("[realtime] {what}: notify group {group_id}: {e}");
+    }
+}
+
+/// Create a category at the bottom of the group's categories (#2031).
+/// Admin-only (the DS re-derives the role); the name follows the group-name rule.
+pub async fn create_channel_category(
+    group_id: String,
+    name: String,
+    requester_id: String,
+    state: &Arc<AppState>,
+) -> Result<ChannelCategory> {
+    let id = Ulid::new().to_string();
+    let name = name.trim().to_string();
+    let body = pollis_api::groups::CreateChannelCategoryBody {
+        id: id.clone(),
+        group_id: group_id.clone(),
+        name: name.clone(),
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
+    notify_group(state, &group_id, "create_channel_category").await;
+    Ok(ChannelCategory { id, group_id, name })
+}
+
+/// Rename a category (#2031). Admin-only.
+pub async fn rename_channel_category(
+    group_id: String,
+    category_id: String,
+    name: String,
+    requester_id: String,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let body = pollis_api::groups::RenameChannelCategoryBody {
+        category_id,
+        group_id: group_id.clone(),
+        name: name.trim().to_string(),
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
+    notify_group(state, &group_id, "rename_channel_category").await;
+    Ok(())
+}
+
+/// Delete a category (#2031). Its channels move to the end of the
+/// uncategorised block; none is deleted. Admin-only.
+pub async fn delete_channel_category(
+    group_id: String,
+    category_id: String,
+    requester_id: String,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let body = pollis_api::groups::DeleteChannelCategoryBody {
+        category_id,
+        group_id: group_id.clone(),
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
+    notify_group(state, &group_id, "delete_channel_category").await;
+    Ok(())
+}
+
+/// Put a category at `position` (0 = top) among the group's categories
+/// (#2031). Admin-only.
+pub async fn move_channel_category(
+    group_id: String,
+    category_id: String,
+    position: u32,
+    requester_id: String,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let body = pollis_api::groups::MoveChannelCategoryBody {
+        category_id,
+        group_id: group_id.clone(),
+        position,
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
+    notify_group(state, &group_id, "move_channel_category").await;
+    Ok(())
+}
+
+/// Move a channel to `position` (0 = top) in `category_id`'s block, or the
+/// uncategorised block when `None` (#2031). Admin-only; the category must be
+/// one of the channel's own group.
+pub async fn move_channel(
+    group_id: String,
+    channel_id: String,
+    category_id: Option<String>,
+    position: u32,
+    requester_id: String,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let body = pollis_api::groups::MoveChannelBody {
+        channel_id,
+        group_id: group_id.clone(),
+        category_id,
+        position,
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
+    notify_group(state, &group_id, "move_channel").await;
+    Ok(())
 }
 
 pub async fn update_channel(
@@ -111,6 +220,8 @@ pub async fn update_channel(
         name,
         description,
         channel_type,
+        // The update response does not carry it; callers re-read the list.
+        category_id: None,
     })
 }
 

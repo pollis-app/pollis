@@ -1069,15 +1069,58 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let description: Option<String> = arg_opt(&args, "description")?;
             let channel_type: Option<String> = arg_opt(&args, "channelType")?;
             let creator_id: String = arg(&args, "creatorId")?;
+            let category_id: Option<String> = arg_opt(&args, "categoryId")?;
             ok(groups::create_channel(
                 group_id,
                 name,
                 description,
                 channel_type,
                 creator_id,
+                category_id,
                 &state()?,
             )
             .await?)
+        }
+        "create_channel_category" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let name: String = arg(&args, "name")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(groups::create_channel_category(group_id, name, requester_id, &state()?).await?)
+        }
+        "rename_channel_category" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let category_id: String = arg(&args, "categoryId")?;
+            let name: String = arg(&args, "name")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::rename_channel_category(group_id, category_id, name, requester_id, &state()?)
+                .await?;
+            ok(())
+        }
+        "delete_channel_category" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let category_id: String = arg(&args, "categoryId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::delete_channel_category(group_id, category_id, requester_id, &state()?).await?;
+            ok(())
+        }
+        "move_channel_category" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let category_id: String = arg(&args, "categoryId")?;
+            let position: u32 = arg(&args, "position")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::move_channel_category(group_id, category_id, position, requester_id, &state()?)
+                .await?;
+            ok(())
+        }
+        "move_channel" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let channel_id: String = arg(&args, "channelId")?;
+            let category_id: Option<String> = arg_opt(&args, "categoryId")?;
+            let position: u32 = arg(&args, "position")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::move_channel(group_id, channel_id, category_id, position, requester_id, &state()?)
+                .await?;
+            ok(())
         }
         "create_group_invite_link" => {
             let group_id: String = arg(&args, "groupId")?;
@@ -1737,6 +1780,12 @@ mod tests {
             "list_my_aliases",
             "set_group_alias",
             "reset_group_alias",
+            // #2031
+            "create_channel_category",
+            "rename_channel_category",
+            "delete_channel_category",
+            "move_channel_category",
+            "move_channel",
             // #1809
             "await_enrollment_approval",
         ] {

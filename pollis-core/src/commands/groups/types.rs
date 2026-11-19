@@ -26,6 +26,18 @@ pub struct Channel {
     pub description: Option<String>,
     // 'text' or 'voice' — persisted in Turso.
     pub channel_type: String,
+    /// The category it sits in (#2031); `None` = the uncategorised block.
+    #[serde(default)]
+    pub category_id: Option<String>,
+}
+
+/// A group's channel category (#2031). Group-wide and admin-managed; lists
+/// carry them in display order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelCategory {
+    pub id: String,
+    pub group_id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,7 +48,11 @@ pub struct GroupWithChannels {
     pub owner_id: String,
     pub created_at: String,
     pub current_user_role: String,
+    /// In display order (#2031): uncategorised first, then category by category.
     pub channels: Vec<Channel>,
+    /// In display order (#2031).
+    #[serde(default)]
+    pub categories: Vec<ChannelCategory>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
