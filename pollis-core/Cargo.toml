@@ -68,6 +68,8 @@ serde_json = "1"
 # structs, declared once and parsed by `pollis-delivery` from the same crate —
 # so a field this client forgets is a compile error, not an absent JSON key.
 pollis-api = { path = "../pollis-api" }
+# Reading and planning imports from other platforms (#1180); pure, no I/O but the export folder.
+pollis-import = { path = "../pollis-import" }
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 async-trait = "0.1"
 # NOTE: rusqlite is declared *per target* below, and the feature set differs on

@@ -6720,6 +6720,7 @@ dependencies = [
  "pollis-api",
  "pollis-capture-proto",
  "pollis-device-cert",
+ "pollis-import",
  "pollis-relay",
  "pollis-schema",
  "pollis-sqlcipher",
@@ -6797,6 +6798,15 @@ name = "pollis-device-cert"
 version = "1.1.0"
 dependencies = [
  "ml-dsa",
+]
+
+[[package]]
+name = "pollis-import"
+version = "1.1.0"
+dependencies = [
+ "pollis-api",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

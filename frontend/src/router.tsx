@@ -18,6 +18,7 @@ import { DMSettingsPage } from "./pages/DMSettings";
 import { LeaveGroupPage } from "./pages/LeaveGroup";
 import { CreateGroupPage } from "./pages/CreateGroupPage";
 import { SearchGroupPage } from "./pages/SearchGroupPage";
+import { DiscordImportPage } from "./pages/DiscordImportPage";
 import { CreateChannelPage } from "./pages/CreateChannelPage";
 import { StartDMPage } from "./pages/StartDMPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -72,6 +73,13 @@ const searchGroupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/search",
   component: SearchGroupPage,
+});
+
+// Importing a Discord server's structure (#1180).
+const discordImportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/import",
+  component: DiscordImportPage,
 });
 
 const groupRoute = createRoute({
@@ -395,6 +403,7 @@ const routeTree = rootRoute.addChildren([
   groupsRoute,
   createGroupRoute,
   searchGroupRoute,
+  discordImportRoute,
   groupRoute,
   channelRoute,
   createChannelRoute,

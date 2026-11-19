@@ -38,6 +38,7 @@
     "groups": "Groups",
     "createGroup": "Create Group",
     "findGroup": "Find Group",
+    "importDiscord": "Import from Discord",
     "newChannel": "New Channel",
     "voice": "voice",
     "joinRequests": "Join Requests",

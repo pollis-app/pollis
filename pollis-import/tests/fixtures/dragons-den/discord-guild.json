@@ -1,0 +1,375 @@
+{
+ "guild": {
+  "id": "900000000000000001",
+  "name": "Dragon's Den",
+  "icon": "a1b2c3",
+  "owner_id": "100",
+  "roles": [
+   {
+    "id": "900000000000000001",
+    "name": "@everyone",
+    "permissions": "1117248",
+    "position": 0,
+    "managed": false
+   },
+   {
+    "id": "800",
+    "name": "Dungeon Master",
+    "permissions": "8",
+    "position": 4,
+    "managed": false
+   },
+   {
+    "id": "801",
+    "name": "Moderator",
+    "permissions": "32",
+    "position": 3,
+    "managed": false
+   },
+   {
+    "id": "802",
+    "name": "Players",
+    "permissions": "0",
+    "position": 2,
+    "managed": false
+   },
+   {
+    "id": "803",
+    "name": "Bard",
+    "permissions": "0",
+    "position": 1,
+    "managed": false
+   },
+   {
+    "id": "804",
+    "name": "Avrae",
+    "permissions": "2048",
+    "position": 5,
+    "managed": true
+   }
+  ],
+  "emojis": [
+   {
+    "id": "700",
+    "name": "Nat20",
+    "animated": false
+   },
+   {
+    "id": "701",
+    "name": "nat20",
+    "animated": true
+   },
+   {
+    "id": "702",
+    "name": "x",
+    "animated": false
+   },
+   {
+    "id": "703",
+    "name": "BeholderEye",
+    "animated": false
+   },
+   {
+    "id": "704",
+    "name": "Mimic",
+    "animated": false
+   },
+   {
+    "id": "705",
+    "name": "crit-fail",
+    "animated": false
+   }
+  ]
+ },
+ "channels": [
+  {
+   "id": "51",
+   "type": 4,
+   "guild_id": "900000000000000001",
+   "name": "Text Channels",
+   "position": 0,
+   "parent_id": null,
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "50",
+   "type": 4,
+   "guild_id": "900000000000000001",
+   "name": "Campaign",
+   "position": 1,
+   "parent_id": null,
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "52",
+   "type": 4,
+   "guild_id": "900000000000000001",
+   "name": "Voice Channels",
+   "position": 2,
+   "parent_id": null,
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "53",
+   "type": 4,
+   "guild_id": "900000000000000001",
+   "name": "Off-topic",
+   "position": 3,
+   "parent_id": null,
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "54",
+   "type": 4,
+   "guild_id": "900000000000000001",
+   "name": "Archive",
+   "position": 4,
+   "parent_id": null,
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "220",
+   "type": 5,
+   "guild_id": "900000000000000001",
+   "name": "rules",
+   "position": 0,
+   "parent_id": null,
+   "topic": "Read before your first session",
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "222",
+   "type": 0,
+   "guild_id": "900000000000000001",
+   "name": "general",
+   "position": 0,
+   "parent_id": "51",
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "223",
+   "type": 0,
+   "guild_id": "900000000000000001",
+   "name": "looking-for-group",
+   "position": 1,
+   "parent_id": "51",
+   "topic": "Find a table",
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "115",
+   "type": 2,
+   "guild_id": "900000000000000001",
+   "name": "the-table",
+   "position": 0,
+   "parent_id": "50",
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "111",
+   "type": 0,
+   "guild_id": "900000000000000001",
+   "name": "session-notes",
+   "position": 0,
+   "parent_id": "50",
+   "topic": "Recaps after every session",
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "113",
+   "type": 15,
+   "guild_id": "900000000000000001",
+   "name": "lore",
+   "position": 1,
+   "parent_id": "50",
+   "topic": "One post per place, person or plot hook",
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "112",
+   "type": 0,
+   "guild_id": "900000000000000001",
+   "name": "maps",
+   "position": 2,
+   "parent_id": "50",
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": [
+    {
+     "id": "900000000000000001",
+     "type": 0,
+     "allow": "0",
+     "deny": "32768"
+    }
+   ]
+  },
+  {
+   "id": "114",
+   "type": 0,
+   "guild_id": "900000000000000001",
+   "name": "gm-only",
+   "position": 3,
+   "parent_id": "50",
+   "topic": "Spoilers. Players keep out.",
+   "nsfw": false,
+   "permission_overwrites": [
+    {
+     "id": "900000000000000001",
+     "type": 0,
+     "allow": "0",
+     "deny": "1024"
+    },
+    {
+     "id": "800",
+     "type": 0,
+     "allow": "3072",
+     "deny": "0"
+    }
+   ]
+  },
+  {
+   "id": "333",
+   "type": 2,
+   "guild_id": "900000000000000001",
+   "name": "tavern",
+   "position": 0,
+   "parent_id": "52",
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "334",
+   "type": 13,
+   "guild_id": "900000000000000001",
+   "name": "storytime",
+   "position": 1,
+   "parent_id": "52",
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "400",
+   "type": 0,
+   "guild_id": "900000000000000001",
+   "name": "memes",
+   "position": 0,
+   "parent_id": "53",
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": [
+    {
+     "id": "102",
+     "type": 1,
+     "allow": "8192",
+     "deny": "0"
+    }
+   ]
+  },
+  {
+   "id": "402",
+   "type": 0,
+   "guild_id": "900000000000000001",
+   "name": "<3-fan-art",
+   "position": 1,
+   "parent_id": "53",
+   "topic": null,
+   "nsfw": false,
+   "permission_overwrites": []
+  },
+  {
+   "id": "401",
+   "type": 0,
+   "guild_id": "900000000000000001",
+   "name": "general",
+   "position": 2,
+   "parent_id": "53",
+   "topic": "Not about the game",
+   "nsfw": false,
+   "permission_overwrites": []
+  }
+ ],
+ "members": [
+  {
+   "user": {
+    "id": "100",
+    "username": "dan",
+    "global_name": "Dan",
+    "bot": false
+   },
+   "nick": "DM Dan",
+   "roles": [
+    "800"
+   ]
+  },
+  {
+   "user": {
+    "id": "101",
+    "username": "ashley",
+    "global_name": "Ashley",
+    "bot": false
+   },
+   "nick": "Ash the Bard",
+   "roles": [
+    "802",
+    "803"
+   ]
+  },
+  {
+   "user": {
+    "id": "102",
+    "username": "rob",
+    "global_name": null,
+    "bot": false
+   },
+   "nick": null,
+   "roles": [
+    "802",
+    "801"
+   ]
+  },
+  {
+   "user": {
+    "id": "103",
+    "username": "Avrae",
+    "global_name": null,
+    "bot": true
+   },
+   "nick": null,
+   "roles": [
+    "804"
+   ]
+  },
+  {
+   "user": {
+    "id": "104",
+    "username": "kim",
+    "global_name": "Quiet Kim",
+    "bot": false
+   },
+   "nick": null,
+   "roles": [
+    "802"
+   ]
+  }
+ ]
+}

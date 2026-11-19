@@ -761,6 +761,165 @@ function findMessage(messageId: string): MockMessage | undefined {
   return undefined;
 }
 
+/** #1180: what a Discord import plan becomes against `groupId`'s current state (or a new group). */
+function discordImportPlanFor(groupId: string | null): any {
+  const base = (preload.discordImport?.preview ?? null) as any;
+  if (!base) {
+    throw new Error('no Discord export found in that folder');
+  }
+  const plan = JSON.parse(JSON.stringify(base.plan));
+  if (groupId) {
+    const cats = store.categories[groupId] ?? [];
+    const catName = (id: string | null | undefined) => cats.find((k) => k.id === id)?.name.toLowerCase() ?? null;
+    const chans = (store.channels[groupId] ?? []).map((c) => `${catName(c.category_id)}|${c.name.toLowerCase()}`);
+    const emoji = store.customEmoji.filter((e) => e.group_id === groupId).map((e) => e.shortcode);
+    for (const k of plan.categories) {
+      k.exists = cats.some((c) => c.name.toLowerCase() === k.name.toLowerCase());
+    }
+    for (const c of plan.channels) {
+      c.exists = chans.includes(`${c.category?.toLowerCase() ?? null}|${c.name.toLowerCase()}`);
+    }
+    for (const e of plan.emoji) {
+      e.exists = !!e.shortcode && emoji.includes(e.shortcode);
+    }
+  }
+  plan.totals.to_create_categories = plan.categories.filter((k: any) => !k.exists).length;
+  plan.totals.to_create_channels = plan.channels.filter((c: any) => !c.exists).length;
+  plan.totals.to_upload_emoji = plan.emoji.filter((e: any) => e.shortcode && !e.exists).length;
+  return plan;
+}
+
+function discordImportCandidates(name: string) {
+  return store.groups
+    .filter((g) => g.name.toLowerCase() === name.toLowerCase() && roleInGroup(g.id) === 'admin')
+    .map((g) => ({ group_id: g.id, name: g.name }));
+}
+
+function discordImportPreview(target: string | null) {
+  const base = preload.discordImport?.preview as any;
+  const candidates = discordImportCandidates(base?.plan?.group?.name ?? '');
+  let chosen: string | null = null;
+  if (target && target !== 'new') {
+    chosen = target;
+  } else if (target === null && candidates.length === 1) {
+    chosen = candidates[0].group_id;
+  }
+  const plan = discordImportPlanFor(chosen);
+  const group = chosen ? store.groups.find((g) => g.id === chosen) : null;
+  return {
+    dir: base.dir,
+    plan,
+    invite_sheet: base.invite_sheet,
+    target: group ? { group_id: group.id, name: group.name } : null,
+    candidates,
+  };
+}
+
+function discordImportApply(target: string | null) {
+  if (preload.discordImport?.failApply) {
+    throw new Error(String(preload.discordImport.failApply));
+  }
+  const base = preload.discordImport.preview as any;
+  let groupId = target && target !== 'new' ? target : null;
+  const created = !groupId;
+  if (!groupId) {
+    groupId = generateId();
+    store.groups.push({
+      id: groupId,
+      name: base.plan.group.name,
+      owner_id: store.session?.id ?? 'me',
+      created_at: nowIso(),
+      current_user_role: 'admin',
+    });
+    store.channels[groupId] = [];
+    store.categories[groupId] = [];
+  }
+  const plan = discordImportPlanFor(groupId);
+  const result = {
+    group_id: groupId,
+    group_name: store.groups.find((g) => g.id === groupId)!.name,
+    created_group: created,
+    icon_set: created,
+    categories_created: 0,
+    channels_created: 0,
+    channels_moved: 0,
+    emoji_uploaded: 0,
+    categories_existing: 0,
+    channels_existing: 0,
+    emoji_existing: 0,
+    failures: [] as { kind: string; name: string; error: string }[],
+    invite_link: null as unknown,
+    invite_link_existing: false,
+  };
+  for (const k of plan.categories) {
+    if (k.exists) {
+      result.categories_existing += 1;
+      continue;
+    }
+    store.categories[groupId] = [...(store.categories[groupId] ?? []), { id: generateId(), group_id: groupId, name: k.name }];
+    result.categories_created += 1;
+  }
+  for (const c of plan.channels) {
+    if (c.exists) {
+      result.channels_existing += 1;
+      continue;
+    }
+    const categoryId = c.category
+      ? (store.categories[groupId] ?? []).find((k) => k.name.toLowerCase() === c.category.toLowerCase())?.id ?? null
+      : null;
+    const channel: MockChannel = {
+      id: generateId(),
+      group_id: groupId,
+      name: c.name,
+      description: c.description ?? undefined,
+      channel_type: c.kind,
+      category_id: categoryId,
+    };
+    store.channels[groupId] = appendChannel(store.channels[groupId] ?? [], store.categories[groupId] ?? [], channel);
+    result.channels_created += 1;
+  }
+  for (const e of plan.emoji) {
+    if (!e.shortcode) {
+      continue;
+    }
+    if (e.exists) {
+      result.emoji_existing += 1;
+      continue;
+    }
+    store.customEmoji.push({
+      group_id: groupId,
+      group_name: result.group_name,
+      shortcode: e.shortcode,
+      content_hash: generateId(),
+      content_type: e.animated ? 'image/gif' : 'image/webp',
+      animated: e.animated,
+      size_bytes: 1024,
+      created_by: store.session?.id ?? 'me',
+    });
+    result.emoji_uploaded += 1;
+  }
+  const live = store.inviteLinks.some((l) => l.group_id === groupId && !l.revoked_at);
+  if (live) {
+    result.invite_link_existing = true;
+  } else {
+    const id = generateId();
+    const token = `${generateId()}.${generateId()}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+    store.inviteLinks.push({
+      id,
+      group_id: groupId,
+      created_at: nowIso(),
+      creator_username: store.session?.username ?? null,
+      expires_at: expiresAt,
+      max_uses: null,
+      uses: 0,
+      revoked_at: null,
+    });
+    result.invite_link = { id, token, url: `https://pollis.com/invite/${token}`, expires_at: expiresAt, max_uses: null };
+  }
+  return result;
+}
+
 /** This user's role: the roster if it names them, else the group row (#942). */
 function roleInGroup(groupId: string): string | null {
   const me = store.session?.id;
@@ -1474,9 +1633,22 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'pick_save_path':
       return store.exportSavePath;
 
-    // An empty list is "cancelled".
+    // An empty list is "cancelled"; `__POLLIS_PRELOAD__.openPaths` is what the picker "chose".
     case 'pick_open_paths':
-      return [];
+      return (preload.openPaths as string[] | undefined) ?? [];
+
+    // Discord import (#1180): the plan is `preload.discordImport.preview` (real `pollis-import`
+    // output for the dragons-den fixture); the mock marks what a target group already holds and
+    // applies it the way `pollis_core::commands::import` does, through the same store.
+    case 'discord_import_preview': {
+      const { target } = args as { dir: string; target: string | null };
+      return discordImportPreview(target);
+    }
+
+    case 'discord_import_apply': {
+      const { target } = args as { dir: string; target: string | null };
+      return discordImportApply(target);
+    }
 
     // Export (#856): no media cache, so every attachment is "missing".
     case 'export_archive': {
