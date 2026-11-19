@@ -129,10 +129,14 @@ for (const skin of SKINS) {
   });
 }
 
-test("a send that fails now is kept as failed, and Retry sends it", async ({ page }) => {
+test("a send made offline is kept as failed at once, and Retry sends it", async ({ page }) => {
   await boot(page, preloadState("modern", "pending", false));
   await openChannel(page);
-  await page.evaluate(() => (window as any).__tauriFailSends(true));
+  // The OS says offline: no retry can land, so the core does not wait them out (#2055).
+  await page.evaluate(() => {
+    (window as any).__tauriSetOffline(true);
+    (window as any).__tauriFailSends(true);
+  });
 
   await page.getByTestId("message-input").click();
   await page.keyboard.type("sent while offline");
@@ -143,10 +147,103 @@ test("a send that fails now is kept as failed, and Retry sends it", async ({ pag
   const failedRow = page.locator("[data-testid^='message-']", { hasText: "sent while offline" }).first();
   await expect(failedRow).toContainText("[Not sent]");
 
-  await page.evaluate(() => (window as any).__tauriFailSends(false));
+  await page.evaluate(() => {
+    (window as any).__tauriSetOffline(false);
+    (window as any).__tauriFailSends(false);
+  });
   await retry.click();
   await expect(page.locator("[data-testid^='message-retry-']")).toHaveCount(0);
   await expect(page.getByText("sent while offline")).toHaveCount(1);
+});
+
+/** Flags `window.__sawNotSent` the moment any row shows "Not sent" or a Retry, however briefly. */
+async function watchForNotSent(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __sawNotSent: boolean };
+    w.__sawNotSent = false;
+    const check = () => {
+      if (
+        document.body.innerText.includes("[Not sent]") ||
+        document.querySelector("[data-testid^='message-retry-']")
+      ) {
+        w.__sawNotSent = true;
+      }
+    };
+    new MutationObserver(check).observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    check();
+  });
+}
+
+const sawNotSent = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __sawNotSent: boolean }).__sawNotSent);
+
+/** The row of our message with `text`, by its stored id. */
+const storedId = (page: Page, text: string) =>
+  page.evaluate(
+    ([channel, content]) =>
+      (window as any).__tauriMock.messages[channel].find(
+        (m: { content?: string }) => m.content === content,
+      )?.id ?? null,
+    [CHANNEL_ID, text],
+  );
+
+test("a send through a brief network blip stays sending and lands, never Not sent (#2055)", async ({
+  page,
+}) => {
+  const preload = { ...preloadState("modern", "pending", false), outboxRetryDelaysMs: [5_000, 5_000, 5_000] };
+  await boot(page, preload);
+  await openChannel(page);
+  await watchForNotSent(page);
+  await page.evaluate(() => (window as any).__tauriFailSends(true));
+
+  await page.getByTestId("message-input").click();
+  await page.keyboard.type("sent through a blip");
+  await page.keyboard.press("Enter");
+
+  // The first attempt failed; the core keeps it pending and retries it in place.
+  await expect.poll(() => storedId(page, "sent through a blip")).not.toBeNull();
+  const id = (await storedId(page, "sent through a blip")) as string;
+  await expect.poll(() => sendState(page, id)).toBe("pending");
+  // While the send is out the row is its optimistic stub, under its own id.
+  const row = page.locator("[data-testid^='message-']", { hasText: "sent through a blip" }).first();
+  await expect(row).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("outbox-blip-sending.png") });
+
+  // The link comes back before the retries are spent.
+  await page.evaluate(() => (window as any).__tauriFailSends(false));
+  await expect.poll(() => sendState(page, id), { timeout: 20_000 }).toBeNull();
+  await expect(row).not.toContainText("[Not sent]");
+  await page.screenshot({ path: test.info().outputPath("outbox-blip-delivered.png") });
+  expect(await sawNotSent(page)).toBe(false);
+  await expect(page.getByText("sent through a blip")).toHaveCount(1);
+});
+
+test("a send through a long outage ends Not sent once the retries are spent (#2055)", async ({ page }) => {
+  const preload = { ...preloadState("modern", "pending", false), outboxRetryDelaysMs: [500, 500, 500] };
+  await boot(page, preload);
+  await openChannel(page);
+  await page.evaluate(() => (window as any).__tauriFailSends(true));
+
+  await page.getByTestId("message-input").click();
+  await page.keyboard.type("sent into an outage");
+  await page.keyboard.press("Enter");
+
+  await expect.poll(() => storedId(page, "sent into an outage")).not.toBeNull();
+  const id = (await storedId(page, "sent into an outage")) as string;
+  // Still sending while the retries run.
+  expect(await sendState(page, id)).toBe("pending");
+  await expect(page.getByTestId(`message-retry-${id}`)).toHaveCount(0);
+
+  // Spent: now it says so, with its way out.
+  const row = page.getByTestId(`message-${id}`);
+  await expect(row).toContainText("[Not sent]", { timeout: 15_000 });
+  expect(await sendState(page, id)).toBe("failed");
+  await expect(page.getByTestId(`message-retry-${id}`)).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("outbox-outage-not-sent.png") });
 });
 
 test("an attachment message whose upload never finished is shown, pending, with Retry", async ({ page }) => {

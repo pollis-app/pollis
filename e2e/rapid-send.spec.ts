@@ -18,6 +18,8 @@ function preloadState(failSends: boolean) {
     profile: { id: USER.id, username: USER.username },
     preferences: JSON.stringify({ skin: "modern" }),
     failSends,
+    // Failing sends here are an offline device: the core does not retry them in place (#2055).
+    knownOffline: failSends,
     groups: [
       { id: GROUP_ID, name: "Acme", owner_id: USER.id, created_at: new Date().toISOString() },
     ],
@@ -147,7 +149,10 @@ test("a failed send in a burst is marked on its own and never holds up the next"
   // Each failure is its own message's, with its own Retry.
   await expect(page.locator("[data-testid^='message-retry-']")).toHaveCount(2);
 
-  await page.evaluate(() => (window as any).__tauriFailSends(false));
+  await page.evaluate(() => {
+    (window as any).__tauriSetOffline(false);
+    (window as any).__tauriFailSends(false);
+  });
   await send(page, BURST[2]);
   await expect.poll(() => stored(page)).toEqual([
     { content: BURST[0], send_state: "failed" },

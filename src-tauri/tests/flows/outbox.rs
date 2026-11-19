@@ -1033,3 +1033,197 @@ async fn a_send_that_never_writes_its_row_does_not_hold_up_the_next() {
     }
     drop((alice, bob));
 }
+
+/// The outbox's in-place retries (#2055), shortened and set for one test; reset on drop.
+struct Blips;
+
+impl Blips {
+    /// Retries after 150 ms each; the OS answers "online" unless `offline`.
+    fn on(offline: bool) -> Self {
+        let delay = std::time::Duration::from_millis(150);
+        test_hooks::set_retry_delays(Some(vec![delay; 3]));
+        test_hooks::set_known_offline(Some(offline));
+        Blips
+    }
+}
+
+impl Drop for Blips {
+    fn drop(&mut self) {
+        test_hooks::fail_next_deliveries(0);
+        test_hooks::set_retry_delays(None);
+        test_hooks::set_known_offline(None);
+    }
+}
+
+async fn fresh_id(client: &TestClient) -> String {
+    client.invoke_json("new_message_id", json!({})).await
+        .as_str().expect("id").to_string()
+}
+
+/// #2055: a send whose first attempts hit a dropped link is retried in place and delivered,
+/// and its row never reads `failed` on the way: what the user sees stays "sending".
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_brief_network_blip_is_retried_silently_and_never_reads_failed() {
+    let (alice, bob, channel_id) = pair().await;
+    let _blips = Blips::on(false);
+    let id = fresh_id(&alice).await;
+
+    test_hooks::fail_next_deliveries(2);
+    let before = test_hooks::delivery_attempts();
+    let sent = send_with_id(&alice, &channel_id, &id, "through a blip", None)
+        .await
+        .expect("delivered once the link is back");
+    assert_eq!(sent["id"], id.as_str());
+    assert_eq!(test_hooks::delivery_attempts(), before + 3, "two failed attempts, then the one that landed");
+
+    let written = test_hooks::states_written(&id);
+    assert!(!written.iter().any(|s| s == "failed"), "never shown as not sent: {written:?}");
+    assert!(own_row(&alice, &channel_id, &id).await.expect("kept").get("send_state").is_none());
+    assert_eq!(envelopes_with_id(&id).await, 1, "one envelope, the same id on every attempt");
+    assert_eq!(copies(&bob, &channel_id, "through a blip").await, 1);
+    drop((alice, bob));
+}
+
+/// #2055: an outage that outlasts the retries ends in `failed` ("Not sent"), written once,
+/// after the last attempt; the drain then delivers it as before.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_send_that_keeps_failing_reads_failed_once_the_retries_are_spent() {
+    let (alice, bob, channel_id) = pair().await;
+    let _blips = Blips::on(false);
+    let id = fresh_id(&alice).await;
+
+    test_hooks::fail_next_deliveries(10);
+    let before = test_hooks::delivery_attempts();
+    send_with_id(&alice, &channel_id, &id, "through an outage", None)
+        .await
+        .expect_err("the link never came back");
+    assert_eq!(test_hooks::delivery_attempts(), before + 4, "the first attempt and three retries, no more");
+    let written = test_hooks::states_written(&id);
+    assert_eq!(written.last().map(String::as_str), Some("failed"), "{written:?}");
+    assert_eq!(written.iter().filter(|s| *s == "failed").count(), 1, "{written:?}");
+    assert_eq!(own_row(&alice, &channel_id, &id).await.expect("kept")["send_state"], "failed");
+
+    test_hooks::fail_next_deliveries(0);
+    let report = alice.invoke_json("flush_outbox", json!({})).await;
+    assert!(report["failed"].as_array().expect("failed").is_empty(), "{report}");
+    assert!(own_row(&alice, &channel_id, &id).await.expect("kept").get("send_state").is_none());
+    assert_eq!(copies(&bob, &channel_id, "through an outage").await, 1);
+    drop((alice, bob));
+}
+
+/// #2055: when the OS says the device is offline no retry can land, so the send reads
+/// `failed` after its one attempt; the reconnect drain picks it up.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_send_while_known_offline_reads_failed_at_once() {
+    let (alice, bob, channel_id) = pair().await;
+    let _blips = Blips::on(true);
+    let id = fresh_id(&alice).await;
+
+    test_hooks::fail_next_deliveries(1);
+    let before = test_hooks::delivery_attempts();
+    send_with_id(&alice, &channel_id, &id, "sent offline", None)
+        .await
+        .expect_err("offline");
+    assert_eq!(test_hooks::delivery_attempts(), before + 1, "no retry while offline");
+    assert_eq!(own_row(&alice, &channel_id, &id).await.expect("kept")["send_state"], "failed");
+
+    alice.invoke_json("flush_outbox", json!({})).await;
+    assert_eq!(copies(&bob, &channel_id, "sent offline").await, 1);
+    drop((alice, bob));
+}
+
+/// #2055: Retry gets the same silent retries, and reads "sending" (`pending`) from the tap
+/// on, not `failed` while it is still trying.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_retry_through_a_blip_reads_sending_until_it_lands() {
+    let (alice, bob, channel_id) = pair().await;
+    let _blips = Blips::on(true);
+    let id = fresh_id(&alice).await;
+    test_hooks::fail_next_deliveries(1);
+    send_with_id(&alice, &channel_id, &id, "retried through a blip", None)
+        .await
+        .expect_err("offline");
+    assert_eq!(own_row(&alice, &channel_id, &id).await.expect("kept")["send_state"], "failed");
+
+    test_hooks::set_known_offline(Some(false));
+    test_hooks::fail_next_deliveries(1);
+    let tapped_at = test_hooks::states_written(&id).len();
+    alice
+        .invoke_try("retry_message", json!({ "messageId": id }))
+        .await
+        .expect("delivered on the retry's second attempt");
+    let written = test_hooks::states_written(&id)[tapped_at..].to_vec();
+    assert_eq!(written.first().map(String::as_str), Some("pending"), "{written:?}");
+    assert!(!written.iter().any(|s| s == "failed"), "{written:?}");
+    assert!(own_row(&alice, &channel_id, &id).await.expect("kept").get("send_state").is_none());
+    assert_eq!(copies(&bob, &channel_id, "retried through a blip").await, 1);
+    drop((alice, bob));
+}
+
+/// #2055 with #1636: while a send waits to retry, nothing is held. A later send of the same
+/// conversation goes first through the waiting one (in line, the same envelope id) and both
+/// land in stored order; a drain in the gap leaves the waiting row `pending`.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_send_waiting_to_retry_holds_nothing_and_keeps_its_place() {
+    let (alice, bob, channel_id) = pair().await;
+    let _blips = Blips::on(false);
+    test_hooks::set_retry_delays(Some(vec![std::time::Duration::from_secs(3); 3]));
+    let first = fresh_id(&alice).await;
+    let second = fresh_id(&alice).await;
+
+    // The first send fails once, then the drain's attempt in its wait fails too.
+    test_hooks::fail_next_deliveries(2);
+    let task = {
+        let state = alice.state.clone();
+        let (channel_id, sender, first) =
+            (channel_id.clone(), alice.user_id().to_string(), first.clone());
+        tokio::spawn(async move {
+            pollis_core::commands::messages::send_message_with_id(
+                Some(first),
+                channel_id,
+                sender,
+                "first, through a blip".to_string(),
+                Vec::new(),
+                None,
+                None,
+                None,
+                &state,
+            )
+            .await
+        })
+    };
+    // Its first attempt has failed once only one link failure is left (for the drain).
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while test_hooks::pending_link_failures() > 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the first attempt ran");
+    alice.invoke_json("flush_outbox", json!({})).await;
+    assert_eq!(
+        own_row(&alice, &channel_id, &first).await.expect("kept")["send_state"],
+        "pending",
+        "the drain left the retrying row as it was"
+    );
+
+    // A later send does not wait out the first one's delay: it sends it first, in line.
+    let started = std::time::Instant::now();
+    send_with_id(&alice, &channel_id, &second, "second, behind it", None)
+        .await
+        .expect("delivered");
+    assert!(started.elapsed() < std::time::Duration::from_secs(3), "{:?}", started.elapsed());
+    task.await.expect("joined").expect("the first lands too");
+
+    let ids = vec![first.clone(), second.clone()];
+    assert_eq!(posted_order(&channel_id, &ids).await, ids, "stored order");
+    assert_eq!(their_line(&bob, &channel_id, &ids).await, ids);
+    assert_eq!(envelopes_with_id(&first).await, 1);
+    assert!(!test_hooks::states_written(&first).iter().any(|s| s == "failed"));
+    drop((alice, bob));
+}

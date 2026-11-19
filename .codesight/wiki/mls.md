@@ -1013,6 +1013,33 @@ the sender is not a member, or a DS 400/403/404/410/422 — typed as
 with Retry / Discard. An unsent row cannot be edited (there is no envelope to
 target).
 
+**Silent retries before "Not sent" (#2055).** A send or Retry whose attempt
+fails transiently (`ds_client::is_transient`: the link, a timeout or a DS 5xx)
+does not write `failed` yet. `outbox::deliver` keeps the row `pending`, so every
+UI still shows it sending, and tries it again in place after each of
+`outbox::RETRY_DELAYS` (2 s, 5 s, 15 s; the shape of the renderer's emoji retry,
+#1562). It writes `failed` only when the delays are spent, when the OS says the
+device has no network (`net::peer::platform::probe`, `online == Some(false)`;
+mobile and Windows cannot tell, so they run the delays), or when the app starts
+leaving for the background (`notify::lock::suspend::is_leaving` / `left()`,
+which also cuts a wait short). A refusal no retry fixes is still `rejected` at
+once, and any other error (an outdated client, a missing session) is `failed`
+at once. Each attempt is a whole `deliver_once`: the same envelope id, the
+message's own lock and its place in the conversation's line, and nothing is held
+between attempts, so the conversation's later sends go through it as an ahead
+pass and keep stored order. While a loop runs, its id is in
+`AppState::outbox_retrying`; a drain's attempt on it leaves the row `pending`
+(`Attempt::Own { hold }`), since the loop decides when it reads "Not sent".
+Retry first sets a `failed` row back to `pending`. The drain itself stays one
+attempt per message. Pinned by `outbox::tests::only_a_transient_failure_…` and
+the flows `a_brief_network_blip_is_retried_silently_and_never_reads_failed`,
+`a_send_that_keeps_failing_reads_failed_once_the_retries_are_spent`,
+`a_send_while_known_offline_reads_failed_at_once`,
+`a_retry_through_a_blip_reads_sending_until_it_lands` and
+`a_send_waiting_to_retry_holds_nothing_and_keeps_its_place` (harness hooks
+`fail_next_deliveries`, `set_retry_delays`, `set_known_offline`,
+`states_written`). The renderers' `send_state` mapping is unchanged.
+
 The row's `sent_at`: every attempt refreshes it while the row has never been
 sealed (empty ciphertext), so a message queued offline for hours lands at the
 time it actually went out; the first attempt that SEALS persists its stamp, and
@@ -1061,7 +1088,8 @@ made in one millisecond never share an id). The core makes the order:
 - **An ahead pass never changes an earlier row's state on a transient error.**
   It leaves the row `pending` and moves on. Only a refusal no retry fixes is
   recorded (`rejected`). `failed` is written only by the row's own call, Retry
-  or the drain (`outbox::Attempt`).
+  or the drain (`outbox::Attempt`), and by the first two only once their
+  in-place retries are over (#2055).
 - Both line queries (`AHEAD_SQL`, `BEHIND_SQL`) read the partial index
   `idx_message_unsent_line (conversation_id, sent_at, id) WHERE send_state IS
   NOT NULL`, never the whole conversation. A unit test pins the query plan.

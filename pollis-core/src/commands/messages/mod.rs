@@ -136,7 +136,7 @@ pub use outbox::{
 };
 pub(crate) use outbox::{mark_suspended_sends_on, spawn_outbox_flush, sweep_orphan_attachments_on};
 pub use outbox::OutgoingAttachment;
-pub use outbox::Enqueuing;
+pub use outbox::{Enqueuing, Retrying};
 
 pub use read::{
     get_channel_messages, get_dm_messages, list_messages, list_thread_summaries,

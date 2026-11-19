@@ -4,6 +4,12 @@
 //!
 //! [`flush_outbox`] (event-driven, never polled) and [`retry_message`] redeliver unsent rows and queued edits.
 //!
+//! **Silent retries (#2055).** A send or Retry whose attempt fails transiently (the link, a DS
+//! 5xx) stays `pending` and is tried again in place after each of [`RETRY_DELAYS`]; it is written
+//! `failed` ("Not sent") only once they are spent, the OS says the device is offline, or the app
+//! is leaving for the background. A refusal no retry fixes is `rejected` at once. Past that the
+//! event-driven drain takes over; nothing retries on a timer.
+//!
 //! **Idempotency.** A retry reuses the envelope id (the DS answers a replay); [`deliver`] holds the per-message lock.
 //!
 //! **Order (#1636).** One conversation delivers one message at a time, in stored `(sent_at, id)`
@@ -23,8 +29,8 @@ use super::types::Message;
 
 /// Not yet confirmed by the DS, including an attachment send waiting on its file key (a wait, not a failure).
 pub(crate) const PENDING: &str = "pending";
-/// `message.send_state` once a delivery attempt has failed in a way a later
-/// one may not (offline, a 5xx, an outdated client).
+/// `message.send_state` once delivery has failed in a way a later attempt may not (offline,
+/// a 5xx, an outdated client) and the outbox has stopped retrying it in place (#2055).
 pub(crate) const FAILED: &str = "failed";
 /// The DS refused it in a way no retry fixes; the drain leaves it to the user.
 pub(crate) const REJECTED: &str = "rejected";
@@ -982,17 +988,169 @@ pub(super) fn restamp_on(
     Ok(super::stamp_envelope_sent_at(stamp))
 }
 
-/// Deliver the queued message `id`, in its conversation's order (#1636).
+/// The waits before each in-place retry of a transiently failed send (#2055): bounded, never a
+/// loop, the same shape as the renderer's custom-emoji retry (#1562). About 22 s in all, after
+/// which the row reads "Not sent" and the event-driven drain takes over.
+pub(crate) const RETRY_DELAYS: [std::time::Duration; 3] = [
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(5),
+    std::time::Duration::from_secs(15),
+];
+
+fn retry_delays() -> Vec<std::time::Duration> {
+    super::send::test_hooks::retry_delays().unwrap_or_else(|| RETRY_DELAYS.to_vec())
+}
+
+/// Whether the OS says this device has no network at all, so no in-place retry can land (#2055).
+/// Where the OS cannot tell (`None`: mobile, Windows) it is not offline, and the retries run.
+async fn known_offline() -> bool {
+    if let Some(offline) = super::send::test_hooks::known_offline() {
+        return offline;
+    }
+    crate::net::peer::platform::probe().await.online == Some(false)
+}
+
+/// What [`deliver`] does after an attempt that failed with a retry still left.
+#[derive(Debug, PartialEq, Eq)]
+enum AfterFailure {
+    /// Stop: the attempt already left the row as it should read (`rejected`, waiting for its
+    /// file key, or a simulated kill, which marks nothing).
+    Stop,
+    /// Stop and write `failed`: retrying in place cannot help.
+    GiveUp,
+    /// Keep the row `pending` and try again after the next delay.
+    Retry,
+}
+
+/// The one decision behind [`deliver`]'s retries, pure so it is tested on its own.
+fn after_failure(e: &Error, awaiting_key: bool, leaving: bool, offline: bool) -> AfterFailure {
+    if is_permanent(e) || awaiting_key || super::send::test_hooks::is_simulated_crash(e) {
+        return AfterFailure::Stop;
+    }
+    if !crate::commands::mls::ds_client::is_transient(e) || leaving || offline {
+        return AfterFailure::GiveUp;
+    }
+    AfterFailure::Retry
+}
+
+/// Ids an in-place retry loop is working on (#2055), counted. A drain's attempt on one leaves
+/// the row `pending` on a transient failure: the loop decides when it reads "Not sent".
+#[derive(Default)]
+pub struct Retrying {
+    inner: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+}
+
+impl Retrying {
+    fn contains(&self, id: &str) -> bool {
+        self.inner.lock().unwrap_or_else(|p| p.into_inner()).contains_key(id)
+    }
+}
+
+/// One loop's entry in [`Retrying`], removed when the loop ends, however it ends.
+struct RetryingEntry {
+    state: Arc<AppState>,
+    id: String,
+}
+
+impl RetryingEntry {
+    fn begin(state: &Arc<AppState>, id: &str) -> Self {
+        *state
+            .outbox_retrying
+            .inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(id.to_string())
+            .or_default() += 1;
+        Self { state: state.clone(), id: id.to_string() }
+    }
+}
+
+impl Drop for RetryingEntry {
+    fn drop(&mut self) {
+        let mut map = self.state.outbox_retrying.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(n) = map.get_mut(&self.id) {
+            *n -= 1;
+            if *n == 0 {
+                map.remove(&self.id);
+            }
+        }
+    }
+}
+
+/// Deliver the queued message `id` for its send or Retry, retrying a transient failure in place
+/// (#2055).
 ///
-/// One conversation delivers one message at a time, oldest first: under the conversation's
-/// line lock, any earlier send still writing its row is waited for, then every earlier
-/// `pending` message is delivered before this one. A failed earlier one is recorded and
-/// skipped, never a reason to stop. Every path (send, Retry, the drain) comes through here,
-/// so the order holds whichever trigger runs and across restarts.
+/// The row stays `pending` across [`RETRY_DELAYS`] and is written `failed` only when they are
+/// spent, when the OS says the device is offline, or when the app starts leaving for the
+/// background (so no wait outlives iOS's background time, and the suspend path never leaves a
+/// row reading "sending"). A refusal no retry fixes is `rejected` at once. Each attempt is a
+/// whole [`deliver_once`]: the same envelope id, its own locks, in its conversation's line.
+/// Nothing is held between attempts, so the conversation's later sends are not held up.
 pub(super) async fn deliver(
     state: &Arc<AppState>,
     id: &str,
     sender_username: Option<String>,
+) -> Result<Message> {
+    use crate::notify::lock::suspend;
+    let _sending = suspend::send_started(Some(id));
+    let _retrying = RetryingEntry::begin(state, id);
+    // A Retry starts from `failed` (or `rejected`): it reads "sending" while it is tried.
+    mark_state(state, id, PENDING).await;
+    let mut delays = retry_delays().into_iter();
+    loop {
+        let delay = delays.next();
+        let attempt = Attempt::Own { hold: delay.is_some() };
+        let err = match deliver_once(state, id, sender_username.clone(), attempt).await {
+            Ok(message) => return Ok(message),
+            Err(e) => e,
+        };
+        // The last attempt recorded its own failure.
+        let Some(delay) = delay else {
+            return Err(err);
+        };
+        let decision = after_failure(
+            &err,
+            awaiting_key(state, id),
+            suspend::is_leaving(),
+            known_offline().await,
+        );
+        match decision {
+            AfterFailure::Stop => return Err(err),
+            AfterFailure::GiveUp => {
+                mark_failed(state, id, false).await;
+                return Err(err);
+            }
+            AfterFailure::Retry => {}
+        }
+        crate::diag!("[outbox] delivery of {id} failed ({err}); trying again in {delay:?}");
+        // Created before the check, so an `enter` in between still wakes it.
+        let left = suspend::left();
+        if suspend::is_leaving() {
+            mark_failed(state, id, false).await;
+            return Err(err);
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(delay) => {}
+            _ = left => {
+                mark_failed(state, id, false).await;
+                return Err(err);
+            }
+        }
+    }
+}
+
+/// One delivery of the queued message `id`, in its conversation's order (#1636).
+///
+/// One conversation delivers one message at a time, oldest first: under the conversation's
+/// line lock, any earlier send still writing its row is waited for, then every earlier
+/// `pending` message is delivered before this one. A failed earlier one is recorded and
+/// skipped, never a reason to stop. Every path (send, Retry and their in-place retries, the
+/// drain) comes through here, so the order holds whichever trigger runs and across restarts.
+async fn deliver_once(
+    state: &Arc<AppState>,
+    id: &str,
+    sender_username: Option<String>,
+    attempt: Attempt,
 ) -> Result<Message> {
     let _sending = crate::notify::lock::suspend::send_started(Some(id));
     let position = {
@@ -1001,10 +1159,11 @@ pub(super) async fn deliver(
         line_position_on(db.conn(), id)?
     };
     let Some((conversation_id, sent_at)) = position else {
-        return deliver_one(state, id, sender_username, Attempt::Own).await;
+        return deliver_one(state, id, sender_username, attempt).await;
     };
     let line = OutboxLock::acquire(state, &line_key(&conversation_id)).await;
-    let result = deliver_in_line(state, &conversation_id, &sent_at, id, sender_username).await;
+    let result =
+        deliver_in_line(state, &conversation_id, &sent_at, id, sender_username, attempt).await;
     line.release().await;
     result
 }
@@ -1015,6 +1174,7 @@ async fn deliver_in_line(
     sent_at: &str,
     id: &str,
     sender_username: Option<String>,
+    attempt: Attempt,
 ) -> Result<Message> {
     for gate in earlier_enqueues(state, conversation_id, sent_at, id) {
         drop(gate.lock().await);
@@ -1035,14 +1195,15 @@ async fn deliver_in_line(
             crate::diag!("[outbox] delivery of {earlier}, ahead of {id}, failed: {e}");
         }
     }
-    deliver_one(state, id, sender_username, Attempt::Own).await
+    deliver_one(state, id, sender_username, attempt).await
 }
 
 /// Whose attempt this is (#1636), which decides what a transient failure records.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Attempt {
-    /// The row's own send, Retry, or the drain: a transient failure marks it `failed`.
-    Own,
+    /// The row's own send, Retry, or the drain: a transient failure marks it `failed`, unless
+    /// `hold`: an in-place retry is still to come (#2055), so the row stays `pending`.
+    Own { hold: bool },
     /// A pass for a LATER send of the conversation: a transient failure leaves the row
     /// `pending` (only a refusal no retry fixes is recorded), so another send never changes
     /// what this row shows.
@@ -1159,7 +1320,11 @@ async fn deliver_locked(
     };
     set_awaiting_key(state, id, false);
 
-    match super::send::deliver_queued(&queued, sender_username, state).await {
+    let delivered = match super::send::test_hooks::take_link_failure() {
+        Some(e) => Err(e),
+        None => super::send::deliver_queued(&queued, sender_username, state).await,
+    };
+    match delivered {
         Ok(message) => Ok(message),
         Err(e) => {
             if !super::send::test_hooks::is_simulated_crash(&e) {
@@ -1170,10 +1335,11 @@ async fn deliver_locked(
     }
 }
 
-/// Record a failed attempt; an [`Attempt::Ahead`] pass records only a permanent refusal.
+/// Record a failed attempt; an [`Attempt::Ahead`] pass, or one with a retry still to come,
+/// records only a permanent refusal.
 async fn record_failure(state: &Arc<AppState>, id: &str, e: &Error, attempt: Attempt) {
     let permanent = is_permanent(e);
-    if attempt == Attempt::Ahead && !permanent {
+    if !permanent && matches!(attempt, Attempt::Ahead | Attempt::Own { hold: true }) {
         return;
     }
     mark_failed(state, id, permanent).await;
@@ -1184,6 +1350,7 @@ async fn mark_failed(state: &Arc<AppState>, id: &str, permanent: bool) {
 }
 
 async fn mark_state(state: &Arc<AppState>, id: &str, send_state: &str) {
+    super::send::test_hooks::note_state_written(id, send_state);
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
         if let Err(mark) = mark_state_on(db.conn(), id, send_state) {
@@ -1393,7 +1560,8 @@ fn fold(delivered: &mut Vec<String>, failed: &mut Vec<String>, next_delivered: V
 
 /// Deliver every unsent message, oldest first (#1335).
 ///
-/// Single-flight: a call during a drain sets `outbox_rerun` instead of overlapping. Nothing retries in a loop.
+/// Single-flight: a call during a drain sets `outbox_rerun` instead of overlapping. One attempt
+/// per message; the only in-place retries are a send's own (#2055), and those are bounded.
 pub async fn flush_outbox(state: &Arc<AppState>) -> Result<OutboxReport> {
     use std::sync::atomic::Ordering;
     // The whole drain, so the gaps between its messages do not count as idle; each message
@@ -1435,7 +1603,10 @@ async fn drain(state: &Arc<AppState>) -> Result<OutboxReport> {
     };
     let mut report = OutboxReport::default();
     for id in ids {
-        match deliver(state, &id, None).await {
+        // One attempt each: the drain is the event-driven retry. A row a send's in-place retry
+        // is still working on stays `pending` (#2055); that loop decides when it reads "Not sent".
+        let attempt = Attempt::Own { hold: state.outbox_retrying.contains(&id) };
+        match deliver_once(state, &id, None, attempt).await {
             Ok(_) => report.delivered.push(id),
             Err(e) => {
                 crate::diag!("[outbox] delivery of {id} failed: {e}");
@@ -2075,6 +2246,49 @@ mod tests {
         assert_eq!(send_state(conn, &gone).as_deref(), Some(REJECTED));
         assert_eq!(unsent_ids_on(conn).unwrap(), vec![flaky]);
         assert!(matches!(load(conn, &gone).unwrap(), Some((_, Some(_)))));
+    }
+
+    /// What a failed attempt with a retry still left leads to (#2055): a link failure or a 5xx is
+    /// retried in place; offline or leaving for the background gives up at once (`failed`); a
+    /// permanent refusal, a row waiting for its file key and a simulated kill stop as they are.
+    #[test]
+    fn only_a_transient_failure_while_online_and_in_the_foreground_is_retried_in_place() {
+        let link = || Error::Other(anyhow::anyhow!("ds_post /v1/messages/send: error sending request"));
+        let five_hundred = || {
+            Error::Other(anyhow::Error::new(crate::commands::mls::ds_client::DsRefused {
+                label: "ds_post".into(),
+                path: "/v1/messages/send".into(),
+                status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
+                body: String::new(),
+            }))
+        };
+        let refused = || {
+            Error::Other(anyhow::Error::new(crate::commands::mls::ds_client::DsRefused {
+                label: "ds_post".into(),
+                path: "/v1/messages/send".into(),
+                status: reqwest::StatusCode::FORBIDDEN,
+                body: String::new(),
+            }))
+        };
+        assert_eq!(after_failure(&link(), false, false, false), AfterFailure::Retry);
+        assert_eq!(after_failure(&five_hundred(), false, false, false), AfterFailure::Retry);
+        assert_eq!(after_failure(&link(), false, false, true), AfterFailure::GiveUp, "offline");
+        assert_eq!(after_failure(&link(), false, true, false), AfterFailure::GiveUp, "leaving");
+        assert_eq!(after_failure(&Error::UpgradeRequired, false, false, false), AfterFailure::GiveUp);
+        assert_eq!(after_failure(&refused(), false, false, false), AfterFailure::Stop, "rejected");
+        assert_eq!(after_failure(&link(), true, false, false), AfterFailure::Stop, "file key");
+        assert_eq!(
+            after_failure(&super::super::send::test_hooks::simulated_crash(), false, false, false),
+            AfterFailure::Stop
+        );
+    }
+
+    /// The retry delays are bounded and short (#2055): a few, never a loop.
+    #[test]
+    fn the_retry_budget_is_finite_and_short() {
+        let total: std::time::Duration = RETRY_DELAYS.iter().sum();
+        assert_eq!(RETRY_DELAYS.len(), 3);
+        assert!(total <= std::time::Duration::from_secs(30), "{total:?}");
     }
 
     /// Which errors are permanent: DS refusals of the request itself, never a

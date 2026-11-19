@@ -21,6 +21,9 @@ onFlowComplete:
 # it is still in the conversation and the outbox delivers it: it must end up
 # on screen, settled (no Retry), not vanish.
 #
+# Part 2a (Android) is #2055: a send made during a brief outage stays
+# "sending" while the core retries it and lands, never showing "Not sent".
+#
 # Part 2 (Android only — Maestro can switch airplane mode only there) is the
 # failed state: a send made offline is kept and labelled with Retry / Discard;
 # back online, Retry delivers it.
@@ -86,7 +89,39 @@ onFlowComplete:
     timeout: 120000
 - takeScreenshot: outbox-01-delivered-after-kill
 
+# ── Part 2a: a brief blip → still sending → delivered, never "Not sent" ─────
+# (#2055, Android) The core retries a transient failure in place (2 s / 5 s /
+# 15 s) with the row still pending, so a send made during a short outage reads
+# "sending" throughout and lands once the network is back, with no Retry ever
+# shown. Rows are matched by their spoken label, which ends "sending" while the
+# row is pending (see subflows/rapid-send-burst.yaml).
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - setAirplaneMode: enabled
+      - tapOn:
+          id: "input-composer"
+      - inputText: "ob2055 blip"
+      - tapOn:
+          id: "btn-send"
+      - assertVisible: ".*: ob2055 blip, sending"
+      - assertNotVisible:
+          id: "btn-retry-message-.*"
+      - takeScreenshot: outbox-02a-blip-sending
+      - setAirplaneMode: disabled
+      - assertNotVisible:
+          id: "btn-retry-message-.*"
+      - extendedWaitUntil:
+          notVisible: ".*: ob2055 blip, sending"
+          timeout: 60000
+      - assertNotVisible:
+          id: "btn-retry-message-.*"
+      - assertVisible: ".*ob2055 blip.*"
+      - takeScreenshot: outbox-02b-blip-delivered
+
 # ── Part 2: offline send → failed → Retry (Android) ─────────────────────────
+# The outage outlasts the in-place retries (#2055), so the row ends "Not sent".
 - runFlow:
     when:
       platform: Android
