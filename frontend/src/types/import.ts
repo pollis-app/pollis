@@ -1,0 +1,170 @@
+// Mirrors `pollis_import::plan` and `pollis_core::commands::import` (#1180). Keep in sync.
+
+export type Media = { Local: string } | { Remote: string };
+
+export type ChannelNote =
+  | { kind: "announcement" }
+  | { kind: "forum" }
+  | { kind: "stage" }
+  | { kind: "renamed"; from: string };
+
+export type EmojiNote =
+  | { kind: "renamed"; collided_with: string }
+  | { kind: "no_valid_shortcode" }
+  | { kind: "image_remote" }
+  | { kind: "image_missing" };
+
+export type SkipReason =
+  | { kind: "orphan_thread" }
+  | { kind: "direct" }
+  | { kind: "unsupported"; source_type: string };
+
+export type PlanNote =
+  | { kind: "no_emails" }
+  | { kind: "no_snapshot" }
+  | { kind: "private_channels"; count: number }
+  | { kind: "roles_collapsed"; discarded: number }
+  | { kind: "history_not_imported"; messages: number };
+
+export type Permission =
+  | "view"
+  | "send_messages"
+  | "read_history"
+  | "connect"
+  | "speak"
+  | "manage_channel"
+  | "manage_messages"
+  | "manage_permissions"
+  | "attach_files"
+  | "add_reactions"
+  | "mention_everyone"
+  | "create_threads";
+
+export interface OverwritePlan {
+  target: string;
+  member: boolean;
+  allow: Permission[];
+  deny: Permission[];
+  other_bits: number;
+}
+
+export interface HistorySummary {
+  messages: number;
+  first_ms: number | null;
+  last_ms: number | null;
+}
+
+export interface CategoryPlan {
+  source_id: string;
+  name: string;
+  exists: boolean;
+}
+
+export interface ChannelPlan {
+  source_id: string;
+  source_name: string;
+  name: string;
+  kind: "text" | "voice";
+  category: string | null;
+  description: string | null;
+  exists: boolean;
+  private: boolean;
+  overwrites: OverwritePlan[];
+  history: HistorySummary;
+  notes: ChannelNote[];
+}
+
+export interface EmojiPlan {
+  source_id: string;
+  source_name: string;
+  shortcode: string | null;
+  exists: boolean;
+  animated: boolean;
+  uses: number;
+  image: Media | null;
+  note: EmojiNote | null;
+}
+
+export interface RolePlan {
+  source_id: string;
+  name: string;
+  maps_to: "admin" | "member" | "discarded" | "bot";
+  holders: number;
+}
+
+export interface PersonPlan {
+  source_id: string;
+  username: string;
+  display_name: string;
+  is_bot: boolean;
+  admin: boolean;
+  roles: string[];
+  channels: string[];
+  messages: number;
+}
+
+export interface ImportTotals {
+  categories: number;
+  channels: number;
+  to_create_categories: number;
+  to_create_channels: number;
+  to_upload_emoji: number;
+  emoji: number;
+  people: number;
+  messages: number;
+  overwrites: number;
+  private_channels: number;
+}
+
+export interface ImportPlan {
+  group: { name: string; icon: Media | null };
+  categories: CategoryPlan[];
+  channels: ChannelPlan[];
+  skipped_channels: { name: string; reason: SkipReason }[];
+  emoji: EmojiPlan[];
+  roles: RolePlan[];
+  permissions_known: boolean;
+  people: PersonPlan[];
+  totals: ImportTotals;
+  notes: PlanNote[];
+  warnings: string[];
+}
+
+export interface ImportTarget {
+  group_id: string;
+  name: string;
+}
+
+export interface DiscordImportPreview {
+  dir: string;
+  plan: ImportPlan;
+  invite_sheet: string;
+  target: ImportTarget | null;
+  candidates: ImportTarget[];
+}
+
+export interface ImportFailure {
+  kind: "category" | "channel" | "emoji" | "icon" | "order" | "invite_link";
+  name: string;
+  error: string;
+}
+
+export interface DiscordImportResult {
+  group_id: string;
+  group_name: string;
+  created_group: boolean;
+  icon_set: boolean;
+  categories_created: number;
+  channels_created: number;
+  channels_moved: number;
+  emoji_uploaded: number;
+  categories_existing: number;
+  channels_existing: number;
+  emoji_existing: number;
+  failures: ImportFailure[];
+  invite_link: { id: string; token: string; url: string; expires_at: string | null; max_uses: number | null } | null;
+  invite_link_existing: boolean;
+}
+
+/** The `target` argument meaning "a new group" (`pollis_core::commands::import::TARGET_NEW`). */
+export const IMPORT_TARGET_NEW = "new";

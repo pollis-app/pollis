@@ -7,6 +7,7 @@
   "groups": {
     "create": "Create Group",
     "find": "Find Group",
+    "importDiscord": "Import from Discord",
     "loadFailed": "Failed to load",
     "loadError": "Error: {{message}}",
     "joinRequestsPending_one": "{{count}} join request pending",

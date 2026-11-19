@@ -17,7 +17,7 @@ export interface PanelContext {
 const NONE: PanelContext = { groupId: null, channelId: null, conversationId: null };
 
 /** Static segments that sit where an id would (`/groups/new`, `/dms/requests`, …). */
-const GROUP_STATIC = new Set(["new", "search"]);
+const GROUP_STATIC = new Set(["new", "search", "import"]);
 const DM_STATIC = new Set(["new", "requests", "blocked"]);
 
 export function panelContextFromPath(pathname: string): PanelContext {

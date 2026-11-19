@@ -49,6 +49,8 @@
     "groupsNewKeywords": "new create",
     "groupsSearchName": "Find groups",
     "groupsSearchKeywords": "discover search public",
+    "groupsImportName": "Import from Discord",
+    "groupsImportKeywords": "import discord server guild migrate move channels categories emoji",
     "savedName": "Saved",
     "savedKeywords": "saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "Arcade",
