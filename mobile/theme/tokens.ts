@@ -134,6 +134,10 @@ export const semantic = {
   get accentLine() {
     return _theme.accentLine;
   },
+  // The ring of an offline presence dot (desktop's `accent-muted`).
+  get accentMuted() {
+    return _theme.accentMuted;
+  },
   // A disabled primary button's fill (40% accent over the background).
   get accentDisabled() {
     return _theme.accentDisabled;

@@ -57,7 +57,7 @@ export function SearchResultRow({
         backgroundColor: pressed ? semantic.high : "transparent",
       })}
     >
-      <UserAvatar userId={result.sender_id} label={sender} size="md" variant={isSelf ? "self" : "default"} />
+      <UserAvatar userId={result.sender_id} label={sender} size="md" variant={isSelf ? "self" : "default"} on="raised" />
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <View
           style={{

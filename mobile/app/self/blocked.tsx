@@ -39,7 +39,7 @@ export default function Blocked() {
                 <ActionRow
                   key={b.user_id}
                   testID={`row-blocked-${b.user_id}`}
-                  glyph={<UserAvatar userId={b.user_id} label={handle} />}
+                  glyph={<UserAvatar userId={b.user_id} label={handle} on="raised" />}
                   name={`@${handle}`}
                   sub={sub}
                   action={

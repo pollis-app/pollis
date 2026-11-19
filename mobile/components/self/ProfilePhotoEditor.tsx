@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Text } from "../Text";
-import { Image } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui";
 import { UserAvatar } from "../UserAvatar";
@@ -77,43 +76,17 @@ export function ProfilePhotoEditor({
         onPress={() => setSheetOpen(true)}
         style={({ pressed }) => ({ opacity: pressed && !busy ? 0.85 : 1 })}
       >
-        {preview ? (
-          <View
-            testID="avatar-self-settings-preview"
-            style={{
-              width: SIZE,
-              height: SIZE,
-              borderRadius: SIZE / 2,
-              overflow: "hidden",
-              backgroundColor: semantic.high,
-            }}
-          >
-            <Image source={{ uri: preview }} style={{ width: SIZE, height: SIZE }} contentFit="cover" transition={0} />
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                start: 0,
-                end: 0,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: semantic.backdrop,
-              }}
-            >
-              <ActivityIndicator color={semantic.text} />
-            </View>
-          </View>
-        ) : (
-          <UserAvatar
-            testID="avatar-self-settings"
-            userId={userId}
-            avatarKey={avatarKey}
-            label={label}
-            size={SIZE}
-            variant="self"
-          />
-        )}
+        {/* A picked picture shows at once, under a spinner until it is saved. */}
+        <UserAvatar
+          testID="avatar-self-settings"
+          userId={userId}
+          avatarKey={avatarKey}
+          previewUri={preview}
+          busy={!!preview}
+          label={label}
+          size={SIZE}
+          variant="self"
+        />
       </Pressable>
       <Button
         testID="btn-avatar-change"

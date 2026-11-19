@@ -1,33 +1,23 @@
 import { useSyncExternalStore } from "react";
 import { View } from "react-native";
-import {
-  avatarPhotosShowing,
-  avatarPhotosVersion,
-  subscribeAvatarPhotos,
-} from "../lib/avatarRenderState";
+import { avatarTagsShowing, avatarTagsVersion, subscribeAvatarTags } from "../lib/avatarRenderState";
 
 // Full-size and under the content, like ThemeProbe / EmojiProbe.
 const PROBE = { position: "absolute", top: 0, bottom: 0, start: 0, end: 0 } as const;
 
-// Invisible e2e hooks, drawn by <Screen>: `<testID>-photo` for every tagged
-// `UserAvatar` drawing a photo. A message or list row is one accessible element
-// on iOS, so the avatar's own testID never reaches Maestro there; this does.
+// Invisible e2e hooks, drawn by <Screen>: one view per tag a tagged `UserAvatar` draws
+// (`<testID>-photo`, `<testID>-presence-online|offline`). A message or list row is one
+// accessible element on iOS, so the avatar's own testIDs never reach Maestro there; these do.
 export function AvatarProbe() {
-  useSyncExternalStore(subscribeAvatarPhotos, avatarPhotosVersion);
-  const ids = avatarPhotosShowing();
-  if (ids.length === 0) {
+  useSyncExternalStore(subscribeAvatarTags, avatarTagsVersion);
+  const tags = avatarTagsShowing();
+  if (tags.length === 0) {
     return null;
   }
   return (
     <>
-      {ids.map((id) => (
-        <View
-          key={id}
-          testID={`${id}-photo`}
-          collapsable={false}
-          pointerEvents="none"
-          style={PROBE}
-        />
+      {tags.map((tag) => (
+        <View key={tag} testID={tag} collapsable={false} pointerEvents="none" style={PROBE} />
       ))}
     </>
   );

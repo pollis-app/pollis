@@ -112,6 +112,7 @@ export default function NewDM() {
                   avatarKey={found.avatar_url ?? null}
                   label={found.username || found.email || undefined}
                   size={layout.touchMin}
+                  on="raised"
                 />
               }
               name={`@${found.username}`}

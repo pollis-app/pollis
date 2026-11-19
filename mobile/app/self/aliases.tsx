@@ -50,6 +50,7 @@ function GroupAliases() {
                       aliasKey={alias?.avatar_url}
                       label={alias?.display_name || mainName}
                       variant="self"
+                      on="raised"
                     />
                   }
                   name={g.name}

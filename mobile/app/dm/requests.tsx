@@ -93,6 +93,7 @@ export default function DMRequests() {
                         avatarKey={d.user2_avatar_url}
                         label={label.name}
                         size={layout.touchMin}
+                        on="raised"
                       />
                       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                         <Text
