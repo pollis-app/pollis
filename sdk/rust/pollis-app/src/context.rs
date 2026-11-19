@@ -260,7 +260,8 @@ impl Context {
         }
     }
 
-    /// Post a new message in a channel (by id, e.g. `message.channel`). Needs `Action::Post`.
+    /// Post a new message in a granted channel, by id (e.g. `message.channel`)
+    /// or by name (`"support"` or `"#support"`, any case). Needs `Action::Post`.
     pub fn post(&self, channel: impl AsRef<str>, text: impl AsRef<str>) -> Result {
         refused(host::post(channel.as_ref(), text.as_ref()))
     }

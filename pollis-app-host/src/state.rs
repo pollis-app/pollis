@@ -469,6 +469,29 @@ fn meta(m: &Message) -> MessageMeta {
     }
 }
 
+impl JobState {
+    /// The id of the granted channel `channel` names: an exact id wins, else a
+    /// case-insensitive name with `#` optional. A name two granted channels
+    /// share names neither. Only granted channels are ever considered, so a
+    /// name reveals nothing and reaches nothing an id could not.
+    fn granted_channel(&self, channel: &str) -> Option<String> {
+        if self.grants.channels.contains_key(channel) {
+            return Some(channel.to_string());
+        }
+        let wanted = channel.trim().trim_start_matches('#');
+        let mut named = self
+            .grants
+            .channels
+            .iter()
+            .filter(|(_, name)| name.trim_start_matches('#').eq_ignore_ascii_case(wanted));
+        let (id, _) = named.next()?;
+        if named.next().is_some() {
+            return None;
+        }
+        Some(id.clone())
+    }
+}
+
 impl wit::Host for JobState {}
 
 impl host::Host for JobState {
@@ -478,16 +501,12 @@ impl host::Host for JobState {
             .require_action("post", ActionKind::Post)
             .and_then(|_| self.check_text("post", &text))
             .and_then(|_| {
-                if self.grants.channels.contains_key(&channel) {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "`post` to `{channel}` refused: not in `read.channels`"
-                    ))
-                }
+                self.granted_channel(&channel).ok_or_else(|| {
+                    format!("`post` to `{channel}` refused: not in `read.channels`")
+                })
             });
         match checked {
-            Ok(()) => self.queue("post", Action::Post { channel, text }),
+            Ok(channel) => self.queue("post", Action::Post { channel, text }),
             Err(e) => Ok(Err(e)),
         }
     }

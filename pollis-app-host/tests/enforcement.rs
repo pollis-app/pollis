@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use common::*;
 use pollis_app_host::*;
-use pollis_app_manifest::{ActionKind, EventKind};
+use pollis_app_manifest::{ActionKind, ChannelGrant, EventKind};
 
 // ---------------------------------------------------------------------------
 // The App runs through every trigger and every host function.
@@ -853,4 +853,59 @@ fn grants_wider_than_the_manifest_are_refused() {
             "grants are wider than the manifest: host `evil.example` is not in `egress`".into()
         )
     );
+}
+
+// ---------------------------------------------------------------------------
+// `post` names a granted channel by id or by name, and nothing else (#2007).
+// ---------------------------------------------------------------------------
+
+fn posted_to(outcome: &JobOutcome) -> Vec<String> {
+    outcome
+        .actions
+        .iter()
+        .map(|action| match action {
+            Action::Post { channel, .. } => channel.clone(),
+            other => panic!("not a post: {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn post_resolves_a_granted_channel_by_name_to_its_id() {
+    let r = run(on_message("post c-ops a; post ops b; post #ops c; post OPS d; post #Ops e"));
+    assert_eq!(posted_to(r.ok()), vec!["c-ops"; 5]);
+}
+
+#[test]
+fn post_by_a_name_that_was_not_granted_is_refused() {
+    let mut narrow = admin();
+    narrow.channels.retain(|c| c.name == "general");
+    let r = run_on(
+        &host(),
+        Arc::new(Fake::default()),
+        "inst-a",
+        &manifest(),
+        &narrow,
+        on_message("post ops hi; post #secret hi"),
+    );
+    let outcome = r.ok();
+    assert!(outcome.actions.is_empty(), "applied: {:?}", outcome.actions);
+    assert_eq!(r.line("err post ops"), "err post ops hi: `post` to `ops` refused: not in `read.channels`");
+    assert_eq!(r.line("err post #secret"), "err post #secret hi: `post` to `#secret` refused: not in `read.channels`");
+}
+
+#[test]
+fn post_by_a_name_two_granted_channels_share_is_refused() {
+    let mut twins = admin();
+    twins.channels.push(ChannelGrant { id: "c-ops-2".into(), name: "ops".into() });
+    let r = run_on(
+        &host(),
+        Arc::new(Fake::default()),
+        "inst-a",
+        &manifest(),
+        &twins,
+        on_message("post ops hi; post c-ops-2 by-id"),
+    );
+    assert_eq!(posted_to(r.ok()), vec!["c-ops-2"]);
+    assert_eq!(r.line("err post ops"), "err post ops hi: `post` to `ops` refused: not in `read.channels`");
 }
