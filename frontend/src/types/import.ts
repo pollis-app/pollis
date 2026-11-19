@@ -1,6 +1,6 @@
 // Mirrors `pollis_import::plan` and `pollis_core::commands::import` (#1180). Keep in sync.
 
-export type Media = { Local: string } | { Remote: string };
+type Media = { Local: string } | { Remote: string };
 
 export type ChannelNote =
   | { kind: "announcement" }
@@ -26,7 +26,7 @@ export type PlanNote =
   | { kind: "roles_collapsed"; discarded: number }
   | { kind: "history_not_imported"; messages: number };
 
-export type Permission =
+type Permission =
   | "view"
   | "send_messages"
   | "read_history"
@@ -48,13 +48,13 @@ export interface OverwritePlan {
   other_bits: number;
 }
 
-export interface HistorySummary {
+interface HistorySummary {
   messages: number;
   first_ms: number | null;
   last_ms: number | null;
 }
 
-export interface CategoryPlan {
+interface CategoryPlan {
   source_id: string;
   name: string;
   exists: boolean;
@@ -74,7 +74,7 @@ export interface ChannelPlan {
   notes: ChannelNote[];
 }
 
-export interface EmojiPlan {
+interface EmojiPlan {
   source_id: string;
   source_name: string;
   shortcode: string | null;
@@ -92,7 +92,7 @@ export interface RolePlan {
   holders: number;
 }
 
-export interface PersonPlan {
+interface PersonPlan {
   source_id: string;
   username: string;
   display_name: string;
@@ -103,7 +103,7 @@ export interface PersonPlan {
   messages: number;
 }
 
-export interface ImportTotals {
+interface ImportTotals {
   categories: number;
   channels: number;
   to_create_categories: number;
@@ -130,7 +130,7 @@ export interface ImportPlan {
   warnings: string[];
 }
 
-export interface ImportTarget {
+interface ImportTarget {
   group_id: string;
   name: string;
 }
@@ -143,7 +143,7 @@ export interface DiscordImportPreview {
   candidates: ImportTarget[];
 }
 
-export interface ImportFailure {
+interface ImportFailure {
   kind: "category" | "channel" | "emoji" | "icon" | "order" | "invite_link";
   name: string;
   error: string;
