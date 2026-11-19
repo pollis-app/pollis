@@ -708,3 +708,17 @@ A green workflow is **not** proof the new bits are serving traffic. For anything
 - **Migration** — confirm it's recorded in prod `schema_migrations` after the deploy that was supposed to apply it.
 
 If a target is deferred, it is now **known-stale** — say so, and make sure the eventual deploy that ships it is on someone's radar.
+
+### Step 4 — clean up the `deferred` label
+
+For each issue the merged PR closes, remove the `deferred` label. The label means "we still plan to do this":
+
+| Issue is… | Keep `deferred`? |
+|---|---|
+| Open | Keep |
+| Closed, work never merged | Keep |
+| Closed, work merged | Remove |
+| Closed as not planned / won't fix | Remove |
+| Closed as duplicate | Remove |
+
+Closing an issue as not planned or duplicate outside a merge removes the label at the same time.
