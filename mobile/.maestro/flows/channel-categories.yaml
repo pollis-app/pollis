@@ -68,8 +68,10 @@ tags:
     visible:
       id: "screen-chat"
     timeout: 30000
+# Phones push the chat over the panel; iPad opens it beside the panel.
 - tapOn:
     id: "btn-back"
+    optional: true
 - extendedWaitUntil:
     visible:
       id: "btn-group-menu"
@@ -93,13 +95,13 @@ tags:
     id: "row-category-.*"
 - takeScreenshot: categories-02-normal
 
-# 4. Collapse it: both channels go with it, the label stays.
+# 4. Collapse it: its channels go with it, the label stays. (On iPad "lore"
+# is the open channel, which a collapsed category keeps showing.)
 - tapOn:
     id: "row-category-.*"
 - assertVisible:
     id: "row-category-.*-collapsed"
 - assertNotVisible: "General"
-- assertNotVisible: "lore"
 - takeScreenshot: categories-03-collapsed
 - tapOn:
     id: "row-category-.*-collapsed"
