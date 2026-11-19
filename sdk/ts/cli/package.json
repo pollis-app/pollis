@@ -1,6 +1,6 @@
 {
   "name": "@pollis-inc/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The `pollis app` command: create, build and test Pollis Apps.",
   "license": "MIT",
   "homepage": "https://pollis.com/bots-developers.html",

@@ -1,6 +1,6 @@
 {
   "name": "pollis",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The Pollis command line for App developers: `npx pollis app new my-bot`. Runs @pollis-inc/cli.",
   "license": "MIT",
   "homepage": "https://pollis.com/bots-developers.html",
