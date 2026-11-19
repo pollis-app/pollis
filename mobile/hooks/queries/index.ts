@@ -28,4 +28,6 @@ export * from "./useUnread";
 export * from "./useNotificationContent";
 export * from "./useHistoryTransfer";
 export * from "./useDeviceUnlock";
+export * from "./useBots";
+export * from "./useBotApps";
 export * from "./useLinkPreviews";

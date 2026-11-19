@@ -1,5 +1,7 @@
 pub mod account_identity;
 pub mod auth;
+// Bots (#1182): pairing, host approvals, unattended start, admin commands.
+pub mod bots;
 pub mod pin;
 // Biometric unlock on mobile, on top of the PIN (#1685).
 pub mod device_unlock;
@@ -27,10 +29,10 @@ pub mod import;
 pub mod history_transfer;
 pub mod messages;
 pub mod dm;
-// LiveKit: real impl with `media` (desktop), no-op stub otherwise (#185).
-#[cfg(feature = "media")]
+// LiveKit: real impl with `realtime` (desktop, bot runtime), no-op stub otherwise (#185).
+#[cfg(feature = "realtime")]
 pub mod livekit;
-#[cfg(not(feature = "media"))]
+#[cfg(not(feature = "realtime"))]
 #[path = "livekit_stub.rs"]
 pub mod livekit;
 // Sender-generated link previews (#1987).

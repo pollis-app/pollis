@@ -230,5 +230,145 @@
     "confirmButton": "हाँ, रीसेट करें",
     "submitting": "रीसेट हो रहा है…",
     "failed": "उपनाम रीसेट नहीं हो सका"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "इस बॉट का App लोड नहीं हो सका।",
+      "noApp": "इसके होस्ट ने अभी तक कोई App नहीं दिया है। बॉट को App के साथ शुरू करें, वह यहाँ दिखेगा।",
+      "notice": {
+        "title": "यह बॉट नहीं चल रहा है",
+        "waiting": "आपकी मंज़ूरी का इंतज़ार है।"
+      },
+      "reasons": {
+        "not_approved": "इसके लिए अभी तक कोई App मंज़ूर नहीं हुआ है।",
+        "hash_mismatch": "इसका होस्ट ऐसा बिल्ड चला रहा है जिसे आपने मंज़ूर नहीं किया।",
+        "developer_key_mismatch": "इसका बिल्ड ऐसी डेवलपर कुंजी से साइन है जिसे आपने मंज़ूर नहीं किया।",
+        "build_widens": "इसका नया बिल्ड आपकी मंज़ूरी से ज़्यादा माँगता है।",
+        "malformed": "इसकी मंज़ूरी पढ़ी नहीं जा सकी।",
+        "wrong_kind": "इसकी मंज़ूरी गलत प्रकार की है।",
+        "wrong_installation": "इसकी मंज़ूरी किसी दूसरे बॉट के लिए बनी थी।",
+        "approver_not_in_group": "जिस एडमिन ने इसे मंज़ूर किया था, वह अब इस ग्रुप में नहीं है।",
+        "uncertified_approver": "यह पक्का नहीं हो सका कि मंज़ूरी देने वाला डिवाइस किसी एडमिन का है।",
+        "bad_signature": "इसकी मंज़ूरी का हस्ताक्षर सही नहीं निकला।",
+        "transparency_alarm": "मंज़ूरी देने वाले एडमिन की कुंजियाँ सार्वजनिक कुंजी लॉग से मेल नहीं खातीं।",
+        "not_admin": "इसे किसी ऐसे व्यक्ति ने मंज़ूर किया जो इस ग्रुप का एडमिन नहीं है।",
+        "manifest_mismatch": "इसका App मंज़ूर किए गए App से मेल नहीं खाता।",
+        "widened_grants": "इसकी मंज़ूरी App की माँग से ज़्यादा देती है।",
+        "rolled_back": "नई मंज़ूरी की जगह पुरानी मंज़ूरी वापस लगा दी गई।",
+        "bad_build_signature": "इसके बिल्ड का डेवलपर हस्ताक्षर सही नहीं निकला।",
+        "artifact_unavailable": "इसका होस्ट App लोड नहीं कर सका।",
+        "artifact_rolled_back": "इसकी मशीन ने ऐसा वर्शन दिया जो बॉट के पहले चला चुके वर्शन से पुराना है, इसलिए बॉट उसे ठुकराता रहता है।"
+      },
+      "approvedHeading": "मंज़ूर App",
+      "version": "वर्शन {{version}}",
+      "appHash": "App हैश",
+      "developerKey": "डेवलपर कुंजी",
+      "source": "स्रोत",
+      "approvedBy": "{{name}} ने {{date}} को मंज़ूर किया",
+      "seq": "मंज़ूरी {{seq}}",
+      "marks": {
+        "development": "डेवलपमेंट बिल्ड",
+        "noEgress": "इस ग्रुप के बाहर डेटा नहीं भेज सकता",
+        "autoUpdate": "अपडेट अपने-आप मंज़ूर होते हैं"
+      },
+      "canDoHeading": "यह क्या कर सकता है",
+      "lines": {
+        "reads": "{{channels}} में {{events}} पढ़ता है, और पिछले {{history}} का इतिहास",
+        "readsNoHistory": "{{channels}} में {{events}} पढ़ता है, कोई इतिहास नहीं",
+        "readsNothing": "कोई चैनल नहीं पढ़ता",
+        "eventsNew": "नए मैसेज",
+        "eventsNewEdited": "नए और बदले गए मैसेज",
+        "wakes": "इन पर चलता है: {{triggers}}",
+        "can": "कर सकता है: {{actions}}",
+        "sendsTo": "इन्हें डेटा भेज सकता है: {{hosts}}",
+        "keeps": "अपना {{size}} तक डेटा रखता है"
+      },
+      "triggers": {
+        "messages": "नए मैसेज",
+        "mentions": "मेंशन",
+        "commands": "कमांड",
+        "schedule": "शेड्यूल",
+        "requests": "अनुरोध",
+        "webhook": "webhook कॉल"
+      },
+      "actions": {
+        "post": "पोस्ट करना",
+        "reply": "जवाब देना",
+        "react": "प्रतिक्रिया देना",
+        "edit_own": "अपने मैसेज बदलना",
+        "delete_own": "अपने मैसेज मिटाना",
+        "transfer_history": "मैसेज इतिहास सौंपना"
+      },
+      "events": {
+        "created": "नए मैसेज",
+        "edited": "बदले गए मैसेज"
+      },
+      "anyChannel": "आपका चुना कोई भी चैनल",
+      "grants": {
+        "heading": "पहुँच",
+        "description": "जो इसे नहीं चाहिए, वह हटा दें। इसे कभी भी इसके App की माँग से ज़्यादा नहीं मिलता।",
+        "channels": "यह जो चैनल पढ़ता है",
+        "noChannels": "इस ग्रुप में ऐसा कोई चैनल नहीं जो यह माँगता है।",
+        "history": "इतिहास के कितने दिन पढ़ सकता है (0 से {{max}})",
+        "egress": "होस्ट जिन्हें यह डेटा भेज सकता है"
+      },
+      "changes": {
+        "heading": "क्या बदला",
+        "newAccess": "नई पहुँच",
+        "needed": "मंज़ूरी के लिए ज़रूरी",
+        "allow": "अनुमति दें",
+        "trigger_added": "{{value}} पर चलता है",
+        "trigger_removed": "अब {{value}} पर नहीं चलता",
+        "channel_added": "{{value}} पढ़ता है",
+        "channel_removed": "अब {{value}} नहीं पढ़ता",
+        "history_increased": "इतिहास: {{previous}} से {{value}}",
+        "history_decreased": "इतिहास: {{previous}} से {{value}}",
+        "event_added": "{{value}} देखता है",
+        "event_removed": "अब {{value}} नहीं देखता",
+        "action_added": "{{value}} कर सकता है",
+        "action_removed": "अब {{value}} नहीं कर सकता",
+        "egress_added": "{{value}} को डेटा भेज सकता है",
+        "egress_removed": "अब {{value}} को डेटा नहीं भेजता",
+        "state_quota_increased": "स्टोरेज: {{previous}} से {{value}}",
+        "state_quota_decreased": "स्टोरेज: {{previous}} से {{value}}",
+        "command_added": "नया कमांड: /{{value}}",
+        "command_removed": "अब /{{value}} नहीं देता",
+        "command_increased": "/{{value}} {{previous}} से {{next}} में बदलता है",
+        "schedule_added": "नए शेड्यूल पर चलता है: {{value}}",
+        "schedule_removed": "शेड्यूल {{value}} हटाया गया",
+        "schedule_increased": "शेड्यूल {{value}} अब ज़्यादा बार चलता है: हर {{next}}, पहले हर {{previous}}",
+        "schedule_decreased": "शेड्यूल {{value}} अब कम बार चलता है: हर {{next}}, पहले हर {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "इस App को मंज़ूर करें",
+        "firstLead": "बॉट का होस्ट यह App दे रहा है। जब तक कोई एडमिन मंज़ूर न करे, कुछ नहीं चलता।",
+        "updateHeading": "एक अपडेट इंतज़ार में है",
+        "updateLead": "इसका होस्ट नया बिल्ड दे रहा है। मंज़ूर करने से पहले देखें कि क्या बदला।",
+        "nothingNew": "यह कुछ नया नहीं माँगता।",
+        "neededHint": "यह अपडेट मंज़ूर करने के लिए, ज़रूरी बताई गई हर नई पहुँच की अनुमति दें।",
+        "approve": "मंज़ूर करें",
+        "approveUpdate": "अपडेट मंज़ूर करें",
+        "approving": "मंज़ूर हो रहा है…",
+        "development": "डेवलपमेंट इंस्टॉलेशन",
+        "developmentHint": "इस डेवलपर कुंजी से साइन किया हर वह बिल्ड चलाता है जो आपकी मंज़ूरी से ज़्यादा नहीं माँगता।",
+        "developmentUnavailable": "डेवलपर कुंजी देने के लिए pollis app dev शुरू करें।",
+        "autoUpdate": "अगली बार अपने-आप मंज़ूर करें",
+        "autoUpdateHint": "जब उसी स्रोत का नया वर्शन कुछ ज़्यादा नहीं माँगता, तो बॉट बिना किसी एडमिन के उसे खुद चला लेता है। जो ज़्यादा माँगता है, वह अब भी मंज़ूरी का इंतज़ार करता है।"
+      },
+      "edit": {
+        "save": "पहुँच सेव करें",
+        "saving": "सेव हो रहा है…"
+      },
+      "errors": {
+        "stale": "किसी दूसरे एडमिन ने अभी-अभी यह बॉट मंज़ूर किया। मंज़ूर करने से पहले फिर से देखें।",
+        "changed": "यह पेज खुलने के बाद App बदल गया। मंज़ूर करने से पहले फिर से देखें।",
+        "failed": "मंज़ूरी सेव नहीं हो सकी।"
+      },
+      "commandKinds": {
+        "command": "चैनल में पोस्ट होने वाला कमांड",
+        "request": "निजी अनुरोध"
+      },
+      "runningAutoUpdated": "वर्शन {{version}} चल रहा है, मंज़ूर स्रोत से अपने-आप अपडेट हुआ"
+    }
   }
 }

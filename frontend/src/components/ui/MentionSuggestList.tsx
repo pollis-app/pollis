@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { SuggestList } from "./SuggestList";
 import { Avatar } from "./Avatar";
+import { BotBadge } from "./BotBadge";
 import type { MentionCandidate } from "../../utils/mentions";
 
 interface MentionSuggestListProps {
@@ -62,6 +63,7 @@ export const MentionSuggestList: React.FC<MentionSuggestListProps> = ({
           {c.displayName && c.displayName !== c.username && (
             <span className="truncate text-secondary text-muted">{c.displayName}</span>
           )}
+          {c.isBot && <BotBadge data-testid={`mention-option-bot-${c.username}`} />}
         </>
       )}
     />

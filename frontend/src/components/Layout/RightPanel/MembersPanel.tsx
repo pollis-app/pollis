@@ -4,9 +4,10 @@ import { observer } from "mobx-react-lite";
 import { appStore } from "../../../stores/appStore";
 import { presenceStore } from "../../../stores/presenceStore";
 import { useSkin } from "../../../hooks/queries/usePreferences";
-import { useGroupMembers } from "../../../hooks/queries/useGroups";
+import { useGroupMembers, useUserGroupsWithChannels } from "../../../hooks/queries/useGroups";
 import { useGroupAliases } from "../../../hooks/queries/useGroupAliases";
 import { aliasAvatar, aliasName } from "../../../utils/groupAlias";
+import { isBotUser } from "../../../utils/bots";
 import { useMessages, useDMConversations } from "../../../hooks/queries/useMessages";
 import { MemberRow } from "./MemberRow";
 import { MediaGrid } from "./MediaGrid";
@@ -34,6 +35,7 @@ interface Person {
   label: string;
   avatarKey: string | null;
   isAdmin: boolean;
+  isBot?: boolean;
 }
 
 /** People + shared media (#824): a DM's members, a group's online members, or else your online DM contacts. */
@@ -44,6 +46,8 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const { setSafety } = useRightPanel();
     const { data: groupMembers = [] } = useGroupMembers(groupId);
     const aliases = useGroupAliases(groupId);
+    const { data: groupsWithChannels } = useUserGroupsWithChannels();
+    const groupName = groupId ? groupsWithChannels?.find((g) => g.id === groupId)?.name : undefined;
     const { messages } = useMessages(channelId, conversationId);
     const isTerminal = useSkin() === "terminal";
     const currentUser = appStore.currentUser;
@@ -104,6 +108,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
             label: aliasName(aliases, m.user_id, m.display_name || m.username || m.user_id),
             avatarKey: aliasAvatar(aliases, m.user_id, m.avatar_url) ?? null,
             isAdmin: m.role === "admin",
+            isBot: isBotUser(m),
           }))
           .sort((a, b) => a.label.localeCompare(b.label));
       }
@@ -186,6 +191,8 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
                 label={person.label}
                 avatarKey={person.avatarKey}
                 isAdmin={person.isAdmin}
+                isBot={person.isBot}
+                groupName={groupName}
                 groupId={conversationId ? undefined : groupId ?? undefined}
               />
             ))

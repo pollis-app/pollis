@@ -1,0 +1,168 @@
+/// The capability interface between a Pollis App and the bot runtime (#2004).
+///
+/// An App is a WebAssembly component that targets the `app` world below. The
+/// runtime instantiates it fresh for every job, calls exactly one handler, and
+/// lets it act only through the `host` imports, each checked against the
+/// installation's effective grants (manifest intersected with the admin's
+/// grants). The SDKs (`@pollis-inc/app`, the Rust SDK) are generated from this file.
+///
+/// Versioning: this package is `pollis:app@0.1.0`. A change that removes or
+/// retypes anything is a new version; the runtime keeps hosting the old one.
+/// There is deliberately no import for deleting other people's messages,
+/// removing members or changing roles: bots never moderate.
+package pollis:app@0.1.0;
+
+/// Data the runtime hands to an App and receives from it.
+interface types {
+    /// Opaque message id (the envelope id).
+    type message-id = string;
+    /// Opaque channel id.
+    type channel-id = string;
+
+    record author {
+        id: string,
+        display-name: string,
+        is-bot: bool,
+    }
+
+    /// Attachment metadata only. Attachment bytes are a later capability.
+    record attachment {
+        name: string,
+        mime-type: string,
+        size: u64,
+    }
+
+    record message {
+        id: message-id,
+        channel: channel-id,
+        author: author,
+        text: string,
+        attachments: list<attachment>,
+        /// The message this one replies to, if any.
+        reply-to: option<message-id>,
+        /// The thread root this message belongs to, if any.
+        thread: option<message-id>,
+        /// Unix milliseconds.
+        sent-at: u64,
+        /// Unix milliseconds of the last edit, if edited.
+        edited-at: option<u64>,
+    }
+
+    /// A slash command addressed to this App (#2018).
+    record command {
+        /// Command name without the leading slash.
+        name: string,
+        /// Everything after the command name, unparsed.
+        args: string,
+        /// The message that carried the command.
+        message: message,
+    }
+
+    /// A schedule firing.
+    record schedule {
+        /// The schedule's name as declared by the App.
+        name: string,
+        /// The slot this firing is for, unix milliseconds.
+        slot: u64,
+    }
+
+    /// A request addressed to this App by a member.
+    record request {
+        id: string,
+        requester: author,
+        body: string,
+    }
+
+    /// An inbound webhook delivery.
+    record webhook {
+        delivery-id: string,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    record message-filter {
+        /// Only this channel; all granted channels when absent.
+        channel: option<channel-id>,
+        /// Unix milliseconds, inclusive. Clamped to the granted history window.
+        since: option<u64>,
+        /// Unix milliseconds, exclusive.
+        until: option<u64>,
+        /// Upper bound on results; the runtime may return fewer.
+        limit: u32,
+    }
+
+    record http-request {
+        method: string,
+        /// Absolute `https://` URL whose host is in the granted egress list.
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: option<list<u8>>,
+    }
+
+    record http-response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    enum log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+}
+
+/// Functions the runtime provides. Every one that can be refused returns
+/// `result`; the error string names the manifest field that refused it, e.g.
+/// "`http-fetch` to `api.x.com` refused: not in `egress`".
+interface host {
+    use types.{message-id, channel-id, message, message-filter, http-request, http-response, log-level};
+
+    /// Queue a new message in a granted channel. Applied only if the handler
+    /// returns ok.
+    post: func(channel: channel-id, text: string) -> result<_, string>;
+    /// Queue a reply to a message in a granted channel.
+    reply: func(message: message-id, text: string) -> result<_, string>;
+    /// Queue a reaction on a message in a granted channel.
+    react: func(message: message-id, emoji: string) -> result<_, string>;
+    /// Queue an edit of a message this bot sent.
+    edit-own: func(message: message-id, text: string) -> result<_, string>;
+    /// Queue deletion of a message this bot sent.
+    delete-own: func(message: message-id) -> result<_, string>;
+
+    /// Messages from granted channels inside the granted history window.
+    query-messages: func(filter: message-filter) -> result<list<message>, string>;
+
+    /// Sealed per-installation key-value state, within the manifest's quota.
+    /// Writes become durable only if the handler returns ok.
+    kv-get: func(key: string) -> result<option<list<u8>>, string>;
+    kv-set: func(key: string, value: list<u8>) -> result<_, string>;
+    kv-delete: func(key: string) -> result<_, string>;
+
+    /// One HTTPS request to a host in the granted egress list. Redirects are
+    /// followed only within the same host.
+    http-fetch: func(request: http-request) -> result<http-response, string>;
+
+    /// Write to the runtime's log. Never reaches the group.
+    log: func(level: log-level, text: string);
+    /// Unix milliseconds.
+    now: func() -> u64;
+    /// A cryptographically random value.
+    random: func() -> u64;
+}
+
+/// What an App is. Every handler must be exported; the runtime calls only
+/// those whose trigger the installation's grants include.
+world app {
+    use types.{message, command, schedule, request, webhook};
+    import host;
+
+    export on-message: func(message: message) -> result<_, string>;
+    export on-mention: func(message: message) -> result<_, string>;
+    export on-command: func(command: command) -> result<_, string>;
+    export on-schedule: func(schedule: schedule) -> result<_, string>;
+    export on-request: func(request: request) -> result<_, string>;
+    export on-webhook: func(webhook: webhook) -> result<_, string>;
+}

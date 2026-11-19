@@ -1,0 +1,93 @@
+name: App SDK
+
+# The developer side of Pollis Apps (#2006): `pollis-app-dev` (the offline
+# test runner through the real App host, the deterministic pre-initializer and
+# the App hash), the TypeScript SDK in sdk/ts (`@pollis-inc/app`, `@pollis-inc/cli`)
+# and the Rust SDK in sdk/rust (`pollis-app`, #2007).
+#
+# The CLI suite builds real Apps end to end and runs them in the real App
+# host, including the reproducibility test: the same source and lockfile give
+# the same App hash wherever they are built.
+
+on:
+  pull_request:
+    paths:
+      - 'sdk/ts/**'
+      - 'sdk/rust/**'
+      - 'apps/**'
+      - 'pollis-app-dev/**'
+      - 'pollis-app-host/**'
+      - 'pollis-app-manifest/**'
+      - 'pollis-app-wit/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/app-sdk.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'sdk/ts/**'
+      - 'sdk/rust/**'
+      - 'apps/**'
+      - 'pollis-app-dev/**'
+      - 'pollis-app-host/**'
+      - 'pollis-app-manifest/**'
+      - 'pollis-app-wit/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/app-sdk.yml'
+  workflow_dispatch:
+  # sdk-publish.yml runs these tests before it publishes.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: cargo test (pollis-app-dev)
+        run: cargo test -p pollis-app-dev
+
+      # Its own workspace, so `-p` from the root cannot reach it.
+      - name: cargo test (pollis-app)
+        working-directory: sdk/rust/pollis-app
+        run: cargo test --locked
+
+      - name: Build pollis-app-dev
+        run: cargo build --release -p pollis-app-dev
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: sdk/ts/package.json
+
+      # 22.18+: the tests are TypeScript run by Node's built-in type stripping.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: sdk/ts/pnpm-lock.yaml
+
+      - name: Install SDK dependencies
+        working-directory: sdk/ts
+        run: pnpm install --frozen-lockfile
+
+      - name: SDK and CLI tests
+        working-directory: sdk/ts
+        env:
+          POLLIS_APP_DEV_BIN: ${{ github.workspace }}/target/release/pollis-app-dev
+        run: pnpm test

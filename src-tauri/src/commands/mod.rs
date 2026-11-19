@@ -3,6 +3,8 @@ pub mod auth;
 // Idle auto-lock (#851).
 pub mod autolock;
 pub mod blocks;
+// Bots (#1182).
+pub mod bots;
 pub mod bookmarks;
 pub mod export;
 pub mod device_enrollment;

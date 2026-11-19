@@ -1,0 +1,50 @@
+{
+  "name": "@pollis-inc/app",
+  "version": "0.1.1",
+  "description": "Write Pollis Apps in TypeScript: handlers, a typed context and the manifest, compiled to a sandboxed component by `pollis app build`.",
+  "license": "MIT",
+  "homepage": "https://pollis.com/bots-developers.html",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pollis-app/pollis.git",
+    "directory": "sdk/ts/app"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "default": "./dist/manifest.js"
+    },
+    "./wit/app.wit": "./wit/app.wit",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "wit"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "gen": "node scripts/gen-host-types.mjs",
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/generated','dist/generated',{recursive:true})\"",
+    "test": "pnpm -s build && node --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.40.0",
+    "@types/node": "^22.19.0",
+    "typescript": "5.9.3"
+  }
+}

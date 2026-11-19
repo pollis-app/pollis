@@ -57,7 +57,12 @@ export interface GroupMember {
   avatar_url?: string;
   role: 'admin' | 'member';
   joined_at: string;
+  /** #1182: a bot account; read through `isBotUser` (utils/bots.ts). */
+  is_bot?: boolean;
 }
+
+export * from './bots';
+export * from './botApps';
 
 export interface Channel {
   id: string; // ULID
@@ -305,6 +310,7 @@ export interface AudioDevice {
 }
 
 export * from "./blocks";
+export * from "./bots";
 
 // Account-key transparency (#330), mirrors pollis-core/src/commands/transparency.rs. Advisory only.
 

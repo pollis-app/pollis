@@ -1,0 +1,84 @@
+name: SDK publish
+
+# Publishes the App developer packages to npm: @pollis-inc/app, @pollis-inc/cli
+# and pollis. Push a tag `sdk-v<version>` on a commit whose three package.json
+# files carry that version.
+#
+# No npm token exists here. npm trusts this workflow file in the `npm-publish`
+# environment (`npm trust github`) and exchanges the job's OIDC identity for a
+# short-lived credential, which also attaches build provenance to each version.
+
+on:
+  push:
+    tags: ['sdk-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-publish
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/app-sdk.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: sdk/ts/package.json
+
+      # No dependency cache: what is published is built from a clean install.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - name: Install npm
+        run: npm install -g npm@11.18.0
+
+      - name: Check the tag matches every package
+        working-directory: sdk/ts
+        run: |
+          version="${GITHUB_REF_NAME#sdk-v}"
+          for dir in app cli pollis; do
+            have="$(node -p "require('./$dir/package.json').version")"
+            if [ "$have" != "$version" ]; then
+              echo "::error::sdk/ts/$dir is at $have but the tag says $version"
+              exit 1
+            fi
+          done
+
+      - name: Install and build
+        working-directory: sdk/ts
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # Dependencies first, so no published version points at one that is not
+      # there yet. pnpm pack turns workspace:* into the real version. A version
+      # already on npm is skipped, so a failed run can be re-run.
+      - name: Publish
+        working-directory: sdk/ts
+        run: |
+          version="${GITHUB_REF_NAME#sdk-v}"
+          for dir in app cli pollis; do
+            name="$(node -p "require('./$dir/package.json').name")"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published"
+              continue
+            fi
+            out="$RUNNER_TEMP/pack-$dir"
+            mkdir -p "$out"
+            (cd "$dir" && pnpm pack --pack-destination "$out")
+            npm publish "$out"/*.tgz --access public
+          done

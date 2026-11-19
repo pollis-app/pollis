@@ -21,6 +21,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { usePrefetchAvatars } from "../../components/UserAvatar";
 import { isNewMemberMessage, newMemberJoins } from "../../lib/newMember";
+import { botHandles, botIds } from "../../lib/bots";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
 import { aliasAvatar, aliasName, mentionLabels } from "../../lib/groupAlias";
@@ -73,6 +74,8 @@ import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { receiptTargetId } from "../../lib/receiptTarget";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
+import { useGroupCommands, useSendCommandRequest } from "../../hooks/queries/useBots";
+import { BOT_REQUESTS_UNAVAILABLE, classifyCommandSend } from "../../lib/slashCommands";
 import { useUsableEmoji } from "../../hooks/queries/useEmoji";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
@@ -252,9 +255,15 @@ function TextChat(props: ChatViewProps = {}) {
     (kind === "channel" ? appStore.selectedGroupId ?? undefined : undefined);
   useConversationRealtime(conversationId, kind, groupId);
   const typing = useTypingPublisher(conversationId, kind, groupId);
+  // #2018: the group's Apps' slash commands, and why a send was held back.
+  const { data: groupCommands } = useGroupCommands(kind === "channel" ? groupId ?? null : null);
+  const sendCommandRequest = useSendCommandRequest();
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
+
   const onChangeDraft = useCallback(
     (text: string) => {
       setDraft(text);
+      setCommandNotice(null);
       typing.notify(text);
     },
     [typing],
@@ -330,6 +339,38 @@ function TextChat(props: ChatViewProps = {}) {
   const onSend = () => {
     const text = outgoingText(draft);
     if (!text && pendingAttachments.length === 0) {
+      return;
+    }
+    // A command is an ordinary message, except a shared name without its bot (not sent) and a
+    // `request` command (sealed to the bot, never posted).
+    const channelId = kind === "channel" ? conversationId ?? null : null;
+    const routed = classifyCommandSend(text, groupCommands ?? [], channelId);
+    if (routed.kind === "ambiguous") {
+      setCommandNotice(t("common:composer.commandAmbiguous", { command: routed.name }));
+      return;
+    }
+    if (routed.kind === "request") {
+      if (!groupId || !channelId || sendCommandRequest.isPending) {
+        return;
+      }
+      setCommandNotice(null);
+      sendCommandRequest.mutate(
+        { groupId, channelId, command: routed.command, args: routed.args },
+        {
+          onSuccess: () => {
+            setDraft("");
+            typing.stop();
+          },
+          onError: (err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            setCommandNotice(
+              message.includes(BOT_REQUESTS_UNAVAILABLE)
+                ? t("common:composer.commandRequestUnavailable")
+                : t("common:composer.commandRequestFailed"),
+            );
+          },
+        },
+      );
       return;
     }
     // Never waits for a fetch still running: the message goes without it.
@@ -608,6 +649,10 @@ function TextChat(props: ChatViewProps = {}) {
     [groupMembers, group?.owner_id],
   );
 
+  // Bots (#1182): the roster says who is one; their rows and mentions carry the Bot badge.
+  const botSenders = useMemo(() => botIds(groupMembers ?? []), [groupMembers]);
+  const botMentions = useMemo(() => botHandles(groupMembers ?? []), [groupMembers]);
+
   // Per-group aliases (#2003): inside a group, people show as it shows them; a DM, by main profile.
   const aliases = useGroupAliases(kind === "channel" ? groupId ?? null : null);
   const groupAuthor = useCallback(
@@ -805,6 +850,9 @@ function TextChat(props: ChatViewProps = {}) {
           showReceipt={mine && isDm}
           continued={item.continued}
           isNew={isNewMemberMessage(newMemberJoinMs, m.sender_id, m.created_at)}
+          isBot={botSenders.has(m.sender_id)}
+          botGroup={group?.name}
+          botMentions={botMentions}
           threadCount={summary?.reply_count ?? 0}
           threadLastReply={
             summary?.last_reply_at
@@ -863,6 +911,9 @@ function TextChat(props: ChatViewProps = {}) {
       retryMessage,
       discardUnsent,
       newMemberJoinMs,
+      botSenders,
+      botMentions,
+      group?.name,
       viewerJoinedAtMs,
       peerLabel,
       avatarKeyById,
@@ -1059,6 +1110,10 @@ function TextChat(props: ChatViewProps = {}) {
             onSend={onSend}
             editable={!!kind && !!conversationId}
             mentionCandidates={mentionCandidates}
+            commands={kind === "channel" ? groupCommands : undefined}
+            channelId={kind === "channel" ? conversationId ?? null : null}
+            commandNotice={commandNotice}
+            sendPending={sendCommandRequest.isPending}
             customEmoji={usableEmoji}
             onAttach={() => void onAttach()}
             pendingAttachments={pendingAttachments}

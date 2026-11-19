@@ -230,5 +230,145 @@
     "confirmButton": "هو، بیا یې تنظیم کړئ",
     "submitting": "بیا تنظیمیږي…",
     "failed": "مستعار نوم بیا تنظیم نه شو"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "د دې بوټ App بار نه شو.",
+      "noApp": "د دې کوربه لا تر اوسه کوم App نه دی وړاندې کړی. بوټ له App سره پیل کړئ، دلته به ښکاره شي.",
+      "notice": {
+        "title": "دا بوټ نه چلېږي",
+        "waiting": "ستاسو د تایید په تمه دی."
+      },
+      "reasons": {
+        "not_approved": "د دې لپاره لا تر اوسه کوم App نه دی تایید شوی.",
+        "hash_mismatch": "د دې کوربه داسې جوړښت چلوي چې تاسو نه دی تایید کړی.",
+        "developer_key_mismatch": "د دې جوړښت په داسې پراختیاکوونکي کیلي لاسلیک شوی چې تاسو نه ده تایید کړې.",
+        "build_widens": "د دې نوی جوړښت له هغه څه ډېر غواړي چې تاسو تایید کړي.",
+        "malformed": "د دې تایید ونه لوستل شو.",
+        "wrong_kind": "د دې تایید غلط ډول دی.",
+        "wrong_installation": "د دې تایید د بل بوټ لپاره شوی و.",
+        "approver_not_in_group": "هغه اډمین چې دا یې تایید کړی و نور په دې ګروپ کې نشته.",
+        "uncertified_approver": "دا تایید نه شو چې تاییدوونکې وسیله د یوه اډمین ده.",
+        "bad_signature": "د دې د تایید لاسلیک سم نه دی.",
+        "transparency_alarm": "د تاییدوونکي اډمین کیلي د عامه کیلي له لاګ سره سمون نه خوري.",
+        "not_admin": "دا داسې چا تایید کړی چې د دې ګروپ اډمین نه دی.",
+        "manifest_mismatch": "د دې App له تایید شوي App سره سمون نه خوري.",
+        "widened_grants": "د دې تایید له هغه څه ډېر ورکوي چې App یې غواړي.",
+        "rolled_back": "د نوي تایید پر ځای یو زوړ تایید بېرته ولګول شو.",
+        "bad_build_signature": "د دې د جوړښت د پراختیاکوونکي لاسلیک سم نه دی.",
+        "artifact_unavailable": "د دې کوربه App بار نه کړای شو.",
+        "artifact_rolled_back": "د دې ماشین داسې نسخه وړاندې کړه چې بوټ له مخکې چلولې نسخې زړه ده، نو بوټ یې ردوي."
+      },
+      "approvedHeading": "تایید شوی App",
+      "version": "نسخه {{version}}",
+      "appHash": "د App هش",
+      "developerKey": "د پراختیاکوونکي کیلي",
+      "source": "سرچینه",
+      "approvedBy": "{{name}} په {{date}} تایید کړ",
+      "seq": "تایید {{seq}}",
+      "marks": {
+        "development": "د پراختیا جوړښت",
+        "noEgress": "له دې ګروپ بهر معلومات نه شي لېږلای",
+        "autoUpdate": "تازه کول پخپله تاییدېږي"
+      },
+      "canDoHeading": "څه کولای شي",
+      "lines": {
+        "reads": "په {{channels}} کې {{events}} لولي، او د وروستیو {{history}} تاریخچه",
+        "readsNoHistory": "په {{channels}} کې {{events}} لولي، تاریخچه نه",
+        "readsNothing": "هېڅ چینل نه لولي",
+        "eventsNew": "نوي پیغامونه",
+        "eventsNewEdited": "نوي او سم شوي پیغامونه",
+        "wakes": "په دې پیلېږي: {{triggers}}",
+        "can": "کولای شي: {{actions}}",
+        "sendsTo": "دې ته معلومات لېږلای شي: {{hosts}}",
+        "keeps": "تر {{size}} پورې خپل معلومات ساتي"
+      },
+      "triggers": {
+        "messages": "نوي پیغامونه",
+        "mentions": "یادونې",
+        "commands": "امرونه",
+        "schedule": "مهالوېش",
+        "requests": "غوښتنې",
+        "webhook": "webhook غوښتنې"
+      },
+      "actions": {
+        "post": "خپرول",
+        "reply": "ځواب ورکول",
+        "react": "غبرګون ښودل",
+        "edit_own": "خپل پیغامونه سمول",
+        "delete_own": "خپل پیغامونه ړنګول",
+        "transfer_history": "د پیغامونو تاریخچه سپارل"
+      },
+      "events": {
+        "created": "نوي پیغامونه",
+        "edited": "سم شوي پیغامونه"
+      },
+      "anyChannel": "هر چینل چې تاسو یې غوره کړئ",
+      "grants": {
+        "heading": "لاسرسی",
+        "description": "هغه څه ترې واخلئ چې ورته اړتیا نه لري. هېڅکله له هغه څه ډېر نه ترلاسه کوي چې App یې غواړي.",
+        "channels": "هغه چینلونه چې لولي یې",
+        "noChannels": "په دې ګروپ کې داسې چینل نشته چې دا یې غواړي.",
+        "history": "د تاریخچې څو ورځې لوستلای شي (0 تر {{max}})",
+        "egress": "هغه کوربه چې ورته معلومات لېږلای شي"
+      },
+      "changes": {
+        "heading": "څه بدل شول",
+        "newAccess": "نوی لاسرسی",
+        "needed": "د تایید لپاره اړین",
+        "allow": "اجازه ورکړئ",
+        "trigger_added": "په {{value}} پیلېږي",
+        "trigger_removed": "نور په {{value}} نه پیلېږي",
+        "channel_added": "{{value}} لولي",
+        "channel_removed": "نور {{value}} نه لولي",
+        "history_increased": "تاریخچه: له {{previous}} څخه {{value}} ته",
+        "history_decreased": "تاریخچه: له {{previous}} څخه {{value}} ته",
+        "event_added": "{{value}} ویني",
+        "event_removed": "نور {{value}} نه ویني",
+        "action_added": "{{value}} کولای شي",
+        "action_removed": "نور {{value}} نه شي کولای",
+        "egress_added": "{{value}} ته معلومات لېږلای شي",
+        "egress_removed": "نور {{value}} ته معلومات نه لېږي",
+        "state_quota_increased": "زېرمه: له {{previous}} څخه {{value}} ته",
+        "state_quota_decreased": "زېرمه: له {{previous}} څخه {{value}} ته",
+        "command_added": "نوی امر: /{{value}}",
+        "command_removed": "نور /{{value}} نه وړاندې کوي",
+        "command_increased": "/{{value}} له {{previous}} څخه {{next}} ته بدلېږي",
+        "schedule_added": "په نوي مهالوېش چلېږي: {{value}}",
+        "schedule_removed": "مهالوېش {{value}} لرې شو",
+        "schedule_increased": "مهالوېش {{value}} ډېر ځله چلېږي: هر {{next}}، مخکې هر {{previous}}",
+        "schedule_decreased": "مهالوېش {{value}} لږ ځله چلېږي: هر {{next}}، مخکې هر {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "دا App تایید کړئ",
+        "firstLead": "د بوټ کوربه دا App وړاندې کوي. تر هغه چې اډمین یې تایید نه کړي، هېڅ نه چلېږي.",
+        "updateHeading": "یو تازه کول په تمه دی",
+        "updateLead": "د دې کوربه نوی جوړښت وړاندې کوي. د تایید مخکې وګورئ چې څه بدل شول.",
+        "nothingNew": "هېڅ نوی شی نه غواړي.",
+        "neededHint": "د دې تازه کولو د تایید لپاره هر هغه نوی لاسرسی ته اجازه ورکړئ چې اړین ښودل شوی.",
+        "approve": "تایید",
+        "approveUpdate": "تازه کول تایید کړئ",
+        "approving": "تاییدېږي…",
+        "development": "د پراختیا نصب",
+        "developmentHint": "هر هغه جوړښت چلوي چې په دې پراختیاکوونکي کیلي لاسلیک شوی وي او له تاسو د تایید شوي څخه ډېر ونه غواړي.",
+        "developmentUnavailable": "د پراختیاکوونکي کیلي د وړاندې کولو لپاره pollis app dev پیل کړئ.",
+        "autoUpdate": "بل ځل پخپله تایید کړئ",
+        "autoUpdateHint": "کله چې د همدې سرچینې نوې نسخه نور څه نه غواړي، بوټ یې پرته له اډمین پخپله چلوي. هر هغه څه چې ډېر غواړي لا هم د تایید په تمه دي."
+      },
+      "edit": {
+        "save": "لاسرسی خوندي کړئ",
+        "saving": "خوندي کېږي…"
+      },
+      "errors": {
+        "stale": "بل اډمین همدا اوس دا بوټ تایید کړ. د تایید مخکې بیا وګورئ.",
+        "changed": "له دې پاڼې د پرانیستلو راهیسې App بدل شوی. د تایید مخکې بیا وګورئ.",
+        "failed": "تایید خوندي نه شو."
+      },
+      "commandKinds": {
+        "command": "هغه امر چې په چینل کې خپرېږي",
+        "request": "شخصي غوښتنه"
+      },
+      "runningAutoUpdated": "نسخه {{version}} چلېږي، له تایید شوې سرچینې پخپله تازه شوې"
+    }
   }
 }

@@ -15,6 +15,7 @@ const LOCKED = [
   "app/(auth)/enrollment.tsx",
   "app/approve-device.tsx",
   "app/group/requests.tsx",
+  "app/group/add-bot.tsx",
 ];
 
 test("slow submits claim a synchronous submit lock", () => {

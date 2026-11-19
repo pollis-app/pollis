@@ -73,6 +73,7 @@ on:
     paths:
       - 'pollis-core/**'
       - 'pollis-api/**'
+      - 'pollis-app-manifest/**'
       - 'pollis-capture-proto/**'
       - 'pollis-device-cert/**'
       - 'pollis-import/**'
@@ -136,6 +137,7 @@ jobs:
             native:
               - 'pollis-core/**'
               - 'pollis-api/**'
+              - 'pollis-app-manifest/**'
               - 'pollis-capture-proto/**'
               - 'pollis-device-cert/**'
               - 'pollis-import/**'

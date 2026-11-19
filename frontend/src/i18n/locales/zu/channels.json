@@ -230,5 +230,145 @@
     "confirmButton": "Yebo, setha kabusha",
     "submitting": "Iyasetha kabusha…",
     "failed": "Ayikwazanga ukusetha kabusha igama lokuzisholo"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "Asikwazanga ukulayisha i-App yale bhothi.",
+      "noApp": "Umsingathi wayo akakanikezi i-App. Qala ibhothi nge-App futhi izovela lapha.",
+      "notice": {
+        "title": "Le bhothi ayisebenzi",
+        "waiting": "Ilinde imvume yakho."
+      },
+      "reasons": {
+        "not_approved": "Ayikanikezwa imvume i-App yayo.",
+        "hash_mismatch": "Umsingathi wayo usebenzisa ukwakhiwa ongakuvumanga.",
+        "developer_key_mismatch": "Ukwakhiwa kwayo kusayinwe ngokhiye kanjiniyela ongamvumanga.",
+        "build_widens": "Ukwakhiwa kwayo okusha kucela okungaphezu kwalokho okuvumile.",
+        "malformed": "Imvume yayo ayikwazanga ukufundwa.",
+        "wrong_kind": "Imvume yayo ingeyohlobo olungalungile.",
+        "wrong_installation": "Imvume yayo yenzelwe enye ibhothi.",
+        "approver_not_in_group": "Umphathi oyivumile akaseko kuleli qembu.",
+        "uncertified_approver": "Asikwazanga ukuqinisekisa ukuthi idivayisi eyivumile ingeyomphathi.",
+        "bad_signature": "Isiginesha yemvume yayo ayilungile.",
+        "transparency_alarm": "Okhiye bomphathi ovumile abahambisani nerekhodi lokhiye lomphakathi.",
+        "not_admin": "Ivunywe ngumuntu ongesiye umphathi waleli qembu.",
+        "manifest_mismatch": "I-App yayo ayihambisani naleyo evunyiwe.",
+        "widened_grants": "Imvume yayo inika okungaphezu kwalokho i-App ekucelayo.",
+        "rolled_back": "Imvume endala ibuyiselwe esikhundleni sentsha.",
+        "bad_build_signature": "Isiginesha kanjiniyela yokwakhiwa kwayo ayilungile.",
+        "artifact_unavailable": "Umsingathi wayo akakwazanga ukulayisha i-App.",
+        "artifact_rolled_back": "Umshini wayo unikeze inguqulo endala kuneyodwa ibhothi esivele iyisebenzisile, ngakho ibhothi iqhubeka iyenqaba."
+      },
+      "approvedHeading": "I-App evunyiwe",
+      "version": "Inguqulo {{version}}",
+      "appHash": "I-hash ye-App",
+      "developerKey": "Ukhiye kanjiniyela",
+      "source": "Umthombo",
+      "approvedBy": "Ivunywe ngu-{{name}} ngo-{{date}}",
+      "seq": "Imvume {{seq}}",
+      "marks": {
+        "development": "Ukwakhiwa kokuthuthukisa",
+        "noEgress": "Ayikwazi ukuthumela idatha ngaphandle kwaleli qembu",
+        "autoUpdate": "Izibuyekezo ziyazivumela"
+      },
+      "canDoHeading": "Engakwenza",
+      "lines": {
+        "reads": "Ifunda {{events}} ku-{{channels}}, nomlando wezi-{{history}} ezedlule",
+        "readsNoHistory": "Ifunda {{events}} ku-{{channels}}, ngaphandle komlando",
+        "readsNothing": "Ayifundi iteshi nelilodwa",
+        "eventsNew": "imilayezo emisha",
+        "eventsNewEdited": "imilayezo emisha nehleliwe",
+        "wakes": "Iyavuka ku: {{triggers}}",
+        "can": "Ingakwazi: {{actions}}",
+        "sendsTo": "Ingathumela idatha ku: {{hosts}}",
+        "keeps": "Igcina kufika ku-{{size}} wedatha yayo"
+      },
+      "triggers": {
+        "messages": "imilayezo emisha",
+        "mentions": "ukubalulwa",
+        "commands": "imiyalo",
+        "schedule": "isheduli",
+        "requests": "izicelo",
+        "webhook": "izingcingo ze-webhook"
+      },
+      "actions": {
+        "post": "ukuthumela",
+        "reply": "ukuphendula",
+        "react": "ukusabela",
+        "edit_own": "ukuhlela imilayezo yayo",
+        "delete_own": "ukususa imilayezo yayo",
+        "transfer_history": "ukudlulisa umlando wemilayezo"
+      },
+      "events": {
+        "created": "imilayezo emisha",
+        "edited": "imilayezo ehleliwe"
+      },
+      "anyChannel": "noma yiliphi iteshi olikhethayo",
+      "grants": {
+        "heading": "Ukufinyelela",
+        "description": "Susa lokho engakudingi. Ayilokothi ithole okungaphezu kwalokho i-App yayo ekucelayo.",
+        "channels": "Amateshi eyifundayo",
+        "noChannels": "Leli qembu alinalo iteshi elicelwayo.",
+        "history": "Izinsuku zomlando engazifunda (0 kuya ku-{{max}})",
+        "egress": "Abasingathi engabathumelela idatha"
+      },
+      "changes": {
+        "heading": "Okushintshile",
+        "newAccess": "Ukufinyelela okusha",
+        "needed": "Kuyadingeka ukuze uvume",
+        "allow": "Vumela",
+        "trigger_added": "Iyavuka ku-{{value}}",
+        "trigger_removed": "Ayisavuki ku-{{value}}",
+        "channel_added": "Ifunda {{value}}",
+        "channel_removed": "Ayisafundi {{value}}",
+        "history_increased": "Umlando: kusuka ku-{{previous}} kuya ku-{{value}}",
+        "history_decreased": "Umlando: kusuka ku-{{previous}} kuya ku-{{value}}",
+        "event_added": "Ibona {{value}}",
+        "event_removed": "Ayisaboni {{value}}",
+        "action_added": "Ingakwazi {{value}}",
+        "action_removed": "Ayisakwazi {{value}}",
+        "egress_added": "Ingathumela idatha ku-{{value}}",
+        "egress_removed": "Ayisathumeli idatha ku-{{value}}",
+        "state_quota_increased": "Isitoreji: kusuka ku-{{previous}} kuya ku-{{value}}",
+        "state_quota_decreased": "Isitoreji: kusuka ku-{{previous}} kuya ku-{{value}}",
+        "command_added": "Umyalo omusha: /{{value}}",
+        "command_removed": "Ayisanikezi /{{value}}",
+        "command_increased": "/{{value}} iyashintsha isuka ku-{{previous}} iye ku-{{next}}",
+        "schedule_added": "Isebenza ngesheduli entsha: {{value}}",
+        "schedule_removed": "Isheduli {{value}} isusiwe",
+        "schedule_increased": "Isheduli {{value}} isebenza kaningi: njalo ngemva kuka-{{next}}, ngaphambili njalo ngemva kuka-{{previous}}",
+        "schedule_decreased": "Isheduli {{value}} isebenza kancane: njalo ngemva kuka-{{next}}, ngaphambili njalo ngemva kuka-{{previous}}"
+      },
+      "pending": {
+        "firstHeading": "Vuma le App",
+        "firstLead": "Umsingathi webhothi unikeza le App. Akukho okusebenzayo kuze kube umphathi uyayivuma.",
+        "updateHeading": "Kunesibuyekezo esilindile",
+        "updateLead": "Umsingathi wayo unikeza ukwakhiwa okusha. Bheka okushintshile ngaphambi kokuthi uvume.",
+        "nothingNew": "Ayiceli lutho olusha.",
+        "neededHint": "Vumela konke ukufinyelela okusha okumakwe ngokuthi kuyadingeka ukuze uvume lesi sibuyekezo.",
+        "approve": "Vuma",
+        "approveUpdate": "Vuma isibuyekezo",
+        "approving": "Iyavuma…",
+        "development": "Ukufakwa kokuthuthukisa",
+        "developmentHint": "Isebenzisa noma yikuphi ukwakhiwa okusayinwe ngalo khiye kanjiniyela okungaceli okungaphezu kwalokho okuvumile.",
+        "developmentUnavailable": "Qala i-pollis app dev ukuze unikeze ukhiye kanjiniyela.",
+        "autoUpdate": "Vuma ngokuzenzakalelayo ngokuzayo",
+        "autoUpdateHint": "Ibhothi isebenzisa ngokwayo inguqulo entsha evela emthonjeni ofanayo uma ingaceli lutho olwengeziwe, ngaphandle komphathi. Noma yini ecela okwengeziwe isalinde imvume."
+      },
+      "edit": {
+        "save": "Londoloza ukufinyelela",
+        "saving": "Iyalondoloza…"
+      },
+      "errors": {
+        "stale": "Omunye umphathi usanda kuvuma le bhothi. Phinda ubheke ngaphambi kokuthi uvume.",
+        "changed": "I-App ishintshile selokhu leli khasi lavulwa. Phinda ubheke ngaphambi kokuthi uvume.",
+        "failed": "Asikwazanga ukulondoloza imvume."
+      },
+      "commandKinds": {
+        "command": "umyalo othunyelwa eteshini",
+        "request": "isicelo esiyimfihlo"
+      },
+      "runningAutoUpdated": "Isebenzisa inguqulo {{version}}, ebuyekezwe ngokuzenzakalelayo emthonjeni ovunyiwe"
+    }
   }
 }

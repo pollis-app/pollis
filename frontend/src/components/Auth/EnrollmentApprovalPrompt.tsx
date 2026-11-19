@@ -5,8 +5,8 @@ import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
-import { TextInput } from "../ui/TextInput";
-import { SAS_LENGTH, normalizeSasInput } from "../../utils/enrollmentSas";
+import { SasCodeInput } from "../ui/SasCodeInput";
+import { SAS_LENGTH } from "../../utils/enrollmentSas";
 import * as api from "../../services/api";
 
 interface EnrollmentApprovalPromptProps {
@@ -125,20 +125,17 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
               </p>
             </div>
 
-            <TextInput
+            <SasCodeInput
               data-testid="approval-code-input"
               label={t("approval.codeLabel")}
               description={t("approval.codeHint", { count: SAS_LENGTH })}
               value={typedCode}
               onChange={(next) => {
                 setError(null);
-                setTypedCode(normalizeSasInput(next));
+                setTypedCode(next);
               }}
-              placeholder={"·".repeat(SAS_LENGTH)}
               disabled={isLoading}
               autoFocus
-              autoComplete="off"
-              className="font-mono"
             />
 
             {error && (

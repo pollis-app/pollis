@@ -1011,6 +1011,73 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             groups::set_member_role(group_id, user_id, role, requester_id, &state()?).await?;
             ok(())
         }
+        // Bots (#1182): the same commands and camelCase args as desktop's.
+        "list_group_bots" => {
+            let group_id: String = arg(&args, "groupId")?;
+            ok(crate::commands::bots::list_group_bots(&state()?, group_id).await?)
+        }
+        // #2018: slash commands in the composer.
+        "list_group_commands" => {
+            let group_id: String = arg(&args, "groupId")?;
+            ok(crate::commands::bots::app_commands::list_group_commands(&state()?, group_id).await?)
+        }
+        "send_command_request" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let channel_id: String = arg(&args, "channelId")?;
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            let command: String = arg(&args, "command")?;
+            let cmd_args: String = arg(&args, "args")?;
+            crate::commands::bots::app_commands::send_command_request(
+                &state()?,
+                group_id,
+                channel_id,
+                bot_user_id,
+                command,
+                cmd_args,
+            )
+            .await?;
+            ok(())
+        }
+        "get_bot" => {
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            ok(crate::commands::bots::get_bot(&state()?, bot_user_id).await?)
+        }
+        "create_bot" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let code: String = arg(&args, "code")?;
+            let display_name: String = arg(&args, "displayName")?;
+            ok(crate::commands::bots::create_bot(&state()?, group_id, code, display_name).await?)
+        }
+        "add_bot_host" => {
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            let code: String = arg(&args, "code")?;
+            ok(crate::commands::bots::add_bot_host(&state()?, bot_user_id, code).await?)
+        }
+        "revoke_bot_host" => {
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            let device_id: String = arg(&args, "deviceId")?;
+            crate::commands::bots::revoke_bot_host(&state()?, bot_user_id, device_id).await?;
+            ok(())
+        }
+        "delete_bot" => {
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            crate::commands::bots::delete_bot(&state()?, bot_user_id).await?;
+            ok(())
+        }
+        // #2005: App approvals.
+        "get_bot_app" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let bot_user_id: String = arg(&args, "botUserId")?;
+            ok(crate::commands::bots::get_bot_app(&state()?, group_id, bot_user_id).await?)
+        }
+        "approve_bot_app" => {
+            let input: crate::commands::bots::ApproveBotAppInput = arg(&args, "input")?;
+            ok(crate::commands::bots::approve_bot_app(&state()?, input).await?)
+        }
+        "list_group_apps" => {
+            let group_id: String = arg(&args, "groupId")?;
+            ok(crate::commands::bots::list_group_apps(&state()?, group_id).await?)
+        }
         "get_group_members" => {
             let group_id: String = arg(&args, "groupId")?;
             let requester_id: String = arg(&args, "requesterId")?;
@@ -1788,6 +1855,20 @@ mod tests {
             "move_channel",
             // #1809
             "await_enrollment_approval",
+            // #1182
+            "list_group_bots",
+            "get_bot",
+            "create_bot",
+            "add_bot_host",
+            "revoke_bot_host",
+            "delete_bot",
+            // #2005
+            "get_bot_app",
+            "approve_bot_app",
+            "list_group_apps",
+            // #2018
+            "list_group_commands",
+            "send_command_request",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }
@@ -1813,6 +1894,28 @@ mod tests {
         assert_eq!(
             missing("mark_conversation_read", r#"{"conversationId":"c1"}"#).await,
             "missing arg: userId"
+        );
+    }
+
+    /// The bot arms (#1182) take desktop's camelCase arg names.
+    #[tokio::test]
+    async fn bot_arms_take_the_desktop_arg_names() {
+        async fn missing(cmd: &str, args: &str) -> String {
+            match invoke(cmd.to_string(), args.to_string()).await {
+                Ok(_) => panic!("{cmd} should fail without its args"),
+                Err(BridgeError::Bridge(msg)) => msg,
+            }
+        }
+        assert_eq!(missing("list_group_bots", "{}").await, "missing arg: groupId");
+        assert_eq!(missing("get_bot", "{}").await, "missing arg: botUserId");
+        assert_eq!(missing("create_bot", r#"{"groupId":"g","code":"c"}"#).await, "missing arg: displayName");
+        assert_eq!(missing("add_bot_host", r#"{"botUserId":"b"}"#).await, "missing arg: code");
+        assert_eq!(missing("revoke_bot_host", r#"{"botUserId":"b"}"#).await, "missing arg: deviceId");
+        assert_eq!(missing("delete_bot", "{}").await, "missing arg: botUserId");
+        assert_eq!(missing("list_group_commands", "{}").await, "missing arg: groupId");
+        assert_eq!(
+            missing("send_command_request", r#"{"groupId":"g","channelId":"c","botUserId":"b","command":"x"}"#).await,
+            "missing arg: args"
         );
     }
 

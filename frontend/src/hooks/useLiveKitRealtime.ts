@@ -15,6 +15,8 @@ import { receiptQueryKeys } from './queries/useReceipts';
 import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipants';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useMutedChannels, useUserGroupsWithChannels } from './queries/useGroups';
+import { botQueryKeys } from './queries/useBots';
+import { botAppQueryKeys } from './queries/useBotApps';
 import { blocksQueryKeys } from './queries/useBlocks';
 import { aliasQueryKeys, channelAliasName } from './queries/useGroupAliases';
 import { notify, setNotifyPrefs, setMutedChannels, loadDeviceCallRingtone } from '../utils/notify';
@@ -98,6 +100,11 @@ type RealtimeEvent =
     group_id?: string;
   }
   | {
+    // #1182: a host joined one of this admin's bots; DS-only.
+    type: 'bots_changed';
+    group_id: string;
+  }
+  | {
     type: 'join_requests_changed';
     group_id: string;
   }
@@ -135,6 +142,11 @@ type RealtimeEvent =
   | {
     // #1628: another of our devices pushed read cursors; converge (DS-originated, content-free).
     type: 'read_cursors_changed';
+  }
+  | {
+    // #1182: an admin approved another host for a bot; sent only to a bot's inbox, so the app never sees it.
+    type: 'bot_host_approval';
+    request_id: string;
   }
   | {
     type: 'realtime_reconnected';
@@ -536,6 +548,13 @@ export function useLiveKitRealtime() {
 
       if (event.type === 'read_cursors_changed') {
         void refreshReadCursors(queryClientRef.current, currentUser.id);
+        return;
+      }
+
+      if (event.type === 'bots_changed') {
+        queryClientRef.current.invalidateQueries({ queryKey: botQueryKeys.all });
+        // #2005: an approval or the runtime's report changed; the bot's App section re-reads.
+        queryClientRef.current.invalidateQueries({ queryKey: botAppQueryKeys.all });
         return;
       }
 

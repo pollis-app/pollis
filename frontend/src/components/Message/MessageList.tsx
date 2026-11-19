@@ -16,6 +16,7 @@ import { useBlockedUsers } from "../../hooks/queries";
 import { useGroupMembers, useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { mentionLabels } from "../../utils/groupAlias";
+import { botHandleSet, botIdSet } from "../../utils/bots";
 import { observer } from "mobx-react-lite";
 import { formatDayDivider, toMs } from "../../utils/format";
 import { useSkin } from "../../hooks/queries/usePreferences";
@@ -185,9 +186,14 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     [aliases, groupMembers],
   );
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
-  const groupCreatorId = groupIdForNames
-    ? groupsWithChannels?.find((g) => g.id === groupIdForNames)?.created_by
+  const namesGroup = groupIdForNames
+    ? groupsWithChannels?.find((g) => g.id === groupIdForNames)
     : undefined;
+  const groupCreatorId = namesGroup?.created_by;
+  const groupName = namesGroup?.name;
+  // Bot badges (#1182) on a bot's messages and on mentions of it.
+  const botIds = useMemo(() => botIdSet(groupMembers), [groupMembers]);
+  const botHandles = useMemo(() => botHandleSet(groupMembers), [groupMembers]);
   const newMemberJoinMs = useMemo(
     () => newMemberJoins(groupMembers, groupCreatorId),
     [groupMembers, groupCreatorId],
@@ -240,8 +246,24 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       linkPreviews,
       aliases,
       mentionLabels: aliasMentionLabels,
+      botIds,
+      botHandles,
+      groupName,
     }),
-    [skin, isLightBg, currentUser?.id, mentionNames, selfName, viewerJoinedAtMs, linkPreviews, aliases, aliasMentionLabels],
+    [
+      skin,
+      isLightBg,
+      currentUser?.id,
+      mentionNames,
+      selfName,
+      viewerJoinedAtMs,
+      linkPreviews,
+      aliases,
+      aliasMentionLabels,
+      botIds,
+      botHandles,
+      groupName,
+    ],
   );
 
   // One tick per DM (#1637), on the newest own message with a receipt. A window

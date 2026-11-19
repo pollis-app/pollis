@@ -138,6 +138,12 @@ mod seam_tests {
         // link-preview fetches (#1987): each hop pins the DNS answer it just
         // checked into its own client, so a pooled client cannot be reused
         "pollis-core/src/commands/link_preview/fetch.rs",
+        // App artifact reads (#2005): https-only with a bounded redirect
+        // policy, built once per process in a `OnceLock`
+        "pollis-bot/src/app_approval.rs",
+        // `pollis-bot post` (#1182): one loopback request per CLI run, so a
+        // pooled client would save no handshake
+        "pollis-bot/src/post.rs",
     ];
 
     fn workspace_root() -> PathBuf {

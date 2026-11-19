@@ -1,0 +1,35 @@
+// The WASI 0.2 interfaces pollis-app-host gives an App (#2004), so ordinary
+// std Rust and ComponentizeJS guests load. Each is a stub with no ambient
+// authority: empty environment and arguments, stdin closed, stdout/stderr to
+// the runtime log, `exit` traps the job, clocks and randomness from the host,
+// and a filesystem with no preopened directories (so no descriptor can ever
+// exist). Sockets and wasi:http are deliberately absent: a component that
+// imports them is refused. Network access is `pollis:app/host.http-fetch`.
+//
+// deps/ is the upstream WASI 0.2.9 WIT, copied unmodified from the `wasip2`
+// crate (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT). sockets.wit is
+// present only because cli.wit's worlds reference it; nothing links it.
+package pollis:host-wasi;
+
+world app-wasi {
+  import wasi:cli/environment@0.2.9;
+  import wasi:cli/exit@0.2.9;
+  import wasi:cli/stdin@0.2.9;
+  import wasi:cli/stdout@0.2.9;
+  import wasi:cli/stderr@0.2.9;
+  import wasi:cli/terminal-input@0.2.9;
+  import wasi:cli/terminal-output@0.2.9;
+  import wasi:cli/terminal-stdin@0.2.9;
+  import wasi:cli/terminal-stdout@0.2.9;
+  import wasi:cli/terminal-stderr@0.2.9;
+  import wasi:io/error@0.2.9;
+  import wasi:io/poll@0.2.9;
+  import wasi:io/streams@0.2.9;
+  import wasi:clocks/monotonic-clock@0.2.9;
+  import wasi:clocks/wall-clock@0.2.9;
+  import wasi:random/random@0.2.9;
+  import wasi:random/insecure@0.2.9;
+  import wasi:random/insecure-seed@0.2.9;
+  import wasi:filesystem/types@0.2.9;
+  import wasi:filesystem/preopens@0.2.9;
+}

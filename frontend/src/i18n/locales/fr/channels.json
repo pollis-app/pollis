@@ -223,5 +223,145 @@
     "confirmButton": "Oui, réinitialiser",
     "submitting": "Réinitialisation…",
     "failed": "Impossible de réinitialiser l'alias"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "Impossible de charger l'App de ce bot.",
+      "noApp": "Son hôte n'a pas encore proposé d'App. Lancez le bot avec une App et elle apparaîtra ici.",
+      "notice": {
+        "title": "Ce bot ne fonctionne pas",
+        "waiting": "En attente de votre approbation."
+      },
+      "reasons": {
+        "not_approved": "Aucune App n'a encore été approuvée pour lui.",
+        "hash_mismatch": "Son hôte exécute une version que vous n'avez pas approuvée.",
+        "developer_key_mismatch": "Sa version est signée par une clé de développeur que vous n'avez pas approuvée.",
+        "build_widens": "Sa nouvelle version demande plus que ce que vous avez approuvé.",
+        "malformed": "Son approbation est illisible.",
+        "wrong_kind": "Son approbation n'est pas du bon type.",
+        "wrong_installation": "Son approbation a été faite pour un autre bot.",
+        "approver_not_in_group": "L'administrateur qui l'a approuvé ne fait plus partie de ce groupe.",
+        "uncertified_approver": "Impossible de confirmer que l'appareil qui l'a approuvé appartient à un administrateur.",
+        "bad_signature": "La signature de son approbation n'est pas valide.",
+        "transparency_alarm": "Les clés de l'administrateur qui l'a approuvé ne correspondent pas au journal public des clés.",
+        "not_admin": "Il a été approuvé par quelqu'un qui n'est pas administrateur de ce groupe.",
+        "manifest_mismatch": "Son App ne correspond pas à celle qui a été approuvée.",
+        "widened_grants": "Son approbation accorde plus que ce que demande l'App.",
+        "rolled_back": "Une approbation plus ancienne a été remise à la place d'une plus récente.",
+        "bad_build_signature": "La signature de développeur de sa version n'est pas valide.",
+        "artifact_unavailable": "Son hôte n'a pas pu charger l'App.",
+        "artifact_rolled_back": "Sa machine a proposé une version plus ancienne qu'une version déjà exécutée par le bot ; le bot continue donc de la refuser."
+      },
+      "approvedHeading": "App approuvée",
+      "version": "Version {{version}}",
+      "appHash": "Empreinte de l'App",
+      "developerKey": "Clé de développeur",
+      "source": "Source",
+      "approvedBy": "Approuvée par {{name}} le {{date}}",
+      "seq": "Approbation {{seq}}",
+      "marks": {
+        "development": "Version de développement",
+        "noEgress": "Ne peut pas envoyer de données hors de ce groupe",
+        "autoUpdate": "Les mises à jour s'approuvent seules"
+      },
+      "canDoHeading": "Ce qu'il peut faire",
+      "lines": {
+        "reads": "Lit {{events}} dans {{channels}}, et l'historique des derniers {{history}}",
+        "readsNoHistory": "Lit {{events}} dans {{channels}}, sans historique",
+        "readsNothing": "Ne lit aucun canal",
+        "eventsNew": "les nouveaux messages",
+        "eventsNewEdited": "les messages nouveaux et modifiés",
+        "wakes": "Se déclenche sur : {{triggers}}",
+        "can": "Peut : {{actions}}",
+        "sendsTo": "Peut envoyer des données à : {{hosts}}",
+        "keeps": "Conserve jusqu'à {{size}} de ses propres données"
+      },
+      "triggers": {
+        "messages": "nouveaux messages",
+        "mentions": "mentions",
+        "commands": "commandes",
+        "schedule": "un planning",
+        "requests": "demandes",
+        "webhook": "appels webhook"
+      },
+      "actions": {
+        "post": "publier",
+        "reply": "répondre",
+        "react": "réagir",
+        "edit_own": "modifier ses propres messages",
+        "delete_own": "supprimer ses propres messages",
+        "transfer_history": "transmettre l'historique des messages"
+      },
+      "events": {
+        "created": "nouveaux messages",
+        "edited": "messages modifiés"
+      },
+      "anyChannel": "tout canal que vous choisissez",
+      "grants": {
+        "heading": "Accès",
+        "description": "Retirez-lui ce dont il n'a pas besoin. Il n'obtient jamais plus que ce que demande son App.",
+        "channels": "Canaux qu'il lit",
+        "noChannels": "Ce groupe n'a aucun des canaux qu'il demande.",
+        "history": "Jours d'historique qu'il peut lire (0 à {{max}})",
+        "egress": "Hôtes auxquels il peut envoyer des données"
+      },
+      "changes": {
+        "heading": "Ce qui a changé",
+        "newAccess": "Nouvel accès",
+        "needed": "Nécessaire pour approuver",
+        "allow": "Autoriser",
+        "trigger_added": "Se déclenche sur {{value}}",
+        "trigger_removed": "Ne se déclenche plus sur {{value}}",
+        "channel_added": "Lit {{value}}",
+        "channel_removed": "Ne lit plus {{value}}",
+        "history_increased": "Historique : de {{previous}} à {{value}}",
+        "history_decreased": "Historique : de {{previous}} à {{value}}",
+        "event_added": "Voit {{value}}",
+        "event_removed": "Ne voit plus {{value}}",
+        "action_added": "Peut {{value}}",
+        "action_removed": "Ne peut plus {{value}}",
+        "egress_added": "Peut envoyer des données à {{value}}",
+        "egress_removed": "N'envoie plus de données à {{value}}",
+        "state_quota_increased": "Stockage : de {{previous}} à {{value}}",
+        "state_quota_decreased": "Stockage : de {{previous}} à {{value}}",
+        "command_added": "Nouvelle commande : /{{value}}",
+        "command_removed": "Ne propose plus /{{value}}",
+        "command_increased": "/{{value}} passe de {{previous}} à {{next}}",
+        "schedule_added": "S'exécute selon un nouveau planning : {{value}}",
+        "schedule_removed": "Planning {{value}} supprimé",
+        "schedule_increased": "Le planning {{value}} s'exécute plus souvent : toutes les {{next}}, avant toutes les {{previous}}",
+        "schedule_decreased": "Le planning {{value}} s'exécute moins souvent : toutes les {{next}}, avant toutes les {{previous}}"
+      },
+      "pending": {
+        "firstHeading": "Approuver cette App",
+        "firstLead": "L'hôte du bot propose cette App. Rien ne s'exécute avant qu'un administrateur l'approuve.",
+        "updateHeading": "Une mise à jour est en attente",
+        "updateLead": "Son hôte propose une nouvelle version. Regardez ce qui a changé avant de l'approuver.",
+        "nothingNew": "Elle ne demande rien de nouveau.",
+        "neededHint": "Autorisez chaque nouvel accès marqué comme nécessaire pour approuver cette mise à jour.",
+        "approve": "Approuver",
+        "approveUpdate": "Approuver la mise à jour",
+        "approving": "Approbation…",
+        "development": "Installation de développement",
+        "developmentHint": "Exécute toute version signée par cette clé de développeur qui ne demande pas plus que ce que vous avez approuvé.",
+        "developmentUnavailable": "Lancez pollis app dev pour proposer une clé de développeur.",
+        "autoUpdate": "Approuver automatiquement la prochaine fois",
+        "autoUpdateHint": "Le bot exécute de lui-même une version plus récente de la même source si elle ne demande rien de plus, sans administrateur. Tout ce qui demande plus attend toujours une approbation."
+      },
+      "edit": {
+        "save": "Enregistrer l'accès",
+        "saving": "Enregistrement…"
+      },
+      "errors": {
+        "stale": "Un autre administrateur vient d'approuver ce bot. Vérifiez à nouveau avant d'approuver.",
+        "changed": "L'App a changé depuis l'ouverture de cette page. Vérifiez à nouveau avant d'approuver.",
+        "failed": "Impossible d'enregistrer l'approbation."
+      },
+      "commandKinds": {
+        "command": "une commande publiée dans le canal",
+        "request": "une demande privée"
+      },
+      "runningAutoUpdated": "Exécute la version {{version}}, mise à jour automatiquement depuis la source approuvée"
+    }
   }
 }

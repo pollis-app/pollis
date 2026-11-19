@@ -6,19 +6,24 @@ import { useSkin } from "../../../hooks/queries/usePreferences";
 import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { PresenceDot } from "../../ui/PresenceDot";
 import { PressButton } from "../../ui/PressButton";
+import { BotBadge } from "../../ui/BotBadge";
 
 interface MemberRowProps {
   userId: string;
   label: string;
   avatarKey?: string | null;
   isAdmin: boolean;
+  /** A bot account (#1182): the Bot badge follows the name. */
+  isBot?: boolean;
+  /** The group's name, for the badge's "Managed by the admins of …". */
+  groupName?: string;
   /** Set in a group: the profile opens as that group shows the member (#2003). */
   groupId?: string;
 }
 
 /** One member; opens their profile. Modern shows the avatar, terminal a bare dot. */
 export const MemberRow: React.FC<MemberRowProps> = observer(
-  ({ userId, label, avatarKey, isAdmin, groupId }) => {
+  ({ userId, label, avatarKey, isAdmin, isBot = false, groupName, groupId }) => {
     const { t } = useTranslation("nav");
     const navigate = useNavigate();
     const isTerminal = useSkin() === "terminal";
@@ -59,6 +64,7 @@ export const MemberRow: React.FC<MemberRowProps> = observer(
         >
           {label}
         </bdi>
+        {isBot && <BotBadge groupName={groupName} data-testid={`right-panel-bot-badge-${userId}`} />}
         {isAdmin && (
           <span
             className={`shrink-0 uppercase tracking-wide text-muted ${

@@ -1,10 +1,10 @@
 use std::collections::HashSet;
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "media")]
+#[cfg(feature = "realtime")]
 use tokio::task::JoinHandle;
 
 use crate::sink::EventSink;
@@ -142,6 +142,25 @@ pub enum RealtimeEvent {
         transfer_id: String,
         event: String,
     },
+    /// An admin approved another host for this bot (#1182), sent to the bot's
+    /// inbox. DS-originated, content-free: a running host re-reads the pending
+    /// requests over the signed API and verifies each one itself
+    /// (`bots::handle_host_approvals`). Never sent to a person's inbox.
+    BotHostApproval {
+        request_id: String,
+    },
+    /// #2005: an admin approved an App for this bot (approval `seq`). Only a
+    /// wake-up: the runtime reads and verifies the approval itself at its next
+    /// job (`bots::apps::verify_installation_approval`). Never sent to a person's inbox.
+    BotAppApproval {
+        seq: i64,
+    },
+    /// A group's bots changed without this client doing it (#1182: another host
+    /// of a bot was added). Sent to the group's admins' inboxes by the DS,
+    /// content-free; re-read over the signed channel.
+    BotsChanged {
+        group_id: String,
+    },
     /// After a non-empty reconcile commit: refetch hint only; names no one (#1506).
     RosterChanged {
         conversation_id: String,
@@ -156,11 +175,15 @@ pub struct LiveKitState {
     pub channel: Option<Arc<dyn EventSink<RealtimeEvent>>>,
 
     /// Arc so a Room can be cloned out without holding the lock across an await. Desktop only.
-    #[cfg(feature = "media")]
+    #[cfg(feature = "realtime")]
     pub rooms: HashMap<String, (Arc<livekit::Room>, JoinHandle<()>)>,
 
     /// Rooms mid-connect, so concurrent `connect_rooms` calls don't duplicate.
     pub connecting: HashSet<String>,
+
+    /// Report events only (#1182): never act on a membership wake here. The bot
+    /// runtime's wake source sets it, so MLS state changes only inside a job.
+    pub wake_only: bool,
 
     /// Held while a room's roster is read and reported, so a seed and a departure can't interleave.
     pub presence_lane: Arc<tokio::sync::Mutex<()>>,
@@ -170,9 +193,10 @@ impl LiveKitState {
     pub fn new() -> Self {
         Self {
             channel: None,
-            #[cfg(feature = "media")]
+            #[cfg(feature = "realtime")]
             rooms: HashMap::new(),
             connecting: HashSet::new(),
+            wake_only: false,
             presence_lane: Arc::new(tokio::sync::Mutex::new(())),
         }
     }

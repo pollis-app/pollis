@@ -792,26 +792,33 @@ handle is nearer to is the one that moves), so the same component works under
 `dir="rtl"`, where the sidebar is drawn on the right and grows leftwards, without
 knowing the reading direction.
 
-### Composer completions: `@mention` and `:shortcode:`
+### Composer completions: `/command`, `@mention` and `:shortcode:`
 
-`ChatInput` carries **two** autocomplete tracks and they are built to the same
+`ChatInput` carries **three** autocomplete tracks and they are built to the same
 shape, so learning one is learning the other:
 
-| | mentions (#843) | emoji shortcodes |
-| --- | --- | --- |
-| trigger | `@` at a word start | `:` at a word start |
-| parser | `utils/mentions.ts` → `mentionQueryAt` | `components/Emoji/emojiShortcodeQuery.ts` → `shortcodeQueryAt` |
-| Modern skin | `ui/MentionSuggestList` above the composer | `ui/EmojiSuggestList`, same anchoring |
-| terminal skin | ghost node inside `ui/RichTextInput`, Tab accepts | same ghost node, Tab accepts |
-| candidates | the conversation's roster | custom emoji the user may send, then the standard table |
+| | commands (#2018) | mentions (#843) | emoji shortcodes |
+| --- | --- | --- | --- |
+| trigger | `/` as the message's first character | `@` at a word start | `:` at a word start |
+| parser | `utils/slashCommands.ts` → `commandQueryAt` | `utils/mentions.ts` → `mentionQueryAt` | `components/Emoji/emojiShortcodeQuery.ts` → `shortcodeQueryAt` |
+| Modern skin | `ui/CommandSuggestList` above the composer | `ui/MentionSuggestList` above the composer | `ui/EmojiSuggestList`, same anchoring |
+| terminal skin | ghost node, Tab accepts | ghost node inside `ui/RichTextInput`, Tab accepts | same ghost node, Tab accepts |
+| candidates | the group's approved Apps' commands granted this channel (`list_group_commands`) | the conversation's roster | custom emoji the user may send, then the standard table |
+
+**Commands (#2018)** are ordinary messages. On send, `classifyCommandSend` decides: a name two
+Apps here declare without the bot's `@handle` is not sent (inline `command-notice`); a
+`request: true` command goes to `send_command_request` and is never posted; anything else,
+unknown commands included, is a normal send. Picking a shared name inserts `/name @bot `.
+`mobile/lib/slashCommands.ts` is a port held to the same text (`frontend/tests/slash-commands.test.ts`).
 
 **A trigger only opens at the start of the string or after whitespace.** That one
 rule is what keeps `http://example.com` and `10:30` from ever reading as a
 shortcode, and `a@b.com` from reading as a mention; both parsers share it and both
 have negative tests for it (`frontend/tests/emoji-shortcode-query.test.ts`).
 
-**Enter / Tab / Esc have exactly one owner.** `handleKeyDown` tests the mention
-track first and the emoji track second, and an open mention query suppresses the
+**Enter / Tab / Esc have exactly one owner.** `handleKeyDown` tests the command track
+first (it opens only on the message's first word, so it never overlaps the others), the
+mention track second and the emoji track third, and an open mention query suppresses the
 emoji one outright. The two cannot in fact both be open — neither body alphabet
 contains the other's trigger character — but the precedence is written down so a
 future widening of either alphabet has one place to be reasoned about.
@@ -953,7 +960,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**244 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**262 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -988,6 +995,19 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
 - **PinField** — props: value, onChange, disabled — `frontend/src/components/Auth/PinField.tsx`. Masked 4-digit `InputOtp` + hidden e2e mirror input; shared by `PinCreateScreen`, `PinEntryScreen`, `ChangePinPage` (#1731).
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`
+
+### `components/Bots` (10)
+
+- **AppCapabilities** — props: manifest, grants, testId — `frontend/src/components/Bots/AppCapabilities.tsx`
+- **AppChangeList** — props: changes, accepted, onToggle, disabled — `frontend/src/components/Bots/AppChangeList.tsx`
+- **AppMark** — props: label — `frontend/src/components/Bots/AppMark.tsx`
+- **AppNotice** — `frontend/src/components/Bots/AppNotice.tsx`
+- **ApprovedAppSection** — props: view, approved, approverName, editable — `frontend/src/components/Bots/ApprovedAppSection.tsx`
+- **AppSummary** — props: manifest, appHash, developerKey, source, marks, footer, testId — `frontend/src/components/Bots/AppSummary.tsx`
+- **BotAppSection** — props: groupId, botUserId — `frontend/src/components/Bots/BotAppSection.tsx`
+- **BotPairingForm** — props: leadTitle, lead, command, children, ready, submitLabel, submittingLabel, failedLabel, onSubmit, cancel, testId — `frontend/src/components/Bots/BotPairingForm.tsx`. Add a bot / Add a host (#1182): the `pollis-bot` command, the machine notice, a `SasCodeInput`, busy until the core answers.
+- **GrantControls** — props: ceiling, narrowing, onChange, disabled, testId — `frontend/src/components/Bots/GrantControls.tsx`
+- **PendingAppSection** — props: view, pending — `frontend/src/components/Bots/PendingAppSection.tsx`
 
 ### `components/Diagnostics` (2)
 
@@ -1048,7 +1068,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 ### `components/Layout/RightPanel` (8)
 
 - **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
-- **MemberRow** — props: userId, label, avatarKey, isAdmin, groupId — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
+- **MemberRow** — props: userId, label, avatarKey, isAdmin, isBot, groupName, groupId — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
 - **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
 - **PinnedPanel** — props: channelId, conversationId — `frontend/src/components/Layout/RightPanel/PinnedPanel.tsx`. Mobile counterpart (#1315): `mobile/app/conversation/pins.tsx`, a pushed page (iPad: a detail-pane page) behind the chat header's pin button — same rows (author, time, snapshot text + attachments, Unpin), plus a row tap that returns to the conversation scrolled to the message via `resolve_message_permalink` + `mobile/stores/messageJumpStore.ts`.
 - **RightPanel** — `frontend/src/components/Layout/RightPanel/RightPanel.tsx`. The generic slot.
@@ -1074,7 +1094,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **LinkPreviewCard** — props: host, title, description, thumb, href, onOpen, onRemove, loading, testId — `frontend/src/components/Message/LinkPreviewCard.tsx`. The one link-preview card (#1987), composer and timeline: fixed height (host, one title line, two description lines) so a late thumbnail never moves the log; a received card is an anchor opening the body link, a composer card carries ×. Mobile: `mobile/components/chat/LinkPreviewCard.tsx`.
 - **MediaLinkUnfurl** — props: text, exceptHref — `frontend/src/components/Message/MediaLinkUnfurl.tsx`. Inline previews for image/video URLs found in message text. **Every host is click-to-load, with no allowlist.** Painting `<img src>` from message text makes merely opening a message fetch from a host the SENDER chose — a read receipt and an IP disclosure in one, from any message including an unaccepted DM request. There was an exception for `cdn.pollis.com`; it is gone, because the hostname comes out of the message (so the sender picks what the check is run against, and the path was never checked at all) and because a webview image request is the renderer's own, not `http_client`'s, so it cannot ride the relay overlay. The reveal is per-URL and deliberately not remembered.
 - **MediaSpotlight** — props: items, startIndex, openedUrl, onClose — `frontend/src/components/Message/MediaSpotlight.tsx`. The image/video lightbox `AttachmentDisplay` opens (#1788). A card given `roll` (the message's attachments, passed by `MessageItem`, `ThreadMessageRow` and `PinnedPanel`) steps through that message's images and videos: prev/next buttons, ← / → (direction-aware, `horizontalArrowStep`) and an `n / total` position, wrapping at both ends. The roll is `spotlightRoll` in `utils/mediaRoll.ts`, mobile's `collectViewerItems` scoped to one message — same kinds (audio and files open alone), same attachment order, same wrap; `frontend/tests/media-roll.test.ts` runs both on the same message. The arrow listener exists only while a spotlight with more than one item is open, on the window's capture phase, so the log's arrow navigation never also moves. Each item mounts fresh (keyed by id): its URL resolves on arrival, and a still-covered sensitive neighbour shows its cover, revealed by a click. One difference is deliberate: mobile's roll carries on across the whole conversation, while desktop's stops at the message, as #1788 asks. The root carries `data-window-viewer` (as do the audio viewer in `AttachmentDisplay` and the Vault's `MediaGalleryView` viewer): while one is in the document, `index.css` makes every scrollbar transparent, because the Linux webview draws thin overlay scrollbars in a last pass above every stacking order and the chat's would otherwise show over the viewer (#1915). Any new full-window viewer needs the attribute. Coverage: `e2e/media-spotlight.spec.ts`.
-- **MentionToken** — props: name, label, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`
+- **MentionToken** — props: name, label, isSelf, isBot, groupName, skin — `frontend/src/components/Message/MentionToken.tsx`
 - **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, isPinned, copyLinkState, onReply, onOpenThread, onToggleSave, onTogglePin, onCopyLink, onEdit, onDelete, onReport — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut. Keyboard selection **inverts** the focused control (`focus:bg-accent focus:text-bg`; menu rows too, with Delete inverting to `bg-danger` instead of borrowing the affirmative accent) — a recolor alone was invisible in the terminal skin, and it replaces the browser's default focus ring on the menu rows. The inversion is on plain `focus:`, not `focus-visible:`, because `MessageList` projects nav state with a programmatic `.focus()` that WebKitGTK does not reliably treat as focus-visible — the row's own `focus-within:bg-hover` is plain-focus for the same reason. The one row that does **not** take the plain inversion is Copy link: it keeps focus after the click (the menu stays open so the copied/failed feedback lands where the pointer is, #897), so a solid accent fill would paint over its tone (#1059). Copied, the row steps its focus fill down to the selected-row tint (`focus:bg-active focus:text-accent`) so the accent text shows — a pressed button releasing; failed, it inverts to `bg-danger` like Delete. Focus never moves off the row: a keyboard user would lose their place in the menu. The "more" trigger rests one step brighter (`text-dim`) than Reply/Edit: three dots carry less ink than the arrow or pencil, so at a shared `text-muted` it read as disabled.
 - **MessageAvatar** — props: userId, username, aliasKey, size — `frontend/src/components/Message/MessageAvatar.tsx`
 - **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
@@ -1121,17 +1141,19 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 - **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
-### `components/ui` (51)
+### `components/ui` (54)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
 - **BackMenu** — props: items, onBack — `frontend/src/components/ui/BackMenu.tsx`. `TerminalMenu` ending in "Go back" (Esc too); `DMs`, `Groups`, `Group` (#1731).
+- **BotBadge** — props: groupName — `frontend/src/components/ui/BotBadge.tsx`. The Bot badge (#1182): a quiet `surface-high` tag in `text-dim` (Terminal `[bot]`) beside a bot's name in the member list and right panel, on its messages, after an `@mention` of it and in the mention picker; tooltip "Managed by the admins of <group>". Driven by `isBotUser` (`utils/bots.ts`). Mobile twin: lane E.
 - **Button** — props: children, onClick, disabled, isLoading, loadingText, className, variant, size, type, onKeyDown, onPointerEnter, onFocus, autoFocus, title, activateOn — `frontend/src/components/ui/Button.tsx`. Mobile's `Button` (`mobile/components/ui.tsx`) takes `loading`: disabled, spinner in place of its icons (`<testID>-busy`), announced busy. Slow submits pair it with `mobile/hooks/useSubmitLock.ts`, which claims the action synchronously so a double tap cannot submit twice (pinned by `mobile/tests/busy-feedback.test.ts`).
 - **Card** — props: children, className, style, padding — `frontend/src/components/ui/Card.tsx`
 - **ChatInput** — props: onSend, placeholder, disabled, autoFocus, className, maxAttachments, onValueChange, draftKey, canNotifyAll, onHistoryUp, linkPreviews — `frontend/src/components/ui/ChatInput.tsx`
 - **Checkbox** — props: label, checked, onChange, disabled, className — `frontend/src/components/ui/Checkbox.tsx`
 - **Chip** — props: children, onClick, selected, disabled, title, machine, style — `frontend/src/components/ui/Chip.tsx`
 - **CodeSnippet** — props: value, labels, ariaLabels, copyTestId — `frontend/src/components/ui/CodeSnippet.tsx`. A read-only value (shell command, link) with a copy `Button` beside it; the value wraps instead of scrolling. Copies through the clipboard bridge with the idle/copied/failed `data-copy-state` (#898). Used by the Software Update page's managed-install command and the created invite-link card.
+- **CommandSuggestList** — props: commands, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/CommandSuggestList.tsx`. The `/command` list (#2018) on the `SuggestList` shell: name, argument hint, description, and the App's name with the Bot badge when two Apps share the name.
 - **ComposerBarHeader** — props: heading, onCancel, cancelLabel, cancelTestId, focusCancel — `frontend/src/components/ui/ComposerBarHeader.tsx`. The heading row (and optional cancel `X`) of every bar that replaces the chat input: `EditMessageBar`, `ConfirmBar`, the DM-request bar.
 - **ComposerLinkPreview** — props: state, onRemove — `frontend/src/components/ui/ComposerLinkPreview.tsx`. The draft's preview above `ChatInput` and inside `EditMessageBar` (#1987): loading on the same frame as a paste, then the card with ×. Mobile: `mobile/components/chat/ComposerLinkPreview.tsx`.
 - **ConfirmBar** — props: testId, heading, body, cancelLabel, cancelTestId, onCancel, confirmLabel, confirmTestId, onConfirm, isPending, pendingLabel — `frontend/src/components/ui/ConfirmBar.tsx`. The one confirmation inside a conversation (#1968): replaces the chat input with the consequence and a `danger` action that holds focus (Enter confirms; Escape, handled by the caller, or the `X` cancels). Delete message / channel in `MainContent`, delete in the Vault.
@@ -1165,6 +1187,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **RadioList** — props: options, value, onChange, optionTestId — `frontend/src/components/ui/RadioList.tsx`
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
 - **RichTextInput** — props: value, onChange, onSelectionChange, onKeyDown, onPaste, onFocus, onBlur, placeholder, disabled, autoFocus, className, style, ariaLabel, testId, ghost, ghostTestId, ghostClassName — `frontend/src/components/ui/RichTextInput.tsx`
+- **SasCodeInput** — props: label, description, value, onChange, disabled, autoFocus — `frontend/src/components/ui/SasCodeInput.tsx`. The typed-code field (#1096 rule: typed, never pre-filled; `normalizeSasInput`), shared by `EnrollmentApprovalPrompt` and bot pairing (#1182).
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
 - **SectionHeader** — props: children, bordered — `frontend/src/components/ui/SectionHeader.tsx`. A panel section's title (#1964): Terminal's sticky sidebar-style bar in spaced capitals, Modern a sentence-case `text-muted` label. Members, Pinned.
 - **Select** — props: value, onChange, options, label, disabled — `frontend/src/components/ui/Select.tsx`. A pick-one dropdown with its `<label>` (#1964), drawn like `TextInput`: the UI face, `border-line-strong`, `rounded-control`, the shared focus ring (`ui/focusRing.ts`).
@@ -1198,11 +1221,15 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (62)
+### `pages` (67)
 
+- **AddBotHostPage** — `frontend/src/pages/AddBotHostPage.tsx`
+- **AddBotPage** — `frontend/src/pages/AddBotPage.tsx`
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
 - **BlockedPage** — `frontend/src/pages/BlockedPage.tsx`
+- **BotPage** — `frontend/src/pages/BotPage.tsx`
+- **BotsPage** — `frontend/src/pages/BotsPage.tsx`
 - **CallPage** — `frontend/src/pages/Call.tsx`
 - **ChangePinPage** — `frontend/src/pages/ChangePinPage.tsx`
 - **ChannelPage** — `frontend/src/pages/Channel.tsx`
@@ -1211,6 +1238,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **CreateChannelPage** — `frontend/src/pages/CreateChannelPage.tsx`
 - **CreateGroup** — props: onSuccess — `frontend/src/pages/CreateGroup.tsx`
 - **CreateGroupPage** — `frontend/src/pages/CreateGroupPage.tsx`
+- **DeleteBotPage** — `frontend/src/pages/DeleteBotPage.tsx`
 - **DiagnosticsPage** — `frontend/src/pages/DiagnosticsPage.tsx`
 - **DMPage** — `frontend/src/pages/DM.tsx`
 - **DMSettingsPage** — `frontend/src/pages/DMSettings.tsx`
@@ -1236,7 +1264,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **LanguagePage** — `frontend/src/pages/LanguagePage.tsx`. `/preferences/language` (#1944): the language `RadioList` (`pref-language-<code>`) and the device-only note; a pick applies at once.
 - **LeaveGroupPage** — `frontend/src/pages/LeaveGroup.tsx`
 - **LinkDevicePage** — `frontend/src/pages/LinkDevicePage.tsx`
-- **Members** — props: groupId, isAdmin — `frontend/src/pages/Members.tsx`
+- **Members** — props: groupId, groupName, isAdmin — `frontend/src/pages/Members.tsx`
 - **MembersPage** — `frontend/src/pages/MembersPage.tsx`
 - **OpenSourceLicensePage** — `frontend/src/pages/OpenSourceLicensePage.tsx`
 - **OpenSourcePage** — `frontend/src/pages/OpenSourcePage.tsx`

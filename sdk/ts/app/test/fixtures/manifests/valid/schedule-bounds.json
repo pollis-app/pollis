@@ -1,0 +1,1 @@
+{"name":"a","version":"1","triggers":["schedule"],"schedules":[{"name":"m","every":60},{"name":"w","every":604800,"offset":604799}]}

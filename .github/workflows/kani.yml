@@ -25,6 +25,7 @@ on:
       # Every crate pollis-core or pollis-delivery reaches by `path =`: the
       # harnesses compile against them. pollis-core re-exports the schema.
       - 'pollis-api/**'
+      - 'pollis-app-manifest/**'
       - 'pollis-capture-proto/**'
       - 'pollis-device-cert/**'
       - 'pollis-import/**'
@@ -63,6 +64,7 @@ on:
       # Every crate pollis-core or pollis-delivery reaches by `path =`: the
       # harnesses compile against them. pollis-core re-exports the schema.
       - 'pollis-api/**'
+      - 'pollis-app-manifest/**'
       - 'pollis-capture-proto/**'
       - 'pollis-device-cert/**'
       - 'pollis-import/**'

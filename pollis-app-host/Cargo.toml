@@ -1,0 +1,37 @@
+[package]
+name = "pollis-app-host"
+version.workspace = true
+edition.workspace = true
+# wasmtime 49 needs 1.96, the repo's pinned toolchain. Higher than the
+# workspace floor on purpose: this crate is not in the Kani harness set that
+# keeps that floor low.
+rust-version = "1.96"
+publish = false
+description = "The sandbox the bot runtime runs Apps in (#2004): a wasmtime component host for pollis:app@0.1.0 with no WASI, per-job CPU/memory/host-call limits, a fresh instance per job, compiled components cached by App hash, and every host function checked against the installation's effective grants."
+
+[lib]
+name = "pollis_app_host"
+path = "src/lib.rs"
+
+[dependencies]
+pollis-app-manifest = { path = "../pollis-app-manifest" }
+# The minimum for a synchronous component-model host compiled with Cranelift:
+# no WASI implementation (ours is in src/wasi.rs), no async/fibers, no GC
+# proposals, no profiling, no wasmtime-cache (our compiled-module cache is in
+# src/disk_cache.rs), no WAT parser. `parallel-compilation` (rayon, already in
+# the tree) because a JS App's ~12 MB component takes seconds to compile on
+# one thread.
+wasmtime = { version = "49.0.6", default-features = false, features = ["runtime", "cranelift", "component-model", "std", "parallel-compilation"] }
+url = "2"
+# The reference http-fetch client (src/http.rs): rustls + webpki roots, already
+# in the tree through verifiable-log-serve.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+sha2 = "0.11"
+getrandom = "0.4"
+thiserror = "2"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3"

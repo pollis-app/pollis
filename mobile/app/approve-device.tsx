@@ -3,11 +3,12 @@ import { ScrollView, View } from "react-native";
 import { Text } from "../components/Text";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Trans, useTranslation } from "react-i18next";
-import { Screen, Header, Button, Field, BottomAction } from "../components/ui";
+import { Screen, Header, Button, BottomAction } from "../components/ui";
+import { SasCodeField } from "../components/SasCodeField";
 import { ErrorText } from "../components/self/SettingsField";
 import { semantic, type as ty, fonts, space } from "../theme/tokens";
 import { useApproveEnrollment, useRejectEnrollment } from "../hooks/queries";
-import { SAS_LENGTH, normalizeSasInput } from "../lib/enrollmentSas";
+import { SAS_LENGTH } from "../lib/enrollmentSas";
 import { useSubmitLock } from "../hooks/useSubmitLock";
 import { useThemeRerender } from "../components/theme";
 
@@ -118,20 +119,16 @@ export default function ApproveDevice() {
         <Text style={ty.secondary}>{t("approval.instruction")}</Text>
         <View style={{ gap: space.xs }}>
           <Text style={ty.section}>{t("approval.codeLabel")}</Text>
-          <Field
+          <SasCodeField
             testID="input-approve-device-code"
             accessibilityLabel={t("approval.codeLabel")}
             value={code}
-            onChangeText={(next) => {
+            onChange={(next) => {
               setError(null);
-              setCode(normalizeSasInput(next));
+              setCode(next);
             }}
-            placeholder={"·".repeat(SAS_LENGTH)}
             editable={!busy}
             autoFocus
-            autoCorrect={false}
-            autoCapitalize="characters"
-            style={{ fontFamily: fonts.mono400, letterSpacing: 2 }}
           />
           <Text style={ty.meta}>{t("approval.codeHint", { count: SAS_LENGTH })}</Text>
         </View>

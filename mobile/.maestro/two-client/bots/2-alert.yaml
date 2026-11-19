@@ -1,0 +1,48 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# BOTS (#1182), part 2 of 4 — driven by scripts/maestro-bots.sh. The host
+# finished pairing and the script sent ${ALERT_TEXT} through the bot's webhook
+# (`pollis-bot post`). It shows in #General as the bot's message with the Bot
+# badge, and the member list badges the bot with who manages it.
+
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP_NAME}, .*"
+    timeout: 30000
+- tapOn: "General"
+- extendedWaitUntil:
+    visible: ".*${ALERT_TEXT}.*"
+    timeout: 120000
+- assertVisible:
+    id: "message-bot-badge"
+# The row is one element: its spoken name says who manages the bot.
+- assertVisible: ".*Bot, managed by the admins of ${GROUP_NAME}.*"
+- takeScreenshot: bots-04-alert
+
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-group-members"
+- extendedWaitUntil:
+    visible:
+      id: "badge-bot-.*"
+    timeout: 30000
+- assertVisible: "Managed by the admins of ${GROUP_NAME}"
+- takeScreenshot: bots-05-member-badge

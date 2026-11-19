@@ -10,6 +10,8 @@ import { formatClockTime, toMs } from "../../../utils/format";
 import type { Message } from "../../../types";
 import { useSelectedGroupAliases } from "../../../hooks/queries/useGroupAliases";
 import { aliasAvatar, aliasName } from "../../../utils/groupAlias";
+import { useSelectedGroupBots } from "../../../hooks/queries/useBots";
+import { BotBadge } from "../../ui/BotBadge";
 
 interface ThreadMessageRowProps {
   message: Message;
@@ -24,6 +26,11 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     const isTerminal = skin !== "modern";
     const aliases = useSelectedGroupAliases();
     const author = aliasName(aliases, message.sender_id, message.sender_username ?? message.sender_id);
+    // A bot's replies carry the Bot badge (#1182), as in the channel.
+    const { botIds, groupName } = useSelectedGroupBots();
+    const botBadge = botIds.has(message.sender_id) ? (
+      <BotBadge groupName={groupName} data-testid="thread-bot-badge" />
+    ) : null;
     // App language; `toMs` or seconds-precision timestamps render as 1970 (#874).
     const time = formatClockTime(toMs(message.created_at));
     const testid = isRoot ? "thread-root" : "thread-reply";
@@ -70,6 +77,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
           <div className="flex items-baseline gap-1.5">
             <span className="shrink-0 text-meta text-muted">{time}</span>
             <span className="truncate text-row text-dim">{author}</span>
+            {botBadge}
           </div>
           {body}
         </div>
@@ -90,6 +98,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
             <span className="truncate text-secondary font-medium text-fg">
               {author}
             </span>
+            {botBadge}
             <span className="shrink-0 text-secondary text-muted">{time}</span>
           </div>
           {body}

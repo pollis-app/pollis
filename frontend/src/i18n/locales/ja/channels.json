@@ -222,5 +222,145 @@
     "confirmButton": "はい、リセット",
     "submitting": "リセット中…",
     "failed": "名前をリセットできませんでした"
+  },
+  "bots": {
+    "app": {
+      "loadFailed": "このボットのAppを読み込めませんでした。",
+      "noApp": "ホストがまだAppを提示していません。ボットをAppと一緒に起動すると、ここに表示されます。",
+      "notice": {
+        "title": "このボットは動作していません",
+        "waiting": "あなたの承認を待っています。"
+      },
+      "reasons": {
+        "not_approved": "まだAppが承認されていません。",
+        "hash_mismatch": "ホストが承認されていないビルドを実行しています。",
+        "developer_key_mismatch": "ビルドが承認されていない開発者キーで署名されています。",
+        "build_widens": "新しいビルドが承認した範囲を超える権限を求めています。",
+        "malformed": "承認を読み取れませんでした。",
+        "wrong_kind": "承認の種類が正しくありません。",
+        "wrong_installation": "承認が別のボット向けに作られています。",
+        "approver_not_in_group": "承認した管理者はもうこのグループにいません。",
+        "uncertified_approver": "承認したデバイスが管理者のものだと確認できませんでした。",
+        "bad_signature": "承認の署名を検証できません。",
+        "transparency_alarm": "承認した管理者の鍵が公開鍵ログと一致しません。",
+        "not_admin": "このグループの管理者ではない人が承認しました。",
+        "manifest_mismatch": "Appが承認されたものと一致しません。",
+        "widened_grants": "承認がAppの求める以上の権限を与えています。",
+        "rolled_back": "新しい承認の代わりに古い承認が戻されました。",
+        "bad_build_signature": "ビルドの開発者署名を検証できません。",
+        "artifact_unavailable": "ホストがAppを読み込めませんでした。",
+        "artifact_rolled_back": "そのマシンが、ボットがすでに実行したものより古いバージョンを提示したため、ボットは拒否し続けます。"
+      },
+      "approvedHeading": "承認済みのApp",
+      "version": "バージョン {{version}}",
+      "appHash": "Appハッシュ",
+      "developerKey": "開発者キー",
+      "source": "入手元",
+      "approvedBy": "{{name}} が {{date}} に承認",
+      "seq": "承認 {{seq}}",
+      "marks": {
+        "development": "開発ビルド",
+        "noEgress": "このグループの外にデータを送信できません",
+        "autoUpdate": "更新は自動で承認されます"
+      },
+      "canDoHeading": "できること",
+      "lines": {
+        "reads": "{{channels}} の{{events}}と、過去 {{history}} の履歴を読み取ります",
+        "readsNoHistory": "{{channels}} の{{events}}を読み取ります（履歴なし）",
+        "readsNothing": "どのチャンネルも読み取りません",
+        "eventsNew": "新しいメッセージ",
+        "eventsNewEdited": "新しいメッセージと編集されたメッセージ",
+        "wakes": "起動のきっかけ：{{triggers}}",
+        "can": "できる操作：{{actions}}",
+        "sendsTo": "データの送信先：{{hosts}}",
+        "keeps": "自分のデータを最大 {{size}} まで保存します"
+      },
+      "triggers": {
+        "messages": "新しいメッセージ",
+        "mentions": "メンション",
+        "commands": "コマンド",
+        "schedule": "スケジュール",
+        "requests": "リクエスト",
+        "webhook": "webhook の呼び出し"
+      },
+      "actions": {
+        "post": "投稿",
+        "reply": "返信",
+        "react": "リアクション",
+        "edit_own": "自分のメッセージの編集",
+        "delete_own": "自分のメッセージの削除",
+        "transfer_history": "メッセージ履歴の引き渡し"
+      },
+      "events": {
+        "created": "新しいメッセージ",
+        "edited": "編集されたメッセージ"
+      },
+      "anyChannel": "あなたが選ぶ任意のチャンネル",
+      "grants": {
+        "heading": "アクセス",
+        "description": "不要な権限は外してください。Appが求める以上の権限を得ることはありません。",
+        "channels": "読み取るチャンネル",
+        "noChannels": "このグループには求められているチャンネルがありません。",
+        "history": "読み取れる履歴の日数（0〜{{max}}）",
+        "egress": "データを送信できるホスト"
+      },
+      "changes": {
+        "heading": "変更点",
+        "newAccess": "新しいアクセス",
+        "needed": "承認に必要",
+        "allow": "許可",
+        "trigger_added": "{{value}} で起動",
+        "trigger_removed": "{{value}} では起動しなくなります",
+        "channel_added": "{{value}} を読み取ります",
+        "channel_removed": "{{value}} を読み取らなくなります",
+        "history_increased": "履歴：{{previous}} → {{value}}",
+        "history_decreased": "履歴：{{previous}} → {{value}}",
+        "event_added": "{{value}}を見られます",
+        "event_removed": "{{value}}を見なくなります",
+        "action_added": "{{value}}ができます",
+        "action_removed": "{{value}}ができなくなります",
+        "egress_added": "{{value}} にデータを送信できます",
+        "egress_removed": "{{value}} にデータを送信しなくなります",
+        "state_quota_increased": "ストレージ：{{previous}} → {{value}}",
+        "state_quota_decreased": "ストレージ：{{previous}} → {{value}}",
+        "command_added": "新しいコマンド：/{{value}}",
+        "command_removed": "/{{value}} を提供しなくなります",
+        "command_increased": "/{{value}} が{{previous}}から{{next}}に変わります",
+        "schedule_added": "新しいスケジュールで実行：{{value}}",
+        "schedule_removed": "スケジュール {{value}} を削除",
+        "schedule_increased": "スケジュール {{value}} の実行が増えます：{{next}}ごと（以前は{{previous}}ごと）",
+        "schedule_decreased": "スケジュール {{value}} の実行が減ります：{{next}}ごと（以前は{{previous}}ごと）"
+      },
+      "pending": {
+        "firstHeading": "このAppを承認",
+        "firstLead": "ボットのホストがこのAppを提示しています。管理者が承認するまで何も動作しません。",
+        "updateHeading": "更新が待機中です",
+        "updateLead": "ホストが新しいビルドを提示しています。承認する前に変更点を確認してください。",
+        "nothingNew": "新しく求めるものはありません。",
+        "neededHint": "この更新を承認するには、承認に必要と示された新しいアクセスをそれぞれ許可してください。",
+        "approve": "承認",
+        "approveUpdate": "更新を承認",
+        "approving": "承認中…",
+        "development": "開発インストール",
+        "developmentHint": "この開発者キーで署名され、承認した範囲を超えないビルドならどれでも実行します。",
+        "developmentUnavailable": "開発者キーを提示するには pollis app dev を起動してください。",
+        "autoUpdate": "次回から自動で承認",
+        "autoUpdateHint": "同じ入手元からの新しいバージョンがそれ以上を求めない場合、ボットは管理者なしで自らそれを実行します。それ以上を求めるものは引き続き承認を待ちます。"
+      },
+      "edit": {
+        "save": "アクセスを保存",
+        "saving": "保存中…"
+      },
+      "errors": {
+        "stale": "別の管理者がたった今このボットを承認しました。もう一度確認してから承認してください。",
+        "changed": "このページを開いてからAppが変わりました。もう一度確認してから承認してください。",
+        "failed": "承認を保存できませんでした。"
+      },
+      "commandKinds": {
+        "command": "チャンネルに投稿されるコマンド",
+        "request": "非公開のリクエスト"
+      },
+      "runningAutoUpdated": "バージョン {{version}} を実行中（承認済みの入手元から自動更新）"
+    }
   }
 }

@@ -19,19 +19,28 @@ import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
 import { useGroupAliases } from "../hooks/queries/useGroupAliases";
 import { aliasName, hasAlias } from "../utils/groupAlias";
+import { isBotUser } from "../utils/bots";
+import { BotBadge } from "../components/ui/BotBadge";
+import { AppMark } from "../components/Bots/AppMark";
+import { useGroupApps } from "../hooks/queries/useBotApps";
 
 interface MembersProps {
   groupId: string;
+  groupName: string;
   isAdmin: boolean;
 }
 
-export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) => {
+export const Members: React.FC<MembersProps> = observer(({ groupId, groupName, isAdmin }) => {
   const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const { data: members = [], isLoading } = useGroupMembers(groupId);
   const setRoleMutation = useSetMemberRole();
   const aliases = useGroupAliases(groupId);
+  // #2005: which bots run a development build; read only when the group has a bot.
+  const hasBots = members.some((m) => isBotUser(m));
+  const { data: apps = [] } = useGroupApps(hasBots ? groupId : null);
+  const devBots = new Set(apps.filter((a) => a.development).map((a) => a.botUserId));
   // Same query as the DM sidebar, so badges agree everywhere.
   const verificationByPeer = usePeerVerificationMap();
 
@@ -93,6 +102,12 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
                   @{m.username}
                 </bdi>
               )}
+              {isBotUser(m) && (
+                <BotBadge groupName={groupName} data-testid={`member-bot-badge-${m.user_id}`} />
+              )}
+              {devBots.has(m.user_id) && (
+                <AppMark label={t("bots.app.marks.development")} data-testid={`member-bot-dev-mark-${m.user_id}`} />
+              )}
               {badge}
               {isSelf && (
                 <span className="ms-1 text-muted">
@@ -106,6 +121,24 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
           const isSelf = m.user_id === currentUser?.id;
           if (!isAdmin || isSelf) {
             return [];
+          }
+          // A bot is never an admin and leaves through its own page (#1182).
+          if (isBotUser(m)) {
+            return [
+              <Button
+                size="sm"
+                variant="secondary"
+                data-testid={`member-manage-bot-${m.user_id}`}
+                onClick={() =>
+                  navigate({
+                    to: "/groups/$groupId/bots/$botId",
+                    params: { groupId, botId: m.user_id },
+                  })
+                }
+              >
+                {t("bots.manage")}
+              </Button>,
+            ];
           }
           return [
             <Switch

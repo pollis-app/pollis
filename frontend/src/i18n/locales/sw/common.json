@@ -72,7 +72,11 @@
     "removeAttachment": "Ondoa {{name}}",
     "send": "Tuma ujumbe",
     "markSensitive": "Weka alama kwamba {{name}} ni nyeti",
-    "unmarkSensitive": "Ondoa alama ya nyeti kwenye {{name}}"
+    "unmarkSensitive": "Ondoa alama ya nyeti kwenye {{name}}",
+    "commandAmbiguous": "Programu zaidi ya moja zina /{{command}}. Chagua moja kwenye orodha.",
+    "commandRequestHint": "Inatumwa kwa faragha kwa {{app}}, haichapishwi kwenye chaneli hii",
+    "commandRequestUnavailable": "Maombi ya faragha kwa programu hayapatikani katika toleo hili. Hakuna kilichochapishwa.",
+    "commandRequestFailed": "Imeshindwa kutuma amri hii. Hakuna kilichochapishwa."
   },
   "mentions": {
     "listLabel": "Mapendekezo ya kutaja",
@@ -112,5 +116,9 @@
     "quit": "Funga Pollis",
     "unread_one": "Pollis — {{count}} haujasomwa",
     "unread_other": "Pollis — {{count}} haijasomwa"
+  },
+  "commands": {
+    "listLabel": "Mapendekezo ya amri",
+    "matching": "Amri zinazolingana na <hl>/{{query}}</hl>"
   }
 }

@@ -468,7 +468,7 @@ pub async fn await_enrollment_approval(
     }
 }
 
-fn unwrap_account_key(wrapped: &[u8], requester_private: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn unwrap_account_key(wrapped: &[u8], requester_private: &[u8]) -> Result<Vec<u8>> {
     if wrapped.len() != WRAPPED_ACCOUNT_KEY_LEN {
         return Err(Error::Crypto(format!(
             "wrapped_account_key has wrong length: {} (expected {})",
@@ -610,6 +610,39 @@ pub async fn approve_device_enrollment(
 
 }
 
+/// Wrap an account identity seed to a requester's ephemeral X25519 key, in the
+/// enrollment format `approver_pub || nonce || ciphertext`.
+///
+/// The one wrap both human enrollment ([`wrap_and_approve`]) and a bot's
+/// add-host (#1182, `commands::bots`) use. Callers MUST have authenticated `ephemeral_pub`.
+pub(crate) fn wrap_account_seed_to(ephemeral_pub: &[u8], account_id_private: &[u8]) -> Result<Vec<u8>> {
+    let mut rng = OsRng;
+
+    let mut approver_priv_bytes = zeroize::Zeroizing::new([0u8; 32]);
+    rng.fill_bytes(&mut *approver_priv_bytes);
+    let approver_priv = StaticSecret::from(*approver_priv_bytes);
+    let approver_pub = PublicKey::from(&approver_priv);
+
+    let requester_pub = x25519_public_from_bytes(ephemeral_pub)?;
+    let shared = approver_priv.diffie_hellman(&requester_pub);
+    require_contributory(&shared, "the request's published ephemeral key")?;
+    let wrap_key = derive_wrap_key(
+        shared.as_bytes(),
+        requester_pub.as_bytes(),
+        approver_pub.as_bytes(),
+    );
+
+    let mut nonce = [0u8; AES_NONCE_LEN];
+    rng.fill_bytes(&mut nonce);
+    let ct = aead_encrypt(&wrap_key, &nonce, account_id_private)?;
+
+    let mut out = Vec::with_capacity(WRAPPED_ACCOUNT_KEY_LEN);
+    out.extend_from_slice(approver_pub.as_bytes());
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
 /// Wrap `account_id_key` to a new device's ephemeral key and post the approval.
 /// Callers MUST have authenticated `ephemeral_pub`; `via` lands in the security event.
 pub(crate) async fn wrap_and_approve(
@@ -626,35 +659,9 @@ pub(crate) async fn wrap_and_approve(
     let new_device_id = new_device_id.to_string();
     let signing_key =
         crate::commands::account_identity::load_account_id_key(state, &user_id).await?;
-    let account_id_private = signing_key.to_seed().to_vec();
+    let account_id_private = zeroize::Zeroizing::new(signing_key.to_seed().to_vec());
 
-    let wrapped = {
-        let mut rng = OsRng;
-
-        let mut approver_priv_bytes = [0u8; 32];
-        rng.fill_bytes(&mut approver_priv_bytes);
-        let approver_priv = StaticSecret::from(approver_priv_bytes);
-        let approver_pub = PublicKey::from(&approver_priv);
-
-        let requester_pub = x25519_public_from_bytes(ephemeral_pub)?;
-        let shared = approver_priv.diffie_hellman(&requester_pub);
-        require_contributory(&shared, "the request's published ephemeral key")?;
-        let wrap_key = derive_wrap_key(
-            shared.as_bytes(),
-            requester_pub.as_bytes(),
-            approver_pub.as_bytes(),
-        );
-
-        let mut nonce = [0u8; AES_NONCE_LEN];
-        rng.fill_bytes(&mut nonce);
-        let ct = aead_encrypt(&wrap_key, &nonce, &account_id_private)?;
-
-        let mut out = Vec::with_capacity(WRAPPED_ACCOUNT_KEY_LEN);
-        out.extend_from_slice(approver_pub.as_bytes());
-        out.extend_from_slice(&nonce);
-        out.extend_from_slice(&ct);
-        out
-    };
+    let wrapped = wrap_account_seed_to(ephemeral_pub, &account_id_private)?;
 
     // The DS binds the request to the signer, so a device approves only its OWN account.
     let metadata = format!("via={via},approver={approver_device_id}");

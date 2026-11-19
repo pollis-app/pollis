@@ -1,0 +1,312 @@
+//! Argument parsing and help text for the `pollis-bot` binary.
+
+use std::net::SocketAddr;
+use std::path::PathBuf;
+
+use crate::config::{DEFAULT_MAX_INSTALLATIONS, DEFAULT_WEBHOOK_BIND};
+use crate::ratelimit::{DEFAULT_BURST, DEFAULT_PER_MINUTE};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invocation {
+    pub data_dir: Option<PathBuf>,
+    pub command: Command,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    Help,
+    Version,
+    Pair { name: Option<String> },
+    AddHost { bot_user_id: String, name: Option<String> },
+    Run { webhook: Option<Option<SocketAddr>>, max_installations: Option<usize>, once: bool },
+    Post { installation_id: String, channel: String, text: String },
+    Status,
+    RotateSecret { installation_id: String },
+    Forget { installation_id: String },
+    /// #2004/#2005: run an App (a local directory or an https:// URL) as an
+    /// installation's handler, once an admin approves its App hash.
+    AppInstall { installation_id: String, artifact: String },
+    /// #2005: create (once) and print this developer's signing key.
+    AppDevKey { key: Option<PathBuf> },
+    /// #2005: sign the build in a directory for a development installation.
+    AppSign { artifact: PathBuf, key: Option<PathBuf> },
+}
+
+pub fn help_text() -> String {
+    format!(
+        "pollis-bot {version} — the Pollis bot runtime
+
+USAGE
+    pollis-bot [--data-dir DIR] <command> [options]
+
+COMMANDS
+    pair [--name NAME]
+        Start a new bot on this host. Prints an eight-character code; a group
+        admin types it in Pollis: open the group, then Bots → Add a bot.
+    add-host --bot BOT_USER_ID [--name NAME]
+        Make this host another host of an existing bot. Prints a code; an admin
+        types it in Pollis: open the group, then Bots → the bot → Add a host.
+    run [--webhook [ADDR]] [--max-installations N] [--once]
+        Run every installation on this host until stopped. --webhook turns the
+        webhook on (default {bind}, loopback) for this run. --once
+        catches up, handles everything pending and exits (for a host that is
+        started on a schedule or by a wake-up and goes back to sleep).
+    post --installation ID --channel CHANNEL TEXT...
+        Post TEXT through the running runtime's webhook endpoint.
+    status
+        Show this host's installations and what the runtime is doing.
+    rotate-secret --installation ID
+        Replace an installation's webhook secret and print the new one once.
+    forget --installation ID
+        Remove an installation from this host (its record, store and keys),
+        e.g. after an admin revoked this host or deleted the bot.
+    app install --installation ID --artifact DIR|URL
+        Run the App in DIR (pollis-app.json and one .wasm component), or at an
+        https:// URL, as the installation's handler. Prints its App hash; it
+        runs once a group admin approves it on the bot's page, and is checked
+        against that approval before every job.
+    app dev-key [--key FILE]
+        Create (once) your developer signing key and print its public half,
+        for a development installation. Default FILE: DIR/developer-key.
+    app sign --artifact DIR [--key FILE]
+        Sign the build in DIR so a development installation runs it.
+
+FILES
+    DIR/config.json      max_installations (default {max}), webhook {{bind, per_minute, burst}}
+                         (default {per_minute}/minute, burst {burst}, per installation)
+    DIR/installations/   one directory per installation
+    DIR/status.json      written by `run`, read by `status`
+    DIR/developer-key    your developer signing key (`app dev-key`); keep it secret
+
+ENVIRONMENT
+    POLLIS_BOT_DATA_DIR  data directory when --data-dir is not given
+",
+        version = env!("CARGO_PKG_VERSION"),
+        bind = DEFAULT_WEBHOOK_BIND,
+        max = DEFAULT_MAX_INSTALLATIONS,
+        per_minute = DEFAULT_PER_MINUTE,
+        burst = DEFAULT_BURST,
+    )
+}
+
+pub fn version_text() -> String {
+    format!("pollis-bot {}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Parse `args` (without the program name).
+pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, String> {
+    let mut args = args.into_iter().peekable();
+    let mut data_dir = None;
+    let mut command_name = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-h" | "--help" | "help" => return Ok(Invocation { data_dir, command: Command::Help }),
+            "-V" | "--version" => return Ok(Invocation { data_dir, command: Command::Version }),
+            "--data-dir" => data_dir = Some(PathBuf::from(value(&mut args, "--data-dir")?)),
+            other if other.starts_with('-') => return Err(format!("unknown option `{other}`")),
+            other => {
+                command_name = Some(other.to_string());
+                break;
+            }
+        }
+    }
+    let Some(name) = command_name else {
+        return Ok(Invocation { data_dir, command: Command::Help });
+    };
+
+    let mut flags: Vec<(String, Option<String>)> = Vec::new();
+    let mut positional: Vec<String> = Vec::new();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            positional.extend(args.by_ref());
+            break;
+        }
+        if arg == "-h" || arg == "--help" {
+            return Ok(Invocation { data_dir, command: Command::Help });
+        }
+        if arg == "--data-dir" {
+            data_dir = Some(PathBuf::from(value(&mut args, "--data-dir")?));
+            continue;
+        }
+        if let Some(flag) = arg.strip_prefix("--") {
+            // `--once` takes no value, `--webhook` an optional one; every other flag takes one.
+            let takes_value = match flag {
+                "once" => false,
+                "webhook" => args.peek().is_some_and(|next| !next.starts_with('-') && next.contains(':')),
+                _ => true,
+            };
+            let v = if takes_value { Some(value(&mut args, &arg)?) } else { None };
+            flags.push((flag.to_string(), v));
+        } else {
+            positional.push(arg);
+        }
+    }
+
+    let mut take = |flag: &str| -> Option<Option<String>> {
+        let pos = flags.iter().position(|(f, _)| f == flag)?;
+        Some(flags.remove(pos).1)
+    };
+    let command = match name.as_str() {
+        "pair" => Command::Pair { name: take("name").flatten() },
+        "add-host" => Command::AddHost {
+            bot_user_id: take("bot").flatten().ok_or("add-host needs --bot BOT_USER_ID")?,
+            name: take("name").flatten(),
+        },
+        "run" => {
+            let webhook = match take("webhook") {
+                None => None,
+                Some(None) => Some(None),
+                Some(Some(addr)) => {
+                    Some(Some(addr.parse().map_err(|_| format!("--webhook `{addr}` is not an address like 127.0.0.1:8787"))?))
+                }
+            };
+            let max_installations = match take("max-installations").flatten() {
+                None => None,
+                Some(n) => match n.parse::<usize>() {
+                    Ok(n) if n > 0 => Some(n),
+                    _ => return Err(format!("--max-installations `{n}` must be a number of at least 1")),
+                },
+            };
+            let once = take("once").is_some();
+            if once && webhook.is_some() {
+                return Err("--once runs one pass and exits, so it cannot serve the webhook; drop --webhook".into());
+            }
+            Command::Run { webhook, max_installations, once }
+        }
+        "post" => {
+            let installation_id = take("installation").flatten().ok_or("post needs --installation ID")?;
+            let channel = take("channel").flatten().ok_or("post needs --channel CHANNEL")?;
+            let text = positional.join(" ");
+            positional.clear();
+            if text.trim().is_empty() {
+                return Err("post needs the text to send".into());
+            }
+            Command::Post { installation_id, channel, text }
+        }
+        "status" => Command::Status,
+        "rotate-secret" => Command::RotateSecret {
+            installation_id: take("installation").flatten().ok_or("rotate-secret needs --installation ID")?,
+        },
+        "forget" => Command::Forget {
+            installation_id: take("installation").flatten().ok_or("forget needs --installation ID")?,
+        },
+        "app" => match positional.first().map(String::as_str) {
+            Some("install") => {
+                positional.remove(0);
+                Command::AppInstall {
+                    installation_id: take("installation").flatten().ok_or("app install needs --installation ID")?,
+                    artifact: take("artifact").flatten().ok_or("app install needs --artifact DIR|URL")?,
+                }
+            }
+            Some("dev-key") => {
+                positional.remove(0);
+                Command::AppDevKey { key: take("key").flatten().map(PathBuf::from) }
+            }
+            Some("sign") => {
+                positional.remove(0);
+                Command::AppSign {
+                    artifact: PathBuf::from(take("artifact").flatten().ok_or("app sign needs --artifact DIR")?),
+                    key: take("key").flatten().map(PathBuf::from),
+                }
+            }
+            _ => {
+                return Err(
+                    "`app` needs a subcommand: `app install --installation ID --artifact DIR|URL`, `app dev-key` or `app sign --artifact DIR`"
+                        .into(),
+                )
+            }
+        },
+        other => return Err(format!("unknown command `{other}`")),
+    };
+    if let Some((flag, _)) = flags.first() {
+        return Err(format!("unknown option `--{flag}` for `{name}`"));
+    }
+    if let Some(extra) = positional.first() {
+        return Err(format!("unexpected argument `{extra}` for `{name}`"));
+    }
+    Ok(Invocation { data_dir, command })
+}
+
+fn value<I: Iterator<Item = String>>(args: &mut I, flag: &str) -> Result<String, String> {
+    args.next().ok_or_else(|| format!("{flag} needs a value"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(args: &[&str]) -> Result<Invocation, String> {
+        parse(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn subcommands_parse() {
+        assert_eq!(p(&["pair"]).unwrap().command, Command::Pair { name: None });
+        assert_eq!(
+            p(&["--data-dir", "/x", "add-host", "--bot", "01B", "--name", "rack-2"]).unwrap(),
+            Invocation {
+                data_dir: Some("/x".into()),
+                command: Command::AddHost { bot_user_id: "01B".into(), name: Some("rack-2".into()) },
+            }
+        );
+        assert_eq!(
+            p(&["post", "--installation", "01I", "--channel", "#alerts", "disk", "full"]).unwrap().command,
+            Command::Post { installation_id: "01I".into(), channel: "#alerts".into(), text: "disk full".into() }
+        );
+        assert_eq!(p(&["status"]).unwrap().command, Command::Status);
+        assert_eq!(
+            p(&["rotate-secret", "--installation", "01I"]).unwrap().command,
+            Command::RotateSecret { installation_id: "01I".into() }
+        );
+        assert_eq!(
+            p(&["forget", "--installation", "01I"]).unwrap().command,
+            Command::Forget { installation_id: "01I".into() }
+        );
+        assert_eq!(
+            p(&["app", "install", "--installation", "01I", "--artifact", "/apps/pager"]).unwrap().command,
+            Command::AppInstall { installation_id: "01I".into(), artifact: "/apps/pager".into() }
+        );
+        assert_eq!(p(&["app", "dev-key"]).unwrap().command, Command::AppDevKey { key: None });
+        assert_eq!(
+            p(&["app", "sign", "--artifact", "dist", "--key", "k"]).unwrap().command,
+            Command::AppSign { artifact: "dist".into(), key: Some("k".into()) }
+        );
+        assert!(p(&["app"]).unwrap_err().contains("app install"));
+        assert!(p(&["app", "install", "--installation", "01I"]).unwrap_err().contains("--artifact"));
+    }
+
+    #[test]
+    fn run_once_is_a_flag() {
+        assert_eq!(
+            p(&["run", "--once"]).unwrap().command,
+            Command::Run { webhook: None, max_installations: None, once: true }
+        );
+    }
+
+    #[test]
+    fn run_takes_an_optional_webhook_address() {
+        assert_eq!(p(&["run"]).unwrap().command, Command::Run { webhook: None, max_installations: None, once: false });
+        assert_eq!(p(&["run", "--webhook"]).unwrap().command, Command::Run { webhook: Some(None), max_installations: None, once: false });
+        assert_eq!(
+            p(&["run", "--webhook", "0.0.0.0:9000", "--max-installations", "3"]).unwrap().command,
+            Command::Run { webhook: Some(Some("0.0.0.0:9000".parse().unwrap())), max_installations: Some(3), once: false }
+        );
+        assert_eq!(
+            p(&["run", "--webhook", "--max-installations", "2"]).unwrap().command,
+            Command::Run { webhook: Some(None), max_installations: Some(2), once: false }
+        );
+    }
+
+    #[test]
+    fn mistakes_are_refused_with_what_was_wrong() {
+        assert!(p(&["frobnicate"]).unwrap_err().contains("frobnicate"));
+        assert!(p(&["add-host"]).unwrap_err().contains("--bot"));
+        assert!(p(&["post", "--installation", "01I", "--channel", "c"]).unwrap_err().contains("text"));
+        assert!(p(&["run", "--max-installations", "0"]).is_err());
+        assert!(p(&["run", "--once", "--webhook"]).is_err());
+        assert!(p(&["run", "--webhook", "nonsense:x"]).is_err());
+        assert!(p(&["status", "--loud", "yes"]).unwrap_err().contains("--loud"));
+        assert!(p(&["status", "extra"]).unwrap_err().contains("extra"));
+        assert_eq!(p(&[]).unwrap().command, Command::Help);
+    }
+}

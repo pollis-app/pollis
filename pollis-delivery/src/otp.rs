@@ -637,6 +637,12 @@ pub async fn process_request_otp_for(
     email: &str,
     purpose: OtpPurpose,
 ) -> anyhow::Result<()> {
+    // #1182: a bot's address can receive no mail and no account signs in with
+    // one; nothing is stored or sent, and the caller answers 200 as for any.
+    if crate::bots::is_bot_address(email) {
+        tracing::info!("OTP request for a bot.invalid address refused");
+        return Ok(());
+    }
     let review = cfg
         .review_login
         .as_ref()
@@ -836,6 +842,10 @@ pub async fn apply_verify_otp(
     // Lowercase too (#1088): one mailbox must be one row (migration `000026`).
     let canonical = normalize_email(email);
     let email = canonical.as_str();
+    // #1182: never a session for a bot's address, whatever code is presented.
+    if crate::bots::is_bot_address(email) {
+        return Ok(VerifyOtpResult::InvalidCode);
+    }
 
     // Validate WITHOUT consuming, so a DB failure below leaves the code valid for a retry (#518).
     //

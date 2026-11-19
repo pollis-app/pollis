@@ -1,0 +1,255 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+  - two-client
+---
+# BOT APP APPROVAL (#2005) — the mobile twin of desktop's e2e/bot-app-approval.spec.ts. Driven
+# like flows/bots.yaml (scripts/maestro-bots.sh): it runs after part 1 created ${BOT_NAME} in
+# ${GROUP_NAME} with a connected host, signed in as that admin. The driver acts on the bot's host
+# between the stages below; each stage re-opens the bot's page until the state it waits for shows
+# (the page itself never polls).
+#
+#   Driver, before this flow: `pollis-bot app install --installation <bot> --artifact <v1>` where
+#     v1's pollis-app.json reads #general (30 days, new messages), may post and reply,
+#     and may send data to ${APP_HOST}.
+#   Driver, once the host runs v1 under the narrowed approval (stage 2): install v2, which adds the host
+#     ${APP_NEW_HOST} and the `schedule` trigger (both widenings).
+#   Driver, once v2 is approved: delete v2's artifact, so the runtime refuses with
+#     artifact_unavailable.
+#
+# Stages: (1) first approval with access narrowed (a channel off, history shortened, the host
+# dropped); (2) narrowing the approved App in place; (3) an update whose widened rows are
+# highlighted, listed first and OFF until switched on, with Approve held until the new trigger is
+# accepted, and the new host left off; (4) the refusal notice.
+
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP_NAME}, .*"
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: "row-group-settings"
+    direction: DOWN
+- tapOn:
+    id: "row-group-settings"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-settings"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: "row-group-bots"
+    direction: DOWN
+- tapOn:
+    id: "row-group-bots"
+- extendedWaitUntil:
+    visible:
+      id: "screen-group-bots"
+    timeout: 15000
+- tapOn: "${BOT_NAME}"
+- extendedWaitUntil:
+    visible:
+      id: "screen-bot"
+    timeout: 15000
+
+# --- 1. First approval, narrowed -------------------------------------------------------------
+# The runtime reports v1 waiting; re-open the page until it shows.
+- repeat:
+    times: 30
+    while:
+      notVisible:
+        id: "section-bot-app-pending"
+    commands:
+      - back
+      - tapOn: "${BOT_NAME}"
+      - extendedWaitUntil:
+          visible:
+            id: "screen-bot"
+          timeout: 15000
+- assertVisible:
+    id: "notice-bot-app-waiting"
+- assertVisible: "Waiting for your approval"
+- assertVisible:
+    id: "bot-app-pending-hash"
+- assertVisible:
+    id: "list-bot-app-pending-plain-reads"
+- scrollUntilVisible:
+    element:
+      id: "bot-app-pending-grants-toggle-channel-General"
+    direction: DOWN
+# Everything the App asks for starts on (a group made on mobile has only #General).
+- assertVisible:
+    id: "bot-app-pending-grants-toggle-channel-General"
+    checked: true
+# Shorten the history to 7 days.
+- tapOn:
+    id: "bot-app-pending-grants-history"
+- eraseText: 4
+- inputText: "7"
+- hideKeyboard
+# Drop the host: the plain-language line becomes the "can't send data outside" mark.
+- scrollUntilVisible:
+    element:
+      id: "bot-app-pending-grants-toggle-egress-${APP_HOST}"
+    direction: DOWN
+- tapOn:
+    id: "bot-app-pending-grants-toggle-egress-${APP_HOST}"
+- takeScreenshot: bot-app-01-first-approval-narrowed
+- scrollUntilVisible:
+    element:
+      id: "btn-approve-bot-app"
+    direction: DOWN
+- tapOn:
+    id: "btn-approve-bot-app"
+# Signing and storing the approval is a DS round trip; the page stays where it was scrolled.
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-approve-bot-app"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: "bot-app-approved"
+    direction: UP
+- assertVisible:
+    id: "bot-app-approved-mark-noEgress"
+- assertVisible: "(?i).*Reads #general, the last 7 days.*"
+- takeScreenshot: bot-app-02-approved
+
+# --- 2. Narrow the approved App in place ----------------------------------------------------
+- scrollUntilVisible:
+    element:
+      id: "section-bot-app-grants"
+    direction: DOWN
+- scrollUntilVisible:
+    element:
+      id: "btn-save-bot-app-grants"
+    direction: DOWN
+# Nothing changed yet: Save is off.
+- assertVisible:
+    id: "btn-save-bot-app-grants"
+    enabled: false
+- tapOn:
+    id: "bot-app-grants-toggle-channel-General"
+- scrollUntilVisible:
+    element:
+      id: "btn-save-bot-app-grants"
+    direction: DOWN
+- assertVisible:
+    id: "btn-save-bot-app-grants"
+    enabled: true
+- tapOn:
+    id: "btn-save-bot-app-grants"
+- extendedWaitUntil:
+    visible: "Reads no channels"
+    timeout: 60000
+- takeScreenshot: bot-app-03-narrowed-in-place
+
+# --- 3. An update that widens ---------------------------------------------------------------
+- repeat:
+    times: 30
+    while:
+      notVisible: "Update waiting"
+    commands:
+      - back
+      - tapOn: "${BOT_NAME}"
+      - extendedWaitUntil:
+          visible:
+            id: "screen-bot"
+          timeout: 15000
+# Both widened rows on screen (the list starts at the bottom edge when the page opens).
+- scrollUntilVisible:
+    element:
+      id: "row-bot-app-widening-egress-${APP_NEW_HOST}"
+    direction: DOWN
+# Widened rows are highlighted with "New access" and start OFF: never pre-accepted.
+- assertVisible:
+    id: "row-bot-app-widening-egress-${APP_NEW_HOST}"
+- assertVisible:
+    id: "row-bot-app-widening-trigger-schedule"
+- assertVisible: "New access"
+- assertVisible:
+    id: "row-bot-app-widening-egress-${APP_NEW_HOST}"
+    checked: false
+- assertVisible:
+    id: "row-bot-app-widening-trigger-schedule"
+    checked: false
+- takeScreenshot: bot-app-04-update-diff
+# A new trigger can only be granted by approving: Approve waits for its switch.
+- scrollUntilVisible:
+    element:
+      id: "btn-approve-bot-app"
+    direction: DOWN
+- assertVisible:
+    id: "btn-approve-bot-app"
+    enabled: false
+- scrollUntilVisible:
+    element:
+      id: "row-bot-app-widening-trigger-schedule"
+    direction: UP
+- tapOn:
+    id: "row-bot-app-widening-trigger-schedule"
+- assertVisible:
+    id: "row-bot-app-widening-trigger-schedule"
+    checked: true
+# v2's `digest` schedule is a new way to invoke it too: approving needs it switched on as well.
+- scrollUntilVisible:
+    element:
+      id: "row-bot-app-widening-schedule-.*"
+    direction: DOWN
+- tapOn:
+    id: "row-bot-app-widening-schedule-.*"
+- assertVisible:
+    id: "row-bot-app-widening-schedule-.*"
+    checked: true
+# The new host stays off.
+- scrollUntilVisible:
+    element:
+      id: "btn-approve-bot-app"
+    direction: DOWN
+- assertVisible:
+    id: "btn-approve-bot-app"
+    enabled: true
+- tapOn:
+    id: "btn-approve-bot-app"
+- extendedWaitUntil:
+    notVisible:
+      id: "section-bot-app-pending"
+    timeout: 60000
+# The new host was not accepted, so the App still can't send data outside the group.
+- scrollUntilVisible:
+    element:
+      id: "bot-app-approved-mark-noEgress"
+    direction: UP
+- assertNotVisible: ".*${APP_NEW_HOST}.*"
+- takeScreenshot: bot-app-05-update-approved
+
+# --- 4. Refusal notice ----------------------------------------------------------------------
+- repeat:
+    times: 30
+    while:
+      notVisible:
+        id: "notice-bot-app-refused"
+    commands:
+      - back
+      - tapOn: "${BOT_NAME}"
+      - extendedWaitUntil:
+          visible:
+            id: "screen-bot"
+          timeout: 15000
+- assertVisible: "This bot is not running: the App's files couldn't be read"
+- takeScreenshot: bot-app-06-refused

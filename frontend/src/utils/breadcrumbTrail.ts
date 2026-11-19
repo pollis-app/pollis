@@ -83,6 +83,20 @@ export function breadcrumbTrail(pathname: string, ctx: TrailContext, t: T): Segm
           label: ch?.name ?? t("nav:breadcrumb.voice"),
           to: `/groups/${groupId}/voice/${channelId}`,
         });
+      } else if (/^\/groups\/[^/]+\/bots(\/|$)/.test(pathname)) {
+        // Bots (#1182): Bots → Add a bot, or Bots → Bot → Add a host / Delete bot.
+        out.push({ label: t("nav:breadcrumb.bots"), to: `/groups/${groupId}/bots` });
+        const botId = pathname.match(/\/bots\/([^/]+)/)?.[1];
+        if (botId === "new") {
+          out.push({ label: t("nav:breadcrumb.addBot"), to: pathname });
+        } else if (botId) {
+          out.push({ label: t("nav:breadcrumb.bot"), to: `/groups/${groupId}/bots/${botId}` });
+          if (pathname.endsWith("/add-host")) {
+            out.push({ label: t("nav:breadcrumb.addBotHost"), to: pathname });
+          } else if (pathname.endsWith("/delete")) {
+            out.push({ label: t("nav:breadcrumb.deleteBot"), to: pathname });
+          }
+        }
       } else if (pathname.endsWith("/join-requests")) {
         out.push({ label: t("nav:breadcrumb.joinRequests"), to: `/groups/${groupId}/join-requests` });
       } else if (pathname.endsWith("/invite")) {

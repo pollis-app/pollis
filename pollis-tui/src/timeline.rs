@@ -14,7 +14,7 @@
 //!
 //! Pure (no clock, no I/O), so the renderer and the key handler share one layout.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Local, NaiveDate};
 use pollis_core::commands::messages::{ChannelMessage, Reaction};
@@ -62,7 +62,12 @@ pub struct Context<'a> {
     pub in_thread: bool,
     /// The viewer's local date, for "Today" / "Yesterday" separators.
     pub today: NaiveDate,
+    /// The group's bots (#1182): their header carries [`BOT_BADGE`].
+    pub bots: &'a HashSet<String>,
 }
+
+/// The Bot badge (#1182) after a bot's name: Terminal's `[bot]`, as on desktop.
+pub const BOT_BADGE: &str = "[bot]";
 
 /// Lay `messages` (display order, oldest first) out at `width` columns.
 pub fn build(messages: &[&ChannelMessage], ctx: &Context<'_>, width: u16) -> Vec<Block> {
@@ -108,6 +113,7 @@ pub fn layout_open(open: &OpenConversation, me_id: &str, me_name: &str, width: u
         selected: open.selected.as_deref(),
         in_thread: open.thread.is_some(),
         today: Local::now().date_naive(),
+        bots: &open.bots,
     };
     build(&displayed, &ctx, width)
 }
@@ -204,8 +210,11 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
     let mut head: Vec<(String, Style)> = vec![
         (format!("{time} "), dim),
         (sender_of(m).to_string(), sender_style),
-        ("  ".to_string(), Style::default()),
     ];
+    if ctx.bots.contains(&m.sender_id) {
+        head.push((format!(" {BOT_BADGE}"), dim));
+    }
+    head.push(("  ".to_string(), Style::default()));
 
     if let Some(reply_to) = &m.reply_to_id {
         let quoted = match (ctx.lookup)(reply_to) {
@@ -516,6 +525,7 @@ mod tests {
         reactions: HashMap<String, Vec<Reaction>>,
         threads: HashMap<String, i64>,
         pool: Vec<ChannelMessage>,
+        bots: HashSet<String>,
     }
 
     impl Fixture {
@@ -524,6 +534,7 @@ mod tests {
                 reactions: HashMap::new(),
                 threads: HashMap::new(),
                 pool: Vec::new(),
+                bots: HashSet::new(),
             }
         }
 
@@ -547,9 +558,26 @@ mod tests {
                 selected,
                 in_thread: false,
                 today,
+                bots: &self.bots,
             };
             build(messages, &ctx, width)
         }
+    }
+
+    #[test]
+    fn a_bots_message_carries_the_bot_badge_and_a_persons_does_not() {
+        let mut f = Fixture::new();
+        f.bots.insert("u-alerts".to_string());
+        let bot = msg("1", "alerts", "CPU above 90%");
+        let person = msg("2", "alice", "on it");
+        let lines = all_text(&f.layout(&[&bot, &person], None, 60));
+        let bot_line = lines.iter().find(|l| l.contains("CPU")).unwrap();
+        assert!(
+            bot_line.contains(&format!("alerts {BOT_BADGE}  CPU")),
+            "{lines:?}"
+        );
+        let person_line = lines.iter().find(|l| l.contains("on it")).unwrap();
+        assert!(!person_line.contains(BOT_BADGE), "{lines:?}");
     }
 
     #[test]

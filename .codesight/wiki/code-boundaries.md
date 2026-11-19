@@ -49,6 +49,7 @@ Path dependencies from each crate's `Cargo.toml` (`dev` = dev-dependency only):
 ```
 src-tauri (pollis)      → pollis-core, pollis-capture-proto        dev: pollis-api, pollis-delivery, pollis-sqlcipher
 pollis-tui              → pollis-core                               dev: pollis-api, pollis-delivery
+pollis-bot              → pollis-core, pollis-api
 pollis-core             → pollis-api, pollis-schema, pollis-device-cert, pollis-relay,
                           verifiable-log-serve, pollis-capture-proto, pollis-sqlcipher
 pollis-delivery (DS)    → pollis-api, pollis-schema, pollis-device-cert, pollis-libsql-connector

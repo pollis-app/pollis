@@ -34,8 +34,9 @@ pub struct AppState {
     ///
     /// The only database this process opens (#987); remote reads go through the DS.
     pub local_db: Arc<Mutex<Option<LocalDb>>>,
-    /// Test-harness only (#1524): a per-device data dir, so sibling devices don't share one DB. Set before sign-in.
-    #[cfg(any(test, feature = "test-harness"))]
+    /// A per-state data dir, set before sign-in: the harness's simulated devices (#1524) and a bot
+    /// runtime's installations (#1182), so two states in one process never share a DB. Unset, the
+    /// process-wide [`crate::db::local::dirs_path`].
     pub local_dir: std::sync::OnceLock<std::path::PathBuf>,
     /// Pluggable secret store; tests inject an [`InMemoryKeystore`] per simulated client.
     pub keystore: Arc<dyn Keystore>,
@@ -48,7 +49,7 @@ pub struct AppState {
     /// Its own lock so voice/realtime paths never nest two locks.
     /// Stores the internal identity because the LOCAL participant's entry is pinned at join, not derived.
     /// Never invalidated: a pseudonym is deterministic, so entries cannot go stale.
-    #[cfg(feature = "media")]
+    #[cfg(feature = "realtime")]
     pub livekit_identities: Arc<Mutex<crate::commands::livekit_identity::IdentityCache>>,
     #[cfg(feature = "media")]
     pub voice: Arc<Mutex<VoiceState>>,
@@ -157,12 +158,11 @@ impl AppState {
         Self {
             config,
             local_db: Arc::new(Mutex::new(None)),
-            #[cfg(any(test, feature = "test-harness"))]
             local_dir: std::sync::OnceLock::new(),
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
-            #[cfg(feature = "media")]
+            #[cfg(feature = "realtime")]
             livekit_identities: Arc::new(Mutex::new(Default::default())),
             #[cfg(feature = "media")]
             voice: Arc::new(Mutex::new(VoiceState::new())),
@@ -291,7 +291,7 @@ impl AppState {
     pub async fn shutdown(&self) {
         self.shutdown_signal.notify_waiters();
 
-        #[cfg(feature = "media")]
+        #[cfg(feature = "realtime")]
         {
             let mut guard = self.livekit.lock().await;
             let rooms = std::mem::take(&mut guard.rooms);
@@ -304,6 +304,8 @@ impl AppState {
             }
 
             // The voice room lives in `self.voice.room`; close it too or we linger as a "ghost card" until LiveKit times out.
+            #[cfg(feature = "media")]
+            {
             let room = {
                 let mut voice = self.voice.lock().await;
                 if let Some(t) = voice.frame_task.take() {
@@ -317,12 +319,12 @@ impl AppState {
             if let Some(room) = room {
                 let _ = tokio::time::timeout(std::time::Duration::from_secs(3), room.close()).await;
             }
+            }
         }
     }
 
-    /// This state's per-user DB directory ([`AppState::local_dir`] under the harness).
+    /// This state's per-user DB directory: [`AppState::local_dir`] when set.
     pub fn local_data_dir(&self) -> std::path::PathBuf {
-        #[cfg(any(test, feature = "test-harness"))]
         if let Some(dir) = self.local_dir.get() {
             return dir.clone();
         }

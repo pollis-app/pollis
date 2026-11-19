@@ -121,6 +121,62 @@
     }
   },
   "content": {
+    "docs/bots/README": {
+      "kind": "doc",
+      "about": "Bots: index, what a bot is, the four terms (App, Installation, Bot, Runtime); linked from README",
+      "source": "docs/bots/README.md",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "docs/bots/using-bots": {
+      "kind": "doc",
+      "about": "Bots for members: the Bot badge, slash commands, mentioning a bot (#2018)",
+      "source": "docs/bots/using-bots.md",
+      "checked_by": []
+    },
+    "docs/bots/admin-guide": {
+      "kind": "doc",
+      "about": "Bots admin guide (source for website/bots.html)",
+      "source": "docs/bots/admin-guide.md",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "docs/bots/app-approval": {
+      "kind": "doc",
+      "about": "Bots: approving an App (App hash, plain-language manifest, narrowing, updates and widenings, development installations, refusals); source for the website/bots.html 'Approving an App' section",
+      "source": "docs/bots/app-approval.md",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "docs/bots/self-hosting": {
+      "kind": "doc",
+      "about": "Bots self-hosting: install, pair and run pollis-bot (source for website/bots-self-hosting.html)",
+      "source": "docs/bots/self-hosting.md",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "docs/bots/alerts-webhook": {
+      "kind": "doc",
+      "about": "Bots alerts webhook: endpoint, auth, rate limit, answers (source for website/bots-developers.html)",
+      "source": "docs/bots/alerts-webhook.md",
+      "checked_by": []
+    },
+    "docs/bots/concepts-for-developers": {
+      "kind": "doc",
+      "about": "Bots for developers: the job loop, triggers, claims, grants (source for website/bots-developers.html)",
+      "source": "docs/bots/concepts-for-developers.md",
+      "checked_by": []
+    },
+    "docs/bots/developer-guide": {
+      "kind": "doc",
+      "about": "Writing an App in TypeScript: pollis app new/test/build, the manifest, handlers and ctx, the App hash, sandbox limits (source for website/bots-developers.html#apps)",
+      "source": "docs/bots/developer-guide.md",
+      "checked_by": []
+    },
     "docs/machine-checked-correctness-design": {
       "kind": "doc",
       "about": "Machine-checked correctness (linked from the website)",
@@ -546,6 +602,12 @@
         "cli"
       ]
     },
+    "readme/pollis-bot": {
+      "kind": "readme",
+      "about": "pollis-bot (the bot runtime) README",
+      "source": "pollis-bot/README.md",
+      "checked_by": []
+    },
     "readme/SECURITY": {
       "kind": "readme",
       "about": "Security policy and disclosure contact",
@@ -641,6 +703,33 @@
       "checked_by": [
         "claims",
         "facts"
+      ]
+    },
+    "website/bots": {
+      "kind": "website-page",
+      "about": "Bots: what a bot is and can read, adding a bot, hosts, limits (from docs/bots/admin-guide.md)",
+      "source": "website/bots.html",
+      "url": "https://pollis.com/bots.html",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "website/bots-self-hosting": {
+      "kind": "website-page",
+      "about": "Self-hosting a bot: install, pair, run as a service, failures (from docs/bots/self-hosting.md)",
+      "source": "website/bots-self-hosting.html",
+      "url": "https://pollis.com/bots-self-hosting.html",
+      "checked_by": [
+        "claims"
+      ]
+    },
+    "website/bots-developers": {
+      "kind": "website-page",
+      "about": "Bots for developers: the alerts webhook, the job loop and writing an App in TypeScript (from docs/bots/alerts-webhook.md, concepts-for-developers.md and developer-guide.md)",
+      "source": "website/bots-developers.html",
+      "url": "https://pollis.com/bots-developers.html",
+      "checked_by": [
+        "claims"
       ]
     },
     "website/continuity": {

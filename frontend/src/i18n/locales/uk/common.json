@@ -57,7 +57,11 @@
     "removeAttachment": "Прибрати {{name}}",
     "send": "Надіслати повідомлення",
     "markSensitive": "Позначити {{name}} як делікатне",
-    "unmarkSensitive": "Зняти позначку «делікатне» з {{name}}"
+    "unmarkSensitive": "Зняти позначку «делікатне» з {{name}}",
+    "commandAmbiguous": "Команда /{{command}} є в кількох застосунків. Виберіть один зі списку.",
+    "commandRequestHint": "Надсилається особисто {{app}}, не публікується в цьому каналі",
+    "commandRequestUnavailable": "Особисті запити до застосунків недоступні в цій версії. Нічого не опубліковано.",
+    "commandRequestFailed": "Не вдалося надіслати команду. Нічого не опубліковано."
   },
   "mentions": {
     "listLabel": "Підказки згадок",
@@ -113,5 +117,9 @@
     "unread_few": "Pollis — {{count}} непрочитані",
     "unread_many": "Pollis — {{count}} непрочитаних",
     "unread_other": "Pollis — {{count}} непрочитаного"
+  },
+  "commands": {
+    "listLabel": "Підказки команд",
+    "matching": "Команди за запитом <hl>/{{query}}</hl>"
   }
 }

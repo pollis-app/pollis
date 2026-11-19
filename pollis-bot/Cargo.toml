@@ -1,0 +1,67 @@
+[package]
+name = "pollis-bot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The Pollis bot runtime: hosts bot installations and runs their job loop (#1182)."
+
+[[bin]]
+name = "pollis-bot"
+path = "src/main.rs"
+
+# The job loop, handlers, webhook listener and config, as a library so the tests
+# (and #2004's App host) link them without the binary's argument handling.
+[lib]
+name = "pollis_bot"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[features]
+# Realtime wake-ups: pollis-core's `realtime` rooms (LiveKit data), without its
+# audio stack (no cpal, rodio, PulseAudio or AudioProcessing). Receiving LiveKit
+# data needs a WebRTC peer connection, so libwebrtc is linked. Off, the runtime
+# still catches up at start and runs webhook jobs, but learns of new group
+# messages only at its next start.
+default = ["realtime"]
+realtime = ["pollis-core/realtime"]
+
+[dependencies]
+# os-keystore on for the same reason as pollis-tui (#879): a desktop host
+# prefers the OS keychain, a bare server falls back to the machine-bound
+# encrypted file, never plaintext. Media comes only with `realtime`.
+pollis-core = { path = "../pollis-core", default-features = false, features = ["os-keystore"] }
+pollis-api = { path = "../pollis-api" }
+# #2004: the App sandbox and its manifest and grants.
+pollis-app-host = { path = "../pollis-app-host" }
+pollis-app-manifest = { path = "../pollis-app-manifest" }
+# Multi-thread runtime: pollis-core's DB and keystore paths use spawn_blocking.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal", "fs"] }
+async-trait = "0.1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+ulid = "1"
+# The alerts webhook listener. The same major pollis-core's loopback media
+# server already uses, so it adds nothing to the graph.
+axum = "0.8"
+# Webhook authentication: the per-installation secret (constant-time compare)
+# and the HMAC-SHA256 signature header.
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2.6"
+hex = "0.4"
+rand = "0.8"
+base64 = "0.22"
+zeroize = "1"
+# `pollis-bot post` calls the local webhook endpoint.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+[dev-dependencies]
+# `InMemoryKeystore` for the scoped-keystore test.
+pollis-core = { path = "../pollis-core", default-features = false, features = ["test-harness"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"

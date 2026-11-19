@@ -1015,7 +1015,8 @@ pub async fn group_members(
 ) -> anyhow::Result<Vec<GroupMemberWire>> {
     let mut rows = conn
         .query(
-            "SELECT gm.user_id, u.username, u.avatar_url, gm.role, gm.joined_at \
+            "SELECT gm.user_id, u.username, u.avatar_url, gm.role, gm.joined_at, \
+                    COALESCE(u.kind = 'bot', 0) \
              FROM group_member gm \
              LEFT JOIN users u ON u.id = gm.user_id \
              WHERE gm.group_id = ?1",
@@ -1030,6 +1031,7 @@ pub async fn group_members(
             avatar_url: row.get(2)?,
             role: row.get(3)?,
             joined_at: row.get(4)?,
+            is_bot: row.get::<i64>(5)? != 0,
         });
     }
     Ok(out)
@@ -1216,8 +1218,10 @@ pub async fn user_by_identifier(
     } else {
         identifier.to_string()
     };
+    // #1182: a bot is found by nobody; it is reached only through its group.
     let sql = format!(
-        "SELECT id, username, preferred_name, avatar_url FROM users WHERE {column} = ?1"
+        "SELECT id, username, preferred_name, avatar_url FROM users \
+         WHERE {column} = ?1 AND kind = 'human'"
     );
     let mut rows = conn.query(&sql, libsql::params![needle]).await?;
     match rows.next().await? {
@@ -1226,6 +1230,8 @@ pub async fn user_by_identifier(
             username: row.get(1)?,
             preferred_name: row.get(2)?,
             avatar_url: row.get(3)?,
+            // Lookups match people only.
+            is_bot: false,
         })),
         None => Ok(None),
     }
@@ -1283,7 +1289,7 @@ pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Res
 
     for chunk in parsed.user_ids.chunks(BIND_CHUNK) {
         let sql = format!(
-            "SELECT id, username, preferred_name, avatar_url FROM users WHERE id IN ({})",
+            "SELECT id, username, preferred_name, avatar_url, kind = 'bot' FROM users WHERE id IN ({})",
             placeholders(chunk.len(), 1)
         );
         let params: Vec<libsql::Value> = chunk.iter().map(|id| id.clone().into()).collect();
@@ -1294,6 +1300,7 @@ pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Res
                 username: row.get(1)?,
                 preferred_name: row.get(2)?,
                 avatar_url: row.get(3)?,
+                is_bot: row.get::<i64>(4)? != 0,
             });
         }
     }

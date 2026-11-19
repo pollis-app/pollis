@@ -1664,9 +1664,29 @@ impl App {
             return;
         };
         let user_id = self.user_id();
+        // A channel's bots (#1182), for the Bot badge; a failed read leaves none badged.
+        let group_id = match kind {
+            ConvKind::Channel => self
+                .home
+                .tree
+                .as_ref()
+                .and_then(|tree| data::group_of_channel(tree, &conv_id))
+                .map(str::to_string),
+            _ => None,
+        };
+        let bots = match group_id {
+            Some(group_id) => data::group_bot_ids(&self.state, &user_id, &group_id)
+                .await
+                .unwrap_or_else(|e| {
+                    pollis_core::diag!("[tui] group members read failed: {e}");
+                    Default::default()
+                }),
+            None => Default::default(),
+        };
         match self.fetch_page(&user_id, &conv_id, kind, None).await {
             Ok(page) => {
                 if let Some(open) = self.home.open.as_mut() {
+                    open.bots = bots;
                     open.messages =
                         crate::home::merge_messages(Vec::new(), page.messages);
                     open.older_cursor = page.next_cursor;

@@ -6,6 +6,7 @@ import { useGroupAliases } from "./useGroupAliases";
 import { aliasAvatar, aliasName } from "../../utils/groupAlias";
 import { useDMConversations } from "./useMessages";
 import type { MentionCandidate } from "../../utils/mentions";
+import { isBotUser } from "../../utils/bots";
 
 /** Mentionable people (#843), only from membership the user can already see; never a directory lookup. Excludes self. */
 export function useMentionCandidates(): MentionCandidate[] {
@@ -31,6 +32,7 @@ export function useMentionCandidates(): MentionCandidate[] {
           username: m.username!,
           displayName: aliasName(aliases, m.user_id, m.display_name) ?? undefined,
           avatarUrl: aliasAvatar(aliases, m.user_id, m.avatar_url) ?? undefined,
+          isBot: isBotUser(m),
         }));
     }
 

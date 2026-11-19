@@ -72,7 +72,11 @@
     "removeAttachment": "Remove {{name}}",
     "send": "Send message",
     "markSensitive": "Mark {{name}} as sensitive",
-    "unmarkSensitive": "Unmark {{name}} as sensitive"
+    "unmarkSensitive": "Unmark {{name}} as sensitive",
+    "commandAmbiguous": "More than one App has /{{command}}. Pick one from the list.",
+    "commandRequestHint": "Sent privately to {{app}}, not posted in this channel",
+    "commandRequestUnavailable": "Private requests to Apps aren't available in this version. Nothing was posted.",
+    "commandRequestFailed": "Couldn't send this command. Nothing was posted."
   },
   "mentions": {
     "listLabel": "Mention suggestions",
@@ -112,5 +116,9 @@
     "quit": "Quit Pollis",
     "unread_one": "Pollis — {{count}} unread",
     "unread_other": "Pollis — {{count}} unread"
+  },
+  "commands": {
+    "listLabel": "Command suggestions",
+    "matching": "Commands matching <hl>/{{query}}</hl>"
   }
 }

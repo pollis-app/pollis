@@ -21,6 +21,9 @@ import InviteToGroup from "../app/group/invite";
 import GroupInviteLinks from "../app/group/invite-links";
 import GroupEmoji from "../app/group/emoji";
 import JoinRequests from "../app/group/requests";
+import GroupBots from "../app/group/bots";
+import BotPage from "../app/group/bot";
+import AddBot from "../app/group/add-bot";
 
 // Two-pane master-detail primitives for the regular (iPad) layout (#622).
 
@@ -38,6 +41,9 @@ const PANE_SCREENS: Record<PanePath, ComponentType> = {
   "/group/invite-links": GroupInviteLinks,
   "/group/emoji": GroupEmoji,
   "/group/requests": JoinRequests,
+  "/group/bots": GroupBots,
+  "/group/bot": BotPage,
+  "/group/add-bot": AddBot,
 };
 
 export function DetailPlaceholder() {

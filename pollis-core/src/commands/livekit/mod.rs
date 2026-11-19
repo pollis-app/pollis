@@ -11,6 +11,8 @@ mod publish;
 mod realtime;
 mod sfu_gate;
 
+// The voice and call paths are their users; a realtime-only build has neither.
+#[cfg_attr(not(feature = "media"), allow(unused_imports))]
 pub(crate) use identity::{
     is_view_identity, lookup_avatar_url_for_identity, lookup_avatar_urls_for_identities,
     pin_local_identity, resolve_participant, resolve_participants,
@@ -276,6 +278,36 @@ pub(super) fn dispatch_data(
                 let _ = channel.send(RealtimeEvent::HistoryTransfer {
                     transfer_id: transfer_id.to_owned(),
                     event: event.to_owned(),
+                });
+            }
+        }
+        Some("bot_host_approval") => {
+            // DS-originated only (#1182), like `enrollment_requested`.
+            if sender.is_some() {
+                return None;
+            }
+            if let Some(request_id) = data.get("request_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::BotHostApproval {
+                    request_id: request_id.to_owned(),
+                });
+            }
+        }
+        Some("bot_app_approval") => {
+            // DS-originated only (#2005), like `bot_host_approval`.
+            if sender.is_some() {
+                return None;
+            }
+            let seq = data.get("seq").and_then(|v| v.as_i64()).unwrap_or(0);
+            let _ = channel.send(RealtimeEvent::BotAppApproval { seq });
+        }
+        Some("bots_changed") => {
+            // DS-originated only (#1182), like `group_aliases_changed`.
+            if sender.is_some() {
+                return None;
+            }
+            if let Some(group_id) = data.get("group_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::BotsChanged {
+                    group_id: group_id.to_owned(),
                 });
             }
         }
@@ -560,6 +592,19 @@ mod tests {
         assert!(run(payload, Some(&someone)).is_empty());
     }
 
+    /// #1182: the bots nudge is forwarded from the DS, with its group; dropped from a participant.
+    #[test]
+    fn bots_changed_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "bots_changed", "group_id": "g1" });
+        let events = run(payload.clone(), None);
+        assert!(matches!(&events[..], [RealtimeEvent::BotsChanged { group_id }] if group_id == "g1"));
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
     /// #2003: the alias nudge is forwarded from the DS, with its group; dropped from a participant.
     #[test]
     fn group_aliases_changed_is_honoured_only_from_the_ds() {
@@ -584,6 +629,32 @@ mod tests {
         let payload = serde_json::json!({ "type": "read_cursors_changed" });
         let events = run(payload.clone(), None);
         assert!(matches!(events[..], [RealtimeEvent::ReadCursorsChanged]));
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #1182: the bot host-approval nudge is forwarded from the DS, dropped from a participant.
+    #[test]
+    fn bot_host_approval_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "bot_host_approval", "request_id": "R" });
+        let events = run(payload.clone(), None);
+        assert!(matches!(&events[..], [RealtimeEvent::BotHostApproval { request_id }] if request_id == "R"));
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #2005: the App approval nudge is forwarded from the DS, dropped from a participant.
+    #[test]
+    fn bot_app_approval_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "bot_app_approval", "seq": 3 });
+        let events = run(payload.clone(), None);
+        assert!(matches!(&events[..], [RealtimeEvent::BotAppApproval { seq: 3 }]));
         let someone = PacketSender {
             user_id: "alice".into(),
             username: None,

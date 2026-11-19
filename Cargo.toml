@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "pollis-core",
     "pollis-tui",
+    "pollis-bot",
     "pollis-capture-proto",
     "pollis-capture-linux",
     "pollis-capture-macos",
@@ -17,6 +18,9 @@ members = [
     "pollis-schema",
     "pollis-sqlcipher",
     "pollis-libsql-connector",
+    "pollis-app-manifest",
+    "pollis-app-host",
+    "pollis-app-dev",
     "pollis-import",
     "patches/device-info",
 ]
@@ -33,6 +37,12 @@ exclude = [
     "patches/openmls-sqlite-storage",
     "patches/libsql",
     "patches/cpal",
+    # The fixture App's guest source (#2004): a wasm32-wasip2 component with its
+    # own [workspace] and lockfile, built by pollis-app-host/fixtures/build.sh.
+    "pollis-app-host/fixtures/test-app",
+    # The Rust SDK for Apps (#2007): compiled into third-party Apps, never into
+    # a Pollis binary. Its own [workspace] and lockfile, like sdk/ts.
+    "sdk/rust/pollis-app",
 ]
 
 [workspace.package]

@@ -1,5 +1,7 @@
 // Stable `Icon.*` wrapper over lucide-react-native at a 1.75pt stroke. Decorative to screen readers.
 import {
+  Bot,
+  Server,
   Hash,
   Search,
   Settings,
@@ -200,6 +202,9 @@ export const Icon = {
   fingerprint: wrap(FingerprintPattern),
   device: wrap(Smartphone, 14),
   laptop: wrap(Laptop, 14),
+  // Bots (#1182): the bot itself, and one of the machines that run it.
+  bot: wrap(Bot),
+  server: wrap(Server),
   history: wrap(History, 14),
   thread: wrap(MessagesSquare, 14),
   flag: wrap(Flag, 14),

@@ -8,6 +8,10 @@
     "scripts/check-claims.mjs (CI) fails on a deleted anchor or a reworded quote; scripts/claims-impact.mjs --since <ref> lists claims whose anchors changed; /sweep-claims re-verifies them."
   ],
   "audited_docs": [
+    "docs/bots/README.md",
+    "docs/bots/admin-guide.md",
+    "docs/bots/app-approval.md",
+    "docs/bots/self-hosting.md",
     "docs/metadata-retention-policy.md",
     "docs/operational-continuity.md",
     "docs/reproducible-builds-residuals.md",
@@ -38,6 +42,8 @@
     "website/artifacts.js",
     "website/assurance.html",
     "website/assurance.js",
+    "website/bots-developers.html",
+    "website/bots.html",
     "website/continuity.html",
     "website/device-security.html",
     "website/faq.html",
@@ -20612,6 +20618,313 @@
       "status": "verified",
       "verified_sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
       "also_rendered_in": []
+    },
+    {
+      "id": "bots-keys-01",
+      "doc": "website/bots.html",
+      "locator": {
+        "heading": "Bots",
+        "quote": "The bot runs on your admin's machine; no developer and no Pollis server holds its keys."
+      },
+      "claim": "A self-hosted bot's account and device keys are generated on its host and reach another host only wrapped to that host's ephemeral key; the DS stores the public key and opaque wrapped blobs, and no developer is in the path (epic #872 'What we claim', self-hosted).",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/host.rs",
+        "pollis-core/src/commands/bots/approval.rs",
+        "pollis-core/src/commands/device_enrollment.rs",
+        "pollis-delivery/src/bots.rs",
+        "pollis-api/src/bots.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/host.rs:105",
+        "pollis-core/src/commands/bots/host.rs:642",
+        "pollis-delivery/src/bots.rs:256",
+        "pollis-delivery/src/bots.rs:997"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-keys-02",
+      "doc": "docs/bots/README.md",
+      "locator": {
+        "heading": "Pollis bots",
+        "quote": "No developer and no Pollis server holds its keys."
+      },
+      "also_rendered_in": [
+        "README.md",
+        "website/faq.html"
+      ],
+      "claim": "Same as bots-keys-01: a bot's private keys exist only on its hosts.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/host.rs",
+        "pollis-core/src/commands/bots/approval.rs",
+        "pollis-core/src/commands/device_enrollment.rs",
+        "pollis-delivery/src/bots.rs",
+        "pollis-api/src/bots.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/host.rs:105",
+        "pollis-core/src/commands/bots/host.rs:642",
+        "pollis-delivery/src/bots.rs:256",
+        "pollis-delivery/src/bots.rs:997"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-keys-03",
+      "doc": "docs/bots/admin-guide.md",
+      "locator": {
+        "heading": "If every host is lost",
+        "quote": "A bot's keys exist only on its hosts."
+      },
+      "also_rendered_in": [
+        "website/bots.html"
+      ],
+      "claim": "There is no server-side copy or recovery blob for a bot's account key; losing every host makes the bot unrecoverable.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/host.rs",
+        "pollis-core/src/commands/bots/approval.rs",
+        "pollis-core/src/commands/device_enrollment.rs",
+        "pollis-delivery/src/bots.rs",
+        "pollis-api/src/bots.rs",
+        "pollis-core/src/commands/bots/unattended.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/host.rs:105",
+        "pollis-core/src/commands/bots/host.rs:642",
+        "pollis-delivery/src/bots.rs:256",
+        "pollis-delivery/src/bots.rs:997",
+        "pollis-core/src/commands/bots/unattended.rs:87"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-keystore-01",
+      "doc": "docs/bots/self-hosting.md",
+      "locator": {
+        "heading": "How the keys are kept",
+        "quote": "They are never stored in plain text."
+      },
+      "also_rendered_in": [
+        "website/bots-self-hosting.html"
+      ],
+      "claim": "An unattended bot host keeps the bot's account seed and local-DB key in the device keystore (OS keychain, else the machine-bound encrypted file), never a plaintext backend.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/keystore.rs",
+        "pollis-core/src/commands/bots/unattended.rs",
+        "pollis-bot/src/secrets.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/keystore.rs:2223",
+        "pollis-core/src/commands/bots/unattended.rs:87"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-keystore-02",
+      "doc": "docs/bots/self-hosting.md",
+      "locator": {
+        "heading": "How the keys are kept",
+        "quote": "It does not protect against someone who can run programs as the same user on this machine, or who has a full image of it."
+      },
+      "also_rendered_in": [
+        "website/bots-self-hosting.html"
+      ],
+      "claim": "The unattended keystore path has no PIN layer, so it resists a copied disk but not a same-UID local attacker or a full-disk image (whitepaper §3.5, 'Bot hosts').",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/keystore.rs",
+        "pollis-core/src/commands/bots/unattended.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/unattended.rs:87"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-scope-01",
+      "doc": "docs/bots/admin-guide.md",
+      "locator": {
+        "heading": "What a bot is",
+        "quote": "Nobody can send it a direct message, and it cannot send one."
+      },
+      "also_rendered_in": [
+        "website/bots.html"
+      ],
+      "claim": "The DS and the schema refuse DM creation and DM requests with a bot in either direction, and directory lookups never return a bot.",
+      "kind": "behaviour",
+      "anchors": [
+        "pollis-delivery/src/bots.rs",
+        "pollis-delivery/src/directory.rs",
+        "pollis-schema/migrations/000053_bots.sql"
+      ],
+      "evidence": [
+        "pollis-delivery/src/directory.rs:1158",
+        "pollis-delivery/tests/bots.rs:677"
+      ],
+      "status": "verified",
+      "verified_sha": "007a3dd4b1332a5322935e2297fb5e1550035e85"
+    },
+    {
+      "id": "bots-apps-01",
+      "doc": "website/bots-developers.html",
+      "locator": {
+        "heading": "Write an App in TypeScript",
+        "quote": "a call the manifest does not allow fails in a test exactly as it would in a group."
+      },
+      "claim": "`pollis app test` runs the built component through pollis_app_host::AppHost::run_job, the runtime's own sandbox, grant checks and refusal strings; only the runtime's services are replaced by fixtures (#2006).",
+      "kind": "security",
+      "anchors": [
+        "pollis-app-dev/src/runner.rs",
+        "pollis-app-host/src/lib.rs",
+        "sdk/ts/app/src/testing.ts"
+      ],
+      "evidence": [
+        "pollis-app-dev/tests/runner.rs:99",
+        "sdk/ts/cli/test/cli.test.ts:236"
+      ],
+      "status": "verified",
+      "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
+    },
+    {
+      "id": "bots-apps-02",
+      "doc": "website/bots-developers.html",
+      "locator": {
+        "heading": "Write an App in TypeScript or Rust",
+        "quote": "The same source and lockfile give the same hash on any machine, in either"
+      },
+      "claim": "The build stages in a fixed directory, seeds ComponentizeJS's work-dir name, strips install-path comments and pre-initializes with fixed randomness and clocks, so the component and App hash depend only on source and lockfile; a test builds in two directories and compares (#2006). Rust (#2007): a pinned toolchain (rust-toolchain.toml), a locked Cargo.lock and the --sdk crate copied into the App rather than linked, with the same two-directory test.",
+      "kind": "security",
+      "anchors": [
+        "sdk/ts/cli/src/build.ts",
+        "sdk/ts/cli/src/rust.ts",
+        "pollis-app-dev/src/wizer.rs",
+        "pollis-app-manifest/src/app_hash.rs"
+      ],
+      "evidence": [
+        "sdk/ts/cli/test/cli.test.ts:122",
+        "sdk/ts/cli/test/rust.test.ts:117",
+        "pollis-app-manifest/src/app_hash.rs:112"
+      ],
+      "status": "verified",
+      "verified_sha": "b305e4b9944df944d25ba6537ae8dc6395f1b8d8"
+    },
+    {
+      "id": "bots-apps-03",
+      "doc": "website/bots-developers.html",
+      "locator": {
+        "heading": "Write an App in TypeScript",
+        "quote": "With no hosts listed, the App cannot send anything outside the group."
+      },
+      "claim": "http-fetch is the App's only network path (sockets and wasi:http imports are refused at load) and is refused for any host not in the effective egress list, so empty egress means no outbound request (#2004, exercised through the SDK in #2006).",
+      "kind": "security",
+      "anchors": [
+        "pollis-app-host/src/egress.rs",
+        "pollis-app-host/src/wasi.rs",
+        "sdk/ts/app/src/runtime.ts"
+      ],
+      "evidence": [
+        "pollis-app-host/src/egress.rs:65",
+        "pollis-app-dev/tests/runner.rs:182",
+        "sdk/ts/cli/test/cli.test.ts:230"
+      ],
+      "status": "verified",
+      "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
+    },
+    {
+      "id": "bots-apps-04",
+      "doc": "website/bots-developers.html",
+      "locator": {
+        "heading": "Write an App in TypeScript",
+        "quote": "are refused at build with the reason;"
+      },
+      "claim": "The build's esbuild plugin refuses every Node built-in (bare and node: prefixed) with a message naming the import and the alternative (#2006).",
+      "kind": "behaviour",
+      "anchors": [
+        "sdk/ts/cli/src/build.ts"
+      ],
+      "evidence": [
+        "sdk/ts/cli/src/build.ts:84",
+        "sdk/ts/cli/test/cli.test.ts:158"
+      ],
+      "status": "verified",
+      "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
+    },
+    {
+      "id": "bots-app-approval-01",
+      "doc": "docs/bots/app-approval.md",
+      "locator": {
+        "heading": "How it is checked",
+        "quote": "The Pollis server stores it but cannot make or change one, because it has no admin's key."
+      },
+      "also_rendered_in": [
+        "website/bots.html"
+      ],
+      "claim": "App approvals are signed by an admin's device ML-DSA-44 key and verified by every reader from its own MLS view and roster; the DS stores the record opaquely and holds no admin key.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/apps.rs",
+        "pollis-core/src/commands/bots/signer.rs",
+        "pollis-core/src/commands/bots/app_approval.rs",
+        "pollis-delivery/src/bot_apps.rs"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/signer.rs:39",
+        "pollis-delivery/src/bot_apps.rs:65"
+      ],
+      "status": "verified",
+      "verified_sha": "c76753e71f835db897029b41d91d8d83f310a014"
+    },
+    {
+      "id": "bots-app-approval-02",
+      "doc": "docs/bots/app-approval.md",
+      "locator": {
+        "heading": "The short version",
+        "quote": "that the App it is about to run has exactly the approved hash, before every job"
+      },
+      "also_rendered_in": [
+        "website/bots.html"
+      ],
+      "claim": "The runtime re-reads and verifies the installation's approval and holds the artifact's App hash against it at the start of every job, before any trigger reaches the App.",
+      "kind": "security",
+      "anchors": [
+        "pollis-bot/src/job.rs",
+        "pollis-bot/src/app_approval.rs",
+        "pollis-core/src/commands/bots/app_approval.rs"
+      ],
+      "evidence": [
+        "pollis-bot/src/job.rs:275",
+        "pollis-core/src/commands/bots/app_approval.rs:397"
+      ],
+      "status": "verified",
+      "verified_sha": "c76753e71f835db897029b41d91d8d83f310a014"
+    },
+    {
+      "id": "bots-app-approval-03",
+      "doc": "docs/bots/app-approval.md",
+      "locator": {
+        "heading": "How it is checked",
+        "quote": "so the server cannot quietly bring back an older version"
+      },
+      "claim": "Each bot host keeps the highest accepted approval seq in the installation's encrypted store and refuses a lower one.",
+      "kind": "security",
+      "anchors": [
+        "pollis-core/src/commands/bots/apps.rs",
+        "pollis-core/src/db/local_schema.sql"
+      ],
+      "evidence": [
+        "pollis-core/src/commands/bots/apps.rs:109"
+      ],
+      "status": "verified",
+      "verified_sha": "c76753e71f835db897029b41d91d8d83f310a014"
     }
   ]
 }

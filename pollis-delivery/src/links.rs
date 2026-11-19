@@ -418,6 +418,10 @@ pub async fn create_link(State(state): State<AppState>, req: RawRequest) -> Resu
         Ok(a) => a,
         Err(_) => return Ok(AuthRejection::Forbidden.into_response()),
     };
+    // #1182: a bot gains a host only through an admin's host approval.
+    if refuse_bot(&state, &actor).await? {
+        return Ok(AuthRejection::Forbidden.into_response());
+    }
     let Some(verifier) = decode_32(&parsed.claim_verifier) else {
         return Ok(bad_request("claim_verifier must be 32 bytes"));
     };
@@ -511,6 +515,10 @@ pub async fn accept_offer(State(state): State<AppState>, req: RawRequest) -> Res
         Ok(a) => a,
         Err(_) => return Ok(AuthRejection::Forbidden.into_response()),
     };
+    // #1182: a bot gains a host only through an admin's host approval.
+    if refuse_bot(&state, &actor).await? {
+        return Ok(AuthRejection::Forbidden.into_response());
+    }
     match state.links.accept(&parsed.link_id, &actor, crate::util::now_unix()) {
         AcceptOutcome::Accepted { device_id, device_name } => Ok(ok_response::<AcceptOfferBody>(
             AcceptOfferResponse { new_device_id: device_id, device_name },
@@ -616,6 +624,12 @@ pub async fn link_status(State(state): State<AppState>, req: RawRequest) -> Resu
     };
     let status = state.links.status(&parsed.link_id, &actor, crate::util::now_unix());
     Ok(ok_response::<LinkStatusBody>(status))
+}
+
+/// Whether `user_id` is a bot, which may neither show nor accept a device link.
+async fn refuse_bot(state: &AppState, user_id: &str) -> Result<bool, AppError> {
+    let conn = state.db.conn().await?;
+    Ok(crate::bots::is_bot(&conn, user_id).await?)
 }
 
 fn refused() -> Response {

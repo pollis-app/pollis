@@ -239,6 +239,14 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   display name at the end; desktop truncates at the end. Row actions (Accept / Block, a role,
   Remove) never squeeze the name: on a narrow row they go on their own line under it, past the
   avatar (mobile `stackRowActions`, desktop's row controls keep their width and the name shrinks).
+- **Bots** (#1182): a bot account always wears the **Bot badge** beside its name, wherever a
+  name stands for it: the member list and right panel, its messages' header, an `@mention` of
+  it and the mention picker, its profile. One quiet tag, the chip radius, `surfaceHigh` fill and
+  `textDim` ink, never the accent and never colour alone (the word "Bot"; Terminal `[bot]`).
+  It says who answers for the bot: "Managed by the admins of <group>", as the badge's tooltip and
+  in words on the bot's profile, never in a modal. Desktop `BotBadge` (`isBotUser` decides), mobile
+  its twin. Bot management copy says plainly that the bot runs on a machine an admin controls and
+  can read what it receives.
 - **Empty states:** every list that can be empty uses `EmptyState`, on desktop
   (`frontend/src/components/ui/EmptyState.tsx`, also what `NavigableList` / `NavigableGrid` draw
   for `emptyLabel`) and on mobile (`EmptyState` in `mobile/components/ui.tsx`). One plain sentence,
@@ -265,6 +273,7 @@ primitive cannot do what a screen needs, extend it in its own file and use it ev
   `FormActions`, `ConfirmBlock` (and `Layout/ConfirmPage`), `ConfirmBar`, `ComposerBarHeader`,
   `Select` (a pick-one dropdown with its label), `SectionHeader` (a panel section's title),
   `Card`, `EmptyState`, `Avatar`, `PresenceAvatar`, `PresenceDot`, `PillButton`, `PressButton`,
+  `BotBadge`, `SasCodeInput` (a code typed off another screen; never pre-filled),
   `NavigableList`, `NavigableGrid`, `TerminalMenu` (Terminal hub pages), `LoaderSpinner`,
   `IconSpinner`, `ChatInput`, `EditMessageBar`, `SuggestList`.
 - **Mobile** (`mobile/components/ui.tsx`): `Screen`, `Header`, `Body`, `BottomAction`, `Txt`,

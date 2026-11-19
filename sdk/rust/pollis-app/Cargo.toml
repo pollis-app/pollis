@@ -1,0 +1,20 @@
+# The Rust SDK for Pollis Apps (#2007). Its own workspace and lockfile, like
+# sdk/ts: an App's dependencies never enter the root lockfile, cargo-deny or
+# cargo-vet, and nothing here is linked into a shipped Pollis binary.
+[package]
+name = "pollis-app"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Write a Pollis App in Rust: handlers, a typed context, the manifest and an offline test helper."
+homepage = "https://pollis.com/bots-developers.html"
+repository = "https://github.com/pollis-app/pollis"
+include = ["src/**", "wit/**", "Cargo.toml", "README.md"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Pinned to the version the App host's fixtures are built with.
+wit-bindgen = "=0.61.1"
+
+[workspace]

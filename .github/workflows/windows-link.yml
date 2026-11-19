@@ -37,6 +37,7 @@ on:
     paths:
       - 'pollis-core/**'
       - 'pollis-api/**'
+      - 'pollis-app-manifest/**'
       - 'pollis-capture-proto/**'
       - 'pollis-device-cert/**'
       - 'pollis-import/**'
@@ -91,6 +92,7 @@ jobs:
               # (mobile/fingerprint.config.js computes the same closure).
               - 'pollis-core/**'
               - 'pollis-api/**'
+              - 'pollis-app-manifest/**'
               - 'pollis-capture-proto/**'
               - 'pollis-device-cert/**'
               - 'pollis-import/**'

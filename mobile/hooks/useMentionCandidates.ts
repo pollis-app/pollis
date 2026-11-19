@@ -8,6 +8,7 @@ import type { ConversationKind } from "./queries";
 import type { MentionCandidate } from "../lib/mentions";
 import { useGroupAliases } from "./queries/useGroupAliases";
 import { aliasAvatar } from "../lib/groupAlias";
+import { isBotUser } from "../lib/bots";
 
 export function useMentionCandidates(
   kind: ConversationKind | null,
@@ -32,6 +33,7 @@ export function useMentionCandidates(
           displayName: aliases.get(m.user_id)?.display_name ?? undefined,
           avatarUrl: m.avatar_url,
           aliasAvatarUrl: aliasAvatar(aliases, m.user_id, null),
+          isBot: isBotUser(m),
         }));
     }
     if (kind === "dm" && conversationId) {

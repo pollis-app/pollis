@@ -40,6 +40,11 @@ import { BlockedPage } from "./pages/BlockedPage";
 import { RenameChannelPage } from "./pages/RenameChannelPage";
 import { RenameGroupPage } from "./pages/RenameGroupPage";
 import { GroupEmojiPage } from "./pages/GroupEmojiPage";
+import { BotsPage } from "./pages/BotsPage";
+import { AddBotPage } from "./pages/AddBotPage";
+import { BotPage } from "./pages/BotPage";
+import { AddBotHostPage } from "./pages/AddBotHostPage";
+import { DeleteBotPage } from "./pages/DeleteBotPage";
 import { SavedPage } from "./pages/SavedPage";
 
 export type { RouterContext };
@@ -148,6 +153,37 @@ const memberProfileRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/$groupId/members/$userId",
   component: UserProfilePage,
+});
+
+// Bots (#1182): group settings pages, parameterized, so not registered static pages.
+const botsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/bots",
+  component: BotsPage,
+});
+
+const addBotRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/bots/new",
+  component: AddBotPage,
+});
+
+const botRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/bots/$botId",
+  component: BotPage,
+});
+
+const addBotHostRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/bots/$botId/add-host",
+  component: AddBotHostPage,
+});
+
+const deleteBotRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/bots/$botId/delete",
+  component: DeleteBotPage,
 });
 
 const joinRequestsRoute = createRoute({
@@ -422,6 +458,11 @@ const routeTree = rootRoute.addChildren([
   resetAliasRoute,
   memberProfileRoute,
   joinRequestsRoute,
+  botsRoute,
+  addBotRoute,
+  botRoute,
+  addBotHostRoute,
+  deleteBotRoute,
   inviteMemberRoute,
   leaveGroupRoute,
   voiceChannelRoute,

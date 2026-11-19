@@ -1,0 +1,138 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# BOTS (#1182), part 4 of 4 — driven by scripts/maestro-bots.sh. Revoke the
+# second host (two taps: the first arms it), leaving one; arm a revoke of the
+# last host and see the "can never run again" warning, then back out; delete
+# the bot (two taps). The Bots page is empty again and the bot is no longer a
+# member.
+
+# After the App parts (4a/4b/5) the app is elsewhere: open the bot from the member list again,
+# as part 3 left it.
+- runFlow:
+    when:
+      notVisible:
+        id: "screen-bot"
+    commands:
+      - stopApp
+      - launchApp
+      - runFlow:
+          when:
+            visible:
+              id: "screen-auth-pin"
+          commands:
+            - runFlow: ../../subflows/enter-pin.yaml
+      - extendedWaitUntil:
+          visible:
+            id: "tab-groups"
+          timeout: 30000
+      - tapOn:
+          id: "tab-groups"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-group-menu"
+            text: "${GROUP_NAME}, .*"
+          timeout: 30000
+      # As part 2 does: into #General, back to the group, then its members.
+      - tapOn: "General"
+      - tapOn:
+          id: "btn-back"
+      - tapOn:
+          id: "row-group-members"
+      - tapOn:
+          id: "badge-bot-.*"
+- extendedWaitUntil:
+    visible:
+      id: "screen-bot"
+    timeout: 15000
+# The App section sits above the hosts. The first tap arms the revoke (the button then reads
+# Confirm); the page can still be settling after opening, so arm until it holds.
+- waitForAnimationToEnd
+- repeat:
+    while:
+      notVisible: "Confirm"
+    times: 3
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: "btn-revoke-bot-host-.*"
+            index: 1
+          direction: DOWN
+      - tapOn:
+          id: "btn-revoke-bot-host-.*"
+          index: 1
+      - waitForAnimationToEnd
+- tapOn: "Confirm"
+- extendedWaitUntil:
+    notVisible:
+      id: "row-bot-host-.*"
+      index: 1
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      id: "row-bot-host-.*"
+    direction: UP
+- takeScreenshot: bots-07-one-host
+
+# Arming the last host's revoke says what it costs; leaving the page disarms it.
+- scrollUntilVisible:
+    element:
+      id: "btn-revoke-bot-host-.*"
+    direction: DOWN
+- tapOn:
+    id: "btn-revoke-bot-host-.*"
+- scrollUntilVisible:
+    element:
+      id: "text-bot-last-host"
+    direction: DOWN
+- takeScreenshot: bots-08-last-host-warning
+- tapOn:
+    id: "btn-back"
+# The badge sits inside the bot's member row, so tapping it opens the row (the bot's page, for an admin).
+- tapOn:
+    id: "badge-bot-.*"
+- extendedWaitUntil:
+    visible:
+      id: "screen-bot"
+    timeout: 15000
+- assertNotVisible:
+    id: "text-bot-last-host"
+
+# Delete: two taps on the red row at the foot of the page.
+- scrollUntilVisible:
+    element:
+      id: "btn-delete-bot"
+    direction: DOWN
+- tapOn:
+    id: "btn-delete-bot"
+- assertVisible: "Tap again to delete ${BOT_NAME}"
+- tapOn:
+    id: "btn-delete-bot"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-bot"
+    timeout: 60000
+# Back on the member list: the bot is gone from the roster.
+- extendedWaitUntil:
+    notVisible:
+      id: "badge-bot-.*"
+    timeout: 60000
+- takeScreenshot: bots-09-deleted
+
+# The Bots page is empty again.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-group-settings"
+- scrollUntilVisible:
+    element:
+      id: "row-group-bots"
+    direction: DOWN
+- tapOn:
+    id: "row-group-bots"
+- extendedWaitUntil:
+    visible:
+      id: "bots-empty"
+    timeout: 30000
+- takeScreenshot: bots-10-empty-again
