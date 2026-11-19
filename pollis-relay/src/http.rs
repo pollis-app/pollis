@@ -135,6 +135,9 @@ mod seam_tests {
         // the client-policy fetch (#1612): one request per launch through a
         // per-call proxy plan, so a pooled client would save no handshake
         "pollis-core/src/client_policy.rs",
+        // link-preview fetches (#1987): each hop pins the DNS answer it just
+        // checked into its own client, so a pooled client cannot be reused
+        "pollis-core/src/commands/link_preview/fetch.rs",
     ];
 
     fn workspace_root() -> PathBuf {
