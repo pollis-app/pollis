@@ -89,7 +89,13 @@ pub struct FetchedArtifact {
     pub dev_signature: Option<DevBuildSignature>,
 }
 
-fn http() -> reqwest::Client {
+/// One client for the process, so artifact reads share its connection pool.
+fn http() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(build_http)
+}
+
+fn build_http() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(FETCH_TIMEOUT)
         .https_only(true)
