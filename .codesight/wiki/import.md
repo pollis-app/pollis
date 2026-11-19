@@ -120,7 +120,10 @@ icon.png|jpg|gif|webp                (optional)
 ```
 
 Without it the group is named from the download's file name ("Northwind Studio Slack
-export Jan 1 2021 - Nov 18 2026.zip" → "Northwind Studio") and the plan says so.
+export Jan 1 2021 - Nov 18 2026.zip" → "Northwind Studio") and the plan says so. Underscores
+count as spaces and a leading 8-hex-digit `xxxxxxxx-` upload prefix is dropped
+("79e62724-Northwind_Studio_Slack_export_….zip" → "Northwind Studio"); a name without
+" Slack export " is used whole. `users.json` carries the team's id but never its name.
 
 | Slack | Pollis | Rule |
 |---|---|---|

@@ -55,12 +55,26 @@ pub fn read_export(path: &Path) -> io::Result<crate::model::Export> {
 
 /// "Northwind Studio Slack export Jan 1 2023 - Nov 18 2026.zip" → "Northwind Studio":
 /// the name Slack gives the download, which is the only place a standard
-/// export names its workspace.
+/// export names its workspace (`users.json` carries the team's id, never its
+/// name). Underscores count as spaces, and a leading `xxxxxxxx-` upload prefix
+/// (8 hex digits) is dropped, as copies passed through an uploader carry them.
+/// A name without " Slack export " in it is used as it is.
 fn workspace_name_from_path(path: &Path) -> String {
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let lower = stem.to_lowercase();
-    let cut = lower.find(" slack export").map_or(stem.as_str(), |i| &stem[..i]);
-    cut.trim().to_string()
+    let spaced = stem.replace('_', " ");
+    let Some(i) = spaced.to_ascii_lowercase().find(" slack export ") else {
+        return stem.trim().to_string();
+    };
+    let before = &spaced[..i];
+    let unprefixed = match (before.get(..8), before.get(8..9)) {
+        (Some(hex), Some("-")) if hex.bytes().all(|b| b.is_ascii_hexdigit()) => &before[9..],
+        _ => before,
+    };
+    let name = unprefixed.trim();
+    if name.is_empty() {
+        return stem.trim().to_string();
+    }
+    name.to_string()
 }
 
 #[cfg(test)]
@@ -71,7 +85,35 @@ mod tests {
     fn the_download_name_names_the_workspace() {
         let p = Path::new("/x/Northwind Studio Slack export Jan 1 2023 - Nov 18 2026.zip");
         assert_eq!(workspace_name_from_path(p), "Northwind Studio");
+        let p = Path::new("/x/TestExportPollis Slack export Nov 19 2026 - Nov 19 2026.zip");
+        assert_eq!(workspace_name_from_path(p), "TestExportPollis");
+    }
+
+    #[test]
+    fn underscores_count_as_spaces() {
+        let p = Path::new("/x/TestExportPollis_Slack_export_Nov_19_2026_-_Nov_19_2026.zip");
+        assert_eq!(workspace_name_from_path(p), "TestExportPollis");
+        let p = Path::new("/x/Northwind_Studio_SLACK_EXPORT_Jan_1_2023_-_Nov_18_2026.zip");
+        assert_eq!(workspace_name_from_path(p), "Northwind Studio");
+    }
+
+    #[test]
+    fn an_upload_prefix_is_dropped() {
+        let p = Path::new("/x/79e62724-TestExportPollis_Slack_export_Nov_19_2026_-_Nov_19_2026.zip");
+        assert_eq!(workspace_name_from_path(p), "TestExportPollis");
+        let p = Path::new("/x/79E62724-Northwind Studio Slack export Jan 1 2023 - Nov 18 2026.zip");
+        assert_eq!(workspace_name_from_path(p), "Northwind Studio");
+        // Not 8 hex digits, so it is part of the name.
+        let p = Path::new("/x/acme-co Slack export Jan 2024.zip");
+        assert_eq!(workspace_name_from_path(p), "acme-co");
+    }
+
+    #[test]
+    fn other_names_are_used_as_they_are() {
         assert_eq!(workspace_name_from_path(Path::new("/x/acme")), "acme");
+        assert_eq!(workspace_name_from_path(Path::new("/x/my_team_backup.zip")), "my_team_backup");
         assert_eq!(workspace_name_from_path(Path::new("/x/Slack export Jan 2024.zip")), "Slack export Jan 2024");
+        let p = Path::new("/x/79e62724-acme_export.zip");
+        assert_eq!(workspace_name_from_path(p), "79e62724-acme_export");
     }
 }
