@@ -1662,6 +1662,14 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
                 .collect::<Vec<_>>())
         }
 
+        // #2059: the users a room's participants show, for mobile's presence dots.
+        "livekit_room_presence" => {
+            let room: String = arg(&args, "room")?;
+            let identities: Vec<String> = arg(&args, "identities")?;
+            let st = state()?;
+            ok(crate::commands::livekit_roster::room_presence(&st, &room, &identities).await?)
+        }
+
         "list_usable_emoji" => {
             let user_id: String = arg(&args, "userId")?;
             ok(emoji::list_usable_emoji(user_id, &state()?).await?)
@@ -1837,6 +1845,8 @@ mod tests {
             "cancel_history_transfer",
             // #1635
             "resolve_livekit_identities",
+            // #2059
+            "livekit_room_presence",
             "get_user_profiles",
             "get_avatar_path",
             "upload_avatar",

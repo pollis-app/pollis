@@ -41,6 +41,8 @@ pub mod link_preview;
 pub mod livekit_signalling;
 // Participant-identity grammar (#836); pure, outside the media gate.
 pub mod livekit_identity;
+// Resolving a room's participants and the people present (#2059); outside the media gate.
+pub mod livekit_roster;
 pub mod mls;
 pub mod overlay;
 // NOT `pin` — that module is the device-unlock PIN.
