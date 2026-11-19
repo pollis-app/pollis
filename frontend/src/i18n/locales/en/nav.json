@@ -39,6 +39,7 @@
     "createGroup": "Create Group",
     "findGroup": "Find Group",
     "importDiscord": "Import from Discord",
+    "importSlack": "Import from Slack",
     "newChannel": "New Channel",
     "voice": "voice",
     "joinRequests": "Join Requests",

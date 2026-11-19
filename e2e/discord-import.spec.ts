@@ -10,7 +10,7 @@ import { skinAgnosticTest } from "./lib/skins";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const PREVIEW = JSON.parse(readFileSync(path.join(__dirname, "fixtures", "discord-import-preview.json"), "utf8"));
-const DIR = PREVIEW.dir as string;
+const DIR = PREVIEW.path as string;
 
 const SKINS = ["terminal", "modern"] as const;
 type Skin = (typeof SKINS)[number];
@@ -241,8 +241,8 @@ for (const skin of SKINS) {
       await page.getByTestId("import-copy-sheet").click();
       await expect(page.getByTestId("import-copy-sheet")).toHaveAttribute("data-copy-state", "copied");
       const copied = await page.evaluate(() => (window as any).__tauriMock.clipboard as string);
-      expect(copied.split("\n")[0]).toBe("username,display_name,pollis_role,discord_roles,channels,messages");
-      expect(copied).toContain("dan,DM Dan,admin");
+      expect(copied.split("\n")[0]).toBe("username,display_name,email,pollis_role,discord_roles,channels,messages");
+      expect(copied).toContain("dan,DM Dan,,admin");
       expect(copied).not.toContain("Avrae");
     });
 

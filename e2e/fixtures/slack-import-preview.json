@@ -1,0 +1,1216 @@
+{
+ "source": "slack",
+ "path": "/Users/alice/Downloads/Northwind Studio Slack export",
+ "plan": {
+  "source": "slack",
+  "group": {
+   "name": "Northwind Studio",
+   "icon": {
+    "Local": "/Users/alice/Downloads/Northwind Studio Slack export/icon.png"
+   }
+  },
+  "categories": [],
+  "channels": [
+   {
+    "source_id": "C02GEN",
+    "source_name": "general",
+    "name": "general",
+    "kind": "text",
+    "category": null,
+    "description": "Company-wide announcements and work-based matters\nOffsite is 12 March",
+    "exists": false,
+    "private": false,
+    "archived": false,
+    "overwrites": [],
+    "history": {
+     "messages": 4,
+     "system_messages": 2,
+     "first_ms": 1704704400000,
+     "last_ms": 1704790800000,
+     "replies": 1,
+     "pinned": 1,
+     "edited": 0,
+     "reactions": 4,
+     "embeds": 0,
+     "stickers": 0,
+     "media": {
+      "files": 1,
+      "bytes": 48213,
+      "local_present": 0,
+      "local_missing": [],
+      "remote_only": 1
+     }
+    },
+    "threads": [],
+    "notes": []
+   },
+   {
+    "source_id": "C03DES",
+    "source_name": "design",
+    "name": "design",
+    "kind": "text",
+    "category": null,
+    "description": "Design reviews and critique\nCrit: Thursdays 3pm",
+    "exists": false,
+    "private": false,
+    "archived": false,
+    "overwrites": [],
+    "history": {
+     "messages": 2,
+     "system_messages": 0,
+     "first_ms": 1706781600000,
+     "last_ms": 1706785200000,
+     "replies": 0,
+     "pinned": 0,
+     "edited": 1,
+     "reactions": 1,
+     "embeds": 0,
+     "stickers": 0,
+     "media": {
+      "files": 0,
+      "bytes": 0,
+      "local_present": 0,
+      "local_missing": [],
+      "remote_only": 0
+     }
+    },
+    "threads": [],
+    "notes": []
+   },
+   {
+    "source_id": "C04ENG",
+    "source_name": "eng-backend",
+    "name": "eng-backend",
+    "kind": "text",
+    "category": null,
+    "description": null,
+    "exists": false,
+    "private": false,
+    "archived": false,
+    "overwrites": [],
+    "history": {
+     "messages": 3,
+     "system_messages": 0,
+     "first_ms": 1704790000000,
+     "last_ms": 1704792000000,
+     "replies": 0,
+     "pinned": 0,
+     "edited": 0,
+     "reactions": 0,
+     "embeds": 0,
+     "stickers": 0,
+     "media": {
+      "files": 0,
+      "bytes": 0,
+      "local_present": 0,
+      "local_missing": [],
+      "remote_only": 0
+     }
+    },
+    "threads": [],
+    "notes": []
+   },
+   {
+    "source_id": "G01LEAD",
+    "source_name": "leadership",
+    "name": "leadership",
+    "kind": "text",
+    "category": null,
+    "description": "Leads only",
+    "exists": false,
+    "private": true,
+    "archived": false,
+    "overwrites": [],
+    "history": {
+     "messages": 1,
+     "system_messages": 0,
+     "first_ms": 1709287200000,
+     "last_ms": 1709287200000,
+     "replies": 0,
+     "pinned": 0,
+     "edited": 0,
+     "reactions": 0,
+     "embeds": 0,
+     "stickers": 0,
+     "media": {
+      "files": 0,
+      "bytes": 0,
+      "local_present": 0,
+      "local_missing": [],
+      "remote_only": 0
+     }
+    },
+    "threads": [],
+    "notes": []
+   },
+   {
+    "source_id": "C01RND",
+    "source_name": "random",
+    "name": "random",
+    "kind": "text",
+    "category": null,
+    "description": "Non-work banter and water cooler conversation",
+    "exists": false,
+    "private": false,
+    "archived": false,
+    "overwrites": [],
+    "history": {
+     "messages": 0,
+     "system_messages": 0,
+     "first_ms": null,
+     "last_ms": null,
+     "replies": 0,
+     "pinned": 0,
+     "edited": 0,
+     "reactions": 0,
+     "embeds": 0,
+     "stickers": 0,
+     "media": {
+      "files": 0,
+      "bytes": 0,
+      "local_present": 0,
+      "local_missing": [],
+      "remote_only": 0
+     }
+    },
+    "threads": [],
+    "notes": []
+   },
+   {
+    "source_id": "C06EMP",
+    "source_name": "watercooler-music",
+    "name": "watercooler-music",
+    "kind": "text",
+    "category": null,
+    "description": null,
+    "exists": false,
+    "private": false,
+    "archived": false,
+    "overwrites": [],
+    "history": {
+     "messages": 0,
+     "system_messages": 0,
+     "first_ms": null,
+     "last_ms": null,
+     "replies": 0,
+     "pinned": 0,
+     "edited": 0,
+     "reactions": 0,
+     "embeds": 0,
+     "stickers": 0,
+     "media": {
+      "files": 0,
+      "bytes": 0,
+      "local_present": 0,
+      "local_missing": [],
+      "remote_only": 0
+     }
+    },
+    "threads": [],
+    "notes": []
+   }
+  ],
+  "skipped_channels": [
+   {
+    "name": "hiring-2024",
+    "reason": {
+     "kind": "archived"
+    }
+   },
+   {
+    "name": "launch-2023",
+    "reason": {
+     "kind": "archived"
+    }
+   },
+   {
+    "name": "Direct message: ana, ben",
+    "reason": {
+     "kind": "direct"
+    }
+   },
+   {
+    "name": "Group DM: ana, ben, cho",
+    "reason": {
+     "kind": "direct"
+    }
+   }
+  ],
+  "emoji": [
+   {
+    "source_id": "shipit",
+    "source_name": "shipit",
+    "shortcode": "shipit",
+    "exists": false,
+    "animated": false,
+    "uses": 4,
+    "image": {
+     "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/shipit.png"
+    },
+    "alias_of": null,
+    "note": null
+   },
+   {
+    "source_id": "party-parrot",
+    "source_name": "party-parrot",
+    "shortcode": "party_parrot",
+    "exists": false,
+    "animated": true,
+    "uses": 2,
+    "image": {
+     "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/party-parrot.gif"
+    },
+    "alias_of": null,
+    "note": null
+   },
+   {
+    "source_id": "party_parrot",
+    "source_name": "party_parrot",
+    "shortcode": "party_parrot_2",
+    "exists": false,
+    "animated": false,
+    "uses": 1,
+    "image": {
+     "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/party_parrot.png"
+    },
+    "alias_of": null,
+    "note": {
+     "kind": "renamed",
+     "collided_with": "party_parrot"
+    }
+   },
+   {
+    "source_id": "nw-logo",
+    "source_name": "nw-logo",
+    "shortcode": "nw_logo",
+    "exists": false,
+    "animated": false,
+    "uses": 1,
+    "image": {
+     "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/nw-logo.png"
+    },
+    "alias_of": null,
+    "note": null
+   },
+   {
+    "source_id": "x",
+    "source_name": "x",
+    "shortcode": null,
+    "exists": false,
+    "animated": false,
+    "uses": 0,
+    "image": {
+     "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/x.png"
+    },
+    "alias_of": null,
+    "note": {
+     "kind": "no_valid_shortcode"
+    }
+   },
+   {
+    "source_id": "missing-pic",
+    "source_name": "missing-pic",
+    "shortcode": null,
+    "exists": false,
+    "animated": false,
+    "uses": 0,
+    "image": {
+     "Remote": "https://emoji.slack-edge.com/T0NW1ND00/missing-pic/abc123.png"
+    },
+    "alias_of": null,
+    "note": {
+     "kind": "image_remote"
+    }
+   },
+   {
+    "source_id": "partyparrot",
+    "source_name": "partyparrot",
+    "shortcode": "partyparrot",
+    "exists": false,
+    "animated": true,
+    "uses": 1,
+    "image": {
+     "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/party-parrot.gif"
+    },
+    "alias_of": "party-parrot",
+    "note": null
+   },
+   {
+    "source_id": "ship-it",
+    "source_name": "ship-it",
+    "shortcode": "ship_it",
+    "exists": false,
+    "animated": false,
+    "uses": 1,
+    "image": {
+     "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/shipit.png"
+    },
+    "alias_of": "shipit",
+    "note": null
+   },
+   {
+    "source_id": "thumbsup_all",
+    "source_name": "thumbsup_all",
+    "shortcode": null,
+    "exists": false,
+    "animated": false,
+    "uses": 0,
+    "image": null,
+    "alias_of": "thumbsup",
+    "note": {
+     "kind": "alias_target_missing"
+    }
+   }
+  ],
+  "roles": [],
+  "permissions_known": true,
+  "people": [
+   {
+    "source_id": "U02BEN",
+    "username": "ben",
+    "display_name": "Ben Okafor",
+    "is_bot": false,
+    "admin": true,
+    "roles": [],
+    "email": "slack-import-ben@pollis.test",
+    "channels": [
+     "general",
+     "eng-backend",
+     "leadership",
+     "random"
+    ],
+    "messages": 3,
+    "first_ms": 1704708000000,
+    "last_ms": 1709287200000
+   },
+   {
+    "source_id": "U01ANA",
+    "username": "ana",
+    "display_name": "Ana",
+    "is_bot": false,
+    "admin": true,
+    "roles": [],
+    "email": "slack-import-ana@pollis.test",
+    "channels": [
+     "general",
+     "design",
+     "eng-backend",
+     "leadership",
+     "random"
+    ],
+    "messages": 1,
+    "first_ms": 1704704400000,
+    "last_ms": 1704704400000
+   },
+   {
+    "source_id": "U03CHO",
+    "username": "cho",
+    "display_name": "cho",
+    "is_bot": false,
+    "admin": false,
+    "roles": [],
+    "email": "slack-import-cho@pollis.test",
+    "channels": [
+     "general",
+     "design",
+     "eng-backend",
+     "random"
+    ],
+    "messages": 2,
+    "first_ms": 1704711600000,
+    "last_ms": 1706781600000
+   },
+   {
+    "source_id": "U07JO",
+    "username": "jo",
+    "display_name": "Jo Müller",
+    "is_bot": false,
+    "admin": false,
+    "roles": [],
+    "email": "slack-import-jo@pollis.test",
+    "channels": [
+     "general",
+     "design",
+     "random",
+     "watercooler-music"
+    ],
+    "messages": 2,
+    "first_ms": 1704790800000,
+    "last_ms": 1706785200000
+   },
+   {
+    "source_id": "U04DEV",
+    "username": "dev",
+    "display_name": "Dev Raman",
+    "is_bot": false,
+    "admin": false,
+    "roles": [],
+    "email": null,
+    "channels": [
+     "general",
+     "random"
+    ],
+    "messages": 0,
+    "first_ms": null,
+    "last_ms": null
+   },
+   {
+    "source_id": "U05EVA",
+    "username": "eva",
+    "display_name": "Eva Novak",
+    "is_bot": false,
+    "admin": false,
+    "roles": [],
+    "email": "slack-import-eva@pollis.test",
+    "channels": [
+     "general",
+     "random"
+    ],
+    "messages": 0,
+    "first_ms": null,
+    "last_ms": null
+   },
+   {
+    "source_id": "U08GHB",
+    "username": "github",
+    "display_name": "GitHub",
+    "is_bot": true,
+    "admin": false,
+    "roles": [],
+    "email": null,
+    "channels": [],
+    "messages": 0,
+    "first_ms": null,
+    "last_ms": null
+   },
+   {
+    "source_id": "U09POLL",
+    "username": "polly",
+    "display_name": "Polly",
+    "is_bot": true,
+    "admin": false,
+    "roles": [],
+    "email": null,
+    "channels": [],
+    "messages": 0,
+    "first_ms": null,
+    "last_ms": null
+   },
+   {
+    "source_id": "USLACKBOT",
+    "username": "slackbot",
+    "display_name": "Slackbot",
+    "is_bot": true,
+    "admin": false,
+    "roles": [],
+    "email": null,
+    "channels": [],
+    "messages": 0,
+    "first_ms": null,
+    "last_ms": null
+   }
+  ],
+  "user_groups": [
+   {
+    "source_id": "S01DES",
+    "handle": "design-team",
+    "name": "Design team",
+    "description": "Everyone who reviews design",
+    "members": [
+     "cho",
+     "Jo Müller"
+    ]
+   }
+  ],
+  "totals": {
+   "categories": 0,
+   "channels": 6,
+   "to_create_categories": 0,
+   "to_create_channels": 6,
+   "to_upload_emoji": 6,
+   "threads": 0,
+   "messages": 10,
+   "system_messages": 2,
+   "first_ms": 1704704400000,
+   "last_ms": 1709287200000,
+   "media_files": 1,
+   "media_bytes": 48213,
+   "media_missing": 0,
+   "media_remote_only": 1,
+   "emoji": 6,
+   "people": 6,
+   "overwrites": 0,
+   "private_channels": 1,
+   "archived_skipped": 2,
+   "people_with_email": 5,
+   "user_groups": 1
+  },
+  "notes": [
+   {
+    "kind": "email_invites",
+    "with_email": 5,
+    "without_email": 1
+   },
+   {
+    "kind": "archived_skipped",
+    "count": 2
+   },
+   {
+    "kind": "user_groups_not_imported",
+    "count": 1
+   },
+   {
+    "kind": "private_channels",
+    "count": 1
+   },
+   {
+    "kind": "history_not_imported",
+    "messages": 10
+   }
+  ],
+  "warnings": []
+ },
+ "invite_sheet": "username,display_name,email,pollis_role,slack_roles,channels,messages\nben,Ben Okafor,slack-import-ben@pollis.test,admin,,general; eng-backend; leadership; random,3\nana,Ana,slack-import-ana@pollis.test,admin,,general; design; eng-backend; leadership; random,1\ncho,cho,slack-import-cho@pollis.test,member,,general; design; eng-backend; random,2\njo,Jo Müller,slack-import-jo@pollis.test,member,,general; design; random; watercooler-music,2\ndev,Dev Raman,,member,,general; random,0\neva,Eva Novak,slack-import-eva@pollis.test,member,,general; random,0\n",
+ "target": null,
+ "candidates": [],
+ "include_archived": false,
+ "preview_archived": {
+  "source": "slack",
+  "path": "/Users/alice/Downloads/Northwind Studio Slack export",
+  "plan": {
+   "source": "slack",
+   "group": {
+    "name": "Northwind Studio",
+    "icon": {
+     "Local": "/Users/alice/Downloads/Northwind Studio Slack export/icon.png"
+    }
+   },
+   "categories": [],
+   "channels": [
+    {
+     "source_id": "C02GEN",
+     "source_name": "general",
+     "name": "general",
+     "kind": "text",
+     "category": null,
+     "description": "Company-wide announcements and work-based matters\nOffsite is 12 March",
+     "exists": false,
+     "private": false,
+     "archived": false,
+     "overwrites": [],
+     "history": {
+      "messages": 4,
+      "system_messages": 2,
+      "first_ms": 1704704400000,
+      "last_ms": 1704790800000,
+      "replies": 1,
+      "pinned": 1,
+      "edited": 0,
+      "reactions": 4,
+      "embeds": 0,
+      "stickers": 0,
+      "media": {
+       "files": 1,
+       "bytes": 48213,
+       "local_present": 0,
+       "local_missing": [],
+       "remote_only": 1
+      }
+     },
+     "threads": [],
+     "notes": []
+    },
+    {
+     "source_id": "C03DES",
+     "source_name": "design",
+     "name": "design",
+     "kind": "text",
+     "category": null,
+     "description": "Design reviews and critique\nCrit: Thursdays 3pm",
+     "exists": false,
+     "private": false,
+     "archived": false,
+     "overwrites": [],
+     "history": {
+      "messages": 2,
+      "system_messages": 0,
+      "first_ms": 1706781600000,
+      "last_ms": 1706785200000,
+      "replies": 0,
+      "pinned": 0,
+      "edited": 1,
+      "reactions": 1,
+      "embeds": 0,
+      "stickers": 0,
+      "media": {
+       "files": 0,
+       "bytes": 0,
+       "local_present": 0,
+       "local_missing": [],
+       "remote_only": 0
+      }
+     },
+     "threads": [],
+     "notes": []
+    },
+    {
+     "source_id": "C04ENG",
+     "source_name": "eng-backend",
+     "name": "eng-backend",
+     "kind": "text",
+     "category": null,
+     "description": null,
+     "exists": false,
+     "private": false,
+     "archived": false,
+     "overwrites": [],
+     "history": {
+      "messages": 3,
+      "system_messages": 0,
+      "first_ms": 1704790000000,
+      "last_ms": 1704792000000,
+      "replies": 0,
+      "pinned": 0,
+      "edited": 0,
+      "reactions": 0,
+      "embeds": 0,
+      "stickers": 0,
+      "media": {
+       "files": 0,
+       "bytes": 0,
+       "local_present": 0,
+       "local_missing": [],
+       "remote_only": 0
+      }
+     },
+     "threads": [],
+     "notes": []
+    },
+    {
+     "source_id": "G02HIRE",
+     "source_name": "hiring-2024",
+     "name": "hiring-2024",
+     "kind": "text",
+     "category": null,
+     "description": "Interview loop",
+     "exists": false,
+     "private": true,
+     "archived": true,
+     "overwrites": [],
+     "history": {
+      "messages": 1,
+      "system_messages": 0,
+      "first_ms": 1712052000000,
+      "last_ms": 1712052000000,
+      "replies": 0,
+      "pinned": 0,
+      "edited": 0,
+      "reactions": 0,
+      "embeds": 0,
+      "stickers": 0,
+      "media": {
+       "files": 0,
+       "bytes": 0,
+       "local_present": 0,
+       "local_missing": [],
+       "remote_only": 0
+      }
+     },
+     "threads": [],
+     "notes": [
+      {
+       "kind": "archived"
+      }
+     ]
+    },
+    {
+     "source_id": "C05OLD",
+     "source_name": "launch-2023",
+     "name": "launch-2023",
+     "kind": "text",
+     "category": null,
+     "description": "Coordinating the 2023 launch",
+     "exists": false,
+     "private": false,
+     "archived": true,
+     "overwrites": [],
+     "history": {
+      "messages": 1,
+      "system_messages": 0,
+      "first_ms": 1683021600000,
+      "last_ms": 1683021600000,
+      "replies": 0,
+      "pinned": 0,
+      "edited": 0,
+      "reactions": 0,
+      "embeds": 0,
+      "stickers": 0,
+      "media": {
+       "files": 0,
+       "bytes": 0,
+       "local_present": 0,
+       "local_missing": [],
+       "remote_only": 0
+      }
+     },
+     "threads": [],
+     "notes": [
+      {
+       "kind": "archived"
+      }
+     ]
+    },
+    {
+     "source_id": "G01LEAD",
+     "source_name": "leadership",
+     "name": "leadership",
+     "kind": "text",
+     "category": null,
+     "description": "Leads only",
+     "exists": false,
+     "private": true,
+     "archived": false,
+     "overwrites": [],
+     "history": {
+      "messages": 1,
+      "system_messages": 0,
+      "first_ms": 1709287200000,
+      "last_ms": 1709287200000,
+      "replies": 0,
+      "pinned": 0,
+      "edited": 0,
+      "reactions": 0,
+      "embeds": 0,
+      "stickers": 0,
+      "media": {
+       "files": 0,
+       "bytes": 0,
+       "local_present": 0,
+       "local_missing": [],
+       "remote_only": 0
+      }
+     },
+     "threads": [],
+     "notes": []
+    },
+    {
+     "source_id": "C01RND",
+     "source_name": "random",
+     "name": "random",
+     "kind": "text",
+     "category": null,
+     "description": "Non-work banter and water cooler conversation",
+     "exists": false,
+     "private": false,
+     "archived": false,
+     "overwrites": [],
+     "history": {
+      "messages": 0,
+      "system_messages": 0,
+      "first_ms": null,
+      "last_ms": null,
+      "replies": 0,
+      "pinned": 0,
+      "edited": 0,
+      "reactions": 0,
+      "embeds": 0,
+      "stickers": 0,
+      "media": {
+       "files": 0,
+       "bytes": 0,
+       "local_present": 0,
+       "local_missing": [],
+       "remote_only": 0
+      }
+     },
+     "threads": [],
+     "notes": []
+    },
+    {
+     "source_id": "C06EMP",
+     "source_name": "watercooler-music",
+     "name": "watercooler-music",
+     "kind": "text",
+     "category": null,
+     "description": null,
+     "exists": false,
+     "private": false,
+     "archived": false,
+     "overwrites": [],
+     "history": {
+      "messages": 0,
+      "system_messages": 0,
+      "first_ms": null,
+      "last_ms": null,
+      "replies": 0,
+      "pinned": 0,
+      "edited": 0,
+      "reactions": 0,
+      "embeds": 0,
+      "stickers": 0,
+      "media": {
+       "files": 0,
+       "bytes": 0,
+       "local_present": 0,
+       "local_missing": [],
+       "remote_only": 0
+      }
+     },
+     "threads": [],
+     "notes": []
+    }
+   ],
+   "skipped_channels": [
+    {
+     "name": "Direct message: ana, ben",
+     "reason": {
+      "kind": "direct"
+     }
+    },
+    {
+     "name": "Group DM: ana, ben, cho",
+     "reason": {
+      "kind": "direct"
+     }
+    }
+   ],
+   "emoji": [
+    {
+     "source_id": "shipit",
+     "source_name": "shipit",
+     "shortcode": "shipit",
+     "exists": false,
+     "animated": false,
+     "uses": 4,
+     "image": {
+      "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/shipit.png"
+     },
+     "alias_of": null,
+     "note": null
+    },
+    {
+     "source_id": "party-parrot",
+     "source_name": "party-parrot",
+     "shortcode": "party_parrot",
+     "exists": false,
+     "animated": true,
+     "uses": 2,
+     "image": {
+      "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/party-parrot.gif"
+     },
+     "alias_of": null,
+     "note": null
+    },
+    {
+     "source_id": "party_parrot",
+     "source_name": "party_parrot",
+     "shortcode": "party_parrot_2",
+     "exists": false,
+     "animated": false,
+     "uses": 1,
+     "image": {
+      "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/party_parrot.png"
+     },
+     "alias_of": null,
+     "note": {
+      "kind": "renamed",
+      "collided_with": "party_parrot"
+     }
+    },
+    {
+     "source_id": "nw-logo",
+     "source_name": "nw-logo",
+     "shortcode": "nw_logo",
+     "exists": false,
+     "animated": false,
+     "uses": 1,
+     "image": {
+      "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/nw-logo.png"
+     },
+     "alias_of": null,
+     "note": null
+    },
+    {
+     "source_id": "x",
+     "source_name": "x",
+     "shortcode": null,
+     "exists": false,
+     "animated": false,
+     "uses": 0,
+     "image": {
+      "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/x.png"
+     },
+     "alias_of": null,
+     "note": {
+      "kind": "no_valid_shortcode"
+     }
+    },
+    {
+     "source_id": "missing-pic",
+     "source_name": "missing-pic",
+     "shortcode": null,
+     "exists": false,
+     "animated": false,
+     "uses": 0,
+     "image": {
+      "Remote": "https://emoji.slack-edge.com/T0NW1ND00/missing-pic/abc123.png"
+     },
+     "alias_of": null,
+     "note": {
+      "kind": "image_remote"
+     }
+    },
+    {
+     "source_id": "partyparrot",
+     "source_name": "partyparrot",
+     "shortcode": "partyparrot",
+     "exists": false,
+     "animated": true,
+     "uses": 1,
+     "image": {
+      "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/party-parrot.gif"
+     },
+     "alias_of": "party-parrot",
+     "note": null
+    },
+    {
+     "source_id": "ship-it",
+     "source_name": "ship-it",
+     "shortcode": "ship_it",
+     "exists": false,
+     "animated": false,
+     "uses": 1,
+     "image": {
+      "Local": "/Users/alice/Downloads/Northwind Studio Slack export/emoji/shipit.png"
+     },
+     "alias_of": "shipit",
+     "note": null
+    },
+    {
+     "source_id": "thumbsup_all",
+     "source_name": "thumbsup_all",
+     "shortcode": null,
+     "exists": false,
+     "animated": false,
+     "uses": 0,
+     "image": null,
+     "alias_of": "thumbsup",
+     "note": {
+      "kind": "alias_target_missing"
+     }
+    }
+   ],
+   "roles": [],
+   "permissions_known": true,
+   "people": [
+    {
+     "source_id": "U02BEN",
+     "username": "ben",
+     "display_name": "Ben Okafor",
+     "is_bot": false,
+     "admin": true,
+     "roles": [],
+     "email": "slack-import-ben@pollis.test",
+     "channels": [
+      "general",
+      "eng-backend",
+      "launch-2023",
+      "leadership",
+      "random"
+     ],
+     "messages": 3,
+     "first_ms": 1704708000000,
+     "last_ms": 1709287200000
+    },
+    {
+     "source_id": "U01ANA",
+     "username": "ana",
+     "display_name": "Ana",
+     "is_bot": false,
+     "admin": true,
+     "roles": [],
+     "email": "slack-import-ana@pollis.test",
+     "channels": [
+      "general",
+      "design",
+      "eng-backend",
+      "hiring-2024",
+      "launch-2023",
+      "leadership",
+      "random"
+     ],
+     "messages": 2,
+     "first_ms": 1683021600000,
+     "last_ms": 1704704400000
+    },
+    {
+     "source_id": "U03CHO",
+     "username": "cho",
+     "display_name": "cho",
+     "is_bot": false,
+     "admin": false,
+     "roles": [],
+     "email": "slack-import-cho@pollis.test",
+     "channels": [
+      "general",
+      "design",
+      "eng-backend",
+      "hiring-2024",
+      "random"
+     ],
+     "messages": 3,
+     "first_ms": 1704711600000,
+     "last_ms": 1712052000000
+    },
+    {
+     "source_id": "U07JO",
+     "username": "jo",
+     "display_name": "Jo Müller",
+     "is_bot": false,
+     "admin": false,
+     "roles": [],
+     "email": "slack-import-jo@pollis.test",
+     "channels": [
+      "general",
+      "design",
+      "random",
+      "watercooler-music"
+     ],
+     "messages": 2,
+     "first_ms": 1704790800000,
+     "last_ms": 1706785200000
+    },
+    {
+     "source_id": "U04DEV",
+     "username": "dev",
+     "display_name": "Dev Raman",
+     "is_bot": false,
+     "admin": false,
+     "roles": [],
+     "email": null,
+     "channels": [
+      "general",
+      "random"
+     ],
+     "messages": 0,
+     "first_ms": null,
+     "last_ms": null
+    },
+    {
+     "source_id": "U05EVA",
+     "username": "eva",
+     "display_name": "Eva Novak",
+     "is_bot": false,
+     "admin": false,
+     "roles": [],
+     "email": "slack-import-eva@pollis.test",
+     "channels": [
+      "general",
+      "random"
+     ],
+     "messages": 0,
+     "first_ms": null,
+     "last_ms": null
+    },
+    {
+     "source_id": "U08GHB",
+     "username": "github",
+     "display_name": "GitHub",
+     "is_bot": true,
+     "admin": false,
+     "roles": [],
+     "email": null,
+     "channels": [],
+     "messages": 0,
+     "first_ms": null,
+     "last_ms": null
+    },
+    {
+     "source_id": "U09POLL",
+     "username": "polly",
+     "display_name": "Polly",
+     "is_bot": true,
+     "admin": false,
+     "roles": [],
+     "email": null,
+     "channels": [],
+     "messages": 0,
+     "first_ms": null,
+     "last_ms": null
+    },
+    {
+     "source_id": "USLACKBOT",
+     "username": "slackbot",
+     "display_name": "Slackbot",
+     "is_bot": true,
+     "admin": false,
+     "roles": [],
+     "email": null,
+     "channels": [],
+     "messages": 0,
+     "first_ms": null,
+     "last_ms": null
+    }
+   ],
+   "user_groups": [
+    {
+     "source_id": "S01DES",
+     "handle": "design-team",
+     "name": "Design team",
+     "description": "Everyone who reviews design",
+     "members": [
+      "cho",
+      "Jo Müller"
+     ]
+    }
+   ],
+   "totals": {
+    "categories": 0,
+    "channels": 8,
+    "to_create_categories": 0,
+    "to_create_channels": 8,
+    "to_upload_emoji": 6,
+    "threads": 0,
+    "messages": 12,
+    "system_messages": 2,
+    "first_ms": 1683021600000,
+    "last_ms": 1712052000000,
+    "media_files": 1,
+    "media_bytes": 48213,
+    "media_missing": 0,
+    "media_remote_only": 1,
+    "emoji": 6,
+    "people": 6,
+    "overwrites": 0,
+    "private_channels": 2,
+    "archived_skipped": 0,
+    "people_with_email": 5,
+    "user_groups": 1
+   },
+   "notes": [
+    {
+     "kind": "email_invites",
+     "with_email": 5,
+     "without_email": 1
+    },
+    {
+     "kind": "user_groups_not_imported",
+     "count": 1
+    },
+    {
+     "kind": "private_channels",
+     "count": 2
+    },
+    {
+     "kind": "history_not_imported",
+     "messages": 12
+    }
+   ],
+   "warnings": []
+  },
+  "invite_sheet": "username,display_name,email,pollis_role,slack_roles,channels,messages\nben,Ben Okafor,slack-import-ben@pollis.test,admin,,general; eng-backend; launch-2023; leadership; random,3\nana,Ana,slack-import-ana@pollis.test,admin,,general; design; eng-backend; hiring-2024; launch-2023; leadership; random,2\ncho,cho,slack-import-cho@pollis.test,member,,general; design; eng-backend; hiring-2024; random,3\njo,Jo Müller,slack-import-jo@pollis.test,member,,general; design; random; watercooler-music,2\ndev,Dev Raman,,member,,general; random,0\neva,Eva Novak,slack-import-eva@pollis.test,member,,general; random,0\n",
+  "target": null,
+  "candidates": [],
+  "include_archived": true
+ }
+}

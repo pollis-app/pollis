@@ -18,7 +18,7 @@ import { DMSettingsPage } from "./pages/DMSettings";
 import { LeaveGroupPage } from "./pages/LeaveGroup";
 import { CreateGroupPage } from "./pages/CreateGroupPage";
 import { SearchGroupPage } from "./pages/SearchGroupPage";
-import { DiscordImportPage } from "./pages/DiscordImportPage";
+import { ImportPage } from "./pages/ImportPage";
 import { CreateChannelPage } from "./pages/CreateChannelPage";
 import { StartDMPage } from "./pages/StartDMPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -75,11 +75,17 @@ const searchGroupRoute = createRoute({
   component: SearchGroupPage,
 });
 
-// Importing a Discord server's structure (#1180).
+// Importing a community's structure: a Discord server (#1180), a Slack workspace (#1179).
 const discordImportRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/import",
-  component: DiscordImportPage,
+  component: () => <ImportPage source="discord" />,
+});
+
+const slackImportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/import/slack",
+  component: () => <ImportPage source="slack" />,
 });
 
 const groupRoute = createRoute({
@@ -404,6 +410,7 @@ const routeTree = rootRoute.addChildren([
   createGroupRoute,
   searchGroupRoute,
   discordImportRoute,
+  slackImportRoute,
   groupRoute,
   channelRoute,
   createChannelRoute,

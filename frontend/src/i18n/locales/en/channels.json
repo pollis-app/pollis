@@ -8,6 +8,7 @@
     "create": "Create Group",
     "find": "Find Group",
     "importDiscord": "Import from Discord",
+    "importSlack": "Import from Slack",
     "loadFailed": "Failed to load",
     "loadError": "Error: {{message}}",
     "joinRequestsPending_one": "{{count}} join request pending",

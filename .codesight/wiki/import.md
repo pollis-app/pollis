@@ -1,10 +1,14 @@
 # Importing from Discord and Slack
 
-Bringing a community over from another chat platform. Discord first (#1180): its
-**structure** (categories, channels in order, topics, voice channels, custom emoji, the
-role collapse, an invite plan), read from an export made on the user's own machine.
-Message history is not imported (see "History: design, not built"). Slack (#1179) reuses
-the same pipeline.
+Bringing a community over from another chat platform: its **structure**, read from an
+export the user made, never its messages (see "History: design, not built"). Two sources,
+one pipeline:
+
+- **Discord** (#1180): categories, channels in order, topics, voice channels, custom
+  emoji, the role collapse and an invite plan, from a DiscordChatExporter export.
+- **Slack** (#1179): channels in Slack's order with purpose and topic, custom emoji, an
+  invite plan with email invites, user groups listed, from the workspace export an admin
+  downloads. See "Slack" below.
 
 ## Pipeline
 
@@ -13,12 +17,15 @@ export folder ──read──▶ model::Export ──plan──▶ plan::Import
  (pollis-import: pure, no network, no keys)                     (pollis-core::commands::import)
 ```
 
-- **Read** (`pollis-import/src/discord/`): every DiscordChatExporter (DCE) `*.json` in one
+- **Read**: one reader per source, each producing the same `model::Export`
+  (`pollis_import::read_export(SourceKind, path)`). Readers only read; they never plan.
+  Discord (`pollis-import/src/discord/`): every DiscordChatExporter (DCE) `*.json` in one
   folder (`dce.rs`), then a guild snapshot beside them if there is one (`snapshot.rs`).
   Wire structs are lenient (every field defaulted, unknown fields ignored) so exports
   from any DCE version parse; a bad file is a warning, never a failed import. The server
   is chosen by **majority of server-channel files**, never by file order (DCE files DM
-  exports under a pseudo-guild that sorts first).
+  exports under a pseudo-guild that sorts first). Slack (`pollis-import/src/slack/`): see
+  "Slack" below.
 - **Model** (`model.rs`): source-neutral. Holds what the source said; renaming and
   dropping are the plan's decisions, so the plan can report them.
 - **Plan** (`plan.rs`): deterministic (same export, same target state, same plan). Its
@@ -28,9 +35,11 @@ export folder ──read──▶ model::Export ──plan──▶ plan::Import
   app renders it in the reader's language.
 - **Report** (`report.rs`): English text for the CLI, and the invite sheet (CSV, cells
   quoted and formula characters defused). The desktop page renders the plan natively.
-- **Apply** (`pollis-core/src/commands/import.rs`): `discord_import_preview` and
-  `discord_import_apply`. See "Apply" below.
-- **CLI**: `cargo run -p pollis-import -- plan <export-dir> [--json | --sheet]`. Read-only.
+- **Apply** (`pollis-core/src/commands/import.rs`): `import_preview` and `import_apply`,
+  taking the source (`"discord"` / `"slack"`). Everything after the read is source-neutral.
+  See "Apply" below.
+- **CLI**: `cargo run -p pollis-import -- plan [--slack] <export> [--json | --sheet]
+  [--include-archived]` (a `.zip` implies `--slack`). Read-only.
 
 ## Input
 
@@ -84,16 +93,68 @@ reported; a taken name (earlier in the import, or already in the group) gets the
 free `_2`, `_3`, ... within 32. Most-used emoji are fitted first, so the popular one keeps
 the plain name. `shortcode_is_valid` and `is_valid_display_name` live in `pollis-api`.
 
+## Slack
+
+**The workspace export is the primary path.** A workspace admin downloads it from Slack's
+admin pages (Settings, Import/Export Data, Export) as a ZIP; no token and no app install.
+The page takes the ZIP as downloaded or the folder it unpacks to (`slack/archive.rs`:
+reads are bounded, ZIP entry names are only ever looked up, never joined onto a path we
+write; images inside a ZIP are copied to a temp cache under hashed names for the upload).
+
+```
+channels.json        public channels (name, purpose, topic, is_archived, is_general, members)
+groups.json          private channels (exports that include them)
+users.json           name, profile.display_name/real_name/email, is_admin/is_owner, deleted, is_bot
+dms.json, mpims.json reported as not imported
+<channel>/<day>.json measured only (message counts, dates, emoji uses), never imported
+```
+
+A standard export has no custom emoji, no user groups and no workspace name, so the
+**workspace snapshot** sits beside it (in the folder or the ZIP):
+
+```
+slack-workspace.json { "team": team.info → team, "emoji": emoji.list → emoji,
+                       "usergroups": usergroups.list → usergroups (include_users) }
+emoji/<name>.png|gif|jpg|jpeg|webp   (optional)
+icon.png|jpg|gif|webp                (optional)
+```
+
+Without it the group is named from the download's file name ("Northwind Studio Slack
+export Jan 1 2021 - Nov 18 2026.zip" → "Northwind Studio") and the plan says so.
+
+| Slack | Pollis | Rule |
+|---|---|---|
+| Workspace | one group | name from the snapshot, else the file name; icon from the snapshot |
+| Channel | text channel | no categories; Slack's sidebar order: the default channel (`is_general`) first, then alphabetical |
+| Purpose, topic | description | purpose, then the topic on a second line when it differs |
+| `is_private` / `groups.json` | channel, flagged | **private on Slack, visible to every Pollis member** |
+| `is_archived` | skipped by default | listed with the reason; `include_archived` brings them, marked |
+| DM, group DM | not imported | listed |
+| Custom emoji | group emoji | the shared shortcode policy (`party-parrot` and `party_parrot` → `:party_parrot:` and `:party_parrot_2:`, the more used one keeping the plain name; at equal use, a name that is already valid keeps it) |
+| `alias:other` | its own shortcode for the target's picture | an alias of a standard emoji, or of one not imported, is skipped and reported |
+| Admins, owners | "make admin" on the sheet | the primary owner is the owner |
+| Members | an invite plan | per-person roster from channel `members`; emails on the sheet; with `invite_by_email`, an ordinary group invite to every email that belongs to a Pollis account |
+| Deactivated accounts | left out | never invited, dropped from user groups |
+| Bots, apps, Slackbot | listed apart | never invited |
+| User groups | listed only | no mention tags yet (#294) |
+
+**Email invites** go through `groups::invite_to_group` (the core of `send_group_invite`),
+one per planned email; the DS resolves the email. An email with no account (or one the
+DS declines to resolve) is "no account": that person joins through the invite link,
+listed by name on the result. A re-run answers "already invited" or "already a member",
+so nobody is invited twice. The admin's own email answers "you". Nothing is invited
+unless the admin leaves the page's switch on, and nobody joins until they accept.
+
 ## Apply
 
 `pollis-core/src/commands/import.rs`, every write an existing device-signed command; the
 DS gains no Discord awareness.
 
-- **Preview** (`discord_import_preview(dir, user_id, target?)`): reads and plans; writes
+- **Preview** (`import_preview(source, path, user_id, target?, include_archived?)`): reads and plans; writes
   nothing. `target` omitted picks the one admin-held group whose name matches the server's
   (a re-run) or else a new group; `"new"` forces a new group; a group id targets it
   (admins only). Returns the plan, the invite sheet, the target and the candidates.
-- **Apply** (`discord_import_apply`): re-plans against the target (a plan from the renderer
+- **Apply** (`import_apply(source, path, user_id, target?, { include_archived, invite_by_email })`): re-plans against the target (a plan from the renderer
   is never trusted), then: `create_group` with no default channels (+ icon); categories
   not already there (matched by name, case-insensitive); channels not already there
   (matched by category name + channel name), each at the bottom of its block, so creating
@@ -109,20 +170,29 @@ DS gains no Discord awareness.
 - The desktop shim requires the folder to have been chosen in this device's picker
   (`src-tauri/src/pathscope.rs`).
 
-## Desktop page
+## Desktop pages
 
-`/groups/import` (`pages/DiscordImportPage.tsx`, `components/Import/`), reached from the
-Groups menu, Cmd+K ("Import from Discord") and the breadcrumb. A page, never a dialog:
-choose the folder, read the dry run (channels by category with every dropped permission,
-emoji, roles, people, notes, parse warnings), pick the target in a radio list when a
-matching group exists, Import. The result shows the counts, any failures, the new invite
-link (`CreatedInviteLinkCard`, shown once) and a way to the group. Copy lives in the
-`import` i18n namespace.
+`/groups/import` (Discord) and `/groups/import/slack` (Slack): one page,
+`pages/ImportPage.tsx` with a `source` prop, over `components/Import/` (`ImportPlanView`,
+`ImportResultView`, both source-neutral). Reached from the Groups menu, Cmd+K ("Import from
+Discord" / "Import from Slack") and the breadcrumb. A page, never a dialog: choose the
+export (Discord: a folder; Slack: the ZIP, or the unpacked folder), read the dry run
+(channels with descriptions and every dropped permission or privacy, what is not imported
+and why, emoji, roles, user groups, people with their emails and rosters, notes, parse
+warnings), pick the target in a radio list when a matching group exists, and for Slack two
+switches: bring archived channels (re-reads the plan) and invite people who already use
+Pollis (on by default, shown only when the export has emails). Import. The result shows
+the counts, the invites (invited, already invited, already in, and who has no account
+yet, by name), any failures, the new invite link (`CreatedInviteLinkCard`, shown once)
+and a way to the group. Copy lives in the `import` i18n namespace: `sourceName`, a block
+per source, and shared `page`, `plan` and `result` blocks.
 
-**Mobile: not built, deliberately.** The export is a folder on a computer (DCE is a
-desktop program); a phone has no such folder and no way to pick one. The group an import
-makes is an ordinary group, so mobile shows its categories, order and emoji like any
-other. `scripts/feature-parity.json` records the exemption.
+**Mobile: not built, deliberately, for either source.** The export is a file made on a
+computer: DCE is a desktop program, and Slack's workspace export is downloaded by an admin
+from Slack's admin pages in a browser. A phone has neither to hand, and migrating a
+workspace is an admin task at a desk. The group an import makes, its emoji and its
+invites are ordinary, so mobile shows and accepts them like any other.
+`scripts/feature-parity.json` records the exemption.
 
 ## Tests
 
@@ -131,12 +201,27 @@ other. `scripts/feature-parity.json` records the exemption.
   server with a snapshot: positions, an empty category, voice and stage, a forum, roles
   with permissions, overwrites including one private channel, a member who never wrote,
   emoji images, an icon; regenerate with `tests/fixtures/gen_dragons_den.py`).
+- `pollis-import/tests/slack_fixture.rs` over `tests/fixtures/northwind`, a Slack
+  workspace export in Slack's own shapes with a workspace snapshot (regenerate with
+  `tests/fixtures/gen_northwind.py`): public, private and archived channels, purpose and
+  topic, users with and without email, admins, a guest, a deactivated account, bots and
+  Slackbot, DMs, emoji colliding after normalising, aliases (to a custom emoji and to a
+  standard one), user groups. Also read as a ZIP (flat and wrapped in a folder, with an
+  entry that tries to climb out) and without its snapshot.
+- `src-tauri/tests/flows/slack_import.rs`: Slack through the real commands and the
+  in-process DS: order and descriptions, a re-run creating nothing, archived channels only
+  when asked (slotting into place), and email invites reaching only the account that
+  exists, once (then "already invited", then "already a member").
 - `src-tauri/tests/flows/discord_import.rs`: the real commands against the in-process DS
   (order, a second run creating nothing, a partial run repaired in place, a member refused,
   the shim refusing an unpicked folder). That DS has no object storage, so emoji and the
   icon are expected failures there.
-- `pollis-tui/examples/discord_import_peer.rs`: the same calls against the dev DS, where
+- `pollis-tui/examples/import_peer.rs` (`discord|slack <email> <export> [--invite-by-email]`,
+  or `signup <email>` for an invitee; `@pollis.test` addresses only): the same calls against the dev DS, where
   the emoji and icon uploads are real.
+- `e2e/slack-import.spec.ts`: the Slack page in both skins over
+  `e2e/fixtures/slack-import-preview.json`. Both preview fixtures are real `pollis-import`
+  output, regenerated by `e2e/fixtures/gen_import_previews.py`.
 - `e2e/discord-import.spec.ts`: the page in both skins over the real plan of the fixture
   (`e2e/fixtures/discord-import-preview.json`, from `pollis-import plan --json`).
 
@@ -180,4 +265,8 @@ imports.
   matches a joining Pollis account to a Discord username.
 - **Group icons are stored but not drawn**: `groups.icon_url` is set, and no screen shows
   a group icon yet.
-- Slack (#1179).
+- **A direct Slack reader** (OAuth token: `channels:read`, `groups:read`, `users:read`,
+  `users:read.email`, `emoji:read`, `usergroups:read`, held in memory on the device, calls
+  straight to `slack.com/api/*`): it would write the same export files and
+  `slack-workspace.json` and never plan. Not built: it needs a Slack app and a test
+  workspace to verify, and many workspaces require an admin to approve app installs.

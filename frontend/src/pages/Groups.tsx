@@ -98,6 +98,15 @@ export const GroupsPage: React.FC = observer(() => {
       testId: "menu-item-import-discord",
       activateOn: "press",
     },
+    {
+      id: "import-slack",
+      label: t("groups.importSlack"),
+      icon: <Import size={14} />,
+      action: () => navigate({ to: "/groups/import/slack" }),
+      type: "system",
+      testId: "menu-item-import-slack",
+      activateOn: "press",
+    },
   ];
 
   if (groupItems.length) {
