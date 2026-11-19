@@ -953,7 +953,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**241 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**244 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1014,6 +1014,11 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **LinkedHistoryRequest** — props: deviceId, deviceName — `frontend/src/components/HistoryTransfer/LinkedHistoryRequest.tsx`
 - **SourcePicker** — props: sources, value, onChange — `frontend/src/components/HistoryTransfer/SourcePicker.tsx`
 - **TransferStatus** — props: transfer, onDone, onRetried — `frontend/src/components/HistoryTransfer/TransferStatus.tsx`
+
+### `components/Import` (2)
+
+- **ImportPlanView** — props: plan, inviteSheet — `frontend/src/components/Import/ImportPlanView.tsx`
+- **ImportResultView** — props: result, onOpenGroup — `frontend/src/components/Import/ImportResultView.tsx`
 
 ### `components/Invites` (3)
 
@@ -1193,7 +1198,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (61)
+### `pages` (62)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -1207,6 +1212,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **CreateGroup** — props: onSuccess — `frontend/src/pages/CreateGroup.tsx`
 - **CreateGroupPage** — `frontend/src/pages/CreateGroupPage.tsx`
 - **DiagnosticsPage** — `frontend/src/pages/DiagnosticsPage.tsx`
+- **DiscordImportPage** — `frontend/src/pages/DiscordImportPage.tsx`
 - **DMPage** — `frontend/src/pages/DM.tsx`
 - **DMSettingsPage** — `frontend/src/pages/DMSettings.tsx`
 - **DMsPage** — `frontend/src/pages/DMs.tsx`
