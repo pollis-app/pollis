@@ -33,6 +33,8 @@ on:
       - 'rust-toolchain.toml'
       - '.github/workflows/app-sdk.yml'
   workflow_dispatch:
+  # sdk-publish.yml runs these tests before it publishes.
+  workflow_call:
 
 permissions:
   contents: read
