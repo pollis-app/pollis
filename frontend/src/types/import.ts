@@ -185,7 +185,7 @@ interface ImportFailure {
 
 export type EmailInviteOutcome = "invited" | "already_invited" | "already_member" | "you" | "no_account" | "failed";
 
-export interface EmailInvite {
+interface EmailInvite {
   username: string;
   display_name: string;
   email: string;
