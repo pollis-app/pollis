@@ -1,0 +1,87 @@
+{
+ "guild": {
+  "id": "900000000000000001",
+  "name": "Dragon's Den",
+  "iconUrl": "icon.png"
+ },
+ "channel": {
+  "id": "817486626816000001",
+  "type": "GuildPublicThread",
+  "categoryId": "111",
+  "category": "session-notes",
+  "name": "Loot split",
+  "topic": null
+ },
+ "messages": [
+  {
+   "id": "817486626816000002",
+   "type": "Default",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "Bard gets it obviously",
+   "author": {
+    "id": "101",
+    "name": "ashley",
+    "discriminator": "0000",
+    "nickname": "Ash the Bard",
+    "color": null,
+    "isBot": false,
+    "roles": [
+     {
+      "id": "802",
+      "name": "Players",
+      "color": null,
+      "position": 2
+     },
+     {
+      "id": "803",
+      "name": "Bard",
+      "color": null,
+      "position": 1
+     }
+    ],
+    "avatarUrl": "avatars/ashley.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [],
+   "inlineEmojis": []
+  },
+  {
+   "id": "817849014681600000",
+   "type": "Default",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "No.",
+   "author": {
+    "id": "100",
+    "name": "dan",
+    "discriminator": "0000",
+    "nickname": "DM Dan",
+    "color": null,
+    "isBot": false,
+    "roles": [
+     {
+      "id": "800",
+      "name": "Dungeon Master",
+      "color": "#fabf5a",
+      "position": 4
+     }
+    ],
+    "avatarUrl": "avatars/dan.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [],
+   "inlineEmojis": []
+  }
+ ]
+}

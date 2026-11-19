@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use crate::model::{
     Attachment, Category, Channel, ChannelKind, Community, CustomEmoji, Export, Media, Message,
-    MessageKind, Person, Reaction, Source,
+    MessageKind, Person, Reaction, Role, Source,
 };
 use crate::snowflake;
 
@@ -43,6 +43,8 @@ struct DceChannel {
     category: Option<String>,
     name: String,
     topic: Option<String>,
+    /// Not written by every DCE version; used when present.
+    position: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -73,6 +75,16 @@ struct DceUser {
     nickname: Option<String>,
     is_bot: bool,
     avatar_url: Option<String>,
+    /// The roles DCE recorded on the author (newer versions only).
+    roles: Vec<DceRole>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default, rename_all = "camelCase")]
+struct DceRole {
+    id: String,
+    name: String,
+    position: i64,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -123,6 +135,7 @@ pub fn read_export_dir(dir: &Path) -> std::io::Result<Export> {
     let mut paths: Vec<PathBuf> = fs::read_dir(dir)?
         .filter_map(|entry| entry.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("json")))
+        .filter(|p| p.file_name().is_none_or(|n| n != super::snapshot::SNAPSHOT_FILE))
         .collect();
     paths.sort();
 
@@ -169,7 +182,9 @@ pub fn read_export_dir(dir: &Path) -> std::io::Result<Export> {
     for (path, file) in parsed {
         builder.add_file(&path, file, chosen.as_deref());
     }
-    Ok(builder.finish())
+    let mut export = builder.finish();
+    super::snapshot::merge_from_dir(dir, &mut export);
+    Ok(export)
 }
 
 #[derive(Default)]
@@ -178,6 +193,7 @@ struct Builder {
     channels: Vec<Channel>,
     people: BTreeMap<String, Person>,
     emoji: BTreeMap<String, CustomEmoji>,
+    roles: BTreeMap<String, Role>,
     warnings: Vec<String>,
 }
 
@@ -224,6 +240,7 @@ impl Builder {
                 (Some(id), Some(name)) if !id.is_empty() => Some(Category {
                     id: id.clone(),
                     name: name.clone(),
+                    position: None,
                 }),
                 _ => None,
             };
@@ -247,8 +264,10 @@ impl Builder {
             topic: file.channel.topic.filter(|t| !t.trim().is_empty()),
             category,
             parent_id,
+            position: file.channel.position,
+            overwrites: Vec::new(),
             messages,
-            file: path.to_path_buf(),
+            file: Some(path.to_path_buf()),
         });
     }
 
@@ -262,6 +281,8 @@ impl Builder {
             nickname: None,
             is_bot: user.is_bot,
             avatar: None,
+            role_ids: Vec::new(),
+            listed_member: false,
         });
         // Later messages win: the newest nickname and avatar are the ones the
         // group knows them by now.
@@ -270,6 +291,23 @@ impl Builder {
         }
         if let Some(url) = &user.avatar_url {
             entry.avatar = media(base, url);
+        }
+        // Mentions carry no roles; only an authored message's list counts.
+        if !user.roles.is_empty() {
+            entry.role_ids = user.roles.iter().map(|r| r.id.clone()).collect();
+        }
+        for r in &user.roles {
+            if r.id.is_empty() {
+                continue;
+            }
+            self.roles.entry(r.id.clone()).or_insert_with(|| Role {
+                id: r.id.clone(),
+                name: r.name.clone(),
+                permissions: None,
+                position: r.position,
+                managed: false,
+                everyone: false,
+            });
         }
     }
 
@@ -349,12 +387,24 @@ impl Builder {
                 icon: None,
             }
         });
+        let mut categories: Vec<Category> = Vec::new();
+        for c in &self.channels {
+            if let Some(cat) = &c.category {
+                if !categories.iter().any(|k| k.id == cat.id) {
+                    categories.push(cat.clone());
+                }
+            }
+        }
         Export {
             source: Source::DiscordChatExporter,
             community,
+            categories,
             channels: self.channels,
             people: self.people,
             emoji: self.emoji,
+            roles: self.roles.into_values().collect(),
+            owner_id: None,
+            has_snapshot: false,
             warnings: self.warnings,
         }
     }
@@ -362,7 +412,7 @@ impl Builder {
 
 /// A DCE media reference: an `http(s)` URL, or (with `--media`) a path relative
 /// to the export file.
-fn media(base: &Path, url: &str) -> Option<Media> {
+pub(super) fn media(base: &Path, url: &str) -> Option<Media> {
     let url = url.trim();
     if url.is_empty() {
         return None;

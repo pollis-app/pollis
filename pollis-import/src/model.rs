@@ -16,19 +16,76 @@ pub struct Export {
     pub source: Source,
     pub community: Community,
     pub channels: Vec<Channel>,
+    /// Every category known, including empty ones (a snapshot lists those;
+    /// from channel files alone only the categories that hold one).
+    pub categories: Vec<Category>,
     /// Everyone who authored or was mentioned, keyed by source user id.
     pub people: BTreeMap<String, Person>,
     /// Custom emoji seen anywhere in the export (inline or as reactions),
     /// keyed by source emoji id. An export has no emoji list of its own, so
     /// emoji nobody used are not here.
     pub emoji: BTreeMap<String, CustomEmoji>,
+    /// The server's roles. From a DCE export only the roles its authors
+    /// carried (no permissions); from a guild snapshot every role.
+    pub roles: Vec<Role>,
+    /// The guild owner's user id, when a guild snapshot named it.
+    pub owner_id: Option<String>,
+    /// Whether a guild snapshot (`discord-guild.json`) supplied the
+    /// structure: positions, roles with permissions, overwrites, the full
+    /// emoji list. Without one, the structure is what the channel files show.
+    pub has_snapshot: bool,
     /// Problems found while reading that did not stop the parse.
     pub warnings: Vec<String>,
 }
 
+/// A server role. Pollis has only member and admin, so roles are collapsed
+/// and every role is reported.
+#[derive(Debug, Clone, Serialize)]
+pub struct Role {
+    pub id: String,
+    pub name: String,
+    /// The permission bitfield, when the source gave one (a snapshot does,
+    /// a DCE export does not).
+    pub permissions: Option<u64>,
+    /// Higher is more senior, as in Discord.
+    pub position: i64,
+    /// Owned by an integration (a bot's own role); never assigned by people.
+    pub managed: bool,
+    /// The `@everyone` role (its id is the guild's id).
+    pub everyone: bool,
+}
+
+impl Role {
+    /// Discord's `ADMINISTRATOR` and `MANAGE_GUILD` bits: holders of either
+    /// run the server, so they map to a Pollis admin.
+    pub const ADMIN_BITS: u64 = (1 << 3) | (1 << 5);
+
+    pub fn grants_admin(&self) -> bool {
+        self.permissions.is_some_and(|p| p & Self::ADMIN_BITS != 0)
+    }
+}
+
+/// A per-channel permission overwrite. Pollis channels are visible to every
+/// group member, so none survives; each is reported.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Overwrite {
+    pub target: OverwriteTarget,
+    pub allow: u64,
+    pub deny: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum OverwriteTarget {
+    Role(String),
+    Member(String),
+}
+
+/// Discord's `VIEW_CHANNEL` bit: denying it to `@everyone` makes a channel private.
+pub const VIEW_CHANNEL: u64 = 1 << 10;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Source {
-    /// A DiscordChatExporter JSON export.
+    /// A DiscordChatExporter JSON export, optionally with a guild snapshot.
     DiscordChatExporter,
 }
 
@@ -64,16 +121,23 @@ pub struct Channel {
     pub category: Option<Category>,
     /// For a thread: the channel it lives in.
     pub parent_id: Option<String>,
+    /// Discord's sort position within its category, when the source gave one.
+    pub position: Option<i64>,
+    /// Per-channel permission overwrites (snapshot only).
+    pub overwrites: Vec<Overwrite>,
     /// Oldest first.
     pub messages: Vec<Message>,
-    /// The export file this channel was read from, for the report.
-    pub file: PathBuf,
+    /// The export file this channel was read from, for the report; `None`
+    /// for a channel known only from the guild snapshot (nothing exported).
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Category {
     pub id: String,
     pub name: String,
+    /// Discord's sort position among categories, when the source gave one.
+    pub position: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -142,6 +206,12 @@ pub struct Person {
     pub nickname: Option<String>,
     pub is_bot: bool,
     pub avatar: Option<Media>,
+    /// Ids of the roles they hold (from the snapshot's member list, else the
+    /// roles DCE recorded on their messages).
+    pub role_ids: Vec<String>,
+    /// Listed in the snapshot's member list: a current member, whether or
+    /// not they wrote anything.
+    pub listed_member: bool,
 }
 
 impl Person {

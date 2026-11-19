@@ -7,5 +7,6 @@
 //! so an export without media keeps only dead URLs.
 
 pub mod dce;
+pub mod snapshot;
 
 pub use dce::read_export_dir;

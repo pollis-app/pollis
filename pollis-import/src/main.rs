@@ -1,4 +1,4 @@
-//! `pollis-import plan <export-dir> [--json] [--drop-categories]`
+//! `pollis-import plan <export-dir> [--json | --sheet]`
 //!
 //! Reads a DiscordChatExporter JSON export and prints what an import would
 //! create and drop. Read-only: it writes nothing and makes no network calls,
@@ -8,13 +8,15 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use pollis_import::discord;
-use pollis_import::plan::{plan, CategoryStrategy, ImportOptions};
+use pollis_import::plan::{plan, ImportOptions};
 use pollis_import::report;
 
-const USAGE: &str = "usage: pollis-import plan <export-dir> [--json] [--drop-categories]
+const USAGE: &str = "usage: pollis-import plan <export-dir> [--json | --sheet]
 
-Reads every DiscordChatExporter JSON file in <export-dir> (one server) and
-prints a dry-run import plan. Nothing is written and nothing leaves this machine.
+Reads every DiscordChatExporter JSON file in <export-dir> (one server), and
+a discord-guild.json snapshot if there is one, and prints a dry-run import
+plan (--json: the plan as JSON; --sheet: the invite sheet as CSV). Nothing is
+written and nothing leaves this machine. The Pollis desktop app applies it.
 
 Export with DiscordChatExporter using a bot token, --format Json and --media,
 so images and emoji are saved beside the JSON (Discord's links expire).";
@@ -27,11 +29,12 @@ fn main() -> ExitCode {
     }
     let mut dir: Option<PathBuf> = None;
     let mut json = false;
-    let mut options = ImportOptions::default();
+    let mut sheet = false;
+    let options = ImportOptions::default();
     for arg in &args[1..] {
         match arg.as_str() {
             "--json" => json = true,
-            "--drop-categories" => options.categories = CategoryStrategy::Drop,
+            "--sheet" => sheet = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;
@@ -56,7 +59,9 @@ fn main() -> ExitCode {
         }
     };
     let plan = plan(&export, &options);
-    if json {
+    if sheet {
+        print!("{}", report::invite_sheet(&plan));
+    } else if json {
         match serde_json::to_string_pretty(&plan) {
             Ok(s) => println!("{s}"),
             Err(e) => {
