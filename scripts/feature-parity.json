@@ -16,7 +16,9 @@
     "connect_rooms": "Desktop's LiveKit room connection; mobile's data-only equivalent is get_livekit_token.",
     "create_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
     "await_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
-    "approve_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one."
+    "approve_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
+    "discord_import_preview": "Discord import (#1180) reads an export folder made by DiscordChatExporter on a computer; a phone has no such folder and no file system to pick it from. The group it creates is ordinary, so mobile shows it like any other.",
+    "discord_import_apply": "Discord import (#1180) reads an export folder made by DiscordChatExporter on a computer; a phone has no such folder and no file system to pick it from. The group it creates is ordinary, so mobile shows it like any other."
   },
   "mobile_only": {
     "version": "uniffi build/version probe used by the mobile diagnostics screen; desktop reads its version from Tauri.",

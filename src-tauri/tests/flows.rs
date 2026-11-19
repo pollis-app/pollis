@@ -23,6 +23,8 @@ mod device_link;
 mod device_outside_tree;
 #[path = "flows/device_unlock.rs"]
 mod device_unlock;
+#[path = "flows/discord_import.rs"]
+mod discord_import;
 #[path = "flows/dms.rs"]
 mod dms;
 #[path = "flows/ds_surface.rs"]

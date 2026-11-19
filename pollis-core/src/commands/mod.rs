@@ -21,6 +21,8 @@ pub(crate) mod ds_reads;
 pub mod emoji;
 pub mod user;
 pub mod groups;
+/// Recreating another platform's community structure in a group (#1180).
+pub mod import;
 // Copy message history between two of one account's devices (#1735).
 pub mod history_transfer;
 pub mod messages;

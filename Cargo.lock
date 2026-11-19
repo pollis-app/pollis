@@ -6720,6 +6720,7 @@ dependencies = [
  "pollis-api",
  "pollis-capture-proto",
  "pollis-device-cert",
+ "pollis-import",
  "pollis-relay",
  "pollis-schema",
  "pollis-sqlcipher",
