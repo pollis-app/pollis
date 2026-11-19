@@ -26,6 +26,7 @@ use libsql::Connection;
 use crate::directory::{CATEGORY_JOIN, CHANNEL_ORDER_SQL};
 use crate::error::AppError;
 use crate::groups::is_admin;
+use crate::util::query_strings;
 use crate::writes::{gate_and_parse, outcome_response, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
 
@@ -68,17 +69,7 @@ pub(crate) async fn block_channels(
            AND ((?2 IS NULL AND cc.id IS NULL) OR cc.id = ?2) \
          ORDER BY {CHANNEL_ORDER_SQL}"
     );
-    let mut rows = conn
-        .query(
-            &sql,
-            libsql::params![group_id.to_string(), category_id.map(str::to_string)],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
+    query_strings(conn, &sql, libsql::params![group_id.to_string(), category_id.map(str::to_string)]).await
 }
 
 /// Make `ids` the whole of one block, in this order, positions 0.. — every
@@ -108,17 +99,12 @@ pub(crate) async fn renumber_block(
 
 /// The group's category ids in order.
 async fn group_categories(conn: &Connection, group_id: &str) -> anyhow::Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT id FROM channel_category WHERE group_id = ?1 ORDER BY position",
-            libsql::params![group_id.to_string()],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
+    query_strings(
+        conn,
+        "SELECT id FROM channel_category WHERE group_id = ?1 ORDER BY position",
+        libsql::params![group_id.to_string()],
+    )
+    .await
 }
 
 /// Make `ids` the group's categories in this order, positions 0... Every
@@ -165,6 +151,23 @@ async fn arranging_admin(
         return Ok(Err(WriteOutcome::Forbidden));
     }
     Ok(Ok(actor))
+}
+
+/// [`arranging_admin`], then: `category_id` is a category of `group_id`.
+async fn admin_of_category(
+    conn: &Connection,
+    authed: Option<&str>,
+    requester: Option<&str>,
+    group_id: &str,
+    category_id: &str,
+) -> anyhow::Result<Option<WriteOutcome>> {
+    if let Err(o) = arranging_admin(conn, authed, requester, group_id).await? {
+        return Ok(Some(o));
+    }
+    if !category_in_group(conn, category_id, group_id).await? {
+        return Ok(Some(WriteOutcome::Forbidden));
+    }
+    Ok(None)
 }
 
 macro_rules! handler {
@@ -264,11 +267,10 @@ async fn rename_category_in(
     authed: Option<&str>,
     body: &RenameChannelCategoryBody,
 ) -> anyhow::Result<WriteOutcome> {
-    if let Err(o) = arranging_admin(tx, authed, body.requester_id.as_deref(), &body.group_id).await? {
-        return Ok(o);
-    }
-    if !category_in_group(tx, &body.category_id, &body.group_id).await? {
-        return Ok(WriteOutcome::Forbidden);
+    if let Some(refused) =
+        admin_of_category(tx, authed, body.requester_id.as_deref(), &body.group_id, &body.category_id).await?
+    {
+        return Ok(refused);
     }
     tx.execute(
         "UPDATE channel_category SET name = ?1 WHERE id = ?2",
@@ -295,11 +297,10 @@ async fn delete_category_in(
     authed: Option<&str>,
     body: &DeleteChannelCategoryBody,
 ) -> anyhow::Result<WriteOutcome> {
-    if let Err(o) = arranging_admin(tx, authed, body.requester_id.as_deref(), &body.group_id).await? {
-        return Ok(o);
-    }
-    if !category_in_group(tx, &body.category_id, &body.group_id).await? {
-        return Ok(WriteOutcome::Forbidden);
+    if let Some(refused) =
+        admin_of_category(tx, authed, body.requester_id.as_deref(), &body.group_id, &body.category_id).await?
+    {
+        return Ok(refused);
     }
     let mut top = block_channels(tx, &body.group_id, None).await?;
     top.extend(block_channels(tx, &body.group_id, Some(&body.category_id)).await?);
@@ -330,11 +331,10 @@ async fn move_category_in(
     authed: Option<&str>,
     body: &MoveChannelCategoryBody,
 ) -> anyhow::Result<WriteOutcome> {
-    if let Err(o) = arranging_admin(tx, authed, body.requester_id.as_deref(), &body.group_id).await? {
-        return Ok(o);
-    }
-    if !category_in_group(tx, &body.category_id, &body.group_id).await? {
-        return Ok(WriteOutcome::Forbidden);
+    if let Some(refused) =
+        admin_of_category(tx, authed, body.requester_id.as_deref(), &body.group_id, &body.category_id).await?
+    {
+        return Ok(refused);
     }
     let others: Vec<String> = group_categories(tx, &body.group_id)
         .await?
