@@ -1,6 +1,5 @@
 import { Fragment, useMemo, useRef, useState } from "react";
-import { Pressable, View, type LayoutChangeEvent } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { PanResponder, Pressable, View, type LayoutChangeEvent } from "react-native";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Text } from "../Text";
@@ -19,6 +18,7 @@ import {
   type ChannelBlock,
 } from "../../lib/channelLayout";
 import { toggleCategoryCollapsed, useCollapsedCategories } from "../../lib/categoryCollapse";
+import { isPendingCategory } from "../../hooks/queries/useChannelCategories";
 import { ChannelRow } from "./ChannelRow";
 
 type Block = ChannelBlock<Channel, ChannelCategory>;
@@ -263,6 +263,16 @@ function GroupChannelListImpl(props: Props) {
     const k = b.category as ChannelCategory;
     const isCollapsed = !editing && collapsed.has(k.id);
     const unread = blockUnread(b.channels, (id) => unreadCounts[id] ?? 0);
+    if (editing && isPendingCategory(k.id)) {
+      // Not on the DS yet: shown, but nothing acts on it until it lands.
+      return (
+        <View key={`label-${k.id}`} onLayout={record("category", k.id)} style={{ minHeight: layout.touchMin, justifyContent: "center", paddingStart: space.sm, marginTop: space.md }}>
+          <Text numberOfLines={1} style={[ty.section, { color: semantic.muted }]}>
+            {k.name}
+          </Text>
+        </View>
+      );
+    }
     if (editing) {
       return (
         <View
@@ -402,6 +412,7 @@ export const GroupChannelList = observer(GroupChannelListImpl);
  * Edit mode's ≡: dragging it moves its row; nothing else on the row drags, so a scroll that starts
  * on a row is still a scroll. A screen reader gets Move up / Move down instead.
  */
+
 function DragHandle({
   testID,
   label,
@@ -421,40 +432,40 @@ function DragHandle({
   onEnd: (commit: boolean) => void;
   onStep: (delta: -1 | 1) => void;
 }) {
-  // Latest callbacks, read by the gesture built once.
+  // Latest callbacks, read by the responder built once.
   const cb = useRef({ onStart, onMove, onEnd });
   cb.current = { onStart, onMove, onEnd };
-  const gesture = useMemo(
+  // The JS responder, not a native pan: it claims the touch on the handle at once and refuses
+  // to hand it to the scroll view, so a drag is never turned into a scroll halfway.
+  const responder = useMemo(
     () =>
-      Gesture.Pan()
-        .runOnJS(true)
-        .minDistance(0)
-        .onStart(() => cb.current.onStart())
-        .onUpdate((e) => cb.current.onMove(e.translationY))
-        .onEnd((_e, success) => cb.current.onEnd(success))
-        .onFinalize((_e, success) => {
-          if (!success) {
-            cb.current.onEnd(false);
-          }
-        }),
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+        onPanResponderGrant: () => cb.current.onStart(),
+        onPanResponderMove: (_e, g) => cb.current.onMove(g.dy),
+        onPanResponderRelease: () => cb.current.onEnd(true),
+        onPanResponderTerminate: () => cb.current.onEnd(false),
+      }),
     [],
   );
   return (
-    <GestureDetector gesture={gesture}>
-      <View
-        testID={testID}
-        accessible
-        accessibilityRole="adjustable"
-        accessibilityLabel={label}
-        accessibilityActions={[
-          { name: "increment", label: moveDown },
-          { name: "decrement", label: moveUp },
-        ]}
-        onAccessibilityAction={(e) => onStep(e.nativeEvent.actionName === "decrement" ? -1 : 1)}
-        style={{ width: layout.touchMin, height: layout.touchMin, alignItems: "center", justifyContent: "center" }}
-      >
-        <Icon.dragHandle size={20} color={semantic.muted} />
-      </View>
-    </GestureDetector>
+    <View
+      {...responder.panHandlers}
+      testID={testID}
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={label}
+      accessibilityActions={[
+        { name: "increment", label: moveDown },
+        { name: "decrement", label: moveUp },
+      ]}
+      onAccessibilityAction={(e) => onStep(e.nativeEvent.actionName === "decrement" ? -1 : 1)}
+      style={{ width: layout.touchMin, height: layout.touchMin, alignItems: "center", justifyContent: "center" }}
+    >
+      <Icon.dragHandle size={20} color={semantic.muted} />
+    </View>
   );
 }

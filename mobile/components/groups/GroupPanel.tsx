@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { View } from "react-native";
-import { ScrollView } from "react-native-gesture-handler";
+import { ScrollView, View } from "react-native";
 import { Text } from "../Text";
 import { useRouter } from "expo-router";
 import { useNav } from "../pane/paneContext";

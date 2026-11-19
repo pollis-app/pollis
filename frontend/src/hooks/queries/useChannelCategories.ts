@@ -36,6 +36,7 @@ function useArrangement<V extends { groupId: string }, R>(
   command: string,
   args: (vars: V, requesterId: string) => Record<string, unknown>,
   optimistic: (g: GroupWithChannels, vars: V) => GroupWithChannels,
+  landed?: (g: GroupWithChannels, data: R) => GroupWithChannels,
 ) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -50,6 +51,13 @@ function useArrangement<V extends { groupId: string }, R>(
       return invoke<R>(command, args(vars, currentUser.id));
     },
     onMutate: (vars) => editGroup(queryClient, userId, vars.groupId, (g) => optimistic(g, vars)),
+    onSuccess: (data, vars) => {
+      if (landed) {
+        queryClient.setQueryData<GroupWithChannels[]>(key, (tree) =>
+          tree?.map((g) => (g.id === vars.groupId ? landed(g, data) : g)),
+        );
+      }
+    },
     onError: (_err, _vars, context) => {
       queryClient.setQueryData(key, context?.previous);
     },
@@ -60,8 +68,10 @@ function useArrangement<V extends { groupId: string }, R>(
   });
 }
 
-/** A temporary id for a category shown before the DS has answered. */
+/** A temporary id for a category shown before the DS has answered: nothing may act on it yet. */
 export const PENDING_CATEGORY_PREFIX = "pending-category-";
+
+export const isPendingCategory = (id: string) => id.startsWith(PENDING_CATEGORY_PREFIX);
 
 export function useCreateCategory() {
   return useArrangement<{ groupId: string; name: string }, ChannelCategory>(
@@ -70,6 +80,10 @@ export function useCreateCategory() {
     (g, { groupId, name }) => ({
       ...g,
       categories: [...g.categories, { id: `${PENDING_CATEGORY_PREFIX}${Date.now()}`, group_id: groupId, name }],
+    }),
+    (g, created) => ({
+      ...g,
+      categories: [...g.categories.filter((k) => !isPendingCategory(k.id) && k.id !== created.id), created],
     }),
   );
 }

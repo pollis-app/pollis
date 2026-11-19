@@ -11,6 +11,11 @@ import { deleteCategory, moveCategory, moveChannel } from "../../lib/channelLayo
 import type { MutationHaptic } from "../../lib/hapticEvents";
 import { groupQueryKeys, type GroupWithChannels } from "./useUserGroups";
 
+/** A temporary id for a category shown before the DS has answered: nothing may act on it yet. */
+export const PENDING_CATEGORY_PREFIX = "pending-category-";
+
+export const isPendingCategory = (id: string) => id.startsWith(PENDING_CATEGORY_PREFIX);
+
 type Snapshot = { tree: GroupWithChannels[] | undefined; channels: Channel[] | undefined };
 
 /** The arranged form of one group: every channel (voice too) and the categories. */
@@ -61,6 +66,7 @@ function useArrangement<V extends { groupId: string }, R>(
   args: (vars: V, requesterId: string) => Record<string, unknown>,
   optimistic: (a: Arranged, vars: V) => Arranged,
   haptic: MutationHaptic<V>,
+  landed?: (a: Arranged, data: R) => Arranged,
 ) {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
@@ -76,6 +82,20 @@ function useArrangement<V extends { groupId: string }, R>(
       return invoke<R>(command, args(vars, currentUser.id));
     },
     onMutate: (vars) => editGroup(queryClient, userId, vars.groupId, (a) => optimistic(a, vars)),
+    onSuccess: (data, vars) => {
+      if (!landed) {
+        return;
+      }
+      queryClient.setQueryData<GroupWithChannels[]>(groupQueryKeys.userGroupsWithChannels(userId), (tree) =>
+        tree?.map((g) => {
+          if (g.id !== vars.groupId) {
+            return g;
+          }
+          const next = landed({ all: g.allChannels ?? g.channels, categories: g.categories ?? [] }, data);
+          return { ...g, allChannels: next.all, channels: textOnly(next.all), categories: next.categories };
+        }),
+      );
+    },
     onError: (_err, vars, context) => {
       queryClient.setQueryData(groupQueryKeys.userGroupsWithChannels(userId), context?.tree);
       if (context?.channels) {
@@ -95,9 +115,13 @@ export function useCreateCategory() {
     ({ groupId, name }, requesterId) => ({ groupId, name, requesterId }),
     (a, { groupId, name }) => ({
       ...a,
-      categories: [...a.categories, { id: `pending-category-${Date.now()}`, group_id: groupId, name }],
+      categories: [...a.categories, { id: `${PENDING_CATEGORY_PREFIX}${Date.now()}`, group_id: groupId, name }],
     }),
     { success: "success" },
+    (a, created) => ({
+      ...a,
+      categories: [...a.categories.filter((k) => !isPendingCategory(k.id) && k.id !== created.id), created],
+    }),
   );
 }
 

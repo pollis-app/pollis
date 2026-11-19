@@ -13,6 +13,7 @@ import {
   useMoveCategory,
   useMoveChannel,
   useRenameCategory,
+  isPendingCategory,
 } from "../../hooks/queries/useChannelCategories";
 import { VoiceChannelMembers } from "../Voice/VoiceChannelMembers";
 import { InlineInput } from "../ui/InlineInput";
@@ -184,8 +185,8 @@ export const SidebarGroupChannels: React.FC<SidebarGroupChannelsProps> = ({
                 block.channels.filter((c) => c.channel_type !== "voice"),
                 (id) => unreadCounts[id] ?? 0,
               )}
-              isAdmin={isAdmin}
-              drag={rowDrag("category", category.id, visible)}
+              isAdmin={isAdmin && !isPendingCategory(category.id)}
+              drag={isPendingCategory(category.id) ? undefined : rowDrag("category", category.id, visible)}
               onNewChannel={() => {
                 appStore.setSelectedGroupId(group.id);
                 appStore.setNewChannelCategoryId(category.id);
