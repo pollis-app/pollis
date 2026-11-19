@@ -95,7 +95,7 @@ tags:
 - runFlow: ../subflows/pick-square-photo.yaml
 - extendedWaitUntil:
     visible:
-      id: "avatar-alias-preview"
+      id: "avatar-alias-editor-preview"
     timeout: 15000
 - tapOn:
     id: "btn-alias-save"

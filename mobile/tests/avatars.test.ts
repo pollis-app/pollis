@@ -300,7 +300,8 @@ test("the photo is drawn from memory with no fade, and the letter only when ther
   const s = src("components/UserAvatar.tsx");
   assert.match(s, /cachePolicy="memory"/);
   assert.match(s, /transition=\{0\}/);
-  assert.match(s, /onError=\{\(\) => avatarStore\.forget\(userId, uri\)\}/);
+  // A stored picture that will not decode is forgotten; a just-picked preview is not stored.
+  assert.match(s, /onError=\{drawsStored && userId \? \(\) => avatarStore\.forget\(userId, uri\) : undefined\}/);
 });
 
 test("every surface that names a person draws their picture", () => {
@@ -346,15 +347,15 @@ test("a new group's seeded roster never stands in for the creator's picture", ()
 });
 
 test("a tagged photo reaches the screen probe until it unmounts", async () => {
-  const { reportAvatarPhoto, avatarPhotosShowing } = await import("../lib/avatarRenderState.ts");
-  const a = reportAvatarPhoto("row-message-1-avatar");
-  const b = reportAvatarPhoto("row-message-1-avatar");
-  assert.deepEqual(avatarPhotosShowing(), ["row-message-1-avatar"]);
+  const { reportAvatarTag, avatarTagsShowing } = await import("../lib/avatarRenderState.ts");
+  const a = reportAvatarTag("row-message-1-avatar-photo");
+  const b = reportAvatarTag("row-message-1-avatar-photo");
+  assert.deepEqual(avatarTagsShowing(), ["row-message-1-avatar-photo"]);
   a();
   a();
-  assert.deepEqual(avatarPhotosShowing(), ["row-message-1-avatar"], "a double withdrawal counts once");
+  assert.deepEqual(avatarTagsShowing(), ["row-message-1-avatar-photo"], "a double withdrawal counts once");
   b();
-  assert.deepEqual(avatarPhotosShowing(), []);
+  assert.deepEqual(avatarTagsShowing(), []);
   assert.match(src("components/ui.tsx"), /<AvatarProbe \/>/);
 });
 

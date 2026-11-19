@@ -1,0 +1,68 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+  - peer
+---
+# PRESENCE (#2059) — the corner dot on every user avatar, desktop's rule: online
+# while a room this device shares with the user shows them; you are always
+# online on your own device. Tag `peer`: maestro-run.sh signs the peer up on the
+# same device first (setup/peer.yaml), so the peer is signed in nowhere: offline.
+# The other half (someone else online, then going offline) needs a second
+# client: scripts/maestro-presence.sh.
+#
+# `UserAvatar` tags `<testID>-presence-online|offline` (through <Screen>'s
+# AvatarProbe, so iOS rows that are one accessible element still expose it).
+
+- runFlow: ../subflows/home.yaml
+
+# You, on the Self card: online.
+- tapOn:
+    id: "tab-self"
+- extendedWaitUntil:
+    visible:
+      id: "avatar-self-presence-online"
+    timeout: 10000
+- takeScreenshot: presence-01-self-online
+
+# A DM with the peer: your message row's avatar is online.
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "btn-new-dm"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
+- tapOn:
+    id: "row-user-.*"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- tapOn:
+    id: "input-composer"
+- inputText: "presence check"
+- hideKeyboard:
+    optional: true
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible:
+      id: "row-message-.*-avatar-presence-online"
+    timeout: 15000
+- takeScreenshot: presence-02-own-message-online
+
+# The peer is signed in nowhere: the Direct list draws its hollow dot.
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*-avatar-presence-offline"
+    timeout: 15000
+- assertNotVisible:
+    id: "row-dm-.*-avatar-presence-online"
+- takeScreenshot: presence-03-peer-offline
