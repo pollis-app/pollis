@@ -38,7 +38,8 @@ test("the channel menu carries the toggle, and the list marks a muted channel", 
   const sheet = read("../components/chat/ChannelMenuSheet.tsx");
   assert.match(sheet, /testID="toggle-channel-mute"/);
   assert.match(sheet, /useSetChannelMuted\(\)/);
-  const panel = read("../components/groups/GroupPanel.tsx");
+  // The rows moved into the category-aware list (#2031).
+  const panel = read("../components/groups/GroupChannelList.tsx");
   assert.match(panel, /`row-channel-\$\{c\.id\}-muted`/);
   assert.match(panel, /muted=\{isMuted\}/);
 });

@@ -1,0 +1,150 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# CHANNEL CATEGORIES (#2031) — an admin's Edit mode on the group panel:
+# create a category, a channel in it from its "+", drag a channel into it by
+# its handle, collapse it, rename it and delete it (its channels stay).
+# Self-contained: creates its own group (the creator is its admin). Category
+# ids are minted at runtime, so their controls are matched by id pattern;
+# each step runs with exactly one category on screen.
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Category Group"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Category Group"
+- assertVisible: "General"
+# No categories yet: no label, the list as it always was.
+- assertNotVisible:
+    id: "row-category-.*"
+
+# 1. Edit mode: handles, and the New category row.
+- tapOn:
+    id: "btn-edit-channels"
+- assertVisible:
+    id: "btn-edit-channels-done"
+- assertVisible:
+    id: "handle-channel-.*"
+- tapOn:
+    id: "btn-new-category"
+- assertVisible:
+    id: "sheet-category-create"
+- tapOn:
+    id: "input-category-name"
+- inputText: "Campaign"
+- tapOn:
+    id: "btn-category-submit"
+- extendedWaitUntil:
+    visible:
+      id: "row-edit-category-.*"
+    timeout: 30000
+- assertVisible: "Campaign"
+- takeScreenshot: categories-01-edit-mode
+
+# 2. A channel from the category's "+" lands in it.
+- tapOn:
+    id: "btn-category-new-channel-.*"
+- assertVisible:
+    id: "text-create-channel-category"
+- tapOn:
+    id: "input-channel-name"
+- inputText: "lore"
+- tapOn:
+    id: "btn-create-channel-submit"
+- extendedWaitUntil:
+    visible:
+      id: "screen-chat"
+    timeout: 30000
+- tapOn:
+    id: "btn-back"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+    timeout: 15000
+
+# 3. Drag General by its handle, down past the label: it joins Campaign.
+- tapOn:
+    id: "btn-edit-channels"
+    optional: true
+- assertVisible:
+    id: "btn-edit-channels-done"
+- swipe:
+    from:
+      id: "handle-channel-.*"
+    direction: DOWN
+    duration: 1500
+- waitForAnimationToEnd
+- tapOn:
+    id: "btn-edit-channels-done"
+- assertVisible:
+    id: "row-category-.*"
+- takeScreenshot: categories-02-normal
+
+# 4. Collapse it: both channels go with it, the label stays.
+- tapOn:
+    id: "row-category-.*"
+- assertVisible:
+    id: "row-category-.*-collapsed"
+- assertNotVisible: "General"
+- assertNotVisible: "lore"
+- takeScreenshot: categories-03-collapsed
+- tapOn:
+    id: "row-category-.*-collapsed"
+- assertVisible: "General"
+- assertVisible: "lore"
+
+# 5. Rename it.
+- tapOn:
+    id: "btn-edit-channels"
+- tapOn:
+    id: "btn-category-menu-.*"
+- assertVisible:
+    id: "sheet-category-menu"
+- tapOn:
+    id: "btn-category-rename"
+- assertVisible:
+    id: "sheet-category-rename"
+- tapOn:
+    id: "input-category-name"
+- eraseText: 20
+- inputText: "Story"
+- tapOn:
+    id: "btn-category-submit"
+- extendedWaitUntil:
+    visible: "Story"
+    timeout: 30000
+
+# 6. Delete it: the confirmation names it, and every channel stays.
+- tapOn:
+    id: "btn-category-menu-.*"
+- tapOn:
+    id: "btn-category-delete"
+- assertVisible:
+    id: "sheet-category-delete"
+- assertVisible: "Delete Story?"
+- takeScreenshot: categories-04-delete-confirm
+- tapOn:
+    id: "btn-category-delete-confirm"
+- extendedWaitUntil:
+    notVisible:
+      id: "row-edit-category-.*"
+    timeout: 30000
+- tapOn:
+    id: "btn-edit-channels-done"
+- assertNotVisible:
+    id: "row-category-.*"
+- assertVisible: "General"
+- assertVisible: "lore"

@@ -7,16 +7,19 @@ import { Icon } from "../icons";
 import { ErrorText } from "./FormBits";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useCreateChannel } from "../../hooks/queries";
-import type { Channel } from "../../types";
+import type { Channel, ChannelCategory } from "../../types";
 
 // Name a new text channel (admins only). No voice on mobile.
 export function CreateChannelSheet({
   groupId,
   existingNames,
+  category = null,
   onClose,
   onCreated,
 }: {
   groupId: string;
+  // From a category's "+" (#2031): the channel lands at the bottom of it.
+  category?: ChannelCategory | null;
   // Lower-cased, to refuse a duplicate up front.
   existingNames: string[];
   onClose: () => void;
@@ -33,7 +36,7 @@ export function CreateChannelSheet({
       return;
     }
     createChannel.mutate(
-      { name: trimmed },
+      { name: trimmed, categoryId: category?.id ?? null },
       {
         onSuccess: (channel) => {
           onClose();
@@ -45,6 +48,11 @@ export function CreateChannelSheet({
 
   return (
     <SheetOverlay title={t("group.newChannel.title")} onClose={onClose} testID="sheet-create-channel">
+      {category ? (
+        <Text testID="text-create-channel-category" style={ty.secondary}>
+          {t("channels:categories.createIn", { name: category.name })}
+        </Text>
+      ) : null}
       <Text style={ty.section}>{t("group.newChannel.nameLabel")}</Text>
       <Field
         testID="input-channel-name"

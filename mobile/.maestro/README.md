@@ -166,6 +166,7 @@ A flow file still runs alone with a bare `maestro test`: `home.yaml` signs
 | --- | --- | --- |
 | `auth` | email→OTP→PIN→inbox (also the smoke test: bridge + dev DS + keystore live), then a cold relaunch: a wrong PIN puts the pad back with `pin-error`, and the right one's fourth digit must, within a second, show `pin-busy` (the launch loader, with no keypad key left on screen) or have already left the pad (a fast unlock; never a frozen pad) | no |
 | `groups` | create group, open, channel visible | no |
+| `channel-categories` | #2031 an admin's Edit mode on the group panel: create a category, a channel from its "+" (the sheet names the category), drag General into it by its ≡ handle, collapse it (both channels hidden, label kept), rename it, delete it through the confirmation sheet (every channel stays). Shots: Edit mode, the normal view, a collapsed category, the delete confirmation | no |
 | `group-aliases` | #2003 Self → Group aliases: two groups start on the main profile; a name and photo set in one group (photo picked through `subflows/pick-square-photo.yaml`, shared with `profile-photo`); "Apply to all my groups" writes the name to both, not the photo; own messages there carry the alias and its photo; "Use my main profile" in one group resets only that one | no |
 | `messaging` | send / edit / delete / react in a self-owned channel | no |
 | `composer-draft` | unsent composer text survives backing out to another tab and returning (desktop's in-memory draft store, `mobile/lib/drafts.ts`); sending clears it | no |
