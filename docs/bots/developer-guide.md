@@ -202,7 +202,7 @@ Every call returns a promise. A call your manifest (or the admin) does not allow
 | Call | Does | Needs |
 |---|---|---|
 | `ctx.reply(message, text)` | Reply to a message | `actions: ["reply"]` |
-| `ctx.post(channelId, text)` | Post in a channel (use `message.channel` for the same one) | `"post"` |
+| `ctx.post(channel, text)` | Post in a granted channel, by id (`message.channel` for the same one) or by name (`"support"` or `"#support"`, any case) | `"post"` |
 | `ctx.react(message, emoji)` | React to a message | `"react"` |
 | `ctx.editOwn(message, text)` | Edit a message your bot sent | `"edit_own"` |
 | `ctx.deleteOwn(message)` | Delete a message your bot sent | `"delete_own"` |
@@ -517,6 +517,8 @@ fn files_a_ticket() {
 **Building.** `pollis app build` runs `cargo build --release --target wasm32-wasip2`, reads the manifest from your code, loads the result in the real sandbox and prints the App hash. The same source, `Cargo.lock` and `rust-toolchain.toml` give the same bytes and the same App hash on any machine, in any directory. Commit all three. The first build writes `Cargo.lock`; after that a `Cargo.toml` change that needs a new lockfile stops the build until you run `cargo update --workspace`, so a dependency can never change without you seeing it.
 
 `dev` and `run` work exactly as [above](#running-it-in-a-group-dev-build-run-approve), with `npx pollis app dev` and `npx pollis app run`.
+
+**A complete example.** The [alerts App](../../apps/alerts/README.md) is a whole Rust App in about 30 lines, with its tests.
 
 **Crates.** Any crate that compiles for `wasm32-wasip2` and does not need files or sockets works. A crate that opens a socket is refused at build, with the import named. Use `ctx.fetch` for HTTP.
 

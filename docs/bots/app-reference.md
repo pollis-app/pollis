@@ -63,7 +63,7 @@ Every call counts toward the per-job host-call cap (see [Limits](#per-job-limits
 
 ### `post(channel, text) -> result<_, string>`
 
-Queue a new message in `channel` (a channel id). Applied only if the handler returns `ok`.
+Queue a new message in `channel`: a granted channel's id, or its name (with or without `#`, any case). A name two granted channels share is refused; use the id. Applied only if the handler returns `ok`.
 
 | Refusal | When |
 |---|---|

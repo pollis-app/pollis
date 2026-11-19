@@ -40,7 +40,7 @@ A bot is a full member of its group, so:
 - It cannot read messages sent before it joined, your direct messages, or other groups.
 - Whoever controls a host machine can read what the bot reads. Run a bot only on a machine you trust with that.
 
-A bot runs either the built-in alerts handler, which posts the alerts it receives on its webhook ([Alerts webhook](./alerts-webhook.md)), or an **App** an admin approved. An App can read and do only what its approval allows, and runs only the exact version that was approved: see [Approving an App](./app-approval.md).
+A bot runs an **App** an admin approved, and does nothing until it has one. The [alerts App](../../apps/alerts/README.md), for example, posts the alerts it receives on its webhook ([Alerts webhook](./alerts-webhook.md)). An App can read and do only what its approval allows, and runs only the exact version that was approved: see [Approving an App](./app-approval.md).
 
 ## Add a bot
 

@@ -59,7 +59,13 @@
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section" id="webhook">
         <h2 class="doc-section-title">The alerts webhook</h2>
-        <p>Turn it on with <code>pollis-bot run --webhook</code>, or in <code>config.json</code>:</p>
+        <p>
+          Alerts are posted by the <strong>alerts App</strong>, which a bot runs like any other App: build it from
+          <a href="https://github.com/pollis-app/pollis/tree/main/apps/alerts" target="_blank"
+            rel="noopener noreferrer"><code>apps/alerts</code></a>, check its hash, give it to the bot with
+          <code>pollis-bot app install</code>, and have a group admin approve it and pick its channels.
+        </p>
+        <p>Turn the webhook on with <code>pollis-bot run --webhook</code>, or in <code>config.json</code>:</p>
         <code class="doc-cmd">{ "webhook": { "bind": "127.0.0.1:8787" } }</code>
         <p>
           The first start with the webhook on prints each installation's <strong>secret</strong> once
@@ -72,7 +78,7 @@ Content-Type: application/json
 
 {"channel": "alerts", "text": "disk 91% on db-1"}</code>
         <ul>
-          <li><code>channel</code>: a text channel of the bot's group, by name (with or without <code>#</code>,
+          <li><code>channel</code>: a channel the admin granted the App, by name (with or without <code>#</code>,
             any case) or by id.</li>
           <li><code>text</code>: up to 4,000 characters.</li>
           <li>The listener binds to <code>127.0.0.1:8787</code> by default. To take alerts from another machine on
@@ -134,13 +140,14 @@ curl -sS -X POST "$URL" \
               <tr><td>200</td><td><code>posted</code></td><td class="doc-td-dim">Posted.</td></tr>
               <tr><td>200</td><td><code>claimed_elsewhere</code></td><td class="doc-td-dim">Another host of the bot posted it.</td></tr>
               <tr><td>202</td><td><code>accepted</code></td><td class="doc-td-dim">The job took over 30 seconds; it still finishes.</td></tr>
-              <tr><td>400</td><td><code>bad_request</code></td><td class="doc-td-dim">Not <code>{"channel", "text"}</code> JSON, or a malformed <code>X-Pollis-Delivery</code>.</td></tr>
+              <tr><td>400</td><td><code>bad_request</code></td><td class="doc-td-dim">A malformed <code>X-Pollis-Delivery</code>.</td></tr>
               <tr><td>401</td><td><code>unauthorized</code></td><td class="doc-td-dim">Wrong or missing secret or signature.</td></tr>
-              <tr><td>404</td><td><code>unknown_installation</code></td><td class="doc-td-dim">No such installation on this machine.</td></tr>
+              <tr><td>404</td><td><code>unknown_installation</code></td><td class="doc-td-dim">No such installation on this machine, or it has no App yet.</td></tr>
               <tr><td>413</td><td></td><td class="doc-td-dim">Body over 64 KiB.</td></tr>
-              <tr><td>422</td><td><code>refused</code></td><td class="doc-td-dim">Not a text channel of the bot's group, empty text, or over 4,000 characters.</td></tr>
+              <tr><td>422</td><td><code>refused</code></td><td class="doc-td-dim">Empty text, or over 4,000 characters.</td></tr>
               <tr><td>429</td><td><code>rate_limited</code></td><td class="doc-td-dim">Over the rate limit; wait <code>Retry-After</code> seconds.</td></tr>
-              <tr><td>500 / 503</td><td><code>failed</code></td><td class="doc-td-dim">The job could not finish; <code>fix</code> says what to do. Retry with the same <code>X-Pollis-Delivery</code>.</td></tr>
+              <tr><td>500</td><td><code>failed</code></td><td class="doc-td-dim">The App refused the call and <code>error</code> says why: the body is not <code>{"channel", "text"}</code> JSON, the channel was not granted, or the App is not approved yet.</td></tr>
+              <tr><td>503</td><td><code>failed</code></td><td class="doc-td-dim">The job could not finish; <code>fix</code> says what to do. Retry with the same <code>X-Pollis-Delivery</code>.</td></tr>
             </tbody>
           </table>
         </div>
