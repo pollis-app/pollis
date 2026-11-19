@@ -4,11 +4,14 @@
 //! keys sit in its own keystore slot. Nothing is shared between two installations.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::handler::HandlerKind;
+use crate::app_approval::ArtifactLocation;
+use crate::app_handler::AppHandler;
+use crate::handler::Handler;
 
 pub const INSTALLATIONS_DIR: &str = "installations";
 pub const RECORD_FILE: &str = "installation.json";
@@ -21,9 +24,32 @@ pub struct InstallationRecord {
     pub group_id: String,
     /// This host's device id under the bot.
     pub device_id: String,
+    /// The App this installation runs. `None` until `pollis-bot app install`:
+    /// such an installation does not run, and `pollis-bot status` says so.
     #[serde(default)]
-    pub handler: HandlerKind,
+    pub app: Option<InstalledApp>,
     pub created_at: String,
+}
+
+/// Where an installation's App is: its component and `pollis-app.json`, each a
+/// local path or an `https://` URL. It runs only under an admin's verified
+/// approval (#2005), re-checked before every job; a development build's
+/// signature is read from `<component>.sig.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstalledApp {
+    pub component: ArtifactLocation,
+    pub manifest: ArtifactLocation,
+}
+
+impl InstalledApp {
+    pub fn handler(&self) -> Arc<dyn Handler> {
+        Arc::new(AppHandler::approved(self.component.clone(), self.manifest.clone()))
+    }
+}
+
+/// What to do about an installation with no App, for logs, `status` and `post`.
+pub fn no_app_fix(installation_id: &str) -> String {
+    format!("run `pollis-bot app install --installation {installation_id} --artifact <directory or https:// URL>`, then restart `pollis-bot run`")
 }
 
 /// Ids are ULIDs; anything else is refused before it can name a path.
@@ -128,7 +154,7 @@ mod tests {
             bot_user_id: id.into(),
             group_id: "01GROUP".into(),
             device_id: "01DEVICE".into(),
-            handler: HandlerKind::Alerts,
+            app: None,
             created_at: "2026-11-18T00:00:00Z".into(),
         }
     }

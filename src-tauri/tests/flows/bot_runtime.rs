@@ -12,7 +12,7 @@ use serial_test::serial;
 use pollis_bot::action::Action;
 use pollis_bot::core_host::installation_core;
 use pollis_bot::app_handler::{ActionKind, AdminGrants, AppHandler, ChannelGrant, EventKind};
-use pollis_bot::handler::{AlertsHandler, Handler, HandlerError};
+use pollis_bot::handler::{Handler, HandlerError};
 use pollis_bot::job::{Installation, JobInput, TriggerOutcome};
 use pollis_bot::trigger::{Trigger, WebhookCall};
 use pollis_core::commands::bots;
@@ -130,7 +130,7 @@ async fn the_only_host_asleep_wakes_on_the_nudge_and_wraps() {
     let (host1, _) = pair_new_bot(&alice, &group, "Alerts").await;
     let bot = host1.bot_user_id().to_string();
     // Host 1 goes to sleep, and stays unseen long enough to look gone.
-    let sleeper = asleep(&host1, Arc::new(AlertsHandler)).await;
+    let sleeper = asleep(&host1, Arc::new(Ack)).await;
     set_last_seen(host1.device_id(), "-2 hours").await;
 
     let (mut host2, handle) = file_add_host(&bot, "host-2").await;
@@ -168,8 +168,8 @@ async fn an_asleep_peer_that_ranks_first_never_blocks_the_wrap() {
     assert!(host1.device_id() < host2.device_id(), "host 1 ranks first");
 
     // Host 1 was seen moments ago but is asleep now; host 2 is woken.
-    let _host1 = asleep(&host1, Arc::new(AlertsHandler)).await;
-    let woken = asleep(&host2, Arc::new(AlertsHandler)).await;
+    let _host1 = asleep(&host1, Arc::new(Ack)).await;
+    let woken = asleep(&host2, Arc::new(Ack)).await;
 
     let (mut host3, handle3) = file_add_host(&bot, "host-3").await;
     alice
@@ -283,13 +283,26 @@ async fn an_app_runs_on_asleep_hosts_that_share_its_state_beside_the_alerts_hand
     assert_eq!(counts, vec!["kv n=3", "kv n=2", "kv n=1"], "{all:?}");
     assert_eq!(all.iter().filter(|t| *t == "thanks").count(), 1, "{all:?}");
 
-    // The built-in alerts handler, unchanged, beside it in the same group.
+    // The published alerts App beside it in the same group, naming the channel as a sender does.
     let (alerts_host, _) = pair_new_bot(&alice, &group, "Alerts").await;
-    let alerts = asleep(&alerts_host, Arc::new(AlertsHandler)).await;
-    let r = alerts
-        .run_job(JobInput::Webhook(WebhookCall::alert("01DELIVERY", "general", "disk full")))
-        .await
-        .expect("alerts job");
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../pollis-bot/tests/fixtures/alerts-app");
+    let wasm = std::fs::read(format!("{fixture}/app.wasm")).expect("alerts App");
+    let manifest = std::fs::read(format!("{fixture}/pollis-app.json")).expect("alerts App manifest");
+    let grants = AdminGrants {
+        channels: vec![ChannelGrant { id: general.clone(), name: "general".into() }],
+        events: [EventKind::Created].into(),
+        actions: [ActionKind::Post].into(),
+        ..Default::default()
+    };
+    let handler: Arc<dyn Handler> = Arc::new(AppHandler::new(wasm, &manifest, grants).expect("alerts App handler"));
+    let alerts = asleep(&alerts_host, handler).await;
+    let call = WebhookCall {
+        delivery_id: "01DELIVERY".into(),
+        content_type: Some("application/json".into()),
+        headers: Vec::new(),
+        body: br#"{"channel":"general","text":"disk full"}"#.to_vec(),
+    };
+    let r = alerts.run_job(JobInput::Webhook(call)).await.expect("alerts job");
     assert_eq!(r.webhook().unwrap().result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
     assert!(contents(&alice, &general).await.contains(&"disk full".to_string()));
 }

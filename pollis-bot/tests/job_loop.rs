@@ -8,14 +8,13 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::{EchoHandler, FailingHandler, FakeCore, FakeDs, MixedHandler, BOT, CHANNEL};
+use common::{hook_call, EchoHandler, FailingHandler, FakeCore, FakeDs, MixedHandler, PostHandler, BOT, CHANNEL};
 use pollis_bot::action::Refusal;
-use pollis_bot::handler::AlertsHandler;
 use pollis_bot::job::{action_message_id, Installation, JobError, JobInput, TriggerOutcome};
-use pollis_bot::trigger::{IncomingMessage, Trigger, WebhookCall};
+use pollis_bot::trigger::{IncomingMessage, Trigger};
 
 fn hook(delivery: &str, channel: &str, text: &str) -> JobInput {
-    JobInput::Webhook(WebhookCall::alert(delivery, channel, text))
+    JobInput::Webhook(hook_call(delivery, channel, text))
 }
 
 fn webhook_outcome(report: &pollis_bot::job::JobReport) -> TriggerOutcome {
@@ -26,7 +25,7 @@ fn webhook_outcome(report: &pollis_bot::job::JobReport) -> TriggerOutcome {
 async fn one_job_per_installation_at_a_time() {
     let ds = Arc::new(FakeDs::default());
     let core = FakeCore::slow("01HOSTA", ds.clone());
-    let inst = Arc::new(Installation::new(core.clone(), Arc::new(AlertsHandler)));
+    let inst = Arc::new(Installation::new(core.clone(), Arc::new(PostHandler)));
     let mut jobs = Vec::new();
     for i in 0..6 {
         let inst = inst.clone();
@@ -44,8 +43,8 @@ async fn different_installations_do_not_wait_on_each_other() {
     let ds = Arc::new(FakeDs::default());
     let a = FakeCore::slow("01HOSTA", ds.clone());
     let b = FakeCore::slow("01HOSTB", ds.clone());
-    let ia = Installation::new(a.clone(), Arc::new(AlertsHandler));
-    let ib = Installation::new(b.clone(), Arc::new(AlertsHandler));
+    let ia = Installation::new(a.clone(), Arc::new(PostHandler));
+    let ib = Installation::new(b.clone(), Arc::new(PostHandler));
     let start = std::time::Instant::now();
     let (ra, rb) = tokio::join!(ia.run_job(JobInput::Wake), ib.run_job(JobInput::Wake));
     ra.unwrap();
@@ -58,7 +57,7 @@ async fn different_installations_do_not_wait_on_each_other() {
 async fn a_webhook_posts_once_through_the_claim() {
     let ds = Arc::new(FakeDs::default());
     let core = FakeCore::new("01HOSTA", ds.clone());
-    let inst = Installation::new(core.clone(), Arc::new(AlertsHandler));
+    let inst = Installation::new(core.clone(), Arc::new(PostHandler));
     let report = inst.run_job(hook("d1", "#alerts", "disk full")).await.unwrap();
     assert_eq!(webhook_outcome(&report), TriggerOutcome::Applied { posted: 1, refused: vec![] });
     let posts = ds.posts();
@@ -82,7 +81,7 @@ async fn an_action_outside_the_grants_is_refused_and_never_applied() {
     let ds = Arc::new(FakeDs::default());
     let core = FakeCore::new("01HOSTA", ds.clone());
 
-    let alerts = Installation::new(core.clone(), Arc::new(AlertsHandler));
+    let alerts = Installation::new(core.clone(), Arc::new(PostHandler));
     let report = alerts.run_job(hook("d1", "01OTHERGROUPCHANNEL", "leak")).await.unwrap();
     assert_eq!(
         webhook_outcome(&report),
@@ -182,7 +181,7 @@ async fn a_send_that_failed_after_winning_the_claim_is_retried_under_the_same_id
 #[tokio::test]
 async fn wake_ups_fold_into_a_queued_job() {
     let ds = Arc::new(FakeDs::default());
-    let inst = Installation::new(FakeCore::new("01HOSTA", ds), Arc::new(AlertsHandler));
+    let inst = Installation::new(FakeCore::new("01HOSTA", ds), Arc::new(PostHandler));
     assert!(inst.queue_wake());
     assert!(!inst.queue_wake(), "a second wake-up before the job starts must not queue another");
     inst.run_job(JobInput::Wake).await.unwrap();
@@ -236,7 +235,7 @@ async fn a_store_that_will_not_open_runs_nothing() {
     let ds = Arc::new(FakeDs::default());
     let core = FakeCore::new("01HOSTA", ds.clone());
     core.fail_open.store(true, Ordering::SeqCst);
-    let inst = Installation::new(core.clone(), Arc::new(AlertsHandler));
+    let inst = Installation::new(core.clone(), Arc::new(PostHandler));
     let err = inst.run_job(hook("d1", "alerts", "x")).await.unwrap_err();
     assert!(matches!(err, JobError::Open(_)), "{err:?}");
     assert!(err.fix().contains("forget"));

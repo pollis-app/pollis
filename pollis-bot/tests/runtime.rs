@@ -10,9 +10,8 @@ use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{FakeCore, FakeDs, BOT, CHANNEL};
+use common::{FakeCore, FakeDs, PostHandler, BOT, CHANNEL};
 use http_body_util::BodyExt;
-use pollis_bot::handler::AlertsHandler;
 use pollis_bot::job::Installation;
 use pollis_bot::ratelimit::TokenBucket;
 use pollis_bot::runtime::Runtime;
@@ -25,7 +24,7 @@ const SECRET: &str = "pbw_runtime-test";
 
 fn host(device: &str, ds: Arc<FakeDs>) -> (Arc<Runtime>, Arc<StatusBoard>) {
     let core = FakeCore::new(device, ds);
-    let inst = Arc::new(Installation::new(core, Arc::new(AlertsHandler)));
+    let inst = Arc::new(Installation::new(core, Arc::new(PostHandler)));
     let status = Arc::new(StatusBoard::new(None, None));
     (Runtime::new(vec![inst], 8, status.clone()).unwrap(), status)
 }
@@ -57,7 +56,7 @@ async fn call(app: &axum::Router, delivery: &str) -> (StatusCode, serde_json::Va
 fn the_runtime_refuses_more_installations_than_configured() {
     let ds = Arc::new(FakeDs::default());
     let insts: Vec<_> = (0..3)
-        .map(|_| Arc::new(Installation::new(FakeCore::new("01HOST", ds.clone()), Arc::new(AlertsHandler))))
+        .map(|_| Arc::new(Installation::new(FakeCore::new("01HOST", ds.clone()), Arc::new(PostHandler))))
         .collect();
     let status = Arc::new(StatusBoard::new(None, None));
     let err = Runtime::new(insts, 2, status).err().expect("over the limit");
