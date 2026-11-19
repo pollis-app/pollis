@@ -247,6 +247,11 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   in words on the bot's profile, never in a modal. Desktop `BotBadge` (`isBotUser` decides), mobile
   its twin. Bot management copy says plainly that the bot runs on a machine an admin controls and
   can read what it receives.
+- **Presence** (#132, #2059): a person's avatar carries a small corner dot, a quarter of the
+  avatar: online is the accent ringed in the surface behind it, offline a hollow dot (`bg`
+  ringed in `accentMuted`). Solid, never a glow. Online means a room this device shares shows
+  them; you are always online on your own device. Groups and channels get no dot. Desktop
+  `PresenceAvatar` / `PresenceDot`; mobile draws it on every `UserAvatar`.
 - **Empty states:** every list that can be empty uses `EmptyState`, on desktop
   (`frontend/src/components/ui/EmptyState.tsx`, also what `NavigableList` / `NavigableGrid` draw
   for `emptyLabel`) and on mobile (`EmptyState` in `mobile/components/ui.tsx`). One plain sentence,
@@ -279,7 +284,8 @@ primitive cannot do what a screen needs, extend it in its own file and use it ev
 - **Mobile** (`mobile/components/ui.tsx`): `Screen`, `Header`, `Body`, `BottomAction`, `Txt`,
   `SectionTitle`, `Group`, `ListRow`, `ActionRow`, `CheckRow`, `Field`, `Toggle`, `EmptyState`, `Button`
   (`primary`, `secondary`, `subtle`, `danger`, `default`), `Chip` (`default`, `solid`, `subtle`,
-  `outline`, `danger`), `IconButton`, `Badge`, `Avatar`, `Card`, `Divider`, `Dot`.
+  `outline`, `danger`), `IconButton`, `Badge`, `Avatar` (the letter tile; groups only), `Card`,
+  `Divider`, `Dot`; every user avatar is `components/UserAvatar.tsx`.
 
 ## Copy
 

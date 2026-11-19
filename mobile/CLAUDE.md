@@ -1653,6 +1653,14 @@ Current state:
   confirmed row if a refetch lost it — then refetches once the row is stored
   (`hooks/queries/pendingMessages.ts`; the same for thread replies). Without
   this a just-sent message blinked out to "No messages yet".
+- **Presence (#2059):** every user avatar is `components/UserAvatar.tsx`, with
+  desktop's corner dot. The feed is the realtime client: on each room's roster
+  change it asks the core's `livekit_room_presence` for the users present and
+  stores the snapshot in `stores/presenceStore.ts` (per room; a closed room is
+  dropped). The arm is a core change, so the fingerprint runtime version keeps
+  this JS off any binary without it (OTA cannot reach one). See
+  `.codesight/wiki/ui.md` → "Presence"; Maestro `flows/presence.yaml` and the
+  presence half of `scripts/maestro-typing.sh`.
 - **Durable outbox (#1335):** the core stores every outgoing message
   (`send_state: "pending"`) BEFORE any network work, under an id the send asks
   for first (`new_message_id`) and tags its stub with (`outboxId`), so a

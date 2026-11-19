@@ -680,6 +680,36 @@ offline while they're still in another. Two properties are load-bearing:
   renderer that reloads does not start with everyone offline. Seeds and
   departures share `LiveKitState::presence_lane`, so one can't overwrite the other.
 
+**Mobile (#2059)** follows the same rule with a different feed. Its rooms are
+joined by the JS LiveKit SDK (data-only), not by the core, so there is no
+`presence_changed` event: on every roster change of a room (connect, a
+participant joining or leaving, a reconnect) `mobile/lib/realtime/client.ts`
+hands the room's remote wire identities to the core's `livekit_room_presence`
+bridge arm, which resolves them through the same `#836` cache desktop uses
+(`commands/livekit_roster.rs`, always compiled) and answers the people present,
+self excluded, once each whatever their sessions (`present_user_ids`, the same
+"last session" rule as `emit_departure`). `mobile/stores/presenceStore.ts` keeps
+those per-room snapshots (`setRoom` / `clearRoom`, the only input, so another
+source can feed it without touching readers); a room the device leaves is
+dropped, since it can no longer vouch for anyone. `status` stays tracked (not
+an action), `online` is computed by content, and self comes from
+`appStore.setCurrentUser` and is cleared by `logout`, as on desktop. Logic is
+pure in `mobile/lib/presence.ts` (`tests/presence.test.ts`).
+
+Every user avatar on mobile is one component, `mobile/components/UserAvatar.tsx`:
+photo or letter, alias picture (`aliasKey`), an editor's just-picked picture
+under a spinner (`previewUri` / `busy`), sizes `sm`/`md`/`lg`/points, and the
+dot in its corner, desktop's geometry (`presenceDotGeometry`: a quarter of the
+avatar, 5 at least, a 2-point ring 2 points past the corner). Online is the
+accent ringed in the surface behind the avatar (`on`: `bg`, `panel`, `raised`,
+`high`); offline is hollow, `bg` ringed in `accentMuted`. A bot is a user and
+follows the same rule (its Bot badge sits by the name, not on the avatar). The
+letter tile `Avatar` in `ui.tsx` is drawn directly only for groups (rounded, no
+dot), and a group DM's stacked pair passes `presence={false}`: it stands for
+the conversation. Maestro reads `<testID>-presence-online|offline` through
+`<Screen>`'s `AvatarProbe` (`flows/presence.yaml`; someone else going online
+and offline in `scripts/maestro-typing.sh` → `two-client/presence/`).
+
 ### The right panel (#824, #904)
 
 The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay — opening it reflows the message list.
