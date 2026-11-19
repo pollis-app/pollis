@@ -1,5 +1,14 @@
 /** Browser mock for @tauri-apps/api/core (VITE_PLAYWRIGHT); state seeds from window.__POLLIS_PRELOAD__. */
 
+import {
+  appendChannel,
+  channelBlocks,
+  deleteCategory,
+  flattenBlocks,
+  moveCategory,
+  moveChannel,
+} from '../utils/channelLayout';
+
 interface MockUser {
   id: string;
   email: string;
@@ -20,6 +29,16 @@ interface MockChannel {
   group_id: string;
   name: string;
   description?: string;
+  channel_type?: string;
+  /** #2031: the category it sits in; absent = the uncategorised block. */
+  category_id?: string | null;
+}
+
+/** #2031: a group's channel category. */
+interface MockCategory {
+  id: string;
+  group_id: string;
+  name: string;
 }
 
 interface MockMessage {
@@ -231,7 +250,12 @@ interface MockStore {
   session: MockUser | null;
   profile: MockProfile | null;
   groups: MockGroup[];
+  /** Per group, in display order (#2031): uncategorised first, then category by category. */
   channels: Record<string, MockChannel[]>;
+  /** #2031: per group, in order. */
+  categories: Record<string, MockCategory[]>;
+  /** #2031: refuse every arrangement write, as the DS does a non-admin. */
+  failArrange: boolean;
   messages: Record<string, MockMessage[]>;
   // Thread replies (#825), keyed by the ROOT message's id.
   threadMessages: Record<string, MockMessage[]>;
@@ -439,6 +463,8 @@ const store: MockStore = {
   savedDiagnosticsPath: null,
   failSends: preload.failSends === true,
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
+  categories: (preload.categories as Record<string, MockCategory[]> | undefined) ?? {},
+  failArrange: preload.failArrange === true,
   readCursors:
     (preload.readCursors as Record<string, string> | undefined) ??
     Object.fromEntries(
@@ -752,6 +778,14 @@ function roleInGroup(groupId: string): string | null {
 }
 
 /** Mock `authz::require_member` (#917), worded as `NOT_A_MEMBER`. */
+/** #2031: the DS refuses an arrangement from anyone but an admin of the group. */
+function requireArrangeMock(groupId: string): void {
+  const group = store.groups.find((g) => g.id === groupId);
+  if (store.failArrange || !group || (group.current_user_role ?? 'admin') !== 'admin') {
+    throw new Error('forbidden');
+  }
+}
+
 function requireMemberMock(groupId: string): void {
   if (roleInGroup(groupId) === null) {
     throw new Error('you are not a member of this group');
@@ -1627,9 +1661,62 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_user_groups_with_channels':
       return store.groups.map((g) => ({
         ...g,
-        channels: store.channels[g.id] ?? [],
+        channels: flattenBlocks(channelBlocks(store.channels[g.id] ?? [], store.categories[g.id] ?? [])),
+        categories: (store.categories[g.id] ?? []).map((k) => ({ ...k })),
         current_user_role: g.current_user_role ?? 'admin',
       }));
+
+    // #2031: arranging a group's channels, as the DS does it (pollis-delivery `channel_order`).
+    case 'create_channel_category': {
+      const { groupId, name } = args as { groupId: string; name: string };
+      requireArrangeMock(groupId);
+      const category: MockCategory = { id: generateId(), group_id: groupId, name: name.trim() };
+      store.categories[groupId] = [...(store.categories[groupId] ?? []), category];
+      return category;
+    }
+
+    case 'rename_channel_category': {
+      const { groupId, categoryId, name } = args as { groupId: string; categoryId: string; name: string };
+      requireArrangeMock(groupId);
+      store.categories[groupId] = (store.categories[groupId] ?? []).map((k) =>
+        k.id === categoryId ? { ...k, name: name.trim() } : k,
+      );
+      return null;
+    }
+
+    case 'delete_channel_category': {
+      const { groupId, categoryId } = args as { groupId: string; categoryId: string };
+      requireArrangeMock(groupId);
+      const next = deleteCategory(store.channels[groupId] ?? [], store.categories[groupId] ?? [], categoryId);
+      store.channels[groupId] = next.channels;
+      store.categories[groupId] = next.categories;
+      return null;
+    }
+
+    case 'move_channel_category': {
+      const { groupId, categoryId, position } = args as { groupId: string; categoryId: string; position: number };
+      requireArrangeMock(groupId);
+      store.categories[groupId] = moveCategory(store.categories[groupId] ?? [], categoryId, position);
+      return null;
+    }
+
+    case 'move_channel': {
+      const { groupId, channelId, categoryId, position } = args as {
+        groupId: string;
+        channelId: string;
+        categoryId: string | null;
+        position: number;
+      };
+      requireArrangeMock(groupId);
+      store.channels[groupId] = moveChannel(
+        store.channels[groupId] ?? [],
+        store.categories[groupId] ?? [],
+        channelId,
+        categoryId ?? null,
+        position,
+      );
+      return null;
+    }
 
     case 'create_group': {
       const { name, description, ownerId } = args as {
@@ -1651,7 +1738,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_group_channels': {
       const { groupId } = args as { groupId: string; requesterId?: string };
       requireMemberMock(groupId);
-      return store.channels[groupId] ?? [];
+      return flattenBlocks(channelBlocks(store.channels[groupId] ?? [], store.categories[groupId] ?? []));
     }
 
     case 'get_group_members': {
@@ -1661,22 +1748,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'create_channel': {
-      const { groupId, name, description } = args as {
+      const { groupId, name, description, channelType, categoryId } = args as {
         groupId: string;
         name: string;
         description?: string | null;
         creatorId?: string;
+        channelType?: string;
+        categoryId?: string | null;
       };
       const channel: MockChannel = {
         id: generateId(),
         group_id: groupId,
         name,
         description: description ?? undefined,
+        channel_type: channelType ?? 'text',
+        category_id: categoryId ?? null,
       };
-      if (!store.channels[groupId]) {
-        store.channels[groupId] = [];
-      }
-      store.channels[groupId].push(channel);
+      // #2031: at the bottom of its block.
+      store.channels[groupId] = appendChannel(store.channels[groupId] ?? [], store.categories[groupId] ?? [], channel);
       return channel;
     }
 

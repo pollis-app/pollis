@@ -7,7 +7,7 @@ import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
 import { deriveSlug } from "../utils/urlRouting";
 import { useNameSlug } from "../hooks/useNameSlug";
-import { groupQueryKeys } from "../hooks/queries/useGroups";
+import { groupQueryKeys, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
@@ -23,7 +23,7 @@ interface CreateChannelProps {
 
 export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess }) => {
   const { t } = useTranslation("channels");
-  const { selectedGroupId, currentUser, addChannel, channels, groups, setSelectedChannelId } = appStore;
+  const { selectedGroupId, currentUser, addChannel, channels, groups, setSelectedChannelId, newChannelCategoryId } = appStore;
   const queryClient = useQueryClient();
   const { name, slug, onNameChange, onSlugChange, finalSlug: resolveFinalSlug } = useNameSlug();
   const [description, setDescription] = useState("");
@@ -32,6 +32,11 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
   const [error, setError] = useState<string | null>(null);
 
   const currentGroup = groups.find((g) => g.id === selectedGroupId);
+  // Created from a category's "+" (#2031): it lands at the bottom of that category.
+  const { data: tree } = useUserGroupsWithChannels();
+  const category = newChannelCategoryId
+    ? tree?.find((g) => g.id === selectedGroupId)?.categories.find((k) => k.id === newChannelCategoryId)
+    : undefined;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,7 +72,14 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
     try {
       const channel = await invoke<{ id: string; group_id: string; name: string; description?: string; channel_type: string }>(
         'create_channel',
-        { groupId: selectedGroupId, name: name.trim(), description: description.trim() || null, creatorId: currentUser.id, channelType },
+        {
+          groupId: selectedGroupId,
+          name: name.trim(),
+          description: description.trim() || null,
+          creatorId: currentUser.id,
+          channelType,
+          categoryId: category?.id ?? null,
+        },
       );
       const channelData: Channel = {
         id: channel.id,
@@ -76,6 +88,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
         name: channel.name,
         description: channel.description || '',
         channel_type: channel.channel_type as Channel['channel_type'],
+        category_id: category?.id ?? null,
         created_by: currentUser.id,
         created_at: Date.now(),
         updated_at: Date.now(),
@@ -127,6 +140,11 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
       data-testid="create-channel-form"
       onSubmit={handleSubmit}
     >
+      {category && (
+        <p data-testid="create-channel-category" className="text-secondary text-dim">
+          {t("categories.createIn", { name: category.name })}
+        </p>
+      )}
       <TextInput
         label={t("createChannel.nameLabel")}
         value={name}

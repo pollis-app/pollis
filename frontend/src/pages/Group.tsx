@@ -155,6 +155,8 @@ export const GroupPage: React.FC = observer(() => {
         icon: <Plus size={14} />,
         action: () => {
           setSelectedGroupId(group.id);
+          // The group's own "+": the uncategorised block (#2031).
+          appStore.setNewChannelCategoryId(null);
           navigate({ to: "/groups/$groupId/channels/new", params: { groupId } });
         },
         type: "system" as const,
