@@ -2,7 +2,7 @@
 /**
  * `pollis`: the Pollis command line for App developers.
  *
- *   pollis app new <name> --lang ts   a new App: one handler, a test, a README
+ *   pollis app new <name> --lang ts|rust   a new App: one handler, a test, a README
  *   pollis app build                  compile to dist/app.wasm + dist/pollis-app.json, print the App hash
  *   pollis app test                   build, then run the tests offline in the real sandbox
  *   pollis app dev --installation ID  development installation: rebuild and sign on save, in pollis-bot
@@ -19,7 +19,8 @@ import { testApp } from "./test.js";
 
 const HELP = `pollis app <command>
 
-  new <name> --lang ts   Create an App: one handler, a test and a README.
+  new <name> --lang ts|rust
+                         Create an App in TypeScript or Rust: one handler, a test and a README.
   build                  Compile the App to dist/app.wasm and write dist/pollis-app.json.
                          Prints the App hash an admin approves.
   test [files...]        Build, then run the App's tests offline in the real sandbox.
@@ -63,15 +64,16 @@ async function main(argv: string[]): Promise<number> {
     case "new": {
       const name = rest[0];
       if (!name) {
-        console.error("usage: pollis app new <name> --lang ts");
+        console.error("usage: pollis app new <name> --lang ts|rust");
         return 2;
       }
       if (!values.lang) {
-        console.error("say which language with --lang (TypeScript: --lang ts)");
+        console.error("say which language with --lang (TypeScript: --lang ts, Rust: --lang rust)");
         return 2;
       }
       const target = newApp({ name, lang: values.lang, parent: values.dir, sdk: values.sdk });
-      console.log(`Created ${target}\n\nNext:\n  cd ${name}\n  pnpm install\n  pnpm test`);
+      const next = values.lang === "rust" ? "npx pollis app test" : "pnpm install\n  pnpm test";
+      console.log(`Created ${target}\n\nNext:\n  cd ${name}\n  ${next}`);
       return 0;
     }
     case "build": {

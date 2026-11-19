@@ -1,5 +1,8 @@
 /**
- * `pollis app build`: TypeScript in, a sandboxed component and its manifest out.
+ * `pollis app build`: an App's source in, a sandboxed component and its manifest
+ * out. Rust Apps compile in `rust.ts`; both languages end at the same check.
+ *
+ * For TypeScript:
  *
  * 1. Bundle the App with esbuild (refusing Node built-ins) and import it in
  *    Node to read `app({ manifest })`; check it and write `pollis-app.json`.
@@ -23,6 +26,10 @@ import { isApp, type AppDefinition } from "@pollis-inc/app";
 import { HANDLER_FOR, ManifestError, resolveManifest, type ResolvedManifest } from "@pollis-inc/app/manifest";
 
 import { devTool, findDevTool } from "./devtool.js";
+import { BuildError } from "./errors.js";
+import { compileRust, isRustApp } from "./rust.js";
+
+export { BuildError };
 
 export interface BuildOptions {
   /** Project directory (holds package.json). */
@@ -41,8 +48,6 @@ export interface BuildResult {
   appHash: string;
   bytes: number;
 }
-
-export class BuildError extends Error {}
 
 /**
  * Packages are resolved as for a browser: the sandbox has web basics
@@ -244,11 +249,54 @@ function log(quiet: boolean | undefined, line: string): void {
   }
 }
 
+/**
+ * Write the build out and load it in the real App host, so an App the runtime
+ * would refuse is refused here, then compute its App hash.
+ */
+function finishBuild(bin: string, out: string, manifest: ResolvedManifest, component: Uint8Array): BuildResult {
+  const manifestPath = join(out, "pollis-app.json");
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  const componentPath = join(out, "app.wasm");
+  writeFileSync(componentPath, component);
+  // A development signature from an earlier `pollis app dev` signs another App hash. Left beside
+  // this build it makes a development installation refuse the build as tampered instead of
+  // offering it to an admin; `pollis app dev` signs each new build itself.
+  rmSync(`${componentPath}.sig.json`, { force: true });
+
+  try {
+    devTool(bin, ["check", componentPath, manifestPath]);
+  } catch (e) {
+    rmSync(componentPath, { force: true });
+    throw new BuildError(`the App host refuses this build: ${(e as Error).message}`);
+  }
+  const appHash = devTool(bin, ["hash", componentPath, manifestPath]);
+  return { component: componentPath, manifestPath, manifest, appHash, bytes: component.length };
+}
+
+async function buildRustApp(dir: string, options: BuildOptions): Promise<BuildResult> {
+  const out = resolve(dir, options.out ?? "dist");
+  const bin = findDevTool();
+  mkdirSync(out, { recursive: true });
+  const scratch = join(out, ".build");
+  rmSync(scratch, { recursive: true, force: true });
+  mkdirSync(scratch, { recursive: true });
+  try {
+    log(options.quiet, `compiling ${relative(process.cwd(), dir) || "."} to a component...`);
+    const { manifest, component } = compileRust(dir, scratch);
+    return finishBuild(bin, out, manifest, component);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 export async function buildApp(options: BuildOptions): Promise<BuildResult> {
   const dir = resolve(options.dir);
+  if (isRustApp(dir)) {
+    return buildRustApp(dir, options);
+  }
   const pkgPath = join(dir, "package.json");
   if (!existsSync(pkgPath)) {
-    throw new BuildError(`no package.json in ${dir}; run this in your App's directory`);
+    throw new BuildError(`no App in ${dir} (no package.json, or Cargo.toml that depends on pollis-app); run this in your App's directory`);
   }
   const pkg = readJson(pkgPath);
   const configured = (pkg.pollis as { entry?: string } | undefined)?.entry;
@@ -282,8 +330,6 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
       }
       throw e;
     }
-    const manifestPath = join(out, "pollis-app.json");
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
 
     // 2. The sandbox bundle.
     let bundle: string;
@@ -328,22 +374,9 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
     } catch (e) {
       throw new BuildError(`compiling to a component failed:\n${(e as Error).message}`);
     }
-    const componentPath = join(out, "app.wasm");
-    writeFileSync(componentPath, component);
-    // A development signature from an earlier `pollis app dev` signs another App hash. Left beside
-    // this build it makes a development installation refuse the build as tampered instead of
-    // offering it to an admin; `pollis app dev` signs each new build itself.
-    rmSync(`${componentPath}.sig.json`, { force: true });
 
     // 4. The real host's verdict, and the App hash.
-    try {
-      devTool(bin, ["check", componentPath, manifestPath]);
-    } catch (e) {
-      rmSync(componentPath, { force: true });
-      throw new BuildError(`the App host refuses this build: ${(e as Error).message}`);
-    }
-    const appHash = devTool(bin, ["hash", componentPath, manifestPath]);
-    return { component: componentPath, manifestPath, manifest, appHash, bytes: component.length };
+    return finishBuild(bin, out, manifest, component);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

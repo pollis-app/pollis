@@ -2,7 +2,8 @@ name: App SDK
 
 # The developer side of Pollis Apps (#2006): `pollis-app-dev` (the offline
 # test runner through the real App host, the deterministic pre-initializer and
-# the App hash) and the TypeScript SDK in sdk/ts (`@pollis-inc/app`, `@pollis-inc/cli`).
+# the App hash), the TypeScript SDK in sdk/ts (`@pollis-inc/app`, `@pollis-inc/cli`)
+# and the Rust SDK in sdk/rust (`pollis-app`, #2007).
 #
 # The CLI suite builds real Apps end to end and runs them in the real App
 # host, including the reproducibility test: the same source and lockfile give
@@ -12,6 +13,7 @@ on:
   pull_request:
     paths:
       - 'sdk/ts/**'
+      - 'sdk/rust/**'
       - 'pollis-app-dev/**'
       - 'pollis-app-host/**'
       - 'pollis-app-manifest/**'
@@ -24,6 +26,7 @@ on:
     branches: [main]
     paths:
       - 'sdk/ts/**'
+      - 'sdk/rust/**'
       - 'pollis-app-dev/**'
       - 'pollis-app-host/**'
       - 'pollis-app-manifest/**'
@@ -57,6 +60,11 @@ jobs:
 
       - name: cargo test (pollis-app-dev)
         run: cargo test -p pollis-app-dev
+
+      # Its own workspace, so `-p` from the root cannot reach it.
+      - name: cargo test (pollis-app)
+        working-directory: sdk/rust/pollis-app
+        run: cargo test --locked
 
       - name: Build pollis-app-dev
         run: cargo build --release -p pollis-app-dev

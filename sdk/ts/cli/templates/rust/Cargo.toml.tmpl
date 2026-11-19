@@ -1,0 +1,25 @@
+[package]
+name = "{{name}}"
+version = "0.1.0"
+edition = "2021"
+description = "A Pollis App."
+publish = false
+
+[lib]
+name = "app"
+crate-type = ["cdylib"]
+
+[dependencies]
+pollis-app = {{pollis_app}}
+
+# Small and reproducible: the same source and Cargo.lock give the same App hash.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# This App stands alone, even inside another Cargo workspace.
+[workspace]
+exclude = ["vendor"]

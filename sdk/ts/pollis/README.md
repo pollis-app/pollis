@@ -3,7 +3,7 @@
 The Pollis command line for App developers. Start a new App with:
 
 ```sh
-npx pollis app new my-bot --lang ts
+npx pollis app new my-bot --lang ts     # or --lang rust
 ```
 
 This package runs [`@pollis-inc/cli`](https://www.npmjs.com/package/@pollis-inc/cli), so both have the same commands and version. An App's own project depends on `@pollis-inc/cli` directly.
