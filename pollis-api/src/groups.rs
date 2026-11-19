@@ -61,6 +61,11 @@ pub struct CreateChannelBody {
     /// The creator; bound to the authenticated user when signed.
     #[serde(default)]
     pub creator_id: Option<String>,
+    /// The category to create it in, at the bottom (#2031); `None` puts it at
+    /// the bottom of the uncategorised block. Placing it in a category is an
+    /// arrangement, so it needs an admin; an older client never sends it.
+    #[serde(default)]
+    pub category_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,6 +82,65 @@ pub struct UpdateChannelBody {
 #[derive(Serialize, Deserialize)]
 pub struct DeleteChannelBody {
     pub channel_id: String,
+    #[serde(default)]
+    pub requester_id: Option<String>,
+}
+
+/// `POST /v1/channels/move` — place a channel in a block of its group (#2031).
+///
+/// `category_id: None` is the uncategorised block. `position` is the channel's
+/// index in the target block once it is there (0 = top); past the end means the
+/// bottom. Admin-only; the DS renumbers every block it touches in one
+/// transaction.
+#[derive(Serialize, Deserialize)]
+pub struct MoveChannelBody {
+    pub channel_id: String,
+    pub group_id: String,
+    #[serde(default)]
+    pub category_id: Option<String>,
+    pub position: u32,
+    #[serde(default)]
+    pub requester_id: Option<String>,
+}
+
+/// `POST /v1/channel-categories/create` — a new category at the bottom of the
+/// group's categories (#2031). The client mints the id. Admin-only.
+#[derive(Serialize, Deserialize)]
+pub struct CreateChannelCategoryBody {
+    pub id: String,
+    pub group_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub requester_id: Option<String>,
+}
+
+/// `POST /v1/channel-categories/rename` (#2031). Admin-only.
+#[derive(Serialize, Deserialize)]
+pub struct RenameChannelCategoryBody {
+    pub category_id: String,
+    pub group_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub requester_id: Option<String>,
+}
+
+/// `POST /v1/channel-categories/delete` (#2031). Its channels move to the end
+/// of the uncategorised block, in their order; none is deleted. Admin-only.
+#[derive(Serialize, Deserialize)]
+pub struct DeleteChannelCategoryBody {
+    pub category_id: String,
+    pub group_id: String,
+    #[serde(default)]
+    pub requester_id: Option<String>,
+}
+
+/// `POST /v1/channel-categories/move` — put a category at `position` among its
+/// group's categories (#2031); past the end means the bottom. Admin-only.
+#[derive(Serialize, Deserialize)]
+pub struct MoveChannelCategoryBody {
+    pub category_id: String,
+    pub group_id: String,
+    pub position: u32,
     #[serde(default)]
     pub requester_id: Option<String>,
 }

@@ -309,6 +309,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "group_alias",
         include_str!("../migrations/000051_group_alias.sql"),
     ),
+    (
+        52,
+        "channel_categories",
+        include_str!("../migrations/000052_channel_categories.sql"),
+    ),
 ];
 
 /// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.

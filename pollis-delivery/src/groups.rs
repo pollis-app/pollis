@@ -438,6 +438,13 @@ pub async fn apply_create_channel(
     if authed.is_some() && group_role(conn, &body.group_id, &creator).await?.is_none() {
         return Ok(WriteOutcome::Forbidden);
     }
+    // Placing a channel in a category is an arrangement (#2031): admins only.
+    if body.category_id.is_some()
+        && authed.is_some()
+        && !is_admin(conn, &body.group_id, &creator).await?
+    {
+        return Ok(WriteOutcome::Forbidden);
+    }
     // `is_member` ORs across kinds, so a reused id grants membership.
     if conversation_id_taken(conn, &body.id).await? {
         return Ok(WriteOutcome::Forbidden);
@@ -445,18 +452,31 @@ pub async fn apply_create_channel(
     // One transaction, so the registry claim and the channel it names commit
     // together or not at all (#880).
     let tx = crate::db::write_tx(conn).await?;
+    let category = body.category_id.as_deref();
+    if let Some(cat) = category {
+        if !crate::channel_order::category_in_group(&tx, cat, &body.group_id).await? {
+            tx.rollback().await?;
+            return Ok(WriteOutcome::Forbidden);
+        }
+    }
+    // The block it joins, read before the insert: it goes at the bottom (#2031).
+    let mut block = crate::channel_order::block_channels(&tx, &body.group_id, category).await?;
     claim_conversation_id(&tx, &body.id, ConversationKind::Channel).await?;
     tx.execute(
-        "INSERT INTO channels (id, group_id, name, description, channel_type) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO channels (id, group_id, name, description, channel_type, category_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         libsql::params![
             body.id.clone(),
             body.group_id.clone(),
             body.name.clone(),
             body.description.clone(),
             body.channel_type.clone(),
+            body.category_id.clone(),
         ],
     )
     .await?;
+    block.push(body.id.clone());
+    crate::channel_order::renumber_block(&tx, category, &block).await?;
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
