@@ -1,8 +1,8 @@
-# Writing a Pollis App in TypeScript
+# Writing a Pollis App
 
-An **App** is the code that decides what a bot does. You write it in TypeScript, test it on your own machine, and build it into a single file that a group's admin approves. Your App never sees the bot's keys: the runtime (`pollis-bot`, on a machine the group's admin chooses) holds them and runs your App inside a sandbox, where it can do only what its manifest asks for and the admin allowed.
+An **App** is the code that decides what a bot does. You write it in TypeScript or Rust, test it on your own machine, and build it into a single file that a group's admin approves. Your App never sees the bot's keys: the runtime (`pollis-bot`, on a machine the group's admin chooses) holds them and runs your App inside a sandbox, where it can do only what its manifest asks for and the admin allowed.
 
-You do not need to know anything about WebAssembly. You write ordinary async TypeScript; the `pollis app` tool does the rest.
+You do not need to know anything about WebAssembly. You write ordinary TypeScript or Rust; the `pollis app` tool does the rest. This guide walks through TypeScript. Everything about manifests, handlers, limits and approval is the same in Rust, and [Writing your App in Rust](#writing-your-app-in-rust) shows what differs.
 
 If the words App, Installation, Bot and Runtime are new, read [the four terms](./README.md#four-words-four-different-things) first. Every function, field and limit is listed in the [App reference](./app-reference.md); this guide is the walkthrough.
 
@@ -19,13 +19,14 @@ If the words App, Installation, Bot and Runtime are new, read [the four terms](.
 - [Limits, stated plainly](#limits-stated-plainly)
 - [Running it in a group: dev, build, run, approve](#running-it-in-a-group-dev-build-run-approve)
 - [Updates, from the admin's side](#updates-from-the-admins-side)
+- [Writing your App in Rust](#writing-your-app-in-rust)
 - [Troubleshooting](#troubleshooting)
 
 ## The commands
 
 | Command | What it does |
 |---|---|
-| `pollis app new <name> --lang ts` | A new App: one handler, a test and a README |
+| `pollis app new <name> --lang ts` (or `--lang rust`) | A new App: one handler, a test and a README |
 | `pollis app test` | Builds the App, then runs your tests against it, offline, in the same sandbox the runtime uses |
 | `pollis app build` | Writes `dist/app.wasm` and `dist/pollis-app.json`, prints the App hash |
 | `pollis app dev --installation <id>` | Runs the App in your bot against a test group as a **development installation**, rebuilding and signing on every save |
@@ -383,6 +384,142 @@ To keep it running after you close the terminal, run `pollis-bot` as a service (
 
 The admin's side in full: [Approving an App](./app-approval.md).
 
+## Writing your App in Rust
+
+The same App, the same sandbox, the same commands. A Rust App is a small crate that depends on `pollis-app`, and it builds to the same two files: `dist/app.wasm` and `dist/pollis-app.json`. Its component is far smaller than a TypeScript one (about 50 KB for the template), because it carries no JavaScript engine.
+
+**You need** [Rust through rustup](https://rustup.rs) and `pollis-app-dev` on your `PATH` ([step 1 above](#quick-start-zero-to-a-tested-app)). Nothing else: no extra Cargo tools. The App's `rust-toolchain.toml` tells rustup which compiler and WebAssembly target to fetch.
+
+**Create it and run its tests:**
+
+```sh
+npx pollis app new hello-bot --lang rust
+cd hello-bot
+npx pollis app test
+```
+
+```
+built hello-bot 0.1.0 (App hash bceb6fda…)
+test a_command_the_app_did_not_declare_never_reaches_it ... ok
+test hello_greets_by_name ... ok
+test hello_with_no_name_greets_the_sender ... ok
+test result: ok. 3 passed; 0 failed
+```
+
+To work against the SDK in your checkout instead of the published crate, add `--sdk <checkout>/sdk/ts`. It copies the crate into your App as `vendor/pollis-app`, so the App hash does not depend on where your checkout is.
+
+**`src/lib.rs`, as `pollis app new` writes it:**
+
+```rust
+use pollis_app::{Action, Command, CommandSpec, Context, Manifest};
+
+fn on_command(cmd: Command, ctx: &Context) -> pollis_app::Result {
+    if cmd.name != "hello" {
+        return Ok(());
+    }
+    let who = match cmd.args.trim() {
+        "" => cmd.message.author.display_name.as_str(),
+        name => name,
+    };
+    ctx.reply(&cmd.message, format!("Hello, {who}!"))
+}
+
+pollis_app::app! {
+    manifest: Manifest::new()
+        .channels(["*"])
+        .actions([Action::Reply])
+        .command(CommandSpec::new("hello", "Say hello").arg_hint("[name]")),
+    on_command: on_command,
+}
+```
+
+- `pollis_app::app! { ... }` is your whole App: a **manifest**, then the handlers you have. Call it once, in `src/lib.rs`.
+- A handler is a function taking what happened and `&Context`. It returns `pollis_app::Result`: `Ok(())` applies what it queued, an error discards all of it. `?` works on every `ctx` call and on any standard error.
+- `bail!("no ticket {id}")` returns an error from a handler.
+
+**The manifest** has the same fields as [above](#the-manifest), as builder methods. Name, version and description default to your `Cargo.toml`.
+
+| TypeScript | Rust |
+|---|---|
+| `read: { channels: ["#support"], history: 7 }` | `.channels(["#support"]).history(7)` |
+| `read: { events: ["created", "edited"] }` | `.events([EventKind::Created, EventKind::Edited])` |
+| `actions: ["reply", "edit_own"]` | `.actions([Action::Reply, Action::EditOwn])` |
+| `state: { quota: 1024 }` | `.state_quota(1024)` |
+| `egress: ["api.linear.app"]` | `.egress(["api.linear.app"])` |
+| `commands: [{ name, description, arg_hint }]` | `.command(CommandSpec::new(name, description).arg_hint(hint))` |
+| `commands: [{ name, description, request: true }]` | `.command(CommandSpec::new(name, description).request())` |
+| `schedules: [{ name, every, offset }]` | `.schedule(ScheduleSpec::new(name, every).offset(offset))` |
+| `triggers: ["messages"]` | `.triggers([Trigger::Messages])` |
+
+**Handlers** are `on_message`, `on_mention`, `on_command`, `on_schedule`, `on_request` and `on_webhook`. Each receives a `Message`, `Command`, `Schedule`, `Request` or `Webhook` with the same fields as in TypeScript, in `snake_case`. They run one at a time and are not `async`.
+
+**What `ctx` can do:**
+
+| TypeScript | Rust |
+|---|---|
+| `await ctx.reply(message, text)` | `ctx.reply(&message, text)?` |
+| `await ctx.post(channelId, text)` | `ctx.post(&message.channel, text)?` |
+| `await ctx.react(message, emoji)` | `ctx.react(&message, emoji)?` |
+| `await ctx.editOwn(message, text)` | `ctx.edit_own(&message, text)?` |
+| `await ctx.deleteOwn(message)` | `ctx.delete_own(&message)?` |
+| `await ctx.messages({ limit: 10 })` | `ctx.messages(MessageQuery { limit: Some(10), ..Default::default() })?` |
+| `await ctx.state.getJSON<number>("n")` | `ctx.state.get_json::<u64>("n")?` (an `Option`) |
+| `await ctx.state.setJSON("n", 1)` | `ctx.state.set_json("n", &1)?` |
+| `await ctx.state.get("k")`, `getText`, `set`, `delete` | `ctx.state.get("k")?`, `get_text`, `set`, `delete` |
+| `await ctx.fetch(url, { method, headers, body })` | `ctx.fetch(url, FetchInit::new().method("POST").header(k, v).body(bytes))?` |
+| `ctx.log.info(text)` | `ctx.log.info(text)` |
+| `ctx.now()` | `ctx.now()` |
+| `crypto.getRandomValues(...)` | `ctx.random()` |
+
+`FetchInit::json(&value)?` sends a JSON body. A response has `.status`, `.ok()`, `.headers.get(name)`, `.text()`, `.json::<T>()?` and `.bytes()`.
+
+Every job starts from a fresh instance, so a `static` is reset too: keep what must last in `ctx.state`.
+
+**Handling a refusal:**
+
+```rust
+match ctx.fetch("https://status.example.com/", FetchInit::new()) {
+    Ok(response) => ctx.log.info(format!("status {}", response.status)),
+    // "`http-fetch` to `status.example.com` refused: not in `egress`"
+    Err(e) if e.is_refused() => ctx.log.warn(e.message()),
+    Err(e) => return Err(e),
+}
+```
+
+A panic also ends the job and nothing is applied, but the job's error is a generic `trap`; the panic's text appears only in the App's log. Return an error when you can.
+
+**Testing.** `pollis app test` builds the App, then runs `cargo test`. Put tests in `tests/`:
+
+```rust
+use pollis_app::testing::{HttpFixture, JobOptions, TestApp};
+
+#[test]
+fn hello_greets_by_name() {
+    let result = TestApp::new().command("hello", "Sam");
+    assert!(result.ok, "{:?}", result.error);
+    assert_eq!(result.replies, ["Hello, Sam!"]);
+}
+
+#[test]
+fn files_a_ticket() {
+    let options = JobOptions::new()
+        // Answers for ctx.fetch. Tests never touch the network.
+        .http(HttpFixture::new("https://api.linear.app/graphql").body(r#"{"id":"T-7"}"#))
+        // State before the job.
+        .state("count", "41");
+    let result = TestApp::new().with(options).command("ticket", "Printer on fire");
+    assert_eq!(result.fetches.len(), 1);
+}
+```
+
+`TestApp` has the same calls as [`testApp()`](#testing): `send`, `message`, `mention`, `command`, `schedule`, `request`, `webhook` and `webhook_json`, and the result has the same fields (`ok`, `error`, `replies`, `posts`, `reactions`, `actions`, `state`, `logs`, `fetches`). `app.with(options)` runs one call with options: `state`, `http`, `message` (history), `grants` and `now`. `pollis app test <filter>` runs only the tests whose name contains `<filter>`.
+
+**Building.** `pollis app build` runs `cargo build --release --target wasm32-wasip2`, reads the manifest from your code, loads the result in the real sandbox and prints the App hash. The same source, `Cargo.lock` and `rust-toolchain.toml` give the same bytes and the same App hash on any machine, in any directory. Commit all three. The first build writes `Cargo.lock`; after that a `Cargo.toml` change that needs a new lockfile stops the build until you run `cargo update --workspace`, so a dependency can never change without you seeing it.
+
+`dev` and `run` work exactly as [above](#running-it-in-a-group-dev-build-run-approve), with `npx pollis app dev` and `npx pollis app run`.
+
+**Crates.** Any crate that compiles for `wasm32-wasip2` and does not need files or sockets works. A crate that opens a socket is refused at build, with the import named. Use `ctx.fetch` for HTTP.
+
 ## Troubleshooting
 
 **`pollis-app-dev` was not found.** Build it (`cargo build --release -p pollis-app-dev` in the Pollis checkout) and put `target/release` on your `PATH`, or set `POLLIS_APP_DEV_BIN` to the binary.
@@ -398,3 +535,7 @@ The admin's side in full: [Approving an App](./app-approval.md).
 **`the App host refuses this build`.** The component imports something the sandbox does not provide. The message names the import; this usually means a dependency reaches for the network or files directly.
 
 **Tests fail with a TypeScript syntax error.** Your Node is older than 22.18. Check `node --version`.
+
+**`Cargo.lock does not match Cargo.toml`.** You changed a dependency. Run `cargo update --workspace` and commit the new `Cargo.lock`.
+
+**`the WebAssembly target is missing`.** Run `rustup target add wasm32-wasip2`. Keep the `rust-toolchain.toml` that `pollis app new` wrote: it pins the compiler your App hash depends on.

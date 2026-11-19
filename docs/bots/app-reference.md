@@ -2,7 +2,7 @@
 
 Everything an App can call, everything it can declare, and every way the runtime can say no. For how a job runs from trigger to applied action, read [concepts-for-developers.md](concepts-for-developers.md) first; this page does not repeat it.
 
-Writing in TypeScript? Start with [the developer guide](developer-guide.md). `@pollis-inc/app` wraps every function below as a promise on `ctx` (`reply` is `ctx.reply`, `http-fetch` is `ctx.fetch`, `kv-get` is `ctx.state.get`, and so on), and its refusals are the same strings.
+Writing in TypeScript? Start with [the developer guide](developer-guide.md). `@pollis-inc/app` wraps every function below as a promise on `ctx` (`reply` is `ctx.reply`, `http-fetch` is `ctx.fetch`, `kv-get` is `ctx.state.get`, and so on), and its refusals are the same strings. Writing in Rust? The `pollis-app` crate wraps them the same way ([Writing your App in Rust](developer-guide.md#writing-your-app-in-rust)): `reply` is `ctx.reply`, `http-fetch` is `ctx.fetch`, `kv-get` is `ctx.state.get`, and a refusal is an error whose `is_refused()` is true.
 
 The sources of truth, if this page and the code ever disagree:
 
@@ -327,7 +327,9 @@ The admin's grants come from their signed approval and nothing else: an admin ch
 
 "Job ends" means the same as an `err` return: nothing queued is applied and no state is written.
 
-## Your first App (Rust)
+## Your first App (Rust, without the SDK)
+
+Most Rust Apps should use the `pollis-app` crate and `pollis app new --lang rust`, which handle everything below for you ([Writing your App in Rust](developer-guide.md#writing-your-app-in-rust)). This section builds the same kind of component by hand from the WIT, which is useful if you want no dependencies beyond `wit-bindgen`.
 
 The smallest useful App: it replies "pong" to any message that says "ping". Ordinary `std` Rust, nothing special.
 
