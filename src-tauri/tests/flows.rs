@@ -70,6 +70,8 @@ mod pq_key_packages;
 mod pq_migration;
 #[path = "flows/push_dismiss.rs"]
 mod push_dismiss;
+#[path = "flows/push_hold.rs"]
+mod push_hold;
 #[path = "flows/read_sync.rs"]
 mod read_sync;
 #[path = "flows/rejoin.rs"]

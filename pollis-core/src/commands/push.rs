@@ -91,6 +91,8 @@ const DISMISS_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(2);
 struct PendingDismiss {
     state: Arc<AppState>,
     read_at: std::collections::HashMap<String, std::time::Instant>,
+    /// The position each read reached (#2056), so the DS clears by message, not by clock.
+    through: std::collections::HashMap<String, pollis_api::devices::ReadPosition>,
     /// A debounced report is waiting to send `read_at`.
     scheduled: bool,
 }
@@ -104,6 +106,7 @@ static DISMISS_PENDING: std::sync::LazyLock<
 /// Ages round UP plus a second, so the DS errs toward keeping a notification; newest win.
 pub(crate) fn dismiss_entries(
     read_at: &std::collections::HashMap<String, std::time::Instant>,
+    through: &std::collections::HashMap<String, pollis_api::devices::ReadPosition>,
     now: std::time::Instant,
 ) -> Vec<pollis_api::devices::DismissEntry> {
     let mut entries: Vec<(std::time::Duration, &String)> = read_at
@@ -122,16 +125,22 @@ pub(crate) fn dismiss_entries(
             pollis_api::devices::DismissEntry {
                 conversation_id: c.clone(),
                 read_secs_ago: u32::try_from(secs + 1).unwrap_or(u32::MAX),
+                through: through.get(c).cloned(),
             }
         })
         .collect()
 }
 
-/// Queue `conversation_id` (whose read cursor just moved) for the next
-/// dismissal report, scheduling one if none is pending for this account.
+/// Queue `conversation_id` (whose read cursor just moved to `through`) for the
+/// next dismissal report, scheduling one if none is pending for this account.
 ///
 /// Fire-and-forget: a failed report is kept and rides along with the next one.
-pub(crate) fn schedule_push_dismiss(state: &Arc<AppState>, user_id: &str, conversation_id: &str) {
+pub(crate) fn schedule_push_dismiss(
+    state: &Arc<AppState>,
+    user_id: &str,
+    conversation_id: &str,
+    through: Option<pollis_api::devices::ReadPosition>,
+) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
@@ -142,11 +151,16 @@ pub(crate) fn schedule_push_dismiss(state: &Arc<AppState>, user_id: &str, conver
             .or_insert_with(|| PendingDismiss {
                 state: Arc::clone(state),
                 read_at: std::collections::HashMap::new(),
+                through: std::collections::HashMap::new(),
                 scheduled: false,
             });
         p.state = Arc::clone(state);
         p.read_at
             .insert(conversation_id.to_string(), std::time::Instant::now());
+        // The cursor only moves forward, so the latest position is the furthest.
+        if let Some(t) = through {
+            p.through.insert(conversation_id.to_string(), t);
+        }
         // Leftovers from a failed report have no task; this advance resends them.
         !std::mem::replace(&mut p.scheduled, true)
     };
@@ -168,10 +182,14 @@ async fn flush_push_dismissals(user_id: &str) {
         let mut pending = DISMISS_PENDING.lock().unwrap_or_else(|e| e.into_inner());
         pending.get_mut(user_id).map(|p| {
             p.scheduled = false;
-            (Arc::clone(&p.state), std::mem::take(&mut p.read_at))
+            (
+                Arc::clone(&p.state),
+                std::mem::take(&mut p.read_at),
+                std::mem::take(&mut p.through),
+            )
         })
     };
-    let Some((state, read_at)) = taken else {
+    let Some((state, read_at, through)) = taken else {
         return;
     };
     if read_at.is_empty() {
@@ -179,7 +197,7 @@ async fn flush_push_dismissals(user_id: &str) {
     }
     let body = pollis_api::devices::DismissPushBody {
         user_id: user_id.to_string(),
-        conversations: dismiss_entries(&read_at, std::time::Instant::now()),
+        conversations: dismiss_entries(&read_at, &through, std::time::Instant::now()),
     };
     let sent: Result<pollis_api::devices::DismissPushResponse> =
         crate::commands::mls::ds_client::ds_post_json(&state, &body).await;
@@ -190,17 +208,33 @@ async fn flush_push_dismissals(user_id: &str) {
             for (conversation, at) in read_at {
                 p.read_at.entry(conversation).or_insert(at);
             }
+            for (conversation, t) in through {
+                p.through.entry(conversation).or_insert(t);
+            }
             // Bounded: a DS predating #1508 answers 404 forever.
             if p.read_at.len() > pollis_api::devices::DISMISS_MAX_CONVERSATIONS {
                 let keep: std::collections::HashSet<String> =
-                    dismiss_entries(&p.read_at, std::time::Instant::now())
+                    dismiss_entries(&p.read_at, &p.through, std::time::Instant::now())
                         .into_iter()
                         .map(|e| e.conversation_id)
                         .collect();
                 p.read_at.retain(|c, _| keep.contains(c));
+                p.through.retain(|c, _| keep.contains(c));
             }
         }
     }
+}
+
+/// Tell the DS this device is, or is no longer, in use (#2056). While any device
+/// of the account is active the DS holds its phone pushes; see
+/// `pollis_delivery::push_hold`. The desktop calls it on focus, blur, hide,
+/// idle and close, and at most once a minute on input while it stays active.
+///
+/// Best-effort: a DS without the endpoint answers 404, which only means pushes go out.
+pub async fn report_push_activity(user_id: String, active: bool, state: &Arc<AppState>) -> Result<()> {
+    let body = pollis_api::devices::PushActivityBody { user_id, active };
+    crate::commands::mls::ds_client::ds_post_json(state, &body).await?;
+    Ok(())
 }
 
 /// Which of these tray notifications were read since, on any device (#1508)?
@@ -237,7 +271,7 @@ mod tests {
         read_at.insert("just-now".to_string(), now);
         read_at.insert("a-bit-ago".to_string(), now - Duration::from_millis(1500));
         read_at.insert("exactly-3s".to_string(), now - Duration::from_secs(3));
-        let mut entries = dismiss_entries(&read_at, now);
+        let mut entries = dismiss_entries(&read_at, &HashMap::new(), now);
         entries.sort_by(|a, b| a.conversation_id.cmp(&b.conversation_id));
         let ages: Vec<(&str, u32)> = entries
             .iter()
@@ -253,7 +287,7 @@ mod tests {
         let read_at: HashMap<String, Instant> = (0..max + 10)
             .map(|i| (format!("c{i:03}"), now - Duration::from_secs(i as u64)))
             .collect();
-        let entries = dismiss_entries(&read_at, now);
+        let entries = dismiss_entries(&read_at, &HashMap::new(), now);
         assert_eq!(entries.len(), max);
         assert!(entries.iter().all(|e| e.read_secs_ago <= max as u32 + 1));
         assert!(!entries.iter().any(|e| e.conversation_id == format!("c{:03}", max + 9)));
@@ -266,6 +300,7 @@ mod tests {
             conversations: vec![pollis_api::devices::DismissEntry {
                 conversation_id: "c1".into(),
                 read_secs_ago: 2,
+                through: None,
             }],
         };
         assert_eq!(
@@ -274,6 +309,33 @@ mod tests {
                 "user_id": "u1",
                 "conversations": [{ "conversation_id": "c1", "read_secs_ago": 2 }],
             })
+        );
+    }
+
+    /// #2056: the report names how far each conversation was read, and only that.
+    #[test]
+    fn the_report_carries_the_read_position() {
+        let now = Instant::now();
+        let mut read_at = HashMap::new();
+        read_at.insert("c1".to_string(), now);
+        read_at.insert("c2".to_string(), now);
+        let mut through = HashMap::new();
+        through.insert(
+            "c1".to_string(),
+            pollis_api::devices::ReadPosition {
+                sent_at: "2026-11-19T10:00:00.000Z".into(),
+                message_id: "m1".into(),
+            },
+        );
+        let mut entries = dismiss_entries(&read_at, &through, now);
+        entries.sort_by(|a, b| a.conversation_id.cmp(&b.conversation_id));
+        assert_eq!(
+            serde_json::to_value(&entries).unwrap(),
+            serde_json::json!([
+                { "conversation_id": "c1", "read_secs_ago": 1,
+                  "through": { "sent_at": "2026-11-19T10:00:00.000Z", "message_id": "m1" } },
+                { "conversation_id": "c2", "read_secs_ago": 1 },
+            ])
         );
     }
 }
