@@ -1,6 +1,7 @@
 /** Emit DM read receipts (#857) only for rows ≥`VISIBLE_RATIO` in view, document visible, window focused, for `DWELL_MS`. Author/DM/opt-out checks are Rust's. */
 import { useEffect, useRef } from "react";
 import { invoke } from "../bridge";
+import { userActivityStore } from "../stores/userActivityStore";
 
 /** Fraction of a message row that must be in view before it counts as seen. */
 const VISIBLE_RATIO = 0.6;
@@ -49,10 +50,8 @@ export function useReadReceipts(
     let dwellTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
 
-    const canReport = () =>
-      typeof document !== "undefined" &&
-      document.visibilityState === "visible" &&
-      document.hasFocus();
+    // The same focus and visibility the read cursor follows (#2056); idle does not stop a receipt.
+    const canReport = () => userActivityStore.focused && userActivityStore.visible;
 
     const flush = async () => {
       if (cancelled || !canReport()) {

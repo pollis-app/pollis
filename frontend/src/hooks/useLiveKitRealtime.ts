@@ -9,6 +9,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useObserver } from 'mobx-react-lite';
 import { appStore } from '../stores/appStore';
+import { userActivityStore } from '../stores/userActivityStore';
 import { useTauriReady } from './useTauriReady';
 import { flushOutbox, lastMessageQueryKeys, messageQueryKeys, useDMConversations, markIngested, refreshDMActivity } from './queries/useMessages';
 import { receiptQueryKeys } from './queries/useReceipts';
@@ -700,6 +701,10 @@ export function useLiveKitRealtime() {
         if (event.sender_id === currentUserIdRef.current) {
           return;
         }
+        // #2056: a mention in the channel the user is actively reading is already seen.
+        if (userActivityStore.isActive && event.channel_id === selectedChannelIdRef.current) {
+          return;
+        }
         // Named as the channel's group shows the sender (#2003).
         const senderUsername = await channelAliasName(
           queryClientRef.current,
@@ -736,8 +741,10 @@ export function useLiveKitRealtime() {
         // The ingest's own `finally` already invalidated the counts.
         refreshUnread: () => {},
         selfId: currentUserIdRef.current,
+        // #2056: "on screen" means actively read; a blurred, hidden or idle window still alerts.
         isSelected: (id) =>
-          id === selectedChannelIdRef.current || id === selectedConversationIdRef.current,
+          userActivityStore.isActive &&
+          (id === selectedChannelIdRef.current || id === selectedConversationIdRef.current),
         announce: async (m) => {
           const handle = m.sender_username ?? i18n.t('nav:statusBar.someone');
           // A channel message names the sender as its group shows them (#2003); a DM, by main profile.
