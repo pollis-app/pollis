@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "description": "The `pollis app` command: create, build and test Pollis Apps.",
   "license": "MIT",
+  "homepage": "https://pollis.com/bots-developers.html",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pollis-app/pollis.git",
+    "directory": "sdk/ts/cli"
+  },
   "type": "module",
   "bin": {
     "pollis": "./dist/main.js"

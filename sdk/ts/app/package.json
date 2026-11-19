@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "description": "Write Pollis Apps in TypeScript: handlers, a typed context and the manifest, compiled to a sandboxed component by `pollis app build`.",
   "license": "MIT",
+  "homepage": "https://pollis.com/bots-developers.html",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pollis-app/pollis.git",
+    "directory": "sdk/ts/app"
+  },
   "type": "module",
   "exports": {
     ".": {
