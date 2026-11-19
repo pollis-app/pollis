@@ -23,6 +23,12 @@ tag date, UTC.
 
 ---
 
+## v1.19.18 — 2026-11-18
+
+- **Link previews for www. links.** A link written without `https://`, such as
+  `www.example.com`, now keeps its preview card when you send it and when
+  others receive it.
+
 ## v1.19.17 — 2026-11-18
 
 - **A different name and picture in each group.** You can now show a separate
