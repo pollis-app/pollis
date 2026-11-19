@@ -2,12 +2,20 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - parity
 # A run that stops in Arabic or Spanish would leave the device in it (#1949).
+# A passing run ends on the English heading, which a `when: visible:` finds at
+# once; a `when: notVisible:` waited ~7 s for it to go first (#2042).
 onFlowComplete:
+  - evalScript: ${output.i18nEnglish = false}
   - runFlow:
       when:
-        notVisible:
+        visible:
           id: "pref-language-heading"
           text: "Language"
+      commands:
+        - evalScript: ${output.i18nEnglish = true}
+  - runFlow:
+      when:
+        true: ${!output.i18nEnglish}
       file: ../subflows/restore-english.yaml
 ---
 # LANGUAGE (#1074) — the mobile counterpart of e2e/i18n.spec.ts: switching

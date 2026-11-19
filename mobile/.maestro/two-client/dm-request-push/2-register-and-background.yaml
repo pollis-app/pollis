@@ -10,12 +10,7 @@ tags:
 - pressKey: Home
 - launchApp:
     stopApp: false
-- runFlow:
-    when:
-      visible:
-        id: "screen-auth-pin"
-    commands:
-      - runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/unlock-if-locked.yaml
 - extendedWaitUntil:
     visible:
       id: "tab-direct"

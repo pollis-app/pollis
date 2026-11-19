@@ -69,9 +69,7 @@ tags:
       id: "screen-chat"
     timeout: 30000
 # Phones push the chat over the panel; iPad opens it beside the panel.
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 - extendedWaitUntil:
     visible:
       id: "btn-group-menu"

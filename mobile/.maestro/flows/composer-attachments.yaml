@@ -169,22 +169,8 @@ tags:
       id: "composer-attachment-0"
     timeout: 10000
 # Keep pressing Send until the strip clears: a press while the previous
-# send is still settling is ignored (as subflows/send-vault-picks.yaml).
-- repeat:
-    while:
-      visible:
-        id: "strip-attachments"
-    times: 30
-    commands:
-      - tapOn:
-          id: "btn-send"
-      - extendedWaitUntil:
-          notVisible:
-            id: "strip-attachments"
-          timeout: 4000
-          optional: true
-- assertNotVisible:
-    id: "strip-attachments"
+# send is still settling is ignored (subflows/send-strip.yaml).
+- runFlow: ../subflows/send-strip.yaml
 - extendedWaitUntil:
     visible:
       id: "btn-attachment-.*"
@@ -193,12 +179,20 @@ tags:
 - takeScreenshot: composer-attachments-09-sent-video
 
 # The Vault composer draws the same card.
-- tapOn:
-    id: "btn-back"
-    optional: true
-- tapOn:
-    id: "btn-back"
-    optional: true
+# Back to the tab bar: one back on a phone, none on the iPad's two-pane, and a
+# second back only if the tab bar is still not up. Two optional backs paid
+# Maestro's ~7 s miss for every back that was not there (#2042).
+- runFlow: ../subflows/back-on-phone.yaml
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "tab-direct"
+- runFlow:
+    when:
+      true: ${!output.shown}
+    commands:
+      - tapOn:
+          id: "btn-back"
 - tapOn:
     id: "tab-direct"
 - tapOn:

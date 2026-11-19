@@ -39,7 +39,6 @@ tags:
 # channel row by its General label).
 - tapOn:
     text: "General"
-    optional: true
 - assertVisible:
     id: "screen-chat"
 - takeScreenshot: messaging-01-empty-channel
@@ -95,7 +94,6 @@ tags:
 - runFlow: ../subflows/long-press-message.yaml
 - tapOn:
     id: "btn-react-0"
-    optional: true
 - takeScreenshot: messaging-05-reacted
 
 # Delete it.

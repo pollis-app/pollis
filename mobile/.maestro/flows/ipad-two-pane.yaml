@@ -20,11 +20,10 @@ tags:
 - assertVisible:
     id: "screen-groups"
 - takeScreenshot: ipad-01-groups-twopane
-# The right-pane placeholder proves the two-pane mounted when the selected
-# group has no channel to auto-open (optional: usually a channel is open).
-- assertVisible:
-    text: "Select a conversation"
-    optional: true
+# (No check for the "Select a conversation" placeholder here: the shared
+# account's selected group usually has a channel open, so an optional assert
+# on it only ever cost ~7 s and asserted nothing, #2042. The steps below prove
+# the two-pane: the new group's #General opens in the right pane.)
 # Creating a group lands on the Groups tab with it selected, its member count
 # in the panel header, and — on iPad — its #General open in the right pane.
 - runFlow: ../subflows/open-create-group.yaml
