@@ -1,6 +1,6 @@
 //! The normalised shape of an export, independent of where it came from.
 //!
-//! A source parser (today only [`crate::discord`]) produces an [`Export`]; the
+//! A source parser ([`crate::discord`], [`crate::slack`]) produces an [`Export`]; the
 //! planner reads nothing else. Fields hold what the source said, not what
 //! Pollis will do with it: renaming, flattening and dropping are decisions the
 //! plan makes and reports.
@@ -30,9 +30,13 @@ pub struct Export {
     pub roles: Vec<Role>,
     /// The guild owner's user id, when a guild snapshot named it.
     pub owner_id: Option<String>,
-    /// Whether a guild snapshot (`discord-guild.json`) supplied the
-    /// structure: positions, roles with permissions, overwrites, the full
-    /// emoji list. Without one, the structure is what the channel files show.
+    /// Slack user groups (`@design-team`). Pollis has no mention tags yet
+    /// (#294), so they are reported, never imported.
+    pub user_groups: Vec<UserGroup>,
+    /// Whether a snapshot supplied what the export lacks: for Discord
+    /// (`discord-guild.json`) positions, roles with permissions, overwrites
+    /// and the full emoji list; for Slack (`slack-workspace.json`) the
+    /// workspace's name and icon, its emoji and its user groups.
     pub has_snapshot: bool,
     /// Problems found while reading that did not stop the parse.
     pub warnings: Vec<String>,
@@ -84,9 +88,24 @@ pub enum OverwriteTarget {
 pub const VIEW_CHANNEL: u64 = 1 << 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Source {
     /// A DiscordChatExporter JSON export, optionally with a guild snapshot.
     DiscordChatExporter,
+    /// A Slack workspace export (ZIP or folder), optionally with a workspace snapshot.
+    SlackExport,
+}
+
+/// A Slack user group (`usergroups.list`). Reported only (#294).
+#[derive(Debug, Clone, Serialize)]
+pub struct UserGroup {
+    pub id: String,
+    /// The mention handle, without `@`.
+    pub handle: String,
+    pub name: String,
+    pub description: Option<String>,
+    /// Source user ids.
+    pub member_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -125,6 +144,14 @@ pub struct Channel {
     pub position: Option<i64>,
     /// Per-channel permission overwrites (snapshot only).
     pub overwrites: Vec<Overwrite>,
+    /// The source itself calls the channel private (Slack's `is_private`).
+    /// Discord says so only through overwrites, which the plan reads.
+    pub private: bool,
+    /// Archived on the source (Slack): skipped unless the admin opts in.
+    pub archived: bool,
+    /// Source user ids of the channel's members, when the source lists them
+    /// (Slack's `members`). The plan turns them into a per-person roster.
+    pub members: Vec<String>,
     /// Oldest first.
     pub messages: Vec<Message>,
     /// The export file this channel was read from, for the report; `None`
@@ -212,6 +239,14 @@ pub struct Person {
     /// Listed in the snapshot's member list: a current member, whether or
     /// not they wrote anything.
     pub listed_member: bool,
+    /// Their email address, when the source shares it (Slack does; Discord
+    /// never). Used to invite people who already have a Pollis account.
+    pub email: Option<String>,
+    /// The source marks them as running the workspace (Slack's admins and
+    /// owners). Discord's equivalent comes from role permissions instead.
+    pub source_admin: bool,
+    /// A deactivated account (Slack's `deleted`): never invited.
+    pub deactivated: bool,
 }
 
 impl Person {
@@ -229,4 +264,7 @@ pub struct CustomEmoji {
     pub image: Option<Media>,
     /// How many times it appeared inline or as a reaction.
     pub uses: u64,
+    /// Slack's `alias:other`: the source id of the emoji whose picture this
+    /// name points at. Imported as its own shortcode for the same picture.
+    pub alias_of: Option<String>,
 }

@@ -16,9 +16,11 @@ use pollis_api::profile::{is_refused_display_char, DISPLAY_NAME_MAX_LEN};
 use serde::Serialize;
 
 use crate::model::{
-    Channel, ChannelKind, Export, Media, MessageKind, OverwriteTarget, Role, VIEW_CHANNEL,
+    Channel, ChannelKind, CustomEmoji, Export, Media, MessageKind, OverwriteTarget, Role, Source,
+    VIEW_CHANNEL,
 };
-use crate::shortcode::{Allocator, Fitted};
+use crate::shortcode::{normalise, Allocator, Fitted};
+use crate::SourceKind;
 
 /// What the target group already has. Empty for a new group.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -32,6 +34,9 @@ pub struct ImportOptions {
     /// Source emoji (by source id) the group already holds, matched by
     /// content: a re-run keeps their shortcode instead of uploading a copy.
     pub imported_emoji: BTreeMap<String, String>,
+    /// Bring archived channels too (Slack). Off by default: they are skipped
+    /// and listed.
+    pub include_archived: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -42,6 +47,8 @@ pub struct ExistingChannel {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportPlan {
+    /// Where the export came from, so each app names the platform.
+    pub source: SourceKind,
     pub group: GroupPlan,
     /// In display order.
     pub categories: Vec<CategoryPlan>,
@@ -54,6 +61,8 @@ pub struct ImportPlan {
     /// nobody can be mapped to admin.
     pub permissions_known: bool,
     pub people: Vec<PersonPlan>,
+    /// Slack user groups: listed, never imported (#294).
+    pub user_groups: Vec<UserGroupPlan>,
     pub totals: Totals,
     /// Things the importer must tell the admin plainly.
     pub notes: Vec<Note>,
@@ -104,8 +113,11 @@ pub struct ChannelPlan {
     pub description: Option<String>,
     /// Already in the target group under this name and category: a re-run skips it.
     pub exists: bool,
-    /// `@everyone` could not see it on Discord. Every Pollis group member will.
+    /// Private on the source (`@everyone` denied view on Discord, `is_private`
+    /// on Slack). Every Pollis group member will see it.
     pub private: bool,
+    /// Archived on the source and brought anyway (the admin opted in).
+    pub archived: bool,
     /// Every per-channel permission overwrite, none of which survives.
     pub overwrites: Vec<OverwritePlan>,
     /// Not imported (structure only); measured so the admin sees what stays behind.
@@ -178,6 +190,8 @@ pub enum ChannelNote {
     Forum,
     Stage,
     Renamed { from: String },
+    /// Archived on the source; imported because the admin asked for archived channels.
+    Archived,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -231,6 +245,8 @@ pub enum SkipReason {
     /// A DM or group DM.
     Direct,
     Unsupported { source_type: String },
+    /// Archived on the source; the admin can opt in to bring archived channels.
+    Archived,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -244,6 +260,8 @@ pub struct EmojiPlan {
     pub animated: bool,
     pub uses: u64,
     pub image: Option<Media>,
+    /// An alias (Slack `alias:other`): the source name of the emoji it points at.
+    pub alias_of: Option<String>,
     pub note: Option<EmojiNote>,
 }
 
@@ -258,6 +276,9 @@ pub enum EmojiNote {
     ImageRemote,
     /// No picture in the export.
     ImageMissing,
+    /// An alias of an emoji that is not being imported (a standard emoji, or
+    /// a custom one that was skipped).
+    AliasTargetMissing,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -293,11 +314,25 @@ pub struct PersonPlan {
     pub admin: bool,
     /// Their Discord role names (not `@everyone`), for the sheet.
     pub roles: Vec<String>,
-    /// The (Pollis) channel names they wrote in, in plan order.
+    /// Their email, when the source shares it: an invite goes to it if it
+    /// belongs to a Pollis account.
+    pub email: Option<String>,
+    /// The (Pollis) channels they wrote in or were a member of, in plan order:
+    /// the roster to add them to once they join.
     pub channels: Vec<String>,
     pub messages: u64,
     pub first_ms: Option<u64>,
     pub last_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UserGroupPlan {
+    pub source_id: String,
+    pub handle: String,
+    pub name: String,
+    pub description: Option<String>,
+    /// Display names of its members (deactivated accounts left out).
+    pub members: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -320,22 +355,37 @@ pub struct Totals {
     pub people: u64,
     pub overwrites: u64,
     pub private_channels: u64,
+    /// Archived channels left out (the admin did not opt in).
+    pub archived_skipped: u64,
+    /// People (not bots) with an email address to invite.
+    pub people_with_email: u64,
+    pub user_groups: u64,
 }
 
 /// A plain statement for the admin.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Note {
-    /// Discord exposes no email addresses: share the invite link.
+    /// The source exposes no email addresses (Discord): share the invite link.
     NoEmails,
+    /// Some people have emails: those with a Pollis account get an invite,
+    /// everyone else the link.
+    EmailInvites { with_email: u64, without_email: u64 },
     /// No guild snapshot: order follows creation date, roles have no
     /// permissions, overwrites and empty categories are unknown.
     NoSnapshot,
+    /// No workspace snapshot (Slack): a standard export holds no custom
+    /// emoji or user groups, and the workspace's name is a guess.
+    NoWorkspaceSnapshot,
+    /// Archived channels left out; the admin can opt in.
+    ArchivedSkipped { count: u64 },
+    /// Slack user groups listed only: Pollis has no mention tags yet (#294).
+    UserGroupsNotImported { count: u64 },
     /// Channels hidden from `@everyone` on Discord; every member sees them here.
     PrivateChannels { count: u64 },
     /// Roles beyond member/admin, dropped.
     RolesCollapsed { discarded: u64 },
-    /// Message history stays on Discord.
+    /// Message history stays on the source platform.
     HistoryNotImported { messages: u64 },
 }
 
@@ -411,6 +461,13 @@ pub fn plan(export: &Export, options: &ImportOptions) -> ImportPlan {
     let mut names_taken: BTreeMap<Option<String>, BTreeSet<String>> = BTreeMap::new();
     let mut channels = Vec::new();
     for ch in ordered {
+        if ch.archived && !options.include_archived {
+            skipped_channels.push(Skipped {
+                name: ch.name.clone(),
+                reason: SkipReason::Archived,
+            });
+            continue;
+        }
         let kind = match &ch.kind {
             ChannelKind::Text | ChannelKind::Announcement | ChannelKind::Forum => TargetKind::Text,
             ChannelKind::Voice | ChannelKind::Stage => TargetKind::Voice,
@@ -437,6 +494,9 @@ pub fn plan(export: &Export, options: &ImportOptions) -> ImportPlan {
             ChannelKind::Forum => notes.push(ChannelNote::Forum),
             ChannelKind::Stage => notes.push(ChannelNote::Stage),
             _ => {}
+        }
+        if ch.archived {
+            notes.push(ChannelNote::Archived);
         }
 
         let category = ch.category.as_ref().and_then(|c| category_names.get(&c.id).cloned());
@@ -465,9 +525,10 @@ pub fn plan(export: &Export, options: &ImportOptions) -> ImportPlan {
                 OverwritePlan { target, member, allow, deny, other_bits: allow_rest + deny_rest }
             })
             .collect();
-        let private = ch.overwrites.iter().any(|o| {
-            o.target == OverwriteTarget::Role(export.community.id.clone()) && o.deny & VIEW_CHANNEL != 0
-        });
+        let private = ch.private
+            || ch.overwrites.iter().any(|o| {
+                o.target == OverwriteTarget::Role(export.community.id.clone()) && o.deny & VIEW_CHANNEL != 0
+            });
 
         let ids: BTreeSet<&str> = ch.messages.iter().map(|m| m.id.as_str()).collect();
         let threads = threads_by_parent
@@ -494,6 +555,7 @@ pub fn plan(export: &Export, options: &ImportOptions) -> ImportPlan {
             category,
             description: ch.topic.as_deref().map(fit_description).filter(|d| !d.is_empty()),
             private,
+            archived: ch.archived,
             overwrites,
             history: summarise(ch),
             threads,
@@ -501,15 +563,38 @@ pub fn plan(export: &Export, options: &ImportOptions) -> ImportPlan {
         });
     }
 
+    let source = SourceKind::of(export.source);
     let emoji = plan_emoji(export, options);
     let people = plan_people(export, &channels);
     let roles = plan_roles(export);
-    let permissions_known = export.roles.iter().any(|r| r.permissions.is_some());
-    let totals = totals(&categories, &channels, &emoji, &people);
+    // Slack marks admins on the people themselves, so it always knows them.
+    let permissions_known = source == SourceKind::Slack || export.roles.iter().any(|r| r.permissions.is_some());
+    let user_groups = plan_user_groups(export);
+    let mut totals = totals(&categories, &channels, &emoji, &people);
+    totals.archived_skipped =
+        skipped_channels.iter().filter(|s| matches!(s.reason, SkipReason::Archived)).count() as u64;
+    totals.user_groups = user_groups.len() as u64;
 
-    let mut notes = vec![Note::NoEmails];
+    let mut notes = Vec::new();
+    if totals.people_with_email == 0 {
+        notes.push(Note::NoEmails);
+    } else {
+        notes.push(Note::EmailInvites {
+            with_email: totals.people_with_email,
+            without_email: totals.people - totals.people_with_email,
+        });
+    }
     if !export.has_snapshot {
-        notes.push(Note::NoSnapshot);
+        notes.push(match source {
+            SourceKind::Discord => Note::NoSnapshot,
+            SourceKind::Slack => Note::NoWorkspaceSnapshot,
+        });
+    }
+    if totals.archived_skipped > 0 {
+        notes.push(Note::ArchivedSkipped { count: totals.archived_skipped });
+    }
+    if totals.user_groups > 0 {
+        notes.push(Note::UserGroupsNotImported { count: totals.user_groups });
     }
     if totals.private_channels > 0 {
         notes.push(Note::PrivateChannels { count: totals.private_channels });
@@ -522,9 +607,14 @@ pub fn plan(export: &Export, options: &ImportOptions) -> ImportPlan {
         notes.push(Note::HistoryNotImported { messages: totals.messages });
     }
 
+    let community = match export.source {
+        Source::DiscordChatExporter => "server",
+        Source::SlackExport => "workspace",
+    };
     ImportPlan {
+        source,
         group: GroupPlan {
-            name: fit_name(&export.community.name, "server", &export.community.id),
+            name: fit_name(&export.community.name, community, &export.community.id),
             icon: export.community.icon.clone(),
         },
         categories,
@@ -534,6 +624,7 @@ pub fn plan(export: &Export, options: &ImportOptions) -> ImportPlan {
         roles,
         permissions_known,
         people,
+        user_groups,
         totals,
         notes,
         warnings: export.warnings.clone(),
@@ -610,44 +701,94 @@ fn summarise(ch: &Channel) -> HistorySummary {
 fn plan_emoji(export: &Export, options: &ImportOptions) -> Vec<EmojiPlan> {
     // Shortcodes that a re-run keeps are not free for anything else.
     let mut alloc = Allocator::with_existing(options.existing_shortcodes.iter().cloned());
-    let mut ordered: Vec<_> = export.emoji.values().collect();
-    // Most used first, so the popular one keeps the plain name in a collision.
-    ordered.sort_by(|a, b| b.uses.cmp(&a.uses).then_with(|| snowflake_cmp(&a.id, &b.id)));
-    ordered
-        .into_iter()
-        .map(|e| {
-            let base = EmojiPlan {
-                source_id: e.id.clone(),
-                source_name: e.name.clone(),
-                shortcode: None,
-                exists: false,
-                animated: e.animated,
-                uses: e.uses,
-                image: e.image.clone(),
-                note: None,
-            };
-            if let Some(code) = options.imported_emoji.get(&e.id) {
-                return EmojiPlan { shortcode: Some(code.clone()), exists: true, ..base };
-            }
-            let image_ok = matches!(&e.image, Some(Media::Local(p)) if p.is_file());
-            if !image_ok {
-                let note = match &e.image {
-                    Some(Media::Remote(_)) => EmojiNote::ImageRemote,
-                    _ => EmojiNote::ImageMissing,
-                };
-                return EmojiPlan { note: Some(note), ..base };
-            }
-            match alloc.fit(&e.name) {
-                Fitted::Ok(s) => EmojiPlan { shortcode: Some(s), ..base },
-                Fitted::Renamed { shortcode, collided_with } => EmojiPlan {
-                    shortcode: Some(shortcode),
-                    note: Some(EmojiNote::Renamed { collided_with }),
-                    ..base
-                },
-                Fitted::Skipped { .. } => EmojiPlan { note: Some(EmojiNote::NoValidShortcode), ..base },
-            }
+    let (mut aliases, mut pictures): (Vec<&CustomEmoji>, Vec<&CustomEmoji>) =
+        export.emoji.values().partition(|e| e.alias_of.is_some());
+    // Most used first, so the popular one keeps the plain name in a
+    // collision; at equal use (a Slack export without history counts none)
+    // a name that is already a valid shortcode keeps it; then by id.
+    let rank = |a: &&CustomEmoji, b: &&CustomEmoji| {
+        b.uses
+            .cmp(&a.uses)
+            .then_with(|| (normalise(&a.name) != a.name).cmp(&(normalise(&b.name) != b.name)))
+            .then_with(|| snowflake_cmp(&a.id, &b.id))
+    };
+    pictures.sort_by(rank);
+    aliases.sort_by(rank);
+
+    let mut out: Vec<EmojiPlan> = pictures.into_iter().map(|e| fit_emoji(e, None, options, &mut alloc)).collect();
+    // Aliases after every picture they could point at has its name.
+    for e in aliases {
+        let target_id = e.alias_of.as_deref().unwrap_or_default();
+        let target_name = export.emoji.get(target_id).map_or_else(|| target_id.to_string(), |t| t.name.clone());
+        let target_kept = out.iter().any(|p| p.source_id == target_id && p.shortcode.is_some());
+        let plan = if target_kept {
+            fit_emoji(e, Some(target_name), options, &mut alloc)
+        } else {
+            EmojiPlan { note: Some(EmojiNote::AliasTargetMissing), ..emoji_base(e, Some(target_name)) }
+        };
+        out.push(plan);
+    }
+    out
+}
+
+fn emoji_base(e: &CustomEmoji, alias_of: Option<String>) -> EmojiPlan {
+    EmojiPlan {
+        source_id: e.id.clone(),
+        source_name: e.name.clone(),
+        shortcode: None,
+        exists: false,
+        animated: e.animated,
+        uses: e.uses,
+        image: e.image.clone(),
+        alias_of,
+        note: None,
+    }
+}
+
+fn fit_emoji(e: &CustomEmoji, alias_of: Option<String>, options: &ImportOptions, alloc: &mut Allocator) -> EmojiPlan {
+    let base = emoji_base(e, alias_of);
+    if let Some(code) = options.imported_emoji.get(&e.id) {
+        return EmojiPlan { shortcode: Some(code.clone()), exists: true, ..base };
+    }
+    let image_ok = matches!(&e.image, Some(Media::Local(p)) if p.is_file());
+    if !image_ok {
+        let note = match &e.image {
+            Some(Media::Remote(_)) => EmojiNote::ImageRemote,
+            _ => EmojiNote::ImageMissing,
+        };
+        return EmojiPlan { note: Some(note), ..base };
+    }
+    match alloc.fit(&e.name) {
+        Fitted::Ok(s) => EmojiPlan { shortcode: Some(s), ..base },
+        Fitted::Renamed { shortcode, collided_with } => EmojiPlan {
+            shortcode: Some(shortcode),
+            note: Some(EmojiNote::Renamed { collided_with }),
+            ..base
+        },
+        Fitted::Skipped { .. } => EmojiPlan { note: Some(EmojiNote::NoValidShortcode), ..base },
+    }
+}
+
+fn plan_user_groups(export: &Export) -> Vec<UserGroupPlan> {
+    let mut groups: Vec<UserGroupPlan> = export
+        .user_groups
+        .iter()
+        .map(|g| UserGroupPlan {
+            source_id: g.id.clone(),
+            handle: g.handle.clone(),
+            name: g.name.clone(),
+            description: g.description.clone().filter(|d| !d.trim().is_empty()),
+            members: g
+                .member_ids
+                .iter()
+                .filter_map(|id| export.people.get(id))
+                .filter(|p| !p.deactivated)
+                .map(|p| p.display_name().to_string())
+                .collect(),
         })
-        .collect()
+        .collect();
+    groups.sort_by(|a, b| a.handle.cmp(&b.handle));
+    groups
 }
 
 fn plan_roles(export: &Export) -> Vec<RolePlan> {
@@ -690,6 +831,16 @@ fn plan_people(export: &Export, channels: &[ChannelPlan]) -> Vec<PersonPlan> {
             target.insert(t.source_id.as_str(), (i, label.clone()));
         }
     }
+    // Channel membership, where the source lists it (Slack).
+    let mut member_of: BTreeMap<&str, BTreeSet<&(usize, String)>> = BTreeMap::new();
+    for ch in &export.channels {
+        let Some(place) = target.get(ch.id.as_str()) else {
+            continue;
+        };
+        for m in &ch.members {
+            member_of.entry(m.as_str()).or_default().insert(place);
+        }
+    }
 
     struct Stat<'a> {
         messages: u64,
@@ -724,9 +875,16 @@ fn plan_people(export: &Export, channels: &[ChannelPlan]) -> Vec<PersonPlan> {
         .people
         .values()
         .filter_map(|p| {
+            if p.deactivated {
+                return None;
+            }
             let stat = stats.get(p.id.as_str());
             if stat.is_none() && !p.listed_member {
                 return None;
+            }
+            let mut rooms: BTreeSet<&(usize, String)> = member_of.get(p.id.as_str()).cloned().unwrap_or_default();
+            if let Some(s) = stat {
+                rooms.extend(s.channels.iter().copied());
             }
             let held: Vec<&Role> = p.role_ids.iter().filter_map(|id| roles.get(id.as_str()).copied()).collect();
             let owner = export.owner_id.as_deref() == Some(p.id.as_str());
@@ -735,9 +893,10 @@ fn plan_people(export: &Export, channels: &[ChannelPlan]) -> Vec<PersonPlan> {
                 username: p.username.clone(),
                 display_name: p.display_name().to_string(),
                 is_bot: p.is_bot,
-                admin: !p.is_bot && (owner || held.iter().any(|r| r.grants_admin())),
+                admin: !p.is_bot && (owner || p.source_admin || held.iter().any(|r| r.grants_admin())),
                 roles: held.iter().filter(|r| !r.everyone).map(|r| r.name.clone()).collect(),
-                channels: stat.map(|s| s.channels.iter().map(|(_, n)| n.clone()).collect()).unwrap_or_default(),
+                email: p.email.clone().filter(|_| !p.is_bot),
+                channels: rooms.iter().map(|(_, n)| n.clone()).collect(),
                 messages: stat.map_or(0, |s| s.messages),
                 first_ms: stat.and_then(|s| s.first),
                 last_ms: stat.and_then(|s| s.last),
@@ -762,6 +921,7 @@ fn totals(categories: &[CategoryPlan], channels: &[ChannelPlan], emoji: &[EmojiP
         to_upload_emoji: emoji.iter().filter(|e| e.shortcode.is_some() && !e.exists).count() as u64,
         emoji: emoji.iter().filter(|e| e.shortcode.is_some()).count() as u64,
         people: people.iter().filter(|p| !p.is_bot).count() as u64,
+        people_with_email: people.iter().filter(|p| !p.is_bot && p.email.is_some()).count() as u64,
         overwrites: channels.iter().map(|c| c.overwrites.len() as u64).sum(),
         private_channels: channels.iter().filter(|c| c.private).count() as u64,
         ..Totals::default()

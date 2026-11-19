@@ -248,6 +248,7 @@ fn a_rerun_against_the_result_creates_nothing() {
             .iter()
             .filter_map(|e| Some((e.source_id.clone(), e.shortcode.clone()?)))
             .collect(),
+        include_archived: false,
     };
     let again = plan(&den(), &options);
     assert_eq!(again.totals.to_create_categories, 0);
@@ -274,9 +275,9 @@ fn a_channel_matches_only_within_its_category() {
 fn the_invite_sheet_lists_people_not_bots() {
     let sheet = report::invite_sheet(&plan(&den(), &ImportOptions::default()));
     let lines: Vec<_> = sheet.lines().collect();
-    assert_eq!(lines[0], "username,display_name,pollis_role,discord_roles,channels,messages");
+    assert_eq!(lines[0], "username,display_name,email,pollis_role,discord_roles,channels,messages");
     assert_eq!(lines.len(), 5);
-    assert!(lines.iter().any(|l| l.starts_with("dan,DM Dan,admin,")));
+    assert!(lines.iter().any(|l| l.starts_with("dan,DM Dan,,admin,")));
     assert!(!sheet.contains("Avrae"));
 }
 

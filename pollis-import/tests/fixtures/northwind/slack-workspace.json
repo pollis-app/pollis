@@ -1,0 +1,51 @@
+{
+  "team": {
+    "id": "T0NW1ND00",
+    "name": "Northwind Studio",
+    "domain": "northwind-studio",
+    "email_domain": "",
+    "icon": {
+      "image_132": "https://avatars.slack-edge.com/northwind_132.png",
+      "image_default": false
+    }
+  },
+  "emoji": {
+    "party-parrot": "https://emoji.slack-edge.com/T0NW1ND00/party-parrot/abc123.gif",
+    "party_parrot": "https://emoji.slack-edge.com/T0NW1ND00/party_parrot/abc123.png",
+    "partyparrot": "alias:party-parrot",
+    "shipit": "https://emoji.slack-edge.com/T0NW1ND00/shipit/abc123.png",
+    "ship-it": "alias:shipit",
+    "thumbsup_all": "alias:thumbsup",
+    "x": "https://emoji.slack-edge.com/T0NW1ND00/x/abc123.png",
+    "nw-logo": "https://emoji.slack-edge.com/T0NW1ND00/nw-logo/abc123.png",
+    "missing-pic": "https://emoji.slack-edge.com/T0NW1ND00/missing-pic/abc123.png"
+  },
+  "usergroups": [
+    {
+      "id": "S01DES",
+      "team_id": "T0NW1ND00",
+      "is_usergroup": true,
+      "name": "Design team",
+      "description": "Everyone who reviews design",
+      "handle": "design-team",
+      "date_delete": 0,
+      "users": [
+        "U03CHO",
+        "U07JO",
+        "U06FIN"
+      ],
+      "user_count": 3
+    },
+    {
+      "id": "S02OLD",
+      "team_id": "T0NW1ND00",
+      "is_usergroup": true,
+      "name": "Launch crew",
+      "description": "",
+      "handle": "launch-crew",
+      "date_delete": 1700000000,
+      "users": [],
+      "user_count": 0
+    }
+  ]
+}

@@ -14,6 +14,7 @@ use crate::snowflake::utc_date;
 pub fn render(plan: &ImportPlan) -> String {
     let mut out = String::new();
     let t = &plan.totals;
+    let source = plan.source.name();
     let _ = writeln!(out, "Import plan for \"{}\" (dry run, nothing written)", plan.group.name);
     let _ = writeln!(
         out,
@@ -42,8 +43,15 @@ pub fn render(plan: &ImportPlan) -> String {
             TargetKind::Voice => "voice",
         };
         let exists = if c.exists { " [exists, skipped]" } else { "" };
-        let private = if c.private { " [private on Discord; every member will see it]" } else { "" };
+        let private = if c.private {
+            format!(" [private on {source}; every member will see it]")
+        } else {
+            String::new()
+        };
         let _ = writeln!(out, "    #{} ({kind}){exists}{private}", c.name);
+        if let Some(d) = &c.description {
+            let _ = writeln!(out, "      {}", d.replace('\n', " / "));
+        }
         for n in &c.notes {
             let _ = writeln!(out, "      note: {}", channel_note(n));
         }
@@ -51,7 +59,7 @@ pub fn render(plan: &ImportPlan) -> String {
             let _ = writeln!(out, "      permission dropped: {}", overwrite(o));
         }
         if c.history.messages > 0 {
-            let _ = writeln!(out, "      history left on Discord: {}", history(&c.history));
+            let _ = writeln!(out, "      history left on {source}: {}", history(&c.history));
         }
     }
     for k in &plan.categories {
@@ -67,6 +75,7 @@ pub fn render(plan: &ImportPlan) -> String {
                 SkipReason::OrphanThread => "thread whose parent channel is not in the export".to_string(),
                 SkipReason::Direct => "direct message; only server channels are imported".to_string(),
                 SkipReason::Unsupported { source_type } => format!("unsupported channel type \"{source_type}\""),
+                SkipReason::Archived => "archived; import again with archived channels included to bring it".to_string(),
             };
             let _ = writeln!(out, "  {}: {reason}", s.name);
         }
@@ -81,8 +90,9 @@ pub fn render(plan: &ImportPlan) -> String {
                 (None, _) => "skipped".into(),
             };
             let anim = if e.animated { ", animated" } else { "" };
+            let alias = e.alias_of.as_ref().map(|a| format!(", alias of {a}")).unwrap_or_default();
             let note = e.note.as_ref().map(|n| format!(" ({})", emoji_note(n))).unwrap_or_default();
-            let _ = writeln!(out, "  {} -> {target}, used {}{anim}{note}", e.source_name, e.uses);
+            let _ = writeln!(out, "  {} -> {target}, used {}{anim}{alias}{note}", e.source_name, e.uses);
         }
     }
 
@@ -102,9 +112,21 @@ pub fn render(plan: &ImportPlan) -> String {
         }
     }
 
+    if !plan.user_groups.is_empty() {
+        let _ = writeln!(out, "\nUser groups (listed only; Pollis has no group mentions yet)");
+        for g in &plan.user_groups {
+            let _ = writeln!(out, "  @{} ({}): {}", g.handle, g.name, g.members.join(", "));
+        }
+    }
+
     let (bots, humans): (Vec<_>, Vec<_>) = plan.people.iter().partition(|p| p.is_bot);
     if !humans.is_empty() {
-        let _ = writeln!(out, "\nPeople to invite (share the group's invite link)");
+        let how = if t.people_with_email > 0 {
+            "an invite by email to those with a Pollis account; the invite link for everyone else"
+        } else {
+            "share the group's invite link"
+        };
+        let _ = writeln!(out, "\nPeople to invite ({how})");
         for p in humans {
             let _ = writeln!(out, "  {}", person(p));
         }
@@ -118,7 +140,7 @@ pub fn render(plan: &ImportPlan) -> String {
 
     let _ = writeln!(out, "\nNotes");
     for n in &plan.notes {
-        let _ = writeln!(out, "  - {}", note(n));
+        let _ = writeln!(out, "  - {}", note(n, source));
     }
     if !plan.warnings.is_empty() {
         let _ = writeln!(out, "\nWarnings");
@@ -135,11 +157,13 @@ pub fn render(plan: &ImportPlan) -> String {
 /// The invite sheet: one row per person (bots left out), for the admin to
 /// work through once people join. CSV, so it opens in any spreadsheet.
 pub fn invite_sheet(plan: &ImportPlan) -> String {
-    let mut out = String::from("username,display_name,pollis_role,discord_roles,channels,messages\n");
+    let source = plan.source.name().to_lowercase();
+    let mut out = format!("username,display_name,email,pollis_role,{source}_roles,channels,messages\n");
     for p in plan.people.iter().filter(|p| !p.is_bot) {
         let row = [
             p.username.clone(),
             p.display_name.clone(),
+            p.email.clone().unwrap_or_default(),
             if p.admin { "admin" } else { "member" }.to_string(),
             p.roles.join("; "),
             p.channels.join("; "),
@@ -167,13 +191,17 @@ fn csv_cell(s: &str) -> String {
     }
 }
 
-fn note(n: &Note) -> String {
+fn note(n: &Note, source: &str) -> String {
     match n {
-        Note::NoEmails => "Discord exposes no email addresses, so nobody is invited automatically: share the group's invite link with the people listed.".into(),
+        Note::NoEmails => format!("{source} exposes no email addresses, so nobody is invited automatically: share the group's invite link with the people listed."),
+        Note::EmailInvites { with_email, without_email } => format!("{with_email} people have an email address: those with a Pollis account get an invite. Share the invite link with the rest ({without_email} without an email, and anyone without an account)."),
+        Note::NoWorkspaceSnapshot => "No workspace snapshot (slack-workspace.json): a standard export has no custom emoji or user groups, and the group is named after the export's file name.".into(),
+        Note::ArchivedSkipped { count } => format!("{count} archived channel(s) left out; include archived channels to bring them."),
+        Note::UserGroupsNotImported { count } => format!("{count} user group(s) listed only: Pollis has no group mentions yet."),
         Note::NoSnapshot => "No guild snapshot (discord-guild.json): channel order follows creation date, role permissions and private channels are unknown, and empty categories are missing.".into(),
-        Note::PrivateChannels { count } => format!("{count} channel(s) were private on Discord. Every member of a Pollis group can see every channel."),
+        Note::PrivateChannels { count } => format!("{count} channel(s) were private on {source}. Every member of a Pollis group can see every channel."),
         Note::RolesCollapsed { discarded } => format!("{discarded} role(s) have no Pollis equivalent and are dropped; their holders join as members."),
-        Note::HistoryNotImported { messages } => format!("Structure only: {messages} message(s) stay on Discord."),
+        Note::HistoryNotImported { messages } => format!("Structure only: {messages} message(s) stay on {source}."),
     }
 }
 
@@ -183,6 +211,7 @@ fn channel_note(n: &ChannelNote) -> String {
         ChannelNote::Forum => "forum imported as a text channel".into(),
         ChannelNote::Stage => "stage imported as a voice channel".into(),
         ChannelNote::Renamed { from } => format!("renamed from \"{from}\""),
+        ChannelNote::Archived => "archived on the source; included as asked".into(),
     }
 }
 
@@ -190,8 +219,9 @@ fn emoji_note(n: &EmojiNote) -> String {
     match n {
         EmojiNote::Renamed { collided_with } => format!("\"{collided_with}\" was taken; renamed"),
         EmojiNote::NoValidShortcode => "no valid shortcode (needs 2 to 32 of a-z, 0-9, _)".into(),
-        EmojiNote::ImageRemote => "image is only a CDN link; re-export with --media".into(),
+        EmojiNote::ImageRemote => "image is only a link (re-export with the images saved beside it)".into(),
         EmojiNote::ImageMissing => "image not found in the export".into(),
+        EmojiNote::AliasTargetMissing => "an alias of an emoji that is not being imported".into(),
     }
 }
 
@@ -235,8 +265,9 @@ fn person(p: &PersonPlan) -> String {
         format!("{} ({})", p.display_name, p.username)
     };
     let admin = if p.admin { ", make admin" } else { "" };
+    let email = p.email.as_ref().map(|e| format!(" <{e}>")).unwrap_or_default();
     let active = range(p.first_ms, p.last_ms).map(|r| format!(", {r}")).unwrap_or_default();
-    format!("{name}{admin}: {} messages{active}", p.messages)
+    format!("{name}{email}{admin}: {} messages{active}", p.messages)
 }
 
 fn history(h: &HistorySummary) -> String {

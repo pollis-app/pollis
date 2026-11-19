@@ -1,0 +1,22 @@
+[
+  {
+    "type": "message",
+    "user": "U02BEN",
+    "text": "deploy at 4",
+    "ts": "1704790000.000100"
+  },
+  {
+    "type": "message",
+    "subtype": "bot_message",
+    "bot_id": "B01GH",
+    "username": "github",
+    "text": "PR #12 merged",
+    "ts": "1704791000.000200"
+  },
+  {
+    "type": "message",
+    "user": "U06FIN",
+    "text": "last day today, thanks all",
+    "ts": "1704792000.000300"
+  }
+]

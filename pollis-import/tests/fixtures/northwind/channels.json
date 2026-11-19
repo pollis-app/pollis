@@ -1,0 +1,150 @@
+[
+  {
+    "id": "C01RND",
+    "name": "random",
+    "created": 1609459300,
+    "creator": "U01ANA",
+    "is_archived": false,
+    "is_general": false,
+    "members": [
+      "U01ANA",
+      "U02BEN",
+      "U03CHO",
+      "U04DEV",
+      "U05EVA",
+      "U07JO"
+    ],
+    "pins": [],
+    "topic": {
+      "value": "Non-work banter and water cooler conversation",
+      "creator": "U01ANA",
+      "last_set": 1609459300
+    },
+    "purpose": {
+      "value": "Non-work banter and water cooler conversation",
+      "creator": "U01ANA",
+      "last_set": 1609459300
+    }
+  },
+  {
+    "id": "C02GEN",
+    "name": "general",
+    "created": 1609459200,
+    "creator": "U01ANA",
+    "is_archived": false,
+    "is_general": true,
+    "members": [
+      "U01ANA",
+      "U02BEN",
+      "U03CHO",
+      "U04DEV",
+      "U05EVA",
+      "U07JO"
+    ],
+    "pins": [],
+    "topic": {
+      "value": "Offsite is 12 March",
+      "creator": "U01ANA",
+      "last_set": 1609459200
+    },
+    "purpose": {
+      "value": "Company-wide announcements and work-based matters",
+      "creator": "U01ANA",
+      "last_set": 1609459200
+    }
+  },
+  {
+    "id": "C03DES",
+    "name": "design",
+    "created": 1612137600,
+    "creator": "U01ANA",
+    "is_archived": false,
+    "is_general": false,
+    "members": [
+      "U01ANA",
+      "U03CHO",
+      "U07JO"
+    ],
+    "pins": [],
+    "topic": {
+      "value": "Crit: Thursdays 3pm",
+      "creator": "U01ANA",
+      "last_set": 1612137600
+    },
+    "purpose": {
+      "value": "Design reviews and critique",
+      "creator": "U01ANA",
+      "last_set": 1612137600
+    }
+  },
+  {
+    "id": "C04ENG",
+    "name": "eng-backend",
+    "created": 1614556800,
+    "creator": "U01ANA",
+    "is_archived": false,
+    "is_general": false,
+    "members": [
+      "U01ANA",
+      "U02BEN",
+      "U03CHO",
+      "U06FIN"
+    ],
+    "pins": [],
+    "topic": {
+      "value": "",
+      "creator": "",
+      "last_set": 0
+    },
+    "purpose": {
+      "value": "",
+      "creator": "",
+      "last_set": 0
+    }
+  },
+  {
+    "id": "C05OLD",
+    "name": "launch-2023",
+    "created": 1672531200,
+    "creator": "U01ANA",
+    "is_archived": true,
+    "is_general": false,
+    "members": [
+      "U01ANA",
+      "U02BEN"
+    ],
+    "pins": [],
+    "topic": {
+      "value": "",
+      "creator": "",
+      "last_set": 0
+    },
+    "purpose": {
+      "value": "Coordinating the 2023 launch",
+      "creator": "U01ANA",
+      "last_set": 1672531200
+    }
+  },
+  {
+    "id": "C06EMP",
+    "name": "watercooler-music",
+    "created": 1680000000,
+    "creator": "U01ANA",
+    "is_archived": false,
+    "is_general": false,
+    "members": [
+      "U07JO"
+    ],
+    "pins": [],
+    "topic": {
+      "value": "",
+      "creator": "",
+      "last_set": 0
+    },
+    "purpose": {
+      "value": "",
+      "creator": "",
+      "last_set": 0
+    }
+  }
+]
