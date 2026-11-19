@@ -20798,22 +20798,24 @@
       "id": "bots-apps-02",
       "doc": "website/bots-developers.html",
       "locator": {
-        "heading": "Write an App in TypeScript",
-        "quote": "The same source and lockfile give the same hash on any machine."
+        "heading": "Write an App in TypeScript or Rust",
+        "quote": "The same source and lockfile give the same hash on any machine, in either"
       },
-      "claim": "The build stages in a fixed directory, seeds ComponentizeJS's work-dir name, strips install-path comments and pre-initializes with fixed randomness and clocks, so the component and App hash depend only on source and lockfile; a test builds in two directories and compares (#2006).",
+      "claim": "The build stages in a fixed directory, seeds ComponentizeJS's work-dir name, strips install-path comments and pre-initializes with fixed randomness and clocks, so the component and App hash depend only on source and lockfile; a test builds in two directories and compares (#2006). Rust (#2007): a pinned toolchain (rust-toolchain.toml), a locked Cargo.lock and the --sdk crate copied into the App rather than linked, with the same two-directory test.",
       "kind": "security",
       "anchors": [
         "sdk/ts/cli/src/build.ts",
+        "sdk/ts/cli/src/rust.ts",
         "pollis-app-dev/src/wizer.rs",
         "pollis-app-manifest/src/app_hash.rs"
       ],
       "evidence": [
         "sdk/ts/cli/test/cli.test.ts:122",
+        "sdk/ts/cli/test/rust.test.ts:117",
         "pollis-app-manifest/src/app_hash.rs:112"
       ],
       "status": "verified",
-      "verified_sha": "c875331a53fee76420620a22d67a444e1e44aa17"
+      "verified_sha": "b305e4b9944df944d25ba6537ae8dc6395f1b8d8"
     },
     {
       "id": "bots-apps-03",
