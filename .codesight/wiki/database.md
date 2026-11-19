@@ -323,6 +323,19 @@ credentials live.
 - `description` TEXT
 - `channel_type` TEXT NOT NULL DEFAULT 'text' _(text or voice)_
 - `created_at` TEXT NOT NULL DEFAULT now
+- `category_id` TEXT _(migration 000052, #2031)_ — the `channel_category` it sits in; NULL = the uncategorised block. Triggers `channels_category_same_group_{insert,update}` refuse a category of another group.
+- `position` INTEGER _(migration 000052, #2031)_ — its place in its block, 0-based. NULL until the block is first arranged: a block sorts positioned channels first, then unpositioned ones by `created_at`, `id`, so a group nobody has arranged keeps its creation order and no row was rewritten by the migration. `UNIQUE (group_id, COALESCE(category_id, ''), position) WHERE position IS NOT NULL` (`idx_channels_block_position`) makes a duplicate position unrepresentable.
+
+### channel_category _(migration 000052, #2031)_
+- `id` TEXT PK _(client-minted ULID)_
+- `group_id` TEXT NOT NULL
+- `name` TEXT NOT NULL _(the group-name rule, `profile::is_valid_display_name`; need not be unique)_
+- `position` INTEGER NOT NULL, `UNIQUE (group_id, position)` (`idx_channel_category_position`)
+- `created_at` TEXT NOT NULL DEFAULT now
+
+**Display order.** The DS returns a group's channels (`directory::groups_with_channels` for the launch read, `channels_of` for `/v1/directory/group`) already in display order, `directory::CHANNEL_ORDER_SQL`: the uncategorised block first, then category by category in `channel_category.position`, each block by `position` then creation. A client that knows nothing of categories (the oldest store build) therefore shows the right order as a flat list. Categories ride along as `categories` on both reads, in order; members-only like channel names (#917).
+
+**Writes** (`pollis-delivery/src/channel_order.rs`): create / rename / delete / move a category and move a channel, all admin-only (role re-derived), each in ONE write transaction (`BEGIN IMMEDIATE`) that renumbers every block it touches from 0 (`renumber_block` clears the block's positions first; `renumber_categories` lifts them past the max), so two admins dragging at once serialize and never collide. `channels/create` puts a new channel at the bottom of its block (a `category_id` there needs an admin). Deleting a category moves its channels to the end of the uncategorised block, in order, before the row goes; the `BEFORE DELETE` trigger `channel_category_delete_detaches` detaches anything a raw delete would leave behind, so a category delete can never take a channel with it (with or without `foreign_keys`). `teardown::purge_group` deletes a group's categories. Tests: `pollis-delivery/tests/channel_categories.rs`.
 
 ### message_envelope
 - `id` TEXT PK _(the client's message id; a re-post of an id already stored in the same conversation, carrying the same `delete_token_hash`, is answered as a REPLAY — 200, nothing written, no push, regardless of current membership — so a sender's durable outbox can retry without double-delivering, #1335. Any other collision gets `Forbidden`, the non-member answer. Posts of one id are serialized across the replay check and the epoch gate)_

@@ -423,6 +423,34 @@ channel). All of them read `appStore.voiceState` / `voiceParticipants`, which
   does not ship yet (dormant until the assets land). `voice.toggleCamera` (mod+shift+v) and
   `voice.toggleScreenShare` (mod+shift+s) live in `keyboard/commands.ts`.
 
+### Channel categories (#2031)
+
+A group's channel list is blocks: the uncategorised channels first with no header (a group with no
+categories looks exactly as before), then each category as a section label. Group-wide and
+admin-managed; the only per-person state is whether a category is collapsed, kept per device
+(desktop `localStorage` key `pollis.sidebar.collapsedCategories`, mobile
+`lib/categoryCollapse.ts`'s sandbox file), never synced. The DS returns channels in display order,
+so both apps bucket the list without sorting: `utils/channelLayout.ts`, byte-copied to
+`mobile/lib/channelLayout.ts` (`mobile/tests/channel-layout.test.ts`), which also holds the
+optimistic moves that mirror the DS and the one-slot steps for keyboard and screen readers.
+
+- **Desktop** (`Sidebar` → `SidebarGroupChannels`): a label is a `SidebarRow` with
+  `variant="label"` at the channels' indent; channels under it are not indented further. Collapsed,
+  it shows the summed unread of its text channels and keeps the open channel and a joined voice
+  room. Admins only: rows are dragged with the pointer (`useSidebarArrange`, pointer events rather
+  than HTML5 drag and drop; the slot is a 2px accent line, never an edge stripe), Alt+↑/↓ moves a
+  focused row a slot, the group row's "+" opens New channel / New category in place, and a
+  label's "+" and ⋯ (Rename inline with `InlineInput`; Delete as an inline confirmation that
+  replaces the label, Cancel focused). No modal. An admin's channel rows open on click, not press,
+  so a drag never navigates. Playwright: `e2e/channel-categories.spec.ts`.
+- **Mobile** (`GroupPanel` → `GroupChannelList`): the same blocks, replacing the old fixed "Text
+  channels" header; a label taps to collapse. Admins get Edit / Done and "+" in the panel header.
+  Edit mode (the iOS Mail / Discord pattern) gives every row a ≡ handle (a Gesture Handler pan on
+  the handle only, so a scroll starting on a row is still a scroll; screen readers get Move up /
+  Move down), shows voice rooms so they can be arranged, puts "+" and ⋯ on labels, and ends with a
+  "New category" row. Rename / delete / create are `CategorySheet` steps; delete is the sheet
+  confirmation pattern. Maestro: `.maestro/flows/channel-categories.yaml`.
+
 ### The windowed log (#874)
 
 **The log is virtualised.** `MessageList` keeps only the visible slice of the
@@ -925,7 +953,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**237 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**241 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -993,7 +1021,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **InviteLinkManager** — props: groupId — `frontend/src/components/Invites/InviteLinkManager.tsx`
 - **InviteLinkRow** — props: link, onRevoke, isRevoking — `frontend/src/components/Invites/InviteLinkRow.tsx`
 
-### `components/Layout` (13)
+### `components/Layout` (16)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`. The bar under the TitleBar: a back/forward chevron pair, then the clickable trail, then search + settings. The chevrons walk **router history**, one entry per click, the way a browser (and Slack, and Discord) does — there is no hierarchical "up one level" navigation any more; the trail's own segments are what jump up the tree. **Both are always rendered**, root included: a control that vanishes at the root shifts everything beside it sideways on the way home. When a direction has nowhere to go it is greyed out and truly `disabled` (a `ui/Button` `variant="ghost"`), so assistive tech is told what the grey says. Enablement comes from `stores/historyNavStore`, which subscribes to `router.history` (event-driven, never polled) and keeps a cursor plus a ceiling — `canGoBack` is `index > 0`, `canGoForward` is `index < maxIndex`, and a PUSH resets the ceiling to the new entry because it discards whatever was ahead. That arithmetic is pure in `utils/historyNav.ts` and pinned by `frontend/tests/history-nav.test.ts`; it exists because no browser API answers "can I go forward?" — `history.length` counts a session, not a direction, and never shrinks on a truncating push. The `nav.back` shortcut (Escape, handled in `AppShell`) routes through the same `historyNavStore.goBack()`, so the key and the chevron cannot land in different places.
@@ -1003,7 +1031,10 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
 - **ResizeHandle** — props: panelRef, edge, label, maxPx, onCommit, onCollapse, onReset — `frontend/src/components/Layout/ResizeHandle.tsx`. Shared by both side panels; drags write `style.width` straight to the panel and never through React. See [Resizable side panels](#resizable-side-panels-985).
 - **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`. Its settings rows carry `sidebar-row-*` testids like `SectionHeader`'s, so navigation tests never match on a translated label (#932).
+- **SidebarCategoryLabel** — props: category, channelCount, isCollapsed, onToggle, unread, isAdmin, drag, onNewChannel, onRename, onDelete, isDeleting — `frontend/src/components/Layout/SidebarCategoryLabel.tsx`. A category's label (#2031): chevron, name, the collapsed unread roll-up; for admins "+" and ⋯, whose Rename and Delete replace the label in place.
+- **SidebarGroupChannels** — props: group, isAdmin, collapsedCategories, toggleCategory, activeChannelId, activeVoiceId, connectedVoiceId, unreadCounts, voiceCounts, mutedChannels, creatingCategory, onCreatingCategoryDone — `frontend/src/components/Layout/SidebarGroupChannels.tsx`. One group's blocks of channels in the sidebar (#2031); see "Channel categories".
 - **SidebarProfilePanel** — `frontend/src/components/Layout/SidebarProfilePanel.tsx`. Modern skin only; identity row + the persistent voice strip (channel, mic, deafen, screenshare, disconnect) that replaces terminal's `VoiceBar`. The status/channel text is a button that navigates back to the connected room (same targets as `VoiceBar`'s channel pill), and the strip floors on `min-h-composer` so it lines up with the composer across the sidebar edge.
+- **SidebarRow** — props: indent, isActive, onClick, leading, chevron, label, badge, trailing, testId, dimmed, activateOn, onIntent, actions, actionsPinned, drag, variant, danger — `frontend/src/components/Layout/SidebarRow.tsx`. Every sidebar row (group, channel, category label, settings): its own button, an optional chevron, admin `actions` beside it, and the drag wiring an admin's row carries (#2031).
 - **StatusBarDismissButton** — props: ariaLabel, onClick — `frontend/src/components/Layout/StatusBarDismissButton.tsx`
 - **StatusBarSummary** — props: color — `frontend/src/components/Layout/StatusBarSummary.tsx`
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
@@ -1085,7 +1116,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
 - **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
-### `components/ui` (50)
+### `components/ui` (51)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
@@ -1109,6 +1140,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **IconButton** — props: size, activateOn, destructive — `frontend/src/components/ui/IconButton.tsx`
 - **IconSpinner** — `frontend/src/components/ui/IconSpinner.tsx`
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick, activateOn — `frontend/src/components/ui/InlineAudioPlayer.tsx`
+- **InlineInput** — props: value, onChange, onSubmit, onCancel, ariaLabel, placeholder, disabled, maxLength — `frontend/src/components/ui/InlineInput.tsx`. A one-line field edited in place in a list row (a category name, #2031): no label, no border, the raised fill; focused and selected on mount, Enter submits, Escape cancels. A form's field is `TextInput`.
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
 - **Kbd** — props: children — `frontend/src/components/ui/Kbd.tsx`
 - **LinkButton** — props: children, onClick, tone, size, color — `frontend/src/components/ui/LinkButton.tsx`
