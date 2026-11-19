@@ -1,0 +1,4 @@
+target/
+dist/
+# The link to the SDK is source; the repository ignores vendor/ elsewhere.
+!vendor/

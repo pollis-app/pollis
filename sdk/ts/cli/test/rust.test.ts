@@ -212,6 +212,33 @@ pollis_app::app! { manifest: Manifest::new().channels(["*"]), on_message: on_mes
   });
 });
 
+describe("the alerts App (apps/alerts)", () => {
+  const repo = join(sdk, "..", "..");
+  const published = readFileSync(join(repo, "apps", "alerts", "APP_HASH"), "utf8").trim();
+
+  /** The App and the SDK it links to, as a fresh checkout at `parent` has them. */
+  function checkout(parent: string): string {
+    const root = join(scratch, parent);
+    const skip = (source: string) => !/\/(target|dist)$/.test(source);
+    cpSync(join(repo, "apps", "alerts"), join(root, "apps", "alerts"), { recursive: true, verbatimSymlinks: true, filter: skip });
+    cpSync(join(repo, "sdk", "rust", "pollis-app"), join(root, "sdk", "rust", "pollis-app"), { recursive: true, filter: skip });
+    return join(root, "apps", "alerts");
+  }
+
+  test("its source builds to the published App hash, wherever it is checked out", async () => {
+    const a = await buildApp({ dir: checkout("alerts-a"), quiet: true });
+    const b = await buildApp({ dir: checkout("deeper/alerts-b"), quiet: true });
+    assert.equal(a.appHash, published, "see apps/alerts/README.md, Changing it");
+    assert.equal(b.appHash, published);
+  });
+
+  test("its own tests pass in the real sandbox", () => {
+    const run = cli(["test", "--dir", checkout("alerts-test")]);
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.match(run.stdout, /test result: ok\. 6 passed/);
+  });
+});
+
 describe("pollis_app in the real sandbox", () => {
   test("every handler and host function, through pollis_app::testing", () => {
     const run = cli(["test", "--dir", kitchenSink("sandbox")]);

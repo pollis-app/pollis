@@ -1,0 +1,5 @@
+# The compiler is part of what makes a build reproducible: keep this pinned.
+[toolchain]
+channel = "1.96.0"
+profile = "minimal"
+targets = ["wasm32-wasip2"]
