@@ -39,51 +39,51 @@ tags:
 - addMedia:
     - "../fixtures/vault-swipe-01.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-02.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-03.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-04.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-05.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-06.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-07.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-08.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-09.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-10.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-11.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - addMedia:
     - "../fixtures/vault-swipe-12.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - extendedWaitUntil:
     visible:
       id: "btn-attachment-.*"

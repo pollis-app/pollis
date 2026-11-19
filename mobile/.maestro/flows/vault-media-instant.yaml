@@ -32,7 +32,7 @@ tags:
 - addMedia:
     - "../fixtures/vault-swipe-03.png"
 - runFlow: ../subflows/pick-newest-photo.yaml
-- runFlow: ../subflows/send-vault-picks.yaml
+- runFlow: ../subflows/send-strip.yaml
 - extendedWaitUntil:
     visible:
       id: "media-image-rendered"

@@ -18,10 +18,23 @@ tags:
 # Create a group. A fresh account has no groups, so the Groups tab shows its
 # empty state with btn-create-group directly; with groups, btn-create-group
 # lives in the "+" sheet at the end of the group pill strip (btn-add-group).
-# The optional tap covers both.
-- tapOn:
-    id: "btn-add-group"
-    optional: true
+# groups runs first on the run's new shared account, so the empty state is the
+# usual case and its check costs nothing; the "+" is tapped only when the
+# account already has groups (#2042: an optional "+" tap cost ~7 s per miss).
+- extendedWaitUntil:
+    visible:
+      id: "btn-create-group|btn-add-group"
+    timeout: 15000
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "btn-create-group"
+- runFlow:
+    when:
+      true: ${!output.shown}
+    commands:
+      - tapOn:
+          id: "btn-add-group"
 - tapOn:
     id: "btn-create-group"
 - assertVisible:
@@ -55,7 +68,6 @@ tags:
 # the "+" sheet.
 - tapOn:
     id: "btn-add-group"
-    optional: true
 - tapOn:
     id: "btn-create-group"
 - assertVisible:

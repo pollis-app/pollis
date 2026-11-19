@@ -8,7 +8,8 @@ appId: ${MAESTRO_APP_ID}
 # 13-inch (M5) missed one in the 1.0.34 release gate (#1813), and
 # long-press-message.yaml retries for the same reason. So wait for the screen
 # to settle, then try up to 3 times. Unrolled like long-press-message.yaml,
-# since `repeat: times:` did not reliably iterate there.
+# since `repeat: times:` did not reliably iterate there. Retries are gated on
+# subflows/probe-shown.yaml, which returns at once when the sheet is up (#2042).
 - extendedWaitUntil:
     visible: ${LINK}
     timeout: 10000
@@ -26,9 +27,12 @@ appId: ${MAESTRO_APP_ID}
           timeout: 4000
           optional: true
 - runFlow:
+    file: probe-shown.yaml
+    env:
+      ID: "sheet-link"
+- runFlow:
     when:
-      notVisible:
-        id: "sheet-link"
+      true: ${!output.shown}
     commands:
       - waitForAnimationToEnd:
           timeout: 3000
@@ -39,9 +43,12 @@ appId: ${MAESTRO_APP_ID}
           timeout: 4000
           optional: true
 - runFlow:
+    file: probe-shown.yaml
+    env:
+      ID: "sheet-link"
+- runFlow:
     when:
-      notVisible:
-        id: "sheet-link"
+      true: ${!output.shown}
     commands:
       - waitForAnimationToEnd:
           timeout: 3000

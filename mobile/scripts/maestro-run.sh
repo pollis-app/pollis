@@ -461,8 +461,9 @@ run_device() {
       ;;
     android)
       if ! adb devices | grep '^emulator-' >/dev/null; then
-        echo "==> booting Android emulator: $ANDROID_AVD"
-        ( "$ANDROID_HOME/emulator/emulator" -avd "$ANDROID_AVD" -no-snapshot -no-boot-anim >/dev/null 2>&1 & )
+        echo "==> booting Android emulator: $ANDROID_AVD (headless)"
+        # Headless: windowed boots have hung on this machine (#2042).
+        ( "$ANDROID_HOME/emulator/emulator" -avd "$ANDROID_AVD" -no-snapshot -no-boot-anim -no-window >/dev/null 2>&1 & )
       fi
       adb wait-for-device
       adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 1; done'

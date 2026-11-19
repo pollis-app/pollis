@@ -14,13 +14,19 @@ appId: ${MAESTRO_APP_ID}
 - extendedWaitUntil:
     notVisible: ".*, sending"
     timeout: 150000
+# Usually nothing failed: subflows/probe-absent.yaml returns at once then,
+# where a `when: visible:` miss cost ~7 s (#2042).
+- runFlow:
+    file: probe-absent.yaml
+    env:
+      ID: "btn-retry-message-.*"
 - runFlow:
     when:
-      visible:
-        id: "btn-retry-message-.*"
+      true: ${!output.absent}
     commands:
       - tapOn:
           id: "btn-retry-message-.*"
+          optional: true
 - extendedWaitUntil:
     notVisible:
       id: "btn-retry-message-.*"

@@ -148,10 +148,9 @@ tags:
     id: "screen-self"
 - openLink: "pollis://self/security?section=data"
 - runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
+    file: ../subflows/after-open-link.yaml
+    env:
+      SCREEN: "screen-self-security"
 - assertVisible:
     id: "screen-self-security"
 - assertVisible:

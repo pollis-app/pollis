@@ -121,10 +121,15 @@ tags:
       id: "screen-group-emoji"
     timeout: 5000
     optional: true
+# Tap again only if the page did not open (subflows/probe-shown.yaml returns
+# at once when it did; a `when: notVisible:` waited ~7 s for it to go, #2042).
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "screen-group-emoji"
 - runFlow:
     when:
-      notVisible:
-        id: "screen-group-emoji"
+      true: ${!output.shown}
     commands:
       - tapOn:
           id: "row-group-emoji"

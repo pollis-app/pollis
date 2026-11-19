@@ -137,21 +137,7 @@ tags:
 # Send: the row is covered, both attachments.
 # Keep pressing Send until the strip clears: a press while a previous send
 # is still settling is ignored (as composer-attachments.yaml).
-- repeat:
-    while:
-      visible:
-        id: "strip-attachments"
-    times: 30
-    commands:
-      - tapOn:
-          id: "btn-send"
-      - extendedWaitUntil:
-          notVisible:
-            id: "strip-attachments"
-          timeout: 4000
-          optional: true
-- assertNotVisible:
-    id: "strip-attachments"
+- runFlow: ../subflows/send-strip.yaml
 - extendedWaitUntil:
     visible:
       id: "sensitive-cover-.*"
@@ -166,10 +152,13 @@ tags:
 # which starts a reply instead.
 - waitForAnimationToEnd:
     timeout: 3000
+# Loops on a flag that subflows/probe-shown.yaml sets: it returns at once
+# when the tap worked, where `while: notVisible:` waited ~7 s on its last
+# check (#2042).
+- evalScript: ${output.loopDone = false}
 - repeat:
     while:
-      notVisible:
-        id: "btn-sensitive-hide-.*"
+      true: ${!output.loopDone}
     times: 3
     commands:
       - tapOn:
@@ -180,6 +169,11 @@ tags:
             id: "btn-sensitive-hide-.*"
           timeout: 3000
           optional: true
+      - runFlow:
+          file: ../subflows/probe-shown.yaml
+          env:
+            ID: "btn-sensitive-hide-.*"
+      - evalScript: ${output.loopDone = output.shown}
 - assertVisible:
     id: "btn-sensitive-hide-.*"
 - assertNotVisible:
@@ -197,10 +191,13 @@ tags:
 # The tap that reveals the video neither opens the viewer nor plays it.
 - waitForAnimationToEnd:
     timeout: 3000
+# Loops on a flag that subflows/probe-shown.yaml sets: it returns at once
+# when the tap worked, where `while: notVisible:` waited ~7 s on its last
+# check (#2042).
+- evalScript: ${output.loopDone = false}
 - repeat:
     while:
-      notVisible:
-        id: "btn-sensitive-hide-.*"
+      true: ${!output.loopDone}
     times: 3
     commands:
       - tapOn:
@@ -211,6 +208,11 @@ tags:
             id: "btn-sensitive-hide-.*"
           timeout: 3000
           optional: true
+      - runFlow:
+          file: ../subflows/probe-shown.yaml
+          env:
+            ID: "btn-sensitive-hide-.*"
+      - evalScript: ${output.loopDone = output.shown}
 - assertVisible:
     id: "btn-sensitive-hide-.*"
 - assertNotVisible:
@@ -222,12 +224,20 @@ tags:
 - takeScreenshot: sensitive-06-video-revealed-not-playing
 
 # The Vault composer marks and covers the same way.
-- tapOn:
-    id: "btn-back"
-    optional: true
-- tapOn:
-    id: "btn-back"
-    optional: true
+# Back to the tab bar: one back on a phone, none on the iPad's two-pane, and a
+# second back only if the tab bar is still not up. Two optional backs paid
+# Maestro's ~7 s miss for every back that was not there (#2042).
+- runFlow: ../subflows/back-on-phone.yaml
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "tab-direct"
+- runFlow:
+    when:
+      true: ${!output.shown}
+    commands:
+      - tapOn:
+          id: "btn-back"
 - tapOn:
     id: "tab-direct"
 - tapOn:
@@ -242,21 +252,7 @@ tags:
 - takeScreenshot: sensitive-07-vault-composer-marked
 # Keep pressing Send until the strip clears: a press while a previous send
 # is still settling is ignored (as composer-attachments.yaml).
-- repeat:
-    while:
-      visible:
-        id: "strip-attachments"
-    times: 30
-    commands:
-      - tapOn:
-          id: "btn-send"
-      - extendedWaitUntil:
-          notVisible:
-            id: "strip-attachments"
-          timeout: 4000
-          optional: true
-- assertNotVisible:
-    id: "strip-attachments"
+- runFlow: ../subflows/send-strip.yaml
 - extendedWaitUntil:
     visible:
       id: "sensitive-cover-.*"
