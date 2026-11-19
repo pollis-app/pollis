@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";
 import {
@@ -35,6 +35,10 @@ export default function NewDM() {
   const createDM = useCreateDM();
 
   const onStartDM = (userId: string) => {
+    // One DM per tap: a second tap while it is being made does nothing.
+    if (createDM.isPending) {
+      return;
+    }
     createDM.mutate(
       { memberIds: [userId] },
       {
@@ -118,7 +122,13 @@ export default function NewDM() {
               name={`@${found.username}`}
               sub={found.preferred_name || found.email || undefined}
               onPress={() => onStartDM(found.id)}
-              chevron
+              disabled={createDM.isPending}
+              end={
+                createDM.isPending ? (
+                  <ActivityIndicator testID="busy-start-dm" size="small" color={semantic.muted} />
+                ) : undefined
+              }
+              chevron={!createDM.isPending}
             />
           </Group>
         ) : null}

@@ -236,3 +236,10 @@ test("a group DM's stacked pair stands for the conversation: no dots", () => {
   assert.doesNotMatch(single, /presence=\{false\}/, "a one-to-one DM shows the person's dot");
   assert.equal(pair.match(/presence=\{false\}/g)?.length, 2);
 });
+
+test("starting a DM shows it is busy and takes one tap, so a retap never makes a second", () => {
+  const page = src("app/dm/new.tsx");
+  assert.match(page, /if \(createDM\.isPending\) \{\s*return;\s*\}/);
+  assert.match(page, /disabled=\{createDM\.isPending\}/);
+  assert.match(page, /testID="busy-start-dm"/);
+});
