@@ -351,6 +351,11 @@ pub async fn send_message(
                 parsed.sender_id.clone().unwrap_or_default()
             });
             let conversation_id = parsed.conversation_id.clone();
+            // #2056: the handle records which message it is for, so a read clears it by position.
+            let message = crate::push::PushMessage {
+                id: parsed.id.clone(),
+                sent_at: parsed.sent_at.clone(),
+            };
             let db = state.db.clone();
             tokio::spawn(async move {
                 let conn = match db.conn().await {
@@ -360,8 +365,14 @@ pub async fn send_message(
                         return;
                     }
                 };
-                if let Err(e) =
-                    crate::push::notify_new_message(&conn, &conversation_id, &sender, &audience).await
+                if let Err(e) = crate::push::notify_new_message(
+                    &conn,
+                    &conversation_id,
+                    &sender,
+                    &audience,
+                    Some(&message),
+                )
+                .await
                 {
                     // No conversation id: push logs name nothing (#1423).
                     tracing::warn!("push fan-out failed: {e}");
