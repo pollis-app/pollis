@@ -39,6 +39,9 @@ exclude = [
     # The fixture App's guest source (#2004): a wasm32-wasip2 component with its
     # own [workspace] and lockfile, built by pollis-app-host/fixtures/build.sh.
     "pollis-app-host/fixtures/test-app",
+    # The Rust SDK for Apps (#2007): compiled into third-party Apps, never into
+    # a Pollis binary. Its own [workspace] and lockfile, like sdk/ts.
+    "sdk/rust/pollis-app",
 ]
 
 [workspace.package]
