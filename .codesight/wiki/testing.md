@@ -675,8 +675,8 @@ shares the single in-process DS. Assert it fired with `!ds_fault_armed()`.
 | `Fail500PostWrite` | same as above — persists, then 500s | adopt (generalized #411, e.g. on a *removal* commit) |
 | `Fail500PreWrite` | returns 500 **without persisting** — the clean, retryable failure | roll the staged commit back cleanly; never adopt a phantom epoch |
 | `DropWelcome` | commit + GroupInfo land, but the add's Welcomes are **never persisted** (cleared off the body before `submit_commit`) | recover the new member via external-join |
-| `SendLandsThenTimesOut` | a message send or edit **lands**, then the client gets a 504 | mark it failed; the drain's re-post is a replay; everyone holds it once |
-| `SendTimesOutUnlanded` | a send or edit gets a 504 and nothing is stored | the drain delivers it, re-sealed if the epoch moved |
+| `SendLandsThenTimesOut` | a message send or edit **lands**, then the client gets a 504 | a send retries in place (#2055) and its re-post is a replay, never reading `failed`; an edit is marked failed and the drain's re-post is the replay; everyone holds it once |
+| `SendTimesOutUnlanded` | a send or edit gets a 504 and nothing is stored | a send's in-place retry (#2055), an edit's drain, delivers it, re-sealed if the epoch moved |
 | `CatchUpTimesOutMidway` | the commit fetch after a catch-up's envelope list gets a 504 | keep what it decrypted; the next pass finishes |
 | `WatermarkTimesOut` | the cursor report after a catch-up gets a 504 and is not stored | re-fetched envelopes are never counted as losses |
 
