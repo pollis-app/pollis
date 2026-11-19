@@ -104,7 +104,6 @@ function GroupPanelImpl({
   const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
   // The testID gains `-muted` so Maestro can see the state.
   const { data: mutedChannels } = useMutedChannels();
-  const unreadCounts = appStore.unreadCounts;
   const me = appStore.currentUser?.id;
 
   const myRole = members.find((m) => m.user_id === me)?.role ?? group?.current_user_role;

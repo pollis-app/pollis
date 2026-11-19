@@ -2,7 +2,9 @@ import { Fragment, useMemo, useRef, useState } from "react";
 import { Pressable, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useTranslation } from "react-i18next";
+import { observer } from "mobx-react-lite";
 import { Text } from "../Text";
+import { useThemeRerender } from "../theme";
 import { Badge, IconButton } from "../ui";
 import { Icon } from "../icons";
 import { semantic, type as ty, fonts, r, space, layout, typeSize } from "../../theme/tokens";
@@ -61,7 +63,8 @@ type Drop =
  * so they can be arranged too, and a "New category" row ends the list. Nothing opens a channel
  * while editing.
  */
-export function GroupChannelList(props: Props) {
+function GroupChannelListImpl(props: Props) {
+  useThemeRerender();
   const { t } = useTranslation("mobile");
   const { editing, categories } = props;
   const collapsed = useCollapsedCategories();
@@ -391,6 +394,9 @@ export function GroupChannelList(props: Props) {
     </View>
   );
 }
+
+// An observer: each row reads its own unread count from the store.
+export const GroupChannelList = observer(GroupChannelListImpl);
 
 /**
  * Edit mode's ≡: dragging it moves its row; nothing else on the row drags, so a scroll that starts
