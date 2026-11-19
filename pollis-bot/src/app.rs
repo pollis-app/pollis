@@ -10,7 +10,7 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::config::{RuntimeConfig, WebhookConfig};
 use crate::host::{BotHost, PairOutcome, PairTarget, PairingProgress, Wakes};
-use crate::installations::{check_capacity, InstallationRecord, Registry};
+use crate::installations::{check_capacity, no_app_fix, InstallationRecord, Registry};
 use crate::job::Installation;
 use crate::log;
 use crate::ratelimit::TokenBucket;
@@ -66,7 +66,12 @@ pub async fn pair(
             registry.save(&record)?;
             log::info(
                 &log::scope(&record.installation_id),
-                format!("paired: bot {} in group {}. Start it with `pollis-bot run`", record.bot_user_id, record.group_id),
+                format!(
+                    "paired: bot {} in group {}. Next, give it an App: {}",
+                    record.bot_user_id,
+                    record.group_id,
+                    no_app_fix(&record.installation_id)
+                ),
             );
             Ok(record)
         }
@@ -104,6 +109,14 @@ pub async fn run(
         bail!("no installations on this host. Fix: run `pollis-bot pair` and have a group admin type the code");
     }
     check_capacity(records.len(), config.max_installations)?;
+    // An installation with no App has nothing to run: it is left sealed, and says what to do.
+    let (records, without_app): (Vec<_>, Vec<_>) = records.into_iter().partition(|r| r.app.is_some());
+    for record in &without_app {
+        log::failure(&log::scope(&record.installation_id), "no App yet, so it is not running", &no_app_fix(&record.installation_id));
+    }
+    if records.is_empty() {
+        bail!("no installation on this host has an App. Fix: {}", no_app_fix(&without_app[0].installation_id));
+    }
 
     crate::app_handler::set_compiled_cache_dir(data_dir.join(APP_CACHE_DIR));
     let status = Arc::new(StatusBoard::new(Some(data_dir), webhook.as_ref().map(|w| w.bind.to_string())));
@@ -120,11 +133,10 @@ pub async fn run(
             )
         })?;
         slots.insert(record.installation_id.clone(), opened.secrets);
-        let handler = record
-            .handler
-            .build()
-            .with_context(|| format!("loading the handler of installation {}", record.installation_id))?;
-        installations.push(Arc::new(Installation::new(opened.core, handler)));
+        let Some(app) = &record.app else {
+            continue;
+        };
+        installations.push(Arc::new(Installation::new(opened.core, app.handler())));
     }
     let runtime = Runtime::new(installations, config.max_installations, status)?;
 
@@ -178,15 +190,7 @@ pub async fn run(
                     String::from_utf8_lossy(&secret)
                 );
             }
-            let mut entry = HookEntry::new(secret, TokenBucket::new(w.per_minute, w.burst, Instant::now()));
-            // An App's webhook gets the request as sent, not the alerts JSON.
-            if records
-                .iter()
-                .any(|r| &r.installation_id == id && matches!(r.handler, crate::handler::HandlerKind::App { .. }))
-            {
-                entry = entry.raw();
-            }
-            hooks.insert(id.clone(), entry);
+            hooks.insert(id.clone(), HookEntry::new(secret, TokenBucket::new(w.per_minute, w.burst, Instant::now())));
         }
         let submitter: Arc<dyn JobSubmitter> = Arc::new(runtime.clone());
         let app = router(Arc::new(WebhookState::new(hooks, submitter)));
@@ -248,6 +252,9 @@ pub async fn post(
     let record = registry
         .get(installation_id)?
         .ok_or_else(|| anyhow!("no installation {installation_id} on this host. Fix: use an id from `pollis-bot status`"))?;
+    if record.app.is_none() {
+        bail!("installation {installation_id} has no App yet, so nothing can post. Fix: {}", no_app_fix(installation_id));
+    }
     // The running runtime's bind (it may come from `run --webhook`), else the file's.
     let bind: SocketAddr = StatusFile::read(data_dir)
         .and_then(|s| s.webhook_bind)
@@ -261,7 +268,7 @@ pub async fn post(
     })?;
     let answer = crate::post::post(bind, installation_id, &secret, channel, text).await?;
     if !answer.posted() {
-        let detail = answer.body.get("fix").or_else(|| answer.body.get("refused")).cloned().unwrap_or_default();
+        let detail = ["fix", "refused", "error"].iter().find_map(|k| answer.body.get(*k)).cloned().unwrap_or_default();
         bail!("the runtime answered {} {}: {detail}", answer.status, answer.body.get("status").cloned().unwrap_or_default());
     }
     Ok(answer.body)
@@ -320,7 +327,15 @@ pub fn status(data_dir: &Path, config: &RuntimeConfig) -> Result<String> {
         let _ = writeln!(out, "\nno installations. Fix: `pollis-bot pair`");
     }
     for r in &records {
-        let _ = writeln!(out, "\n{}  bot {}  group {}  handler {:?}", r.installation_id, r.bot_user_id, r.group_id, r.handler);
+        let _ = writeln!(out, "\n{}  bot {}  group {}", r.installation_id, r.bot_user_id, r.group_id);
+        match &r.app {
+            Some(app) => {
+                let _ = writeln!(out, "    app: {}", app.component);
+            }
+            None => {
+                let _ = writeln!(out, "    no App yet: not running\n    fix: {}", no_app_fix(&r.installation_id));
+            }
+        }
         if let Some(st) = running.as_ref().and_then(|s| s.installations.get(&r.installation_id)) {
             let _ = writeln!(out, "    {} since {}", st.state.label(), st.since);
             if let (Some(e), Some(f)) = (&st.last_error, &st.fix) {

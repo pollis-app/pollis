@@ -2,10 +2,9 @@
 //!
 //! A handler is pure decision: it gets the trigger and returns [`Action`]s, and
 //! has no way to act itself. The loop owns claiming, grant checks and sending,
-//! so a handler of any kind is held to the same rules. The built-in
-//! [`AlertsHandler`] is the only kind today; #2004 adds the sandboxed WASM App
-//! as a second implementation of [`Handler`], with nothing in the loop
-//! changing.
+//! so a handler is held to the same rules whatever it is. The runtime's only
+//! handler is the sandboxed App, [`crate::app_handler::AppHandler`]; the trait
+//! is what keeps the loop testable without one.
 
 use async_trait::async_trait;
 
@@ -13,7 +12,7 @@ use std::sync::Arc;
 
 use crate::action::Action;
 use crate::core::{CoreError, InstallationCore, StateWrite};
-use crate::trigger::{Trigger, WebhookPayload};
+use crate::trigger::Trigger;
 
 /// A handler's failure. The loop discards every action of a job whose handler
 /// fails, so an error is never half-applied.
@@ -65,82 +64,4 @@ pub struct HandlerContext {
 pub struct HandlerOutput {
     pub actions: Vec<Action>,
     pub state: Vec<StateWrite>,
-}
-
-/// Which handler an installation runs, as written in its `installation.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HandlerKind {
-    #[default]
-    Alerts,
-    /// #2004: a sandboxed App: its component and `pollis-app.json`, each a
-    /// local path or an `https://` URL. It runs only under an admin's verified
-    /// approval (#2005), re-checked before every job; a development build's
-    /// signature is read from `<component>.sig.json`.
-    App {
-        component: crate::app_approval::ArtifactLocation,
-        manifest: crate::app_approval::ArtifactLocation,
-    },
-}
-
-impl HandlerKind {
-    pub fn build(&self) -> anyhow::Result<Arc<dyn Handler>> {
-        Ok(match self {
-            HandlerKind::Alerts => Arc::new(AlertsHandler),
-            HandlerKind::App { component, manifest } => {
-                Arc::new(crate::app_handler::AppHandler::approved(component.clone(), manifest.clone()))
-            }
-        })
-    }
-}
-
-/// The built-in alerts handler: a webhook call becomes one `post`; messages in
-/// the group are ignored.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct AlertsHandler;
-
-#[async_trait]
-impl Handler for AlertsHandler {
-    fn kind(&self) -> &'static str {
-        "alerts"
-    }
-
-    async fn handle(&self, trigger: &Trigger) -> Result<Vec<Action>, HandlerError> {
-        match trigger {
-            Trigger::Webhook(call) => match &call.payload {
-                WebhookPayload::Alert { channel, text } => Ok(vec![Action::Post {
-                    channel: channel.clone(),
-                    text: text.clone(),
-                }]),
-                // Only an App installation's webhook is raw.
-                WebhookPayload::Raw(_) => Ok(Vec::new()),
-            },
-            Trigger::Message(_) | Trigger::Schedule(_) => Ok(Vec::new()),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::trigger::{IncomingMessage, WebhookCall};
-
-    #[tokio::test]
-    async fn a_webhook_becomes_one_post_and_a_message_becomes_nothing() {
-        let hook = Trigger::Webhook(WebhookCall::alert("d", "alerts", "disk full"));
-        assert_eq!(
-            AlertsHandler.handle(&hook).await.unwrap(),
-            vec![Action::Post { channel: "alerts".into(), text: "disk full".into() }]
-        );
-        let msg = Trigger::Message(IncomingMessage {
-            envelope_id: "e".into(),
-            channel_id: "c".into(),
-            sender_id: "u".into(),
-            text: Some("hello bot".into()),
-            reply_to_id: None,
-            thread_id: None,
-            sent_at: String::new(),
-        });
-        assert!(AlertsHandler.handle(&msg).await.unwrap().is_empty());
-    }
 }

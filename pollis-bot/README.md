@@ -35,7 +35,7 @@ An admin opens the group, then **Bots** → the bot → **Add a host**, and type
 
 ```bash
 pollis-bot run                 # every installation on this host, until stopped
-pollis-bot run --webhook       # also the alerts webhook on 127.0.0.1:8787
+pollis-bot run --webhook       # also the webhook on 127.0.0.1:8787
 pollis-bot run --once          # catch up, handle what is pending, exit (scheduled or woken hosts)
 pollis-bot status              # installations and what each is doing
 pollis-bot forget --installation <id>   # remove a revoked host's or deleted bot's installation
@@ -44,6 +44,8 @@ pollis-bot forget --installation <id>   # remove a revoked host's or deleted bot
 Run it under your service manager (systemd, launchd) so it starts on boot. It needs no network listener of its own except the optional webhook; everything else is outbound to the Delivery Service.
 
 ## Alerts
+
+Alerts are posted by the [alerts App](../apps/alerts/README.md), which a bot runs like any other App: `app install` it (below) and have an admin approve it. An installation with no App does not run.
 
 Turn the webhook on in `<data dir>/config.json` (or with `run --webhook`):
 
@@ -62,7 +64,7 @@ curl -X POST http://127.0.0.1:8787/hooks/<installation id> \
 pollis-bot post --installation <id> --channel alerts "deploy finished"
 ```
 
-- `channel` is a channel id or name in the bot's group; anything else is refused (422).
+- `channel` is the id or name of a channel the admin granted; anything else is refused (500, with the reason in `error`). So is a body that is not this JSON.
 - Senders that sign can send `X-Pollis-Signature: sha256=<hex HMAC-SHA256(secret, body)>` instead of the bearer header.
 - A sender that posts to several hosts of one bot should send the same `X-Pollis-Delivery: <id>` to each; exactly one posts.
 - Rate limit, per installation: a burst of 10, then 30 a minute (`webhook.burst`, `webhook.per_minute`). Over it: 429 with `Retry-After`.

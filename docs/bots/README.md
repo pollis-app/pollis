@@ -36,15 +36,17 @@ These words are kept apart everywhere in Pollis: in the apps, in these docs and 
 
 A bot is not the machine it runs on, and not the code it runs. Machines (hosts) can be added and removed, and the code can change, while the bot stays the same member.
 
-Every bot has one installation. It runs the runtime's built-in **alerts** handler (it posts the alerts it receives on its webhook into a channel) until it is given an App, which runs once an admin approves it ([Approving an App](./app-approval.md)). To write one, start with [Writing an App in TypeScript](./developer-guide.md); [Concepts for developers](./concepts-for-developers.md) describes the job loop it plugs into.
+Every bot has one installation, and it does nothing until it is given an App, which runs once an admin approves it ([Approving an App](./app-approval.md)). The [alerts App](../../apps/alerts/README.md) is a ready-made one: it posts the alerts it receives on its webhook into a channel. To write your own, start with [Writing a Pollis App](./developer-guide.md); [Concepts for developers](./concepts-for-developers.md) describes the job loop it plugs into.
 
 ## Quick start
 
 1. An admin opens the group, then **Bots** → **Add a bot**.
 2. On the machine that will run the bot, run `pollis-bot pair` ([Self-hosting](./self-hosting.md#install)).
 3. Type the eight-character code it prints into the **Add a bot** page, give the bot a name, and confirm.
-4. On the machine, run `pollis-bot run --webhook` and note the webhook secret it prints once.
-5. Send an alert:
+4. Build the [alerts App](../../apps/alerts/README.md#build-it-and-check-the-hash) and give it to the bot: `pollis-bot app install --installation <installation id> --artifact apps/alerts/dist`.
+5. On the machine, run `pollis-bot run --webhook` and note the webhook secret it prints once.
+6. An admin opens **Bots**, then the bot, picks the channels it may post in and approves the App.
+7. Send an alert:
 
    ```bash
    curl -X POST http://127.0.0.1:8787/hooks/<installation id> \

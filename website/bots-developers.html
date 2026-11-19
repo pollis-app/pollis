@@ -6,12 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pollis — Bots for developers</title>
   <meta name="description"
-    content="Post alerts into a Pollis channel through a bot's webhook, how the bot runtime's job loop works, and writing an App in TypeScript." />
+    content="Post alerts into a Pollis channel through a bot's webhook, how the bot runtime's job loop works, and writing an App in TypeScript or Rust." />
   <meta name="theme-color" content="#0f1117" />
 
   <meta property="og:title" content="Pollis — Bots for developers" />
   <meta property="og:description"
-    content="Post alerts into a Pollis channel through a bot's webhook, how the bot runtime's job loop works, and writing an App in TypeScript." />
+    content="Post alerts into a Pollis channel through a bot's webhook, how the bot runtime's job loop works, and writing an App in TypeScript or Rust." />
   <meta property="og:type" content="website" />
 
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
@@ -59,7 +59,13 @@
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section" id="webhook">
         <h2 class="doc-section-title">The alerts webhook</h2>
-        <p>Turn it on with <code>pollis-bot run --webhook</code>, or in <code>config.json</code>:</p>
+        <p>
+          Alerts are posted by the <strong>alerts App</strong>, which a bot runs like any other App: build it from
+          <a href="https://github.com/pollis-app/pollis/tree/main/apps/alerts" target="_blank"
+            rel="noopener noreferrer"><code>apps/alerts</code></a>, check its hash, give it to the bot with
+          <code>pollis-bot app install</code>, and have a group admin approve it and pick its channels.
+        </p>
+        <p>Turn the webhook on with <code>pollis-bot run --webhook</code>, or in <code>config.json</code>:</p>
         <code class="doc-cmd">{ "webhook": { "bind": "127.0.0.1:8787" } }</code>
         <p>
           The first start with the webhook on prints each installation's <strong>secret</strong> once
@@ -72,7 +78,7 @@ Content-Type: application/json
 
 {"channel": "alerts", "text": "disk 91% on db-1"}</code>
         <ul>
-          <li><code>channel</code>: a text channel of the bot's group, by name (with or without <code>#</code>,
+          <li><code>channel</code>: a channel the admin granted the App, by name (with or without <code>#</code>,
             any case) or by id.</li>
           <li><code>text</code>: up to 4,000 characters.</li>
           <li>The listener binds to <code>127.0.0.1:8787</code> by default. To take alerts from another machine on
@@ -134,13 +140,14 @@ curl -sS -X POST "$URL" \
               <tr><td>200</td><td><code>posted</code></td><td class="doc-td-dim">Posted.</td></tr>
               <tr><td>200</td><td><code>claimed_elsewhere</code></td><td class="doc-td-dim">Another host of the bot posted it.</td></tr>
               <tr><td>202</td><td><code>accepted</code></td><td class="doc-td-dim">The job took over 30 seconds; it still finishes.</td></tr>
-              <tr><td>400</td><td><code>bad_request</code></td><td class="doc-td-dim">Not <code>{"channel", "text"}</code> JSON, or a malformed <code>X-Pollis-Delivery</code>.</td></tr>
+              <tr><td>400</td><td><code>bad_request</code></td><td class="doc-td-dim">A malformed <code>X-Pollis-Delivery</code>.</td></tr>
               <tr><td>401</td><td><code>unauthorized</code></td><td class="doc-td-dim">Wrong or missing secret or signature.</td></tr>
-              <tr><td>404</td><td><code>unknown_installation</code></td><td class="doc-td-dim">No such installation on this machine.</td></tr>
+              <tr><td>404</td><td><code>unknown_installation</code></td><td class="doc-td-dim">No such installation on this machine, or it has no App yet.</td></tr>
               <tr><td>413</td><td></td><td class="doc-td-dim">Body over 64 KiB.</td></tr>
-              <tr><td>422</td><td><code>refused</code></td><td class="doc-td-dim">Not a text channel of the bot's group, empty text, or over 4,000 characters.</td></tr>
+              <tr><td>422</td><td><code>refused</code></td><td class="doc-td-dim">Empty text, or over 4,000 characters.</td></tr>
               <tr><td>429</td><td><code>rate_limited</code></td><td class="doc-td-dim">Over the rate limit; wait <code>Retry-After</code> seconds.</td></tr>
-              <tr><td>500 / 503</td><td><code>failed</code></td><td class="doc-td-dim">The job could not finish; <code>fix</code> says what to do. Retry with the same <code>X-Pollis-Delivery</code>.</td></tr>
+              <tr><td>500</td><td><code>failed</code></td><td class="doc-td-dim">The App refused the call and <code>error</code> says why: the body is not <code>{"channel", "text"}</code> JSON, the channel was not granted, or the App is not approved yet.</td></tr>
+              <tr><td>503</td><td><code>failed</code></td><td class="doc-td-dim">The job could not finish; <code>fix</code> says what to do. Retry with the same <code>X-Pollis-Delivery</code>.</td></tr>
             </tbody>
           </table>
         </div>
@@ -208,10 +215,10 @@ curl -sS -X POST "$URL" \
 
       <!-- ─────────────────────────────────────────────────────────── -->
       <section class="doc-section" id="apps">
-        <h2 class="doc-section-title">Write an App in TypeScript</h2>
+        <h2 class="doc-section-title">Write an App in TypeScript or Rust</h2>
         <p>
           An App is the code that decides what a bot does. You write it in TypeScript with
-          <code>@pollis-inc/app</code>; the group's own runtime runs it in a sandbox, where it can do only what its
+          <code>@pollis-inc/app</code> or in Rust with the <code>pollis-app</code> crate; the group's own runtime runs it in a sandbox, where it can do only what its
           manifest asks for and an admin allows. You never run the bot or hold its keys.
         </p>
         <code class="doc-cmd">import { app } from "@pollis-inc/app";
@@ -228,11 +235,13 @@ export default app({
 });</code>
         <ul>
           <li><code>npx pollis app new hello-bot --lang ts</code> creates an App with one handler, a test and a
-            README. Inside the App, <code>pnpm test</code> and <code>pnpm build</code> run the commands below.</li>
+            README. Inside the App, <code>pnpm test</code> and <code>pnpm build</code> run the commands below.
+            For Rust, use <code>--lang rust</code>; the commands below work the same way.</li>
           <li><code>pollis app test</code> runs your tests against the built App in the same sandbox the runtime
             uses, offline: a call the manifest does not allow fails in a test exactly as it would in a group.</li>
           <li><code>pollis app build</code> writes the component and <code>pollis-app.json</code> and prints the
-            <strong>App hash</strong>. The same source and lockfile give the same hash on any machine.</li>
+            <strong>App hash</strong>. The same source and lockfile give the same hash on any machine, in either
+            language.</li>
           <li><code>pollis app run --installation &lt;id&gt;</code> hands the build to your bot and runs it once a
             group admin approves that App hash on the bot's page.</li>
           <li><code>pollis app dev --installation &lt;id&gt;</code> runs it in a test group as a development
@@ -248,7 +257,8 @@ export default app({
         <p>
           <strong>Limits.</strong> An App can send what it reads to the hosts its manifest lists. It has no files,
           sockets or processes, so Node built-ins such as <code>fs</code>, <code>net</code> and
-          <code>child_process</code> are refused at build with the reason; plain-JavaScript npm packages work. It
+          <code>child_process</code> are refused at build with the reason; plain-JavaScript npm packages work, as
+          do Rust crates that need no sockets. It
           sees attachments' names, types and sizes, not their bytes. Every job starts fresh, within 10 seconds and
           64 MiB, and nothing it queued is applied unless it finishes without an error. No App can moderate.
         </p>

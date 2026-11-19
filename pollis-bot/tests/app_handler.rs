@@ -268,14 +268,12 @@ async fn an_apps_webhook_receives_the_raw_request() {
     let handler: Arc<dyn Handler> = Arc::new(AppHandler::new(wasm, hooks, post_only).unwrap());
     let ds = Arc::new(FakeDs::default());
     let host = Installation::new(FakeCore::new("host-1", ds.clone()), handler);
-    // The fixture runs its webhook body as a script: plain text, not the alerts JSON.
+    // The fixture runs its webhook body as a script: plain text.
     let call = pollis_bot::trigger::WebhookCall {
         delivery_id: "d-1".into(),
-        payload: pollis_bot::trigger::WebhookPayload::Raw(pollis_bot::trigger::RawWebhook {
-            content_type: Some("text/plain".into()),
-            headers: vec![("x-github-event".into(), "push".into())],
-            body: format!("post {CHANNEL} from the hook").into_bytes(),
-        }),
+        content_type: Some("text/plain".into()),
+        headers: vec![("x-github-event".into(), "push".into())],
+        body: format!("post {CHANNEL} from the hook").into_bytes(),
     };
     let r = host.run_job(JobInput::Webhook(call)).await.unwrap();
     assert_eq!(r.webhook().unwrap().result, Ok(TriggerOutcome::Applied { posted: 1, refused: vec![] }));
@@ -421,9 +419,6 @@ async fn the_next_slot_is_the_one_timer_the_runtime_sets() {
     let host = Installation::new(FakeCore::new("host-1", Arc::new(FakeDs::default())), ticker());
     assert_eq!(host.next_slot(6_000), Some(6_060));
     assert_eq!(host.next_slot(6_059), Some(6_060));
-    let alerts = Installation::new(
-        FakeCore::new("host-1", Arc::new(FakeDs::default())),
-        Arc::new(pollis_bot::handler::AlertsHandler),
-    );
-    assert_eq!(alerts.next_slot(6_000), None, "no schedules, no timer");
+    let plain = Installation::new(FakeCore::new("host-1", Arc::new(FakeDs::default())), Arc::new(PostHandler));
+    assert_eq!(plain.next_slot(6_000), None, "no schedules, no timer");
 }

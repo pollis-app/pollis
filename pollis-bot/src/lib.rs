@@ -3,13 +3,14 @@
 //!
 //! - [`trigger`]: what starts a job, and the key hosts claim it under.
 //! - [`job`]: the seven-step job loop and the per-installation lock.
-//! - [`handler`]: handlers (the built-in alerts handler) and [`app_handler`],
-//!   a sandboxed App (#2004) run through `pollis-app-host`, loaded only under
-//!   a verified admin approval ([`app_approval`], #2005).
+//! - [`handler`]: what the loop asks of a handler, and [`app_handler`], the
+//!   only one the runtime has: a sandboxed App (#2004) run through
+//!   `pollis-app-host`, loaded only under a verified admin approval
+//!   ([`app_approval`], #2005).
 //! - [`action`]: actions and the grant check.
 //! - [`core`]: the narrow per-installation surface the loop needs from `pollis-core`.
 //! - [`runtime`]: many installations, event-driven wake-ups, webhook submission.
-//! - [`webhook`] + [`ratelimit`] + [`secrets`]: the alerts webhook listener.
+//! - [`webhook`] + [`ratelimit`] + [`secrets`]: the webhook listener.
 //! - [`config`], [`installations`], [`status`], [`log`]: config, on-disk
 //!   installations, `pollis-bot status`, state logging.
 //! - [`post`]: `pollis-bot post`, a client of the local webhook.

@@ -1,6 +1,6 @@
 # Bots: alerts webhook
 
-Post alerts from your monitoring, CI or scripts into a channel of your group. Each bot's runtime listens for them on a small HTTP endpoint on its own machine; nothing goes through a Pollis server in plain text. The runtime encrypts the alert and posts it as the bot.
+Post alerts from your monitoring, CI or scripts into a channel of your group. Each bot's runtime listens for them on a small HTTP endpoint on its own machine; nothing goes through a Pollis server in plain text. The bot's [alerts App](../../apps/alerts/README.md) turns each call into a post, and the runtime encrypts it and posts it as the bot.
 
 ## Contents
 
@@ -17,7 +17,7 @@ Post alerts from your monitoring, CI or scripts into a channel of your group. Ea
 
 ## Before you start
 
-1. A bot is paired and running ([Self-hosting](./self-hosting.md)).
+1. A bot is paired and running the [alerts App](../../apps/alerts/README.md#set-up-an-alert-bot), and an admin has approved it and picked the channels it may post in.
 2. The webhook is on: either `pollis-bot run --webhook`, or in `config.json` in the data directory:
 
    ```json
@@ -44,7 +44,7 @@ Content-Type: application/json
 {"channel": "alerts", "text": "disk 91% on db-1"}
 ```
 
-- `channel`: a text channel of the bot's group, by **name** (with or without `#`, any case) or by **id**. If two channels share the name, use the id.
+- `channel`: a channel the admin granted the App, by **name** (with or without `#`, any case) or by **id**. If two granted channels share the name, use the id.
 - `text`: the message, up to 4,000 characters.
 
 By default the listener binds to `127.0.0.1:8787`, so only programs on the same machine can reach it. To take alerts from another machine on your network (for example Grafana on your LAN), set `bind` to that interface's address, such as `"192.168.1.20:8787"`, or `"0.0.0.0:8787"` for every interface. Callers still need the secret. The listener speaks plain HTTP; keep it on networks you trust, or put a TLS reverse proxy in front of it.
@@ -158,20 +158,21 @@ Change it in `config.json`:
 
 ## Answers
 
-Every answer is JSON with a `status` field. Checks run in this order: installation, secret, rate limit, body.
+Every answer is JSON with a `status` field. Checks run in this order: installation, secret, rate limit, delivery id; then the App reads the body.
 
 | HTTP | `status` | Meaning | Do this |
 |---|---|---|---|
 | 200 | `posted` | Posted. `refused` lists anything not posted. | Nothing. |
 | 200 | `claimed_elsewhere` | Another host of the bot posted this delivery. | Nothing. |
 | 202 | `accepted` | The job took over 30 seconds; it still finishes. | Nothing; check the bot's log if it never appears. |
-| 400 | `bad_request` | The body is not `{"channel", "text"}` JSON, or `X-Pollis-Delivery` is malformed. | Read `fix` in the answer. |
+| 400 | `bad_request` | `X-Pollis-Delivery` is malformed. | Read `fix` in the answer. |
 | 401 | `unauthorized` | Wrong or missing secret or signature. | Use the current secret. |
-| 404 | `unknown_installation` | No such installation on this machine. | Use an id from `pollis-bot status`. |
+| 404 | `unknown_installation` | No such installation on this machine, or it has no App yet. | Use an id from `pollis-bot status`, and give it the App. |
 | 413 | | The body is over 64 KiB. | Send less. |
-| 422 | `refused` | The channel is not a text channel of the bot's group, the text is empty, or it is over 4,000 characters. `refused` says which. | Fix the channel or the text. |
+| 422 | `refused` | The text is empty, or it is over 4,000 characters. `refused` says which. | Fix the text. |
 | 429 | `rate_limited` | Over the rate limit. | Wait `Retry-After` seconds. |
-| 500 / 503 | `failed` | The job could not finish (for example, the Delivery Service was unreachable). `fix` says what to do. | Retry with the same `X-Pollis-Delivery`. |
+| 500 | `failed` | The App refused the call, and `error` says why: the body is not `{"channel", "text"}` JSON (`bad_request: send a JSON body…`), the channel was not granted (`not in read.channels`), or the App is not approved yet. Nothing was posted. | Fix what `error` names. Resending the same body fails the same way. |
+| 503 | `failed` | The job could not finish (for example, the Delivery Service was unreachable). `fix` says what to do. | Retry with the same `X-Pollis-Delivery`. |
 
 ## Limits
 
@@ -180,4 +181,4 @@ Every answer is JSON with a `status` field. Checks run in this order: installati
 | Text per post | 4,000 characters |
 | Request body | 64 KiB |
 | Rate, per installation | burst 10, then 30 a minute (configurable) |
-| Where it posts | text channels of the bot's own group only |
+| Where it posts | the text channels of the bot's own group that an admin granted |

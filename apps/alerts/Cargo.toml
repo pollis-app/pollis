@@ -1,0 +1,33 @@
+# The alerts App (#2007): posts what a sender gives its webhook into a channel.
+# First-party, and published like anyone else's: its source, hash and manifest
+# are public and an admin approves it like any other App.
+[package]
+name = "alerts"
+version = "0.1.0"
+edition = "2021"
+description = "Posts the alerts your monitoring, CI or scripts send to the bot's webhook into a channel."
+publish = false
+
+[lib]
+name = "app"
+crate-type = ["cdylib"]
+
+[dependencies]
+# A link to sdk/rust/pollis-app. Inside this package on purpose: Cargo hashes the
+# absolute path of a dependency outside it into the build, and the App hash must
+# not depend on where the repository is checked out.
+pollis-app = { path = "vendor/pollis-app" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[workspace]
+exclude = ["vendor"]

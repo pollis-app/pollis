@@ -32,7 +32,7 @@ use crate::action::Action;
 use crate::app_approval::{ApprovedApp, ArtifactLocation, ReadyApp};
 use crate::core::{InstallationCore, Member, StateWrite};
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerOutput};
-use crate::trigger::{IncomingMessage, Trigger, WebhookPayload};
+use crate::trigger::{IncomingMessage, Trigger};
 
 static COMPILED_CACHE_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
 
@@ -68,10 +68,10 @@ pub struct AppHandler {
 enum AppSource {
     /// Given directly ([`AppHandler::new`]): tests and embedders that verified
     /// the App themselves.
-    Fixed(ReadyApp),
+    Fixed(Box<ReadyApp>),
     /// An installation's App: re-checked against its admin's approval before
     /// every job (#2005). The runtime's only path.
-    Approved(ApprovedApp),
+    Approved(Box<ApprovedApp>),
 }
 
 impl AppHandler {
@@ -89,7 +89,7 @@ impl AppHandler {
         let mentions = triggers.contains(&TriggerKind::Mentions);
         let schedules = if triggers.contains(&TriggerKind::Schedule) { manifest.schedules.clone() } else { Vec::new() };
         Ok(AppHandler {
-            source: AppSource::Fixed(ReadyApp {
+            source: AppSource::Fixed(Box::new(ReadyApp {
                 app_hash: pollis_app_manifest::app_hash(&component, manifest_json)?,
                 component: Arc::new(component),
                 manifest,
@@ -97,7 +97,7 @@ impl AppHandler {
                 development: false,
                 mentions,
                 schedules,
-            }),
+            })),
             http: PublicHttpClient::new(),
         })
     }
@@ -106,12 +106,12 @@ impl AppHandler {
     /// `https://` URL). Nothing is loaded here: every job first checks the
     /// installation's approval and holds the artifact against it.
     pub fn approved(component: ArtifactLocation, manifest: ArtifactLocation) -> AppHandler {
-        AppHandler { source: AppSource::Approved(ApprovedApp::new(component, manifest)), http: PublicHttpClient::new() }
+        AppHandler { source: AppSource::Approved(Box::new(ApprovedApp::new(component, manifest))), http: PublicHttpClient::new() }
     }
 
     fn ready(&self) -> Result<ReadyApp, HandlerError> {
         match &self.source {
-            AppSource::Fixed(app) => Ok(app.clone()),
+            AppSource::Fixed(app) => Ok((**app).clone()),
             AppSource::Approved(a) => a.ready().map_err(|why| HandlerError(format!("not running the App: {why}"))),
         }
     }
@@ -245,23 +245,11 @@ impl Handler for AppHandler {
                 None,
             ),
             Trigger::Webhook(w) => {
-                let hook = match &w.payload {
-                    WebhookPayload::Raw(raw) => {
-                        let mut headers = raw.headers.clone();
-                        if let Some(ct) = &raw.content_type {
-                            headers.insert(0, ("content-type".to_string(), ct.clone()));
-                        }
-                        host::Webhook { delivery_id: w.delivery_id.clone(), headers, body: raw.body.clone() }
-                    }
-                    // An App installation's listener always sends raw calls;
-                    // an alerts-shaped one (`pollis-bot post`) arrives as JSON.
-                    WebhookPayload::Alert { channel, text } => host::Webhook {
-                        delivery_id: w.delivery_id.clone(),
-                        headers: vec![("content-type".to_string(), "application/json".to_string())],
-                        body: serde_json::to_vec(&serde_json::json!({ "channel": channel, "text": text }))
-                            .map_err(|e| HandlerError(e.to_string()))?,
-                    },
-                };
+                let mut headers = w.headers.clone();
+                if let Some(ct) = &w.content_type {
+                    headers.insert(0, ("content-type".to_string(), ct.clone()));
+                }
+                let hook = host::Webhook { delivery_id: w.delivery_id.clone(), headers, body: w.body.clone() };
                 (host::Trigger::Webhook(hook), None)
             }
         };

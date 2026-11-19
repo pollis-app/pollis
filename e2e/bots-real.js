@@ -21,10 +21,13 @@ const GROUP = "Ops";
 const CHANNEL = "alerts";
 const HOOK1 = "127.0.0.1:18787";
 const HOOK2 = "127.0.0.1:18788";
+// The published build of the alerts App (apps/alerts), the one an admin approves.
+const ALERTS_APP = path.join(h.ROOT, "pollis-bot", "tests", "fixtures", "alerts-app");
+const ALERTS_HASH = fs.readFileSync(path.join(h.ROOT, "apps", "alerts", "APP_HASH"), "utf8").trim();
 
 const {
   log, shot, check, appEnvFor, Host, hook, settle, sql, count, signUp, openGroup, openChannel, typeCodeInto,
-  openBotPage, waitMessage,
+  openBotPage, waitMessage, waitPending, approvePending,
 } = createBotsLab({ tag: "bots-real", work: WORK, artifacts: ARTIFACTS, group: GROUP, channel: CHANNEL });
 
 async function main() {
@@ -103,10 +106,21 @@ async function main() {
     results.pair = "pass";
 
     // ── 2. webhook ───────────────────────────────────────────────────────────────────────────
+    // A bot with no App has nothing to run, and says what to do.
+    const noApp = h1.spawn(["run", "--once"], "run-without-an-app");
+    const noAppExit = await h1.exitOf(noApp, 60000, "run with no App");
+    check(noAppExit.code !== 0 && /app install/.test(noApp.text), "a bot with no App refuses to run and names `app install`");
+    const install1 = h1.spawn(["app", "install", "--installation", inst1.installation_id, "--artifact", ALERTS_APP], "install-alerts");
+    check((await h1.exitOf(install1, 120000, "app install")).code === 0, "the alerts App installs on host1");
+    check(install1.text.includes(ALERTS_HASH), "app install prints the published App hash");
     let run1 = h1.spawn(["run", "--webhook", HOOK1], "run1");
     hostRecs.push([h1, run1]);
     const secret1 = (await h1.waitFor(run1, /Webhook secret for installation \S+ \(shown once[^\n]*\n\s+(\S+)/, 60000, "the webhook secret"))[1];
     await h1.waitFor(run1, /listening on/, 30000, "webhook listening");
+    // First-party or not, it runs only once an admin approves it.
+    await waitPending(browser, botId);
+    await approvePending(browser, "2-alerts-app", { development: false, autoUpdate: false });
+    await h1.waitFor(run1, new RegExp(`running App ${ALERTS_HASH}`), 120000, "host1 running the approved alerts App");
     await h.sleep(3000);
     const r1 = await hook(HOOK1, inst1.installation_id, secret1, "disk 91% on db-1 (bearer)", "bearer");
     check(r1.status === 200 && r1.json.status === "posted", "bearer webhook call posted");
@@ -148,6 +162,8 @@ async function main() {
     await shot(browser, "3-host2-listed-live.png");
     check(true, "the open bot page lists host2 without a reload");
 
+    const install2 = h2.spawn(["app", "install", "--installation", inst2.installation_id, "--artifact", ALERTS_APP], "install-alerts");
+    check((await h2.exitOf(install2, 120000, "app install on host2")).code === 0, "the alerts App installs on host2");
     let run2 = h2.spawn(["run", "--webhook", HOOK2], "run2");
     hostRecs.push([h2, run2]);
     const secret2 = (await h2.waitFor(run2, /Webhook secret for installation \S+ \(shown once[^\n]*\n\s+(\S+)/, 60000, "host2 webhook secret"))[1];

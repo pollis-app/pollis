@@ -181,7 +181,7 @@ export interface Logger {
  * and no state is written.
  */
 export interface Context {
-  /** Post a new message in a channel (by id, e.g. `message.channel`). Needs `post`. */
+  /** Post a new message in a granted channel, by id (e.g. `message.channel`) or by name (`"support"` or `"#support"`, any case). Needs `post`. */
   post(channel: string, text: string): Promise<void>;
   /** Reply to a message. Needs `reply`. */
   reply(to: Message | string, text: string): Promise<void>;

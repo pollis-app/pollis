@@ -2,7 +2,7 @@
 
 How the bot runtime works, for anyone who will write code that runs in it. Read the [four terms](./README.md#four-words-four-different-things) first: App, Installation, Bot and Runtime mean different things here.
 
-This page describes how the runtime runs every handler: the built-in alerts handler and Apps, your own code in a sandbox. The [App reference](./app-reference.md) covers what an App can call and declare.
+This page describes how the runtime runs an App: your code, in a sandbox. The [App reference](./app-reference.md) covers what an App can call and declare.
 
 ## Contents
 
@@ -78,32 +78,27 @@ A handler is a function from a trigger to a list of actions:
 handle(trigger) -> Ok([action, ...]) | Err(error)
 ```
 
-There are two handler kinds:
-
-- the built-in **alerts** handler: a webhook call becomes one `post` action with the call's `channel` and `text`; messages in the group are ignored;
-- an **App**: a WebAssembly component (written in Rust today, TypeScript with the SDK) that the runtime runs in a sandbox for each trigger. It acts only by calling the functions in the [App reference](./app-reference.md), each checked against its grants before it is even queued.
+The handler is always an **App**: a WebAssembly component (written in TypeScript or Rust with the SDKs) that the runtime runs in a sandbox for each trigger. An installation with no App does not run. An App acts only by calling the functions in the [App reference](./app-reference.md), each checked against its grants before it is even queued.
 
 The actions a handler can return:
 
 | Action | Fields | Rules |
 |---|---|---|
-| `post` | `channel`, `text` | Text channels of the bot's own group only (the alerts handler may name a channel by id or by name, with or without `#`); text not empty and at most 4,000 characters |
-| `reply` | message, `text` | Apps only; a message in a granted channel; same text rules |
-| `react` | message, emoji | Apps only; a message in a granted channel |
-| `edit_own` | message, `text` | Apps only; a message this bot sent |
-| `delete_own` | message | Apps only; a message this bot sent |
+| `post` | `channel`, `text` | A granted text channel of the bot's own group, by id or by name (with or without `#`, any case); text not empty and at most 4,000 characters |
+| `reply` | message, `text` | A message in a granted channel; same text rules |
+| `react` | message, emoji | A message in a granted channel |
+| `edit_own` | message, `text` | A message this bot sent |
+| `delete_own` | message | A message this bot sent |
 
 There are no actions for deleting other people's messages, removing members or changing roles. Bots never moderate.
 
-If a handler returns an error (for an App: returns `err`, traps, runs out of time or memory), every action of that trigger is discarded, no state change is saved, and nothing is claimed. A handler's work is all or nothing.
+If an App returns `err`, traps, or runs out of time or memory, every action of that trigger is discarded, no state change is saved, and nothing is claimed. A handler's work is all or nothing.
 
 ## Grants
 
 **Grants** are what an installation is allowed to do. The runtime checks every action against them in step 6, whatever the handler asked for.
 
-For the alerts handler the grant is fixed: `post` to the text channels of the bot's own group. A `post` to any other channel is refused, reported in the log and in the webhook's answer, and never sent.
-
-For an App, the grants are its manifest intersected with what the admin approved: which triggers wake it, which channels and how much history it reads, which actions it may take, how much state it keeps and which hosts it may reach. The sandbox refuses anything outside them, and the job loop checks every action's channel against the group again before carrying it out. The admin's grants come only from their signed approval, which the runtime checks before every job, together with the App's exact hash ([Approving an App](./app-approval.md)).
+The grants are the App's manifest intersected with what the admin approved: which triggers wake it, which channels and how much history it reads, which actions it may take, how much state it keeps and which hosts it may reach. The sandbox refuses anything outside them, and the job loop checks every action's channel against the group again before carrying it out. The admin's grants come only from their signed approval, which the runtime checks before every job, together with the App's exact hash ([Approving an App](./app-approval.md)).
 
 ## Failures and retries
 
@@ -153,4 +148,4 @@ An installation runs exactly one App version, pinned by its App hash, with the g
 - **History:** `query-messages` returns the trigger's own message until the runtime keeps a message log.
 - **SDKs:** a TypeScript SDK and the `pollis app` CLI.
 
-The alerts webhook ([Alerts webhook](./alerts-webhook.md)) works today without any App.
+The [alerts App](../../apps/alerts/README.md) is a small, complete example: a webhook call becomes one post.

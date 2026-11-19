@@ -33,7 +33,7 @@ const EGRESS = "api.example.com";
 const GROUP_ID = { value: null };
 
 const {
-  log, shot, check, appEnvFor, Host, count, signUp, openGroup, openChannel, typeCodeInto, openBotPage, waitMessage,
+  log, shot, check, appEnvFor, Host, count, signUp, openGroup, openChannel, typeCodeInto, openBotPage, waitMessage, waitPending, approvePending,
 } = createBotsLab({ tag: "bots-milestone", work: WORK, artifacts: ARTIFACTS, group: GROUP, channel: CHANNEL });
 
 // ── the App's source ─────────────────────────────────────────────────────────────────────────
@@ -157,69 +157,6 @@ async function expectBotReply(browser, text, timeoutMs = 120000) {
 async function messagePresent(browser, text) {
   return browser.execute((tok) => [...document.querySelectorAll('[data-testid="message-content"]')]
     .some((n) => (n.textContent || "").includes(tok)), text);
-}
-
-// ── the admin's App section ──────────────────────────────────────────────────────────────────
-
-async function waitPending(browser, botId, timeoutMs = 120000) {
-  const end = Date.now() + timeoutMs;
-  while (Date.now() < end) {
-    await openBotPage(browser, botId);
-    await h.waitTestId(browser, "bot-app", 20000);
-    if (await h.present(browser, "bot-app-pending")) {
-      return;
-    }
-    await h.sleep(4000);
-  }
-  throw new Error("the bot's page never showed an App waiting for approval");
-}
-
-async function switchOn(browser, testId, on) {
-  await h.waitTestId(browser, testId);
-  const checked = await browser.execute((id) => {
-    const el = document.querySelector(`[data-testid="${id}"]`);
-    const box = el && (el.matches("input,button,[role=switch],[role=checkbox]") ? el : el.querySelector("input,button,[role=switch],[role=checkbox]"));
-    if (!box) {
-      return null;
-    }
-    return box.getAttribute("aria-checked") === "true" || box.checked === true;
-  }, testId);
-  if (checked === null) {
-    throw new Error(`${testId}: no switch inside`);
-  }
-  if (checked !== on) {
-    await h.clickTestId(browser, testId);
-  }
-}
-
-async function approvePending(browser, label, { development = false, autoUpdate = false, accept = [] } = {}) {
-  await h.waitTestId(browser, "bot-app-pending", 20000);
-  await switchOn(browser, "bot-app-development", development);
-  if (!development && (await h.present(browser, "bot-app-auto-update"))) {
-    await switchOn(browser, "bot-app-auto-update", autoUpdate);
-  }
-  // Grants: the channel this test talks in, and whatever the update needs switched on.
-  const channelSwitch = await browser.execute(() => {
-    const el = document.querySelector('[data-testid^="bot-app-pending-grants-channel-"]');
-    return el ? el.getAttribute("data-testid") : null;
-  });
-  if (channelSwitch) {
-    await switchOn(browser, channelSwitch, true);
-  }
-  for (const key of accept) {
-    await switchOn(browser, `bot-app-accept-${key}`, true);
-  }
-  await shot(browser, `${label}-before-approve.png`);
-  await h.clickTestId(browser, "bot-app-approve");
-  await browser.waitUntil(async () => !(await h.present(browser, "bot-app-pending")) || (await h.present(browser, "bot-app-approve-error")), {
-    timeout: 60000, timeoutMsg: "the approval never landed",
-  });
-  if (await h.present(browser, "bot-app-approve-error")) {
-    const text = await (await browser.$('[data-testid="bot-app-approve-error"]')).getText();
-    throw new Error(`approving failed: ${text}`);
-  }
-  await shot(browser, `${label}-approved.png`);
-  log(`admin approved (${label})`);
 }
 
 async function main() {

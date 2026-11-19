@@ -48,7 +48,7 @@ COMMANDS
         types it in Pollis: open the group, then Bots → the bot → Add a host.
     run [--webhook [ADDR]] [--max-installations N] [--once]
         Run every installation on this host until stopped. --webhook turns the
-        alerts webhook on (default {bind}, loopback) for this run. --once
+        webhook on (default {bind}, loopback) for this run. --once
         catches up, handles everything pending and exits (for a host that is
         started on a schedule or by a wake-up and goes back to sleep).
     post --installation ID --channel CHANNEL TEXT...

@@ -3,10 +3,9 @@
 //!
 //! A handler never acts. It returns [`Action`]s; the loop checks each against
 //! the installation's [`Grants`] and applies only what passes, through the
-//! normal send path. In this ticket the grant is hard-coded: `post` to a text
-//! channel of the bot's own group. #2005 replaces the hard-coded grant with the
-//! admin-approved one; #2004 adds the App actions (`reply`, `react`, …) as new
-//! variants, each refused unless granted.
+//! normal send path. This check is the outer bound, the bot's own group's text
+//! channels; the App sandbox has already held every action to the grants the
+//! admin approved (#2004, #2005).
 
 use serde::Serialize;
 
@@ -86,14 +85,14 @@ pub struct ChannelInfo {
     pub is_text: bool,
 }
 
-/// What an installation may do. Today: post to its own group's text channels.
+/// The outer bound on what an installation may do: its own group's text channels.
 #[derive(Debug, Clone)]
 pub struct Grants {
     channels: Vec<ChannelInfo>,
 }
 
 impl Grants {
-    /// The hard-coded #1182 grant over the bot's group's current channels.
+    /// The bound over the bot's group's current channels.
     pub fn own_group(channels: Vec<ChannelInfo>) -> Self {
         Self { channels }
     }

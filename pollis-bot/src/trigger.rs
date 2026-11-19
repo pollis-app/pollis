@@ -43,46 +43,18 @@ pub struct IncomingMessage {
     pub sent_at: String,
 }
 
-/// One authenticated call to `POST /hooks/<installation_id>`.
+/// One authenticated call to `POST /hooks/<installation_id>`: the request as
+/// sent, for the App's `on-webhook`, with only the headers it may see (never
+/// the credential headers).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebhookCall {
     /// The sender's `X-Pollis-Delivery` header, or a fresh ULID. A sender that
     /// posts the same alert to every host of a bot sends the same id to each,
     /// and the claim lets exactly one of them post it.
     pub delivery_id: String,
-    pub payload: WebhookPayload,
-}
-
-/// What a webhook call carries, by the installation's handler kind.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WebhookPayload {
-    /// The alerts handler's `{"channel", "text"}`.
-    Alert {
-        /// A channel id, or a channel name (with or without a leading `#`).
-        channel: String,
-        text: String,
-    },
-    /// #2004: an App's webhook receives the request as sent.
-    Raw(RawWebhook),
-}
-
-/// A webhook request for an App: its body, content type and the headers it
-/// may see (never the credential headers).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawWebhook {
     pub content_type: Option<String>,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
-}
-
-impl WebhookCall {
-    /// An alerts call.
-    pub fn alert(delivery_id: impl Into<String>, channel: impl Into<String>, text: impl Into<String>) -> Self {
-        WebhookCall {
-            delivery_id: delivery_id.into(),
-            payload: WebhookPayload::Alert { channel: channel.into(), text: text.into() },
-        }
-    }
 }
 
 /// #2004: one slot of an App's manifest-declared schedule.
@@ -146,7 +118,12 @@ mod tests {
             thread_id: None,
             sent_at: String::new(),
         });
-        let hook = Trigger::Webhook(WebhookCall::alert("X", "c", "t"));
+        let hook = Trigger::Webhook(WebhookCall {
+            delivery_id: "X".into(),
+            content_type: None,
+            headers: Vec::new(),
+            body: Vec::new(),
+        });
         assert_eq!(msg.key().as_str(), "msg:X");
         assert_eq!(hook.key().as_str(), "hook:X");
         assert_ne!(msg.key(), hook.key());

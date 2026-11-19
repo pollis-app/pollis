@@ -166,7 +166,7 @@ export async function devApp(options: RuntimeOptions): Promise<number> {
     } while (again);
     building = false;
   };
-  const watched = ["src", "package.json"].map((p) => join(dir, p)).filter((p) => existsSync(p));
+  const watched = ["src", "package.json", "Cargo.toml", "Cargo.lock"].map((p) => join(dir, p)).filter((p) => existsSync(p));
   const watchers = watched.map((p) =>
     watch(p, { recursive: true }, () => {
       void rebuild();

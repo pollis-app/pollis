@@ -16,7 +16,7 @@ use pollis_app_manifest::{Manifest, MANIFEST_FILE_NAME};
 use pollis_core::commands::bots::app_approval::{developer_key_public, new_developer_seed, sign_dev_build};
 
 use crate::app_approval::{fetch_artifact, ArtifactLocation, DEV_KEY_FILE};
-use crate::installations::{InstallationRecord, Registry};
+use crate::installations::{InstallationRecord, InstalledApp, Registry};
 use crate::log;
 
 /// The component and manifest locations an `--artifact` names: a directory
@@ -72,7 +72,7 @@ pub async fn app_install(data_dir: &Path, installation_id: &str, artifact: &str)
         .map_err(|e| anyhow!("starting the App sandbox: {e}"))?;
     host.prepare(hash, &fetched.component)
         .map_err(|e| anyhow!("{component} does not load in the App sandbox: {e}"))?;
-    record.handler = crate::handler::HandlerKind::App { component, manifest };
+    record.app = Some(InstalledApp { component, manifest });
     registry.save(&record)?;
     let hex = pollis_app_manifest::hex(&hash);
     log::info(&log::scope(installation_id), format!("App set; App hash {hex}"));

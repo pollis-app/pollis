@@ -1,8 +1,8 @@
-//! The alerts webhook listener (#1182, "Built-in alerts handler").
+//! The webhook listener (#1182).
 //!
-//! `POST /hooks/<installation_id>` with `{"channel": "...", "text": "..."}`, or,
-//! for an App installation (#2004), any body: the App's `on-webhook` receives
-//! the body, its content type and the non-credential headers.
+//! `POST /hooks/<installation_id>` with any body: the installation's App
+//! receives the body, its content type and the non-credential headers in
+//! `on-webhook`, and decides what the body means.
 //! Off until configured; binds loopback by default. Authenticated per
 //! installation, by either:
 //!
@@ -15,8 +15,8 @@
 //! and exactly one of them posts it. Without it each call is its own delivery.
 //!
 //! Checked in this order: installation known (404), authenticated (401), within
-//! the per-installation rate limit (429 + `Retry-After`), well-formed (400).
-//! Only then does a job run.
+//! the per-installation rate limit (429 + `Retry-After`), a well-formed
+//! delivery id (400). Only then does a job run.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,7 +29,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use hmac::{Hmac, Mac};
-use serde::Deserialize;
 use serde_json::json;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
@@ -38,7 +37,7 @@ use zeroize::Zeroizing;
 
 use crate::job::{JobError, JobReport, TriggerOutcome};
 use crate::ratelimit::TokenBucket;
-use crate::trigger::{RawWebhook, WebhookCall, WebhookPayload};
+use crate::trigger::WebhookCall;
 
 /// Largest request body accepted.
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -63,19 +62,11 @@ pub trait JobSubmitter: Send + Sync {
 pub struct HookEntry {
     secret: Zeroizing<Vec<u8>>,
     limiter: std::sync::Mutex<TokenBucket>,
-    /// An App installation: pass the request through instead of parsing it.
-    raw: bool,
 }
 
 impl HookEntry {
     pub fn new(secret: Zeroizing<Vec<u8>>, limiter: TokenBucket) -> Self {
-        Self { secret, limiter: std::sync::Mutex::new(limiter), raw: false }
-    }
-
-    /// For an App installation (#2004).
-    pub fn raw(mut self) -> Self {
-        self.raw = true;
-        self
+        Self { secret, limiter: std::sync::Mutex::new(limiter) }
     }
 }
 
@@ -123,12 +114,6 @@ pub fn router(state: Arc<WebhookState>) -> Router {
         .route("/hooks/{installation_id}", post(handle_hook))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
-}
-
-#[derive(Deserialize)]
-struct HookBody {
-    channel: String,
-    text: String,
 }
 
 /// HMAC-SHA256 of `body` under `secret`, as the `X-Pollis-Signature` value.
@@ -179,7 +164,7 @@ async fn handle_hook(
     let Some(entry) = state.hooks.get(&installation_id) else {
         return answer(
             StatusCode::NOT_FOUND,
-            json!({"status": "unknown_installation", "fix": "use an installation id from `pollis-bot status` on this host"}),
+            json!({"status": "unknown_installation", "fix": "use an installation id from `pollis-bot status` on this host; one with no App yet does not take webhooks until `pollis-bot app install`"}),
         );
     };
     if !authenticated(&entry.secret, &headers, &body) {
@@ -208,24 +193,6 @@ async fn handle_hook(
         }
         return response;
     }
-    let payload = if entry.raw {
-        WebhookPayload::Raw(RawWebhook {
-            content_type: headers
-                .get(axum::http::header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_string),
-            headers: app_headers(&headers),
-            body: body.to_vec(),
-        })
-    } else {
-        let Ok(parsed) = serde_json::from_slice::<HookBody>(&body) else {
-            return answer(
-                StatusCode::BAD_REQUEST,
-                json!({"status": "bad_request", "fix": "send a JSON body {\"channel\": \"...\", \"text\": \"...\"}"}),
-            );
-        };
-        WebhookPayload::Alert { channel: parsed.channel, text: parsed.text }
-    };
     let delivery_id = match headers.get(DELIVERY_HEADER) {
         Some(v) => match v.to_str() {
             Ok(id) if valid_delivery_id(id) => id.to_string(),
@@ -239,7 +206,15 @@ async fn handle_hook(
         None => ulid::Ulid::new().to_string(),
     };
 
-    let call = WebhookCall { delivery_id: delivery_id.clone(), payload };
+    let call = WebhookCall {
+        delivery_id: delivery_id.clone(),
+        content_type: headers
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string),
+        headers: app_headers(&headers),
+        body: body.to_vec(),
+    };
     let rx = state.submitter.submit_webhook(&installation_id, call);
     match tokio::time::timeout(state.answer_timeout, rx).await {
         Err(_) => answer(StatusCode::ACCEPTED, json!({"status": "accepted", "delivery_id": delivery_id})),
@@ -374,10 +349,7 @@ mod tests {
         let calls = submitter.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "INST");
-        assert_eq!(
-            calls[0].1.payload,
-            WebhookPayload::Alert { channel: "alerts".into(), text: "disk full".into() }
-        );
+        assert_eq!(calls[0].1.body, BODY.as_bytes());
     }
 
     #[tokio::test]
@@ -444,10 +416,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_malformed_body_or_delivery_id_is_400() {
+    async fn a_malformed_delivery_id_is_400() {
         let (app, submitter) = app(10);
-        let (status, _) = send(&app, request("/hooks/INST", &[("authorization", &bearer())], "{\"text\":1}")).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
         let (status, _) = send(
             &app,
             request("/hooks/INST", &[("authorization", &bearer()), (DELIVERY_HEADER, "has space")], BODY),
@@ -496,14 +466,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_app_installation_gets_the_raw_request_without_credentials() {
-        let submitter = Arc::new(FakeSubmitter::default());
-        let mut hooks = HashMap::new();
-        hooks.insert(
-            "INST".to_string(),
-            HookEntry::new(Zeroizing::new(SECRET.to_vec()), TokenBucket::new(60, 10, Instant::now())).raw(),
-        );
-        let app = router(Arc::new(WebhookState::new(hooks, submitter.clone())));
+    async fn the_app_gets_the_request_as_sent_without_credentials() {
+        let (app, submitter) = app(10);
         let body = "not json at all";
         let mut req = Request::post("/hooks/INST")
             .header("content-type", "text/plain")
@@ -517,9 +481,7 @@ mod tests {
         let (status, v) = send(&app, req).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         let calls = submitter.calls.lock().unwrap();
-        let WebhookPayload::Raw(raw) = &calls[0].1.payload else {
-            panic!("an App's call is raw");
-        };
+        let raw = &calls[0].1;
         assert_eq!(raw.body, body.as_bytes());
         assert_eq!(raw.content_type.as_deref(), Some("text/plain"));
         let names: Vec<&str> = raw.headers.iter().map(|(n, _)| n.as_str()).collect();

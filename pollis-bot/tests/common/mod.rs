@@ -12,10 +12,58 @@ use async_trait::async_trait;
 use pollis_bot::action::{Action, ChannelInfo};
 use pollis_bot::core::{CoreError, InstallationCore, Member, StateCommit, StateValue, StateWrite};
 use pollis_bot::handler::{Handler, HandlerError};
-use pollis_bot::trigger::{IncomingMessage, Trigger, TriggerKey};
+use pollis_bot::trigger::{IncomingMessage, Trigger, TriggerKey, WebhookCall};
+use pollis_core::commands::bots::app_approval::{
+    AppApproval, AppApprovalRecord, AppApprovalRefusal, VerifiedAppApproval, APP_APPROVAL_VERSION,
+};
 
 pub const BOT: &str = "01BOTUSER";
 pub const CHANNEL: &str = "01ALERTSCHANNEL";
+
+/// The published alerts App (`apps/alerts`), exactly as built: `alerts_app.rs`
+/// pins it to `apps/alerts/APP_HASH`.
+pub const ALERTS_APP_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/alerts-app");
+
+pub fn alerts_app_component() -> Vec<u8> {
+    std::fs::read(format!("{ALERTS_APP_DIR}/app.wasm")).unwrap()
+}
+
+pub fn alerts_app_manifest() -> Vec<u8> {
+    std::fs::read(format!("{ALERTS_APP_DIR}/pollis-app.json")).unwrap()
+}
+
+/// What the real core's verification answers once an admin approved the alerts
+/// App with `#alerts` granted.
+pub fn alerts_approval() -> VerifiedAppApproval {
+    let manifest_json = alerts_app_manifest();
+    let hash = pollis_app_manifest::app_hash(&alerts_app_component(), &manifest_json).unwrap();
+    let grants = pollis_app_manifest::AdminGrants {
+        channels: vec![pollis_app_manifest::ChannelGrant { id: CHANNEL.into(), name: "alerts".into() }],
+        events: [pollis_app_manifest::EventKind::Created].into(),
+        actions: [pollis_app_manifest::ActionKind::Post].into(),
+        ..Default::default()
+    };
+    let record = AppApprovalRecord::Production(AppApproval {
+        app_hash: pollis_app_manifest::hex(&hash),
+        approver_device_id: "ADMIN-D".into(),
+        approver_user_id: "ADMIN".into(),
+        auto_update: false,
+        bot_user_id: BOT.into(),
+        grants,
+        group_id: "GROUP".into(),
+        installation_id: BOT.into(),
+        issued_at: 1_700_000_000,
+        manifest_hash: pollis_app_manifest::hex(&pollis_app_manifest::manifest_hash(&manifest_json).unwrap()),
+        seq: 1,
+        source: None,
+        v: APP_APPROVAL_VERSION,
+    });
+    VerifiedAppApproval {
+        record,
+        manifest: pollis_app_manifest::Manifest::from_json(&manifest_json).unwrap(),
+        manifest_json: String::from_utf8(manifest_json).unwrap(),
+    }
+}
 
 /// What the DS holds: who claimed each trigger, and the posted messages (idempotent by id).
 #[derive(Default)]
@@ -50,6 +98,8 @@ impl FakeDs {
 }
 
 pub struct FakeCore {
+    /// The admin's approval this host verified, if any.
+    pub approval: Mutex<Option<VerifiedAppApproval>>,
     pub device: String,
     pub ds: Arc<FakeDs>,
     /// How far this host has handled the log.
@@ -75,6 +125,7 @@ pub struct FakeCore {
 impl FakeCore {
     pub fn new(device: &str, ds: Arc<FakeDs>) -> Arc<Self> {
         Arc::new(Self {
+            approval: Mutex::new(None),
             device: device.into(),
             ds,
             cursor: Mutex::new(0),
@@ -109,6 +160,10 @@ impl FakeCore {
 impl InstallationCore for FakeCore {
     fn installation_id(&self) -> &str {
         BOT
+    }
+
+    async fn app_approval(&self) -> Result<Result<VerifiedAppApproval, AppApprovalRefusal>, CoreError> {
+        Ok(self.approval.lock().unwrap().clone().ok_or(AppApprovalRefusal::NotApproved))
     }
 
     fn bot_user_id(&self) -> &str {
@@ -289,6 +344,38 @@ impl InstallationCore for FakeCore {
 /// Replies to every message in its channel: a handler whose actions come from
 /// message triggers, which every host sees.
 pub struct EchoHandler;
+
+/// A webhook call as a test sender makes it: `{"channel", "text"}`.
+pub fn hook_call(delivery: &str, channel: &str, text: &str) -> WebhookCall {
+    WebhookCall {
+        delivery_id: delivery.into(),
+        content_type: Some("application/json".into()),
+        headers: Vec::new(),
+        body: serde_json::to_vec(&serde_json::json!({ "channel": channel, "text": text })).unwrap(),
+    }
+}
+
+/// A plain handler for tests of the loop itself: a webhook call's
+/// `{"channel", "text"}` becomes one post; anything else does nothing.
+pub struct PostHandler;
+
+#[async_trait]
+impl Handler for PostHandler {
+    fn kind(&self) -> &'static str {
+        "post"
+    }
+
+    async fn handle(&self, trigger: &Trigger) -> Result<Vec<Action>, HandlerError> {
+        let Trigger::Webhook(call) = trigger else {
+            return Ok(Vec::new());
+        };
+        let body: serde_json::Value = serde_json::from_slice(&call.body).map_err(|e| HandlerError(e.to_string()))?;
+        Ok(vec![Action::Post {
+            channel: body["channel"].as_str().unwrap_or_default().into(),
+            text: body["text"].as_str().unwrap_or_default().into(),
+        }])
+    }
+}
 
 #[async_trait]
 impl Handler for EchoHandler {

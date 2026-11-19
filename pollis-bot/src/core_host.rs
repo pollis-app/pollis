@@ -179,7 +179,7 @@ impl BotHost for CoreHost {
             bot_user_id: session.bot_user_id,
             group_id: session.group_id,
             device_id: session.device_id,
-            handler: Default::default(),
+            app: None,
             created_at: chrono::Utc::now().to_rfc3339(),
         }))
     }

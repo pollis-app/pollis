@@ -1,0 +1,24 @@
+{
+  "name": "alerts",
+  "version": "0.1.0",
+  "description": "Posts the alerts your monitoring, CI or scripts send to the bot's webhook into a channel.",
+  "triggers": [
+    "webhook"
+  ],
+  "read": {
+    "channels": [
+      "*"
+    ],
+    "history": 0,
+    "events": [
+      "created"
+    ]
+  },
+  "actions": [
+    "post"
+  ],
+  "state": {
+    "quota": 0
+  },
+  "egress": []
+}

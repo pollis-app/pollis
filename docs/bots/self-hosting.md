@@ -24,7 +24,7 @@ The full command reference is `pollis-bot --help` and [`pollis-bot/README.md`](.
 ## What you need
 
 - A machine that stays on: a home server, a VM, a Raspberry Pi-class Linux box, a Mac. Linux, macOS and Windows all work.
-- Outbound internet access to the Pollis Delivery Service. The runtime opens no port of its own, except the optional alerts webhook.
+- Outbound internet access to the Pollis Delivery Service. The runtime opens no port of its own, except the optional webhook.
 - A group admin who can type the pairing code into Pollis ([Admin guide](./admin-guide.md#add-a-bot)).
 
 A bot reads every message in its group. Use a machine you would trust with that.
@@ -76,7 +76,7 @@ Pairing creates the bot and makes this machine its first host.
    ```
 
 3. Give the code to a group admin. They type it on the **Add a bot** page with the bot's name.
-4. When they confirm, `pair` prints `paired: bot <bot id> in group <group id>. Start it with `pollis-bot run`` and exits.
+4. When they confirm, `pair` prints `paired: bot <bot id> in group <group id>`, with the command that gives the bot an App, and exits.
 
 The code expires ten minutes after it is printed. If it expires, run `pollis-bot pair` again.
 
@@ -86,11 +86,11 @@ Run `pair` as the same user, on the same machine, that will later run the servic
 
 ```bash
 pollis-bot run                 # every bot on this machine, until stopped
-pollis-bot run --webhook       # also listen for alerts on 127.0.0.1:8787
+pollis-bot run --webhook       # also listen for webhook calls on 127.0.0.1:8787
 pollis-bot status              # what each bot is doing
 ```
 
-`run` opens every installation on this machine, catches up on anything it missed, and then waits for events. A host does not have to stay up: `pollis-bot run --once` catches up, handles everything pending (including approving another host) and exits, so a machine that sleeps can run it on a schedule or at wake. Each installation's store is unlocked only while a job runs. It stops on Ctrl-C (and on `SIGTERM` on Linux and macOS). Nothing is lost while it is stopped: the next start catches up.
+`run` opens every installation on this machine that has an App ([Run an App](#run-an-app)), catches up on anything it missed, and then waits for events. A host does not have to stay up: `pollis-bot run --once` catches up, handles everything pending (including approving another host) and exits, so a machine that sleeps can run it on a schedule or at wake. Each installation's store is unlocked only while a job runs. It stops on Ctrl-C (and on `SIGTERM` on Linux and macOS). Nothing is lost while it is stopped: the next start catches up.
 
 To keep the webhook on without the flag, add it to `config.json` in the data directory (see [Files](#files)):
 
@@ -102,7 +102,7 @@ The first time the webhook is on, `run` prints each installation's webhook secre
 
 ## Run an App
 
-A bot runs the built-in alerts handler until you point it at an App. The App can be a directory on this machine (with `pollis-app.json` and one `.wasm`) or an `https://` address:
+A bot does nothing until you give it an App: `pollis-bot run` skips it, and `pollis-bot status` says `no App yet` with the command to run. The App can be a directory on this machine (with `pollis-app.json` and one `.wasm`) or an `https://` address:
 
 ```bash
 pollis-bot app install --installation <installation id> --artifact /opt/apps/triage
@@ -110,6 +110,8 @@ pollis-bot run
 ```
 
 `app install` prints the App's **App hash**. The App runs only once a group admin approves that exact hash on the bot's page in Pollis, and the runtime checks the approval and the file again before every job. If the file changes (a new version), the bot stops running it until an admin approves the new one. The log says why it is not running and what to do; the admins see the same on the bot's page. See [Approving an App](./app-approval.md).
+
+To post alerts from your monitoring or scripts, use the [alerts App](../../apps/alerts/README.md): its page shows how to build it, check its hash and set up the bot.
 
 ## Run as a service
 
