@@ -1,0 +1,42 @@
+{
+ "guild": {
+  "id": "900000000000000001",
+  "name": "Dragon's Den",
+  "iconUrl": "Dragon's Den_files/icon.png"
+ },
+ "channel": {
+  "id": "555",
+  "type": "GuildPublicThread",
+  "categoryId": "999",
+  "category": "deleted-channel",
+  "name": "Orphan",
+  "topic": null
+ },
+ "messages": [
+  {
+   "id": "827271099187200000",
+   "type": "Default",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "hello?",
+   "author": {
+    "id": "102",
+    "name": "rob",
+    "discriminator": "0000",
+    "nickname": null,
+    "color": null,
+    "isBot": false,
+    "roles": [],
+    "avatarUrl": "avatars/rob.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [],
+   "inlineEmojis": []
+  }
+ ]
+}

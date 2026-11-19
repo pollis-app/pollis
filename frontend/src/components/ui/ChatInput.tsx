@@ -39,6 +39,10 @@ import {
   type GroupCommand,
 } from "../../utils/slashCommands";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { useLinkPreviewsEnabled } from "../../hooks/queries/useLinkPreviews";
+import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
+import type { LinkPreviewDraft } from "../../utils/linkPreview";
+import { ComposerLinkPreview } from "./ComposerLinkPreview";
 import {
   applyShortcode,
   completedShortcodeAt,
@@ -91,7 +95,8 @@ export interface ChatInputHandle {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, attachments: Attachment[]) => void;
+  /** `linkPreview`: the draft's finished preview (#1987), only when `linkPreviews` is on. */
+  onSend: (message: string, attachments: Attachment[], linkPreview: LinkPreviewDraft | null) => void;
   placeholder?: string;
   disabled?: boolean;
   autoFocus?: boolean;
@@ -105,6 +110,8 @@ interface ChatInputProps {
   canNotifyAll?: boolean;
   // ArrowUp on an empty/first line; return true to claim it.
   onHistoryUp?: () => boolean;
+  // Builds a sender-generated link preview for the draft's first https link (#1987).
+  linkPreviews?: boolean;
 }
 
 function typeFromMime(mime: string): Attachment["type"] {
@@ -211,6 +218,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   draftKey = null,
   canNotifyAll = false,
   onHistoryUp,
+  linkPreviews = false,
 }, ref) => {
   probeRender("ChatInput");
   const { t } = useTranslation("common");
@@ -459,6 +467,13 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   // @mention autocomplete (#843): candidates from this conversation's roster only.
   const skin = useSkin();
+  // Link previews (#1987): never in the Terminal look, nor with the device setting off.
+  const linkPreviewsEnabled = useLinkPreviewsEnabled();
+  const linkPreview = useLinkPreviewDraft(
+    message,
+    linkPreviews && skin === "modern" && linkPreviewsEnabled,
+    draftKey,
+  );
   const mentionCandidates = useMentionCandidates();
   // Async `selectionchange` caret; the ArrowUp hand-off reads the selection directly.
   const [caret, setCaret] = useState(0);
@@ -631,7 +646,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       sendRequestCommand(routed.command, routed.args);
       return;
     }
-    onSend(message.trim(), attachments);
+    // Never waits for a fetch still running: the message goes without it.
+    onSend(message.trim(), attachments, linkPreview.takeForSend(message.trim()));
     clearAfterSend();
     // Don't revoke previews: optimistic stubs may still reference them.
     setAttachments([]);
@@ -890,6 +906,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           ))}
         </div>
       )}
+
+      <ComposerLinkPreview state={linkPreview.state} onRemove={linkPreview.remove} />
 
       {/* @all hint — appears live while the message contains a standalone
           @all in a group channel, telling the sender the send will ping

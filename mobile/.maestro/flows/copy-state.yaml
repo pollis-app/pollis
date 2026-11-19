@@ -15,7 +15,7 @@ tags:
 # runs only with INVITE_PREVIEW=1 (pass `-e INVITE_PREVIEW=1` once the dev DS
 # carries #1972).
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 
 # --- 1. approve-device with nothing to approve ---
 - openLink: "pollis://approve-device"
@@ -31,11 +31,7 @@ tags:
 # --- seed a group with one message ---
 - tapOn:
     id: "tab-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

@@ -516,8 +516,10 @@ mod tests {
                     name: cname.to_string(),
                     description: None,
                     channel_type: "text".to_string(),
+                    category_id: None,
                 })
                 .collect(),
+            categories: Vec::new(),
         }
     }
 
@@ -564,6 +566,7 @@ mod tests {
             undecryptable: false,
             send_state: None,
             edit_state: None,
+            link_preview: None,
         }
     }
 

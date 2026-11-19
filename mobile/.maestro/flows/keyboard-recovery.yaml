@@ -37,7 +37,7 @@ appId: ${MAESTRO_APP_ID}
 # (Start + Move + End, so KeyboardAvoidingView pads to the replayed height)
 # is pinned by tests/keyboard.test.ts.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-direct"
 - assertVisible:
@@ -165,11 +165,7 @@ appId: ${MAESTRO_APP_ID}
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

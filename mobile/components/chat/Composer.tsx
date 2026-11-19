@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { View, Pressable, Platform, ScrollView, type TextInput } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
@@ -58,6 +58,7 @@ export function Composer({
   canSendEmptyText = false,
   focusRequest = 0,
   placeholder,
+  linkPreview,
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
@@ -80,6 +81,8 @@ export function Composer({
   canSendEmptyText?: boolean;
   focusRequest?: number;
   placeholder?: string;
+  // The draft's link preview card (#1987), above the field.
+  linkPreview?: ReactNode;
 }) {
   const { t } = useTranslation("common");
   const openDraft = useOpenDraftMediaViewer();
@@ -326,6 +329,7 @@ export function Composer({
           </ScrollView>
         </View>
       ) : null}
+      {linkPreview}
       {pendingAttachments && pendingAttachments.length > 0 ? (
         <ScrollView
           testID="strip-attachments"

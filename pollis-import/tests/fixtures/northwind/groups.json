@@ -1,0 +1,50 @@
+[
+  {
+    "id": "G01LEAD",
+    "name": "leadership",
+    "created": 1609459400,
+    "creator": "U01ANA",
+    "is_archived": false,
+    "is_general": false,
+    "members": [
+      "U01ANA",
+      "U02BEN"
+    ],
+    "pins": [],
+    "topic": {
+      "value": "",
+      "creator": "",
+      "last_set": 0
+    },
+    "purpose": {
+      "value": "Leads only",
+      "creator": "U01ANA",
+      "last_set": 1609459400
+    },
+    "is_private": true
+  },
+  {
+    "id": "G02HIRE",
+    "name": "hiring-2024",
+    "created": 1704067200,
+    "creator": "U01ANA",
+    "is_archived": true,
+    "is_general": false,
+    "members": [
+      "U01ANA",
+      "U03CHO"
+    ],
+    "pins": [],
+    "topic": {
+      "value": "",
+      "creator": "",
+      "last_set": 0
+    },
+    "purpose": {
+      "value": "Interview loop",
+      "creator": "U01ANA",
+      "last_set": 1704067200
+    },
+    "is_private": true
+  }
+]

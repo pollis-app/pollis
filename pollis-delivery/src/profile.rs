@@ -106,28 +106,7 @@ pub fn is_valid_username(s: &str) -> bool {
 pub const USERNAME_INVALID: &str =
     "username must be 3-32 characters of a-z, 0-9, '_', '.' or '-'";
 
-/// Upper bound on a human display name (preferred or group name, #1095).
-pub const DISPLAY_NAME_MAX_LEN: usize = 100;
-
-/// Whether `s` is acceptable as a human display name.
-///
-/// NOT the username charset (display names are rendered, never resolved). Refused:
-///
-/// * longer than [`DISPLAY_NAME_MAX_LEN`] (#1095);
-/// * control characters, newlines included;
-/// * bidi overrides/isolates and LRM/RLM (display-order spoofing);
-/// * `<` and `>` (the sink escapes them too); `&` is allowed.
-pub fn is_valid_display_name(s: &str) -> bool {
-    !s.trim().is_empty()
-        && s.chars().count() <= DISPLAY_NAME_MAX_LEN
-        && !s.chars().any(|c| {
-            c.is_control()
-                || matches!(c,
-                    '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}')
-                || c == '<'
-                || c == '>'
-        })
-}
+pub use pollis_api::profile::{is_valid_display_name, DISPLAY_NAME_MAX_LEN};
 
 /// The message a rejected display name is refused with.
 pub const DISPLAY_NAME_INVALID: &str =

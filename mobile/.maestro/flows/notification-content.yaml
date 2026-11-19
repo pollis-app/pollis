@@ -1,11 +1,13 @@
 appId: ${MAESTRO_APP_ID}
+tags:
+  - gate
 ---
 # NOTIFICATION CONTENT (#1599) — the three-row radio list in Preferences →
 # Notifications. The choice is written to the core's local DB (where the push
 # extension reads it), so leaving and re-entering the screen re-reads it from
 # there. Self-contained; ends back on the default.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 
 - tapOn:
     id: "tab-self"

@@ -12,17 +12,13 @@ tags:
 # also pinned by tests/sheet-opaque.test.ts.
 # Self-contained: creates its own group so there is a channel to open.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
 
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 # #General is opt-in (off by default, like desktop); these steps open it.
 - tapOn:
     id: "toggle-general-channel"

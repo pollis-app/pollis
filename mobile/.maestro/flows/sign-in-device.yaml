@@ -1,4 +1,7 @@
 appId: ${MAESTRO_APP_ID}
+tags:
+  - fresh-account
+  - gate
 ---
 # SIGN IN DEVICE SHORTCUT (#1550) — the tab bar's third cell is a shield that
 # pushes "Scan to sign in a device" (self/link-device) from any tab, and back
@@ -7,7 +10,10 @@ appId: ${MAESTRO_APP_ID}
 # Self-contained; a v2 code typed by hand stands in for the scanned QR, which
 # is enough to reach the PIN confirm (finishing needs a second device).
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "sign-in-device"
 - tapOn:
     id: "tab-direct"
 - assertVisible:

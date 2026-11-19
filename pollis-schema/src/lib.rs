@@ -311,18 +311,23 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
     ),
     (
         52,
-        "bots",
-        include_str!("../migrations/000052_bots.sql"),
+        "channel_categories",
+        include_str!("../migrations/000052_channel_categories.sql"),
     ),
     (
         53,
-        "bot_app_state",
-        include_str!("../migrations/000053_bot_app_state.sql"),
+        "bots",
+        include_str!("../migrations/000053_bots.sql"),
     ),
     (
         54,
+        "bot_app_state",
+        include_str!("../migrations/000054_bot_app_state.sql"),
+    ),
+    (
+        55,
         "bot_app_approval",
-        include_str!("../migrations/000054_bot_app_approval.sql"),
+        include_str!("../migrations/000055_bot_app_approval.sql"),
     ),
 ];
 

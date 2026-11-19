@@ -1,6 +1,13 @@
 // The message content string, both directions (pure): plain text or the `_att`/`_txt` envelope, in lockstep with desktop's parseContent.
 
-import type { AttachmentKeyScope, ContentOrigin, MessageAttachment } from "../types";
+import type {
+  AttachmentKeyScope,
+  ContentOrigin,
+  LinkPreviewDraft,
+  LinkPreviewWire,
+  MessageAttachment,
+  MessageLinkPreview,
+} from "../types";
 
 export interface AttachmentWire {
   // Absent on an entry the outbox has not uploaded yet (#1335).
@@ -69,25 +76,80 @@ export function parseContent(raw: string | undefined, origin: ContentOrigin): {
     }
     return {
       text: typeof parsed._txt === "string" ? parsed._txt : "",
-      // No `key`: not uploaded by the outbox yet (#1335), drawn pending.
-      attachments: (parsed._att as AttachmentWire[]).map((a, i) => ({
-        id: a.key ?? `uploading-${i}`,
-        object_key: a.key ?? "",
-        content_hash: a.hash ?? "",
-        sha256: a.sha ?? "",
-        key_scope: keyScopeFor(a, origin),
-        filename: a.name,
-        content_type: a.ct,
-        file_size: a.size,
-        uploaded_at: Date.now(),
-        blurhash: a.bh,
-        width: a.w,
-        height: a.h,
-        sensitive: a.sens === true,
-        poster: posterOf(a.pv),
-      })),
+      attachments: (parsed._att as AttachmentWire[]).map((a, i) => attachmentFromWire(a, i, origin)),
     };
   } catch {
     return { text: raw, attachments: [] };
   }
+}
+
+/** One `_att` entry as a `MessageAttachment`. No `key`: not uploaded by the outbox yet (#1335), drawn pending. */
+function attachmentFromWire(a: AttachmentWire, i: number, origin: ContentOrigin): MessageAttachment {
+  return {
+    id: a.key ?? `uploading-${i}`,
+    object_key: a.key ?? "",
+    content_hash: a.hash ?? "",
+    sha256: a.sha ?? "",
+    key_scope: keyScopeFor(a, origin),
+    filename: a.name,
+    content_type: a.ct,
+    file_size: a.size,
+    uploaded_at: Date.now(),
+    blurhash: a.bh,
+    width: a.w,
+    height: a.h,
+    sensitive: a.sens === true,
+    poster: posterOf(a.pv),
+  };
+}
+
+/** A row's `link_preview` (#1987); its thumbnail uses the `_att` field names, so it loads like an image attachment. As desktop's. */
+export function linkPreviewFromWire(
+  wire: LinkPreviewWire | null | undefined,
+  origin: ContentOrigin,
+): MessageLinkPreview | null {
+  if (!wire || typeof wire.url !== "string" || typeof wire.title !== "string" || wire.title === "") {
+    return null;
+  }
+  const image = wire.image;
+  return {
+    url: wire.url,
+    title: wire.title,
+    description:
+      typeof wire.description === "string" && wire.description !== "" ? wire.description : null,
+    image:
+      image && image.key && typeof image.ct === "string" && image.ct.startsWith("image/")
+        ? attachmentFromWire({ ...image, name: "" }, 0, origin)
+        : null,
+  };
+}
+
+/** A preview as its own row shows it before the stored row is read back: the composer's thumbnail, local only. */
+export function optimisticLinkPreview(
+  draft: LinkPreviewDraft | null | undefined,
+): MessageLinkPreview | null {
+  if (!draft) {
+    return null;
+  }
+  return {
+    url: draft.url,
+    title: draft.title,
+    description: draft.description,
+    image: draft.image
+      ? {
+          id: draft.image.stagedId,
+          object_key: "",
+          content_hash: "",
+          sha256: "",
+          key_scope: null,
+          filename: "",
+          content_type: "image/jpeg",
+          file_size: 0,
+          uploaded_at: Date.now(),
+          width: draft.image.width,
+          height: draft.image.height,
+          localPreviewUri: draft.image.dataUrl,
+        }
+      : null,
+  };
 }

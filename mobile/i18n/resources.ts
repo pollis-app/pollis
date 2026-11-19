@@ -60,6 +60,7 @@ import en_common from "../../frontend/src/i18n/locales/en/common.json";
 import en_dms from "../../frontend/src/i18n/locales/en/dms.json";
 import en_emoji from "../../frontend/src/i18n/locales/en/emoji.json";
 import en_errors from "../../frontend/src/i18n/locales/en/errors.json";
+import en_import from "../../frontend/src/i18n/locales/en/import.json";
 import en_mobile from "../../frontend/src/i18n/locales/en/mobile.json";
 import en_nav from "../../frontend/src/i18n/locales/en/nav.json";
 import en_saved from "../../frontend/src/i18n/locales/en/saved.json";
@@ -431,6 +432,7 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "dms": en_dms,
     "emoji": en_emoji,
     "errors": en_errors,
+    "import": en_import,
     "mobile": en_mobile,
     "nav": en_nav,
     "saved": en_saved,

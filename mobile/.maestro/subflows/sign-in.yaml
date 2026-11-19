@@ -21,9 +21,15 @@ appId: ${MAESTRO_APP_ID}
 # --- Email ---
 - assertVisible:
     id: "screen-auth-email"
+# FRESH=<name> signs up a brand-new address (fresh-email.yaml) instead of
+# MAESTRO_EMAIL, which maestro-run.sh keeps for the run's shared account (#2029).
+- runFlow:
+    when:
+      true: ${typeof FRESH !== 'undefined' && FRESH !== ''}
+    file: fresh-email.yaml
 - tapOn:
     id: "input-email"
-- inputText: "${MAESTRO_EMAIL}"
+- inputText: "${(typeof FRESH !== 'undefined' && FRESH !== '') ? output.freshEmail : MAESTRO_EMAIL}"
 - tapOn:
     id: "btn-submit-email"
 
@@ -76,17 +82,27 @@ appId: ${MAESTRO_APP_ID}
 # own btn-continue is still on screen: without this wait the conditional below
 # matches the OUTGOING button and its tap lands on the incoming tab bar (on
 # iPad, bottom centre is the sign-in-device shield). Settle first.
+# The settle alone stopped being enough on iPad once unlock got faster
+# (#1982): wait for the kit screen to be gone, and only ever tap the
+# Continue that belongs to the initializing screen.
 - waitForAnimationToEnd:
     timeout: 5000
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-auth-emergency-kit"
+    timeout: 10000
+    optional: true
 - runFlow:
     when:
       visible:
-        id: "btn-continue"
+        id: "screen-auth-initializing"
     commands:
       # optional: initializing often auto-advances between the visibility
       # check and the tap, and a vanished button is not a failed sign-in.
       - tapOn:
           id: "btn-continue"
+          childOf:
+            id: "screen-auth-initializing"
           optional: true
 
 # --- Landed on the tabs ---

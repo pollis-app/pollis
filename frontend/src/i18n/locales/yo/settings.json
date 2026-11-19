@@ -117,6 +117,12 @@
     "itemStrict": "<mode>Múná</mode> — Sopọ̀ gba relay nìkan. Bí kò bá sí relay tí a lè dé, a máa dá fífi ránṣẹ́ dúró dípò kí a fi IP rẹ hàn.",
     "applyError": "A kò lè lo ipò relay: {{error}} — ó wà ní {{mode}} báyìí."
   },
+  "linkPreviews": {
+    "heading": "Àwọn àkọ́wò ìjápọ̀",
+    "label": "Ṣẹ̀dá àwọn àkọ́wò ìjápọ̀",
+    "description": "Nígbà tí o bá fi ìjápọ̀ ránṣẹ́, Pollis máa ń mú ojú-ìwé náà wá láti ẹ̀rọ yìí láti ṣẹ̀dá àkọ́wò. Ojú òpó náà máa rí àdírẹ́sì IP rẹ, bí ẹni pé ìwọ fúnra rẹ ló ṣí i. Àwọn tí o fi ránṣẹ́ sí kì í kàn sí ojú òpó náà rárá.",
+    "strictNote": "Àṣírí nẹ́tíwọ́ọ̀kì múná máa ń pa àwọn àkọ́wò ìjápọ̀."
+  },
   "relayServing": {
     "heading": "Ṣiṣẹ́ relay fún àwọn ẹlòmíì",
     "intro": "Ìpinnu kan tó yàtọ̀ sí ètò tó wà lókè. Èyí tó wà lókè ń pinnu bóyá ìrìnnà <dim>tìrẹ</dim> máa gba relay kọjá. Èyí ń pinnu bóyá ìrìnnà <dim>àwọn ẹlòmíì</dim> máa gba <dim>ẹ̀rọ rẹ</dim> kọjá. Títan ọ̀kan kì í tan èkejì láé.",

@@ -1,0 +1,28 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Select the group named ${GROUP} on the Groups tab (#2029). After a relaunch
+# the tab reselects the last group this account used (components/groups/
+# lastGroup.ts), so usually there is nothing to tap. A text tap on the name is
+# never safe there: the selected group's menu button (`btn-group-menu`, label
+# "<name>, group menu…") matches it too and opens the menu sheet. So only an
+# unselected pill is tapped, by its exact label, and only when needed.
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+    timeout: 30000
+- runFlow:
+    when:
+      notVisible:
+        id: "btn-group-menu"
+        text: "${GROUP}, .*"
+    commands:
+      - tapOn:
+          id: "row-group-.*"
+          text: "${GROUP}"
+- extendedWaitUntil:
+    visible:
+      id: "btn-group-menu"
+      text: "${GROUP}, .*"
+    timeout: 30000

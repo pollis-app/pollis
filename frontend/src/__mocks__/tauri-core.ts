@@ -1,5 +1,14 @@
 /** Browser mock for @tauri-apps/api/core (VITE_PLAYWRIGHT); state seeds from window.__POLLIS_PRELOAD__. */
 
+import {
+  appendChannel,
+  channelBlocks,
+  deleteCategory,
+  flattenBlocks,
+  moveCategory,
+  moveChannel,
+} from '../utils/channelLayout';
+
 interface MockUser {
   id: string;
   email: string;
@@ -20,6 +29,16 @@ interface MockChannel {
   group_id: string;
   name: string;
   description?: string;
+  channel_type?: string;
+  /** #2031: the category it sits in; absent = the uncategorised block. */
+  category_id?: string | null;
+}
+
+/** #2031: a group's channel category. */
+interface MockCategory {
+  id: string;
+  group_id: string;
+  name: string;
 }
 
 interface MockMessage {
@@ -36,6 +55,10 @@ interface MockMessage {
   send_state?: 'pending' | 'failed';
   /** The edit outbox (#1555): our edit, not confirmed yet; `content` holds it. */
   edit_state?: 'pending' | 'failed';
+  /** The sender's link preview (#1987), as the core reads it from the trailer. */
+  link_preview?: Record<string, unknown> | null;
+  /** Deleted for everyone: a tombstone with no text. */
+  deleted_at?: string;
 }
 
 /** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
@@ -276,7 +299,12 @@ interface MockStore {
   session: MockUser | null;
   profile: MockProfile | null;
   groups: MockGroup[];
+  /** Per group, in display order (#2031): uncategorised first, then category by category. */
   channels: Record<string, MockChannel[]>;
+  /** #2031: per group, in order. */
+  categories: Record<string, MockCategory[]>;
+  /** #2031: refuse every arrangement write, as the DS does a non-admin. */
+  failArrange: boolean;
   messages: Record<string, MockMessage[]>;
   // Thread replies (#825), keyed by the ROOT message's id.
   threadMessages: Record<string, MockMessage[]>;
@@ -487,6 +515,8 @@ const store: MockStore = {
   savedDiagnosticsPath: null,
   failSends: preload.failSends === true,
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
+  categories: (preload.categories as Record<string, MockCategory[]> | undefined) ?? {},
+  failArrange: preload.failArrange === true,
   readCursors:
     (preload.readCursors as Record<string, string> | undefined) ??
     Object.fromEntries(
@@ -896,6 +926,204 @@ function findMessage(messageId: string): MockMessage | undefined {
   return undefined;
 }
 
+/** #1180/#1179: an import's preload (`discordImport` / `slackImport`): `preview` is real `pollis-import`
+ *  output, the Slack one with `preview_archived` (archived channels included) beside it. */
+function importPreload(source: string): any {
+  const data = (preload as any)[`${source}Import`];
+  if (!data?.preview) {
+    throw new Error(`no ${source === 'slack' ? 'Slack' : 'Discord'} export found there`);
+  }
+  return data;
+}
+
+function importBase(source: string, includeArchived: boolean): any {
+  const data = importPreload(source);
+  return includeArchived && data.preview.preview_archived ? data.preview.preview_archived : data.preview;
+}
+
+/** What an import plan becomes against `groupId`'s current state (or a new group). */
+function importPlanFor(source: string, groupId: string | null, includeArchived: boolean): any {
+  const base = importBase(source, includeArchived);
+  const plan = JSON.parse(JSON.stringify(base.plan));
+  if (groupId) {
+    const cats = store.categories[groupId] ?? [];
+    const catName = (id: string | null | undefined) => cats.find((k) => k.id === id)?.name.toLowerCase() ?? null;
+    const chans = (store.channels[groupId] ?? []).map((c) => `${catName(c.category_id)}|${c.name.toLowerCase()}`);
+    const emoji = store.customEmoji.filter((e) => e.group_id === groupId).map((e) => e.shortcode);
+    for (const k of plan.categories) {
+      k.exists = cats.some((c) => c.name.toLowerCase() === k.name.toLowerCase());
+    }
+    for (const c of plan.channels) {
+      c.exists = chans.includes(`${c.category?.toLowerCase() ?? null}|${c.name.toLowerCase()}`);
+    }
+    for (const e of plan.emoji) {
+      e.exists = !!e.shortcode && emoji.includes(e.shortcode);
+    }
+  }
+  plan.totals.to_create_categories = plan.categories.filter((k: any) => !k.exists).length;
+  plan.totals.to_create_channels = plan.channels.filter((c: any) => !c.exists).length;
+  plan.totals.to_upload_emoji = plan.emoji.filter((e: any) => e.shortcode && !e.exists).length;
+  return plan;
+}
+
+function importCandidates(name: string) {
+  return store.groups
+    .filter((g) => g.name.toLowerCase() === name.toLowerCase() && roleInGroup(g.id) === 'admin')
+    .map((g) => ({ group_id: g.id, name: g.name }));
+}
+
+function importPreview(source: string, target: string | null, includeArchived: boolean) {
+  const base = importBase(source, includeArchived);
+  const candidates = importCandidates(base?.plan?.group?.name ?? '');
+  let chosen: string | null = null;
+  if (target && target !== 'new') {
+    chosen = target;
+  } else if (target === null && candidates.length === 1) {
+    chosen = candidates[0].group_id;
+  }
+  const plan = importPlanFor(source, chosen, includeArchived);
+  const group = chosen ? store.groups.find((g) => g.id === chosen) : null;
+  return {
+    source,
+    path: base.path,
+    plan,
+    invite_sheet: base.invite_sheet,
+    target: group ? { group_id: group.id, name: group.name } : null,
+    candidates,
+    include_archived: includeArchived,
+  };
+}
+
+/** Email invites already sent by an import, as `groupId|email` (the DS's pending invites). */
+const importInvited = new Set<string>();
+
+function importApply(
+  source: string,
+  target: string | null,
+  options: { include_archived?: boolean; invite_by_email?: boolean } | null,
+) {
+  const data = importPreload(source);
+  if (data.failApply) {
+    throw new Error(String(data.failApply));
+  }
+  const includeArchived = !!options?.include_archived;
+  const base = importBase(source, includeArchived);
+  let groupId = target && target !== 'new' ? target : null;
+  const created = !groupId;
+  if (!groupId) {
+    groupId = generateId();
+    store.groups.push({
+      id: groupId,
+      name: base.plan.group.name,
+      owner_id: store.session?.id ?? 'me',
+      created_at: nowIso(),
+      current_user_role: 'admin',
+    });
+    store.channels[groupId] = [];
+    store.categories[groupId] = [];
+  }
+  const plan = importPlanFor(source, groupId, includeArchived);
+  const result = {
+    group_id: groupId,
+    group_name: store.groups.find((g) => g.id === groupId)!.name,
+    created_group: created,
+    icon_set: created,
+    categories_created: 0,
+    channels_created: 0,
+    channels_moved: 0,
+    emoji_uploaded: 0,
+    categories_existing: 0,
+    channels_existing: 0,
+    emoji_existing: 0,
+    failures: [] as { kind: string; name: string; error: string }[],
+    invite_link: null as unknown,
+    invite_link_existing: false,
+    email_invites: [] as { username: string; display_name: string; email: string; outcome: string }[],
+  };
+  for (const k of plan.categories) {
+    if (k.exists) {
+      result.categories_existing += 1;
+      continue;
+    }
+    store.categories[groupId] = [...(store.categories[groupId] ?? []), { id: generateId(), group_id: groupId, name: k.name }];
+    result.categories_created += 1;
+  }
+  for (const c of plan.channels) {
+    if (c.exists) {
+      result.channels_existing += 1;
+      continue;
+    }
+    const categoryId = c.category
+      ? (store.categories[groupId] ?? []).find((k) => k.name.toLowerCase() === c.category.toLowerCase())?.id ?? null
+      : null;
+    const channel: MockChannel = {
+      id: generateId(),
+      group_id: groupId,
+      name: c.name,
+      description: c.description ?? undefined,
+      channel_type: c.kind,
+      category_id: categoryId,
+    };
+    store.channels[groupId] = appendChannel(store.channels[groupId] ?? [], store.categories[groupId] ?? [], channel);
+    result.channels_created += 1;
+  }
+  for (const e of plan.emoji) {
+    if (!e.shortcode) {
+      continue;
+    }
+    if (e.exists) {
+      result.emoji_existing += 1;
+      continue;
+    }
+    store.customEmoji.push({
+      group_id: groupId,
+      group_name: result.group_name,
+      shortcode: e.shortcode,
+      content_hash: generateId(),
+      content_type: e.animated ? 'image/gif' : 'image/webp',
+      animated: e.animated,
+      size_bytes: 1024,
+      created_by: store.session?.id ?? 'me',
+    });
+    result.emoji_uploaded += 1;
+  }
+  const live = store.inviteLinks.some((l) => l.group_id === groupId && !l.revoked_at);
+  if (live) {
+    result.invite_link_existing = true;
+  } else {
+    const id = generateId();
+    const token = `${generateId()}.${generateId()}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+    store.inviteLinks.push({
+      id,
+      group_id: groupId,
+      created_at: nowIso(),
+      creator_username: store.session?.username ?? null,
+      expires_at: expiresAt,
+      max_uses: null,
+      uses: 0,
+      revoked_at: null,
+    });
+    result.invite_link = { id, token, url: `https://pollis.com/invite/${token}`, expires_at: expiresAt, max_uses: null };
+  }
+  // Email invites: `slackImport.accounts` are the emails with Pollis accounts.
+  if (options?.invite_by_email) {
+    const accounts: string[] = data.accounts ?? [];
+    for (const p of plan.people.filter((x: any) => !x.is_bot && x.email)) {
+      const key = `${groupId}|${p.email}`;
+      let outcome = 'no_account';
+      if (p.email === store.session?.email) {
+        outcome = 'you';
+      } else if (accounts.includes(p.email)) {
+        outcome = importInvited.has(key) ? 'already_invited' : 'invited';
+        importInvited.add(key);
+      }
+      result.email_invites.push({ username: p.username, display_name: p.display_name, email: p.email, outcome });
+    }
+  }
+  return result;
+}
+
 /** This user's role: the roster if it names them, else the group row (#942). */
 function roleInGroup(groupId: string): string | null {
   const me = store.session?.id;
@@ -913,6 +1141,14 @@ function roleInGroup(groupId: string): string | null {
 }
 
 /** Mock `authz::require_member` (#917), worded as `NOT_A_MEMBER`. */
+/** #2031: the DS refuses an arrangement from anyone but an admin of the group. */
+function requireArrangeMock(groupId: string): void {
+  const group = store.groups.find((g) => g.id === groupId);
+  if (store.failArrange || !group || (group.current_user_role ?? 'admin') !== 'admin') {
+    throw new Error('forbidden');
+  }
+}
+
 function requireMemberMock(groupId: string): void {
   if (roleInGroup(groupId) === null) {
     throw new Error('you are not a member of this group');
@@ -1222,6 +1458,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // `= []` defaults don't cover `null`, so return lists.
     case 'list_dm_requests':
       return store.dmRequests;
+
+    // Accepting a request makes it an ordinary DM (#1987's card then draws).
+    case 'accept_dm_request': {
+      const { dmChannelId } = args as { dmChannelId: string };
+      store.dmRequests = store.dmRequests.filter((r) => r.id !== dmChannelId);
+      return null;
+    }
 
     case 'list_pending_invites':
     case 'list_join_requests':
@@ -1727,9 +1970,26 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'pick_save_path':
       return store.exportSavePath;
 
-    // An empty list is "cancelled".
+    // An empty list is "cancelled"; `__POLLIS_PRELOAD__.openPaths` is what the picker "chose".
     case 'pick_open_paths':
-      return [];
+      return (preload.openPaths as string[] | undefined) ?? [];
+
+    // Import (#1180 Discord, #1179 Slack): the plan is `preload.<source>Import.preview` (real
+    // `pollis-import` output for the dragons-den and northwind fixtures); the mock marks what a target
+    // group already holds and applies it the way `pollis_core::commands::import` does, through the same store.
+    case 'import_preview': {
+      const { source, target, includeArchived } = args as { source: string; target: string | null; includeArchived?: boolean };
+      return importPreview(source, target, !!includeArchived);
+    }
+
+    case 'import_apply': {
+      const { source, target, options } = args as {
+        source: string;
+        target: string | null;
+        options: { include_archived?: boolean; invite_by_email?: boolean } | null;
+      };
+      return importApply(source, target, options);
+    }
 
     // Export (#856): no media cache, so every attachment is "missing".
     case 'export_archive': {
@@ -1914,9 +2174,62 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_user_groups_with_channels':
       return store.groups.map((g) => ({
         ...g,
-        channels: store.channels[g.id] ?? [],
+        channels: flattenBlocks(channelBlocks(store.channels[g.id] ?? [], store.categories[g.id] ?? [])),
+        categories: (store.categories[g.id] ?? []).map((k) => ({ ...k })),
         current_user_role: g.current_user_role ?? 'admin',
       }));
+
+    // #2031: arranging a group's channels, as the DS does it (pollis-delivery `channel_order`).
+    case 'create_channel_category': {
+      const { groupId, name } = args as { groupId: string; name: string };
+      requireArrangeMock(groupId);
+      const category: MockCategory = { id: generateId(), group_id: groupId, name: name.trim() };
+      store.categories[groupId] = [...(store.categories[groupId] ?? []), category];
+      return category;
+    }
+
+    case 'rename_channel_category': {
+      const { groupId, categoryId, name } = args as { groupId: string; categoryId: string; name: string };
+      requireArrangeMock(groupId);
+      store.categories[groupId] = (store.categories[groupId] ?? []).map((k) =>
+        k.id === categoryId ? { ...k, name: name.trim() } : k,
+      );
+      return null;
+    }
+
+    case 'delete_channel_category': {
+      const { groupId, categoryId } = args as { groupId: string; categoryId: string };
+      requireArrangeMock(groupId);
+      const next = deleteCategory(store.channels[groupId] ?? [], store.categories[groupId] ?? [], categoryId);
+      store.channels[groupId] = next.channels;
+      store.categories[groupId] = next.categories;
+      return null;
+    }
+
+    case 'move_channel_category': {
+      const { groupId, categoryId, position } = args as { groupId: string; categoryId: string; position: number };
+      requireArrangeMock(groupId);
+      store.categories[groupId] = moveCategory(store.categories[groupId] ?? [], categoryId, position);
+      return null;
+    }
+
+    case 'move_channel': {
+      const { groupId, channelId, categoryId, position } = args as {
+        groupId: string;
+        channelId: string;
+        categoryId: string | null;
+        position: number;
+      };
+      requireArrangeMock(groupId);
+      store.channels[groupId] = moveChannel(
+        store.channels[groupId] ?? [],
+        store.categories[groupId] ?? [],
+        channelId,
+        categoryId ?? null,
+        position,
+      );
+      return null;
+    }
 
     case 'create_group': {
       const { name, description, ownerId } = args as {
@@ -1938,7 +2251,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_group_channels': {
       const { groupId } = args as { groupId: string; requesterId?: string };
       requireMemberMock(groupId);
-      return store.channels[groupId] ?? [];
+      return flattenBlocks(channelBlocks(store.channels[groupId] ?? [], store.categories[groupId] ?? []));
     }
 
     case 'get_group_members': {
@@ -1948,22 +2261,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'create_channel': {
-      const { groupId, name, description } = args as {
+      const { groupId, name, description, channelType, categoryId } = args as {
         groupId: string;
         name: string;
         description?: string | null;
         creatorId?: string;
+        channelType?: string;
+        categoryId?: string | null;
       };
       const channel: MockChannel = {
         id: generateId(),
         group_id: groupId,
         name,
         description: description ?? undefined,
+        channel_type: channelType ?? 'text',
+        category_id: categoryId ?? null,
       };
-      if (!store.channels[groupId]) {
-        store.channels[groupId] = [];
-      }
-      store.channels[groupId].push(channel);
+      // #2031: at the bottom of its block.
+      store.channels[groupId] = appendChannel(store.channels[groupId] ?? [], store.categories[groupId] ?? [], channel);
       return channel;
     }
 
@@ -2133,6 +2448,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
           thread_id: threadId ?? undefined,
           sent_at: nowIso(),
           send_state: 'pending',
+          link_preview: mockWirePreview(args.linkPreview),
         };
         if (!store.messages[conversationId]) {
           store.messages[conversationId] = [];
@@ -2209,12 +2525,25 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message) {
         message.content = newContent;
         message.edited_at = nowIso();
+        // An edit rebuilds the message, preview included (#1987).
+        message.link_preview = mockWirePreview(args.linkPreview);
         // A failed post keeps the edit for the drain (#1555).
         if (store.failSends) {
           message.edit_state = 'failed';
           throw new Error('network unreachable');
         }
         delete message.edit_state;
+      }
+      return null;
+    }
+
+    // Delete for everyone: the row keeps a tombstone; the core's trigger clears the preview with the text (#1987).
+    case 'delete_message': {
+      const message = findMessage((args as { messageId: string }).messageId);
+      if (message) {
+        delete message.content;
+        message.link_preview = null;
+        message.deleted_at = nowIso();
       }
       return null;
     }
@@ -2763,6 +3092,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'discard_staged_attachment':
       return true;
 
+    // Link previews (#1987): `linkPreviews` maps a URL to the draft the core would build, after
+    // `linkPreviewDelayMs`; any other URL has none. Every call lands in `window.__linkPreviewFetches`.
+    case 'fetch_link_preview': {
+      const url = args.url as string;
+      const w = window as unknown as { __linkPreviewFetches?: string[] };
+      w.__linkPreviewFetches = [...(w.__linkPreviewFetches ?? []), url];
+      const draft = ((preload.linkPreviews ?? {}) as Record<string, unknown>)[url] ?? null;
+      const delay = (preload.linkPreviewDelayMs as number | undefined) ?? 0;
+      return delay > 0 ? new Promise((resolve) => setTimeout(() => resolve(draft), delay)) : draft;
+    }
+
+    case 'get_link_previews_enabled':
+      return linkPreviewsEnabled;
+
+    case 'set_link_previews_enabled':
+      linkPreviewsEnabled = args.enabled !== false;
+      return null;
+
     // The OS clipboard the paste fallback reads (#1794); `window.__setOsClipboard` fills it.
     case 'read_clipboard_files':
       return [...osClipboard.files];
@@ -2813,6 +3160,17 @@ function unreadIn(conversationId: string): MockMessage[] {
 }
 
 let stagedAttachmentCount = 0;
+
+/** A sent draft as the core stores it (#1987): the thumbnail is not uploaded in the mock, so none. */
+function mockWirePreview(draft: unknown): Record<string, unknown> | null {
+  if (!draft || typeof draft !== 'object') {
+    return null;
+  }
+  const { url, title, description } = draft as { url: string; title: string; description?: string | null };
+  return { url, title, description: description ?? null, image: null };
+}
+// "Generate link previews" (#1987), per device; on by default.
+let linkPreviewsEnabled = true;
 
 const verifiedPeers = new Set<string>((preload.verifiedPeers as string[] | undefined) ?? []);
 

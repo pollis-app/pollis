@@ -4,7 +4,16 @@ import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { unreadQueryKeys } from "./useUnread";
 import { useObserver } from "mobx-react-lite";
-import type { AttachmentKeyScope, ContentOrigin, Message, DMConversation } from "../../types";
+import type {
+  AttachmentKeyScope,
+  ContentOrigin,
+  Message,
+  MessageAttachment,
+  MessageLinkPreview,
+  DMConversation,
+  LinkPreviewDraft,
+  LinkPreviewWire,
+} from "../../types";
 import type { OutgoingAttachment } from "../../utils/attachmentEnvelope";
 import {
   carryStubs,
@@ -77,6 +86,8 @@ type RawMessage = {
   /** ULID of the thread root this was sent into (#825). */
   thread_id?: string;
   sent_at: string;
+  /** The sender's link preview (#1987), from the message's own trailer. */
+  link_preview?: LinkPreviewWire | null;
 };
 
 export type RawChannelMessage = {
@@ -98,6 +109,8 @@ export type RawChannelMessage = {
   send_state?: SendState;
   /** Our edit of it the DS has not confirmed yet (#1555); `content` is the edit. */
   edit_state?: SendState;
+  /** The sender's link preview (#1987), from the message's own trailer. */
+  link_preview?: LinkPreviewWire | null;
 };
 
 /** Mirror of `pollis_core::commands::messages::OutboxReport`. */
@@ -137,27 +150,85 @@ export function parseContent(
     }
     return {
       text: parsed._txt ?? '',
-      // No `key` yet: not uploaded by the outbox (#1335), drawn pending.
-      attachments: (parsed._att as AttachmentWire[]).map((a, i) => ({
-        id: a.key ?? `uploading-${i}`,
-        object_key: a.key ?? '',
-        content_hash: a.hash ?? '',
-        sha256: a.sha ?? '',
-        key_scope: keyScopeFor(a, origin),
-        filename: a.name,
-        content_type: a.ct,
-        file_size: a.size,
-        uploaded_at: Date.now(),
-        blurhash: a.bh,
-        width: a.w,
-        height: a.h,
-        sensitive: a.sens === true,
-        poster: posterOf(a.pv),
-      })),
+      attachments: (parsed._att as AttachmentWire[]).map((a, i) => attachmentFromWire(a, i, origin)),
     };
   } catch {
     return { text: raw, attachments: [] };
   }
+}
+
+/** One `_att` entry as a `MessageAttachment`. No `key` yet: not uploaded by the outbox (#1335), drawn pending. */
+function attachmentFromWire(
+  a: AttachmentWire,
+  i: number,
+  origin: ContentOrigin,
+): MessageAttachment {
+  return {
+    id: a.key ?? `uploading-${i}`,
+    object_key: a.key ?? '',
+    content_hash: a.hash ?? '',
+    sha256: a.sha ?? '',
+    key_scope: keyScopeFor(a, origin),
+    filename: a.name,
+    content_type: a.ct,
+    file_size: a.size,
+    uploaded_at: Date.now(),
+    blurhash: a.bh,
+    width: a.w,
+    height: a.h,
+    sensitive: a.sens === true,
+    poster: posterOf(a.pv),
+  };
+}
+
+/** A row's `link_preview` (#1987); its thumbnail uses the `_att` field names, so it loads like an image attachment. */
+function linkPreviewFromWire(
+  wire: LinkPreviewWire | null | undefined,
+  origin: ContentOrigin,
+): MessageLinkPreview | null {
+  if (!wire || typeof wire.url !== 'string' || typeof wire.title !== 'string' || wire.title === '') {
+    return null;
+  }
+  const image = wire.image;
+  return {
+    url: wire.url,
+    title: wire.title,
+    description: typeof wire.description === 'string' && wire.description !== '' ? wire.description : null,
+    image:
+      image && image.key && typeof image.ct === 'string' && image.ct.startsWith('image/')
+        ? attachmentFromWire({ ...image, name: '' }, 0, origin)
+        : null,
+  };
+}
+
+/** A preview as its own row shows it before the stored row is read back: the composer's thumbnail, local only. */
+export function optimisticLinkPreview(
+  draft: LinkPreviewDraft | null | undefined,
+): MessageLinkPreview | null {
+  if (!draft) {
+    return null;
+  }
+  return {
+    url: draft.url,
+    title: draft.title,
+    description: draft.description,
+    image: draft.image
+      ? {
+          id: draft.image.stagedId,
+          object_key: '',
+          content_hash: '',
+          sha256: '',
+          key_scope: null,
+          filename: '',
+          content_type: 'image/jpeg',
+          file_size: 0,
+          uploaded_at: Date.now(),
+          width: draft.image.width,
+          height: draft.image.height,
+          localPreviewUrl: draft.image.dataUrl,
+        }
+      : null,
+  };
 }
 
 /** Longest `pv` accepted; the core sends at most 16 KiB of it. */
@@ -201,6 +272,7 @@ function baseMessage(m: RawMessage) {
     is_pinned: false,
     created_at: new Date(m.sent_at).getTime(),
     attachments: parsed?.attachments ?? [],
+    link_preview: linkPreviewFromWire(m.link_preview, { conversationId: m.conversation_id }),
   };
 }
 
@@ -324,6 +396,7 @@ export function useSendMessage() {
       threadId,
       messageId,
       attachments,
+      linkPreview,
     }: {
       channelId: string;
       conversationId: string;
@@ -336,6 +409,8 @@ export function useSendMessage() {
       messageId?: string;
       // Attachments for the outbox to upload (#1335); `content` is the caption.
       attachments?: OutgoingAttachment[];
+      // A finished composer preview (#1987); the core consumes its staged thumbnail.
+      linkPreview?: LinkPreviewDraft | null;
     }) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -352,6 +427,7 @@ export function useSendMessage() {
         senderUsername: currentUser.username ?? null,
         messageId: id,
         attachments: attachments ?? [],
+        linkPreview: linkPreview ?? null,
       });
     },
     // A DM moves to the top as the send starts (#1838); the stored row is kept even if it fails.
@@ -369,6 +445,10 @@ export function useSendMessage() {
         ...transformMessage(newMessage),
         sender_username: currentUser?.username ?? undefined,
       };
+      // The thumbnail uploads after the send (#1987): keep the composer's copy until it has.
+      if (variables.linkPreview && !confirmedMessage.link_preview?.image) {
+        confirmedMessage.link_preview = optimisticLinkPreview(variables.linkPreview);
+      }
       // A refetch may already hold the stored row (#1335).
       queryClient.setQueryData<MessagesQueryResult>(queryKey, (old) => {
         const prev = old ?? { messages: [], nextCursor: null };
@@ -679,6 +759,8 @@ type EditMessageVars = {
   channelId?: string;
   messageId: string;
   newContent: string;
+  // An edit rebuilds the message (#1987): no preview here means none after it.
+  linkPreview?: LinkPreviewDraft | null;
 };
 
 type EditMessageContext = {
@@ -691,7 +773,7 @@ export function useEditMessage() {
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation<void, Error, EditMessageVars, EditMessageContext>({
-    mutationFn: async ({ conversationId, messageId, newContent }) => {
+    mutationFn: async ({ conversationId, messageId, newContent, linkPreview }) => {
       if (!currentUser) {
         throw new Error('No current user');
       }
@@ -700,9 +782,10 @@ export function useEditMessage() {
         messageId,
         userId: currentUser.id,
         newContent,
+        linkPreview: linkPreview ?? null,
       });
     },
-    onMutate: async ({ channelId, conversationId, messageId, newContent }) => {
+    onMutate: async ({ channelId, conversationId, messageId, newContent, linkPreview }) => {
       const queryKey = channelId
         ? messageQueryKeys.channel(channelId)
         : messageQueryKeys.conversation(conversationId);
@@ -718,7 +801,12 @@ export function useEditMessage() {
           ...old,
           messages: old.messages.map((m) =>
             m.id === messageId
-              ? { ...m, content_decrypted: newContent, edited_at: new Date().toISOString() }
+              ? {
+                  ...m,
+                  content_decrypted: newContent,
+                  edited_at: new Date().toISOString(),
+                  link_preview: optimisticLinkPreview(linkPreview),
+                }
               : m
           ),
         };

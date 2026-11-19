@@ -134,6 +134,10 @@
     "loadDescription": "Loda kafa daga {{url}}. Wannan yana tuntuɓar shafin kai tsaye kuma yana bayyana masa adireshin IP ɗinku.",
     "openLabel": "Buɗe {{url}}"
   },
+  "linkPreview": {
+    "loading": "Ana loda samfoti…",
+    "remove": "Cire samfotin mahaɗi"
+  },
   "notify": {
     "newMessageTitle": "Sabon saƙo",
     "newMessageBody": "{{name}}: Sabon saƙo",

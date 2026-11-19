@@ -17,6 +17,7 @@ import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator, receiptLabel } from "./ReceiptIndicator";
 import { MessageAttachments } from "./MessageAttachments";
+import { MessageLinkPreview } from "./MessageLinkPreview";
 import { SwipeToReply } from "./SwipeToReply";
 import { UnsentActions } from "./UnsentActions";
 import { Tag } from "../Tag";
@@ -33,7 +34,7 @@ import { linkA11yActions, runLinkA11yAction } from "../../lib/openLink";
 import type { UnsentReason } from "../../hooks/queries/pendingMessages";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
-import type { MessageAttachment } from "../../types";
+import type { MessageAttachment, MessageLinkPreview as LinkPreview } from "../../types";
 
 // Avatar column (40) + gap (12), so continued bodies line up.
 const AVATAR = 40;
@@ -78,6 +79,7 @@ export function MessageRow({
   mentionLabels,
   botMentions,
   attachments,
+  linkPreview,
   onOpenAttachment,
   onPressAvatar,
   onLongPress,
@@ -131,6 +133,8 @@ export function MessageRow({
   // Lowercased handles of the roster's bots (#1182): their mentions carry the Bot badge.
   botMentions?: ReadonlySet<string>;
   attachments?: MessageAttachment[];
+  // The sender's link preview (#1987); pass null where it must not show (an unaccepted request).
+  linkPreview?: LinkPreview | null;
   onOpenAttachment?: (attachment: MessageAttachment) => void;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
@@ -415,6 +419,9 @@ export function MessageRow({
                   </Text>
                 ) : null}
               </Text>
+            ) : null}
+            {!deletedText && text && linkPreview ? (
+              <MessageLinkPreview text={text} preview={linkPreview} onLongPress={onLongPressTouch} />
             ) : null}
             {attachments && attachments.length > 0 ? (
               <MessageAttachments

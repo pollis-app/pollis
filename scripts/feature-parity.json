@@ -16,7 +16,9 @@
     "connect_rooms": "Desktop's LiveKit room connection; mobile's data-only equivalent is get_livekit_token.",
     "create_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
     "await_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
-    "approve_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one."
+    "approve_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
+    "import_preview": "Structure import (#1180 Discord, #1179 Slack) reads an export a person makes on a computer: a DiscordChatExporter folder, or the Slack workspace ZIP an admin downloads from Slack's admin pages in a desktop browser. A phone has no such file to hand and a workspace migration is an admin task at a desk. The group it creates, its emoji and its invites are ordinary, so mobile shows and accepts them like any other.",
+    "import_apply": "Structure import (#1180 Discord, #1179 Slack) reads an export a person makes on a computer: a DiscordChatExporter folder, or the Slack workspace ZIP an admin downloads from Slack's admin pages in a desktop browser. A phone has no such file to hand and a workspace migration is an admin task at a desk. The group it creates, its emoji and its invites are ordinary, so mobile shows and accepts them like any other."
   },
   "mobile_only": {
     "version": "uniffi build/version probe used by the mobile diagnostics screen; desktop reads its version from Tauri.",

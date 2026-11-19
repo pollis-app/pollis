@@ -5,8 +5,8 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt as _;
 use pollis_delivery::db::Db;
 use pollis_delivery::messages::{
-    apply_delete_attachment, apply_register_attachment, object_is_referenced,
-    AttachmentDeleteBody, AttachmentRegisterBody,
+    apply_delete_attachment, apply_register_attachment, apply_release_attachment,
+    object_is_referenced, AttachmentDeleteBody, AttachmentRegisterBody, AttachmentReleaseBody,
 };
 use pollis_delivery::writes::WriteOutcome;
 use pollis_delivery::{build_router_with_state, AppState};
@@ -738,4 +738,63 @@ async fn the_put_substitution_gate_binds_the_first_uploader_too() {
         StatusCode::FORBIDDEN,
         "nobody may overwrite an object others still hold"
     );
+}
+
+async fn release_one(db: &Db, hash: &str, msg: &str, token: &str) {
+    let out = apply_release_attachment(
+        &db.conn().await.unwrap(),
+        Some("sender"),
+        &AttachmentReleaseBody {
+            content_hash: hash.into(),
+            message_id: msg.into(),
+            delete_token: token.into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok | WriteOutcome::Forbidden));
+}
+
+/// An edit that replaces a link-preview thumbnail (#1987) releases exactly that
+/// reference: the message, its other files, and other messages' references stay.
+#[tokio::test]
+async fn an_edit_releases_only_the_replaced_thumbnail() {
+    let db = fresh().await;
+    register_ref(&db, "old_thumb", "media/old_thumb.enc", "m1").await;
+    register_ref(&db, "photo", "media/photo.enc", "m1").await;
+    register_ref(&db, "old_thumb", "media/old_thumb.enc", "m2").await;
+
+    release_one(&db, "old_thumb", "m1", &token_of("m1")).await;
+
+    assert!(referenced(&db, "photo").await, "the message's attachment is untouched");
+    assert!(referenced(&db, "old_thumb").await, "m2 still holds the same object");
+
+    release_one(&db, "old_thumb", "m2", &token_of("m2")).await;
+    assert!(!referenced(&db, "old_thumb").await);
+    assert!(!object_exists(&db, "old_thumb").await, "unreferenced, it is marked for reclaim");
+}
+
+/// Without the message's own capability nothing is released, whoever asks.
+#[tokio::test]
+async fn a_release_without_the_capability_releases_nothing() {
+    let db = fresh().await;
+    register_ref(&db, "thumb", "media/thumb.enc", "m_victim").await;
+    register_ref(&db, "x", "media/x.enc", "m_attacker").await;
+    for token in ["", "guess", &token_of("m_attacker")] {
+        release_one(&db, "thumb", "m_victim", token).await;
+        assert!(referenced(&db, "thumb").await, "token {token:?} must not release it");
+        assert!(object_exists(&db, "thumb").await);
+    }
+}
+
+/// The capability still proves authorship after envelope GC took the envelope,
+/// and releasing twice is harmless.
+#[tokio::test]
+async fn a_release_works_after_envelope_gc_and_is_idempotent() {
+    let db = fresh().await;
+    register_ref(&db, "thumb", "media/thumb.enc", "m1").await;
+    collect_envelope(&db, "m1").await;
+    release_one(&db, "thumb", "m1", &token_of("m1")).await;
+    release_one(&db, "thumb", "m1", &token_of("m1")).await;
+    assert!(!referenced(&db, "thumb").await);
 }

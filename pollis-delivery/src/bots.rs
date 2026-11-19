@@ -1,5 +1,5 @@
 //! Bots (#1182): a bot is a user scoped to one group, and its hosts are its
-//! devices. Schema and the invalid states it refuses: migration `000052_bots.sql`.
+//! devices. Schema and the invalid states it refuses: migration `000053_bots.sql`.
 //!
 //! ## Pairing (first host = creation)
 //!
@@ -1199,7 +1199,7 @@ pub async fn apply_claim_trigger(
 // ---------------------------------------------------------------- App state (#2004)
 
 /// The most sealed App state one installation may hold. The schema enforces it
-/// too (`000053_bot_app_state.sql`); the manifest's `state.quota` is enforced by
+/// too (`000054_bot_app_state.sql`); the manifest's `state.quota` is enforced by
 /// the hosts on plaintext sizes, under this.
 pub const BOT_APP_STATE_MAX_BYTES: u64 = 1 << 20;
 /// The most sealed bytes one entry may hold (schema CHECK).

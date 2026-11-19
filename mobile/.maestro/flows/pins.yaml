@@ -14,17 +14,13 @@ tags:
 # sheet then offers "Unpin message"; a row tap returns to the conversation
 # with the message on screen; the list's Unpin empties it.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
 
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

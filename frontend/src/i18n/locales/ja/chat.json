@@ -123,6 +123,10 @@
     "loadDescription": "{{url}}からメディアを読み込みます。このサイトに直接接続するため、あなたのIPアドレスがサイトに知られます。",
     "openLabel": "{{url}}を開く"
   },
+  "linkPreview": {
+    "loading": "プレビューを読み込み中…",
+    "remove": "リンクプレビューを削除"
+  },
   "notify": {
     "newMessageTitle": "新しいメッセージ",
     "newMessageBody": "{{name}}：新しいメッセージ",

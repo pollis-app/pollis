@@ -21,6 +21,7 @@ members = [
     "pollis-app-manifest",
     "pollis-app-host",
     "pollis-app-dev",
+    "pollis-import",
     "patches/device-info",
 ]
 # Detached from this workspace on purpose: `fuzz/` is the Track-B cargo-fuzz crate

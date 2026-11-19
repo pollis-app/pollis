@@ -23,6 +23,8 @@ pub(crate) mod ds_reads;
 pub mod emoji;
 pub mod user;
 pub mod groups;
+/// Recreating another platform's community structure in a group (#1180).
+pub mod import;
 // Copy message history between two of one account's devices (#1735).
 pub mod history_transfer;
 pub mod messages;
@@ -33,6 +35,8 @@ pub mod livekit;
 #[cfg(not(feature = "realtime"))]
 #[path = "livekit_stub.rs"]
 pub mod livekit;
+// Sender-generated link previews (#1987).
+pub mod link_preview;
 // Pure wire-payload builders, outside the media gate so they test on every target.
 pub mod livekit_signalling;
 // Participant-identity grammar (#836); pure, outside the media gate.

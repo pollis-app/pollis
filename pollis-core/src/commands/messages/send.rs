@@ -54,6 +54,42 @@ pub async fn send_message_with_id(
     sender_username: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<Message> {
+    send_message_with_preview(
+        message_id,
+        conversation_id,
+        sender_id,
+        content,
+        attachments,
+        None,
+        reply_to_id,
+        thread_id,
+        sender_username,
+        state,
+    )
+    .await
+}
+
+/// [`send_message_with_id`] carrying the composer's link preview (#1987).
+///
+/// The draft is checked against `content` (`link_preview::outgoing`): a
+/// preview of a link that is not in the text is dropped, never sent. Its
+/// thumbnail is stored and uploaded with the message like an attachment.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_message_with_preview(
+    message_id: Option<String>,
+    conversation_id: String,
+    sender_id: String,
+    content: String,
+    attachments: Vec<OutgoingAttachment>,
+    link_preview: Option<crate::commands::link_preview::LinkPreviewDraft>,
+    reply_to_id: Option<String>,
+    thread_id: Option<String>,
+    sender_username: Option<String>,
+    state: &Arc<AppState>,
+) -> Result<Message> {
+    let outgoing = link_preview
+        .as_ref()
+        .and_then(|draft| crate::commands::link_preview::outgoing(draft, &content));
     let id = match message_id {
         Some(id) => super::outbox::checked_message_id(id)?,
         None => Ulid::new().to_string(),
@@ -66,6 +102,9 @@ pub async fn send_message_with_id(
         reply_to_id,
         thread_id,
         sent_at: super::envelope_sent_at(),
+        link_preview: outgoing
+            .as_ref()
+            .map(|o| crate::commands::link_preview::wire::to_stored(&o.preview)),
     };
     // Also before the first await: iOS gives the app background time to finish this send
     // before it is suspended (`notify::lock::suspend::enter`), so the user may leave the app
@@ -74,8 +113,18 @@ pub async fn send_message_with_id(
     // Before the first await (#1636): the stamp above is this send's place in its
     // conversation, and no delivery may pass it until its row is written.
     let ticket = super::outbox::EnqueueTicket::begin(state, &queued);
-    let enqueued = super::outbox::enqueue(state, &queued, attachments).await;
+    let enqueued = super::outbox::enqueue(
+        state,
+        &queued,
+        attachments,
+        outgoing.as_ref().and_then(|o| o.thumbnail.as_ref()),
+    )
+    .await;
     drop(ticket);
+    // The outbox holds its own copy of the thumbnail now.
+    if let Some(draft) = &link_preview {
+        crate::commands::link_preview::release_draft(draft);
+    }
     if let super::outbox::Enqueued::AlreadySent(message) = enqueued? {
         return Ok(message);
     }
@@ -84,6 +133,21 @@ pub async fn send_message_with_id(
         return Err(test_hooks::simulated_crash());
     }
     super::outbox::deliver(state, &queued.id, sender_username).await
+}
+
+/// The plaintext a message is sealed as: text padded to a size bucket (#331)
+/// with its thread (#825) and link-preview (#1987) trailers. An attachment
+/// envelope with neither trailer stays unpadded, as it always has.
+pub(super) fn frame_plaintext(
+    content: &str,
+    thread_id: Option<&str>,
+    preview: Option<&crate::commands::link_preview::LinkPreview>,
+) -> Vec<u8> {
+    let trailer = preview.map(crate::commands::link_preview::wire::encode);
+    if thread_id.is_none() && trailer.is_none() && super::edit_delete::is_attachment_content(content) {
+        return content.as_bytes().to_vec();
+    }
+    super::framing::pad_with_trailers(content.as_bytes(), thread_id, trailer.as_deref())
 }
 
 /// Deliver one queued message (the outbox already holds the local row).
@@ -104,6 +168,7 @@ pub(super) async fn deliver_queued(
         reply_to_id,
         thread_id,
         sent_at,
+        link_preview,
     } = queued.clone();
     state.check_not_outdated()?;
 
@@ -182,14 +247,11 @@ pub(super) async fn deliver_queued(
     // The custom-emoji use rule (#848, #1808), before the first seal fixes the text.
     let content = apply_emoji_rule(state, &id, content).await?;
 
-    // Pad text to a size bucket (#331); attachments stay unpadded unless threaded (#825), whose id rides the frame.
-    let plaintext: Vec<u8> = match thread_id.as_deref() {
-        Some(thread) => super::framing::pad_threaded(content.as_bytes(), thread),
-        None if super::edit_delete::is_attachment_content(&content) => {
-            content.as_bytes().to_vec()
-        }
-        None => super::framing::pad(content.as_bytes()),
-    };
+    // The link preview (#1987), re-checked against the text as it will be sent.
+    let preview = link_preview
+        .as_deref()
+        .and_then(|json| crate::commands::link_preview::wire::from_stored(json, &content));
+    let plaintext = frame_plaintext(&content, thread_id.as_deref(), preview.as_ref());
 
     // #1079: serialize behind any committer on this device before sealing — see
     // `seal::seal_under_lock`; released before the post's own catch-up can want it.
@@ -298,6 +360,10 @@ pub(super) async fn deliver_queued(
     // Register attachment references (#690) so the DS refcounts objects. Best-effort.
     if super::edit_delete::is_attachment_content(&content) {
         let _ = super::edit_delete::register_attachment_refs(state, &id, &content).await;
+    }
+    // The preview's thumbnail is released with the message the same way (#1987).
+    if let Some(image) = preview.as_ref().and_then(|p| p.image.as_ref()) {
+        let _ = super::edit_delete::register_refs(state, &id, vec![super::edit_delete::preview_ref(image)]).await;
     }
 
     // Notify via LiveKit (non-fatal); the wake-up carries routing only, no sender.

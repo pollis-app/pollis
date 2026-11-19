@@ -6,8 +6,8 @@
 > (`pollis-core/src/commands/messages/watermark.rs`, I3); the Kani gate +
 > canonicalization proofs `may_rejoin` / `resolve` / `classify`
 > (`pollis-core/src/commands/mls/invariants.rs`, I5/I2/I1), each paired with a
-> `should_panic` mutant certifying teeth; and the nightly `schedule:` marathon
-> soak with one-step failing-op-sequence → regression promotion. **M4/M5 have now
+> `should_panic` mutant certifying teeth; and the on-demand marathon soak
+> (`mls-flows.yml`) with one-step failing-op-sequence → regression promotion. **M4/M5 have now
 > landed (#481):** TLA+ exhaustive models for both the delivery/retention machine
 > (Spec B, `specs/tla/Delivery.tla`, I3+I4) and the commit-log epoch machine
 > (Spec A, `specs/tla/CommitLog.tla`, I1+I2) — each sound + a refuting teeth
@@ -125,9 +125,10 @@ work is.
   (`pollis-core/src/commands/messages/watermark.rs`).
 - ✅ **M2 — Kani gate + canonicalization (I5/I2/I1)**: `may_rejoin` / `resolve` /
   `classify` proofs (`pollis-core/src/commands/mls/invariants.rs`).
-- ✅ **M3 — continuous soak (Track A)**: the marathon runs nightly on a
-  `schedule:` and a failing op sequence is captured as a durable CI artifact for
-  one-step promotion to a deterministic regression — see §5.4.
+- ✅ **M3 — soak (Track A)**: the marathon runs on demand
+  (`.github/workflows/mls-flows.yml`; it ran nightly until #2022) and a failing
+  op sequence is captured as a durable CI artifact for one-step promotion to a
+  deterministic regression — see §5.4.
 
 **M4 and M5 are now landed (#481).** M5 Spec B (TLA+ Delivery / retention, I3+I4,
 `specs/tla/Delivery.tla`) was authored ahead of the #539 retention-floor code per
@@ -431,14 +432,15 @@ soak/OSS-Fuzz failure
 
 ### 5.4 M3 — the continuous soak + one-step promotion (IMPLEMENTED)
 
-Track A is now wired into CI. The marathon soak
-(`model_marathon_convergence`, `src-tauri/tests/flows/model.rs`) runs on a
-**nightly `schedule:`** in `.github/workflows/mls-tests.yml` (07:23 UTC) at a
-meaningful size — **`MARATHON_OPS=500`, `MARATHON_ACTORS=8`** — in addition to
-the existing manual `workflow_dispatch`. The scheduled run has no dispatch
-inputs, so the step's `${{ github.event.inputs.marathon_ops || '500' }}` /
-`|| '8'` fallbacks pin the nightly size; a manual dispatch still uses its own
-inputs (300/6 defaults). A marathon failure fails the job **red** (the run is
+Track A is wired into CI as an on-demand job. The marathon soak
+(`model_marathon_convergence`, `src-tauri/tests/flows/model.rs`) is the
+`marathon` job of `.github/workflows/mls-flows.yml`, run by
+`workflow_dispatch` with `marathon_ops` / `marathon_actors` inputs (300/6
+defaults; 500/8 is the size the old nightly used). It ran on a nightly
+`schedule:` in `mls-tests.yml` until #2022 made CI unit and smoke checks only;
+locally it is `MARATHON_OPS=500 MARATHON_ACTORS=8 cargo test --features
+test-harness --test flows -- --ignored --nocapture model_marathon_convergence`
+from `src-tauri/`. A marathon failure fails the job **red** (the run is
 `set -o pipefail`-guarded so the `tee` can't swallow the non-zero exit) — no
 silent green.
 
@@ -458,7 +460,7 @@ promotion, not automation.
 
 **One-step promotion (soak failure → permanent regression).**
 
-1. Open the failed nightly run, download the `marathon-failing-op-sequence`
+1. Open the failed `mls-flows.yml` run, download the `marathon-failing-op-sequence`
    artifact, and read `marathon-failing-op-sequence.txt`. It contains the exact
    `Op` vector, e.g. `op sequence (500 ops): [Send(0), Add(1), Fault(1),
    Remove(1), Sync(2), ...]`.

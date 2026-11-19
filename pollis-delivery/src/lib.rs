@@ -19,6 +19,7 @@ pub mod bootstrap;
 pub mod bots;
 pub mod bot_apps;
 pub mod broker;
+pub mod channel_order;
 pub mod cert;
 pub mod client_policy;
 pub mod commit;
@@ -326,6 +327,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<messages::EnvelopeGcBody as DsRequest>::PATH, post(messages::envelope_gc))
         .route(<messages::AttachmentRegisterBody as DsRequest>::PATH, post(messages::register_attachment))
         .route(<messages::AttachmentDeleteBody as DsRequest>::PATH, post(messages::delete_attachment))
+        .route(<messages::AttachmentReleaseBody as DsRequest>::PATH, post(messages::release_attachment))
         // Domain B (#419) — groups / channels / membership / invites / join-requests.
         .route(<groups::CreateGroupBody as DsRequest>::PATH, post(groups::create_group))
         .route(<groups::UpdateGroupBody as DsRequest>::PATH, post(groups::update_group))
@@ -334,6 +336,12 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<groups::CreateChannelBody as DsRequest>::PATH, post(groups::create_channel))
         .route(<groups::UpdateChannelBody as DsRequest>::PATH, post(groups::update_channel))
         .route(<groups::DeleteChannelBody as DsRequest>::PATH, post(groups::delete_channel))
+        // Channel categories and order (#2031).
+        .route(<channel_order::MoveChannelBody as DsRequest>::PATH, post(channel_order::move_channel))
+        .route(<channel_order::CreateChannelCategoryBody as DsRequest>::PATH, post(channel_order::create_category))
+        .route(<channel_order::RenameChannelCategoryBody as DsRequest>::PATH, post(channel_order::rename_category))
+        .route(<channel_order::DeleteChannelCategoryBody as DsRequest>::PATH, post(channel_order::delete_category))
+        .route(<channel_order::MoveChannelCategoryBody as DsRequest>::PATH, post(channel_order::move_category))
         .route(<groups::RemoveMemberBody as DsRequest>::PATH, post(groups::remove_member))
         .route(<groups::SetMemberRoleBody as DsRequest>::PATH, post(groups::set_member_role))
         .route(<groups::CreateInviteBody as DsRequest>::PATH, post(groups::create_invite))

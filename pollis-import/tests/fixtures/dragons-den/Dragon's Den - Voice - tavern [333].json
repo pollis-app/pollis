@@ -1,0 +1,55 @@
+{
+ "guild": {
+  "id": "900000000000000001",
+  "name": "Dragon's Den",
+  "iconUrl": "icon.png"
+ },
+ "channel": {
+  "id": "333",
+  "type": "GuildVoiceChat",
+  "categoryId": null,
+  "category": null,
+  "name": "tavern",
+  "topic": null
+ },
+ "messages": [
+  {
+   "id": "926927762227200000",
+   "type": "Default",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "brb",
+   "author": {
+    "id": "101",
+    "name": "ashley",
+    "discriminator": "0000",
+    "nickname": "Ash the Bard",
+    "color": null,
+    "isBot": false,
+    "roles": [
+     {
+      "id": "802",
+      "name": "Players",
+      "color": null,
+      "position": 2
+     },
+     {
+      "id": "803",
+      "name": "Bard",
+      "color": null,
+      "position": 1
+     }
+    ],
+    "avatarUrl": "avatars/ashley.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [],
+   "inlineEmojis": []
+  }
+ ]
+}

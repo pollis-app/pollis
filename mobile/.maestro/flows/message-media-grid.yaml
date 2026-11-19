@@ -9,16 +9,12 @@ tags:
 # stacked full-width. Shot 01 is the review gallery for the layout.
 # Self-contained: a fresh disposable account, no peer.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
-- tapOn:
-    id: "btn-create-group"
+- runFlow: ../subflows/open-create-group.yaml
 - tapOn:
     id: "toggle-general-channel"
 - tapOn:

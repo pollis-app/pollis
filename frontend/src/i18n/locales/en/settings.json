@@ -119,6 +119,12 @@
     "itemStrict": "<mode>Strict</mode> — Only connect through the relay. If no relay is reachable, sending is paused rather than revealing your IP.",
     "applyError": "Couldn't apply relay mode: {{error}} — currently {{mode}}."
   },
+  "linkPreviews": {
+    "heading": "Link previews",
+    "label": "Generate link previews",
+    "description": "When you send a link, Pollis fetches the page from this device to build a preview. The site sees your IP address, as if you'd opened it. People you send to never contact the site.",
+    "strictNote": "Strict network privacy turns link previews off."
+  },
   "relayServing": {
     "heading": "Run a relay for others",
     "intro": "A separate choice from the setting above. That one decides whether <dim>your</dim> traffic goes through a relay. This one decides whether <dim>other people's</dim> traffic goes through <dim>your device</dim>. Turning on either never turns on the other.",

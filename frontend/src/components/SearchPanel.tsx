@@ -187,6 +187,8 @@ const PAGE_RESULTS: PageResultSpec[] = [
   { id: "page-groups", nameKey: "pages.groupsName", keywordsKey: "pages.groupsKeywords", breadcrumb: "/groups", path: "/groups" },
   { id: "page-groups-new", nameKey: "pages.groupsNewName", keywordsKey: "pages.groupsNewKeywords", breadcrumb: "/groups/new", path: "/groups/new" },
   { id: "page-groups-search", nameKey: "pages.groupsSearchName", keywordsKey: "pages.groupsSearchKeywords", breadcrumb: "/groups/search", path: "/groups/search" },
+  { id: "page-groups-import", nameKey: "pages.groupsImportName", keywordsKey: "pages.groupsImportKeywords", breadcrumb: "/groups/import", path: "/groups/import" },
+  { id: "page-groups-import-slack", nameKey: "pages.groupsImportSlackName", keywordsKey: "pages.groupsImportSlackKeywords", breadcrumb: "/groups/import/slack", path: "/groups/import/slack" },
   { id: "page-saved", nameKey: "pages.savedName", keywordsKey: "pages.savedKeywords", breadcrumb: "/saved", path: "/saved" },
   { id: "page-search", nameKey: "pages.searchName", keywordsKey: "pages.searchKeywords", breadcrumb: "/search", path: "/search" },
   { id: "page-vault", nameKey: "pages.vaultName", keywordsKey: "pages.vaultKeywords", breadcrumb: "/vault", path: "/vault" },

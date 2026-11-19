@@ -89,6 +89,9 @@ import {
   Plane,
   Lightbulb,
   type LucideIcon,
+  Folder,
+  FolderPlus,
+  Menu,
 } from "lucide-react-native";
 import { I18nManager, View } from "react-native";
 import { semantic } from "../theme/tokens";
@@ -167,6 +170,10 @@ export const Icon = {
 
   /* ── Objects ── */
   hash: wrap(Hash, 14),
+  // Channel categories (#2031): a category, a new one, and Edit mode's drag handle (≡).
+  folder: wrap(Folder, 14),
+  folderPlus: wrap(FolderPlus),
+  dragHandle: wrap(Menu),
   at: wrap(AtSign, 14),
   people: wrap(Users, 14),
   bell: wrap(Bell, 14),

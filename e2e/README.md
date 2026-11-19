@@ -20,6 +20,13 @@ pnpm --filter @pollis/e2e e2e:ui                 # all Playwright UI specs
 pnpm --filter @pollis/e2e e2e:ui mentions        # just the mentions spec
 ```
 
+**Neither suite runs automatically in CI (#2022).** CI runs unit tests and
+smoke/build checks only. Before merging a change, run the specs and scenarios
+that cover it locally (and the Maestro flows on-device for anything mobile
+reaches) and state the results in the PR. Both suites have
+`workflow_dispatch`-only workflows for a full run on a CI runner — see
+[CI](#ci) below.
+
 Both `.spec.js` and `.spec.ts` are picked up by the one config.
 
 | spec | what it proves |
@@ -51,6 +58,9 @@ Both `.spec.js` and `.spec.ts` are picked up by the one config.
 | `dm-activity-order.spec.ts` | DM list order (#1838) in BOTH skins: the sidebar lists DMs by latest activity (newest local message, else creation time) whatever order the DS returned, sending into the oldest DM moves it to the top for the sender, a `new_message` wake that stored a message moves its DM to the top for the receiver, a receipt wake moves nothing, and none of it re-reads `list_dm_channels` |
 | `typing-indicator.spec.ts` | Typing indicator (#1635): a peer's `typing` reads "bob is typing…" / "ann and bob are typing…" over the composer and clears on stop, the user's own other device never shows, and typing in the composer publishes one throttled start and one stop when the draft is cleared |
 | `empty-states.spec.ts` | One empty-state treatment (#1969) in BOTH skins: Blocked users, Saved and DM requests with nothing in them each show one `EmptyState` sentence, centred both ways in the pane (not a top-left line of body text), in the skin's muted ink |
+| `link-previews.spec.ts` | Sender-generated link previews (#1987): a pasted link shows the loading card on the same frame then the card, × keeps that link unpreviewed for the draft, a typed link previews after the pause and the sent message keeps the card, sending while it loads sends at once with none, a received card opens the body link and one whose URL is not in the body is not drawn, the edit bar previews and an edit dropping the link drops the card, the setting off fetches nothing, strict network privacy shows the switch off and disabled with its note, a DM request shows only the bare link until accepted, an image link keeps its click-to-load unfurl with no card, and the Terminal look neither draws nor fetches. `LINK_PREVIEW_SHOTS=<dir>` writes review screenshots |
+| `discord-import.spec.ts` | Discord import (#1180) in BOTH skins: the page from Groups, the dry run of the fixture guild (layout by category, the private channel and every dropped overwrite, emoji renames and skips, roles collapsed, people to invite with no emails), nothing written by reading, Import builds the group in Discord's order with an invite link, a second run targets that group and adds nothing, switching to a new group re-plans, a cancelled picker and a failed import, the CSV invite sheet. `POLLIS_SHOTS=<dir>` writes review screenshots |
+| `slack-import.spec.ts` | Slack import (#1179) in BOTH skins: the page from Groups, the dry run of the fixture workspace (one block with no categories, purpose and topic as descriptions, the private channel called out, archived channels and DMs listed as not imported, emoji collisions and aliases, user groups listed only, people with emails, admins and rosters), nothing written by reading, Import builds the group in Slack's order and invites only the account that exists, a second run adds nothing and invites nobody twice, archived channels on request, invites switched off, an unpacked folder and a failed import, the CSV sheet with emails. `POLLIS_SHOTS=<dir>` writes review screenshots |
 | `terminal-attachment-indent.spec.ts` | Terminal skin (#1489): picture strips, file rows and reaction pills start at the message text column after `name :`, not the timestamp — for a multi-attachment row, consecutive same-sender rows and a reply |
 
 First run needs the browser once: `pnpm --filter @pollis/e2e exec playwright install chromium`.
@@ -79,6 +89,7 @@ entry point (see below):
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
 | `two-client-dm-reply.js` | bidirectional 1:1 DM — B replies and A sees it (reverse leg of two-client) | yes | yes (writable) |
 | `two-client-delete.js` | delete-for-everyone — after A's DM converges into B, A deletes it and B's already-delivered copy flips to "Message deleted" (E2EE redaction) | yes | yes (writable) |
+| `two-client-link-preview.js` | link previews (#1987) — A's core builds a preview (real fetch) and B draws the card from the message; an edit to another link shows the new card in both windows; delete-for-everyone takes it in both; then B → A. Image-less pages, since this backend has no object storage | yes | yes (writable) |
 | `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
 | `bots-real.js` | Bots (#1182) with the real `pollis-bot` binary as hosts: pair, install and approve the alerts App (#2007), webhook (bearer + HMAC), second host + revoke, reboot (`run --once`, `run`), group teardown deletes the bot. Needs `cargo build -p pollis-bot` | yes | yes (writable) |
 | `bots-milestone.js` | The bots milestone (#2006): `pollis app new` → edit → `test` → `dev` (developer key approved, a member's `/ping` answered, live rebuild on save) → `build` → `run` (admin approves the hash), a widening update waits for re-approval, a non-widening one from the same source runs with no admin. Needs `cargo build -p pollis -p pollis-bot -p pollis-app-dev` and the SDK built (`sdk/ts`) | yes | yes (writable) |
@@ -102,6 +113,7 @@ pnpm --filter @pollis/e2e e2e restart-persistence       # account persists acros
 pnpm --filter @pollis/e2e e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
 pnpm --filter @pollis/e2e e2e two-client-dm-reply       # bidirectional DM (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-delete         # delete-for-everyone redaction (needs backend)
+pnpm --filter @pollis/e2e e2e two-client-link-preview   # link-preview cards: send, edit, delete in both windows (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-channel        # group text-channel convergence (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-voice-channel  # group voice join/leave (needs backend + LiveKit + audio)
 pnpm --filter @pollis/e2e e2e voice-removal-frame-keys  # removed member's frame keys (needs backend + LiveKit + audio; app built with --features pollis/e2e-hooks)
@@ -635,6 +647,10 @@ duplicated):
 
 ## CI
 
+Every workflow here is `workflow_dispatch`-only: nothing in this directory runs
+on a PR, push or schedule (#2022). `.github/workflows/e2e-browser.yml` runs the
+Playwright UI specs, sharded four ways; the rest drive the WebDriver scenarios.
+
 `.github/workflows/e2e-smoke.yml` runs `smoke.js` on Linux, triggered
 manually (`workflow_dispatch`) — not on every push, since it needs a real
 (virtual) display and a full `cargo build`, both slower than the rest of CI.
@@ -664,6 +680,7 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `two-client.js` | `e2e-two-client.yml` | — |
 | `two-client-dm-reply.js` | `e2e-two-client-dm-reply.yml` | — |
 | `two-client-delete.js` | `e2e-two-client-delete.yml` | — |
+| `two-client-link-preview.js` | `e2e-two-client-link-preview.yml` | network to example.com/.org/.net |
 | `two-client-channel.js` | `e2e-two-client-channel.yml` | — |
 | `two-client-voice-channel.js` | `e2e-two-client-voice-channel.yml` | LiveKit + audio |
 | `voice-removal-frame-keys.js` | `e2e-two-client-voice-channel.yml` (second step) | LiveKit + audio, `pollis/e2e-hooks` build |
@@ -673,6 +690,6 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `voice-channel-no-mic.js` | `e2e-voice-channel-no-mic.yml` | LiveKit + audio (`POLLIS_DISABLE_MIC=1`) |
 | `vault-search-style.spec.ts` | Vault, search and chrome style in BOTH skins, asserted on COMPUTED styles rather than class strings: the vault composer draws one border and adds no padding of its own, the Chat/Media toggle is rounded, the empty state takes the skin's own face (and therefore differs between skins), both vault placeholders resolve to the same face/size/weight, hover highlights carry no non-zero background transition, a search hit renders custom emoji as an image instead of its `<:name:hash>` source, the search box is the shared `TextInput`, the sidebar has no Search Messages row, and the voice bar names nobody when the only identities present are your own devices |
 
-None run automatically. Wiring a cheap PR tier + a nightly full tier is the
-remaining piece of #570 M4 (deferred on cost); until then, dispatch them from
-the Actions tab after touching MLS delivery, DMs, the DS, or media.
+None run automatically, by design (#2022): run the scenarios a change touches
+locally before merging it, or dispatch them from the Actions tab, after
+touching MLS delivery, DMs, the DS, or media.

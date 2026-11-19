@@ -1,6 +1,15 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - fresh-account
+# Back online whatever happened: a failure while offline must not leave the
+# device in airplane mode for the flows after this one (#2029).
+onFlowComplete:
+  - runFlow:
+      when:
+        platform: Android
+      commands:
+        - setAirplaneMode: disabled
 ---
 # VAULT SAVE (#1497) — a big entry saves, and a save that cannot is honest
 # about it and retryable. Against the dev DS on a Release build.
@@ -17,7 +26,10 @@ tags:
 #
 # Self-contained: a fresh disposable account, no peer.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "vault-retry"
 - tapOn:
     id: "tab-direct"
 - tapOn:

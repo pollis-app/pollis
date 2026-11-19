@@ -175,6 +175,7 @@ endpoints! {
     Operator messages::EnvelopeGcBody           => "/v1/envelopes/gc",                   StatusOk;
     Client   messages::AttachmentRegisterBody   => "/v1/attachments/register",           StatusOk, idempotent;
     Client   messages::AttachmentDeleteBody     => "/v1/attachments/delete",             StatusOk;
+    Client   messages::AttachmentReleaseBody    => "/v1/attachments/release",            StatusOk, idempotent;
 
     Client   groups::CreateGroupBody            => "/v1/groups/create",                  StatusOk;
     Client   groups::UpdateGroupBody            => "/v1/groups/update",                  groups::UpdatedGroup;
@@ -183,6 +184,11 @@ endpoints! {
     Client   groups::CreateChannelBody          => "/v1/channels/create",                StatusOk;
     Client   groups::UpdateChannelBody          => "/v1/channels/update",                groups::UpdatedChannel;
     Client   groups::DeleteChannelBody          => "/v1/channels/delete",                StatusOk;
+    Client   groups::MoveChannelBody            => "/v1/channels/move",                  StatusOk;
+    Client   groups::CreateChannelCategoryBody  => "/v1/channel-categories/create",      StatusOk;
+    Client   groups::RenameChannelCategoryBody  => "/v1/channel-categories/rename",      StatusOk;
+    Client   groups::DeleteChannelCategoryBody  => "/v1/channel-categories/delete",      StatusOk;
+    Client   groups::MoveChannelCategoryBody    => "/v1/channel-categories/move",        StatusOk;
     Client   groups::RemoveMemberBody           => "/v1/members/remove",                 StatusOk;
     Client   groups::SetMemberRoleBody          => "/v1/members/role",                   StatusOk;
     Client   groups::CreateInviteBody           => "/v1/invites/create",                 groups::InviteCreated;

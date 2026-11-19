@@ -31,6 +31,8 @@ mod device_link;
 mod device_outside_tree;
 #[path = "flows/device_unlock.rs"]
 mod device_unlock;
+#[path = "flows/discord_import.rs"]
+mod discord_import;
 #[path = "flows/dms.rs"]
 mod dms;
 #[path = "flows/ds_surface.rs"]
@@ -46,6 +48,8 @@ mod history_transfer;
 // Tests the harness's own sqlite3, not the product.
 #[path = "flows/linked_sqlite.rs"]
 mod linked_sqlite;
+#[path = "flows/link_preview.rs"]
+mod link_preview;
 #[path = "flows/lost_messages.rs"]
 mod lost_messages;
 #[path = "flows/messages.rs"]
@@ -80,6 +84,8 @@ mod reports;
 mod sealed_sender;
 #[path = "flows/security.rs"]
 mod security;
+#[path = "flows/slack_import.rs"]
+mod slack_import;
 #[path = "flows/vault.rs"]
 mod vault;
 #[path = "flows/zero_loss.rs"]

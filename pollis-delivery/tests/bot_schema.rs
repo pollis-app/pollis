@@ -1,5 +1,5 @@
 //! #1182 — the schema refuses every invalid bot state, by direct SQL with no
-//! pollis-delivery code in the path (migration `000052_bots.sql`).
+//! pollis-delivery code in the path (migration `000053_bots.sql`).
 //!
 //! Each test builds the state through the documented insert order and then
 //! attempts one invalid write, asserting the database itself refuses it.

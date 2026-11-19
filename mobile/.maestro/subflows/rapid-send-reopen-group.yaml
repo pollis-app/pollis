@@ -20,11 +20,7 @@ appId: ${MAESTRO_APP_ID}
     visible:
       id: "tab-groups"
     timeout: 240000
-- tapOn:
-    id: "tab-groups"
-- tapOn:
-    text: "${GROUP}.*"
-    index: 0
+- runFlow: open-group.yaml
 - tapOn:
     text: "General"
     optional: true

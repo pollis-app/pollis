@@ -1,0 +1,48 @@
+appId: ${MAESTRO_APP_ID}
+---
+# The first step of every flow that uses the run's shared account (#2029):
+# relaunch the app WITHOUT clearing its state, unlock it with the PIN and stand
+# on the tab bar with no sheet open. The account comes from setup/setup.yaml,
+# which maestro-run.sh runs once per device before these flows, so a flow pays
+# for a relaunch and an unlock instead of a sign-up.
+#
+# A signed-out app (a flow run with a bare `maestro test` and no setup) signs
+# MAESTRO_EMAIL up here instead, so every flow file still runs on its own.
+# A flow that failed while offline (outbox, media-recovery, vault-retry switch
+# airplane mode on Android) must not take the network from the ones after it.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - setAirplaneMode: disabled
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin|screen-auth-email|tab-groups"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: enter-pin.yaml
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-email"
+    file: sign-in.yaml
+    env:
+      KEEP_STATE: "true"
+- extendedWaitUntil:
+    visible:
+      id: "tab-groups"
+    timeout: 30000
+# A sheet that survived the relaunch (none should) would cover the tab bar.
+- runFlow:
+    when:
+      visible:
+        id: "btn-sheet-close"
+    commands:
+      - tapOn:
+          id: "btn-sheet-close"

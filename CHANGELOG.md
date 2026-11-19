@@ -23,6 +23,26 @@ tag date, UTC.
 
 ---
 
+## v1.19.18 — 2026-11-18
+
+- **Link previews for www. links.** A link written without `https://`, such as
+  `www.example.com`, now keeps its preview card when you send it and when
+  others receive it.
+
+## v1.19.17 — 2026-11-18
+
+- **A different name and picture in each group.** You can now show a separate
+  display name and profile picture in any group. Your @handle stays the same
+  and is shown beside the name, and everywhere outside that group (direct
+  messages included) you keep your main profile. Profile → Group aliases lists
+  every group: change one, apply a name or picture to all of them at once, or
+  go back to your main profile. Group admins can reset a member's alias.
+- **Link previews.** A link in a message shows a card with the page's title,
+  description and picture. Your app fetches the preview when you send, so the
+  people reading never contact the linked site, and the server only sees an
+  encrypted message. Editing the link updates the card; deleting the message
+  removes it for everyone.
+
 ## v1.19.16 — 2026-11-17
 
 - **Real device names on Linux.** The microphone and speaker pickers list your

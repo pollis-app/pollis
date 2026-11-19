@@ -1,0 +1,100 @@
+{
+ "guild": {
+  "id": "900000000000000001",
+  "name": "Dragon's Den",
+  "iconUrl": "Dragon's Den_files/icon.png"
+ },
+ "channel": {
+  "id": "222",
+  "type": "GuildTextChat",
+  "categoryId": "51",
+  "category": "Text Channels",
+  "name": "general",
+  "topic": ""
+ },
+ "messages": [
+  {
+   "id": "617810912870400000",
+   "type": "Default",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "first!",
+   "author": {
+    "id": "102",
+    "name": "rob",
+    "discriminator": "0000",
+    "nickname": null,
+    "color": null,
+    "isBot": false,
+    "roles": [],
+    "avatarUrl": "avatars/rob.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [],
+   "inlineEmojis": [
+    {
+     "id": "702",
+     "name": "x",
+     "code": "x",
+     "isAnimated": false,
+     "imageUrl": "emoji/x.png"
+    }
+   ]
+  },
+  {
+   "id": "1301999203123200000",
+   "type": "Default",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "Rolled 1d20: 17",
+   "author": {
+    "id": "103",
+    "name": "Avrae",
+    "discriminator": "0000",
+    "nickname": null,
+    "color": null,
+    "isBot": true,
+    "roles": [],
+    "avatarUrl": "avatars/Avrae.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [],
+   "inlineEmojis": []
+  },
+  {
+   "id": "1302361590988800000",
+   "type": "GuildMemberJoin",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "",
+   "author": {
+    "id": "100",
+    "name": "dan",
+    "discriminator": "0000",
+    "nickname": "DM Dan",
+    "color": null,
+    "isBot": false,
+    "roles": [],
+    "avatarUrl": "avatars/dan.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [],
+   "inlineEmojis": []
+  }
+ ]
+}

@@ -517,6 +517,7 @@ mod tests {
             undecryptable: false,
             send_state: None,
             edit_state: None,
+            link_preview: None,
         }
     }
 

@@ -1,0 +1,23 @@
+New
+• Links in messages show a preview with the page title and picture. Turn it off in Preferences.
+• Choose a different name and picture for each group, in Self → Group aliases.
+• 17 more languages, including Korean, Japanese, Hindi, Urdu, Bengali, Portuguese and Swahili.
+• Language has its own page in Self.
+• An invite link shows the name of the group before you join.
+• Searching from a group searches only that group.
+• Several pictures in one message show as a grid.
+• The emoji picker has category tabs and starts with the most common faces.
+
+Fixes
+• Message notifications arrive faster.
+• Unlocking the app and joining a group are faster.
+• Approving a join request shows its progress and no longer waits.
+• Deleted messages say "Message deleted" instead of leaving an empty row.
+• Messages that can't be read say "Couldn't decrypt".
+• Errors from the server read as a plain sentence.
+• Korean text wraps between words, not inside them.
+• Long usernames fit in lists.
+• Sign out asks in a sheet that matches the app.
+• Empty screens explain what goes there and how to start.
+• The Delete button in group settings shows its icon clearly.
+• Reliability improvements.

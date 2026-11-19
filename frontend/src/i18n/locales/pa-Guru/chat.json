@@ -134,6 +134,10 @@
     "loadDescription": "{{url}} ਤੋਂ ਮੀਡੀਆ ਲੋਡ ਕਰੋ। ਇਹ ਉਸ ਸਾਈਟ ਨਾਲ ਸਿੱਧਾ ਸੰਪਰਕ ਕਰਦਾ ਹੈ ਅਤੇ ਤੁਹਾਡਾ IP ਪਤਾ ਉਸਨੂੰ ਦੱਸ ਦਿੰਦਾ ਹੈ।",
     "openLabel": "{{url}} ਖੋਲ੍ਹੋ"
   },
+  "linkPreview": {
+    "loading": "ਝਲਕ ਲੋਡ ਹੋ ਰਹੀ ਹੈ…",
+    "remove": "ਲਿੰਕ ਦੀ ਝਲਕ ਹਟਾਓ"
+  },
   "notify": {
     "newMessageTitle": "ਨਵਾਂ ਸੁਨੇਹਾ",
     "newMessageBody": "{{name}}: ਨਵਾਂ ਸੁਨੇਹਾ",

@@ -19,7 +19,11 @@ pub mod emoji;
 pub mod groups;
 // Copy message history between two of one account's devices (#1735).
 pub mod history_transfer;
+// Recreating a Discord server's structure in a group (#1180).
+pub mod import;
 pub mod install_kind;
+// Sender-generated link previews (#1987).
+pub mod link_preview;
 // OS media permissions: shell-runtime only, never touches pollis-core.
 #[cfg(feature = "native-shell")]
 pub mod media_permissions;

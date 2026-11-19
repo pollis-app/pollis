@@ -1,0 +1,59 @@
+[
+  {
+    "type": "message",
+    "user": "U04DEV",
+    "text": "<@U04DEV> has joined the channel",
+    "ts": "1704700800.000100",
+    "subtype": "channel_join"
+  },
+  {
+    "type": "message",
+    "user": "U01ANA",
+    "text": "Welcome everyone :party-parrot: offsite details soon",
+    "ts": "1704704400.000200",
+    "reactions": [
+      {
+        "name": "shipit",
+        "users": [
+          "U02BEN",
+          "U03CHO",
+          "U07JO"
+        ],
+        "count": 3
+      },
+      {
+        "name": "tada",
+        "users": [
+          "U05EVA"
+        ],
+        "count": 1
+      }
+    ],
+    "pinned_to": [
+      "C02GEN"
+    ]
+  },
+  {
+    "type": "message",
+    "user": "U02BEN",
+    "text": "agenda draft attached",
+    "ts": "1704708000.000300",
+    "subtype": "file_share",
+    "files": [
+      {
+        "id": "F01AGENDA",
+        "name": "agenda.pdf",
+        "size": 48213,
+        "url_private": "https://files.slack.com/files-pri/T0NW1ND00-F01AGENDA/agenda.pdf"
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "user": "U03CHO",
+    "text": "can we do a thread for travel?",
+    "ts": "1704711600.000400",
+    "thread_ts": "1704708000.000300",
+    "parent_user_id": "U02BEN"
+  }
+]

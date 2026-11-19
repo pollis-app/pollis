@@ -1,0 +1,246 @@
+{
+ "guild": {
+  "id": "900000000000000001",
+  "name": "Dragon's Den",
+  "iconUrl": "icon.png"
+ },
+ "channel": {
+  "id": "111",
+  "type": "GuildTextChat",
+  "categoryId": "50",
+  "category": "Campaign",
+  "name": "session-notes",
+  "topic": "Recaps after every session"
+ },
+ "messages": [
+  {
+   "id": "717105188044800000",
+   "type": "Default",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": true,
+   "content": "Session 1 recap: the party meets in a tavern.",
+   "author": {
+    "id": "100",
+    "name": "dan",
+    "discriminator": "0000",
+    "nickname": "DM Dan",
+    "color": null,
+    "isBot": false,
+    "roles": [
+     {
+      "id": "800",
+      "name": "Dungeon Master",
+      "color": "#fabf5a",
+      "position": 4
+     }
+    ],
+    "avatarUrl": "avatars/dan.png"
+   },
+   "attachments": [
+    {
+     "id": "1",
+     "url": "session-notes_files/map%20one.png",
+     "fileName": "map one.png",
+     "fileSizeBytes": 2048
+    },
+    {
+     "id": "2",
+     "url": "session-notes_files/gone.png",
+     "fileName": "gone.png",
+     "fileSizeBytes": 4096
+    },
+    {
+     "id": "3",
+     "url": "https://cdn.discordapp.com/attachments/x/old.jpg",
+     "fileName": "old.jpg",
+     "fileSizeBytes": 8192
+    }
+   ],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [
+    {
+     "emoji": {
+      "id": "700",
+      "name": "Nat20",
+      "code": "Nat20",
+      "isAnimated": false,
+      "imageUrl": "emoji/700.png"
+     },
+     "count": 3,
+     "users": []
+    },
+    {
+     "emoji": {
+      "id": "",
+      "name": "🎲",
+      "code": "game_die",
+      "isAnimated": false,
+      "imageUrl": "https://twemoji/x.svg"
+     },
+     "count": 2,
+     "users": []
+    }
+   ],
+   "mentions": [],
+   "inlineEmojis": []
+  },
+  {
+   "id": "717467575910400000",
+   "type": "Reply",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": "2020-06-02T21:00:00+00:00",
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "I roll for persuasion <:Nat20:700>",
+   "author": {
+    "id": "101",
+    "name": "ashley",
+    "discriminator": "0000",
+    "nickname": "Ash the Bard",
+    "color": null,
+    "isBot": false,
+    "roles": [
+     {
+      "id": "802",
+      "name": "Players",
+      "color": null,
+      "position": 2
+     },
+     {
+      "id": "803",
+      "name": "Bard",
+      "color": null,
+      "position": 1
+     }
+    ],
+    "avatarUrl": "avatars/ashley.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [
+    {
+     "id": "100",
+     "name": "dan",
+     "discriminator": "0000",
+     "nickname": "DM Dan",
+     "color": null,
+     "isBot": false,
+     "roles": [],
+     "avatarUrl": "avatars/dan.png"
+    }
+   ],
+   "inlineEmojis": [
+    {
+     "id": "700",
+     "name": "Nat20",
+     "code": "Nat20",
+     "isAnimated": false,
+     "imageUrl": "emoji/700.png"
+    }
+   ],
+   "reference": {
+    "messageId": "717105188044800000",
+    "channelId": "111",
+    "guildId": "900000000000000001"
+   }
+  },
+  {
+   "id": "717467575910400005",
+   "type": "ChannelPinnedMessage",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "",
+   "author": {
+    "id": "100",
+    "name": "dan",
+    "discriminator": "0000",
+    "nickname": "DM Dan",
+    "color": null,
+    "isBot": false,
+    "roles": [
+     {
+      "id": "800",
+      "name": "Dungeon Master",
+      "color": "#fabf5a",
+      "position": 4
+     }
+    ],
+    "avatarUrl": "avatars/dan.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [],
+   "mentions": [],
+   "inlineEmojis": []
+  },
+  {
+   "id": "817486626816000001",
+   "type": "Default",
+   "timestamp": "2021-01-01T20:00:00+00:00",
+   "timestampEdited": null,
+   "callEndedTimestamp": null,
+   "isPinned": false,
+   "content": "Who gets the +1 sword?",
+   "author": {
+    "id": "102",
+    "name": "rob",
+    "discriminator": "0000",
+    "nickname": null,
+    "color": null,
+    "isBot": false,
+    "roles": [
+     {
+      "id": "802",
+      "name": "Players",
+      "color": null,
+      "position": 2
+     },
+     {
+      "id": "801",
+      "name": "Moderator",
+      "color": null,
+      "position": 3
+     }
+    ],
+    "avatarUrl": "avatars/rob.png"
+   },
+   "attachments": [],
+   "embeds": [],
+   "stickers": [],
+   "reactions": [
+    {
+     "emoji": {
+      "id": "701",
+      "name": "nat20",
+      "code": "nat20",
+      "isAnimated": true,
+      "imageUrl": "emoji/701.gif"
+     },
+     "count": 1,
+     "users": []
+    },
+    {
+     "emoji": {
+      "id": "703",
+      "name": "BeholderEye",
+      "code": "BeholderEye",
+      "isAnimated": false,
+      "imageUrl": "emoji/703.png"
+     },
+     "count": 1,
+     "users": []
+    }
+   ],
+   "mentions": [],
+   "inlineEmojis": []
+  }
+ ]
+}

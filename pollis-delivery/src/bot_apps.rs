@@ -2,7 +2,7 @@
 //! relays it; it verifies nothing in it and cannot forge one (it holds no
 //! admin key). The runtime verifies every record from its own state before it
 //! loads an App. Wire types: `pollis_api::bot_apps`. Schema:
-//! `000054_bot_app_approval.sql`, which also refuses a skipped or repeated
+//! `000055_bot_app_approval.sql`, which also refuses a skipped or repeated
 //! `seq` and any change to a stored record.
 //!
 //! | Endpoint | Who |

@@ -208,6 +208,7 @@ mod tests {
             name: id.to_string(),
             description: None,
             channel_type: kind.to_string(),
+            category_id: None,
         };
         let mut groups = vec![GroupWithChannels {
             id: "g1".to_string(),
@@ -221,6 +222,7 @@ mod tests {
                 channel("voice-chat", "voice"),
                 channel("dev", "text"),
             ],
+            categories: Vec::new(),
         }];
         drop_voice_channels(&mut groups);
         let tree = ConversationTree {

@@ -27,9 +27,18 @@ export interface Channel {
   name: string;
   description?: string;
   channel_type: "text" | "voice";
+  /** The category it sits in (#2031); null/absent = the uncategorised block. */
+  category_id?: string | null;
   created_by: string;
   created_at: number;
   updated_at: number;
+}
+
+/** A group's channel category (#2031): group-wide, admin-managed. */
+export interface ChannelCategory {
+  id: string;
+  group_id: string;
+  name: string;
 }
 
 export interface DMConversation {
@@ -73,6 +82,21 @@ export interface MessageAttachment {
   poster?: string;
   // Never persisted or sent.
   localPreviewUri?: string;
+}
+
+/** Wire shapes of a link preview (#1987), shared with desktop through `lib/linkPreview.ts`. */
+export type {
+  LinkPreviewDraft,
+  LinkPreviewWire,
+} from "../lib/linkPreview";
+
+/** A received link preview: plain text only, its thumbnail loaded like an image attachment. */
+export interface MessageLinkPreview {
+  url: string;
+  title: string;
+  description: string | null;
+  // Null while the sender's upload is pending, or when the page had none.
+  image: MessageAttachment | null;
 }
 
 export interface MessageQueueItem {

@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - gate
 ---
 # APP VERSION + UPDATE (#1443) — Self -> App shows the installed version and
 # build number, and an Update row naming where this install updates from.
@@ -12,7 +13,7 @@ tags:
 # pinned in tests/install-channel.test.ts. The row is not tapped: it leaves
 # the app for a browser or store, which this flow cannot follow.
 
-- runFlow: ../subflows/sign-in.yaml
+- runFlow: ../subflows/home.yaml
 - tapOn:
     id: "tab-self"
 - scrollUntilVisible:
