@@ -2,6 +2,7 @@
 
 export * from "./useUserProfile";
 export * from "./useUserGroups";
+export * from "./useChannelCategories";
 export * from "./useDMChannels";
 export * from "./useMessages";
 export * from "./useAuth";

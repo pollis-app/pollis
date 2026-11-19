@@ -66,9 +66,18 @@ export interface Channel {
   name: string;
   description?: string;
   channel_type: 'text' | 'voice';
+  /** The category it sits in (#2031); null/absent = the uncategorised block. */
+  category_id?: string | null;
   created_by: string; // user_id
   created_at: number;
   updated_at: number;
+}
+
+/** A group's channel category (#2031): group-wide, admin-managed. */
+export interface ChannelCategory {
+  id: string;
+  group_id: string;
+  name: string;
 }
 
 export interface Message {

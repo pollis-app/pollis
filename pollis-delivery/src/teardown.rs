@@ -25,6 +25,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "history_transfer_budget",
     "account_recovery",
     "directory_lookup_budget",
+    "channel_category",
     "channel_mute",
     "conversation_watermark",
     "device_enrollment_request",
@@ -65,6 +66,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
 /// [`purge_group`], [`purge_dm_channel`] and [`purge_conversation_log`] between
 /// them.
 pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
+    "channel_category",
     "channel_mute",
     "group_alias",
     "channels",
@@ -484,6 +486,8 @@ pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Ve
         purge_conversation_rows(conn, channel_id).await?;
     }
     conn.execute("DELETE FROM channels WHERE group_id = ?1", gid()).await?;
+    // Its channel categories (#2031), after the channels that named them.
+    conn.execute("DELETE FROM channel_category WHERE group_id = ?1", gid()).await?;
 
     // Emoji references the group held (#848) — released here, collected by
     // `POST /v1/emoji/gc`.

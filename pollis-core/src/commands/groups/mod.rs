@@ -14,7 +14,7 @@ mod membership;
 mod types;
 
 pub use types::{
-    Channel, CreatedInviteLink, Group, GroupInvite, GroupMember, GroupPreview,
+    Channel, ChannelCategory, CreatedInviteLink, Group, GroupInvite, GroupMember, GroupPreview,
     GroupWithChannels, InviteLinkSummary, InvitePreview, JoinRequest, PendingInvite,
     RedeemedInvite,
 };
@@ -30,8 +30,9 @@ pub use aliases::{
 pub(crate) use aliases::{cache_group_aliases, cached_alias_name};
 
 pub use channels::{
-    create_channel, delete_channel, list_group_channels, list_muted_channels, set_channel_muted,
-    update_channel,
+    create_channel, create_channel_category, delete_channel, delete_channel_category,
+    list_group_channels, list_muted_channels, move_channel,
+    move_channel_category, rename_channel_category, set_channel_muted, update_channel,
 };
 
 pub use membership::{

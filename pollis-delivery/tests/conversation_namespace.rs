@@ -74,6 +74,7 @@ fn channel_body(id: &str, group_id: &str) -> CreateChannelBody {
         description: None,
         channel_type: "text".to_string(),
         creator_id: Some(OWNER.to_string()),
+        category_id: None,
     }
 }
 

@@ -462,6 +462,7 @@ export function useAcceptInvite() {
             row: (invite): GroupWithChannels => ({
               ...group(invite),
               channels: [],
+              categories: [],
               current_user_role: 'member',
             }),
           },

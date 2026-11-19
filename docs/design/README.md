@@ -219,6 +219,13 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
     for its grid; the Settings hub and a user's profile keep their profile header layout.
   - Mobile keeps its native patterns (a `SheetOverlay`, a tap-again row or button, grouped lists);
     the copy is shared, and the destructive row or button is the only red one.
+- **Arranging a list (#2031).** Desktop arranges by dragging the rows themselves, for the people
+  allowed to (everyone else gets no drag wiring at all), with the drop slot drawn as a thin accent
+  line across the row, never an edge stripe, and Alt+↑/↓ for the keyboard; a rename edits the row
+  in place (`InlineInput`) and a delete replaces the row with an inline confirmation. Mobile uses
+  an Edit mode (the iOS Mail / Discord pattern): Edit in the header, a ≡ handle on every row so
+  dragging is deliberate, the row's actions shown only while editing, Done to leave; screen readers
+  get Move up / Move down on the handle.
 - **Same-frame feedback.** Anything that can take time shows an optimistic result or a busy,
   un-repeatable control on the same frame, on every platform.
 - **Name what an action acts on.** A confirmation names its object ("Join Design team?", not
@@ -254,7 +261,7 @@ primitive cannot do what a screen needs, extend it in its own file and use it ev
 
 - **Desktop** (`frontend/src/components/ui/`): `Button` (`primary`, `secondary`, `ghost`,
   `danger`), `IconButton`, `LinkButton`, `Chip`, `Kbd`, `PanelCloseRow`, `TextInput`, `TextArea`,
-  `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`, `PageColumn`, `FormLead`,
+  `InlineInput` (a field edited in place in a list row), `Checkbox`, `Switch`, `RadioList`, `RangeSlider`, `InputOtp`, `PageColumn`, `FormLead`,
   `FormActions`, `ConfirmBlock` (and `Layout/ConfirmPage`), `ConfirmBar`, `ComposerBarHeader`,
   `Select` (a pick-one dropdown with its label), `SectionHeader` (a panel section's title),
   `Card`, `EmptyState`, `Avatar`, `PresenceAvatar`, `PresenceDot`, `PillButton`, `PressButton`,

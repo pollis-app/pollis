@@ -4,11 +4,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
-import type { Channel, Group } from "../../types";
+import type { Channel, ChannelCategory, Group } from "../../types";
 import { groupInviteQueryKeys, type GroupMember } from "./useGroupInvites";
 
 export interface GroupWithChannels extends Group {
+  /** Text channels in display order (#2031); mobile shows no voice rooms (#185). */
   channels: Channel[];
+  /** Every channel, voice rooms included, in display order: what Edit mode arranges (#2031). */
+  allChannels?: Channel[];
+  /** In display order (#2031). */
+  categories?: ChannelCategory[];
   /** The viewer's role in this group ("admin" | "member"). */
   current_user_role?: string;
   /** The group's creator; never tagged "new" (#1506). */
@@ -114,8 +119,11 @@ export function useUserGroupsWithChannels() {
         { userId: currentUser.id },
       );
       // Mobile has no voice UI (#185): drop voice channels here, the groups-tab path's single filter.
+      // Edit mode still arranges them (#2031), so the whole list is kept beside.
       return groups.map((g) => ({
         ...g,
+        allChannels: g.channels,
+        categories: g.categories ?? [],
         channels: g.channels.filter((c) => c.channel_type !== "voice"),
       }));
     },
@@ -187,16 +195,18 @@ export function useCreateChannel(groupId: string | null) {
   return useMutation({
     // Tactile feedback (#1286): lib/queryClient.ts plays it.
     meta: { haptic: { success: "success" } },
-    mutationFn: async (vars: { name: string; description?: string }) => {
+    mutationFn: async (vars: { name: string; description?: string; categoryId?: string | null }) => {
       if (!currentUser || !groupId) {
         throw new Error("No active group");
       }
+      // A category's "+" (#2031) puts it at the bottom of that category.
       return await invoke<Channel>("create_channel", {
         groupId,
         name: vars.name,
         description: vars.description ?? null,
         channelType: "text",
         creatorId: currentUser.id,
+        categoryId: vars.categoryId ?? null,
       });
     },
     onSuccess: () => {

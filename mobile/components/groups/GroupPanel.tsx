@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { useNav } from "../pane/paneContext";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
-import { Divider, IconButton, PressInPressable, EmptyState } from "../ui";
+import { Button, Divider, IconButton, PressInPressable, EmptyState } from "../ui";
 import { Icon } from "../icons";
 import { semantic, type as ty, fonts, r, space, layout, typeSize } from "../../theme/tokens";
 import {
@@ -15,10 +15,14 @@ import {
   useGroupJoinRequests,
   useMutedChannels,
   usePrefetchConversation,
+  useMoveCategory,
+  useMoveChannel,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
-import type { Channel } from "../../types";
+import type { Channel, ChannelCategory } from "../../types";
 import { ChannelRow } from "./ChannelRow";
+import { GroupChannelList } from "./GroupChannelList";
+import { CategorySheet, type CategorySheetMode } from "./CategorySheet";
 import { GroupMenuSheet } from "./GroupMenuSheet";
 import { CreateChannelSheet } from "./CreateChannelSheet";
 import { useThemeRerender } from "../theme";
@@ -51,7 +55,17 @@ function GroupPanelImpl({
   const rootRouter = useRouter();
   const prefetch = usePrefetchConversation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
+  // `null` closed; `{ category: null }` the group's own "+"; a category's "+" names it (#2031).
+  const [createIn, setCreateIn] = useState<{ category: ChannelCategory | null } | null>(null);
+  // Edit mode (#2031): admins arrange the list; nothing opens a channel meanwhile.
+  const [editing, setEditing] = useState(false);
+  const [categorySheet, setCategorySheet] = useState<CategorySheetMode | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const moveChannel = useMoveChannel();
+  const moveCategory = useMoveCategory();
+  useEffect(() => {
+    setEditing(false);
+  }, [groupId]);
 
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === groupId);
@@ -89,7 +103,6 @@ function GroupPanelImpl({
   const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
   // The testID gains `-muted` so Maestro can see the state.
   const { data: mutedChannels } = useMutedChannels();
-  const unreadCounts = appStore.unreadCounts;
   const me = appStore.currentUser?.id;
 
   const myRole = members.find((m) => m.user_id === me)?.role ?? group?.current_user_role;
@@ -99,6 +112,9 @@ function GroupPanelImpl({
     ? t("group.detail.memberCount", { count: members.length })
     : null;
   const channelNames = useMemo(() => channels.map((c) => c.name.toLowerCase()), [channels]);
+  const categories = group?.categories ?? [];
+  const allChannels = group?.allChannels ?? channels;
+  const arranging = editing && isAdmin;
 
   return (
     <View
@@ -148,6 +164,25 @@ function GroupPanelImpl({
           {/* Reserved while members load, so the header doesn't grow when the count lands (#1733). */}
           <Text style={[ty.meta, { fontSize: typeSize.section }]}>{memberCountLabel ?? "\u00a0"}</Text>
         </PressInPressable>
+        {isAdmin ? (
+          <>
+            <Button
+              testID={arranging ? "btn-edit-channels-done" : "btn-edit-channels"}
+              variant={arranging ? "primary" : "subtle"}
+              accessibilityLabel={arranging ? t("channels:categories.done") : t("channels:categories.editChannels")}
+              onPress={() => setEditing(!arranging)}
+            >
+              {arranging ? t("channels:categories.done") : t("channels:categories.edit")}
+            </Button>
+            <IconButton
+              testID="btn-create-channel"
+              filled
+              accessibilityLabel={t("group.panel.createChannel")}
+              icon={<Icon.plus size={20} color={semantic.text} />}
+              onPress={() => setCreateIn({ category: null })}
+            />
+          </>
+        ) : null}
         <IconButton
           testID="row-group-invite"
           pressIn
@@ -190,6 +225,7 @@ function GroupPanelImpl({
 
       <ScrollView
         style={{ flex: 1 }}
+        scrollEnabled={!dragging}
         contentContainerStyle={{
           paddingTop: space.lg,
           paddingHorizontal: space.lg,
@@ -199,68 +235,37 @@ function GroupPanelImpl({
       >
         {top}
 
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            paddingStart: space.sm,
-            minHeight: layout.touchMin,
-          }}
-        >
-          <Text accessibilityRole="header" style={ty.section}>
-            {t("group.detail.textChannels")}
-          </Text>
-          {isAdmin ? (
-            <IconButton
-              testID="btn-create-channel"
-              accessibilityLabel={t("group.panel.createChannel")}
-              icon={<Icon.plus size={18} color={semantic.dim} />}
-              onPress={() => setCreateOpen(true)}
-            />
-          ) : null}
-        </View>
-
         {channelsQuery.isLoading && channels.length === 0 ? (
           <Text style={[ty.secondary, { paddingStart: space.md, paddingVertical: space.sm }]}>
             {t("group.detail.loadingChannels")}
           </Text>
         ) : null}
-        {!channelsQuery.isLoading && channels.length === 0 ? (
+        {!channelsQuery.isLoading && channels.length === 0 && categories.length === 0 && !arranging ? (
           <EmptyState testID="group-panel-no-channels">{t("group.common.noChannels")}</EmptyState>
         ) : null}
-        {channels.map((c) => {
-          const unread = unreadCounts[c.id] ?? 0;
-          const selected = selectedChannelId === c.id;
-          const isMuted = mutedChannels?.has(c.id) ?? false;
-          const color = selected
-            ? semantic.accent
-            : isMuted
-              ? semantic.muted
-              : unread > 0
-                ? semantic.text
-                : semantic.dim;
-          const base = selected
-            ? t("group.panel.channelSelected", { name: c.name })
-            : unread > 0
-              ? t("group.panel.channelUnread", { name: c.name, count: unread })
-              : c.name;
-          const label = isMuted ? `${base}, ${t("channels:channel.mutedHint")}` : base;
-          return (
-            <ChannelRow
-              key={c.id}
-              testID={isMuted ? `row-channel-${c.id}-muted` : `row-channel-${c.id}`}
-              icon={<Icon.hash size={16} color={color} />}
-              name={c.name}
-              selected={selected}
-              unread={unread > 0}
-              muted={isMuted}
-              accessibilityLabel={label}
-              onPressIn={() => prefetch(c.id, "channel")}
-              onPress={() => onOpenChannel(c)}
-            />
-          );
-        })}
+        <GroupChannelList
+          channels={channels}
+          allChannels={allChannels}
+          categories={categories}
+          editing={arranging}
+          selectedChannelId={selectedChannelId}
+          mutedChannels={mutedChannels}
+          onOpenChannel={onOpenChannel}
+          onPrefetch={(id) => prefetch(id, "channel")}
+          onNewChannelIn={(category) => setCreateIn({ category })}
+          onCategoryMenu={(category, channelCount) => setCategorySheet({ kind: "menu", category, channelCount })}
+          onNewCategory={() => setCategorySheet({ kind: "create" })}
+          onMoveChannel={(channelId, categoryId, position) =>
+            moveChannel.mutate({ groupId, channelId, categoryId, position })
+          }
+          onMoveCategory={(categoryId, position) => moveCategory.mutate({ groupId, categoryId, position })}
+          onDraggingChange={setDragging}
+        />
+        {moveChannel.isError || moveCategory.isError ? (
+          <Text testID="text-arrange-error" style={[ty.secondary, { color: semantic.danger, paddingStart: space.sm, paddingTop: space.sm }]}>
+            {t("channels:categories.moveFailed")}
+          </Text>
+        ) : null}
 
         <Text
           accessibilityRole="header"
@@ -309,13 +314,17 @@ function GroupPanelImpl({
           onClose={() => setMenuOpen(false)}
         />
       ) : null}
-      {createOpen ? (
+      {createIn ? (
         <CreateChannelSheet
           groupId={groupId}
           existingNames={channelNames}
-          onClose={() => setCreateOpen(false)}
+          category={createIn.category}
+          onClose={() => setCreateIn(null)}
           onCreated={onOpenChannel}
         />
+      ) : null}
+      {categorySheet ? (
+        <CategorySheet groupId={groupId} mode={categorySheet} onClose={() => setCategorySheet(null)} />
       ) : null}
     </View>
   );
