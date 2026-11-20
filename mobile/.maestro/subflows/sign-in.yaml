@@ -4,10 +4,6 @@ appId: ${MAESTRO_APP_ID}
 # Assumes a disposable dev-DS account (first run signs it up). Reads
 # ${MAESTRO_EMAIL}, ${MAESTRO_OTP}, ${MAESTRO_PIN} from the runner's -e env.
 #
-# NOTE (Mac operator): this box could not RUN Maestro, so timing/branch steps
-# are authored best-effort against the real testIDs. On the first run, confirm
-# the PIN keypad auto-advances at 4 digits and whether an emergency-kit screen
-# appears; adjust the `optional` steps if needed.
 
 # KEEP_STATE=true skips the wipe for a caller that prepared the app itself
 # (locale-smoke: Android's per-app language is cleared by clearState).
@@ -56,17 +52,16 @@ appId: ${MAESTRO_APP_ID}
 - runFlow: enter-pin.yaml
 - runFlow: enter-pin.yaml
 
-# --- Optional emergency-kit acknowledgement (first signup only) ---
-# Mounts asynchronously after PIN confirm (key generation) — `runFlow: when:`
-# checks visibility once, immediately, so it needs a real wait first or it
-# skips a screen that's still one frame away.
+# --- Emergency-kit acknowledgement (a first signup only) ---
+# Mounts asynchronously after PIN confirm (key generation). Wait for whichever
+# screen comes next: the kit on a new account (every run's case), else the
+# initializing screen or the tabs. The kit check below then costs nothing on a
+# new account; only an existing one pays Maestro's ~7 s miss (#2042).
 - extendedWaitUntil:
     visible:
-      id: "screen-auth-emergency-kit"
-    # Key generation can outlast 15 s on a loaded machine; a late kit screen
-    # then slipped past the `when` below and failed the sign-in.
+      id: "screen-auth-emergency-kit|screen-auth-initializing|tab-groups"
+    # Key generation can outlast 15 s on a loaded machine.
     timeout: 40000
-    optional: true
 - runFlow:
     when:
       visible:
@@ -77,14 +72,11 @@ appId: ${MAESTRO_APP_ID}
       - tapOn:
           id: "btn-continue"
 
-# --- Optional "initializing" continue (it usually auto-advances) ---
+# --- The "initializing" screen auto-advances; Continue only if it lingers ---
 # The emergency kit's Continue pushes away with an animation, during which its
-# own btn-continue is still on screen: without this wait the conditional below
-# matches the OUTGOING button and its tap lands on the incoming tab bar (on
-# iPad, bottom centre is the sign-in-device shield). Settle first.
-# The settle alone stopped being enough on iPad once unlock got faster
-# (#1982): wait for the kit screen to be gone, and only ever tap the
-# Continue that belongs to the initializing screen.
+# own btn-continue is still on screen: settle and wait for the kit to be gone
+# first, so only the initializing screen's Continue is ever tapped (on iPad,
+# bottom centre is the sign-in-device shield, #1982).
 - waitForAnimationToEnd:
     timeout: 5000
 - extendedWaitUntil:
@@ -92,13 +84,18 @@ appId: ${MAESTRO_APP_ID}
       id: "screen-auth-emergency-kit"
     timeout: 10000
     optional: true
+# Usually it has already advanced, and the probe returns at once (#2042); a
+# screen still up gets up to ~7 s to advance on its own before the tap.
+- runFlow:
+    file: probe-absent.yaml
+    env:
+      ID: "screen-auth-initializing"
 - runFlow:
     when:
-      visible:
-        id: "screen-auth-initializing"
+      true: ${!output.absent}
     commands:
-      # optional: initializing often auto-advances between the visibility
-      # check and the tap, and a vanished button is not a failed sign-in.
+      # optional: it can still advance between the probe and the tap, and a
+      # vanished button is not a failed sign-in.
       - tapOn:
           id: "btn-continue"
           childOf:

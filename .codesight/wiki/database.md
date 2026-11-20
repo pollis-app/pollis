@@ -1274,6 +1274,7 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 - `kind` TEXT NOT NULL _(`dm` | `channel`)_
 - `created_at` TEXT NOT NULL DEFAULT `datetime('now')`
 - `dismissed_at` TEXT NULL _(migration 000040, #1508 — set when the user read the conversation on any client)_
+- `message_id`, `message_sent_at` TEXT NULL _(migration 000056, #2056 — the envelope the push was for, so a read clears it by position; NULL for a DM request or a handle minted before 000056, which clear by time)_
 - INDEX `idx_push_handle_user_conversation` on `(user_id, conversation_id)` _(000040)_
 
 **Read notifications are cleared everywhere (#1508).** When a client's read cursor moves, the core reports the conversation and how many seconds ago it was read to `POST /v1/push/dismiss` (`pollis_api::devices::DismissPushBody`, debounced 2 s in `pollis-core/src/commands/push.rs`). The DS stamps `dismissed_at` on that user's undismissed handles for it that were minted **before** the read (an age, so the clocks never have to agree, rounded up by the client so it can only err old: a message that lands after the read keeps its notification), and sends each of the user's tokens one silent push `{ "d": [handles] }` — no title, no body, `priority: normal`, `contentAvailable` on iOS — coalesced per user over `push::DISMISS_COALESCE` (2 s). The handles are the values the original notifications already carried, so the providers learn only that those notifications were read, never a conversation. Rows are stamped rather than deleted: a phone that missed the silent push asks `POST /v1/push/dismissed` on foreground with the handles in its tray (scoped to the signer; another user's handle is simply absent), and a second read of the same conversation finds nothing outstanding and sends nothing. **What the DS learns:** that this user read this conversation at about this time — what the read-receipt envelope (#892, on by default) already tells it; the encrypted read-cursor blob is untouched. Android new-message pushes also carry `tag: <handle>`, because the system posts a backgrounded app's notification itself and keeps only the tag readable afterwards.
@@ -1289,6 +1290,14 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 **The honest cost, and its mitigation.** The DS gains a durable record that a notification for conversation X went to user Y. It already knew that while building the payload; this makes it last for `PUSH_HANDLE_TTL_DAYS` (7), which it did not before. That argues for a short TTL and a real sweep — both in `push::sweep_push_handles`, on the same schedule as the other retention sweeps — not for a different design. Rows also go with account deletion and conversation teardown.
 
 **Rollout, and why it took one step rather than two (#1157).** #1122 landed the handle alongside `conversationId` on the usual additive plan — send both, prefer the handle, drop the old field once clients that prefer it are the floor. #1157 then dropped it immediately, because the floor turned out to be vacuous: **mobile has never been distributed** (#712, #340 and #341 are all still open), and mobile is the only push consumer — desktop never registers a token. There is no shipped client reading `conversationId`, so waiting a release would have bought nothing and left the disclosure open for it.
+
+### push_held _(migration 000056, #2056)_
+- `user_id`, `conversation_id` TEXT NOT NULL, PK `(user_id, conversation_id)`
+- `kind` TEXT NOT NULL _(`dm` | `channel`)_
+- `message_id`, `message_sent_at` TEXT NOT NULL _(the newest message held; `(sent_at, id)` order)_
+- `created_at` TEXT NOT NULL DEFAULT `datetime('now')` _(when the newest message was held; the time cutoff of an older client's dismiss)_
+
+A message push the DS did not send because the recipient was at an active desktop (`push_hold`). A read of the conversation deletes it; the user going inactive, their active report lapsing, or a DS restart sends one push per row and deletes it. Activity itself is memory only. Purged with the account and the conversation (`teardown.rs`). See `notifications.md` → "Fire and clear rules across devices".
 
 ### push_ticket _(migration 000037, #1423)_
 - `ticket_id` TEXT PK _(Expo's ticket id, 1-128 chars)_

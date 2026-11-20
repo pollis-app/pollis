@@ -1,0 +1,14 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Sets output.shown to true when an element with id ${ID} is on screen
+# (#2042). Use it where the element is USUALLY there: the check then returns at
+# once. When the element is absent, the check waits up to ~7 s (Maestro's
+# optional-lookup time) before it sets output.shown to false.
+# Run the rare branch after it with `when: true: ${!output.shown}`.
+- evalScript: ${output.shown = false}
+- runFlow:
+    when:
+      visible:
+        id: ${ID}
+    commands:
+      - evalScript: ${output.shown = true}

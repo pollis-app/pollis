@@ -5,17 +5,10 @@ appId: ${MAESTRO_APP_ID}
 # flows made, and its "+" (btn-add-group) sits at the strip's end, past the
 # screen edge. groups.yaml still drives the "+" sheet itself.
 - openLink: "pollis://group/new"
-- extendedWaitUntil:
-    visible:
-      id: "screen-group-new"
-    timeout: 5000
-    optional: true
-# iOS may ask before an app opens its own scheme from outside.
 - runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
+    file: after-open-link.yaml
+    env:
+      SCREEN: "screen-group-new"
 - extendedWaitUntil:
     visible:
       id: "screen-group-new"

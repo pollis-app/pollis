@@ -66,6 +66,9 @@ pub struct Item {
     pub muted: bool,
     /// A channel message that @mentions this user by name (additive to the #1599 contract).
     pub mention: bool,
+    /// Already read on another of the account's devices (additive, #2056). Such an item is
+    /// also `muted`, so a host built before #2056 posts nothing for it either.
+    pub read: bool,
     /// What the item is (additive, #1734): [`KIND_MESSAGE`], or [`KIND_DM_REQUEST`] for a
     /// pending DM request, where `sender_name` is the requester's display name, `body` is
     /// empty and `message_id` is empty. Hosts show "Message request" and the name, never a
@@ -561,6 +564,7 @@ async fn request_item_once(
         body_key: None,
         muted: false,
         mention: false,
+        read: false,
         kind: KIND_DM_REQUEST,
     }))
 }
@@ -587,7 +591,17 @@ struct Row {
     conversation_id: String,
     sender_id: String,
     content: String,
+    /// At or before the conversation's read cursor (#2056).
+    read: bool,
 }
+
+/// `read` for a row of `message`: at or before its conversation's read cursor.
+const READ_BY_CURSOR: &str = "EXISTS (SELECT 1 FROM read_cursor c \
+    WHERE c.conversation_id = message.conversation_id \
+      AND (message.sent_at, message.id) <= (c.last_read_at, c.last_read_message_id))";
+
+/// Longest the fetch spends learning reads made on the account's other devices.
+const CURSOR_PULL_MAX: Duration = Duration::from_secs(3);
 
 /// Read back what to show and build the answer. A failed or timed-out ingest still shows
 /// whatever it managed to persist; with nothing to show it reports `failure`.
@@ -613,6 +627,20 @@ async fn finish(
                 Outcome::Failed(reason)
             }
         };
+    }
+    // #2056: learn reads made elsewhere first, so a message the user already read on their
+    // desktop is not announced here. Best-effort and bounded; a failure only means the
+    // dismissal that follows the read clears the notification instead.
+    let pull_until = deadline.min(Instant::now() + CURSOR_PULL_MAX);
+    match tokio::time::timeout_at(
+        pull_until.into(),
+        crate::commands::messages::pull_read_cursors(state, user_id),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => crate::diag!("[notify] read-cursor pull skipped: {e}"),
+        Err(_) => crate::diag!("[notify] read-cursor pull ran out of time"),
     }
     let rows = match select_rows(state, user_id, floor, target.as_ref()).await {
         Ok(rows) => rows,
@@ -658,7 +686,8 @@ async fn finish(
                 &[(user_id.to_string(), my_name.clone())],
             )
             .is_empty();
-        let muted = !is_dm && !mention && mutes.contains(&row.conversation_id);
+        let read = row.read;
+        let muted = read || (!is_dm && !mention && mutes.contains(&row.conversation_id));
         let sender_name = aliases
             .iter()
             .find(|(conv, id, _)| *conv == row.conversation_id && *id == row.sender_id)
@@ -680,6 +709,7 @@ async fn finish(
             body_key,
             muted,
             mention,
+            read,
             kind: KIND_MESSAGE,
         });
     }
@@ -714,6 +744,7 @@ async fn select_rows(
                     conversation_id: r.get(1)?,
                     sender_id: r.get(2)?,
                     content: r.get(3)?,
+                    read: r.get(4)?,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -722,7 +753,7 @@ async fn select_rows(
     };
     let mut rows = read(
         &format!(
-            "SELECT id, conversation_id, sender_id, content FROM message
+            "SELECT id, conversation_id, sender_id, content, {READ_BY_CURSOR} FROM message
              WHERE {LIVE_INBOUND}
                AND (?2 IS NULL OR conversation_id = ?2)
                AND rowid > ?3
@@ -750,7 +781,7 @@ async fn select_rows(
     let window = format!("-{FALLBACK_SECS} seconds");
     let latest = read(
         &format!(
-            "SELECT id, conversation_id, sender_id, content FROM message
+            "SELECT id, conversation_id, sender_id, content, {READ_BY_CURSOR} FROM message
              WHERE {LIVE_INBOUND}
                AND conversation_id = ?2
                AND received_at >= datetime('now', ?3)
@@ -959,6 +990,39 @@ async fn conversation_meta(
 mod tests {
     use super::*;
 
+    /// #2056: a message at or before the conversation's read cursor (read on another device and
+    /// pulled in before the previews are chosen) is flagged read; anything newer is not.
+    #[test]
+    fn a_message_already_read_elsewhere_is_flagged_read() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::local::apply_local_schema(&conn).unwrap();
+        for (id, at) in [("m1", "2026-01-01T00:00:01Z"), ("m2", "2026-01-01T00:00:02Z")] {
+            conn.execute(
+                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+                 VALUES (?1, 'c1', 'them', X'00', 'body', ?2)",
+                rusqlite::params![id, at],
+            )
+            .unwrap();
+        }
+        let flags = |conn: &rusqlite::Connection| -> Vec<(String, bool)> {
+            let mut stmt = conn
+                .prepare(&format!("SELECT id, {READ_BY_CURSOR} FROM message ORDER BY id"))
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        assert_eq!(flags(&conn), vec![("m1".into(), false), ("m2".into(), false)]);
+        conn.execute(
+            "INSERT INTO read_cursor (conversation_id, last_read_at, last_read_message_id, updated_at)
+             VALUES ('c1', '2026-01-01T00:00:01Z', 'm1', datetime('now'))",
+            [],
+        )
+        .unwrap();
+        assert_eq!(flags(&conn), vec![("m1".into(), true), ("m2".into(), false)]);
+    }
+
     /// #1735: a row copied from a sibling is history, not news — neither the
     /// rowid-floor query nor the recent-message fallback may preview it, even
     /// when it lands (an import) after the floor was read and inside the window.
@@ -1046,6 +1110,7 @@ mod tests {
                 body_key: None,
                 muted: false,
                 mention: false,
+                read: false,
                 kind: KIND_MESSAGE,
             }],
         };

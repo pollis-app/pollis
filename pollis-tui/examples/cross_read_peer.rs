@@ -9,9 +9,12 @@
 //!   `ingest-<n>` signal it fetches the DM — storing the sender's messages, which emits the
 //!   delivered receipts that wake the phone (`PEER_INGESTED_<n>`); on `read-<n>` it marks the DM
 //!   read, as a person opening it would, and waits out the debounced cursor push and push dismiss
-//!   (`PEER_READ_<n>`).
+//!   (`PEER_READ_<n>`). On `active-<n>` / `idle-<n>` (#2056) it reports this device in use or
+//!   not, as a focused or idle desktop does (`PEER_ACTIVE_<n>` / `PEER_IDLE_<n>`), so the DS
+//!   holds the phone's pushes meanwhile.
 //! * `sender <email> <owner-user-id>` — opens a DM with the owner and prints `PEER_SENDER_READY`.
-//!   On `go-1` it sends two messages, on `go-2` one, printing `PEER_SENT_<n>`.
+//!   On `go-1` it sends two messages, on `go-2`, `go-3` and `go-4` one each, printing
+//!   `PEER_SENT_<n>`.
 //!
 //! Signals are files in `CROSS_READ_SIGNAL_DIR`. Not a shipping binary: examples build against
 //! pollis-tui's dev-dependencies.
@@ -25,7 +28,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use pollis_core::commands::{auth, dm, messages};
+use pollis_core::commands::{auth, dm, messages, push};
 use pollis_core::config::Config;
 use pollis_core::state::AppState;
 
@@ -125,8 +128,15 @@ async fn owner(email: &str) -> Result<()> {
 
     let mut done: Vec<String> = Vec::new();
     loop {
-        let wanted: Vec<String> = (1..=2)
-            .flat_map(|n| [format!("ingest-{n}"), format!("read-{n}")])
+        let wanted: Vec<String> = (1..=4)
+            .flat_map(|n| {
+                [
+                    format!("ingest-{n}"),
+                    format!("read-{n}"),
+                    format!("active-{n}"),
+                    format!("idle-{n}"),
+                ]
+            })
             .filter(|s| !done.contains(s))
             .collect();
         if wanted.is_empty() {
@@ -134,6 +144,13 @@ async fn owner(email: &str) -> Result<()> {
         }
         let signal = next_signal(&dir, &wanted).await?;
         let (what, n) = signal.split_once('-').context("signal name")?;
+        // #2056: a desktop that is, or stops being, in use; the DS holds the phone's pushes meanwhile.
+        if what == "active" || what == "idle" {
+            push::report_push_activity(me.clone(), what == "active", &state).await?;
+            println!("PEER_{}_{n}", what.to_uppercase());
+            done.push(signal);
+            continue;
+        }
         // Storing the sender's messages emits the delivered receipts that wake the phone.
         let page = pollis_tui::data::dm_messages(&state, &me, &dm_id, None).await?;
         if what == "read" {
@@ -183,5 +200,11 @@ async fn sender(email: &str, owner_id: &str) -> Result<()> {
     next_signal(&dir, &["go-2".to_string()]).await?;
     send("one more while your phone sleeps").await?;
     println!("PEER_SENT_2");
+    next_signal(&dir, &["go-3".to_string()]).await?;
+    send("read this at your desk").await?;
+    println!("PEER_SENT_3");
+    next_signal(&dir, &["go-4".to_string()]).await?;
+    send("and this one after you walk away").await?;
+    println!("PEER_SENT_4");
     Ok(())
 }

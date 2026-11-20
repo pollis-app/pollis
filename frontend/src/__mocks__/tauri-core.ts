@@ -358,6 +358,8 @@ interface MockStore {
   readCursors: Record<string, string>;
   /** #1628: positions another device read and pushed; `refresh_read_cursors` merges them. */
   readElsewhere: Record<string, string>;
+  /** #2056: every `report_push_activity` this device sent, in order (true = in use). */
+  pushActivity: boolean[];
   /** #1628: message ids an ingest already stored, so a replay or receipt wake reports no news. */
   ingested: string[];
   /** Security-event log (#1548), any order. */
@@ -525,6 +527,7 @@ const store: MockStore = {
         .map(([id, msgs]) => [id, msgs[msgs.length - 1].id]),
     ),
   readElsewhere: {},
+  pushActivity: [],
   ingested: Object.values((preload.messages ?? {}) as Record<string, MockMessage[]>).flatMap((msgs) =>
     msgs.map((m) => m.id),
   ),
@@ -1730,6 +1733,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       store.readCursors[id] = newest.id;
       return true;
     }
+
+    // #2056: the DS holds phone pushes while this is true; the spec reads the log back.
+    case 'report_push_activity':
+      store.pushActivity.push(Boolean(args.active));
+      return null;
 
     case 'refresh_read_cursors': {
       const moved: string[] = [];

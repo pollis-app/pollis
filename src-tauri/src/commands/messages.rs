@@ -146,6 +146,12 @@ pub async fn refresh_read_cursors(user_id: String, state: State<'_, Arc<AppState
     pollis_core::commands::messages::refresh_read_cursors(user_id, &state).await
 }
 
+/// #2056: this desktop is, or is no longer, in use; the DS holds phone pushes while it is.
+#[tauri::command]
+pub async fn report_push_activity(user_id: String, active: bool, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::push::report_push_activity(user_id, active, &state).await
+}
+
 #[tauri::command]
 pub async fn get_conversation_receipts(conversation_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<MessageReceipts>> {
     pollis_core::commands::messages::get_conversation_receipts(conversation_id, &state).await

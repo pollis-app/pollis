@@ -12,11 +12,20 @@ appId: ${MAESTRO_APP_ID}
     visible:
       id: "btn-group-menu"
     timeout: 30000
+# subflows/probe-shown.yaml, inlined for the text match: it returns at once
+# when the group is already selected, where a `when: notVisible:` waited ~7 s
+# for its menu button to go before skipping (#2042).
+- evalScript: ${output.groupSelected = false}
 - runFlow:
     when:
-      notVisible:
+      visible:
         id: "btn-group-menu"
         text: "${GROUP}, .*"
+    commands:
+      - evalScript: ${output.groupSelected = true}
+- runFlow:
+    when:
+      true: ${!output.groupSelected}
     commands:
       - tapOn:
           id: "row-group-.*"

@@ -1,0 +1,23 @@
+appId: ${MAESTRO_APP_ID}
+---
+# After bringing the app back to the foreground (`launchApp: stopApp: false`):
+# unlock it with the PIN if it is locked. Auto-lock is off by default, so it
+# usually is not, and a `when: visible: screen-auth-pin` paid Maestro's ~7 s
+# miss on every resume (#2042). Wait until some screen is drawn (every screen
+# carries a `screen-…` id; a cold start draws the PIN pad first), then check
+# for the pad with subflows/probe-absent.yaml, which returns at once when it is
+# not there.
+- extendedWaitUntil:
+    visible:
+      id: "screen-.*"
+    timeout: 15000
+    optional: true
+- runFlow:
+    file: probe-absent.yaml
+    env:
+      ID: "screen-auth-pin"
+- runFlow:
+    when:
+      true: ${!output.absent}
+    commands:
+      - runFlow: enter-pin.yaml
