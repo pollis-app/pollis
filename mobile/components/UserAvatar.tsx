@@ -142,7 +142,7 @@ export function UserAvatar({
   const drawsDot = presence && !!userId;
 
   useReportTag(drawsStored && testID ? `${testID}-photo` : null);
-  useReportTag(drawsDot && testID ? `${testID}-presence-${status}` : null);
+  useReportTag(drawsDot && testID ? `presence-${status}-${testID}` : null);
 
   let face: ReactElement;
   if (!uri) {

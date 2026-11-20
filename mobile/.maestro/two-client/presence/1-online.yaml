@@ -17,6 +17,6 @@ tags:
           id: "btn-back"
 - extendedWaitUntil:
     visible:
-      id: "row-dm-.*-avatar-presence-online"
+      id: "presence-online-row-dm-.*-avatar"
     timeout: 30000
 - takeScreenshot: presence-two-01-peer-online

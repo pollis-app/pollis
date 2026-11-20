@@ -203,9 +203,12 @@ test("the dot draws in theme colours only: accent on the surface behind, hollow 
   assert.match(avatar, /const drawsDot = presence && !!userId;/);
 });
 
-test("Maestro sees the dot's state through the screen probe", () => {
+test("Maestro sees the dot's state through the screen probe, under a tag no row selector matches", () => {
   const avatar = src("components/UserAvatar.tsx");
-  assert.match(avatar, /useReportTag\(drawsDot && testID \? `\$\{testID\}-presence-\$\{status\}` : null\);/);
+  // A full-screen probe tagged `row-message-…-presence-…` took the long press `row-message-.*` meant
+  // for the row, on every flow that opens the message sheet.
+  assert.doesNotMatch(avatar, /`\$\{testID\}-presence-/);
+  assert.match(avatar, /useReportTag\(drawsDot && testID \? `presence-\$\{status\}-\$\{testID\}` : null\);/);
 });
 
 test("every user avatar is the one UserAvatar; the letter tile is drawn directly only for groups", () => {

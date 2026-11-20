@@ -707,7 +707,7 @@ accent ringed in the surface behind the avatar (`on`: `bg`, `panel`, `raised`,
 follows the same rule (its Bot badge sits by the name, not on the avatar). The
 letter tile `Avatar` in `ui.tsx` is drawn directly only for groups (rounded, no
 dot), and a group DM's stacked pair passes `presence={false}`: it stands for
-the conversation. Maestro reads `<testID>-presence-online|offline` through
+the conversation. Maestro reads `presence-online|offline-<testID>` through
 `<Screen>`'s `AvatarProbe` (`flows/presence.yaml`; someone else going online
 and offline in `scripts/maestro-typing.sh` → `two-client/presence/`).
 

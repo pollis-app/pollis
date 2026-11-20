@@ -10,7 +10,7 @@ tags:
 # The other half (someone else online, then going offline) needs a second
 # client: scripts/maestro-presence.sh.
 #
-# `UserAvatar` tags `<testID>-presence-online|offline` (through <Screen>'s
+# `UserAvatar` tags `presence-online|offline-<testID>` (through <Screen>'s
 # AvatarProbe, so iOS rows that are one accessible element still expose it).
 
 - runFlow: ../subflows/home.yaml
@@ -20,7 +20,7 @@ tags:
     id: "tab-self"
 - extendedWaitUntil:
     visible:
-      id: "avatar-self-presence-online"
+      id: "presence-online-avatar-self"
     timeout: 10000
 - takeScreenshot: presence-01-self-online
 
@@ -61,17 +61,23 @@ tags:
     id: "btn-send"
 - extendedWaitUntil:
     visible:
-      id: "row-message-.*-avatar-presence-online"
+      id: "presence-online-row-message-.*-avatar"
     timeout: 15000
 - takeScreenshot: presence-02-own-message-online
 
-# The peer is signed in nowhere: the Direct list draws its hollow dot.
-- tapOn:
-    id: "btn-back"
+# The peer is signed in nowhere: the Direct list draws its hollow dot. Phones go back to it;
+# iPad's two-pane already shows it beside the conversation.
+- runFlow:
+    when:
+      visible:
+        id: "btn-back"
+    commands:
+      - tapOn:
+          id: "btn-back"
 - extendedWaitUntil:
     visible:
-      id: "row-dm-.*-avatar-presence-offline"
+      id: "presence-offline-row-dm-.*-avatar"
     timeout: 15000
 - assertNotVisible:
-    id: "row-dm-.*-avatar-presence-online"
+    id: "presence-online-row-dm-.*-avatar"
 - takeScreenshot: presence-03-peer-offline

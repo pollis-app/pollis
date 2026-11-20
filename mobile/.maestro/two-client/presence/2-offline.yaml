@@ -7,8 +7,8 @@ tags:
 
 - extendedWaitUntil:
     visible:
-      id: "row-dm-.*-avatar-presence-offline"
+      id: "presence-offline-row-dm-.*-avatar"
     timeout: 60000
 - assertNotVisible:
-    id: "row-dm-.*-avatar-presence-online"
+    id: "presence-online-row-dm-.*-avatar"
 - takeScreenshot: presence-two-02-peer-offline

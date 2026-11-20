@@ -1,5 +1,5 @@
 // Which tags tagged avatars are drawing, read only by `AvatarProbe` for Maestro. Pure.
-// A tag is the avatar's testID plus what it shows: `-photo`, `-presence-online`, `-presence-offline`.
+// A tag is the avatar's testID plus what it shows: `<testID>-photo`, or `presence-online-<testID>` / `presence-offline-<testID>`.
 
 const shown = new Map<string, number>();
 const listeners = new Set<() => void>();
