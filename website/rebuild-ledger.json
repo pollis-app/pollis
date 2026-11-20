@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-20T01:01:27Z",
+  "generated_at": "2026-11-20T01:02:14Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "8df524ba",
@@ -13,8 +13,8 @@
       "event": "workflow_run",
       "run_id": "44438636881",
       "run_url": "https://github.com/pollis-app/pollis/actions/runs/44438636881",
-      "classification": null,
-      "evidence": null
+      "classification": "environment_drift",
+      "evidence": "v1.19.18, runner-image drift, classified by the workflow itself (\"verdict: environment_drift\" in the Assert reproduced hash step of rebuild-linux), and the same shape as v1.10.4: zero member files differ. Log inclusion verified (verify-log-inclusion green), so the comparison was real. The release built on ubuntu22@20261111.360.2+helper:ubuntu24@20261111.127.1; this rebuild ran on ubuntu22@20261116.365.1+helper:ubuntu24@20261111.370.1. Logged payload 104d8fe9…, rebuilt 7c9136c8…. Both AppImages are exactly 111,630,840 bytes and only 2,394 bytes differ, in two clusters: 16 bytes at offsets 932097–932112 (the same squashfs header region as v1.10.4) and a run from offset 111606976 in the trailing squashfs tables. The unpacked AppImage diff by origin reports 0 differing vendored host libraries and 0 differing files built from Pollis source, so every file in the bundle, usr/bin/pollis included, is byte-identical; only the squashfs container written by the packaging tool on the two images differs. The rebuild is internally deterministic: rerun attempt 2 (job 135994162262, 2026-11-20) landed on the same ubuntu22@20261116.365.1 image and reproduced 7c9136c8… byte-for-byte with the identical 2,394-byte, 0-file diff. It cannot converge until the pool hands out the release image 20261111.360.2 again. Not a finding against the shipped binary."
     },
     {
       "tag": "v1.19.17",
