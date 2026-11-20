@@ -268,6 +268,7 @@ export function Composer({
                   aliasKey={candidate.aliasAvatarUrl}
                   label={candidate.username}
                   size="sm"
+                  on="raised"
                 />
                 <Text style={[ty.body, { color: semantic.text }]}>
                   @{candidate.username}

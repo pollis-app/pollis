@@ -288,8 +288,7 @@ function ReactorRow({
           label={person.name ?? undefined}
           size={36}
           variant={person.isSelf ? "self" : "default"}
-          // The list sits on `high`, the letter avatar's own fill: one step down keeps it visible.
-          style={person.isSelf ? undefined : { backgroundColor: semantic.raised }}
+          on="high"
         />
       }
       name={name}

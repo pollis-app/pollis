@@ -328,13 +328,11 @@ pub(super) async fn emit_presence(
     present: bool,
 ) {
     let (internal, _) = super::identity::resolve_participant(state, room_id, identity).await;
-    let user_id = match user_id_from_identity(&internal) {
+    // The one presence rule, shared with mobile's `livekit_room_presence` (#2059).
+    let user_id = match crate::commands::livekit_roster::present_user(&internal, self_user_id) {
         Some(uid) => uid,
         None => return,
     };
-    if user_id == self_user_id {
-        return;
-    }
     let channel = {
         let lk = state.livekit.lock().await;
         lk.channel.clone()

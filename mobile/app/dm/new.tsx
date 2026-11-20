@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
@@ -34,13 +35,22 @@ export default function NewDM() {
   };
   const createDM = useCreateDM();
 
+  // One DM per tap: the lock is claimed synchronously, so a second tap in the same frame (before
+  // `isPending` re-renders) does nothing. A success navigates away and keeps it held.
+  const start = useSubmitLock();
   const onStartDM = (userId: string) => {
+    if (!start.begin()) {
+      return;
+    }
     createDM.mutate(
       { memberIds: [userId] },
       {
         onSuccess: (channel) => {
           // Phones replace this form; iPad opens the two-pane.
           openConversation({ id: channel.id, kind: "dm" }, { replace: true });
+        },
+        onError: () => {
+          start.end();
         },
       },
     );
@@ -112,12 +122,19 @@ export default function NewDM() {
                   avatarKey={found.avatar_url ?? null}
                   label={found.username || found.email || undefined}
                   size={layout.touchMin}
+                  on="raised"
                 />
               }
               name={`@${found.username}`}
               sub={found.preferred_name || found.email || undefined}
               onPress={() => onStartDM(found.id)}
-              chevron
+              disabled={start.busy}
+              end={
+                start.busy ? (
+                  <ActivityIndicator testID="busy-start-dm" size="small" color={semantic.muted} />
+                ) : undefined
+              }
+              chevron={!start.busy}
             />
           </Group>
         ) : null}

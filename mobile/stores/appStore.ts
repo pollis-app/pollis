@@ -10,6 +10,7 @@ import type {
   MessageQueueItem,
 } from "../types";
 import { messageJumpStore } from "./messageJumpStore";
+import { presenceStore } from "./presenceStore";
 import { unreadBadges, type UnreadCount } from "../lib/unread";
 
 class AppStore implements AppState {
@@ -48,6 +49,7 @@ class AppStore implements AppState {
 
   setCurrentUser(user: User | null) {
     this.currentUser = user;
+    presenceStore.setSelfUserId(user?.id ?? null);
   }
 
   setUsername(username: string | null) {
@@ -188,6 +190,8 @@ class AppStore implements AppState {
     this.isLocked = false;
     // A jump queued in this session points into this session's history.
     messageJumpStore.reset();
+    // So is who was online in it.
+    presenceStore.reset();
   }
 }
 

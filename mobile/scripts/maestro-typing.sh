@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Typing indicator (#1635), on ONE device plus a dev-DS peer.
+# Typing indicator (#1635) and presence dots (#2059), on ONE device plus a dev-DS peer.
 #
 #   mobile/scripts/maestro-typing.sh <device-id>
 #
@@ -9,7 +9,9 @@
 # reports what the phone sent when a flow asks it over loopback HTTP
 # (`.maestro/scripts/peer-typing.js`):
 #   1. the peer types: "<peer> is typing…" shows over the composer; it stops: the line goes;
-#   2. the device types: the peer sees `typing`; clearing the draft or sending: `stopped`.
+#   2. the device types: the peer sees `typing`; clearing the draft or sending: `stopped`;
+#   3. presence: the DM's row on the Direct list shows the peer online; the peer quits, leaving
+#      the room, and the dot turns hollow (offline) with no reload.
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled in, and
 # POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler `dev_personal` when unset).
@@ -22,6 +24,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 ENV_FILE="$HERE/.maestro/.env"
 FLOWS="$HERE/.maestro/two-client/typing"
+PRESENCE="$HERE/.maestro/two-client/presence"
 
 ENV_ARGS=()
 while IFS= read -r line; do
@@ -74,13 +77,18 @@ HANDLE="$(sed -n 's/^PEER_HANDLE=//p' "$PEER_OUT")"
 PORT="$(sed -n 's/^PEER_PORT=//p' "$PEER_OUT")"
 echo "    peer handle: $HANDLE"
 
-echo "==> 1/2 device opens a DM with the peer"
+echo "==> 1/3 device opens a DM with the peer"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$PRIMARY_EMAIL" \
   -e MAESTRO_PEER_HANDLE="$HANDLE" "$FLOWS/1-open-dm.yaml"
 await_peer PEER_READY 300
 
-echo "==> 2/2 typing, both ways"
+echo "==> 2/3 typing, both ways"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e PEER_PORT="$PORT" \
   -e MAESTRO_PEER_HANDLE="$HANDLE" "$FLOWS/2-typing.yaml"
+
+echo "==> 3/3 presence: online, then offline once the peer leaves"
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "$PRESENCE/1-online.yaml"
 curl -fsS "http://127.0.0.1:$PORT/quit" >/dev/null || true
-echo "==> typing passed"
+wait "$PEER_PID" 2>/dev/null || true
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "$PRESENCE/2-offline.yaml"
+echo "==> typing and presence passed"

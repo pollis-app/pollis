@@ -384,6 +384,7 @@ export function GlobalSearchResults({
                   avatarKey={user.data.avatar_url ?? null}
                   label={user.data.username || undefined}
                   size={layout.touchMin - 8}
+                  on="raised"
                 />
               }
               name={`@${user.data.username}`}

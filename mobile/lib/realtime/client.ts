@@ -5,10 +5,22 @@ import type { Room } from "livekit-client";
 import { invoke } from "../native";
 import { decodeRealtimeEvent, isTrustedOrigin, type RealtimeEvent } from "./events";
 import { createParticipantResolver } from "./participants";
+import { createRoomPresenceFeed } from "../presence";
+import { presenceStore } from "../../stores/presenceStore";
 
 const resolveSender = createParticipantResolver((room, identities) =>
   invoke("resolve_livekit_identities", { room, identities }),
 );
+
+// Presence (#2059): who each open room shows, resolved by the core (the rule desktop applies).
+const presenceFeed = createRoomPresenceFeed(
+  (room, identities) => invoke<string[]>("livekit_room_presence", { room, identities }),
+  presenceStore,
+);
+
+function refreshPresence(roomName: string, room: Room): void {
+  void presenceFeed.refresh(roomName, Array.from(room.remoteParticipants.keys()));
+}
 
 // registerGlobals() runs lazily on first connect: at module load it can crash boot without the webrtc module.
 let globalsRegistered = false;
@@ -120,8 +132,21 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
     });
     // Wake-ups published while down are gone: tell listeners to catch up.
     room.on(RoomEvent.Reconnected, () => {
+      refreshPresence(roomName, room);
       for (const listener of entry.listeners) {
         listener({ type: "realtime_reconnected", room: roomName });
+      }
+    });
+    room.on(RoomEvent.ParticipantConnected, () => {
+      refreshPresence(roomName, room);
+    });
+    room.on(RoomEvent.ParticipantDisconnected, () => {
+      refreshPresence(roomName, room);
+    });
+    // A room this device is out of can no longer vouch for anyone in it.
+    room.on(RoomEvent.Disconnected, () => {
+      if (entries.get(roomName)?.room === room) {
+        presenceFeed.drop(roomName);
       }
     });
     await room.connect(url, token);
@@ -131,6 +156,7 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
       return;
     }
     entry.room = room;
+    refreshPresence(roomName, room);
   } catch (e) {
     console.warn("[realtime] connect failed:", e);
     dropEntry(roomName, entry);
@@ -182,6 +208,7 @@ export function subscribeRealtime(
       if (entry.listeners.size === 0 && entries.get(roomName) === entry) {
         entries.delete(roomName);
         if (entry.room) {
+          presenceFeed.drop(roomName);
           void entry.room.disconnect();
           entry.room = null;
         }

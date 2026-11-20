@@ -159,6 +159,7 @@ function Members() {
                         aliasKey={aliasAvatar(aliases, m.user_id, null)}
                         label={m.username || m.user_id}
                         variant={isMe ? "self" : "default"}
+                        on="raised"
                       />
                     }
                     name={name}
@@ -299,7 +300,7 @@ function Members() {
                     <ListRow
                       testID={`row-invited-${inv.invitee_id}`}
                       minHeight={64}
-                      glyph={<UserAvatar userId={inv.invitee_id} label={inv.invitee_username || inv.invitee_id} />}
+                      glyph={<UserAvatar userId={inv.invitee_id} label={inv.invitee_username || inv.invitee_id} on="raised" />}
                       name={handle}
                       nameIsHandle={label.isHandle}
                       sub={

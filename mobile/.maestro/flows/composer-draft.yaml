@@ -64,7 +64,14 @@ tags:
     timeout: 15000
 - hideKeyboard:
     optional: true
-- runFlow: ../subflows/back-on-phone.yaml
+# Android: with the keyboard already down after the send, hideKeyboard is a system back and has
+# left the conversation, so tap back only while it is still there.
+- runFlow:
+    when:
+      visible:
+        id: "btn-back"
+    commands:
+      - runFlow: ../subflows/back-on-phone.yaml
 - tapOn:
     id: "tab-direct"
 - tapOn:

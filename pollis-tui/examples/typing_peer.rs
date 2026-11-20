@@ -11,6 +11,7 @@
 //!   GET /typing?on=1   start typing: published now and re-sent every 3 s, as desktop does
 //!   GET /typing?on=0   stop: one `is_typing: false`
 //!   GET /seen          the phone's last typing state in this DM: `typing`, `stopped` or `none`
+//!   GET /say           send "hello from the peer" in the DM (a row with the peer's avatar, #2059)
 //!   GET /quit
 //!
 //! Not a shipping binary:
@@ -23,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use pollis_core::commands::{dm, livekit};
+use pollis_core::commands::{dm, livekit, messages};
 use pollis_core::config::Config;
 use pollis_core::realtime::RealtimeEvent;
 use pollis_core::sink::EventSink;
@@ -150,6 +151,24 @@ async fn main() -> Result<()> {
                 println!("TYPING on");
                 ("200 OK", "on".to_string(), false)
             }
+            // A message from the peer, so the phone draws a row with the peer's avatar (#2059).
+            "/say" => match messages::send_message(
+                dm_id.clone(),
+                me.id.clone(),
+                "hello from the peer".to_string(),
+                None,
+                None,
+                Some(me.username.clone()),
+                &state,
+            )
+            .await
+            {
+                Ok(m) => {
+                    println!("SAID id={}", m.id);
+                    ("200 OK", "said".to_string(), false)
+                }
+                Err(e) => ("500 Internal Server Error", format!("send failed: {e}"), false),
+            },
             "/typing?on=0" => {
                 if let Some(t) = typing.take() {
                     t.abort();

@@ -11,55 +11,8 @@ use super::participants::VoiceParticipantInfo;
 pub(crate) use crate::commands::livekit_identity::{
     internal_identity, is_view_identity, user_id_from_identity, ParticipantKind,
 };
-
-/// Translate the opaque LiveKit identities in `wire` into the internal
-/// identities the rest of the app speaks (#836).
-///
-/// Returns `wire -> (internal_identity, display_name)` for EVERY input; cached or one DS batch.
-///
-/// Best-effort: unresolved peers keep their pseudonym (unattributed, not missing).
-pub(crate) async fn resolve_participants(
-    state: &Arc<AppState>,
-    logical_room: &str,
-    wire: &[String],
-) -> HashMap<String, (String, String)> {
-    let missing: Vec<String> = {
-        let cache = state.livekit_identities.lock().await;
-        wire.iter()
-            .filter(|id| !cache.contains_key(&(logical_room.to_string(), (*id).clone())))
-            .cloned()
-            .collect()
-    };
-
-    if !missing.is_empty() {
-        match crate::commands::mls::ds_livekit_identities(state, logical_room, missing).await {
-            Ok(resolved) => {
-                let mut cache = state.livekit_identities.lock().await;
-                for r in resolved {
-                    let kind = ParticipantKind::from_wire(r.kind.as_deref().unwrap_or("voice"));
-                    cache.insert(
-                        (logical_room.to_string(), r.identity.clone()),
-                        (internal_identity(&r.user_id, &r.identity, kind), r.name),
-                    );
-                }
-            }
-            Err(e) => {
-                crate::diag!("[livekit] identity resolve for {logical_room} failed: {e}");
-            }
-        }
-    }
-
-    let cache = state.livekit_identities.lock().await;
-    wire.iter()
-        .map(|id| {
-            let translated = cache
-                .get(&(logical_room.to_string(), id.clone()))
-                .cloned()
-                .unwrap_or_else(|| (id.clone(), String::new()));
-            (id.clone(), translated)
-        })
-        .collect()
-}
+// Always compiled: mobile's presence (#2059) resolves through the same cache.
+pub(crate) use crate::commands::livekit_roster::resolve_participants;
 
 /// Single-identity convenience over [`resolve_participants`].
 pub(crate) async fn resolve_participant(

@@ -22,6 +22,15 @@ tags:
     timeout: 20000
 - tapOn:
     id: "row-user-.*"
+# With the search keyboard up, Android can spend the first tap dismissing it.
+- waitForAnimationToEnd
+- runFlow:
+    when:
+      visible:
+        id: "row-user-.*"
+    commands:
+      - tapOn:
+          id: "row-user-.*"
 - extendedWaitUntil:
     visible:
       id: "input-composer"

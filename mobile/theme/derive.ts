@@ -21,6 +21,8 @@ export type Theme = {
   accentSoft: string;
   accentMid: string;
   accentLine: string;
+  // The ring of an offline presence dot (#2059), desktop's `accent-muted`.
+  accentMuted: string;
   // A disabled primary button's fill (theme/button.ts).
   accentDisabled: string;
   onAccent: string;
@@ -49,6 +51,7 @@ export function deriveTheme(accentRgb: string, bgRgb: string): Theme {
     accentSoft: t.accentSoft,
     accentMid: t.accentMid,
     accentLine: t.accentLine,
+    accentMuted: t.accentMuted,
     accentDisabled: t.accentDisabled,
     onAccent: t.onAccent,
     danger: t.danger,

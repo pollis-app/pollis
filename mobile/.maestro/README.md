@@ -197,6 +197,7 @@ A flow file still runs alone with a bare `maestro test`: `home.yaml` signs
 | `vault` | #1316 Direct → Vault: empty state, save two entries, pin, edit (pin survives), search filters, media view, a best-effort image entry opening the viewer from the grid, delete asks first (cancel keeps it, confirm removes it), re-open re-syncs from the DS | no |
 | `export` | #856 on-device archive from Security: summary renders, share button reachable, no network offer on an attachment-free account | no |
 | `ipad-two-pane` | #622 list+detail side-by-side (run on **iPad**) | no |
+| `presence` | #2059 the presence dot on user avatars: your own avatar on the Self card and on your message row is online (`presence-online-avatar-self`, `presence-online-row-message-…-avatar`); a peer signed in nowhere draws the hollow offline dot on its Direct row (`presence-offline-row-dm-…-avatar`). Tags come from `UserAvatar` through `<Screen>`'s AvatarProbe. Someone else online, then offline: `scripts/maestro-typing.sh` (Two-client flows) | same device |
 | `dms` | start a DM with a freshly signed-up peer (initiator side). Tag `peer`: `maestro-run.sh` signs the peer up on the same device first (`setup/peer.yaml`); `scripts/maestro-report.sh` uses a second device | same device |
 | `custom-emoji` | #1562 add a static and an animated custom emoji, see both as images (never the `:shortcode:` text) in the group's list, the composer's suggestions, a sent message and again after a cold restart | no |
 | `deep-link` | #1223 a `pollis://` link routes both warm (scene `openURLContexts`) and cold (scene `connectionOptions` → `Linking.getInitialURL`) under the UIScene life cycle | no |
@@ -342,6 +343,11 @@ exactly as desktop does). `two-client/typing/`: the peer types and
 `text-typing-indicator` reads "<peer> is typing…", then goes when it stops; the
 device types and the peer sees `typing`, then `stopped` when the draft is
 cleared and again after a send (`scripts/peer-typing.js`).
+**Presence (automated, #2059):** the same `maestro-typing.sh` run goes on to
+`two-client/presence/`: back on the Direct list the DM's row shows the peer
+online (`presence-online-row-dm-…-avatar`); the script stops the peer, whose
+session leaves the DM's room, and the row's dot turns hollow
+(`presence-offline-…`) with no reload.
 **DM receipts (automated, #1637):** `mobile/scripts/maestro-receipts.sh <device>`
 — one device plus the same `live_message_peer`, which also fetches the DM and
 marks the device's messages read when a flow asks (`scripts/peer-read.js`). Two

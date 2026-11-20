@@ -49,7 +49,7 @@ pub struct AppState {
     /// Its own lock so voice/realtime paths never nest two locks.
     /// Stores the internal identity because the LOCAL participant's entry is pinned at join, not derived.
     /// Never invalidated: a pseudonym is deterministic, so entries cannot go stale.
-    #[cfg(feature = "realtime")]
+    /// Ungated: mobile's room presence resolves through it too (#2059).
     pub livekit_identities: Arc<Mutex<crate::commands::livekit_identity::IdentityCache>>,
     #[cfg(feature = "media")]
     pub voice: Arc<Mutex<VoiceState>>,
@@ -164,7 +164,6 @@ impl AppState {
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
-            #[cfg(feature = "realtime")]
             livekit_identities: Arc::new(Mutex::new(Default::default())),
             #[cfg(feature = "media")]
             voice: Arc::new(Mutex::new(VoiceState::new())),

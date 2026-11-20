@@ -157,6 +157,7 @@ function ConversationInfo() {
                       label={m.handle}
                       size="sm"
                       variant={isMe ? "self" : "default"}
+                      on="raised"
                     />
                   }
                   // Truncated in the middle so "· you" never wraps alone.

@@ -132,6 +132,7 @@ function UserProfile() {
             label={handle}
             size="lg"
             variant={isSelf ? "self" : "default"}
+            on="panel"
           />
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <Txt testID="text-user-name" variant="title" accessibilityRole="header">

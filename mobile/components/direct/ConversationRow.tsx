@@ -184,6 +184,7 @@ function ConversationAvatar({
         avatarKey={people[0].avatarKey}
         label={people[0].label}
         size={30}
+        presence={false}
         style={{ position: "absolute", top: 0, start: 0 }}
       />
       <UserAvatar
@@ -191,6 +192,7 @@ function ConversationAvatar({
         avatarKey={people[1].avatarKey}
         label={people[1].label}
         size={30}
+        presence={false}
         style={{
           position: "absolute",
           bottom: 0,

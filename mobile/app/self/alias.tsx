@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
-import { Image } from "expo-image";
+import { Pressable, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
@@ -140,40 +139,17 @@ function GroupAliasEditor() {
             disabled={busy}
             onPress={() => setSheetOpen(true)}
           >
-            {preview ? (
-              <View
-                testID="avatar-alias-preview"
-                style={{ width: SIZE, height: SIZE, borderRadius: SIZE / 2, overflow: "hidden", backgroundColor: semantic.high }}
-              >
-                <Image source={{ uri: preview }} style={{ width: SIZE, height: SIZE }} contentFit="cover" transition={0} />
-                {uploading ? (
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      bottom: 0,
-                      start: 0,
-                      end: 0,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      backgroundColor: semantic.backdrop,
-                    }}
-                  >
-                    <ActivityIndicator color={semantic.text} />
-                  </View>
-                ) : null}
-              </View>
-            ) : (
-              <UserAvatar
-                testID="avatar-alias-editor"
-                userId={userId}
-                avatarKey={profile ? profile.avatar_url ?? null : undefined}
-                aliasKey={clearPicture ? null : alias?.avatar_url}
-                label={trimmed || mainName}
-                size={SIZE}
-                variant="self"
-              />
-            )}
+            <UserAvatar
+              testID="avatar-alias-editor"
+              userId={userId}
+              avatarKey={profile ? profile.avatar_url ?? null : undefined}
+              aliasKey={clearPicture ? null : alias?.avatar_url}
+              previewUri={preview}
+              busy={uploading}
+              label={trimmed || mainName}
+              size={SIZE}
+              variant="self"
+            />
           </Pressable>
           <Button
             testID="btn-alias-photo-change"

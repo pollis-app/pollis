@@ -40,6 +40,7 @@ export function ProfileCard({
           label={displayName}
           size="lg"
           variant="self"
+          on="panel"
         />
         <View
           accessible

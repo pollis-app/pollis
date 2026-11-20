@@ -56,7 +56,7 @@ export default function JoinRequests() {
                   <ListRow
                     testID={`row-request-${r.id}`}
                     minHeight={64}
-                    glyph={<UserAvatar userId={r.requester_id} label={r.requester_username ?? r.requester_id} />}
+                    glyph={<UserAvatar userId={r.requester_id} label={r.requester_username ?? r.requester_id} on="raised" />}
                     name={handle}
                     sub={t("mobile:group.requests.requested", {
                       date: new Date(r.created_at).toLocaleDateString(activeLocale()),

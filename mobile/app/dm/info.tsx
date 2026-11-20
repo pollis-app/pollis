@@ -90,6 +90,7 @@ function DMInfo() {
                         label={handle}
                         size={layout.touchMin - 8}
                         variant={isMe ? "self" : "default"}
+                        on="raised"
                       />
                     }
                     name={
