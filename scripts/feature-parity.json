@@ -57,7 +57,17 @@
     "create_bot": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
     "add_bot_host": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
     "revoke_bot_host": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
-    "delete_bot": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages."
+    "delete_bot": "The terminal client renders the Bot badge but cannot create or manage bots (#1182): bots are managed from the desktop and mobile Bots pages.",
+    "approve_bot_app": "The terminal client has no group admin pages; approving and inspecting bot Apps is done in the desktop or mobile app, or with the `pollis` bot CLI.",
+    "get_bot_app": "The terminal client has no group admin pages; approving and inspecting bot Apps is done in the desktop or mobile app, or with the `pollis` bot CLI.",
+    "list_group_apps": "The terminal client has no group admin pages; approving and inspecting bot Apps is done in the desktop or mobile app, or with the `pollis` bot CLI.",
+    "list_group_commands": "The terminal client has no slash-command picker for bot commands; it sends plain messages only.",
+    "send_command_request": "The terminal client has no slash-command picker for bot commands; it sends plain messages only.",
+    "create_channel_category": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app.",
+    "delete_channel_category": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app.",
+    "rename_channel_category": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app.",
+    "move_channel_category": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app.",
+    "move_channel": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app."
   },
   "patterns": [
     {
@@ -123,7 +133,6 @@
       "get_conversation_receipts",
       "get_diagnostics",
       "get_group_join_requests",
-      "get_group_members",
       "get_my_join_request",
       "get_pending_invites",
       "get_preferences",
@@ -141,7 +150,6 @@
       "leave_dm_channel",
       "leave_group",
       "list_blocked_users",
-      "list_group_commands",
       "list_group_emoji",
       "list_group_invite_links",
       "list_peer_verifications",
@@ -173,7 +181,6 @@
       "save_preferences",
       "search_group_by_slug",
       "search_messages",
-      "send_command_request",
       "send_vault_message",
       "set_contact_verified",
       "set_member_role",
