@@ -112,17 +112,38 @@ async fn an_unexpected_loss_fails_the_test() {
     drop((alice, bob));
 }
 
-/// The answer is lost; the drain replays it, held exactly once.
+/// Retries in place shortened for a test (#2055), the OS answering "online"; reset on drop.
+struct QuickRetries;
+
+impl QuickRetries {
+    fn on() -> Self {
+        test_hooks::set_retry_delays(Some(vec![std::time::Duration::from_millis(150); 3]));
+        test_hooks::set_known_offline(Some(false));
+        QuickRetries
+    }
+}
+
+impl Drop for QuickRetries {
+    fn drop(&mut self) {
+        test_hooks::set_retry_delays(None);
+        test_hooks::set_known_offline(None);
+    }
+}
+
+/// The answer is lost; the in-place retry (#2055) replays it under the same id, held exactly
+/// once, and the row never reads `failed`.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_send_that_lands_then_times_out_reaches_everyone_once() {
     let (alice, bob, _group, channel) = pair().await;
+    let _quick = QuickRetries::on();
     let id = new_id(&alice).await;
     arm_ds_fault(DsFault::SendLandsThenTimesOut);
     send_with_id(&alice, &channel, &id, "landed, answer lost")
         .await
-        .expect_err("the sender sees a timeout");
+        .expect("the timeout is retried in place and the replay answers");
     assert!(!crate::harness::ds_fault_armed(), "the fault fired");
+    assert!(!test_hooks::states_written(&id).iter().any(|s| s == "failed"));
 
     assert_reads_all(&bob, "bob", &channel, &["landed, answer lost"]).await;
 
@@ -131,17 +152,19 @@ async fn a_send_that_lands_then_times_out_reaches_everyone_once() {
     assert_reads_all(&bob, "bob", &channel, &["landed, answer lost"]).await;
 }
 
-/// Times out before the DS stores anything; the drain delivers it.
+/// Times out before the DS stores anything; the in-place retry (#2055) delivers it.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn a_send_that_times_out_unlanded_is_delivered_by_the_drain() {
+async fn a_send_that_times_out_unlanded_is_delivered_by_the_retry() {
     let (alice, bob, _group, channel) = pair().await;
+    let _quick = QuickRetries::on();
     let id = new_id(&alice).await;
     arm_ds_fault(DsFault::SendTimesOutUnlanded);
     send_with_id(&alice, &channel, &id, "never landed")
         .await
-        .expect_err("the sender sees a timeout");
-    assert!(!contents(&bob.fetch_channel_messages(&channel).await).contains(&"never landed".into()));
+        .expect("the timeout is retried in place");
+    assert!(!crate::harness::ds_fault_armed(), "the fault fired");
+    assert!(!test_hooks::states_written(&id).iter().any(|s| s == "failed"));
 
     assert!(bob.self_update(&_group).await);
     drain(&alice).await;

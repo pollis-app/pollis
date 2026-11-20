@@ -1678,7 +1678,10 @@ Current state:
   part). On iOS a send made just before leaving the app finishes in the
   app's background time before the database closes, or is marked `failed` if
   the time runs out (#1678; `.codesight/wiki/notifications.md` → "Cross-process
-  lock"). A failed send is a stored `failed` row: `MessageRow` labels it "Not sent" and
+  lock"). A transient failure is first retried in the core with the row still
+  `pending` (2 s / 5 s / 15 s, #2055), so a network blip never flashes "Not
+  sent"; mobile has no OS offline signal in the core, so an offline send reads
+  "Not sent" after those ~22 s. A failed send is a stored `failed` row: `MessageRow` labels it "Not sent" and
   `components/chat/UnsentActions.tsx` says why in one line (`unsentReason`:
   `failed` — "It'll send automatically when Pollis reconnects."; `rejected`,
   which no retry can fix so the drain stops trying, or a send the core never

@@ -352,6 +352,10 @@ interface MockStore {
   savedDiagnosticsPath: string | null;
   /** Outbox (#1335): while true every send fails as offline; see `window.__tauriFailSends`. */
   failSends: boolean;
+  /** #2055: the OS says there is no network, so a failed send is not retried in place; `window.__tauriSetOffline`. */
+  knownOffline: boolean;
+  /** #2055: the core's in-place retry delays (2 s / 5 s / 15 s); specs shorten them. */
+  outboxRetryDelaysMs: number[];
   /** Per-channel mute (#1431). */
   mutedChannels: string[];
   /** #1628: this device's read cursor per conversation (a message id); preloaded messages start read. */
@@ -427,6 +431,7 @@ const ALLOWED_POLICY: MockClientPolicyStatus = {
 const PRIMARY_HOOKS = [
   '__tauriMock',
   '__tauriFailSends',
+  '__tauriSetOffline',
   '__tauriRevokeDevice',
   '__tauriRejectWith',
   '__tauriSetClientPolicy',
@@ -516,6 +521,8 @@ const store: MockStore = {
       : preload.exportSavePath,
   savedDiagnosticsPath: null,
   failSends: preload.failSends === true,
+  knownOffline: preload.knownOffline === true,
+  outboxRetryDelaysMs: (preload.outboxRetryDelaysMs as number[] | undefined) ?? [2_000, 5_000, 15_000],
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
   categories: (preload.categories as Record<string, MockCategory[]> | undefined) ?? {},
   failArrange: preload.failArrange === true,
@@ -554,6 +561,9 @@ const store: MockStore = {
 (window as any).__tauriFailSends = (fail: boolean) => {
   store.failSends = fail;
 };
+(window as any).__tauriSetOffline = (offline: boolean) => {
+  store.knownOffline = offline;
+};
 
 /** Every unsent message in the store, oldest first — what `flush_outbox` walks. */
 function unsentMessages(): MockMessage[] {
@@ -562,13 +572,48 @@ function unsentMessages(): MockMessage[] {
     .filter((m) => m.send_state !== undefined);
 }
 
+/** Ids a send or Retry is retrying in place (#2055); a drain's failure leaves them `pending`. */
+const retryingIds = new Set<string>();
+
+/** One attempt, as the drain makes it: a failure marks it `failed` unless a retry is still to come. */
 function deliverMock(message: MockMessage): MockMessage {
+  if (message.send_state === undefined) {
+    return message;
+  }
   if (store.failSends) {
-    message.send_state = 'failed';
+    if (!retryingIds.has(message.id)) {
+      message.send_state = 'failed';
+    }
     throw new Error('network unreachable');
   }
   delete message.send_state;
   return message;
+}
+
+/** A send or Retry, as the core runs it (#2055): `pending` across the retry delays, `failed` once they are spent or the OS says offline. */
+async function deliverWithRetries(message: MockMessage): Promise<MockMessage> {
+  message.send_state = 'pending';
+  retryingIds.add(message.id);
+  try {
+    for (const delay of [...store.outboxRetryDelaysMs, null]) {
+      try {
+        return deliverMock(message);
+      } catch (err) {
+        if (delay === null || store.knownOffline) {
+          throw err;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    throw new Error('unreachable');
+  } catch (err) {
+    if (message.send_state !== undefined) {
+      message.send_state = 'failed';
+    }
+    throw err;
+  } finally {
+    retryingIds.delete(message.id);
+  }
 }
 
 /** #1338: once revoked, every command rejects except these. */
@@ -2466,7 +2511,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message.send_state === undefined) {
         return message;
       }
-      return deliverMock(message);
+      return deliverWithRetries(message);
     }
 
     case 'new_message_id':
@@ -2480,7 +2525,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message.send_state === undefined) {
         return message;
       }
-      return deliverMock(message);
+      return deliverWithRetries(message);
     }
 
     case 'discard_unsent_message': {

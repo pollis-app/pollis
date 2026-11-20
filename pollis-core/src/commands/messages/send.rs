@@ -770,6 +770,101 @@ pub mod test_hooks {
         ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
+    #[cfg(feature = "test-harness")]
+    static LINK_FAILURES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// Make the next `n` delivery attempts fail as a dropped link would (#2055), before
+    /// anything is sealed or posted.
+    #[cfg(feature = "test-harness")]
+    pub fn fail_next_deliveries(n: usize) {
+        LINK_FAILURES.store(n, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Link failures armed and not yet consumed.
+    #[cfg(feature = "test-harness")]
+    pub fn pending_link_failures() -> usize {
+        LINK_FAILURES.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Consume one armed link failure. Always `None` outside the harness.
+    pub(crate) fn take_link_failure() -> Option<crate::error::Error> {
+        #[cfg(feature = "test-harness")]
+        {
+            use std::sync::atomic::Ordering;
+            if LINK_FAILURES
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                return Some(crate::error::Error::Other(anyhow::anyhow!(
+                    "ds_post /v1/messages/send: error sending request (test harness)"
+                )));
+            }
+        }
+        None
+    }
+
+    #[cfg(feature = "test-harness")]
+    static RETRY_DELAYS: std::sync::Mutex<Option<Vec<std::time::Duration>>> =
+        std::sync::Mutex::new(None);
+
+    /// Replace the outbox's in-place retry delays (#2055); `None` restores them.
+    #[cfg(feature = "test-harness")]
+    pub fn set_retry_delays(delays: Option<Vec<std::time::Duration>>) {
+        *RETRY_DELAYS.lock().unwrap_or_else(|p| p.into_inner()) = delays;
+    }
+
+    /// The harness's retry delays, if a test set them.
+    pub(crate) fn retry_delays() -> Option<Vec<std::time::Duration>> {
+        #[cfg(feature = "test-harness")]
+        {
+            return RETRY_DELAYS.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        }
+        #[allow(unreachable_code)]
+        None
+    }
+
+    #[cfg(feature = "test-harness")]
+    static KNOWN_OFFLINE: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+
+    /// Answer the outbox's "is this device offline?" (#2055) instead of the OS; `None` asks the OS.
+    #[cfg(feature = "test-harness")]
+    pub fn set_known_offline(offline: Option<bool>) {
+        *KNOWN_OFFLINE.lock().unwrap_or_else(|p| p.into_inner()) = offline;
+    }
+
+    pub(crate) fn known_offline() -> Option<bool> {
+        #[cfg(feature = "test-harness")]
+        {
+            return *KNOWN_OFFLINE.lock().unwrap_or_else(|p| p.into_inner());
+        }
+        #[allow(unreachable_code)]
+        None
+    }
+
+    #[cfg(feature = "test-harness")]
+    static STATES_WRITTEN: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+    /// Every `send_state` the outbox wrote for `id`, in order (#2055): what the UI could have read.
+    #[cfg(feature = "test-harness")]
+    pub fn states_written(id: &str) -> Vec<String> {
+        STATES_WRITTEN
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .filter(|(m, _)| m == id)
+            .map(|(_, s)| s.clone())
+            .collect()
+    }
+
+    pub(crate) fn note_state_written(id: &str, send_state: &str) {
+        #[cfg(feature = "test-harness")]
+        STATES_WRITTEN
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push((id.to_string(), send_state.to_string()));
+        let _ = (id, send_state);
+    }
+
     const SIMULATED_CRASH: &str = "simulated process death (test harness)";
 
     pub(crate) fn simulated_crash() -> crate::error::Error {
