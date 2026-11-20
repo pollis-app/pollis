@@ -991,7 +991,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**262 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**259 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1065,11 +1065,6 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **LinkedHistoryRequest** — props: deviceId, deviceName — `frontend/src/components/HistoryTransfer/LinkedHistoryRequest.tsx`
 - **SourcePicker** — props: sources, value, onChange — `frontend/src/components/HistoryTransfer/SourcePicker.tsx`
 - **TransferStatus** — props: transfer, onDone, onRetried — `frontend/src/components/HistoryTransfer/TransferStatus.tsx`
-
-### `components/Import` (2)
-
-- **ImportPlanView** — props: plan, inviteSheet — `frontend/src/components/Import/ImportPlanView.tsx`
-- **ImportResultView** — props: result, withCategories, onOpenGroup — `frontend/src/components/Import/ImportResultView.tsx`
 
 ### `components/Invites` (3)
 
@@ -1252,7 +1247,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
 - **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
 
-### `pages` (67)
+### `pages` (66)
 
 - **AddBotHostPage** — `frontend/src/pages/AddBotHostPage.tsx`
 - **AddBotPage** — `frontend/src/pages/AddBotPage.tsx`
@@ -1280,7 +1275,6 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **GroupPage** — `frontend/src/pages/Group.tsx`
 - **GroupsPage** — `frontend/src/pages/Groups.tsx`
 - **HistoryTransferApprovalPage** — `frontend/src/pages/HistoryTransferApprovalPage.tsx`
-- **ImportPage** — props: source — `frontend/src/pages/ImportPage.tsx`
 - **IncomingCallPage** — `frontend/src/pages/IncomingCallPage.tsx`
 - **InviteLinkLandingPage** — `frontend/src/pages/InviteLinkLandingPage.tsx`
 - **InviteMember** — props: groupId, groupName — `frontend/src/pages/InviteMember.tsx`

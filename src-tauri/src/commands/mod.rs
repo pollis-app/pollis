@@ -19,7 +19,9 @@ pub mod emoji;
 pub mod groups;
 // Copy message history between two of one account's devices (#1735).
 pub mod history_transfer;
-// Recreating a Discord server's structure in a group (#1180).
+// Recreating a Discord/Slack structure in a group (#1180/#1179). Never registered in
+// the app's invoke handler; only the flows harness compiles it (`import` feature).
+#[cfg(feature = "import")]
 pub mod import;
 pub mod install_kind;
 // Sender-generated link previews (#1987).

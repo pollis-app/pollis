@@ -608,8 +608,6 @@ pub fn run() {
             commands::groups::delete_channel_category,
             commands::groups::move_channel_category,
             commands::groups::move_channel,
-            commands::import::import_preview,
-            commands::import::import_apply,
             commands::groups::send_group_invite,
             commands::groups::get_pending_invites,
             commands::groups::accept_group_invite,

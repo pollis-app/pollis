@@ -2,7 +2,7 @@ import { errorMessage } from "../utils/errorMessage";
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
-import { Users, Plus, Search, Import } from "lucide-react";
+import { Users, Plus, Search } from "lucide-react";
 import type { TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { BackMenu } from "../components/ui/BackMenu";
 import { appStore } from "../stores/appStore";
@@ -87,24 +87,6 @@ export const GroupsPage: React.FC = observer(() => {
       action: () => navigate({ to: "/groups/search" }),
       type: "system",
       testId: "menu-item-find-group",
-      activateOn: "press",
-    },
-    {
-      id: "import-discord",
-      label: t("groups.importDiscord"),
-      icon: <Import size={14} />,
-      action: () => navigate({ to: "/groups/import" }),
-      type: "system",
-      testId: "menu-item-import-discord",
-      activateOn: "press",
-    },
-    {
-      id: "import-slack",
-      label: t("groups.importSlack"),
-      icon: <Import size={14} />,
-      action: () => navigate({ to: "/groups/import/slack" }),
-      type: "system",
-      testId: "menu-item-import-slack",
       activateOn: "press",
     },
   ];
