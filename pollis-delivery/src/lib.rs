@@ -46,6 +46,7 @@ pub mod file_keys;
 pub mod pins;
 pub mod profile;
 pub mod push;
+pub mod push_hold;
 pub mod ratelimit;
 pub mod reads;
 pub mod reports;
@@ -405,6 +406,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // #1508: a read clears its notifications on every device.
         .route(<devices::DismissPushBody as DsRequest>::PATH, post(push::dismiss_push))
         .route(<devices::DismissedPushHandlesBody as DsRequest>::PATH, post(push::read_dismissed_push_handles))
+        // #2056: no phone push while the user is at a desktop.
+        .route(<devices::PushActivityBody as DsRequest>::PATH, post(push_hold::push_activity))
         // Domains E + G (#419) — account lifecycle / identity / recovery / enrollment / audit.
         .route(<account::RotateIdentityBody as DsRequest>::PATH, post(account::rotate_identity))
         .route(<account::DeleteAccountBody as DsRequest>::PATH, post(account::delete_account))

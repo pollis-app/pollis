@@ -329,6 +329,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "bot_app_approval",
         include_str!("../migrations/000055_bot_app_approval.sql"),
     ),
+    (
+        56,
+        "push_hold",
+        include_str!("../migrations/000056_push_hold.sql"),
+    ),
 ];
 
 /// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.

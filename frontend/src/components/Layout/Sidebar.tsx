@@ -396,7 +396,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isAc
     >
       {icon}
       <span className="flex-1 leading-[100%] text-[0.8rem]">{label}</span>
-      {badge != null && <UnreadBadge count={badge} muted />}
+      {badge != null && <UnreadBadge count={badge} muted testId={`sidebar-unread-${testId}`} />}
     </PressButton>
   );
 };

@@ -19,6 +19,10 @@
 #   6. the sender writes once -> one notification in the tray;
 #   7. the owner device reads it -> the tray empties (#1508's silent dismiss push), and on return
 #      to the foreground nothing is unread.
+#   8. (#2056) the owner device is in use, like a focused desktop: the sender writes -> the tray
+#      stays EMPTY (the DS holds the push); the owner reads it, then goes idle -> still empty.
+#   9. the owner device is in use again; the sender writes; the owner goes idle without reading
+#      -> the held push arrives (one notification); the owner reads -> the tray empties.
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled in, and
 # POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler `dev_personal` when unset). The DS
@@ -155,5 +159,37 @@ if [ "$ANDROID" = 1 ]; then
   await_tray 0 60
   echo "    tray cleared by the read on the other device"
   run_flow 6-resume.yaml
+
+  echo "==> 8 (#2056) the owner device is in use: the sender writes, the phone is not pushed"
+  adb -s "$DEVICE" shell input keyevent KEYCODE_HOME
+  signal active-3
+  owner_says PEER_ACTIVE_3 60
+  signal go-3
+  sender_says PEER_SENT_3 120
+  sleep 25
+  [ "$(tray_count)" -eq 0 ] || { echo "the phone was pushed while the owner device was in use" >&2; exit 1; }
+  signal read-3
+  owner_says PEER_READ_3 120
+  signal idle-3
+  owner_says PEER_IDLE_3 60
+  sleep 20
+  [ "$(tray_count)" -eq 0 ] || { echo "a message read on the owner device was pushed on idle" >&2; exit 1; }
+  echo "    held while in use, dropped by the read: no notification"
+
+  echo "==> 9 (#2056) unread when the owner device goes idle: the held push arrives"
+  signal active-4
+  owner_says PEER_ACTIVE_4 60
+  signal go-4
+  sender_says PEER_SENT_4 120
+  sleep 15
+  [ "$(tray_count)" -eq 0 ] || { echo "the phone was pushed while the owner device was in use" >&2; exit 1; }
+  signal idle-4
+  owner_says PEER_IDLE_4 60
+  await_tray 1 90
+  echo "    released on idle: one notification"
+  signal read-4
+  owner_says PEER_READ_4 120
+  await_tray 0 60
+  echo "    cleared by the read on the owner device"
 fi
 echo "==> cross-device-unread passed"

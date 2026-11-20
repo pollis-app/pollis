@@ -687,6 +687,7 @@ pub fn run() {
             commands::messages::get_unread_counts,
             commands::messages::mark_conversation_read,
             commands::messages::refresh_read_cursors,
+            commands::messages::report_push_activity,
             commands::messages::get_conversation_receipts,
             commands::messages::delete_message,
             commands::messages::edit_message,

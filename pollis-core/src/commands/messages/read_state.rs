@@ -258,25 +258,46 @@ pub async fn mark_conversation_read(
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-        mark_conversation_read_in(db.conn(), &conversation_id, &user_id)?
+        mark_conversation_read_at(db.conn(), &conversation_id, &user_id)?
     };
     // Only a cursor that moved is worth syncing.
-    if moved {
-        schedule_read_cursor_push(state, &user_id);
-        // #1508: and clear its notifications from the account's phones. Only
-        // on a move — re-opening a read conversation reports nothing.
-        crate::commands::push::schedule_push_dismiss(state, &user_id, &conversation_id);
-    }
-    Ok(moved)
+    let Some((at, message_id)) = moved else {
+        return Ok(false);
+    };
+    schedule_read_cursor_push(state, &user_id);
+    // #1508: and clear its notifications from the account's phones. Only on a
+    // move — re-opening a read conversation reports nothing. #2056: named by
+    // position, so a push for a message read a second after it arrived clears too.
+    crate::commands::push::schedule_push_dismiss(
+        state,
+        &user_id,
+        &conversation_id,
+        Some(pollis_api::devices::ReadPosition {
+            sent_at: at,
+            message_id,
+        }),
+    );
+    Ok(true)
 }
 
 /// The body of [`mark_conversation_read`], against a bare connection so it is
 /// testable without an [`AppState`].
+#[cfg(test)]
 pub(crate) fn mark_conversation_read_in(
     conn: &Connection,
     conversation_id: &str,
     user_id: &str,
 ) -> Result<bool> {
+    Ok(mark_conversation_read_at(conn, conversation_id, user_id)?.is_some())
+}
+
+/// [`mark_conversation_read_in`], answering where the cursor moved to
+/// (`(sent_at, message_id)`), or `None` when it did not move.
+pub(crate) fn mark_conversation_read_at(
+    conn: &Connection,
+    conversation_id: &str,
+    user_id: &str,
+) -> Result<Option<(String, String)>> {
     // Newest message from somebody else, excluding own/deleted as `unread_counts` does.
     let newest: Option<(String, String)> = conn
         .query_row(
@@ -290,8 +311,8 @@ pub(crate) fn mark_conversation_read_in(
         .map_err(|e| Error::Other(anyhow::anyhow!("newest message lookup: {e}")))?;
 
     match newest {
-        Some((at, id)) => advance_read_cursor(conn, conversation_id, &at, &id),
-        None => Ok(false),
+        Some((at, id)) => Ok(advance_read_cursor(conn, conversation_id, &at, &id)?.then_some((at, id))),
+        None => Ok(None),
     }
 }
 
@@ -416,6 +437,18 @@ async fn fetch_read_cursors(state: &Arc<AppState>, user_id: &str) -> Result<Vec<
             Ok(Vec::new())
         }
     }
+}
+
+/// Pull the account's cursors and merge them in, without pushing (#2056): the headless
+/// notification fetch asks "was this already read elsewhere?" and must not write the blob.
+/// Returns the conversations whose cursor moved here.
+pub async fn pull_read_cursors(state: &Arc<AppState>, user_id: &str) -> Result<Vec<String>> {
+    let remote = fetch_read_cursors(state, user_id).await?;
+    let guard = state.local_db.lock().await;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+    merge_read_cursors(db.conn(), &remote)
 }
 
 /// One device converges at a time: a launch sync, a nudge and a debounced push may overlap.
@@ -612,6 +645,19 @@ mod tests {
         let cursors = all_read_cursors(&conn).unwrap();
         assert_eq!(cursors[0].last_read_message_id, "m1");
         assert_eq!(count(&conn), 0);
+    }
+
+    /// #2056: the read names its position, which the dismiss report carries so the DS clears
+    /// pushes by message; an unmoved cursor names nothing, so nothing is reported.
+    #[test]
+    fn a_read_answers_the_position_it_moved_to() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        assert_eq!(
+            mark_conversation_read_at(&conn, CONV, ME).unwrap(),
+            Some(("2026-01-01T00:00:01Z".to_string(), "m1".to_string()))
+        );
+        assert_eq!(mark_conversation_read_at(&conn, CONV, ME).unwrap(), None);
     }
 
     #[test]

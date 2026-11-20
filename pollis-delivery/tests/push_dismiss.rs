@@ -47,6 +47,7 @@ fn dismiss(user: &str, conversations: &[(&str, u32)]) -> DismissPushBody {
             .map(|(c, age)| DismissEntry {
                 conversation_id: (*c).into(),
                 read_secs_ago: *age,
+                through: None,
             })
             .collect(),
     }

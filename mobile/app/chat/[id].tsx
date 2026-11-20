@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, FlatList } from "react-native";
+import { AppState, View, FlatList } from "react-native";
+import { readsOnArrival, resumedToForeground } from "../../lib/unread";
 import { Text } from "../../components/Text";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -317,11 +318,28 @@ function TextChat(props: ChatViewProps = {}) {
     if (!conversationId || !newestId) {
       return;
     }
-    if (appStore.openConversationId !== conversationId) {
+    // #2056: only while the user is looking; a background ingest leaves it unread.
+    if (!readsOnArrival(appStore.openConversationId, conversationId, AppState.currentState)) {
       return;
     }
     markConversationRead(conversationId);
   }, [conversationId, newestId]);
+
+  // #2056: what arrived while the app was in the background is read on coming back to this chat.
+  useEffect(() => {
+    if (!conversationId) {
+      return;
+    }
+    let previous = AppState.currentState;
+    const sub = AppState.addEventListener("change", (next) => {
+      const resumed = resumedToForeground(previous, next);
+      previous = next;
+      if (resumed && readsOnArrival(appStore.openConversationId, conversationId, next)) {
+        markConversationRead(conversationId);
+      }
+    });
+    return () => sub.remove();
+  }, [conversationId]);
 
   // The iPad pane stays mounted across conversations: a reply must not outlive its own.
   useEffect(() => {
