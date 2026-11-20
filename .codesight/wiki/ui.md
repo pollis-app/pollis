@@ -688,7 +688,8 @@ hands the room's remote wire identities to the core's `livekit_room_presence`
 bridge arm, which resolves them through the same `#836` cache desktop uses
 (`commands/livekit_roster.rs`, always compiled) and answers the people present,
 self excluded, once each whatever their sessions (`present_user_ids`, the same
-"last session" rule as `emit_departure`). `mobile/stores/presenceStore.ts` keeps
+"last session" rule as `emit_departure`). Who a participant counts as is one
+function, `livekit_roster::present_user`, which desktop's `emit_presence` calls too. `mobile/stores/presenceStore.ts` keeps
 those per-room snapshots (`setRoom` / `clearRoom`, the only input, so another
 source can feed it without touching readers); a room the device leaves is
 dropped, since it can no longer vouch for anyone. `status` stays tracked (not
