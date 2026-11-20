@@ -1796,7 +1796,7 @@ Current state:
   the app was backgrounded or closed badges the tab, the DM row, the group dot
   and the channel count. `markConversationRead` (clears the badge and runs
   `mark_conversation_read`) replaces every bare `appStore.markRead`; the chat
-  screen marks itself read on focus, on blur and as messages arrive, and
+  screen marks itself read on focus, on blur, as messages arrive while the app is in the foreground and on returning to it (#2056), and
   records itself in `appStore.openConversationId`, which never badges.
   `refresh_read_cursors` (pull, merge, push only if ahead; #1628) runs on
   unlock, resume, `realtime_reconnected` and the DS's `read_cursors_changed`

@@ -89,6 +89,9 @@ async fn main() -> Result<()> {
     // Commit-log halves an earlier account deletion still owes (#1883).
     pollis_delivery::account::spawn_account_log_purge_drain(&state);
 
+    // #2056: activity is memory only, so after a restart nobody is active; send what was held.
+    pollis_delivery::push_hold::spawn_boot_release(Arc::clone(&db));
+
     let app = build_router_with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))

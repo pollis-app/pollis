@@ -162,21 +162,7 @@ tags:
       id: "composer-attachment-2"
     timeout: 10000
 # Keep pressing Send until the strip clears (sensitive-media.yaml).
-- repeat:
-    while:
-      visible:
-        id: "strip-attachments"
-    times: 30
-    commands:
-      - tapOn:
-          id: "btn-send"
-      - extendedWaitUntil:
-          notVisible:
-            id: "strip-attachments"
-          timeout: 4000
-          optional: true
-- assertNotVisible:
-    id: "strip-attachments"
+- runFlow: ../subflows/send-strip.yaml
 
 # The grid: three tiles in it, not stacked one per line.
 - extendedWaitUntil:

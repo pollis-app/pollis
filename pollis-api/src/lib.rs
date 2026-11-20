@@ -251,6 +251,7 @@ endpoints! {
     Client   devices::PushFetchBody             => "/v1/push/fetch",                     devices::PushFetchResponse;
     Client   devices::DismissPushBody           => "/v1/push/dismiss",                   devices::DismissPushResponse;
     Client   devices::DismissedPushHandlesBody  => "/v1/push/dismissed",                 devices::DismissedPushHandlesResponse;
+    Client   devices::PushActivityBody          => "/v1/push/activity",                  StatusOk;
 
     Client   account::RotateIdentityBody        => "/v1/account/rotate-identity",        account::RotateIdentityResponse;
     Client   account::DeleteAccountBody         => "/v1/account/delete",                 StatusOk;

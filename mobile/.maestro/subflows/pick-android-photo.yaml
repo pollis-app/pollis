@@ -13,10 +13,19 @@ appId: ${MAESTRO_APP_ID}
     timeout: 3000
     optional: true
 # The count did not move: the picker dropped the tap. Tap that tile once more.
+# Check that the tap took (it usually does) with a `when: visible:`, which
+# returns at once then; a `when: notVisible:` waited ~7 s for the count to go
+# before skipping, on every pick (#2042).
+- evalScript: ${output.pickTook = false}
 - runFlow:
     when:
-      notVisible:
+      visible:
         text: "${COUNT} photos or videos selected"
+    commands:
+      - evalScript: ${output.pickTook = true}
+- runFlow:
+    when:
+      true: ${!output.pickTook}
     commands:
       - tapOn:
           text: "Photo taken on.*"

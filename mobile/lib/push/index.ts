@@ -1,6 +1,6 @@
 // Push client. Payloads are content-free: only an opaque handle `h` (#1122, #1157). Everything degrades without throwing.
 
-import { Platform, Linking } from "react-native";
+import { AppState, Platform, Linking } from "react-native";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { invoke } from "../native";
@@ -12,14 +12,37 @@ import { handleOfPresented, trayHandles, type Presented } from "./dismiss";
 import { dismissHandles } from "./dismissTask";
 import { pushCapsFor } from "./caps";
 import { embeddedExtra } from "../buildInfo";
-import { isTitleless } from "./presentation";
+import { isTitleless, nativeOpenConversation, presentInForeground } from "./presentation";
+import { appStore } from "../../stores/appStore";
+
+/** Longest the foreground handler waits to learn which conversation a push is for. */
+const FOREGROUND_RESOLVE_MS = 1500;
+
+/** The conversation a foreground push is for, only when one is on screen; else null, unresolved. */
+async function foregroundConversation(data: unknown): Promise<string | null> {
+  if (nativeOpenConversation(appStore.openConversationId, AppState.currentState) === null) {
+    return null;
+  }
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), FOREGROUND_RESOLVE_MS));
+  const routed = await Promise.race([resolveNotificationRouting(data), timeout]);
+  return routed?.conversationId ?? null;
+}
 
 // Content-free foreground presentation (no sound, no badge). Safe at module load.
 // A title-less push (an Android rich push the native handler already posted, a `{d}` dismissal)
-// is never presented, or it would show as a second, blank notification.
+// is never presented, or it would show as a second, blank notification. Nor is one for the chat
+// on screen (#2056): the open chat shows the message, as Android's native handler already does.
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
-    const show = !isTitleless(notification.request.content);
+    const content = notification.request.content;
+    const show =
+      !isTitleless(content) &&
+      presentInForeground(
+        content,
+        await foregroundConversation(content.data),
+        appStore.openConversationId,
+        AppState.currentState,
+      );
     return {
       shouldShowBanner: show,
       shouldShowList: show,

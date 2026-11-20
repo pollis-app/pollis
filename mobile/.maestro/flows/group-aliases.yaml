@@ -17,9 +17,23 @@ tags:
     id: "tab-groups"
 
 # Two groups, each with #General.
-- tapOn:
-    id: "btn-add-group"
-    optional: true
+# A new account shows btn-create-group in the Groups tab's empty state; the
+# "+" sheet (btn-add-group) is only needed once it has groups. Tap "+" only
+# then: an optional "+" tap cost ~7 s per miss (#2042).
+- extendedWaitUntil:
+    visible:
+      id: "btn-create-group|btn-add-group"
+    timeout: 15000
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "btn-create-group"
+- runFlow:
+    when:
+      true: ${!output.shown}
+    commands:
+      - tapOn:
+          id: "btn-add-group"
 # The "+" sheet animates in (slower on iPad).
 - extendedWaitUntil:
     visible:
@@ -164,18 +178,21 @@ tags:
     timeout: 30000
 - takeScreenshot: aliases-04-own-message
 # iPad shows the chat beside the group: no back there.
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 
 # "Use my main profile" in Club only. With the composer still focused (iPad
 # keeps the chat on screen), the first tap on the tab bar only closes the keyboard.
 - tapOn:
     id: "tab-self"
+# Tap again only if Self did not open (subflows/probe-shown.yaml returns at
+# once when it did; a `when: notVisible:` waited ~7 s for it to go, #2042).
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "row-self-aliases"
 - runFlow:
     when:
-      notVisible:
-        id: "row-self-aliases"
+      true: ${!output.shown}
     commands:
       - tapOn:
           id: "tab-self"

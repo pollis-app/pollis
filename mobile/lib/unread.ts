@@ -25,6 +25,19 @@ export function resumedToForeground(previous: string, next: string): boolean {
 }
 
 /**
+ * Does a message arriving in `conversationId` read it on this phone (#2056)? Only while that chat
+ * is on screen AND the app is in the foreground: a background ingest (a push wake, a reconnect)
+ * must not mark read what nobody saw. Returning to the foreground reads it then.
+ */
+export function readsOnArrival(
+  openConversationId: string | null,
+  conversationId: string,
+  appState: string,
+): boolean {
+  return appState === "active" && openConversationId === conversationId;
+}
+
+/**
  * One cross-device converge (#1628), with its effects injected: ask the core which conversations
  * were read elsewhere, then re-read the badges and clear those conversations' notifications.
  * Concurrent callers share one run plus at most one trailing run.

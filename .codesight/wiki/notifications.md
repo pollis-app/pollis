@@ -372,9 +372,9 @@ phone's tray. Four paths, all matching on the notification's opaque handle `h`
    tap uses (cached in core) and the ones for that conversation are dismissed.
 2. **Any client read it.** `pollis-core`'s `mark_conversation_read`, when the
    cursor moves, queues the conversation (`commands::push::schedule_push_dismiss`,
-   2 s debounce) and reports `{ conversation_id, read_secs_ago }` to
+   2 s debounce) and reports `{ conversation_id, read_secs_ago, through }` to
    `POST /v1/push/dismiss`. The DS stamps the user's handles minted before the
-   read and sends every token of theirs one **silent, data-only** push
+   read, or (#2056) for a message at or before `through`, the read position and sends every token of theirs one **silent, data-only** push
    `{ d: [handles] }` (no title or body, `priority: normal`, iOS
    `contentAvailable`), coalesced per user (`push::DISMISS_COALESCE`, 2 s).
    On the phone, the expo-notifications background task
@@ -423,6 +423,63 @@ crashed on the first silent push to a killed app).
 
 **Desktop** raises no push and registers no token; its part is the core report
 above, so reading on desktop clears the phone.
+
+## Fire and clear rules across devices (#2056)
+
+One read cursor per conversation, shared by every device of the account (#844, #1628); every
+surface below derives from it. Reference: Slack (desktop activity holds mobile pushes until the
+desktop goes idle), Discord (read only with the newest message in view), Signal (a read on one
+device clears the others' notifications). The full model is on #2056.
+
+**Actively reading** (desktop) = window focused, document visible, input in the last 2 minutes
+(`IDLE_AFTER_MS`), the conversation on screen, its newest message in view (log at its live tail,
+scrolled to within a row of the bottom). `frontend/src/stores/userActivityStore.ts` holds focus,
+visibility and idle (one re-armed timeout, never a poll); the pure decisions are
+`frontend/src/utils/notificationRules.ts` (`shouldMarkRead`, `activityReportDue`).
+
+| Mechanism | Fires | Clears |
+| --- | --- | --- |
+| Unread badge (row, section header, bottom bar, dock/taskbar/tray, phone lists) | A message from someone else past the cursor | Cursor moves: desktop `useReadWhileViewing` (in `MessageList`) marks read whenever the user is actively reading — open, arrival, refocus, return from idle, scroll to bottom; mobile on open, on arrival while the chat is on screen **and the app is in the foreground** (`readsOnArrival`), on returning to the foreground in that chat, on leaving. Other devices learn it from the cursor sync. |
+| Desktop OS notification / status-bar alert | New message, unless the conversation is being actively read (`isSelected` in the wake handler is "selected AND `userActivityStore.isActive`"; a mention in the actively read channel is skipped too). A blurred, hidden or idle window alerts even for the conversation on screen. Mute and prefs as before. | Alert clears when its conversation is read anywhere (`clearAlertIfRead`). |
+| Mobile push | DS, per recipient: not the sender, not muted-unless-named, and **not while any of the recipient's devices is active** — then the push is held. | Read anywhere → `POST /v1/push/dismiss` names the read **position**; the DS clears every push for a message at or before it and drops the held push. |
+| Held push | When the user's last active device reports inactive, or its report lapses (2 min), or at DS boot: one push per conversation still held. | Dropped by a read of the conversation first. |
+| Phone presentation | Rich fetch pulls the cursors (`pull_read_cursors`, no push) before choosing previews; an item already read is `read: true` and `muted: true`, so Android posts nothing and iOS shows the generic text (dropping needs the filtering entitlement), which the dismissal then clears. iOS's foreground handler no longer presents a push for the chat on screen (`presentInForeground`), matching Android's native handler. | #1508's four paths. |
+
+**Active reports.** Desktop only: `useActivityReport` (AppShell) calls `report_push_activity`
+→ `POST /v1/push/activity` `{ user_id, active }` (device-signed, self-scoped) on every change
+(focus, blur, hide, idle, page hide, sign-out) and, while active, on input at most once a minute
+(`RENEW_MS`) — never on a timer. `pollis_delivery::push_hold` keeps `user → device → active until`
+in memory only (never written or logged), each report good for `ACTIVITY_TTL_SECS` (120 s); a
+one-shot task after the TTL releases the user's holds if nobody renewed. Phones never report:
+their own alerts are pushes, so holding them for a foreground phone would silence it.
+
+**Held pushes** live in `push_held` (000056), one row per (user, conversation), newest message
+wins (`(sent_at, id)` order, so a late older send never replaces it). A release claims each row
+by deleting it only if it still names the same message, then pushes it — so two releases never
+push twice and a newer hold that lands meanwhile waits for the next release. A hold that cannot
+be written is pushed at once; a DS restart sends everything held (`spawn_boot_release`), since
+after one nobody is active. Rows go with account deletion and conversation teardown.
+
+**Dismiss by position.** `push_handle` records `message_id` / `message_sent_at` (the envelope's
+own, 000056). `DismissEntry.through` (`ReadPosition { sent_at, message_id }`, from
+`mark_conversation_read_at`) clears every handle at or before it whatever the clocks say; the
+old time cutoff (`read_secs_ago`) still applies alongside, so an older client, or a handle minted
+before 000056, behaves as before. Before this, a read within ~2 s of arrival — exactly the case
+of reading an open conversation — never cleared that message's push.
+
+**Edge cases.** Scrolled up or in an older window: unread, alerts. Threads: replies share the
+conversation's cursor. Mentions follow the same rules; only the existing mute bypass differs.
+Several devices: any active desktop holds the account's pushes; each device reports for itself.
+Offline devices: ingest, then cursor sync, so nothing read elsewhere alerts; a phone that missed
+dismissals reconciles on launch and foreground.
+
+**Compatibility.** Every wire change is additive: `through` is skipped when absent and ignored
+by an older DS; `/v1/push/activity` answers 404 on an older DS (best-effort, pushes just go out);
+`Item.read` is additive and the item is also `muted` for older hosts. Tests:
+`pollis-delivery/src/push.rs` (`an_active_user_is_held_and_released_when_inactive`,
+`a_read_drops_the_held_push`, `activity_is_per_device_and_lapses`,
+`a_read_clears_pushes_up_to_its_message_whatever_the_clock`), `frontend/tests/notification-rules.test.ts`,
+`mobile/tests/notification-rules.test.ts`, Playwright `e2e/notification-rules.spec.ts`.
 
 ## DM requests (#1734)
 

@@ -53,7 +53,7 @@ use crate::AppState;
 use crate::util::{BIND_CHUNK, placeholders};
 
 /// Expo's push service endpoint. Accepts a JSON array of up to 100 messages.
-const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
+pub(crate) const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 
 /// Expo's receipts endpoint. Accepts up to 1000 ticket ids per request.
 const EXPO_RECEIPTS_URL: &str = "https://exp.host/--/api/v2/push/getReceipts";
@@ -133,8 +133,17 @@ pub async fn notify_new_message(
     conversation_id: &str,
     sender_id: &str,
     audience: &PushAudience,
+    message: Option<&PushMessage>,
 ) -> anyhow::Result<()> {
-    notify_new_message_at(conn, EXPO_PUSH_URL, conversation_id, sender_id, audience).await
+    notify_new_message_at(conn, EXPO_PUSH_URL, conversation_id, sender_id, audience, message).await
+}
+
+/// The message a push is for (#2056): the envelope's own id and delivery stamp,
+/// recorded on the handle so a read can clear it by position, not by clock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushMessage {
+    pub id: String,
+    pub sent_at: String,
 }
 
 /// [`notify_new_message`] against an explicit Expo URL, so a test can stand a
@@ -145,6 +154,7 @@ pub async fn notify_new_message_at(
     conversation_id: &str,
     sender_id: &str,
     audience: &PushAudience,
+    message: Option<&PushMessage>,
 ) -> anyhow::Result<()> {
     let user_ids = push_recipients(conn, conversation_id, sender_id, audience).await?;
     if user_ids.is_empty() {
@@ -154,21 +164,26 @@ pub async fn notify_new_message_at(
     // `kind` mirrors the values the mobile push router understands
     // (mobile/hooks/usePushNotifications.ts): "channel" | "dm" | "dm_request".
     if !is_dm(conn, conversation_id).await? {
-        return fan_out(conn, expo_url, conversation_id, &user_ids, "channel").await;
+        // #2056: a recipient at an active desktop is held, not pushed.
+        let now = crate::push_hold::hold_active(conn, expo_url, &user_ids, conversation_id, "channel", message).await;
+        return fan_out(conn, expo_url, conversation_id, &now, "channel", message).await;
     }
     let plan = dm_push_plan(conn, conversation_id, sender_id, user_ids).await?;
-    fan_out(conn, expo_url, conversation_id, &plan.members, "dm").await?;
+    // #2056: likewise for a DM; a DM request is never held.
+    let members = crate::push_hold::hold_active(conn, expo_url, &plan.members, conversation_id, "dm", message).await;
+    fan_out(conn, expo_url, conversation_id, &members, "dm", message).await?;
     fan_out_request(conn, expo_url, conversation_id, &plan.requests, RequestPush::FirstMessage)
         .await
 }
 
-/// Push every device of `user_ids` with handles of one `kind`.
-async fn fan_out(
+/// Push every device of `user_ids` with handles of one `kind`, minted for `message`.
+pub(crate) async fn fan_out(
     conn: &Connection,
     expo_url: &str,
     conversation_id: &str,
     user_ids: &[String],
     kind: &str,
+    message: Option<&PushMessage>,
 ) -> anyhow::Result<()> {
     if user_ids.is_empty() {
         return Ok(());
@@ -177,7 +192,7 @@ async fn fan_out(
     if tokens.is_empty() {
         return Ok(());
     }
-    let handles = mint_push_handles(conn, user_ids, conversation_id, kind).await;
+    let handles = mint_push_handles_for(conn, user_ids, conversation_id, kind, message).await;
     let messages: Vec<serde_json::Value> = tokens
         .iter()
         .map(|t| expo_message(&t.token, t.platform.as_deref(), t.caps, handles.get(&t.user_id)))
@@ -1054,6 +1069,18 @@ pub async fn mint_push_handles(
     conversation_id: &str,
     kind: &str,
 ) -> HashMap<String, String> {
+    mint_push_handles_for(conn, user_ids, conversation_id, kind, None).await
+}
+
+/// [`mint_push_handles`], recording the message each handle is for (#2056) so a
+/// read clears it by position. `None` (a DM request) clears by time alone.
+pub async fn mint_push_handles_for(
+    conn: &Connection,
+    user_ids: &[String],
+    conversation_id: &str,
+    kind: &str,
+    message: Option<&PushMessage>,
+) -> HashMap<String, String> {
     use base64::Engine as _;
     let mut out = HashMap::new();
     for user in user_ids {
@@ -1062,13 +1089,16 @@ pub async fn mint_push_handles(
         let handle = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
         let wrote = conn
             .execute(
-                "INSERT INTO push_handle (handle, user_id, conversation_id, kind) \
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO push_handle \
+                 (handle, user_id, conversation_id, kind, message_id, message_sent_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 libsql::params![
                     handle.clone(),
                     user.clone(),
                     conversation_id.to_string(),
-                    kind.to_string()
+                    kind.to_string(),
+                    message.map(|m| m.id.clone()),
+                    message.map(|m| m.sent_at.clone())
                 ],
             )
             .await;
@@ -1315,6 +1345,55 @@ fn expo_dismiss_message(
     msg
 }
 
+/// How far one conversation was read: a time (every client) and, from a client
+/// since #2056, the message position, which wins whatever the clocks say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadCutoff {
+    pub at_unix: i64,
+    pub through: Option<pollis_api::devices::ReadPosition>,
+}
+
+impl ReadCutoff {
+    /// `(sent_at, message_id)` as SQL parameters; both NULL without a position.
+    pub(crate) fn through_params(&self) -> (Option<String>, Option<String>) {
+        match &self.through {
+            Some(p) => (Some(p.sent_at.clone()), Some(p.message_id.clone())),
+            None => (None, None),
+        }
+    }
+}
+
+/// One cutoff per conversation; if a conversation is named twice, the LATEST
+/// time and the furthest position win.
+pub fn read_cutoffs(entries: &[DismissEntry], now_unix: i64) -> BTreeMap<String, ReadCutoff> {
+    let mut cutoffs: BTreeMap<String, ReadCutoff> = BTreeMap::new();
+    for e in entries {
+        if e.conversation_id.is_empty() || e.conversation_id.len() > 128 {
+            continue;
+        }
+        let through = e.through.clone().filter(|p| {
+            !p.sent_at.is_empty() && p.sent_at.len() <= 64 && p.message_id.len() <= 128
+        });
+        let at = now_unix - i64::from(e.read_secs_ago);
+        let slot = cutoffs
+            .entry(e.conversation_id.clone())
+            .or_insert_with(|| ReadCutoff { at_unix: at, through: None });
+        if at > slot.at_unix {
+            slot.at_unix = at;
+        }
+        if let Some(p) = through {
+            let further = slot.through.as_ref().is_none_or(|cur| {
+                (p.sent_at.as_str(), p.message_id.as_str())
+                    > (cur.sent_at.as_str(), cur.message_id.as_str())
+            });
+            if further {
+                slot.through = Some(p);
+            }
+        }
+    }
+    cutoffs
+}
+
 /// Stamp the user's outstanding handles for `entries` dismissed and return
 /// them. Only handles minted at or before each read (`now - read_secs_ago`),
 /// within the TTL, and not already dismissed.
@@ -1326,33 +1405,28 @@ pub async fn mark_dismissed(
     entries: &[DismissEntry],
     now_unix: i64,
 ) -> Vec<String> {
-    // One cutoff per conversation: the LATEST read wins if a conversation is
-    // named twice.
-    let mut cutoffs: BTreeMap<&str, i64> = BTreeMap::new();
-    for e in entries {
-        if e.conversation_id.is_empty() || e.conversation_id.len() > 128 {
-            continue;
-        }
-        let at = now_unix - i64::from(e.read_secs_ago);
-        let slot = cutoffs.entry(e.conversation_id.as_str()).or_insert(at);
-        if at > *slot {
-            *slot = at;
-        }
-    }
+    let cutoffs = read_cutoffs(entries, now_unix);
     let mut handles = Vec::new();
-    for (conversation_id, cutoff) in cutoffs {
+    for (conversation_id, cutoff) in &cutoffs {
+        // #2056: a held push for what was just read is never sent.
+        crate::push_hold::drop_read(conn, user_id, conversation_id, cutoff).await;
+        let (through_at, through_id) = cutoff.through_params();
         let rows = conn
             .query(
                 "SELECT handle FROM push_handle \
                  WHERE user_id = ?1 AND conversation_id = ?2 AND dismissed_at IS NULL \
-                   AND created_at <= datetime(?3, 'unixepoch') \
+                   AND (created_at <= datetime(?3, 'unixepoch') \
+                        OR (?5 IS NOT NULL AND message_sent_at IS NOT NULL \
+                            AND (message_sent_at, message_id) <= (?5, ?6))) \
                    AND created_at >= datetime('now', ?4) \
                  ORDER BY created_at",
                 libsql::params![
                     user_id.to_string(),
                     conversation_id.to_string(),
-                    cutoff,
-                    format!("-{PUSH_HANDLE_TTL_DAYS} days")
+                    cutoff.at_unix,
+                    format!("-{PUSH_HANDLE_TTL_DAYS} days"),
+                    through_at,
+                    through_id
                 ],
             )
             .await;
@@ -1590,6 +1664,7 @@ pub async fn dismiss_conversations_at(
         .map(|c| DismissEntry {
             conversation_id: c.clone(),
             read_secs_ago: 0,
+            through: None,
         })
         .collect();
     let mut handles = mark_dismissed(conn, user_id, &entries, crate::util::now_unix() as i64).await;
@@ -1917,7 +1992,7 @@ mod tests {
         .unwrap();
         let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
         let audience = PushAudience::from_send(Some(vec![]), None).unwrap();
-        notify_new_message_at(&c, &url, "ch1", "alice", &audience)
+        notify_new_message_at(&c, &url, "ch1", "alice", &audience, None)
             .await
             .unwrap();
         let sent: Vec<serde_json::Value> = seen
@@ -2381,7 +2456,7 @@ mod tests {
     /// Expo and reading back what it was sent.
     async fn woken(c: &Connection, audience: &PushAudience) -> Vec<String> {
         let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
-        notify_new_message_at(c, &url, "ch1", "alice", audience)
+        notify_new_message_at(c, &url, "ch1", "alice", audience, None)
             .await
             .unwrap();
         let mut out: Vec<String> = seen
@@ -2451,6 +2526,7 @@ mod tests {
         DismissEntry {
             conversation_id: conversation_id.to_string(),
             read_secs_ago,
+            through: None,
         }
     }
 
@@ -2691,7 +2767,7 @@ mod tests {
 
     async fn send_in_d1(c: &Connection, url: &str, sender: &str) {
         let audience = PushAudience::from_send(Some(vec![]), None).unwrap();
-        notify_new_message_at(c, url, "d1", sender, &audience).await.unwrap();
+        notify_new_message_at(c, url, "d1", sender, &audience, None).await.unwrap();
     }
 
     /// Creating a request pushes the pending recipient once, and only on a device that
@@ -2892,5 +2968,221 @@ mod tests {
         // The foreground catch-up agrees, and nothing is left to clear.
         assert_eq!(dismissed_handles(&c, "bob-1734", std::slice::from_ref(&h)).await, vec![h]);
         assert!(outstanding_handles(&c, "bob-1734", &["d1".to_string()]).await.is_empty());
+    }
+
+    // ── #2056: held while at a desktop, cleared by message position ──────────
+
+    /// A channel from `gus-<tag>` to `hana-<tag>` and `ivo-<tag>`, one token each.
+    async fn hold_fixture(tag: &str) -> Connection {
+        let c = conn().await;
+        for sql in [
+            "INSERT INTO conversation (id, kind) VALUES ('g1', 'group')",
+            "INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'gus')",
+            "INSERT INTO conversation (id, kind) VALUES ('ch1', 'channel')",
+            "INSERT INTO channels (id, group_id, name) VALUES ('ch1', 'g1', 'general')",
+        ] {
+            c.execute(sql, ()).await.unwrap();
+        }
+        for user in ["gus", "hana", "ivo"] {
+            let id = format!("{user}-{tag}");
+            c.execute(
+                "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', ?1, 'member')",
+                libsql::params![id.clone()],
+            )
+            .await
+            .unwrap();
+            add_token(&c, &format!("ExponentPushToken[{id}]"), &id).await;
+        }
+        c
+    }
+
+    fn msg(id: &str, sent_at: &str) -> PushMessage {
+        PushMessage {
+            id: id.into(),
+            sent_at: sent_at.into(),
+        }
+    }
+
+    async fn send(c: &Connection, url: &str, tag: &str, m: &PushMessage) {
+        let audience = PushAudience::from_send(Some(vec![]), Some(vec![])).unwrap();
+        notify_new_message_at(c, url, "ch1", &format!("gus-{tag}"), &audience, Some(m))
+            .await
+            .unwrap();
+    }
+
+    fn pushed_to(seen: &Mutex<Vec<serde_json::Value>>) -> Vec<String> {
+        let mut out: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|b| b.as_array().cloned().unwrap_or_default())
+            .map(|m| m["to"].as_str().unwrap().to_string())
+            .collect();
+        out.sort();
+        out
+    }
+
+    async fn held(c: &Connection, user: &str) -> Vec<(String, String)> {
+        let mut rows = c
+            .query(
+                "SELECT conversation_id, message_id FROM push_held WHERE user_id = ?1",
+                libsql::params![user.to_string()],
+            )
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(r) = rows.next().await.unwrap() {
+            out.push((r.get(0).unwrap(), r.get(1).unwrap()));
+        }
+        out
+    }
+
+    const MINUTE: std::time::Duration = std::time::Duration::from_secs(60);
+
+    /// The reported bug: reading on desktop must not buzz the phone. An active
+    /// user is held, everyone else is pushed; going inactive sends what is left.
+    #[tokio::test]
+    async fn an_active_user_is_held_and_released_when_inactive() {
+        let tag = "held-2056";
+        let c = hold_fixture(tag).await;
+        let hana = format!("hana-{tag}");
+        let ivo_token = format!("ExponentPushToken[ivo-{tag}]");
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        assert!(crate::push_hold::report(&hana, "desk", true, MINUTE));
+
+        send(&c, &url, tag, &msg("m1", "2026-11-19T10:00:00.000Z")).await;
+        send(&c, &url, tag, &msg("m2", "2026-11-19T10:00:01.000Z")).await;
+        assert_eq!(
+            pushed_to(&seen),
+            vec![ivo_token.clone(), ivo_token],
+            "only the user away from a desktop is pushed"
+        );
+        assert_eq!(held(&c, &hana).await, vec![("ch1".to_string(), "m2".to_string())]);
+        // An older message arriving late never replaces the newer hold.
+        let late = msg("m0", "2026-11-19T09:59:00.000Z");
+        let now = crate::push_hold::hold_active(&c, &url, std::slice::from_ref(&hana), "ch1", "channel", Some(&late)).await;
+        assert!(now.is_empty());
+        assert_eq!(held(&c, &hana).await, vec![("ch1".to_string(), "m2".to_string())]);
+
+        // Still active: a release sends nothing.
+        assert_eq!(crate::push_hold::release(&c, &url, &hana).await, 0);
+        seen.lock().unwrap().clear();
+        assert!(!crate::push_hold::report(&hana, "desk", false, MINUTE));
+        assert_eq!(crate::push_hold::release(&c, &url, &hana).await, 1, "one push per conversation");
+        assert_eq!(pushed_to(&seen), vec![format!("ExponentPushToken[hana-{tag}]")]);
+        assert!(held(&c, &hana).await.is_empty());
+        // A second release never repeats it.
+        assert_eq!(crate::push_hold::release(&c, &url, &hana).await, 0);
+
+        // The handle it went out with records the message, so a read clears it by position.
+        let mut rows = c
+            .query(
+                "SELECT message_id FROM push_handle WHERE user_id = ?1",
+                libsql::params![hana.clone()],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert_eq!(row.get::<String>(0).unwrap(), "m2");
+    }
+
+    /// A conversation read before the user goes idle is never pushed.
+    #[tokio::test]
+    async fn a_read_drops_the_held_push() {
+        let tag = "read-2056";
+        let c = hold_fixture(tag).await;
+        let hana = format!("hana-{tag}");
+        let (url, seen) = fake_expo(200, serde_json::json!({ "data": [] })).await;
+        crate::push_hold::report(&hana, "desk", true, MINUTE);
+        send(&c, &url, tag, &msg("m1", "2026-11-19T10:00:00.000Z")).await;
+        assert_eq!(held(&c, &hana).await.len(), 1);
+
+        // Read a minute ago by the clock, yet by position it covers m1.
+        let read = DismissEntry {
+            conversation_id: "ch1".into(),
+            read_secs_ago: 60,
+            through: Some(pollis_api::devices::ReadPosition {
+                sent_at: "2026-11-19T10:00:00.000Z".into(),
+                message_id: "m1".into(),
+            }),
+        };
+        mark_dismissed(&c, &hana, &[read], crate::util::now_unix() as i64).await;
+        assert!(held(&c, &hana).await.is_empty());
+
+        seen.lock().unwrap().clear();
+        crate::push_hold::report(&hana, "desk", false, MINUTE);
+        assert_eq!(crate::push_hold::release(&c, &url, &hana).await, 0);
+        assert!(pushed_to(&seen).is_empty());
+    }
+
+    /// One desktop going inactive leaves the user active while another still is;
+    /// an active report lapses on its own.
+    #[tokio::test]
+    async fn activity_is_per_device_and_lapses() {
+        let user = "jo-2056";
+        assert!(crate::push_hold::report(user, "laptop", true, MINUTE));
+        assert!(crate::push_hold::report(user, "desktop", true, MINUTE));
+        assert!(
+            crate::push_hold::report(user, "laptop", false, MINUTE),
+            "the other device is still active"
+        );
+        assert!(!crate::push_hold::report(user, "desktop", false, MINUTE));
+        assert!(!crate::push_hold::is_active(user));
+
+        crate::push_hold::report(user, "laptop", true, std::time::Duration::from_millis(30));
+        assert!(crate::push_hold::is_active(user));
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        assert!(!crate::push_hold::is_active(user), "a report nobody renews stops counting");
+    }
+
+    /// Dismiss by position (#2056): a read a second after arrival clears the
+    /// push the time cutoff would have missed, and nothing newer than the read.
+    #[tokio::test]
+    async fn a_read_clears_pushes_up_to_its_message_whatever_the_clock() {
+        let c = conn().await;
+        let user = vec!["kai-2056".to_string()];
+        let a = msg("a", "2026-11-19T10:00:00.000Z");
+        let b = msg("b", "2026-11-19T10:00:05.000Z");
+        let h1 = mint_push_handles_for(&c, &user, "c1", "dm", Some(&a)).await["kai-2056"].clone();
+        let h2 = mint_push_handles_for(&c, &user, "c1", "dm", Some(&b)).await["kai-2056"].clone();
+        let read = DismissEntry {
+            conversation_id: "c1".into(),
+            read_secs_ago: 30,
+            through: Some(pollis_api::devices::ReadPosition {
+                sent_at: a.sent_at.clone(),
+                message_id: a.id.clone(),
+            }),
+        };
+        let now = crate::util::now_unix() as i64;
+        // Without a position (an older client) a read this recent clears nothing.
+        let old = DismissEntry {
+            through: None,
+            ..read.clone()
+        };
+        assert!(mark_dismissed(&c, "kai-2056", &[old], now).await.is_empty());
+        assert_eq!(mark_dismissed(&c, "kai-2056", &[read], now).await, vec![h1]);
+        assert_eq!(outstanding_handles(&c, "kai-2056", &["c1".to_string()]).await, vec![h2]);
+    }
+
+    /// The furthest position and the latest time win when a conversation repeats.
+    #[test]
+    fn read_cutoffs_keep_the_furthest_position() {
+        let at = |s: &str, id: &str| pollis_api::devices::ReadPosition {
+            sent_at: s.into(),
+            message_id: id.into(),
+        };
+        let entry = |age: u32, through| DismissEntry {
+            conversation_id: "c".into(),
+            read_secs_ago: age,
+            through,
+        };
+        let entries = vec![
+            entry(5, Some(at("2026-11-19T10:00:02Z", "b"))),
+            entry(9, Some(at("2026-11-19T10:00:01Z", "z"))),
+            entry(1, None),
+        ];
+        let cut = read_cutoffs(&entries, 100);
+        assert_eq!(cut["c"].at_unix, 99);
+        assert_eq!(cut["c"].through, Some(at("2026-11-19T10:00:02Z", "b")));
     }
 }

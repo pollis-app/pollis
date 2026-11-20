@@ -687,8 +687,9 @@ exactly (`frontend/src/i18n/locales/en/*.json`) or use a regex.
 Layout changes that flows depend on (see `SELECTORS.md` for the ids):
 - **Groups tab:** with no groups it shows an empty state with
   `btn-create-group` / `btn-join-group`; with groups, those two live in the
-  "+" sheet (`btn-add-group`) at the end of the group pill strip. Flows tap
-  `btn-add-group` with `optional: true` first. A pill (`row-group-<id>`)
+  "+" sheet (`btn-add-group`) at the end of the group pill strip. Flows wait
+  for either, and tap `btn-add-group` only when `btn-create-group` is not
+  already showing (see "Optional steps" below). A pill (`row-group-<id>`)
   switches the in-place `panel-group`; it does not push `screen-group`.
   Creating a group (`btn-submit-group`) also lands here, with the new group
   selected: wait for `btn-group-menu` with text `"<name>, .*"` (its label is
@@ -701,8 +702,9 @@ Layout changes that flows depend on (see `SELECTORS.md` for the ids):
   with a wait of your own: both end as soon as the app is ready.
 - **iPad (regular width):** Groups/Direct are two-pane; a conversation opens
   in the right pane (`screen-chat`, no `btn-back`) and the pages it opens
-  (info, members, settings, thread, profile) push inside that pane. Flows that
-  tap `btn-back` to leave a conversation mark it `optional: true`.
+  (info, members, settings, thread, profile) push inside that pane. Flows
+  leave a conversation with `subflows/back-on-phone.yaml`, which taps
+  `btn-back` on a phone and nothing on the iPad (the runner passes `IPAD=1`).
 - **Android photo picker, several photos:** a tile tap can be reported done
   and select nothing (the grid redrawing under a sync, or a tile for a photo
   MediaStore no longer holds). `subflows/pick-six-photos-android.yaml`
@@ -730,6 +732,39 @@ Layout changes that flows depend on (see `SELECTORS.md` for the ids):
   point tap to dismiss the keyboard can open a hit; `hideKeyboard` works there
   (normal keyboard with a return key). The number pad (OTP / change-email
   codes) has no return key, so `hideKeyboard` cannot close it.
+
+## Optional steps cost ~7 s when they miss (#2042)
+
+Maestro gives every optional lookup 7 s (its optional-lookup time, counted
+from the last tap or input), and spends all of it whenever the element is not
+there: a `tapOn` or `assertVisible` with `optional: true`, a `runFlow: when:
+visible:` that turns out false, a `when: notVisible:` on something that IS on
+screen (it waits for it to go), and the last check of a `repeat: while:` loop.
+On the gate that added up to about a quarter of a flow. So:
+
+- **Where the app state is known, use a definite step.** A first signup always
+  shows the emergency kit; a new account's Groups tab always shows its empty
+  state; a just-created group always has its #General.
+- **Where it varies, make the cheap check the usual one.**
+  `subflows/probe-absent.yaml` (`ID`) sets `output.absent` and returns within
+  half a second when nothing matches; `subflows/probe-shown.yaml` (`ID`) sets
+  `output.shown` and returns at once when it matches. Pick the one whose
+  answer is the usual case, then run the rare branch with `runFlow: when:
+  true: ${!output.absent}` (or `${!output.shown}`). The rare branch still pays
+  the ~7 s. Loops run on a flag the same way (`repeat: while: true:
+  ${!output.done}`); `subflows/send-strip.yaml` is the model.
+- **Wait for whichever screen comes next** with an id regex
+  (`"screen-auth-emergency-kit|screen-auth-initializing|tab-groups"`) before a
+  branch, so the check after it looks at a settled screen.
+- Ready-made: `subflows/back-on-phone.yaml` (leave a conversation),
+  `subflows/unlock-if-locked.yaml` (after `launchApp: stopApp: false`; auto-lock
+  is off by default), `subflows/after-open-link.yaml` (`SCREEN`, after an
+  `openLink`: answers iOS's "Open" prompt only when the screen did not come
+  up).
+- An optional step that usually matches (a picker's Add/Done, an optional tap
+  on a row that is there) costs nothing and can stay. A timed pause written as
+  an optional wait for an id that never exists (`__never_matches__`) is a
+  deliberate sleep, not a miss.
 
 ## Known issues found by the first real run (2026-08-22)
 

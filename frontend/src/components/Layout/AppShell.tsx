@@ -32,6 +32,7 @@ import { useHistoryTransferRuntime } from "../../hooks/useHistoryTransferRuntime
 import { acceptIncomingCall, declineIncomingCall } from "../../voice/incomingCall";
 import { flushOutbox } from "../../hooks/queries/useMessages";
 import { useBadge } from "../../hooks/useBadge";
+import { useActivityReport } from "../../hooks/useActivityReport";
 import { useAutoLock } from "../../hooks/useAutoLock";
 import { AlertTriangle, Download, Mail, Phone } from "lucide-react";
 import { startUpdatePolling, stopUpdatePolling } from "../../services/updatePoller";
@@ -59,6 +60,8 @@ export const AppShell: React.FC = observer(() => {
   useHydrateUnread(appStore.currentUser?.id ?? null);
   // Converge with other devices' reads at startup and on focus (#844, #1628).
   useSyncReadCursors(appStore.currentUser?.id ?? null);
+  // Hold the account's phone pushes while the user is at this window (#2056).
+  useActivityReport(appStore.currentUser?.id ?? null);
   const { t } = useTranslation("nav");
   probeRender("AppShell");
   const [isSyncing, setIsSyncing] = useState(false);

@@ -137,7 +137,9 @@ export const SidebarRow: React.FC<SidebarRowProps> = ({
         {/* Isolated: user-generated names must not drag the badge in mixed-direction text. */}
         <bdi className="flex-1 truncate">{label}</bdi>
         {trailing}
-        {badge != null && <SidebarUnreadBadge count={badge} muted={dimmed} />}
+        {badge != null && (
+          <SidebarUnreadBadge count={badge} muted={dimmed} testId={testId ? `sidebar-unread-${testId}` : undefined} />
+        )}
       </PressButton>
       {actions && (
         <div
@@ -154,8 +156,9 @@ export const SidebarRow: React.FC<SidebarRowProps> = ({
   );
 };
 
-export const SidebarUnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
+export const SidebarUnreadBadge: React.FC<{ count: number; muted?: boolean; testId?: string }> = ({ count, muted, testId }) => (
   <span
+    data-testid={testId}
     className={`shrink-0 rounded-chip px-1.5 py-0.5 text-meta leading-none text-bg ${
       muted ? "bg-muted" : "bg-accent"
     }`}

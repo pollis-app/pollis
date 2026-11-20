@@ -28,7 +28,7 @@ extern "C" {
 //     "message_id":"...","sender_name":"...","conversation_title":"..."|null,
 //     "is_dm":true,"body":"...",
 //     "body_key":"attachment|image|video|voice|sensitive"|null,
-//     "muted":false,"mention":false,"kind":"message|dm_request"}]}
+//     "muted":false,"mention":false,"read":false,"kind":"message|dm_request"}]}
 //   {"ok":false,"reason":"not_logged_in|lock_busy|timeout|network|decrypt|internal"}
 //
 // items are the messages THIS call stored, oldest first, so a message is returned by at most
@@ -37,7 +37,9 @@ extern "C" {
 // dedupe by message_id. With mode "name" every body is "" and body_key null; mode "none"
 // never fetches or decrypts anything and returns no items. "muted" means the channel is muted
 // and the message does not @mention this user (hosts must not show it); "mention" is true when
-// it does. mode "none" with no items means the user chose Nothing, or has not unlocked the app
+// it does. "read" (#2056; absent from older cores = false) is true when the message was already
+// read on another of the account's devices; such an item is also "muted", so hosts post nothing
+// for it. mode "none" with no items means the user chose Nothing, or has not unlocked the app
 // since installing this build: show the generic text.
 // "kind" (#1734; absent from older cores = "message"): "dm_request" is a pending DM request
 // the user has not accepted. Nothing in it is fetched or decrypted; the one item has the

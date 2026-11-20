@@ -90,10 +90,13 @@ tags:
 # On the iOS simulator the first double tap after the send and hideKeyboard is
 # sometimes lost (by hand it always lands), so try up to three times; the bar
 # must still appear.
+# Loops on a flag that subflows/probe-shown.yaml sets: it returns at once
+# when the tap worked, where `while: notVisible:` waited ~7 s on its last
+# check (#2042).
+- evalScript: ${output.loopDone = false}
 - repeat:
     while:
-      notVisible:
-        id: "bar-reply"
+      true: ${!output.loopDone}
     times: 3
     commands:
       - doubleTapOn:
@@ -103,6 +106,11 @@ tags:
             id: "bar-reply"
           timeout: 4000
           optional: true
+      - runFlow:
+          file: ../subflows/probe-shown.yaml
+          env:
+            ID: "bar-reply"
+      - evalScript: ${output.loopDone = output.shown}
 - assertVisible:
     id: "bar-reply"
 - assertNotVisible:

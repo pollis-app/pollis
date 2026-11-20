@@ -34,9 +34,7 @@ tags:
 
 # Re-read from the store: still once each, in order.
 # On iPad the channel is the two-pane's right pane, with no back button.
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 - tapOn:
     text: "General"
     optional: true
@@ -52,9 +50,7 @@ tags:
 # after the burst, while it is still going out. The core stored every message
 # before any network work, so after the relaunch each lands once, in order.
 # On iPad the channel is the two-pane's right pane, with no back button.
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 # On iPad the composer keeps focus and the keyboard covers the tab bar.
 - runFlow:
     when:

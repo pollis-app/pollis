@@ -67,9 +67,7 @@ tags:
 
 # ── The channel list marks it ────────────────────────────────────────────
 # On iPad the channel is the two-pane's right pane, with no back button.
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 - extendedWaitUntil:
     visible:
       id: "row-channel-.*-muted"
@@ -102,9 +100,7 @@ tags:
 - tapOn:
     id: "btn-menu-cancel"
 # On iPad the channel is the two-pane's right pane, with no back button.
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 - extendedWaitUntil:
     visible:
       id: "panel-group"

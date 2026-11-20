@@ -241,7 +241,40 @@ pub struct DismissEntry {
     /// Whole seconds since the cursor moved, rounded UP (so the DS's cutoff can
     /// only fall before the read, never after it).
     pub read_secs_ago: u32,
+    /// The read position the cursor moved to (#2056): the newest message read, as
+    /// `(sent_at, message_id)`, the order the cursor uses. The DS clears every push
+    /// for a message at or before it, whatever the clocks say. Absent from a client
+    /// before #2056, which keeps the time cutoff alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub through: Option<ReadPosition>,
 }
+
+/// A position in a conversation, ordered by `(sent_at, message_id)` exactly as the
+/// read cursor is (#844).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadPosition {
+    pub sent_at: String,
+    pub message_id: String,
+}
+
+/// "This device is / is no longer in use" (#2056).
+///
+/// Sent by a desktop when it becomes active (focused, visible, not idle), at most
+/// once a minute on input while it stays so, and when it stops (blur, hide, idle,
+/// close). While any device of the user is active the DS holds their message
+/// pushes; when none is, it sends what is still unread. An active report lapses
+/// after [`ACTIVITY_TTL_SECS`] unless renewed, so a client that vanishes without
+/// saying so stops holding pushes on its own.
+///
+/// Device-signed and self-scoped. Kept in DS memory only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushActivityBody {
+    pub user_id: String,
+    pub active: bool,
+}
+
+/// How long one active report counts for (#2056).
+pub const ACTIVITY_TTL_SECS: u64 = 120;
 
 /// "I read these conversations": clear their notifications on every device of
 /// mine (#1508).

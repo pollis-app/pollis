@@ -48,6 +48,8 @@ import { KeyChangeNoticeRow } from "./KeyChangeNoticeRow";
 import { useKeyChangeNotices, type KeyChangeNotice } from "../../hooks/queries/useUserProfile";
 import { placeKeyChangeNotices } from "../../utils/keyChangeTimeline";
 import { receiptTargetId } from "../../utils/receiptTarget";
+import { useMarkConversationRead } from "../../hooks/queries/useUnread";
+import { useReadWhileViewing } from "../../hooks/useReadWhileViewing";
 
 // How long the permalink jump highlight stays on the target row.
 const HIGHLIGHT_MS = 1800;
@@ -471,6 +473,17 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   useEffect(() => {
     maybeLoadNewer();
   }, [maybeLoadNewer, timeline.length]);
+
+  // Reading is marking read (#2056): arrival, refocus, return from idle and scrolling to the
+  // bottom all clear the conversation, but only while the user is here and sees the newest row.
+  const { mutate: markConversationRead } = useMarkConversationRead(currentUser?.id ?? null);
+  useReadWhileViewing({
+    conversationId: selectedChannelId ?? selectedConversationId ?? null,
+    scrollRef: containerRef,
+    atLiveTail: !hasNewer && !isFetchingNewer,
+    thresholdPx: rowEstimatePx,
+    markRead: markConversationRead,
+  });
 
   // Stable identity (#874); the target is often off-window, so reveal it first.
   const onScrollToMessageRef = useRef(onScrollToMessage);

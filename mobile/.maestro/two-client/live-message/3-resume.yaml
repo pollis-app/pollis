@@ -18,12 +18,7 @@ tags:
 - launchApp:
     stopApp: false
 # Auto-lock may have engaged while away; unlock if so.
-- runFlow:
-    when:
-      visible:
-        id: "screen-auth-pin"
-    commands:
-      - runFlow: ../../subflows/enter-pin.yaml
+- runFlow: ../../subflows/unlock-if-locked.yaml
 - tapOn:
     id: "tab-direct"
 - tapOn:
