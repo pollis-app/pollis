@@ -12,8 +12,6 @@ import {
   type RoomPresence,
 } from "../lib/presence.ts";
 
-export type { PresenceStatus };
-
 class PresenceStore {
   byRoom: RoomPresence = {};
 
