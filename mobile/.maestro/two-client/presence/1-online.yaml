@@ -7,8 +7,14 @@ tags:
 # pollis-core's own LiveKit path, sits in its room. The DM's row on the Direct
 # list shows it online.
 
-- tapOn:
-    id: "btn-back"
+# Phones: back to the Direct list. iPad's two-pane keeps the list beside the conversation.
+- runFlow:
+    when:
+      visible:
+        id: "btn-back"
+    commands:
+      - tapOn:
+          id: "btn-back"
 - extendedWaitUntil:
     visible:
       id: "row-dm-.*-avatar-presence-online"
