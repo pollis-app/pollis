@@ -23,6 +23,31 @@ tag date, UTC.
 
 ---
 
+## v1.19.19 — 2026-11-20
+
+- **Channel categories.** Group admins can sort channels under named
+  categories and drag channels and categories into any order (Alt+↑/↓ from the
+  keyboard). New channel and New category are on the group's "+". You can
+  collapse a category on this device; it still shows its unread count, and the
+  channel you have open stays visible.
+- **Bots.** A group admin can add a bot from the group's Settings → Bots by
+  pairing it with a machine that runs it. A bot's messages carry a Bot badge,
+  its commands appear when you type `/`, and you can mention it like a member.
+  Apps that run inside a bot ask a group admin to approve what they can do, and
+  ask again if that grows.
+- **Bring a Discord server or Slack workspace's layout into a group.** Import
+  from Discord and Import from Slack, in the Groups menu, read an export you
+  made on this computer and recreate its channels, categories, topics and
+  custom emoji in a group, then give you an invite link for the people.
+  Messages are not imported.
+- **Notifications follow where you are reading.** While you are using Pollis on
+  this computer, your phone holds its message notifications and gets them only
+  if you step away. Reading a conversation here marks it read and clears its
+  notification on your phone. A conversation on screen while the window is in
+  the background or you are away still badges and notifies.
+- **Sending through a brief network drop.** A message whose send fails for a
+  moment is retried automatically instead of showing Not sent.
+
 ## v1.19.18 — 2026-11-18
 
 - **Link previews for www. links.** A link written without `https://`, such as

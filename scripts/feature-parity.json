@@ -30,6 +30,7 @@
     "get_emoji_path": "Mobile counterpart of desktop's get_emoji_url.",
     "resolve_livekit_identities": "Mobile runs LiveKit in JS (data-only), so it resolves the per-room participant pseudonyms (#836) of a data packet's sender through this bridge call, e.g. for typing (#1635). Desktop resolves the same pseudonyms inside pollis-core's realtime loop, so it has no bridge call.",
     "get_livekit_token": "Mobile's LiveKit data-only connection; desktop's counterpart is connect_rooms.",
+    "livekit_room_presence": "Mobile runs LiveKit in JS (data-only), so on each roster change it asks the core which users are present (#2059). Desktop applies the same rule, livekit_roster::present_user, inside pollis-core's realtime loop, so it has no bridge call.",
     "list_group_channels": "Mobile's group panel re-reads one group's channels; desktop reads every group's channels in one list_user_groups_with_channels call. Same data and the same members-only check (#917). Desktop only appeared to call it through a dead services/api.ts wrapper, removed in #1763.",
     "bundle_export": "Mobile packages export_archive output into one file for the share sheet; desktop writes the archive to a picked folder.",
     "accept_device_offer": "Scanning a new device's QR needs a camera, and desktop has no scanner (#1361); desktop to desktop uses the pasted v1 code.",
