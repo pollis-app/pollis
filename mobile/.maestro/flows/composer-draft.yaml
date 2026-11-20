@@ -39,9 +39,7 @@ tags:
 
 # Leave: back out of the conversation (phones push it; iPad has it in the
 # pane, so the back is optional) and switch to another tab.
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 - tapOn:
     id: "tab-direct"
 - assertVisible:
@@ -66,9 +64,7 @@ tags:
     timeout: 15000
 - hideKeyboard:
     optional: true
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 - tapOn:
     id: "tab-direct"
 - tapOn:

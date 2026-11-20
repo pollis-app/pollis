@@ -253,15 +253,28 @@ appId: ${MAESTRO_APP_ID}
     notVisible:
       id: "screen-chat"
     timeout: 10000
+# Android: Back returns from the browser to the chat; relaunch only if it did
+# not (subflows/probe-shown.yaml returns at once when it did, where a `when:
+# notVisible:` waited ~7 s for the chat to go, #2042). iOS: the browser is in
+# front (the wait above saw the chat go), so relaunch.
 - runFlow:
     when:
       platform: Android
     commands:
       - pressKey: back
+      - runFlow:
+          file: ../subflows/probe-shown.yaml
+          env:
+            ID: "screen-chat"
+      - runFlow:
+          when:
+            true: ${!output.shown}
+          commands:
+            - launchApp:
+                stopApp: false
 - runFlow:
     when:
-      notVisible:
-        id: "screen-chat"
+      platform: iOS
     commands:
       - launchApp:
           stopApp: false

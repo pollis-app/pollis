@@ -148,9 +148,19 @@ onFlowComplete:
       - takeScreenshot: outbox-02-failed-offline
       - setAirplaneMode: disabled
       # The reconnect may drain it before the tap; either way it must settle.
-      - tapOn:
-          id: "btn-retry-message-.*"
-          optional: true
+      # Retry only if it is still there (subflows/probe-absent.yaml returns at
+      # once when the drain won, where an optional tap waited ~7 s, #2042).
+      - runFlow:
+          file: ../subflows/probe-absent.yaml
+          env:
+            ID: "btn-retry-message-.*"
+      - runFlow:
+          when:
+            true: ${!output.absent}
+          commands:
+            - tapOn:
+                id: "btn-retry-message-.*"
+                optional: true
       - extendedWaitUntil:
           notVisible:
             id: "btn-retry-message-.*"
@@ -184,12 +194,7 @@ onFlowComplete:
       - pressKey: Home
       - launchApp:
           stopApp: false
-      - runFlow:
-          when:
-            visible:
-              id: "screen-auth-pin"
-          commands:
-            - runFlow: ../subflows/enter-pin.yaml
+      - runFlow: ../subflows/unlock-if-locked.yaml
       - extendedWaitUntil:
           notVisible: ".*\\(edit not sent\\).*"
           timeout: 60000

@@ -16,10 +16,9 @@ appId: ${MAESTRO_APP_ID}
 - openLink: "pollis://self/preferences"
 # iOS asks before an app opens its own scheme from outside.
 - runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
+    file: ../subflows/after-open-link.yaml
+    env:
+      SCREEN: "screen-self-preferences"
 - assertVisible:
     id: "screen-self-preferences"
 - takeScreenshot: deep-link-01-warm
@@ -28,10 +27,9 @@ appId: ${MAESTRO_APP_ID}
 - stopApp
 - openLink: "pollis://self/preferences"
 - runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
+    file: ../subflows/after-open-link.yaml
+    env:
+      SCREEN: "screen-auth-pin|screen-self-preferences"
 # A cold start of a signed-in device unlocks with its PIN first.
 - runFlow:
     when:

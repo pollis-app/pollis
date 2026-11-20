@@ -153,21 +153,29 @@ tags:
           text: "(?i)(add|done).*"
           optional: true
 # A picker that is still up (nothing could be picked) is cancelled, so the
-# rest of the flow runs against the Vault.
+# rest of the flow runs against the Vault. The checks look for the Vault's
+# attach button, which is back at once in the usual case; a `when:
+# notVisible:` there waited ~7 s for it to go, twice (#2042).
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "btn-attach"
 - runFlow:
     when:
-      notVisible:
-        id: "btn-attach"
+      true: ${!output.shown}
     commands:
       - tapOn:
           text: "Cancel"
           optional: true
-- runFlow:
-    when:
-      notVisible:
-        id: "btn-attach"
-    commands:
-      - back
+      - runFlow:
+          file: ../subflows/probe-shown.yaml
+          env:
+            ID: "btn-attach"
+      - runFlow:
+          when:
+            true: ${!output.shown}
+          commands:
+            - back
 - extendedWaitUntil:
     visible:
       id: "strip-attachments"

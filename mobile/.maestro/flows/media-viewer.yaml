@@ -157,11 +157,26 @@ tags:
 
 # Save asks for add-only photo access on first use (iOS shows the
 # system alert; Android 13+ needs no grant at all).
+# The alert comes once per install, so it is answered only when the save's
+# feedback has not shown; an optional tap on it cost ~7 s per miss (#2042).
 - tapOn:
     id: "btn-media-save"
-- tapOn:
-    text: "(?i)allow.*"
+- extendedWaitUntil:
+    visible:
+      id: "text-media-feedback"
+    timeout: 3000
     optional: true
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "text-media-feedback"
+- runFlow:
+    when:
+      true: ${!output.shown}
+    commands:
+      - tapOn:
+          text: "(?i)allow.*"
+          optional: true
 - extendedWaitUntil:
     visible:
       id: "text-media-feedback"

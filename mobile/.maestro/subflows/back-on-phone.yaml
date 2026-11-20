@@ -1,0 +1,12 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Back out of a conversation on a phone, where it is pushed over its tab. On
+# the iPad (the runner passes IPAD=1) the conversation is the two-pane's right
+# pane, which has no back button, so there is nothing to tap; an optional tap
+# there cost Maestro's ~7 s miss every time (#2042).
+- runFlow:
+    when:
+      true: ${typeof IPAD === 'undefined' || IPAD != "1"}
+    commands:
+      - tapOn:
+          id: "btn-back"

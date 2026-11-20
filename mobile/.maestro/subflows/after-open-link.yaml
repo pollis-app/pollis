@@ -1,0 +1,26 @@
+appId: ${MAESTRO_APP_ID}
+---
+# After an `openLink`: iOS may ask before an app opens its own scheme from
+# outside, and its "Open" is tapped if so. It rarely asks, so the screen the
+# link leads to (id ${SCREEN}, a regex) is waited for first and the prompt is
+# looked for only when that screen did not come up; a bare `when: visible:
+# "Open"` paid Maestro's ~7 s miss after every link (#2042). The caller still
+# asserts where the link landed.
+- extendedWaitUntil:
+    visible:
+      id: ${SCREEN}
+    timeout: 5000
+    optional: true
+- runFlow:
+    file: probe-shown.yaml
+    env:
+      ID: ${SCREEN}
+- runFlow:
+    when:
+      true: ${!output.shown}
+    commands:
+      - runFlow:
+          when:
+            visible: "Open"
+          commands:
+            - tapOn: "Open"

@@ -6,6 +6,11 @@ appId: ${MAESTRO_APP_ID}
 # settles) even though the identical gesture succeeds immediately on retry
 # — so try up to 3 times rather than trust a single attempt. Unrolled
 # (not `repeat:`) since `repeat: times:` did not reliably iterate here.
+#
+# Each retry is gated on the sheet NOT being up. The check is "is btn-edit
+# shown" (subflows/probe-shown.yaml), which returns at once when the first
+# press worked, the usual case. A `when: notVisible: btn-edit` there waited
+# ~7 s for the open sheet to go before skipping, on every use (#2042).
 - runFlow:
     when:
       notVisible:
@@ -19,9 +24,12 @@ appId: ${MAESTRO_APP_ID}
           timeout: 4000
           optional: true
 - runFlow:
+    file: probe-shown.yaml
+    env:
+      ID: "btn-edit"
+- runFlow:
     when:
-      notVisible:
-        id: "btn-edit"
+      true: ${!output.shown}
     commands:
       - longPressOn:
           id: "row-message-.*"
@@ -31,9 +39,12 @@ appId: ${MAESTRO_APP_ID}
           timeout: 4000
           optional: true
 - runFlow:
+    file: probe-shown.yaml
+    env:
+      ID: "btn-edit"
+- runFlow:
     when:
-      notVisible:
-        id: "btn-edit"
+      true: ${!output.shown}
     commands:
       - longPressOn:
           id: "row-message-.*"

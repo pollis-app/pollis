@@ -1,0 +1,30 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Send what is in the composer's attachment strip (a chat or the Vault). The
+# screen ignores Send while the previous send is still in flight, and a failed
+# Vault save puts the draft back in the strip, so keep pressing Send until the
+# strip has gone; the caller asserts what landed.
+#
+# The loop runs on a flag that subflows/probe-absent.yaml sets, which returns
+# at once once the strip is gone. A `repeat: while: visible:` paid Maestro's
+# ~7 s optional-lookup miss on its last check, every use (#2042).
+- evalScript: ${output.stripGone = false}
+- repeat:
+    while:
+      true: ${!output.stripGone}
+    times: 30
+    commands:
+      - tapOn:
+          id: "btn-send"
+      - extendedWaitUntil:
+          notVisible:
+            id: "strip-attachments"
+          timeout: 4000
+          optional: true
+      - runFlow:
+          file: probe-absent.yaml
+          env:
+            ID: "strip-attachments"
+      - evalScript: ${output.stripGone = output.absent}
+- assertNotVisible:
+    id: "strip-attachments"

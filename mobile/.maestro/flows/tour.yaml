@@ -91,15 +91,22 @@ tags:
 # tap only when the initializing screen itself is showing.
 - waitForAnimationToEnd:
     timeout: 5000
+# It has usually moved on already; subflows/probe-absent.yaml returns at once
+# then, where a `when: visible:` miss cost ~7 s (#2042).
+- runFlow:
+    file: ../subflows/probe-absent.yaml
+    env:
+      ID: "screen-auth-initializing"
 - runFlow:
     when:
-      visible:
-        id: "screen-auth-initializing"
+      true: ${!output.absent}
     commands:
       # optional: the screen moves on by itself once setup is done, and a
       # button that has already gone is not a failed sign-in.
       - tapOn:
           id: "btn-continue"
+          childOf:
+            id: "screen-auth-initializing"
           optional: true
 - extendedWaitUntil:
     visible:
@@ -140,12 +147,25 @@ tags:
 - tapOn:
     id: "btn-search-cancel"
 
-# A group with a message.
+# A group with a message. A new account's Groups tab shows btn-create-group
+# in its empty state; the "+" sheet is only needed once groups exist
+# (groups.yaml; #2042: an optional "+" tap cost ~7 s per miss).
 - tapOn:
     id: "tab-groups"
-- tapOn:
-    id: "btn-add-group"
-    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "btn-create-group|btn-add-group"
+    timeout: 15000
+- runFlow:
+    file: ../subflows/probe-shown.yaml
+    env:
+      ID: "btn-create-group"
+- runFlow:
+    when:
+      true: ${!output.shown}
+    commands:
+      - tapOn:
+          id: "btn-add-group"
 - tapOn:
     id: "btn-create-group"
 - waitForAnimationToEnd:
@@ -222,9 +242,7 @@ tags:
     optional: true
 # Phones: back from the channel to the Groups tab. iPad: the channel is the
 # two-pane's right pane (no back button) and the group panel stays on the left.
-- tapOn:
-    id: "btn-back"
-    optional: true
+- runFlow: ../subflows/back-on-phone.yaml
 
 # Group pages (pushed from the Groups tab's panel; on iPad they open in the
 # right pane).

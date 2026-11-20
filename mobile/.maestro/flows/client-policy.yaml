@@ -30,10 +30,9 @@ tags:
 - openLink: "pollis://dev/client-policy?policy=%7B%22v%22%3A1%2C%22minimum%22%3A%7B%22ios%22%3A%22999.0.0%22%2C%22android-play%22%3A%22999.0.0%22%2C%22android-sideload%22%3A%22999.0.0%22%7D%7D"
 # iOS asks before an app opens its own scheme from outside.
 - runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
+    file: ../subflows/after-open-link.yaml
+    env:
+      SCREEN: "screen-client-blocked"
 - extendedWaitUntil:
     visible:
       id: "screen-client-blocked"
@@ -86,10 +85,9 @@ tags:
 # --- Unblocked: the override cleared, the unpublished dev file (404) has no minimums ---
 - openLink: "pollis://dev/client-policy?clear=1"
 - runFlow:
-    when:
-      visible: "Open"
-    commands:
-      - tapOn: "Open"
+    file: ../subflows/after-open-link.yaml
+    env:
+      SCREEN: "screen-client-blocked|screen-auth-email"
 - runFlow:
     when:
       visible:

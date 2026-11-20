@@ -113,6 +113,17 @@ async function expectFailed(page: Page, key: string) {
   await expect(thumb(page, key).first().locator("img")).toHaveCount(0);
 }
 
+/**
+ * Every surface showing `name` has asked and failed: the chat row and the right panel's Media tile,
+ * which mounts a moment after the row. Restore only after this, or the tile's own first ask lands on
+ * the restored network and (rightly, #1826) draws the row before the step under test.
+ */
+async function expectFailedEverywhere(page: Page, key: string, name: string) {
+  await expectFailed(page, key);
+  const tile = page.getByTestId("right-panel").locator(`[data-testid="right-panel-media-tile"][title="${name}"]`);
+  await expect(tile).toHaveAttribute("data-media-state", "failed");
+}
+
 async function expectDrawn(page: Page, key: string) {
   for (const card of await thumb(page, key).all()) {
     await expect(card).toHaveAttribute("data-media-state", "ready");
@@ -122,7 +133,7 @@ async function expectDrawn(page: Page, key: string) {
 
 test("a failed row draws the picture as soon as another row loads the same file", async ({ page }) => {
   await boot(page, [PHOTO]);
-  await expectFailed(page, PHOTO);
+  await expectFailedEverywhere(page, PHOTO, "first.jpg");
   await expectDrawn(page, OTHER);
 
   await restore(page, PHOTO);
@@ -137,7 +148,7 @@ test("a failed row draws the picture as soon as another row loads the same file"
 
 test("the spotlight's 'failed to load' clears when the file loads elsewhere, and so does the row", async ({ page }) => {
   await boot(page, [PHOTO]);
-  await expectFailed(page, PHOTO);
+  await expectFailedEverywhere(page, PHOTO, "first.jpg");
   // Open the working picture and step back to the failed one.
   await thumb(page, OTHER).click();
   const spot = page.getByTestId("media-spotlight");
@@ -155,7 +166,7 @@ test("the spotlight's 'failed to load' clears when the file loads elsewhere, and
 
 test("a remount after a failure asks again instead of keeping the old error", async ({ page }) => {
   await boot(page, [PHOTO]);
-  await expectFailed(page, PHOTO);
+  await expectFailedEverywhere(page, PHOTO, "first.jpg");
   await restore(page, PHOTO);
 
   // Away through the sidebar, which unmounts the row, and back.

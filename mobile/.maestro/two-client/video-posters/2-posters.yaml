@@ -103,21 +103,7 @@ tags:
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: video-posters-02-composer
-- repeat:
-    while:
-      visible:
-        id: "strip-attachments"
-    times: 30
-    commands:
-      - tapOn:
-          id: "btn-send"
-      - extendedWaitUntil:
-          notVisible:
-            id: "strip-attachments"
-          timeout: 4000
-          optional: true
-- assertNotVisible:
-    id: "strip-attachments"
+- runFlow: ../../subflows/send-strip.yaml
 - extendedWaitUntil:
     notVisible:
       id: "row-message-pending-.*"

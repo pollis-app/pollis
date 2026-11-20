@@ -6,10 +6,15 @@ appId: ${MAESTRO_APP_ID}
 # `maestro-run.sh all ios` runs in that language. Every step is optional: a run
 # that failed before sign-in has nothing to restore, and that failure is the
 # one to report.
+# Usually the Language page is still up: probe-shown returns at once then,
+# where a `when: notVisible:` waited ~7 s for the radio to go (#2042).
+- runFlow:
+    file: probe-shown.yaml
+    env:
+      ID: "radio-language-en"
 - runFlow:
     when:
-      notVisible:
-        id: "radio-language-en"
+      true: ${!output.shown}
     commands:
       - stopApp
       - launchApp

@@ -1,0 +1,17 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Sets output.absent to true when nothing matches id ${ID} (#2042). Use it
+# where the element is USUALLY absent: the check then returns within half a
+# second. When the element is on screen, the check waits up to ~7 s for it to
+# go (Maestro's optional-lookup time) before it sets output.absent to false.
+# Run the rare branch after it with `when: true: ${!output.absent}`.
+#
+# Why not `when: visible:` or `optional: true`: a miss there always costs the
+# whole ~7 s, and on the common path that adds up across the gate.
+- evalScript: ${output.absent = false}
+- runFlow:
+    when:
+      notVisible:
+        id: ${ID}
+    commands:
+      - evalScript: ${output.absent = true}
