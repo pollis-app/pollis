@@ -23,7 +23,9 @@ pub(crate) mod ds_reads;
 pub mod emoji;
 pub mod user;
 pub mod groups;
-/// Recreating another platform's community structure in a group (#1180).
+/// Recreating another platform's community structure in a group (#1180). Behind the
+/// off-by-default `import` feature: no shipped build compiles it.
+#[cfg(feature = "import")]
 pub mod import;
 // Copy message history between two of one account's devices (#1735).
 pub mod history_transfer;

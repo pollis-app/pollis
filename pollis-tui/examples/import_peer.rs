@@ -2,7 +2,7 @@
 //!
 //! Signs up (or signs in) `<email>` on the DS named by `POLLIS_DELIVERY_URL`
 //! (the dev DS — it fixes the OTP), imports `<export>` with the same
-//! `pollis_core::commands::import` calls the desktop page makes, then runs it a
+//! `pollis_core::commands::import` calls (not shipped in any app; `import` feature), then runs it a
 //! second time against the group the first run made and reads the group back:
 //! categories and channels in order, the emoji, the invite links and, with
 //! `--invite-by-email`, what became of each planned email. Prints the lines the
@@ -16,7 +16,7 @@
 //! no object storage; this is where the emoji and icon uploads are real.
 //!
 //!   POLLIS_DATA_DIR=$(mktemp -d) POLLIS_DELIVERY_URL=https://api-dev.pollis.com \
-//!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --example import_peer -- \
+//!   POLLIS_DEV_ACCESS_KEY=… cargo run -p pollis-tui --features import-peer --example import_peer -- \
 //!   slack <email> pollis-import/tests/fixtures/northwind --invite-by-email
 
 use std::sync::Arc;

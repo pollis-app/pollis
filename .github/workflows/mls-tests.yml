@@ -311,9 +311,12 @@ jobs:
       # `tests/remote_with_retry.rs`. #987/#988 deleted `RemoteDb` and the
       # client's database handle outright, so both are gone — the feature is
       # still load-bearing for the reasons above.
+      #
+      # `import` compiles the shelved structure importer (#1180/#1179), which no
+      # shipped build enables, so it keeps building here.
       - name: MLS unit tests (pollis-core)
         if: ${{ !cancelled() }}
-        run: cargo test -p pollis-core --features test-harness
+        run: cargo test -p pollis-core --features test-harness,import
 
       # The Windows crypto provider (#992), exercised on Linux. `pollis-sqlcipher`
       # only SHIPS on Windows, but it compiles its SQLCipher amalgamation on
@@ -366,7 +369,9 @@ jobs:
       # new lint fail the job, which the `gate` check below already reports.
       - name: Rust lints (clippy)
         if: ${{ !cancelled() }}
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        # The two features lint the shelved importer (#1180/#1179), which no
+        # shipped build enables: the desktop shims and the TUI's dev-DS peer.
+        run: cargo clippy --workspace --all-targets --features pollis/import,pollis-tui/import-peer -- -D warnings
 
   # The local database's at-rest guarantee, on the third desktop platform (#998).
   #

@@ -21,9 +21,17 @@ path = "src/lib.rs"
 # Dev-only; the shipped `pollis` binary never enables it.
 typing-peer = ["pollis-core/media"]
 
+# Dev-DS check for the shelved structure importer (#1180/#1179); the shipped
+# `pollis` binary never enables it.
+import-peer = ["pollis-core/import"]
+
 [[example]]
 name = "typing_peer"
 required-features = ["typing-peer"]
+
+[[example]]
+name = "import_peer"
+required-features = ["import-peer"]
 
 [dependencies]
 # Media OFF (the TUI is headless — no LiveKit/libwebrtc/cpal); auth/pin/mls/

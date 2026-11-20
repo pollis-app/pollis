@@ -69,7 +69,11 @@ os-keystore = ["pollis-core/os-keystore"]
 # scope. Not enabled in release builds — run the harness with
 # `cargo test --features test-harness --test flows` (default features), or
 # headless with `--no-default-features --features test-harness`.
-test-harness = ["tauri/test", "pollis-core/test-harness", "dep:libsql"]
+test-harness = ["tauri/test", "pollis-core/test-harness", "dep:libsql", "import"]
+# The shelved Discord/Slack structure importer (#1180/#1179): compiles the
+# `import_preview` / `import_apply` shims for the flows harness only. Never in
+# `default`, and the app's invoke handler does not register them.
+import = ["pollis-core/import"]
 # Test-only voice E2EE hooks for the desktop e2e (#1850): registers the
 # `e2e_voice_*` commands in the real app. Debug builds only — `lib.rs` refuses
 # to compile it without `debug_assertions`, so it can never reach a release.

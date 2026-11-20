@@ -114,7 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   })();
   const activeGroupId = (() => {
     const m = pathname.match(/^\/groups\/([^/]+)/);
-    return m && m[1] !== "new" && m[1] !== "search" && m[1] !== "import" ? m[1] : null;
+    return m && m[1] !== "new" && m[1] !== "search" ? m[1] : null;
   })();
 
   const isOnSettingsHub = pathname === "/settings";

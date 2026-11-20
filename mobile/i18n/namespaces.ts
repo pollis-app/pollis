@@ -15,7 +15,6 @@ export const NAMESPACES = [
   "vault",
   "errors",
   "arcade",
-  "import",
   "mobile",
 ] as const;
 

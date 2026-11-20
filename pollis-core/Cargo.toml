@@ -28,6 +28,10 @@ cli = ["uniffi/cli"]
 # normal RELEASE desktop build keeps default features, so its OS-keychain path
 # is bit-for-bit unchanged.
 os-keystore = ["dep:keyring"]
+# The Discord/Slack structure importer (`commands::import`, #1180/#1179). OFF by
+# default and enabled by no shipped build (desktop, mobile, CLI): it is kept, and
+# tested, for a later server-run import, not exposed in any app.
+import = ["dep:pollis-import"]
 # Exposes test helpers (Config::for_test, InMemoryKeystore) for the
 # integration harness in src-tauri/tests/flows.rs.
 test-harness = []
@@ -79,7 +83,8 @@ pollis-api = { path = "../pollis-api" }
 # #2005/#2018: the App hash, manifest, grants and commands (serde only, no WASM engine).
 pollis-app-manifest = { path = "../pollis-app-manifest" }
 # Reading and planning imports from other platforms (#1180); pure, no I/O but the export folder.
-pollis-import = { path = "../pollis-import" }
+# Only with the off-by-default `import` feature: no shipped build links it.
+pollis-import = { path = "../pollis-import", optional = true }
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 async-trait = "0.1"
 # NOTE: rusqlite is declared *per target* below, and the feature set differs on

@@ -92,7 +92,9 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::groups::delete_channel_category,
             crate::commands::groups::move_channel_category,
             crate::commands::groups::move_channel,
+            #[cfg(feature = "import")]
             crate::commands::import::import_preview,
+            #[cfg(feature = "import")]
             crate::commands::import::import_apply,
             crate::commands::groups::send_group_invite,
             crate::commands::groups::get_pending_invites,

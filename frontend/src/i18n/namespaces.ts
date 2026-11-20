@@ -14,8 +14,6 @@ export const NAMESPACES = [
   "vault",
   "errors",
   "arcade",
-  // Importing from other platforms (#1180).
-  "import",
   // Mobile-only copy, kept here so i18n tooling covers it.
   "mobile",
 ] as const;

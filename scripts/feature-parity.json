@@ -17,8 +17,6 @@
     "create_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
     "await_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
     "approve_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
-    "import_preview": "Structure import (#1180 Discord, #1179 Slack) reads an export a person makes on a computer: a DiscordChatExporter folder, or the Slack workspace ZIP an admin downloads from Slack's admin pages in a desktop browser. A phone has no such file to hand and a workspace migration is an admin task at a desk. The group it creates, its emoji and its invites are ordinary, so mobile shows and accepts them like any other.",
-    "import_apply": "Structure import (#1180 Discord, #1179 Slack) reads an export a person makes on a computer: a DiscordChatExporter folder, or the Slack workspace ZIP an admin downloads from Slack's admin pages in a desktop browser. A phone has no such file to hand and a workspace migration is an admin task at a desk. The group it creates, its emoji and its invites are ordinary, so mobile shows and accepts them like any other.",
     "report_push_activity": "Desktop tells the DS it is in use so the user's phones hold their pushes while they read there (#2056). A phone in use already receives in the foreground and needs no hold."
   },
   "mobile_only": {
