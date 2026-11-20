@@ -1,0 +1,11 @@
+New
+• Channels can be sorted into categories and put in any order. Group admins tap Edit in the channel list to arrange them.
+• Tap a category to collapse it on this phone.
+• Bots: a group admin can add one in the group's Settings → Bots. Its messages carry a Bot badge, and its commands appear when you type /.
+• A dot on a person's picture shows when they're online, wherever the picture appears.
+
+Fixes
+• While you're using Pollis on your computer, your phone holds message notifications and gets them only if you step away.
+• Reading a conversation anywhere clears its notifications on your phone.
+• A message that fails to send during a brief connection drop is retried automatically instead of showing Not sent.
+• No notification banner for the chat you have open.
