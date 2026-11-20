@@ -87,6 +87,13 @@ onFlowComplete:
     notVisible:
       id: "btn-retry-message-.*"
     timeout: 120000
+# A pending row has no Retry either: wait until it no longer reads "sending"
+# (its spoken label), so the parts below start with it delivered (#2055).
+- extendedWaitUntil:
+    notVisible: ".*: ob1335 killed, sending"
+    timeout: 120000
+- assertNotVisible:
+    id: "btn-retry-message-.*"
 - takeScreenshot: outbox-01-delivered-after-kill
 
 # ── Part 2a: a brief blip → still sending → delivered, never "Not sent" ─────
@@ -165,6 +172,13 @@ onFlowComplete:
           notVisible:
             id: "btn-retry-message-.*"
           timeout: 60000
+      # A Retry reads "sending" while the core retries it in place (#2055),
+      # with no Retry button: wait until it is delivered, not just retrying.
+      - extendedWaitUntil:
+          notVisible: ".*: ob1335 offline, sending"
+          timeout: 60000
+      - assertNotVisible:
+          id: "btn-retry-message-.*"
       - assertVisible: ".*ob1335 offline.*"
       - takeScreenshot: outbox-03-retried
 
