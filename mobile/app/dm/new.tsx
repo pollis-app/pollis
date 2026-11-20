@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { useTranslation } from "react-i18next";
 import {
   Screen,
@@ -34,14 +35,13 @@ export default function NewDM() {
   };
   const createDM = useCreateDM();
 
-  // One DM per tap: a second tap while it is being made does nothing. A ref, not `isPending`,
-  // because two taps in one frame both see the render before the mutation started.
-  const starting = useRef(false);
+  // One DM per tap: the lock is claimed synchronously, so a second tap in the same frame (before
+  // `isPending` re-renders) does nothing. A success navigates away and keeps it held.
+  const start = useSubmitLock();
   const onStartDM = (userId: string) => {
-    if (starting.current) {
+    if (!start.begin()) {
       return;
     }
-    starting.current = true;
     createDM.mutate(
       { memberIds: [userId] },
       {
@@ -49,8 +49,8 @@ export default function NewDM() {
           // Phones replace this form; iPad opens the two-pane.
           openConversation({ id: channel.id, kind: "dm" }, { replace: true });
         },
-        onSettled: () => {
-          starting.current = false;
+        onError: () => {
+          start.end();
         },
       },
     );
@@ -128,13 +128,13 @@ export default function NewDM() {
               name={`@${found.username}`}
               sub={found.preferred_name || found.email || undefined}
               onPress={() => onStartDM(found.id)}
-              disabled={createDM.isPending}
+              disabled={start.busy}
               end={
-                createDM.isPending ? (
+                start.busy ? (
                   <ActivityIndicator testID="busy-start-dm" size="small" color={semantic.muted} />
                 ) : undefined
               }
-              chevron={!createDM.isPending}
+              chevron={!start.busy}
             />
           </Group>
         ) : null}
