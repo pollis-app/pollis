@@ -1100,7 +1100,9 @@ pub(super) async fn deliver(
     loop {
         let delay = delays.next();
         let attempt = Attempt::Own { hold: delay.is_some() };
-        let err = match deliver_once(state, id, sender_username.clone(), attempt).await {
+        // Boxed: the attempt's state (the whole seal and post) stays off the caller's stack,
+        // which a host that polls the send inline (the TUI's tests, 2 MB) cannot spare.
+        let err = match Box::pin(deliver_once(state, id, sender_username.clone(), attempt)).await {
             Ok(message) => return Ok(message),
             Err(e) => e,
         };
