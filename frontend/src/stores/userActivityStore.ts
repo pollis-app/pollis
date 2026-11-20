@@ -8,7 +8,7 @@
 import { makeAutoObservable } from "mobx";
 
 /** No input for this long and the user is idle: nothing is read, pushes go to the phone. */
-export const IDLE_AFTER_MS = 2 * 60 * 1000;
+const IDLE_AFTER_MS = 2 * 60 * 1000;
 
 const INPUT_EVENTS = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
 
