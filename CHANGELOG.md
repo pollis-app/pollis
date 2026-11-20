@@ -23,6 +23,12 @@ tag date, UTC.
 
 ---
 
+## v1.19.20 — 2026-11-20
+
+- **Import from Discord and Import from Slack are removed** from the Groups
+  menu, along with their pages and search results. Groups you already
+  imported are ordinary groups and are unaffected.
+
 ## v1.19.19 — 2026-11-20
 
 - **Channel categories.** Group admins can sort channels under named
