@@ -1,0 +1,9 @@
+New
+• Channels can be sorted into categories and put in any order.
+• Bots: a group admin can add one in the group's Settings → Bots.
+• A dot on a person's picture shows when they're online.
+
+Fixes
+• While you use Pollis on your computer, your phone holds message notifications until you step away.
+• A message that fails to send during a brief connection drop is retried automatically.
+• Other fixes and improvements.
