@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useOpenConversation } from "../../hooks/useOpenConversation";
 import { useTranslation } from "react-i18next";
@@ -34,17 +34,23 @@ export default function NewDM() {
   };
   const createDM = useCreateDM();
 
+  // One DM per tap: a second tap while it is being made does nothing. A ref, not `isPending`,
+  // because two taps in one frame both see the render before the mutation started.
+  const starting = useRef(false);
   const onStartDM = (userId: string) => {
-    // One DM per tap: a second tap while it is being made does nothing.
-    if (createDM.isPending) {
+    if (starting.current) {
       return;
     }
+    starting.current = true;
     createDM.mutate(
       { memberIds: [userId] },
       {
         onSuccess: (channel) => {
           // Phones replace this form; iPad opens the two-pane.
           openConversation({ id: channel.id, kind: "dm" }, { replace: true });
+        },
+        onSettled: () => {
+          starting.current = false;
         },
       },
     );

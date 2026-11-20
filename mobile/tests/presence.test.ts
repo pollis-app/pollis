@@ -239,7 +239,9 @@ test("a group DM's stacked pair stands for the conversation: no dots", () => {
 
 test("starting a DM shows it is busy and takes one tap, so a retap never makes a second", () => {
   const page = src("app/dm/new.tsx");
-  assert.match(page, /if \(createDM\.isPending\) \{\s*return;\s*\}/);
+  // A ref, not `isPending`: two taps in one frame both see the render before the mutation started.
+  assert.match(page, /if \(starting\.current\) \{\s*return;\s*\}\s*starting\.current = true;/);
+  assert.match(page, /onSettled: \(\) => \{\s*starting\.current = false;/);
   assert.match(page, /disabled=\{createDM\.isPending\}/);
   assert.match(page, /testID="busy-start-dm"/);
 });

@@ -60,17 +60,23 @@ pub(crate) async fn resolve_participants(
         .collect()
 }
 
-/// The people a room's participants (internal identities) show, once each, sorted, without
-/// `self_user_id`: a user is in the room while any session of theirs is (a device, a call, a
-/// viewer, #1919). DS participants and unresolved pseudonyms are no one.
+/// The presence rule, shared by desktop's realtime loop and mobile (#2059): the other user one
+/// participant's internal identity shows, if any. DS participants, unresolved pseudonyms and
+/// `self_user_id` are no one.
+pub fn present_user<'a>(internal: &'a str, self_user_id: &str) -> Option<&'a str> {
+    user_id_from_identity(internal).filter(|uid| !uid.is_empty() && *uid != self_user_id)
+}
+
+/// The people a room's participants (internal identities) show, once each, sorted, by
+/// [`present_user`]: a user is in the room while any session of theirs is (a device, a call, a
+/// viewer, #1919).
 pub fn present_user_ids<'a>(
     internal: impl IntoIterator<Item = &'a str>,
     self_user_id: &str,
 ) -> Vec<String> {
     internal
         .into_iter()
-        .filter_map(user_id_from_identity)
-        .filter(|uid| !uid.is_empty() && *uid != self_user_id)
+        .filter_map(|identity| present_user(identity, self_user_id))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .map(str::to_string)
