@@ -368,6 +368,7 @@ export default function RootLayout() {
               />
               <Stack.Screen name="m/[...permalink]" />
               <Stack.Screen name="dev/client-policy" options={{ animation: "none" }} />
+              <Stack.Screen name="dev/background" options={{ animation: "none" }} />
               <Stack.Screen name="approve-device" options={drillIn} />
               <Stack.Screen name="approve-history-transfer" options={drillIn} />
               {/* After setup, like an auth step: no swipe back into initializing. */}
