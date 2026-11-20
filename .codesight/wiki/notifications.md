@@ -796,7 +796,10 @@ Android FCM handler both call one plain C function in `pollis-core`
   before that change a gate closed in such a gap left the message unsent,
   and looking sent, until the app was reopened. `ms` comes from
   `backgroundTimeRemaining` (at most 25 s). The expiration handler closes the
-  gate itself, so it works in either phase. No command reopens the database
+  gate itself, so it works in either phase. A send waiting out an in-place
+  retry (#2055) does not use that time: `enter` raises `suspend::is_leaving`
+  and wakes `suspend::left()`, so the wait ends at once and the row is written
+  `failed`. No command reopens the database
   while the gate is closed. A ticket older than the last resume does nothing.
   Android never closes the gate. The extension closes its connection before
   returning. Tests: `notify::lock::tests` (`a_send_between_its_sections_…`,

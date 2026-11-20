@@ -298,11 +298,14 @@ pub mod suspend {
         resumes: u64,
         /// Closed by a current [`begin`], opened by [`end`].
         closed: bool,
+        /// Set by a current [`enter`], cleared by [`end`]: the app is on its way to the background.
+        leaving: bool,
     }
 
     static GATE: Mutex<Gate> = Mutex::new(Gate {
         resumes: 0,
         closed: false,
+        leaving: false,
     });
     /// App-side holds of `state.lock` currently open, across every `AppState` in the process.
     static OPEN_HOLDS: AtomicUsize = AtomicUsize::new(0);
@@ -315,6 +318,23 @@ pub mod suspend {
     /// closed for the suspension.
     pub fn is_suspending() -> bool {
         gate().closed
+    }
+
+    /// Whether the app is on its way to the background ([`enter`] ran, no [`end`] since).
+    /// The outbox stops retrying in place then (#2055), so no wait outlives the app's time.
+    pub fn is_leaving() -> bool {
+        gate().leaving
+    }
+
+    fn leaving_signal() -> &'static tokio::sync::Notify {
+        static SIGNAL: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+        SIGNAL.get_or_init(tokio::sync::Notify::new)
+    }
+
+    /// Resolves once the app starts leaving for the background. It wakes for every [`enter`]
+    /// after it was created, polled or not; check [`is_leaving`] after creating it for one before.
+    pub fn left() -> tokio::sync::futures::Notified<'static> {
+        leaving_signal().notified()
     }
 
     pub(super) fn hold_started() {
@@ -375,6 +395,7 @@ pub mod suspend {
             let mut g = gate();
             g.resumes = g.resumes.wrapping_add(1);
             g.closed = false;
+            g.leaving = false;
         }
         // Wake an `enter` still letting sends finish: it stops at once.
         let _sends = sends();
@@ -509,6 +530,13 @@ pub mod suspend {
     /// holds (the rest). Does nothing if the app came back since `ticket`.
     pub fn enter(ticket: u64, timeout: Duration) -> Entered {
         let started = Instant::now();
+        {
+            let mut g = gate();
+            if g.resumes == ticket {
+                g.leaving = true;
+            }
+        }
+        leaving_signal().notify_waiters();
         let for_sends = timeout * SENDS_SHARE.0 / SENDS_SHARE.1;
         let unfinished = match let_sends_finish(ticket, for_sends) {
             Ok(()) => Vec::new(),
@@ -741,6 +769,39 @@ mod tests {
         assert_eq!(suspend::sends_in_flight(), 0);
         suspend::end();
         send.await.unwrap();
+    }
+
+    /// A send waiting out an in-place retry (#2055) is woken the moment the app starts leaving,
+    /// so it settles at once instead of holding the background time until the budget runs out.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_send_waiting_to_retry_stops_as_the_app_leaves() {
+        let _serial = GATE_TESTS.lock().await;
+        assert!(!suspend::is_leaving());
+        let guard = suspend::send_started(Some("retrying"));
+        let waiting = tokio::spawn(async move {
+            let _guard = guard;
+            let left = suspend::left();
+            if suspend::is_leaving() {
+                return true;
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(30)) => false,
+                _ = left => true,
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let t = suspend::ticket();
+        let started = Instant::now();
+        let entered = tokio::task::spawn_blocking(move || suspend::enter(t, Duration::from_secs(10)))
+            .await
+            .unwrap();
+        assert!(waiting.await.unwrap(), "woken by the app leaving, not the delay");
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        assert!(entered.unfinished.is_empty(), "{entered:?}");
+        assert!(suspend::is_leaving());
+        suspend::end();
+        assert!(!suspend::is_leaving(), "back in the foreground");
     }
 
     #[tokio::test(flavor = "multi_thread")]

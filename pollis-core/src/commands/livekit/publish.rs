@@ -347,7 +347,7 @@ pub async fn cancel_call(
     let inbox = format!("inbox-{other_user_id}");
     match crate::commands::mls::ds_livekit_send_data(state, &inbox, payload.clone()).await {
         Ok(()) => Ok(()),
-        Err(first) if is_transient_ds_error(&first) => {
+        Err(first) if crate::commands::mls::ds_client::is_transient(&first) => {
             crate::diag!("[call] cancel_call: transient DS failure, retrying once: {first}");
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             crate::commands::mls::ds_livekit_send_data(state, &inbox, payload).await
@@ -355,27 +355,6 @@ pub async fn cancel_call(
         Err(e) => Err(e),
     }
 }
-
-/// A failure the next attempt might not repeat: the link, not the request.
-fn is_transient_ds_error(e: &Error) -> bool {
-    match e {
-        Error::Network(_) => true,
-        Error::Other(inner) => {
-            if let Some(refused) = inner.downcast_ref::<crate::commands::mls::ds_client::DsRefused>() {
-                return refused.status.is_server_error();
-            }
-            let text = inner.to_string();
-            text.contains("error sending request")
-                || text.contains("timed out")
-                || text.contains("connection refused")
-                || text.contains(" 502")
-                || text.contains(" 503")
-                || text.contains(" 504")
-        }
-        _ => false,
-    }
-}
-
 
 /// Tell this user's other devices to stop ringing (`call_canceled` to own inbox).
 ///
@@ -397,29 +376,4 @@ pub async fn dismiss_call_on_my_devices(
     publish_to_user_inbox(state, &user_id, payload).await?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod cancel_retry_tests {
-    use super::*;
-
-    #[test]
-    fn only_link_failures_and_5xx_are_retried() {
-        let transient = [
-            Error::Other(anyhow::anyhow!("error sending request for url (http://ds)")),
-            Error::Other(anyhow::anyhow!("ds_livekit_send_data 503 Service Unavailable: no server")),
-            Error::Other(anyhow::anyhow!("request timed out")),
-        ];
-        for e in transient {
-            assert!(is_transient_ds_error(&e), "{e}");
-        }
-        let final_ = [
-            Error::Other(anyhow::anyhow!("ds_livekit_send_data 403 Forbidden: not allowed")),
-            Error::Other(anyhow::anyhow!("no active user for DS request signing")),
-            Error::DeviceRevoked,
-        ];
-        for e in final_ {
-            assert!(!is_transient_ds_error(&e), "{e}");
-        }
-    }
 }

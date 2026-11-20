@@ -676,6 +676,27 @@ pub(crate) fn is_connection_failure(e: &reqwest::Error) -> bool {
     !e.is_timeout() && (e.is_connect() || e.is_request())
 }
 
+/// A failure the next attempt might not repeat: the link or a DS 5xx, not the request.
+/// Shared by `cancel_call`'s one resend and the outbox's in-place retries (#2055).
+pub(crate) fn is_transient(e: &Error) -> bool {
+    match e {
+        Error::Network(_) => true,
+        Error::Other(inner) => {
+            if let Some(refused) = inner.downcast_ref::<DsRefused>() {
+                return refused.status.is_server_error();
+            }
+            let text = inner.to_string();
+            text.contains("error sending request")
+                || text.contains("timed out")
+                || text.contains("connection refused")
+                || text.contains(" 502")
+                || text.contains(" 503")
+                || text.contains(" 504")
+        }
+        _ => false,
+    }
+}
+
 /// An error and every `source()` beneath it, `": "`-joined — what a transport
 /// failure actually was, not just reqwest's top line.
 pub(crate) fn error_chain(e: &(dyn std::error::Error + 'static)) -> String {
@@ -878,6 +899,29 @@ mod dev_key_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_link_failures_and_5xx_are_transient() {
+        let transient = [
+            Error::Other(anyhow::anyhow!("error sending request for url (http://ds)")),
+            Error::Other(anyhow::anyhow!("ds_livekit_send_data 503 Service Unavailable: no server")),
+            Error::Other(anyhow::anyhow!("request timed out")),
+            DsRefused::error("ds_post", "/v1/messages/send", reqwest::StatusCode::BAD_GATEWAY, String::new()),
+        ];
+        for e in transient {
+            assert!(is_transient(&e), "{e}");
+        }
+        let final_ = [
+            Error::Other(anyhow::anyhow!("ds_livekit_send_data 403 Forbidden: not allowed")),
+            Error::Other(anyhow::anyhow!("no active user for DS request signing")),
+            DsRefused::error("ds_post", "/v1/messages/send", reqwest::StatusCode::FORBIDDEN, String::new()),
+            Error::DeviceRevoked,
+            Error::UpgradeRequired,
+        ];
+        for e in final_ {
+            assert!(!is_transient(&e), "{e}");
+        }
+    }
 
     /// A hanging DS must not hang the caller: pins the [`REPORT_TIMEOUT`] bound `ds_report_commit_since` applies.
     #[tokio::test]
