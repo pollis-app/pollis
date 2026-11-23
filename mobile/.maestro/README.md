@@ -336,6 +336,13 @@ then waits with a tight timeout: a message into the open DM is on screen within
 the DM opens, with no loading line; and after 35 s in the background one is in
 the DM within 3 s of opening it on resume.
 
+**Profile change (automated, #2084):** `mobile/scripts/maestro-profile-change.sh <device>`
+— one device plus `pollis-tui`'s `profile_peer` example. `two-client/profile-change/`:
+the device reads the peer's message under its handle, the peer changes its handle and
+display name, and with the app still open on the channel the old message's sender label
+follows within 30 s, then the member list shows the new display name and handle. Needs a
+dev DS that sends `profile_changed`.
+
 **Typing indicator (automated, #1635):** `mobile/scripts/maestro-typing.sh <device>`
 — one device plus `pollis-tui`'s `typing_peer` example (built with
 `--features typing-peer`, i.e. pollis-core's real LiveKit path, so it types
