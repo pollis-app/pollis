@@ -93,7 +93,7 @@ export function GlobalSearchResults({
       }
     }
     for (const d of dms) {
-      kinds.set(d.id, { kind: "dm", name: d.user2_identifier });
+      kinds.set(d.id, { kind: "dm", name: d.user2_preferred_name || d.user2_identifier });
     }
     return kinds;
   }, [groups, dms]);

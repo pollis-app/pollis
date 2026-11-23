@@ -767,7 +767,10 @@ function TextChat(props: ChatViewProps = {}) {
     return names.length > 0 ? names.join(", ") : null;
   }, [kind, messages, currentUser?.id, dmPeers]);
 
+  // #2085: a DM's title is the live peer name (display name first), so a rename shows at once;
+  // the name the route was opened with is only the first frame's fallback.
   const title =
+    (kind === "dm" && peerName) ||
     (displayName && displayName.trim()) ||
     channelName ||
     peerName ||
@@ -966,6 +969,7 @@ function TextChat(props: ChatViewProps = {}) {
         hideBack={embedded}
         backTo={backTo}
         title={title}
+        titleTestID="text-chat-title"
         subtitle={subtitle}
         titleIcon={
           kind === "channel" ? (

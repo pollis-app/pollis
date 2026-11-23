@@ -62,7 +62,7 @@ function Direct() {
     resetPane();
   }, [selectedConversationId, resetPane]);
   const selectedDm = dms.find((d) => d.id === selectedConversationId);
-  const selectedHandle = selectedDm?.user2_identifier || undefined;
+  const selectedHandle = selectedDm?.user2_preferred_name || selectedDm?.user2_identifier || undefined;
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
 
@@ -207,7 +207,6 @@ function Direct() {
           </Txt>
         ) : null}
         {shown.map((d) => {
-          const handle = d.user2_identifier || t("dms:profile.fallbackName");
           const label = rowName(d);
           const last = lastMessages[d.id];
           const preview = previewText(last);
@@ -236,7 +235,7 @@ function Direct() {
                 if (!isRegular) {
                   router.push({
                     pathname: "/chat/[id]",
-                    params: { id: d.id, kind: "dm", name: handle },
+                    params: { id: d.id, kind: "dm", name: label.name },
                   });
                 }
               }}

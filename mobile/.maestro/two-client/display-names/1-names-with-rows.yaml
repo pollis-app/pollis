@@ -72,6 +72,6 @@ tags:
       id: "row-request-.*"
     timeout: 30000
 - assertVisible:
-    id: "row-request-.*"
-    text: "${PEER_NAME}, .*"
+    id: "text-request-name-.*"
+    text: "${PEER_NAME}"
 - takeScreenshot: display-names-02-request

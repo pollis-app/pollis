@@ -17,6 +17,17 @@ tags:
     timeout: 30000
 - tapOn:
     id: "row-dm-.*"
+# The OS notification prompt comes up over the first conversation and, on iOS, hides the
+# composer from the accessibility tree: answer it first.
+- extendedWaitUntil:
+    visible: "Allow"
+    timeout: 8000
+    optional: true
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
 - extendedWaitUntil:
     visible:
       id: "input-composer"
@@ -26,6 +37,6 @@ tags:
     timeout: 120000
 - assertNotVisible: "${MAESTRO_PEER_HANDLE}: hello in the dm.*"
 - assertVisible:
+    id: "text-chat-title"
     text: "${PEER_NAME}"
-    index: 0
 - takeScreenshot: display-names-03-dm

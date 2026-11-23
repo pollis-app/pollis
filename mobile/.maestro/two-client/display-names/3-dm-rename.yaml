@@ -11,6 +11,6 @@ tags:
     timeout: 30000
 - assertNotVisible: "${PEER_NAME}: hello in the dm.*"
 - assertVisible:
+    id: "text-chat-title"
     text: "${NEW_NAME}"
-    index: 0
 - takeScreenshot: display-names-04-dm-renamed
