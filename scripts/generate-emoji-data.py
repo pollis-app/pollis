@@ -3,15 +3,16 @@
 
 What this does
 --------------
-Enumerates the standard-Unicode emoji repertoire straight out of Python's
-``unicodedata`` module and writes it as a typed, dependency-free TypeScript
-module for the Discord-style emoji picker. Run it from anywhere:
+Reads Unicode's official emoji list, ``emoji-test.txt``, vendored verbatim as
+``scripts/emoji-test.txt``, and writes every fully-qualified emoji in it (the
+RGI set, Emoji 16.0) as a typed, dependency-free TypeScript module for the
+Discord-style emoji picker. Run it from anywhere with Python 3.14 or newer:
 
-    python3 scripts/generate-emoji-data.py
+    python3.14 scripts/generate-emoji-data.py
 
-The generator is deterministic: given the same ``unicodedata`` build and the
-same country table it re-emits byte-identical output, so re-running it on an
-unchanged tree produces an empty diff.
+The generator is deterministic and offline: given the same vendored files and
+the same ``unicodedata`` build it re-emits byte-identical output, so re-running
+it on an unchanged tree produces an empty diff.
 
 Why generated instead of an npm package
 ---------------------------------------
@@ -27,32 +28,66 @@ The obvious alternative is a package like ``emoji-datasource`` or
     than a dependency here: it is diffable, auditable, has no install step, and
     the regeneration procedure is this one stdlib-only script.
 
-How category assignment works
------------------------------
-There is no ``emoji-data.txt`` / ``emoji-test.txt`` on the build machine (no
-``/usr/share/unicode/``), so the official ``Emoji_Presentation`` property and
-the CLDR group names are not available to read. Instead:
+Where the emoji set comes from
+------------------------------
+``scripts/emoji-test.txt`` is Unicode's ``emoji-test.txt`` for Emoji 16.0, byte
+for byte. ``scripts/emoji-test.json`` records where it came from (URL, version,
+sha256) and the licence it is used under (Unicode-3.0), and the generator
+refuses to run when the file's sha256 no longer matches. Refresh both with::
 
-*   ``CATEGORY_RANGES`` below hardcodes, per category, the codepoint ranges
-    that make up that category. The categories are evaluated in the declared
-    order and **the first range that contains a codepoint wins**, so a narrow
-    carve-out placed in an earlier category overrides a broad range in a later
-    one (e.g. people claims U+1F385 FATHER CHRISTMAS out of the middle of the
-    activity block, and food claims U+1F382 BIRTHDAY CAKE). Every emoji
-    therefore lands in exactly one category, and the result is de-duplicated.
-*   Any codepoint whose ``unicodedata.name()`` raises ``ValueError`` is
-    unassigned in this Unicode version and is skipped. That single check is
-    what keeps the holes inside each block out of the output, and it is also
-    what makes the script forward-compatible: on a newer ``unicodedata`` the
-    previously-reserved codepoints inside the declared ranges simply start
-    appearing.
-*   Display name and search keywords are both ``unicodedata.name()``,
-    lowercased with hyphens and underscores folded to spaces
-    ("EARTH GLOBE EUROPE-AFRICA" -> "earth globe europe africa"). The emitted
-    ``StandardEmoji`` shape has no separate keyword field by design: the name
-    *is* the keyword list, which is why the raw Unicode name is kept rather
-    than a prettified CLDR short name — "WHITE UP POINTING BACKHAND INDEX"
-    matches more useful queries than "backhand index pointing up".
+    python3.14 scripts/generate-emoji-data.py --refresh-emoji-test
+
+after moving ``EMOJI_TEST_VERSION``. That mode is network-only; a plain run
+stays offline.
+
+The table is every ``fully-qualified`` line of the file, in the file's own
+order (the CLDR order Slack, Discord and the system keyboards use), minus the
+lines that carry a skin-tone modifier, which are reached through ``tonable``
+(below). Of the ``component`` lines, the bare tones are skipped and the four
+hair styles kept (filed under People): they are not RGI emoji, but every emoji
+font draws them and the table has always carried them. So every ZWJ sequence (🧑‍💻, ❤️‍🔥, 😮‍💨, 🐦‍🔥, the
+families), every keycap and the tag-sequence flags are in the table, and the
+count is checked against the file (``frontend/tests/emoji-coverage.test.ts``).
+
+Categories are the file's CLDR groups, with "Smileys & Emotion" and
+"People & Body" folded into one ``people`` group as Discord and Slack do.
+Within a category, entries keep the file's order.
+
+Names: a single-codepoint emoji keeps its ``unicodedata.name()``, lowercased
+with hyphens and underscores folded to spaces ("WHITE UP POINTING BACKHAND
+INDEX" -> "white up pointing backhand index"), because the raw Unicode name
+matches more useful queries than the CLDR short name ("backhand index pointing
+up"). A sequence has no Unicode name, so it takes the file's CLDR name, folded
+the same way ("woman: red hair"), and a flag is "<place> flag": the tzdata
+short name for a country flag, as the table has always used ("korea (south)
+flag"), else the CLDR one ("united nations flag"). This name is the English search fallback; the localized names and
+keywords come from the CLDR annotations (below).
+
+``char`` and U+FE0F
+-------------------
+A single-codepoint emoji's ``char`` is the bare codepoint with **no** U+FE0F,
+as it has always been, so stored reactions, recents and the shortcode keys keep
+matching. The renderers add the selector at display time: ``emojiDisplayChar``
+appends it to single codepoints below U+1F000, which default to text
+presentation. A sequence's ``char`` is its fully-qualified form exactly as the
+file spells it ("❤️‍🔥" = 2764 FE0F 200D 1F525, "#️⃣" = 0023 FE0F 20E3): a
+selector inside a sequence is part of what makes it render as one glyph, and
+``emojiDisplayChar`` passes multi-codepoint strings through untouched. Every
+key into the vendored JSON tables (shortcodes, annotations) is ``char`` with
+U+FE0F stripped.
+
+Skin tones
+----------
+An entry is ``tonable`` when the file lists it in all five *uniform* tones
+(every person in it the same tone), the only kind the picker's one skin-tone
+choice can ask for; mixed-tone forms such as 🧑🏻‍🤝‍🧑🏿 are not offered.
+``applySkinTone`` puts the tone straight after the first codepoint and drops a
+U+FE0F that followed it (☝ -> ☝🏻, 🏃‍♀️ -> 🏃🏻‍♀️, ⛹️‍♂️ -> ⛹🏻‍♂️), which is right for every
+one-person emoji. Where each person takes the tone (🧑‍🤝‍🧑, 👩‍❤️‍👨 and the like)
+the generator emits the light-tone form in ``TONE_TEMPLATES`` and the runtime
+swaps the chosen tone in. The generator checks both rules against the file for
+all five tones, so every toned string the picker can produce is one the file
+lists as fully-qualified.
 
 Where the shortcodes come from
 -----------------------------
@@ -71,17 +106,17 @@ provenance header (source, pinned version, sha256 of the upstream file, and the
 MIT licence it is used under: Copyright (c) 2019 GitHub, Inc.).
 
 Its shape is ``alias -> hyphen-joined uppercase codepoints``, e.g.
-``"joy": "1F602"`` and ``"gb": "1F1EC-1F1E7"``, with U+FE0F stripped so the keys
-line up with the bare bases this file emits. Aliases are lowercase
+``"joy": "1F602"`` and ``"gb": "1F1EC-1F1E7"``, with U+FE0F stripped, the key form
+every vendored table uses (see "``char`` and U+FE0F"). Aliases are lowercase
 ``[a-z0-9_+-]``; note that ``+`` and ``-`` are in that set (``:+1:``, ``:-1:``,
 ``:e-mail:``) and are NOT legal in a *custom* emoji shortcode, which stays
 ``[a-z0-9_]{2,32}``. Single-character aliases (``:v:``, ``:o:``, ``:x:``) are
 kept: they are real, and the two-character minimum before the composer starts
 suggesting is a UI rule, not a data rule.
 
-An alias whose target emoji is not in the emitted table (ZWJ sequences,
-keycaps, skin-toned variants — none of which this generator enumerates) is
-simply dropped, so the emitted set is always a subset of what is renderable.
+An alias whose target emoji is not in the emitted table (a skin-toned
+variant, which the picker composes from its base) is simply dropped, so the
+emitted set is always a subset of what is renderable.
 
 To refresh the vendored table against a newer gemoji release::
 
@@ -121,8 +156,8 @@ and cover thousands of sequences this table does not emit, while the trimmed
 JSON is static, diffable, and needs no install step. The JSON carries its own
 provenance (release tag, per-file sha256, licence) and is keyed
 ``locale -> hyphen-joined uppercase codepoints -> [name, keyword, ...]``,
-lowercased, with U+FE0F stripped so the keys line up with the bare bases this
-file emits. Entries CLDR marks ``draft="provisional"`` / ``"unconfirmed"`` are
+lowercased, with U+FE0F stripped as CLDR's own ``cp`` attribute is; the emitted
+modules carry each entry's ``char``. Entries CLDR marks ``draft="provisional"`` / ``"unconfirmed"`` are
 skipped; ``contributed`` is kept.
 
 The locale set is read from ``frontend/src/i18n/languages.ts``, so adding a
@@ -140,55 +175,14 @@ separate chunk per locale (#874's code-splitting rule); Metro does not split,
 so on mobile every locale ships in the binary and the dynamic import only
 defers parsing until the picker opens.
 
-Where the order comes from
---------------------------
-Within a category, entries follow the CLDR emoji order (#1972), the order
-Unicode's ``emoji-test.txt`` lists them in and the one Slack, Discord and the
-system keyboards use: 😀 first, not U+261D ☝ just because its codepoint is
-lowest. ``unicodedata`` has no order, so the single-codepoint part of that file
-is vendored, trimmed, in ``scripts/emoji-order.json`` (provenance, sha256 and
-licence inside). Anything the file does not list sorts after the listed ones,
-in codepoint order, so a newer ``unicodedata`` still emits every emoji. Refresh
-it with::
-
-    python3 scripts/generate-emoji-data.py --refresh-order
-
-which is network-only like ``--refresh-annotations`` (pinned to
-``EMOJI_TEST_VERSION``); a plain run stays offline.
-
-Known approximation limits
---------------------------
-This is a good approximation of the official CLDR groups, not a reproduction
-of them. Specifically:
-
-*   The eight categories collapse CLDR's "Smileys & Emotion" and
-    "People & Body" into a single ``people`` group, matching how Discord and
-    Slack present the picker.
-*   Range boundaries are drawn on block runs, so a handful of emoji sit one
-    category away from where CLDR files them. Known examples: U+1F4A3 BOMB and
-    U+1F4A7 DROPLET fall inside the emotion-symbol run and are filed under
-    ``people``; the hand-tool run U+1F6E0..U+1F6E2 falls inside the transport
-    run and is filed under ``travel``. These are cosmetic — search is by name
-    and is category-independent.
-*   Legacy non-emoji pictographs share blocks with real emoji (the U+1F5xx
-    range is full of things like "THREE RAYS ABOVE" that no font renders as
-    emoji). The ranges are drawn tightly, using singletons through those
-    stretches, to keep them out; the current output was audited against V8's
-    ``\\p{Emoji}`` property escape and contains zero non-emoji. Widening any
-    range risks reintroducing them, so re-run that audit if you do.
-*   ``char`` is the bare base codepoint, with **no** U+FE0F variation selector.
-    Roughly 190 of these entries (the ones from the older BMP symbol blocks,
-    e.g. U+261D, U+2328, U+2764) default to *text* presentation, so a renderer
-    that wants a colour glyph should append U+FE0F at display time. The
-    selector is deliberately not baked into the data because it would make the
-    bases multi-codepoint and break the skin-tone composition contract that
-    ``applySkinTone`` documents.
-*   ZWJ sequences (family groupings, profession sequences, flag-tag sequences
-    such as England/Scotland/Wales) are **not** enumerated. Only single
-    codepoints plus the regional-indicator flag pairs are emitted.
-*   Skin-tone variants are not enumerated either; the ``tonable`` flag marks
-    the bases that accept a Fitzpatrick modifier and the runtime composes the
-    variant. See ``EMOJI_MODIFIER_BASE_RANGES``.
+Known limits
+------------
+*   The newest emoji and the tag-sequence flags (England, Scotland, Wales) need
+    a font that has them. Apple platforms and current Chrome and Android builds
+    do; an older Android system font draws a missing one as a box or as its
+    pieces. See ``.codesight/wiki/ui.md`` -> "Emoji coverage".
+*   The ``:shortcode:`` aliases are gemoji's, which stop before Emoji 15.1, so
+    newer emoji (🫩, 🐦‍🔥, 🙂‍↔️ ...) are found by name, not by shortcode.
 """
 
 from __future__ import annotations
@@ -217,8 +211,10 @@ MOBILE_OUTPUT_PATH = REPO_ROOT / "mobile" / "components" / "emoji" / "emojiData.
 # for its provenance, licence and refresh recipe.
 SHORTCODES_PATH = REPO_ROOT / "scripts" / "emoji-shortcodes.json"
 
-# The vendored CLDR emoji order. See "Where the order comes from" above.
-ORDER_PATH = REPO_ROOT / "scripts" / "emoji-order.json"
+# Unicode's emoji-test.txt, vendored verbatim, plus its provenance. See "Where
+# the emoji set comes from" above.
+EMOJI_TEST_PATH = REPO_ROOT / "scripts" / "emoji-test.txt"
+EMOJI_TEST_META_PATH = REPO_ROOT / "scripts" / "emoji-test.json"
 EMOJI_TEST_VERSION = "16.0"
 EMOJI_TEST_URL = f"https://unicode.org/Public/emoji/{EMOJI_TEST_VERSION}/emoji-test.txt"
 
@@ -258,349 +254,32 @@ CATEGORY_LABELS: list[tuple[str, str]] = [
     ("flags", "Flags"),
 ]
 
-# Inclusive codepoint ranges per category. Evaluated in this order; the first
-# range containing a codepoint claims it, so earlier categories can carve
-# single codepoints out of a later category's broad block range.
-CATEGORY_RANGES: dict[str, list[tuple[int, int]]] = {
-    # CLDR "Smileys & Emotion" + "People & Body", including the person-sport
-    # and person-activity emoji that CLDR files under People rather than
-    # Activities (they are the ones that take skin tones).
-    "people": [
-        (0x261D, 0x261D),
-        (0x2639, 0x263A),
-        (0x26F9, 0x26F9),
-        (0x270A, 0x270D),
-        (0x2763, 0x2764),
-        (0x1F385, 0x1F385),
-        (0x1F3C2, 0x1F3C4),
-        (0x1F3C7, 0x1F3C7),
-        (0x1F3CA, 0x1F3CC),
-        (0x1F440, 0x1F450),
-        (0x1F463, 0x1F487),
-        (0x1F48B, 0x1F48C),
-        (0x1F48F, 0x1F48F),
-        (0x1F491, 0x1F491),
-        (0x1F493, 0x1F49F),
-        (0x1F4A2, 0x1F4AD),
-        (0x1F574, 0x1F575),
-        (0x1F57A, 0x1F57A),
-        (0x1F590, 0x1F590),
-        (0x1F595, 0x1F596),
-        (0x1F5A4, 0x1F5A4),
-        (0x1F5E3, 0x1F5E3),
-        (0x1F5E8, 0x1F5E8),
-        (0x1F5EF, 0x1F5EF),
-        (0x1F600, 0x1F64F),
-        (0x1F6A3, 0x1F6A3),
-        (0x1F6B4, 0x1F6B6),
-        (0x1F6C0, 0x1F6C0),
-        (0x1F6CC, 0x1F6CC),
-        (0x1F90C, 0x1F90F),
-        (0x1F918, 0x1F939),
-        (0x1F93C, 0x1F93E),
-        (0x1F970, 0x1F97A),
-        (0x1F9B0, 0x1F9B9),
-        (0x1F9BB, 0x1F9BB),
-        (0x1F9BE, 0x1F9BF),
-        (0x1F9CD, 0x1F9E1),
-        (0x1FAC0, 0x1FAC5),
-        (0x1FAF0, 0x1FAF8),
-    ],
-    # CLDR "Animals & Nature" (plants and animals; sky & weather is filed
-    # under Travel & Places, matching CLDR).
-    "nature": [
-        (0x1F331, 0x1F335),
-        (0x1F337, 0x1F33C),
-        (0x1F33E, 0x1F343),
-        (0x1F400, 0x1F43F),
-        (0x1F490, 0x1F490),
-        (0x1F4AE, 0x1F4AE),
-        (0x1F577, 0x1F578),
-        (0x1F980, 0x1F9AE),
-        (0x1FAA8, 0x1FAA8),
-        (0x1FAB0, 0x1FABF),
-    ],
-    # CLDR "Food & Drink", including dishware.
-    "food": [
-        (0x2615, 0x2615),
-        (0x1F32D, 0x1F330),
-        (0x1F336, 0x1F336),
-        (0x1F33D, 0x1F33D),
-        (0x1F344, 0x1F37F),
-        (0x1F382, 0x1F382),
-        (0x1F942, 0x1F944),
-        (0x1F950, 0x1F96F),
-        (0x1F9C0, 0x1F9CB),
-        (0x1FAD0, 0x1FADC),
-    ],
-    # CLDR "Activities": events, games, sport equipment, awards, arts.
-    "activity": [
-        (0x265F, 0x265F),
-        (0x26BD, 0x26BE),
-        (0x26F3, 0x26F3),
-        (0x26F7, 0x26F8),
-        (0x1F004, 0x1F004),
-        (0x1F0CF, 0x1F0CF),
-        (0x1F380, 0x1F393),
-        (0x1F396, 0x1F397),
-        (0x1F3A3, 0x1F3A3),
-        (0x1F3A8, 0x1F3A8),
-        (0x1F3AA, 0x1F3AB),
-        (0x1F3AD, 0x1F3B4),
-        (0x1F3BD, 0x1F3C1),
-        (0x1F3C5, 0x1F3C6),
-        (0x1F3C8, 0x1F3C9),
-        (0x1F3CF, 0x1F3D3),
-        (0x1F3F5, 0x1F3F5),
-        (0x1F3F8, 0x1F3F9),
-        (0x1F52E, 0x1F52E),
-        (0x1F579, 0x1F579),
-        (0x1F6DD, 0x1F6DD),
-        (0x1F93A, 0x1F93A),
-        (0x1F945, 0x1F945),
-        (0x1F947, 0x1F94C),
-        (0x1F9E7, 0x1F9E9),
-        (0x1FA80, 0x1FA86),
-    ],
-    # CLDR "Travel & Places", which also owns sky & weather and time.
-    "travel": [
-        (0x231A, 0x231B),
-        (0x23F0, 0x23F3),
-        (0x2600, 0x2604),
-        (0x2614, 0x2614),
-        (0x26C4, 0x26C5),
-        (0x26C8, 0x26C8),
-        (0x26E9, 0x26EA),
-        (0x26F0, 0x26F5),
-        (0x26FA, 0x26FA),
-        (0x26FD, 0x26FD),
-        (0x2708, 0x2708),
-        (0x1F300, 0x1F321),
-        (0x1F324, 0x1F32C),
-        (0x1F3A0, 0x1F3A2),
-        (0x1F3CD, 0x1F3CE),
-        (0x1F3D4, 0x1F3F0),
-        (0x1F492, 0x1F492),
-        (0x1F4BA, 0x1F4BA),
-        (0x1F550, 0x1F567),
-        (0x1F570, 0x1F570),
-        (0x1F5FA, 0x1F5FF),
-        (0x1F680, 0x1F6A9),
-        (0x1F6AB, 0x1F6B3),
-        (0x1F6B7, 0x1F6B8),
-        (0x1F6D1, 0x1F6D1),
-        (0x1F6D5, 0x1F6D6),
-        (0x1F6DE, 0x1F6DF),
-        (0x1F6E0, 0x1F6E5),
-        (0x1F6E9, 0x1F6E9),
-        (0x1F6EB, 0x1F6EC),
-        (0x1F6F0, 0x1F6F0),
-        (0x1F6F3, 0x1F6FC),
-        (0x1F9F3, 0x1F9F3),
-        (0x1FA90, 0x1FA90),
-    ],
-    # CLDR "Objects": clothing, tools, office, household, science, music.
-    "objects": [
-        (0x260E, 0x260E),
-        (0x2328, 0x2328),
-        (0x2692, 0x2692),
-        (0x2694, 0x2694),
-        (0x2696, 0x2697),
-        (0x2699, 0x2699),
-        (0x26B0, 0x26B1),
-        (0x26CF, 0x26CF),
-        (0x26D1, 0x26D1),
-        (0x26D3, 0x26D3),
-        (0x2702, 0x2702),
-        (0x2709, 0x2709),
-        (0x270F, 0x270F),
-        (0x2712, 0x2712),
-        (0x1F399, 0x1F39B),
-        (0x1F39E, 0x1F39F),
-        (0x1F3A4, 0x1F3A7),
-        (0x1F3A9, 0x1F3A9),
-        (0x1F3AC, 0x1F3AC),
-        (0x1F3B5, 0x1F3BC),
-        (0x1F3F7, 0x1F3F7),
-        (0x1F3FA, 0x1F3FA),
-        (0x1F451, 0x1F462),
-        (0x1F488, 0x1F48A),
-        (0x1F48D, 0x1F48E),
-        (0x1F4A1, 0x1F4A1),
-        (0x1F4B0, 0x1F4B9),
-        (0x1F4BB, 0x1F4FD),
-        (0x1F4FF, 0x1F4FF),
-        (0x1F525, 0x1F52D),
-        (0x1F56F, 0x1F56F),
-        (0x1F576, 0x1F576),
-        (0x1F587, 0x1F587),
-        (0x1F58A, 0x1F58D),
-        (0x1F5A5, 0x1F5A5),
-        (0x1F5A8, 0x1F5A8),
-        (0x1F5B1, 0x1F5B2),
-        (0x1F5BC, 0x1F5BC),
-        (0x1F5C2, 0x1F5C4),
-        (0x1F5D1, 0x1F5D3),
-        (0x1F5DC, 0x1F5DE),
-        (0x1F5E1, 0x1F5E1),
-        (0x1F5F3, 0x1F5F3),
-        (0x1F6AA, 0x1F6AA),
-        (0x1F6BD, 0x1F6BD),
-        (0x1F6BF, 0x1F6BF),
-        (0x1F6C1, 0x1F6C1),
-        (0x1F6D2, 0x1F6D2),
-        (0x1F6D7, 0x1F6D7),
-        (0x1F6DC, 0x1F6DC),
-        (0x1F97B, 0x1F97F),
-        (0x1F9AF, 0x1F9AF),
-        (0x1F9BC, 0x1F9BD),
-        (0x1F9E2, 0x1F9E6),
-        (0x1F9EA, 0x1F9FF),
-        (0x1FA70, 0x1FA7F),
-        (0x1FA87, 0x1FA89),
-        (0x1FA91, 0x1FAAF),
-    ],
-    # CLDR "Symbols": signage, arrows, geometric shapes, keycaps, alphanumerics.
-    "symbols": [
-        (0x00A9, 0x00A9),
-        (0x00AE, 0x00AE),
-        (0x203C, 0x203C),
-        (0x2049, 0x2049),
-        (0x2122, 0x2122),
-        (0x2139, 0x2139),
-        (0x2194, 0x2199),
-        (0x21A9, 0x21AA),
-        (0x23CF, 0x23CF),
-        (0x23E9, 0x23EF),
-        (0x23F8, 0x23FA),
-        (0x24C2, 0x24C2),
-        (0x25AA, 0x25AB),
-        (0x25B6, 0x25B6),
-        (0x25C0, 0x25C0),
-        (0x25FB, 0x25FE),
-        (0x2611, 0x2611),
-        (0x2626, 0x2626),
-        (0x262A, 0x262A),
-        (0x262E, 0x262F),
-        (0x2638, 0x2638),
-        (0x2648, 0x2653),
-        (0x267B, 0x267B),
-        (0x267E, 0x267F),
-        (0x2695, 0x2695),
-        (0x269B, 0x269C),
-        (0x26A0, 0x26A1),
-        (0x26A7, 0x26A7),
-        (0x26AA, 0x26AB),
-        (0x26CE, 0x26CE),
-        (0x26D4, 0x26D4),
-        (0x2705, 0x2705),
-        (0x2714, 0x2714),
-        (0x2716, 0x2716),
-        (0x271D, 0x271D),
-        (0x2721, 0x2721),
-        (0x2728, 0x2728),
-        (0x2733, 0x2734),
-        (0x2744, 0x2744),
-        (0x2747, 0x2747),
-        (0x274C, 0x274C),
-        (0x274E, 0x274E),
-        (0x2753, 0x2755),
-        (0x2757, 0x2757),
-        (0x2795, 0x2797),
-        (0x27A1, 0x27A1),
-        (0x27B0, 0x27B0),
-        (0x27BF, 0x27BF),
-        (0x2934, 0x2935),
-        (0x2B05, 0x2B07),
-        (0x2B1B, 0x2B1C),
-        (0x2B50, 0x2B50),
-        (0x2B55, 0x2B55),
-        (0x3030, 0x3030),
-        (0x303D, 0x303D),
-        (0x3297, 0x3297),
-        (0x3299, 0x3299),
-        (0x1F170, 0x1F171),
-        (0x1F17E, 0x1F17F),
-        (0x1F18E, 0x1F18E),
-        (0x1F191, 0x1F19A),
-        (0x1F201, 0x1F202),
-        (0x1F21A, 0x1F21A),
-        (0x1F22F, 0x1F22F),
-        (0x1F232, 0x1F23A),
-        (0x1F250, 0x1F251),
-        (0x1F4A0, 0x1F4A0),
-        (0x1F4AF, 0x1F4AF),
-        (0x1F500, 0x1F524),
-        (0x1F52F, 0x1F53D),
-        (0x1F6B9, 0x1F6BC),
-        (0x1F6BE, 0x1F6BE),
-        (0x1F6C2, 0x1F6C5),
-        (0x1F6D0, 0x1F6D0),
-        (0x1F7E0, 0x1F7EB),
-        (0x1F7F0, 0x1F7F0),
-    ],
-    # Built separately from regional-indicator pairs; see build_flags().
-    "flags": [],
+# The file's CLDR groups, mapped onto the picker's categories. "Component"
+# (the bare tones and hair styles) is deliberately absent.
+GROUP_CATEGORIES: dict[str, str] = {
+    "Smileys & Emotion": "people",
+    "People & Body": "people",
+    "Animals & Nature": "nature",
+    "Food & Drink": "food",
+    "Travel & Places": "travel",
+    "Activities": "activity",
+    "Objects": "objects",
+    "Symbols": "symbols",
+    "Flags": "flags",
 }
-
-# Emoji_Modifier_Base: the bases that accept a Fitzpatrick skin-tone modifier.
-# Hardcoded because the derived property file is not on disk. Filtered at
-# generation time down to the codepoints that actually made it into the set.
-EMOJI_MODIFIER_BASE_RANGES: list[tuple[int, int]] = [
-    (0x261D, 0x261D),
-    (0x26F9, 0x26F9),
-    (0x270A, 0x270D),
-    (0x1F385, 0x1F385),
-    (0x1F3C2, 0x1F3C4),
-    (0x1F3C7, 0x1F3C7),
-    (0x1F3CA, 0x1F3CC),
-    (0x1F442, 0x1F443),
-    (0x1F446, 0x1F450),
-    (0x1F466, 0x1F478),
-    (0x1F47C, 0x1F47C),
-    (0x1F481, 0x1F483),
-    (0x1F485, 0x1F487),
-    (0x1F48F, 0x1F48F),
-    (0x1F491, 0x1F491),
-    (0x1F4AA, 0x1F4AA),
-    (0x1F574, 0x1F575),
-    (0x1F57A, 0x1F57A),
-    (0x1F590, 0x1F590),
-    (0x1F595, 0x1F596),
-    (0x1F645, 0x1F647),
-    (0x1F64B, 0x1F64F),
-    (0x1F6A3, 0x1F6A3),
-    (0x1F6B4, 0x1F6B6),
-    (0x1F6C0, 0x1F6C0),
-    (0x1F6CC, 0x1F6CC),
-    (0x1F90C, 0x1F90C),
-    (0x1F90F, 0x1F90F),
-    (0x1F918, 0x1F91F),
-    (0x1F926, 0x1F926),
-    (0x1F930, 0x1F939),
-    (0x1F93C, 0x1F93E),
-    (0x1F977, 0x1F977),
-    (0x1F9B5, 0x1F9B6),
-    (0x1F9B8, 0x1F9B9),
-    (0x1F9BB, 0x1F9BB),
-    (0x1F9CD, 0x1F9DF),
-    (0x1FAC3, 0x1FAC5),
-    (0x1FAF0, 0x1FAF8),
-]
 
 # The five Fitzpatrick modifiers, in Discord's order. Index 0 is "no tone".
 SKIN_TONES = ["", "\U0001F3FB", "\U0001F3FC", "\U0001F3FD", "\U0001F3FE", "\U0001F3FF"]
+TONE_SET = frozenset(SKIN_TONES[1:])
+LIGHT_TONE = SKIN_TONES[1]
+VS16 = "️"
 
-# Regional indicator A, the base of the flag pair encoding.
-REGIONAL_INDICATOR_A = 0x1F1E6
 
-# Country tables the generator prefers, in order, before falling back.
-ZONEINFO_TABLE = Path("/usr/share/zoneinfo/iso3166.tab")
-ISO_CODES_JSON = Path("/usr/share/iso-codes/json/iso_3166-1.json")
-
-# ISO 3166-1 alpha-2 fallback, used only when neither system table is present.
-# Names follow the tzdata short-form convention.
-FALLBACK_COUNTRY_NAMES: dict[str, str] = {
+# English names for the regional-indicator flags, in the tzdata short form the
+# table has always used ("korea (south)", "britain (uk)"), so a search that
+# found a flag before still does. A flag missing here (AC, EU, UN, ...) takes
+# its CLDR name.
+COUNTRY_NAMES: dict[str, str] = {
     "AD": "Andorra", "AE": "United Arab Emirates", "AF": "Afghanistan",
     "AG": "Antigua & Barbuda", "AI": "Anguilla", "AL": "Albania", "AM": "Armenia",
     "AO": "Angola", "AQ": "Antarctica", "AR": "Argentina", "AS": "Samoa (American)",
@@ -663,13 +342,12 @@ FALLBACK_COUNTRY_NAMES: dict[str, str] = {
     "ZM": "Zambia", "ZW": "Zimbabwe",
 }
 
+REGIONAL_INDICATOR_A = 0x1F1E6
 
-def expand(ranges: list[tuple[int, int]]) -> set[int]:
-    """Flatten inclusive ``(start, end)`` ranges into a set of codepoints."""
-    out: set[int] = set()
-    for start, end in ranges:
-        out.update(range(start, end + 1))
-    return out
+
+def strip_vs16(value: str) -> str:
+    """``value`` without any U+FE0F, the form every vendored JSON key uses."""
+    return value.replace(VS16, "")
 
 
 def display_name(codepoint: int) -> str | None:
@@ -678,11 +356,15 @@ def display_name(codepoint: int) -> str | None:
         raw = unicodedata.name(chr(codepoint))
     except ValueError:
         return None
-    return raw.lower().replace("-", " ").replace("_", " ")
+    return fold_name(raw)
+
+
+def fold_name(raw: str) -> str:
+    return " ".join(raw.lower().replace("-", " ").replace("_", " ").split())
 
 
 def load_shortcodes() -> tuple[dict[str, list[str]], str]:
-    """Invert the vendored alias table into ``char -> sorted aliases``.
+    """Invert the vendored alias table into ``FE0F-stripped char -> sorted aliases``.
 
     Aliases are sorted rather than kept in gemoji's own order so the output is
     a pure function of the checked-in JSON: two aliases for one emoji must not
@@ -698,155 +380,175 @@ def load_shortcodes() -> tuple[dict[str, list[str]], str]:
     return by_char, str(payload["_version"])
 
 
-def load_order() -> dict[int, int]:
-    """``codepoint -> rank`` in CLDR order, from the vendored ``emoji-order.json``."""
-    payload = json.loads(ORDER_PATH.read_text(encoding="utf-8"))
-    return {int(key, 16): rank for rank, key in enumerate(payload["order"])}
+def read_emoji_test() -> str:
+    """The vendored emoji-test.txt, after checking it against its recorded sha256."""
+    raw = EMOJI_TEST_PATH.read_bytes()
+    meta = json.loads(EMOJI_TEST_META_PATH.read_text(encoding="utf-8"))
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != meta["_sha256"]:
+        raise SystemExit(
+            f"{EMOJI_TEST_PATH} has sha256 {digest}, but {EMOJI_TEST_META_PATH} records "
+            f"{meta['_sha256']}; refresh both with --refresh-emoji-test"
+        )
+    return raw.decode("utf-8")
 
 
-def refresh_order() -> None:
-    """Re-download ``emoji-test.txt`` and rewrite ``emoji-order.json`` (network)."""
+def refresh_emoji_test() -> None:
+    """Re-download ``emoji-test.txt`` and rewrite its provenance (network)."""
     with urllib.request.urlopen(EMOJI_TEST_URL, timeout=60) as response:
         raw = response.read()
-    order: list[str] = []
-    seen: set[str] = set()
-    for line in raw.decode("utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or ";" not in line:
-            continue
-        codepoints, rest = line.split(";", 1)
-        if rest.split("#", 1)[0].strip() == "component":
-            continue
-        # Bases only: U+FE0F is presentation, and anything longer is a sequence.
-        parts = [part for part in codepoints.split() if part.upper() != "FE0F"]
-        if len(parts) != 1:
-            continue
-        key = parts[0].upper()
-        if key not in seen:
-            seen.add(key)
-            order.append(key)
+    EMOJI_TEST_PATH.write_bytes(raw)
     doc = {
         "_source": EMOJI_TEST_URL,
         "_version": EMOJI_TEST_VERSION,
         "_sha256": hashlib.sha256(raw).hexdigest(),
-        "_licence": "Unicode-3.0 — Copyright © 1991-2024 Unicode, Inc.",
-        "_shape": "single-codepoint emoji bases in CLDR order (the file's own order), U+FE0F stripped; sequences dropped",
-        "_regenerate": "python3 scripts/generate-emoji-data.py --refresh-order",
-        "order": order,
+        "_licence": "Unicode-3.0 — Copyright © 1991-2024 Unicode, Inc. (https://www.unicode.org/license.txt)",
+        "_file": "scripts/emoji-test.txt, vendored byte for byte",
+        "_regenerate": "python3.14 scripts/generate-emoji-data.py --refresh-emoji-test",
     }
-    ORDER_PATH.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def read_zoneinfo_table(path: Path) -> dict[str, str]:
-    """Parse tzdata's iso3166.tab: ``XX<TAB>Country Name``, ``#`` comments."""
-    names: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        code, _, name = line.partition("\t")
-        code = code.strip()
-        name = name.strip()
-        if len(code) == 2 and code.isalpha() and name:
-            names[code.upper()] = name
-    return names
-
-
-def read_iso_codes_json(path: Path) -> dict[str, str]:
-    """Parse the iso-codes package's iso_3166-1.json."""
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    names: dict[str, str] = {}
-    for entry in payload.get("3166-1", []):
-        code = entry.get("alpha_2", "")
-        name = entry.get("name", "")
-        if len(code) == 2 and name:
-            names[code.upper()] = name
-    return names
-
-
-def load_country_names() -> tuple[dict[str, str], str]:
-    """Return the ISO 3166-1 alpha-2 table plus the source it came from."""
-    if ZONEINFO_TABLE.is_file():
-        names = read_zoneinfo_table(ZONEINFO_TABLE)
-        if names:
-            return names, str(ZONEINFO_TABLE)
-    if ISO_CODES_JSON.is_file():
-        names = read_iso_codes_json(ISO_CODES_JSON)
-        if names:
-            return names, str(ISO_CODES_JSON)
-    return dict(FALLBACK_COUNTRY_NAMES), "hardcoded fallback table"
-
-
-def flag_char(code: str) -> str:
-    """Turn an alpha-2 code into its regional-indicator pair."""
-    return "".join(
-        chr(REGIONAL_INDICATOR_A + (ord(letter) - ord("A"))) for letter in code
+    EMOJI_TEST_META_PATH.write_text(
+        json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
 
-def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str, str]:
-    """Assemble every entry, in category order then CLDR order (codepoint order after it)."""
-    tonable_bases = expand(EMOJI_MODIFIER_BASE_RANGES)
-    rank = load_order()
-    unranked = len(rank)
-    shortcodes, shortcode_version = load_shortcodes()
-    entries: list[dict[str, object]] = []
-    counts: dict[str, int] = {}
-    claimed: set[int] = set()
-
-    for category_id, _label in CATEGORY_LABELS:
-        if category_id == "flags":
+def parse_emoji_test(text: str) -> list[tuple[str, str, str, str]]:
+    """``(emoji, status, group, cldr name)`` for every data line, in file order."""
+    rows: list[tuple[str, str, str, str]] = []
+    group = ""
+    for line in text.splitlines():
+        if line.startswith("# group:"):
+            group = line.split(":", 1)[1].strip()
             continue
-        count = 0
-        ordered = sorted(
-            expand(CATEGORY_RANGES[category_id]),
-            key=lambda cp: (rank.get(cp, unranked), cp),
-        )
-        for codepoint in ordered:
-            # First matching category wins, so a codepoint already taken by an
-            # earlier category is skipped here.
-            if codepoint in claimed:
-                continue
-            name = display_name(codepoint)
-            # Unassigned in this Unicode version: this is the hole filter.
-            if name is None:
-                continue
-            claimed.add(codepoint)
-            entries.append(
-                {
-                    "char": chr(codepoint),
-                    "name": name,
-                    "category": category_id,
-                    "tonable": codepoint in tonable_bases,
-                    "shortcodes": shortcodes.get(chr(codepoint), []),
-                }
-            )
-            count += 1
-        counts[category_id] = count
+        if not line.strip() or line.startswith("#"):
+            continue
+        codepoints, rest = line.split(";", 1)
+        status, comment = rest.split("#", 1)
+        emoji = "".join(chr(int(part, 16)) for part in codepoints.split())
+        # The comment is "<emoji> E<version> <name>".
+        name = comment.strip().split(" ", 2)[2]
+        rows.append((emoji, status.strip(), group, name))
+    return rows
 
-    country_names, source = load_country_names()
-    flag_count = 0
-    for code in sorted(country_names):
-        # "flag" is appended because StandardEmoji has no separate keyword
-        # field: the name doubles as the search index.
-        entries.append(
+
+def simple_tone(char: str, tone: str) -> str:
+    """The runtime's default rule: the tone after the first codepoint, minus a U+FE0F there."""
+    codepoints = list(char)
+    rest = codepoints[1:]
+    if rest and rest[0] == VS16:
+        rest = rest[1:]
+    return codepoints[0] + tone + "".join(rest)
+
+
+def uniform_tone_variants(rows: list[tuple[str, str, str, str]]) -> dict[str, dict[str, str]]:
+    """``FE0F-stripped base -> tone -> toned form``, for forms whose people all share one tone."""
+    variants: dict[str, dict[str, str]] = {}
+    for emoji, status, _group, _name in rows:
+        if status != "fully-qualified":
+            continue
+        tones = {c for c in emoji if c in TONE_SET}
+        if len(tones) != 1:
+            continue
+        (tone,) = tones
+        base = strip_vs16("".join(c for c in emoji if c not in TONE_SET))
+        slot = variants.setdefault(base, {})
+        if tone in slot:
+            raise SystemExit(f"two {tone!r} forms for one base: {slot[tone]!r} and {emoji!r}")
+        slot[tone] = emoji
+    return variants
+
+
+def tone_rule(char: str, variants: dict[str, dict[str, str]]) -> tuple[bool, str | None]:
+    """``(tonable, template)``: template is None when the default rule is right for every tone."""
+    forms = variants.get(strip_vs16(char), {})
+    if len(forms) != len(TONE_SET):
+        return False, None
+    if all(simple_tone(char, tone) == forms[tone] for tone in TONE_SET):
+        return True, None
+    template = forms[LIGHT_TONE]
+    for tone in TONE_SET:
+        if template.replace(LIGHT_TONE, tone) != forms[tone]:
+            raise SystemExit(f"no single tone rule for {char!r}")
+    return True, template
+
+
+def entry_char(emoji: str) -> str:
+    """A single codepoint stays bare (see "char and U+FE0F"); a sequence keeps its selectors."""
+    bare = strip_vs16(emoji)
+    return bare if len(bare) == 1 else emoji
+
+
+def entry_name(char: str, cldr_name: str) -> str:
+    if len(char) == 1:
+        name = display_name(ord(char))
+        if name is not None:
+            return name
+    if len(char) == 2 and all(0 <= ord(c) - REGIONAL_INDICATOR_A < 26 for c in char):
+        code = "".join(chr(ord("A") + ord(c) - REGIONAL_INDICATOR_A) for c in char)
+        if code in COUNTRY_NAMES:
+            return f"{COUNTRY_NAMES[code].lower()} flag"
+    if cldr_name.startswith("flag: "):
+        return fold_name(f"{cldr_name[len('flag: '):]} flag")
+    return fold_name(cldr_name)
+
+
+def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str, dict[str, int]]:
+    """Every fully-qualified, tone-free emoji in emoji-test.txt, by category then file order.
+
+    Also returns the shortcode table version and the line counts the header
+    reconciles the total against.
+    """
+    rows = parse_emoji_test(read_emoji_test())
+    variants = uniform_tone_variants(rows)
+    shortcodes, shortcode_version = load_shortcodes()
+    by_category: dict[str, list[dict[str, object]]] = {cid: [] for cid, _ in CATEGORY_LABELS}
+    seen: set[str] = set()
+    fully_qualified = 0
+    components = 0
+
+    for emoji, status, group, cldr_name in rows:
+        if status == "fully-qualified":
+            fully_qualified += 1
+        elif status == "component" and emoji not in TONE_SET:
+            components += 1
+            # The four hair styles (🦰 🦱 🦳 🦲) are components, not RGI emoji,
+            # but every emoji font draws them on their own and the table has
+            # carried them since it was first generated, so they stay, filed
+            # under People where CLDR's Component group would sit.
+            group = "People & Body"
+        else:
+            continue
+        if any(c in TONE_SET for c in emoji):
+            continue
+        category = GROUP_CATEGORIES.get(group)
+        if category is None:
+            raise SystemExit(f"emoji-test.txt group {group!r} has no picker category")
+        char = entry_char(emoji)
+        key = strip_vs16(char)
+        if key in seen:
+            raise SystemExit(f"{emoji!r} is listed twice")
+        seen.add(key)
+        tonable, template = tone_rule(char, variants)
+        by_category[category].append(
             {
-                "char": flag_char(code),
-                "name": f"{country_names[code].lower()} flag",
-                "category": "flags",
-                "tonable": False,
-                "shortcodes": shortcodes.get(flag_char(code), []),
+                "char": char,
+                "name": entry_name(char, cldr_name),
+                "category": category,
+                "tonable": tonable,
+                "tone_template": template,
+                "shortcodes": shortcodes.get(key, []),
             }
         )
-        flag_count += 1
-    counts["flags"] = flag_count
 
-    return entries, counts, source, shortcode_version
+    entries = [entry for cid, _ in CATEGORY_LABELS for entry in by_category[cid]]
+    counts = {cid: len(by_category[cid]) for cid, _ in CATEGORY_LABELS}
+    toned = fully_qualified - (len(entries) - components)
+    stats = {"fully_qualified": fully_qualified, "toned": toned, "components": components}
+    return entries, counts, shortcode_version, stats
 
 
 def codepoint_key(char: str) -> str:
-    """The JSON key for a character: hyphen-joined uppercase hex, as gemoji."""
-    return "-".join(f"{ord(c):04X}" for c in char)
+    """The JSON key for a character: hyphen-joined uppercase hex, U+FE0F stripped, as gemoji."""
+    return "-".join(f"{ord(c):04X}" for c in strip_vs16(char))
 
 
 def shipped_language_codes() -> list[str]:
@@ -910,7 +612,7 @@ def parse_cldr_annotations(
 
 def refresh_annotations(entries: list[dict[str, object]]) -> None:
     """Download the CLDR files for every shipped locale and rewrite the JSON."""
-    wanted = {str(entry["char"]): codepoint_key(str(entry["char"])) for entry in entries}
+    wanted = {strip_vs16(str(entry["char"])): codepoint_key(str(entry["char"])) for entry in entries}
     locales: dict[str, dict[str, list[str]]] = {}
     digests: dict[str, dict[str, str]] = {}
     for lang in shipped_language_codes():
@@ -979,9 +681,9 @@ def annotation_header(release: str) -> list[str]:
 
 
 def render_annotation_module(
-    lang: str, table: dict[str, list[str]], release: str
+    lang: str, table: dict[str, list[str]], chars: dict[str, str], release: str
 ) -> str:
-    """One locale's `[char, name, keywords]` rows."""
+    """One locale's `[char, name, keywords]` rows; ``chars`` maps a key to its entry's ``char``."""
     lines = annotation_header(release)
     lines.append(f"// Locale: {lang} — {len(table)} entries")
     lines.append("")
@@ -989,7 +691,7 @@ def render_annotation_module(
     lines.append("")
     lines.append("const ROWS: readonly EmojiAnnotationRow[] = [")
     for key, values in table.items():
-        char = "".join(chr(int(part, 16)) for part in key.split("-"))
+        char = chars[key]
         name, keywords = values[0], values[1:]
         lines.append(
             f"  [{ts_string(char)}, {ts_string(name)}, {ts_string('|'.join(keywords))}],"
@@ -1039,7 +741,9 @@ def render_annotation_index(langs: list[str], release: str) -> str:
 def write_annotations(entries: list[dict[str, object]]) -> dict[str, int]:
     """Emit every locale module and the index; drop modules for gone locales."""
     locales, release = load_annotations()
-    known = {codepoint_key(str(entry["char"])) for entry in entries}
+    # Keyed without U+FE0F, emitted with the entry's own `char` so a lookup by
+    # `emoji.char` hits for sequences too.
+    known = {codepoint_key(str(entry["char"])): str(entry["char"]) for entry in entries}
     langs = sorted(locales)
     counts: dict[str, int] = {}
     modules: dict[str, str] = {"index.ts": render_annotation_index(langs, release)}
@@ -1048,7 +752,7 @@ def write_annotations(entries: list[dict[str, object]]) -> dict[str, int]:
         # rather than shipped as an orphan row.
         table = {key: values for key, values in locales[lang].items() if key in known}
         counts[lang] = len(table)
-        modules[f"{lang}.ts"] = render_annotation_module(lang, table, release)
+        modules[f"{lang}.ts"] = render_annotation_module(lang, table, known, release)
     for out_dir in ANNOTATIONS_DIRS:
         out_dir.mkdir(parents=True, exist_ok=True)
         for name, rendered in modules.items():
@@ -1068,37 +772,47 @@ def ts_string(value: str) -> str:
 def render(
     entries: list[dict[str, object]],
     counts: dict[str, int],
-    source: str,
     shortcode_version: str,
+    stats: dict[str, int],
 ) -> str:
     """Render the whole TypeScript module."""
     total = len(entries)
     summary = ", ".join(f"{cid} {counts[cid]}" for cid, _label in CATEGORY_LABELS)
     with_shortcodes = sum(1 for entry in entries if entry["shortcodes"])
     alias_total = sum(len(entry["shortcodes"]) for entry in entries)
+    tonable_total = sum(1 for entry in entries if entry["tonable"])
+    templates = [entry for entry in entries if entry["tone_template"] is not None]
+    meta = json.loads(EMOJI_TEST_META_PATH.read_text(encoding="utf-8"))
 
     lines: list[str] = []
     lines.append("// GENERATED FILE — DO NOT EDIT BY HAND.")
     lines.append("//")
     lines.append("// Produced by `scripts/generate-emoji-data.py`. To regenerate:")
     lines.append("//")
-    lines.append("//     python3 scripts/generate-emoji-data.py")
+    lines.append("//     python3.14 scripts/generate-emoji-data.py")
     lines.append("//")
-    lines.append(f"// Unicode data version: {unicodedata.unidata_version}")
-    lines.append(f"// Country names from:   {source}")
+    lines.append(f"// Emoji set from:       scripts/emoji-test.txt (Emoji {meta['_version']}, sha256 {meta['_sha256'][:16]}…)")
+    lines.append(f"// Unicode names from:   unicodedata {unicodedata.unidata_version}")
     lines.append(f"// Shortcodes from:      scripts/emoji-shortcodes.json ({shortcode_version})")
     lines.append(f"// Entries:              {total} ({summary})")
+    lines.append(
+        f"//                       = {stats['fully_qualified']} fully-qualified lines - {stats['toned']} skin-tone forms"
+        f" + {stats['components']} hair styles"
+    )
+    lines.append(f"// Skin-tone bases:      {tonable_total} ({len(templates)} with a TONE_TEMPLATES form)")
     lines.append(f"// With shortcodes:      {with_shortcodes} entries, {alias_total} aliases")
     lines.append("//")
-    lines.append("// Names come straight from `unicodedata.name()`, lowercased, and are the")
-    lines.append("// English search fallback. Localized names and keywords live in the per-locale")
-    lines.append("// modules under `annotations/` (CLDR), which the picker loads on demand.")
-    lines.append("// Categories approximate the CLDR groups; see the generator's docstring for")
-    lines.append("// the exact ranges and the known approximation limits.")
+    lines.append("// Every fully-qualified emoji in Unicode's emoji-test.txt, in its CLDR groups")
+    lines.append("// and order, skin-tone forms excepted (`tonable` + `applySkinTone` reach them).")
+    lines.append("// Names are the English search fallback: the Unicode name for a single")
+    lines.append("// codepoint, the CLDR name for a sequence. Localized names and keywords live in")
+    lines.append("// the per-locale modules under `annotations/` (CLDR), loaded on demand.")
     lines.append("//")
-    lines.append("// `char` is the bare base codepoint with no U+FE0F variation selector. Entries")
-    lines.append("// drawn from the older BMP symbol blocks default to text presentation, so a")
-    lines.append("// renderer wanting a colour glyph should append U+FE0F at display time.")
+    lines.append("// `char` for a single codepoint is the bare codepoint with no U+FE0F; entries")
+    lines.append("// below U+1F000 default to text presentation, so a renderer wanting a colour")
+    lines.append("// glyph appends U+FE0F at display time (`emojiDisplayChar`). `char` for a")
+    lines.append("// sequence (ZWJ, keycap, flag) is its fully-qualified form, selectors included,")
+    lines.append("// and is displayed as is.")
     lines.append("//")
     lines.append("// `shortcodes` are the `:joy:`-style aliases, vendored from gemoji (MIT) — see")
     lines.append("// the generator's \"Where the shortcodes come from\" section. They may contain")
@@ -1115,12 +829,12 @@ def render(
     lines.append("}")
     lines.append("")
     lines.append("export interface StandardEmoji {")
-    lines.append("  /** The emoji character itself. */")
+    lines.append("  /** The emoji itself: a bare codepoint, or a fully-qualified sequence. */")
     lines.append("  readonly char: string;")
     lines.append('  /** Human-readable name, lowercase (e.g. "grinning face"). */')
     lines.append("  readonly name: string;")
     lines.append("  readonly category: EmojiCategoryId;")
-    lines.append("  /** True when this base emoji accepts a Fitzpatrick skin-tone modifier. */")
+    lines.append("  /** True when the emoji comes in all five skin tones (see `applySkinTone`). */")
     lines.append("  readonly tonable: boolean;")
     lines.append("  /**")
     lines.append('   * `:shortcode:` aliases, e.g. ["+1", "thumbsup"]. Often empty — only the')
@@ -1176,13 +890,20 @@ def render(
     lines.append(");")
     lines.append("")
     lines.append("/**")
-    lines.append(" * Apply a skin tone index (0 = none) to an emoji, returning the toned character.")
+    lines.append(" * The tonable emoji where every person takes the tone (🧑‍🤝‍🧑, 👩‍❤️‍👨 …), as their")
+    lines.append(" * light-tone (U+1F3FB) form; `applySkinTone` swaps the chosen tone in. Every")
+    lines.append(" * other tonable emoji takes the tone after its first codepoint.")
+    lines.append(" */")
+    lines.append("const TONE_TEMPLATES: ReadonlyMap<string, string> = new Map([")
+    for entry in templates:
+        lines.append(f"  [{ts_string(str(entry['char']))}, {ts_string(str(entry['tone_template']))}],")
+    lines.append("]);")
+    lines.append("")
+    lines.append("/**")
+    lines.append(" * Apply a skin tone index (0 = none) to an emoji, returning the toned string.")
     lines.append(" *")
-    lines.append(" * The modifier is inserted directly after the first codepoint, which is correct")
-    lines.append(" * for every base in STANDARD_EMOJI because they are all single-codepoint. It is")
-    lines.append(" * NOT generally correct for ZWJ sequences (families, professions), where each")
-    lines.append(" * person component takes its own modifier — this dataset contains none of those,")
-    lines.append(" * so if ZWJ sequences are ever added this function must be revisited.")
+    lines.append(" * The generator checked both rules below against emoji-test.txt for all five")
+    lines.append(" * tones, so the result is always a fully-qualified emoji Unicode lists.")
     lines.append(" */")
     lines.append("export function applySkinTone(emoji: StandardEmoji, toneIndex: number): string {")
     lines.append("  if (!emoji.tonable || toneIndex <= 0) {")
@@ -1192,13 +913,19 @@ def render(
     lines.append('  if (tone === undefined || tone === "") {')
     lines.append("    return emoji.char;")
     lines.append("  }")
+    lines.append("  const template = TONE_TEMPLATES.get(emoji.char);")
+    lines.append("  if (template !== undefined) {")
+    lines.append("    return template.split(SKIN_TONES[1]).join(tone);")
+    lines.append("  }")
     lines.append("  // Split on codepoints, not UTF-16 units, so the surrogate pair stays intact.")
     lines.append("  const codepoints = Array.from(emoji.char);")
     lines.append("  const first = codepoints[0];")
     lines.append("  if (first === undefined) {")
     lines.append("    return emoji.char;")
     lines.append("  }")
-    lines.append('  return first + tone + codepoints.slice(1).join("");')
+    lines.append("  // A modifier implies emoji presentation, so a U+FE0F after the base goes.")
+    lines.append('  const rest = codepoints[1] === "\\u{FE0F}" ? codepoints.slice(2) : codepoints.slice(1);')
+    lines.append('  return first + tone + rest.join("");')
     lines.append("}")
     lines.append("")
     return "\n".join(lines)
@@ -1212,17 +939,17 @@ def main() -> None:
         help="re-download the CLDR annotations for every shipped locale (network)",
     )
     parser.add_argument(
-        "--refresh-order",
+        "--refresh-emoji-test",
         action="store_true",
-        help="re-download Unicode's emoji-test.txt and rewrite scripts/emoji-order.json (network)",
+        help="re-download Unicode's emoji-test.txt and rewrite scripts/emoji-test.json (network)",
     )
     args = parser.parse_args()
-    if args.refresh_order:
-        refresh_order()
+    if args.refresh_emoji_test:
+        refresh_emoji_test()
 
-    # The emoji set comes from this Python's `unicodedata`: an older Python
-    # (macOS's /usr/bin/python3 is 3.9, Unicode 13) silently drops every newer
-    # emoji from every table, so refuse rather than shrink them (#1726).
+    # Single-codepoint names come from this Python's `unicodedata`: an older
+    # Python (macOS's /usr/bin/python3 is 3.9, Unicode 13) would fall back to
+    # the CLDR names for every newer emoji and churn the tables, so refuse (#1726).
     have = tuple(int(part) for part in unicodedata.unidata_version.split("."))
     if have < MIN_UNICODE_VERSION:
         want = ".".join(str(part) for part in MIN_UNICODE_VERSION)
@@ -1231,18 +958,18 @@ def main() -> None:
             "(run it with Python 3.14 or newer)"
         )
 
-    entries, counts, source, shortcode_version = build_entries()
+    entries, counts, shortcode_version, stats = build_entries()
     if args.refresh_annotations:
         refresh_annotations(entries)
-    rendered = render(entries, counts, source, shortcode_version)
+    rendered = render(entries, counts, shortcode_version, stats)
     for out_path in (OUTPUT_PATH, MOBILE_OUTPUT_PATH):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(rendered, encoding="utf-8")
     annotation_counts = write_annotations(entries)
 
     tonable_total = sum(1 for entry in entries if entry["tonable"])
+    print(f"emoji-test.txt {EMOJI_TEST_VERSION}: {stats['fully_qualified']} fully-qualified lines")
     print(f"unicodedata {unicodedata.unidata_version}")
-    print(f"country names: {source}")
     for category_id, label in CATEGORY_LABELS:
         print(f"  {category_id:<9} {label:<11} {counts[category_id]:>5}")
     print(f"  {'TOTAL':<21} {len(entries):>5}")

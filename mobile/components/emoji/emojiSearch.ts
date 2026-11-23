@@ -25,8 +25,9 @@ export function pickerEmojiId(item: PickerEmoji): string {
 /**
  * The character to actually display (and insert) for a standard emoji.
  *
- * `emojiData.ts` stores bare codepoints with no variation selector. The
- * selector is added here, at render time: never when a skin tone was applied
+ * `emojiData.ts` stores a single codepoint bare, with no variation selector,
+ * and a sequence (ZWJ, keycap, flag) fully qualified, which is shown as is.
+ * The selector is added here, at render time: never when a skin tone was applied
  * (a Fitzpatrick modifier already implies emoji presentation), and only for
  * single-codepoint bases below U+1F000 (the legacy BMP pictographs that
  * default to text presentation).
