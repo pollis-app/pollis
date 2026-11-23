@@ -55,7 +55,8 @@ test("the inbox subscribes only once the device is in the signed-in app", () => 
   assert.ok(isInSignedInApp(["approve-device"], false));
   const inbox = read("../hooks/useInboxRealtime.ts");
   assert.match(inbox, /isInSignedInApp\(segments, isLocked\)/);
-  assert.match(inbox, /!isRoomOpen\(room\)/);
+  assert.match(inbox, /!sub\.isOpen\(\)/);
+  assert.match(inbox, /reopenDropped\(subsRef\.current, handlerRef\.current\)/);
 });
 
 test("each request opens once, newest first", () => {

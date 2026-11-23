@@ -66,6 +66,12 @@ async function fetchRealtimeToken(
 
 export interface RealtimeSubscription {
   close(): void;
+  /**
+   * False once this subscription no longer hears its room: the connect failed and the room was
+   * dropped (#2084). Another holder may have opened the room since, under a NEW entry this
+   * subscription is not part of, so ask the subscription, never the room.
+   */
+  isOpen(): boolean;
 }
 
 type RoomEntry = {
@@ -184,11 +190,6 @@ export function publishRealtime(
   });
 }
 
-/** False once its connect failed, so a holder can re-subscribe. */
-export function isRoomOpen(roomName: string): boolean {
-  return entries.has(roomName);
-}
-
 /** Subscribe to a room in data-only mode; returns synchronously. */
 export function subscribeRealtime(
   roomName: string,
@@ -203,7 +204,11 @@ export function subscribeRealtime(
   entry.listeners.add(onEvent);
 
   let closed = false;
+  const joined = entry;
   return {
+    isOpen() {
+      return !closed && entries.get(roomName) === joined;
+    },
     close() {
       if (closed) {
         return;

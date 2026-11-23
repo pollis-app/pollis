@@ -91,6 +91,8 @@ maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "${G[@]}" -e MAESTRO_EMAIL="$PR
 await_peer PEER_READY 300
 
 echo "==> the peer renames itself to $NEW_HANDLE / $NEW_NAME"
+# Let the foreground return's room re-opens connect first.
+sleep 10
 touch "$POLLIS_RENAME_TRIGGER"
 await_peer PEER_RENAMED 60
 

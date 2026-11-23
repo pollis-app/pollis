@@ -41,6 +41,19 @@ test("a rename moves the typing name of every resolved participant of that user"
   assert.deepEqual(await resolve("room-1", "r-b1"), { userId: "u-bo", username: "old" });
 });
 
+test("a subscription knows when its own room entry was dropped, so the inbox re-joins it", () => {
+  // The chat can re-open a room the inbox's connect failed on; that new entry lacks the inbox's
+  // listener, so asking "is the room open" kept the inbox deaf to the group's nudges.
+  const client = read("lib/realtime/client.ts");
+  assert.match(client, /isOpen\(\) \{\s*return !closed && entries\.get\(roomName\) === joined;/);
+  assert.doesNotMatch(client, /export function isRoomOpen/);
+  const realtime = read("hooks/useInboxRealtime.ts");
+  assert.match(realtime, /case "membership_changed":[\s\S]*?reopenDropped\(subsRef\.current, handlerRef\.current\);/);
+  assert.match(realtime, /reopenDropped\(subs, handleEvent\);/);
+  // The join re-reads the lists, and that re-read is what retries a refused room.
+  assert.match(realtime, /\}, \[userId, roomsKey, groupsReadAt, dmsReadAt\]\);/);
+});
+
 test("the inbox handler refreshes the profile, then every list that names people", () => {
   const realtime = read("hooks/useInboxRealtime.ts");
   assert.match(realtime, /case "profile_changed":[\s\S]*?void onProfileChanged\(qc, event\.user_id\);/);

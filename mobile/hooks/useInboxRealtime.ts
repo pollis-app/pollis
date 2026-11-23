@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { appStore } from "../stores/appStore";
 import { invoke } from "../lib/native";
 import { useSegments } from "expo-router";
-import { isRoomOpen, subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
+import { subscribeRealtime, type RealtimeSubscription } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
 import { catchUpTargets, roomCatchUpTarget } from "../lib/messageWake";
 import { dmQueryKeys, useDMChannels } from "./queries/useDMChannels";
@@ -29,6 +29,26 @@ import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPro
 import { catchUpThenBackstop } from "../lib/mlsBackstop";
 import { noticeHistoryTransfer } from "../lib/historyTransferPrompt";
 
+/**
+ * Re-subscribe every room whose subscription no longer hears it (its connect failed). Asked of the
+ * subscription, not the room: the open chat may have re-opened the same room since, and that
+ * entry does not carry this hook's listener, so the inbox would never hear its nudges (#2084).
+ */
+function reopenDropped(
+  subs: Map<string, RealtimeSubscription>,
+  handler: ((event: RealtimeEvent) => void) | null,
+): void {
+  if (!handler) {
+    return;
+  }
+  for (const [room, sub] of subs) {
+    if (!sub.isOpen()) {
+      sub.close();
+      subs.set(room, subscribeRealtime(room, handler));
+    }
+  }
+}
+
 export function useInboxRealtime() {
   const signedInId = useObserver(() => appStore.currentUser?.id ?? null);
   const isLocked = useObserver(() => appStore.isLocked);
@@ -46,8 +66,12 @@ export function useInboxRealtime() {
   const queryClient = useQueryClient();
   const ingest = useIngestConversation();
   // The lists double as the realtime room list. No polling.
-  const { data: groups = [], isSuccess: groupsLoaded } = useUserGroupsWithChannels();
-  const { data: dms = [], isSuccess: dmsLoaded } = useDMChannels();
+  const {
+    data: groups = [],
+    isSuccess: groupsLoaded,
+    dataUpdatedAt: groupsReadAt,
+  } = useUserGroupsWithChannels();
+  const { data: dms = [], isSuccess: dmsLoaded, dataUpdatedAt: dmsReadAt } = useDMChannels();
 
   // Refs so the stable event handler never forces a resubscribe.
   const qcRef = useRef(queryClient);
@@ -122,6 +146,8 @@ export function useInboxRealtime() {
           );
           break;
         case "membership_changed":
+          // A room refused before this membership landed can be joined now (#2084).
+          reopenDropped(subsRef.current, handlerRef.current);
           void qc.invalidateQueries({ queryKey: groupQueryKeys.all });
           void qc.invalidateQueries({
             queryKey: groupInviteQueryKeys.pending(userId),
@@ -203,12 +229,16 @@ export function useInboxRealtime() {
         subs.set(room, subscribeRealtime(room, handleEvent));
       }
     }
+    // A room refused its token because the membership had not landed yet (a group being
+    // joined, #2084) gets another try each time the lists are re-read, which the join itself
+    // causes: event-driven, never a timer.
+    reopenDropped(subs, handleEvent);
 
     return () => {
       // The reconcile owns removal; this cleanup is a no-op between renders.
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, roomsKey]);
+  }, [userId, roomsKey, groupsReadAt, dmsReadAt]);
 
   // Resume catch-up: own-device messages have no push to fall back on. One pass per foreground.
   useEffect(() => {
@@ -228,16 +258,7 @@ export function useInboxRealtime() {
       void qcRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
       // Counts and the cross-device cursor converge are `useUnreadSync`'s resume handler.
       // Re-open rooms whose connect failed.
-      const handler = handlerRef.current;
-      if (handler) {
-        const subs = subsRef.current;
-        for (const [room, sub] of subs) {
-          if (!isRoomOpen(room)) {
-            sub.close();
-            subs.set(room, subscribeRealtime(room, handler));
-          }
-        }
-      }
+      reopenDropped(subsRef.current, handlerRef.current);
       // Then the re-add and self-update backstops (#1571, #1880).
       const resumedUser = userId;
       void catchUpThenBackstop(

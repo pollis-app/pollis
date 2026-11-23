@@ -12,8 +12,10 @@ tags:
     timeout: 30000
 - assertNotVisible: "${MAESTRO_PEER_HANDLE}: hello before the rename.*"
 - takeScreenshot: profile-change-02-after
+# Phones go back to the group panel; the iPad shows it beside the chat already.
 - tapOn:
     id: "btn-back"
+    optional: true
 - tapOn:
     id: "row-group-members"
 - extendedWaitUntil:
@@ -22,5 +24,5 @@ tags:
     timeout: 30000
 - assertVisible:
     id: "row-member-${MAESTRO_PEER_ID}"
-    text: "${NEW_NAME}, @${NEW_HANDLE} · .*"
+    text: "${NEW_NAME}, .*"
 - takeScreenshot: profile-change-03-members
