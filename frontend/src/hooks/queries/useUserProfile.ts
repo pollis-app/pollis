@@ -4,7 +4,7 @@ import { invoke } from "../../bridge";
 import * as api from "../../services/api";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
-import { messageQueryKeys } from "./useMessages";
+import { lastMessageQueryKeys, messageQueryKeys } from "./useMessages";
 import { groupQueryKeys } from "./useGroups";
 import { isBotUser, type MaybeBot } from "../../utils/bots";
 
@@ -27,6 +27,33 @@ export const userQueryKeys = {
 function invalidateOwnProfile(queryClient: QueryClient, userId: string | null) {
   queryClient.invalidateQueries({ queryKey: userQueryKeys.profile(userId) });
   queryClient.invalidateQueries({ queryKey: userQueryKeys.otherProfile(userId) });
+}
+
+/**
+ * #2084: `userId` changed their handle, display name or picture (the DS's content-free
+ * `profile_changed`). Reading the profile refreshes Rust's cached copies first, then every surface
+ * that names people re-reads: profiles, message pages (sender labels), DM and group lists,
+ * members, requests, pins and search.
+ */
+export async function onProfileChanged(queryClient: QueryClient, userId: string) {
+  try {
+    await invoke("get_user_profile", { userId });
+  } catch (err) {
+    // Offline: the re-reads below still run and the cache refreshes on its next use.
+    console.warn("[profile] get_user_profile failed:", err);
+  }
+  for (const prefix of [
+    ["user"],
+    messageQueryKeys.all,
+    lastMessageQueryKeys.all,
+    ["dm-conversations"],
+    ["dmRequests"],
+    groupQueryKeys.all,
+    ["pins"],
+    ["search-messages"],
+  ]) {
+    queryClient.invalidateQueries({ queryKey: prefix });
+  }
 }
 
 export function useOtherUserProfile(userId: string | null | undefined) {

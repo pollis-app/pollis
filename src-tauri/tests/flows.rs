@@ -62,6 +62,8 @@ mod outbox;
 mod own_envelopes;
 #[path = "flows/file_keys.rs"]
 mod file_keys;
+#[path = "flows/profile_change.rs"]
+mod profile_change;
 #[path = "flows/pinning.rs"]
 mod pinning;
 #[path = "flows/pq_key_packages.rs"]

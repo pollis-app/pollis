@@ -190,7 +190,7 @@ async fn read_local_channel_page(
     Ok(rows)
 }
 
-/// Finish a page: overlay unconfirmed edits (#1555), then attach usernames from `user_cache`, fetching misses once.
+/// Finish a page: overlay unconfirmed edits (#1555), then attach usernames (`user_cache`, refreshing misses and stale rows once).
 async fn hydrate_rows(
     state: &Arc<AppState>,
     messages: &mut [ChannelMessage],
@@ -204,63 +204,9 @@ async fn hydrate_rows(
         super::edit_outbox::overlay_pending_edits(db.conn(), messages)?;
     }
 
-    let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for m in messages.iter() {
-        ids.insert(m.sender_id.clone());
-    }
-    let ids_vec: Vec<String> = ids.into_iter().collect();
-
-    let mut found: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let missing: Vec<String> = {
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        // Chunked (#916).
-        for chunk in crate::db::chunk::bind_chunks(&ids_vec, 0) {
-            let sql = format!(
-                "SELECT id, username FROM user_cache WHERE id IN ({})",
-                crate::db::chunk::placeholders(chunk.len(), 1)
-            );
-            let mut stmt = db.conn().prepare(&sql)?;
-            let mapped = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            for (id, name) in mapped.flatten() {
-                found.insert(id, name);
-            }
-        }
-        ids_vec.iter().filter(|i| !found.contains_key(*i)).cloned().collect()
-    };
-
-    if !missing.is_empty() {
-        // One request for the whole missing set — the DS chunks its own binds.
-        match crate::commands::ds_reads::users(state, missing.clone(), None).await {
-            Ok(users) => {
-                let fetched: Vec<(String, String)> = users
-                    .into_iter()
-                    .map(|u| (u.id, u.username))
-                    .collect();
-                for (id, name) in &fetched {
-                    found.insert(id.clone(), name.clone());
-                }
-                if !fetched.is_empty() {
-                    let guard = state.local_db.lock().await;
-                    if let Some(db) = guard.as_ref() {
-                        for (id, name) in &fetched {
-                            let _ = db.conn().execute(
-                                "INSERT INTO user_cache (id, username, updated_at) VALUES (?1, ?2, datetime('now'))
-                                 ON CONFLICT(id) DO UPDATE SET username = ?2, updated_at = datetime('now')",
-                                rusqlite::params![id, name],
-                            );
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                // Offline or transient: leave names as None; a later read fills them.
-                crate::diag!("[messages] hydrate_rows: remote fallback failed: {e}");
-            }
-        }
-    }
+    let ids: Vec<String> = messages.iter().map(|m| m.sender_id.clone()).collect();
+    // #2084: fresh cache, else one DS batch; a stale name only when that read fails.
+    let found = crate::commands::user_cache::usernames(state, &ids, None).await;
 
     for m in messages.iter_mut() {
         m.sender_username = found.get(&m.sender_id).cloned();

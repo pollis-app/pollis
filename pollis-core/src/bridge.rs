@@ -387,7 +387,11 @@ pub(crate) fn reopen_parked_db() {
         return;
     }
     match crate::db::local::LocalDb::open_existing_for_user_in(&state.local_data_dir(), &user, &key) {
-        Ok(db) => *slot = Some(db),
+        Ok(db) => {
+            // #2084: a rename made while this app was in the background shows on return.
+            crate::commands::user_cache::mark_all_stale(db.conn());
+            *slot = Some(db);
+        }
         Err(e) => crate::diag!("[suspend] local database not reopened after resume: {e}"),
     }
 }

@@ -48,7 +48,8 @@ pub struct AppState {
     /// Memo of the DS's `/v1/livekit/identities` answers; pseudonyms only the DS can open.
     /// Its own lock so voice/realtime paths never nest two locks.
     /// Stores the internal identity because the LOCAL participant's entry is pinned at join, not derived.
-    /// Never invalidated: a pseudonym is deterministic, so entries cannot go stale.
+    /// Never evicted: a pseudonym is deterministic. The name is renamed in place when its user
+    /// changes their profile (#2084, `livekit_roster::rename_user`).
     /// Ungated: mobile's room presence resolves through it too (#2059).
     pub livekit_identities: Arc<Mutex<crate::commands::livekit_identity::IdentityCache>>,
     #[cfg(feature = "media")]
@@ -357,6 +358,8 @@ impl AppState {
         }
         crate::commands::messages::loss::prune_known_envelopes(db.conn());
         crate::commands::messages::pending_change::prune(db.conn());
+        // #2084: names read in an earlier session are re-checked on first use.
+        crate::commands::user_cache::mark_all_stale(db.conn());
 
         *self.local_db.lock().await = Some(db);
         // Spawned (#850): indexing scales with the corpus and must not delay sign-in.

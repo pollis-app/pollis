@@ -22,6 +22,7 @@ pub mod export_fetch;
 pub(crate) mod ds_reads;
 pub mod emoji;
 pub mod user;
+pub mod user_cache;
 pub mod groups;
 /// Recreating another platform's community structure in a group (#1180). Behind the
 /// off-by-default `import` feature: no shipped build compiles it.

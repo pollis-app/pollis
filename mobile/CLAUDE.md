@@ -1905,8 +1905,15 @@ Current state:
   verification, before the device can sign a room-token request, and a room
   whose connect failed was never retried — so the inbox was dead for the whole
   session after every fresh sign-in. `useInboxRealtime` also re-opens any room
-  whose connect failed when the app returns to the foreground. Maestro:
-  `scripts/maestro-approval-prompt.sh`.
+  whose connect failed (`reopenDropped`) when the app returns to the foreground,
+  when a `membership_changed` lands and whenever the group or DM list is
+  re-read, which joining a group causes: a group's token is refused until the
+  join lands. It asks the SUBSCRIPTION (`sub.isOpen()`), never the room
+  (#2084): the open chat may have re-opened the same room since, under an entry
+  that lacks the inbox's listener, and asking "is the room open" left the inbox
+  deaf to that group's nudges (`profile_changed`, `membership_changed`) for the
+  session. Maestro: `scripts/maestro-approval-prompt.sh`,
+  `scripts/maestro-profile-change.sh`.
 - ~~**`device_revoked`** self-sign-out on the inbox connection~~ — **DONE.**
   `useInboxRealtime` treats the event payload as advisory, confirms with
   `is_current_device_registered`, then hands off to `deviceWasRevoked()`
