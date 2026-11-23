@@ -12,9 +12,9 @@
     "liveTerminal": "[наживо]"
   },
   "pages": {
-    "userName": "Користувач",
+    "userName": "Профіль",
     "userKeywords": "обліковий запис профіль ім'я користувача пошта аватар налаштування account profile username email avatar",
-    "settingsName": "Налаштування",
+    "settingsName": "Обліковий запис",
     "settingsKeywords": "параметри користувач безпека settings preferences security",
     "preferencesName": "Параметри",
     "preferencesKeywords": "тема колір шрифт сповіщення вигляд оформлення theme color font notifications appearance",
@@ -48,7 +48,7 @@
     "groupsNewKeywords": "нова створити new create group",
     "groupsSearchName": "Знайти групи",
     "groupsSearchKeywords": "знайти пошук публічні find search public",
-    "savedName": "Збережене",
+    "savedName": "Збережені повідомлення",
     "savedKeywords": "збережене закладки закладка позначене пізніше посилання saved bookmarks",
     "arcadeName": "Аркада",
     "arcadeKeywords": "аркада гра астероїди корабель стріляти пасхалка грати arcade game",

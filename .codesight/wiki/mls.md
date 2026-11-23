@@ -494,7 +494,7 @@ the step that refused it (#1520), e.g. `failed: secret reuse (message at (0, 9),
 group at (0, 9))` — and, for a `message`,
 a placeholder row (`message.undecryptable`). Clients render it as "This message
 couldn't be decrypted on this device" with no author and no message actions,
-only a link to Diagnostics (desktop `/diagnostics`, mobile Self → Diagnostics;
+only a link to Diagnostics (desktop `/diagnostics`, mobile Account → Diagnostics;
 the TUI has no such page). A run of consecutive placeholders is drawn as ONE
 row that says how many (`collapseUndecryptable` on desktop and mobile,
 `message_lines` in the TUI); the rows themselves stay one per envelope. A

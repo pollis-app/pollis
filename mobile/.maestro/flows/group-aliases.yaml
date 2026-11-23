@@ -3,7 +3,7 @@ tags:
   - parity
   - fresh-account
 ---
-# GROUP ALIASES (#2003) — Self → Group aliases: set a name and a photo in one
+# GROUP ALIASES (#2003) — Account → Group aliases: set a name and a photo in one
 # group, see them on your own message rows there, apply a name to every group,
 # and go back to the main profile in one group. Self-contained (two groups of
 # your own). Other people's aliases, mentions, the member list and an admin's

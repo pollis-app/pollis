@@ -13,9 +13,9 @@
     "searchMessagesFor": "Bincika saƙonni don \"{{query}}\""
   },
   "pages": {
-    "userName": "Mai amfani",
+    "userName": "Bayanan mutum",
     "userKeywords": "asusu bayanan mutum sunan mai amfani imel hoto saituna account profile username email avatar settings",
-    "settingsName": "Saituna",
+    "settingsName": "Asusu",
     "settingsKeywords": "zaɓuɓɓuka mai amfani tsaro preferences user security",
     "preferencesName": "Zaɓuɓɓuka",
     "preferencesKeywords": "jigo launi rubutu sanarwa kamanni theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "sabo ƙirƙira new create",
     "groupsSearchName": "Nemi Rukunoni",
     "groupsSearchKeywords": "gano bincike na jama'a discover search public",
-    "savedName": "Waɗanda aka adana",
+    "savedName": "Saƙonnin da aka adana",
     "savedKeywords": "adanawa alamar adanawa tauraro maƙala daga baya mahaɗi saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "Wasanni",
     "arcadeKeywords": "wasanni wasa duwatsun sararin samaniya jirgi harbi ɓoyayyen abin mamaki arcade game asteroids ship shoot easter egg play",

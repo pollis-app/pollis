@@ -7,7 +7,7 @@ tags:
 #
 # 1. A failed sign-in offers "Copy diagnostics" under the error, before any
 #    session exists (the screen the tester was stuck on).
-# 2. Self → Diagnostics shows the log, and it holds the core's own sign-in
+# 2. Account → Diagnostics shows the log, and it holds the core's own sign-in
 #    lines: proof that pollis-core opened its log file under the app's data
 #    directory and wrote to it on this device — not merely that the screen
 #    renders.

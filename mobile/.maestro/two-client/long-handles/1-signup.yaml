@@ -5,7 +5,7 @@ tags:
 # LONG HANDLES (#1971), part 1 of 3 — driven by scripts/maestro-long-handles.sh.
 # Sign up a fresh account. The DS starts a new account on its email's local
 # part plus a four-character suffix, capped at 32, and the script's address is
-# long, so the handle is already the longest the DS allows: Account details
+# long, so the handle is already the longest the DS allows: Profile
 # shows it, 32 characters. The peers, also long-handled, then send it message
 # requests and a group invite.
 

@@ -13,9 +13,9 @@
     "searchMessagesFor": "\"{{query}}\" لئی سنیہے سرچ کرو"
   },
   "pages": {
-    "userName": "یوزر",
+    "userName": "پروفائل",
     "userKeywords": "اکاؤنٹ پروفائل یوزر نیم ای میل اوتار سیٹنگز account profile username email avatar settings",
-    "settingsName": "سیٹنگز",
+    "settingsName": "اکاؤنٹ",
     "settingsKeywords": "ترجیحاں یوزر سکیورٹی preferences user security",
     "preferencesName": "ترجیحاں",
     "preferencesKeywords": "تھیم رنگ فونٹ نوٹیفکیشن شکل theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "نواں بناؤ new create",
     "groupsSearchName": "گروپ لبھو",
     "groupsSearchKeywords": "لبھو سرچ پبلک discover search public",
-    "savedName": "سیو کیتے",
+    "savedName": "سیو کیتے سنیہے",
     "savedKeywords": "سیو بک مارک سٹار پن بعد وچ پکا لنک لنک saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "آرکیڈ",
     "arcadeKeywords": "آرکیڈ گیم ایسٹیرائڈ جہاز فائر ایسٹر ایگ کھیڈو arcade game asteroids ship shoot easter egg play",

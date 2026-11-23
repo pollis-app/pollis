@@ -13,9 +13,9 @@
     "searchMessagesFor": "Wá \"{{query}}\" nínú àwọn ìfiránṣẹ́"
   },
   "pages": {
-    "userName": "Olùmúlò",
+    "userName": "Profáìlì",
     "userKeywords": "àkáǹtì profáìlì orúkọ olùmúlò ímeèlì àwòrán ètò account profile username email avatar settings",
-    "settingsName": "Ètò",
+    "settingsName": "Àkáǹtì",
     "settingsKeywords": "àṣàyàn olùmúlò ààbò preferences user security",
     "preferencesName": "Àṣàyàn",
     "preferencesKeywords": "àwọ̀ fọ́ǹtì ìfitónilétí ìrísí theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "tuntun ṣẹ̀dá new create",
     "groupsSearchName": "Wá Ẹgbẹ́",
     "groupsSearchKeywords": "ṣàwárí wá gbangba discover search public",
-    "savedName": "Àwọn tí a fi pamọ́",
+    "savedName": "Àwọn ìfiránṣẹ́ tí a fi pamọ́",
     "savedKeywords": "fi pamọ́ ìfipamọ́ ìràwọ̀ ìlẹ̀mọ́ lẹ́yìn náà líǹkì saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "Eré Àtijọ́",
     "arcadeKeywords": "eré àpáta òfuurufú ọkọ̀ yìnbọn ẹ̀bùn ìkọ̀kọ̀ ṣeré arcade game asteroids ship shoot easter egg play",

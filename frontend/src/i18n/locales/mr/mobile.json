@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "संभाषण",
-    "info": "माहिती",
     "memberSelf": "@{{handle}} · तुम्ही",
     "roleAdmin": "ॲडमिन",
     "roleOwner": "मालक"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, ग्रुप मेनू",
-      "invite": "लोकांना आमंत्रित करा",
       "search": "{{name}} मध्ये शोधा",
-      "createChannel": "चॅनेल तयार करा",
       "thisGroup": "हा ग्रुप",
       "members": "सदस्य",
       "settings": "ग्रुप सेटिंग्ज",
-      "joinRequests": "सामील होण्याच्या विनंत्या",
-      "customEmoji": "कस्टम इमोजी",
-      "leave": "ग्रुप सोडा",
       "leaveConfirm": "{{name}} सोडण्यासाठी पुन्हा टॅप करा",
       "leaveHint": "पुन्हा सामील होण्यासाठी तुम्हाला नवीन आमंत्रण लागेल.",
       "leaving": "सोडत आहे…",
@@ -402,12 +396,8 @@
       "editProfile": "प्रोफाइल संपादित करा",
       "accountSection": "खाते",
       "appSection": "ॲप",
-      "accountDetails": "खात्याचे तपशील",
-      "securityDevices": "सुरक्षा आणि डिव्हाइस",
       "deviceCount_one": "{{count}} डिव्हाइस",
       "deviceCount_other": "{{count}} डिव्हाइस",
-      "savedMessages": "सेव्ह केलेले मेसेज",
-      "appearance": "स्वरूप",
       "signOut": "साइन आउट करा…",
       "signOutConfirmTitle": "या डिव्हाइसवर Pollis मधून साइन आउट करायचे?",
       "version": "आवृत्ती",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}} उघडते",
       "updateFailed": "{{place}} उघडता आले नाही"
     },
-    "identityHeading": "ओळख",
     "preferences": {
       "accentA11y": "ॲक्सेंट {{name}}",
       "accentHeading": "ॲक्सेंट",
@@ -485,13 +474,8 @@
       "blockedUsers": "ब्लॉक केलेले वापरकर्ते",
       "changePinSub": "तुमचा 4 अंकी PIN या डिव्हाइसवर Pollis अनलॉक करतो."
     },
-    "title": "तुम्ही",
+    "title": "खाते",
     "userSettings": {
-      "displayName": "प्रदर्शित नाव",
-      "handle": "हँडल",
-      "handleHint": "इतर सदस्य @handle वापरून तुम्हाला शोधू शकतात आणि DM पाठवू शकतात.",
-      "handleInvalid": "हँडल 3–32 वर्णांचे असते: लहान इंग्रजी अक्षरे, अंक, '_', '.' किंवा '-'.",
-      "save": "बदल सेव्ह करा",
       "photo": {
         "heading": "प्रोफाइल फोटो",
         "hint": "तुम्ही ज्यांच्याशी बोलता ते सर्व हा फोटो पाहतात.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "थेट",
+    "direct": "DM",
     "groups": "ग्रुप",
-    "self": "तुम्ही",
+    "self": "खाते",
     "signInDevice": "लिंक",
     "withInvites_one": "{{label}}, {{count}} ग्रुप आमंत्रण",
     "withInvites_other": "{{label}}, {{count}} ग्रुप आमंत्रणे",
@@ -552,7 +536,7 @@
     "message": "मेसेज",
     "opening": "उघडत आहे…",
     "safetyActionsHeading": "सुरक्षितता क्रिया",
-    "selfNote": "हे तुम्ही आहात. तुमचे हँडल आणि प्रदर्शित नाव <link>तुम्ही → वापरकर्ता सेटिंग्ज</link> मध्ये संपादित करा.",
+    "selfNote": "हे तुम्ही आहात. तुमचे हँडल आणि प्रदर्शित नाव <link>खाते → प्रोफाइल</link> मध्ये संपादित करा.",
     "title": "वापरकर्ता",
     "unblockUser": "वापरकर्त्याला अनब्लॉक करा",
     "verified": "◆ पडताळलेले"

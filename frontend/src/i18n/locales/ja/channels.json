@@ -19,7 +19,7 @@
     "newChannel": "新しいチャンネル",
     "inviteMember": "メンバーを招待",
     "joinRequests": "参加リクエスト",
-    "leave": "グループから退出",
+    "leave": "グループを退出",
     "joinVoiceChat": "ボイスチャットに参加",
     "inCall_other": "{{count}}人が通話中"
   },

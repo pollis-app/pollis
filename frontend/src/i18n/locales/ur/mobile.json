@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "گفتگو",
-    "info": "معلومات",
     "memberSelf": "‎@{{handle}}‎ · آپ",
     "roleAdmin": "ایڈمن",
     "roleOwner": "مالک"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}، گروپ کا مینو",
-      "invite": "لوگوں کو دعوت دیں",
       "search": "{{name}} میں تلاش کریں",
-      "createChannel": "چینل بنائیں",
       "thisGroup": "یہ گروپ",
       "members": "اراکین",
       "settings": "گروپ کی ترتیبات",
-      "joinRequests": "شمولیت کی درخواستیں",
-      "customEmoji": "حسب ضرورت ایموجی",
-      "leave": "گروپ چھوڑیں",
       "leaveConfirm": "{{name}} چھوڑنے کے لیے دوبارہ ٹیپ کریں",
       "leaveHint": "دوبارہ شامل ہونے کے لیے آپ کو نئی دعوت درکار ہو گی۔",
       "leaving": "چھوڑ رہے ہیں…",
@@ -402,12 +396,8 @@
       "editProfile": "پروفائل میں ترمیم کریں",
       "accountSection": "اکاؤنٹ",
       "appSection": "ایپ",
-      "accountDetails": "اکاؤنٹ کی تفصیلات",
-      "securityDevices": "سیکیورٹی اور ڈیوائسز",
       "deviceCount_one": "{{count}} ڈیوائس",
       "deviceCount_other": "{{count}} ڈیوائسز",
-      "savedMessages": "محفوظ شدہ پیغامات",
-      "appearance": "ظاہری شکل",
       "signOut": "سائن آؤٹ…",
       "signOutConfirmTitle": "اس ڈیوائس پر Pollis سے سائن آؤٹ کریں؟",
       "version": "ورژن",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}} کھولتا ہے",
       "updateFailed": "{{place}} نہیں کھل سکا"
     },
-    "identityHeading": "شناخت",
     "preferences": {
       "accentA11y": "ایکسنٹ {{name}}",
       "accentHeading": "ایکسنٹ",
@@ -485,13 +474,8 @@
       "blockedUsers": "بلاک کردہ صارفین",
       "changePinSub": "آپ کا 4 ہندسوں کا PIN اس ڈیوائس پر Pollis ان لاک کرتا ہے۔"
     },
-    "title": "آپ",
+    "title": "اکاؤنٹ",
     "userSettings": {
-      "displayName": "ڈسپلے نام",
-      "handle": "ہینڈل",
-      "handleHint": "دوسرے اراکین ‎@handle‎ کے ذریعے آپ کو تلاش کر کے DM بھیج سکتے ہیں۔",
-      "handleInvalid": "ہینڈل 3–32 حروف کے ہوتے ہیں: چھوٹے انگریزی حروف، ہندسے، '_'، '.' یا '-'۔",
-      "save": "تبدیلیاں محفوظ کریں",
       "photo": {
         "heading": "پروفائل فوٹو",
         "hint": "جن سے بھی آپ بات کرتے ہیں وہ سب یہ فوٹو دیکھتے ہیں۔",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "براہ راست",
+    "direct": "DMs",
     "groups": "گروپس",
-    "self": "آپ",
+    "self": "اکاؤنٹ",
     "signInDevice": "لنک",
     "withInvites_one": "{{label}}، گروپ کی {{count}} دعوت",
     "withInvites_other": "{{label}}، گروپ کی {{count}} دعوتیں",
@@ -552,7 +536,7 @@
     "message": "پیغام",
     "opening": "کھل رہا ہے…",
     "safetyActionsHeading": "حفاظتی اقدامات",
-    "selfNote": "یہ آپ ہیں۔ اپنا ہینڈل اور ڈسپلے نام <link>آپ ← صارف کی ترتیبات</link> میں تبدیل کریں۔",
+    "selfNote": "یہ آپ ہیں۔ اپنا ہینڈل اور ڈسپلے نام <link>اکاؤنٹ ← پروفائل</link> میں تبدیل کریں۔",
     "title": "صارف",
     "unblockUser": "صارف کو ان بلاک کریں",
     "verified": "◆ تصدیق شدہ"

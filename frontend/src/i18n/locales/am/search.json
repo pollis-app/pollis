@@ -13,9 +13,9 @@
     "searchMessagesFor": "\"{{query}}\"ን በመልዕክቶች ውስጥ ፈልግ"
   },
   "pages": {
-    "userName": "ተጠቃሚ",
+    "userName": "መገለጫ",
     "userKeywords": "መለያ መገለጫ የተጠቃሚ ስም ኢሜይል አምሳያ ቅንብሮች account profile username email avatar settings",
-    "settingsName": "ቅንብሮች",
+    "settingsName": "መለያ",
     "settingsKeywords": "ምርጫዎች ተጠቃሚ ደህንነት preferences user security",
     "preferencesName": "ምርጫዎች",
     "preferencesKeywords": "ገጽታ ቀለም ቅርጸ-ቁምፊ ማሳወቂያዎች መልክ theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "አዲስ ፍጠር new create",
     "groupsSearchName": "ቡድኖችን ፈልግ",
     "groupsSearchKeywords": "ያግኙ ፍለጋ ይፋዊ discover search public",
-    "savedName": "የተቀመጡ",
+    "savedName": "የተቀመጡ መልዕክቶች",
     "savedKeywords": "የተቀመጡ ዕልባት ዕልባቶች ኮከብ የተደረገባቸው የተሰኩ በኋላ ቋሚ አገናኝ አገናኝ saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "የመጫወቻ አዳራሽ",
     "arcadeKeywords": "የመጫወቻ አዳራሽ ጨዋታ አስትሮይድ መርከብ መተኮስ የተደበቀ ጨዋታ መጫወት arcade game asteroids ship shoot easter egg play",

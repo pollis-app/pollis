@@ -13,9 +13,9 @@
     "searchMessagesFor": "په پیغامونو کې د \"{{query}}\" لټون"
   },
   "pages": {
-    "userName": "کارن",
+    "userName": "پروفایل",
     "userKeywords": "حساب پروفایل کارن نوم برېښنالیک انځورګوټی تنظیمات account profile username email avatar settings",
-    "settingsName": "تنظیمات",
+    "settingsName": "حساب",
     "settingsKeywords": "غوره توبونه کارن امنیت preferences user security",
     "preferencesName": "غوره توبونه",
     "preferencesKeywords": "بڼه رنګ فونټ خبرتیاوې ښکارېدنه theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "نوی جوړول new create",
     "groupsSearchName": "ګروپونه ومومئ",
     "groupsSearchKeywords": "موندل لټون عامه discover search public",
-    "savedName": "خوندي شوي",
+    "savedName": "خوندي شوي پیغامونه",
     "savedKeywords": "خوندي شوي نښه ستوری پن وروسته لینک saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "آرکېډ",
     "arcadeKeywords": "آرکېډ لوبه asteroids بېړۍ ډزې لوبول arcade game ship shoot easter egg play",

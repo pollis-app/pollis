@@ -5,20 +5,13 @@
     "description": "只更改这台设备。"
   },
   "hub": {
-    "title": "账户",
-    "headlineFallback": "账户",
     "avatarAlt": "{{name}} 的头像",
-    "preferencesLabel": "偏好设置",
+    "savedDescription": "收藏的消息",
     "preferencesDescription": "颜色、字号等",
-    "userLabel": "用户设置",
-    "userDescription": "个人资料、用户名、头像",
-    "voiceLabel": "语音与视频",
+    "userDescription": "显示名称、用户名、邮箱",
     "voiceDescription": "麦克风、扬声器、摄像头、音频处理",
-    "securityLabel": "安全",
     "securityDescription": "设备注册、身份重置",
-    "shortcutsLabel": "快捷键",
     "shortcutsDescription": "全局键盘快捷键一览",
-    "openSourceLabel": "开源许可",
     "openSourceDescription": "本应用中的第三方软件及其许可证"
   },
   "preferences": {
@@ -160,14 +153,13 @@
     "openButton": "语音与视频"
   },
   "user": {
-    "title": "用户设置",
     "signInPrompt": "请先登录",
-    "accountHeading": "账户",
-    "usernameLabel": "用户名",
-    "usernamePlaceholder": "用户名",
-    "usernameInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。",
-    "preferredNameLabel": "昵称",
-    "preferredNamePlaceholder": "别人怎么称呼你",
+    "identityHeading": "身份",
+    "displayNameLabel": "显示名称",
+    "displayNamePlaceholder": "别人怎么称呼你",
+    "handleLabel": "用户名",
+    "handleHint": "其他成员可以通过 @handle 找到你并发私信。",
+    "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。",
     "saveFailed": "保存失败",
     "saved": "已保存。",
     "saving": "保存中…",
@@ -196,7 +188,7 @@
     "avatarUploadFailed": "头像上传失败",
     "uploadAvatarButton": "上传头像",
     "uploading": "上传中…",
-    "removeAvatarButton": "移除头像",
+    "removeAvatarButton": "移除照片",
     "avatarRemoved": "头像已移除。",
     "avatarRemoveFailed": "无法移除你的头像。"
   },

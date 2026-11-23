@@ -119,14 +119,15 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 
   const isOnSettingsHub = pathname === "/settings";
   const settingsItems = [
+    // Same order as the settings hub and mobile's Account tab (#2086).
     { id: "saved", label: t("sidebar.saved"), icon: <Bookmark {...iconProps} />, to: "/saved" as const, isActive: pathname === "/saved" },
-    { id: "preferences", label: t("sidebar.preferences"), icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
-    { id: "language", label: t("sidebar.language"), icon: <Globe {...iconProps} />, to: "/preferences/language" as const, isActive: pathname === "/preferences/language" },
-    { id: "user", label: t("sidebar.userSettings"), icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
-    { id: "voice-settings", label: t("sidebar.voiceAndVideo"), icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
+    { id: "user", label: t("sidebar.profile"), icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
     { id: "security", label: t("sidebar.security"), icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || (pathname.startsWith("/security/") && pathname !== "/security/events" && pathname !== "/security/copy-history") },
     { id: "security-events", label: t("sidebar.securityEvents"), icon: <ScrollText {...iconProps} />, to: "/security/events" as const, isActive: pathname === "/security/events" },
     { id: "copy-history", label: t("sidebar.copyHistory"), icon: <History {...iconProps} />, to: "/security/copy-history" as const, isActive: pathname === "/security/copy-history" },
+    { id: "preferences", label: t("sidebar.preferences"), icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
+    { id: "language", label: t("sidebar.language"), icon: <Globe {...iconProps} />, to: "/preferences/language" as const, isActive: pathname === "/preferences/language" },
+    { id: "voice-settings", label: t("sidebar.voiceAndVideo"), icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
     { id: "shortcuts", label: t("sidebar.keyBindings"), icon: <Keyboard {...iconProps} />, to: "/shortcuts" as const, isActive: pathname === "/shortcuts" },
     { id: "update", label: t("sidebar.softwareUpdate"), icon: <Download {...iconProps} />, to: "/update" as const, isActive: pathname === "/update" },
   ];

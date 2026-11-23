@@ -140,7 +140,7 @@ export default function SavedScreen() {
 
   return (
     <Screen testID="screen-saved">
-      <Header title={t("mobile:self.hub.savedMessages")} backTo={t("mobile:self.title")} />
+      <Header title={t("nav:sidebar.saved")} backTo={t("mobile:self.title")} />
       {unresolved ? (
         <View style={{ paddingHorizontal: space.xxl, paddingTop: space.lg }}>
           <ErrorText testID="saved-unresolved-notice">{permalinkMissCopy()}</ErrorText>

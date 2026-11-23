@@ -40,7 +40,7 @@ same thing, and the camera is a better out-of-band channel than a typed code.
 
 ## Who plays which role
 
-An enrolled **desktop** shows the QR (Settings → Security → Link a new device).
+An enrolled **desktop** shows the QR (Account → Security → Link a new device).
 A new **phone** scans it, or enters the code, and a new **desktop** pastes the
 code shown under the QR, since desktops have no camera scanner. Until #1361 an
 enrolled phone could show one too; that screen is now the v2 scanner. The

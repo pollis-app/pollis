@@ -27,7 +27,7 @@
   },
   "start": {
     "pageTitle": "New message",
-    "identifierLabel": "Username or Email",
+    "identifierLabel": "Handle or email",
     "identifierPlaceholder": "friend@pollis.com",
     "submit": "Start Conversation",
     "submitting": "Starting…",

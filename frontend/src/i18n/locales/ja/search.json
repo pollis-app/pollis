@@ -13,9 +13,9 @@
     "searchMessagesFor": "「{{query}}」でメッセージを検索"
   },
   "pages": {
-    "userName": "ユーザー",
+    "userName": "プロフィール",
     "userKeywords": "アカウント プロフィール ユーザー名 メール メールアドレス アバター 設定 account profile username email avatar settings",
-    "settingsName": "設定",
+    "settingsName": "アカウント",
     "settingsKeywords": "環境設定 ユーザー セキュリティ preferences user security",
     "preferencesName": "環境設定",
     "preferencesKeywords": "テーマ 色 カラー フォント 通知 外観 theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "新規 作成 new create",
     "groupsSearchName": "グループを探す",
     "groupsSearchKeywords": "発見 検索 公開 discover search public",
-    "savedName": "保存済み",
+    "savedName": "保存したメッセージ",
     "savedKeywords": "保存済み 保存 ブックマーク スター ピン留め 後で パーマリンク リンク saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "アーケード",
     "arcadeKeywords": "アーケード ゲーム アステロイド 宇宙船 シューティング イースターエッグ 遊ぶ arcade game asteroids ship shoot easter egg play",

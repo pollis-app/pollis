@@ -99,7 +99,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Переписка",
-    "info": "Сведения",
     "memberSelf": "@{{handle}} · вы",
     "roleAdmin": "Администратор",
     "roleOwner": "Владелец"
@@ -242,15 +241,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, меню группы",
-      "invite": "Пригласить людей",
       "search": "Поиск в {{name}}",
-      "createChannel": "Создать канал",
       "thisGroup": "Эта группа",
       "members": "Участники",
       "settings": "Настройки группы",
-      "joinRequests": "Заявки на вступление",
-      "customEmoji": "Свои эмодзи",
-      "leave": "Покинуть группу",
       "leaveConfirm": "Нажмите ещё раз, чтобы покинуть {{name}}",
       "leaveHint": "Чтобы вернуться, понадобится новое приглашение.",
       "leaving": "Выход…",
@@ -410,14 +404,10 @@
       "editProfile": "Изменить профиль",
       "accountSection": "Аккаунт",
       "appSection": "Приложение",
-      "accountDetails": "Данные аккаунта",
-      "securityDevices": "Безопасность и устройства",
       "deviceCount_one": "{{count}} устройство",
       "deviceCount_few": "{{count}} устройства",
       "deviceCount_many": "{{count}} устройств",
       "deviceCount_other": "{{count}} устройства",
-      "savedMessages": "Сохранённые сообщения",
-      "appearance": "Оформление",
       "signOut": "Выйти…",
       "signOutConfirmTitle": "Выйти из Pollis на этом устройстве?",
       "version": "Версия",
@@ -427,7 +417,6 @@
       "updateHint": "Открывает {{place}}",
       "updateFailed": "Не удалось открыть {{place}}"
     },
-    "identityHeading": "Идентификация",
     "preferences": {
       "accentA11y": "Акцент {{name}}",
       "accentHeading": "Акцентный цвет",
@@ -501,13 +490,8 @@
       "blockedUsers": "Заблокированные пользователи",
       "changePinSub": "4-значный PIN-код разблокирует Pollis на этом устройстве."
     },
-    "title": "Профиль",
+    "title": "Аккаунт",
     "userSettings": {
-      "displayName": "Отображаемое имя",
-      "handle": "Имя пользователя",
-      "handleHint": "Другие участники смогут найти вас и написать вам по @handle.",
-      "handleInvalid": "Имя пользователя — от 3 до 32 символов: строчные латинские буквы, цифры, '_', '.' или '-'.",
-      "save": "Сохранить изменения",
       "photo": {
         "heading": "Фото профиля",
         "hint": "Это фото видят все, с кем вы общаетесь.",
@@ -543,9 +527,9 @@
     }
   },
   "tabs": {
-    "direct": "Личные",
+    "direct": "ЛС",
     "groups": "Группы",
-    "self": "Профиль",
+    "self": "Аккаунт",
     "signInDevice": "Связать",
     "withInvites_few": "{{label}}, {{count}} приглашения в группы",
     "withInvites_many": "{{label}}, {{count}} приглашений в группы",
@@ -574,7 +558,7 @@
     "message": "Написать",
     "opening": "Открываем…",
     "safetyActionsHeading": "Защита",
-    "selfNote": "Это вы. Изменить имя пользователя и отображаемое имя можно в разделе <link>Профиль → Настройки пользователя</link>.",
+    "selfNote": "Это вы. Изменить имя пользователя и отображаемое имя можно в разделе <link>Аккаунт → Профиль</link>.",
     "title": "Пользователь",
     "unblockUser": "Разблокировать пользователя",
     "verified": "◆ Проверен"

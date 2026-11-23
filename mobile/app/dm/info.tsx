@@ -58,7 +58,7 @@ function DMInfo() {
   return (
     <Screen testID="screen-dm-info" aboveTabBar={router.inPane}>
       <Header onBack={router.onBack}
-        title={t("conversationInfo.info")}
+        title={t("dms:settings.pageTitle")}
         backTo={t("conversationInfo.fallbackTitle")}
       />
       <Body>

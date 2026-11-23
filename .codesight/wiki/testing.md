@@ -1152,7 +1152,7 @@ Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
   fallback; the Tauri mock's `verify_otp` rejects with strings for codes
   `111111` (wrong) and `500500` (accepted, then a later step failed).
 - `mobile/.maestro/flows/diagnostics.yaml` — on a real build: the copy button
-  under a sign-in error, and Self → Diagnostics showing the core's own masked
+  under a sign-in error, and Account → Diagnostics showing the core's own masked
   `verify_otp` line (proof the file log is written on the device).
 
 ## Known flakes
@@ -1282,7 +1282,7 @@ ran on every renderer PR from #1059 until #2022.
 | `voice-bar-alignment.spec.ts` | The voice stage's tray (`.vs-foot`) and the right panel's Details row are one height, and their top borders are one line, in BOTH skins at 13/15/18px font sizes (#1790). The borders are found in the screenshot pixels, not read off the DOM. The tray had been `--bar-h` − 1px, while the bordered bottom bars are `--composer-flush-h`, 2px apart at every size. `VOICE_BAR_SHOTS=<dir>` writes the review crops |
 | `non-admin-identity.spec.ts` | Group/channel identity for someone who cannot edit it, in BOTH skins (#1281): a member gets no rename entry point; an admin's form keeps its empty editable Description; a rename page open across a demotion turns read-only — name as text, description only when there is one, no Save. The demotion is driven by flipping the mock's role, jumping `page.clock` past the 60 s group-list staleness and firing a reconnect. Mobile's half is `join-request/5-peer-settings.yaml` |
 | `long-handles.spec.ts` | Long handles (#1971) in BOTH skins at 1280 and 900px: a 40-character handle in the sidebar DM row, Members (beside the admin's role switch and Kick), the DMs hub and Message requests stays inside its row, the page never scrolls sideways, and every row control stays fully on screen. Seeds requests through the mock's `dmRequests` preload. `POLLIS_E2E_SHOTS=<dir>` saves a screenshot per page. Mobile twin: `mobile/scripts/maestro-long-handles.sh` |
-| `open-source.spec.ts` | Settings → Open Source Licenses (#1832): the hub row and the Cmd+K page result open the list, each row shows its licence, the filter matches a name or a licence, and a row opens every licence text the package ships. Runs on `frontend/src/__mocks__/oss-notices.json`, which the Vite plugin serves under `VITE_PLAYWRIGHT` instead of the generated list. Mobile twin: Maestro `flows/open-source.yaml` |
+| `open-source.spec.ts` | Account → Open source licenses (#1832): the hub row and the Cmd+K page result open the list, each row shows its licence, the filter matches a name or a licence, and a row opens every licence text the package ships. Runs on `frontend/src/__mocks__/oss-notices.json`, which the Vite plugin serves under `VITE_PLAYWRIGHT` instead of the generated list. Mobile twin: Maestro `flows/open-source.yaml` |
 
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
 

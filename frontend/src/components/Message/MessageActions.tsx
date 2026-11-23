@@ -222,6 +222,20 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                   {t("actions.replyInThread")}
                 </PressButton>
               )}
+              {/* Copy link before Save and Pin, as in mobile's message sheet (#2086). */}
+              {onCopyLink && (
+                <PressButton
+                  activateOn="click"
+                  role="menuitem"
+                  data-testid="copy-link-button"
+                  data-copy-state={copyLinkState}
+                  onClick={() => onCopyLink(messageId)}
+                  className={`${menuRowClass} ${copyLinkFocusClass} ${copyLinkTone}`}
+                >
+                  {React.createElement(copyLinkIcon, { size: 16, className: "shrink-0" })}
+                  {copyLinkLabel}
+                </PressButton>
+              )}
               {onToggleSave && (
                 <PressButton
                   activateOn="click"
@@ -248,19 +262,6 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                     <Pin size={16} className="shrink-0" />
                   )}
                   {isPinned ? t("actions.unpin") : t("actions.pin")}
-                </PressButton>
-              )}
-              {onCopyLink && (
-                <PressButton
-                  activateOn="click"
-                  role="menuitem"
-                  data-testid="copy-link-button"
-                  data-copy-state={copyLinkState}
-                  onClick={() => onCopyLink(messageId)}
-                  className={`${menuRowClass} ${copyLinkFocusClass} ${copyLinkTone}`}
-                >
-                  {React.createElement(copyLinkIcon, { size: 16, className: "shrink-0" })}
-                  {copyLinkLabel}
                 </PressButton>
               )}
               {canReport && onReport && (

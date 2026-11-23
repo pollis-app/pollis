@@ -93,7 +93,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "대화",
-    "info": "정보",
     "memberSelf": "@{{handle}} · 나",
     "roleAdmin": "관리자",
     "roleOwner": "소유자"
@@ -221,15 +220,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, 그룹 메뉴",
-      "invite": "사람 초대",
       "search": "{{name}} 검색",
-      "createChannel": "채널 만들기",
       "thisGroup": "이 그룹",
       "members": "멤버",
       "settings": "그룹 설정",
-      "joinRequests": "참여 요청",
-      "customEmoji": "사용자 지정 이모지",
-      "leave": "그룹 나가기",
       "leaveConfirm": "한 번 더 탭하면 {{name}}에서 나갑니다",
       "leaveHint": "다시 참여하려면 새 초대가 필요합니다.",
       "leaving": "나가는 중…",
@@ -393,11 +387,7 @@
       "editProfile": "프로필 수정",
       "accountSection": "계정",
       "appSection": "앱",
-      "accountDetails": "계정 정보",
-      "securityDevices": "보안 및 기기",
       "deviceCount_other": "기기 {{count}}대",
-      "savedMessages": "저장한 메시지",
-      "appearance": "모양",
       "signOut": "로그아웃…",
       "signOutConfirmTitle": "이 기기에서 Pollis 로그아웃할까요?",
       "version": "버전",
@@ -407,7 +397,6 @@
       "updateHint": "{{place}} 열기",
       "updateFailed": "{{place}}을(를) 열지 못했습니다"
     },
-    "identityHeading": "신원",
     "preferences": {
       "accentA11y": "강조 색상 {{name}}",
       "accentHeading": "강조 색상",
@@ -472,13 +461,8 @@
       "blockedUsers": "차단한 사용자",
       "changePinSub": "4자리 PIN으로 이 기기에서 Pollis 잠금 해제를 합니다."
     },
-    "title": "나",
+    "title": "계정",
     "userSettings": {
-      "displayName": "표시 이름",
-      "handle": "핸들",
-      "handleHint": "다른 멤버가 @핸들로 나를 찾고 DM을 보낼 수 있습니다.",
-      "handleInvalid": "핸들은 3–32자이며 영문 소문자, 숫자, '_', '.', '-'만 사용할 수 있습니다.",
-      "save": "변경 사항 저장",
       "photo": {
         "heading": "프로필 사진",
         "hint": "대화하는 모든 사람이 이 사진을 볼 수 있습니다.",
@@ -516,7 +500,7 @@
   "tabs": {
     "direct": "DM",
     "groups": "그룹",
-    "self": "나",
+    "self": "계정",
     "signInDevice": "연결",
     "withInvites_other": "{{label}}, 그룹 초대 {{count}}개",
     "withRequests_other": "{{label}}, 메시지 요청 {{count}}개",
@@ -536,7 +520,7 @@
     "message": "메시지",
     "opening": "여는 중…",
     "safetyActionsHeading": "안전 조치",
-    "selfNote": "나입니다. 핸들과 표시 이름은 <link>나 → 사용자 설정</link>에서 수정하세요.",
+    "selfNote": "나입니다. 핸들과 표시 이름은 <link>계정 → 프로필</link>에서 수정하세요.",
     "title": "사용자",
     "unblockUser": "사용자 차단 해제",
     "verified": "◆ 인증됨"

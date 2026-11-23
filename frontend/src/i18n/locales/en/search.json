@@ -13,10 +13,10 @@
     "searchMessagesFor": "Search messages for \"{{query}}\""
   },
   "pages": {
-    "userName": "User",
-    "userKeywords": "account profile username email avatar settings",
-    "settingsName": "Settings",
-    "settingsKeywords": "preferences user security",
+    "userName": "Profile",
+    "userKeywords": "account profile handle username display name email avatar photo settings",
+    "settingsName": "Account",
+    "settingsKeywords": "settings preferences profile user security",
     "preferencesName": "Preferences",
     "preferencesKeywords": "theme color font notifications appearance",
     "languageName": "Language",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "new create",
     "groupsSearchName": "Find groups",
     "groupsSearchKeywords": "discover search public",
-    "savedName": "Saved",
+    "savedName": "Saved messages",
     "savedKeywords": "saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "Arcade",
     "arcadeKeywords": "arcade game asteroids ship shoot easter egg play",
