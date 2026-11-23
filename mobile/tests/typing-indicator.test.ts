@@ -125,3 +125,16 @@ test("the chat screen publishes from the composer, stops on send, and shows the 
   // The user's own other devices never show as typing.
   assert.match(read("hooks/useConversationRealtime.ts"), /event\.user_id === appStore\.currentUser\?\.id/);
 });
+
+test("the indicator keeps one fixed band whether or not anyone types (#2082)", () => {
+  const src = read("components/chat/TypingIndicator.tsx");
+  // Never collapses: the band is always rendered, only its text comes and goes.
+  assert.doesNotMatch(src, /return null/);
+  assert.match(src, /testID="typing-band"/);
+  assert.match(src, /\{text \? \(/);
+  // Its height holds the one line at the largest scale the text is allowed.
+  assert.match(src, /minHeight: height/);
+  assert.match(src, /Math\.min\(Math\.max\(fontScale, 1\), MAX_SCALE\)/);
+  assert.match(src, /maxFontSizeMultiplier=\{MAX_SCALE\}/);
+  assert.match(src, /numberOfLines=\{1\}/);
+});
