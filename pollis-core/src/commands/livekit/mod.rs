@@ -311,6 +311,17 @@ pub(super) fn dispatch_data(
                 });
             }
         }
+        Some("profile_changed") => {
+            // DS-originated only (#2084), like `group_aliases_changed`.
+            if sender.is_some() {
+                return None;
+            }
+            if let Some(user_id) = data.get("user_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::ProfileChanged {
+                    user_id: user_id.to_owned(),
+                });
+            }
+        }
         Some("read_cursors_changed") => {
             // DS-originated only (#1628), like `channel_mutes_changed`.
             if sender.is_some() {
@@ -616,6 +627,20 @@ mod tests {
         ));
         let own = run(serde_json::json!({ "type": "group_aliases_changed" }), None);
         assert!(matches!(own[..], [RealtimeEvent::GroupAliasesChanged { group_id: None }]));
+        let someone = PacketSender {
+            user_id: "alice".into(),
+            username: None,
+        };
+        assert!(run(payload, Some(&someone)).is_empty());
+    }
+
+    /// #2084: the profile nudge is forwarded from the DS with its user; dropped from a participant.
+    #[test]
+    fn profile_changed_is_honoured_only_from_the_ds() {
+        let payload = serde_json::json!({ "type": "profile_changed", "user_id": "u1" });
+        let events = run(payload.clone(), None);
+        assert!(matches!(&events[..], [RealtimeEvent::ProfileChanged { user_id }] if user_id == "u1"));
+        assert!(run(serde_json::json!({ "type": "profile_changed" }), None).is_empty());
         let someone = PacketSender {
             user_id: "alice".into(),
             username: None,

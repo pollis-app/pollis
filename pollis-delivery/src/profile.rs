@@ -78,9 +78,71 @@ pub async fn update_profile(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    profile_outcome_response::<UpdateProfileBody>(
-        apply_update_profile(&conn, authed.as_deref(), &parsed).await?,
-    )
+    let outcome = apply_update_profile(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, ProfileOutcome::Ok) && changes_public_profile(&parsed) {
+        let user = authed.clone().unwrap_or_else(|| parsed.user_id.clone());
+        spawn_profile_changed_wakes(&state, user);
+    }
+    profile_outcome_response::<UpdateProfileBody>(outcome)
+}
+
+/// True when an update touches what other people see: the handle, the display name or the
+/// picture. A phone-only edit wakes no one.
+fn changes_public_profile(body: &UpdateProfileBody) -> bool {
+    body.username.is_some() || body.preferred_name.is_some() || body.avatar_url.is_some()
+}
+
+/// The content-free nudge (#2084) that a user's public profile changed. It names the user (every
+/// receiver already knows them: it shares a room with them) and nothing about the change.
+pub fn profile_changed_event(user_id: &str) -> serde_json::Value {
+    serde_json::json!({ "type": "profile_changed", "user_id": user_id })
+}
+
+/// Every realtime room a profile change must reach: the user's inbox (their other devices),
+/// then each group room and each DM room (accepted or pending) they are in.
+pub async fn profile_change_rooms(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<String>> {
+    let mut rooms = vec![format!("inbox-{user_id}")];
+    rooms.extend(
+        crate::util::query_strings(
+            conn,
+            "SELECT group_id FROM group_member WHERE user_id = ?1 ORDER BY group_id",
+            libsql::params![user_id.to_string()],
+        )
+        .await?,
+    );
+    rooms.extend(
+        crate::util::query_strings(
+            conn,
+            "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1 ORDER BY dm_channel_id",
+            libsql::params![user_id.to_string()],
+        )
+        .await?,
+    );
+    Ok(rooms)
+}
+
+/// Tell everyone who shows this user's name to re-read it, in the background. Best-effort: a
+/// device that misses it re-reads cached names on its next launch, unlock or resume, and any
+/// cached name older than `user_cache::FRESH_SECS` on its next use.
+fn spawn_profile_changed_wakes(state: &AppState, user_id: String) {
+    if state.broker.livekit_ready().is_none() {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        let rooms = match state.db.conn().await {
+            Ok(conn) => profile_change_rooms(&conn, &user_id)
+                .await
+                .unwrap_or_else(|_| vec![format!("inbox-{user_id}")]),
+            Err(_) => vec![format!("inbox-{user_id}")],
+        };
+        let event = profile_changed_event(&user_id);
+        for room in rooms {
+            if let Err(e) = crate::broker::room_send_data(&state, &room, &event).await {
+                tracing::warn!("profile-change wake-up failed (non-fatal): {e}");
+            }
+        }
+    });
 }
 
 /// Shortest username the DS accepts.

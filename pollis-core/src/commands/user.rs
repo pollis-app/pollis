@@ -16,17 +16,15 @@ pub struct UserProfile {
     pub is_bot: bool,
 }
 
+/// One profile, fresh from the DS. Also the `profile_changed` handler's re-read (#2084): it
+/// refreshes this device's copies of the name ([`note_fresh_profiles`]) before the UI redraws.
 pub async fn get_user_profile(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Option<UserProfile>> {
-    Ok(
-        crate::commands::ds_reads::users(state, vec![user_id], None)
-            .await?
-            .into_iter()
-            .next()
-            .map(profile_from_wire),
-    )
+    let users = crate::commands::ds_reads::users(state, vec![user_id], None).await?;
+    note_fresh_profiles(state, &users).await;
+    Ok(users.into_iter().next().map(profile_from_wire))
 }
 
 /// Many profiles in ONE DS round trip; unknown ids are left out (mobile avatars).
@@ -37,16 +35,43 @@ pub async fn get_user_profiles(
     let mut ids = user_ids;
     ids.sort();
     ids.dedup();
-    Ok(crate::commands::ds_reads::users(state, ids, None)
-        .await?
-        .into_iter()
-        .map(profile_from_wire)
-        .collect())
+    let users = crate::commands::ds_reads::users(state, ids, None).await?;
+    note_fresh_profiles(state, &users).await;
+    Ok(users.into_iter().map(profile_from_wire).collect())
+}
+
+/// #2084: profiles the DS just returned bring this device's own copies up to date: the
+/// `user_cache` handles messages are labelled with, the LiveKit names (typing, voice) and,
+/// for the signed-in user, the accounts index the next launch restores the session from.
+async fn note_fresh_profiles(state: &Arc<AppState>, users: &[pollis_api::directory::UserWire]) {
+    if users.is_empty() {
+        return;
+    }
+    let names: Vec<(String, String)> = users.iter().map(|u| (u.id.clone(), u.username.clone())).collect();
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            crate::commands::user_cache::store(db.conn(), &names);
+        }
+    }
+    for (id, name) in &names {
+        crate::commands::livekit_roster::rename_user(state, id, name).await;
+    }
+    let Ok(me) = crate::commands::mls::ds_client::current_user_id(state).await else {
+        return;
+    };
+    let Some((_, mine)) = names.iter().find(|(id, _)| *id == me) else {
+        return;
+    };
+    // Writes only when the handle differs.
+    if let Err(e) = crate::accounts::rename_account(&me, mine) {
+        crate::diag!("[profile] accounts index not updated after a remote rename: {e}");
+    }
 }
 
 /// Wire → domain for one user profile.
 /// No `phone` (#987): unrendered and the most re-identifying field.
-fn profile_from_wire(u: pollis_api::directory::UserWire) -> UserProfile {
+pub(crate) fn profile_from_wire(u: pollis_api::directory::UserWire) -> UserProfile {
     UserProfile {
         id: u.id,
         username: Some(u.username),
@@ -74,21 +99,17 @@ pub async fn update_user_profile(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    // Refresh both local username caches; neither read path consults the DS.
+    // Refresh this device's copies at once; other devices hear `profile_changed` (#2084).
     if let Some(username) = username {
         if let Err(e) = crate::accounts::rename_account(&user_id, &username) {
             crate::diag!("[profile] accounts index not updated after rename: {e}");
         }
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
-            if let Err(e) = db.conn().execute(
-                "INSERT INTO user_cache (id, username, updated_at) VALUES (?1, ?2, datetime('now'))
-                 ON CONFLICT(id) DO UPDATE SET username = ?2, updated_at = datetime('now')",
-                rusqlite::params![user_id, username],
-            ) {
-                crate::diag!("[profile] user_cache not updated after rename: {e}");
-            }
+            crate::commands::user_cache::store(db.conn(), &[(user_id.clone(), username.clone())]);
         }
+        drop(guard);
+        crate::commands::livekit_roster::rename_user(state, &user_id, &username).await;
     }
 
     Ok(())

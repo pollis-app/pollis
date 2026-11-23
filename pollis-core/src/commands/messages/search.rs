@@ -670,7 +670,7 @@ async fn enrich(
         group_name: Option<String>,
     }
 
-    let (conversations, mut usernames) = {
+    let conversations = {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
@@ -700,54 +700,12 @@ async fn enrich(
             }
         }
 
-        let mut usernames: HashMap<String, String> = HashMap::new();
-        let ids: Vec<String> = sender_ids.iter().cloned().collect();
-        for chunk in crate::db::chunk::bind_chunks(&ids, 0) {
-            let sql = format!(
-                "SELECT id, username FROM user_cache WHERE id IN ({})",
-                crate::db::chunk::placeholders(chunk.len(), 1)
-            );
-            let mut stmt = db.conn().prepare(&sql)?;
-            let mapped = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            for (id, name) in mapped.flatten() {
-                usernames.insert(id, name);
-            }
-        }
-        (conversations, usernames)
+        conversations
     };
 
-    // One request for whatever the cache could not name; offline, the id renders.
-    let missing: Vec<String> = sender_ids
-        .iter()
-        .filter(|id| !usernames.contains_key(*id))
-        .cloned()
-        .collect();
-    if !missing.is_empty() {
-        match crate::commands::ds_reads::users(state, missing, None).await {
-            Ok(users) => {
-                let fetched: Vec<(String, String)> =
-                    users.into_iter().map(|u| (u.id, u.username)).collect();
-                let guard = state.local_db.lock().await;
-                if let Some(db) = guard.as_ref() {
-                    for (id, name) in &fetched {
-                        let _ = db.conn().execute(
-                            "INSERT INTO user_cache (id, username, updated_at) VALUES (?1, ?2, datetime('now')) \
-                             ON CONFLICT(id) DO UPDATE SET username = ?2, updated_at = datetime('now')",
-                            rusqlite::params![id, name],
-                        );
-                    }
-                }
-                for (id, name) in fetched {
-                    usernames.insert(id, name);
-                }
-            }
-            Err(e) => {
-                crate::diag!("[search] sender name lookup failed (non-fatal): {e}");
-            }
-        }
-    }
+    // #2084: one request for whatever the cache cannot name freshly; offline, the id renders.
+    let sender_ids: Vec<String> = sender_ids.into_iter().collect();
+    let usernames = crate::commands::user_cache::usernames(state, &sender_ids, None).await;
 
     Ok(hits
         .into_iter()

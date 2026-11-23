@@ -60,6 +60,17 @@ pub(crate) async fn resolve_participants(
         .collect()
 }
 
+/// Give every cached participant of `user_id` the name `name` (#2084): a pseudonym never
+/// changes, but the name it resolves to does when the user renames themselves.
+pub(crate) async fn rename_user(state: &Arc<AppState>, user_id: &str, name: &str) {
+    let mut cache = state.livekit_identities.lock().await;
+    for (internal, shown) in cache.values_mut() {
+        if user_id_from_identity(internal) == Some(user_id) {
+            *shown = name.to_string();
+        }
+    }
+}
+
 /// The presence rule, shared by desktop's realtime loop and mobile (#2059): the other user one
 /// participant's internal identity shows, if any. DS participants, unresolved pseudonyms and
 /// `self_user_id` are no one.
