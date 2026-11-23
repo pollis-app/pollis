@@ -327,6 +327,8 @@ export function IconButton({
 }
 
 // Top bar for every screen. Leave out `title` for a back-only bar.
+const LARGE_HEADER_PAD_TOP = 4;
+
 export function Header({
   title,
   subtitle,
@@ -409,10 +411,11 @@ export function Header({
         flexDirection: "row",
         alignItems: "center",
         gap: large ? space.sm : 4,
-        minHeight: large ? 56 : layout.header,
+        // Large: tall enough for a 44 pt action, so tab headers with and without one match (#2087).
+        minHeight: large ? layout.touchMin + LARGE_HEADER_PAD_TOP + space.lg : layout.header,
         paddingStart: large ? space.xxl : 4,
         paddingEnd: large ? space.lg : space.sm,
-        paddingTop: large ? 4 : 0,
+        paddingTop: large ? LARGE_HEADER_PAD_TOP : 0,
         paddingBottom: large ? space.lg : space.sm,
       }}
     >
