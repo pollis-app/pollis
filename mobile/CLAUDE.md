@@ -1226,7 +1226,7 @@ There is no bottom back strip any more (`Ctx`/`Crumb` are gone). Auth
 screens disable the edge swipe, so their top-left back is the only way out.
 Sub-screens are stack pushes outside `(tabs)`.
 
-Tabs and search (#1550): the bar is Groups · Direct · shield · Self. The
+Tabs and search (#1550): the bar is Groups · DMs · shield · Account (routes `groups`, `direct`, `self`; labels as on desktop, #2086). The
 shield (`tab-link-device`, labelled "Link") is a shortcut, not a tab: it
 pushes `self/link-device` (Scan to sign in a device, the same page and PIN
 confirm as Account → Security) onto the root stack, so back returns to the tab
