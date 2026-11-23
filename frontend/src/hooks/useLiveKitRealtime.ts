@@ -26,7 +26,7 @@ import { runMessageWake, type WakeFresh } from '../utils/messageWake';
 import { refreshReadCursors, unreadQueryKeys } from './queries/useUnread';
 import { typingStore, typingRoomKey } from '../stores/typingStore';
 import { presenceStore } from '../stores/presenceStore';
-import { keyChangeNoticeKeys, peerVerificationKeys } from './queries/useUserProfile';
+import { keyChangeNoticeKeys, onProfileChanged, peerVerificationKeys } from './queries/useUserProfile';
 import { listPendingEnrollmentRequests } from '../services/api';
 import { onHistoryTransferHint, type HistoryTransferHint } from './queries/useHistoryTransfers';
 import { isTypedCodeRequest } from '../utils/enrollmentPrompt';
@@ -143,6 +143,11 @@ type RealtimeEvent =
   | {
     // #1628: another of our devices pushed read cursors; converge (DS-originated, content-free).
     type: 'read_cursors_changed';
+  }
+  | {
+    // #2084: this user's public profile changed (DS-originated, content-free); re-read it.
+    type: 'profile_changed';
+    user_id: string;
   }
   | {
     // #1182: an admin approved another host for a bot; sent only to a bot's inbox, so the app never sees it.
@@ -549,6 +554,11 @@ export function useLiveKitRealtime() {
 
       if (event.type === 'read_cursors_changed') {
         void refreshReadCursors(queryClientRef.current, currentUser.id);
+        return;
+      }
+
+      if (event.type === 'profile_changed') {
+        void onProfileChanged(queryClientRef.current, event.user_id);
         return;
       }
 

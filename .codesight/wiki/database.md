@@ -1664,6 +1664,7 @@ has `pv`, never sent anywhere; goes with the database on a wipe or reset.
 - `username` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL DEFAULT now
 - Username lookup cache so the UI can render a sender without a remote round trip. Not authoritative — `users` in Turso is.
+- **Never the last word on a name (#2084).** `commands::user_cache` is the only code that reads or writes it. A row is trusted for `FRESH_SECS` (10 min); a stale or missing row is re-read in the ONE `POST /v1/directory/users` batch a page / search / push already makes, and the old name answers only when that read fails (offline). Every row is marked stale when the database opens (launch, unlock, a mobile resume), and every `get_user_profile(s)` read refreshes the rows it returns. Before #2084 a hit was final: only the renaming device ever updated its own row, so every other device, the user's own included, labelled old and new messages with the old handle forever, across restarts.
 
 
 ### group_alias_cache _(#2003)_

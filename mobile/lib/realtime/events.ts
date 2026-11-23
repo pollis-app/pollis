@@ -89,6 +89,11 @@ export type RealtimeEvent =
       type: "read_cursors_changed";
     }
   | {
+      // DS-only (#2084): `user_id`'s public profile changed; re-read it and what names them.
+      type: "profile_changed";
+      user_id: string;
+    }
+  | {
       // #1635, unreliable and re-sent while typing. The wire body is identity-free (#836): the
       // client stamps `user_id`/`username` from the PUBLISHING participant, never from the body.
       type: "typing";
@@ -126,6 +131,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "group_aliases_changed",
   "bots_changed",
   "read_cursors_changed",
+  "profile_changed",
   "typing",
   "history_transfer",
 ]);
@@ -177,6 +183,10 @@ export function decodeRealtimeEvent(
   if (type === "history_transfer") {
     return decodeHistoryTransfer(parsed as Record<string, unknown>);
   }
+  if (type === "profile_changed") {
+    const userId = (parsed as { user_id?: unknown }).user_id;
+    return typeof userId === "string" && userId.length > 0 ? { type, user_id: userId } : null;
+  }
   return parsed as RealtimeEvent;
 }
 
@@ -191,6 +201,7 @@ export function isTrustedOrigin(event: RealtimeEvent, fromParticipant: boolean):
     event.type === "group_aliases_changed" ||
     event.type === "bots_changed" ||
     event.type === "read_cursors_changed" ||
+    event.type === "profile_changed" ||
     event.type === "history_transfer"
   ) {
     return !fromParticipant;

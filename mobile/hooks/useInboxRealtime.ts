@@ -23,6 +23,7 @@ import {
   useIngestConversation,
 } from "./queries/useMessages";
 import { refreshReadCursors } from "./queries/useUnread";
+import { onProfileChanged, refreshProfile } from "./queries/useUserProfile";
 import { deviceWasRevoked } from "../lib/deviceRevoked";
 import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPrompt";
 import { catchUpThenBackstop } from "../lib/mlsBackstop";
@@ -170,6 +171,10 @@ export function useInboxRealtime() {
           // #1628: another device read something; converge, re-badge, clear its notifications.
           void refreshReadCursors(userId, qc);
           break;
+        case "profile_changed":
+          // #2084: someone in these rooms (or another of our devices) renamed; re-read and redraw.
+          void onProfileChanged(qc, event.user_id);
+          break;
         case "enrollment_requested":
           // #1360; `useEnrollmentApprovals` opens the approval screen.
           noticeEnrollmentRequested(event);
@@ -241,6 +246,8 @@ export function useInboxRealtime() {
         () => invoke("reconcile_backstop_all", { userId: resumedUser }),
       );
       void flushOutbox(qcRef.current);
+      // #2084: a rename made on another device while we were away.
+      void refreshProfile(resumedUser);
     });
     return () => {
       sub.remove();
@@ -259,6 +266,10 @@ export function useInboxRealtime() {
     }
     landedRef.current = true;
     const landedUser = signedInId;
+    // #2084: the session's handle came from the accounts index; a rename elsewhere corrects it.
+    if (landedUser) {
+      void refreshProfile(landedUser);
+    }
     void catchUpThenBackstop(
       catchUpTargets(groupsRef.current, dmsRef.current),
       (id, kind) => ingestRef.current(id, kind),

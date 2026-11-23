@@ -13,7 +13,7 @@ export function createParticipantResolver(resolve: Resolve) {
   const cache = new Map<string, PacketSender | null>();
   const inflight = new Map<string, Promise<PacketSender | null>>();
 
-  return function resolveSender(room: string, identity: string): Promise<PacketSender | null> {
+  function resolveSender(room: string, identity: string): Promise<PacketSender | null> {
     const key = `${room}\u0000${identity}`;
     if (cache.has(key)) {
       return Promise.resolve(cache.get(key) ?? null);
@@ -36,5 +36,16 @@ export function createParticipantResolver(resolve: Resolve) {
       });
     inflight.set(key, lookup);
     return lookup;
-  };
+  }
+
+  /** #2084: `userId` renamed themselves; the pseudonym stays, the name it shows moves. */
+  function renameUser(userId: string, username: string) {
+    for (const [key, sender] of cache) {
+      if (sender && sender.userId === userId) {
+        cache.set(key, { ...sender, username });
+      }
+    }
+  }
+
+  return Object.assign(resolveSender, { renameUser });
 }

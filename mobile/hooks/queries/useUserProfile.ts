@@ -1,11 +1,12 @@
 // User profile hooks, mirroring desktop's useUserProfile.ts.
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import { AVATAR_DIR, avatarStore } from "../../lib/avatarCache";
 import { AVATAR_RENDITIONS } from "../../lib/avatarKey";
+import { renameParticipant } from "../../lib/realtime/client";
 
 export interface ServiceUserData {
   username: string;
@@ -18,6 +19,49 @@ export interface ServiceUserData {
 export const userQueryKeys = {
   profile: (userId: string | null) => ["user", "profile", userId] as const,
 };
+
+/**
+ * #2084: re-read one profile. The read refreshes the core's cached copies of the name
+ * (message sender names, typing, and for our own account the accounts index the next launch
+ * restores from); here the store, typing names and avatars follow. Run for our own account on
+ * landing and every resume, since the session's handle is restored from that index.
+ */
+export async function refreshProfile(userId: string): Promise<void> {
+  try {
+    const profile = await invoke<{ id: string; username?: string; avatar_url?: string | null } | null>(
+      "get_user_profile",
+      { userId },
+    );
+    if (!profile) {
+      return;
+    }
+    if (profile.username) {
+      renameParticipant(userId, profile.username);
+      if (appStore.currentUser?.id === userId && appStore.currentUser.username !== profile.username) {
+        appStore.setUsername(profile.username);
+      }
+    }
+    avatarStore.noteKey(userId, profile.avatar_url ?? null);
+  } catch (err) {
+    // Offline: the core re-checks its cache on next use.
+    console.warn("[profile] get_user_profile failed:", err);
+  }
+}
+
+/** Every cached list that names people: profiles, message pages, previews, DMs, groups and members, pins, search. */
+const NAMED_QUERY_PREFIXES = [["user"], ["messages"], ["last-message"], ["dm"], ["groups"], ["pins"], ["search"]];
+
+/**
+ * #2084: `userId` changed their handle, display name or picture (the DS's content-free
+ * `profile_changed`): refresh it, then every surface that names people re-reads.
+ * Desktop: `onProfileChanged` in its `useUserProfile.ts`.
+ */
+export async function onProfileChanged(queryClient: QueryClient, userId: string) {
+  await refreshProfile(userId);
+  for (const prefix of NAMED_QUERY_PREFIXES) {
+    void queryClient.invalidateQueries({ queryKey: prefix });
+  }
+}
 
 export function useUserProfile() {
   const currentUser = useObserver(() => appStore.currentUser);

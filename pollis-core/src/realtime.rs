@@ -96,6 +96,12 @@ pub enum RealtimeEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         group_id: Option<String>,
     },
+    /// A user's public profile (handle, display name, picture) changed (#2084). Sent by the DS
+    /// to that user's inbox and to every group and DM room they are in; content-free, so
+    /// re-read it over the signed channel (`get_user_profile`) and redraw what names them.
+    ProfileChanged {
+        user_id: String,
+    },
     /// Another of this account's devices pushed read cursors (#1628); converge them
     /// (`refresh_read_cursors`). DS-originated and content-free.
     ReadCursorsChanged,

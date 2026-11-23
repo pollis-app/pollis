@@ -514,15 +514,8 @@ pub async fn list_pinned_messages(
             );
             continue;
         }
-        let sender_username: Option<String> = db
-            .conn()
-            .query_row(
-                "SELECT username FROM user_cache WHERE id = ?1",
-                rusqlite::params![snapshot.sender_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| Error::Other(anyhow::anyhow!("pin username lookup: {e}")))?;
+        let sender_username =
+            crate::commands::user_cache::cached_one(db.conn(), &snapshot.sender_id);
         out.push(PinnedMessage {
             id: pin.id,
             conversation_id: pin.conversation_id,

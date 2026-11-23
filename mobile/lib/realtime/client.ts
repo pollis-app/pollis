@@ -12,6 +12,11 @@ const resolveSender = createParticipantResolver((room, identities) =>
   invoke("resolve_livekit_identities", { room, identities }),
 );
 
+/** #2084: typing names already resolved for `userId` show their new handle. */
+export function renameParticipant(userId: string, username: string): void {
+  resolveSender.renameUser(userId, username);
+}
+
 // Presence (#2059): who each open room shows, resolved by the core (the rule desktop applies).
 const presenceFeed = createRoomPresenceFeed(
   (room, identities) => invoke<string[]>("livekit_room_presence", { room, identities }),

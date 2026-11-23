@@ -1269,15 +1269,7 @@ async fn deliver_locked(
         // A drained message's author label comes from this device's cached profile.
         let sender_username = match sender_username {
             Some(name) => Some(name),
-            None => db
-                .conn()
-                .query_row(
-                    "SELECT username FROM user_cache WHERE id = ?1",
-                    rusqlite::params![row.sender_id],
-                    |r| r.get::<_, Option<String>>(0),
-                )
-                .optional()?
-                .flatten(),
+            None => crate::commands::user_cache::cached_one(db.conn(), &row.sender_id),
         };
         let link_preview: Option<String> = db
             .conn()
