@@ -13,9 +13,9 @@
     "searchMessagesFor": "\"{{query}}\"(으)로 메시지 검색"
   },
   "pages": {
-    "userName": "사용자",
+    "userName": "프로필",
     "userKeywords": "계정 프로필 사용자 이름 이메일 아바타 설정 account profile username email avatar settings",
-    "settingsName": "설정",
+    "settingsName": "계정",
     "settingsKeywords": "환경설정 사용자 보안 preferences user security",
     "preferencesName": "환경설정",
     "preferencesKeywords": "테마 색상 글꼴 알림 모양 theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "새로 만들기 new create",
     "groupsSearchName": "그룹 찾기",
     "groupsSearchKeywords": "탐색 검색 공개 discover search public",
-    "savedName": "저장됨",
+    "savedName": "저장한 메시지",
     "savedKeywords": "저장됨 북마크 즐겨찾기 고정 나중에 고유 링크 saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "아케이드",
     "arcadeKeywords": "아케이드 게임 소행성 우주선 사격 이스터 에그 플레이 arcade game asteroids ship shoot easter egg play",

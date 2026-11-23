@@ -111,10 +111,10 @@ function GroupEmoji() {
 
   return (
     <Screen testID="screen-group-emoji" aboveTabBar={router.inPane}>
-      <Header onBack={router.onBack} title={t("mobile:group.panel.customEmoji")} subtitle={group ? groupName : undefined} />
+      <Header onBack={router.onBack} title={t("channels:group.customEmoji")} subtitle={group ? groupName : undefined} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
         <SectionTitle style={{ paddingHorizontal: 0 }}>
-          {t("mobile:group.panel.customEmoji")}
+          {t("channels:group.customEmoji")}
         </SectionTitle>
         {isLoading ? <Hint>{t("common:states.loading")}</Hint> : null}
         {loadFailed ? <ErrorText>{t("mobile:group.emoji.loadFailed")}</ErrorText> : null}

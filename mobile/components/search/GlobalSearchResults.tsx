@@ -161,7 +161,7 @@ export function GlobalSearchResults({
       },
       {
         id: "user-settings",
-        n: t("settings:user.title"),
+        n: t("nav:sidebar.profile"),
         s: t("mobile:self.hub.userSettingsSub"),
         to: "/self/user-settings" as const,
       },

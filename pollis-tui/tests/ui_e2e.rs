@@ -39,13 +39,13 @@ async fn message_typed_on_one_ui_surfaces_on_the_others_rendered_screen() {
     // B accepts the pending request, its only selectable row.
     bob.wait_for("pending", SIDEBAR_TIMEOUT).await;
     bob.press(KeyCode::Char('a'), KeyModifiers::NONE).await;
-    // Graduates to "Direct Messages" once B joined and the accept synced; this is where #1041
+    // Graduates to "DMs" once B joined and the accept synced; this is where #1041
     // lost A's first message.
-    bob.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
+    bob.wait_for("DMs", SIDEBAR_TIMEOUT).await;
 
     // Wait for the accepted-DM section, not just the peer's name, so the row opens as an
     // accepted DM.
-    alice.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
+    alice.wait_for("DMs", SIDEBAR_TIMEOUT).await;
     alice.enter().await;
     alice.press(KeyCode::Char('i'), KeyModifiers::NONE).await;
     alice.send_keys("PING_ACROSS_THE_UI").await;

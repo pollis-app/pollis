@@ -6,7 +6,7 @@ tags:
 # SIGN IN DEVICE SHORTCUT (#1550) — the tab bar's third cell is a shield that
 # pushes "Scan to sign in a device" (self/link-device) from any tab, and back
 # returns to the tab it was tapped from. It is a shortcut, not a tab: the
-# same page (and PIN confirm) is still under Self → Security.
+# same page (and PIN confirm) is still under Account → Security.
 # Self-contained; a v2 code typed by hand stands in for the scanned QR, which
 # is enough to reach the PIN confirm (finishing needs a second device).
 
@@ -28,7 +28,7 @@ tags:
 - assertVisible:
     id: "screen-link-device"
 - takeScreenshot: sign-in-device-02-scanner
-# Typed code → the same PIN confirm as Self → Security → Scan to sign in.
+# Typed code → the same PIN confirm as Account → Security → Scan to sign in.
 - tapOn:
     id: "btn-scan-toggle-manual"
 - tapOn:

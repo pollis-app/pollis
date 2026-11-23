@@ -13,9 +13,9 @@
     "searchMessagesFor": "\"{{query}}\" ਲਈ ਸੁਨੇਹੇ ਖੋਜੋ"
   },
   "pages": {
-    "userName": "ਵਰਤੋਂਕਾਰ",
+    "userName": "ਪ੍ਰੋਫਾਈਲ",
     "userKeywords": "ਖਾਤਾ ਪ੍ਰੋਫਾਈਲ ਵਰਤੋਂਕਾਰ ਨਾਮ ਈਮੇਲ ਅਵਤਾਰ ਸੈਟਿੰਗਾਂ account profile username email avatar settings",
-    "settingsName": "ਸੈਟਿੰਗਾਂ",
+    "settingsName": "ਖਾਤਾ",
     "settingsKeywords": "ਤਰਜੀਹਾਂ ਵਰਤੋਂਕਾਰ ਸੁਰੱਖਿਆ preferences user security",
     "preferencesName": "ਤਰਜੀਹਾਂ",
     "preferencesKeywords": "ਥੀਮ ਰੰਗ ਫੌਂਟ ਸੂਚਨਾਵਾਂ ਦਿੱਖ theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "ਨਵਾਂ ਬਣਾਓ new create",
     "groupsSearchName": "ਗਰੁੱਪ ਲੱਭੋ",
     "groupsSearchKeywords": "ਲੱਭੋ ਖੋਜੋ ਜਨਤਕ discover search public",
-    "savedName": "ਰੱਖਿਅਤ ਕੀਤੇ",
+    "savedName": "ਰੱਖਿਅਤ ਕੀਤੇ ਸੁਨੇਹੇ",
     "savedKeywords": "ਰੱਖਿਅਤ ਬੁੱਕਮਾਰਕ ਸਟਾਰ ਪਿੰਨ ਕੀਤੇ ਬਾਅਦ ਵਿੱਚ ਪਰਮਾਲਿੰਕ ਲਿੰਕ saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "ਆਰਕੇਡ",
     "arcadeKeywords": "ਆਰਕੇਡ ਗੇਮ ਐਸਟਰਾਇਡ ਜਹਾਜ਼ ਸ਼ੂਟ ਖੇਡੋ arcade game asteroids ship shoot easter egg play",

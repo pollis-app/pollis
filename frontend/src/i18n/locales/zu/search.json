@@ -13,9 +13,9 @@
     "searchMessagesFor": "Sesha imilayezo ethi \"{{query}}\""
   },
   "pages": {
-    "userName": "Umsebenzisi",
+    "userName": "Iphrofayela",
     "userKeywords": "i-akhawunti iphrofayela igama lomsebenzisi i-imeyili isithombe izilungiselelo account profile username email avatar settings",
-    "settingsName": "Izilungiselelo",
+    "settingsName": "I-akhawunti",
     "settingsKeywords": "okuthandayo umsebenzisi ukuphepha preferences user security",
     "preferencesName": "Okuthandayo",
     "preferencesKeywords": "itimu umbala ifonti izaziso ukubukeka theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "entsha dala new create",
     "groupsSearchName": "Thola Amaqembu",
     "groupsSearchKeywords": "thola sesha omphakathi discover search public",
-    "savedName": "Okulondoloziwe",
+    "savedName": "Imilayezo elondoloziwe",
     "savedKeywords": "okulondoloziwe ibhukhimakhi amabhukhimakhi okunenkanyezi okuphiniwe kamuva isixhumanisi saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "I-Arcade",
     "arcadeKeywords": "umdlalo ama-asteroid umkhumbi dubula okufihliwe dlala arcade game asteroids ship shoot easter egg play",

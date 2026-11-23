@@ -15,13 +15,13 @@
   "group": {
     "notFound": "Group not found",
     "members": "Members",
-    "customEmoji": "Custom Emoji",
-    "rename": "Rename Group",
-    "newChannel": "New Channel",
-    "inviteMember": "Invite Member",
-    "joinRequests": "Join Requests",
+    "customEmoji": "Custom emoji",
+    "rename": "Rename group",
+    "newChannel": "New channel",
+    "inviteMember": "Invite people",
+    "joinRequests": "Join requests",
     "bots": "Bots",
-    "leave": "Leave Group",
+    "leave": "Leave group",
     "joinVoiceChat": "Join voice chat",
     "inCall_one": "{{count}} in call",
     "inCall_other": "{{count}} in call"
@@ -147,7 +147,7 @@
   "inviteMember": {
     "pageTitle": "Invite member — {{group}}",
     "intro": "Invite someone to <accent>{{name}}</accent>",
-    "identifierLabel": "Username or Email",
+    "identifierLabel": "Handle or email",
     "identifierPlaceholder": "friend@pollis.com",
     "submit": "Send Invite",
     "submitting": "Sending…",

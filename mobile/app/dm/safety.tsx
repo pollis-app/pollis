@@ -71,7 +71,7 @@ function DMSafetyNumber() {
       <Header
         onBack={router.onBack}
         title={t("safety.title", { name })}
-        backTo={t("mobile:conversationInfo.info")}
+        backTo={t("dms:settings.pageTitle")}
       />
       <Body contentContainerStyle={{ padding: space.xxl, gap: space.xl }}>
         {safety.isLoading ? (

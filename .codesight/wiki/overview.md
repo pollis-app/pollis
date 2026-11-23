@@ -266,7 +266,7 @@ full detail: `docs/metadata-retention-policy.md` §3.
   plugin (`frontend/vite-plugin-oss-notices.ts`; a release build fails without
   it, the Playwright build gets `src/__mocks__/oss-notices.json`), mobile through
   `metro.config.js` into the gitignored `mobile/generated/` — shown on desktop
-  `/open-source` and mobile Self → Open source licenses; (2) per release, a
+  `/open-source` and mobile Account → Open source licenses; (2) per release, a
   CycloneDX SBOM and `summary.json`, published to
   `cdn.pollis.com/releases/oss/<product>/<version>/` (+ `latest.json`) by
   `scripts/publish-oss-evidence.sh`, from desktop-release.yml directly and from
@@ -286,7 +286,7 @@ full detail: `docs/metadata-retention-policy.md` §3.
   at write time (home dir, email local parts, IPs, 40+ char token runs). A failed
   DS call logs its path, status and request id. Nothing leaves the device; the
   `get_diagnostics` command feeds Diagnostics (desktop `/diagnostics`, mobile
-  Self → Diagnostics) and the "Copy diagnostics" button under sign-in errors.
+  Account → Diagnostics) and the "Copy diagnostics" button under sign-in errors.
   The log reaches ~1 MB, more than a screen or a clipboard holds, so the preview
   and Copy carry only the newest ~48 KB (`recentReport`, `frontend/src/utils/` and
   its copy in `mobile/lib/diagnosticsReport.ts`) and say they show only the most

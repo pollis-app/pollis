@@ -12,9 +12,9 @@
     "liveTerminal": "[direct]"
   },
   "pages": {
-    "userName": "Utilisateur",
+    "userName": "Profil",
     "userKeywords": "compte profil nom d'utilisateur e-mail email avatar paramètres",
-    "settingsName": "Paramètres",
+    "settingsName": "Compte",
     "settingsKeywords": "préférences utilisateur sécurité",
     "preferencesName": "Préférences",
     "preferencesKeywords": "thème couleur police notifications apparence",
@@ -48,7 +48,7 @@
     "groupsNewKeywords": "nouveau créer",
     "groupsSearchName": "Trouver des groupes",
     "groupsSearchKeywords": "découvrir rechercher public",
-    "savedName": "Enregistrés",
+    "savedName": "Messages enregistrés",
     "savedKeywords": "enregistrés signet signets favoris épinglés plus tard permalien lien",
     "arcadeName": "Arcade",
     "arcadeKeywords": "arcade jeu astéroïdes vaisseau tirer easter egg jouer",

@@ -161,7 +161,7 @@ and note E2EE in the review notes.
 (`NSPrivacyTracking=false`, no tracking domains, no ATT prompt needed.)
 
 **Also required by App Review (separate from the label):** in-app **account deletion** — shipped
-on mobile under Self → Security (see §8.1), which satisfies Apple 5.1.1(v) and Play's
+on mobile under Account → Security (see §8.1), which satisfies Apple 5.1.1(v) and Play's
 account-deletion policy.
 
 ---
@@ -176,7 +176,7 @@ Full reasoning in `docs/mobile-compliance-answers.md` §3. Form answers:
 - Is all user data encrypted in transit? → **Yes** (TLS everywhere; message content additionally
   E2EE).
 - Do you provide a way for users to request data deletion? → **Yes** — in-app account deletion
-  (Self → Security on mobile) plus
+  (Account → Security on mobile) plus
   `https://pollis.com/privacy.html#deletion`.
 
 Per-type declarations (each: **collected**, **not shared**, **not processed ephemerally**,
@@ -302,7 +302,7 @@ landscape is acceptable there).
 Re-checked 2026-08-22 against the actual signed build. Four of the six are done;
 do not re-litigate them from this list's old wording.
 
-1. ~~**Mobile in-app account deletion UI**~~ — **DONE.** Self → Security carries the
+1. ~~**Mobile in-app account deletion UI**~~ — **DONE.** Account → Security carries the
    typed-DELETE full-screen confirm → `delete_account` + best-effort `wipe_local_data`
    → sign-out (App Store 5.1.1(v)).
 2. ~~**`ITSAppUsesNonExemptEncryption`**~~ — **DONE.** `app.json` sets it `false` (France
@@ -361,7 +361,7 @@ real data.
 > If the app asks to approve this new device, choose "Use recovery key" and enter
 > `[recovery key]`.
 > Pollis is end-to-end encrypted messaging. To try it: create a group, open its channel, and
-> send a message; or open Self → Security to see devices and account deletion, or a direct message's info → "You & <name>" for its safety number.
+> send a message; or open Account → Security to see devices and account deletion, or a direct message's info → "You & <name>" for its safety number.
 > To report or block: long-press any message from another person → Report, or open a person's
 > profile → Report / Block User. Reports go to support@pollis.com and are reviewed within 24
 > hours; abusive accounts are suspended.
@@ -384,7 +384,7 @@ reused on every submission.
 TestFlight build, in this order: launch → Sign in (email + code; the terms line is visible) →
 PIN → recovery key screen → create a group (optionally with #General) → send a message → a
 second account's message: long-press → Report → pick a reason → Report and block → their
-profile shows Unblock → Self → Security → Delete account (show the confirm screen; cancel or
+profile shows Unblock → Account → Security → Delete account (show the confirm screen; cancel or
 complete on a throwaway account). There is no paid content.
 
 **2. Purpose and audience.** Pollis is an end-to-end encrypted group messenger, organised like
@@ -397,7 +397,7 @@ of Signal, open source, with no ads, tracking or data sale.
 **3. Setup and main features.** Sign in with the review account below (email + fixed code; no
 email is sent). If asked to approve a new device, choose "Use recovery key" and enter the key
 in the notes. Then: Groups → Create Group → open a channel → send a message; Direct → New
-message; Search; Self → Preferences / Security (devices, export, account
+message; Search; Account → Preferences / Security (devices, export, account
 deletion); a DM's info → "You & <name>" (safety numbers). Report: long-press another person's message → Report, or their profile → Report;
 Block from the same places. Nothing else (sample files, hardware) is needed.
 

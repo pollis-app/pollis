@@ -99,7 +99,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Розмова",
-    "info": "Інформація",
     "memberSelf": "@{{handle}} · ви",
     "roleAdmin": "Адмін",
     "roleOwner": "Власник"
@@ -242,15 +241,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, меню групи",
-      "invite": "Запросити людей",
       "search": "Пошук у {{name}}",
-      "createChannel": "Створити канал",
       "thisGroup": "Ця група",
       "members": "Учасники",
       "settings": "Налаштування групи",
-      "joinRequests": "Заявки на вступ",
-      "customEmoji": "Власні емодзі",
-      "leave": "Покинути групу",
       "leaveConfirm": "Торкніться ще раз, щоб покинути {{name}}",
       "leaveHint": "Щоб повернутися, знадобиться нове запрошення.",
       "leaving": "Вихід…",
@@ -410,14 +404,10 @@
       "editProfile": "Змінити профіль",
       "accountSection": "Обліковий запис",
       "appSection": "Застосунок",
-      "accountDetails": "Дані облікового запису",
-      "securityDevices": "Безпека й пристрої",
       "deviceCount_one": "{{count}} пристрій",
       "deviceCount_few": "{{count}} пристрої",
       "deviceCount_many": "{{count}} пристроїв",
       "deviceCount_other": "{{count}} пристрою",
-      "savedMessages": "Збережені повідомлення",
-      "appearance": "Вигляд",
       "signOut": "Вийти…",
       "signOutConfirmTitle": "Вийти з Pollis на цьому пристрої?",
       "version": "Версія",
@@ -427,7 +417,6 @@
       "updateHint": "Відкриває {{place}}",
       "updateFailed": "Не вдалося відкрити {{place}}"
     },
-    "identityHeading": "Ідентичність",
     "preferences": {
       "accentA11y": "Акцент {{name}}",
       "accentHeading": "Акцентний колір",
@@ -501,13 +490,8 @@
       "blockedUsers": "Заблоковані користувачі",
       "changePinSub": "4-значний PIN-код розблоковує Pollis на цьому пристрої."
     },
-    "title": "Профіль",
+    "title": "Обліковий запис",
     "userSettings": {
-      "displayName": "Відображуване ім'я",
-      "handle": "Ім'я користувача",
-      "handleHint": "Інші учасники можуть знайти вас і написати вам за @handle.",
-      "handleInvalid": "Ім'я користувача — від 3 до 32 символів: малі латинські літери, цифри, '_', '.' або '-'.",
-      "save": "Зберегти зміни",
       "photo": {
         "heading": "Фото профілю",
         "hint": "Це фото бачать усі, з ким ви спілкуєтеся.",
@@ -545,7 +529,7 @@
   "tabs": {
     "direct": "Особисті",
     "groups": "Групи",
-    "self": "Профіль",
+    "self": "Обліковий запис",
     "signInDevice": "Зв’язати",
     "withInvites_few": "{{label}}, {{count}} запрошення до груп",
     "withInvites_many": "{{label}}, {{count}} запрошень до груп",
@@ -574,7 +558,7 @@
     "message": "Написати",
     "opening": "Відкриваємо…",
     "safetyActionsHeading": "Дії безпеки",
-    "selfNote": "Це ви. Змінити ім'я користувача та відображуване ім'я можна в <link>Профіль → Налаштування користувача</link>.",
+    "selfNote": "Це ви. Змінити ім'я користувача та відображуване ім'я можна в <link>Обліковий запис → Профіль</link>.",
     "title": "Користувач",
     "unblockUser": "Розблокувати користувача",
     "verified": "◆ Перевірено"

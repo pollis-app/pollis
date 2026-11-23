@@ -92,8 +92,8 @@ export const SidebarProfilePanel: React.FC = observer(() => {
           data-testid="sidebar-profile-settings"
           activateOn="press"
           onClick={() => router.navigate({ to: "/settings" })}
-          aria-label={t("profile.settings")}
-          title={t("profile.settings")}
+          aria-label={t("sidebar.account")}
+          title={t("sidebar.account")}
         >
           <SettingsIcon size={15} className="size-[0.933rem] shrink-0" />
         </IconButton>

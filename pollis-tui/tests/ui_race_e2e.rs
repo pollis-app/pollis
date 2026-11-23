@@ -63,9 +63,9 @@ async fn message_surfaces_when_the_recipient_loses_the_epoch_zero_race() {
 
     bob.wait_for("pending", SIDEBAR_TIMEOUT).await;
     bob.press(KeyCode::Char('a'), KeyModifiers::NONE).await;
-    bob.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
+    bob.wait_for("DMs", SIDEBAR_TIMEOUT).await;
 
-    alice.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
+    alice.wait_for("DMs", SIDEBAR_TIMEOUT).await;
     alice.enter().await;
     alice.press(KeyCode::Char('i'), KeyModifiers::NONE).await;
     alice.send_keys("PING_ACROSS_THE_UI").await;

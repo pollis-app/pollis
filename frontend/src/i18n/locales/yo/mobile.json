@@ -93,7 +93,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Ìjíròrò",
-    "info": "Àlàyé",
     "memberSelf": "@{{handle}} · ìwọ",
     "roleAdmin": "Alábòójútó",
     "roleOwner": "Ẹni tó ni ín"
@@ -221,15 +220,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, àṣàyàn ẹgbẹ́",
-      "invite": "Ké sí àwọn ènìyàn",
       "search": "Wá nínú {{name}}",
-      "createChannel": "Ṣẹ̀dá ìkànnì",
       "thisGroup": "Ẹgbẹ́ yìí",
       "members": "Àwọn ọmọ ẹgbẹ́",
       "settings": "Ètò ẹgbẹ́",
-      "joinRequests": "Àwọn ìbéèrè láti darapọ̀",
-      "customEmoji": "Èmójì àkànṣe",
-      "leave": "Kúrò nínú ẹgbẹ́",
       "leaveConfirm": "Tẹ̀ ẹ́ lẹ́ẹ̀kan sí i láti kúrò nínú {{name}}",
       "leaveHint": "Ìwọ yóò nílò ìkésíni tuntun láti tún darapọ̀.",
       "leaving": "Ó ń kúrò…",
@@ -393,11 +387,7 @@
       "editProfile": "Ṣàtúnṣe profáìlì",
       "accountSection": "Àkáǹtì",
       "appSection": "Áàpù",
-      "accountDetails": "Àlàyé àkáǹtì",
-      "securityDevices": "Ààbò àti ẹ̀rọ",
       "deviceCount_other": "Ẹ̀rọ {{count}}",
-      "savedMessages": "Àwọn ìfiránṣẹ́ tí a fi pamọ́",
-      "appearance": "Ìrísí",
       "signOut": "Jáde…",
       "signOutConfirmTitle": "Ṣé o fẹ́ jáde kúrò nínú Pollis lórí ẹ̀rọ yìí?",
       "version": "Ẹ̀yà",
@@ -407,7 +397,6 @@
       "updateHint": "Yóò ṣí {{place}}",
       "updateFailed": "A kò lè ṣí {{place}}"
     },
-    "identityHeading": "Ìdánimọ̀",
     "preferences": {
       "accentA11y": "Àwọ̀ àfihàn {{name}}",
       "accentHeading": "Àwọ̀ àfihàn",
@@ -472,13 +461,8 @@
       "blockedUsers": "Àwọn olùmúlò tí a dènà",
       "changePinSub": "PIN oní-nọ́mbà 4 rẹ ni Pollis fi ń ṣí sílẹ̀ lórí ẹ̀rọ yìí."
     },
-    "title": "Èmi",
+    "title": "Àkáǹtì",
     "userSettings": {
-      "displayName": "Orúkọ àfihàn",
-      "handle": "Àdàpè",
-      "handleHint": "Àwọn ọmọ ẹgbẹ́ míì lè rí ọ kí wọ́n sì fi DM ránṣẹ́ sí ọ pẹ̀lú @àdàpè.",
-      "handleInvalid": "Àdàpè gbọ́dọ̀ ní àmì 3–32: lẹ́tà kékeré, nọ́mbà, '_', '.' tàbí '-'.",
-      "save": "Fi àwọn àyípadà pamọ́",
       "photo": {
         "heading": "Fọ́tò profáìlì",
         "hint": "Gbogbo ẹni tí o bá ń bá sọ̀rọ̀ ló ń rí fọ́tò yìí.",
@@ -514,9 +498,9 @@
     }
   },
   "tabs": {
-    "direct": "Àdáni",
+    "direct": "Ìfiránṣẹ́ àdáni",
     "groups": "Ẹgbẹ́",
-    "self": "Èmi",
+    "self": "Àkáǹtì",
     "signInDevice": "Sopọ̀",
     "withInvites_other": "{{label}}, ìkésíni ẹgbẹ́ {{count}}",
     "withRequests_other": "{{label}}, ìbéèrè ìfiránṣẹ́ {{count}}",
@@ -536,7 +520,7 @@
     "message": "Ìfiránṣẹ́",
     "opening": "Ó ń ṣí i…",
     "safetyActionsHeading": "Àwọn ìgbésẹ̀ ààbò",
-    "selfNote": "Ìwọ nìyí. Ṣàtúnṣe àdàpè àti orúkọ àfihàn rẹ nínú <link>Èmi → Ètò olùmúlò</link>.",
+    "selfNote": "Ìwọ nìyí. Ṣàtúnṣe àdàpè àti orúkọ àfihàn rẹ nínú <link>Àkáǹtì → Profáìlì</link>.",
     "title": "Olùmúlò",
     "unblockUser": "Mú ìdènà olùmúlò kúrò",
     "verified": "◆ A ti jẹ́rìísí"

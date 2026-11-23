@@ -34,7 +34,7 @@ export const RootPage: React.FC = observer(() => {
     },
     {
       id: "dms",
-      label: t("home.dms"),
+      label: t("sidebar.dms"),
       icon: <MessageCircle size={14} />,
       description: t("home.dmsDescription"),
       action: () => navigate({ to: "/dms" }),

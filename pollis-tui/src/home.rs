@@ -45,9 +45,9 @@ impl PromptKind {
             PromptKind::NewChannel { group_name, .. } => {
                 format!("New channel in {group_name}")
             }
-            PromptKind::StartDm => "Start DM — username or email".to_string(),
+            PromptKind::StartDm => "Start DM — handle or email".to_string(),
             PromptKind::Invite { group_name, .. } => {
-                format!("Invite to {group_name} — username or email")
+                format!("Invite to {group_name} — handle or email")
             }
             PromptKind::React { .. } => {
                 "React — an emoji or :shortcode: (:+1: :heart: :joy: :tada:)".to_string()
@@ -122,7 +122,7 @@ pub enum RowTarget {
     ToggleGroup(usize),
     /// A leaf conversation — Enter opens it.
     Open(ConvRef),
-    /// A non-interactive section label ("Direct Messages", "Requests").
+    /// A non-interactive section label ("DMs", "Requests").
     Header,
 }
 
@@ -333,7 +333,7 @@ pub fn context_group(
     None
 }
 
-/// Flatten the tree into sidebar rows: groups, then Direct Messages, then Requests.
+/// Flatten the tree into sidebar rows: groups, then DMs, then Requests.
 pub fn build_sidebar_rows(
     tree: &ConversationTree,
     expanded: &HashSet<String>,
@@ -366,7 +366,7 @@ pub fn build_sidebar_rows(
 
     if !tree.dm_channels.is_empty() {
         rows.push(SidebarRow {
-            label: "Direct Messages".to_string(),
+            label: "DMs".to_string(),
             depth: 0,
             target: RowTarget::Header,
         });
@@ -689,7 +689,7 @@ mod tests {
                 group_name: "General".into(),
             }
             .label(),
-            "Invite to General — username or email"
+            "Invite to General — handle or email"
         );
     }
 

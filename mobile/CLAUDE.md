@@ -428,7 +428,7 @@ both prod. Run the whole store build (prebuild, Xcode archive, Gradle) with
   others were inert. Grep for the read, not just for the var.
 
 **Install channel (#1443) — leave `POLLIS_RELEASE_KEY` unset (or `upload`).**
-Self → App → Update opens where the install updates from, and the build decides
+Account → App → Update opens where the install updates from, and the build decides
 which: `app.config.js` writes `extra.installChannel` = `sideload` when
 `POLLIS_RELEASE_KEY=sideload` is in the **environment**, else `store` when
 `POLLIS_OTA=production`, else `dev`. The copy that counts is the one
@@ -856,7 +856,7 @@ install and crash loading the core.
   `app.config.js` derivation, not debuggable; native libs for exactly its own
   ABI, `libpollis-native.so` included; and the raw bytes of `assets/index.android.bundle` contain `api.pollis.com`
   and not `api-dev.pollis.com` (Hermes bytecode — `strings` can miss it); and
-  `assets/app.config` embeds `extra.installChannel: "sideload"` (#1443 — Self →
+  `assets/app.config` embeds `extra.installChannel: "sideload"` (#1443 — Account →
   App → Update then opens this page, not Play). After
   upload it re-downloads both CDN URLs and `latest.json` and compares hashes.
 - **No native auto-update.** Nothing in the app checks for a newer APK; users
@@ -1226,10 +1226,10 @@ There is no bottom back strip any more (`Ctx`/`Crumb` are gone). Auth
 screens disable the edge swipe, so their top-left back is the only way out.
 Sub-screens are stack pushes outside `(tabs)`.
 
-Tabs and search (#1550): the bar is Groups · Direct · shield · Self. The
+Tabs and search (#1550): the bar is Groups · DMs · shield · Account (routes `groups`, `direct`, `self`; labels as on desktop, #2086). The
 shield (`tab-link-device`, labelled "Link") is a shortcut, not a tab: it
 pushes `self/link-device` (Scan to sign in a device, the same page and PIN
-confirm as Self → Security) onto the root stack, so back returns to the tab
+confirm as Account → Security) onto the root stack, so back returns to the tab
 it was tapped from, and it is never the selected cell. `TabBar` matches cells
 to routes by name, never by index, and a second tap on the focused tab calls
 `emitTabReselect` (`lib/tabReselect.ts`; Self ends a search on it). Global
@@ -1409,7 +1409,7 @@ Current state:
   React Query hooks (no hardcoded mock arrays); message send / receive / ingest /
   reactions / edit / delete; profile, devices, blocking, safety numbers,
   preferences. Safety numbers live in the DM, not on a profile (#1563): DM info
-  → `dm/safety` ("You & <name>", one per other member in a group DM). Self → Security additionally carries: in-app **account deletion**
+  → `dm/safety` ("You & <name>", one per other member in a group DM). Account → Security additionally carries: in-app **account deletion**
   (typed-DELETE full-screen confirm → `delete_account` + best-effort
   `wipe_local_data` → sign-out; App Store 5.1.1(v)); **auto-lock** (#899,
   `lib/autolock.tsx` — RN-layer deadline against the plain `lock` arm, since
@@ -1615,7 +1615,7 @@ Current state:
   after. Nothing else refreshes it within the query's minute, and the realtime
   `membership_changed` echo that once did is lost whenever the DS cannot reach
   LiveKit, which left the creator's message rows on the letter avatar
-  (`tests/avatars.test.ts`). Set / change / remove: Self → Account details
+  (`tests/avatars.test.ts`). Set / change / remove: Account → Profile
   (`components/self/ProfilePhotoEditor.tsx`; library or front camera, system square
   crop, `upload_avatar` re-encodes and strips EXIF). `endSession()` wipes the
   directory. Maestro: `.maestro/flows/profile-photo.yaml`.
@@ -1879,7 +1879,7 @@ Current state:
     a store-signed build (PL-24).
 - **webrtc Expo config plugin** + an AndroidManifest mic/camera **removal** rule
   so the data-only realtime path adds no voice/video permission.
-- **QR sign-in, both directions (#1207, #1361).** Self → Security → "Scan to
+- **QR sign-in, both directions (#1207, #1361).** Account → Security → "Scan to
   sign in a device" (`app/self/link-device.tsx`) is a **scanner**. It reads the
   v2 code a new desktop or phone shows (`pollis-link:v2:`, the new device's
   ephemeral key, no secret), takes the PIN, then `accept_device_offer` +

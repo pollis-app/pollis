@@ -12,9 +12,9 @@
     "liveTerminal": "[直播中]"
   },
   "pages": {
-    "userName": "用户",
+    "userName": "个人资料",
     "userKeywords": "用户 账户 个人资料 用户名 邮箱 头像 设置 account profile username email avatar settings",
-    "settingsName": "设置",
+    "settingsName": "账户",
     "settingsKeywords": "设置 偏好设置 用户 安全 preferences user security",
     "preferencesName": "偏好设置",
     "preferencesKeywords": "偏好设置 主题 颜色 字体 字号 通知 外观 theme color font notifications appearance",
@@ -48,7 +48,7 @@
     "groupsNewKeywords": "新建 创建 群组 new create",
     "groupsSearchName": "查找群组",
     "groupsSearchKeywords": "发现 搜索 公开 群组 discover search public",
-    "savedName": "收藏",
+    "savedName": "已保存的消息",
     "savedKeywords": "收藏 书签 标记 稍后 链接 saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "街机",
     "arcadeKeywords": "街机 游戏 小行星 飞船 射击 彩蛋 arcade game asteroids ship shoot easter egg play",

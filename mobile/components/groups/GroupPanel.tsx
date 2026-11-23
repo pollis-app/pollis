@@ -177,7 +177,7 @@ function GroupPanelImpl({
             <IconButton
               testID="btn-create-channel"
               filled
-              accessibilityLabel={t("group.panel.createChannel")}
+              accessibilityLabel={t("channels:group.newChannel")}
               icon={<Icon.plus size={20} color={semantic.text} />}
               onPress={() => setCreateIn({ category: null })}
             />
@@ -187,7 +187,7 @@ function GroupPanelImpl({
           testID="row-group-invite"
           pressIn
           filled
-          accessibilityLabel={t("group.panel.invite")}
+          accessibilityLabel={t("channels:group.inviteMember")}
           icon={<Icon.userPlus size={20} color={semantic.text} />}
           onPress={() => router.push({ pathname: "/group/invite", params: { groupId } })}
         />
@@ -297,10 +297,10 @@ function GroupPanelImpl({
           <ChannelRow
             testID="row-group-requests"
             icon={<Icon.inbox size={16} color={semantic.text} />}
-            name={t("group.panel.joinRequests")}
+            name={t("channels:group.joinRequests")}
             count={joinRequests.length}
             dimWhenRead={false}
-            accessibilityLabel={`${t("group.panel.joinRequests")}, ${t("channels:groups.joinRequestsPending", { count: joinRequests.length })}`}
+            accessibilityLabel={`${t("channels:group.joinRequests")}, ${t("channels:groups.joinRequestsPending", { count: joinRequests.length })}`}
             onPress={() => router.push({ pathname: "/group/requests", params: { groupId } })}
           />
         ) : null}

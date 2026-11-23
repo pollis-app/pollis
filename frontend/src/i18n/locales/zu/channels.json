@@ -15,12 +15,12 @@
   "group": {
     "notFound": "Iqembu alitholakalanga",
     "members": "Amalungu",
-    "customEmoji": "Ama-emoji Enziwe Ngokwezifiso",
+    "customEmoji": "Ama-emoji enziwe ngokwezifiso",
     "rename": "Qamba Kabusha Iqembu",
     "newChannel": "Isiteshi Esisha",
-    "inviteMember": "Mema Ilungu",
-    "joinRequests": "Izicelo Zokujoyina",
-    "leave": "Shiya Iqembu",
+    "inviteMember": "Mema abantu",
+    "joinRequests": "Izicelo zokujoyina",
+    "leave": "Shiya iqembu",
     "joinVoiceChat": "Joyina ingxoxo yezwi",
     "inCall_one": "{{count}} kukholi",
     "inCall_other": "{{count}} kukholi"

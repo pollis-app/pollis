@@ -13,9 +13,9 @@
     "searchMessagesFor": "Tafuta ujumbe wenye \"{{query}}\""
   },
   "pages": {
-    "userName": "Mtumiaji",
+    "userName": "Wasifu",
     "userKeywords": "akaunti wasifu jina la mtumiaji barua pepe picha mipangilio account profile username email avatar settings",
-    "settingsName": "Mipangilio",
+    "settingsName": "Akaunti",
     "settingsKeywords": "mapendeleo mtumiaji usalama preferences user security",
     "preferencesName": "Mapendeleo",
     "preferencesKeywords": "mandhari rangi fonti arifa mwonekano theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "mpya unda new create",
     "groupsSearchName": "Tafuta vikundi",
     "groupsSearchKeywords": "gundua tafuta vya umma discover search public",
-    "savedName": "Vilivyohifadhiwa",
+    "savedName": "Ujumbe uliohifadhiwa",
     "savedKeywords": "vilivyohifadhiwa alamisho nyota vilivyobanwa baadaye kiungo saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "Michezo",
     "arcadeKeywords": "michezo mchezo vimondo meli piga risasi siri cheza arcade game asteroids ship shoot easter egg play",

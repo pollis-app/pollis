@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "ਗੱਲਬਾਤ",
-    "info": "ਜਾਣਕਾਰੀ",
     "memberSelf": "@{{handle}} · ਤੁਸੀਂ",
     "roleAdmin": "ਐਡਮਿਨ",
     "roleOwner": "ਮਾਲਕ"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, ਗਰੁੱਪ ਮੀਨੂ",
-      "invite": "ਲੋਕਾਂ ਨੂੰ ਸੱਦਾ ਦਿਓ",
       "search": "{{name}} ਵਿੱਚ ਖੋਜੋ",
-      "createChannel": "ਚੈਨਲ ਬਣਾਓ",
       "thisGroup": "ਇਹ ਗਰੁੱਪ",
       "members": "ਮੈਂਬਰ",
       "settings": "ਗਰੁੱਪ ਸੈਟਿੰਗਾਂ",
-      "joinRequests": "ਸ਼ਾਮਲ ਹੋਣ ਦੀਆਂ ਬੇਨਤੀਆਂ",
-      "customEmoji": "ਕਸਟਮ ਇਮੋਜੀ",
-      "leave": "ਗਰੁੱਪ ਛੱਡੋ",
       "leaveConfirm": "{{name}} ਛੱਡਣ ਲਈ ਦੁਬਾਰਾ ਟੈਪ ਕਰੋ",
       "leaveHint": "ਦੁਬਾਰਾ ਸ਼ਾਮਲ ਹੋਣ ਲਈ ਤੁਹਾਨੂੰ ਨਵੇਂ ਸੱਦੇ ਦੀ ਲੋੜ ਪਵੇਗੀ।",
       "leaving": "ਛੱਡਿਆ ਜਾ ਰਿਹਾ ਹੈ…",
@@ -402,12 +396,8 @@
       "editProfile": "ਪ੍ਰੋਫਾਈਲ ਸੋਧੋ",
       "accountSection": "ਖਾਤਾ",
       "appSection": "ਐਪ",
-      "accountDetails": "ਖਾਤੇ ਦੇ ਵੇਰਵੇ",
-      "securityDevices": "ਸੁਰੱਖਿਆ ਅਤੇ ਡਿਵਾਈਸ",
       "deviceCount_one": "{{count}} ਡਿਵਾਈਸ",
       "deviceCount_other": "{{count}} ਡਿਵਾਈਸ",
-      "savedMessages": "ਰੱਖਿਅਤ ਕੀਤੇ ਸੁਨੇਹੇ",
-      "appearance": "ਦਿੱਖ",
       "signOut": "ਸਾਈਨ ਆਉਟ ਕਰੋ…",
       "signOutConfirmTitle": "ਕੀ ਇਸ ਡਿਵਾਈਸ 'ਤੇ Pollis ਤੋਂ ਸਾਈਨ ਆਉਟ ਕਰਨਾ ਹੈ?",
       "version": "ਵਰਜਨ",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}} ਖੋਲ੍ਹਦਾ ਹੈ",
       "updateFailed": "{{place}} ਖੋਲ੍ਹਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ"
     },
-    "identityHeading": "ਪਛਾਣ",
     "preferences": {
       "accentA11y": "ਐਕਸੈਂਟ {{name}}",
       "accentHeading": "ਐਕਸੈਂਟ",
@@ -485,13 +474,8 @@
       "blockedUsers": "ਬਲੌਕ ਕੀਤੇ ਵਰਤੋਂਕਾਰ",
       "changePinSub": "ਤੁਹਾਡਾ 4-ਅੰਕਾਂ ਵਾਲਾ PIN ਇਸ ਡਿਵਾਈਸ 'ਤੇ Pollis ਨੂੰ ਅਨਲੌਕ ਕਰਦਾ ਹੈ।"
     },
-    "title": "ਮੈਂ",
+    "title": "ਖਾਤਾ",
     "userSettings": {
-      "displayName": "ਦਿਖਣ ਵਾਲਾ ਨਾਮ",
-      "handle": "ਹੈਂਡਲ",
-      "handleHint": "ਦੂਜੇ ਮੈਂਬਰ @handle ਨਾਲ ਤੁਹਾਨੂੰ ਲੱਭ ਸਕਦੇ ਹਨ ਅਤੇ DM ਭੇਜ ਸਕਦੇ ਹਨ।",
-      "handleInvalid": "ਹੈਂਡਲ 3–32 ਅੱਖਰਾਂ ਦੇ ਹੁੰਦੇ ਹਨ: ਛੋਟੇ ਅੰਗਰੇਜ਼ੀ ਅੱਖਰ, ਅੰਕ, '_', '.' ਜਾਂ '-'।",
-      "save": "ਬਦਲਾਅ ਰੱਖਿਅਤ ਕਰੋ",
       "photo": {
         "heading": "ਪ੍ਰੋਫਾਈਲ ਫ਼ੋਟੋ",
         "hint": "ਜਿਸ ਨਾਲ ਵੀ ਤੁਸੀਂ ਗੱਲ ਕਰਦੇ ਹੋ, ਉਹ ਇਹ ਫ਼ੋਟੋ ਦੇਖਦਾ ਹੈ।",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "ਸਿੱਧੇ",
+    "direct": "DM",
     "groups": "ਗਰੁੱਪ",
-    "self": "ਮੈਂ",
+    "self": "ਖਾਤਾ",
     "signInDevice": "ਲਿੰਕ",
     "withInvites_one": "{{label}}, {{count}} ਗਰੁੱਪ ਸੱਦਾ",
     "withInvites_other": "{{label}}, {{count}} ਗਰੁੱਪ ਸੱਦੇ",
@@ -552,7 +536,7 @@
     "message": "ਸੁਨੇਹਾ",
     "opening": "ਖੋਲ੍ਹਿਆ ਜਾ ਰਿਹਾ ਹੈ…",
     "safetyActionsHeading": "ਸੁਰੱਖਿਆ ਕਾਰਵਾਈਆਂ",
-    "selfNote": "ਇਹ ਤੁਸੀਂ ਹੋ। ਆਪਣਾ ਹੈਂਡਲ ਅਤੇ ਦਿਖਣ ਵਾਲਾ ਨਾਮ <link>ਮੈਂ → ਵਰਤੋਂਕਾਰ ਸੈਟਿੰਗਾਂ</link> ਵਿੱਚ ਸੋਧੋ।",
+    "selfNote": "ਇਹ ਤੁਸੀਂ ਹੋ। ਆਪਣਾ ਹੈਂਡਲ ਅਤੇ ਦਿਖਣ ਵਾਲਾ ਨਾਮ <link>ਖਾਤਾ → ਪ੍ਰੋਫਾਈਲ</link> ਵਿੱਚ ਸੋਧੋ।",
     "title": "ਵਰਤੋਂਕਾਰ",
     "unblockUser": "ਵਰਤੋਂਕਾਰ ਨੂੰ ਅਨਬਲੌਕ ਕਰੋ",
     "verified": "◆ ਪੁਸ਼ਟੀ ਕੀਤੀ ਗਈ"

@@ -12,9 +12,9 @@
     "liveTerminal": "[directo]"
   },
   "pages": {
-    "userName": "Usuario",
+    "userName": "Perfil",
     "userKeywords": "cuenta perfil nombre de usuario correo email avatar ajustes",
-    "settingsName": "Ajustes",
+    "settingsName": "Cuenta",
     "settingsKeywords": "preferencias usuario seguridad",
     "preferencesName": "Preferencias",
     "preferencesKeywords": "tema color fuente letra notificaciones apariencia",
@@ -48,7 +48,7 @@
     "groupsNewKeywords": "nuevo crear",
     "groupsSearchName": "Buscar grupos",
     "groupsSearchKeywords": "descubrir buscar público",
-    "savedName": "Guardados",
+    "savedName": "Mensajes guardados",
     "savedKeywords": "guardados marcador marcadores destacados fijados para después enlace permanente",
     "arcadeName": "Arcade",
     "arcadeKeywords": "arcade juego asteroides nave disparar huevo de pascua jugar",

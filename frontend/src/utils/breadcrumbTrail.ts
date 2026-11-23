@@ -111,7 +111,7 @@ export function breadcrumbTrail(pathname: string, ctx: TrailContext, t: T): Segm
       }
     }
   } else if (pathname.startsWith("/dms")) {
-    out.push({ label: t("nav:breadcrumb.directMessages"), to: "/dms" });
+    out.push({ label: t("nav:sidebar.dms"), to: "/dms" });
 
     const convIdMatch = pathname.match(/^\/dms\/([^/]+)/);
     const conversationId = convIdMatch?.[1];
@@ -148,7 +148,7 @@ export function breadcrumbTrail(pathname: string, ctx: TrailContext, t: T): Segm
     out.push({ label: t("nav:breadcrumb.language"), to: "/preferences/language" });
   } else if (pathname === "/user") {
     out.push({ label: t("nav:breadcrumb.account"), to: "/settings" });
-    out.push({ label: t("nav:breadcrumb.userSettings"), to: "/user" });
+    out.push({ label: t("nav:sidebar.profile"), to: "/user" });
   } else if (pathname.startsWith("/user/")) {
     out.push({ label: t("nav:breadcrumb.profile"), to: pathname });
   } else if (pathname === "/security") {
