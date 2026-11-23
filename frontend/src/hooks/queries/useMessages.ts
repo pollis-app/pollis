@@ -132,7 +132,8 @@ type RawDmChannel = {
   created_at: string;
   /** Newest local message's `sent_at`, else `created_at` (#1838); the list arrives sorted by it. */
   last_activity_at: string;
-  members: Array<{ user_id: string; username?: string; avatar_url?: string; added_by: string; added_at: string }>;
+  /** `preferred_name` (#2085): the display name, with the row. */
+  members: Array<{ user_id: string; username?: string; preferred_name?: string | null; avatar_url?: string; added_by: string; added_at: string }>;
 };
 
 // Decode the content string: plain text, or `{"_att":[…],"_txt":caption}`. Shared by pins (#99) and the Vault (#107); `origin` names each attachment's key (#1382).

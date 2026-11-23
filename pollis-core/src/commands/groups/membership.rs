@@ -23,7 +23,8 @@ pub async fn get_group_members(
         .map(|m| GroupMember {
             user_id: m.user_id,
             username: m.username,
-            display_name: None,
+            // #2085: the display name arrives with the roster row.
+            display_name: m.preferred_name,
             avatar_url: m.avatar_url,
             role: m.role,
             joined_at: m.joined_at,

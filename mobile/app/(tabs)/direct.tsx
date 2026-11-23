@@ -27,7 +27,6 @@ import {
   previewText,
   markConversationRead,
   usePrefetchConversation,
-  useUserProfiles,
 } from "../../hooks/queries";
 import { personName } from "../../lib/personName";
 import { appStore } from "../../stores/appStore";
@@ -71,23 +70,15 @@ function Direct() {
   const dmIds = useMemo(() => dms.map((d) => d.id), [dms]);
   const { data: lastMessages = {} } = useLastMessages(dmIds);
 
-  // Display names (#1971): one batched read for every row.
-  const peerIds = useMemo(
-    () => dms.flatMap((d) => (d.user2_id ? [d.user2_id] : [])),
-    [dms],
-  );
-  const { data: profiles } = useUserProfiles(peerIds);
+  // Display names (#1971) arrive with the list itself (#2085), so a row is named once.
   const rowName = useCallback(
     (d: (typeof dms)[number]) =>
       personName(
-        {
-          username: d.user2_identifier,
-          preferred_name: d.user2_id ? profiles?.get(d.user2_id)?.preferred_name : undefined,
-        },
+        { username: d.user2_identifier, preferred_name: d.user2_preferred_name },
         t("dms:profile.fallbackName"),
         { at: false },
       ),
-    [profiles, t],
+    [t],
   );
 
   // Warm every row's picture before it scrolls into view.

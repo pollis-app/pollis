@@ -23,6 +23,9 @@ pub struct DmChannel {
 pub struct DmChannelMember {
     pub user_id: String,
     pub username: Option<String>,
+    /// #2085: the display name, with the row; never a separate lookup.
+    #[serde(default)]
+    pub preferred_name: Option<String>,
     pub avatar_url: Option<String>,
     pub added_by: String,
     pub added_at: String,
@@ -41,6 +44,7 @@ fn dm_from_wire(d: pollis_api::directory::DmChannelWire) -> DmChannel {
             .map(|m| DmChannelMember {
                 user_id: m.user_id,
                 username: m.username,
+                preferred_name: m.preferred_name,
                 avatar_url: m.avatar_url,
                 added_by: m.added_by.unwrap_or_default(),
                 added_at: m.added_at.unwrap_or_default(),
@@ -94,6 +98,7 @@ pub async fn create_dm_channel(
                     .map(|m| DmChannelMember {
                         user_id: m.user_id,
                         username: m.username,
+                        preferred_name: m.preferred_name,
                         avatar_url: m.avatar_url,
                         added_by: creator_id.clone(),
                         added_at: now.clone(),

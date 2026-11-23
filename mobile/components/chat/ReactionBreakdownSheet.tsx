@@ -68,8 +68,10 @@ export function ReactionBreakdownSheet({
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const ids = useMemo(() => reactorIds(reactions), [reactions]);
-  // ONE batched read for everyone on the message; the roster draws the first frame.
-  const fetched = useUserProfiles(ids);
+  // The roster names members with their display names (#2085); ONE batched read covers only
+  // whoever it cannot (a sender who has left, known by handle alone).
+  const unnamed = useMemo(() => ids.filter((id) => roster.get(id)?.preferred_name === undefined), [ids, roster]);
+  const fetched = useUserProfiles(unnamed);
   const profiles = useMemo(
     () => mergeProfiles(roster, fetched.data as ReadonlyMap<string, ReactorProfile> | undefined),
     [roster, fetched.data],

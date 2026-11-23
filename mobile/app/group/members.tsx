@@ -16,7 +16,6 @@ import {
   useRemoveMember,
   useSetMemberRole,
   useUserGroupsWithChannels,
-  useUserProfiles,
   useGroupApps,
   sortMembersByRole,
 } from "../../hooks/queries";
@@ -58,12 +57,6 @@ function Members() {
 
   // Role then alphabetical (no presence source on mobile).
   const sortedMembers = useMemo(() => sortMembersByRole(members), [members]);
-  // Display names (#1971): one batched read; rows show the handle until it lands.
-  const personIds = useMemo(
-    () => [...members.map((m) => m.user_id), ...invites.map((inv) => inv.invitee_id)],
-    [members, invites],
-  );
-  const { data: profiles } = useUserProfiles(personIds);
   // Per-group aliases (#2003): the alias headlines, the handle stays beside it.
   const aliases = useGroupAliases(id);
   const resetAlias = useResetGroupAlias();
@@ -129,7 +122,8 @@ function Members() {
               const label = aliasDisplay
                 ? { name: aliasDisplay, isHandle: false }
                 : personName(
-                    { username: m.username, preferred_name: profiles?.get(m.user_id)?.preferred_name },
+                    // #2085: the display name comes with the roster row.
+                    { username: m.username, preferred_name: m.display_name },
                     m.user_id.slice(0, 8),
                   );
               const handle = label.name;
@@ -287,7 +281,7 @@ function Members() {
                 const label = personName(
                   {
                     username: inv.invitee_username,
-                    preferred_name: profiles?.get(inv.invitee_id)?.preferred_name,
+                    preferred_name: inv.invitee_preferred_name,
                   },
                   inv.invitee_id.slice(0, 8),
                 );

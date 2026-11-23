@@ -28,6 +28,8 @@ export interface GroupMember {
   avatar_url?: string | null;
   role: string;
   joined_at: string;
+  /** #2085: the member's display name, with the roster row (core's `display_name`). */
+  display_name?: string | null;
   /** A bot (#1182): drives the Bot badge. Absent from an old core, which means human. */
   is_bot?: boolean;
 }
@@ -37,6 +39,8 @@ export interface GroupInvite {
   id: string;
   invitee_id: string;
   invitee_username: string | null;
+  /** #2085: the invitee's display name, with the row. */
+  invitee_preferred_name?: string | null;
   inviter_id: string;
   inviter_username: string | null;
   created_at: string;

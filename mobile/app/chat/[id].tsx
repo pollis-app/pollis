@@ -708,8 +708,9 @@ function TextChat(props: ChatViewProps = {}) {
     40,
   );
 
-  // Reactors' names before the sheet's one batched profile read lands: loaded senders
-  // (covers people who have left), then the roster, then self.
+  // Reactors' names on the sheet's first frame: loaded senders (covers people who have left),
+  // then the roster, whose rows carry display names (#2085), then self. The sheet reads
+  // profiles only for whoever this cannot name.
   const reactorRoster = useMemo(() => {
     const map = new Map<string, ReactorProfile>();
     for (const m of messages) {
@@ -717,17 +718,26 @@ function TextChat(props: ChatViewProps = {}) {
         map.set(m.sender_id, { username: m.sender_username });
       }
     }
-    for (const m of [...(dmChannel?.members ?? []), ...(groupMembers ?? [])]) {
+    for (const m of dmChannel?.members ?? []) {
       map.set(m.user_id, {
         username: m.username || map.get(m.user_id)?.username,
+        preferred_name: m.preferred_name ?? null,
+        avatar_url: m.avatar_url ?? null,
+      });
+    }
+    for (const m of groupMembers ?? []) {
+      map.set(m.user_id, {
+        username: m.username || map.get(m.user_id)?.username,
+        preferred_name: m.display_name ?? null,
         avatar_url: m.avatar_url ?? null,
       });
     }
     if (currentUser) {
+      const prev = map.get(currentUser.id);
       map.set(currentUser.id, {
-        ...map.get(currentUser.id),
-        username: currentUser.username || map.get(currentUser.id)?.username,
-        preferred_name: currentUser.preferred_name,
+        ...prev,
+        username: currentUser.username || prev?.username,
+        preferred_name: currentUser.preferred_name ?? prev?.preferred_name,
       });
     }
     return map;

@@ -16,6 +16,8 @@ import { activityMs, bumpActivity } from "../../lib/dmActivity";
 export interface RawDmMember {
   user_id: string;
   username?: string;
+  /** #2085: the display name, with the row; absent from an older core. */
+  preferred_name?: string | null;
   avatar_url?: string;
 }
 
@@ -45,6 +47,7 @@ function transform(
     user1_id: selfId,
     user2_identifier: other?.username || other?.user_id || "Unknown",
     user2_id: other?.user_id,
+    user2_preferred_name: other?.preferred_name ?? undefined,
     user2_avatar_url: other?.avatar_url,
     created_at: new Date(raw.created_at).getTime(),
     // Latest activity (#1838); the core already sorted the list by it.

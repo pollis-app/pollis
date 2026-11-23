@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { View, useWindowDimensions } from "react-native";
 import { Text } from "../../components/Text";
 import { useTranslation } from "react-i18next";
@@ -17,7 +17,6 @@ import {
   useDMRequests,
   useAcceptDMRequest,
   useBlockUser,
-  useUserProfiles,
 } from "../../hooks/queries";
 import { useThemeRerender } from "../../components/theme";
 import { dismissConversationNotifications } from "../../lib/push";
@@ -30,12 +29,6 @@ export default function DMRequests() {
   const { data: requests = [], isLoading } = useDMRequests();
   const acceptRequest = useAcceptDMRequest();
   const blockUser = useBlockUser();
-  // Display names (#1971), one batched read.
-  const senderIds = useMemo(
-    () => requests.flatMap((d) => (d.user2_id ? [d.user2_id] : [])),
-    [requests],
-  );
-  const { data: profiles } = useUserProfiles(senderIds);
   // Narrow rows put Block / Accept under the name, so the name keeps the width (#1971).
   const { width: windowWidth, fontScale } = useWindowDimensions();
   const [listWidth, setListWidth] = useState(windowWidth - 2 * space.xxl);
@@ -57,9 +50,8 @@ export default function DMRequests() {
                 const label = personName(
                   {
                     username: d.user2_identifier,
-                    preferred_name: d.user2_id
-                      ? profiles?.get(d.user2_id)?.preferred_name
-                      : undefined,
+                    // #2085: with the request row, never a second read.
+                    preferred_name: d.user2_preferred_name,
                   },
                   t("dms:profile.fallbackName"),
                 );
