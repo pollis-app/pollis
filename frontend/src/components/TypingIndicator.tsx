@@ -21,7 +21,7 @@ function describe(usernames: string[], t: TFunction): string | null {
   return t("chat:typing.several", { count: usernames.length });
 }
 
-/** "X is typing…" above the input, in a fixed-height row. */
+/** "X is typing…" above the input, in a fixed-height one-line row: the messages never move as it shows or hides (#2082). */
 export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
   channelId,
   conversationId,
@@ -33,7 +33,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
   return (
     <div
       data-testid="typing-indicator"
-      className="px-4 text-secondary font-mono text-muted"
+      className="px-4 text-secondary font-mono text-muted truncate"
       style={{
         minHeight: 16,
         lineHeight: "16px",
