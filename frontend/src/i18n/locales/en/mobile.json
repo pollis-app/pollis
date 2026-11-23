@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Conversation",
-    "info": "Info",
     "memberSelf": "@{{handle}} · you",
     "roleAdmin": "Admin",
     "roleOwner": "Owner"
@@ -119,7 +118,7 @@
   "dm": {
     "backToInbox": "Back to inbox",
     "danger": "Danger",
-    "exactMatchHint": "Enter a user's exact username or email address.",
+    "exactMatchHint": "Enter a user's exact handle or email address.",
     "new": "New",
     "participants": "Participants",
     "participantsCount_one": "Participants · {{count}}",
@@ -127,7 +126,7 @@
     "searchFailed": "Search failed.",
     "startWith": "Start DM with @{{name}}",
     "tapAgainToConfirm": "Tap again to confirm",
-    "identifierLabel": "Username or email"
+    "identifierLabel": "Handle or email"
   },
   "emoji": {
     "groupFallback": "Group"
@@ -178,7 +177,7 @@
       "share": "Share",
       "shareableLink": "Shareable link",
       "thisGroup": "this group",
-      "identifierLabel": "Username or email",
+      "identifierLabel": "Handle or email",
       "submit": "Send invite"
     },
     "inviteLinks": {
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, group menu",
-      "invite": "Invite people",
       "search": "Search {{name}}",
-      "createChannel": "Create a channel",
       "thisGroup": "This group",
       "members": "Members",
       "settings": "Group settings",
-      "joinRequests": "Join requests",
-      "customEmoji": "Custom emoji",
-      "leave": "Leave group",
       "leaveConfirm": "Tap again to leave {{name}}",
       "leaveHint": "You'll need a new invite to rejoin.",
       "leaving": "Leaving…",
@@ -273,7 +267,7 @@
   "invite": {
     "backToPollis": "Back to Pollis",
     "checking": "Checking your invite…",
-    "confirm": "Joining shares your username and device identity with everyone in this group. Only join a link you trust.",
+    "confirm": "Joining shares your handle and device identity with everyone in this group. Only join a link you trust.",
     "confirmTitle": "Join this group?",
     "confirmTitleNamed": "Join {{name}}?",
     "join": "Join group",
@@ -346,7 +340,7 @@
   "search": {
     "channels": "Channels",
     "clear": "Clear search",
-    "hint": "Type at least 2 characters to search. To find a person, enter their exact username and press return.",
+    "hint": "Type at least 2 characters to search. To find a person, enter their exact handle and press return.",
     "filtersLabel": "Filters",
     "messages": "Messages",
     "placeholder": "Search everything…",
@@ -402,12 +396,8 @@
       "editProfile": "Edit profile",
       "accountSection": "Account",
       "appSection": "App",
-      "accountDetails": "Account details",
-      "securityDevices": "Security & devices",
       "deviceCount_one": "{{count}} device",
       "deviceCount_other": "{{count}} devices",
-      "savedMessages": "Saved messages",
-      "appearance": "Appearance",
       "signOut": "Sign out…",
       "signOutConfirmTitle": "Sign out of Pollis on this device?",
       "version": "Version",
@@ -417,7 +407,6 @@
       "updateHint": "Opens {{place}}",
       "updateFailed": "Couldn’t open {{place}}"
     },
-    "identityHeading": "Identity",
     "preferences": {
       "accentA11y": "Accent {{name}}",
       "accentHeading": "Accent",
@@ -485,13 +474,8 @@
       "blockedUsers": "Blocked users",
       "changePinSub": "Your 4-digit PIN unlocks Pollis on this device."
     },
-    "title": "Self",
+    "title": "Account",
     "userSettings": {
-      "displayName": "Display name",
-      "handle": "Handle",
-      "handleHint": "Other members can find and DM you with @handle.",
-      "handleInvalid": "Handles are 3–32 characters: lowercase letters, digits, '_', '.' or '-'.",
-      "save": "Save changes",
       "photo": {
         "heading": "Profile photo",
         "hint": "Everyone you talk to sees this photo.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "Direct",
+    "direct": "DMs",
     "groups": "Groups",
-    "self": "Self",
+    "self": "Account",
     "signInDevice": "Link",
     "withInvites_one": "{{label}}, {{count}} group invite",
     "withInvites_other": "{{label}}, {{count}} group invites",
@@ -552,7 +536,7 @@
     "message": "Message",
     "opening": "Opening…",
     "safetyActionsHeading": "Safety actions",
-    "selfNote": "This is you. Edit your handle and display name in <link>Self → User settings</link>.",
+    "selfNote": "This is you. Edit your handle and display name in <link>Account → Profile</link>.",
     "title": "User",
     "unblockUser": "Unblock user",
     "verified": "◆ Verified"

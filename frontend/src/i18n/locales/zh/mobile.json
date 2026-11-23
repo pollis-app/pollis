@@ -93,7 +93,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "对话",
-    "info": "信息",
     "memberSelf": "@{{handle}} · 你",
     "roleAdmin": "管理员",
     "roleOwner": "所有者"
@@ -221,15 +220,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}，群组菜单",
-      "invite": "邀请成员",
       "search": "搜索 {{name}}",
-      "createChannel": "创建频道",
       "thisGroup": "此群组",
       "members": "成员",
       "settings": "群组设置",
-      "joinRequests": "加入申请",
-      "customEmoji": "自定义表情",
-      "leave": "退出群组",
       "leaveConfirm": "再次轻点以退出 {{name}}",
       "leaveHint": "重新加入需要新的邀请。",
       "leaving": "正在退出…",
@@ -383,11 +377,7 @@
       "editProfile": "编辑个人资料",
       "accountSection": "账户",
       "appSection": "应用",
-      "accountDetails": "账户详情",
-      "securityDevices": "安全与设备",
       "deviceCount_other": "{{count}} 台设备",
-      "savedMessages": "已保存的消息",
-      "appearance": "外观",
       "signOut": "退出登录…",
       "signOutConfirmTitle": "要在此设备上退出 Pollis 吗？",
       "version": "版本",
@@ -397,7 +387,6 @@
       "updateHint": "打开{{place}}",
       "updateFailed": "无法打开{{place}}"
     },
-    "identityHeading": "身份",
     "preferences": {
       "accentA11y": "强调色 {{name}}",
       "accentHeading": "强调色",
@@ -462,13 +451,8 @@
       "blockedUsers": "已屏蔽的用户",
       "changePinSub": "4 位 PIN 用于在此设备上解锁 Pollis。"
     },
-    "title": "我的",
+    "title": "账户",
     "userSettings": {
-      "displayName": "显示名称",
-      "handle": "用户名",
-      "handleHint": "其他成员可以通过 @handle 找到你并发私信。",
-      "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。",
-      "save": "保存更改",
       "photo": {
         "heading": "头像",
         "hint": "与你聊天的每个人都能看到这张照片。",
@@ -506,7 +490,7 @@
   "tabs": {
     "direct": "私信",
     "groups": "群组",
-    "self": "我的",
+    "self": "账户",
     "signInDevice": "关联",
     "withInvites_other": "{{label}}，{{count}} 个群组邀请",
     "withRequests_other": "{{label}}，{{count}} 条消息请求",
@@ -526,7 +510,7 @@
     "message": "发消息",
     "opening": "正在打开…",
     "safetyActionsHeading": "安全操作",
-    "selfNote": "这是你自己。在<link>我的 → 用户设置</link>中编辑你的用户名和显示名称。",
+    "selfNote": "这是你自己。在<link>账户 → 个人资料</link>中编辑你的用户名和显示名称。",
     "title": "用户",
     "unblockUser": "取消屏蔽用户",
     "verified": "◆ 已验证"

@@ -14,12 +14,12 @@
   "group": {
     "notFound": "A kò rí ẹgbẹ́ náà",
     "members": "Ọmọ ẹgbẹ́",
-    "customEmoji": "Èmójì Àkànṣe",
+    "customEmoji": "Èmójì àkànṣe",
     "rename": "Yí Orúkọ Ẹgbẹ́ Padà",
     "newChannel": "Ìkànnì Tuntun",
-    "inviteMember": "Ké sí Ọmọ ẹgbẹ́",
-    "joinRequests": "Ìbéèrè Ìdarapọ̀",
-    "leave": "Kúrò nínú Ẹgbẹ́",
+    "inviteMember": "Ké sí àwọn ènìyàn",
+    "joinRequests": "Àwọn ìbéèrè láti darapọ̀",
+    "leave": "Kúrò nínú ẹgbẹ́",
     "joinVoiceChat": "Darapọ̀ mọ́ ìjíròrò ohùn",
     "inCall_other": "{{count}} wà lórí ìpè"
   },

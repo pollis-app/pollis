@@ -100,7 +100,7 @@ function ChangeEmail() {
     <Screen testID="screen-self-change-email">
       <Header
         title={t("mobile:self.changeEmail.title")}
-        backTo={t("mobile:self.hub.accountDetails")}
+        backTo={t("nav:sidebar.profile")}
       />
       <ScrollView
         ref={scrollRef}

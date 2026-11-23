@@ -5,26 +5,18 @@
     "description": "Ẹ̀rọ yìí nìkan ni ó máa yí padà."
   },
   "hub": {
-    "title": "Àkáǹtì",
-    "headlineFallback": "Àkáǹtì",
     "avatarAlt": "Àwòrán profáìlì {{name}}",
-    "preferencesLabel": "Àwọn ohun tí o fẹ́ràn",
+    "savedDescription": "Àwọn ìfiránṣẹ́ tí o sàmì sí",
     "preferencesDescription": "Àwọ̀, ìwọ̀n lẹ́tà, àti bẹ́ẹ̀ bẹ́ẹ̀ lọ",
-    "userLabel": "Ètò olùmúlò",
-    "userDescription": "Profáìlì, orúkọ olùmúlò, àwòrán profáìlì",
-    "voiceLabel": "Ohùn àti fídíò",
+    "userDescription": "Orúkọ àfihàn, àdàpè, ímeèlì",
     "voiceDescription": "Máíkì, sípíkà, kámẹ́rà, ìṣiṣẹ́ ohùn",
-    "securityLabel": "Ààbò",
     "securityDescription": "Ìforúkọsílẹ̀ ẹ̀rọ, àtúntò ìdánimọ̀",
-    "shortcutsLabel": "Àwọn bọ́tìnnì àbùjá",
     "shortcutsDescription": "Ìtọ́kasí àwọn àbùjá kíbọ́ọ̀dù gbogbogbò",
-    "diagnosticsLabel": "Àyẹ̀wò ìṣòro",
     "diagnosticsDescription": "Ṣe àdàkọ àkọsílẹ̀ ẹ̀rọ yìí láti fi ránṣẹ́ sí ẹgbẹ́ ìrànlọ́wọ́",
-    "openSourceLabel": "Àwọn ìwé àṣẹ orísun ṣíṣí",
     "openSourceDescription": "Sọ́fítíwọ̀ ẹlẹ́kẹta tó wà nínú áàpù yìí àti àwọn ìwé àṣẹ wọn"
   },
   "preferences": {
-    "title": "Àwọn ohun tí o fẹ́ràn"
+    "title": "Àṣàyàn"
   },
   "appearance": {
     "heading": "Ìrísí",
@@ -162,14 +154,13 @@
     "openButton": "Ohùn àti fídíò"
   },
   "user": {
-    "title": "Ètò olùmúlò",
     "signInPrompt": "Jọ̀wọ́ wọlé",
-    "accountHeading": "Àkáǹtì",
-    "usernameLabel": "Orúkọ olùmúlò",
-    "usernamePlaceholder": "orúkọ olùmúlò",
-    "usernameInvalid": "Orúkọ olùmúlò jẹ́ àmì 3–32: lẹ́tà kékeré, nọ́mbà, '_', '.' tàbí '-'.",
-    "preferredNameLabel": "Orúkọ tí o fẹ́",
-    "preferredNamePlaceholder": "Ohun tí àwọn èèyàn ń pè ọ́",
+    "identityHeading": "Ìdánimọ̀",
+    "displayNameLabel": "Orúkọ àfihàn",
+    "displayNamePlaceholder": "Ohun tí àwọn èèyàn ń pè ọ́",
+    "handleLabel": "Àdàpè",
+    "handleHint": "Àwọn ọmọ ẹgbẹ́ míì lè rí ọ kí wọ́n sì fi DM ránṣẹ́ sí ọ pẹ̀lú @àdàpè.",
+    "handleInvalid": "Àdàpè gbọ́dọ̀ ní àmì 3–32: lẹ́tà kékeré, nọ́mbà, '_', '.' tàbí '-'.",
     "saveFailed": "A kò lè fi pamọ́",
     "saved": "A ti fi pamọ́.",
     "saving": "Ó ń fi pamọ́…",
@@ -190,7 +181,7 @@
     "verificationCodeRequired": "Tẹ kóòdù tó wà nínú ímeèlì rẹ.",
     "verifyButton": "Jẹ́rìísí",
     "verifying": "Ó ń jẹ́rìísí…",
-    "avatarHeading": "Àwòrán profáìlì",
+    "avatarHeading": "Fọ́tò profáìlì",
     "avatarPickTitle": "Tẹ̀ ẹ́ láti yan àwòrán",
     "avatarPreviewAlt": "Àyẹ̀wò ṣáájú",
     "avatarAlt": "Àwòrán profáìlì",
@@ -201,7 +192,7 @@
     "avatarUploadFailed": "A kò lè gbé àwòrán profáìlì sókè",
     "uploadAvatarButton": "Gbé àwòrán profáìlì sókè",
     "uploading": "Ó ń gbé e sókè…",
-    "removeAvatarButton": "Yọ àwòrán profáìlì kúrò",
+    "removeAvatarButton": "Yọ fọ́tò kúrò",
     "avatarRemoved": "A ti yọ àwòrán profáìlì kúrò.",
     "avatarRemoveFailed": "A kò lè yọ àwòrán profáìlì rẹ kúrò."
   },

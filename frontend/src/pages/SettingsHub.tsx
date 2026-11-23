@@ -1,7 +1,8 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
-import { Palette, User, ShieldCheck, Volume2, Keyboard, Stethoscope, Scale } from "lucide-react";
+import { Bookmark, Globe, Palette, User, ShieldCheck, Volume2, Keyboard, Stethoscope, Scale } from "lucide-react";
+import { languageOption } from "../i18n/languages";
 import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
@@ -10,28 +11,31 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 export const SettingsHubPage: React.FC = observer(() => {
-  const { t } = useTranslation("settings");
+  const { t, i18n } = useTranslation("settings");
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const { data: profile } = useUserProfile();
 
   const headlineName =
     profile?.preferred_name ||
-    (profile?.username ? `@${profile.username}` : t("hub.headlineFallback"));
+    (profile?.username ? `@${profile.username}` : t("nav:sidebar.account"));
 
+  // Same items, labels and order as the sidebar's Account section and mobile's
+  // Account tab (#2086); desktop-only pages (voice, key bindings) sit where
+  // mobile has nothing.
   const items: TerminalMenuItem[] = [
     {
-      id: "preferences",
-      label: t("hub.preferencesLabel"),
-      icon: <Palette size={14} />,
-      description: t("hub.preferencesDescription"),
-      action: () => navigate({ to: "/preferences" }),
-      testId: "menu-item-preferences",
+      id: "saved",
+      label: t("nav:sidebar.saved"),
+      icon: <Bookmark size={14} />,
+      description: t("hub.savedDescription"),
+      action: () => navigate({ to: "/saved" }),
+      testId: "menu-item-saved",
       activateOn: "press",
     },
     {
       id: "user",
-      label: t("hub.userLabel"),
+      label: t("nav:sidebar.profile"),
       icon: <User size={14} />,
       description: t("hub.userDescription"),
       action: () => navigate({ to: "/user" }),
@@ -39,17 +43,8 @@ export const SettingsHubPage: React.FC = observer(() => {
       activateOn: "press",
     },
     {
-      id: "voice",
-      label: t("hub.voiceLabel"),
-      icon: <Volume2 size={14} />,
-      description: t("hub.voiceDescription"),
-      action: () => navigate({ to: "/voice-settings" }),
-      testId: "menu-item-voice-settings",
-      activateOn: "press",
-    },
-    {
       id: "security",
-      label: t("hub.securityLabel"),
+      label: t("nav:sidebar.security"),
       icon: <ShieldCheck size={14} />,
       description: t("hub.securityDescription"),
       action: () => navigate({ to: "/security" }),
@@ -57,8 +52,35 @@ export const SettingsHubPage: React.FC = observer(() => {
       activateOn: "press",
     },
     {
+      id: "preferences",
+      label: t("nav:sidebar.preferences"),
+      icon: <Palette size={14} />,
+      description: t("hub.preferencesDescription"),
+      action: () => navigate({ to: "/preferences" }),
+      testId: "menu-item-preferences",
+      activateOn: "press",
+    },
+    {
+      id: "language",
+      label: t("nav:sidebar.language"),
+      icon: <Globe size={14} />,
+      description: languageOption(i18n.language)?.label,
+      action: () => navigate({ to: "/preferences/language" }),
+      testId: "menu-item-language",
+      activateOn: "press",
+    },
+    {
+      id: "voice",
+      label: t("nav:sidebar.voiceAndVideo"),
+      icon: <Volume2 size={14} />,
+      description: t("hub.voiceDescription"),
+      action: () => navigate({ to: "/voice-settings" }),
+      testId: "menu-item-voice-settings",
+      activateOn: "press",
+    },
+    {
       id: "shortcuts",
-      label: t("hub.shortcutsLabel"),
+      label: t("nav:sidebar.keyBindings"),
       icon: <Keyboard size={14} />,
       description: t("hub.shortcutsDescription"),
       action: () => navigate({ to: "/shortcuts" }),
@@ -67,7 +89,7 @@ export const SettingsHubPage: React.FC = observer(() => {
     },
     {
       id: "diagnostics",
-      label: t("hub.diagnosticsLabel"),
+      label: t("diagnostics.title"),
       icon: <Stethoscope size={14} />,
       description: t("hub.diagnosticsDescription"),
       action: () => navigate({ to: "/diagnostics" }),
@@ -76,7 +98,7 @@ export const SettingsHubPage: React.FC = observer(() => {
     },
     {
       id: "open-source",
-      label: t("hub.openSourceLabel"),
+      label: t("openSource.title"),
       icon: <Scale size={14} />,
       description: t("hub.openSourceDescription"),
       action: () => navigate({ to: "/open-source" }),
@@ -86,7 +108,7 @@ export const SettingsHubPage: React.FC = observer(() => {
   ];
 
   return (
-    <PageShell title={t("hub.title")} scrollable>
+    <PageShell title={t("nav:sidebar.account")} scrollable>
       <div data-testid="settings-hub-page" className="flex justify-center px-6 py-10">
         <div className="w-full max-w-md flex flex-col gap-6">
           {/* Own-profile header — mirrors the layout of viewing another

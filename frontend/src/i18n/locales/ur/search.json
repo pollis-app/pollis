@@ -13,9 +13,9 @@
     "searchMessagesFor": "\"{{query}}\" کے لیے پیغامات میں تلاش کریں"
   },
   "pages": {
-    "userName": "صارف",
+    "userName": "پروفائل",
     "userKeywords": "اکاؤنٹ پروفائل صارف نام ای میل اوتار ترتیبات account profile username email avatar settings",
-    "settingsName": "ترتیبات",
+    "settingsName": "اکاؤنٹ",
     "settingsKeywords": "ترجیحات صارف سیکیورٹی preferences user security",
     "preferencesName": "ترجیحات",
     "preferencesKeywords": "تھیم رنگ فونٹ اطلاعات ظاہری شکل theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "نیا بنائیں new create",
     "groupsSearchName": "گروپس تلاش کریں",
     "groupsSearchKeywords": "دریافت تلاش عوامی discover search public",
-    "savedName": "محفوظ شدہ",
+    "savedName": "محفوظ شدہ پیغامات",
     "savedKeywords": "محفوظ بک مارک بک مارکس ستارہ پن بعد میں لنک saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "آرکیڈ",
     "arcadeKeywords": "آرکیڈ گیم سیارچے جہاز شوٹ ایسٹر ایگ کھیلیں arcade game asteroids ship shoot easter egg play",

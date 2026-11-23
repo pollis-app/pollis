@@ -110,7 +110,7 @@ function Self() {
     signOutSheet.open();
   };
 
-  const appearanceName = t("mobile:self.hub.appearance");
+  const appearanceName = t("nav:sidebar.preferences");
 
   return (
     <Screen testID="screen-self" aboveTabBar>
@@ -185,11 +185,20 @@ function Self() {
             onEdit={() => router.push("/self/user-settings")}
           />
 
-          <Group title={t("mobile:self.hub.accountSection")}>
+          {/* Same names and order as desktop's Account menu (#2086). The screen
+              is already titled Account, so this group needs no heading. */}
+          <Group>
+            <ListRow
+              testID="row-self-saved"
+              glyph={<Icon.bookmark size={GLYPH} color={semantic.text} />}
+              name={t("nav:sidebar.saved")}
+              chevron
+              onPress={() => router.push("/self/saved")}
+            />
             <ListRow
               testID="row-self-user-settings"
               glyph={<Icon.user size={GLYPH} color={semantic.text} />}
-              name={t("mobile:self.hub.accountDetails")}
+              name={t("nav:sidebar.profile")}
               chevron
               onPress={() => router.push("/self/user-settings")}
             />
@@ -204,17 +213,10 @@ function Self() {
             <ListRow
               testID="row-self-security"
               glyph={<Icon.shield size={GLYPH} color={semantic.text} />}
-              name={t("mobile:self.hub.securityDevices")}
+              name={t("nav:sidebar.security")}
               value={deviceValue}
               chevron
               onPress={() => router.push("/self/security")}
-            />
-            <ListRow
-              testID="row-self-saved"
-              glyph={<Icon.bookmark size={GLYPH} color={semantic.text} />}
-              name={t("mobile:self.hub.savedMessages")}
-              chevron
-              onPress={() => router.push("/self/saved")}
             />
           </Group>
 

@@ -13,9 +13,9 @@
     "searchMessagesFor": "Pesquisar mensagens por \"{{query}}\""
   },
   "pages": {
-    "userName": "Utilizador",
+    "userName": "Perfil",
     "userKeywords": "conta perfil nome de utilizador email avatar definições usuário configurações account profile username email avatar settings",
-    "settingsName": "Definições",
+    "settingsName": "Conta",
     "settingsKeywords": "preferências utilizador segurança configurações usuário preferences user security",
     "preferencesName": "Preferências",
     "preferencesKeywords": "tema cor tipo de letra fonte notificações aspeto aparência theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "novo criar new create",
     "groupsSearchName": "Encontrar grupos",
     "groupsSearchKeywords": "descobrir pesquisar procurar públicos discover search public",
-    "savedName": "Guardadas",
+    "savedName": "Mensagens guardadas",
     "savedKeywords": "guardadas guardar marcador marcadores favoritos afixadas mais tarde ligação permanente link saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "Arcada",
     "arcadeKeywords": "arcada jogo asteroides nave disparar easter egg jogar arcade game asteroids ship shoot easter egg play",

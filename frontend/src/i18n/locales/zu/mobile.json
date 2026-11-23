@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Ingxoxo",
-    "info": "Ulwazi",
     "memberSelf": "@{{handle}} · wena",
     "roleAdmin": "Umphathi",
     "roleOwner": "Umnikazi"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, imenyu yeqembu",
-      "invite": "Mema abantu",
       "search": "Sesha ku-{{name}}",
-      "createChannel": "Dala isiteshi",
       "thisGroup": "Leli qembu",
       "members": "Amalungu",
       "settings": "Izilungiselelo zeqembu",
-      "joinRequests": "Izicelo zokujoyina",
-      "customEmoji": "Ama-emoji enziwe ngokwezifiso",
-      "leave": "Shiya iqembu",
       "leaveConfirm": "Thepha futhi ukuze ushiye i-{{name}}",
       "leaveHint": "Uzodinga isimemo esisha ukuze uphinde ujoyine.",
       "leaving": "Iyashiya…",
@@ -402,12 +396,8 @@
       "editProfile": "Hlela iphrofayela",
       "accountSection": "I-akhawunti",
       "appSection": "Uhlelo lokusebenza",
-      "accountDetails": "Imininingwane ye-akhawunti",
-      "securityDevices": "Ukuphepha namadivayisi",
       "deviceCount_one": "idivayisi engu-{{count}}",
       "deviceCount_other": "amadivayisi angu-{{count}}",
-      "savedMessages": "Imilayezo elondoloziwe",
-      "appearance": "Ukubukeka",
       "signOut": "Phuma…",
       "signOutConfirmTitle": "Phuma ku-Pollis kule divayisi?",
       "version": "Inguqulo",
@@ -417,7 +407,6 @@
       "updateHint": "Ivula i-{{place}}",
       "updateFailed": "Ayikwazanga ukuvula i-{{place}}"
     },
-    "identityHeading": "Umazisi",
     "preferences": {
       "accentA11y": "Umbala wokugqamisa {{name}}",
       "accentHeading": "Umbala wokugqamisa",
@@ -485,13 +474,8 @@
       "blockedUsers": "Abasebenzisi abavinjiwe",
       "changePinSub": "I-PIN yakho yamadijithi angu-4 ivula i-Pollis kule divayisi."
     },
-    "title": "Mina",
+    "title": "I-akhawunti",
     "userSettings": {
-      "displayName": "Igama lokubonisa",
-      "handle": "Isibambo",
-      "handleHint": "Amanye amalungu angakuthola futhi akuthumelele i-DM nge-@isibambo.",
-      "handleInvalid": "Izibambo zinezinhlamvu ezingu-3–32: izinhlamvu ezincane, amadijithi, '_', '.' noma '-'.",
-      "save": "Londoloza izinguquko",
       "photo": {
         "heading": "Isithombe sephrofayela",
         "hint": "Wonke umuntu oxoxa naye uyasibona lesi sithombe.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "Eqondile",
+    "direct": "Ama-DM",
     "groups": "Amaqembu",
-    "self": "Mina",
+    "self": "I-akhawunti",
     "signInDevice": "Xhuma",
     "withInvites_one": "{{label}}, isimemo seqembu esingu-{{count}}",
     "withInvites_other": "{{label}}, izimemo zamaqembu ezingu-{{count}}",
@@ -552,7 +536,7 @@
     "message": "Umlayezo",
     "opening": "Iyavula…",
     "safetyActionsHeading": "Izenzo zokuphepha",
-    "selfNote": "Nguwe lo. Hlela isibambo sakho negama lokubonisa ku-<link>Mina → Izilungiselelo zomsebenzisi</link>.",
+    "selfNote": "Nguwe lo. Hlela isibambo sakho negama lokubonisa ku-<link>I-akhawunti → Iphrofayela</link>.",
     "title": "Umsebenzisi",
     "unblockUser": "Susa ukuvimba umsebenzisi",
     "verified": "◆ Kuqinisekisiwe"

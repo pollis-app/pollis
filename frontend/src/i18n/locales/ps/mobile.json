@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "خبرې اترې",
-    "info": "معلومات",
     "memberSelf": "‎@{{handle}}‎ · تاسو",
     "roleAdmin": "اډمین",
     "roleOwner": "مالک"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}، د ګروپ مېنو",
-      "invite": "خلکو ته بلنه ورکړئ",
       "search": "په {{name}} کې لټون",
-      "createChannel": "چینل جوړ کړئ",
       "thisGroup": "دا ګروپ",
       "members": "غړي",
       "settings": "د ګروپ تنظیمات",
-      "joinRequests": "د ګډون غوښتنې",
-      "customEmoji": "ځانګړي ایموجي",
-      "leave": "له ګروپ ووځئ",
       "leaveConfirm": "له {{name}} څخه د وتلو لپاره بیا ټک وکړئ",
       "leaveHint": "د بیا ورګډېدو لپاره به نوې بلنې ته اړتیا ولرئ.",
       "leaving": "وځي…",
@@ -402,12 +396,8 @@
       "editProfile": "پروفایل سم کړئ",
       "accountSection": "حساب",
       "appSection": "اپلیکېشن",
-      "accountDetails": "د حساب جزئیات",
-      "securityDevices": "امنیت او وسیلې",
       "deviceCount_one": "{{count}} وسیله",
       "deviceCount_other": "{{count}} وسیلې",
-      "savedMessages": "خوندي شوي پیغامونه",
-      "appearance": "بڼه",
       "signOut": "وتل…",
       "signOutConfirmTitle": "په دې وسیله کې له Pollis څخه ووځئ؟",
       "version": "نسخه",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}} پرانیزي",
       "updateFailed": "{{place}} خلاص نه شو"
     },
-    "identityHeading": "هویت",
     "preferences": {
       "accentA11y": "د تاکید رنګ {{name}}",
       "accentHeading": "د تاکید رنګ",
@@ -485,13 +474,8 @@
       "blockedUsers": "بلاک شوي کارنان",
       "changePinSub": "ستاسو 4 عددي PIN په دې وسیله کې Pollis خلاصوي."
     },
-    "title": "ځان",
+    "title": "حساب",
     "userSettings": {
-      "displayName": "ښکاره نوم",
-      "handle": "هېنډل",
-      "handleHint": "نور غړي کولی شي تاسو د ‎@handle‎ په مرسته ومومي او مستقیم پیغام درته ولېږي.",
-      "handleInvalid": "هېنډلونه 3–32 توري دي: کوچني لاتیني توري، عددونه، '_'، '.' یا '-'.",
-      "save": "بدلونونه خوندي کړئ",
       "photo": {
         "heading": "د پروفایل انځور",
         "hint": "هر څوک چې ورسره خبرې کوئ دا انځور ویني.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "مستقیم",
+    "direct": "مستقیم پیغامونه",
     "groups": "ګروپونه",
-    "self": "ځان",
+    "self": "حساب",
     "signInDevice": "تړل",
     "withInvites_one": "{{label}}، د ګروپ {{count}} بلنه",
     "withInvites_other": "{{label}}، د ګروپ {{count}} بلنې",
@@ -552,7 +536,7 @@
     "message": "پیغام",
     "opening": "پرانیستل کېږي…",
     "safetyActionsHeading": "د خوندیتوب کړنې",
-    "selfNote": "دا تاسو یاست. خپل هېنډل او ښکاره نوم په <link>ځان ← د کارن تنظیمات</link> کې سم کړئ.",
+    "selfNote": "دا تاسو یاست. خپل هېنډل او ښکاره نوم په <link>حساب ← پروفایل</link> کې سم کړئ.",
     "title": "کارن",
     "unblockUser": "کارن له بلاک وباسئ",
     "verified": "◆ تایید شوی"

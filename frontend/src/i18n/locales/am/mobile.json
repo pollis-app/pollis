@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "ውይይት",
-    "info": "መረጃ",
     "memberSelf": "@{{handle}} · እርስዎ",
     "roleAdmin": "አስተዳዳሪ",
     "roleOwner": "ባለቤት"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}፣ የቡድን ምናሌ",
-      "invite": "ሰዎችን ጋብዝ",
       "search": "በ{{name}} ውስጥ ፈልግ",
-      "createChannel": "ቻናል ፍጠር",
       "thisGroup": "ይህ ቡድን",
       "members": "አባላት",
       "settings": "የቡድን ቅንብሮች",
-      "joinRequests": "የመቀላቀል ጥያቄዎች",
-      "customEmoji": "ብጁ ኢሞጂ",
-      "leave": "ቡድኑን ልቀቅ",
       "leaveConfirm": "{{name}}ን ለመልቀቅ እንደገና ይንኩ",
       "leaveHint": "እንደገና ለመቀላቀል አዲስ ግብዣ ያስፈልግዎታል።",
       "leaving": "በመልቀቅ ላይ…",
@@ -402,12 +396,8 @@
       "editProfile": "መገለጫ አርትዕ",
       "accountSection": "መለያ",
       "appSection": "መተግበሪያ",
-      "accountDetails": "የመለያ ዝርዝሮች",
-      "securityDevices": "ደህንነት እና መሣሪያዎች",
       "deviceCount_one": "{{count}} መሣሪያ",
       "deviceCount_other": "{{count}} መሣሪያዎች",
-      "savedMessages": "የተቀመጡ መልዕክቶች",
-      "appearance": "መልክ",
       "signOut": "ውጣ…",
       "signOutConfirmTitle": "በዚህ መሣሪያ ላይ ከPollis ይውጡ?",
       "version": "ስሪት",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}}ን ይከፍታል",
       "updateFailed": "{{place}}ን መክፈት አልተቻለም"
     },
-    "identityHeading": "ማንነት",
     "preferences": {
       "accentA11y": "አጽንዖት {{name}}",
       "accentHeading": "አጽንዖት",
@@ -485,13 +474,8 @@
       "blockedUsers": "የታገዱ ተጠቃሚዎች",
       "changePinSub": "ባለ 4 አሃዝ PINዎ በዚህ መሣሪያ ላይ Pollisን ይከፍታል።"
     },
-    "title": "እኔ",
+    "title": "መለያ",
     "userSettings": {
-      "displayName": "የሚታይ ስም",
-      "handle": "መለያ ስም",
-      "handleHint": "ሌሎች አባላት በ@መለያ ስምዎ ሊያገኙዎት እና ቀጥታ መልዕክት ሊልኩልዎ ይችላሉ።",
-      "handleInvalid": "መለያ ስሞች 3–32 ቁምፊዎች ናቸው፦ ትንሽ የላቲን ፊደላት፣ አሃዞች፣ '_'፣ '.' ወይም '-'።",
-      "save": "ለውጦችን አስቀምጥ",
       "photo": {
         "heading": "የመገለጫ ፎቶ",
         "hint": "የሚያወሩት ሰው ሁሉ ይህን ፎቶ ያያል።",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "ቀጥታ",
+    "direct": "ቀጥታ መልዕክቶች",
     "groups": "ቡድኖች",
-    "self": "እኔ",
+    "self": "መለያ",
     "signInDevice": "አገናኝ",
     "withInvites_one": "{{label}}፣ {{count}} የቡድን ግብዣ",
     "withInvites_other": "{{label}}፣ {{count}} የቡድን ግብዣዎች",
@@ -552,7 +536,7 @@
     "message": "መልዕክት",
     "opening": "በመክፈት ላይ…",
     "safetyActionsHeading": "የደህንነት እርምጃዎች",
-    "selfNote": "ይህ እርስዎ ነዎት። መለያ ስምዎን እና የሚታይ ስምዎን በ<link>እኔ → የተጠቃሚ ቅንብሮች</link> ውስጥ ያርትዑ።",
+    "selfNote": "ይህ እርስዎ ነዎት። መለያ ስምዎን እና የሚታይ ስምዎን በ<link>መለያ → መገለጫ</link> ውስጥ ያርትዑ።",
     "title": "ተጠቃሚ",
     "unblockUser": "የተጠቃሚውን እገዳ አንሳ",
     "verified": "◆ ተረጋግጧል"

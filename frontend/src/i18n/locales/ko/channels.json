@@ -17,8 +17,8 @@
     "customEmoji": "사용자 지정 이모지",
     "rename": "그룹 이름 변경",
     "newChannel": "새 채널",
-    "inviteMember": "멤버 초대",
-    "joinRequests": "가입 요청",
+    "inviteMember": "사람 초대",
+    "joinRequests": "참여 요청",
     "leave": "그룹 나가기",
     "joinVoiceChat": "음성 채팅 참여",
     "inCall_other": "통화 중 {{count}}명"

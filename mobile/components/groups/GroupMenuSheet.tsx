@@ -51,7 +51,7 @@ export function GroupMenuSheet({
     ? t("group.panel.leaving")
     : armed
       ? t("group.panel.leaveConfirm", { name: groupName })
-      : t("group.panel.leave");
+      : t("channels:group.leave");
 
   return (
     <SheetOverlay title={groupName} onClose={onClose} testID="sheet-group-menu">
@@ -69,7 +69,7 @@ export function GroupMenuSheet({
           testID="btn-menu-invite"
           pressIn
           glyph={<Icon.userPlus size={22} color={semantic.dim} />}
-          name={t("group.panel.invite")}
+          name={t("channels:group.inviteMember")}
           onPress={() => go("/group/invite")}
         />
         <ListRow
@@ -84,9 +84,9 @@ export function GroupMenuSheet({
             testID="btn-menu-requests"
             pressIn
             glyph={<Icon.inbox size={22} color={semantic.dim} />}
-            name={t("group.panel.joinRequests")}
+            name={t("channels:group.joinRequests")}
             badge={pendingRequests}
-            accessibilityLabel={`${t("group.panel.joinRequests")}, ${t("channels:groups.joinRequestsPending", { count: pendingRequests })}`}
+            accessibilityLabel={`${t("channels:group.joinRequests")}, ${t("channels:groups.joinRequestsPending", { count: pendingRequests })}`}
             onPress={() => go("/group/requests")}
           />
         ) : null}

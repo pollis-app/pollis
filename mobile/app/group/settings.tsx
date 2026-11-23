@@ -238,7 +238,7 @@ function GroupSettings() {
           <ListRow
             testID="row-group-emoji"
             glyph={<Icon.smile size={20} color={semantic.dim} />}
-            name={t("mobile:group.panel.customEmoji")}
+            name={t("channels:group.customEmoji")}
             sub={t("mobile:group.settings.customEmojiSub")}
             chevron
             onPress={() =>
@@ -286,7 +286,7 @@ function GroupSettings() {
                   ? t("mobile:group.panel.leaving")
                   : confirmLeave
                     ? t("mobile:group.panel.leaveConfirm", { name: groupName })
-                    : t("mobile:group.panel.leave")
+                    : t("channels:group.leave")
               }
               nameStyle={{ color: semantic.danger }}
               sub={t("mobile:group.panel.leaveHint")}

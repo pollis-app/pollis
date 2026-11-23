@@ -67,7 +67,7 @@ function UserSettings() {
 
   return (
     <Screen testID="screen-self-user-settings">
-      <Header title={t("mobile:self.hub.accountDetails")} backTo={t("mobile:self.title")} />
+      <Header title={t("nav:sidebar.profile")} backTo={t("mobile:self.title")} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl, paddingTop: space.xxl, gap: space.xxxl }}>
         <View style={{ alignItems: "center", gap: space.md }}>
           <ProfilePhotoEditor
@@ -83,27 +83,27 @@ function UserSettings() {
 
         <View style={{ gap: space.xxl }}>
           <SectionTitle style={{ paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 }}>
-            {t("mobile:self.identityHeading")}
+            {t("settings:user.identityHeading")}
           </SectionTitle>
-          <SettingsField label={t("mobile:self.userSettings.displayName")}>
+          <SettingsField label={t("settings:user.displayNameLabel")}>
             <Field
               value={displayName}
               onChangeText={setDisplayName}
               testID="input-display-name"
-              accessibilityLabel={t("mobile:self.userSettings.displayName")}
+              accessibilityLabel={t("settings:user.displayNameLabel")}
             />
           </SettingsField>
           <SettingsField
-            label={t("mobile:self.userSettings.handle")}
-            hint={t("mobile:self.userSettings.handleHint")}
-            error={handleInvalid && nextHandle ? t("mobile:self.userSettings.handleInvalid") : null}
+            label={t("settings:user.handleLabel")}
+            hint={t("settings:user.handleHint")}
+            error={handleInvalid && nextHandle ? t("settings:user.handleInvalid") : null}
             errorTestID="text-handle-invalid"
           >
             <Field
               value={handle}
               onChangeText={setHandle}
               testID="input-handle"
-              accessibilityLabel={t("mobile:self.userSettings.handle")}
+              accessibilityLabel={t("settings:user.handleLabel")}
               icon={<Text style={[ty.body, { color: semantic.muted }]}>@</Text>}
             />
           </SettingsField>
@@ -152,7 +152,7 @@ function UserSettings() {
         >
           {updateProfile.isPending
             ? t("user.saving")
-            : t("mobile:self.userSettings.save")}
+            : t("settings:user.saveButton")}
         </Button>
         <Button
           variant="subtle"

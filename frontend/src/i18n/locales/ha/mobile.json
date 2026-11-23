@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Tattaunawa",
-    "info": "Bayani",
     "memberSelf": "@{{handle}} · ku",
     "roleAdmin": "Mai gudanarwa",
     "roleOwner": "Mai rukuni"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, menu na rukuni",
-      "invite": "Gayyaci mutane",
       "search": "Bincika {{name}}",
-      "createChannel": "Ƙirƙiri tasha",
       "thisGroup": "Wannan rukuni",
       "members": "Mambobi",
       "settings": "Saitunan rukuni",
-      "joinRequests": "Buƙatun shiga",
-      "customEmoji": "Emoji na musamman",
-      "leave": "Bar rukuni",
       "leaveConfirm": "Sake taɓawa don barin {{name}}",
       "leaveHint": "Za a buƙaci sabuwar gayyata don sake shiga.",
       "leaving": "Ana barin…",
@@ -402,12 +396,8 @@
       "editProfile": "Gyara bayanan mutum",
       "accountSection": "Asusu",
       "appSection": "Manhaja",
-      "accountDetails": "Bayanan asusu",
-      "securityDevices": "Tsaro da na'urori",
       "deviceCount_one": "na'ura {{count}}",
       "deviceCount_other": "na'urori {{count}}",
-      "savedMessages": "Saƙonnin da aka adana",
-      "appearance": "Kamanni",
       "signOut": "Fita…",
       "signOutConfirmTitle": "A fita daga Pollis a wannan na'ura?",
       "version": "Siga",
@@ -417,7 +407,6 @@
       "updateHint": "Yana buɗe {{place}}",
       "updateFailed": "Ba a iya buɗe {{place}} ba"
     },
-    "identityHeading": "Shaida",
     "preferences": {
       "accentA11y": "Launin ado {{name}}",
       "accentHeading": "Launin ado",
@@ -485,13 +474,8 @@
       "blockedUsers": "Masu amfani da aka toshe",
       "changePinSub": "PIN ɗinku mai lambobi 4 yana buɗe Pollis a wannan na'ura."
     },
-    "title": "Ni",
+    "title": "Asusu",
     "userSettings": {
-      "displayName": "Sunan nuni",
-      "handle": "Laƙabi",
-      "handleHint": "Sauran mambobi za su iya nemo ku kuma su aiko muku da DM ta @laƙabi.",
-      "handleInvalid": "Laƙabi yana da haruffa 3–32: ƙananan haruffa, lambobi, '_', '.' ko '-'.",
-      "save": "Adana canje-canje",
       "photo": {
         "heading": "Hoton bayani",
         "hint": "Duk wanda kuke magana da shi yana ganin wannan hoto.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "Kai tsaye",
+    "direct": "DM",
     "groups": "Rukunoni",
-    "self": "Ni",
+    "self": "Asusu",
     "signInDevice": "Haɗa",
     "withInvites_one": "{{label}}, gayyatar rukuni {{count}}",
     "withInvites_other": "{{label}}, gayyatocin rukuni {{count}}",
@@ -552,7 +536,7 @@
     "message": "Saƙo",
     "opening": "Ana buɗewa…",
     "safetyActionsHeading": "Matakan tsaro",
-    "selfNote": "Wannan ku ne. Gyara laƙabi da sunan nuni a <link>Ni → Saitunan mai amfani</link>.",
+    "selfNote": "Wannan ku ne. Gyara laƙabi da sunan nuni a <link>Asusu → Bayanan mutum</link>.",
     "title": "Mai amfani",
     "unblockUser": "Cire toshewar mai amfani",
     "verified": "◆ An tantance"

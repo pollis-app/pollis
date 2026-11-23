@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "گل بات",
-    "info": "معلومات",
     "memberSelf": "‎@{{handle}}‎ · تسیں",
     "roleAdmin": "ایڈمن",
     "roleOwner": "مالک"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}، گروپ مینیو",
-      "invite": "لوکاں نوں دعوت دیو",
       "search": "{{name}} وچ سرچ کرو",
-      "createChannel": "چینل بناؤ",
       "thisGroup": "ایہہ گروپ",
       "members": "ممبر",
       "settings": "گروپ دیاں سیٹنگز",
-      "joinRequests": "شامل ہون دیاں درخواستاں",
-      "customEmoji": "اپنے ایموجی",
-      "leave": "گروپ چھڈو",
       "leaveConfirm": "{{name}} چھڈن لئی فیر ٹیپ کرو",
       "leaveHint": "دوبارہ شامل ہون لئی تہانوں نویں دعوت دی لوڑ پوے گی۔",
       "leaving": "چھڈ رہے آں…",
@@ -402,12 +396,8 @@
       "editProfile": "پروفائل ایڈٹ کرو",
       "accountSection": "اکاؤنٹ",
       "appSection": "ایپ",
-      "accountDetails": "اکاؤنٹ دی تفصیل",
-      "securityDevices": "سکیورٹی تے ڈیوائساں",
       "deviceCount_one": "{{count}} ڈیوائس",
       "deviceCount_other": "{{count}} ڈیوائساں",
-      "savedMessages": "سیو کیتے سنیہے",
-      "appearance": "شکل",
       "signOut": "سائن آؤٹ…",
       "signOutConfirmTitle": "ایس ڈیوائس تے Pollis توں سائن آؤٹ کرنا اے؟",
       "version": "ورژن",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}} کھولدا اے",
       "updateFailed": "{{place}} نہیں کھل سکیا"
     },
-    "identityHeading": "شناخت",
     "preferences": {
       "accentA11y": "ایکسنٹ {{name}}",
       "accentHeading": "ایکسنٹ",
@@ -485,13 +474,8 @@
       "blockedUsers": "بلاک کیتے یوزر",
       "changePinSub": "تہاڈا 4 ہندسیاں والا PIN ایس ڈیوائس تے Pollis ان لاک کردا اے۔"
     },
-    "title": "میں",
+    "title": "اکاؤنٹ",
     "userSettings": {
-      "displayName": "وکھائی دین والا ناں",
-      "handle": "ہینڈل",
-      "handleHint": "دوجے ممبر ‎@handle‎ نال تہانوں لبھ سکدے تے DM کر سکدے نیں۔",
-      "handleInvalid": "ہینڈل 3–32 اکھراں دا ہوندا اے: انگریزی دے نکے اکھر، ہندسے، '_'، '.' یا '-'۔",
-      "save": "تبدیلیاں سیو کرو",
       "photo": {
         "heading": "پروفائل فوٹو",
         "hint": "جنہاں نال وی تسیں گل کردے او اوہ سارے ایہہ فوٹو ویکھدے نیں۔",
@@ -529,7 +513,7 @@
   "tabs": {
     "direct": "DM",
     "groups": "گروپ",
-    "self": "میں",
+    "self": "اکاؤنٹ",
     "signInDevice": "لنک",
     "withInvites_one": "{{label}}، گروپ دی {{count}} دعوت",
     "withInvites_other": "{{label}}، گروپ دیاں {{count}} دعوتاں",
@@ -552,7 +536,7 @@
     "message": "سنیہا",
     "opening": "کھل رہیا اے…",
     "safetyActionsHeading": "حفاظت والے کم",
-    "selfNote": "ایہہ تسیں او۔ اپنا ہینڈل تے وکھائی دین والا ناں <link>میں ← یوزر سیٹنگز</link> وچ ایڈٹ کرو۔",
+    "selfNote": "ایہہ تسیں او۔ اپنا ہینڈل تے وکھائی دین والا ناں <link>اکاؤنٹ ← پروفائل</link> وچ ایڈٹ کرو۔",
     "title": "یوزر",
     "unblockUser": "یوزر نوں ان بلاک کرو",
     "verified": "◆ تصدیق شدہ"

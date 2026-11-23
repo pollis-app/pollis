@@ -13,9 +13,9 @@
     "searchMessagesFor": "\"{{query}}\" కోసం మెసేజ్‌లలో సెర్చ్ చేయండి"
   },
   "pages": {
-    "userName": "యూజర్",
+    "userName": "ప్రొఫైల్",
     "userKeywords": "ఖాతా ప్రొఫైల్ యూజర్‌నేమ్ ఈమెయిల్ అవతార్ సెట్టింగ్‌లు account profile username email avatar settings",
-    "settingsName": "సెట్టింగ్‌లు",
+    "settingsName": "ఖాతా",
     "settingsKeywords": "ప్రాధాన్యతలు యూజర్ భద్రత preferences user security",
     "preferencesName": "ప్రాధాన్యతలు",
     "preferencesKeywords": "థీమ్ రంగు ఫాంట్ నోటిఫికేషన్‌లు రూపం theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "కొత్త సృష్టించు new create",
     "groupsSearchName": "గ్రూప్‌లను కనుగొను",
     "groupsSearchKeywords": "కనుగొను సెర్చ్ పబ్లిక్ discover search public",
-    "savedName": "సేవ్ చేసినవి",
+    "savedName": "సేవ్ చేసిన మెసేజ్‌లు",
     "savedKeywords": "సేవ్ బుక్‌మార్క్ బుక్‌మార్క్‌లు స్టార్ పిన్ చేసినవి తర్వాత పర్మాలింక్ లింక్ saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "ఆర్కేడ్",
     "arcadeKeywords": "ఆర్కేడ్ గేమ్ ఆస్టరాయిడ్స్ షిప్ షూట్ ఈస్టర్ ఎగ్ ఆడు arcade game asteroids ship shoot easter egg play",

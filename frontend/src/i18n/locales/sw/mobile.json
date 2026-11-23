@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Mazungumzo",
-    "info": "Maelezo",
     "memberSelf": "@{{handle}} · wewe",
     "roleAdmin": "Msimamizi",
     "roleOwner": "Mmiliki"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, menyu ya kikundi",
-      "invite": "Alika watu",
       "search": "Tafuta katika {{name}}",
-      "createChannel": "Unda chaneli",
       "thisGroup": "Kikundi hiki",
       "members": "Wanachama",
       "settings": "Mipangilio ya kikundi",
-      "joinRequests": "Maombi ya kujiunga",
-      "customEmoji": "Emoji maalum",
-      "leave": "Ondoka kwenye kikundi",
       "leaveConfirm": "Gusa tena ili kuondoka kwenye {{name}}",
       "leaveHint": "Utahitaji mwaliko mpya ili kujiunga tena.",
       "leaving": "Inaondoka…",
@@ -402,12 +396,8 @@
       "editProfile": "Hariri wasifu",
       "accountSection": "Akaunti",
       "appSection": "Programu",
-      "accountDetails": "Maelezo ya akaunti",
-      "securityDevices": "Usalama na vifaa",
       "deviceCount_one": "Kifaa {{count}}",
       "deviceCount_other": "Vifaa {{count}}",
-      "savedMessages": "Ujumbe uliohifadhiwa",
-      "appearance": "Mwonekano",
       "signOut": "Ondoka kwenye akaunti…",
       "signOutConfirmTitle": "Ungependa kuondoka kwenye Pollis kwenye kifaa hiki?",
       "version": "Toleo",
@@ -417,7 +407,6 @@
       "updateHint": "Hufungua {{place}}",
       "updateFailed": "Imeshindwa kufungua {{place}}"
     },
-    "identityHeading": "Utambulisho",
     "preferences": {
       "accentA11y": "Msisitizo {{name}}",
       "accentHeading": "Msisitizo",
@@ -485,13 +474,8 @@
       "blockedUsers": "Watumiaji waliozuiwa",
       "changePinSub": "PIN yako ya tarakimu 4 hufungua Pollis kwenye kifaa hiki."
     },
-    "title": "Mimi",
+    "title": "Akaunti",
     "userSettings": {
-      "displayName": "Jina la kuonyesha",
-      "handle": "Jina la utambulisho",
-      "handleHint": "Wanachama wengine wanaweza kukupata na kukutumia DM kwa @jina.",
-      "handleInvalid": "Majina ya utambulisho yana herufi 3–32: herufi ndogo, tarakimu, '_', '.' au '-'.",
-      "save": "Hifadhi mabadiliko",
       "photo": {
         "heading": "Picha ya wasifu",
         "hint": "Kila mtu unayezungumza naye huona picha hii.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "Moja kwa moja",
+    "direct": "DM",
     "groups": "Vikundi",
-    "self": "Mimi",
+    "self": "Akaunti",
     "signInDevice": "Unganisha",
     "withInvites_one": "{{label}}, mwaliko {{count}} wa kikundi",
     "withInvites_other": "{{label}}, mialiko {{count}} ya vikundi",
@@ -552,7 +536,7 @@
     "message": "Ujumbe",
     "opening": "Inafungua…",
     "safetyActionsHeading": "Vitendo vya usalama",
-    "selfNote": "Huyu ni wewe. Hariri jina lako la utambulisho na jina la kuonyesha kwenye <link>Mimi → Mipangilio ya mtumiaji</link>.",
+    "selfNote": "Huyu ni wewe. Hariri jina lako la utambulisho na jina la kuonyesha kwenye <link>Akaunti → Wasifu</link>.",
     "title": "Mtumiaji",
     "unblockUser": "Ondoa kizuizi kwa mtumiaji",
     "verified": "◆ Amethibitishwa"

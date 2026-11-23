@@ -30,7 +30,7 @@ Server-visible (Turso, plaintext) account/directory metadata, all **linked to th
 | Data | Where | Collected on mobile? | Evidence |
 |---|---|---|---|
 | **Email address** | `users.email` (NOT NULL UNIQUE) | **Yes** — the sole sign-in identifier (email → OTP → PIN). | `pollis-core/src/commands/auth.rs` `verify_otp`; `mobile/app/(auth)/email.tsx` |
-| **Username / handle** | `users.username` (NOT NULL UNIQUE) | **Yes** — account handle, editable in Self → user-settings; directory-searchable. | `pollis-core/src/commands/user.rs`; `mobile/app/self/user-settings.tsx`, `mobile/app/dm/new.tsx` |
+| **Username / handle** | `users.username` (NOT NULL UNIQUE) | **Yes** — account handle, editable in Account → Profile; directory-searchable. | `pollis-core/src/commands/user.rs`; `mobile/app/self/user-settings.tsx`, `mobile/app/dm/new.tsx` |
 | **Display / preferred name** | `users.preferred_name` (nullable) | **Yes, optional** — user-set profile name. | migration `000001_user_preferred_name.sql`; `mobile/app/self/user-settings.tsx` |
 | Phone number | `users.phone` (nullable) | **No** — column exists but the mobile app has no phone input and never writes it. | schema only; no mobile UI |
 | Avatar | `users.avatar_url` | Optional — points to a **public, unencrypted** R2 object (profile decoration, not message content; anyone with the URL can fetch it). | `pollis-core/src/commands/r2.rs` "Public objects (avatars, group icons)" |

@@ -22,6 +22,23 @@
 
 ## Conventions
 
+- **Menus read the same on desktop, mobile and the TUI (#2086).** One name and one order per
+  menu, and both apps take the label from the same catalogue key, so every locale stays aligned:
+  - Main nav: **Groups · DMs · Account** (`nav:sidebar.{groups,dms,account}`; mobile's tabs and
+    the TUI's sidebar header too).
+  - Account menu (desktop sidebar + `/settings` hub, mobile Account tab): **Saved messages,
+    Profile, Security, Preferences, Language**, then the platform-only rows where they fall
+    (desktop: Security events, Copy history, Voice & video, Key bindings, Software update; mobile:
+    Group aliases, Notifications, Auto-lock, Version/Update), then Diagnostics, Open source
+    licenses. Labels are `nav:sidebar.*`; page titles match them.
+  - Profile fields: **Display name, Handle** (`settings:user.{displayNameLabel,handleLabel}`),
+    photo first, email after. User-facing copy says "handle", never "username"
+    (`users.username` is the field).
+  - Group menu: **Members, Invite people, New channel, Join requests, Custom emoji**, then the
+    group's own settings, **Leave group** last (`channels:group.*` on both apps).
+  - Message menu: Reply in thread, Copy link, Save, Pin, then Edit/Report/Delete (desktop's
+    hover bar keeps Reply, React and Edit as one-click shortcuts).
+  New labels go in a shared key, never a per-app copy of the same word.
 - Reusable components live in **their own files**, never inlined in a parent.
 - Use the shared primitives in `frontend/src/components/ui/` (`Button`, `Switch`,
   `TextInput`, …) — never a hand-rolled styled equivalent.

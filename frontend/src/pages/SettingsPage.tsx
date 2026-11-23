@@ -160,7 +160,7 @@ export const SettingsPage: React.FC = observer(() => {
     const nextUsername = username.trim();
     // Like the DS, an unchanged legacy username passes.
     if (nextUsername !== (userData?.username ?? "") && !isValidUsername(nextUsername)) {
-      setUsernameError(t("user.usernameInvalid"));
+      setUsernameError(t("user.handleInvalid"));
       return;
     }
     setUsernameError(null);
@@ -239,19 +239,116 @@ export const SettingsPage: React.FC = observer(() => {
 
   if (!currentUser) {
     return (
-      <PageShell title={t("user.title")} scrollable>
+      <PageShell title={t("nav:sidebar.profile")} scrollable>
         <EmptyState testId="settings-no-user">{t("user.signInPrompt")}</EmptyState>
       </PageShell>
     );
   }
 
   return (
-    <PageShell title={t("user.title")} scrollable>
+    <PageShell title={t("nav:sidebar.profile")} scrollable>
       <PageColumn spacing="sections" paneTestId="settings-page" data-testid="settings-content">
-        {/* Account */}
+        {/* Photo first, as on mobile (#2086). */}
         <section className="flex flex-col gap-4 mb-12">
           <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
-            {t("user.accountHeading")}
+            {t("user.avatarHeading")}
+          </h2>
+
+          <div className="flex items-center gap-4">
+            <div
+              data-testid="avatar-preview-container"
+              className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer rounded-panel border-2 border-line bg-surface-high"
+              onClick={() => fileInputRef.current?.click()}
+              title={t("user.avatarPickTitle")}
+            >
+              {preview ? (
+                <img data-testid="avatar-new-preview" src={preview} alt={t("user.avatarPreviewAlt")} className="w-full h-full object-cover" />
+              ) : currentAvatarUrl ? (
+                <img
+                  data-testid="avatar-current"
+                  src={currentAvatarUrl}
+                  alt={t("user.avatarAlt")}
+                  className="w-full h-full object-cover"
+                  onError={() => setCurrentAvatarUrl(null)}
+                />
+              ) : (
+                <User data-testid="avatar-placeholder" size={22} aria-hidden="true" className="text-muted" />
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label
+                htmlFor="settings-avatar-input"
+                className="inline-flex items-center gap-1.5 text-secondary font-mono cursor-pointer transition-colors text-accent"
+              >
+                <Upload size={14} aria-hidden="true" />
+                {t("user.chooseImage")}
+              </label>
+              <input
+                key={fileInputKey}
+                ref={fileInputRef}
+                id="settings-avatar-input"
+                data-testid="settings-avatar-input"
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                disabled={updateAvatarMutation.isPending}
+                aria-label={t("user.avatarInputLabel")}
+                className="sr-only"
+              />
+              <p className="text-secondary font-mono text-muted">
+                {t("user.avatarHint")}
+              </p>
+            </div>
+          </div>
+
+          {uploadError && (
+            <p data-testid="avatar-upload-error" className="text-secondary font-mono text-danger">
+              {uploadError}
+            </p>
+          )}
+
+          {saveSuccess && !selectedFile && (
+            <p data-testid="avatar-upload-success" className="text-secondary font-mono text-accent-dim">
+              {t("user.avatarUpdated")}
+            </p>
+          )}
+
+          {avatarRemoved && !currentAvatarUrl && !selectedFile && (
+            <p data-testid="avatar-remove-success" className="text-secondary font-mono text-accent-dim">
+              {t("user.avatarRemoved")}
+            </p>
+          )}
+
+          {currentAvatarUrl && !selectedFile && (
+            <Button
+              data-testid="remove-avatar-button"
+              variant="danger"
+              onClick={handleAvatarRemove}
+              disabled={updateAvatarMutation.isPending}
+              isLoading={updateAvatarMutation.isPending}
+            >
+              {t("user.removeAvatarButton")}
+            </Button>
+          )}
+
+          {selectedFile && (
+            <Button
+              data-testid="upload-avatar-button"
+              onClick={handleAvatarUpload}
+              disabled={updateAvatarMutation.isPending}
+              isLoading={updateAvatarMutation.isPending}
+              loadingText={t("user.uploading")}
+            >
+              {t("user.uploadAvatarButton")}
+            </Button>
+          )}
+        </section>
+
+        {/* Display name and handle, in mobile's order (#2086). */}
+        <section className="flex flex-col gap-4 mb-12">
+          <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
+            {t("user.identityHeading")}
           </h2>
 
           {isLoading ? (
@@ -261,26 +358,26 @@ export const SettingsPage: React.FC = observer(() => {
           ) : (
             <div className="flex flex-col gap-4">
               <TextInput
-                label={t("user.usernameLabel")}
+                label={t("user.displayNameLabel")}
+                value={preferredName}
+                onChange={setPreferredName}
+                placeholder={t("user.displayNamePlaceholder")}
+                id="settings-preferred-name"
+              />
+              <input data-testid="settings-preferred-name-input" type="hidden" value={preferredName} readOnly />
+
+              <TextInput
+                label={t("user.handleLabel")}
                 value={username}
                 onChange={(value) => {
                   setUsername(value);
                   setUsernameError(null);
                 }}
-                placeholder={t("user.usernamePlaceholder")}
+                description={t("user.handleHint")}
                 error={usernameError ?? undefined}
                 id="settings-username"
               />
               <input data-testid="settings-username-input" type="hidden" value={username} readOnly />
-
-              <TextInput
-                label={t("user.preferredNameLabel")}
-                value={preferredName}
-                onChange={setPreferredName}
-                placeholder={t("user.preferredNamePlaceholder")}
-                id="settings-preferred-name"
-              />
-              <input data-testid="settings-preferred-name-input" type="hidden" value={preferredName} readOnly />
             </div>
           )}
 
@@ -459,103 +556,6 @@ export const SettingsPage: React.FC = observer(() => {
                 </Button>
               </div>
             </div>
-          )}
-        </section>
-
-        {/* Avatar */}
-        <section className="flex flex-col gap-4 mb-12">
-          <h2 className="text-secondary font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
-            {t("user.avatarHeading")}
-          </h2>
-
-          <div className="flex items-center gap-4">
-            <div
-              data-testid="avatar-preview-container"
-              className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer rounded-panel border-2 border-line bg-surface-high"
-              onClick={() => fileInputRef.current?.click()}
-              title={t("user.avatarPickTitle")}
-            >
-              {preview ? (
-                <img data-testid="avatar-new-preview" src={preview} alt={t("user.avatarPreviewAlt")} className="w-full h-full object-cover" />
-              ) : currentAvatarUrl ? (
-                <img
-                  data-testid="avatar-current"
-                  src={currentAvatarUrl}
-                  alt={t("user.avatarAlt")}
-                  className="w-full h-full object-cover"
-                  onError={() => setCurrentAvatarUrl(null)}
-                />
-              ) : (
-                <User data-testid="avatar-placeholder" size={22} aria-hidden="true" className="text-muted" />
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="settings-avatar-input"
-                className="inline-flex items-center gap-1.5 text-secondary font-mono cursor-pointer transition-colors text-accent"
-              >
-                <Upload size={14} aria-hidden="true" />
-                {t("user.chooseImage")}
-              </label>
-              <input
-                key={fileInputKey}
-                ref={fileInputRef}
-                id="settings-avatar-input"
-                data-testid="settings-avatar-input"
-                type="file"
-                accept="image/*"
-                onChange={handleFileChange}
-                disabled={updateAvatarMutation.isPending}
-                aria-label={t("user.avatarInputLabel")}
-                className="sr-only"
-              />
-              <p className="text-secondary font-mono text-muted">
-                {t("user.avatarHint")}
-              </p>
-            </div>
-          </div>
-
-          {uploadError && (
-            <p data-testid="avatar-upload-error" className="text-secondary font-mono text-danger">
-              {uploadError}
-            </p>
-          )}
-
-          {saveSuccess && !selectedFile && (
-            <p data-testid="avatar-upload-success" className="text-secondary font-mono text-accent-dim">
-              {t("user.avatarUpdated")}
-            </p>
-          )}
-
-          {avatarRemoved && !currentAvatarUrl && !selectedFile && (
-            <p data-testid="avatar-remove-success" className="text-secondary font-mono text-accent-dim">
-              {t("user.avatarRemoved")}
-            </p>
-          )}
-
-          {currentAvatarUrl && !selectedFile && (
-            <Button
-              data-testid="remove-avatar-button"
-              variant="danger"
-              onClick={handleAvatarRemove}
-              disabled={updateAvatarMutation.isPending}
-              isLoading={updateAvatarMutation.isPending}
-            >
-              {t("user.removeAvatarButton")}
-            </Button>
-          )}
-
-          {selectedFile && (
-            <Button
-              data-testid="upload-avatar-button"
-              onClick={handleAvatarUpload}
-              disabled={updateAvatarMutation.isPending}
-              isLoading={updateAvatarMutation.isPending}
-              loadingText={t("user.uploading")}
-            >
-              {t("user.uploadAvatarButton")}
-            </Button>
           )}
         </section>
 

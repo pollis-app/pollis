@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "సంభాషణ",
-    "info": "సమాచారం",
     "memberSelf": "@{{handle}} · మీరు",
     "roleAdmin": "అడ్మిన్",
     "roleOwner": "యజమాని"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, గ్రూప్ మెనూ",
-      "invite": "వ్యక్తులను ఆహ్వానించు",
       "search": "{{name}}లో సెర్చ్ చేయండి",
-      "createChannel": "ఛానెల్ సృష్టించు",
       "thisGroup": "ఈ గ్రూప్",
       "members": "సభ్యులు",
       "settings": "గ్రూప్ సెట్టింగ్‌లు",
-      "joinRequests": "చేరిక అభ్యర్థనలు",
-      "customEmoji": "అనుకూల ఎమోజీ",
-      "leave": "గ్రూప్ నుండి నిష్క్రమించు",
       "leaveConfirm": "{{name}} నుండి నిష్క్రమించడానికి మళ్లీ నొక్కండి",
       "leaveHint": "మళ్లీ చేరడానికి మీకు కొత్త ఆహ్వానం అవసరం.",
       "leaving": "నిష్క్రమిస్తోంది…",
@@ -402,12 +396,8 @@
       "editProfile": "ప్రొఫైల్ ఎడిట్ చేయి",
       "accountSection": "ఖాతా",
       "appSection": "యాప్",
-      "accountDetails": "ఖాతా వివరాలు",
-      "securityDevices": "భద్రత & పరికరాలు",
       "deviceCount_one": "{{count}} పరికరం",
       "deviceCount_other": "{{count}} పరికరాలు",
-      "savedMessages": "సేవ్ చేసిన మెసేజ్‌లు",
-      "appearance": "రూపం",
       "signOut": "సైన్ అవుట్…",
       "signOutConfirmTitle": "ఈ పరికరంలో Pollis నుండి సైన్ అవుట్ చేయాలా?",
       "version": "వెర్షన్",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}} తెరుస్తుంది",
       "updateFailed": "{{place}} తెరవడం సాధ్యపడలేదు"
     },
-    "identityHeading": "గుర్తింపు",
     "preferences": {
       "accentA11y": "యాక్సెంట్ {{name}}",
       "accentHeading": "యాక్సెంట్",
@@ -485,13 +474,8 @@
       "blockedUsers": "బ్లాక్ చేసిన యూజర్‌లు",
       "changePinSub": "మీ 4-అంకెల PIN ఈ పరికరంలో Pollisను అన్‌లాక్ చేస్తుంది."
     },
-    "title": "నేను",
+    "title": "ఖాతా",
     "userSettings": {
-      "displayName": "డిస్‌ప్లే పేరు",
-      "handle": "హ్యాండిల్",
-      "handleHint": "ఇతర సభ్యులు @handleతో మిమ్మల్ని కనుగొని DM చేయగలరు.",
-      "handleInvalid": "హ్యాండిల్‌లు 3–32 అక్షరాలు: చిన్న ఆంగ్ల అక్షరాలు, అంకెలు, '_', '.' లేదా '-'.",
-      "save": "మార్పులను సేవ్ చేయి",
       "photo": {
         "heading": "ప్రొఫైల్ ఫోటో",
         "hint": "మీరు మాట్లాడే ప్రతి ఒక్కరికీ ఈ ఫోటో కనిపిస్తుంది.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "డైరెక్ట్",
+    "direct": "DMలు",
     "groups": "గ్రూప్‌లు",
-    "self": "నేను",
+    "self": "ఖాతా",
     "signInDevice": "లింక్",
     "withInvites_one": "{{label}}, {{count}} గ్రూప్ ఆహ్వానం",
     "withInvites_other": "{{label}}, {{count}} గ్రూప్ ఆహ్వానాలు",
@@ -552,7 +536,7 @@
     "message": "మెసేజ్",
     "opening": "తెరుస్తోంది…",
     "safetyActionsHeading": "భద్రతా చర్యలు",
-    "selfNote": "ఇది మీరే. మీ హ్యాండిల్, డిస్‌ప్లే పేరును <link>నేను → యూజర్ సెట్టింగ్‌లు</link>లో ఎడిట్ చేయండి.",
+    "selfNote": "ఇది మీరే. మీ హ్యాండిల్, డిస్‌ప్లే పేరును <link>ఖాతా → ప్రొఫైల్</link>లో ఎడిట్ చేయండి.",
     "title": "యూజర్",
     "unblockUser": "యూజర్‌ను అన్‌బ్లాక్ చేయి",
     "verified": "◆ ధృవీకరించబడింది"

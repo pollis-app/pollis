@@ -11355,9 +11355,9 @@
       "doc": "docs/store-listing.md",
       "locator": {
         "heading": "4. Play Data safety form (Play Console → App content → Data safety)",
-        "quote": "Do you provide a way for users to request data deletion? → Yes — in-app account deletion (Self → Security on mobile)"
+        "quote": "Do you provide a way for users to request data deletion? → Yes — in-app account deletion (Account → Security on mobile)"
       },
-      "claim": "In-app account deletion under Self → Security.",
+      "claim": "In-app account deletion under Account → Security.",
       "kind": "behaviour",
       "anchors": [
         "mobile/app/self/delete-account.tsx",
@@ -11462,9 +11462,9 @@
       "doc": "docs/store-listing.md",
       "locator": {
         "heading": "9. App Review sign-in",
-        "quote": "open Self → Security to see devices and account deletion, or a direct message's info → \"You &"
+        "quote": "open Account → Security to see devices and account deletion, or a direct message's info → \"You &"
       },
-      "claim": "open Self → Security to see devices and account deletion, or a direct message's info → \"You & \" for its safety number.",
+      "claim": "open Account → Security to see devices and account deletion, or a direct message's info → \"You & \" for its safety number.",
       "kind": "behaviour",
       "anchors": [
         "mobile/app/self/security.tsx",
@@ -16673,9 +16673,9 @@
       "doc": "website/device-security.html",
       "locator": {
         "heading": "Your own security log does record it",
-        "quote": "Revoking a device writes a Device revoked entry to Settings → Security"
+        "quote": "Revoking a device writes a Device revoked entry to Account → Security"
       },
-      "claim": "Revoke writes a device_revoked security event, readable in Settings → Security.",
+      "claim": "Revoke writes a device_revoked security event, readable in Account → Security.",
       "kind": "behaviour",
       "anchors": [
         "pollis-core/src/commands/auth.rs",
@@ -20516,7 +20516,7 @@
       "doc": "website/open-source.html",
       "locator": {
         "heading": "Open source",
-        "quote": "The desktop and mobile apps also list every package with its full licence text: Settings → Open Source Licenses on desktop, Self → Open source licenses on mobile."
+        "quote": "The desktop and mobile apps also list every package with its full licence text under Account → Open source licenses."
       },
       "claim": "Desktop (Settings) and mobile (Self tab) have an in-app open-source licences screen.",
       "kind": "behaviour",

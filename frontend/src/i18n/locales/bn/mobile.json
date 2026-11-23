@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "কথোপকথন",
-    "info": "তথ্য",
     "memberSelf": "@{{handle}} · আপনি",
     "roleAdmin": "অ্যাডমিন",
     "roleOwner": "মালিক"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, গ্রুপ মেনু",
-      "invite": "লোকজনকে আমন্ত্রণ জানান",
       "search": "{{name}}-এ সার্চ করুন",
-      "createChannel": "একটি চ্যানেল তৈরি করুন",
       "thisGroup": "এই গ্রুপ",
       "members": "সদস্য",
       "settings": "গ্রুপের সেটিংস",
-      "joinRequests": "যোগদানের অনুরোধ",
-      "customEmoji": "কাস্টম ইমোজি",
-      "leave": "গ্রুপ ছেড়ে দিন",
       "leaveConfirm": "{{name}} ছাড়তে আবার ট্যাপ করুন",
       "leaveHint": "আবার যোগ দিতে আপনার নতুন আমন্ত্রণ লাগবে।",
       "leaving": "ছেড়ে যাওয়া হচ্ছে…",
@@ -402,12 +396,8 @@
       "editProfile": "প্রোফাইল এডিট করুন",
       "accountSection": "অ্যাকাউন্ট",
       "appSection": "অ্যাপ",
-      "accountDetails": "অ্যাকাউন্টের বিবরণ",
-      "securityDevices": "নিরাপত্তা ও ডিভাইস",
       "deviceCount_one": "{{count}}টি ডিভাইস",
       "deviceCount_other": "{{count}}টি ডিভাইস",
-      "savedMessages": "সেভ করা মেসেজ",
-      "appearance": "চেহারা",
       "signOut": "সাইন আউট…",
       "signOutConfirmTitle": "এই ডিভাইসে Pollis থেকে সাইন আউট করবেন?",
       "version": "ভার্সন",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}} খোলে",
       "updateFailed": "{{place}} খোলা যায়নি"
     },
-    "identityHeading": "পরিচয়",
     "preferences": {
       "accentA11y": "অ্যাকসেন্ট {{name}}",
       "accentHeading": "অ্যাকসেন্ট",
@@ -485,13 +474,8 @@
       "blockedUsers": "ব্লক করা ব্যবহারকারী",
       "changePinSub": "আপনার 4 অঙ্কের PIN এই ডিভাইসে Pollis আনলক করে।"
     },
-    "title": "আমি",
+    "title": "অ্যাকাউন্ট",
     "userSettings": {
-      "displayName": "প্রদর্শিত নাম",
-      "handle": "হ্যান্ডেল",
-      "handleHint": "অন্য সদস্যরা @handle দিয়ে আপনাকে খুঁজে DM পাঠাতে পারেন।",
-      "handleInvalid": "হ্যান্ডেল 3–32 অক্ষরের হয়: ছোট হাতের অক্ষর, সংখ্যা, '_', '.' বা '-'।",
-      "save": "পরিবর্তন সেভ করুন",
       "photo": {
         "heading": "প্রোফাইল ছবি",
         "hint": "আপনি যাঁদের সাথে কথা বলেন তাঁরা সবাই এই ছবি দেখতে পান।",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "সরাসরি",
+    "direct": "DM",
     "groups": "গ্রুপ",
-    "self": "আমি",
+    "self": "অ্যাকাউন্ট",
     "signInDevice": "লিঙ্ক",
     "withInvites_one": "{{label}}, {{count}}টি গ্রুপ আমন্ত্রণ",
     "withInvites_other": "{{label}}, {{count}}টি গ্রুপ আমন্ত্রণ",
@@ -552,7 +536,7 @@
     "message": "মেসেজ",
     "opening": "খোলা হচ্ছে…",
     "safetyActionsHeading": "সুরক্ষার পদক্ষেপ",
-    "selfNote": "এটি আপনি। <link>আমি → ব্যবহারকারীর সেটিংস</link>-এ আপনার হ্যান্ডেল আর প্রদর্শিত নাম এডিট করুন।",
+    "selfNote": "এটি আপনি। <link>অ্যাকাউন্ট → প্রোফাইল</link>-এ আপনার হ্যান্ডেল আর প্রদর্শিত নাম এডিট করুন।",
     "title": "ব্যবহারকারী",
     "unblockUser": "ব্যবহারকারীকে আনব্লক করুন",
     "verified": "◆ যাচাই করা"

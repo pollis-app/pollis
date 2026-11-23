@@ -142,14 +142,13 @@ function Direct() {
           />
         </View>
       ) : null}
-      <Body contentContainerStyle={{ paddingHorizontal: space.sm, gap: 2 }}>
+      {/* Rows share the search field's edges (#2087). */}
+      <Body contentContainerStyle={{ paddingHorizontal: space.xxl, gap: 2 }}>
         {/* The Vault (#1316) heads the list; hidden while searching. */}
         {!needle ? (
           <>
             <VaultRow onPress={() => router.push("/vault")} />
-            <Divider
-              style={{ marginVertical: space.sm, marginHorizontal: space.sm }}
-            />
+            <Divider style={{ marginVertical: space.sm }} />
           </>
         ) : null}
         {requests.length > 0 ? (
@@ -159,15 +158,13 @@ function Direct() {
               count={requests.length}
               onPress={() => router.push("/dm/requests")}
             />
-            <Divider
-              style={{ marginVertical: space.sm, marginHorizontal: space.sm }}
-            />
+            <Divider style={{ marginVertical: space.sm }} />
           </>
         ) : null}
         {isLoading ? (
           <Txt
             variant="secondary"
-            style={{ paddingHorizontal: space.sm, paddingTop: space.lg }}
+            style={{ paddingHorizontal: space.lg, paddingTop: space.lg }}
           >
             {t("direct.loading")}
           </Txt>
@@ -175,7 +172,7 @@ function Direct() {
         {isError ? (
           <Txt
             variant="secondary"
-            style={{ paddingHorizontal: space.sm, paddingTop: space.lg }}
+            style={{ paddingHorizontal: space.lg, paddingTop: space.lg }}
           >
             {t("direct.loadFailed")}
           </Txt>
@@ -201,7 +198,7 @@ function Direct() {
         {needle && dms.length > 0 && shown.length === 0 ? (
           <Txt
             variant="secondary"
-            style={{ paddingHorizontal: space.sm, paddingTop: space.lg }}
+            style={{ paddingHorizontal: space.lg, paddingTop: space.lg }}
           >
             {t("direct.noMatches")}
           </Txt>

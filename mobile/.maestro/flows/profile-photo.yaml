@@ -3,7 +3,7 @@ tags:
   - parity
 ---
 # PROFILE PHOTO — set your own photo from the library (system picker + square
-# crop), see it on Account details, on the Self card and on your message rows,
+# crop), see it on Profile, on the Self card and on your message rows,
 # then prove it is drawn from disk after a cold restart, and remove it.
 #
 # `UserAvatar` carries `<testID>-photo` once a picture is on disk for that
