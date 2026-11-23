@@ -6,11 +6,15 @@ tags:
 # typist on pollis-core's own LiveKit path — is in its room.
 #
 # Receive: the peer types → "<peer> is typing…" over the composer; it stops →
-# the line goes.
+# the line goes. Its band stays either way (#2082), with the keyboard closed and
+# open; the idle / typing / stopped screenshots are compared for a moved message.
 # Send: this device types → the peer sees `typing`; clearing the draft → the
 # peer sees `stopped`; typing again and sending → `typing`, then `stopped`.
 
 # --- Receive ------------------------------------------------------------------
+- assertVisible:
+    id: "typing-band"
+- takeScreenshot: typing-00-idle
 - runScript:
     file: ../../scripts/peer-typing.js
     env:
@@ -31,6 +35,35 @@ tags:
     notVisible:
       id: "text-typing-indicator"
     timeout: 5000
+- assertVisible:
+    id: "typing-band"
+- takeScreenshot: typing-01b-stopped
+
+# The same with the keyboard up.
+- tapOn:
+    id: "input-composer"
+- waitForAnimationToEnd
+- takeScreenshot: typing-01c-keyboard-idle
+- runScript:
+    file: ../../scripts/peer-typing.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      ACTION: "on"
+- extendedWaitUntil:
+    visible:
+      id: "text-typing-indicator"
+    timeout: 10000
+- takeScreenshot: typing-01d-keyboard-typing
+- runScript:
+    file: ../../scripts/peer-typing.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      ACTION: "off"
+- extendedWaitUntil:
+    notVisible:
+      id: "text-typing-indicator"
+    timeout: 5000
+- takeScreenshot: typing-01e-keyboard-stopped
 
 # --- Send ---------------------------------------------------------------------
 - tapOn:
