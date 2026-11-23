@@ -92,7 +92,7 @@ mobile/lib/swipeReply*                         reply
 mobile/lib/mentions*                           messaging
 mobile/app/conversation/*                      pins channel-menu
 mobile/lib/messageJump*                        pins search
-mobile/components/emoji/*                      custom-emoji copy-state messaging
+mobile/components/emoji/*                      custom-emoji copy-state messaging emoji-coverage
 mobile/lib/emoji*                              custom-emoji
 
 # --- DMs and people ---
