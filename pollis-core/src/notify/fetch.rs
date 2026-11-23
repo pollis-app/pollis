@@ -813,49 +813,12 @@ async fn sender_names(
     rows: &[Row],
     deadline: Instant,
 ) -> Vec<(String, String)> {
-    let mut wanted: Vec<String> = Vec::new();
-    for r in rows {
-        if !wanted.contains(&r.sender_id) {
-            wanted.push(r.sender_id.clone());
-        }
-    }
-    let mut found: Vec<(String, String)> = Vec::new();
-    {
-        let guard = state.local_db.lock().await;
-        if let Some(db) = guard.as_ref() {
-            for id in &wanted {
-                if let Ok(name) = db.conn().query_row(
-                    "SELECT username FROM user_cache WHERE id = ?1",
-                    rusqlite::params![id],
-                    |r| r.get::<_, String>(0),
-                ) {
-                    found.push((id.clone(), name));
-                }
-            }
-        }
-    }
-    let missing: Vec<String> = wanted
+    let wanted: Vec<String> = rows.iter().map(|r| r.sender_id.clone()).collect();
+    // #2084: the shared cache, refreshed within the push's deadline.
+    crate::commands::user_cache::usernames(state, &wanted, Some(deadline.into()))
+        .await
         .into_iter()
-        .filter(|id| !found.iter().any(|(f, _)| f == id))
-        .collect();
-    if missing.is_empty() {
-        return found;
-    }
-    let lookup = crate::commands::ds_reads::users(state, missing, None);
-    if let Ok(Ok(users)) = tokio::time::timeout_at(deadline.into(), lookup).await {
-        let guard = state.local_db.lock().await;
-        for u in users {
-            if let Some(db) = guard.as_ref() {
-                let _ = db.conn().execute(
-                    "INSERT INTO user_cache (id, username, updated_at) VALUES (?1, ?2, datetime('now'))
-                     ON CONFLICT(id) DO UPDATE SET username = ?2, updated_at = datetime('now')",
-                    rusqlite::params![u.id, u.username],
-                );
-            }
-            found.push((u.id, u.username));
-        }
-    }
-    found
+        .collect()
 }
 
 /// `(conversation_id, sender_id, alias)` for every channel row whose sender has an
