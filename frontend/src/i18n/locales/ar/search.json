@@ -12,9 +12,9 @@
     "liveTerminal": "[مباشر]"
   },
   "pages": {
-    "userName": "المستخدم",
+    "userName": "الملف الشخصي",
     "userKeywords": "الحساب الملف الشخصي اسم المستخدم البريد الإلكتروني الصورة الرمزية الإعدادات account profile username email avatar settings",
-    "settingsName": "الإعدادات",
+    "settingsName": "الحساب",
     "settingsKeywords": "التفضيلات المستخدم الأمان settings preferences user security",
     "preferencesName": "التفضيلات",
     "preferencesKeywords": "السمة اللون الخط الإشعارات المظهر theme color font notifications appearance",
@@ -48,7 +48,7 @@
     "groupsNewKeywords": "جديدة إنشاء new create",
     "groupsSearchName": "البحث عن مجموعات",
     "groupsSearchKeywords": "استكشاف بحث عامة discover search public",
-    "savedName": "المحفوظات",
+    "savedName": "الرسائل المحفوظة",
     "savedKeywords": "محفوظ إشارة مرجعية مفضلة مثبتة لاحقًا رابط دائم saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "الأركيد",
     "arcadeKeywords": "أركيد لعبة كويكبات مركبة إطلاق بيضة عيد الفصح لعب arcade game asteroids ship shoot easter egg play",

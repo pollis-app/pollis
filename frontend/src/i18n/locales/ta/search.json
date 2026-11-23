@@ -13,9 +13,9 @@
     "searchMessagesFor": "\"{{query}}\"-ஐச் செய்திகளில் தேடு"
   },
   "pages": {
-    "userName": "பயனர்",
+    "userName": "சுயவிவரம்",
     "userKeywords": "கணக்கு சுயவிவரம் பயனர்பெயர் மின்னஞ்சல் அவதார் அமைப்புகள் account profile username email avatar settings",
-    "settingsName": "அமைப்புகள்",
+    "settingsName": "கணக்கு",
     "settingsKeywords": "விருப்பங்கள் பயனர் பாதுகாப்பு preferences user security",
     "preferencesName": "விருப்பங்கள்",
     "preferencesKeywords": "தீம் நிறம் எழுத்துரு அறிவிப்புகள் தோற்றம் theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "புதிய உருவாக்கு new create",
     "groupsSearchName": "குழுக்களைக் கண்டறி",
     "groupsSearchKeywords": "கண்டறி தேடு பொது discover search public",
-    "savedName": "சேமித்தவை",
+    "savedName": "சேமித்த செய்திகள்",
     "savedKeywords": "சேமித்தவை புக்மார்க் புக்மார்க்குகள் நட்சத்திரமிட்டவை பின் செய்தவை பிறகு நிரந்தர இணைப்பு saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "ஆர்கேட்",
     "arcadeKeywords": "ஆர்கேட் விளையாட்டு விண்கற்கள் கப்பல் சுடு ஈஸ்டர் எக் விளையாடு arcade game asteroids ship shoot easter egg play",

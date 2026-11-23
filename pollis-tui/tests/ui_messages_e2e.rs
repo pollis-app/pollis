@@ -70,7 +70,7 @@ async fn other_clients_message_shapes_render_and_message_keys_work() {
 
     bob.wait_for("pending", SIDEBAR_TIMEOUT).await;
     key(&mut bob, 'a').await;
-    bob.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
+    bob.wait_for("DMs", SIDEBAR_TIMEOUT).await;
     bob.enter().await;
 
     let dm_id = alice.app().home.open.as_ref().unwrap().conv_id.clone();

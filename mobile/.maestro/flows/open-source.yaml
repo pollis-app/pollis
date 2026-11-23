@@ -4,7 +4,7 @@ tags:
 ---
 # OPEN SOURCE LICENSES (#1832) — desktop's /open-source page, on a real build.
 #
-# Self → Open source licenses lists every third-party package this build ships
+# Account → Open source licenses lists every third-party package this build ships
 # (generated from the lockfiles by metro.config.js when the bundle was built),
 # the filter narrows it, and a package opens the licence text it ships. uniffi
 # is in every build (the Rust bridge) and is MPL-2.0, so it proves the Rust half

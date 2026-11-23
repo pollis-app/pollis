@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Conversation",
-    "info": "Infos",
     "memberSelf": "@{{handle}} · vous",
     "roleAdmin": "Admin",
     "roleOwner": "Propriétaire"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, menu du groupe",
-      "invite": "Inviter des personnes",
       "search": "Rechercher dans {{name}}",
-      "createChannel": "Créer un salon",
       "thisGroup": "Ce groupe",
       "members": "Membres",
       "settings": "Paramètres du groupe",
-      "joinRequests": "Demandes d'adhésion",
-      "customEmoji": "Emoji personnalisés",
-      "leave": "Quitter le groupe",
       "leaveConfirm": "Touchez à nouveau pour quitter {{name}}",
       "leaveHint": "Il vous faudra une nouvelle invitation pour revenir.",
       "leaving": "Départ…",
@@ -392,12 +386,8 @@
       "editProfile": "Modifier le profil",
       "accountSection": "Compte",
       "appSection": "App",
-      "accountDetails": "Détails du compte",
-      "securityDevices": "Sécurité et appareils",
       "deviceCount_one": "{{count}} appareil",
       "deviceCount_other": "{{count}} appareils",
-      "savedMessages": "Messages enregistrés",
-      "appearance": "Apparence",
       "signOut": "Se déconnecter…",
       "signOutConfirmTitle": "Se déconnecter de Pollis sur cet appareil ?",
       "version": "Version",
@@ -407,7 +397,6 @@
       "updateHint": "Ouvre {{place}}",
       "updateFailed": "Impossible d’ouvrir {{place}}"
     },
-    "identityHeading": "Identité",
     "preferences": {
       "accentA11y": "Accentuation {{name}}",
       "accentHeading": "Accentuation",
@@ -475,13 +464,8 @@
       "blockedUsers": "Utilisateurs bloqués",
       "changePinSub": "Votre PIN à 4 chiffres déverrouille Pollis sur cet appareil."
     },
-    "title": "Moi",
+    "title": "Compte",
     "userSettings": {
-      "displayName": "Nom affiché",
-      "handle": "Nom d'utilisateur",
-      "handleHint": "Les autres membres peuvent vous trouver et vous écrire avec @handle.",
-      "handleInvalid": "Le nom d'utilisateur doit compter de 3 à 32 caractères : minuscules, chiffres, '_', '.' ou '-'.",
-      "save": "Enregistrer les modifications",
       "photo": {
         "heading": "Photo de profil",
         "hint": "Toutes les personnes avec qui vous parlez voient cette photo.",
@@ -517,9 +501,9 @@
     }
   },
   "tabs": {
-    "direct": "Messages",
+    "direct": "MP",
     "groups": "Groupes",
-    "self": "Moi",
+    "self": "Compte",
     "signInDevice": "Lier",
     "withInvites_one": "{{label}}, {{count}} invitation de groupe",
     "withInvites_other": "{{label}}, {{count}} invitations de groupe",
@@ -542,7 +526,7 @@
     "message": "Message",
     "opening": "Ouverture…",
     "safetyActionsHeading": "Actions de sécurité",
-    "selfNote": "C'est vous. Modifiez votre nom d'utilisateur et votre nom affiché dans <link>Moi → Paramètres utilisateur</link>.",
+    "selfNote": "C'est vous. Modifiez votre nom d'utilisateur et votre nom affiché dans <link>Compte → Profil</link>.",
     "title": "Utilisateur",
     "unblockUser": "Débloquer l'utilisateur",
     "verified": "◆ Vérifié"

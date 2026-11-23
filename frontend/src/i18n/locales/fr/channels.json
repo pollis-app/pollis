@@ -15,10 +15,10 @@
   "group": {
     "notFound": "Groupe introuvable",
     "members": "Membres",
-    "customEmoji": "Émojis personnalisés",
+    "customEmoji": "Emoji personnalisés",
     "rename": "Renommer le groupe",
     "newChannel": "Nouveau canal",
-    "inviteMember": "Inviter un membre",
+    "inviteMember": "Inviter des personnes",
     "joinRequests": "Demandes d'adhésion",
     "leave": "Quitter le groupe",
     "joinVoiceChat": "Rejoindre le canal vocal",

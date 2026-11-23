@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "உரையாடல்",
-    "info": "தகவல்",
     "memberSelf": "@{{handle}} · நீங்கள்",
     "roleAdmin": "நிர்வாகி",
     "roleOwner": "உரிமையாளர்"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, குழு மெனு",
-      "invite": "நபர்களை அழை",
       "search": "{{name}}-இல் தேடு",
-      "createChannel": "சேனலை உருவாக்கு",
       "thisGroup": "இந்தக் குழு",
       "members": "உறுப்பினர்கள்",
       "settings": "குழு அமைப்புகள்",
-      "joinRequests": "சேர்வதற்கான கோரிக்கைகள்",
-      "customEmoji": "தனிப்பயன் ஈமோஜி",
-      "leave": "குழுவிலிருந்து வெளியேறு",
       "leaveConfirm": "{{name}}-இலிருந்து வெளியேற மீண்டும் தட்டவும்",
       "leaveHint": "மீண்டும் சேர உங்களுக்குப் புதிய அழைப்பிதழ் தேவைப்படும்.",
       "leaving": "வெளியேறுகிறது…",
@@ -402,12 +396,8 @@
       "editProfile": "சுயவிவரத்தைத் திருத்து",
       "accountSection": "கணக்கு",
       "appSection": "ஆப்ஸ்",
-      "accountDetails": "கணக்கு விவரங்கள்",
-      "securityDevices": "பாதுகாப்பு & சாதனங்கள்",
       "deviceCount_one": "{{count}} சாதனம்",
       "deviceCount_other": "{{count}} சாதனங்கள்",
-      "savedMessages": "சேமித்த செய்திகள்",
-      "appearance": "தோற்றம்",
       "signOut": "வெளியேறு…",
       "signOutConfirmTitle": "இந்தச் சாதனத்தில் Pollis-இலிருந்து வெளியேறவா?",
       "version": "பதிப்பு",
@@ -417,7 +407,6 @@
       "updateHint": "{{place}}-ஐத் திறக்கும்",
       "updateFailed": "{{place}}-ஐத் திறக்க முடியவில்லை"
     },
-    "identityHeading": "அடையாளம்",
     "preferences": {
       "accentA11y": "முதன்மை நிறம் {{name}}",
       "accentHeading": "முதன்மை நிறம்",
@@ -485,13 +474,8 @@
       "blockedUsers": "தடுத்த பயனர்கள்",
       "changePinSub": "உங்கள் 4 இலக்க PIN இந்தச் சாதனத்தில் Pollis-இன் பூட்டைத் திறக்கும்."
     },
-    "title": "நான்",
+    "title": "கணக்கு",
     "userSettings": {
-      "displayName": "காட்சிப் பெயர்",
-      "handle": "ஹேண்டில்",
-      "handleHint": "மற்ற உறுப்பினர்கள் @handle மூலம் உங்களைக் கண்டறிந்து DM அனுப்பலாம்.",
-      "handleInvalid": "ஹேண்டில்கள் 3–32 எழுத்துகள் கொண்டவை: சிறிய எழுத்துகள், இலக்கங்கள், '_', '.' அல்லது '-'.",
-      "save": "மாற்றங்களைச் சேமி",
       "photo": {
         "heading": "சுயவிவரப் படம்",
         "hint": "நீங்கள் பேசும் அனைவரும் இந்தப் படத்தைப் பார்ப்பார்கள்.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "நேரடி",
+    "direct": "DM-கள்",
     "groups": "குழுக்கள்",
-    "self": "நான்",
+    "self": "கணக்கு",
     "signInDevice": "இணை",
     "withInvites_one": "{{label}}, {{count}} குழு அழைப்பு",
     "withInvites_other": "{{label}}, {{count}} குழு அழைப்புகள்",
@@ -552,7 +536,7 @@
     "message": "செய்தி",
     "opening": "திறக்கிறது…",
     "safetyActionsHeading": "பாதுகாப்புச் செயல்கள்",
-    "selfNote": "இது நீங்கள்தான். <link>நான் → பயனர் அமைப்புகள்</link> என்பதில் உங்கள் ஹேண்டிலையும் காட்சிப் பெயரையும் திருத்தவும்.",
+    "selfNote": "இது நீங்கள்தான். <link>கணக்கு → சுயவிவரம்</link> என்பதில் உங்கள் ஹேண்டிலையும் காட்சிப் பெயரையும் திருத்தவும்.",
     "title": "பயனர்",
     "unblockUser": "பயனரின் தடுப்பை நீக்கு",
     "verified": "◆ சரிபார்க்கப்பட்டது"

@@ -13,9 +13,9 @@
     "searchMessagesFor": "মেসেজে \"{{query}}\" সার্চ করুন"
   },
   "pages": {
-    "userName": "ব্যবহারকারী",
+    "userName": "প্রোফাইল",
     "userKeywords": "অ্যাকাউন্ট প্রোফাইল ইউজারনেম ইমেল অবতার সেটিংস account profile username email avatar settings",
-    "settingsName": "সেটিংস",
+    "settingsName": "অ্যাকাউন্ট",
     "settingsKeywords": "পছন্দসমূহ ব্যবহারকারী নিরাপত্তা preferences user security",
     "preferencesName": "পছন্দসমূহ",
     "preferencesKeywords": "থিম রং ফন্ট বিজ্ঞপ্তি চেহারা theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "নতুন তৈরি new create",
     "groupsSearchName": "গ্রুপ খুঁজুন",
     "groupsSearchKeywords": "খুঁজুন সার্চ পাবলিক discover search public",
-    "savedName": "সেভ করা",
+    "savedName": "সেভ করা মেসেজ",
     "savedKeywords": "সেভ বুকমার্ক তারকা পিন করা পরে পার্মালিঙ্ক লিঙ্ক saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "আর্কেড",
     "arcadeKeywords": "আর্কেড গেম গ্রহাণু জাহাজ গুলি ইস্টার এগ খেলা arcade game asteroids ship shoot easter egg play",

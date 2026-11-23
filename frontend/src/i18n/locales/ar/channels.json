@@ -19,10 +19,10 @@
   "group": {
     "notFound": "المجموعة غير موجودة",
     "members": "الأعضاء",
-    "customEmoji": "الرموز التعبيرية المخصصة",
+    "customEmoji": "رموز تعبيرية مخصصة",
     "rename": "إعادة تسمية المجموعة",
     "newChannel": "قناة جديدة",
-    "inviteMember": "دعوة عضو",
+    "inviteMember": "دعوة أشخاص",
     "joinRequests": "طلبات الانضمام",
     "leave": "مغادرة المجموعة",
     "joinVoiceChat": "الانضمام إلى المحادثة الصوتية",

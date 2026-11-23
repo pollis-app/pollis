@@ -93,7 +93,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "会話",
-    "info": "情報",
     "memberSelf": "@{{handle}} · あなた",
     "roleAdmin": "管理者",
     "roleOwner": "オーナー"
@@ -221,15 +220,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}、グループメニュー",
-      "invite": "メンバーを招待",
       "search": "{{name}} を検索",
-      "createChannel": "チャンネルを作成",
       "thisGroup": "このグループ",
       "members": "メンバー",
       "settings": "グループ設定",
-      "joinRequests": "参加リクエスト",
-      "customEmoji": "カスタム絵文字",
-      "leave": "グループを退出",
       "leaveConfirm": "もう一度タップして {{name}} を退出",
       "leaveHint": "再参加するには新しい招待が必要です。",
       "leaving": "退出しています…",
@@ -393,11 +387,7 @@
       "editProfile": "プロフィールを編集",
       "accountSection": "アカウント",
       "appSection": "アプリ",
-      "accountDetails": "アカウントの詳細",
-      "securityDevices": "セキュリティとデバイス",
       "deviceCount_other": "{{count}} 台のデバイス",
-      "savedMessages": "保存したメッセージ",
-      "appearance": "外観",
       "signOut": "ログアウト…",
       "signOutConfirmTitle": "このデバイスで Pollis からログアウトしますか？",
       "version": "バージョン",
@@ -407,7 +397,6 @@
       "updateHint": "{{place}} を開きます",
       "updateFailed": "{{place}} を開けませんでした"
     },
-    "identityHeading": "基本情報",
     "preferences": {
       "accentA11y": "アクセント {{name}}",
       "accentHeading": "アクセント",
@@ -472,13 +461,8 @@
       "blockedUsers": "ブロック中のユーザー",
       "changePinSub": "4 桁の PIN で、このデバイスの Pollis をロック解除します。"
     },
-    "title": "自分",
+    "title": "アカウント",
     "userSettings": {
-      "displayName": "表示名",
-      "handle": "ユーザー名",
-      "handleHint": "ほかのメンバーは @ユーザー名 であなたを見つけて DM を送れます。",
-      "handleInvalid": "ユーザー名は 3～32 文字で、英小文字、数字、「_」「.」「-」が使えます。",
-      "save": "変更を保存",
       "photo": {
         "heading": "プロフィール写真",
         "hint": "この写真は会話するすべての相手に表示されます。",
@@ -514,9 +498,9 @@
     }
   },
   "tabs": {
-    "direct": "ダイレクト",
+    "direct": "DM",
     "groups": "グループ",
-    "self": "自分",
+    "self": "アカウント",
     "signInDevice": "リンク",
     "withInvites_other": "{{label}}、グループへの招待 {{count}} 件",
     "withRequests_other": "{{label}}、メッセージリクエスト {{count}} 件",
@@ -536,7 +520,7 @@
     "message": "メッセージ",
     "opening": "開いています…",
     "safetyActionsHeading": "安全のための操作",
-    "selfNote": "これはあなたです。ユーザー名と表示名は<link>自分 → ユーザー設定</link>で編集できます。",
+    "selfNote": "これはあなたです。ユーザー名と表示名は<link>アカウント → プロフィール</link>で編集できます。",
     "title": "ユーザー",
     "unblockUser": "ユーザーのブロックを解除",
     "verified": "◆ 検証済み"

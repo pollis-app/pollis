@@ -15,12 +15,12 @@
   "group": {
     "notFound": "Ba a sami rukuni ba",
     "members": "Mambobi",
-    "customEmoji": "Emoji na Musamman",
+    "customEmoji": "Emoji na musamman",
     "rename": "Sake sunan Rukuni",
     "newChannel": "Sabuwar Tasha",
-    "inviteMember": "Gayyato Mamba",
-    "joinRequests": "Buƙatun Shiga",
-    "leave": "Bar Rukuni",
+    "inviteMember": "Gayyaci mutane",
+    "joinRequests": "Buƙatun shiga",
+    "leave": "Bar rukuni",
     "joinVoiceChat": "Shiga hirar murya",
     "inCall_one": "{{count}} a cikin kira",
     "inCall_other": "{{count}} a cikin kira"

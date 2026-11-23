@@ -95,7 +95,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "Conversa",
-    "info": "Informações",
     "memberSelf": "@{{handle}} · eu",
     "roleAdmin": "Administrador",
     "roleOwner": "Proprietário"
@@ -228,15 +227,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}, menu do grupo",
-      "invite": "Convidar pessoas",
       "search": "Pesquisar em {{name}}",
-      "createChannel": "Criar um canal",
       "thisGroup": "Este grupo",
       "members": "Membros",
       "settings": "Definições do grupo",
-      "joinRequests": "Pedidos de adesão",
-      "customEmoji": "Emojis personalizados",
-      "leave": "Sair do grupo",
       "leaveConfirm": "Toque novamente para sair de {{name}}",
       "leaveHint": "Vai precisar de um novo convite para voltar a aderir.",
       "leaving": "A sair…",
@@ -402,12 +396,8 @@
       "editProfile": "Editar perfil",
       "accountSection": "Conta",
       "appSection": "Aplicação",
-      "accountDetails": "Dados da conta",
-      "securityDevices": "Segurança e dispositivos",
       "deviceCount_one": "{{count}} dispositivo",
       "deviceCount_other": "{{count}} dispositivos",
-      "savedMessages": "Mensagens guardadas",
-      "appearance": "Aspeto",
       "signOut": "Terminar sessão…",
       "signOutConfirmTitle": "Terminar sessão no Pollis neste dispositivo?",
       "version": "Versão",
@@ -417,7 +407,6 @@
       "updateHint": "Abre {{place}}",
       "updateFailed": "Não foi possível abrir {{place}}"
     },
-    "identityHeading": "Identidade",
     "preferences": {
       "accentA11y": "Destaque {{name}}",
       "accentHeading": "Destaque",
@@ -485,13 +474,8 @@
       "blockedUsers": "Utilizadores bloqueados",
       "changePinSub": "O seu PIN de 4 dígitos desbloqueia o Pollis neste dispositivo."
     },
-    "title": "Eu",
+    "title": "Conta",
     "userSettings": {
-      "displayName": "Nome a mostrar",
-      "handle": "Nome de utilizador",
-      "handleHint": "Outros membros podem encontrá-lo e enviar-lhe mensagens diretas com @nome.",
-      "handleInvalid": "Os nomes de utilizador têm 3–32 caracteres: letras minúsculas, dígitos, '_', '.' ou '-'.",
-      "save": "Guardar alterações",
       "photo": {
         "heading": "Fotografia de perfil",
         "hint": "Todas as pessoas com quem fala veem esta fotografia.",
@@ -527,9 +511,9 @@
     }
   },
   "tabs": {
-    "direct": "Diretas",
+    "direct": "Mensagens diretas",
     "groups": "Grupos",
-    "self": "Eu",
+    "self": "Conta",
     "signInDevice": "Ligar",
     "withInvites_one": "{{label}}, {{count}} convite para grupo",
     "withInvites_other": "{{label}}, {{count}} convites para grupos",
@@ -552,7 +536,7 @@
     "message": "Mensagem",
     "opening": "A abrir…",
     "safetyActionsHeading": "Ações de segurança",
-    "selfNote": "Este é o seu perfil. Edite o nome de utilizador e o nome a mostrar em <link>Eu → Definições do utilizador</link>.",
+    "selfNote": "Este é o seu perfil. Edite o nome de utilizador e o nome a mostrar em <link>Conta → Perfil</link>.",
     "title": "Utilizador",
     "unblockUser": "Desbloquear utilizador",
     "verified": "◆ Verificado"

@@ -102,7 +102,7 @@ test("both codes complete the change", async ({ page }) => {
 test("typing into the new-address field stays there when the page's initial focus fires", async ({
   page,
 }) => {
-  // Freeze the clock so the page's delayed Username focus lands mid-fill (#1258).
+  // Freeze the clock so the page's delayed Handle focus lands mid-fill (#1258).
   await page.clock.install();
   await boot(page);
   await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000);
@@ -114,5 +114,5 @@ test("typing into the new-address field stays there when the page's initial focu
   await page.keyboard.type(NEW_EMAIL);
 
   await expect(page.getByLabel("New email")).toHaveValue(NEW_EMAIL);
-  await expect(page.getByLabel("Username")).toHaveValue(USER.username);
+  await expect(page.getByLabel("Handle")).toHaveValue(USER.username);
 });

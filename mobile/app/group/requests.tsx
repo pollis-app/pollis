@@ -38,7 +38,7 @@ export default function JoinRequests() {
 
   return (
     <Screen testID="screen-group-requests" aboveTabBar={router.inPane}>
-      <Header onBack={router.onBack} title={t("mobile:group.panel.joinRequests")} subtitle={group?.name} />
+      <Header onBack={router.onBack} title={t("channels:group.joinRequests")} subtitle={group?.name} />
       <Body contentContainerStyle={{ paddingHorizontal: space.xxl }}>
         <SectionTitle style={{ paddingHorizontal: 0 }}>
           {t("mobile:group.requests.pendingSection")}

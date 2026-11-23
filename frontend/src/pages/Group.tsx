@@ -129,6 +129,43 @@ export const GroupPage: React.FC = observer(() => {
       testId: "menu-item-members",
       activateOn: "press" as const,
     },
+    // Members, invite, new channel, join requests, emoji, then the group's own
+    // settings: the order mobile's group menu and Group settings use (#2086).
+    ...(isAdmin ? [
+      {
+        id: "invite-member",
+        label: t("group.inviteMember"),
+        icon: <UserPlus size={14} />,
+        action: () => navigate({ to: "/groups/$groupId/invite", params: { groupId } }),
+        type: "system" as const,
+        testId: "menu-item-invite-member",
+        activateOn: "press" as const,
+      },
+      {
+        id: "create-channel",
+        label: t("group.newChannel"),
+        icon: <Plus size={14} />,
+        action: () => {
+          setSelectedGroupId(group.id);
+          // The group's own "+": the uncategorised block (#2031).
+          appStore.setNewChannelCategoryId(null);
+          navigate({ to: "/groups/$groupId/channels/new", params: { groupId } });
+        },
+        type: "system" as const,
+        testId: "menu-item-create-channel",
+        activateOn: "press" as const,
+      },
+      {
+        id: "join-requests",
+        label: t("group.joinRequests"),
+        icon: <Inbox size={14} />,
+        action: () => navigate({ to: "/groups/$groupId/join-requests", params: { groupId } }),
+        badge: joinRequests.length > 0 ? joinRequests.length : undefined,
+        type: "system" as const,
+        testId: "menu-item-join-requests",
+        activateOn: "press" as const,
+      },
+    ] : []),
     // Any member may add emoji (#848), so outside the admin block.
     {
       id: "group-emoji",
@@ -147,39 +184,6 @@ export const GroupPage: React.FC = observer(() => {
         action: () => navigate({ to: "/groups/$groupId/rename", params: { groupId } }),
         type: "system" as const,
         testId: "menu-item-rename-group",
-        activateOn: "press" as const,
-      },
-      {
-        id: "create-channel",
-        label: t("group.newChannel"),
-        icon: <Plus size={14} />,
-        action: () => {
-          setSelectedGroupId(group.id);
-          // The group's own "+": the uncategorised block (#2031).
-          appStore.setNewChannelCategoryId(null);
-          navigate({ to: "/groups/$groupId/channels/new", params: { groupId } });
-        },
-        type: "system" as const,
-        testId: "menu-item-create-channel",
-        activateOn: "press" as const,
-      },
-      {
-        id: "invite-member",
-        label: t("group.inviteMember"),
-        icon: <UserPlus size={14} />,
-        action: () => navigate({ to: "/groups/$groupId/invite", params: { groupId } }),
-        type: "system" as const,
-        testId: "menu-item-invite-member",
-        activateOn: "press" as const,
-      },
-      {
-        id: "join-requests",
-        label: t("group.joinRequests"),
-        icon: <Inbox size={14} />,
-        action: () => navigate({ to: "/groups/$groupId/join-requests", params: { groupId } }),
-        badge: joinRequests.length > 0 ? joinRequests.length : undefined,
-        type: "system" as const,
-        testId: "menu-item-join-requests",
         activateOn: "press" as const,
       },
       // Bots (#1182): admins create and manage them.

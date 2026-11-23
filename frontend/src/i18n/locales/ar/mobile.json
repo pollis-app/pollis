@@ -103,7 +103,6 @@
   },
   "conversationInfo": {
     "fallbackTitle": "محادثة",
-    "info": "معلومات",
     "memberSelf": "‎@{{handle}}‎ · أنت",
     "roleAdmin": "مشرف",
     "roleOwner": "المالك"
@@ -256,15 +255,10 @@
     },
     "panel": {
       "menuLabel": "{{name}}، قائمة المجموعة",
-      "invite": "دعوة أشخاص",
       "search": "البحث في {{name}}",
-      "createChannel": "إنشاء قناة",
       "thisGroup": "هذه المجموعة",
       "members": "الأعضاء",
       "settings": "إعدادات المجموعة",
-      "joinRequests": "طلبات الانضمام",
-      "customEmoji": "رموز تعبيرية مخصصة",
-      "leave": "مغادرة المجموعة",
       "leaveConfirm": "اضغط مرة أخرى لمغادرة {{name}}",
       "leaveHint": "ستحتاج إلى دعوة جديدة للعودة.",
       "leaving": "جارٍ المغادرة…",
@@ -428,16 +422,12 @@
       "editProfile": "تعديل الملف الشخصي",
       "accountSection": "الحساب",
       "appSection": "التطبيق",
-      "accountDetails": "تفاصيل الحساب",
-      "securityDevices": "الأمان والأجهزة",
       "deviceCount_zero": "{{count}} أجهزة",
       "deviceCount_one": "جهاز واحد",
       "deviceCount_two": "جهازان",
       "deviceCount_few": "{{count}} أجهزة",
       "deviceCount_many": "{{count}} جهازًا",
       "deviceCount_other": "{{count}} جهاز",
-      "savedMessages": "الرسائل المحفوظة",
-      "appearance": "المظهر",
       "signOut": "تسجيل الخروج…",
       "signOutConfirmTitle": "هل تريد تسجيل الخروج من Pollis على هذا الجهاز؟",
       "version": "الإصدار",
@@ -447,7 +437,6 @@
       "updateHint": "يفتح {{place}}",
       "updateFailed": "تعذّر فتح {{place}}"
     },
-    "identityHeading": "الهوية",
     "preferences": {
       "accentA11y": "لون التمييز {{name}}",
       "accentHeading": "لون التمييز",
@@ -527,13 +516,8 @@
       "blockedUsers": "المستخدمون المحظورون",
       "changePinSub": "رقم PIN المكوّن من 4 أرقام يفتح قفل Pollis على هذا الجهاز."
     },
-    "title": "أنا",
+    "title": "الحساب",
     "userSettings": {
-      "displayName": "اسم العرض",
-      "handle": "اسم المستخدم",
-      "handleHint": "يمكن للأعضاء الآخرين العثور عليك ومراسلتك عبر ‎@handle‎.",
-      "handleInvalid": "اسم المستخدم من 3 إلى 32 حرفًا: أحرف لاتينية صغيرة وأرقام و'_' و'.' و'-'.",
-      "save": "حفظ التغييرات",
       "photo": {
         "heading": "صورة الملف الشخصي",
         "hint": "يرى هذه الصورة كل من تتحدث معهم.",
@@ -569,9 +553,9 @@
     }
   },
   "tabs": {
-    "direct": "المباشرة",
+    "direct": "الرسائل المباشرة",
     "groups": "المجموعات",
-    "self": "أنا",
+    "self": "الحساب",
     "signInDevice": "ربط",
     "withInvites_few": "{{label}}، {{count}} دعوات إلى مجموعات",
     "withInvites_many": "{{label}}، {{count}} دعوة إلى مجموعات",
@@ -606,7 +590,7 @@
     "message": "مراسلة",
     "opening": "جارٍ الفتح…",
     "safetyActionsHeading": "إجراءات السلامة",
-    "selfNote": "هذا أنت. عدّل اسم المستخدم واسم العرض من <link>أنا ← إعدادات المستخدم</link>.",
+    "selfNote": "هذا أنت. عدّل اسم المستخدم واسم العرض من <link>الحساب ← الملف الشخصي</link>.",
     "title": "المستخدم",
     "unblockUser": "إلغاء حظر المستخدم",
     "verified": "◆ موثَّق"

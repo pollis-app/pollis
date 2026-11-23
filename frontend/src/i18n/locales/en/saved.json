@@ -1,6 +1,6 @@
 {
   "page": {
-    "title": "Saved",
+    "title": "Saved messages",
     "unresolved": "You do not have this message on this device.",
     "empty": "No saved messages. Use the bookmark action on a message to save it.",
     "unsave": "Unsave"

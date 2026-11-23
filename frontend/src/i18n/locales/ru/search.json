@@ -12,9 +12,9 @@
     "liveTerminal": "[эфир]"
   },
   "pages": {
-    "userName": "Пользователь",
+    "userName": "Профиль",
     "userKeywords": "аккаунт профиль имя пользователя эл почта аватар настройки",
-    "settingsName": "Настройки",
+    "settingsName": "Аккаунт",
     "settingsKeywords": "параметры пользователь безопасность",
     "preferencesName": "Параметры",
     "preferencesKeywords": "тема цвет шрифт уведомления оформление внешний вид",
@@ -48,7 +48,7 @@
     "groupsNewKeywords": "новая создать",
     "groupsSearchName": "Найти группы",
     "groupsSearchKeywords": "поиск найти публичные",
-    "savedName": "Сохранённое",
+    "savedName": "Сохранённые сообщения",
     "savedKeywords": "сохранённое закладка закладки избранное позже постоянная ссылка ссылка",
     "arcadeName": "Аркада",
     "arcadeKeywords": "аркада игра астероиды корабль стрелялка пасхалка играть",

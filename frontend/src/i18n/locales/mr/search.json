@@ -13,9 +13,9 @@
     "searchMessagesFor": "\"{{query}}\" साठी मेसेजमध्ये शोधा"
   },
   "pages": {
-    "userName": "वापरकर्ता",
+    "userName": "प्रोफाइल",
     "userKeywords": "खाते प्रोफाइल युझरनेम ईमेल अवतार सेटिंग्ज account profile username email avatar settings",
-    "settingsName": "सेटिंग्ज",
+    "settingsName": "खाते",
     "settingsKeywords": "प्राधान्ये वापरकर्ता सुरक्षा preferences user security",
     "preferencesName": "प्राधान्ये",
     "preferencesKeywords": "थीम रंग फॉन्ट सूचना स्वरूप theme color font notifications appearance",
@@ -49,7 +49,7 @@
     "groupsNewKeywords": "नवीन तयार करा new create",
     "groupsSearchName": "ग्रुप शोधा",
     "groupsSearchKeywords": "शोधा सार्वजनिक discover search public",
-    "savedName": "सेव्ह केलेले",
+    "savedName": "सेव्ह केलेले मेसेज",
     "savedKeywords": "सेव्ह केलेले बुकमार्क स्टार पिन केलेले नंतर परमालिंक लिंक saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "आर्केड",
     "arcadeKeywords": "आर्केड गेम लघुग्रह जहाज शूट इस्टर एग खेळा arcade game asteroids ship shoot easter egg play",

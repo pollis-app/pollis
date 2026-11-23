@@ -835,7 +835,7 @@ What a rich push shows: **Name and message** (`full`, the default), **Name
 only** (`name`) or **Nothing** (`none`, the generic text every push showed
 before #1599).
 
-- **Mobile UI:** Self → Preferences, right after the Notifications group: a
+- **Mobile UI:** Account → Preferences, right after the Notifications group: a
   "Notification content" group holding a vertical radio list — one full-width
   `RadioRow` (`mobile/components/RadioRow.tsx`, shared with the report screen's
   reasons) per choice, each with a one-line description. The selected row takes
