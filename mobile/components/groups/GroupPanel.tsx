@@ -207,7 +207,7 @@ function GroupPanelImpl({
           }
           style={{
             minHeight: layout.touchMin,
-            borderRadius: r.sm,
+            borderRadius: r.md,
             backgroundColor: semantic.raised,
             flexDirection: "row",
             alignItems: "center",
@@ -228,7 +228,8 @@ function GroupPanelImpl({
         scrollEnabled={!dragging}
         contentContainerStyle={{
           paddingTop: space.lg,
-          paddingHorizontal: space.lg,
+          // Rows share the search bar's edges (#2087).
+          paddingHorizontal: space.xxl,
           paddingBottom: space.xxxl + bottomInset,
           gap: 2,
         }}
