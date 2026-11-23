@@ -1428,7 +1428,9 @@ Current state:
   roster then one `get_user_profiles`, Maestro
   `scripts/maestro-reaction-breakdown.sh`; generated
   `components/emoji/emojiData.ts` — regenerate with
-  `scripts/generate-emoji-data.py`, which writes frontend + mobile together);
+  `python3.14 scripts/generate-emoji-data.py`, which writes frontend + mobile
+  together from the vendored Emoji 16.0 `scripts/emoji-test.txt`: every RGI
+  emoji, ZWJ sequences and skin tones included, #2094);
   custom group emoji (`list_usable_emoji` / `list_group_emoji` /
   `upload_group_emoji` / `remove_group_emoji`; rendering via `get_emoji_path`
   → cached `file://`, see `lib/emojiCache.ts`; `CustomEmojiImage` never mounts a source-less `<Image>` (iOS fires `onError` for one, which showed every custom emoji as `:shortcode:` text on iOS, #1562) and retries a failure (`lib/emojiRetry.ts`); Maestro reads what it drew from `EmojiProbe` (`flows/custom-emoji.yaml`, `scripts/maestro-custom-emoji.sh`); management at
