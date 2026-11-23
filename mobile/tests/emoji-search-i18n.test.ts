@@ -114,12 +114,16 @@ test("the display name is the locale's, falling back through the stack to Unicod
   assert.equal(emojiDisplayName(heart, []), heart.name);
 });
 
-test("every shipped language has a table, and every table covers the whole set", async () => {
+test("every shipped language has a table, and every entry has a name in it or in English", async () => {
   assert.deepEqual([...EMOJI_ANNOTATION_LOCALES], [...supportedLanguageCodes()].sort());
   const known = new Set(STANDARD_EMOJI.map((e) => e.char));
+  // English covers everything, so the [locale, en] stack always names an emoji;
+  // CLDR leaves a few of the newest sequences unnamed in some locales (#2094).
+  assert.equal(en.size, STANDARD_EMOJI.length, "en covers every entry");
   for (const locale of EMOJI_ANNOTATION_LOCALES) {
     const table = await loadLocale(locale);
-    assert.equal(table.size, STANDARD_EMOJI.length, `${locale} covers every entry`);
+    const gaps = STANDARD_EMOJI.filter((e) => !table.has(e.char));
+    assert.ok(gaps.length <= 20, `${locale} lacks ${gaps.length} names`);
     for (const [char, annotation] of table) {
       assert.ok(known.has(char), `${locale}: orphan row ${char}`);
       assert.ok(annotation.name.length > 0, `${locale}: ${char} has no name`);
