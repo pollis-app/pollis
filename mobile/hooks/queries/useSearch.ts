@@ -21,6 +21,8 @@ export interface SearchMessageResult {
   group_name: string | null;
   sender_id: string;
   sender_username: string | null;
+  /** #2085: the sender's display name when they set one. */
+  sender_display_name?: string | null;
   thread_id: string | null;
   has_attachment: boolean;
   has_link: boolean;

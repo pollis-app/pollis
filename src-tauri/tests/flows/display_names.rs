@@ -75,3 +75,54 @@ async fn rosters_dm_lists_and_invites_carry_display_names_in_the_same_read() {
     let members = listed["members"].as_array().expect("members");
     assert_eq!(name_of(members, "user_id", &cy_p.id, "preferred_name").as_deref(), Some("Cy Invitee"));
 }
+
+/// #2085: a message row names its sender by display name beside the handle, in a DM, and a
+/// rename elsewhere (handle and display name) reaches the open DM without a restart.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn message_rows_carry_the_senders_display_name_and_follow_a_rename() {
+    wipe().await;
+    let mut ann = TestClient::new().await;
+    let mut nick = TestClient::new().await;
+    let ann_p = ann.sign_up("ann@test.local").await;
+    let nick_p = nick.sign_up("nick@test.local").await;
+    set_display_name(&nick, "Nick").await;
+
+    let dm = nick.create_dm(&[nick_p.id.as_str(), ann_p.id.as_str()]).await;
+    ann.accept_dm_request(&dm).await;
+    nick.send_channel_message(&dm, "hello there").await;
+
+    let nick_id = nick_p.id.clone();
+    let label = |rows: &[serde_json::Value]| {
+        let m = rows.iter().find(|m| m["sender_id"] == nick_id.as_str()).expect("nick's message");
+        (
+            m["sender_display_name"].as_str().map(str::to_string),
+            m["sender_username"].as_str().map(str::to_string),
+        )
+    };
+    let rows = ann.fetch_dm_messages(&dm).await;
+    assert_eq!(label(&rows), (Some("Nick".to_string()), Some(nick_p.username.clone())));
+
+    // Nick changes both elsewhere; Ann's app takes the DS nudge (it re-reads the profile).
+    nick.invoke_json(
+        "update_user_profile",
+        json!({ "userId": nick_p.id, "username": "nick", "preferredName": "Nicholas", "phone": null, "avatarUrl": null }),
+    )
+    .await;
+    ann.invoke_json("get_user_profile", json!({ "userId": nick_p.id })).await;
+    let rows = ann.fetch_dm_messages(&dm).await;
+    assert_eq!(label(&rows), (Some("Nicholas".to_string()), Some("nick".to_string())));
+
+    // Search hits carry it too.
+    let page = ann
+        .invoke_json("search_messages", json!({ "query": "hello", "limit": 10 }))
+        .await;
+    let hit = page["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .find(|h| h["sender_id"] == nick_p.id.as_str())
+        .cloned()
+        .expect("nick's hit");
+    assert_eq!(hit["sender_display_name"].as_str(), Some("Nicholas"));
+}

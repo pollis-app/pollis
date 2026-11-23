@@ -23,7 +23,7 @@ import { ConversationHeader } from "../components/Layout/ConversationHeader";
 import { activeCallIdOf, voiceCounterpartyUserId } from "../types/voice-state";
 import { errorMessage } from "../utils/errorMessage";
 
-type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
+type RawDmMember = { user_id: string; username?: string; preferred_name?: string | null; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
 
 export const DMPage: React.FC = observer(() => {
@@ -90,6 +90,9 @@ export const DMPage: React.FC = observer(() => {
     ?? pendingSender?.username
     ?? pendingSender?.user_id
     ?? "";
+  // #2085: the header names the peer by display name when set, else by @handle.
+  const peerDisplayName = conv?.user2_display_name || pendingSender?.preferred_name || null;
+  const headerName = peerDisplayName ?? `@${username}`;
   const isOneOnOne = memberCount === 2 && otherUserId != null;
   // 1:1 only; group DMs would need a picker.
   const canShowProfile = isOneOnOne;
@@ -158,10 +161,10 @@ export const DMPage: React.FC = observer(() => {
       className="font-mono transition-colors text-inherit hover:text-accent border-0 bg-transparent p-0 cursor-pointer text-secondary"
       aria-label={t("conversation.viewProfile", { name: username })}
     >
-      <bdi>@{username}</bdi>
+      <bdi>{headerName}</bdi>
     </PressButton>
   ) : conv || pendingRequest ? (
-    `@${username}`
+    headerName
   ) : (
     t("conversation.fallbackTitle")
   );

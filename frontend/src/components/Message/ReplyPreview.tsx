@@ -1,3 +1,4 @@
+import { senderName } from "../../utils/senderName";
 import React from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
@@ -29,7 +30,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
     return null;
   }
   const handle = message.sender_username ?? message.sender_id;
-  const author = aliasName(aliases, message.sender_id, handle);
+  const author = aliasName(aliases, message.sender_id, senderName(message));
   const authorColor = getUsernameColor(handle, isLightBg);
   // The text, else the first file's name, else (no text on this device) that it could not be decrypted.
   const content =

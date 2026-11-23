@@ -54,6 +54,12 @@
   that lists them, so a row is named once. There is no second `get_user_profiles` read behind a
   list (it used to draw the handle, then swap in the name). Desktop's member page names a member by
   display name with `@handle` beside it, as for an alias; the TUI titles a DM the same way.
+- **Message authors (#2085):** every message row carries `sender_display_name` beside
+  `sender_username` (core `hydrate_rows`, from `user_cache`). Author labels, reply quotes,
+  thread rows, pins, search hits and last-message previews name the sender by display name,
+  else the handle (desktop `utils/senderName.ts`, mobile `lib/authorName.ts`); a group alias
+  still wins inside its group. The DM title follows the same rule (desktop shows `@handle` only
+  when there is no display name). Colours stay keyed on the handle. Mentions keep `@handle`.
 - Components read MobX stores inside `observer()` wrappers; remote data comes from
   React Query hooks in `frontend/src/hooks/queries/`.
 

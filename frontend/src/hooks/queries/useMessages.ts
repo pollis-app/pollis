@@ -95,6 +95,7 @@ export type RawChannelMessage = {
   conversation_id: string;
   sender_id: string;
   sender_username?: string;
+  sender_display_name?: string | null;
   ciphertext: string;
   content?: string;
   reply_to_id?: string;
@@ -289,6 +290,7 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
   return {
     ...baseMessage(m),
     sender_username: m.sender_username,
+    sender_display_name: m.sender_display_name ?? null,
     edited_at: m.edited_at,
     deleted_at: m.deleted_at,
     undecryptable: m.undecryptable,
@@ -594,6 +596,7 @@ export function useDMConversations() {
           id: c.id,
           user1_id: currentUser.id,
           user2_identifier: other?.username || other?.user_id || 'Unknown',
+          user2_display_name: other?.preferred_name || undefined,
           user2_id: other?.user_id,
           user2_avatar_url: other?.avatar_url,
           member_count: c.members.length,

@@ -565,6 +565,7 @@ mod tests {
             conversation_id: "c".to_string(),
             sender_id: "s".to_string(),
             sender_username: Some("s".to_string()),
+            sender_display_name: None,
             ciphertext: String::new(),
             content: Some(content.to_string()),
             reply_to_id: None,

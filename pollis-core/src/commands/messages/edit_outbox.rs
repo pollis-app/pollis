@@ -400,6 +400,7 @@ mod tests {
             conversation_id: "c1".to_string(),
             sender_id: "u1".to_string(),
             sender_username: None,
+            sender_display_name: None,
             ciphertext: String::new(),
             content: Some(content.to_string()),
             reply_to_id: None,

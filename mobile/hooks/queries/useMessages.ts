@@ -50,6 +50,8 @@ export interface RawChannelMessage {
   conversation_id: string;
   sender_id: string;
   sender_username?: string;
+  /** #2085: the sender's display name when they set one; labels prefer it. */
+  sender_display_name?: string | null;
   ciphertext?: string;
   content?: string;
   reply_to_id?: string | null;
@@ -96,6 +98,7 @@ export interface Message {
   conversation_id: string;
   sender_id: string;
   sender_username?: string;
+  sender_display_name?: string | null;
   content: string;
   attachments: MessageAttachment[];
   reply_to_id?: string | null;
@@ -134,6 +137,7 @@ function transform(raw: RawChannelMessage): Message {
     conversation_id: raw.conversation_id,
     sender_id: raw.sender_id,
     sender_username: raw.sender_username,
+    sender_display_name: raw.sender_display_name ?? null,
     content: parsed.text,
     attachments: parsed.attachments,
     link_preview: linkPreviewFromWire(raw.link_preview, { conversationId: raw.conversation_id }),

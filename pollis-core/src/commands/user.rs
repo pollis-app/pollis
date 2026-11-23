@@ -47,13 +47,17 @@ async fn note_fresh_profiles(state: &Arc<AppState>, users: &[pollis_api::directo
     if users.is_empty() {
         return;
     }
-    let names: Vec<(String, String)> = users.iter().map(|u| (u.id.clone(), u.username.clone())).collect();
+    let cached: Vec<(String, crate::commands::user_cache::CachedName)> = users
+        .iter()
+        .map(|u| (u.id.clone(), crate::commands::user_cache::CachedName::from(u)))
+        .collect();
     {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
-            crate::commands::user_cache::store(db.conn(), &names);
+            crate::commands::user_cache::store(db.conn(), &cached);
         }
     }
+    let names: Vec<(String, String)> = users.iter().map(|u| (u.id.clone(), u.username.clone())).collect();
     for (id, name) in &names {
         crate::commands::livekit_roster::rename_user(state, id, name).await;
     }
@@ -93,22 +97,30 @@ pub async fn update_user_profile(
     let body = pollis_api::profile::UpdateProfileBody {
         user_id: user_id.clone(),
         username: username.clone(),
-        preferred_name,
+        preferred_name: preferred_name.clone(),
         phone,
         avatar_url,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
+
+    // #2085: this device's own rows read the new names at once.
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            crate::commands::user_cache::note_own_edit(
+                db.conn(),
+                &user_id,
+                username.as_deref(),
+                preferred_name.as_deref(),
+            );
+        }
+    }
 
     // Refresh this device's copies at once; other devices hear `profile_changed` (#2084).
     if let Some(username) = username {
         if let Err(e) = crate::accounts::rename_account(&user_id, &username) {
             crate::diag!("[profile] accounts index not updated after rename: {e}");
         }
-        let guard = state.local_db.lock().await;
-        if let Some(db) = guard.as_ref() {
-            crate::commands::user_cache::store(db.conn(), &[(user_id.clone(), username.clone())]);
-        }
-        drop(guard);
         crate::commands::livekit_roster::rename_user(state, &user_id, &username).await;
     }
 

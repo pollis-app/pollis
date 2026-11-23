@@ -12,8 +12,8 @@
 //!
 //! Also drives `maestro-display-names.sh` (#2085): `POLLIS_PEER_NAME` sets a display name right
 //! after sign-up, `POLLIS_DM_PHONE=1` opens a DM to the phone once it has joined (a message
-//! request on the phone), and with no `POLLIS_RENAME_TRIGGER` the peer exits after `PEER_READY`
-//! plus a short wait instead of renaming.
+//! request on the phone) and writes `hello in the dm` there, and with no `POLLIS_RENAME_TRIGGER`
+//! the peer exits after `PEER_READY` plus a short wait instead of renaming.
 //!
 //! `mobile/scripts/maestro-profile-change.sh` drives it. Not a shipping binary: examples build
 //! against pollis-tui's dev-dependencies.
@@ -110,9 +110,12 @@ async fn admin(email: &str, phone: &str) -> Result<()> {
     .await?;
     println!("PEER_SAW_PHONE_JOIN");
     if std::env::var("POLLIS_DM_PHONE").as_deref() == Ok("1") {
-        dm::create_dm_channel(me.clone(), vec![phone_id.clone()], &state)
+        let opened = dm::create_dm_channel(me.clone(), vec![phone_id.clone()], &state)
             .await
             .context("open a DM to the phone")?;
+        messages::send_message(opened.id.clone(), me.clone(), "hello in the dm".to_string(), None, None, None, &state)
+            .await
+            .context("write in the DM")?;
         println!("PEER_OPENED_DM");
     }
 

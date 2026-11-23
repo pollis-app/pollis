@@ -247,7 +247,9 @@ CREATE TABLE IF NOT EXISTS mls_generation (
 CREATE TABLE IF NOT EXISTS user_cache (
     id         TEXT PRIMARY KEY,
     username   TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- #2085: the display name, so message rows carry it beside the handle.
+    preferred_name TEXT
 );
 
 -- Per-group alias names (#2003) this device last read for each group, so a

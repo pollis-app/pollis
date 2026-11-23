@@ -346,7 +346,9 @@ dev DS that sends `profile_changed`.
 **Display names with the data (automated, #2085):** `mobile/scripts/maestro-display-names.sh <device>`
 — the same `profile_peer`, with a display name set at sign-up and a DM opened to the device.
 `two-client/display-names/`: the member list and the message request name the peer by display
-name on the frame the row appears (the rows carry it; no second profile read).
+name on the frame the row appears (the rows carry it; no second profile read); in the accepted
+DM the peer's message and the title use the display name, and when the peer then changes its
+display name and handle, both follow in the open DM with no relaunch.
 
 **Typing indicator (automated, #1635):** `mobile/scripts/maestro-typing.sh <device>`
 — one device plus `pollis-tui`'s `typing_peer` example (built with

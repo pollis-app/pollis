@@ -189,8 +189,12 @@ fn undecryptable_line(count: usize) -> Line<'static> {
     ])
 }
 
+/// The display name when the sender set one (#2085), else the handle, else the id.
 fn sender_of(m: &ChannelMessage) -> &str {
-    m.sender_username.as_deref().unwrap_or(&m.sender_id)
+    m.sender_display_name
+        .as_deref()
+        .or(m.sender_username.as_deref())
+        .unwrap_or(&m.sender_id)
 }
 
 /// One message: optional quote context, the header line with the first run of
@@ -500,12 +504,21 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn a_sender_is_named_by_display_name_then_handle() {
+        let mut m = msg("1", "bob", "hi");
+        assert_eq!(sender_of(&m), "bob");
+        m.sender_display_name = Some("Bob Builder".to_string());
+        assert_eq!(sender_of(&m), "Bob Builder");
+    }
+
     fn msg(id: &str, sender: &str, content: &str) -> ChannelMessage {
         ChannelMessage {
             id: id.to_string(),
             conversation_id: "c".to_string(),
             sender_id: format!("u-{sender}"),
             sender_username: Some(sender.to_string()),
+            sender_display_name: None,
             ciphertext: String::new(),
             content: Some(content.to_string()),
             reply_to_id: None,

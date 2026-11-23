@@ -1,3 +1,4 @@
+import { senderName } from "../../utils/senderName";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Reply, CornerUpLeft } from "lucide-react";
@@ -122,7 +123,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   ) : null;
 
   const replyToAuthor = replyTo
-    ? aliasName(ctx.aliases, replyTo.sender_id, replyTo.sender_username ?? replyTo.sender_id)
+    ? aliasName(ctx.aliases, replyTo.sender_id, senderName(replyTo))
     : null;
   const replyToAuthorColor = replyTo
     ? getUsernameColor(replyTo.sender_username ?? replyTo.sender_id, isLightBg)

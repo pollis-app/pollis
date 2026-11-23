@@ -128,6 +128,7 @@ fn row_to_channel_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMe
         conversation_id: row.get(1)?,
         sender_id: row.get(2)?,
         sender_username: None,
+        sender_display_name: None,
         ciphertext: format!("mls:{}", hex::encode(&ct)),
         content: content_shown.clone(),
         reply_to_id: row.get(5)?,
@@ -190,7 +191,7 @@ async fn read_local_channel_page(
     Ok(rows)
 }
 
-/// Finish a page: overlay unconfirmed edits (#1555), then attach usernames (`user_cache`, refreshing misses and stale rows once).
+/// Finish a page: overlay unconfirmed edits (#1555), then attach sender names, handle and display name (`user_cache`, refreshing misses and stale rows once).
 async fn hydrate_rows(
     state: &Arc<AppState>,
     messages: &mut [ChannelMessage],
@@ -206,10 +207,13 @@ async fn hydrate_rows(
 
     let ids: Vec<String> = messages.iter().map(|m| m.sender_id.clone()).collect();
     // #2084: fresh cache, else one DS batch; a stale name only when that read fails.
-    let found = crate::commands::user_cache::usernames(state, &ids, None).await;
+    let found = crate::commands::user_cache::names(state, &ids, None).await;
 
     for m in messages.iter_mut() {
-        m.sender_username = found.get(&m.sender_id).cloned();
+        let name = found.get(&m.sender_id);
+        m.sender_username = name.map(|n| n.username.clone());
+        // #2085: the display name rides with the row, beside the handle.
+        m.sender_display_name = name.and_then(|n| n.display_name.clone());
     }
     Ok(())
 }

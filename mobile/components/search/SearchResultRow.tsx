@@ -20,7 +20,8 @@ export function SearchResultRow({
   onPress: () => void;
 }) {
   const { t } = useTranslation("search");
-  const sender = result.sender_username ?? result.sender_id;
+  // #2085: the display name when the sender set one, else the handle.
+  const sender = result.sender_display_name || result.sender_username || result.sender_id;
   const where = [
     conversationLabel,
     result.thread_id ? t("view.inThread") : null,

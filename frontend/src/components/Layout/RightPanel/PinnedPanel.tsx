@@ -1,3 +1,4 @@
+import { senderName } from "../../../utils/senderName";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
@@ -57,7 +58,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
         <ul className="flex flex-col">
           {pins.map((pin) => {
             const parsed = parseContent(pin.content, { conversationId: pin.conversation_id });
-            const author = aliasName(aliases, pin.sender_id, pin.sender_username ?? pin.sender_id);
+            const author = aliasName(aliases, pin.sender_id, senderName(pin));
             return (
               <li
                 key={pin.id}

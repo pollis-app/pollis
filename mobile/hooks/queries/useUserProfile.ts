@@ -28,10 +28,12 @@ export const userQueryKeys = {
  */
 export async function refreshProfile(userId: string): Promise<void> {
   try {
-    const profile = await invoke<{ id: string; username?: string; avatar_url?: string | null } | null>(
-      "get_user_profile",
-      { userId },
-    );
+    const profile = await invoke<{
+      id: string;
+      username?: string;
+      preferred_name?: string | null;
+      avatar_url?: string | null;
+    } | null>("get_user_profile", { userId });
     if (!profile) {
       return;
     }
@@ -40,6 +42,12 @@ export async function refreshProfile(userId: string): Promise<void> {
       if (appStore.currentUser?.id === userId && appStore.currentUser.username !== profile.username) {
         appStore.setUsername(profile.username);
       }
+    }
+    // #2085: own messages are labelled with our display name; a restored session has none.
+    const me = appStore.currentUser;
+    const preferred = profile.preferred_name || undefined;
+    if (me?.id === userId && me.preferred_name !== preferred) {
+      appStore.setCurrentUser({ ...me, preferred_name: preferred });
     }
     avatarStore.noteKey(userId, profile.avatar_url ?? null);
   } catch (err) {

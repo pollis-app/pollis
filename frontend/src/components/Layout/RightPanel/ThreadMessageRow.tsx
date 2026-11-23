@@ -1,3 +1,4 @@
+import { senderName } from "../../../utils/senderName";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
@@ -25,7 +26,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     const skin = useSkin();
     const isTerminal = skin !== "modern";
     const aliases = useSelectedGroupAliases();
-    const author = aliasName(aliases, message.sender_id, message.sender_username ?? message.sender_id);
+    const author = aliasName(aliases, message.sender_id, senderName(message));
     // A bot's replies carry the Bot badge (#1182), as in the channel.
     const { botIds, groupName } = useSelectedGroupBots();
     const botBadge = botIds.has(message.sender_id) ? (
