@@ -140,6 +140,18 @@
       "reason": "A developer tool whose commands and output are quoted verbatim in the English docs.",
       "paths": ["verifiable-log-serve/src"]
     },
+    "bot-runtime": {
+      "title": "Bot runtime CLI (pollis-bot): pairing, status and logs for a self-hosted bot",
+      "decision": "english-only",
+      "reason": "An operator tool run on a server, whose commands and output are quoted verbatim in the English self-hosting docs. It writes no text of its own into conversations: a bot posts only what its App produces.",
+      "paths": ["pollis-bot/src"]
+    },
+    "app-developer-tools": {
+      "title": "App developer tools (the pollis CLI, @pollis-inc/app, the pollis-app crate and the new-App templates)",
+      "decision": "english-only",
+      "reason": "Developer tools whose commands, refusals and output are quoted verbatim in the English developer docs; the text an App posts is its author's, not Pollis's.",
+      "paths": ["sdk/ts/pollis", "sdk/ts/cli", "sdk/ts/app", "sdk/rust/pollis-app"]
+    },
     "app-name": {
       "title": "App name, window title, bundle display name",
       "decision": "english-only",

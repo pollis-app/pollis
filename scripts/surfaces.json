@@ -163,7 +163,9 @@
       "kind": "doc",
       "about": "Bots alerts webhook: endpoint, auth, rate limit, answers (source for website/bots-developers.html)",
       "source": "docs/bots/alerts-webhook.md",
-      "checked_by": []
+      "checked_by": [
+        "facts"
+      ]
     },
     "docs/bots/concepts-for-developers": {
       "kind": "doc",
@@ -175,6 +177,23 @@
       "kind": "doc",
       "about": "Writing an App in TypeScript: pollis app new/test/build, the manifest, handlers and ctx, the App hash, sandbox limits (source for website/bots-developers.html#apps)",
       "source": "docs/bots/developer-guide.md",
+      "checked_by": [
+        "facts"
+      ]
+    },
+    "docs/bots/app-reference": {
+      "kind": "doc",
+      "about": "Pollis App reference: every host function, manifest field and refusal (for App developers)",
+      "source": "docs/bots/app-reference.md",
+      "checked_by": [
+        "facts"
+      ]
+    },
+    "docs/bots-threat-model": {
+      "kind": "doc",
+      "about": "Bots and Apps threat model: trust boundaries and the guarantee each gives, with the test that pins it",
+      "source": "docs/bots-threat-model.md",
+      "audience": "linked-design",
       "checked_by": []
     },
     "docs/machine-checked-correctness-design": {
@@ -608,6 +627,30 @@
       "source": "pollis-bot/README.md",
       "checked_by": []
     },
+    "readme/apps-alerts": {
+      "kind": "readme",
+      "about": "The alerts App README: what it posts and what it asks for",
+      "source": "apps/alerts/README.md",
+      "checked_by": []
+    },
+    "readme/pollis-app-wit": {
+      "kind": "readme",
+      "about": "pollis:app WIT interface and manifest schema README (the App capability contract SDKs generate from)",
+      "source": "pollis-app-wit/README.md",
+      "checked_by": []
+    },
+    "readme/sdk-rust-pollis-app": {
+      "kind": "readme",
+      "about": "pollis-app crate README: write a Pollis App in Rust",
+      "source": "sdk/rust/pollis-app/README.md",
+      "checked_by": []
+    },
+    "readme/sdk-ts-pollis": {
+      "kind": "readme",
+      "about": "pollis npm package README: the command line for App developers",
+      "source": "sdk/ts/pollis/README.md",
+      "checked_by": []
+    },
     "readme/SECURITY": {
       "kind": "readme",
       "about": "Security policy and disclosure contact",
@@ -729,7 +772,8 @@
       "source": "website/bots-developers.html",
       "url": "https://pollis.com/bots-developers.html",
       "checked_by": [
-        "claims"
+        "claims",
+        "facts"
       ]
     },
     "website/continuity": {
@@ -933,7 +977,14 @@
     "mobile/store/runtime-versions.json": "OTA runtime ledger (build input)",
     "pollis-sqlcipher/tests/fixtures/README.md": "test fixture note",
     "scripts/x11-clipboard-repro/README.md": "repro harness note",
-    "specs/tla/README.md": "formal-spec guide"
+    "specs/tla/README.md": "formal-spec guide",
+    "patches/cpal/README.md": "upstream README of a vendored, patched dependency",
+    "patches/libsql/README.md": "upstream README of a vendored, patched dependency",
+    "patches/openmls-basic-credential/README.md": "upstream README of a vendored, patched dependency",
+    "patches/openmls-rust-crypto/README.md": "upstream README of a vendored, patched dependency",
+    "pollis-core/tests/fixtures/hpke_golden/README.md": "test fixture note",
+    "sdk/ts/cli/templates/rust/README.md": "template copied into a new App by pollis app new; the App developer rewrites it",
+    "sdk/ts/cli/templates/ts/README.md": "template copied into a new App by pollis app new; the App developer rewrites it"
   },
   "features": {
     "screen-capture": {

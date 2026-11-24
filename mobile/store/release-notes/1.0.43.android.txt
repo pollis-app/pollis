@@ -1,0 +1,9 @@
+New
+• Every emoji, including skin tones and newer ones like 🫡.
+• Display names instead of handles in messages, members and DMs.
+• Name and picture changes update right away in every chat.
+• Tabs and menus renamed: DMs, Account, Saved messages, Profile.
+
+Fixes
+• Messages no longer jump when someone starts or stops typing.
+• Other fixes and improvements.

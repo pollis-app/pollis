@@ -31,7 +31,7 @@ A handler never holds keys, never talks to the network and never sends anything 
 
 Every trigger, of every kind, goes through the same seven steps:
 
-1. **Trigger.** Something arrives for an installation: the runtime is woken because the group may have new messages, or a webhook call comes in.
+1. **Trigger.** Something arrives for an installation: the runtime is woken because the group may have new messages, a webhook call comes in, or an App's schedule reaches a slot.
 2. **Lock.** The runtime takes that installation's lock. One installation runs one job at a time; different installations run in parallel.
 3. **Catch up.** The runtime brings the bot's view of the group up to date through the normal message path, the same one the Pollis apps use. Messages newer than the last one handled become message triggers, oldest first. The bot's own messages never become triggers.
 4. **Handle.** Each trigger goes to the installation's handler, which returns a list of actions (possibly empty). An App runs in a fresh sandbox for this one trigger and may also have changed its [state](#app-state).
@@ -39,7 +39,7 @@ Every trigger, of every kind, goes through the same seven steps:
 6. **Check and apply.** Each action is checked against the installation's [grants](#grants). Actions that pass are carried out through the normal send path; actions that don't are reported and never carried out.
 7. **Unlock.** The lock is released.
 
-There are no timers in this loop. A job starts only when the runtime starts (to catch up on what it missed), when a realtime event says the group may have changed, or when a webhook call arrives. Wake-ups that arrive while a job is queued fold into that job.
+There is no polling loop. A job starts only when the runtime starts (to catch up on what it missed), when a realtime event says the group may have changed, when a webhook call arrives, or at an App's next schedule slot. Wake-ups that arrive while a job is queued fold into that job.
 
 ## Triggers and trigger keys
 
