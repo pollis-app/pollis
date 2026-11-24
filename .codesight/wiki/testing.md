@@ -1254,6 +1254,7 @@ ran on every renderer PR from #1059 until #2022.
 |---|---|
 | `mentions.spec.js` | `@username` autocomplete + rendering in BOTH skins (#843) |
 | `bookmarks.spec.ts` | Saved messages + permalinks, and what an unresolvable permalink refuses to say, in BOTH skins (#854). Also pins the copy-link row's three states on **resolved paint**, not class strings — the row keeps focus after the click, so a copied row must show the accent text over the selected-row tint and a failed one the danger inversion (#1059) |
+| `emoji-coverage.spec.ts` | The full Emoji 16.0 set (#2094): 🫡 in People without searching, reacting with 🫡 and with a toned ZWJ sequence (one pill each), ❤️‍🔥 by `:shortcode:` and 🫡 from the picker into the composer |
 | `emoji.spec.ts` | The custom-emoji picker (full standard set, search, caret-accurate insertion) and `<:name:hash>` rendering, in BOTH skins (#848) |
 | `invite-links.spec.ts` | Invite-link create / one-time copy / revoke, in BOTH skins (#847) |
 | `undecryptable-copy.spec.ts` | Nothing says "[encrypted]": a message this device could not read says it could not be decrypted, a quote of one says "Couldn't decrypt", and a quote of a group message sent before the viewer joined (its ULID predates their `joined_at`) says "Sent before you joined" |

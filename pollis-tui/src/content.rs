@@ -254,32 +254,67 @@ fn shortcodes() -> &'static std::collections::HashMap<String, String> {
     })
 }
 
+/// Unicode's emoji list, the one the desktop and mobile pickers are generated from (#2094).
+const EMOJI_TEST: &str = include_str!("../../scripts/emoji-test.txt");
+
+/// Every multi-codepoint emoji, keyed without U+FE0F, as the file spells it fully qualified.
+fn qualified_sequences() -> &'static std::collections::HashMap<String, String> {
+    static TABLE: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = std::collections::HashMap::new();
+        for line in EMOJI_TEST.lines() {
+            if line.starts_with('#') {
+                continue;
+            }
+            let Some((codepoints, rest)) = line.split_once(';') else {
+                continue;
+            };
+            if !rest.trim_start().starts_with("fully-qualified") {
+                continue;
+            }
+            let full: Option<String> = codepoints
+                .split_whitespace()
+                .map(|cp| u32::from_str_radix(cp, 16).ok().and_then(char::from_u32))
+                .collect();
+            let Some(full) = full else {
+                continue;
+            };
+            let bare: String = full.chars().filter(|&c| c != '\u{FE0F}').collect();
+            if bare.chars().count() > 1 {
+                table.insert(bare, full);
+            }
+        }
+        table
+    })
+}
+
 /// What the user typed at the react prompt, as the emoji to react with.
 ///
-/// Resolved through the shortcode table or taken literally, with U+FE0F stripped: reactions
-/// match by exact string, as desktop and mobile store them. `None` for neither.
+/// Resolved through the shortcode table or taken literally, in the form desktop and mobile
+/// store, since reactions match by exact string: a single codepoint without U+FE0F, a
+/// sequence (ZWJ, keycap, flag) fully qualified as Unicode lists it. `None` for neither.
 pub fn resolve_reaction(input: &str) -> Option<String> {
     let trimmed = input.trim();
     let name = trimmed.trim_matches(':').to_lowercase();
     if name.is_empty() {
         return None;
     }
-    if let Some(codepoints) = shortcodes().get(&name) {
-        let emoji: Option<String> = codepoints
+    let bare: String = if let Some(codepoints) = shortcodes().get(&name) {
+        codepoints
             .split('-')
             .map(|cp| u32::from_str_radix(cp, 16).ok().and_then(char::from_u32))
-            .collect();
-        return emoji;
-    }
-    if trimmed.chars().any(|c| c.is_ascii_alphanumeric()) {
+            .collect::<Option<String>>()?
+    } else {
+        if trimmed.chars().any(|c| c.is_ascii_alphanumeric()) {
+            return None;
+        }
+        trimmed.chars().filter(|&c| c != '\u{FE0F}').collect()
+    };
+    if bare.is_empty() {
         return None;
     }
-    let bare: String = trimmed.chars().filter(|&c| c != '\u{FE0F}').collect();
-    if bare.is_empty() {
-        None
-    } else {
-        Some(bare)
-    }
+    Some(qualified_sequences().get(&bare).cloned().unwrap_or(bare))
 }
 
 #[cfg(test)]
@@ -299,6 +334,23 @@ mod tests {
         );
         assert_eq!(resolve_reaction("🔥").as_deref(), Some("🔥"));
         assert_eq!(resolve_reaction("not-an-emoji"), None);
+        // #2094: a sequence goes out fully qualified, as the pickers send it.
+        assert_eq!(
+            resolve_reaction(":saluting_face:").as_deref(),
+            Some("\u{1FAE1}")
+        );
+        assert_eq!(
+            resolve_reaction(":heart_on_fire:").as_deref(),
+            Some("\u{2764}\u{FE0F}\u{200D}\u{1F525}")
+        );
+        assert_eq!(
+            resolve_reaction("\u{2764}\u{200D}\u{1F525}").as_deref(),
+            Some("\u{2764}\u{FE0F}\u{200D}\u{1F525}")
+        );
+        assert_eq!(
+            resolve_reaction("\u{1F9D1}\u{1F3FD}\u{200D}\u{1F4BB}").as_deref(),
+            Some("\u{1F9D1}\u{1F3FD}\u{200D}\u{1F4BB}")
+        );
         assert_eq!(resolve_reaction("::"), None);
     }
 

@@ -56,6 +56,7 @@ on:
       # The non-Rust files the PR-side `changes` job also runs on.
       - 'docs/ds-operator-endpoints.md'
       - 'scripts/emoji-shortcodes.json'
+      - 'scripts/emoji-test.txt'
       - 'scripts/ci-free-disk.sh'
       - 'scripts/ci-apt-retries.sh'
       - 'scripts/ci-apt-install.sh'
@@ -142,6 +143,9 @@ jobs:
               - 'docs/ds-operator-endpoints.md'
             shortcodes:
               - 'scripts/emoji-shortcodes.json'
+            # The TUI's copy of Unicode's emoji list (#2094), same reason.
+            emojitest:
+              - 'scripts/emoji-test.txt'
             # The CI helpers the heavy jobs run (disk, apt, clang). They sit under
             # the exempt scripts/**, so without this a PR that broke one would go
             # green here and turn `main` red on the next Rust merge. One pattern
@@ -163,6 +167,7 @@ jobs:
           NATIVEDEPS: ${{ steps.filter.outputs.nativedeps }}
           RUNBOOK: ${{ steps.filter.outputs.runbook }}
           SHORTCODES: ${{ steps.filter.outputs.shortcodes }}
+          EMOJITEST: ${{ steps.filter.outputs.emojitest }}
           FREEDISK: ${{ steps.filter.outputs.freedisk }}
           APTRETRIES: ${{ steps.filter.outputs.aptretries }}
           APTINSTALL: ${{ steps.filter.outputs.aptinstall }}
@@ -172,12 +177,12 @@ jobs:
             # A real Rust change, an edit to this workflow itself, or a file
             # Rust compiles in from an otherwise-exempt directory.
             if [ "$FILTERED" = "true" ] || [ "$HARNESS" = "true" ] || [ "$NATIVEDEPS" = "true" ] || [ "$RUNBOOK" = "true" ] || [ "$SHORTCODES" = "true" ] \
-              || [ "$FREEDISK" = "true" ] || [ "$APTRETRIES" = "true" ] || [ "$APTINSTALL" = "true" ] || [ "$CLANG" = "true" ]; then
+              || [ "$EMOJITEST" = "true" ] || [ "$FREEDISK" = "true" ] || [ "$APTRETRIES" = "true" ] || [ "$APTINSTALL" = "true" ] || [ "$CLANG" = "true" ]; then
               echo "run_tests=true" >> "$GITHUB_OUTPUT"
             else
               echo "run_tests=false" >> "$GITHUB_OUTPUT"
             fi
-            echo "rust=$FILTERED harness=$HARNESS nativedeps=$NATIVEDEPS runbook=$RUNBOOK shortcodes=$SHORTCODES ci-scripts=$FREEDISK/$APTRETRIES/$APTINSTALL/$CLANG"
+            echo "rust=$FILTERED harness=$HARNESS nativedeps=$NATIVEDEPS runbook=$RUNBOOK shortcodes=$SHORTCODES emoji-test=$EMOJITEST ci-scripts=$FREEDISK/$APTRETRIES/$APTINSTALL/$CLANG"
           else
             # push / workflow_dispatch / any non-PR trigger: always run the
             # full gate.

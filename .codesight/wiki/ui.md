@@ -900,7 +900,7 @@ There is no new grammar on the wire, nothing to parse in Rust, and no migration.
 Accepting from the list or the ghost adds a trailing space (the word is finished);
 typing the colon yourself does not (you are mid-word).
 
-**The 1500-entry table stays out of the startup chunk.** `emojiData.ts` is the
+**The 1,910-entry table stays out of the startup chunk.** `emojiData.ts` is the
 largest module in the bundle and #874 code-split it behind the picker's lazy
 import; the composer is always mounted, so `components/Emoji/emojiShortcodeIndex.ts`
 is the *only* module in this path that imports it, and `useShortcodeEntries` pulls
@@ -911,14 +911,53 @@ itself imports nothing but a type, which is also what makes it unit-testable und
 **Skin-tone variants (`:wave::skin-tone-3:`) are out of scope.** Completions use the
 tone already stored by the picker; there is no tone syntax in the composer.
 
+### Emoji coverage (#2094)
+
+The table is **every fully-qualified emoji in Unicode's `emoji-test.txt`**
+(Emoji 16.0: 3,781 lines), minus the 1,875 skin-tone forms, plus the four hair
+styles (🦰 🦱 🦳 🦲, components the table has always carried): **1,910 entries**,
+where the old hand-drawn codepoint ranges gave 1,581 and skipped whole blocks
+(🫡 🫠) and every sequence. The file is vendored byte for byte as
+`scripts/emoji-test.txt`, with its URL, version, sha256 and Unicode-3.0 licence in
+`scripts/emoji-test.json`; the generator refuses a file whose sha256 differs and
+refreshes both with `python3.14 scripts/generate-emoji-data.py --refresh-emoji-test`
+(network; a plain run stays offline). Categories are the file's CLDR groups
+(Smileys & Emotion and People & Body folded into People).
+
+- **`char`.** A single codepoint stays bare (no U+FE0F), as before, so stored
+  reactions, recents and shortcode keys keep matching; `emojiDisplayChar` adds the
+  selector below U+1F000 at display time. A sequence (ZWJ, keycap, flag) is stored
+  fully qualified, selectors included ("❤️‍🔥" = 2764 FE0F 200D 1F525), and shown and
+  sent as is. Every vendored JSON key is `char` with U+FE0F stripped.
+- **Skin tones.** `tonable` means the file lists all five *uniform* tones (every
+  person the same tone, the only kind one picker setting can ask for).
+  `applySkinTone` puts the tone after the first codepoint and drops a U+FE0F there
+  (🧑‍💻 → 🧑🏽‍💻, ⛹️‍♂️ → ⛹🏽‍♂️); the seven two-person sequences where both people take
+  it (🧑‍🤝‍🧑, 👩‍❤️‍👨 …) use `TONE_TEMPLATES`. The generator checks both rules against
+  the file, and `frontend/tests/emoji-coverage.test.ts` checks that every toned
+  string the picker can make is listed and every listed uniform form is reachable.
+  The old ranges marked six non-modifier bases tonable (🧐 🧞 🧟 👯 🤼 👪), which
+  glued a stray swatch on; they no longer are.
+- **Reactions.** A reaction is the picked string, stored and matched byte for byte
+  by the DS with no length cap (`a_multi_codepoint_reaction_round_trips_byte_for_byte`
+  in `pollis-delivery/src/messages.rs`), so a ZWJ or tag sequence is one pill.
+  Playwright: `e2e/emoji-coverage.spec.ts`; Maestro: `flows/emoji-coverage.yaml`.
+- **Size.** `emojiData.ts` is ~120 KB (was ~96 KB) and each annotation module ~25%
+  larger; both stay lazy chunks (#874). The picker opened in the same ~1 s on the
+  Playwright dev server before and after (People now mounts 559 cells).
+- **Fonts.** Glyphs come from the platform: Apple Color Emoji (macOS/iOS, WebKit),
+  the system Noto Color Emoji on Android and Linux. An Android without the updatable
+  emoji font (Google Play system updates, Android 12+) draws an emoji newer than its
+  font as a box or as its pieces, as every other app on that phone does; the app does
+  not bundle a font.
+
 ### Picker order and category tabs (#1972)
 
-Within a category the table follows the CLDR emoji order (Unicode's
-`emoji-test.txt`), vendored as `scripts/emoji-order.json` and refreshed with
-`python3 scripts/generate-emoji-data.py --refresh-order` (network; a plain run
-stays offline). Before #1972 it was codepoint order, which led People with the
-old BMP symbols (☝ ☹ ☺ … ❣ ❤) instead of 😀. Emoji the file does not list sort
-after the listed ones. One generator run writes desktop's and mobile's tables;
+Within a category the table follows the CLDR emoji order, the order of the
+vendored `scripts/emoji-test.txt` (#2094; before that a trimmed
+`scripts/emoji-order.json`). Before #1972 it was codepoint order, which led People
+with the old BMP symbols (☝ ☹ ☺ … ❣ ❤) instead of 😀. One generator run writes
+desktop's and mobile's tables;
 `frontend/tests/emoji-order.test.ts` pins the order and that both copies match.
 Search ties (same tier, same name length) fall to table order, so `corazón` in
 Spanish now lists 💔 "corazón roto" just ahead of ❤ "corazón rojo".
@@ -937,7 +976,7 @@ glyph, `accessibilityState.selected`). A search shows no tabs. Rules:
 user got a translated picker where `corazón` found nothing. The per-locale names
 and keywords are **CLDR emoji annotations**, vendored by
 `scripts/generate-emoji-data.py --refresh-annotations` into
-`scripts/emoji-annotations.json` (trimmed to the 1,581 entries the table emits;
+`scripts/emoji-annotations.json` (trimmed to the 1,910 entries the table emits;
 flags come from CLDR's `annotationsDerived`) and emitted as one module per locale
 under `components/Emoji/annotations/`. Each is as large as the table itself, so
 the same #874 rule applies: `useEmojiAnnotations` dynamically imports **the active

@@ -1,0 +1,105 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# EMOJI COVERAGE (#2094) — the picker carries the whole Emoji 16.0 set, so
+# 🫡 (U+1FAE1, Emoji 14.0, missing before) can be found and reacted with, and
+# a ZWJ sequence (🧑‍💻) goes on as ONE reaction pill, skin tone included.
+# Self-contained: creates a group (→ #General) and posts into it.
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Emoji Coverage"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Emoji Coverage"
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+
+- tapOn:
+    id: "input-composer"
+- inputText: "salute check"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*salute check.*"
+    timeout: 10000
+- runFlow: ../subflows/message-settled.yaml
+
+# ── React with 🫡 from the full picker ────────────────────────────────────
+- runFlow: ../subflows/long-press-message.yaml
+- tapOn:
+    id: "btn-react-more"
+- extendedWaitUntil:
+    visible:
+      id: "list-emoji"
+    timeout: 10000
+- tapOn:
+    id: "input-emoji-search"
+- inputText: "saluting"
+# The cell's spoken label is the emoji's name.
+- extendedWaitUntil:
+    visible: "saluting face"
+    timeout: 10000
+- takeScreenshot: emoji-coverage-01-search-saluting
+- tapOn: "saluting face"
+- extendedWaitUntil:
+    visible:
+      id: "pill-reaction-.*-🫡"
+    timeout: 15000
+- takeScreenshot: emoji-coverage-02-pill-saluting
+
+# ── A toned ZWJ sequence is one reaction ──────────────────────────────────
+- runFlow: ../subflows/long-press-message.yaml
+- tapOn:
+    id: "btn-react-more"
+- extendedWaitUntil:
+    visible:
+      id: "list-emoji"
+    timeout: 10000
+- tapOn:
+    id: "btn-tone-3"
+- tapOn:
+    id: "input-emoji-search"
+# A partial query, so the field's own text never equals the cell's spoken
+# name: a full-match tap on "technologist" would land on the search field.
+- inputText: "technolog"
+- extendedWaitUntil:
+    visible: "technologist"
+    timeout: 10000
+- takeScreenshot: emoji-coverage-03-search-technologist
+- tapOn: "technologist"
+- extendedWaitUntil:
+    visible:
+      id: "pill-reaction-.*-🧑🏽‍💻"
+    timeout: 15000
+- assertVisible:
+    id: "pill-reaction-.*-🫡"
+- takeScreenshot: emoji-coverage-04-pills
+
+# Leave the tone as the next flow expects it (none).
+- runFlow: ../subflows/long-press-message.yaml
+- tapOn:
+    id: "btn-react-more"
+- extendedWaitUntil:
+    visible:
+      id: "list-emoji"
+    timeout: 10000
+- tapOn:
+    id: "btn-tone-0"
+- takeScreenshot: emoji-coverage-05-people-tab
+- tapOn:
+    id: "btn-sheet-close"

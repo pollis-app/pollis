@@ -5571,6 +5571,42 @@ mod reaction_membership_tests {
         assert!(seen_by(&c, "mallory", "m-gone").await.is_empty());
     }
 
+    /// #2094: the pickers offer every RGI emoji, so a reaction can be a long
+    /// ZWJ, tag or toned sequence. It is stored and read back byte for byte,
+    /// with no length cap or normalisation, and removed by the same string.
+    #[tokio::test]
+    async fn a_multi_codepoint_reaction_round_trips_byte_for_byte() {
+        let c = conn().await;
+        seed_envelope(&c, "m-seq", "g1").await;
+        let sequences = [
+            "\u{1FAE1}",
+            "\u{2764}\u{FE0F}\u{200D}\u{1F525}",
+            "\u{1F9D1}\u{1F3FD}\u{200D}\u{1F4BB}",
+            "\u{1F9D1}\u{1F3FB}\u{200D}\u{2764}\u{FE0F}\u{200D}\u{1F48B}\u{200D}\u{1F9D1}\u{1F3FC}",
+            "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
+        ];
+        for emoji in sequences {
+            let mut b = body("m-seq", None);
+            b.emoji = emoji.to_string();
+            let out = apply_add_reaction(&c, Some("alice"), &b).await.unwrap();
+            assert!(matches!(out, WriteOutcome::Ok), "{emoji} refused");
+        }
+        let mut seen: Vec<String> = seen_by(&c, "alice", "m-seq")
+            .await
+            .into_iter()
+            .map(|(emoji, _)| emoji)
+            .collect();
+        seen.sort();
+        let mut want: Vec<String> = sequences.iter().map(|s| s.to_string()).collect();
+        want.sort();
+        assert_eq!(seen, want);
+
+        let mut b = body("m-seq", None);
+        b.emoji = sequences[3].to_string();
+        apply_remove_reaction(&c, Some("alice"), &b).await.unwrap();
+        assert_eq!(reaction_count(&c, "m-seq").await, 4);
+    }
+
     /// #1433: a reaction made while the envelope existed outlives it. FAILS
     /// before the change — the pill vanished with the sweep.
     #[tokio::test]

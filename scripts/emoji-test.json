@@ -1,0 +1,8 @@
+{
+  "_source": "https://unicode.org/Public/emoji/16.0/emoji-test.txt",
+  "_version": "16.0",
+  "_sha256": "24f0c534e86cf142e2496953e8f0e46a3e702392911eddcd29c6cced85139697",
+  "_licence": "Unicode-3.0 — Copyright © 1991-2024 Unicode, Inc. (https://www.unicode.org/license.txt)",
+  "_file": "scripts/emoji-test.txt, vendored byte for byte",
+  "_regenerate": "python3.14 scripts/generate-emoji-data.py --refresh-emoji-test"
+}
