@@ -1425,7 +1425,8 @@ Current state:
   (`get_reactions` batched per conversation in one queryFn; a long press on a
   pill opens `components/chat/ReactionBreakdownSheet.tsx`, who reacted with
   what, #1684 — tabs and rows from `lib/reactionBreakdown.ts`, names from the
-  roster then one `get_user_profiles`, Maestro
+  roster, whose rows carry display names (#2085), and one `get_user_profiles` only for
+  reactors it cannot name, Maestro
   `scripts/maestro-reaction-breakdown.sh`; generated
   `components/emoji/emojiData.ts` — regenerate with
   `scripts/generate-emoji-data.py`, which writes frontend + mobile together);

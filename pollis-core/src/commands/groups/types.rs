@@ -84,6 +84,9 @@ pub struct GroupInvite {
     pub id: String,
     pub invitee_id: String,
     pub invitee_username: Option<String>,
+    /// #2085: the invitee's display name, with the row.
+    #[serde(default)]
+    pub invitee_preferred_name: Option<String>,
     pub inviter_id: String,
     pub inviter_username: Option<String>,
     pub created_at: String,

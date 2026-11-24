@@ -10,6 +10,11 @@
 //! its display name to `$POLLIS_NEW_NAME` (`PEER_RENAMED`), and exit 0 once the DS's wake-ups
 //! have had time to leave.
 //!
+//! Also drives `maestro-display-names.sh` (#2085): `POLLIS_PEER_NAME` sets a display name right
+//! after sign-up, `POLLIS_DM_PHONE=1` opens a DM to the phone once it has joined (a message
+//! request on the phone) and writes `hello in the dm` there, and with no `POLLIS_RENAME_TRIGGER`
+//! the peer exits after `PEER_READY` plus a short wait instead of renaming.
+//!
 //! `mobile/scripts/maestro-profile-change.sh` drives it. Not a shipping binary: examples build
 //! against pollis-tui's dev-dependencies.
 
@@ -17,7 +22,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use pollis_core::commands::{groups, messages, user};
+use pollis_core::commands::{dm, groups, messages, user};
 use pollis_core::config::Config;
 use pollis_core::state::AppState;
 
@@ -76,10 +81,13 @@ async fn main() -> Result<()> {
 
 async fn admin(email: &str, phone: &str) -> Result<()> {
     let group_name = std::env::var("POLLIS_GROUP_NAME").context("POLLIS_GROUP_NAME is required")?;
-    let trigger = std::env::var("POLLIS_RENAME_TRIGGER").context("POLLIS_RENAME_TRIGGER is required")?;
-    let new_handle = std::env::var("POLLIS_NEW_HANDLE").context("POLLIS_NEW_HANDLE is required")?;
-    let new_name = std::env::var("POLLIS_NEW_NAME").context("POLLIS_NEW_NAME is required")?;
+    let trigger = std::env::var("POLLIS_RENAME_TRIGGER").ok();
     let (state, me) = sign_up(email).await?;
+    if let Ok(name) = std::env::var("POLLIS_PEER_NAME") {
+        user::update_user_profile(me.clone(), None, Some(name), None, None, &state)
+            .await
+            .context("set the display name")?;
+    }
 
     let made = groups::create_group(group_name, None, me.clone(), Some(true), Some(false), &state)
         .await
@@ -95,12 +103,21 @@ async fn admin(email: &str, phone: &str) -> Result<()> {
     .await?;
     println!("PEER_INVITED_PHONE");
 
-    wait_for("the phone accepts", || async {
+    let phone_id = wait_for("the phone accepts", || async {
         let members = groups::get_group_members(group_id.clone(), me.clone(), &state).await?;
         Ok(members.into_iter().find(|m| m.user_id != me).map(|m| m.user_id))
     })
     .await?;
     println!("PEER_SAW_PHONE_JOIN");
+    if std::env::var("POLLIS_DM_PHONE").as_deref() == Ok("1") {
+        let opened = dm::create_dm_channel(me.clone(), vec![phone_id.clone()], &state)
+            .await
+            .context("open a DM to the phone")?;
+        messages::send_message(opened.id.clone(), me.clone(), "hello in the dm".to_string(), None, None, None, &state)
+            .await
+            .context("write in the DM")?;
+        println!("PEER_OPENED_DM");
+    }
 
     let general = groups::list_group_channels(group_id.clone(), me.clone(), &state)
         .await?
@@ -120,6 +137,13 @@ async fn admin(email: &str, phone: &str) -> Result<()> {
     .context("post the message")?;
     println!("PEER_READY");
 
+    let Some(trigger) = trigger else {
+        // Nothing to rename: stay a member long enough for the phone's reads, then leave.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        return Ok(());
+    };
+    let new_handle = std::env::var("POLLIS_NEW_HANDLE").context("POLLIS_NEW_HANDLE is required")?;
+    let new_name = std::env::var("POLLIS_NEW_NAME").context("POLLIS_NEW_NAME is required")?;
     wait_for("the rename trigger", || async {
         Ok(std::path::Path::new(&trigger).exists().then_some(()))
     })

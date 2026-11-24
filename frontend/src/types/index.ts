@@ -91,6 +91,8 @@ export interface Message {
   conversation_id?: string; // ULID (required - channel or DM conversation)
   sender_id: string; // user_id
   sender_username?: string; // resolved at fetch time from Turso JOIN
+  /** #2085: the sender's display name when they set one; labels prefer it. */
+  sender_display_name?: string | null;
   ciphertext: Uint8Array; // encrypted content (MLS protocol)
   nonce: Uint8Array; // nonce for encryption
   content_decrypted?: string; // Decrypted content (client-side only, never persisted)
@@ -122,6 +124,8 @@ export interface DMConversation {
   id: string; // ULID (conversation_id)
   user1_id: string; // user_id
   user2_identifier: string; // username/email/phone of other user
+  /** #2085: the peer's display name, with the row. */
+  user2_display_name?: string;
   user2_id?: string;
   user2_avatar_url?: string;
   /** Total members including the viewer (#857); optional. */
@@ -243,6 +247,8 @@ export interface SearchResult {
   group_name: string | null;
   sender_id: string;
   sender_username: string | null;
+  /** #2085: the sender's display name when they set one. */
+  sender_display_name?: string | null;
   thread_id: string | null;
   has_attachment: boolean;
   has_link: boolean;

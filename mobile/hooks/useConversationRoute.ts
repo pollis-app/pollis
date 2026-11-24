@@ -25,7 +25,7 @@ export function useConversationRoute() {
       }
       const dm = dms.find((d) => d.id === conversationId);
       if (dm) {
-        return { kind: "dm", name: dm.user2_identifier };
+        return { kind: "dm", name: dm.user2_preferred_name || dm.user2_identifier };
       }
       // Not in any local list: a DM the list has not refreshed for.
       return { kind: "dm" };

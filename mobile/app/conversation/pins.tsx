@@ -58,7 +58,7 @@ function PinnedMessagesScreen() {
 
   const renderRow = ({ item, index }: { item: PinnedMessage; index: number }) => {
     const author =
-      aliasName(aliases, item.sender_id, authorName(item.sender_id, item.sender_username ?? undefined, currentUser)) ??
+      aliasName(aliases, item.sender_id, authorName(item.sender_id, item.sender_username ?? undefined, currentUser, item.sender_display_name)) ??
       t("chat:list.unknownAuthor");
     const sent = new Date(item.sent_at).getTime();
     const when = Number.isFinite(sent) ? `${dayLabel(sent)} · ${timeLabel(sent)}` : "";

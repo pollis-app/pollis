@@ -44,6 +44,9 @@ pub struct PinnedMessage {
     pub sender_id: String,
     /// Resolved from the local `user_cache` when this device knows the name.
     pub sender_username: Option<String>,
+    /// #2085: the sender's display name when this device knows one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_display_name: Option<String>,
     pub sent_at: String,
 }
 
@@ -514,8 +517,9 @@ pub async fn list_pinned_messages(
             );
             continue;
         }
-        let sender_username =
-            crate::commands::user_cache::cached_one(db.conn(), &snapshot.sender_id);
+        let sender = crate::commands::user_cache::cached_one(db.conn(), &snapshot.sender_id);
+        let sender_username = sender.as_ref().map(|n| n.username.clone());
+        let sender_display_name = sender.and_then(|n| n.display_name);
         out.push(PinnedMessage {
             id: pin.id,
             conversation_id: pin.conversation_id,
@@ -525,6 +529,7 @@ pub async fn list_pinned_messages(
             content: snapshot.content,
             sender_id: snapshot.sender_id,
             sender_username,
+            sender_display_name,
             sent_at: snapshot.sent_at,
         });
     }

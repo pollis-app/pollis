@@ -15,6 +15,8 @@ export interface DmChannel {
   members: Array<{
     user_id: string;
     username?: string;
+    /** #2085: the display name, with the row. */
+    preferred_name?: string | null;
     added_by: string;
     added_at: string;
     accepted_at?: string | null;

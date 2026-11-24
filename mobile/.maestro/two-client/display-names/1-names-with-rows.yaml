@@ -1,0 +1,77 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DISPLAY NAMES WITH THE DATA (#2085) — driven by scripts/maestro-display-names.sh.
+# The peer set the display name ${PEER_NAME} before creating ${GROUP_NAME}, invites this
+# account and, once it has joined, asks to message it. Every list that names the peer does so
+# by display name on the frame the row appears: the member list and the message request.
+
+- runFlow: ../../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-groups"
+- extendedWaitUntil:
+    visible:
+      id: "row-invite-.*"
+    timeout: 60000
+    optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "row-invite-.*"
+    commands:
+      - stopApp
+      - launchApp
+      - runFlow:
+          when:
+            visible:
+              id: "screen-auth-pin"
+          commands:
+            - runFlow: ../../subflows/enter-pin.yaml
+      - extendedWaitUntil:
+          visible:
+            id: "tab-groups"
+          timeout: 30000
+      - tapOn:
+          id: "tab-groups"
+      - extendedWaitUntil:
+          visible:
+            id: "row-invite-.*"
+          timeout: 60000
+- tapOn:
+    id: "btn-accept-invite-.*"
+- extendedWaitUntil:
+    visible:
+      id: "row-group-members"
+    timeout: 30000
+- tapOn:
+    id: "row-group-members"
+# The row appears already named: no handle first, no second read.
+- extendedWaitUntil:
+    visible:
+      id: "row-member-${MAESTRO_PEER_ID}"
+    timeout: 30000
+- assertVisible:
+    id: "row-member-${MAESTRO_PEER_ID}"
+    text: "${PEER_NAME}, .*"
+- takeScreenshot: display-names-01-members
+# Phones go back to the group panel; the iPad shows it beside the members page.
+- tapOn:
+    id: "btn-back"
+    optional: true
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-requests"
+    timeout: 60000
+- tapOn:
+    id: "row-dm-requests"
+- extendedWaitUntil:
+    visible:
+      id: "row-request-.*"
+    timeout: 30000
+- assertVisible:
+    id: "text-request-name-.*"
+    text: "${PEER_NAME}"
+- takeScreenshot: display-names-02-request

@@ -17,7 +17,7 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message,
   const { t } = useTranslation("chat");
   // Bracketed forms are Terminal's (#1965).
   const isTerminal = useSkin() === "terminal";
-  const sender = message ? aliasName(aliases, message.sender_id, message.sender_username) : undefined;
+  const sender = message ? aliasName(aliases, message.sender_id, message.sender_display_name || message.sender_username) : undefined;
 
   const text = message?.content_decrypted
     ? (sender

@@ -566,6 +566,8 @@ export interface GroupInvite {
   id: string;
   invitee_id: string;
   invitee_username: string | null;
+  /** #2085: the invitee's display name, with the row. */
+  invitee_preferred_name?: string | null;
   inviter_id: string;
   inviter_username: string | null;
   created_at: string;

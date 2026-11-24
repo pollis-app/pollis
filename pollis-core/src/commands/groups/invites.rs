@@ -182,6 +182,7 @@ pub async fn list_group_invites(
             id: i.id,
             invitee_id: i.invitee_id,
             invitee_username: i.invitee_username,
+            invitee_preferred_name: i.invitee_preferred_name,
             inviter_id: i.inviter_id,
             inviter_username: i.inviter_username,
             created_at: i.created_at,

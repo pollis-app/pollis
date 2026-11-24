@@ -1269,7 +1269,7 @@ async fn deliver_locked(
         // A drained message's author label comes from this device's cached profile.
         let sender_username = match sender_username {
             Some(name) => Some(name),
-            None => crate::commands::user_cache::cached_one(db.conn(), &row.sender_id),
+            None => crate::commands::user_cache::cached_one(db.conn(), &row.sender_id).map(|n| n.username),
         };
         let link_preview: Option<String> = db
             .conn()

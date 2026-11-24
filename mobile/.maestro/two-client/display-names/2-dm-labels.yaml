@@ -1,0 +1,42 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DISPLAY NAMES WITH THE DATA (#2085), part 2 — driven by scripts/maestro-display-names.sh.
+# Still on the message requests page from part 1. Accept the peer's DM and open it: the peer's
+# message and the conversation's title name the peer by display name, not by handle.
+
+- tapOn:
+    id: "btn-accept-request-.*"
+- tapOn:
+    id: "btn-back"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "row-dm-.*"
+    timeout: 30000
+- tapOn:
+    id: "row-dm-.*"
+# The OS notification prompt comes up over the first conversation and, on iOS, hides the
+# composer from the accessibility tree: answer it first.
+- extendedWaitUntil:
+    visible: "Allow"
+    timeout: 8000
+    optional: true
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "${PEER_NAME}: hello in the dm.*"
+    timeout: 120000
+- assertNotVisible: "${MAESTRO_PEER_HANDLE}: hello in the dm.*"
+- assertVisible:
+    id: "text-chat-title"
+    text: "${PEER_NAME}"
+- takeScreenshot: display-names-03-dm

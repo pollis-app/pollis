@@ -95,6 +95,7 @@ export type RawChannelMessage = {
   conversation_id: string;
   sender_id: string;
   sender_username?: string;
+  sender_display_name?: string | null;
   ciphertext: string;
   content?: string;
   reply_to_id?: string;
@@ -132,7 +133,8 @@ type RawDmChannel = {
   created_at: string;
   /** Newest local message's `sent_at`, else `created_at` (#1838); the list arrives sorted by it. */
   last_activity_at: string;
-  members: Array<{ user_id: string; username?: string; avatar_url?: string; added_by: string; added_at: string }>;
+  /** `preferred_name` (#2085): the display name, with the row. */
+  members: Array<{ user_id: string; username?: string; preferred_name?: string | null; avatar_url?: string; added_by: string; added_at: string }>;
 };
 
 // Decode the content string: plain text, or `{"_att":[…],"_txt":caption}`. Shared by pins (#99) and the Vault (#107); `origin` names each attachment's key (#1382).
@@ -288,6 +290,7 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
   return {
     ...baseMessage(m),
     sender_username: m.sender_username,
+    sender_display_name: m.sender_display_name ?? null,
     edited_at: m.edited_at,
     deleted_at: m.deleted_at,
     undecryptable: m.undecryptable,
@@ -593,6 +596,7 @@ export function useDMConversations() {
           id: c.id,
           user1_id: currentUser.id,
           user2_identifier: other?.username || other?.user_id || 'Unknown',
+          user2_display_name: other?.preferred_name || undefined,
           user2_id: other?.user_id,
           user2_avatar_url: other?.avatar_url,
           member_count: c.members.length,

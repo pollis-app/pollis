@@ -575,6 +575,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
   const getAuthorUsername = useCallback(
     (authorId: string, message?: Message) =>
+      message?.sender_display_name ||
       message?.sender_username ||
       (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId),
     [currentUser?.id, currentUser?.username],

@@ -94,10 +94,10 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, groupName, i
               className="flex-1 truncate flex items-center gap-2 text-fg"
             >
               <bdi data-testid={`member-name-${m.user_id}`} className="truncate">
-                {aliasName(aliases, m.user_id, m.username ?? m.user_id)}
+                {aliasName(aliases, m.user_id, m.display_name || m.username || m.user_id)}
               </bdi>
-              {/* The handle beside an alias (#2003), so who is who stays clear. */}
-              {hasAlias(aliases, m.user_id) && aliases.get(m.user_id)?.display_name && m.username && (
+              {/* The handle beside an alias (#2003) or a display name (#2085, with the roster row), so who is who stays clear. */}
+              {((hasAlias(aliases, m.user_id) && aliases.get(m.user_id)?.display_name) || m.display_name) && m.username && (
                 <bdi data-testid={`member-handle-${m.user_id}`} className="truncate text-muted">
                   @{m.username}
                 </bdi>
@@ -218,8 +218,9 @@ const InvitedSection: React.FC<{ groupId: string; isAdmin: boolean }> = observer
       const ms = parseServerTimestamp(invite.created_at);
       return ms === null ? invite.created_at : new Date(ms).toLocaleDateString(activeLocale());
     };
+    // The display name when set (#2085, with the row), else the handle.
     const inviteeName = (invite: GroupInvite): string =>
-      invite.invitee_username ?? invite.invitee_id;
+      invite.invitee_preferred_name || invite.invitee_username || invite.invitee_id;
     const revokingId = revoke.isPending ? revoke.variables?.inviteId : undefined;
 
     return (

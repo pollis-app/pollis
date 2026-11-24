@@ -1,3 +1,4 @@
+import { senderName } from "../../utils/senderName";
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchMessages } from "../../hooks/queries/useSearchMessages";
@@ -216,7 +217,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                         data-testid="search-result-sender"
                         className="text-secondary font-mono font-medium truncate text-accent"
                       >
-                        {result.sender_username ?? result.sender_id}
+                        {senderName(result)}
                       </span>
                       <span className="text-secondary font-mono flex-shrink-0 text-muted">
                         {formatShortDateTime(result.sent_at)}

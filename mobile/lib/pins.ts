@@ -11,6 +11,8 @@ export interface PinnedMessage {
   content: string;
   sender_id: string;
   sender_username?: string | null;
+  /** #2085: the sender's display name when this device knows one. */
+  sender_display_name?: string | null;
   sent_at: string;
 }
 

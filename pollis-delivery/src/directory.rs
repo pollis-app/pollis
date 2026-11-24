@@ -723,6 +723,7 @@ pub async fn dm_row(
         .map(|m| pollis_api::profile::DmMember {
             user_id: m.user_id,
             username: m.username,
+            preferred_name: m.preferred_name,
             avatar_url: m.avatar_url,
             accepted_at: m.accepted_at,
         })
@@ -740,7 +741,7 @@ pub async fn dm_members(conn: &Connection, dm_id: &str) -> anyhow::Result<Vec<Dm
     let mut rows = conn
         .query(
             "SELECT dcm.user_id, u.username, u.avatar_url, dcm.added_by, dcm.added_at, \
-                    dcm.accepted_at \
+                    dcm.accepted_at, u.preferred_name \
              FROM dm_channel_member dcm \
              LEFT JOIN users u ON u.id = dcm.user_id \
              WHERE dcm.dm_channel_id = ?1",
@@ -756,6 +757,7 @@ pub async fn dm_members(conn: &Connection, dm_id: &str) -> anyhow::Result<Vec<Dm
             added_by: row.get(3)?,
             added_at: row.get(4)?,
             accepted_at: row.get(5)?,
+            preferred_name: row.get(6)?,
         });
     }
     Ok(out)
@@ -1016,7 +1018,7 @@ pub async fn group_members(
     let mut rows = conn
         .query(
             "SELECT gm.user_id, u.username, u.avatar_url, gm.role, gm.joined_at, \
-                    COALESCE(u.kind = 'bot', 0) \
+                    COALESCE(u.kind = 'bot', 0), u.preferred_name \
              FROM group_member gm \
              LEFT JOIN users u ON u.id = gm.user_id \
              WHERE gm.group_id = ?1",
@@ -1032,6 +1034,7 @@ pub async fn group_members(
             role: row.get(3)?,
             joined_at: row.get(4)?,
             is_bot: row.get::<i64>(5)? != 0,
+            preferred_name: row.get(6)?,
         });
     }
     Ok(out)
@@ -1045,7 +1048,8 @@ pub async fn group_invites(
 ) -> anyhow::Result<Vec<GroupInviteWire>> {
     let mut rows = conn
         .query(
-            "SELECT gi.id, gi.invitee_id, ie.username, gi.inviter_id, ir.username, gi.created_at \
+            "SELECT gi.id, gi.invitee_id, ie.username, gi.inviter_id, ir.username, gi.created_at, \
+                    ie.preferred_name \
              FROM group_invite gi \
              LEFT JOIN users ie ON ie.id = gi.invitee_id \
              LEFT JOIN users ir ON ir.id = gi.inviter_id \
@@ -1063,6 +1067,7 @@ pub async fn group_invites(
             inviter_id: row.get(3)?,
             inviter_username: row.get(4)?,
             created_at: row.get(5)?,
+            invitee_preferred_name: row.get(6)?,
         });
     }
     Ok(out)

@@ -246,6 +246,9 @@ pub struct DmMemberWire {
     pub user_id: String,
     #[serde(default)]
     pub username: Option<String>,
+    /// #2085: the display name, carried with the row so it never loads separately.
+    #[serde(default)]
+    pub preferred_name: Option<String>,
     #[serde(default)]
     pub avatar_url: Option<String>,
     #[serde(default)]
@@ -336,6 +339,9 @@ pub struct GroupInviteWire {
     pub invitee_id: String,
     #[serde(default)]
     pub invitee_username: Option<String>,
+    /// #2085: the invitee's display name, with the row.
+    #[serde(default)]
+    pub invitee_preferred_name: Option<String>,
     pub inviter_id: String,
     #[serde(default)]
     pub inviter_username: Option<String>,
@@ -347,6 +353,9 @@ pub struct GroupMemberWire {
     pub user_id: String,
     #[serde(default)]
     pub username: Option<String>,
+    /// #2085: the display name, carried with the row so it never loads separately.
+    #[serde(default)]
+    pub preferred_name: Option<String>,
     #[serde(default)]
     pub avatar_url: Option<String>,
     pub role: String,

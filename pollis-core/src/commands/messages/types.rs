@@ -47,6 +47,9 @@ pub struct ChannelMessage {
     pub conversation_id: String,
     pub sender_id: String,
     pub sender_username: Option<String>,
+    /// #2085: the sender's display name when they set one; labels prefer it to the handle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_display_name: Option<String>,
     pub ciphertext: String,
     pub content: Option<String>,
     pub reply_to_id: Option<String>,
@@ -117,6 +120,9 @@ pub struct SearchResult {
     pub group_name: Option<String>,
     pub sender_id: String,
     pub sender_username: Option<String>,
+    /// #2085: the sender's display name when they set one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_display_name: Option<String>,
     pub thread_id: Option<String>,
     pub has_attachment: bool,
     pub has_link: bool,

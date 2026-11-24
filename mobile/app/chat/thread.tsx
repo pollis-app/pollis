@@ -133,7 +133,7 @@ function ThreadScreen() {
       const retryId = retryTarget(m);
       const mine = currentUser?.id === m.sender_id;
       const name =
-        aliasName(aliases, m.sender_id, authorName(m.sender_id, m.sender_username, currentUser)) ??
+        aliasName(aliases, m.sender_id, authorName(m.sender_id, m.sender_username, currentUser, m.sender_display_name)) ??
         t("chat:list.unknownAuthor");
       return (
         <MessageRow
@@ -179,7 +179,7 @@ function ThreadScreen() {
   );
 
   const rootName = root
-    ? aliasName(aliases, root.sender_id, authorName(root.sender_id, root.sender_username, currentUser))
+    ? aliasName(aliases, root.sender_id, authorName(root.sender_id, root.sender_username, currentUser, root.sender_display_name))
     : null;
   const header = (
     <View>

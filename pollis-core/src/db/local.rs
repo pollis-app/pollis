@@ -572,6 +572,8 @@ const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
         "ALTER TABLE outbox_attachment ADD COLUMN link_preview INTEGER NOT NULL DEFAULT 0 CHECK (link_preview IN (0, 1))",
     ),
     ("outbox_edit", "link_preview", "ALTER TABLE outbox_edit ADD COLUMN link_preview TEXT"),
+    // Sender display names on message rows (#2085). Must match `local_schema.sql`.
+    ("user_cache", "preferred_name", "ALTER TABLE user_cache ADD COLUMN preferred_name TEXT"),
 ];
 
 /// Apply [`ADDITIVE_COLUMNS`] to a database that predates them.

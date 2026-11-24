@@ -1,0 +1,16 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DISPLAY NAMES WITH THE DATA (#2085), part 3 — driven by scripts/maestro-display-names.sh.
+# The DM is still open from part 2 (no relaunch). The peer changed its display name to
+# ${NEW_NAME} and its handle to ${NEW_HANDLE}: its message and the title follow within seconds.
+
+- extendedWaitUntil:
+    visible: "${NEW_NAME}: hello in the dm.*"
+    timeout: 30000
+- assertNotVisible: "${PEER_NAME}: hello in the dm.*"
+- assertVisible:
+    id: "text-chat-title"
+    text: "${NEW_NAME}"
+- takeScreenshot: display-names-04-dm-renamed

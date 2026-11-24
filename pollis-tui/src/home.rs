@@ -407,13 +407,20 @@ pub fn build_sidebar_rows(
     rows
 }
 
-/// Title a DM by the member who is not the current user.
+/// Title a DM by the member who is not the current user: the display name when they set one,
+/// else the handle (#2085; it arrives with the row).
 fn dm_label(dm: &pollis_core::commands::dm::DmChannel, user_id: &str) -> String {
     let names: Vec<String> = dm
         .members
         .iter()
         .filter(|m| m.user_id != user_id)
-        .map(|m| m.username.clone().unwrap_or_else(|| m.user_id.clone()))
+        .map(|m| {
+            m.preferred_name
+                .clone()
+                .filter(|n| !n.trim().is_empty())
+                .or_else(|| m.username.clone())
+                .unwrap_or_else(|| m.user_id.clone())
+        })
         .collect();
     if names.is_empty() {
         "Direct message".to_string()
@@ -533,6 +540,7 @@ mod tests {
                 DmChannelMember {
                     user_id: "me".to_string(),
                     username: Some("me".to_string()),
+                    preferred_name: None,
                     avatar_url: None,
                     added_by: "me".to_string(),
                     added_at: "t".to_string(),
@@ -541,6 +549,7 @@ mod tests {
                 DmChannelMember {
                     user_id: other_user.to_string(),
                     username: other_name.map(|s| s.to_string()),
+                    preferred_name: None,
                     avatar_url: None,
                     added_by: "me".to_string(),
                     added_at: "t".to_string(),
@@ -556,6 +565,7 @@ mod tests {
             conversation_id: "c".to_string(),
             sender_id: "s".to_string(),
             sender_username: Some("s".to_string()),
+            sender_display_name: None,
             ciphertext: String::new(),
             content: Some(content.to_string()),
             reply_to_id: None,
@@ -607,6 +617,12 @@ mod tests {
         assert_eq!(dm_label(&d, "me"), "bob");
         let anon = dm("d", "xyz", None);
         assert_eq!(dm_label(&anon, "me"), "xyz");
+        // #2085: the display name, when set, titles the DM.
+        let mut named = dm("d", "bob", Some("bob"));
+        named.members[1].preferred_name = Some("Bob Builder".to_string());
+        assert_eq!(dm_label(&named, "me"), "Bob Builder");
+        named.members[1].preferred_name = Some("  ".to_string());
+        assert_eq!(dm_label(&named, "me"), "bob");
     }
 
     #[test]

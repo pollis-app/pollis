@@ -16,6 +16,7 @@ export interface PinnedMessage {
   content: string;
   sender_id: string;
   sender_username?: string | null;
+  sender_display_name?: string | null;
   sent_at: string;
 }
 

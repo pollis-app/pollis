@@ -705,7 +705,7 @@ async fn enrich(
 
     // #2084: one request for whatever the cache cannot name freshly; offline, the id renders.
     let sender_ids: Vec<String> = sender_ids.into_iter().collect();
-    let usernames = crate::commands::user_cache::usernames(state, &sender_ids, None).await;
+    let names = crate::commands::user_cache::names(state, &sender_ids, None).await;
 
     Ok(hits
         .into_iter()
@@ -719,7 +719,8 @@ async fn enrich(
                 conversation_name: conv.and_then(|c| c.name.clone()),
                 group_id: conv.and_then(|c| c.group_id.clone()),
                 group_name: conv.and_then(|c| c.group_name.clone()),
-                sender_username: usernames.get(&hit.sender_id).cloned(),
+                sender_username: names.get(&hit.sender_id).map(|n| n.username.clone()),
+                sender_display_name: names.get(&hit.sender_id).and_then(|n| n.display_name.clone()),
                 message_id: hit.message_id,
                 conversation_id: hit.conversation_id,
                 sender_id: hit.sender_id,

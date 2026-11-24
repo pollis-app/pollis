@@ -674,8 +674,8 @@ function TextChat(props: ChatViewProps = {}) {
   // Per-group aliases (#2003): inside a group, people show as it shows them; a DM, by main profile.
   const aliases = useGroupAliases(kind === "channel" ? groupId ?? null : null);
   const groupAuthor = useCallback(
-    (senderId: string, senderUsername: string | undefined) =>
-      aliasName(aliases, senderId, authorName(senderId, senderUsername, currentUser)),
+    (senderId: string, senderUsername: string | undefined, senderDisplayName?: string | null) =>
+      aliasName(aliases, senderId, authorName(senderId, senderUsername, currentUser, senderDisplayName)),
     [aliases, currentUser],
   );
   const aliasMentionLabels = useMemo(
@@ -708,26 +708,36 @@ function TextChat(props: ChatViewProps = {}) {
     40,
   );
 
-  // Reactors' names before the sheet's one batched profile read lands: loaded senders
-  // (covers people who have left), then the roster, then self.
+  // Reactors' names on the sheet's first frame: loaded senders (covers people who have left),
+  // then the roster, whose rows carry display names (#2085), then self. The sheet reads
+  // profiles only for whoever this cannot name.
   const reactorRoster = useMemo(() => {
     const map = new Map<string, ReactorProfile>();
     for (const m of messages) {
       if (m.sender_username && !map.has(m.sender_id)) {
-        map.set(m.sender_id, { username: m.sender_username });
+        map.set(m.sender_id, { username: m.sender_username, preferred_name: m.sender_display_name });
       }
     }
-    for (const m of [...(dmChannel?.members ?? []), ...(groupMembers ?? [])]) {
+    for (const m of dmChannel?.members ?? []) {
       map.set(m.user_id, {
         username: m.username || map.get(m.user_id)?.username,
+        preferred_name: m.preferred_name ?? null,
+        avatar_url: m.avatar_url ?? null,
+      });
+    }
+    for (const m of groupMembers ?? []) {
+      map.set(m.user_id, {
+        username: m.username || map.get(m.user_id)?.username,
+        preferred_name: m.display_name ?? null,
         avatar_url: m.avatar_url ?? null,
       });
     }
     if (currentUser) {
+      const prev = map.get(currentUser.id);
       map.set(currentUser.id, {
-        ...map.get(currentUser.id),
-        username: currentUser.username || map.get(currentUser.id)?.username,
-        preferred_name: currentUser.preferred_name,
+        ...prev,
+        username: currentUser.username || prev?.username,
+        preferred_name: currentUser.preferred_name ?? prev?.preferred_name,
       });
     }
     return map;
@@ -738,16 +748,29 @@ function TextChat(props: ChatViewProps = {}) {
     if (kind !== "dm") {
       return null;
     }
+    // #2085: the display name first, from the members (they arrive with the DM) or a message row.
     const peerMsg = messages.find((m) => m.sender_id !== currentUser?.id);
-    if (peerMsg?.sender_username) {
-      return peerMsg.sender_username;
+    if (dmPeers.length === 1) {
+      const [peer] = dmPeers;
+      const fromRow = peerMsg?.sender_id === peer.user_id ? peerMsg : undefined;
+      const name =
+        peer.preferred_name || fromRow?.sender_display_name || fromRow?.sender_username || peer.username;
+      if (name) {
+        return name;
+      }
+    }
+    if (peerMsg?.sender_display_name || peerMsg?.sender_username) {
+      return peerMsg.sender_display_name || peerMsg.sender_username || null;
     }
     // A DM opened before anyone wrote in it: name it from its members.
-    const names = dmPeers.map((p) => p.username).filter(Boolean);
+    const names = dmPeers.map((p) => p.preferred_name || p.username).filter(Boolean);
     return names.length > 0 ? names.join(", ") : null;
   }, [kind, messages, currentUser?.id, dmPeers]);
 
+  // #2085: a DM's title is the live peer name (display name first), so a rename shows at once;
+  // the name the route was opened with is only the first frame's fallback.
   const title =
+    (kind === "dm" && peerName) ||
     (displayName && displayName.trim()) ||
     channelName ||
     peerName ||
@@ -821,13 +844,13 @@ function TextChat(props: ChatViewProps = {}) {
       }
       const mine = currentUser?.id === m.sender_id;
       const summary = threadSummaries?.get(m.id);
-      const name = groupAuthor(m.sender_id, m.sender_username) ?? t("chat:list.unknownAuthor");
+      const name = groupAuthor(m.sender_id, m.sender_username, m.sender_display_name) ?? t("chat:list.unknownAuthor");
       const original = m.reply_to_id ? repliedTo.get(m.reply_to_id) : undefined;
       const replyTo = m.reply_to_id
         ? original
           ? {
               name:
-                groupAuthor(original.sender_id, original.sender_username) ??
+                groupAuthor(original.sender_id, original.sender_username, original.sender_display_name) ??
                 t("chat:list.unknownAuthor"),
               snippet: original.deleted_at
                 ? t("chat:message.deleted")
@@ -946,6 +969,7 @@ function TextChat(props: ChatViewProps = {}) {
         hideBack={embedded}
         backTo={backTo}
         title={title}
+        titleTestID="text-chat-title"
         subtitle={subtitle}
         titleIcon={
           kind === "channel" ? (
@@ -1108,7 +1132,7 @@ function TextChat(props: ChatViewProps = {}) {
           {replyTarget ? (
             <ReplyBar
               name={
-                groupAuthor(replyTarget.sender_id, replyTarget.sender_username) ??
+                groupAuthor(replyTarget.sender_id, replyTarget.sender_username, replyTarget.sender_display_name) ??
                 t("chat:list.unknownAuthor")
               }
               snippet={replySnippet(replyTarget) || t("chat:message.undecryptable.title")}
@@ -1156,7 +1180,7 @@ function TextChat(props: ChatViewProps = {}) {
         <MessageActionsSheet
           target={actionTarget}
           quoteName={
-            groupAuthor(actionTarget.sender_id, actionTarget.sender_username) ??
+            groupAuthor(actionTarget.sender_id, actionTarget.sender_username, actionTarget.sender_display_name) ??
             t("chat:list.unknownAuthor")
           }
           quoteTime={timeLabel(actionTarget.created_at)}

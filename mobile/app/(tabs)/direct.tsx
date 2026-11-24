@@ -27,7 +27,6 @@ import {
   previewText,
   markConversationRead,
   usePrefetchConversation,
-  useUserProfiles,
 } from "../../hooks/queries";
 import { personName } from "../../lib/personName";
 import { appStore } from "../../stores/appStore";
@@ -63,7 +62,7 @@ function Direct() {
     resetPane();
   }, [selectedConversationId, resetPane]);
   const selectedDm = dms.find((d) => d.id === selectedConversationId);
-  const selectedHandle = selectedDm?.user2_identifier || undefined;
+  const selectedHandle = selectedDm?.user2_preferred_name || selectedDm?.user2_identifier || undefined;
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
 
@@ -71,23 +70,15 @@ function Direct() {
   const dmIds = useMemo(() => dms.map((d) => d.id), [dms]);
   const { data: lastMessages = {} } = useLastMessages(dmIds);
 
-  // Display names (#1971): one batched read for every row.
-  const peerIds = useMemo(
-    () => dms.flatMap((d) => (d.user2_id ? [d.user2_id] : [])),
-    [dms],
-  );
-  const { data: profiles } = useUserProfiles(peerIds);
+  // Display names (#1971) arrive with the list itself (#2085), so a row is named once.
   const rowName = useCallback(
     (d: (typeof dms)[number]) =>
       personName(
-        {
-          username: d.user2_identifier,
-          preferred_name: d.user2_id ? profiles?.get(d.user2_id)?.preferred_name : undefined,
-        },
+        { username: d.user2_identifier, preferred_name: d.user2_preferred_name },
         t("dms:profile.fallbackName"),
         { at: false },
       ),
-    [profiles, t],
+    [t],
   );
 
   // Warm every row's picture before it scrolls into view.
@@ -213,7 +204,6 @@ function Direct() {
           </Txt>
         ) : null}
         {shown.map((d) => {
-          const handle = d.user2_identifier || t("dms:profile.fallbackName");
           const label = rowName(d);
           const last = lastMessages[d.id];
           const preview = previewText(last);
@@ -242,7 +232,7 @@ function Direct() {
                 if (!isRegular) {
                   router.push({
                     pathname: "/chat/[id]",
-                    params: { id: d.id, kind: "dm", name: handle },
+                    params: { id: d.id, kind: "dm", name: label.name },
                   });
                 }
               }}

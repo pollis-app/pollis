@@ -46,6 +46,8 @@ export interface DMConversation {
   user1_id: string;
   user2_identifier: string;
   user2_id?: string;
+  /** #2085: the peer's display name, from the same read as the row. */
+  user2_preferred_name?: string;
   user2_avatar_url?: string;
   created_at: number;
   updated_at: number;

@@ -89,6 +89,9 @@ pub struct DmMember {
     pub user_id: String,
     #[serde(default)]
     pub username: Option<String>,
+    /// #2085: the display name, with the row.
+    #[serde(default)]
+    pub preferred_name: Option<String>,
     #[serde(default)]
     pub avatar_url: Option<String>,
     #[serde(default)]
