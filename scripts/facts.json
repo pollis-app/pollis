@@ -726,6 +726,213 @@
         { "file": "website/privacy.html", "pattern": "Pollis is not directed at children under {value}" },
         { "file": "docs/store-listing.md", "pattern": "\\(\\*?\\*?{value}\\+\\*?\\*?, the minimum the owner will accept\\)" }
       ]
+    },
+
+    "video-poster-max-edge-px": {
+      "value_from": { "file": "pollis-core/src/commands/poster.rs", "pattern": "pub const POSTER_MAX_EDGE: u32 = (\\d+);" },
+      "unit": "px",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "at most {value} px on the long edge" }
+      ]
+    },
+
+    "video-poster-max-kib": {
+      "value_from": { "file": "pollis-core/src/commands/poster.rs", "pattern": "pub const POSTER_MAX_JPEG_BYTES: usize = ([\\d *]+);", "divide": 1024 },
+      "unit": "KiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/security-whitepaper.md", "pattern": "on the long edge and {value} KiB" }
+      ]
+    },
+
+    "bot-trigger-claim-retention-days": {
+      "value_from": { "file": "pollis-delivery/src/bots.rs", "pattern": "pub const TRIGGER_CLAIM_RETENTION_SECS: u64 = ([\\d *]+);", "divide": 86400 },
+      "unit": "days",
+      "asserted_in": [
+        { "file": "docs/metadata-retention-policy.md", "pattern": "\\| {value} days; older rows are deleted" },
+        { "file": ".codesight/wiki/database.md", "pattern": "the first host to claim a trigger wins\\. Pruned after {value} days" }
+      ]
+    },
+
+    "bot-app-state-max-mib": {
+      "value_from": { "file": "pollis-delivery/src/bots.rs", "pattern": "pub const BOT_APP_STATE_MAX_BYTES: u64 = 1 << (\\d+);", "map": {"20": 1} },
+      "unit": "MiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/metadata-retention-policy.md", "pattern": "Life of the bot, at most {value} MiB per installation" },
+        { "file": "docs/bots/app-reference.md", "pattern": "an installation can never hold more than {value} MiB of sealed state" }
+      ]
+    },
+
+    "app-job-deadline-seconds": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "deadline: Duration::from_secs\\((\\d+)\\)," },
+      "unit": "seconds",
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "Wall-clock deadline \\| {value} s \\|" },
+        { "file": "docs/bots/developer-guide.md", "pattern": "Per-job limits: {value} seconds" },
+        { "file": "website/bots-developers.html", "pattern": "Every job starts fresh, within {value} seconds" }
+      ]
+    },
+
+    "app-job-memory-mib": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "memory_bytes: (\\d+) << 20," },
+      "unit": "MiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "Linear memory \\| {value} MiB \\|" },
+        { "file": "docs/bots/developer-guide.md", "pattern": "seconds, {value} MiB of memory" },
+        { "file": "website/bots-developers.html", "pattern": "seconds and {value} MiB, and nothing it queued" }
+      ]
+    },
+
+    "app-job-host-calls": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_host_calls: ([\\d_]+)," },
+      "unit": "host calls",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "\\| {value} \\| job ends \\(`HostCallLimit`\\)" }
+      ]
+    },
+
+    "app-job-http-fetches": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_http_fetches: (\\d+)," },
+      "unit": "requests",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "each redirect hop counts\\) \\| {value} \\| job ends" },
+        { "file": "docs/bots/developer-guide.md", "pattern": "MiB of memory, {value} HTTP requests" }
+      ]
+    },
+
+    "app-job-queries": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_queries: (\\d+)," },
+      "unit": "calls",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "`query-messages` calls \\| {value} \\| job ends" }
+      ]
+    },
+
+    "app-job-actions": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_actions: (\\d+)," },
+      "unit": "queued actions",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "Queued actions \\| {value} \\| job ends" },
+        { "file": "docs/bots/developer-guide.md", "pattern": "HTTP requests, {value} queued actions" }
+      ]
+    },
+
+    "app-job-query-results": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_query_results: (\\d+)," },
+      "unit": "messages",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "Messages per query \\| {value} \\| result truncated" }
+      ]
+    },
+
+    "app-http-response-mib": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_http_response_bytes: 1 << (\\d+),", "map": {"20": 1} },
+      "unit": "MiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "HTTP response body \\| {value} MiB \\|" },
+        { "file": "docs/bots/app-reference.md", "pattern": "Response bodies over {value} MiB are refused" },
+        { "file": "docs/bots/developer-guide.md", "pattern": "queued actions, {value} MiB per HTTP response" },
+        { "file": "docs/bots/developer-guide.md", "pattern": "Responses over {value} MiB are refused" }
+      ]
+    },
+
+    "app-text-per-action-kib": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_text_bytes: (\\d+) << 10," },
+      "unit": "KiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "Text per action \\| {value} KiB \\|" }
+      ]
+    },
+
+    "app-kv-key-max-bytes": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_kv_key_bytes: (\\d+)," },
+      "unit": "bytes",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "kv key \\| {value} bytes \\|" },
+        { "file": "docs/bots/app-reference.md", "pattern": "keys are 1 to {value} bytes" }
+      ]
+    },
+
+    "app-log-line-kib": {
+      "value_from": { "file": "pollis-app-host/src/types.rs", "pattern": "max_log_bytes: (\\d+) << 10," },
+      "unit": "KiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/app-reference.md", "pattern": "Log line \\| {value} KiB \\| truncated" },
+        { "file": "docs/bots/app-reference.md", "pattern": "Text over {value} KiB is truncated" }
+      ]
+    },
+
+    "alerts-webhook-body-kib": {
+      "value_from": { "file": "pollis-bot/src/webhook.rs", "pattern": "pub const MAX_BODY_BYTES: usize = ([\\d *]+);", "divide": 1024 },
+      "unit": "KiB",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "Request body \\| {value} KiB \\|" },
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "The body is over {value} KiB" },
+        { "file": "website/bots-developers.html", "pattern": "Body over {value} KiB" }
+      ]
+    },
+
+    "alerts-webhook-answer-seconds": {
+      "value_from": { "file": "pollis-bot/src/webhook.rs", "pattern": "pub const ANSWER_TIMEOUT: Duration = Duration::from_secs\\((\\d+)\\);" },
+      "unit": "seconds",
+      "asserted_in": [
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "The job took over {value} seconds" },
+        { "file": "website/bots-developers.html", "pattern": "The job took over {value} seconds" }
+      ]
+    },
+
+    "alerts-webhook-post-chars": {
+      "value_from": { "file": "pollis-bot/src/action.rs", "pattern": "pub const MAX_POST_CHARS: usize = (\\d+);" },
+      "unit": "characters",
+      "words": false,
+      "asserted_in": [
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "the message, up to {value} characters" },
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "Text per post \\| {value} characters \\|" },
+        { "file": "website/bots-developers.html", "pattern": "text: up to {value} characters" },
+        { "file": "website/bots-developers.html", "pattern": "Empty text, or over {value} characters" }
+      ]
+    },
+
+    "alerts-webhook-burst": {
+      "value_from": { "file": "pollis-bot/src/ratelimit.rs", "pattern": "pub const DEFAULT_BURST: u32 = (\\d+);" },
+      "unit": "calls",
+      "asserted_in": [
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "a burst of {value} calls, refilled" },
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "burst {value}, then" },
+        { "file": "website/bots-developers.html", "pattern": "a burst of {value}, refilled" }
+      ]
+    },
+
+    "alerts-webhook-per-minute": {
+      "value_from": { "file": "pollis-bot/src/ratelimit.rs", "pattern": "pub const DEFAULT_PER_MINUTE: u32 = (\\d+);" },
+      "unit": "calls a minute",
+      "asserted_in": [
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "refilled at {value} calls a minute" },
+        { "file": "docs/bots/alerts-webhook.md", "pattern": "then {value} a minute \\(configurable\\)" },
+        { "file": "website/bots-developers.html", "pattern": "refilled at {value} a minute" }
+      ]
+    },
+
+    "rust-lockfile-crates": {
+      "value_from": { "file": "Cargo.lock", "pattern": "(\\[\\[package\\]\\][\\s\\S]*)", "count": "\\[\\[package\\]\\]" },
+      "unit": "crates",
+      "words": false,
+      "asserted_in": [
+        { "file": "website/assurance.html", "pattern": "Pollis's Rust lockfile resolves to {value} crates" }
+      ]
     }
   }
 }

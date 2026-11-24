@@ -69,9 +69,9 @@ If nothing in the update asks for more, **Approve update** takes one tap and kee
 
 ## Updates that approve themselves
 
-When approving, you can switch on **Approve updates automatically**. Your signed approval then also says: "a newer version from this same address may run, as long as it asks for nothing more". The bot itself checks that before every job, so an update lands even when no admin is online:
+When approving, you can switch on **Approve updates automatically**. Your signed approval then also says: "a different build from this same address may run, as long as it asks for nothing more". The bot itself checks that before every job, so an update lands even when no admin is online:
 
-- a new version from exactly the approved address that asks for nothing more runs, with your choices carried over (anything it no longer asks for is dropped);
+- a different build from exactly the approved address that asks for nothing more runs, with your choices carried over (anything it no longer asks for is dropped);
 - a version that asks for more, or one from anywhere else, waits for an admin as usual;
 - once the bot runs a newer version it never goes back to an older one under the same approval, even if the older file is served again.
 
@@ -99,7 +99,7 @@ If the bot cannot check its approval, it does not run the App, and its page show
 | An older approval was served | The server sent an approval older than one the bot already accepted | The bot keeps refusing it; approve again |
 | Can't load the App | The file or address given on the machine cannot be read | Whoever runs the machine fixes the path or address |
 
-Messages that arrive while the App is not running are not handed to it later.
+Messages that arrive while the App is waiting for an approval are not handed to it later.
 
 ## For developers: what your users approve
 
@@ -115,7 +115,7 @@ Every approval is a small record signed by the approving admin's device: which b
 Before every job the bot's runtime checks, from its own copy of the group:
 
 1. the signature, under the key of the admin's device, and that device's certificate under the admin's account key (and the public key log);
-2. that the admin is still an admin, in both the group's encrypted membership and the member list;
+2. that the approving device is still in the group's encrypted membership, and the member list still lists its owner as an admin;
 3. that the App it is about to run hashes to the approved App hash, and the manifest to the approved manifest hash;
 4. that the permissions ask for nothing the manifest did not;
 5. that the approval is not older than the newest one it already accepted, so the server cannot quietly bring back an older version.

@@ -12,12 +12,15 @@
     "download_file": "Desktop saves to a picked path; mobile hands the file to the OS share sheet.",
     "stage_attachment": "Desktop stages drag-and-drop/pasted files before send; mobile uploads straight from the picker with upload_media.",
     "upload_media_staged": "Second half of desktop staging; mobile uses upload_media.",
-    "discard_staged_attachment": "Desktop staging only.",
     "connect_rooms": "Desktop's LiveKit room connection; mobile's data-only equivalent is get_livekit_token.",
     "create_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
     "await_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
     "approve_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
-    "report_push_activity": "Desktop tells the DS it is in use so the user's phones hold their pushes while they read there (#2056). A phone in use already receives in the foreground and needs no hold."
+    "report_push_activity": "Desktop tells the DS it is in use so the user's phones hold their pushes while they read there (#2056). A phone in use already receives in the foreground and needs no hold.",
+    "clear_update_required": "Desktop shell: the self-updater's 'continue without updating' lifts the send block mark_update_required set (#1916). Mobile is updated by the stores and OTA, not by this flow.",
+    "get_device_id": "Real-time media: desktop's voice session uses the device id as its per-device voice identity. Voice is desktop-only by product decision (mobile is LiveKit data-only).",
+    "save_diagnostics": "Desktop writes the diagnostics report to a path picked in the native save dialog (#1305); mobile writes get_diagnostics output to a file itself and hands it to the OS share sheet.",
+    "set_video_wants": "Real-time media: which video tracks the desktop's tiles want decoded. Video is desktop-only by product decision (mobile is LiveKit data-only)."
   },
   "mobile_only": {
     "version": "uniffi build/version probe used by the mobile diagnostics screen; desktop reads its version from Tauri.",
@@ -37,7 +40,16 @@
     "device_unlock_begin": "Biometric unlock (#1685) stands in for typing the PIN at unlock on iOS (Face ID / Touch ID, keychain item bound to .biometryCurrentSet in an app-only access group) and Android (Class 3, CryptoObject per use). Desktop exemption: the keyring crate's apple-native backend cannot attach biometric access control to an item, and Linux and Windows have no equivalent store, so desktop keeps the PIN alone.",
     "device_unlock_confirm": "Biometric unlock (#1685) stands in for typing the PIN at unlock on iOS (Face ID / Touch ID, keychain item bound to .biometryCurrentSet in an app-only access group) and Android (Class 3, CryptoObject per use). Desktop exemption: the keyring crate's apple-native backend cannot attach biometric access control to an item, and Linux and Windows have no equivalent store, so desktop keeps the PIN alone.",
     "unlock_with_device_key": "Biometric unlock (#1685) stands in for typing the PIN at unlock on iOS (Face ID / Touch ID, keychain item bound to .biometryCurrentSet in an app-only access group) and Android (Class 3, CryptoObject per use). Desktop exemption: the keyring crate's apple-native backend cannot attach biometric access control to an item, and Linux and Windows have no equivalent store, so desktop keeps the PIN alone.",
-    "disable_device_unlock": "Biometric unlock (#1685) stands in for typing the PIN at unlock on iOS (Face ID / Touch ID, keychain item bound to .biometryCurrentSet in an app-only access group) and Android (Class 3, CryptoObject per use). Desktop exemption: the keyring crate's apple-native backend cannot attach biometric access control to an item, and Linux and Windows have no equivalent store, so desktop keeps the PIN alone."
+    "disable_device_unlock": "Biometric unlock (#1685) stands in for typing the PIN at unlock on iOS (Face ID / Touch ID, keychain item bound to .biometryCurrentSet in an app-only access group) and Android (Class 3, CryptoObject per use). Desktop exemption: the keyring crate's apple-native backend cannot attach biometric access control to an item, and Linux and Windows have no equivalent store, so desktop keeps the PIN alone.",
+    "await_history_transfer": "uniffi has no event channel, so mobile parks this call next to run_history_transfer to stream a transfer's progress (#1735); desktop gets the same progress over a bridge Channel.",
+    "get_avatar_path": "Mobile counterpart of desktop's loopback avatar URL: a local file path for the native image view.",
+    "upload_avatar": "Mobile sets its profile picture through core (re-encode, upload, save on the profile in one call, #1680); desktop does the same steps itself with upload_public_file and update_user_profile.",
+    "upload_avatar_image": "The upload half of upload_avatar, for a per-group alias picture (#2017); desktop uploads the alias picture with upload_public_file.",
+    "remove_avatar": "Mobile clears its profile picture through core; desktop clears it with update_user_profile directly.",
+    "get_notification_content": "Rich push (#1599): what a push notification may show, read by the phone's notification extension. Push is mobile-only; desktop raises OS notifications from its live connection.",
+    "set_notification_content": "Rich push (#1599): what a push notification may show, read by the phone's notification extension. Push is mobile-only; desktop raises OS notifications from its live connection.",
+    "reconcile_backstop_all": "Mobile runs its own ingest pass, then only the reconcile and self-update backstops (#1571, #1880); desktop's catch_up_all_mls_groups runs the same backstops inside its full sweep.",
+    "wait_persisted": "uniffi has no event channel, so mobile parks this call to learn which conversations' local rows changed (#1610), whichever path stored them; desktop's renderer drives its ingest calls itself and refreshes from their results."
   },
   "missing_from_cli": {
     "preview_group_invite_link": "The terminal client cannot join by invite link yet (redeem_group_invite_link is known debt below); naming the group before joining (#1972) belongs with that flow when it lands.",
@@ -67,7 +79,14 @@
     "delete_channel_category": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app.",
     "rename_channel_category": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app.",
     "move_channel_category": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app.",
-    "move_channel": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app."
+    "move_channel": "The terminal client lists channels flat and has no channel admin; categories and channel order are managed in the desktop or mobile app.",
+    "discard_staged_attachment": "The terminal client sends no link previews or attachments, so it stages nothing to discard.",
+    "fetch_link_preview": "The terminal client draws no link previews and sends none.",
+    "get_link_previews_enabled": "The terminal client draws no link previews and sends none, so it has no setting for them.",
+    "set_link_previews_enabled": "The terminal client draws no link previews and sends none, so it has no setting for them.",
+    "list_group_invites": "The terminal client can send a group invite but has no group admin pages; pending invites are listed and revoked in the desktop or mobile app.",
+    "revoke_group_invite": "The terminal client can send a group invite but has no group admin pages; pending invites are listed and revoked in the desktop or mobile app.",
+    "refresh_read_cursors": "The terminal client shows no unread counts and reports no reads (get_unread_counts / mark_conversation_read are known debt below); syncing read cursors belongs with that surface."
   },
   "patterns": [
     {
