@@ -74,7 +74,9 @@ tags:
     id: "btn-tone-3"
 - tapOn:
     id: "input-emoji-search"
-- inputText: "technologist"
+# A partial query, so the field's own text never equals the cell's spoken
+# name: a full-match tap on "technologist" would land on the search field.
+- inputText: "technolog"
 - extendedWaitUntil:
     visible: "technologist"
     timeout: 10000
