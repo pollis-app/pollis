@@ -23,6 +23,21 @@ tag date, UTC.
 
 ---
 
+## v1.19.21 — 2026-11-24
+
+- **Display names everywhere.** Messages, member lists, DM lists and message
+  requests show people's display names instead of their handles.
+- **Profile changes show up right away.** When someone changes their name or
+  picture, it updates on your other devices and in every open chat without a
+  restart, on old messages as well as new ones.
+- **The full emoji set.** The emoji and reaction pickers now offer every
+  Emoji 16.0 emoji, including skin tones and combined emoji such as 🫡 and 🧑‍💻.
+- **Same menu names on every app.** Menus use the same names and order as the
+  mobile app: "Saved messages", "Profile" (was "User settings"), "Display name"
+  and "Handle" (were "Preferred name" and "Username"), and a tidier group menu.
+- **The "is typing" line stays on one line**, so the messages above it no
+  longer move when a long one appears.
+
 ## v1.19.20 — 2026-11-20
 
 - **Import from Discord and Import from Slack are removed** from the Groups

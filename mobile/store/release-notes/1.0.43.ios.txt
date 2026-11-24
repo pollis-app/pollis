@@ -1,0 +1,9 @@
+New
+• The emoji and reaction pickers have every emoji, including skin tones and newer ones like 🫡.
+• Messages, member lists and DMs show people's display names instead of their handles.
+• When someone changes their name or picture, it updates right away in every chat, on old messages too.
+• Tabs and menus have clearer names: DMs, Account, Saved messages, Profile.
+
+Fixes
+• Messages no longer jump when someone starts or stops typing.
+• Lists in DMs and groups line up with their search bars, and the search bar stays put when you switch tabs.
