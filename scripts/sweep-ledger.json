@@ -9,33 +9,48 @@
     "facts, cli, installers, surfaces, platform-matrix: the baselines that landed with #1722, #1721 and #1728."
   ],
   "claims": {
-    "sha": "7aee6cc496920231a45cc988b9b78e25236a5c73",
-    "date": "2026-11-12",
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
     "by": "sweep-claims"
   },
   "facts": {
-    "sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
-    "date": "2026-11-11",
-    "by": "baseline (#1722)"
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
+    "by": "pre-release-sweeps"
   },
   "cli": {
-    "sha": "8b11507973c033d20ca02efdba13e2393a3180d7",
-    "date": "2026-11-07",
-    "by": "baseline (#1721)"
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
+    "by": "pre-release-sweeps"
   },
   "installers": {
-    "sha": "8b11507973c033d20ca02efdba13e2393a3180d7",
-    "date": "2026-11-07",
-    "by": "baseline (#1721)"
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
+    "by": "pre-release-sweeps"
   },
   "surfaces": {
-    "sha": "660f8cc956cd892b399a5f5cca80072c1b628849",
-    "date": "2026-11-12",
-    "by": "baseline (#1728)"
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
+    "by": "pre-release-sweeps"
   },
   "platform-matrix": {
-    "sha": "660f8cc956cd892b399a5f5cca80072c1b628849",
-    "date": "2026-11-12",
-    "by": "baseline (#1728)"
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
+    "by": "pre-release-sweeps"
+  },
+  "feature-parity": {
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
+    "by": "pre-release-sweeps"
+  },
+  "i18n": {
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
+    "by": "pre-release-sweeps"
+  },
+  "i18n-surfaces": {
+    "sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
+    "date": "2026-11-24",
+    "by": "pre-release-sweeps"
   }
 }

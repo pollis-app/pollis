@@ -396,8 +396,8 @@ of Signal, open source, with no ads, tracking or data sale.
 
 **3. Setup and main features.** Sign in with the review account below (email + fixed code; no
 email is sent). If asked to approve a new device, choose "Use recovery key" and enter the key
-in the notes. Then: Groups → Create Group → open a channel → send a message; Direct → New
-message; Search; Account → Preferences / Security (devices, export, account
+in the notes. Then: Groups → Create Group → open a channel → send a message; DMs → New
+message; Account → search, Preferences / Security (devices, export, account
 deletion); a DM's info → "You & <name>" (safety numbers). Report: long-press another person's message → Report, or their profile → Report;
 Block from the same places. Nothing else (sample files, hardware) is needed.
 

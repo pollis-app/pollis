@@ -88,7 +88,7 @@ Visible to any store-and-forward server: which conversations exist, roughly how 
 
 **Resend** sees an email address and a 6-digit OTP in plaintext while delivering the message.
 
-**Push (mobile only).** The DS sends push notifications through Expo, which hands them to APNs/FCM (`pollis-delivery/src/push.rs`). Desktop registers no push token. Each push has a fixed title and body and a `data` blob containing only an opaque handle `h`: 128 random bits, minted fresh per recipient per notification (#1122, #1157). The app trades `h` for `{conversation_id, kind}` over its own signed channel (`POST /v1/push/resolve`, or `POST /v1/push/fetch`, which in the same request returns that conversation's waiting envelopes to the signing device, #1804), which answers only the user it was minted for. The DS keeps the handle mapping for `PUSH_HANDLE_TTL_DAYS` (7). Expo, Apple and Google therefore see the device token, the notification time, and an unlinkable handle, but not the conversation, sender or content. When the user reads a conversation on any client, the DS sends their devices a silent push whose `data` is only the list of those same handles, so the phones can clear them from the tray (#1508); the providers learn that those notifications were read, and the DS records that the conversation was read (as the read-receipt envelope already tells it).
+**Push (mobile only).** The DS sends push notifications through Expo, which hands them to APNs/FCM (`pollis-delivery/src/push.rs`). Desktop registers no push token. Each push carries at most a fixed title and body, and a `data` blob containing only an opaque handle `h`: 128 random bits, minted fresh per recipient per notification (#1122, #1157). The app trades `h` for `{conversation_id, kind}` over its own signed channel (`POST /v1/push/resolve`, or `POST /v1/push/fetch`, which in the same request returns that conversation's waiting envelopes to the signing device, #1804), which answers only the user it was minted for. The DS keeps the handle mapping for `PUSH_HANDLE_TTL_DAYS` (7). Expo, Apple and Google therefore see the device token, the notification time, and an unlinkable handle, but not the conversation, sender or content. When the user reads a conversation on any client, the DS sends their devices a silent push whose `data` is only the list of those same handles, so the phones can clear them from the tray (#1508); the providers learn that those notifications were read, and the DS records that the conversation was read (as the read-receipt envelope already tells it).
 
 ---
 
@@ -511,7 +511,7 @@ All four produce the same SQLCipher 4 ciphertext; the provider supplies primitiv
 
 ### 7.1 What's local-only
 
-- Decrypted message plaintext (`message.content`).
+- Decrypted message text (`message.content`).
 - MLS group state (`mls_kv`: epoch state, ratchet tree, leaf private keys, signature keypairs, KeyPackage private halves).
 - Per-device MLS signing public keys (`mls_kv` scope `PollisDeviceSigPub`, one row per signature scheme).
 - UI and preference caches.
@@ -530,7 +530,7 @@ None of this changes §1: a same-UID attacker is still out of scope. It protects
 
 ### 7.3 What's deliberately not local
 
-User profiles, group/channel metadata, membership and blocks live on Turso and are fetched through the DS at read time. A stolen device with the SQLCipher key therefore cannot enumerate the social graph beyond its own account: it holds no database credential (§8), and the DS answers only for the authenticated signer. It does hold that account's own slice: the MLS ratchet trees name the members of each of its conversations, and small display caches (`user_cache`, `conversation_cache`, `dm_conversation`) keep the usernames, channel and group names and DM peers it has shown.
+User profiles, group/channel metadata, membership and blocks live on Turso and are fetched through the DS at read time. A stolen device with the SQLCipher key therefore cannot enumerate the social graph beyond its own account: it holds no database credential (§8), and the DS answers only for the authenticated signer. It does hold that account's own slice: the MLS ratchet trees name the members of each of its conversations, and small display caches (`user_cache`, `group_alias_cache`, `conversation_cache`, `dm_conversation`) keep the usernames and display names, per-group aliases, channel and group names and DM peers it has shown.
 
 ---
 
@@ -593,7 +593,7 @@ A presigned URL authorises one operation on one key for a short window, so a bin
 
 ### 9.4 Avatars and group icons
 
-These use `upload_public_file` (group icons) and `upload_avatar` (profile photos) and are **not** encrypted. Anyone with the R2 URL can fetch them. This is intentional: anyone who can see the user or group already sees the avatar. Worth flagging: whoever obtains a `users.avatar_url` or `groups.icon_url` can fetch the image without authentication. 
+These use `upload_public_file` (group icons) and `upload_avatar` / `upload_avatar_image` (profile photos, and the per-group alias photos a member can set) and are **not** encrypted. Anyone with the R2 URL can fetch them. This is intentional: anyone who can see the user or group already sees the avatar. Worth flagging: whoever obtains a `users.avatar_url`, `group_alias.avatar_url` or `groups.icon_url` can fetch the image without authentication. 
 ---
 
 ## 10. Real-Time Media (LiveKit)

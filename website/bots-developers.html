@@ -159,7 +159,7 @@ curl -sS -X POST "$URL" \
         <p>Every trigger goes through the same seven steps:</p>
         <ol>
           <li><strong>Trigger.</strong> Something arrives for an installation: new messages in the group may be
-            waiting, or a webhook call comes in.</li>
+            waiting, a webhook call comes in, or an App's schedule reaches a slot.</li>
           <li><strong>Lock.</strong> One job per installation at a time; installations run in parallel.</li>
           <li><strong>Catch up.</strong> The bot's view of the group is brought up to date through the normal
             message path. New messages become message triggers, oldest first; the bot's own never do.</li>
@@ -171,8 +171,8 @@ curl -sS -X POST "$URL" \
             passes is sent through the normal send path, what doesn't is reported and never sent.</li>
           <li><strong>Unlock.</strong></li>
         </ol>
-        <p>There are no timers: a job starts when the runtime starts, when a realtime event says the group may
-          have changed, or when a webhook call arrives.</p>
+        <p>There is no polling loop: a job starts when the runtime starts, when a realtime event says the group
+          may have changed, when a webhook call arrives, or at an App's next schedule slot.</p>
       </section>
 
       <!-- ─────────────────────────────────────────────────────────── -->
@@ -184,6 +184,7 @@ curl -sS -X POST "$URL" \
             <tbody>
               <tr><td>A new message in the bot's group</td><td class="doc-td-dim"><code>msg:&lt;envelope id&gt;</code></td></tr>
               <tr><td>A webhook call</td><td class="doc-td-dim"><code>hook:&lt;delivery id&gt;</code></td></tr>
+              <tr><td>An App's schedule reaching a slot</td><td class="doc-td-dim"><code>slot:&lt;schedule name&gt;@&lt;slot time&gt;</code></td></tr>
             </tbody>
           </table>
         </div>
@@ -200,8 +201,9 @@ curl -sS -X POST "$URL" \
           same message.
         </p>
         <p>
-          <strong>Grants.</strong> Every action is checked against what the installation is allowed to do. Today
-          that is <code>post</code> to the text channels of the bot's own group; anything else is refused.
+          <strong>Grants.</strong> Every action is checked twice: the App sandbox holds it to the grants the admin
+          approved, and the runtime holds it to the text channels of the bot's own group. Anything else is refused
+          and never sent.
         </p>
         <p>
           The full write-up is in
