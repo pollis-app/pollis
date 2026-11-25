@@ -663,6 +663,7 @@ const PIN_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// The cross-process lock on `pin_meta`'s counter: `pin.lock` in the data directory the app and
 /// its extensions share. Held only around a counter update (never across the key derivation),
 /// so nothing holds it long enough to be suspended with it.
+#[cfg(unix)]
 async fn pin_file_lock(dir: &std::path::Path) -> Result<std::fs::File> {
     crate::private_fs::create_dir_all(dir).map_err(|e| Error::Other(anyhow::anyhow!("create {}: {e}", dir.display())))?;
     let path = dir.join("pin.lock");
@@ -685,6 +686,12 @@ async fn pin_file_lock(dir: &std::path::Path) -> Result<std::fs::File> {
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+}
+
+/// Windows runs one Pollis process per data dir; nothing else counts attempts there.
+#[cfg(not(unix))]
+async fn pin_file_lock(_dir: &std::path::Path) -> Result<()> {
+    Ok(())
 }
 
 /// What one locked counter update found.
