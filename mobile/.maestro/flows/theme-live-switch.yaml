@@ -1,0 +1,108 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+  - fresh-account
+---
+# THEME SWITCHED LIVE (#2107) — a background change while the app is open must
+# repaint every card at once, text included, with no cold start. Before the fix
+# the Account profile card's name kept the previous ground's text colour (a
+# `type.*` step was one object, and React Native skips a style prop whose object
+# did not change), and the Vault's rows did not repaint on a background change
+# (their list's extraData followed the accent only).
+#
+# The background is set the way desktop's picker does it, through the dev-only
+# link `pollis://dev/background?hex=rrggbb` (app/dev/background.tsx). Maestro
+# cannot read a text colour, so the screenshots are the evidence: each pair is
+# the same screen on the dark default ground and on a light one, switched live.
+# `theme-bg-<rrggbb>` (components/ThemeProbe.tsx) says which ground a screen
+# rendered with. Self-contained: a fresh disposable account, no peer.
+
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      FRESH: "theme-live"
+
+# A Vault entry, so the Vault has rows to repaint.
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-vault"
+- assertVisible:
+    id: "screen-vault"
+- tapOn:
+    id: "input-composer"
+- inputText: "theme switch entry"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*theme switch entry.*"
+    timeout: 20000
+- hideKeyboard
+- tapOn:
+    id: "btn-back"
+
+# --- Account on the dark default ground ---
+- tapOn:
+    id: "tab-self"
+- assertVisible:
+    id: "card-self-profile"
+- extendedWaitUntil:
+    visible:
+      id: "theme-bg-0a0907"
+    timeout: 15000
+- takeScreenshot: theme-live-01-account-dark
+
+# --- Switch to a light ground with the Account tab open ---
+- openLink: "pollis://dev/background?hex=f4f1ea"
+- extendedWaitUntil:
+    visible:
+      id: "theme-bg-f4f1ea"
+    timeout: 15000
+- assertVisible:
+    id: "card-self-profile"
+- takeScreenshot: theme-live-02-account-light
+
+# --- Profile (Account details) on the light ground ---
+- tapOn:
+    id: "btn-edit-profile"
+- assertVisible:
+    id: "screen-self-user-settings"
+- takeScreenshot: theme-live-03-profile-light
+- tapOn:
+    id: "btn-back"
+
+# --- Vault, opened on the light ground ---
+- tapOn:
+    id: "tab-direct"
+- tapOn:
+    id: "row-vault"
+- extendedWaitUntil:
+    visible: ".*theme switch entry.*"
+    timeout: 15000
+- takeScreenshot: theme-live-04-vault-light
+
+# --- Back to dark with the Vault open: its rows repaint in place ---
+- openLink: "pollis://dev/background?hex=0a0907"
+- extendedWaitUntil:
+    visible:
+      id: "theme-bg-0a0907"
+    timeout: 15000
+- assertVisible:
+    id: "screen-vault"
+- takeScreenshot: theme-live-05-vault-dark
+- tapOn:
+    id: "btn-back"
+
+# --- Profile and Account, now dark again ---
+- tapOn:
+    id: "tab-self"
+- assertVisible:
+    id: "card-self-profile"
+- takeScreenshot: theme-live-06-account-dark-again
+- tapOn:
+    id: "btn-edit-profile"
+- assertVisible:
+    id: "screen-self-user-settings"
+- takeScreenshot: theme-live-07-profile-dark
+- tapOn:
+    id: "btn-back"

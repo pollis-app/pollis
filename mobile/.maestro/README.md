@@ -104,7 +104,7 @@ The order:
 
 1. the `fresh-account` flows: those that need an account nobody else has
    touched (`auth`, `sign-in-device`, `client-policy`, `diagnostics`, `tour`,
-   `empty-states`, `theme-startup`, `export`, `group-aliases`,
+   `empty-states`, `theme-startup`, `theme-live-switch`, `export`, `group-aliases`,
    the four `vault*` flows, `locale-smoke`). Each clears the app and signs up
    an address of its own: `subflows/fresh-email.yaml` adds `-<name>-<time>` to
    the run's address (`sign-in.yaml` does it when called with `FRESH`);
@@ -142,6 +142,7 @@ its `onFlowComplete`). Flows that cannot share the account and why:
 | `client-policy`, `diagnostics`, `tour`, `locale-smoke` | they drive the signed-out screens (email, OTP, a blocked build, the device language at first launch) |
 | `empty-states` | every screen it checks is empty only on a new account |
 | `theme-startup` | a new account must settle on the default accent |
+| `theme-live-switch` | its Vault starts empty and its ground starts on the default |
 | `export` | the archive of an attachment-free account offers no download; the shared one has attachments |
 | `group-aliases` | "Apply to all my groups" changes every group of the account, and its list expects two |
 | `vault`, `vault-media-instant`, `vault-swipe`, `vault-retry` | there is one Vault per account, and each checks its empty state and exact contents |
@@ -185,6 +186,7 @@ A flow file still runs alone with a bare `maestro test`: `home.yaml` signs
 | `channel-menu` | #1193 the channel kebab sheet: every item tapped by `testID`, plus `channel-menu-01-open` — the gallery shot that must show an OPAQUE sheet (no header/composer through its buttons; the invariant itself is pinned in `tests/sheet-opaque.test.ts`) | no |
 | `profile-prefs` | accent re-theme, behavior toggle, display-name save | no |
 | `theme-startup` | #1447 pick lilac, then a cold restart: the first screen (PIN unlock or tabs) carries `theme-boot-accent-bda3e0` and no amber probe before any tap, and the tabs stay lilac after unlock; a fresh account settles on amber even with lilac left in the device store | no |
+| `theme-live-switch` | #2107 the background switched live (dev link `pollis://dev/background`, as desktop's picker sets it), dark → light → dark: Account (profile card), Profile and the Vault (rows repaint in place), each shot on both grounds with no cold start; `theme-bg-<rrggbb>` says which ground a screen rendered | no |
 | `search` | #1202 desktop parity: a seeded message hit with highlighted snippet + "About N results", sort toggle, corpus footer, opening a hit, settings-page quick-jump, and the "why no results" explanation | no |
 | `security` | device list + blocked-list entry | no |
 | `empty-states` | #1969 one empty-state treatment: a fresh account's Groups (sentence + Create / Find), Direct (sentence + New message), Saved and Blocked, then a new group's empty #General and its empty Custom emoji, each a centred `EmptyState` sentence | no |
