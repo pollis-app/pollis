@@ -342,6 +342,11 @@ final class ShareModel: ObservableObject {
     core.suspend(timeoutMs: 20_000)
   }
 
+  /// The background time ran out: suspend at once, without waiting for sends.
+  func hostTimeExpired() -> Bool {
+    core.suspend(timeoutMs: 0)
+  }
+
   func hostDidBecomeActive() {
     core.resume()
   }

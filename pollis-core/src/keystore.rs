@@ -1150,7 +1150,15 @@ mod file_backend {
 
         // Best-effort migration off plaintext; it must never fail the read.
         if legacy {
-            match write_map_at(path, codec, &map) {
+            // Under the write lock, from a fresh read: another process may have written since.
+            let migrated = with_write_lock(path, || {
+                let (fresh, still_legacy) = read_map_at(path, codec)?;
+                if still_legacy {
+                    write_map_at(path, codec, &fresh)?;
+                }
+                Ok(())
+            });
+            match migrated {
                 Ok(()) => crate::diag!(
                     "[keystore] re-wrote the plaintext keystore encrypted at rest (#882)"
                 ),

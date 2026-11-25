@@ -101,6 +101,10 @@ fn session_state() -> Option<(Arc<AppState>, String, PathBuf)> {
 
 async fn unlocked_state() -> Result<Arc<AppState>> {
     let (state, _, _) = session_state().ok_or_else(|| Error::Other(anyhow::anyhow!("no share session")))?;
+    // A resume that could not reopen the database (it was busy) leaves it to the next call.
+    if !crate::notify::lock::suspend::is_suspending() {
+        reopen_if_parked();
+    }
     if state.unlock.lock().await.is_none() || state.local_db.lock().await.is_none() {
         return Err(Error::Other(anyhow::anyhow!("the share session is locked")));
     }
@@ -168,7 +172,7 @@ pub async fn unlock(factor: Factor) -> Unlock {
     };
     let keystore = state.keystore.as_ref();
     let unlocked = match factor {
-        Factor::Pin(pin) => match pin::check_pin(keystore, &user_id, &pin).await {
+        Factor::Pin(pin) => match pin::check_pin(keystore, &user_id, &pin, Some(&data_dir)).await {
             Ok(PinCheck::Unlocked(u)) => u,
             Ok(PinCheck::Incorrect { attempts_remaining }) => {
                 return Unlock::Incorrect { attempts_remaining }
@@ -232,9 +236,15 @@ pub fn suspend(timeout: std::time::Duration) -> bool {
     let ticket = crate::notify::lock::suspend::ticket();
     let entered = crate::notify::lock::suspend::enter(ticket, timeout);
     let mut guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
+    // [`resume`] ends the suspension under this same mutex: if it came first, the host is back
+    // in the foreground and the database stays open.
+    if !crate::notify::lock::suspend::is_current(ticket) {
+        return true;
+    }
     let Some(session) = guard.as_mut() else {
         return entered.drained;
     };
+    release_claims(&session.state);
     match crate::bridge::close_db_bounded(&session.state, std::time::Duration::from_secs(2)) {
         Ok(Some(_)) => {
             session.parked = true;
@@ -248,9 +258,32 @@ pub fn suspend(timeout: std::time::Duration) -> bool {
     }
 }
 
+/// Hand this process's outbox claims back before it stops (#2100), so the app delivers what is
+/// left at once instead of waiting out the leases.
+fn release_claims(state: &Arc<AppState>) {
+    let Ok(guard) = state.local_db.try_lock() else {
+        return;
+    };
+    if let Some(db) = guard.as_ref() {
+        if let Err(e) = crate::commands::messages::release_outbox_claims_on(db.conn()) {
+            crate::diag!("[share] could not release the outbox claims: {e}");
+        }
+    }
+}
+
 /// Back in the foreground: holds may start again, and a database [`suspend`] closed reopens.
 pub fn resume() {
+    let _session = SESSION.lock().unwrap_or_else(|p| p.into_inner());
+    // Under the session mutex, so a [`suspend`] still letting sends finish sees it and does not
+    // close the database after this.
     crate::notify::lock::suspend::end();
+    drop(_session);
+    reopen_if_parked();
+}
+
+/// Reopen a database [`suspend`] closed. Left parked when the keys or the slot are busy; the
+/// next [`targets`] or [`send`] tries again.
+fn reopen_if_parked() {
     let mut guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
     let Some(session) = guard.as_mut() else {
         return;
@@ -284,8 +317,19 @@ pub fn close() {
     let Some(session) = session else {
         return;
     };
+    // As the app's suspension does: no new hold of `state.lock`, and the open ones end (or run
+    // out of time) before it is released, so nothing keeps working on MLS state without it.
+    let ticket = crate::notify::lock::suspend::ticket();
+    if !crate::notify::lock::suspend::begin(ticket, std::time::Duration::from_secs(2)) {
+        crate::diag!("[share] closing with work still holding the lock");
+    }
+    release_claims(&session.state);
     session.state.state_lock.force_release();
     let _ = crate::bridge::close_db_bounded(&session.state, std::time::Duration::from_secs(2));
+    // The session is gone and its database closed: anything left of it finds nothing to work
+    // on, so the gate need not stay shut (a host that is not a separate process, such as the
+    // flows harness, keeps running work of its own).
+    crate::notify::lock::suspend::end();
     // The keys go with the state; nothing of the session outlives it.
     let cleared = session.state.unlock.try_lock().map(|mut u| *u = None);
     drop(cleared);

@@ -67,6 +67,10 @@ final class ShareViewController: UIViewController {
     observers.append(center.addObserver(forName: .NSExtensionHostWillResignActive, object: nil, queue: .main) { [model] _ in
       ProcessInfo.processInfo.performExpiringActivity(withReason: "Pollis share") { expiring in
         guard !expiring else {
+          // The time ran out with sends still going: close the gate and the database now, so
+          // nothing is held when the process is suspended (0xdead10cc).
+          let released = model.hostTimeExpired()
+          log.info("expired released=\(released, privacy: .public)")
           return
         }
         let released = model.hostWillResignActive()
