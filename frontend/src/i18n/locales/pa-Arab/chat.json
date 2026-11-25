@@ -118,6 +118,8 @@
     "error": "غلطی",
     "failedToLoad": "لوڈ نہیں ہو سکیا",
     "failedToDownload": "ڈاؤن لوڈ نہیں ہو سکیا",
+    "removed": "فائل ہٹا دتی گئی",
+    "updateToOpen": "ایہ فائل کھولن لئی Pollis اپڈیٹ کرو",
     "lightboxFetch": "لیاؤ",
     "lightboxDone": "ہو گیا",
     "lightboxDoneTerminal": "[ ہو گیا ]",

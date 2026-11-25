@@ -129,6 +129,8 @@
     "error": "пом",
     "failedToLoad": "Не вдалося завантажити",
     "failedToDownload": "Не вдалося завантажити файл",
+    "removed": "Файл видалено",
+    "updateToOpen": "Оновіть Pollis, щоб відкрити цей файл",
     "lightboxFetch": "отримати",
     "lightboxDone": "Готово",
     "lightboxDoneTerminal": "[ готово ]",

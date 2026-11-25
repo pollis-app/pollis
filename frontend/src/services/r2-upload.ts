@@ -62,6 +62,15 @@ export async function getFileDownloadUrl(key: string): Promise<string> {
   return url;
 }
 
+/** The core's error for a file the operator removed (#2109): shown as "File removed", never retried. */
+export const ATTACHMENT_REMOVED = "attachment_removed";
+
+/** Whether a media command failed because the operator removed the file. */
+export function isAttachmentRemoved(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  return text.trim() === ATTACHMENT_REMOVED;
+}
+
 /// Media command args (#1382); throws without a key scope so nothing is decrypted under a guess.
 function mediaArgs(attachment: MessageAttachment) {
   if (!attachment.key_scope) {

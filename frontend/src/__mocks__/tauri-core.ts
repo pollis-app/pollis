@@ -644,6 +644,12 @@ const failingMediaKeys = new Set<string>((preload.failMediaKeys ?? []) as string
   }
 };
 
+/** #2109: files the operator removed; their media commands fail with the core's `attachment_removed`. */
+const removedMediaKeys = new Set<string>((preload.removedMediaKeys ?? []) as string[]);
+(window as any).__tauriRemoveMedia = (key: string) => {
+  removedMediaKeys.add(key);
+};
+
 /** `video_poster_cache` (#1894), by content hash. */
 const localVideoPosters = new Map<string, { jpeg: string | null; blurhash: string; width: number; height: number }>();
 
@@ -2265,9 +2271,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
                 name: a.filename,
                 ct: a.contentType,
                 size: 0,
-                hash: `mock-${id}-${i}`,
-                // #1382: without these the renderer refuses to fetch.
-                kv: 1,
+                hash: `v2-mock-${id}-${i}`,
+                // #2109: a shared object, keyed by its `sha`; without these the renderer refuses to fetch.
+                v: 2,
                 sha: `sha-${id}-${i}`,
                 ...(a.blurhash ? { bh: a.blurhash } : {}),
                 ...(a.width ? { w: a.width, h: a.height } : {}),
@@ -2918,6 +2924,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     // A preload's `mediaUrls` stands in for the media server; else null.
     case 'get_media_url': {
+      if (removedMediaKeys.has(args.r2Key as string)) {
+        throw 'attachment_removed';
+      }
       if (failingMediaKeys.has(args.r2Key as string)) {
         throw 'download_media: error sending request: network unreachable';
       }

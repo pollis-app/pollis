@@ -118,6 +118,8 @@
     "error": "hitilafu",
     "failedToLoad": "Imeshindwa kupakia",
     "failedToDownload": "Imeshindwa kupakua",
+    "removed": "Faili imeondolewa",
+    "updateToOpen": "Sasisha Pollis ili kufungua faili hili",
     "lightboxFetch": "leta",
     "lightboxDone": "Imekamilika",
     "lightboxDoneTerminal": "[ imekamilika ]",

@@ -1,0 +1,35 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# SHARED FILE (#2109), part 3 of 3 — driven by scripts/maestro-shared-file.sh.
+# The peer opened this device's photo and sent the same bytes back ("echo of
+# your photo"). Both rows must draw the picture, downloaded and decrypted on
+# this device, and neither may read "Image unavailable": with the DS's
+# shared-upload switch on they are one stored object, with it off two v1
+# objects, and either way both open.
+
+# Leave and re-open the conversation so its ingest runs whether or not a
+# realtime wake arrived.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      text: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 30000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible: ".*echo of your photo.*"
+    timeout: 90000
+- extendedWaitUntil:
+    visible:
+      id: "media-image-rendered"
+    timeout: 60000
+- assertNotVisible:
+    id: "media-unavailable"
+- assertNotVisible:
+    id: "media-removed"
+- takeScreenshot: shared-file-02-echo

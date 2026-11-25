@@ -106,6 +106,31 @@ export const AttachmentTile = observer(function AttachmentTile({
   const blurhash = attachment.blurhash ?? local?.blurhash ?? undefined;
   const placeholder = useMemo(() => (blurhash ? { blurhash } : undefined), [blurhash]);
 
+  // A reference from a newer app version (#2109): said plainly, nothing to open or retry.
+  if (attachment.needs_update) {
+    return (
+      <View
+        testID={`attachment-update-${attachment.id}`}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          alignSelf: "flex-start",
+          gap: 6,
+          minHeight: 44,
+          paddingHorizontal: 12,
+          borderRadius: r.md,
+          backgroundColor: semantic.raised,
+        }}
+      >
+        <Icon.attach size={16} color={semantic.muted} />
+        <Text numberOfLines={1} style={[ty.secondary, { maxWidth: 160, color: semantic.muted }]}>
+          {attachment.filename}
+        </Text>
+        <Text style={[ty.meta, { color: semantic.dim }]}>{t("attachment.updateToOpen")}</Text>
+      </View>
+    );
+  }
+
   if (covered) {
     const box = visualBox;
     return (

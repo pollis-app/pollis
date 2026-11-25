@@ -118,6 +118,8 @@
     "error": "iphutha",
     "failedToLoad": "Yehlulekile ukulayisha",
     "failedToDownload": "Yehlulekile ukulanda",
+    "removed": "Ifayela lisusiwe",
+    "updateToOpen": "Buyekeza i-Pollis ukuze uvule leli fayela",
     "lightboxFetch": "landa",
     "lightboxDone": "Kuqediwe",
     "lightboxDoneTerminal": "[ kuqediwe ]",

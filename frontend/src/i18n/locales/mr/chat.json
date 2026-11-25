@@ -118,6 +118,8 @@
     "error": "एरर",
     "failedToLoad": "लोड करता आले नाही",
     "failedToDownload": "डाउनलोड करता आले नाही",
+    "removed": "फाइल काढली गेली",
+    "updateToOpen": "ही फाइल उघडण्यासाठी Pollis अपडेट करा",
     "lightboxFetch": "मिळवा",
     "lightboxDone": "पूर्ण झाले",
     "lightboxDoneTerminal": "[ पूर्ण झाले ]",

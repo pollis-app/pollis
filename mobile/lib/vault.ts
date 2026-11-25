@@ -1,7 +1,7 @@
 // Pure rules behind the Vault screen (#1316), ports of desktop's Vault.tsx.
 
 import type { MessageAttachment } from "../types";
-import { parseContent, type AttachmentWire } from "./messageContent.ts";
+import { parseContent, referenceKeyFields, type AttachmentWire } from "./messageContent.ts";
 import { isRollMedia, mediaKind, type ViewerItems } from "./media/viewer.ts";
 
 export interface VaultMessage {
@@ -63,7 +63,7 @@ export function editedVaultContent(original: string, draft: string): string | nu
     ct: a.content_type,
     size: a.file_size,
     hash: a.content_hash,
-    kv: 0,
+    ...referenceKeyFields(a.version, 0),
     sha: a.sha256,
     bh: a.blurhash,
     w: a.width,

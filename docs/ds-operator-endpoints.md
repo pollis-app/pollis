@@ -105,3 +105,36 @@ keep, which is what makes it safe to run by hand at any time.
 waiting up to an hour for the next sweep, or forcing collection after fixing
 whatever was pinning a watermark. If it collects nothing, the answer is a watermark
 that has not advanced — look at the conversation's devices, not at this endpoint.
+
+---
+
+## Operator commands
+
+Not routes at all: run by an operator with the Delivery Service's own configuration
+(its database and R2 credentials, from Doppler). Nothing a client or a token can reach.
+
+### Removing a stored file — `scripts/remove-stored-file.sh`
+
+Operator removal of a stored file (#2109). Each distinct file is stored once, so one
+run removes it from every message and Vault entry that holds it.
+
+```bash
+scripts/remove-stored-file.sh --dry-run <object id>   # what it would remove
+scripts/remove-stored-file.sh <object id>             # prod; DOPPLER_CONFIG=dev_personal for dev
+```
+
+The id is a shared object id (`v2-` + 64 hex) or a pre-#2109 file id (64 hex). The
+script runs `pollis-delivery/examples/remove_stored_file.rs` under `doppler run`,
+which calls `messages::remove_stored_object` (covered by
+`pollis-delivery/tests/attachment_dedup.rs`):
+
+1. Records the id in `attachment_removed`. From then on the DS refuses it everywhere:
+   a claim answers `removed`, a registration or reference is refused, a Vault save
+   drops it, and a presign for it answers `410` with `attachment_removed`, which
+   clients show as "File removed" (no retry).
+2. Deletes the object from R2 (its canonical key only).
+3. Deletes the object's row, every message and Vault reference to it, and any claims.
+
+The record stays, so sending the identical file again cannot restore it. A device
+that already downloaded the file keeps its local cached copy until that is evicted.
+A bucket failure leaves the record in place; running it again finishes the job.

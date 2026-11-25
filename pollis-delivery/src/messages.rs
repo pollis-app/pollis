@@ -1448,6 +1448,10 @@ pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result
     let orphaned_vault = crate::util::query_strings(conn, ORPHANED_VAULT_HASHES_SQL, ()).await?;
     mark_released_objects(conn, &orphaned_vault).await?;
     conn.execute(REAP_ORPHANED_VAULT_REFS_SQL, ()).await?;
+    // A claim whose message or Vault entry never arrived holds its shared
+    // object for a bounded time only (#2109); then it is released like any
+    // other unreferenced file.
+    expire_attachment_leases(conn).await?;
     Ok(SweepReport {
         visited: conversations.len(),
         metrics,
@@ -1478,14 +1482,50 @@ fn min_opt(a: Option<String>, b: Option<String>) -> Option<String> {
 // authenticated path writes no forged row.
 //
 // The vault leg (#107): a `vault_attachment_ref` on a live `vault_message`.
+//
+// The lease leg (#2109): a shared object somebody has claimed for a message or
+// Vault entry they are still sending. It holds the object from the moment the
+// sender learns it is stored (and skips the upload) until their reference
+// lands, so another account's delete cannot take the bytes in between. A lease
+// lapses after [`ATTACHMENT_LEASE_DAYS`] days if its reference never comes.
 macro_rules! live_ref_exists {
     () => {
         "(EXISTS (SELECT 1 FROM attachment_ref ar WHERE ar.content_hash = ?1) \
           OR EXISTS (SELECT 1 FROM vault_attachment_ref var \
                      JOIN vault_message vm ON vm.id = var.vault_message_id \
-                     WHERE var.content_hash = ?1))"
+                     WHERE var.content_hash = ?1) \
+          OR EXISTS (SELECT 1 FROM attachment_lease al \
+                     WHERE al.content_hash = ?1 \
+                       AND al.updated_at > datetime('now', '-30 days')))"
     };
 }
+
+/// How long a claim holds a shared object without its reference landing
+/// (#2109). The `live_ref_exists` literal above spells the same number.
+pub const ATTACHMENT_LEASE_DAYS: i64 = 30;
+
+/// Take (or add one to) the caller's lease on a shared object (#2109).
+const TAKE_LEASE_SQL: &str = "\
+INSERT INTO attachment_lease (content_hash, user_id, pending, updated_at) \
+VALUES (?1, ?2, 1, datetime('now')) \
+ON CONFLICT(content_hash, user_id) DO UPDATE SET \
+    pending = MIN(attachment_lease.pending + 1, 1000), \
+    updated_at = datetime('now')";
+
+/// One of the caller's pending sends of this object landed: the last one
+/// drops the lease, an earlier one counts down.
+const DROP_LAST_LEASE_SQL: &str = "\
+DELETE FROM attachment_lease WHERE content_hash = ?1 AND user_id = ?2 AND pending <= 1";
+const COUNT_DOWN_LEASE_SQL: &str = "\
+UPDATE attachment_lease SET pending = pending - 1 \
+ WHERE content_hash = ?1 AND user_id = ?2 AND pending > 1";
+
+/// Leases whose reference never came, past [`ATTACHMENT_LEASE_DAYS`].
+const LAPSED_LEASE_HASHES_SQL: &str = "\
+SELECT DISTINCT content_hash FROM attachment_lease \
+ WHERE updated_at <= datetime('now', '-30 days')";
+const REAP_LAPSED_LEASES_SQL: &str = "\
+DELETE FROM attachment_lease WHERE updated_at <= datetime('now', '-30 days')";
 
 /// `SELECT` form of [`live_ref_exists`] — yields a single `0`/`1` row for
 /// [`object_is_referenced`].
@@ -1639,6 +1679,33 @@ pub async fn mark_released_objects(conn: &Connection, hashes: &[String]) -> anyh
             .await?;
     }
     Ok(marked)
+}
+
+/// Drop the leases past [`ATTACHMENT_LEASE_DAYS`] and release what they alone
+/// held (#2109). Returns how many objects that released.
+pub async fn expire_attachment_leases(conn: &Connection) -> anyhow::Result<u64> {
+    let lapsed = crate::util::query_strings(conn, LAPSED_LEASE_HASHES_SQL, ()).await?;
+    if lapsed.is_empty() {
+        return Ok(0);
+    }
+    conn.execute(REAP_LAPSED_LEASES_SQL, ()).await?;
+    mark_released_objects(conn, &lapsed).await
+}
+
+/// `user`'s reference to shared object `hash` just landed: one of their
+/// pending sends of it is done (#2109). A no-op for anything without a lease.
+pub(crate) async fn settle_lease(conn: &Connection, hash: &str, user: &str) -> anyhow::Result<()> {
+    if !is_shared_object_id(hash) {
+        return Ok(());
+    }
+    let dropped = conn
+        .execute(DROP_LAST_LEASE_SQL, libsql::params![hash.to_string(), user.to_string()])
+        .await?;
+    if dropped == 0 {
+        conn.execute(COUNT_DOWN_LEASE_SQL, libsql::params![hash.to_string(), user.to_string()])
+            .await?;
+    }
+    Ok(())
 }
 
 /// What one [`reclaim_released_attachments`] pass did.
@@ -1908,7 +1975,241 @@ pub async fn register_attachment(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<AttachmentRegisterBody>(apply_register_attachment(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = register_attachment_in(&conn, &state.broker, authed.as_deref(), &parsed).await?;
+    outcome_response::<AttachmentRegisterBody>(outcome)
+}
+
+/// What `/v1/attachments/register` does: a shared object's row is written
+/// only once its bytes are seen in the bucket (#2109), so a row never names a
+/// file that is not there; then [`apply_register_attachment`].
+pub async fn register_attachment_in(
+    conn: &Connection,
+    store: &impl crate::broker::ObjectStore,
+    authed: Option<&str>,
+    body: &AttachmentRegisterBody,
+) -> anyhow::Result<WriteOutcome> {
+    // A removed file stays removed: nothing may name it again.
+    if object_is_removed(conn, body.content_hash()).await? {
+        return Ok(WriteOutcome::Invalid("this attachment was removed"));
+    }
+    if is_shared_object_id(body.content_hash()) {
+        match ensure_shared_object(conn, store, body.content_hash()).await? {
+            SharedObject::Present => {}
+            SharedObject::Missing => return Ok(WriteOutcome::Invalid("this attachment is not stored")),
+            SharedObject::Deleting => {
+                return Ok(WriteOutcome::Invalid("this attachment is being deleted"))
+            }
+        }
+    }
+    apply_register_attachment(conn, authed, body).await
+}
+
+/// `POST /v1/attachments/format` (#2109): whether new uploads are shared
+/// objects. Any authenticated device may ask; the answer is the DS's switch.
+pub async fn attachment_format(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    if let Err(resp) = gate_and_parse::<AttachmentFormatBody>(&state, &req).await? {
+        return Ok(resp);
+    }
+    let shared = state.shared_attachments.load(std::sync::atomic::Ordering::SeqCst);
+    Ok(crate::writes::ok_response::<AttachmentFormatBody>(AttachmentFormatResponse { shared }))
+}
+
+/// `POST /v1/attachments/claim` (#2109): lease a shared object for the
+/// caller's send and say whether its bytes still need uploading. Refused
+/// (403) while shared uploads are off, so no v2 object is stored before the
+/// clients in the stores can open one.
+pub async fn claim_attachment(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let (authed, parsed) = match gate_and_parse::<AttachmentClaimBody>(&state, &req).await? {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
+    if !is_shared_object_id(&parsed.content_hash) {
+        return Ok(crate::writes::bad_request("content_hash is not a shared object id"));
+    }
+    if !state.shared_attachments.load(std::sync::atomic::Ordering::SeqCst) {
+        return Ok(axum::response::IntoResponse::into_response(crate::error::AuthRejection::Forbidden));
+    }
+    let Some(actor) = authed.as_deref() else {
+        // A lease belongs to someone; the no-auth path has nobody to hold it.
+        return Ok(crate::writes::bad_request("a claim needs an authenticated device"));
+    };
+    let conn = state.db.conn().await?;
+    let status = apply_claim_attachment(&conn, actor, &parsed.content_hash).await?;
+    Ok(crate::writes::ok_response::<AttachmentClaimBody>(AttachmentClaimResponse { status }))
+}
+
+/// Lease shared object `hash` for `actor` and report what is stored (#2109).
+///
+/// The lease is taken in the same transaction that reads the object's state,
+/// so from the answer `Stored` on, no delete can reclaim the object before the
+/// actor's reference lands: [`live_ref_exists`] counts the lease. A released
+/// object is revived here for the same reason.
+pub async fn apply_claim_attachment(
+    conn: &Connection,
+    actor: &str,
+    hash: &str,
+) -> anyhow::Result<AttachmentClaimStatus> {
+    if object_is_removed(conn, hash).await? {
+        return Ok(AttachmentClaimStatus::Removed);
+    }
+    let tx = crate::db::write_tx(conn).await?;
+    tx.execute(TAKE_LEASE_SQL, libsql::params![hash.to_string(), actor.to_string()])
+        .await?;
+    let known = object_is_known(&tx, hash).await?;
+    let status = match object_state(&tx, hash).await?.as_deref() {
+        Some("deleting") => AttachmentClaimStatus::Busy,
+        _ if known => {
+            revive_released_object(&tx, hash).await?;
+            AttachmentClaimStatus::Stored
+        }
+        _ => AttachmentClaimStatus::Upload,
+    };
+    tx.commit().await?;
+    Ok(status)
+}
+
+/// True when the operator removed attachment `hash` (#2109).
+pub async fn object_is_removed(conn: &Connection, hash: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM attachment_removed WHERE content_hash = ?1",
+            libsql::params![hash.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
+/// What an operator removal did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct RemovalReport {
+    /// Message and Vault references the file had.
+    pub references: u64,
+}
+
+/// Operator removal of a stored file (#2109): one action takes it from every
+/// message and Vault entry holding it, since the file is stored once.
+///
+/// The tombstone is written first, so from that moment no claim, upload,
+/// registration or download presign touches the id, and it stays: sending the
+/// identical file again cannot restore it. Then the bytes go, then the row,
+/// every reference and every lease. A failed bucket delete returns the error
+/// with the tombstone in place; running the removal again finishes it.
+///
+/// Only the object's own key is deleted: the canonical key of a shared
+/// object, or a v1 row's key if it names this id.
+pub async fn remove_stored_object(
+    conn: &Connection,
+    store: &impl crate::broker::ObjectStore,
+    hash: &str,
+) -> anyhow::Result<RemovalReport> {
+    conn.execute(
+        "INSERT OR IGNORE INTO attachment_removed (content_hash) VALUES (?1)",
+        libsql::params![hash.to_string()],
+    )
+    .await?;
+    let row_key = crate::util::query_strings(
+        conn,
+        "SELECT r2_key FROM attachment_object WHERE content_hash = ?1",
+        libsql::params![hash.to_string()],
+    )
+    .await?
+    .into_iter()
+    .next();
+    let key = if is_shared_object_id(hash) {
+        Some(shared_object_key(hash))
+    } else {
+        row_key
+            .filter(|k| {
+                crate::broker::parse_r2_key(k).is_some_and(|p| {
+                    p.family == crate::broker::R2Family::Media && p.content_hash == Some(hash)
+                })
+            })
+            .or_else(|| Some(format!("media/{hash}.enc")))
+    };
+    if let Some(key) = key {
+        store.delete_object(&key).await?;
+    }
+    let references = conn
+        .execute(
+            "DELETE FROM attachment_ref WHERE content_hash = ?1",
+            libsql::params![hash.to_string()],
+        )
+        .await?
+        + conn
+            .execute(
+                "DELETE FROM vault_attachment_ref WHERE content_hash = ?1",
+                libsql::params![hash.to_string()],
+            )
+            .await?;
+    conn.execute(
+        "DELETE FROM attachment_lease WHERE content_hash = ?1",
+        libsql::params![hash.to_string()],
+    )
+    .await?;
+    conn.execute(
+        "DELETE FROM attachment_object WHERE content_hash = ?1",
+        libsql::params![hash.to_string()],
+    )
+    .await?;
+    Ok(RemovalReport { references })
+}
+
+/// Whether a shared object's row stands for bytes in the bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharedObject {
+    /// The row exists (or was just written) and its bytes are stored.
+    Present,
+    /// Nothing is stored under this id; no row was written.
+    Missing,
+    /// The DS is deleting this object.
+    Deleting,
+}
+
+/// The one place a shared object's row is created (#2109): only after the
+/// bucket answers that its key exists. The bucket accepted those bytes only
+/// if they hash to the id (the presigned PUT signs the checksum), so a row
+/// always names the right bytes, and nobody can create a row for a file and
+/// thereby stop its real upload.
+///
+/// The bucket is asked again once the row exists, which closes the window in
+/// which a reclaim deleted the bytes between the first answer and the insert.
+pub async fn ensure_shared_object(
+    conn: &Connection,
+    store: &impl crate::broker::ObjectStore,
+    hash: &str,
+) -> anyhow::Result<SharedObject> {
+    if object_is_known(conn, hash).await? {
+        return Ok(match object_state(conn, hash).await?.as_deref() {
+            Some("deleting") => SharedObject::Deleting,
+            _ => SharedObject::Present,
+        });
+    }
+    let key = shared_object_key(hash);
+    if !store.object_exists(&key).await? {
+        return Ok(SharedObject::Missing);
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
+        libsql::params![hash.to_string(), key.clone()],
+    )
+    .await?;
+    if store.object_exists(&key).await? {
+        return Ok(SharedObject::Present);
+    }
+    // Gone after all: take back the row this call wrote. No row may name
+    // bytes that are not there, whoever already holds a lease on it.
+    conn.execute(
+        "DELETE FROM attachment_object WHERE content_hash = ?1 AND reclaim_state IS NULL",
+        libsql::params![hash.to_string()],
+    )
+    .await?;
+    Ok(SharedObject::Missing)
 }
 
 pub async fn delete_attachment(
@@ -2014,13 +2315,23 @@ pub async fn apply_register_attachment(
             return Ok(WriteOutcome::Forbidden);
         }
     }
+    let shared = is_shared_object_id(body.content_hash());
     let tx = crate::db::write_tx(conn).await?;
-    // No uploader recorded: lifetime depends only on live references (000032).
-    tx.execute(
-        "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
-        libsql::params![body.content_hash().to_string(), body.r2_key().to_string()],
-    )
-    .await?;
+    if shared {
+        // A shared object's row is written by `ensure_shared_object` alone,
+        // once its bytes are seen (#2109); here it must already exist.
+        if !object_is_known(&tx, body.content_hash()).await? {
+            tx.rollback().await?;
+            return Ok(WriteOutcome::Invalid("this attachment is not stored"));
+        }
+    } else {
+        // No uploader recorded: lifetime depends only on live references (000032).
+        tx.execute(
+            "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
+            libsql::params![body.content_hash().to_string(), body.r2_key().to_string()],
+        )
+        .await?;
+    }
     // The reference exists only on the send variant (#925).
     if let Some(message_id) = body.message_id() {
         // The DS is deleting this file's bytes: a reference now could not keep
@@ -2029,6 +2340,15 @@ pub async fn apply_register_attachment(
             tx.rollback().await?;
             return Ok(WriteOutcome::Invalid("this attachment is being deleted"));
         }
+        let is_new = {
+            let mut rows = tx
+                .query(
+                    "SELECT 1 FROM attachment_ref WHERE content_hash = ?1 AND message_id = ?2",
+                    libsql::params![body.content_hash().to_string(), message_id.to_string()],
+                )
+                .await?;
+            rows.next().await?.is_none()
+        };
         // No registrar recorded either (000032). The envelope's deletion
         // capability hash rides along, so the author's delete can release this
         // reference after envelope GC has collected the envelope (#1881).
@@ -2043,6 +2363,10 @@ pub async fn apply_register_attachment(
         // A send whose declaration lands after another message's delete
         // released the object revives it, rather than losing the file (#1881).
         revive_released_object(&tx, body.content_hash()).await?;
+        // The sender's claim did its job: this reference holds the file now.
+        if let (true, Some(actor)) = (is_new, authed) {
+            settle_lease(&tx, body.content_hash(), actor).await?;
+        }
     }
     tx.commit().await?;
     Ok(WriteOutcome::Ok)

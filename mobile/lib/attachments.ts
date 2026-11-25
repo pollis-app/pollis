@@ -1,6 +1,7 @@
 // Attachment upload + message-content envelope; must match desktop's attachmentEnvelope.ts byte-for-byte.
 
 import { invoke } from "./native";
+import { referenceKeyFields } from "./messageContent.ts";
 
 export interface PickedAttachment {
   id: string;
@@ -23,9 +24,11 @@ export interface MediaUploadResult {
   filename: string;
   content_type: string;
   size_bytes: number;
-  // The object's random file id (#1382), not a content hash.
+  // The object id: `v2-` + SHA-256 of the stored ciphertext (#2109). Never key material.
   content_hash: string;
-  // Which ring key sealed it; always 0 for these Vault uploads.
+  // The `_att` reference version: 2 for a shared object (#2109).
+  version: number;
+  // A v1 ring key version; unused (0) for a shared object.
   key_version: number;
   sha256: string;
   blurhash?: string | null;
@@ -109,7 +112,7 @@ export async function buildMessageContent(
       ct: r.content_type,
       size: r.size_bytes,
       hash: r.content_hash,
-      kv: r.key_version,
+      ...referenceKeyFields(r.version, r.key_version),
       sha: r.sha256,
       bh: r.blurhash ?? attachments[i]?.blurhash ?? undefined,
       w: r.width ?? undefined,

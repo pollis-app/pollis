@@ -15,21 +15,6 @@ const PNG_1X1: [u8; 70] = [
     1, 128, 235, 71, 186, 146, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ];
 
-struct StubbedUploads;
-
-impl StubbedUploads {
-    fn on() -> Self {
-        test_hooks::stub_attachment_uploads(true);
-        StubbedUploads
-    }
-}
-
-impl Drop for StubbedUploads {
-    fn drop(&mut self) {
-        test_hooks::stub_attachment_uploads(false);
-    }
-}
-
 async fn pair() -> (TestClient, TestClient, String) {
     wipe().await;
     let mut alice = TestClient::new().await;
@@ -111,7 +96,6 @@ async fn refs(message_id: &str, hash: &str) -> i64 {
 #[serial]
 async fn a_preview_reaches_the_recipient_and_an_edit_rebuilds_it() {
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
 
     let id = send(
         &alice,
@@ -152,7 +136,6 @@ async fn a_preview_reaches_the_recipient_and_an_edit_rebuilds_it() {
 #[serial]
 async fn a_preview_of_a_link_not_in_the_text_is_never_sent() {
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
     let id = send(&alice, &channel_id, "no links here", draft("https://example.com/a", "Spoof", true)).await;
     assert!(row(&bob, &channel_id, &id).await["link_preview"].is_null());
     assert!(row(&alice, &channel_id, &id).await["link_preview"].is_null());
@@ -166,7 +149,6 @@ async fn a_preview_of_a_link_not_in_the_text_is_never_sent() {
 #[serial]
 async fn a_bare_www_link_keeps_its_preview() {
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
     let content = "take a look www.pollis.com it's neat";
     let id = send(&alice, &channel_id, content, draft("https://www.pollis.com", "Pollis", false)).await;
     let mine = row(&alice, &channel_id, &id).await;
@@ -183,7 +165,6 @@ async fn a_bare_www_link_keeps_its_preview() {
 #[serial]
 async fn deleting_a_message_takes_its_preview_and_thumbnail() {
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
     let id = send(&alice, &channel_id, "https://example.com/a", draft("https://example.com/a", "A", true)).await;
     let hash = row(&bob, &channel_id, &id).await["link_preview"]["image"]["hash"]
         .as_str()
@@ -201,7 +182,6 @@ async fn deleting_a_message_takes_its_preview_and_thumbnail() {
 #[serial]
 async fn the_same_link_and_thumbnail_can_be_sent_again() {
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
     let first = send(&alice, &channel_id, "look https://example.com/a", draft("https://example.com/a", "A", true)).await;
     edit(&alice, &channel_id, &first, "no link here", serde_json::Value::Null).await;
     let second = send(&alice, &channel_id, "again https://example.com/a", draft("https://example.com/a", "A", true)).await;
