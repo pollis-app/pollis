@@ -1127,9 +1127,20 @@ fn sha256_bytes(data: &[u8]) -> [u8; 32] {
 /// Longest edge of the image a blurhash is computed from.
 const BLURHASH_SOURCE_MAX: u32 = 64;
 
+/// Most a decode for an image's blurhash and size may allocate (#2100): a 24 MP photo fits; a
+/// larger one goes without, rather than taking a share extension past its memory limit.
+const IMAGE_DECODE_MAX_ALLOC: u64 = 128 * 1024 * 1024;
+
 fn compute_image_meta(data: &[u8]) -> anyhow::Result<(String, u32, u32)> {
     use image::GenericImageView;
-    let img = image::load_from_memory(data)
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(data))
+        .with_guessed_format()
+        .map_err(|e| anyhow::anyhow!("image format: {e}"))?;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(IMAGE_DECODE_MAX_ALLOC);
+    reader.limits(limits);
+    let img = reader
+        .decode()
         .map_err(|e| anyhow::anyhow!("image decode: {e}"))?;
     let (width, height) = img.dimensions();
     Ok((blurhash_of(&img)?, width, height))

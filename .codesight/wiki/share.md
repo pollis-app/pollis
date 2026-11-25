@@ -36,7 +36,9 @@ never a person, group or channel: the chat is chosen inside Pollis, after an unl
   the Vault's through the Vault's queue (below). Row ids are derived from the share's ULID and the
   conversation (`target_message_id`), so running the same share again adopts its rows and the DS
   answers a re-posted envelope id as a replay: nothing is sent twice. A target the user may not
-  share to refuses the whole share before anything is stored. A link preview is built for the
+  share to refuses the whole share before anything is stored. Every target's id is claimed
+  (`outbox_claim`) until all are stored, so no drain delivers part of a share; one that fails
+  part-way takes back the rows it wrote, so nothing of it goes out. A link preview is built for the
   first https link when previews are on (`link_preview`, #1987). Bridge: `share_enqueue`,
   `share_deliver`.
 - **Streamed files.** An outbox attachment is stored into `outbox_attachment` with SQLite
@@ -45,20 +47,32 @@ never a person, group or channel: the chat is chosen inside Pollis, after an unl
   chunked AES-256-GCM (byte-identical objects), the ciphertext written to `<data_dir>/upload-tmp/`
   and PUT from disk with an explicit Content-Length. Peak memory is a couple of chunks whatever
   the size, which is what lets the iOS extension send a 100 MB video. This is every outbox send's
-  path now, not only shares. Images ≤ 24 MiB are still decoded for their blurhash and size.
+  path now, not only shares. Images ≤ 24 MiB the sender did not measure are still decoded for
+  their blurhash and size, one at a time per process, with a 128 MiB allocation limit, and a
+  decode is reused for the same bytes (a share's other targets).
+- **One delivery per row across processes.** The app and the extension open the same database,
+  so `OutboxLock` also takes a lease in `outbox_claim` (see [database.md](database.md)). The
+  app's drain passes by a row the extension is delivering, and takes it over once the lease runs
+  out. A delivery reads its row and its stored files in one read, so it never pairs a
+  provisional envelope with files another process already uploaded. A chunk is written only into
+  the row it reserved (checked by rowid, id and position).
 - **`session`** — the iOS extension's own headless session, built like the Notification Service
   Extension's fetch (#1599): App Group data dir, shared keychain group, no realtime, LiveKit or
   media server, `LocalDb::open_existing_for_user_in`. It never reads the notification escrow:
   - **PIN** through `pin::check_pin`, the app's own attempt counter and lockout: a wrong PIN in
     the extension counts against the app's ten, a right one forgives them all, the tenth wipes
-    the keys exactly as in the app.
+    the keys exactly as in the app. The attempt is counted before it is checked, under
+    `pin.lock` (see [pin-design.md](pin-design.md)), so the two keypads cannot share a count.
   - **Biometrics** through `device_unlock::unwrap_with_device_key`, the app's device unlock key
     (#1685), which gates on the PIN counter and never writes it.
   - Every MLS step takes its share of the cross-process `state.lock` per section, as the app's do.
   - `suspend` / `resume` / `close`: when the host app leaves the foreground the sends in flight
     get ¾ of the time, then no new hold starts, the open ones drain and the database closes
-    (`0xdead10cc`); anything unfinished is marked `failed` and the app's next outbox drain
-    delivers it.
+    (`0xdead10cc`); anything unfinished is marked `failed`, its claims are released, and the
+    app's next outbox drain delivers it. `resume` ends the suspension under the session's mutex,
+    so a `suspend` still letting sends finish leaves the database open; a reopen that finds it
+    busy is retried by the next call. `close` drains the holds before it releases the lock. When
+    iOS's background time runs out, the host suspends at once (`timeout 0`).
 - **`ffi`** — the C ABI, `pollis-core/include/pollis_share.h`: `pollis_share_open`,
   `_unlock_pin`, `_unlock_device_key`, `_targets`, `_send` (with a progress callback),
   `_suspend`, `_resume`, `_close`. Logs outcomes only (`[share] send: ok sent=2 queued=0`).
@@ -97,9 +111,12 @@ message outbox's guarantees:
 - **Android** (`ShareIntakeActivity`, `ShareInbox`, `PollisShareModule` in
   `modules/pollis-native`): the intake copies each `content://` stream into
   `cacheDir/pollis-share/<id>/` while it holds the read grant (only another app's provider:
-  never a `file://` URI or Pollis's own), brings the app forward with a plain launch intent and
+  never a `file://` URI or Pollis's own; the intake runs as Pollis, so ownership is the
+  provider's UID, a `user@authority` URI is refused, and an opened descriptor that is one of
+  Pollis's own files is refused too), brings the app forward with a plain launch intent and
   finishes; not MainActivity, for the reason `PushTapActivity` exists (#1614). The app takes the
   share after the PIN (`hooks/useShareIntake.ts`, the push tap's gate) and pushes `app/share.tsx`.
+  The share stays pending until it is stored or cancelled, so a crash or reload offers it again.
   Copies are deleted once stored, on cancel, at sign-out and after a day.
 
 ## Tests
@@ -108,7 +125,9 @@ message outbox's guarantees:
   `r2::stream::tests`; flows `src-tauri/tests/flows/share.rs` (targets, one share to every target
   once with its own file keys, a repeated share sent once, the extension's send finished by the
   app, suspend/resume, one PIN counter with the app, biometrics never touching it, signed out,
-  the Vault as a target) and `vault.rs` (a double-submitted save saved once, an interrupted save
+  the Vault as a target, a row the extension holds left to it until its lease runs out, a share
+  that fails part-way sending nothing); `pin::tests::parallel_wrong_pins_each_count`,
+  `outbox::tests` (claimed bytes not swept, a chunk never written into another row) and `vault.rs` (a double-submitted save saved once, an interrupted save
   finished once, a file under the Vault key, a discarded save).
 - Node: `share-picker`, `android-share-intake`, `share-extension`, `vault`.
 - Desktop Playwright: `e2e/vault-queue.spec.ts`.

@@ -28,9 +28,33 @@ use crate::state::AppState;
 const TMP_DIR: &str = "upload-tmp";
 
 /// An image at most this large is decoded for its blurhash and size, as the in-memory path
-/// does. A larger one keeps what the sender supplied (the share extension measures with the
-/// platform decoder): decoding it here would cost more memory than the whole upload.
+/// does. A larger one goes without (as an image whose decode is refused by the allocation
+/// limit does): decoding it here would cost more memory than the whole upload.
 pub(crate) const IMAGE_META_MAX_BYTES: u64 = 24 * 1024 * 1024;
+
+/// One image held and decoded for its metadata at a time, process-wide (#2100): three uploads
+/// at once (`UPLOAD_SLOTS`) each holding a photo and its decode would not fit a share extension.
+static IMAGE_META: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// The metadata of the images decoded last, by plaintext SHA-256: a share sends the same photo
+/// to several chats, and each copy needs only one decode.
+/// An image's blurhash, width and height.
+type ImageMeta = (String, u32, u32);
+static IMAGE_META_SEEN: std::sync::Mutex<Vec<(String, ImageMeta)>> = std::sync::Mutex::new(Vec::new());
+const IMAGE_META_SEEN_MAX: usize = 16;
+
+fn seen_meta(sha256: &str) -> Option<ImageMeta> {
+    let seen = IMAGE_META_SEEN.lock().unwrap_or_else(|p| p.into_inner());
+    seen.iter().find(|(k, _)| k == sha256).map(|(_, m)| m.clone())
+}
+
+fn remember_meta(sha256: String, meta: ImageMeta) {
+    let mut seen = IMAGE_META_SEEN.lock().unwrap_or_else(|p| p.into_inner());
+    if seen.len() >= IMAGE_META_SEEN_MAX {
+        seen.remove(0);
+    }
+    seen.push((sha256, meta));
+}
 
 /// How old a leftover temporary file must be before [`sweep_stale`] removes it. Far longer
 /// than any upload in flight takes to write and send its file.
@@ -86,6 +110,8 @@ pub(crate) struct StreamUpload {
     hasher: Sha256,
     /// The plaintext of a small image, for its blurhash; `None` for anything else.
     image: Option<zeroize::Zeroizing<Vec<u8>>>,
+    /// Held while `image` is: one image's bytes in memory at a time.
+    _image_permit: Option<tokio::sync::SemaphorePermit<'static>>,
     plain_len: u64,
     expected_len: u64,
     chunks: u32,
@@ -99,12 +125,14 @@ pub(crate) struct StreamUpload {
 
 impl StreamUpload {
     /// Start an upload of `expected_len` bytes sealed for `scope`. The ring key is resolved
-    /// first, so an unreachable ring fails before any byte is read.
+    /// first, so an unreachable ring fails before any byte is read. `measure`: an image the
+    /// sender did not measure is decoded for its blurhash and size.
     pub(crate) async fn begin(
         state: &Arc<AppState>,
         scope: UploadScope,
         content_type: &str,
         expected_len: u64,
+        measure: bool,
     ) -> Result<Self> {
         if expected_len > pollis_api::broker::R2_MEDIA_MAX_BYTES {
             return Err(Error::Other(anyhow::anyhow!(
@@ -127,8 +155,13 @@ impl StreamUpload {
         let file = tokio::fs::File::create(&path)
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("create upload file: {e}")))?;
-        let image = (content_type.starts_with("image/") && expected_len <= IMAGE_META_MAX_BYTES)
-            .then(|| zeroize::Zeroizing::new(Vec::with_capacity(expected_len as usize)));
+        let wants_image = measure && content_type.starts_with("image/") && expected_len <= IMAGE_META_MAX_BYTES;
+        let image_permit = if wants_image {
+            Some(IMAGE_META.acquire().await.expect("the image semaphore is never closed"))
+        } else {
+            None
+        };
+        let image = wants_image.then(|| zeroize::Zeroizing::new(Vec::with_capacity(expected_len as usize)));
         Ok(Self {
             cipher,
             base_nonce,
@@ -139,6 +172,7 @@ impl StreamUpload {
             content_type: content_type.to_string(),
             hasher: Sha256::new(),
             image,
+            _image_permit: image_permit,
             plain_len: 0,
             expected_len,
             chunks: 0,
@@ -206,10 +240,17 @@ impl StreamUpload {
             .map_err(|e| Error::Other(anyhow::anyhow!("sync upload file: {e}")))?;
         let sha256 = hex::encode(self.hasher.finalize_reset());
         let (blurhash, width, height) = match self.image.take() {
+            Some(_) if seen_meta(&sha256).is_some() => {
+                let (bh, w, h) = seen_meta(&sha256).unwrap_or_default();
+                (Some(bh), Some(w), Some(h))
+            }
             Some(bytes) => {
                 let ct = self.content_type.clone();
                 match tokio::task::spawn_blocking(move || super::compute_image_meta(&bytes)).await {
-                    Ok(Ok((bh, w, h))) => (Some(bh), Some(w), Some(h)),
+                    Ok(Ok((bh, w, h))) => {
+                        remember_meta(sha256.clone(), (bh.clone(), w, h));
+                        (Some(bh), Some(w), Some(h))
+                    }
                     Ok(Err(e)) => {
                         crate::diag!("[upload] image meta failed ({ct}): {e}");
                         (None, None, None)
@@ -219,6 +260,8 @@ impl StreamUpload {
             }
             None => (None, None, None),
         };
+        // The image's bytes and decode are done with: the next image may start.
+        self._image_permit.take();
 
         #[cfg(feature = "test-harness")]
         let stubbed = crate::commands::messages::test_hooks::uploads_stubbed();
