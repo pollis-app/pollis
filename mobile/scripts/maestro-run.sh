@@ -487,7 +487,7 @@ run_device() {
     echo "WARN: $ENV_FILE missing; copy env.example and fill it in." >&2
   fi
   # Per-device points for the out-of-process pickers and the bottom toggles
-  # (profile-photo, keyboard-recovery); a line in .env overrides them.
+  # (profile-photo, keyboard-recovery, keyboard-back); a line in .env overrides them.
   if ! grep -q '^PICK_POINT=' "$ENV_FILE" 2>/dev/null; then
     case "$dev" in
       ios) ENV_ARGS+=(-e "PICK_POINT=16%,24%" -e "USE_POINT=89%,92%") ;;
@@ -500,6 +500,10 @@ run_device() {
     fi
     if ! grep -q '^PIN_ZERO_POINT=' "$ENV_FILE" 2>/dev/null; then
       ENV_ARGS+=(-e "PIN_ZERO_POINT=50%,68%")
+    fi
+    # keyboard-back: the chat pane's composer (bounds about 16-92% across, 92% down).
+    if ! grep -q '^COMPOSER_POINT=' "$ENV_FILE" 2>/dev/null; then
+      ENV_ARGS+=(-e "COMPOSER_POINT=60%,92%")
     fi
     # The iPad's photo picker takes only point taps (subflows/ipad-pick-photos.yaml).
     ENV_ARGS+=(-e "IPAD=1")
