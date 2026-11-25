@@ -303,6 +303,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/ops/otp-requests", get(ops_log::otp_requests))
         .route("/v1/ops/errors", get(error_log::list))
         .route("/v1/ops/push", get(push::ops_push))
+        // #2109: operator removal of a stored file (operator bearer token).
+        .route("/v1/ops/attachments/remove", post(messages::ops_remove_attachment))
         // #1751: the DS -> LiveKit path. Passive one-word verdict (open), and counts + live probe (operator).
         .route("/health/livekit", get(livekit::health))
         .route("/v1/ops/livekit", get(livekit::ops))
@@ -329,6 +331,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<messages::AttachmentRegisterBody as DsRequest>::PATH, post(messages::register_attachment))
         .route(<messages::AttachmentDeleteBody as DsRequest>::PATH, post(messages::delete_attachment))
         .route(<messages::AttachmentReleaseBody as DsRequest>::PATH, post(messages::release_attachment))
+        .route(<messages::AttachmentClaimBody as DsRequest>::PATH, post(messages::claim_attachment))
         // Domain B (#419) — groups / channels / membership / invites / join-requests.
         .route(<groups::CreateGroupBody as DsRequest>::PATH, post(groups::create_group))
         .route(<groups::UpdateGroupBody as DsRequest>::PATH, post(groups::update_group))

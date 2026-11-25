@@ -109,9 +109,10 @@ pub async fn apply_save_vault_message(
     if body.attachment_hashes.len() > VAULT_MAX_ATTACHMENT_REFS {
         return Ok(VaultOutcome::Invalid("too many attachment references"));
     }
-    // A reference is exactly 64 lowercase hex (a SHA-256).
+    // A reference is a v1 file id (64 hex) or a shared object id (#2109).
     for h in &body.attachment_hashes {
-        if h.len() != 64 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        let v1 = h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit());
+        if !v1 && !pollis_api::messages::is_shared_object_id(h) {
             return Ok(VaultOutcome::Invalid("attachment hash is not sha-256 hex"));
         }
     }
@@ -135,7 +136,7 @@ pub async fn apply_save_vault_message(
              WHERE vault_message.user_id = ?2",
             libsql::params![
                 body.id.clone(),
-                user,
+                user.clone(),
                 nonce,
                 blob,
                 body.created_at.clone()
@@ -152,6 +153,11 @@ pub async fn apply_save_vault_message(
     let before = crate::messages::drop_vault_references(&tx, &body.id).await?;
     for h in &body.attachment_hashes {
         let h = h.to_ascii_lowercase();
+        // A removed file (#2109) is not held again; the entry saves without
+        // it, so editing an entry that showed "File removed" still works.
+        if crate::messages::object_is_removed(&tx, &h).await? {
+            continue;
+        }
         // A file whose bytes the DS is deleting cannot be kept by this entry (#1881).
         if crate::messages::object_state(&tx, &h).await?.as_deref() == Some("deleting") {
             tx.rollback().await?;
@@ -165,6 +171,10 @@ pub async fn apply_save_vault_message(
         .await?;
         // A file another delete just released is held again (#1881).
         crate::messages::revive_released_object(&tx, &h).await?;
+        // A file this save adds settles the claim its upload took (#2109).
+        if !before.contains(&h) {
+            crate::messages::settle_lease(&tx, &h, &user).await?;
+        }
     }
     // A file this edit dropped is released, if nothing else holds it.
     crate::messages::mark_released_objects(&tx, &before).await?;

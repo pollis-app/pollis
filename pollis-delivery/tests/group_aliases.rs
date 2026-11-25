@@ -106,6 +106,10 @@ impl ObjectStore for Bucket {
         self.deleted.lock().unwrap().push(key.to_string());
         Ok(())
     }
+
+    async fn object_exists(&self, key: &str) -> anyhow::Result<bool> {
+        Ok(!self.deleted.lock().unwrap().iter().any(|k| k == key))
+    }
 }
 
 /// Reclaim with no grace, so the test need not wait.

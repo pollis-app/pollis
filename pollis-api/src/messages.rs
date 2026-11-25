@@ -207,6 +207,104 @@ pub struct AttachmentReleaseBody {
     pub delete_token: String,
 }
 
+/// The id prefix of a shared attachment object (#2109): one stored object per
+/// distinct file, across every account. A v1 object's id is 64 bare hex
+/// characters (a random file id, #1382), so the two can never collide.
+pub const SHARED_OBJECT_PREFIX: &str = "v2-";
+
+/// The SHA-256 a shared object id names, or `None` when `id` is not one.
+///
+/// A shared object's id is `v2-` + the lowercase hex SHA-256 of its stored
+/// bytes (the ciphertext), so the store can refuse bytes that do not match
+/// their name. It is not the plaintext digest and it is not key material.
+pub fn shared_object_digest(id: &str) -> Option<[u8; 32]> {
+    let hex = id.strip_prefix(SHARED_OBJECT_PREFIX)?;
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, pair) in hex.as_bytes().chunks(2).enumerate() {
+        let nibble = |b: u8| if b.is_ascii_digit() { b - b'0' } else { b - b'a' + 10 };
+        out[i] = (nibble(pair[0]) << 4) | nibble(pair[1]);
+    }
+    Some(out)
+}
+
+/// True when `id` names a shared attachment object.
+pub fn is_shared_object_id(id: &str) -> bool {
+    shared_object_digest(id).is_some()
+}
+
+/// True when `id` is an attachment object id of either kind: 64 hex
+/// characters (v1, #1382) or a shared object id (#2109). Safe as one path
+/// component either way.
+pub fn is_attachment_id(id: &str) -> bool {
+    (id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit())) || is_shared_object_id(id)
+}
+
+/// The one R2 key a shared object may live at.
+pub fn shared_object_key(id: &str) -> String {
+    format!("media/{id}.enc")
+}
+
+/// The headers a PUT of shared object `id` must carry, which the DS signs into
+/// the presigned URL (#2109): the SHA-256 the id names, which R2 checks the
+/// body against, and `If-None-Match: *`, which makes the write create-only.
+/// Empty for any other id. The DS and the client both call this, so the
+/// signed values and the sent ones cannot differ.
+pub fn shared_object_put_headers(id: &str) -> Vec<(&'static str, String)> {
+    use base64::Engine as _;
+    match shared_object_digest(id) {
+        Some(digest) => vec![
+            ("if-none-match", "*".to_string()),
+            (
+                "x-amz-checksum-sha256",
+                base64::engine::general_purpose::STANDARD.encode(digest),
+            ),
+        ],
+        None => Vec::new(),
+    }
+}
+
+/// `POST /v1/attachments/claim` — "I am about to send shared object
+/// `content_hash`" (#2109). Holds the object for the caller until their
+/// reference lands (a lease), and says whether its bytes still need uploading.
+#[derive(Serialize, Deserialize)]
+pub struct AttachmentClaimBody {
+    pub content_hash: String,
+}
+
+/// What a claim found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AttachmentClaimStatus {
+    /// The object is stored: register a reference, upload nothing.
+    Stored,
+    /// Nothing is stored under this id: upload it, then register it.
+    Upload,
+    /// The DS is deleting this object right now: ask again shortly.
+    Busy,
+    /// The operator removed this file; it cannot be stored or sent again.
+    Removed,
+}
+
+/// The error code a DS answer carries for a file the operator removed: the
+/// download presign answers `410` with it, so clients show "File removed"
+/// instead of retrying.
+pub const ATTACHMENT_REMOVED: &str = "attachment_removed";
+
+/// `POST /v1/ops/attachments/remove` — operator removal of a stored file.
+/// Operator bearer token only; no client sends it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpsRemoveAttachmentBody {
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentClaimResponse {
+    pub status: AttachmentClaimStatus,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct AttachmentDeleteBody {
     pub content_hash: String,
