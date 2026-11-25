@@ -156,6 +156,11 @@ struct VideoGrants {
     can_publish: bool,
     can_subscribe: bool,
     can_publish_data: bool,
+    /// #2110: a session sets its own `active` attribute (away), which LiveKit allows only with
+    /// this grant. It also covers the session's own name and metadata, which Pollis leaves empty.
+    /// Left out when false, so a view token is byte for byte what it was before.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    can_update_own_metadata: bool,
 }
 
 /// POST /v1/livekit/token — mint a LiveKit access token for the authenticated
@@ -329,6 +334,8 @@ pub fn sign_livekit_token(
             can_publish: true,
             can_subscribe: true,
             can_publish_data,
+            // A view session (screenshare receive) is not a presence session.
+            can_update_own_metadata: can_publish_data,
         },
     };
     encode_hs256_jwt(&claims, api_secret)

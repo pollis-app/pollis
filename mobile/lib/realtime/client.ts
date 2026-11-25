@@ -1,11 +1,17 @@
 // Foreground realtime over LiveKit rooms in DATA-ONLY mode. Ref-counted per room: LiveKit evicts a second join by the same identity. Degrades to a no-op.
 
 // livekit-client + @livekit/react-native are imported LAZILY: at module eval they touch web globals Hermes lacks and crash boot.
+import { AppState } from "react-native";
 import type { Room } from "livekit-client";
 import { invoke } from "../native";
 import { decodeRealtimeEvent, isTrustedOrigin, type RealtimeEvent } from "./events";
 import { createParticipantResolver } from "./participants";
-import { createRoomPresenceFeed } from "../presence";
+import {
+  activeAttributes,
+  appStateInUse,
+  createRoomPresenceFeed,
+  sessionInUse,
+} from "../presence";
 import { presenceStore } from "../../stores/presenceStore";
 
 const resolveSender = createParticipantResolver((room, identities) =>
@@ -17,14 +23,55 @@ export function renameParticipant(userId: string, username: string): void {
   resolveSender.renameUser(userId, username);
 }
 
-// Presence (#2059): who each open room shows, resolved by the core (the rule desktop applies).
+// Presence (#2059, #2110): who each open room shows and who of them is away, resolved by the
+// core (the rule desktop applies). A session whose `active` attribute is "0" is not in use.
 const presenceFeed = createRoomPresenceFeed(
-  (room, identities) => invoke<string[]>("livekit_room_presence", { room, identities }),
+  (room, identities, inactive) =>
+    invoke<unknown>("livekit_room_presence", { room, identities, inactive }),
   presenceStore,
 );
 
 function refreshPresence(roomName: string, room: Room): void {
-  void presenceFeed.refresh(roomName, Array.from(room.remoteParticipants.keys()));
+  const identities: string[] = [];
+  const inactive: string[] = [];
+  for (const [identity, participant] of room.remoteParticipants) {
+    identities.push(identity);
+    if (!sessionInUse(participant.attributes)) {
+      inactive.push(identity);
+    }
+  }
+  void presenceFeed.refresh(roomName, identities, inactive);
+}
+
+// This device's side (#2110): peers see it away while the app is in the background. Written as
+// the `active` attribute on every open room on change only, and on a room joined while away (a
+// new session starts with none, which reads as in use).
+let inUse = appStateInUse(AppState.currentState);
+let followingAppState = false;
+
+function publishActivity(room: Room): void {
+  room.localParticipant.setAttributes(activeAttributes(inUse)).catch((e: unknown) => {
+    console.warn("[realtime] activity not written:", e);
+  });
+}
+
+function followAppState(): void {
+  if (followingAppState) {
+    return;
+  }
+  followingAppState = true;
+  AppState.addEventListener("change", (next) => {
+    const now = appStateInUse(next);
+    if (now === inUse) {
+      return;
+    }
+    inUse = now;
+    for (const entry of entries.values()) {
+      if (entry.room) {
+        publishActivity(entry.room);
+      }
+    }
+  });
 }
 
 // registerGlobals() runs lazily on first connect: at module load it can crash boot without the webrtc module.
@@ -144,6 +191,10 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
     // Wake-ups published while down are gone: tell listeners to catch up.
     room.on(RoomEvent.Reconnected, () => {
       refreshPresence(roomName, room);
+      // A full reconnect may be a new session, with no attribute.
+      if (!inUse) {
+        publishActivity(room);
+      }
       for (const listener of entry.listeners) {
         listener({ type: "realtime_reconnected", room: roomName });
       }
@@ -152,6 +203,10 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
       refreshPresence(roomName, room);
     });
     room.on(RoomEvent.ParticipantDisconnected, () => {
+      refreshPresence(roomName, room);
+    });
+    // #2110: a peer's session started or stopped being in use.
+    room.on(RoomEvent.ParticipantAttributesChanged, () => {
       refreshPresence(roomName, room);
     });
     // A room this device is out of can no longer vouch for anyone in it.
@@ -168,6 +223,10 @@ async function openRoom(roomName: string, entry: RoomEntry): Promise<void> {
     }
     entry.room = room;
     refreshPresence(roomName, room);
+    followAppState();
+    if (!inUse) {
+      publishActivity(room);
+    }
   } catch (e) {
     console.warn("[realtime] connect failed:", e);
     dropEntry(roomName, entry);

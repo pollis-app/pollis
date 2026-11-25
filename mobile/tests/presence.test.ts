@@ -1,4 +1,5 @@
-/* Presence dots (#2059): desktop's rule, the store, the realtime feed, and one avatar for every user. */
+/* Presence dots (#2059) and away (#2110): desktop's rule, the store, the realtime feed, this
+   device's `active` attribute, and one avatar for every user. */
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,13 +9,19 @@ import { fileURLToPath } from "node:url";
 import { autorun } from "mobx";
 
 import {
+  activeAttributes,
+  appStateInUse,
+  awayBite,
   createRoomPresenceFeed,
-  onlineUsers,
+  presentUsers,
   presenceDotGeometry,
+  sessionInUse,
+  snapshotOf,
   statusOf,
   withRoom,
   withoutRoom,
   type RoomPresence,
+  type RoomSnapshot,
 } from "../lib/presence.ts";
 import { presenceStore } from "../stores/presenceStore.ts";
 
@@ -41,29 +48,65 @@ function sources(): string[] {
 
 // ── the rule ────────────────────────────────────────────────────────────────
 
+const on = (...online: string[]): RoomSnapshot => ({ online, away: [] });
+const status = (s: RoomPresence, user: string) => statusOf(presentUsers(s), user, "me");
+
 test("a user is online while any shared room shows them", () => {
   let s: RoomPresence = {};
-  s = withRoom(s, "dm-1", ["bob"]);
-  s = withRoom(s, "group-1", ["bob", "carol"]);
-  assert.equal(statusOf(onlineUsers(s), "bob", "me"), "online");
-  assert.equal(statusOf(onlineUsers(s), "carol", "me"), "online");
+  s = withRoom(s, "dm-1", on("bob"));
+  s = withRoom(s, "group-1", on("bob", "carol"));
+  assert.equal(status(s, "bob"), "online");
+  assert.equal(status(s, "carol"), "online");
   // Bob leaves the DM's room but is still in the group's.
-  s = withRoom(s, "dm-1", []);
-  assert.equal(statusOf(onlineUsers(s), "bob", "me"), "online");
-  s = withRoom(s, "group-1", ["carol"]);
-  assert.equal(statusOf(onlineUsers(s), "bob", "me"), "offline");
-  assert.equal(statusOf(onlineUsers(s), "carol", "me"), "online");
+  s = withRoom(s, "dm-1", on());
+  assert.equal(status(s, "bob"), "online");
+  s = withRoom(s, "group-1", on("carol"));
+  assert.equal(status(s, "bob"), "offline");
+  assert.equal(status(s, "carol"), "online");
+});
+
+test("#2110: away while every room that shows them shows them not in use; online if any does", () => {
+  let s: RoomPresence = withRoom({}, "dm-1", { online: [], away: ["bob"] });
+  assert.equal(status(s, "bob"), "away");
+  s = withRoom(s, "group-1", on("bob"));
+  assert.equal(status(s, "bob"), "online");
+  s = withRoom(s, "group-1", { online: [], away: ["bob"] });
+  assert.equal(status(s, "bob"), "away");
+  s = withoutRoom(s, "dm-1");
+  s = withoutRoom(s, "group-1");
+  assert.equal(status(s, "bob"), "offline");
+  // Listed both ways in one room: online.
+  assert.deepEqual(withRoom({}, "r", { online: ["bob"], away: ["bob"] }).r, on("bob"));
+});
+
+test("#2110: a missing attribute is in use, so a build that predates it still shows online", () => {
+  assert.equal(sessionInUse(undefined), true);
+  assert.equal(sessionInUse({}), true);
+  assert.equal(sessionInUse({ active: "1" }), true);
+  assert.equal(sessionInUse({ active: "0" }), false);
+  // A core that predates #2110 answers a bare list: everyone online.
+  assert.deepEqual(snapshotOf(["bob"]), on("bob"));
+  assert.deepEqual(snapshotOf({ online: ["bob"], away: ["carol"] }), { online: ["bob"], away: ["carol"] });
+  assert.deepEqual(snapshotOf(null), on());
+});
+
+test("#2110: this device is not in use only in the background", () => {
+  assert.equal(appStateInUse("active"), true);
+  assert.equal(appStateInUse("inactive"), true, "iOS's app switcher passes in a moment");
+  assert.equal(appStateInUse("background"), false);
+  assert.deepEqual(activeAttributes(true), { active: "1" });
+  assert.deepEqual(activeAttributes(false), { active: "0" });
 });
 
 test("a room this device left vouches for no one", () => {
-  let s: RoomPresence = withRoom({}, "group-1", ["bob"]);
+  let s: RoomPresence = withRoom({}, "group-1", on("bob"));
   s = withoutRoom(s, "group-1");
-  assert.equal(statusOf(onlineUsers(s), "bob", "me"), "offline");
+  assert.equal(status(s, "bob"), "offline");
   assert.equal(withoutRoom(s, "never-joined"), s, "an unknown room changes nothing");
 });
 
 test("self is online; no user is no one", () => {
-  const none = onlineUsers({});
+  const none = presentUsers({});
   assert.equal(statusOf(none, "me", "me"), "online");
   assert.equal(statusOf(none, null, "me"), "offline");
   assert.equal(statusOf(none, undefined, null), "offline");
@@ -71,7 +114,7 @@ test("self is online; no user is no one", () => {
 });
 
 test("a snapshot lists each user once", () => {
-  assert.deepEqual(withRoom({}, "r", ["bob", "bob"]).r, ["bob"]);
+  assert.deepEqual(withRoom({}, "r", on("bob", "bob")).r, on("bob"));
 });
 
 // ── the store ───────────────────────────────────────────────────────────────
@@ -83,16 +126,19 @@ test("the store re-renders readers as rooms change, and forgets everything on si
   const dispose = autorun(() => {
     seen.push(presenceStore.status("bob"));
   });
-  presenceStore.setRoom("dm-1", ["bob"]);
-  presenceStore.setRoom("group-1", ["bob"]);
+  presenceStore.setRoom("dm-1", on("bob"));
+  presenceStore.setRoom("group-1", on("bob"));
+  presenceStore.setRoom("dm-1", { online: [], away: ["bob"] });
+  presenceStore.setRoom("group-1", { online: [], away: ["bob"] });
   presenceStore.clearRoom("dm-1");
   presenceStore.clearRoom("group-1");
   dispose();
-  // The second room and the first clear leave Bob online: no re-render for them.
-  assert.deepEqual(seen, ["offline", "online", "offline"]);
+  // The second room, and the first going away while the second still shows him in use, leave Bob
+  // online: no re-render for them.
+  assert.deepEqual(seen, ["offline", "online", "away", "offline"]);
 
   assert.equal(presenceStore.status("me"), "online");
-  presenceStore.setRoom("group-1", ["bob"]);
+  presenceStore.setRoom("group-1", on("bob"));
   presenceStore.reset();
   assert.equal(presenceStore.status("bob"), "offline");
   assert.equal(presenceStore.status("me"), "offline", "no self after sign-out");
@@ -120,8 +166,9 @@ function recordingSink() {
   const calls: string[] = [];
   return {
     calls,
-    setRoom(room: string, users: string[]) {
-      calls.push(`set ${room} ${users.join(",")}`);
+    setRoom(room: string, snap: RoomSnapshot) {
+      const away = snap.away.length > 0 ? ` away ${snap.away.join(",")}` : "";
+      calls.push(`set ${room} ${snap.online.join(",")}${away}`);
     },
     clearRoom(room: string) {
       calls.push(`clear ${room}`);
@@ -129,22 +176,22 @@ function recordingSink() {
   };
 }
 
-test("the feed hands the core the room's identities and stores its answer", async () => {
-  const asked: Array<[string, string[]]> = [];
+test("the feed hands the core the room's identities and the inactive ones, and stores its answer", async () => {
+  const asked: Array<[string, string[], string[]]> = [];
   const sink = recordingSink();
-  const feed = createRoomPresenceFeed(async (room, ids) => {
-    asked.push([room, ids]);
-    return ["bob"];
+  const feed = createRoomPresenceFeed(async (room, ids, inactive) => {
+    asked.push([room, ids, inactive]);
+    return { online: ["bob"], away: ["carol"] };
   }, sink);
-  await feed.refresh("dm-1", ["d-abc", "d-def"]);
-  assert.deepEqual(asked, [["dm-1", ["d-abc", "d-def"]]]);
-  assert.deepEqual(sink.calls, ["set dm-1 bob"]);
+  await feed.refresh("dm-1", ["d-abc", "d-def"], ["d-def"]);
+  assert.deepEqual(asked, [["dm-1", ["d-abc", "d-def"], ["d-def"]]]);
+  assert.deepEqual(sink.calls, ["set dm-1 bob away carol"]);
 });
 
 test("only the newest refresh of a room lands", async () => {
   const sink = recordingSink();
-  const first = deferred<string[]>();
-  const second = deferred<string[]>();
+  const first = deferred<unknown>();
+  const second = deferred<unknown>();
   const answers = [first, second];
   const feed = createRoomPresenceFeed(() => answers.shift()!.promise, sink);
   const a = feed.refresh("dm-1", ["d-a"]);
@@ -158,7 +205,7 @@ test("only the newest refresh of a room lands", async () => {
 
 test("nothing lands for a room after it was dropped", async () => {
   const sink = recordingSink();
-  const answer = deferred<string[]>();
+  const answer = deferred<unknown>();
   const feed = createRoomPresenceFeed(() => answer.promise, sink);
   const pending = feed.refresh("dm-1", ["d-a"]);
   feed.drop("dm-1");
@@ -176,12 +223,21 @@ test("a failed resolve (offline, or a binary without the command) leaves the roo
 
 test("the realtime client feeds presence from the core on every roster change and drops a closed room", () => {
   const client = src("lib/realtime/client.ts");
-  assert.match(client, /invoke<string\[\]>\("livekit_room_presence", \{ room, identities \}\)/);
-  for (const ev of ["Reconnected", "ParticipantConnected", "ParticipantDisconnected"]) {
+  assert.match(client, /invoke<unknown>\("livekit_room_presence", \{ room, identities, inactive \}\)/);
+  assert.match(client, /if \(!sessionInUse\(participant\.attributes\)\) \{\s*inactive\.push\(identity\);/);
+  const events = ["Reconnected", "ParticipantConnected", "ParticipantDisconnected", "ParticipantAttributesChanged"];
+  for (const ev of events) {
     assert.match(client, new RegExp(`RoomEvent\\.${ev}, \\(\\) => \\{\\s*refreshPresence\\(roomName, room\\);`));
   }
   assert.match(client, /entry\.room = room;\s*refreshPresence\(roomName, room\);/);
   assert.match(client, /presenceFeed\.drop\(roomName\);\s*void entry\.room\.disconnect\(\);/);
+});
+
+test("#2110: the client writes this device's attribute on an AppState change and on a join while away", () => {
+  const client = src("lib/realtime/client.ts");
+  assert.match(client, /room\.localParticipant\.setAttributes\(activeAttributes\(inUse\)\)/);
+  assert.match(client, /const now = appStateInUse\(next\);\s*if \(now === inUse\) \{\s*return;\s*\}/);
+  assert.match(client, /followAppState\(\);\s*if \(!inUse\) \{\s*publishActivity\(room\);/);
 });
 
 // ── the dot and the one avatar ──────────────────────────────────────────────
@@ -192,9 +248,17 @@ test("the dot is desktop's: a quarter of the avatar, never under 5, a 2-point ri
   assert.deepEqual(presenceDotGeometry(16), { dot: 5, ring: 2, offset: -2 });
 });
 
-test("the dot draws in theme colours only: accent on the surface behind, hollow when offline", () => {
+test("away bites four fifths of the dot out of its top corner", () => {
+  assert.deepEqual(awayBite(10), { size: 8, inset: -2 });
+  assert.deepEqual(awayBite(5), { size: 4, inset: -1 });
+});
+
+test("the dot draws in theme colours only: accent on the surface behind, a crescent when away, hollow when offline", () => {
   const avatar = src("components/UserAvatar.tsx");
   const dot = avatar.slice(avatar.indexOf("function PresenceDot"), avatar.indexOf("/**\n * Every user avatar"));
+  assert.match(dot, /const online = status !== "offline";/);
+  assert.match(dot, /status === "away" \?[\s\S]*backgroundColor: ring,/);
+  assert.match(dot, /overflow: "hidden"/);
   assert.match(dot, /borderColor: online \? ring : semantic\.accentMuted/);
   assert.match(dot, /backgroundColor: online \? semantic\.accent : semantic\.bg/);
   assert.doesNotMatch(dot, /#[0-9a-f]{3,8}\b|rgba?\(|shadow|elevation/i, "solid colours, no glow");

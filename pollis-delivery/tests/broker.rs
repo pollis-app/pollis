@@ -96,6 +96,15 @@ fn a_participant_token_expires_in_minutes_not_hours() {
     );
 }
 
+/// #2110: a realtime session writes its own `active` attribute, which LiveKit refuses without
+/// `canUpdateOwnMetadata`; peers would then never see it away.
+#[test]
+fn livekit_token_lets_a_session_set_its_own_attributes() {
+    let token = sign_livekit_token(LK_KEY, LK_SECRET, "room-1", "alice", true, 1_700_000_000).unwrap();
+    let (_, payload, _) = split_jwt(&token);
+    assert_eq!(payload["video"]["canUpdateOwnMetadata"], true);
+}
+
 #[test]
 fn livekit_view_variant_disables_publish_data() {
     let token = sign_livekit_token(
@@ -110,6 +119,7 @@ fn livekit_view_variant_disables_publish_data() {
     let (_, payload, _) = split_jwt(&token);
     assert_eq!(payload["sub"], "alice:view");
     assert_eq!(payload["video"]["canPublishData"], false);
+    assert!(payload["video"].get("canUpdateOwnMetadata").is_none());
     assert_eq!(payload["video"]["roomJoin"], true);
     assert_eq!(payload["video"]["canPublish"], true);
     assert_eq!(payload["video"]["canSubscribe"], true);
@@ -136,9 +146,12 @@ fn livekit_admin_token_grants_room_admin_and_verifies() {
 // #1845: the DS signs JWTs itself (hmac + sha2) instead of via `jsonwebtoken`.
 // These are the exact tokens `jsonwebtoken` 10.3 minted for the same inputs, so
 // any drift in header bytes, claim order, JSON escaping or base64 shows up here.
-const GOLDEN_PARTICIPANT: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoiYWxpY2UiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAwOTAwLCJuYW1lIjoiIiwidmlkZW8iOnsicm9vbSI6InJvb20tMSIsInJvb21Kb2luIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOnRydWUsImNhblB1Ymxpc2hEYXRhIjp0cnVlfX0.tlPm2YKjgX_TI_Qa6tZu21xAtqI0fqX2YvZ_cNoUfPs";
+// #2110 appended one grant, `canUpdateOwnMetadata: true`, to the two data-capable
+// tokens: their payloads are the 10.3 bytes with exactly that member added before
+// the closing braces, re-signed. The view and admin tokens are still 10.3's own.
+const GOLDEN_PARTICIPANT: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoiYWxpY2UiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAwOTAwLCJuYW1lIjoiIiwidmlkZW8iOnsicm9vbSI6InJvb20tMSIsInJvb21Kb2luIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOnRydWUsImNhblB1Ymxpc2hEYXRhIjp0cnVlLCJjYW5VcGRhdGVPd25NZXRhZGF0YSI6dHJ1ZX19.ufxxM3Z786flRnpN4OGBGIpfGgkdyOPLz9KOKM2aCUU";
 const GOLDEN_VIEW: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoiYWxpY2U6dmlldyIsImlhdCI6MTcwMDAwMDAwMCwibmJmIjoxNzAwMDAwMDAwLCJleHAiOjE3MDAwMDA5MDAsIm5hbWUiOiIiLCJ2aWRlbyI6eyJyb29tIjoicm9vbS0xIiwicm9vbUpvaW4iOnRydWUsImNhblB1Ymxpc2giOnRydWUsImNhblN1YnNjcmliZSI6dHJ1ZSwiY2FuUHVibGlzaERhdGEiOmZhbHNlfX0.LGSitJocmDnHiNCqjK_pfDoCRSUvnpZirIX8NnO0FPw";
-const GOLDEN_ESCAPED_ROOM: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoieCIsImlhdCI6MTcwMDAwMDAwMCwibmJmIjoxNzAwMDAwMDAwLCJleHAiOjE3MDAwMDA5MDAsIm5hbWUiOiIiLCJ2aWRlbyI6eyJyb29tIjoiZG0tXCJxXCJcXMOpLzw-JiIsInJvb21Kb2luIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOnRydWUsImNhblB1Ymxpc2hEYXRhIjp0cnVlfX0.gdhkCvoqvBSPSVke4At388QtAdBIqgRNR2JWDT_5-r0";
+const GOLDEN_ESCAPED_ROOM: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoieCIsImlhdCI6MTcwMDAwMDAwMCwibmJmIjoxNzAwMDAwMDAwLCJleHAiOjE3MDAwMDA5MDAsIm5hbWUiOiIiLCJ2aWRlbyI6eyJyb29tIjoiZG0tXCJxXCJcXMOpLzw-JiIsInJvb21Kb2luIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOnRydWUsImNhblB1Ymxpc2hEYXRhIjp0cnVlLCJjYW5VcGRhdGVPd25NZXRhZGF0YSI6dHJ1ZX19.KczzQIDFXCfxC8Q66Qbu8et1zpgwstXdFfvDgWSDkRU";
 const GOLDEN_ADMIN: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoicG9sbGlzLWRzIiwiaWF0IjoxNzAwMDAwMDAwLCJuYmYiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDMwMCwidmlkZW8iOnsicm9vbUFkbWluIjp0cnVlLCJyb29tTGlzdCI6dHJ1ZSwicm9vbSI6ImluYm94LXVfMTIzIn19.sdBn6YplkAJTvoeIfMV42gblkjjOHBToqgP4vNo2VkM";
 const GOLDEN_ADMIN_LIST: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJBUElleGFtcGxlS2V5Iiwic3ViIjoicG9sbGlzLWRzIiwiaWF0IjoxNzAwMDAwMDAwLCJuYmYiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDMwMCwidmlkZW8iOnsicm9vbUFkbWluIjp0cnVlLCJyb29tTGlzdCI6dHJ1ZSwicm9vbSI6IiJ9fQ.gUxDesquDbBScicD7YlnUzeRh5zlqVeFr6cgNe3sfgE";
 

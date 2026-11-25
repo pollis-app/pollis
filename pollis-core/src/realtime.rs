@@ -130,11 +130,13 @@ pub enum RealtimeEvent {
         username: Option<String>,
         is_typing: bool,
     },
-    /// Presence inferred from LiveKit room participation; no heartbeats.
+    /// Presence inferred from LiveKit room participation; no heartbeats. `active` (#2110): some
+    /// session of the user's in this room is in use; false = every one is running unused (away).
     PresenceChanged {
         user_id: String,
         room_id: String,
         present: bool,
+        active: bool,
     },
     /// A peer's `account_id_pub` changed since the TOFU pin. Advisory; sends are not blocked.
     KeyChanged {
@@ -193,6 +195,15 @@ pub struct LiveKitState {
 
     /// Held while a room's roster is read and reported, so a seed and a departure can't interleave.
     pub presence_lane: Arc<tokio::sync::Mutex<()>>,
+
+    /// #2110: the renderer says the user is at this app (focused or recently used, not idle).
+    pub renderer_active: bool,
+
+    /// #2110: the shell hid the window (closed to the tray or Dock); cleared when it shows again.
+    pub window_hidden: bool,
+
+    /// Held while this device's `active` attribute is written to its rooms, so writes land in order.
+    pub activity_lane: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl LiveKitState {
@@ -204,7 +215,16 @@ impl LiveKitState {
             connecting: HashSet::new(),
             wake_only: false,
             presence_lane: Arc::new(tokio::sync::Mutex::new(())),
+            renderer_active: true,
+            window_hidden: false,
+            activity_lane: Arc::new(tokio::sync::Mutex::new(())),
         }
+    }
+
+    /// Whether this device's user is at the app (#2110): the window is shown and the renderer
+    /// reports use. What its rooms' `active` attribute says.
+    pub fn in_use(&self) -> bool {
+        self.renderer_active && !self.window_hidden
     }
 }
 

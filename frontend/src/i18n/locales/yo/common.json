@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "Ipò: {{status}}",
+    "away": "kò sí nítòsí",
     "offline": "kò sí lórí ayélujára",
     "online": "wà lórí ayélujára"
   },

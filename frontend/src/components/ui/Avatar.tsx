@@ -16,7 +16,22 @@ interface AvatarProps {
 
 const PRESENCE_COLORS: Record<PresenceStatus, string> = {
   online: "var(--c-accent)",
+  // #2110: the online dot with a bite taken out of it, a crescent moon.
+  away: "var(--c-accent)",
   offline: "var(--c-bg)",
+};
+
+const RING = "var(--c-surface, var(--c-bg))";
+
+/** The bite that turns the dot into a crescent (#2110): a circle in the ring's colour, clipped by the dot. */
+const AWAY_BITE: React.CSSProperties = {
+  position: "absolute",
+  top: "-20%",
+  left: "-20%",
+  width: "80%",
+  height: "80%",
+  borderRadius: "50%",
+  background: RING,
 };
 
 export const Avatar: React.FC<AvatarProps> = ({
@@ -66,8 +81,9 @@ export const Avatar: React.FC<AvatarProps> = ({
     border:
       presence === "offline"
         ? "2px solid var(--c-accent-muted)"
-        : "2px solid var(--c-surface, var(--c-bg))",
+        : `2px solid ${RING}`,
     boxSizing: "content-box",
+    overflow: "hidden",
   };
 
   const inner = blobUrl ? (
@@ -98,9 +114,12 @@ export const Avatar: React.FC<AvatarProps> = ({
       <span
         data-testid={testId ? `${testId}-presence` : undefined}
         aria-label={t("presence.label", { status: t(`presence.${presence}`) })}
+        data-presence={presence}
         className="rounded-full"
         style={dotStyle}
-      />
+      >
+        {presence === "away" ? <span aria-hidden="true" style={AWAY_BITE} /> : null}
+      </span>
     </span>
   );
 };

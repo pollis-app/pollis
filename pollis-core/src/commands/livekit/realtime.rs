@@ -7,8 +7,6 @@ use crate::error::Result;
 use crate::realtime::RealtimeEvent;
 use crate::state::AppState;
 
-use super::identity::user_id_from_identity;
-
 /// Called once by the frontend on startup. Stores the typed Channel used to
 /// push RealtimeEvents to the frontend. Safe to call again on re-login.
 pub async fn subscribe_realtime(
@@ -134,18 +132,23 @@ pub async fn connect_rooms(
                             let started = std::time::Instant::now();
                             while let Some(event) = events.recv().await {
                                 match event {
-                                    RoomEvent::ParticipantConnected(p) => {
+                                    RoomEvent::ParticipantConnected(p)
+                                    | RoomEvent::ParticipantDisconnected(p) => {
                                         emit_presence(
                                             app_state,
+                                            room,
                                             &p.identity().to_string(),
                                             room_id,
                                             user_id,
-                                            true,
                                         )
                                         .await;
                                     }
-                                    RoomEvent::ParticipantDisconnected(p) => {
-                                        emit_departure(
+                                    // #2110: a peer's session started or stopped being in use.
+                                    RoomEvent::ParticipantAttributesChanged {
+                                        participant: Participant::Remote(p),
+                                        ..
+                                    } => {
+                                        emit_presence(
                                             app_state,
                                             room,
                                             &p.identity().to_string(),
@@ -273,6 +276,8 @@ pub async fn connect_rooms(
                                             entry.0 = Arc::clone(&new_room);
                                         }
                                     }
+                                    // A new session starts with no attribute (#2110).
+                                    publish_activity_on_join(&app_state_task, &room_id_owned).await;
 
                                     // Re-emit presence for who's already there.
                                     emit_room_initial_presence(
@@ -302,9 +307,13 @@ pub async fn connect_rooms(
                     });
 
                     crate::diag!("[realtime] connected room {room_id}");
-                    let mut lk = lk_arc_connect.lock().await;
-                    lk.connecting.remove(&room_id);
-                    lk.rooms.insert(room_id, (room, handle));
+                    {
+                        let mut lk = lk_arc_connect.lock().await;
+                        lk.connecting.remove(&room_id);
+                        lk.rooms.insert(room_id.clone(), (room, handle));
+                    }
+                    // In the map first, so a change from here on reaches this room too (#2110).
+                    publish_activity_on_join(&app_state_connect, &room_id).await;
                 }
                 Err(e) => {
                     crate::diag!("[realtime] failed to connect room {room_id}: {e}");
@@ -318,21 +327,23 @@ pub async fn connect_rooms(
     Ok(())
 }
 
-/// Emit one PresenceChanged for a participant's (pseudonymous, #836) identity.
-/// No-op for non-users and unresolved ids: a wrong name is worse than none.
-pub(super) async fn emit_presence(
-    state: &Arc<AppState>,
-    identity: &str,
-    room_id: &str,
-    self_user_id: &str,
-    present: bool,
-) {
-    let (internal, _) = super::identity::resolve_participant(state, room_id, identity).await;
-    // The one presence rule, shared with mobile's `livekit_room_presence` (#2059).
-    let user_id = match crate::commands::livekit_roster::present_user(&internal, self_user_id) {
-        Some(uid) => uid,
-        None => return,
-    };
+/// Every remote session in `room`: its wire identity, and whether its `active` attribute says in
+/// use (#2110; no attribute = in use, so a build that predates it shows online).
+fn roster(room: &livekit::Room) -> Vec<(String, bool)> {
+    room.remote_participants()
+        .iter()
+        .map(|(identity, p)| {
+            let attributes = p.attributes();
+            let active = crate::commands::livekit_roster::session_active(
+                attributes.get(crate::commands::livekit_roster::ACTIVE_ATTRIBUTE).map(String::as_str),
+            );
+            (identity.to_string(), active)
+        })
+        .collect()
+}
+
+/// Send one PresenceChanged; `status` is the user's state in the room (`None` = gone).
+async fn send_presence(state: &Arc<AppState>, user_id: &str, room_id: &str, status: Option<bool>) {
     let channel = {
         let lk = state.livekit.lock().await;
         lk.channel.clone()
@@ -341,48 +352,62 @@ pub(super) async fn emit_presence(
         let _ = ch.send(RealtimeEvent::PresenceChanged {
             user_id: user_id.to_string(),
             room_id: room_id.to_string(),
-            present,
+            present: status.is_some(),
+            active: status.unwrap_or(true),
         });
     }
 }
 
-/// A session left `room`. The user is gone from it only if that was their last one there: a user
-/// holds one per device, and in a DM a call's session sits beside the realtime one (#1919).
-async fn emit_departure(
+/// Report the user behind one session (pseudonymous, #836) as `room` now shows them: present and
+/// in use, present and away, or gone. It reads the whole roster, so an arrival, a departure and an
+/// attribute change are one path: a user is in the room while any session of theirs is (one per
+/// device, and in a DM a call's session beside the realtime one, #1919), and in use while any of
+/// those is (#2110). No-op for non-users and unresolved ids: a wrong name is worse than none.
+pub(super) async fn emit_presence(
     state: &Arc<AppState>,
-    room: &Arc<livekit::Room>,
+    room: &livekit::Room,
     identity: &str,
     room_id: &str,
     self_user_id: &str,
 ) {
     let lane = presence_lane(state).await;
     let _ordered = lane.lock().await;
-    // The SDK drops a participant from the map before it reports the departure.
-    let mut wire: Vec<String> = room.remote_participants().keys().map(|k| k.to_string()).collect();
-    let remaining = wire.len();
+    // The SDK updates the map before it reports a change, so a departed session is already gone.
+    let sessions = roster(room);
+    let mut wire: Vec<String> = sessions.iter().map(|(id, _)| id.clone()).collect();
     wire.push(identity.to_string());
     let resolved = super::identity::resolve_participants(state, room_id, &wire).await;
-    let internal = |wire_id: &String| resolved.get(wire_id).map(|(internal, _)| internal.as_str());
-    let user_id = match internal(&wire[remaining]).and_then(user_id_from_identity) {
-        Some(uid) => uid,
+    // The one presence rule, shared with mobile's `livekit_room_presence` (#2059).
+    let user_id = match resolved
+        .get(identity)
+        .and_then(|(internal, _)| crate::commands::livekit_roster::present_user(internal, self_user_id))
+    {
+        Some(uid) => uid.to_string(),
         None => return,
     };
-    if user_remains(wire[..remaining].iter().filter_map(internal), user_id) {
-        return;
-    }
-    emit_presence(state, identity, room_id, self_user_id, false).await;
+    let users = presence_of(&sessions, &resolved, self_user_id);
+    send_presence(state, &user_id, room_id, users.get(&user_id).copied()).await;
 }
 
-/// Whether `user_id` still has a session among `remaining`, a room's internal identities.
-fn user_remains<'a>(remaining: impl IntoIterator<Item = &'a str>, user_id: &str) -> bool {
-    remaining.into_iter().any(|identity| user_id_from_identity(identity) == Some(user_id))
+/// Each user `sessions` show, with whether any of their sessions is in use.
+fn presence_of(
+    sessions: &[(String, bool)],
+    resolved: &std::collections::HashMap<String, (String, String)>,
+    self_user_id: &str,
+) -> std::collections::BTreeMap<String, bool> {
+    crate::commands::livekit_roster::presence_by_user(
+        sessions
+            .iter()
+            .filter_map(|(id, active)| resolved.get(id).map(|(internal, _)| (internal.as_str(), *active))),
+        self_user_id,
+    )
 }
 
 async fn presence_lane(state: &Arc<AppState>) -> Arc<tokio::sync::Mutex<()>> {
     Arc::clone(&state.livekit.lock().await.presence_lane)
 }
 
-/// On (re)connect, emit PresenceChanged for every existing participant.
+/// On (re)connect, emit PresenceChanged for every user already in the room.
 pub(super) async fn emit_room_initial_presence(
     room: &Arc<livekit::Room>,
     room_id: &str,
@@ -391,42 +416,74 @@ pub(super) async fn emit_room_initial_presence(
 ) {
     let lane = presence_lane(state).await;
     let _ordered = lane.lock().await;
-    let participants = room.remote_participants();
+    let sessions = roster(room);
     // One batched resolve for the whole snapshot.
-    let wire: Vec<String> = participants.keys().map(|k| k.to_string()).collect();
-    let _ = super::identity::resolve_participants(state, room_id, &wire).await;
-    for identity in wire {
-        emit_presence(state, &identity, room_id, self_user_id, true).await;
+    let wire: Vec<String> = sessions.iter().map(|(id, _)| id.clone()).collect();
+    let resolved = super::identity::resolve_participants(state, room_id, &wire).await;
+    for (user_id, active) in presence_of(&sessions, &resolved, self_user_id) {
+        send_presence(state, &user_id, room_id, Some(active)).await;
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::user_remains;
+/// The renderer reports whether the user is at the app (#2110): focused or used within the idle
+/// window. Peers see it as this device's `active` attribute on every room it is in.
+pub async fn set_presence_active(active: bool, state: &Arc<AppState>) -> Result<()> {
+    update_activity(state, |lk| lk.renderer_active = active).await;
+    Ok(())
+}
 
-    /// #1919: a phone leaving the room must not take the same user's desktop offline with it.
-    #[test]
-    fn a_user_with_another_device_in_the_room_remains() {
-        assert!(user_remains(["bob:laptop", "carol:phone"], "bob"));
+/// The shell hid the window (closed to the tray or Dock) or showed it again (#2110). A hidden
+/// window is not in use whatever the renderer last said; showing it hands back to the renderer.
+pub async fn set_window_hidden(hidden: bool, state: &Arc<AppState>) -> Result<()> {
+    update_activity(state, |lk| lk.window_hidden = hidden).await;
+    Ok(())
+}
+
+/// Apply `change`; when it flips whether this device is in use, write the attribute. On change
+/// only: no timer, no heartbeat.
+async fn update_activity(state: &Arc<AppState>, change: impl FnOnce(&mut crate::realtime::LiveKitState)) {
+    let flipped = {
+        let mut lk = state.livekit.lock().await;
+        let before = lk.in_use();
+        change(&mut lk);
+        lk.in_use() != before
+    };
+    if flipped {
+        let state = Arc::clone(state);
+        tokio::spawn(async move { publish_activity(&state, None).await });
     }
+}
 
-    /// A DM call's session leaves when the call ends; the realtime one is still there.
-    #[test]
-    fn a_user_whose_call_or_viewer_session_is_left_remains() {
-        assert!(user_remains(["voice-bob:laptop"], "bob"));
-        assert!(user_remains(["bob:laptop:view"], "bob"));
+/// Write this device's current `active` attribute to every connected room, or to `only`. Writes
+/// are ordered and each reads the state when it runs, so the last one always wins.
+async fn publish_activity(state: &Arc<AppState>, only: Option<&str>) {
+    let lane = Arc::clone(&state.livekit.lock().await.activity_lane);
+    let _ordered = lane.lock().await;
+    let (rooms, active) = {
+        let lk = state.livekit.lock().await;
+        let rooms: Vec<(String, Arc<livekit::Room>)> = lk
+            .rooms
+            .iter()
+            .filter(|(id, _)| only.is_none_or(|o| o == id.as_str()))
+            .map(|(id, (room, _))| (id.clone(), Arc::clone(room)))
+            .collect();
+        (rooms, lk.in_use())
+    };
+    for (room_id, room) in rooms {
+        let attributes = std::collections::HashMap::from([(
+            crate::commands::livekit_roster::ACTIVE_ATTRIBUTE.to_string(),
+            crate::commands::livekit_roster::active_attribute_value(active).to_string(),
+        )]);
+        if let Err(e) = room.local_participant().set_attributes(attributes).await {
+            crate::diag!("[realtime] activity for room {room_id} not written: {e}");
+        }
     }
+}
 
-    #[test]
-    fn the_last_session_leaving_ends_presence() {
-        assert!(!user_remains(["carol:phone", "bobby:laptop"], "bob"));
-        assert!(!user_remains([], "bob"));
-    }
-
-    /// Unresolved pseudonyms and the DS's own participants are nobody: never guess a user.
-    #[test]
-    fn unresolved_and_internal_participants_are_not_the_user() {
-        assert!(!user_remains(["d-bob", "v-bob", "w-bob", "server", "pollis-ds"], "bob"));
-        assert!(!user_remains(["server"], "server"));
+/// A room just (re)joined starts with no attribute, which reads as in use: write it only when
+/// this device is not.
+async fn publish_activity_on_join(state: &Arc<AppState>, room_id: &str) {
+    if !state.livekit.lock().await.in_use() {
+        publish_activity(state, Some(room_id)).await;
     }
 }

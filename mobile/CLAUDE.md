@@ -1677,7 +1677,9 @@ Current state:
   desktop's corner dot. The feed is the realtime client: on each room's roster
   change it asks the core's `livekit_room_presence` for the users present and
   stores the snapshot in `stores/presenceStore.ts` (per room; a closed room is
-  dropped). The arm is a core change, so the fingerprint runtime version keeps
+  dropped). Away (#2110): the client sets the `active` participant attribute
+  from `AppState` (background `"0"`, foreground `"1"`) and passes the peers
+  whose attribute is `"0"` as `inactive`; a missing attribute is in use. The arm is a core change, so the fingerprint runtime version keeps
   this JS off any binary without it (OTA cannot reach one). See
   `.codesight/wiki/ui.md` → "Presence"; Maestro `flows/presence.yaml` and the
   presence half of `scripts/maestro-typing.sh`.

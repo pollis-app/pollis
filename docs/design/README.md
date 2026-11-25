@@ -250,9 +250,11 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   its twin. Bot management copy says plainly that the bot runs on a machine an admin controls and
   can read what it receives.
 - **Presence** (#132, #2059): a person's avatar carries a small corner dot, a quarter of the
-  avatar: online is the accent ringed in the surface behind it, offline a hollow dot (`bg`
-  ringed in `accentMuted`). Solid, never a glow. Online means a room this device shares shows
-  them; you are always online on your own device. Groups and channels get no dot. Desktop
+  avatar: online is the accent ringed in the surface behind it, away (#2110) the same dot with
+  a bite taken out of its top corner in the ring's colour (a crescent moon, same box), offline a
+  hollow dot (`bg` ringed in `accentMuted`). Solid, never a glow. Online means a room this device
+  shares shows them in use, away that it shows them with the app running but not in use; you are
+  always online on your own device. Groups and channels get no dot. Desktop
   `PresenceAvatar` / `PresenceDot`; mobile draws it on every `UserAvatar`.
 - **Empty states:** every list that can be empty uses `EmptyState`, on desktop
   (`frontend/src/components/ui/EmptyState.tsx`, also what `NavigableList` / `NavigableGrid` draw

@@ -19,6 +19,11 @@ pub async fn connect_rooms(room_ids: Vec<String>, user_id: String, username: Str
 }
 
 #[tauri::command]
+pub async fn set_presence_active(active: bool, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::livekit::set_presence_active(active, &state).await
+}
+
+#[tauri::command]
 pub async fn publish_typing(room_id: String, channel_id: Option<String>, conversation_id: Option<String>, user_id: String, username: Option<String>, is_typing: bool, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::livekit::publish_typing(room_id, channel_id, conversation_id, user_id, username, is_typing, &state).await
 }

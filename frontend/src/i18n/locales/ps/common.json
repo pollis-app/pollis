@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "شتون: {{status}}",
+    "away": "لرې",
     "offline": "آفلاین",
     "online": "آنلاین"
   },

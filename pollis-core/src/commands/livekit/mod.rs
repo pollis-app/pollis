@@ -31,7 +31,7 @@ pub use publish::{
     publish_voice_roster_changed,
     start_call, StartCallResult,
 };
-pub use realtime::{connect_rooms, subscribe_realtime};
+pub use realtime::{connect_rooms, set_presence_active, set_window_hidden, subscribe_realtime};
 pub use sfu_gate::{sfu_gate, Role as SfuRole, SfuGate};
 
 /// Whether a failed `Room::connect` means the SFU itself could not be reached
