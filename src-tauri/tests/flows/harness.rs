@@ -78,8 +78,13 @@ pub(crate) async fn world() -> &'static TestWorld {
                 .await
                 .expect("drop log tables from main");
 
+            // An in-process R2 (#2109): attachments take their real presign/PUT/GET path.
+            let r2_url = crate::fake_r2::spawn();
+            config.r2_endpoint = r2_url.clone();
+            config.r2_public_url = r2_url.clone();
+
             // The real DS gets the harness's own handles: two `Database`s on one file don't share WAL writes promptly.
-            let delivery_url = spawn_in_process_delivery(remote.clone(), log.clone()).await;
+            let delivery_url = spawn_in_process_delivery(remote.clone(), log.clone(), &r2_url).await;
             config.pollis_delivery_url = Some(delivery_url);
 
             TestWorld { remote, log, config }
@@ -379,7 +384,7 @@ pub(crate) fn expire_ds_last_seen_throttle(user_id: &str) {
         .forget_user(user_id);
 }
 
-async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
+async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>, r2_url: &str) -> String {
     use std::sync::mpsc;
 
     // The harness's own handles: a second `Database` on one file doesn't see WAL writes promptly.
@@ -416,6 +421,14 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
             probe_window_secs: 1,
             get_max: 1_000_000,
             get_window_secs: 1,
+        })
+        .with_broker_config(pollis_delivery::broker::BrokerConfig {
+            r2_endpoint: Some(r2_url.to_string()),
+            r2_region: "auto".to_string(),
+            r2_bucket: Some(crate::fake_r2::BUCKET.to_string()),
+            r2_access_key_id: Some("flows".to_string()),
+            r2_secret_access_key: Some("flows".to_string()),
+            ..pollis_delivery::broker::BrokerConfig::default()
         });
 
     // The very map the auth gate consults, for `expire_ds_device_keys`.
@@ -867,6 +880,7 @@ pub(crate) async fn wipe() {
     clear_ds_fault();
     SENT_WAKE_UPS.lock().expect("wake-up log").clear();
     SENT_PUSH_AUDIENCES.lock().expect("push log").clear();
+    crate::fake_r2::clear();
     let w = world().await;
     wipe_remote(
         &w.remote.conn().await.expect("main conn"),

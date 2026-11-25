@@ -27,7 +27,7 @@ use crate::state::AppState;
 
 use super::types::Message;
 
-/// Not yet confirmed by the DS, including an attachment send waiting on its file key (a wait, not a failure).
+/// Not yet confirmed by the DS.
 pub(crate) const PENDING: &str = "pending";
 /// `message.send_state` once delivery has failed in a way a later attempt may not (offline,
 /// a 5xx, an outdated client) and the outbox has stopped retrying it in place (#2055).
@@ -35,8 +35,12 @@ pub(crate) const FAILED: &str = "failed";
 /// The DS refused it in a way no retry fixes; the drain leaves it to the user.
 pub(crate) const REJECTED: &str = "rejected";
 
-/// Whether `e` is a refusal no retry fixes: DS 400, 403, 404, 410 or 422.
+/// Whether `e` is a refusal no retry fixes: DS 400, 403, 404, 410 or 422, or
+/// an attachment the operator removed (#2109).
 pub(super) fn is_permanent(e: &Error) -> bool {
+    if matches!(e, Error::AttachmentRemoved) {
+        return true;
+    }
     let Error::Other(any) = e else {
         return false;
     };
@@ -259,12 +263,15 @@ struct AttWire<'a> {
     name: &'a str,
     ct: &'a str,
     size: usize,
-    /// The object's random file id (not a content hash, #1382).
+    /// The object id: `v2-` + SHA-256 of the stored ciphertext (#2109).
     hash: &'a str,
-    /// Which key of the conversation's file key ring sealed it.
-    kv: i64,
-    /// SHA-256 of the plaintext, checked after decrypt. Only ever inside the
-    /// MLS-encrypted message.
+    /// The reference version (#2109): `2`, a shared object keyed by `sha`.
+    /// A v1 reference (#1382) has no `v` and names a ring key with `kv`,
+    /// which a v2 reference leaves out, so an older client draws it as
+    /// unavailable instead of trying a ring key.
+    v: u8,
+    /// SHA-256 of the plaintext, checked after decrypt, and the file key's
+    /// source. Only ever inside the MLS-encrypted message.
     sha: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     bh: Option<&'a str>,
@@ -360,7 +367,7 @@ fn final_content(
                 ct: &r.content_type,
                 size: r.size_bytes,
                 hash: &r.content_hash,
-                kv: r.key_version,
+                v: r.version,
                 sha: &r.sha256,
                 bh: r.blurhash.as_deref().or(a.blurhash.as_deref()),
                 w: r.width.or(a.width),
@@ -471,7 +478,6 @@ fn preview_thumbnail_on(conn: &rusqlite::Connection, id: &str) -> Result<Option<
 pub(super) async fn upload_preview_thumbnail(
     state: &Arc<AppState>,
     id: &str,
-    conversation_id: &str,
     preview_json: &str,
 ) -> Result<Option<String>> {
     let thumb = {
@@ -487,12 +493,10 @@ pub(super) async fn upload_preview_thumbnail(
     else {
         return Ok(None);
     };
-    crate::commands::r2::check_outbox_upload_key(conversation_id, state).await?;
     let up = crate::commands::r2::upload_outbox_bytes(
         data,
         crate::commands::link_preview::THUMBNAIL_FILENAME.to_string(),
         crate::commands::link_preview::THUMBNAIL_CONTENT_TYPE.to_string(),
-        conversation_id,
         state,
     )
     .await?;
@@ -501,6 +505,7 @@ pub(super) async fn upload_preview_thumbnail(
         url: up.url,
         hash: up.content_hash,
         kv: up.key_version,
+        v: Some(up.version),
         sha: up.sha256,
         ct: crate::commands::link_preview::THUMBNAIL_CONTENT_TYPE.to_string(),
         size: up.size_bytes,
@@ -1013,8 +1018,8 @@ async fn known_offline() -> bool {
 /// What [`deliver`] does after an attempt that failed with a retry still left.
 #[derive(Debug, PartialEq, Eq)]
 enum AfterFailure {
-    /// Stop: the attempt already left the row as it should read (`rejected`, waiting for its
-    /// file key, or a simulated kill, which marks nothing).
+    /// Stop: the attempt already left the row as it should read (`rejected`, or a simulated
+    /// kill, which marks nothing).
     Stop,
     /// Stop and write `failed`: retrying in place cannot help.
     GiveUp,
@@ -1023,8 +1028,8 @@ enum AfterFailure {
 }
 
 /// The one decision behind [`deliver`]'s retries, pure so it is tested on its own.
-fn after_failure(e: &Error, awaiting_key: bool, leaving: bool, offline: bool) -> AfterFailure {
-    if is_permanent(e) || awaiting_key || super::send::test_hooks::is_simulated_crash(e) {
+fn after_failure(e: &Error, leaving: bool, offline: bool) -> AfterFailure {
+    if is_permanent(e) || super::send::test_hooks::is_simulated_crash(e) {
         return AfterFailure::Stop;
     }
     if !crate::commands::mls::ds_client::is_transient(e) || leaving || offline {
@@ -1110,12 +1115,7 @@ pub(super) async fn deliver(
         let Some(delay) = delay else {
             return Err(err);
         };
-        let decision = after_failure(
-            &err,
-            awaiting_key(state, id),
-            suspend::is_leaving(),
-            known_offline().await,
-        );
+        let decision = after_failure(&err, suspend::is_leaving(), known_offline().await);
         match decision {
             AfterFailure::Stop => return Err(err),
             AfterFailure::GiveUp => {
@@ -1186,12 +1186,6 @@ async fn deliver_in_line(
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
         pending_ahead_on(db.conn(), conversation_id, id)?
     };
-    // A row waiting for its file key cannot go yet, so it holds nobody up; the drain or its
-    // own retry sends it when the key arrives.
-    let ahead: Vec<String> = ahead
-        .into_iter()
-        .filter(|earlier| !awaiting_key(state, earlier))
-        .collect();
     for earlier in ahead {
         if let Err(e) = deliver_one(state, &earlier, None, Attempt::Ahead).await {
             crate::diag!("[outbox] delivery of {earlier}, ahead of {id}, failed: {e}");
@@ -1212,27 +1206,6 @@ enum Attempt {
     Ahead,
 }
 
-/// Whether `id` last stopped on its conversation's file key (#1636); in memory only, so after a
-/// restart such a row gets one more ahead attempt, which the key check ends before any bytes.
-fn awaiting_key(state: &Arc<AppState>, id: &str) -> bool {
-    state
-        .outbox_awaiting_key
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .contains(id)
-}
-
-fn set_awaiting_key(state: &Arc<AppState>, id: &str, waiting: bool) {
-    let mut set = state
-        .outbox_awaiting_key
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    if waiting {
-        set.insert(id.to_string());
-    } else {
-        set.remove(id);
-    }
-}
 
 /// One delivery attempt for `id`, under its own lock.
 /// Re-reads the row under the lock; what a failure records depends on [`Attempt`].
@@ -1300,19 +1273,11 @@ async fn deliver_locked(
 
     let queued = match finish_uploads(state, queued).await {
         Ok(queued) => queued,
-        Err(e) if crate::commands::file_keys::is_file_key_unavailable(&e) => {
-            // Only the file key is missing: stays queued, not failed; the next drain sends it.
-            mark_state(state, id, PENDING).await;
-            set_awaiting_key(state, id, true);
-            return Err(e);
-        }
         Err(e) => {
-            set_awaiting_key(state, id, false);
             record_failure(state, id, &e, attempt).await;
             return Err(e);
         }
     };
-    set_awaiting_key(state, id, false);
 
     let delivered = match super::send::test_hooks::take_link_failure() {
         Some(e) => Err(e),
@@ -1366,7 +1331,7 @@ async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Que
     // The link preview's thumbnail (#1987), same path and same failure handling.
     if let Some(json) = queued.link_preview.clone() {
         if let Some(updated) =
-            upload_preview_thumbnail(state, &queued.id, &queued.conversation_id, &json).await?
+            upload_preview_thumbnail(state, &queued.id, &json).await?
         {
             let guard = state.local_db.lock().await;
             let db = guard.as_ref().ok_or_else(not_signed_in)?;
@@ -1392,9 +1357,7 @@ async fn finish_attachment_uploads(
     mut queued: Queued,
     metas: &[AttMeta],
 ) -> Result<Queued> {
-    // The key before any bytes (#1636): a row still waiting for it must not read its
-    // attachments out of the database on every attempt.
-    crate::commands::r2::check_outbox_upload_key(&queued.conversation_id, state).await?;
+    // No file key to wait for (#2109): a shared object's key travels in the message.
     let mut uploaded = Vec::with_capacity(metas.len());
     for (n, meta) in metas.iter().enumerate() {
         let data = {
@@ -1407,7 +1370,6 @@ async fn finish_attachment_uploads(
                 data,
                 meta.filename.clone(),
                 meta.content_type.clone(),
-                &queued.conversation_id,
                 state,
             )
             .await?,
@@ -2264,15 +2226,15 @@ mod tests {
                 body: String::new(),
             }))
         };
-        assert_eq!(after_failure(&link(), false, false, false), AfterFailure::Retry);
-        assert_eq!(after_failure(&five_hundred(), false, false, false), AfterFailure::Retry);
-        assert_eq!(after_failure(&link(), false, false, true), AfterFailure::GiveUp, "offline");
-        assert_eq!(after_failure(&link(), false, true, false), AfterFailure::GiveUp, "leaving");
-        assert_eq!(after_failure(&Error::UpgradeRequired, false, false, false), AfterFailure::GiveUp);
-        assert_eq!(after_failure(&refused(), false, false, false), AfterFailure::Stop, "rejected");
-        assert_eq!(after_failure(&link(), true, false, false), AfterFailure::Stop, "file key");
+        assert_eq!(after_failure(&link(), false, false), AfterFailure::Retry);
+        assert_eq!(after_failure(&five_hundred(), false, false), AfterFailure::Retry);
+        assert_eq!(after_failure(&link(), false, true), AfterFailure::GiveUp, "offline");
+        assert_eq!(after_failure(&link(), true, false), AfterFailure::GiveUp, "leaving");
+        assert_eq!(after_failure(&Error::UpgradeRequired, false, false), AfterFailure::GiveUp);
+        assert_eq!(after_failure(&refused(), false, false), AfterFailure::Stop, "rejected");
+        assert_eq!(after_failure(&Error::AttachmentRemoved, false, false), AfterFailure::Stop, "removed file");
         assert_eq!(
-            after_failure(&super::super::send::test_hooks::simulated_crash(), false, false, false),
+            after_failure(&super::super::send::test_hooks::simulated_crash(), false, false),
             AfterFailure::Stop
         );
     }

@@ -216,135 +216,25 @@ async fn received_captions(client: &TestClient, dm_id: &str) -> Vec<String> {
         .collect()
 }
 
-/// The peer minted the ring, then moved the epoch; the upload ran before catch-up.
+/// #2109: a new photo is a shared object keyed by its own reference, so it needs no
+/// conversation file key at all. A DM whose ring this device cannot open (none stored,
+/// none cached) still sends at once, and the peer opens it.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn a_dm_member_behind_the_rings_epoch_still_sends_a_photo() {
+async fn a_photo_needs_no_conversation_file_key() {
     wipe().await;
     let _stub = StubbedUploads::on();
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
     let dm_id = dm_pair(&mut alice, &mut bob).await;
     forget_the_ring(&dm_id, &[&alice, &bob]).await;
-
-    let (_, sent) = send_photo(&alice, &dm_id, "alice mints").await;
-    sent.expect("alice's photo mints the ring");
-    assert!(alice.self_update(&dm_id).await, "alice moves the epoch on");
-
-    let (id, sent) = send_photo(&bob, &dm_id, "The icon is so tiny on my phone!").await;
-    sent.expect("bob, one commit behind, still sends the photo");
-    assert_eq!(own_send_state(&bob, &dm_id, &id).await, None, "delivered");
-    assert!(received_captions(&alice, &dm_id)
-        .await
-        .contains(&"The icon is so tiny on my phone!".to_string()));
-    drop((alice, bob));
-}
-
-/// This device committed past the ring's only wrap epoch before the peer re-wrapped.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn a_dm_member_past_the_rings_epoch_still_sends_a_photo() {
-    wipe().await;
-    let _stub = StubbedUploads::on();
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let dm_id = dm_pair(&mut alice, &mut bob).await;
-    forget_the_ring(&dm_id, &[&alice, &bob]).await;
-
-    let (_, sent) = send_photo(&alice, &dm_id, "alice mints").await;
-    sent.expect("alice's photo mints the ring");
-    // Alice is offline, so she cannot re-wrap at bob's epoch.
-    assert!(bob.self_update(&dm_id).await, "bob moves the epoch on");
-
-    let (id, sent) = send_photo(&bob, &dm_id, "The icon is so tiny on my phone!").await;
-    sent.expect("bob, past the ring's epoch, still sends the photo");
-    assert_eq!(own_send_state(&bob, &dm_id, &id).await, None, "delivered");
-    assert!(received_captions(&alice, &dm_id)
-        .await
-        .contains(&"The icon is so tiny on my phone!".to_string()));
-    drop((alice, bob));
-}
-
-/// An unreachable key keeps the photo queued until the peer's re-wrap lands.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn a_photo_waiting_for_the_file_key_stays_queued_and_goes_out_once_it_arrives() {
-    wipe().await;
-    let _stub = StubbedUploads::on();
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let dm_id = dm_pair(&mut alice, &mut bob).await;
-    forget_the_ring(&dm_id, &[&alice, &bob]).await;
-
-    let (_, sent) = send_photo(&alice, &dm_id, "alice mints").await;
-    sent.expect("alice's photo mints the ring");
-    assert!(bob.self_update(&dm_id).await, "bob moves the epoch on");
     wipe_local_ring(&bob, &dm_id).await;
 
-    let (id, _) = send_photo(&bob, &dm_id, "waits for the key").await;
-    assert_eq!(
-        own_send_state(&bob, &dm_id, &id).await.as_deref(),
-        Some("pending"),
-        "a missing file key is a wait, not a failure"
-    );
-
-    alice.process_commits_for(&dm_id).await;
-    bob.invoke_json("flush_outbox", serde_json::json!({})).await;
-    assert_eq!(own_send_state(&bob, &dm_id, &id).await, None, "delivered by the drain");
+    let (id, sent) = send_photo(&bob, &dm_id, "no ring needed").await;
+    sent.expect("the photo sends without a file key");
+    assert_eq!(own_send_state(&bob, &dm_id, &id).await, None, "delivered at once");
     assert!(received_captions(&alice, &dm_id)
         .await
-        .contains(&"waits for the key".to_string()));
-    drop((alice, bob));
-}
-
-/// Rapid sends (#1636): a photo waiting for the file key holds nobody up. A text sent after it
-/// goes straight out without another attempt at the photo, and the photo goes once the key
-/// arrives.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn a_photo_waiting_for_the_file_key_does_not_hold_up_the_next_send() {
-    use pollis_core::commands::messages::test_hooks;
-    wipe().await;
-    let _stub = StubbedUploads::on();
-    let mut alice = TestClient::new().await;
-    let mut bob = TestClient::new().await;
-    let dm_id = dm_pair(&mut alice, &mut bob).await;
-    forget_the_ring(&dm_id, &[&alice, &bob]).await;
-
-    let (_, sent) = send_photo(&alice, &dm_id, "alice mints").await;
-    sent.expect("alice's photo mints the ring");
-    assert!(bob.self_update(&dm_id).await, "bob moves the epoch on");
-    wipe_local_ring(&bob, &dm_id).await;
-
-    let (photo, _) = send_photo(&bob, &dm_id, "waits for the key").await;
-    assert_eq!(own_send_state(&bob, &dm_id, &photo).await.as_deref(), Some("pending"));
-
-    let before = test_hooks::delivery_attempts();
-    bob.invoke_try(
-        "send_message",
-        serde_json::json!({
-            "conversationId": dm_id,
-            "senderId": bob.user_id(),
-            "content": "sent after the photo",
-            "replyToId": null,
-            "senderUsername": null,
-        }),
-    )
-    .await
-    .expect("the text is not held up by the photo");
-    assert_eq!(test_hooks::delivery_attempts(), before + 1, "the waiting photo was passed over");
-    assert_eq!(own_send_state(&bob, &dm_id, &photo).await.as_deref(), Some("pending"));
-    assert!(alice
-        .fetch_dm_messages(&dm_id)
-        .await
-        .iter()
-        .any(|m| m["content"] == "sent after the photo"));
-
-    alice.process_commits_for(&dm_id).await;
-    bob.invoke_json("flush_outbox", serde_json::json!({})).await;
-    assert_eq!(own_send_state(&bob, &dm_id, &photo).await, None, "delivered once the key is there");
-    assert!(received_captions(&alice, &dm_id)
-        .await
-        .contains(&"waits for the key".to_string()));
+        .contains(&"no ring needed".to_string()));
     drop((alice, bob));
 }

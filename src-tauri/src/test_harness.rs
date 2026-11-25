@@ -462,6 +462,8 @@ pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) 
         "group_member",
         "groups",
         "attachment_ref",
+        "attachment_lease",
+        "attachment_removed",
         "attachment_object",
         "users",
     ];

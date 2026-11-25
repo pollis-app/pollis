@@ -118,8 +118,6 @@ pub struct AppState {
     pub outbox_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// Sends still writing their outbox row, per conversation (#1636), so an earlier one is never overtaken.
     pub outbox_enqueuing: Arc<crate::commands::messages::Enqueuing>,
-    /// Unsent messages whose last attempt stopped on the file key (#1636); later sends pass them.
-    pub outbox_awaiting_key: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Unsent messages a send or Retry is retrying in place (#2055); the drain leaves them `pending`.
     pub outbox_retrying: Arc<crate::commands::messages::Retrying>,
     /// Follow-up work a command started and returned without waiting for: an approval's MLS add
@@ -199,7 +197,6 @@ impl AppState {
             inbound_news: Arc::default(),
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_enqueuing: Arc::default(),
-            outbox_awaiting_key: Arc::default(),
             outbox_retrying: Arc::default(),
             background_work: Arc::default(),
             key_package_refill: Arc::new(Mutex::new(())),
