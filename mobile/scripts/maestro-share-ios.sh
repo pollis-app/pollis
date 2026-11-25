@@ -43,7 +43,12 @@ OUT="$MAE/artifacts/$(date +%Y-%m-%d)/$PLATFORM"
 DEBUG="$OUT/.debug-share"
 mkdir -p "$DEBUG"
 IPAD=0
-[ "$PLATFORM" = ipad ] && IPAD=1
+# Where the share sheet puts the Pollis cell when Safari shares a page (ios-0-safari.yaml).
+SHEET_POINT="${SHEET_POINT:-82%,76%}"
+if [ "$PLATFORM" = ipad ]; then
+  IPAD=1
+  SHEET_POINT="${SHEET_POINT_IPAD:-93%,19%}"
+fi
 
 part() {
   local flow="$1"
@@ -65,17 +70,17 @@ part ios-3-vault -e TAG=photo
 
 xcrun simctl openurl "$DEVICE" "https://pollis.com/learn"
 sleep 4
-part ios-0-safari
+part ios-0-safari -e SHEET_POINT="$SHEET_POINT"
 part ios-1-pin
 part ios-2-send -e TAG=link
 part ios-3-vault -e TAG=link
 
 xcrun simctl openurl "$DEVICE" "https://pollis.com/learn"
 sleep 3
-part ios-0-safari
+part ios-0-safari -e SHEET_POINT="$SHEET_POINT"
 part ios-4-lockout
 
-part ios-0-safari
+part ios-0-safari -e SHEET_POINT="$SHEET_POINT"
 part ios-5-signed-out
 
 find "$DEBUG" -name 'share-*.png' -exec cp {} "$OUT/" \; 2>/dev/null || true

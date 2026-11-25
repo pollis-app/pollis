@@ -28,12 +28,7 @@ appId: com.apple.mobileslideshow
     timeout: 10000
 - tapOn: "Share"
 - extendedWaitUntil:
-    visible:
-      id: "shareCell"
-      text: "Pollis"
+    visible: "Pollis"
     timeout: 15000
 - takeScreenshot: share-ios-photos-sheet
-# The share sheet's app cell, not a "pollis" on the page behind it.
-- tapOn:
-    id: "shareCell"
-    text: "Pollis"
+- tapOn: "Pollis"

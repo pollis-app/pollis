@@ -28,6 +28,7 @@ import { deviceWasRevoked } from "../lib/deviceRevoked";
 import { isInSignedInApp, noticeEnrollmentRequested } from "../lib/enrollmentPrompt";
 import { catchUpThenBackstop } from "../lib/mlsBackstop";
 import { noticeHistoryTransfer } from "../lib/historyTransferPrompt";
+import { vaultQueryKeys } from "./queries/useVault";
 
 /**
  * Re-subscribe every room whose subscription no longer hears it (its connect failed). Asked of the
@@ -256,6 +257,8 @@ export function useInboxRealtime() {
       // now, from the local store, before any round trip (#1610).
       void qcRef.current.invalidateQueries({ queryKey: messageQueryKeys.all, refetchType: "all" });
       void qcRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+      // #2100: a Vault save the share extension made while the app was away.
+      void qcRef.current.invalidateQueries({ queryKey: vaultQueryKeys.all });
       // Counts and the cross-device cursor converge are `useUnreadSync`'s resume handler.
       // Re-open rooms whose connect failed.
       reopenDropped(subsRef.current, handlerRef.current);

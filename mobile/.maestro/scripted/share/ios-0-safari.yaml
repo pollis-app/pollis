@@ -1,21 +1,35 @@
 appId: com.apple.mobilesafari
 ---
 # Open Pollis's share sheet from Safari on a page (#2100). The script opened the page first
-# (`simctl openurl`).
-- extendedWaitUntil:
-    visible:
-      id: "MoreMenuButton"
-    timeout: 20000
-- tapOn:
-    id: "MoreMenuButton"
-- tapOn: "Share"
-- extendedWaitUntil:
-    visible:
-      id: "shareCell"
-      text: "Pollis"
-    timeout: 15000
+# (`simctl openurl`). After the extension is cancelled the share sheet is still up, and the page's
+# menu button is hidden under it: then the sheet is used as it is.
+- waitForAnimationToEnd:
+    timeout: 3000
+# iPad Safari has a Share button in its toolbar (tapped by place: like the sheet, its reported
+# frame is offset); the iPhone has Share in the page menu.
+- runFlow:
+    when:
+      true: ${IPAD == "1"}
+      visible:
+        id: "MoreMenuButton"
+    commands:
+      - tapOn:
+          point: "88%,4%"
+- runFlow:
+    when:
+      true: ${IPAD != "1"}
+      visible:
+        id: "MoreMenuButton"
+    commands:
+      - tapOn:
+          id: "MoreMenuButton"
+      - tapOn: "Share"
+# The sheet itself is not in the test driver's tree reliably here: wait for it to settle.
+- waitForAnimationToEnd:
+    timeout: 5000
 - takeScreenshot: share-ios-safari-sheet
-# The share sheet's app cell, not a "pollis" on the page behind it.
+# The share sheet's app cell. Not by its label: the page behind has a "pollis" too, and in Safari
+# the sheet's reported frames are offset, so a label tap lands on the page. SHEET_POINT is the
+# cell on this device (the script sets it per device).
 - tapOn:
-    id: "shareCell"
-    text: "Pollis"
+    point: "${SHEET_POINT}"
