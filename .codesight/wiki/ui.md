@@ -764,6 +764,8 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 
 **Content is contextual, the column is not.** The panel's context comes from the route alone (`RightPanel/panelContext.ts`, pinned by `frontend/tests/panel-context.test.ts`), never from `appStore.selected*`: those outlive the page that set them, which once left a channel's group roster on every settings page. Any `/groups/<id>/…` page lists that group's **other members who are online**; a channel adds threads, pins and its media. `/dms/<id>` (and its settings) lists everyone in the conversation, you included, with safety numbers and media. Every other page (Preferences, Search, root, …) lists the **online people you have a DM open with**, named from the DM list, never a raw id. No media grid off a conversation, and a stale `?thread=` there falls back to the people list rather than rendering an empty thread. Presence is `presenceStore`; test builds expose it as `window.__pollisPresence` so specs can mark people online.
 
+**A 1:1 call shows its DM (#2116).** On `/call/<id>` the panel's default shape is `"dm"`: the 1:1 DM with the other party (the voice counterparty, else the ringing caller or callee), resolved by `utils/callDm.ts` from the DM list — members exactly self + peer, so a group DM containing the peer never counts, and with no such DM the panel is the people list as before (a call never creates a DM). It mounts `Layout/DMChat`, the one DM chat view the DM page also renders: selection (so the realtime wake's `isSelected` and `useReadWhileViewing` treat it as on screen, #2056), the durable read cursor, receipts, then `MainContent` without autofocus. Threads, pins and safety opened from it win over it, as `?thread=` does on a DM page, because the panel context's conversation on a call is that DM. Open/closed is still `rightPanelStore`. Group voice channels never use `/call/`, so they never get one. Coverage: `e2e/call-dm-panel.spec.ts`, `frontend/tests/call-dm.test.ts`.
+
 **The media grid is the message log's thumbnails.** `MediaGrid` renders `AttachmentDisplay` in its `tile` mode (a square that fills the cell instead of the fixed 96×96 thumb) — the same blurhash placeholder while bytes resolve, the same `0.5rem` corners, no border, click-to-lightbox — so a picture looks identical in the panel and in the chat. It used to be a separate `MediaTile` with none of that; the search page's `ResultThumbnails` used the same tile and now renders the same component. The grid is pictures and videos only (`isVisualMedia` in `MembersPanel`, the split `MessageItem` makes); audio and files stay in the log. Coverage: `e2e/right-panel-media.spec.ts`.
 
 ### Resizable side panels (#985)
@@ -1058,7 +1060,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**259 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**260 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1139,13 +1141,14 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **InviteLinkManager** — props: groupId — `frontend/src/components/Invites/InviteLinkManager.tsx`
 - **InviteLinkRow** — props: link, onRevoke, isRevoking — `frontend/src/components/Invites/InviteLinkRow.tsx`
 
-### `components/Layout` (16)
+### `components/Layout` (17)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`. The bar under the TitleBar: a back/forward chevron pair, then the clickable trail, then search + settings. The chevrons walk **router history**, one entry per click, the way a browser (and Slack, and Discord) does — there is no hierarchical "up one level" navigation any more; the trail's own segments are what jump up the tree. **Both are always rendered**, root included: a control that vanishes at the root shifts everything beside it sideways on the way home. When a direction has nowhere to go it is greyed out and truly `disabled` (a `ui/Button` `variant="ghost"`), so assistive tech is told what the grey says. Enablement comes from `stores/historyNavStore`, which subscribes to `router.history` (event-driven, never polled) and keeps a cursor plus a ceiling — `canGoBack` is `index > 0`, `canGoForward` is `index < maxIndex`, and a PUSH resets the ceiling to the new entry because it discards whatever was ahead. That arithmetic is pure in `utils/historyNav.ts` and pinned by `frontend/tests/history-nav.test.ts`; it exists because no browser API answers "can I go forward?" — `history.length` counts a session, not a direction, and never shrinks on a truncating push. The `nav.back` shortcut (Escape, handled in `AppShell`) routes through the same `historyNavStore.goBack()`, so the key and the chevron cannot land in different places.
 - **ConfirmPage** — props: title, paneTestId — `frontend/src/components/Layout/ConfirmPage.tsx`. A confirmation that is its own page (#1968): `PageShell` + `PageColumn` + `ConfirmBlock`. Leave group and Remove member; `e2e/confirm-form-patterns.spec.ts`.
 - **ConversationHeader** — props: title, children — `frontend/src/components/Layout/ConversationHeader.tsx`. The `h-bar` top bar of the channel and DM pages (#1640): title on the start side, every action in one `flex items-center gap-2` row on the end side. Spacing and vertical centring live here only — actions carry no `me-*` margins and nothing is absolutely positioned (the DM call button used to be, and sat on top of the pin). In the DM header the call slot becomes a "Return to call" `PillButton` (same target as the voice bar's channel pill, via `activeCallIdOf` in `types/voice-state.ts`) while any 1:1 call is joining or joined. Pinned by `frontend/tests/conversation-header.test.ts` and `e2e/dm-header-actions.spec.ts`.
-- **MainContent** — props: pendingDmRequest — `frontend/src/components/Layout/MainContent.tsx`
+- **DMChat** — props: conversationId, pendingDmRequest, autoFocus — `frontend/src/components/Layout/DMChat.tsx`
+- **MainContent** — props: pendingDmRequest, autoFocus — `frontend/src/components/Layout/MainContent.tsx`
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
 - **ResizeHandle** — props: panelRef, edge, label, maxPx, onCommit, onCollapse, onReset — `frontend/src/components/Layout/ResizeHandle.tsx`. Shared by both side panels; drags write `style.width` straight to the panel and never through React. See [Resizable side panels](#resizable-side-panels-985).
 - **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`. Its settings rows carry `sidebar-row-*` testids like `SectionHeader`'s, so navigation tests never match on a translated label (#932).
