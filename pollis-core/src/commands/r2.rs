@@ -805,6 +805,27 @@ async fn seal_off_runtime(
     .map_err(|e| Error::Other(anyhow::anyhow!("upload preparation failed: {e}")))
 }
 
+/// A new upload's object: a random file id that names it and salts its key (it is not key
+/// material), its R2 key and URL, and its file key from `ring_key`, which is consumed.
+pub(crate) struct NewObject {
+    pub content_hash: String,
+    pub r2_key: String,
+    pub r2_url: String,
+    pub enc_key: zeroize::Zeroizing<[u8; 32]>,
+    pub enc_nonce: [u8; 12],
+}
+
+pub(crate) fn new_object(state: &Arc<AppState>, ring_key: zeroize::Zeroizing<[u8; 32]>) -> NewObject {
+    let mut file_id = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
+    let content_hash = hex::encode(file_id);
+    let r2_key = format!("media/{content_hash}.enc");
+    let r2_url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), r2_key);
+    let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
+    drop(ring_key);
+    NewObject { content_hash, r2_key, r2_url, enc_key, enc_nonce }
+}
+
 /// Shared upload core: fresh per-file key from `scope`'s ring, random object name.
 async fn upload_plaintext(
     data: Plaintext,
@@ -826,14 +847,7 @@ async fn upload_plaintext(
     // Key first: an unreachable ring must fail before any bytes are encrypted.
     let (key_version, ring_key) = upload_ring_key(state, &scope).await?;
 
-    // A random file id names the object and salts the key; it is not key material.
-    let mut file_id = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
-    let content_hash = hex::encode(file_id);
-    let r2_key = format!("media/{content_hash}.enc");
-    let r2_url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), r2_key);
-    let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
-    drop(ring_key);
+    let NewObject { content_hash, r2_key, r2_url, enc_key, enc_nonce } = new_object(state, ring_key);
 
     let is_image = content_type.starts_with("image/");
     let Sealed { sha256, image_meta, ciphertext } =

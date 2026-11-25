@@ -4,25 +4,14 @@
 //! Every function is blocking: call it off the main thread. None returns NULL; strings are JSON,
 //! owned by Rust, freed with `pollis_string_free`. Never message content in a log line.
 
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_char, c_void, CString};
 use std::time::Duration;
 
 use super::session::{self, Factor, Params};
 
 const INTERNAL: &str = r#"{"ok":false,"reason":"internal"}"#;
 
-unsafe fn opt_str(p: *const c_char) -> Option<String> {
-    if p.is_null() {
-        return None;
-    }
-    CStr::from_ptr(p).to_str().ok().map(str::to_string)
-}
-
-fn to_c(s: String) -> *mut c_char {
-    CString::new(s)
-        .unwrap_or_else(|_| c"{\"ok\":false,\"reason\":\"internal\"}".to_owned())
-        .into_raw()
-}
+use crate::notify::ffi::{opt_str, to_c};
 
 /// Run `f` on the core's big-stack workers (an extension thread's stack is too small for
 /// SQLCipher and MLS) and turn a panic into the internal error.
@@ -249,6 +238,7 @@ pub extern "C" fn pollis_share_close() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::CStr;
 
     #[test]
     fn a_null_data_dir_is_internal_not_a_crash() {

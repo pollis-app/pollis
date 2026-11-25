@@ -114,13 +114,8 @@ impl StreamUpload {
         }
         let slot = super::upload_slot().await;
         let (key_version, ring_key) = super::upload_ring_key(state, &scope).await?;
-        let mut file_id = [0u8; 32];
-        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
-        let content_hash = hex::encode(file_id);
-        let r2_key = format!("media/{content_hash}.enc");
-        let r2_url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), r2_key);
-        let (enc_key, base_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
-        drop(ring_key);
+        let super::NewObject { content_hash, r2_key, r2_url, enc_key, enc_nonce: base_nonce } =
+            super::new_object(state, ring_key);
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*enc_key));
         drop(enc_key);
 

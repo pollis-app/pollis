@@ -23,12 +23,9 @@
 // `POLLIS_IOS_SHARE=off` builds the app without any of it (no target, no entitlement changes), for
 // a store build cut before the developer portal has the `com.pollis.ios.Share` App ID. See
 // mobile/CLAUDE.md "Share extension".
-const fs = require("fs");
 const path = require("path");
-const plist = require("@expo/plist").default;
-const { withDangerousMod, withXcodeProject } = require("expo/config-plugins");
 const { LOCALES_DIR, LPROJ, mobileSection, escapeStrings } = require("./iosLocales");
-const { addExtensionTarget } = require("./iosExtensionTarget");
+const { withExtensionTarget, writeExtensionFolder } = require("./iosExtensionTarget");
 const nse = require("./withNotificationServiceExtension");
 const { appOnlyGroup } = require("./withDeviceUnlock");
 
@@ -147,21 +144,18 @@ function localizableStrings(localesDir = LOCALES_DIR) {
 }
 
 function writeExtensionFiles(config, ids, iosDir) {
-  const dir = path.join(iosDir, TARGET);
-  fs.mkdirSync(dir, { recursive: true });
-  for (const file of OWN_SOURCES) {
-    fs.copyFileSync(path.join(SOURCE_DIR, file), path.join(dir, file));
-  }
-  for (const [file, from] of Object.entries(SHARED_SOURCES)) {
-    fs.copyFileSync(from, path.join(dir, file));
-  }
-  fs.copyFileSync(path.join(SOURCE_DIR, BRIDGING_HEADER), path.join(dir, BRIDGING_HEADER));
-  fs.writeFileSync(path.join(dir, INFO_PLIST), plist.build(extensionInfoPlist(config, ids)));
-  fs.writeFileSync(path.join(dir, ENTITLEMENTS), plist.build(extensionEntitlements(ids)));
-  for (const [lproj, text] of Object.entries(localizableStrings())) {
-    fs.mkdirSync(path.join(dir, `${lproj}.lproj`), { recursive: true });
-    fs.writeFileSync(path.join(dir, `${lproj}.lproj`, "Localizable.strings"), text);
-  }
+  const files = {
+    ...Object.fromEntries(
+      [...OWN_SOURCES, BRIDGING_HEADER].map((file) => [file, path.join(SOURCE_DIR, file)]),
+    ),
+    ...SHARED_SOURCES,
+  };
+  writeExtensionFolder(iosDir, TARGET, {
+    files,
+    infoPlist: { name: INFO_PLIST, value: extensionInfoPlist(config, ids) },
+    entitlements: { name: ENTITLEMENTS, value: extensionEntitlements(ids) },
+    strings: localizableStrings(),
+  });
 }
 
 const withShareExtension = (config, options) => {
@@ -171,8 +165,9 @@ const withShareExtension = (config, options) => {
   const ids = identifiers(config, options);
   // The app's own entitlements are untouched: it already has the App Group (the NSE plugin) and
   // the app-only group (withDeviceUnlock).
-  config = withXcodeProject(config, (c) => {
-    c.modResults = addExtensionTarget(c, c.modResults, {
+  return withExtensionTarget(
+    config,
+    {
       target: TARGET,
       bundleId: ids.extension,
       swiftSources: SWIFT_SOURCES,
@@ -180,17 +175,9 @@ const withShareExtension = (config, options) => {
       infoPlist: INFO_PLIST,
       entitlements: ENTITLEMENTS,
       frameworks: ["AVFoundation", "LocalAuthentication"],
-    });
-    return c;
-  });
-  config = withDangerousMod(config, [
-    "ios",
-    (c) => {
-      writeExtensionFiles(c, ids, c.modRequest.platformProjectRoot);
-      return c;
     },
-  ]);
-  return config;
+    (c, iosDir) => writeExtensionFiles(c, ids, iosDir),
+  );
 };
 
 module.exports = withShareExtension;

@@ -13,17 +13,13 @@
 // app does not advertise the `rich` push capability) — for a store build cut before the developer
 // portal has the App Group and the extension's App ID. See mobile/CLAUDE.md "Notification Service
 // Extension".
-const fs = require("fs");
 const path = require("path");
-const plist = require("@expo/plist").default;
 const {
-  withDangerousMod,
   withEntitlementsPlist,
   withInfoPlist,
-  withXcodeProject,
 } = require("expo/config-plugins");
 const { LOCALES_DIR, LPROJ, mobileSection, escapeStrings } = require("./iosLocales");
-const { addExtensionTarget, addUnique } = require("./iosExtensionTarget");
+const { addUnique, withExtensionTarget, writeExtensionFolder } = require("./iosExtensionTarget");
 
 const TARGET = "PollisNotificationService";
 const SOURCE_DIR = path.join(__dirname, "notification-service");
@@ -138,28 +134,14 @@ function extensionInfoPlist(config, { group, keychain }) {
 }
 
 function writeExtensionFiles(config, ids, iosDir) {
-  const dir = path.join(iosDir, TARGET);
-  fs.mkdirSync(dir, { recursive: true });
-  for (const file of SWIFT_SOURCES) {
-    fs.copyFileSync(path.join(SOURCE_DIR, file), path.join(dir, file));
-  }
-  fs.copyFileSync(path.join(SOURCE_DIR, BRIDGING_HEADER), path.join(dir, BRIDGING_HEADER));
-  fs.writeFileSync(path.join(dir, INFO_PLIST), plist.build(extensionInfoPlist(config, ids)));
-  fs.writeFileSync(path.join(dir, ENTITLEMENTS), plist.build(sharedEntitlements({}, ids)));
-  for (const [lproj, text] of Object.entries(localizableStrings())) {
-    fs.mkdirSync(path.join(dir, `${lproj}.lproj`), { recursive: true });
-    fs.writeFileSync(path.join(dir, `${lproj}.lproj`, "Localizable.strings"), text);
-  }
-}
-
-function addNseTarget(config, ids, project) {
-  return addExtensionTarget(config, project, {
-    target: TARGET,
-    bundleId: ids.extension,
-    swiftSources: SWIFT_SOURCES,
-    bridgingHeader: BRIDGING_HEADER,
-    infoPlist: INFO_PLIST,
-    entitlements: ENTITLEMENTS,
+  const files = Object.fromEntries(
+    [...SWIFT_SOURCES, BRIDGING_HEADER].map((file) => [file, path.join(SOURCE_DIR, file)]),
+  );
+  writeExtensionFolder(iosDir, TARGET, {
+    files,
+    infoPlist: { name: INFO_PLIST, value: extensionInfoPlist(config, ids) },
+    entitlements: { name: ENTITLEMENTS, value: sharedEntitlements({}, ids) },
+    strings: localizableStrings(),
   });
 }
 
@@ -187,18 +169,18 @@ const withNotificationServiceExtension = (config, options) => {
     c.modResults.NSUserActivityTypes = addUnique(c.modResults.NSUserActivityTypes, "INSendMessageIntent");
     return c;
   });
-  config = withXcodeProject(config, (c) => {
-    c.modResults = addNseTarget(c, ids, c.modResults);
-    return c;
-  });
-  config = withDangerousMod(config, [
-    "ios",
-    (c) => {
-      writeExtensionFiles(c, ids, c.modRequest.platformProjectRoot);
-      return c;
+  return withExtensionTarget(
+    config,
+    {
+      target: TARGET,
+      bundleId: ids.extension,
+      swiftSources: SWIFT_SOURCES,
+      bridgingHeader: BRIDGING_HEADER,
+      infoPlist: INFO_PLIST,
+      entitlements: ENTITLEMENTS,
     },
-  ]);
-  return config;
+    (c, iosDir) => writeExtensionFiles(c, ids, iosDir),
+  );
 };
 
 module.exports = withNotificationServiceExtension;

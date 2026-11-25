@@ -2,6 +2,10 @@
 // pbxproj surgery that adds a Swift extension target statically linking the Rust core from the
 // app's xcframework, embeds it in the app, and localizes it. Each plugin passes its own target name,
 // bundle id, sources and build settings; nothing here holds copy or entitlements.
+const fs = require("fs");
+const path = require("path");
+const plist = require("@expo/plist").default;
+const { withDangerousMod, withXcodeProject } = require("expo/config-plugins");
 const { LPROJ, addKnownRegions } = require("./iosLocales");
 
 // Relative to ios/ (SRCROOT).
@@ -258,4 +262,45 @@ function addExtensionTarget(config, project, spec) {
   return project;
 }
 
-module.exports = { addExtensionTarget, addUnique, foldEmbedPhases, XCFRAMEWORK, CORE_HEADERS };
+/**
+ * Write an extension's folder under ios/: its sources (`files`: name -> source path), Info.plist,
+ * entitlements and one Localizable.strings per lproj (`strings`: lproj -> text).
+ */
+function writeExtensionFolder(iosDir, target, { files, infoPlist, entitlements, strings }) {
+  const dir = path.join(iosDir, target);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, from] of Object.entries(files)) {
+    fs.copyFileSync(from, path.join(dir, name));
+  }
+  fs.writeFileSync(path.join(dir, infoPlist.name), plist.build(infoPlist.value));
+  fs.writeFileSync(path.join(dir, entitlements.name), plist.build(entitlements.value));
+  for (const [lproj, text] of Object.entries(strings)) {
+    fs.mkdirSync(path.join(dir, `${lproj}.lproj`), { recursive: true });
+    fs.writeFileSync(path.join(dir, `${lproj}.lproj`, "Localizable.strings"), text);
+  }
+}
+
+/** Both mods an extension plugin needs: the target in the pbxproj, then its folder on disk. */
+function withExtensionTarget(config, spec, writeFolder) {
+  config = withXcodeProject(config, (c) => {
+    c.modResults = addExtensionTarget(c, c.modResults, spec);
+    return c;
+  });
+  return withDangerousMod(config, [
+    "ios",
+    (c) => {
+      writeFolder(c, c.modRequest.platformProjectRoot);
+      return c;
+    },
+  ]);
+}
+
+module.exports = {
+  addExtensionTarget,
+  addUnique,
+  foldEmbedPhases,
+  writeExtensionFolder,
+  withExtensionTarget,
+  XCFRAMEWORK,
+  CORE_HEADERS,
+};

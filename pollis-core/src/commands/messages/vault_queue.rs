@@ -87,18 +87,7 @@ pub async fn enqueue(
         }
     }
     let metas = outbox::plan_attachments(&attachments).await?;
-    for (position, (att, meta)) in attachments.iter().zip(&metas).enumerate() {
-        if let Err(e) = outbox::store_attachment(state, &id, position, att, meta).await {
-            let guard = state.local_db.lock().await;
-            if let Some(db) = guard.as_ref() {
-                let _ = db.conn().execute(
-                    "DELETE FROM outbox_attachment WHERE message_id = ?1",
-                    rusqlite::params![id],
-                );
-            }
-            return Err(e);
-        }
-    }
+    outbox::store_all_attachments(state, &id, &attachments, &metas).await?;
     let content = if metas.is_empty() {
         text
     } else {

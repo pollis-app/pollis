@@ -289,6 +289,29 @@ async fn store_attachment_streamed(
     Ok(())
 }
 
+/// Store every attachment of `id`, in order. One that fails takes the ones already stored with
+/// it, so a failed enqueue leaves no bytes behind (the message outbox's and the Vault's, #2100).
+pub(super) async fn store_all_attachments(
+    state: &Arc<AppState>,
+    id: &str,
+    attachments: &[OutgoingAttachment],
+    metas: &[AttMeta],
+) -> Result<()> {
+    for (position, (att, meta)) in attachments.iter().zip(metas).enumerate() {
+        if let Err(e) = store_attachment(state, id, position, att, meta).await {
+            let guard = state.local_db.lock().await;
+            if let Some(db) = guard.as_ref() {
+                let _ = db.conn().execute(
+                    "DELETE FROM outbox_attachment WHERE message_id = ?1",
+                    rusqlite::params![id],
+                );
+            }
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 /// Fill `buf` from `file`, short only at the end of the file.
 async fn read_full(file: &mut tokio::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
     use tokio::io::AsyncReadExt;
@@ -800,18 +823,7 @@ pub(super) async fn enqueue(
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
         store_preview_thumbnail_on(db.conn(), &queued.id, preview_thumbnail)?;
     }
-    for (position, (att, meta)) in attachments.iter().zip(&metas).enumerate() {
-        if let Err(e) = store_attachment(state, &queued.id, position, att, meta).await {
-            let guard = state.local_db.lock().await;
-            if let Some(db) = guard.as_ref() {
-                let _ = db.conn().execute(
-                    "DELETE FROM outbox_attachment WHERE message_id = ?1",
-                    rusqlite::params![queued.id],
-                );
-            }
-            return Err(e);
-        }
-    }
+    store_all_attachments(state, &queued.id, &attachments, &metas).await?;
     // Test-harness only: hold an attachment send between its bytes and its row (#1636).
     #[cfg(feature = "test-harness")]
     if !attachments.is_empty() {

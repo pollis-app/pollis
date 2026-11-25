@@ -448,6 +448,20 @@ fn ok<T: serde::Serialize>(v: T) -> Result<String, BridgeError> {
     serde_json::to_string(&v).map_err(BridgeError::from)
 }
 
+/// #1335: Expo hands out `file://` URIs; the core reads bare paths.
+fn bare_paths(
+    attachments: Option<Vec<crate::commands::messages::OutgoingAttachment>>,
+) -> Vec<crate::commands::messages::OutgoingAttachment> {
+    attachments
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut a| {
+            a.path = a.path.map(|p| p.strip_prefix("file://").unwrap_or(&p).to_string());
+            a
+        })
+        .collect()
+}
+
 /// Dispatch a command by name. `args_json` must be a JSON object; pass
 /// `"{}"` (or `""`) for nullary commands. Returns the command's result
 /// re-serialized as a JSON string (the JS side `JSON.parse`s it inside
@@ -1239,16 +1253,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let message_id: Option<String> = arg_opt(&args, "messageId")?;
             // #1335: Expo hands out `file://` URIs; the core reads bare paths.
             let attachments: Vec<messages::OutgoingAttachment> =
-                arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|mut a| {
-                        a.path = a
-                            .path
-                            .map(|p| p.strip_prefix("file://").unwrap_or(&p).to_string());
-                        a
-                    })
-                    .collect();
+                bare_paths(arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?);
             // #1987: the composer's link preview, checked against `content` in core.
             let link_preview: Option<crate::commands::link_preview::LinkPreviewDraft> =
                 arg_opt(&args, "linkPreview")?;
@@ -1505,16 +1510,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let message_id: Option<String> = arg_opt(&args, "messageId")?;
             // Expo hands out `file://` URIs; the core reads bare paths.
             let attachments: Vec<messages::OutgoingAttachment> =
-                arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|mut a| {
-                        a.path = a
-                            .path
-                            .map(|p| p.strip_prefix("file://").unwrap_or(&p).to_string());
-                        a
-                    })
-                    .collect();
+                bare_paths(arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?);
             ok(vault::send_vault_message_with(user_id, message_id, content, attachments, &state()?).await?)
         }
         "retry_vault_message" => {
