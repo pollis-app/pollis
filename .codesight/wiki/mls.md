@@ -907,7 +907,12 @@ member could equally have cached every plaintext it ever saw.
 
 ## Attachment file key ring (#1382)
 
-Attachments are sealed under a per-conversation **file key ring**
+**Files stored before #2109 only.** New uploads are shared objects keyed by
+their own digest, which travels inside the MLS message (`commands.md` →
+"shared_files"), so they need no ring; the ring below is kept, minted and
+re-wrapped unchanged so every member keeps opening the older files.
+
+Attachments were sealed under a per-conversation **file key ring**
 (`commands/file_keys.rs`), built exactly like `Kpin` above: random 32-byte keys,
 stored server-side only WRAPPED under `export_secret("pollis-file-kek", &[], 32)`
 in `file_keystate` with the same `(generation, epoch)` CAS and head ceiling, and
@@ -1127,9 +1132,8 @@ SQLCipher database, under the session's `db_key` — never a file (#1000). Until
 they are uploaded the row holds a provisional `_att` envelope with no `key`,
 which both renderers draw as pending. Delivery (`outbox::finish_uploads`)
 uploads them one at a time — each blob read just before its upload and moved
-into it (a repeat after a kill uploads a NEW object under a fresh random file id
-— #1382 ended convergent dedup — and the orphaned first object is collected by the
-DS sweep once nothing references it) — swaps in the finished
+into it (a repeat after a kill seals to the SAME shared object (#2109), whose
+claim tells the retry it is already stored, so nothing is uploaded twice) — swaps in the finished
 envelope, byte for byte the renderers' encoding, and drops the bytes in one
 transaction, then posts. A keep-data sign-out keeps queued attachment messages
 exactly as it keeps queued text — they sit in the per-user SQLCipher database,

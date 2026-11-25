@@ -146,7 +146,9 @@ DB, split out in #420 Goal A).
 | Abuse reports and suspensions (#1213) | `user_report` (reporter, reported account, reason, optional conversation/message ids — never content), `account_suspension` | Until the reporter or reported account is deleted (reports, both directions) / until the operator lifts it or the account is deleted (suspension) | `teardown.rs` `purge_user_rows`; operator: `scripts/suspend-account.sh` |
 | Membership and social graph | `group_member`, `dm_channel_member`, `groups`, `channels`, `dm_channel`, `user_block`, `group_invite`, `group_join_request`, `group_invite_link`, `group_invite_link_redemption`, `group_emoji`, `account_recovery`, `user_preferences`, `device_enrollment_request` | Life of the account / conversation; **explicitly deleted** on account deletion and on group/DM teardown, table by table | `teardown.rs` `purge_user_rows` / `purge_group` / `purge_dm_channel`, enumerated in `USER_PURGED_TABLES` |
 | Security events | `security_event` (`id`, `user_id`, `kind`, `device_id`, `created_at`, `metadata`) | **90 days** (#762, `POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, §9); also **explicitly deleted** on account deletion | `messages.rs` `sweep_aged_records`; `teardown.rs` `purge_user_rows` |
-| Attachment object index | `attachment_object` (`content_hash` → `r2_key`; `content_hash` holds the object's **random per-upload file id**, not a hash of the content) | **Reference-counted (#690):** kept while any message or Vault entry still references the file id — the same predicate for every caller, with no uploader identity in it. Once the last reference is released, the DS deletes the R2 object and then the row; the row stays (`reclaim_state`) until the R2 delete succeeds, and a failed delete is retried on the next envelope-GC pass (#1881). The DS holds no "which account stored this object" linkage (the `uploaded_by` / `registered_by` columns are unused and empty). | `messages.rs` `release_message_references`, `reclaim_released_attachments`, `apply_delete_attachment`; `000032_attachment_ownership_retired.sql`, `000050_attachment_reclaim.sql` |
+| Attachment object index | `attachment_object` (`content_hash` → `r2_key`; `content_hash` holds the object name: since #2109 `v2-` + the SHA-256 of the stored **ciphertext**, one row per distinct file across all accounts; before it a random per-upload file id) | **Reference-counted (#690):** kept while any message or Vault entry still references the object — the same predicate for every caller, with no uploader identity in it. Once the last reference is released, the DS deletes the R2 object and then the row; the row stays (`reclaim_state`) until the R2 delete succeeds, and a failed delete is retried on the next envelope-GC pass (#1881). The DS holds no "which account stored this object" linkage (the `uploaded_by` / `registered_by` columns are unused and empty). | `messages.rs` `release_message_references`, `reclaim_released_attachments`, `apply_delete_attachment`; `000032_attachment_ownership_retired.sql`, `000050_attachment_reclaim.sql` |
+| Pending sends of a stored file (#2109) | `attachment_lease` (object name, the sending account, a count of that account's sends still in flight, `updated_at`) | Deleted as soon as the sender's message or Vault reference lands; one whose reference never comes lapses after **30 days** (`messages.rs` `expire_attachment_leases`, on the envelope-GC pass) | `000057_attachment_dedup.sql` |
+| Operator-removed files (#2109) | `attachment_removed` (object name, `removed_at`) | Kept, so the removed file cannot be stored again; holds no account, message or conversation | `000057_attachment_dedup.sql`; `messages.rs` `remove_stored_object` |
 | Wrapped file key rings (#1382) | `file_keystate` (`conversation_id`, wrapped ring, `key_version`, `(generation, epoch)`, `updated_by_device_id`) | One mutable row per MLS conversation, overwritten on every re-wrap/rotation; the ring is ciphertext under an MLS exporter key the DS never holds. **Explicitly deleted** on group/DM teardown | `000036_file_keystate.sql`; `teardown.rs` `purge_group` / `purge_dm_channel` |
 | Attachment references | `attachment_ref` (`content_hash` = file id, `message_id`) | One row per message that carries a file, plus that message's deletion-capability hash (#1086). It lasts as long as the message does in its members' history: only a delete of the message for everyone (the author's, or a group admin's) releases it. Envelope GC #689, retention #720, account deletion and conversation teardown remove envelopes but leave every member's history, and its files, in place, so they release nothing (#1881). Registration is bound to the message's author (#1165). **New at-rest linkage — see the note below.** | `messages.rs` (`object_is_referenced`, `release_message_references`), `000012_attachment_ref.sql`, `000050_attachment_reclaim.sql` |
 | Failed DS requests (#1305) | `ds_error_log` (time, method, matched route pattern, status, the response's `error` text, the `warn!`/`error!` lines the request raised, and a random per-request id the client generated) — **no user, device, email or IP column**; text is scrubbed (`pollis_api::redact::scrub`) before the insert | **72 hours and at most 500 rows**, whichever is smaller; written at most 30 rows a minute | The table's own `AFTER INSERT` trigger (`000035_ds_error_log.sql`) on every insert — no sweep and no code path can skip it; `pollis-delivery/tests/error_log.rs` |
@@ -202,9 +204,11 @@ to declare each reference to the DS, because the server cannot read message cont
 references itself. The chosen mechanism — `attachment_ref (content_hash, message_id)` — adds a
 piece of *at-rest* linkage: joining `attachment_ref` to
 `message_envelope.conversation_id` tells the operator which messages carry which stored object.
-`content_hash` is a random file id minted per upload, so identical content uploaded twice is two
-unrelated ids: the linkage is "this message carries this object", and two messages share an id only when
-they reference the same upload. It does **not** reveal the file itself (plaintext is never seen, and nothing the DS holds is key material), the
+Since #2109 each distinct file is stored once, so `content_hash` is the same object name wherever the
+same file is sent: the linkage is "these messages, in these conversations, carry the same stored file".
+That is the price of storing each file once, and it is the only addition: the name is a hash of the
+ciphertext, so the operator still cannot learn what the file is without already holding a copy. (Files
+stored before #2109 carry a random per-upload id, so identical copies of those stay unlinked.) It does **not** reveal the file itself (plaintext is never seen, and nothing the DS holds is key material), the
 filename (not in the R2 key, §5), or the sender (sealed, above). The `message_id` is **load-bearing**, not incidental: a
 delete of the message names it, which is what releases the reference, and registration binds it to the
 message's author, which keeps it unforgeable. The conversation is readable only while the envelope
@@ -333,11 +337,15 @@ client IPs from the first-party services, and is opt-in and off by default. This
 
 ## 5. Media (Cloudflare R2)
 
-- Object keys are `media/{random file id}.enc` (`pollis-core/src/commands/r2.rs`). The key contains
-  no user, device, group, or conversation identifier, and **no filename**, because a distinctive name
-  would itself be metadata visible to the storage operator (#762).
-- Objects are client-side encrypted (AES-256-GCM) before upload under a key derived from the conversation's
-  MLS-wrapped file key ring (or, for Vault files, the account key); R2 and the DS hold ciphertext and no key
+- Object keys are `media/v2-{SHA-256 of the ciphertext}.enc` (#2109; before it `media/{random file id}.enc`,
+  `pollis-core/src/commands/r2.rs`). The key contains no user, device, group, or conversation identifier,
+  and **no filename**, because a distinctive name would itself be metadata visible to the storage operator
+  (#762). Each distinct file is stored once, so the same name recurs wherever the same file is sent: the
+  operator can see that one stored file is referenced from several conversations, and anyone who holds a
+  file can compute its name and test whether it is stored. Neither reveals a file's contents.
+- Objects are client-side encrypted (AES-256-GCM) before upload under a key derived from the file's own
+  SHA-256, which travels only inside the end-to-end encrypted message (older files: the conversation's
+  MLS-wrapped file key ring, or for Vault files the account key); R2 and the DS hold ciphertext and no key
   material.
 - Deletion is **reference-counted** (#690): a file stays while any message or Vault entry still refers to
   it. A message's reference is released only when the message is deleted for everyone (the author's delete,

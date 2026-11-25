@@ -105,3 +105,41 @@ keep, which is what makes it safe to run by hand at any time.
 waiting up to an hour for the next sweep, or forcing collection after fixing
 whatever was pinning a watermark. If it collects nothing, the answer is a watermark
 that has not advanced — look at the conversation's devices, not at this endpoint.
+
+---
+
+## Token-gated operator routes
+
+Not in the `endpoints!` table, and not device-signed: these take the operator bearer
+token (`POLLIS_DS_METRICS_TOKEN`), the same as the read-only `/v1/ops/*` routes. With
+no token configured they answer `404`; without the right bearer, `401`. No client
+holds the token.
+
+### `POST /v1/ops/attachments/remove`
+
+Operator removal of a stored file (#2109). Each distinct file is stored once, so one
+call removes it from every message and Vault entry that holds it.
+
+**Body** — `pollis_api::messages::OpsRemoveAttachmentBody`: `{"content_hash": "<object id>"}`,
+either a shared object id (`v2-` + 64 hex) or a pre-#2109 file id (64 hex).
+
+**Answers** `{"removed": true, "references": <n>}`, or `500` if the bucket delete did
+not finish (run it again; it is idempotent).
+
+What it does, in `messages::remove_stored_object`:
+
+1. Records the id in `attachment_removed`. From then on the DS refuses it everywhere:
+   a claim answers `removed`, a registration or reference is refused, a Vault save
+   drops it, and a presign for it answers `410` with `attachment_removed`, which
+   clients show as "File removed" (no retry).
+2. Deletes the object from R2 (its canonical key only).
+3. Deletes the object's row, every message and Vault reference to it, and any claims.
+
+The record stays, so sending the identical file again cannot restore it. A device
+that already downloaded the file keeps its local cached copy until that is evicted.
+
+```bash
+curl -X POST -H "Authorization: Bearer $POLLIS_DS_METRICS_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"content_hash":"v2-…"}' https://api.pollis.com/v1/ops/attachments/remove
+```
