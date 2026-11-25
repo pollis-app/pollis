@@ -1,0 +1,24 @@
+appId: ${MAESTRO_APP_ID}
+---
+# The chat's composer sits at the bottom of the screen, where it is with no
+# keyboard padding (#2098): JS holds the keyboard closed, a point tap at
+# COMPOSER_POINT (the composer's bounds with nothing padding the screen)
+# focuses it, and the keyboard is put away again. A screen left padded has
+# empty background at that point, so the keyboard never opens.
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 3000
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    point: ${COMPOSER_POINT || "50%,93%"}
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-open"
+    timeout: 3000
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 3000
