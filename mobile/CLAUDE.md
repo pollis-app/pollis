@@ -484,6 +484,8 @@ xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
 #    silently lost (below). Inner bundle first: signing the app seals PlugIns/.
 codesign -f -s - --entitlements ios/PollisNotificationService/PollisNotificationService.entitlements \
   build/Pollis.xcarchive/Products/Applications/Pollis.app/PlugIns/PollisNotificationService.appex
+codesign -f -s - --entitlements ios/PollisShare/PollisShare.entitlements \
+  build/Pollis.xcarchive/Products/Applications/Pollis.app/PlugIns/PollisShare.appex
 codesign -f -s - --entitlements ios/Pollis/Pollis.entitlements \
   build/Pollis.xcarchive/Products/Applications/Pollis.app
 xcodebuild -exportArchive -archivePath build/Pollis.xcarchive \
@@ -528,6 +530,7 @@ unzip -q build/export/Pollis.ipa -d /tmp/ipa
 codesign -dvvv /tmp/ipa/Payload/Pollis.app          # Authority=Apple Distribution
 codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app   # get-task-allow=false, aps-environment=production, app group + 8JT3WH45NZ.com.pollis.shared
 codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app/PlugIns/PollisNotificationService.appex   # same app group + keychain group
+codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app/PlugIns/PollisShare.appex   # app group + shared AND app-only keychain groups
 /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' /tmp/ipa/Payload/Pollis.app/Info.plist
 strings /tmp/ipa/Payload/Pollis.app/main.jsbundle | grep -o 'https://api[a-z.-]*pollis.com'
 jq -r .extra.installChannel /tmp/ipa/Payload/Pollis.app/EXConstants.bundle/app.config   # store
@@ -685,6 +688,70 @@ process's peak physical footprint), never content, under subsystem
 `com.pollis.ios.NotificationService`:
 `log stream --predicate 'subsystem == "com.pollis.ios.NotificationService"'`.
 <!-- measured numbers: see PR #1599-ios-nse -->
+
+#### Share extension (#2100)
+
+`plugins/withShareExtension.js` adds the `PollisShare` share extension
+(`com.pollis.ios.Share`, Swift + SwiftUI in `plugins/share-extension/`, deployment target =
+the app's), so another app's share sheet can send text, links, photos, videos and files into
+Pollis chats. Like the NSE it links `libpollis_core.a` from the app's xcframework; it calls the
+share C ABI (`pollis-core/include/pollis_share.h`, core in `pollis-core/src/share/`). The pbxproj
+work both extensions share is `plugins/iosExtensionTarget.js` (one embed phase holds both appex).
+
+- **Flow.** `ShareIntake.swift` reads the shared items in order: text and web links pre-fill the
+  message; files are copied by the file system into the extension's own temporary directory
+  (never the App Group, never Data in memory), HEIC photos re-encoded to JPEG and HEVC video
+  exported to H.264, as the app's picker asks for the Compatible representation; a video gets a
+  640-edge poster. Over 100 MB or more than 10 items is refused. Then `pollis_share_open`:
+  signed out shows "Sign in to Pollis first"; signed in shows a PIN keypad (the app's own counter
+  and lockout, `pin::check_pin`) and, when biometric unlock is on, Face ID / Touch ID through the
+  app's device unlock key. The picker (`pollis_share_targets`: DMs, text channels and the Vault,
+  up to 5) and the message send in place (`pollis_share_send`); the temporary files are deleted
+  once the core reports `stored`. A target the extension could not finish stays in the outbox
+  and the app delivers it; the sheet says so before Done. Nothing is handed to the app.
+- **The share sheet lists Pollis, never a person or chat.** That needs an extension declaring
+  `IntentsSupported: INSendMessageIntent`; this one never does, so the NSE's donated
+  communication intents stay out of the share sheet. The activation rule is the dictionary form
+  (text, 1 web URL, up to 10 images/movies/files), never `TRUEPREDICATE`.
+  `tests/share-extension.test.ts` pins both.
+- **Keychain.** The extension gets the App Group, the shared group
+  `8JT3WH45NZ.com.pollis.shared` (first: the keystore key) and the app-only group
+  `8JT3WH45NZ.com.pollis.app` (last), where `lib/deviceUnlock.ts` keeps the biometric key
+  (service `pollis.deviceUnlock:auth`, account `duk.<user id>`). A user is in front of the share
+  sheet, and the item only opens behind `.biometryCurrentSet`; the NSE, which runs with nobody
+  present, still never gets that group. Info.plist names them as `PollisAppGroup`,
+  `PollisKeychainAccessGroup`, `PollisAppOnlyKeychainGroup`, and carries `NSFaceIDUsageDescription`.
+- **0xdead10cc.** When the host app leaves the foreground (`NSExtensionHostWillResignActive`) the
+  extension calls `pollis_share_suspend(20000)` inside `performExpiringActivity` (sends finish or
+  park, `state.lock` released, database closed) and `pollis_share_resume` when it returns;
+  `pollis_share_close` always runs before the request completes or is cancelled.
+- **Copy** is `mobile:share.*`, written per `.lproj` as Localizable.strings at prebuild
+  (plurals as `_one` / `_other`, picked in `ShareStrings.swift`).
+- **Logs** are outcomes only, subsystem `com.pollis.ios.Share`.
+
+**Developer portal, once, before a store build carries it** (team `8JT3WH45NZ`):
+
+1. Identifiers → register App ID `com.pollis.ios.Share` (explicit) with **App Groups**
+   (`group.com.pollis.ios`). Keychain groups need no capability.
+2. Nothing in App Store Connect; it ships inside the app's record.
+
+The export then signs it like the NSE: step 4 above has a `codesign` line for
+`PollisShare.appex` (inner bundles first; `scripts/store-build.sh` does the same and checks its
+entitlements). Until step 1 is done, prebuild with `POLLIS_IOS_SHARE=off` (no target, no
+entitlement change). `POLLIS_IOS_NSE=off` turns it off too: without the NSE the app has no App
+Group, so its data is not where the extension looks.
+
+Size: like the NSE, the extension statically links the core a second time, dead-stripped to what
+the share ABI reaches (larger than the NSE's: it also sends). Code pages are clean and file-backed;
+what counts against the share-extension memory limit is the heap, which the streamed outbox keeps
+to a few MB per file (`commands/r2/stream.rs`), plus a HEIC conversion's decoded frame.
+
+**Testing.** A share extension cannot be started from `simctl`, so its Swift logic (state machine,
+core wrappers, intake rules, copy) runs on macOS against a stub core:
+`plugins/share-extension/harness/run.sh` (signed out, the PIN countdown to lockout, biometric
+fallback, the 5-target cap, item limits, sent/queued progress, close on cancel, intake).
+`tests/share-extension.test.ts` covers the plugin. The real sheet is driven on the simulator
+from Photos and Safari (see the PR for the run).
 
 **Deployment target: iOS 16.4.** Expo SDK 56 raised the minimum
 (`ExpoModulesCore.podspec` requires 16.4), so the app **no longer supports
