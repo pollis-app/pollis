@@ -1,0 +1,27 @@
+/*
+ * The terminal row in a narrow column (#2116), such as a DM beside a call in the right panel:
+ * time, name and ":" squeezed the body into a one-character column. Below 30rem the body takes its
+ * own full-width line under them, and the hover actions float over the row instead of reserving
+ * width. The main log at any ordinary width is untouched.
+ */
+.message-list-column {
+  container-type: inline-size;
+}
+
+@container (max-width: 30rem) {
+  .msg-term-line {
+    flex-wrap: wrap;
+  }
+
+  .msg-term-body {
+    flex-basis: 100%;
+  }
+
+  .msg-term-actions {
+    position: absolute;
+    top: 0.25rem;
+    inset-inline-end: 1rem;
+    padding-inline: 0.25rem;
+    background: var(--c-surface-raised);
+  }
+}
