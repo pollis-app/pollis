@@ -1651,6 +1651,16 @@ The Vault's durable queue: a save waits here, its files in `outbox_attachment` u
 id, until the DS holds the entry and `vault_entry_cache` has it; then the row goes. Drained with
 the message outbox. See [share.md](share.md#the-vaults-durable-queue-commandsmessagesvault_queuers).
 
+### outbox_claim _(local, #2100)_
+- `key` TEXT PK _(a message or Vault save id, a conversation's send line, an edit)_, `holder` TEXT NOT NULL _(a per-process id)_, `until_ms` INTEGER NOT NULL _(wall-clock lease end)_
+
+Which process is working on an outbox key. The app and the iOS share extension open the same
+database, and `OutboxLock`'s in-process mutex cannot keep them off the same row, so it also takes
+this lease: renewed every 15 s while held, released when done, run out after 60 s if its process
+is killed or suspended. The drain passes by a key another process holds; a store holds its id's
+claim from the first byte to the row, so the orphan sweep at open leaves its bytes. Not a file
+lock: nothing is held across an iOS suspension. The extension releases its claims as it parks.
+
 ### vault_entry_cache _(local cache, #107)_
 - `id` TEXT PK, `content` TEXT NOT NULL _(decrypted entry body — same shape as `message.content`)_, `pinned` INTEGER, `created_at` / `updated_at` TEXT
 

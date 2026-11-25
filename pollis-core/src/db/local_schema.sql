@@ -603,6 +603,18 @@ CREATE TABLE IF NOT EXISTS vault_outbox (
     send_state TEXT NOT NULL DEFAULT 'pending' CHECK (send_state IN ('pending', 'failed', 'rejected'))
 );
 
+-- Which process is working on an outbox key (#2100): a message or Vault save id, a
+-- conversation's send line, an edit. The app and the iOS share extension share this database,
+-- and an in-process lock cannot keep them off the same row. A claim is a lease: its holder
+-- renews it while it works and deletes it when done; one a stopped or suspended process left
+-- runs out at `until_ms` (wall-clock milliseconds) and is taken over. A row being stored holds
+-- its claim too, so the orphan sweep leaves its bytes alone.
+CREATE TABLE IF NOT EXISTS outbox_claim (
+    key      TEXT PRIMARY KEY,
+    holder   TEXT NOT NULL,
+    until_ms INTEGER NOT NULL
+);
+
 -- An edit, self-redaction or admin tombstone that reached this device before
 -- the message it targets (#1735) — the target is absent (sent before this
 -- device joined, so only a history transfer can bring it) or a loss

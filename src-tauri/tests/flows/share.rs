@@ -418,3 +418,110 @@ async fn the_vault_is_a_target_like_any_chat() {
     assert_eq!(later.len(), 1, "{vault}");
     assert!(later[0].get("send_state").is_none());
 }
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}
+
+/// Another process's claim on `key`, as the share extension holds one while it delivers.
+async fn claim_elsewhere(client: &TestClient, key: &str, until_ms: i64) {
+    let guard = client.state.local_db.lock().await;
+    guard
+        .as_ref()
+        .expect("db")
+        .conn()
+        .execute(
+            "INSERT OR REPLACE INTO outbox_claim (key, holder, until_ms) VALUES (?1, 'another-process', ?2)",
+            rusqlite::params![key, until_ms],
+        )
+        .expect("claim");
+}
+
+async fn row_count(client: &TestClient, sql: &str, id: &str) -> i64 {
+    let guard = client.state.local_db.lock().await;
+    guard.as_ref().expect("db").conn().query_row(sql, [id], |r| r.get(0)).expect("count")
+}
+
+/// #2100: the app and the extension share one database. The app's drain passes by a row the
+/// extension holds, and takes it over once the extension's lease runs out (it was suspended or
+/// killed), sending it once.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_app_leaves_a_row_the_extension_is_delivering_until_its_lease_runs_out() {
+    let (alice, bob, dm, _channel) = alice_and_bob().await;
+    alice.activate();
+    // Stored, not delivered: the rows wait in the outbox.
+    let req = request(&[&dm], "held by the extension");
+    let queued = enqueue_share(&alice.state, &req).await.expect("stored");
+    let id = queued[0].message_id.clone();
+
+    claim_elsewhere(&alice, &id, now_ms() + 60_000).await;
+    alice.flush_outbox().await;
+    assert_eq!(copies(&bob, &dm, true, "held by the extension").await, 0, "the app left it alone");
+
+    // The extension stopped renewing: its lease is over, and the app finishes the row.
+    claim_elsewhere(&alice, &id, now_ms() - 1).await;
+    alice.flush_outbox().await;
+    alice.flush_outbox().await;
+    assert_eq!(copies(&bob, &dm, true, "held by the extension").await, 1);
+    assert_eq!(envelopes_with_id(&id).await, 1);
+    assert_eq!(
+        row_count(&alice, "SELECT COUNT(*) FROM outbox_claim WHERE key = ?1 AND holder != 'another-process'", &id).await,
+        0,
+        "the app's own claim is gone once it is done"
+    );
+}
+
+/// #2100: a share that fails part-way takes back the rows it wrote, so nothing of it goes out
+/// later (the user cancels, or tries again).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_share_that_fails_part_way_sends_nothing() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    let _stub = StubUploads::on();
+    let (alice, bob, dm, channel) = alice_and_bob().await;
+    alice.activate();
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("note.bin");
+    std::fs::write(&path, vec![7u8; 64 * 1024]).unwrap();
+    let mut req = request(&[&dm, &channel], "part of a share");
+    req.attachments = vec![serde_json::from_value(json!({
+        "path": path.display().to_string(),
+        "filename": "note.bin",
+        "contentType": "application/octet-stream",
+    }))
+    .unwrap()];
+
+    // The first target's bytes are stored; the file goes before the second target reads it.
+    let mut before_row = rendezvous::arm(Point::OutboxBeforeRow);
+    let share = {
+        let state = alice.state.clone();
+        let req = req.clone();
+        tokio::spawn(async move { enqueue_share(&state, &req).await })
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), before_row.recv())
+        .await
+        .expect("the first target never reached its row")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::OutboxBeforeRow);
+    std::fs::remove_file(&path).unwrap();
+    let _ = release.send(());
+    assert!(share.await.unwrap().is_err(), "the second target cannot be stored");
+
+    for conv in [&dm, &channel] {
+        let id = target_message_id(&req.share_id, conv).unwrap();
+        assert_eq!(row_count(&alice, "SELECT COUNT(*) FROM message WHERE id = ?1", &id).await, 0, "{conv}: taken back");
+        assert_eq!(
+            row_count(&alice, "SELECT COUNT(*) FROM outbox_attachment WHERE message_id = ?1", &id).await,
+            0,
+            "{conv}: no bytes left behind"
+        );
+    }
+    alice.flush_outbox().await;
+    assert_eq!(copies(&bob, &dm, true, "part of a share").await, 0);
+    assert_eq!(copies(&bob, &channel, false, "part of a share").await, 0);
+}

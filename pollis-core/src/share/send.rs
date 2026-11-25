@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use rusqlite::OptionalExtension;
 use ulid::Ulid;
 
 use super::targets::MAX_TARGETS;
@@ -200,16 +201,68 @@ pub async fn enqueue_share(state: &Arc<AppState>, req: &ShareRequest) -> Result<
             a
         })
         .collect();
-    let mut queued = Vec::with_capacity(req.targets.len());
-    let mut result = Ok(());
+    // Every target's id is claimed until all are stored: no drain (the app's, while the
+    // extension stores) delivers one before the share is whole, and a share that fails
+    // part-way takes back what it wrote.
+    let mut ids = Vec::with_capacity(req.targets.len());
     for conversation_id in &req.targets {
-        let message_id = target_message_id(&req.share_id, conversation_id)?;
+        ids.push((conversation_id.clone(), target_message_id(&req.share_id, conversation_id)?));
+    }
+    let mut claims = Vec::with_capacity(ids.len());
+    for (_, id) in &ids {
+        if let Some(c) = crate::commands::messages::claim_outbox_key(state, id).await {
+            claims.push(c);
+        }
+    }
+    let result = enqueue_targets(state, req, &user_id, &ids, &attachments, draft.as_ref()).await;
+    for c in claims {
+        c.release(state).await;
+    }
+    // Every row holds its own copy of the thumbnail now.
+    if let Some(d) = &draft {
+        crate::commands::link_preview::release_draft(d);
+    }
+    result
+}
+
+/// Whether `id` is already stored, as a message or a queued or saved Vault entry.
+async fn stored_before(state: &Arc<AppState>, id: &str) -> Result<bool> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(|| Error::Other(anyhow::anyhow!("not signed in")))?;
+    let found: Option<i64> = db
+        .conn()
+        .query_row(
+            "SELECT 1 FROM message WHERE id = ?1 UNION ALL SELECT 1 FROM vault_outbox WHERE id = ?1 LIMIT 1",
+            rusqlite::params![id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(found.is_some())
+}
+
+async fn enqueue_targets(
+    state: &Arc<AppState>,
+    req: &ShareRequest,
+    user_id: &str,
+    ids: &[(String, String)],
+    attachments: &[OutgoingAttachment],
+    draft: Option<&LinkPreviewDraft>,
+) -> Result<Vec<QueuedShare>> {
+    let mut queued = Vec::with_capacity(ids.len());
+    // Rows this call wrote (not adopted from an earlier attempt), to take back on a failure.
+    let mut written: Vec<(String, String)> = Vec::new();
+    let mut result = Ok(());
+    for (conversation_id, message_id) in ids {
+        let message_id = message_id.clone();
+        if !stored_before(state, &message_id).await? {
+            written.push((conversation_id.clone(), message_id.clone()));
+        }
         if conversation_id == super::targets::VAULT_TARGET {
             let stored = crate::commands::messages::vault_queue::enqueue(
                 state,
                 Some(message_id.clone()),
                 req.text.clone(),
-                attachments.clone(),
+                attachments.to_vec(),
             )
             .await;
             match stored {
@@ -227,10 +280,10 @@ pub async fn enqueue_share(state: &Arc<AppState>, req: &ShareRequest) -> Result<
         let stored = crate::commands::messages::enqueue_message(
             Some(message_id.clone()),
             conversation_id.clone(),
-            user_id.clone(),
+            user_id.to_string(),
             req.text.clone(),
-            attachments.clone(),
-            draft.as_ref(),
+            attachments.to_vec(),
+            draft,
             None,
             None,
             state,
@@ -247,11 +300,21 @@ pub async fn enqueue_share(state: &Arc<AppState>, req: &ShareRequest) -> Result<
             }
         }
     }
-    // Every row holds its own copy of the thumbnail now.
-    if let Some(d) = &draft {
-        crate::commands::link_preview::release_draft(d);
+    if let Err(e) = result {
+        // Nothing of a share that failed part-way goes out: the user cancels or tries again.
+        for (conversation_id, id) in written {
+            let removed = if conversation_id == super::targets::VAULT_TARGET {
+                crate::commands::messages::vault_queue::discard_unsent_vault_message(id.clone(), state).await
+            } else {
+                crate::commands::messages::discard_unsent_message(id.clone(), state).await
+            };
+            if let Err(d) = removed {
+                crate::diag!("[share] could not take back {id} after a failed share: {d}");
+            }
+        }
+        return Err(e);
     }
-    result.map(|()| queued)
+    Ok(queued)
 }
 
 /// Deliver the rows [`enqueue_share`] wrote, every target at once, calling `progress` as each

@@ -64,7 +64,8 @@ pub(crate) fn queued_on(conn: &rusqlite::Connection) -> Result<Vec<VaultMessage>
     Ok(rows)
 }
 
-/// Queue a save: files first, then the row (the commit point), as the outbox does.
+/// Queue a save: files first, then the row (the commit point), as the outbox does. The id is
+/// claimed from the first byte to the row, so another process's orphan sweep leaves the bytes.
 pub async fn enqueue(
     state: &Arc<AppState>,
     message_id: Option<String>,
@@ -76,6 +77,20 @@ pub async fn enqueue(
         None => outbox::new_message_id(),
     };
     let _sending = crate::notify::lock::suspend::send_started(Some(&id));
+    let held = outbox::claim::Claim::take(state, &id).await;
+    let result = enqueue_claimed(state, id, text, attachments).await;
+    if let Some(held) = held {
+        held.release(state).await;
+    }
+    result
+}
+
+async fn enqueue_claimed(
+    state: &Arc<AppState>,
+    id: String,
+    text: String,
+    attachments: Vec<OutgoingAttachment>,
+) -> Result<Enqueued> {
     {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(outbox::not_signed_in)?;
@@ -123,21 +138,18 @@ async fn set_state(state: &Arc<AppState>, id: &str, send_state: &str) {
 /// One attempt: upload the files (if any are still stored), save the entry, cache it, and take
 /// it out of the queue. Each step is safe to repeat.
 async fn attempt(state: &Arc<AppState>, user_id: &str, id: &str) -> Result<VaultMessage> {
-    let (content, created_at) = {
+    // The row and its stored files in one read, so both come from the same side of a finished
+    // upload's transaction (which rewrites the content and deletes the files together).
+    let (content, created_at, metas) = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(outbox::not_signed_in)?;
         match queued_row_on(db.conn(), id)? {
-            Some((content, created_at, _)) => (content, created_at),
+            Some((content, created_at, _)) => (content, created_at, outbox::attachment_metas_on(db.conn(), id)?),
             None => {
                 return vault::get_local(db.conn(), id)?
                     .ok_or_else(|| Error::Other(anyhow::anyhow!("vault entry {id} is not queued")));
             }
         }
-    };
-    let metas = {
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(outbox::not_signed_in)?;
-        outbox::attachment_metas_on(db.conn(), id)?
     };
     let content = if metas.is_empty() {
         content
@@ -246,6 +258,10 @@ pub(crate) async fn drain(state: &Arc<AppState>) -> Result<(Vec<String>, Vec<Str
     let user_id = crate::commands::mls::current_user_id(state).await?;
     let (mut saved, mut failed) = (Vec::new(), Vec::new());
     for id in ids {
+        // Another process (the share extension) is saving it.
+        if outbox::claim::held_elsewhere(state, &id).await {
+            continue;
+        }
         let _sending = crate::notify::lock::suspend::send_started(Some(&id));
         let lock = OutboxLock::acquire(state, &id).await;
         match attempt(state, &user_id, &id).await {

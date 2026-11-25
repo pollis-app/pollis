@@ -280,7 +280,7 @@ async fn store_attachment_streamed(
         }
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
-        write_attachment_chunk_on(db.conn(), rowid, offset, &buf[..n])?;
+        write_attachment_chunk_on(db.conn(), rowid, id, position, offset, &buf[..n])?;
         offset += n as u64;
     }
     if offset != size {
@@ -354,13 +354,28 @@ pub(super) fn reserve_attachment_on(
     Ok(conn.last_insert_rowid())
 }
 
-/// Write `data` into the reserved blob of row `rowid` at `offset`.
+/// Write `data` into the reserved blob of row `rowid` at `offset`. The row must still be
+/// `id`'s attachment at `position`: a rowid freed and handed to another row in between (the
+/// reserved row deleted under it) is refused, never written into.
 pub(super) fn write_attachment_chunk_on(
     conn: &rusqlite::Connection,
     rowid: i64,
+    id: &str,
+    position: usize,
     offset: u64,
     data: &[u8],
 ) -> Result<()> {
+    let still_ours = conn
+        .query_row(
+            "SELECT 1 FROM outbox_attachment WHERE rowid = ?1 AND message_id = ?2 AND position = ?3",
+            rusqlite::params![rowid, id, position as i64],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !still_ours {
+        return Err(Error::Other(anyhow::anyhow!("the attachment being stored for {id} was removed")));
+    }
     let mut blob = conn.blob_open(rusqlite::MAIN_DB, "outbox_attachment", "data", rowid, false)?;
     blob.write_at(data, offset as usize)?;
     Ok(())
@@ -400,11 +415,14 @@ pub(super) async fn upload_stored_attachment(
     n: usize,
     meta: &AttMeta,
 ) -> Result<crate::commands::r2::MediaUploadResult> {
+    // An image the sender measured (blurhash and size) is not decoded again.
+    let measured = meta.blurhash.is_some() && meta.width.is_some() && meta.height.is_some();
     let mut upload = crate::commands::r2::StreamUpload::begin(
         state,
         scope,
         &meta.content_type,
         meta.size as u64,
+        !measured,
     )
     .await?;
     let mut buf = zeroize::Zeroizing::new(vec![0u8; crate::commands::r2::UPLOAD_CHUNK]);
@@ -698,11 +716,15 @@ pub(super) fn remove_unsent_on(conn: &rusqlite::Connection, id: &str) -> Result<
 }
 
 /// Bytes whose message row was never written (killed mid-enqueue); swept at DB open.
+///
+/// Another process (the iOS share extension) may be storing a row right now: its bytes come
+/// before its row, under a live claim on the id ([`OutboxLock`]), and are left alone.
 pub(crate) fn sweep_orphan_attachments_on(conn: &rusqlite::Connection) -> Result<usize> {
     Ok(conn.execute(
         "DELETE FROM outbox_attachment WHERE message_id NOT IN (SELECT id FROM message) \
-         AND message_id NOT IN (SELECT id FROM vault_outbox)",
-        [],
+         AND message_id NOT IN (SELECT id FROM vault_outbox) \
+         AND message_id NOT IN (SELECT key FROM outbox_claim WHERE until_ms > ?1)",
+        rusqlite::params![claim::now_ms()],
     )?)
 }
 
@@ -801,7 +823,23 @@ pub(super) fn enqueue_on(
     Ok(Enqueued::Unsent)
 }
 
+/// Store a message: its files, then its row. The id is claimed ([`claim`]) from the first byte
+/// to the row, so another process's orphan sweep at open leaves the bytes alone (#2100).
 pub(super) async fn enqueue(
+    state: &Arc<AppState>,
+    queued: &Queued,
+    attachments: Vec<OutgoingAttachment>,
+    preview_thumbnail: Option<&crate::commands::link_preview::OutgoingThumbnail>,
+) -> Result<Enqueued> {
+    let held = claim::Claim::take(state, &queued.id).await;
+    let result = enqueue_claimed(state, queued, attachments, preview_thumbnail).await;
+    if let Some(held) = held {
+        held.release(state).await;
+    }
+    result
+}
+
+async fn enqueue_claimed(
     state: &Arc<AppState>,
     queued: &Queued,
     attachments: Vec<OutgoingAttachment>,
@@ -928,9 +966,12 @@ pub(super) struct OutboxLock {
     state: Arc<AppState>,
     id: String,
     guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+    claim: Option<claim::Claim>,
 }
 
 impl OutboxLock {
+    /// This process's lock on `id`, then the claim on it across processes ([`claim`]): waits
+    /// while another process holds it.
     pub(super) async fn acquire(state: &Arc<AppState>, id: &str) -> Self {
         let entry = {
             let mut map = state.outbox_locks.lock().await;
@@ -939,14 +980,19 @@ impl OutboxLock {
                 .clone()
         };
         let guard = entry.lock_owned().await;
+        let claim = claim::Claim::take(state, id).await;
         Self {
             state: state.clone(),
             id: id.to_string(),
             guard: Some(guard),
+            claim,
         }
     }
 
     pub(super) async fn release(mut self) {
+        if let Some(claim) = self.claim.take() {
+            claim.release(&self.state).await;
+        }
         self.guard.take();
         let mut map = self.state.outbox_locks.lock().await;
         if let Some(entry) = map.get(&self.id) {
@@ -1431,7 +1477,9 @@ async fn deliver_locked(
     sender_username: Option<String>,
     attempt: Attempt,
 ) -> Result<Message> {
-    let (queued, sender_username) = {
+    // The row and its stored files in one read: another process's finished upload rewrites the
+    // content and deletes the files in one transaction, so both come from the same side of it.
+    let (queued, sender_username, metas) = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(not_signed_in)?;
         let Some((row, send_state)) = load(db.conn(), id)? else {
@@ -1457,6 +1505,7 @@ async fn deliver_locked(
             )
             .optional()?
             .flatten();
+        let metas = attachment_metas_on(db.conn(), id)?;
         (
             Queued {
                 id: row.id,
@@ -1469,13 +1518,14 @@ async fn deliver_locked(
                 link_preview,
             },
             sender_username,
+            metas,
         )
     };
 
     #[cfg(feature = "test-harness")]
     super::send::test_hooks::count_attempt();
 
-    let queued = match finish_uploads(state, queued).await {
+    let queued = match finish_uploads(state, queued, &metas).await {
         Ok(queued) => queued,
         Err(e) if crate::commands::file_keys::is_file_key_unavailable(&e) => {
             // Only the file key is missing: stays queued, not failed; the next drain sends it.
@@ -1531,14 +1581,10 @@ async fn mark_state(state: &Arc<AppState>, id: &str, send_state: &str) {
 }
 
 /// Upload stored attachments one at a time, then swap in the finished `_att` envelope in one transaction.
-async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued) -> Result<Queued> {
-    let metas = {
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(not_signed_in)?;
-        attachment_metas_on(db.conn(), &queued.id)?
-    };
+/// `metas` were read with the row ([`deliver_locked`]).
+async fn finish_uploads(state: &Arc<AppState>, mut queued: Queued, metas: &[AttMeta]) -> Result<Queued> {
     if !metas.is_empty() {
-        queued = finish_attachment_uploads(state, queued, &metas).await?;
+        queued = finish_attachment_uploads(state, queued, metas).await?;
     }
     // The link preview's thumbnail (#1987), same path and same failure handling.
     if let Some(json) = queued.link_preview.clone() {
@@ -1769,6 +1815,11 @@ async fn drain(state: &Arc<AppState>) -> Result<OutboxReport> {
     };
     let mut report = OutboxReport::default();
     for id in ids {
+        // Another process (the share extension) is delivering it: its own pass finishes it, or
+        // its lease runs out and a later drain does.
+        if claim::held_elsewhere(state, &id).await {
+            continue;
+        }
         // One attempt each: the drain is the event-driven retry. A row a send's in-place retry
         // is still working on stays `pending` (#2055); that loop decides when it reads "Not sent".
         let attempt = Attempt::Own { hold: state.outbox_retrying.contains(&id) };
@@ -1781,9 +1832,14 @@ async fn drain(state: &Arc<AppState>) -> Result<OutboxReport> {
         }
     }
     // The Vault's queue (#2100), the same event-driven retry.
-    let (vault_delivered, vault_failed) = super::vault_queue::drain(state).await?;
-    report.delivered.extend(vault_delivered);
-    report.failed.extend(vault_failed);
+    match super::vault_queue::drain(state).await {
+        Ok((vault_delivered, vault_failed)) => {
+            report.delivered.extend(vault_delivered);
+            report.failed.extend(vault_failed);
+        }
+        // The edits below do not depend on it.
+        Err(e) => crate::diag!("[outbox] the Vault queue's drain failed: {e}"),
+    }
     // Edits after sends: an edit only ever targets a delivered message, so
     // nothing here waits on the loop above (#1555).
     let (edits_delivered, edits_failed) = super::edit_outbox::drain_edits(state).await?;
@@ -1813,6 +1869,197 @@ pub(crate) fn spawn_outbox_flush(state: &Arc<AppState>) {
             Err(e) => crate::diag!("[outbox] drain after unlock failed: {e}"),
         }
     });
+}
+
+/// The cross-process half of [`OutboxLock`] (#2100): a lease row in `outbox_claim`.
+///
+/// The app and the iOS share extension open the same database. Without this, the app's drain
+/// could deliver a row the extension is delivering, uploading every file twice and racing two
+/// seals of one id. A holder renews its lease while it works, so a process that is killed or
+/// suspended mid-send stops renewing and its rows are taken over once the lease runs out.
+/// Nothing here is a file lock, so nothing is held across an iOS suspension.
+pub(crate) mod claim {
+    use std::sync::Arc;
+    use std::sync::OnceLock;
+    use std::time::Duration;
+
+    use crate::state::AppState;
+
+    /// How long a lease lasts without renewal.
+    pub(crate) const LEASE: Duration = Duration::from_secs(60);
+    /// How often a holder renews.
+    const RENEW_EVERY: Duration = Duration::from_secs(15);
+    /// How often a waiter looks again while another process holds the key.
+    const WAIT_STEP: Duration = Duration::from_millis(250);
+
+    pub(crate) fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+
+    /// This process's holder id, fresh per process.
+    pub(crate) fn holder() -> &'static str {
+        static HOLDER: OnceLock<String> = OnceLock::new();
+        HOLDER.get_or_init(|| ulid::Ulid::new().to_string())
+    }
+
+    /// Take `key` if it is free, ours, or its lease ran out. `None` when another process holds it.
+    pub(crate) fn try_take_on(conn: &rusqlite::Connection, key: &str, holder: &str, now: i64) -> rusqlite::Result<bool> {
+        let n = conn.execute(
+            "INSERT INTO outbox_claim (key, holder, until_ms) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(key) DO UPDATE SET holder = excluded.holder, until_ms = excluded.until_ms \
+             WHERE outbox_claim.holder = excluded.holder OR outbox_claim.until_ms <= ?4",
+            rusqlite::params![key, holder, now + LEASE.as_millis() as i64, now],
+        )?;
+        Ok(n == 1)
+    }
+
+    /// Whether another process holds a live claim on `key`.
+    pub(crate) fn held_elsewhere_on(conn: &rusqlite::Connection, key: &str, holder: &str, now: i64) -> rusqlite::Result<bool> {
+        use rusqlite::OptionalExtension;
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM outbox_claim WHERE key = ?1 AND holder != ?2 AND until_ms > ?3",
+                rusqlite::params![key, holder, now],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// Whether another process is working on `key` now: the drain passes such a row by.
+    pub(crate) async fn held_elsewhere(state: &Arc<AppState>, key: &str) -> bool {
+        let guard = state.local_db.lock().await;
+        guard
+            .as_ref()
+            .is_some_and(|db| held_elsewhere_on(db.conn(), key, holder(), now_ms()).unwrap_or(false))
+    }
+
+    /// Drop every claim this process holds: it is about to stop (the share extension parks).
+    pub(crate) fn release_all_on(conn: &rusqlite::Connection) -> rusqlite::Result<usize> {
+        conn.execute("DELETE FROM outbox_claim WHERE holder = ?1", rusqlite::params![holder()])
+    }
+
+    /// A held claim; renewed in the background until released or dropped. `renew` is `None`
+    /// for a nested one: the key was already this process's (an outer step holds it), so this
+    /// one neither renews nor releases it.
+    pub(crate) struct Claim {
+        key: String,
+        renew: Option<tokio::task::JoinHandle<()>>,
+    }
+
+    fn ours_on(conn: &rusqlite::Connection, key: &str, now: i64) -> rusqlite::Result<bool> {
+        use rusqlite::OptionalExtension;
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM outbox_claim WHERE key = ?1 AND holder = ?2 AND until_ms > ?3",
+                rusqlite::params![key, holder(), now],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    impl Claim {
+        /// Take `key`, waiting while another process holds it. `None` when there is no
+        /// database (nothing to send then) or it cannot be written.
+        pub(crate) async fn take(state: &Arc<AppState>, key: &str) -> Option<Self> {
+            loop {
+                let taken = {
+                    let guard = state.local_db.lock().await;
+                    let db = guard.as_ref()?;
+                    if ours_on(db.conn(), key, now_ms()).unwrap_or(false) {
+                        return Some(Self { key: key.to_string(), renew: None });
+                    }
+                    match try_take_on(db.conn(), key, holder(), now_ms()) {
+                        Ok(taken) => taken,
+                        Err(e) => {
+                            crate::diag!("[outbox] could not claim {key}: {e}");
+                            return None;
+                        }
+                    }
+                };
+                if taken {
+                    break;
+                }
+                tokio::time::sleep(WAIT_STEP).await;
+            }
+            let renew = {
+                let state = state.clone();
+                let key = key.to_string();
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(RENEW_EVERY).await;
+                        let guard = state.local_db.lock().await;
+                        let Some(db) = guard.as_ref() else {
+                            continue;
+                        };
+                        let renewed = db.conn().execute(
+                            "UPDATE outbox_claim SET until_ms = ?1 WHERE key = ?2 AND holder = ?3",
+                            rusqlite::params![now_ms() + LEASE.as_millis() as i64, key, holder()],
+                        );
+                        if !matches!(renewed, Ok(1)) {
+                            crate::diag!("[outbox] lost the claim on {key}");
+                        }
+                    }
+                })
+            };
+            Some(Self { key: key.to_string(), renew: Some(renew) })
+        }
+
+        pub(crate) async fn release(mut self, state: &Arc<AppState>) {
+            let Some(renew) = self.renew.take() else {
+                return;
+            };
+            renew.abort();
+            let guard = state.local_db.lock().await;
+            if let Some(db) = guard.as_ref() {
+                if let Err(e) = db.conn().execute(
+                    "DELETE FROM outbox_claim WHERE key = ?1 AND holder = ?2",
+                    rusqlite::params![self.key, holder()],
+                ) {
+                    crate::diag!("[outbox] could not release the claim on {}: {e}", self.key);
+                }
+            }
+        }
+    }
+
+    impl Drop for Claim {
+        // A dropped (cancelled) holder stops renewing; the lease runs out on its own.
+        fn drop(&mut self) {
+            if let Some(renew) = &self.renew {
+                renew.abort();
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn conn() -> rusqlite::Connection {
+            let c = rusqlite::Connection::open_in_memory().unwrap();
+            c.execute_batch("CREATE TABLE outbox_claim (key TEXT PRIMARY KEY, holder TEXT NOT NULL, until_ms INTEGER NOT NULL);")
+                .unwrap();
+            c
+        }
+
+        #[test]
+        fn one_holder_at_a_time_until_the_lease_runs_out() {
+            let c = conn();
+            assert!(try_take_on(&c, "m1", "app", 1_000).unwrap());
+            assert!(!try_take_on(&c, "m1", "extension", 1_001).unwrap(), "held by the app");
+            assert!(held_elsewhere_on(&c, "m1", "extension", 1_001).unwrap());
+            assert!(!held_elsewhere_on(&c, "m1", "app", 1_001).unwrap(), "not elsewhere for its holder");
+            assert!(try_take_on(&c, "m1", "app", 1_002).unwrap(), "its holder renews");
+            let expired = 1_002 + LEASE.as_millis() as i64;
+            assert!(try_take_on(&c, "m1", "extension", expired).unwrap(), "a lease that ran out is taken over");
+            assert!(!try_take_on(&c, "m1", "app", expired + 1).unwrap());
+            assert!(try_take_on(&c, "m2", "app", expired).unwrap(), "keys are independent");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2141,6 +2388,40 @@ mod tests {
         assert_eq!(sweep_orphan_attachments_on(conn).unwrap(), 1);
         assert_eq!(attachment_metas_on(conn, &queued_id).unwrap().len(), 1);
         assert!(attachment_metas_on(conn, &orphan).unwrap().is_empty());
+    }
+
+    /// #2100: bytes another process is still storing (its row not written yet) are under its
+    /// claim, and the sweep at open leaves them; once the claim's lease is over they go.
+    #[test]
+    fn bytes_under_a_live_claim_are_not_swept() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let storing = new_message_id();
+        store_attachment_on(conn, &storing, 0, &meta("b.png", 1), b"y").unwrap();
+        assert!(claim::try_take_on(conn, &storing, "extension", claim::now_ms()).unwrap());
+        assert_eq!(sweep_orphan_attachments_on(conn).unwrap(), 0);
+        assert_eq!(attachment_metas_on(conn, &storing).unwrap().len(), 1);
+        conn.execute("UPDATE outbox_claim SET until_ms = 0 WHERE key = ?1", [&storing]).unwrap();
+        assert_eq!(sweep_orphan_attachments_on(conn).unwrap(), 1);
+    }
+
+    /// #2100: a chunk is written only into the row it reserved. A reserved row deleted under
+    /// the writer (and its rowid handed to another row) is refused, never written into.
+    #[test]
+    fn a_chunk_never_lands_in_another_rows_blob() {
+        let db = LocalDb::open_in_memory().unwrap();
+        let conn = db.conn();
+        let (mine, theirs) = (new_message_id(), new_message_id());
+        let rowid = reserve_attachment_on(conn, &mine, 0, &meta("a.bin", 4)).unwrap();
+        write_attachment_chunk_on(conn, rowid, &mine, 0, 0, b"ab").unwrap();
+        conn.execute("DELETE FROM outbox_attachment WHERE message_id = ?1", [&mine]).unwrap();
+        let reused = reserve_attachment_on(conn, &theirs, 0, &meta("b.bin", 4)).unwrap();
+        assert_eq!(reused, rowid, "SQLite hands the freed rowid on");
+        assert!(write_attachment_chunk_on(conn, rowid, &mine, 0, 2, b"cd").is_err());
+        let data: Vec<u8> = conn
+            .query_row("SELECT data FROM outbox_attachment WHERE message_id = ?1", [&theirs], |r| r.get(0))
+            .unwrap();
+        assert_eq!(data, vec![0u8; 4], "the other row is untouched");
     }
 
     /// The finished envelope is the renderers' byte for byte: same key order,
