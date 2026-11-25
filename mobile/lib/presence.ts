@@ -91,7 +91,7 @@ export function statusOf(
 // ── this device's side (#2110) ───────────────────────────────────────────────
 
 /** The LiveKit participant attribute every client sets: "1" in use, "0" running but not in use. */
-export const ACTIVE_ATTRIBUTE = "active";
+const ACTIVE_ATTRIBUTE = "active";
 
 /** What the attribute says for `inUse`. */
 export function activeAttributes(inUse: boolean): Record<string, string> {
