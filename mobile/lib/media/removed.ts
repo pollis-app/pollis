@@ -1,7 +1,7 @@
 // #2109: a file the operator removed is shown as "File removed", once, and never retried. Pure.
 
 /** The core's error text for a removed file (`pollis_core::error::Error::AttachmentRemoved`). */
-export const ATTACHMENT_REMOVED = "attachment_removed";
+const ATTACHMENT_REMOVED = "attachment_removed";
 
 export function isAttachmentRemoved(error: unknown): boolean {
   const message =
