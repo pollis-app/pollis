@@ -1668,10 +1668,11 @@ pub trait ObjectStore: Sync {
     ) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
 }
 
-impl ObjectStore for BrokerConfig {
-    /// A DELETE through the same SigV4 presign the client's own deletes use,
-    /// sent by the DS. Unconfigured R2 is an error, so the row stays marked.
-    async fn delete_object(&self, key: &str) -> anyhow::Result<()> {
+impl BrokerConfig {
+    /// Send a bodiless `method` (`DELETE` or `HEAD`) to `key` through the same
+    /// SigV4 presign the clients use, as the DS, and answer R2's status.
+    /// Unconfigured R2 is an error.
+    async fn r2_status(&self, method: &str, key: &str) -> anyhow::Result<reqwest::StatusCode> {
         let (endpoint, bucket, access_key, secret_key) = self
             .r2_ready()
             .ok_or_else(|| anyhow::anyhow!("r2 not configured"))?;
@@ -1681,17 +1682,29 @@ impl ObjectStore for BrokerConfig {
             &self.r2_region,
             access_key,
             secret_key,
-            "DELETE",
+            method,
             key,
             PRESIGN_EXPIRES_SECS,
             &amz_datetime(),
         );
-        let status = crate::util::http_delete(crate::util::Upstream::R2, &url)
+        let request = match method {
+            "HEAD" => crate::util::http_head(crate::util::Upstream::R2, &url),
+            _ => crate::util::http_delete(crate::util::Upstream::R2, &url),
+        };
+        Ok(request
             .send()
             .await
             // The URL carries a signature; keep it out of the error and the logs.
             .map_err(|e| anyhow::anyhow!(e.without_url()))?
-            .status();
+            .status())
+    }
+}
+
+impl ObjectStore for BrokerConfig {
+    /// A DELETE through the same SigV4 presign the client's own deletes use,
+    /// sent by the DS. Unconfigured R2 is an error, so the row stays marked.
+    async fn delete_object(&self, key: &str) -> anyhow::Result<()> {
+        let status = self.r2_status("DELETE", key).await?;
         if status.is_success() || status == reqwest::StatusCode::NOT_FOUND {
             Ok(())
         } else {
@@ -1702,26 +1715,7 @@ impl ObjectStore for BrokerConfig {
     /// A HEAD through the same presign. 404 = not stored; anything else that
     /// is not a success is an error, so the caller writes nothing.
     async fn object_exists(&self, key: &str) -> anyhow::Result<bool> {
-        let (endpoint, bucket, access_key, secret_key) = self
-            .r2_ready()
-            .ok_or_else(|| anyhow::anyhow!("r2 not configured"))?;
-        let url = presign_r2_url(
-            endpoint,
-            bucket,
-            &self.r2_region,
-            access_key,
-            secret_key,
-            "HEAD",
-            key,
-            PRESIGN_EXPIRES_SECS,
-            &amz_datetime(),
-        );
-        let status = crate::util::http_head(crate::util::Upstream::R2, &url)
-            .send()
-            .await
-            // The URL carries a signature; keep it out of the error and the logs.
-            .map_err(|e| anyhow::anyhow!(e.without_url()))?
-            .status();
+        let status = self.r2_status("HEAD", key).await?;
         if status.is_success() {
             Ok(true)
         } else if status == reqwest::StatusCode::NOT_FOUND {
@@ -1754,35 +1748,17 @@ pub fn presign_r2_url(
     expires: u64,
     datetime: &str,
 ) -> String {
-    presign_r2_url_bounded(
-        endpoint, bucket, region, access_key, secret_key, method, key, expires, datetime, None,
-    )
-}
-
-/// [`presign_r2_url`], optionally binding an EXACT `Content-Length`.
-///
-/// With `Some(n)` the URL authorizes exactly `n` bytes; R2 rejects any other length (#848).
-#[allow(clippy::too_many_arguments)]
-pub fn presign_r2_url_bounded(
-    endpoint: &str,
-    bucket: &str,
-    region: &str,
-    access_key: &str,
-    secret_key: &str,
-    method: &str,
-    key: &str,
-    expires: u64,
-    datetime: &str,
-    content_length: Option<u64>,
-) -> String {
     presign_r2_url_with_headers(
-        endpoint, bucket, region, access_key, secret_key, method, key, expires, datetime,
-        content_length, &[],
+        endpoint, bucket, region, access_key, secret_key, method, key, expires, datetime, None, &[],
     )
 }
 
-/// [`presign_r2_url_bounded`], also signing `extra` headers (lowercase names),
-/// which the request must then carry with exactly these values (#2109).
+/// [`presign_r2_url`], optionally binding an EXACT `Content-Length` and
+/// signing `extra` headers (lowercase names).
+///
+/// With `Some(n)` the URL authorizes exactly `n` bytes; R2 rejects any other
+/// length (#848). Every `extra` header must then be sent with exactly the
+/// signed value (#2109: a shared object's checksum and `If-None-Match: *`).
 #[allow(clippy::too_many_arguments)]
 pub fn presign_r2_url_with_headers(
     endpoint: &str,

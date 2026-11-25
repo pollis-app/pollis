@@ -707,28 +707,6 @@ pub(crate) async fn upload_outbox_bytes(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
-    // Test harness: seal as production does but store nothing.
-    #[cfg(feature = "test-harness")]
-    if crate::commands::messages::test_hooks::uploads_stubbed() {
-        let h = crate::commands::shared_files::sha256(&data);
-        let (content_hash, _ciphertext) = crate::commands::shared_files::seal(&data, &h);
-        let key = pollis_api::messages::shared_object_key(&content_hash);
-        return Ok(MediaUploadResult {
-            url: format!("{}/{key}", state.config.r2_endpoint.trim_end_matches('/')),
-            key,
-            filename,
-            content_type,
-            size_bytes: data.len(),
-            content_hash,
-            version: SHARED_ATTACHMENT_VERSION,
-            key_version: 0,
-            sha256: hex::encode(h),
-            blurhash: None,
-            width: None,
-            height: None,
-            poster: None,
-        });
-    }
     let _slot = upload_slot().await;
     upload_plaintext(Plaintext::Owned(data), filename, content_type, state).await
 }

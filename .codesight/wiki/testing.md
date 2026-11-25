@@ -589,8 +589,8 @@ before any network work, or after the DS took the envelope but before this
 device recorded it. `flows/outbox.rs` uses it with `lock` + `unlock` as the
 restart to prove a message the user saw accepted is delivered after the next
 unlock (a thread reply included; an attachment send killed BEFORE its upload,
-with `test_hooks::stub_attachment_uploads` sealing without storing). The flows
-world also has an in-process R2 (`flows/fake_r2.rs`, #2109): the DS's broker and
+through the flows world's in-process R2). The flows world has an in-process R2
+(`flows/fake_r2.rs`, #2109; it replaced the `stub_attachment_uploads` hook): the DS's broker and
 the clients point at it, it honours the shared-object PUT's `If-None-Match: *`
 and `x-amz-checksum-sha256`, and `wipe()` empties it, so attachments run their
 real presign / PUT / register / GET path (`flows/attachment_dedup.rs`), that a re-post after a landed envelope is answered as a

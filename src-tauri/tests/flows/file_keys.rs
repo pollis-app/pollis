@@ -95,21 +95,6 @@ async fn late_joiners_open_the_ring_and_a_removal_rotates_it_out_of_reach() {
 
 // A DM member without the ring: it is wrapped under ONE epoch's exporter.
 
-struct StubbedUploads;
-
-impl StubbedUploads {
-    fn on() -> Self {
-        pollis_core::commands::messages::test_hooks::stub_attachment_uploads(true);
-        StubbedUploads
-    }
-}
-
-impl Drop for StubbedUploads {
-    fn drop(&mut self) {
-        pollis_core::commands::messages::test_hooks::stub_attachment_uploads(false);
-    }
-}
-
 async fn dm_pair(alice: &mut TestClient, bob: &mut TestClient) -> String {
     let a = alice.sign_up("fk-dm-alice@test.local").await;
     let b = bob.sign_up("fk-dm-bob@test.local").await;
@@ -223,7 +208,6 @@ async fn received_captions(client: &TestClient, dm_id: &str) -> Vec<String> {
 #[serial]
 async fn a_photo_needs_no_conversation_file_key() {
     wipe().await;
-    let _stub = StubbedUploads::on();
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
     let dm_id = dm_pair(&mut alice, &mut bob).await;
