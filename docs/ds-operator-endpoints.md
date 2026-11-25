@@ -110,10 +110,11 @@ that has not advanced — look at the conversation's devices, not at this endpoi
 
 ## Token-gated operator routes
 
-Not in the `endpoints!` table, and not device-signed: these take the operator bearer
-token (`POLLIS_DS_METRICS_TOKEN`), the same as the read-only `/v1/ops/*` routes. With
-no token configured they answer `404`; without the right bearer, `401`. No client
-holds the token.
+Not in the `endpoints!` table, and not device-signed. A destructive route takes its own
+bearer token, `POLLIS_DS_OPERATOR_TOKEN` (Doppler → Secrets Store → container, like every
+DS secret), never the read-only `POLLIS_DS_METRICS_TOKEN` that dashboards and the
+`GET /v1/ops/*` routes use. With no operator token configured the route answers `404`;
+without the right bearer, `401`. No client holds the token.
 
 ### `POST /v1/ops/attachments/remove`
 
@@ -139,7 +140,7 @@ The record stays, so sending the identical file again cannot restore it. A devic
 that already downloaded the file keeps its local cached copy until that is evicted.
 
 ```bash
-curl -X POST -H "Authorization: Bearer $POLLIS_DS_METRICS_TOKEN" \
+curl -X POST -H "Authorization: Bearer $POLLIS_DS_OPERATOR_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"content_hash":"v2-…"}' https://api.pollis.com/v1/ops/attachments/remove
 ```

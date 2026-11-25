@@ -643,6 +643,7 @@ async fn upload_edit_preview(
     let Some(updated) = super::outbox::upload_preview_thumbnail(
         state,
         &edit.target_message_id,
+        &edit.conversation_id,
         &json,
     )
     .await?

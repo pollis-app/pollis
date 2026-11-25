@@ -7,15 +7,23 @@
 //! conversation key ring, #1382) keep downloading. Nothing the DS or the bucket holds
 //! opens a file.
 
-use crate::harness::{wipe, writable_remote, TestClient};
+use crate::harness::{set_shared_attachments, wipe, writable_remote, TestClient};
 use pollis_core::commands::r2::{download_media, AttachmentKeyScope};
 use serde_json::json;
 use serial_test::serial;
 
 const PHOTO: &[u8] = b"\x89PNG the same photo, byte for byte, from everyone";
 
-/// Alice and Bob in one group channel, plus a DM between them.
+/// Alice and Bob in one group channel, plus a DM between them, with the DS's
+/// shared-upload switch ON (the state after the follow-up flips it).
 async fn world() -> (TestClient, TestClient, String, String) {
+    let w = world_switch_off().await;
+    set_shared_attachments(true);
+    w
+}
+
+/// [`world`] with the switch as production ships it: off, so uploads are v1.
+async fn world_switch_off() -> (TestClient, TestClient, String, String) {
     wipe().await;
     let mut alice = TestClient::new().await;
     let a = alice.sign_up("dedup-alice@test.local").await;
@@ -192,27 +200,64 @@ async fn one_file_to_several_chats_and_the_vault_is_one_object() {
     drop((alice, bob));
 }
 
-/// A v1 object — random file id, sealed under the conversation's ring (#1382) — still opens.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn a_v1_object_still_downloads() {
-    let (alice, bob, channel_id, _) = world().await;
-    let bytes = b"stored before #2109".to_vec();
-    let up = pollis_core::commands::r2::test_upload_v1(&channel_id, bytes.clone(), &alice.state)
-        .await
-        .expect("v1 upload");
-    assert_eq!(up.content_hash.len(), 64, "a v1 id is a bare random file id");
-    bob.process_commits_for(&channel_id).await;
-    let got = download_media(
-        up.key.clone(),
-        up.content_hash.clone(),
-        up.sha256.clone(),
-        AttachmentKeyScope::Conversation { conversation_id: channel_id.clone(), key_version: up.key_version },
-        &bob.state,
+/// Opens `att` the way a build without v2 support does: only a `kv` reference, under the ring.
+async fn open_as_v1_reader(client: &TestClient, conversation: &str, att: &serde_json::Value) -> Vec<u8> {
+    let kv = att["kv"].as_i64().expect("an old-format reader needs kv");
+    download_media(
+        att["key"].as_str().unwrap().to_string(),
+        att["hash"].as_str().unwrap().to_string(),
+        att["sha"].as_str().unwrap().to_string(),
+        AttachmentKeyScope::Conversation { conversation_id: conversation.to_string(), key_version: kv },
+        &client.state,
     )
     .await
-    .expect("a member opens the v1 object under the ring");
-    assert_eq!(got, bytes);
+    .expect("the old-format reader opens it under the ring")
+}
+
+/// The switch OFF (as shipped): uploads are v1, exactly what every build in the
+/// stores can open, and no shared object is stored. The same file twice is two
+/// objects, as before #2109. Flipping the switch on later leaves them opening.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn with_the_switch_off_uploads_stay_v1_for_old_readers() {
+    let (alice, bob, channel_id, _) = world_switch_off().await;
+    let (_, a_att) = send_photo(&alice, &channel_id, PHOTO).await;
+    let (_, b_att) = send_photo(&bob, &channel_id, PHOTO).await;
+    for att in [&a_att, &b_att] {
+        assert!(att.get("v").is_none(), "no v2 reference while the switch is off: {att}");
+        assert!(att["kv"].as_i64().unwrap_or(0) >= 1, "a ring key version: {att}");
+        assert_eq!(att["hash"].as_str().unwrap().len(), 64, "a random v1 file id: {att}");
+    }
+    assert_ne!(a_att["hash"], b_att["hash"], "v1 is not deduplicated");
+    assert_eq!(media_keys().len(), 2);
+    assert_eq!(count("SELECT COUNT(*) FROM attachment_lease").await, 0, "no claims while off");
+    assert!(media_keys().iter().all(|k| !k.starts_with("media/v2-")));
+
+    // A reader that only understands `kv` (a build in the stores today) opens both.
+    alice.process_commits_for(&channel_id).await;
+    assert_eq!(open_as_v1_reader(&bob, &channel_id, &a_att).await, PHOTO);
+    assert_eq!(open_as_v1_reader(&alice, &channel_id, &b_att).await, PHOTO);
+
+    // The switch flips: new uploads are shared, and the v1 files still open.
+    set_shared_attachments(true);
+    let (_, c_att) = send_photo(&alice, &channel_id, PHOTO).await;
+    assert_eq!(c_att["v"], 2);
+    assert_eq!(open(&bob, &c_att).await.expect("v2 opens"), PHOTO);
+    assert_eq!(open_as_v1_reader(&bob, &channel_id, &a_att).await, PHOTO);
+    drop((alice, bob));
+}
+
+/// The client asks the DS before every upload, so the switch takes effect at once.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_client_follows_the_ds_switch() {
+    let (alice, bob, _, _) = world_switch_off().await;
+    let ask = || pollis_core::commands::r2::shared_uploads_enabled(&alice.state);
+    assert!(!ask().await.expect("ask"), "off as shipped");
+    set_shared_attachments(true);
+    assert!(ask().await.expect("ask"), "on once flipped");
+    set_shared_attachments(false);
+    assert!(!ask().await.expect("ask"), "and off again");
     drop((alice, bob));
 }
 

@@ -363,6 +363,19 @@ async fn delivery_submit(
     }
 }
 
+/// The in-process DS's shared-upload switch (#2109), captured when the DS boots.
+static DS_SHARED_ATTACHMENTS: std::sync::OnceLock<std::sync::Arc<std::sync::atomic::AtomicBool>> =
+    std::sync::OnceLock::new();
+
+/// Turn the DS's shared attachment uploads (#2109) on or off. Off, as in
+/// production until the switch is flipped; `wipe()` turns it off again.
+pub(crate) fn set_shared_attachments(on: bool) {
+    DS_SHARED_ATTACHMENTS
+        .get()
+        .expect("the in-process DS has not booted yet")
+        .store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// The in-process DS's device-key cache, captured when the DS boots.
 static DS_DEVICE_KEYS: std::sync::OnceLock<pollis_delivery::auth::DeviceKeyCache> =
     std::sync::OnceLock::new();
@@ -433,6 +446,7 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>, r2_url: &str) ->
 
     // The very map the auth gate consults, for `expire_ds_device_keys`.
     let _ = DS_DEVICE_KEYS.set(real_state.device_keys.clone());
+    let _ = DS_SHARED_ATTACHMENTS.set(real_state.shared_attachments.clone());
 
     let fault_state = DsState { main, log };
     let (tx, rx) = mpsc::channel::<String>();
@@ -882,6 +896,7 @@ pub(crate) async fn wipe() {
     SENT_PUSH_AUDIENCES.lock().expect("push log").clear();
     crate::fake_r2::clear();
     let w = world().await;
+    set_shared_attachments(false);
     wipe_remote(
         &w.remote.conn().await.expect("main conn"),
         &w.log.conn().await.expect("log conn"),

@@ -274,6 +274,18 @@ pub struct AttachmentClaimBody {
     pub content_hash: String,
 }
 
+/// `POST /v1/attachments/format` — "how do I upload a new attachment?" (#2109).
+/// Asked before each upload, so the DS's switch takes effect without a client
+/// release: v2 uploads stay off until every build in the stores opens them.
+#[derive(Serialize, Deserialize)]
+pub struct AttachmentFormatBody {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentFormatResponse {
+    /// `true`: upload a shared object (claim, then PUT if asked). `false`: v1.
+    pub shared: bool,
+}
+
 /// What a claim found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

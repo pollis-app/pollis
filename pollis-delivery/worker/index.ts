@@ -48,6 +48,8 @@ const SECRET_KEYS = [
   "DEV_OTP",
   // #720: gates GET /v1/retention/metrics; absent, the endpoint 404s.
   "POLLIS_DS_METRICS_TOKEN",
+  // #2109: the destructive operator routes (removing a stored file); absent, they 404.
+  "POLLIS_DS_OPERATOR_TOKEN",
   // #707: authenticates push fan-out to Expo.
   "EXPO_TOKEN",
   // `<email>:<6 digits>` — the one account App Store / Play review signs in
@@ -73,6 +75,8 @@ const TUNABLE_VAR_KEYS = [
   "RL_INVITE_REDEEM_WINDOW_SECS",
   // Dev-only ops log (ops_log.rs).
   "POLLIS_DS_OPS_LOG",
+  // #2109: shared attachment uploads; unset is off.
+  "POLLIS_DS_SHARED_ATTACHMENTS",
 ] as const;
 
 // Every header that can carry a client IP, all deleted before forwarding.

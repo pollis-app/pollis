@@ -661,11 +661,19 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
     `POST /v1/attachments/claim` route; the DS's reference count reads
     `attachment_lease`, so the DS must never run ahead of that migration — the
     deploy's migrate-then-ship step applies it first. A new client against an old
-    DS cannot claim, so every upload fails: deploy the DS (dev → verify → prod,
-    **confirm `/version`**) before any client carrying #2109. Older clients keep
-    sending v1 (ring-sealed) attachments, which every client still opens; an older
-    client receiving a v2 reference (`v: 2`, no `kv`) shows the file as unavailable
-    rather than opening it, until it updates.
+    DS answers the client's `POST /v1/attachments/format` with 404, which the client
+    reads as "v1", so no ordering breaks uploads; deploy the DS first anyway.
+    **Uploads stay v1 until the switch is flipped.** `POLLIS_DS_SHARED_ATTACHMENTS`
+    (an optional wrangler var, unset = off) decides; every build in the stores opens
+    v1. Turning it on is #2112, in this order: (1) desktop and mobile
+    builds carrying #2109 (they read v2) are in every store; (2) raise the
+    client-policy minimum (#1611) to those builds; (3) set
+    `POLLIS_DS_SHARED_ATTACHMENTS = "on"` in `wrangler.dev.jsonc`, verify, then
+    `wrangler.prod.jsonc`, and deploy. Turning it off again is safe: clients go back
+    to v1 on their next upload, and v2 files keep opening.
+    **Operator removal** (`POST /v1/ops/attachments/remove`) needs the
+    `POLLIS_DS_OPERATOR_TOKEN` secret in Doppler (`pollis` project, `dev_personal`
+    → api-dev and `prd_prod` → api); unset, the route is 404.
 - [ ] **Relay pool** — **the hydra pool is currently SWITCHED OFF** (`hydra_enabled = false`), so there is no fleet to converge: an image roll publishes to GHCR and stops there, and the `intended-image` record step skips with the CI OIDC role gone. Rebuild the image if the code changed, then mark this N/A until the pool is switched back on. When it IS on: `pollis-relay` / `pollis-device-cert` change? rebuild the GHCR image (`relay-image.yml`). On the **hydra pool** (post-#703) that workflow also records the new immutable build into the `intended-image` SSM param (GitHub OIDC, no standing creds) and the reconciler converges the fleet on its schedule — verify each `GET /version` reports the new `sha` and the CloudWatch `StaleBuildNodes` metric returns to 0. Operator-provisioned (non-hydra) hosts are still a manual roll per `docs/relay-operations.md`. A wire-breaking protocol bump additionally needs `expected_relay_protocol` bumped (coordinated release — see above).
 - [ ] **Mobile (store builds + sideload APK)** — user-visible mobile change, or **any `pollis-core` / native change** (the fingerprint means OTA cannot carry it)? Bump `mobile/package.json` `version` and merge; build and upload the **store builds** by hand from that commit — iOS → TestFlight, Android AAB → Play `internal` + `alpha` via `scripts/play-publish.py` (`mobile/CLAUDE.md` → "Store builds"); then tag `mobile-v<version>` → `mobile-apk-release.yml` for the **sideload APK** (never a `v*` tag — that is the desktop). A core change reaches phones only through that store build, so say so in the PR. Note too if a `pollis-core` change needs a `#[cfg]`/uniffi follow-up. `mobile-core-check.yml` gates both `#[cfg]` gate-rot (cross-compile) **and** the full Android build (`android-build` assembles the APK) — a `pollis-core` change that breaks the uniffi surface, the prebuild, or the Gradle assembly now shows up as red CI, not on the next workstation build. iOS has no artifact job; `ios-check` links (`cargo build`) and asserts the artifact's iOS min-version, but the `.ipa` itself is only ever built by hand on a Mac.
 - [ ] **Mobile OTA** — JS-only mobile change that should reach phones before the next store build? Tag `mobile-ota-<date>-<n>` on the merged commit → `mobile-ota-release.yml`, approve the `ota-signing` job after reading the build summary (platforms, runtime versions, bundle hashes). It lands only on binaries whose fingerprint matches — a merge that also touched `pollis-core` or anything native has no OTA-capable target until a store build ships. Bad update? `republish` an earlier group or `rollback-to-embedded` (`mobile/CLAUDE.md` → "OTA updates").

@@ -542,8 +542,33 @@ pub async fn mint_file_keys_for_new_group(state: &Arc<AppState>, mls_conversatio
         return;
     };
     if let Err(e) = ensure_ring(state, mls_conversation_id, &user_id, true).await {
-        crate::diag!("[file-keys] create-time mint failed for {mls_conversation_id}: {e}");
+        crate::diag!("[file-keys] create-time mint failed for {mls_conversation_id} (first upload will mint): {e}");
     }
+}
+
+/// A send needs the conversation's file key and this device cannot reach it
+/// yet; the outbox keeps the message queued, so it's not a failure.
+#[derive(Debug)]
+pub struct FileKeyUnavailable;
+
+impl std::fmt::Display for FileKeyUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "this conversation's file key has not reached this device yet — \
+             the attachment will send as soon as it does",
+        )
+    }
+}
+
+impl std::error::Error for FileKeyUnavailable {}
+
+fn file_key_unavailable() -> Error {
+    Error::Other(anyhow::Error::new(FileKeyUnavailable))
+}
+
+/// Whether `e` is the wait for the conversation's file key, and nothing else.
+pub fn is_file_key_unavailable(e: &Error) -> bool {
+    matches!(e, Error::Other(any) if any.downcast_ref::<FileKeyUnavailable>().is_some())
 }
 
 /// [`ensure_ring`], and when that finds no ring this device can open, once
@@ -564,6 +589,28 @@ async fn ensure_ring_caught_up(
         crate::diag!("[file-keys] catch-up before re-reading the ring of {mls_conversation_id} failed: {e}");
     }
     ensure_ring(state, mls_conversation_id, user_id, mint_if_absent).await
+}
+
+/// The key and version a NEW upload to this conversation must use: the ring's
+/// newest key, after settling any rotation this device owes.
+pub(crate) async fn upload_key(
+    state: &Arc<AppState>,
+    mls_conversation_id: &str,
+    user_id: &str,
+) -> Result<(i64, Zeroizing<[u8; KEY_LEN]>)> {
+    let ring = ensure_ring_caught_up(state, mls_conversation_id, user_id, true)
+        .await?
+        .ok_or_else(file_key_unavailable)?;
+    settle_owed_rotation(state, mls_conversation_id, user_id).await?;
+    // Move a kept-KEK ring's wrap to this epoch so peers here can open it.
+    rewrap_if_behind(state, mls_conversation_id, user_id).await;
+    let ring = cached_ring(state, mls_conversation_id)
+        .await?
+        .map(|c| c.ring)
+        .unwrap_or(ring);
+    let version = ring.version();
+    let key = ring.key(version).expect("a ring has at least one key");
+    Ok((version, key))
 }
 
 /// The ring key at `version`, refetching if the cached ring is shorter.

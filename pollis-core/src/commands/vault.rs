@@ -506,17 +506,6 @@ pub mod test_hooks {
         pub file_nonce: [u8; 12],
     }
 
-    /// A shared object's AES-256-GCM key and base nonce (#2109), from the
-    /// plaintext SHA-256 the reference carries.
-    pub fn shared_file_key(sha256_hex: &str) -> Result<([u8; 32], [u8; 12])> {
-        let h: [u8; 32] = hex::decode(sha256_hex)
-            .ok()
-            .and_then(|b| b.try_into().ok())
-            .ok_or_else(|| Error::Other(anyhow::anyhow!("sha256 must be 32 hex bytes")))?;
-        let (key, nonce) = crate::commands::shared_files::content_key(&h);
-        Ok((*key, nonce))
-    }
-
     pub async fn vault_file_secrets(
         state: &Arc<AppState>,
         user_id: &str,

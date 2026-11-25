@@ -1292,21 +1292,22 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "A stolen key is a window, not a door",
-        "quote": "Shared files are sealed with a key that travels inside the message itself, so anyone who can read the message can open its file for as long as they keep the message."
+        "quote": "Shared files are sealed with a per-conversation file key that members' devices keep for the life of the conversation"
       },
-      "claim": "A file's key travels inside its end-to-end encrypted message; whoever keeps the message can open the file.",
+      "claim": "A conversation's file keys are kept by members' devices for the life of the conversation.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs",
+        "pollis-core/src/commands/file_keys.rs",
         "pollis-core/src/commands/r2.rs",
-        "pollis-core/src/commands/messages/outbox.rs"
+        "pollis-core/src/db/local_schema.sql"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:50",
-        "pollis-core/src/commands/messages/outbox.rs:256"
+        "pollis-core/src/db/local_schema.sql:501",
+        "pollis-core/src/commands/r2.rs:830",
+        "pollis-core/src/commands/file_keys.rs:4"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -1337,20 +1338,21 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Photos and files, encrypted before they leave",
-        "quote": "Each distinct file is stored once, however many people send it and however many chats it goes to."
+        "quote": "The server keeps the ring, but only locked under a secret that comes from the conversation's current MLS state"
       },
-      "claim": "Each distinct file is one stored object across all senders and conversations; references are per message and Vault entry.",
-      "kind": "behaviour",
+      "claim": "The DS stores each conversation's file key ring only wrapped under an MLS-epoch-exported KEK, re-wrapped as epochs advance.",
+      "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/r2.rs",
-        "pollis-delivery/src/messages.rs"
+        "pollis-core/src/commands/file_keys.rs",
+        "pollis-delivery/src/file_keys.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/r2.rs:781",
-        "pollis-delivery/src/messages.rs:2035"
+        "pollis-core/src/commands/file_keys.rs:3",
+        "pollis-core/src/commands/file_keys.rs:33",
+        "pollis-core/src/commands/file_keys.rs:474"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
@@ -1358,21 +1360,21 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Photos and files, encrypted before they leave",
-        "quote": "It encrypts the file with AES-256-GCM, so the same file always encrypts to the same bytes, and names the stored copy after a hash of those encrypted bytes."
+        "quote": "encrypts the file with AES-256-GCM, and uploads only the encrypted result to Cloudflare R2"
       },
-      "claim": "The file is sealed with AES-256-GCM under a key from its own SHA-256, deterministically, and named by the SHA-256 of the ciphertext.",
+      "claim": "Each file is sealed with AES-256-GCM under a per-file key from the newest ring key and a random id, then uploaded encrypted to R2.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs",
-        "pollis-core/src/commands/r2.rs"
+        "pollis-core/src/commands/r2.rs",
+        "pollis-core/src/commands/file_keys.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:50",
-        "pollis-core/src/commands/shared_files.rs:62",
-        "pollis-core/src/commands/shared_files.rs:71"
+        "pollis-core/src/commands/r2.rs:790",
+        "pollis-core/src/commands/r2.rs:827",
+        "pollis-core/src/commands/r2.rs:832"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -1380,20 +1382,20 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Photos and files, encrypted before they leave",
-        "quote": "Your device never holds storage credentials: it asks the Delivery Service for a short-lived, pre-signed upload link, which R2 accepts only for bytes matching the name."
+        "quote": "Your device never holds storage credentials: it asks the Delivery Service for a short-lived, pre-signed upload link."
       },
-      "claim": "Clients get DS-minted presigned R2 URLs and hold no storage credentials; a shared object's PUT signs its checksum.",
+      "claim": "Clients get DS-minted presigned R2 URLs and hold no storage credentials.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/r2.rs",
         "pollis-delivery/src/broker.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:1628",
-        "pollis-core/src/commands/r2.rs:1368"
+        "pollis-core/src/commands/r2.rs:1284",
+        "pollis-core/src/commands/r2.rs:892"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -1422,20 +1424,18 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Photos and files, encrypted before they leave",
-        "quote": "The file's hash, the one thing its key comes from, goes inside the encrypted message, so MLS protects it along with the text"
+        "quote": "Files in your Vault use a key derived from your own account key instead"
       },
-      "claim": "The plaintext SHA-256 that keys a file travels only inside the MLS-encrypted message (or the Vault entry).",
+      "claim": "Vault attachments are sealed under a key derived from the account key.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/messages/outbox.rs",
-        "pollis-core/src/commands/shared_files.rs"
+        "pollis-core/src/commands/vault.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/messages/outbox.rs:256",
-        "pollis-core/src/commands/shared_files.rs:50"
+        "pollis-core/src/commands/vault.rs:64"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -1443,19 +1443,18 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Photos and files, encrypted before they leave",
-        "quote": "An encrypted blob, its size, and its name, a hash of the encrypted bytes (not the filename)."
+        "quote": "An encrypted blob, its size, and a random object name (not the filename, not a fingerprint of the file)."
       },
-      "claim": "R2 sees ciphertext, its size, and a name that is the SHA-256 of the ciphertext.",
+      "claim": "R2 sees only ciphertext, size and a random object name.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs",
         "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:62"
+        "pollis-core/src/commands/r2.rs:830"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -1463,59 +1462,60 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Photos and files, encrypted before they leave",
-        "quote": "which messages reference it (so it can delete it once nothing does)"
+        "quote": "which message references it (so it can clean the blob up once nothing does)"
       },
-      "claim": "The DS records which messages reference each stored object, and deletes it when none does.",
+      "claim": "The DS records which message references each blob for cleanup.",
       "kind": "behaviour",
       "anchors": [
         "pollis-schema/migrations/000012_attachment_ref.sql",
         "pollis-delivery/src/messages.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:1618",
-        "pollis-delivery/src/messages.rs:1756"
+        "pollis-schema/migrations/000012_attachment_ref.sql:47",
+        "pollis-delivery/src/messages.rs:1568",
+        "pollis-delivery/src/messages.rs:1657"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
       "id": "learn-page-attachments-08",
       "doc": "website/learn.html",
       "locator": {
-        "heading": "What storing each file once means",
-        "quote": "Deleting your message removes only your reference; the stored copy stays while anyone else's message still uses it."
+        "heading": "The trade this makes",
+        "quote": "When someone is removed, a new key is added and used for everything uploaded afterwards"
       },
-      "claim": "One account's delete releases only its own references; the object survives while any other reference lives.",
-      "kind": "behaviour",
+      "claim": "A removal appends a new ring key; old files are not re-encrypted; joiners can open earlier files they can see referenced.",
+      "kind": "security",
       "anchors": [
-        "pollis-delivery/src/messages.rs"
+        "pollis-core/src/commands/file_keys.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:1491",
-        "pollis-delivery/src/messages.rs:1618"
+        "pollis-core/src/commands/file_keys.rs:4",
+        "pollis-core/src/commands/file_keys.rs:5"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
       "id": "learn-page-attachments-09",
       "doc": "website/learn.html",
       "locator": {
-        "heading": "What storing each file once means",
-        "quote": "Someone who already has a particular file can work out its stored name, and so can tell whether that exact file is stored"
+        "heading": "The trade this makes",
+        "quote": "Every upload is stored separately, even if two people send the same file."
       },
-      "claim": "Trade-off of storing each file once: a party holding a file can compute its object name and test whether it is stored.",
-      "kind": "security",
+      "claim": "Uploads are not deduplicated (random id per upload).",
+      "kind": "behaviour",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs"
+        "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:62"
+        "pollis-core/src/commands/r2.rs:827"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -4186,21 +4186,21 @@
       "doc": "website/learn.html",
       "locator": {
         "heading": "Who sees what",
-        "quote": "plus a blurred placeholder and, for a video, a small preview frame, all inside the encrypted message"
+        "quote": "The file's id, filename and hash, plus a blurred placeholder and, for a video, a small preview frame, all inside the encrypted message"
       },
-      "claim": "Conversation members get the attachment reference (object name, filename, plaintext hash, blurhash, video poster) only inside the encrypted message.",
+      "claim": "Conversation members get the attachment reference (id, name, hash, blurhash, video poster) only inside the encrypted message.",
       "kind": "security",
       "anchors": [
         "pollis-core/src/commands/messages/outbox.rs",
-        "pollis-core/src/commands/poster.rs",
-        "pollis-core/src/commands/r2.rs"
+        "pollis-core/src/commands/poster.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/messages/outbox.rs:256",
-        "pollis-core/src/commands/r2.rs:495"
+        "pollis-core/src/commands/messages/outbox.rs:247",
+        "pollis-core/src/commands/messages/outbox.rs:271",
+        "pollis-core/src/commands/poster.rs:15"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -7474,21 +7474,19 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "6.8 Bounded history (deliberate)",
-        "quote": "a file opens with the reference inside the message that carries it"
+        "quote": "a file's bytes live in R2 under the conversation's file key ring (§9.1), which every current member can unwrap"
       },
-      "claim": "A new attachment opens with the reference carried inside its (MLS-encrypted) message; files stored before #2109 open with the per-conversation file key ring.",
+      "claim": "Attachment keys live in a per-conversation ring wrapped under an MLS exporter, openable by any current member.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs",
-        "pollis-core/src/commands/r2.rs",
         "pollis-core/src/commands/file_keys.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:50",
-        "pollis-core/src/commands/r2.rs:948"
+        "pollis-core/src/commands/file_keys.rs:31",
+        "pollis-core/src/commands/file_keys.rs:540"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
@@ -8601,105 +8599,106 @@
       "id": "wp-s9-01",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "Each distinct file is stored once, across every account."
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "The ring reaches the DS only wrapped (AES-256-GCM) under a KEK from the current epoch's exporter"
       },
-      "claim": "New uploads are convergent: identical files across all accounts are one stored object, reference-counted per message and Vault entry.",
+      "claim": "The per-conversation file key ring is stored on the DS only wrapped under the MLS exporter 'pollis-file-kek'.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs",
-        "pollis-core/src/commands/r2.rs",
-        "pollis-delivery/src/messages.rs"
+        "pollis-core/src/commands/file_keys.rs",
+        "pollis-schema/migrations/000036_file_keystate.sql"
       ],
       "evidence": [
-        "pollis-core/src/commands/r2.rs:781",
-        "pollis-delivery/src/messages.rs:2035"
+        "pollis-core/src/commands/file_keys.rs:33",
+        "pollis-core/src/commands/file_keys.rs:1"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
       "id": "wp-s9-02",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "It travels only inside the end-to-end encrypted reference"
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "Any key-holding device re-wraps it on every epoch advance, at the same sites and under the same `(generation, epoch)` CAS"
       },
-      "claim": "The plaintext digest a v2 file key is derived from is sent only inside the end-to-end encrypted `_att` reference, never to the DS or R2.",
+      "claim": "The ring is re-wrapped on every epoch advance alongside the pin key.",
       "kind": "behaviour",
       "anchors": [
-        "pollis-core/src/commands/messages/outbox.rs",
-        "pollis-core/src/commands/r2.rs"
+        "pollis-core/src/commands/mls/group_state.rs",
+        "pollis-core/src/commands/mls/reconcile.rs",
+        "pollis-core/src/commands/mls/self_update.rs",
+        "pollis-core/src/commands/file_keys.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/messages/outbox.rs:256",
-        "pollis-core/src/commands/r2.rs:781"
+        "pollis-core/src/commands/mls/group_state.rs:1641",
+        "pollis-core/src/commands/mls/reconcile.rs:1193",
+        "pollis-core/src/commands/mls/self_update.rs:179"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
       "id": "wp-s9-03",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "A claim holds the object for its sender until their reference lands (or for 30 days if it never does), so another account's delete cannot remove a file someone is sending."
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "The device that commits a member's removal appends a fresh key wrapped at the post-removal epoch"
       },
-      "claim": "A claim (attachment_lease) counts as a live reference until the sender's reference lands or 30 days pass.",
-      "kind": "behaviour",
+      "claim": "Removal appends a fresh ring key; existing files are not re-encrypted; a durable owed mark survives crashes.",
+      "kind": "security",
       "anchors": [
-        "pollis-delivery/src/messages.rs",
-        "pollis-schema/migrations/000057_attachment_dedup.sql"
+        "pollis-core/src/commands/file_keys.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:1491",
-        "pollis-delivery/src/messages.rs:1686"
+        "pollis-core/src/commands/file_keys.rs:3",
+        "pollis-core/src/commands/file_keys.rs:4"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
       "id": "wp-s9-04",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "Two senders racing store one object: the second write fails the create-only condition and both reference the first."
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "mint is insert-only at `key_version = 1`, a re-wrap must keep the same `key_version` at a strictly newer `(generation, epoch)`"
       },
-      "claim": "A shared object's presigned PUT is create-only (If-None-Match: *); a 412 counts as stored.",
-      "kind": "behaviour",
+      "claim": "The DS refuses ring forks: mint at v1 only, rewrap same version newer epoch, rotate +1; membership-gated and head-ceilinged.",
+      "kind": "security",
       "anchors": [
-        "pollis-delivery/src/broker.rs",
-        "pollis-core/src/commands/r2.rs"
+        "pollis-delivery/src/file_keys.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/broker.rs:1628",
-        "pollis-core/src/commands/r2.rs:781"
+        "pollis-delivery/src/file_keys.rs:7",
+        "pollis-delivery/src/file_keys.rs:84",
+        "pollis-delivery/src/file_keys.rs:90"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
       "id": "wp-s9-05",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "Identical files give identical ciphertext, which is what lets them be stored once."
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "Key and base nonce = HKDF-SHA256(salt = `file_id`, ikm = ring key)"
       },
-      "claim": "The v2 file key and base nonce are HKDF-SHA256 of the plaintext digest under the pollis-file-key-v2 / pollis-file-nonce-v2 labels, so sealing is deterministic.",
+      "claim": "Per-file key and nonce come from HKDF-SHA256(salt=file_id, ikm=ring key) with info pollis-file-key-v1 / pollis-file-nonce-v1.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs"
+        "pollis-core/src/commands/file_keys.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:37",
-        "pollis-core/src/commands/shared_files.rs:50"
+        "pollis-core/src/commands/file_keys.rs:42",
+        "pollis-core/src/commands/file_keys.rs:51"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "20c861a9e90fa42742a0ec34c032c615c800f8a9",
       "also_rendered_in": []
     },
     {
@@ -8727,93 +8726,92 @@
       "id": "wp-s9-07",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "Chunk nonce = base nonce XOR the little-endian u32 chunk index in the first 4 bytes."
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "Chunk nonce = base nonce XOR the little-endian u32 chunk index in the first 4 bytes, so nonces are unique without state."
       },
-      "claim": "Attachment chunk nonces are the base nonce XOR the chunk index.",
+      "claim": "Attachment chunk nonces are the base nonce XOR the chunk index, so they are unique without state.",
       "kind": "behaviour",
       "anchors": [
         "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/r2.rs:1195"
+        "pollis-core/src/commands/r2.rs:1123",
+        "pollis-core/src/commands/r2.rs:895",
+        "pollis-core/src/commands/r2.rs:1146"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
       "id": "wp-s9-08",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "The name is a hash of the ciphertext, so it yields nothing about"
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "Random, so identical files posted twice are two objects; there is no cross-user dedup."
       },
-      "claim": "A shared object is named v2- + SHA-256 of its ciphertext, from which no key can be derived; R2 enforces the name as a checksum.",
+      "claim": "Object keys are media/{random file_id}.enc, so there is no dedup.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs",
-        "pollis-delivery/src/broker.rs",
-        "pollis-api/src/messages.rs"
+        "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:62",
-        "pollis-delivery/src/broker.rs:1628"
+        "pollis-core/src/commands/r2.rs:827",
+        "pollis-core/src/commands/r2.rs:830"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
       "id": "wp-s9-09",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "The receiver checks that the stored bytes are the object named, decrypts under the key"
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "The receiver verifies `sha` after decrypt, so another member cannot substitute different bytes under the same file id."
       },
-      "claim": "On download the client checks the ciphertext against the object name, decrypts under the digest-derived key and verifies the plaintext SHA-256.",
+      "claim": "The _att reference carries hash/kv/sha and the receiver checks the plaintext SHA-256.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs",
         "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:81"
+        "pollis-core/src/commands/r2.rs:886",
+        "pollis-core/src/commands/r2.rs:910",
+        "pollis-core/src/commands/messages/outbox.rs:1680"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
       "id": "wp-s9-10",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "They keep opening exactly as before, and every current member can still unwrap the ring; new uploads no longer use it."
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "every enrolled device of the account opens them; the DS, which never holds the account key, cannot"
       },
-      "claim": "v1 references (kv) still download under the conversation ring or Vault root; new uploads never use them.",
-      "kind": "behaviour",
+      "claim": "Vault attachments use an HKDF root from the account identity seed with info pollis-vault-files-v1.",
+      "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/file_keys.rs",
-        "pollis-core/src/commands/r2.rs",
         "pollis-core/src/commands/vault.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/r2.rs:948",
-        "pollis-core/src/commands/vault.rs:64"
+        "pollis-core/src/commands/vault.rs:61",
+        "pollis-core/src/commands/vault.rs:71"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
       "id": "wp-s9-11",
       "doc": "docs/security-whitepaper.md",
       "locator": {
-        "heading": "9.1 Attachment encryption (one stored object per file, #2109)",
-        "quote": "Each device keeps unwrapped rings for older files in `file_key_cache` in its SQLCipher DB."
+        "heading": "9.1 Attachment encryption (per-conversation file key ring, #1382)",
+        "quote": "Each device keeps the unwrapped ring in `file_key_cache` in its SQLCipher DB."
       },
-      "claim": "Unwrapped rings (for pre-#2109 files) are cached in the local file_key_cache table.",
+      "claim": "Unwrapped rings are cached in the local file_key_cache table.",
       "kind": "behaviour",
       "anchors": [
         "pollis-core/src/db/local_schema.sql"
@@ -8822,7 +8820,7 @@
         "pollis-core/src/db/local_schema.sql:501"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -8852,9 +8850,9 @@
       "doc": "docs/security-whitepaper.md",
       "locator": {
         "heading": "9.2 Visibility on R2 and the DS",
-        "quote": "An object is deleted once every message and Vault entry that refers to it has been deleted, whoever sent them"
+        "quote": "An object is deleted once every message and Vault entry that refers to it has been deleted."
       },
-      "claim": "An attachment object is deleted from R2 and the DS only after every message and Vault entry referring to it is deleted, across accounts; envelope collection releases nothing; the DS keeps the row until the R2 delete succeeds.",
+      "claim": "An attachment object is deleted from R2 and the DS only after every message and Vault entry referring to it is deleted; envelope collection releases nothing; the DS keeps the row until the R2 delete succeeds.",
       "kind": "behaviour",
       "anchors": [
         "pollis-delivery/src/messages.rs",
@@ -8868,7 +8866,7 @@
         "pollis-schema/migrations/000050_attachment_reclaim.sql:1"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -17525,21 +17523,22 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "the app takes the file's SHA-256 and derives the key and nonce from it with HKDF-SHA256"
+        "quote": "The server stores that ring only wrapped with AES-256-GCM under a key exported from the conversation's current MLS epoch"
       },
-      "claim": "Files are stored once; the key comes from the file's SHA-256 via HKDF, 4 MiB AES-256-GCM chunks, named by the ciphertext's SHA-256.",
+      "claim": "Attachment file-key ring wrapped under the MLS exporter (pollis-file-kek); per-file key/nonce via HKDF from a random 32-byte id; 4 MiB AES-256-GCM chunks; random R2 names.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs",
+        "pollis-core/src/commands/file_keys.rs",
         "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:50",
-        "pollis-core/src/commands/shared_files.rs:62"
+        "pollis-core/src/commands/file_keys.rs:33",
+        "pollis-core/src/commands/r2.rs:827",
+        "pollis-core/src/commands/r2.rs:849"
       ],
       "fact": "attachment-chunk-mib",
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -17547,18 +17546,19 @@
       "doc": "website/security.html",
       "locator": {
         "heading": "How Pollis Keeps Your Conversations Private",
-        "quote": "anyone who already has a particular file can compute its stored name and so tell whether that exact file is stored"
+        "quote": "Files in your Vault are encrypted under a key derived from your account identity key"
       },
-      "claim": "Trade-off of storing each file once: a party holding a file can compute its object name and test whether it is stored.",
+      "claim": "Vault files use a key derived from the account identity key.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/shared_files.rs"
+        "pollis-core/src/commands/vault.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:62"
+        "pollis-core/src/commands/vault.rs:52",
+        "pollis-core/src/commands/vault.rs:64"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -19193,21 +19193,22 @@
       "doc": "website/faq.html",
       "locator": {
         "heading": "Where do my files go when I attach something?",
-        "quote": "Objects are reference-counted per message and Vault entry across all accounts and deleted with their last reference."
+        "quote": "stored in Cloudflare R2 as media/<file id>.enc."
       },
-      "claim": "Shared objects are reference-counted across accounts and reclaimed with their last reference.",
-      "kind": "behaviour",
+      "claim": "Attachments: ring of file keys wrapped under pollis-file-kek, HKDF per file id, 4 MiB AES-256-GCM chunks, R2 key media/<id>.enc, removal rotates the ring.",
+      "kind": "security",
       "anchors": [
-        "pollis-delivery/src/messages.rs",
-        "pollis-delivery/src/vault.rs"
+        "pollis-core/src/commands/file_keys.rs",
+        "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-delivery/src/messages.rs:1618",
-        "pollis-delivery/src/messages.rs:1756"
+        "pollis-core/src/commands/file_keys.rs:33",
+        "pollis-core/src/commands/r2.rs:830",
+        "pollis-core/src/commands/r2.rs:832"
       ],
       "fact": "attachment-chunk-mib",
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {
@@ -20345,19 +20346,18 @@
       "doc": "docs/metadata-retention-policy.md",
       "locator": {
         "heading": "5. Media (Cloudflare R2)",
-        "quote": "Each distinct file is stored once, so the same name recurs wherever the same file is sent"
+        "quote": "Object keys are `media/{random file id}.enc`"
       },
-      "claim": "R2 attachment keys name the ciphertext digest; one object per distinct file.",
+      "claim": "R2 attachment keys are random per-upload file ids.",
       "kind": "security",
       "anchors": [
-        "pollis-core/src/commands/r2.rs",
-        "pollis-core/src/commands/shared_files.rs"
+        "pollis-core/src/commands/r2.rs"
       ],
       "evidence": [
-        "pollis-core/src/commands/shared_files.rs:62"
+        "pollis-core/src/commands/r2.rs:830"
       ],
       "status": "verified",
-      "verified_sha": "acf170654a05e3909b159f40df952fe6cb5e48af",
+      "verified_sha": "8d12eb22a41903fcc25536096803e4b1033fdc39",
       "also_rendered_in": []
     },
     {

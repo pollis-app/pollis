@@ -2004,8 +2004,23 @@ pub async fn register_attachment_in(
     apply_register_attachment(conn, authed, body).await
 }
 
+/// `POST /v1/attachments/format` (#2109): whether new uploads are shared
+/// objects. Any authenticated device may ask; the answer is the DS's switch.
+pub async fn attachment_format(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    if let Err(resp) = gate_and_parse::<AttachmentFormatBody>(&state, &req).await? {
+        return Ok(resp);
+    }
+    let shared = state.shared_attachments.load(std::sync::atomic::Ordering::SeqCst);
+    Ok(crate::writes::ok_response::<AttachmentFormatBody>(AttachmentFormatResponse { shared }))
+}
+
 /// `POST /v1/attachments/claim` (#2109): lease a shared object for the
-/// caller's send and say whether its bytes still need uploading.
+/// caller's send and say whether its bytes still need uploading. Refused
+/// (403) while shared uploads are off, so no v2 object is stored before the
+/// clients in the stores can open one.
 pub async fn claim_attachment(
     State(state): State<AppState>,
     req: RawRequest,
@@ -2016,6 +2031,9 @@ pub async fn claim_attachment(
     };
     if !is_shared_object_id(&parsed.content_hash) {
         return Ok(crate::writes::bad_request("content_hash is not a shared object id"));
+    }
+    if !state.shared_attachments.load(std::sync::atomic::Ordering::SeqCst) {
+        return Ok(axum::response::IntoResponse::into_response(crate::error::AuthRejection::Forbidden));
     }
     let Some(actor) = authed.as_deref() else {
         // A lease belongs to someone; the no-auth path has nobody to hold it.
@@ -2143,16 +2161,17 @@ pub async fn remove_stored_object(
 }
 
 /// `POST /v1/ops/attachments/remove` — operator removal of a stored file
-/// (#2109). The operator bearer token, as on the other `/v1/ops/` routes: 404
-/// when none is configured, 401 without it. No client holds the token, and
-/// the route is not in the device-signed endpoint table.
+/// (#2109). Its own bearer token, `POLLIS_DS_OPERATOR_TOKEN`, never the
+/// read-only metrics token (dashboards may hold that one): 404 when unset,
+/// 401 without it. No client holds it, and the route is not in the
+/// device-signed endpoint table.
 pub async fn ops_remove_attachment(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
     use axum::response::IntoResponse as _;
-    let Some(expected) = state.metrics_token.as_deref() else {
+    let Some(expected) = state.operator_token.as_deref() else {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     };
     if !crate::bearer_token_matches(&headers, expected) {

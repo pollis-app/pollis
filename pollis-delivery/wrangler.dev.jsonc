@@ -131,6 +131,7 @@
     { "binding": "R2_SECRET_KEY", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_R2_SECRET_KEY" },
     { "binding": "R2_BUCKET", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_R2_BUCKET" },
     { "binding": "POLLIS_DS_METRICS_TOKEN", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_POLLIS_DS_METRICS_TOKEN" },
+    { "binding": "POLLIS_DS_OPERATOR_TOKEN", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_POLLIS_DS_OPERATOR_TOKEN" },
     { "binding": "EXPO_TOKEN", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_EXPO_TOKEN" },
     { "binding": "DEV_OTP", "store_id": "da03afd25d6b40e5b6e9f7c7b0885c7b", "secret_name": "DS_DEV_DEV_OTP" },
     // Read by the Worker for the dev gate, never forwarded to the container

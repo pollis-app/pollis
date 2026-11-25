@@ -177,6 +177,7 @@ endpoints! {
     Client   messages::AttachmentDeleteBody     => "/v1/attachments/delete",             StatusOk;
     Client   messages::AttachmentReleaseBody    => "/v1/attachments/release",            StatusOk, idempotent;
     Client   messages::AttachmentClaimBody      => "/v1/attachments/claim",              messages::AttachmentClaimResponse;
+    Client   messages::AttachmentFormatBody     => "/v1/attachments/format",             messages::AttachmentFormatResponse;
 
     Client   groups::CreateGroupBody            => "/v1/groups/create",                  StatusOk;
     Client   groups::UpdateGroupBody            => "/v1/groups/update",                  groups::UpdatedGroup;

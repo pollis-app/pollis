@@ -100,7 +100,10 @@ pub(crate) fn spawn() -> String {
                 .build()
                 .expect("fake r2: runtime");
             rt.block_on(async move {
-                let router = axum::Router::new().fallback(handle);
+                // R2 takes objects far over axum's 2 MiB default body limit.
+                let router = axum::Router::new()
+                    .fallback(handle)
+                    .layer(axum::extract::DefaultBodyLimit::disable());
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                     .await
                     .expect("fake r2: bind");
