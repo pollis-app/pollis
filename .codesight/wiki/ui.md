@@ -1058,7 +1058,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**259 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**260 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1176,9 +1176,10 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SensitiveCover** — `frontend/src/components/Media/SensitiveCover.tsx`
 - **SensitiveHideButton** — `frontend/src/components/Media/SensitiveHideButton.tsx`
 
-### `components/Message` (26)
+### `components/Message` (27)
 
 - **AttachmentDisplay** — props: attachment, tile, testId, roll — `frontend/src/components/Message/AttachmentDisplay.tsx`
+- **AttachmentNotice** — `frontend/src/components/Message/AttachmentNotice.tsx`. What `AttachmentDisplay` draws, in place of the file, for an attachment it cannot open (#2109): one the operator removed ("File removed", `kind="removed"`) or one from a newer app version ("Update Pollis to open this file", `kind="update"`). No retry. Mobile: `MediaStatus` / `MediaImage` / `AttachmentTile` with `lib/media/removed.ts`.
 - **DownloadStatusIcon** — props: status — `frontend/src/components/Message/DownloadStatusIcon.tsx`. Download / spinner / check glyph of `AttachmentDisplay`'s download buttons (#1731).
 - **KeyChangeNoticeRow** — props: noticeId, peerUserId, peerLabel, at, skin, onVerify — `frontend/src/components/Message/KeyChangeNoticeRow.tsx`
 - **LastMessagePreview** — props: message, isLoading, aliases — `frontend/src/components/Message/LastMessagePreview.tsx`
