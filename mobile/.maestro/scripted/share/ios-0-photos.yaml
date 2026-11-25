@@ -20,7 +20,9 @@ appId: com.apple.mobileslideshow
     times: 4
     commands:
       - tapOn:
-          point: "50%,45%"
+          text: "Photo, .*"
+          index: 0
+          optional: true
       - waitForAnimationToEnd:
           timeout: 2000
 - extendedWaitUntil:

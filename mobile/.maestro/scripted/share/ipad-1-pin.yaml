@@ -1,0 +1,26 @@
+appId: com.apple.mobileslideshow
+---
+# iPad (#2100): the extension's form sheet is not in the test driver's tree, so the keypad is tapped
+# by place: a wrong PIN (5678, the app's own countdown), then the right one (1234).
+- tapOn:
+    point: "50%,51%"
+- tapOn:
+    point: "67%,51%"
+- tapOn:
+    point: "33%,56%"
+- tapOn:
+    point: "50%,56%"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: ipad-share-01-wrong-pin
+- tapOn:
+    point: "33%,46%"
+- tapOn:
+    point: "50%,46%"
+- tapOn:
+    point: "67%,46%"
+- tapOn:
+    point: "33%,51%"
+- waitForAnimationToEnd:
+    timeout: 8000
+- takeScreenshot: ipad-share-02-picker

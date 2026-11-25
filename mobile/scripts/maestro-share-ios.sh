@@ -16,6 +16,8 @@
 #   ios-0-safari + ios-4-lockout    ten wrong PINs in the extension lock the account out here
 #   ios-0-safari + ios-5-signed-out the sheet now says "Sign in to Pollis first"
 #
+# On the iPad (`ipad`) only the Photos share runs, through ipad-1-pin / ipad-2-send, which tap by
+# place: the extension's form sheet there is not in the test driver's tree.
 # The account is used up by the lockout; every run signs up a fresh one. Needs a Release build
 # with the extension on the simulator, .maestro/.env filled in.
 set -euo pipefail
@@ -64,6 +66,16 @@ PHOTO="$(mktemp -d)/share-ios.png"
 cp "$MAE/fixtures/media-viewer.png" "$PHOTO"
 xcrun simctl addmedia "$DEVICE" "$PHOTO"
 part ios-0-photos
+if [ "$IPAD" = 1 ]; then
+  # The iPad's form sheet is not in the test driver's tree: the keypad and rows by place. The
+  # Safari, lockout and signed-out parts are the iPhone's (same extension, same core).
+  part ipad-1-pin
+  part ipad-2-send
+  part ios-3-vault -e TAG=photo
+  find "$DEBUG" \( -name 'share-*.png' -o -name 'ipad-share-*.png' \) -exec cp {} "$OUT/" \; 2>/dev/null || true
+  echo "==> share into Pollis (iOS extension): iPad parts passed. Screenshots: $OUT"
+  exit 0
+fi
 part ios-1-pin
 part ios-2-send -e TAG=photo
 part ios-3-vault -e TAG=photo
