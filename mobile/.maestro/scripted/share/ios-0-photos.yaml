@@ -14,6 +14,15 @@ appId: com.apple.mobileslideshow
 # controls hidden a tap brings them back.
 - waitForAnimationToEnd:
     timeout: 3000
+# Photos sometimes does not come forward right after `simctl addmedia`: launch it once more.
+- runFlow:
+    when:
+      notVisible: "Photo, .*"
+    commands:
+      - launchApp:
+          appId: com.apple.mobileslideshow
+      - waitForAnimationToEnd:
+          timeout: 3000
 - repeat:
     while:
       notVisible: "Share"

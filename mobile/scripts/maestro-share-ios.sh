@@ -65,6 +65,10 @@ part 1-setup
 PHOTO="$(mktemp -d)/share-ios.png"
 cp "$MAE/fixtures/media-viewer.png" "$PHOTO"
 xcrun simctl addmedia "$DEVICE" "$PHOTO"
+# Bring Photos forward from the outside: a Maestro launch right after Pollis sometimes leaves
+# Pollis in front.
+xcrun simctl launch "$DEVICE" com.apple.mobileslideshow >/dev/null
+sleep 3
 part ios-0-photos
 if [ "$IPAD" = 1 ]; then
   # The iPad's form sheet is not in the test driver's tree: the keypad and rows by place. The
