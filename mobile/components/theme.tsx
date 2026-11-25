@@ -37,6 +37,8 @@ type ThemeCtx = {
   backgroundHex: string;
   // Synced as `background_color`, shared with desktop.
   setBackground: (hex: string) => void;
+  // Changes whenever either base colour does: a list's `extraData`, so its rows repaint on a background change too (#2107).
+  themeKey: string;
 };
 
 const Ctx = createContext<ThemeCtx>({
@@ -44,6 +46,7 @@ const Ctx = createContext<ThemeCtx>({
   setAccent: () => {},
   backgroundHex: DEFAULT_BACKGROUND_HEX,
   setBackground: () => {},
+  themeKey: `${DEFAULT_ACCENT_HEX}|${DEFAULT_BACKGROUND_HEX}`,
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -126,7 +129,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [accentHex, backgroundHex]);
 
   const value = useMemo(
-    () => ({ accentHex, setAccent, backgroundHex, setBackground }),
+    () => ({ accentHex, setAccent, backgroundHex, setBackground, themeKey: `${accentHex}|${backgroundHex}` }),
     [accentHex, setAccent, backgroundHex, setBackground],
   );
 

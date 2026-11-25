@@ -42,10 +42,10 @@ mobile/stores/*                                gate
 mobile/hooks/queries/*                         gate
 mobile/lib/native/*                            gate
 mobile/lib/session/*                           gate auth
-design/*                                       theme-startup profile-prefs tour
-mobile/theme/*                                 theme-startup profile-prefs tour
-mobile/components/theme.tsx                    theme-startup profile-prefs
-mobile/components/ThemeProbe.tsx               theme-startup
+design/*                                       theme-startup theme-live-switch profile-prefs tour
+mobile/theme/*                                 theme-startup theme-live-switch profile-prefs tour
+mobile/components/theme.tsx                    theme-startup theme-live-switch profile-prefs
+mobile/components/ThemeProbe.tsx               theme-startup theme-live-switch
 mobile/components/ui.tsx                       gate empty-states tour
 mobile/components/Text.tsx                     gate locale-smoke
 
@@ -113,20 +113,20 @@ mobile/lib/attachments*                        composer-attachments media-viewer
 mobile/hooks/useVideoPoster.ts                 composer-attachments
 
 # --- Vault ---
-mobile/app/vault.tsx                           vault vault-media-instant vault-swipe vault-retry
+mobile/app/vault.tsx                           vault vault-media-instant vault-swipe vault-retry theme-live-switch
 mobile/components/vault/*                      vault vault-media-instant vault-swipe vault-retry
 mobile/lib/vault*                              vault vault-retry
 mobile/hooks/queries/useVault.ts               vault vault-retry
 
 # --- Self, settings, search ---
-mobile/app/(tabs)/self.tsx                     search app-update security open-source
+mobile/app/(tabs)/self.tsx                     search app-update security open-source theme-live-switch
 mobile/components/search/*                     search copy-state
 mobile/app/self/preferences.tsx                profile-prefs notification-content i18n theme-startup
 mobile/app/self/language.tsx                   i18n locale-smoke
 mobile/components/LanguagePicker.tsx           i18n locale-smoke
 mobile/i18n/*                                  i18n locale-smoke
 frontend/src/i18n/locales/*                    i18n locale-smoke
-mobile/app/self/user-settings.tsx              profile-prefs profile-photo change-email
+mobile/app/self/user-settings.tsx              profile-prefs profile-photo change-email theme-live-switch
 mobile/app/self/change-email.tsx               change-email
 mobile/components/self/ProfilePhoto*           profile-photo
 mobile/components/UserAvatar.tsx               profile-photo presence group-aliases

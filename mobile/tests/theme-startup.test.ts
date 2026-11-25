@@ -307,7 +307,7 @@ function isMemoisedCallback(sf: ts.SourceFile, name: string): boolean {
   return memo;
 }
 
-test("a list with a memoised renderItem passes the accent as extraData", () => {
+test("a list with a memoised renderItem passes the theme key as extraData", () => {
   for (const { rel, sf } of sources) {
     const visit = (n: ts.Node) => {
       if (
@@ -324,8 +324,8 @@ test("a list with a memoised renderItem passes the accent as extraData", () => {
         if (expr && ts.isIdentifier(expr) && isMemoisedCallback(sf, expr.text)) {
           assert.match(
             get("extraData")?.getText() ?? "",
-            /accentHex/,
-            `${rel}: ${n.tagName.getText()} renderItem={${expr.text}} needs extraData={accentHex}`,
+            /themeKey/,
+            `${rel}: ${n.tagName.getText()} renderItem={${expr.text}} needs extraData={themeKey} (accent and background, #2107)`,
           );
         }
       }
