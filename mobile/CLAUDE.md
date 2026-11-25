@@ -1349,6 +1349,23 @@ platforms, so every `<Screen>`, `SheetOverlay` and
 screen. `<Screen>` draws the invisible `keyboard-open` /
 `keyboard-closed` probe (`components/KeyboardProbe.tsx`) and
 `.maestro/flows/keyboard-recovery.yaml` is the device-tier proof.
+#2098: the #1662 show replay misfired after an iOS edge-swipe back. The swipe
+carries the keyboard off sideways; UIKit reports the hide (will/did-hide, End
+at 0), but the keyboard layout guide the tracking view follows (iOS 26+) keeps
+the keyboard's full height, and the swiped screen's field is still focused
+while it leaves. The `didHide` re-check read that frame as a keyboard JS had
+missed (`reconcile didHide: replay show (301.0)`), and the chat gone back to
+kept its composer a keyboard's height up with nothing below it. The header
+back slides the keyboard down and never hit it; Android has no such replay
+(its check reads the IME insets, which are exact). Now only a forced round
+(foreground, key window), the case #1662 is about, replays a show: after a hide
+UIKit reported itself, a keyboard that returns sends its own willShow
+(`… after a hide, no show replayed` in the log). And a keyboard frame with
+nothing focused (`UIResponder.current` nil) reads 0 in every round.
+`.maestro/flows/keyboard-back.yaml` goes back every way with the keyboard up
+(header, edge swipe completed, let go early and followed by Home, Android Back,
+a tab switch) and checks the composer by a point tap at its bounds
+(`COMPOSER_POINT`).
 
 Lost padding (Reanimated settled props): JS can hold the right keyboard state
 and the screen still be laid out wrong, because the padding itself is a
@@ -2074,7 +2091,8 @@ there, never here; the rules for using them are `docs/design/README.md`.
   (emoji and initials sized to their box, the enrollment code, the 11pt count
   badges). Sentence case, no tracked capitals, nothing below 12 but those
   badges; all text follows system font scaling.
-- `r` radii 4/10/12/14/16/20(sheet); `layout.touchMin` 44.
+- `r` radii 4/10/12/14/16/20(sheet); `r.box` (12) is the one corner for fields,
+  full-width buttons, cards, `Group`s, grouped-list rows and list rows (#2101); `layout.touchMin` 44.
 - Font: Geist via `fonts.regular/medium/semibold/bold` (one family per
   weight, never with `fontWeight`); spread a `type.*` step rather than
   hand-setting size + family.

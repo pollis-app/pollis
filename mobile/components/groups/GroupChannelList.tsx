@@ -207,7 +207,7 @@ function GroupChannelListImpl(props: Props) {
           transform: [{ translateY: drag.dy }],
           zIndex: 2,
           backgroundColor: semantic.raised,
-          borderRadius: r.sm,
+          borderRadius: r.box,
         }
       : undefined;
 
@@ -327,7 +327,7 @@ function GroupChannelListImpl(props: Props) {
           paddingStart: space.sm,
           paddingEnd: space.md,
           marginTop: space.md,
-          borderRadius: r.sm,
+          borderRadius: r.box,
           backgroundColor: pressed ? semantic.raised : "transparent",
         })}
       >
@@ -393,7 +393,7 @@ function GroupChannelListImpl(props: Props) {
             minHeight: layout.touchMin,
             marginTop: space.lg,
             paddingHorizontal: space.md,
-            borderRadius: r.sm,
+            borderRadius: r.box,
             backgroundColor: pressed ? semantic.high : semantic.raised,
           })}
         >

@@ -11,7 +11,7 @@ import { ErrorText } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
 import { EmojiText } from "../../components/emoji/EmojiText";
 import { dayLabel, timeLabel } from "../../components/chat/dates";
-import { fonts, semantic, type as ty, r, space } from "../../theme/tokens";
+import { fonts, semantic, type as ty, space, groupedRowCorners } from "../../theme/tokens";
 import {
   usePinnedMessages,
   useTogglePinnedMessage,
@@ -65,16 +65,12 @@ function PinnedMessagesScreen() {
     const preview = pinPreview(item.content);
     const spoken = preview.text.trim() || preview.filenames.join(", ");
     const first = index === 0;
-    const last = index === pins.length - 1;
     return (
       <View
         style={{
           marginHorizontal: space.xxl,
           backgroundColor: semantic.raised,
-          borderTopLeftRadius: first ? r.lg : 0,
-          borderTopRightRadius: first ? r.lg : 0,
-          borderBottomLeftRadius: last ? r.lg : 0,
-          borderBottomRightRadius: last ? r.lg : 0,
+          ...groupedRowCorners(index, pins.length - 1),
           borderTopWidth: first ? 0 : 1,
           borderTopColor: semantic.hairSoft,
           flexDirection: "row",

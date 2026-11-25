@@ -52,7 +52,7 @@ export function ChannelRow({
       accessibilityState={{ selected: !!selected }}
       style={({ pressed }) => ({
         minHeight: layout.touchMin,
-        borderRadius: r.sm,
+        borderRadius: r.box,
         flexDirection: "row",
         alignItems: "center",
         gap: space.md,
