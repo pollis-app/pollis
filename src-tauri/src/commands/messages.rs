@@ -16,7 +16,7 @@ pub async fn list_messages(conversation_id: String, limit: Option<i64>, before_i
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn send_message(conversation_id: String, sender_id: String, content: String, reply_to_id: Option<String>, thread_id: Option<String>, sender_username: Option<String>, message_id: Option<String>, attachments: Option<Vec<OutgoingAttachment>>, link_preview: Option<pollis_core::commands::link_preview::LinkPreviewDraft>, scope: State<'_, crate::pathscope::PathScope>, state: State<'_, Arc<AppState>>) -> Result<Message> {
-    // The outbox reads attachment files itself (#1335), so gate them like `upload_media`.
+    // The outbox reads attachment files itself (#1335), so gate them as every path-taking command is.
     let attachments = attachments.unwrap_or_default();
     for att in &attachments {
         if let Some(path) = &att.path {

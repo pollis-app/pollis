@@ -211,7 +211,7 @@ impl StreamUpload {
                 match tokio::task::spawn_blocking(move || super::compute_image_meta(&bytes)).await {
                     Ok(Ok((bh, w, h))) => (Some(bh), Some(w), Some(h)),
                     Ok(Err(e)) => {
-                        crate::diag!("[upload_media] image meta failed ({ct}): {e}");
+                        crate::diag!("[upload] image meta failed ({ct}): {e}");
                         (None, None, None)
                     }
                     Err(_) => (None, None, None),

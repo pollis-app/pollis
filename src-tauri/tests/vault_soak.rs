@@ -104,10 +104,25 @@ async fn vault_media_soak() {
         alice.pick_file(&f.path);
         let marks = (world.ds_tap.mark(), world.s3_tap.as_ref().map(|t| t.mark()));
         let t = Instant::now();
-        let up: Result<serde_json::Value, String> = alice
-            .invoke("upload_media", json!({ "path": f.path.to_string_lossy(), "filename": f.filename, "contentType": f.content_type }))
+        // #2100: a Vault file goes through the Vault's durable queue: stored, uploaded, saved.
+        let saved: Result<serde_json::Value, String> = alice
+            .invoke(
+                "send_vault_message",
+                json!({
+                    "userId": alice.user_id,
+                    "content": "",
+                    "attachments": [{ "path": f.path.to_string_lossy(), "filename": f.filename, "contentType": f.content_type }],
+                }),
+            )
             .await;
         let upload_secs = t.elapsed().as_secs_f64();
+        let up: Result<serde_json::Value, String> = saved.and_then(|entry| {
+            let content: serde_json::Value = serde_json::from_str(entry["content"].as_str().unwrap_or("{}"))
+                .map_err(|e| e.to_string())?;
+            let mut att = content["_att"][0].clone();
+            att["entry_id"] = entry["id"].clone();
+            Ok(att)
+        });
 
         if f.size > cap {
             run.over_cap = true;
@@ -134,28 +149,12 @@ async fn vault_media_soak() {
             }
         };
         let key = up["key"].as_str().unwrap().to_string();
-        let file_id = up["content_hash"].as_str().unwrap().to_string();
-        let sha = up["sha256"].as_str().unwrap().to_string();
-        let kv = up["key_version"].as_i64().unwrap_or(-1);
+        let file_id = up["hash"].as_str().unwrap().to_string();
+        let sha = up["sha"].as_str().unwrap().to_string();
+        let kv = up["kv"].as_i64().unwrap_or(-1);
         run.file_id = Some(file_id.clone());
-
-        let content = json!({ "_att": [{
-            "key": key, "url": up["url"], "name": f.filename, "ct": f.content_type,
-            "size": f.size, "hash": file_id, "kv": kv, "sha": sha,
-            "bh": up["blurhash"], "w": up["width"], "h": up["height"],
-        }]})
-        .to_string();
-        let t2 = Instant::now();
-        let entry: Result<serde_json::Value, String> =
-            alice.invoke("send_vault_message", json!({ "userId": alice.user_id, "content": content })).await;
-        run.upload_secs = Some(upload_secs + t2.elapsed().as_secs_f64());
-        let entry_id = match entry {
-            Ok(v) => v["id"].as_str().unwrap().to_string(),
-            Err(e) => {
-                run.push(Proof::check("upload", false, format!("send_vault_message: {e}")));
-                continue;
-            }
-        };
+        run.upload_secs = Some(upload_secs);
+        let entry_id = up["entry_id"].as_str().unwrap().to_string();
         run.push(Proof::check(
             "upload",
             sha == f.sha_hex() && kv == 0 && key == format!("media/{file_id}.enc"),
@@ -498,19 +497,20 @@ async fn vault_media_soak() {
         std::fs::write(&sentinel, &b).expect("write sentinel");
     }
     alice.pick_file(&sentinel);
-    let sent: serde_json::Value = alice
-        .invoke("upload_media", json!({ "path": sentinel.to_string_lossy(), "filename": "sentinel.bin", "contentType": "application/octet-stream" }))
-        .await
-        .expect("sentinel upload");
-    let sentinel_content = json!({ "_att": [{
-        "key": sent["key"], "url": sent["url"], "name": "sentinel.bin", "ct": "application/octet-stream",
-        "size": sent["size_bytes"], "hash": sent["content_hash"], "kv": sent["key_version"], "sha": sent["sha256"],
-    }]})
-    .to_string();
-    let _: serde_json::Value = alice
-        .invoke("send_vault_message", json!({ "userId": alice.user_id, "content": sentinel_content }))
+    let entry: serde_json::Value = alice
+        .invoke(
+            "send_vault_message",
+            json!({
+                "userId": alice.user_id,
+                "content": "",
+                "attachments": [{ "path": sentinel.to_string_lossy(), "filename": "sentinel.bin", "contentType": "application/octet-stream" }],
+            }),
+        )
         .await
         .expect("sentinel entry");
+    let saved: serde_json::Value = serde_json::from_str(entry["content"].as_str().unwrap()).expect("envelope");
+    let att = &saved["_att"][0];
+    let sent = json!({ "key": att["key"], "content_hash": att["hash"], "sha256": att["sha"] });
     let sentinel_url: String = alice
         .invoke(
             "get_media_url",

@@ -376,6 +376,8 @@ async fn a_vault_file_goes_through_the_queue_under_the_vault_key() {
     let path = dir.path().join("note.pdf");
     let bytes: Vec<u8> = (0..(5 * 1024 * 1024 + 3)).map(|i| (i % 241) as u8).collect();
     std::fs::write(&path, &bytes).unwrap();
+    // The user picked it: the shim admits only picked or dropped paths.
+    tauri::Manager::state::<pollis_lib::pathscope::PathScope>(&alice.webview).remember_file(&path);
     let saved = alice
         .invoke_try(
             "send_vault_message",

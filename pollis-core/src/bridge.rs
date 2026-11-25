@@ -1747,17 +1747,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(format!("file://{}", path.display()))
         }
 
-        // The Vault upload path (chat attachments use the outbox); sealed under the Vault file key (#1382).
-        "upload_media" => {
-            let path: String = arg(&args, "path")?;
-            let filename: String = arg(&args, "filename")?;
-            let content_type: String = arg(&args, "contentType")?;
-            // A video's poster frame, base64 (#1837).
-            let poster: Option<String> = arg_opt(&args, "poster")?;
-            let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
-            ok(crate::commands::r2::upload_media(path, filename, content_type, poster, &state()?)
-                .await?)
-        }
         // No loopback server on mobile: decrypt to a sandbox file; the JS side unlinks it on last release.
         "get_media_path" => {
             let r2_key: String = arg(&args, "r2Key")?;
@@ -1858,7 +1847,6 @@ mod tests {
             "list_security_events",
             "delete_account",
             "wipe_local_data",
-            "upload_media",
             "new_message_id",
             "retry_message",
             "discard_unsent_message",

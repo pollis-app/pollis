@@ -589,17 +589,15 @@ fn parse_hex32(what: &str, value: &str) -> Result<[u8; 32]> {
         .map_err(|_| Error::Other(anyhow::anyhow!("{what} must be 32 hex bytes")))
 }
 
-/// Upload plaintext; `Staged` bytes stay staged until the PUT succeeds, for retry.
+/// Plaintext an in-memory upload seals (a link preview's thumbnail).
 enum Plaintext {
     Owned(Vec<u8>),
-    Staged(std::sync::Arc<zeroize::Zeroizing<Vec<u8>>>),
 }
 
 impl Plaintext {
     fn as_slice(&self) -> &[u8] {
         match self {
             Plaintext::Owned(v) => v,
-            Plaintext::Staged(v) => v,
         }
     }
 
@@ -623,61 +621,6 @@ async fn upload_slot() -> tokio::sync::SemaphorePermit<'static> {
         .expect("the upload semaphore is never closed")
 }
 
-/// Upload a file to the user's Vault, sealed under the Vault file key (#1382).
-/// Reads from a path (no bytes over IPC); webview bytes use [`upload_media_staged`].
-pub async fn upload_media(
-    path: String,
-    filename: String,
-    content_type: String,
-    poster: Option<String>,
-    state: &Arc<AppState>,
-) -> Result<MediaUploadResult> {
-    // Refuse an over-cap file from metadata, before reading it (#1491).
-    let len = tokio::fs::metadata(&path)
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("stat file {path}: {e}")))?
-        .len();
-    if len > pollis_api::broker::R2_MEDIA_MAX_BYTES {
-        return Err(Error::Other(anyhow::anyhow!(
-            "attachment is {len} bytes; the limit is {} bytes",
-            pollis_api::broker::R2_MEDIA_MAX_BYTES
-        )));
-    }
-
-    let _slot = upload_slot().await;
-    let data = tokio::fs::read(&path).await
-        .map_err(|e| Error::Other(anyhow::anyhow!("read file {path}: {e}")))?;
-
-    let result =
-        upload_plaintext(Plaintext::Owned(data), filename, content_type, UploadScope::Vault, state).await?;
-    Ok(with_poster(result, poster).await)
-}
-
-/// Upload an attachment the renderer staged in memory (`commands::staging`) —
-/// a paste, or a drop the webview surfaced as a `File` rather than a path.
-/// Staged bytes are released only on success, so a failed upload can retry.
-pub async fn upload_media_staged(
-    staged_id: String,
-    filename: String,
-    content_type: String,
-    poster: Option<String>,
-    state: &Arc<AppState>,
-) -> Result<MediaUploadResult> {
-    let _slot = upload_slot().await;
-    let bytes = crate::commands::staging::peek_staged(&staged_id).ok_or_else(|| {
-        Error::Other(anyhow::anyhow!(
-            "no staged attachment {staged_id}: it was already uploaded, discarded, or the              session ended"
-        ))
-    })?;
-
-    let result =
-        upload_plaintext(Plaintext::Staged(bytes), filename, content_type, UploadScope::Vault, state).await;
-    if result.is_ok() {
-        crate::commands::staging::discard_staged(&staged_id);
-    }
-    Ok(with_poster(result?, poster).await)
-}
-
 /// A video's poster from the client's frame (#1837), off the async runtime.
 /// `None` when there is no frame or it does not decode: a send never fails on its poster.
 pub(crate) async fn video_poster(
@@ -699,17 +642,6 @@ pub(crate) async fn video_poster(
             None
         }
     }
-}
-
-/// Fill a Vault video upload's blurhash, size and poster from its frame.
-async fn with_poster(mut result: MediaUploadResult, frame: Option<String>) -> MediaUploadResult {
-    if let Some(p) = video_poster(&result.content_type, frame).await {
-        result.blurhash = Some(p.blurhash);
-        result.width = Some(p.width);
-        result.height = Some(p.height);
-        result.poster = p.jpeg.map(crate::commands::poster::PosterJpeg::into_string);
-    }
-    result
 }
 
 /// Fail with the file-key wait before an outbox upload reads any bytes (#1636).
@@ -856,7 +788,7 @@ async fn upload_plaintext(
     let (blurhash, width, height) = match image_meta {
         Some(Ok((bh, w, h))) => (Some(bh), Some(w), Some(h)),
         Some(Err(e)) => {
-            crate::diag!("[upload_media] image meta failed ({content_type}): {e}");
+            crate::diag!("[upload] image meta failed ({content_type}): {e}");
             (None, None, None)
         }
         None => (None, None, None),

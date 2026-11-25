@@ -20,16 +20,17 @@ pub async fn send_vault_message(
     content: String,
     message_id: Option<String>,
     attachments: Option<Vec<pollis_core::commands::messages::OutgoingAttachment>>,
+    scope: State<'_, crate::pathscope::PathScope>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<VaultMessage> {
-    pollis_core::commands::vault::send_vault_message_with(
-        user_id,
-        message_id,
-        content,
-        attachments.unwrap_or_default(),
-        &state,
-    )
-    .await
+    // The queue reads the files itself, so gate them like `send_message` does.
+    let attachments = attachments.unwrap_or_default();
+    for att in &attachments {
+        if let Some(path) = &att.path {
+            scope.require(std::path::Path::new(path), "send_vault_message")?;
+        }
+    }
+    pollis_core::commands::vault::send_vault_message_with(user_id, message_id, content, attachments, &state).await
 }
 
 #[tauri::command]

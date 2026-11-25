@@ -665,7 +665,7 @@ async fn message_delete_works_when_ds_auth_is_disabled() {
     );
 }
 
-/// The four path-taking commands refuse paths no human chose, and pass the gate once recorded.
+/// The path-taking commands refuse paths no human chose, and pass the gate once recorded.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn path_taking_commands_refuse_a_path_the_user_never_chose() {
@@ -681,11 +681,20 @@ async fn path_taking_commands_refuse_a_path_the_user_never_chose() {
 
     let refusals = [
         (
-            "upload_media",
+            "send_vault_message",
             json!({
-                "path": secret,
-                "filename": "id_rsa",
-                "contentType": "application/octet-stream"
+                "userId": "u",
+                "content": "",
+                "attachments": [{ "path": secret, "filename": "id_rsa", "contentType": "application/octet-stream" }]
+            }),
+        ),
+        (
+            "send_message",
+            json!({
+                "conversationId": "c",
+                "senderId": "u",
+                "content": "",
+                "attachments": [{ "path": secret, "filename": "id_rsa", "contentType": "application/octet-stream" }]
             }),
         ),
         (
@@ -720,15 +729,15 @@ async fn path_taking_commands_refuse_a_path_the_user_never_chose() {
 
     let err = client
         .invoke_try(
-            "upload_media",
+            "send_vault_message",
             json!({
-                "path": secret,
-                "filename": "id_rsa",
-                "contentType": "application/octet-stream"
+                "userId": "u",
+                "content": "",
+                "attachments": [{ "path": secret, "filename": "id_rsa", "contentType": "application/octet-stream" }]
             }),
         )
         .await
-        .expect_err("this client is not signed in, so the upload still cannot complete");
+        .expect_err("this client is not signed in, so the save still cannot complete");
     assert!(
         !err.contains("not chosen in a file dialog"),
         "a path the user DID choose must get past the gate; got: {err}"
