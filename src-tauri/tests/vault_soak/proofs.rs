@@ -234,7 +234,17 @@ pub fn derive_like_file_key(ring: &[u8; 32], file_id: &[u8; 32]) -> ([u8; 32], [
     (key, nonce)
 }
 
-/// Keys an attacker without the account key could try; every one must fail.
+/// The #2109 derivation (`shared_files::content_key`) applied to `ikm`, to model a server-side attacker.
+pub fn derive_like_shared_key(ikm: &[u8; 32]) -> ([u8; 32], [u8; 12]) {
+    let hk = hkdf::Hkdf::<Sha256>::new(Some(b"pollis-shared-file-v2"), ikm);
+    let mut key = [0u8; 32];
+    let mut nonce = [0u8; 12];
+    hk.expand(b"pollis-file-key-v2", &mut key).expect("hkdf");
+    hk.expand(b"pollis-file-nonce-v2", &mut nonce).expect("hkdf");
+    (key, nonce)
+}
+
+/// Keys an attacker without the reference could try; every one must fail.
 pub fn attacker_keys(file_id: &[u8; 32], plaintext_sha: &[u8; 32]) -> Vec<(String, [u8; 32], [u8; 12])> {
     let mut out = Vec::new();
     let (k, n) = derive_like_file_key(&[0u8; 32], file_id);
@@ -243,6 +253,9 @@ pub fn attacker_keys(file_id: &[u8; 32], plaintext_sha: &[u8; 32]) -> Vec<(Strin
     out.push(("HKDF(file id, ring = file id)".to_string(), k, n));
     let (k, n) = derive_like_file_key(plaintext_sha, plaintext_sha);
     out.push(("convergent: HKDF(sha256(plaintext))".to_string(), k, n));
+    // #2109: the object name (what the server holds), run through the v2 derivation as if it were the digest.
+    let (k, n) = derive_like_shared_key(file_id);
+    out.push(("v2 derivation of the object name".to_string(), k, n));
     let mut k = [0u8; 32];
     let mut n = [0u8; 12];
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut k);

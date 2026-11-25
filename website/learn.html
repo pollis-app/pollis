@@ -1537,7 +1537,7 @@ Lockboxes left in advance, a welcome that carries only today's keys, earlier mes
         <div class="ln-prose">
           <p>Suppose someone copies a key off your device today. What do they get, looking backward in time and forward?</p>
           <p><strong>The past: forward secrecy.</strong> Nothing. Each new key is derived from the previous one by a one-way step that cannot be reversed, and used keys are deleted. A key stolen today opens today's messages; the material for yesterday's no longer exists. (To handle messages that arrive out of order, the protocol briefly keeps a small, bounded set of recent message keys, so the boundary is that window rather than a hard line.)</p>
-          <p>Forward secrecy protects <em>recorded network traffic</em>, not your device. Your messages are stored decrypted in a local database so the app can show them instantly, and that database is protected by a key in your operating system's keystore. Someone inside your unlocked device can read your history directly. What forward secrecy guarantees is that traffic recorded months ago stays sealed, even with a key stolen today. Shared files are sealed with a per-conversation file key that members' devices keep for the life of the conversation (<a href="#attachments">see Topic 6</a>).</p>
+          <p>Forward secrecy protects <em>recorded network traffic</em>, not your device. Your messages are stored decrypted in a local database so the app can show them instantly, and that database is protected by a key in your operating system's keystore. Someone inside your unlocked device can read your history directly. What forward secrecy guarantees is that traffic recorded months ago stays sealed, even with a key stolen today. Shared files are sealed with a key that travels inside the message itself, so anyone who can read the message can open its file for as long as they keep it (<a href="#attachments">see Topic 6</a>).</p>
           <p><strong>The future: post-compromise security.</strong> Normally a stolen key keeps working until you notice and start over. In MLS the group heals on its own. Ordinary updates, such as adding a member or a routine key refresh, replace keys along part of the tree. Once a member the attacker does not control makes an update, the stolen key stops working, without anyone having to notice the theft.</p>
           <p>This is the payoff of the tree from <a href="#mls-groups">Topic 3</a>: rekeying is cheap, so it happens often, and the window in which a stolen key is useful stays short. It does not open backward, and it closes on its own.</p>
         </div>
@@ -1580,8 +1580,9 @@ Time runs left to right: a one-way key chain, what an unlocked screen shows, a b
             <p>One thing to be precise about. If your old messages are still on your screen,
               someone holding your unlocked device just reads them. Forward secrecy protects
               encrypted traffic, someone who recorded your data months ago and steals a key
-              today still can't open what they recorded. Shared files are sealed with a file key
-              that members' devices keep for the life of the conversation.</p>
+              today still can't open what they recorded. Shared files are sealed with a key that
+              travels inside the message itself, so anyone who can read the message can open its
+              file for as long as they keep the message.</p>
             <p>Now the future. Normally a stolen key means you're compromised forever. Here, the
               attacker is reading. Epoch seven. Epoch eight. This is a real break.</p>
             <p>Then someone else in the group, someone the attacker doesn't control, does
@@ -1617,59 +1618,60 @@ Time runs left to right: a one-way key chain, what an unlocked screen shows, a b
         <div class="ln-prose">
           <p>Photos, voice clips, and PDFs follow the same rule as text: the operator never sees
             the contents. They take a slightly different path, though.</p>
-          <p>Every conversation has its own small <strong>ring of file keys</strong>: random keys that
-            only the conversation's members can unlock. The server keeps the ring, but only locked
-            under a secret that comes from the conversation's current MLS state, and the members
-            re-lock it every time that state moves on. Anyone who is a member right now can unlock it;
-            the server never can.</p>
-          <p>Before a file leaves your device, it gets a <strong>random id</strong>. Your device
-            derives a key for that one file from the newest ring key and the id, encrypts the file with
-            AES-256-GCM, and uploads only the encrypted result to Cloudflare R2, an S3-style object
-            store, under the random id. Your device never holds storage credentials: it asks the
-            Delivery Service for a short-lived, pre-signed upload link.</p>
-          <p>The id, which ring key was used, and a SHA-256 <a href="#vocabulary">hash</a> of the
-            original file go <em>inside</em> the encrypted message, so MLS protects them along with the
-            text. Only people in the conversation learn which stored blob a message points at, and only
-            they can unlock the key to open it. After decrypting, the app checks the hash, so nobody
-            can quietly swap in different bytes.</p>
-          <p>Files in your <strong>Vault</strong> use a key derived from your own account key instead,
-            so every one of your devices can open them and nobody else can.</p>
+          <p>Each distinct file is <strong>stored once</strong>, however many people send it and
+            however many chats it goes to. Every message or Vault entry that uses it holds a reference,
+            and the stored copy is deleted when the last reference is.</p>
+          <p>Before a file leaves your device, your device takes its SHA-256 <a
+            href="#vocabulary">hash</a> and derives the file's key from that hash. It encrypts the file
+            with AES-256-GCM, so the same file always encrypts to the same bytes, and names the stored
+            copy after a hash of those <em>encrypted</em> bytes. The name says nothing about the key.
+            If the file is already stored, nothing is uploaded; otherwise only the encrypted result goes
+            to Cloudflare R2, an S3-style object store. Your device never holds storage credentials: it
+            asks the Delivery Service for a short-lived, pre-signed upload link, which R2 accepts only
+            for bytes matching the name.</p>
+          <p>The file's hash, the one thing its key comes from, goes <em>inside</em> the encrypted
+            message, so MLS protects it along with the text (in your <strong>Vault</strong>, your
+            account key does). Only people who can read the message can open the file. After
+            decrypting, the app checks the hash, so nobody can quietly swap in different bytes.</p>
+          <p>Files sent before this change were sealed under a per-conversation key ring and still
+            open as before.</p>
         </div>
 
         <dl class="ln-sees">
-          <div class="ln-sees-row"><dt>The storage (R2)</dt><dd>An encrypted blob, its size, and a
-            random object name (not the filename, not a fingerprint of the file). It never receives a
-            key.</dd></div>
-          <div class="ln-sees-row"><dt>The Delivery Service</dt><dd>The random object name, which
-            message references it (so it can clean the blob up once nothing does), and the
-            conversation's file key ring locked under a key it doesn't have. Never a usable key, the
-            filename, or the plaintext.</dd></div>
-          <div class="ln-sees-row"><dt>People in the chat</dt><dd>The file's id, filename and hash,
-            plus a blurred placeholder and, for a video, a small preview frame, all inside the encrypted
-            message, along with the unlocked key ring, so they can fetch the blob and open the file.</dd></div>
+          <div class="ln-sees-row"><dt>The storage (R2)</dt><dd>An encrypted blob, its size, and its
+            name, a hash of the encrypted bytes (not the filename). It never receives a key.</dd></div>
+          <div class="ln-sees-row"><dt>The Delivery Service</dt><dd>The stored object's name, which
+            messages reference it (so it can delete it once nothing does), and, while a send is in
+            progress, which account is sending it. Never a usable key, the filename, or the
+            plaintext.</dd></div>
+          <div class="ln-sees-row"><dt>People in the chat</dt><dd>The file's name, hash and stored
+            object name, plus a blurred placeholder and, for a video, a small preview frame, all inside
+            the encrypted message, which is enough to fetch the blob and open the file.</dd></div>
           <div class="ln-sees-row"><dt>Everyone else</dt><dd>Nothing useful. The link is short-lived
             and the blob is meaningless without the key.</dd></div>
         </dl>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">How file keys work</div>
-          <p>The key ring belongs to the conversation, not to the moment a file was sent. Someone who
-            joins later can open files posted before they joined, as long as they can see a message that
-            points at them. When someone is removed, a new key is added and used for everything uploaded
-            afterwards, so later files are out of their reach; files from before the removal are not
-            re-encrypted, and they could have saved those anyway. Storage sees each file's size. Every
-            upload is stored separately, even if two people send the same file. Separately, the on-device
-            cache re-encrypts every file at rest under a key tied to your local database.</p>
+          <div class="ln-limit-label">What storing each file once means</div>
+          <p>Someone who already has a particular file can work out its stored name, and so can tell
+            whether that exact file is stored, and the operator can see that the same stored file is
+            referenced from more than one conversation. Neither reveals the contents of a file to
+            anyone who doesn't already have it. Deleting your message removes only your reference;
+            the stored copy stays while anyone else's message still uses it. Because each file is
+            stored once, the operator can remove a stored file, which removes it everywhere it was
+            sent; the apps then show "File removed". Storage sees each file's size. Separately, the
+            on-device cache re-encrypts every file at rest under a key tied to your local database.</p>
         </div>
 
         <p class="ln-deeper">
-          The rigorous version: the per-conversation key ring in <a
-            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/file_keys.rs"
-            target="_blank" rel="noopener noreferrer">file_keys.rs</a>, the upload and per-file key
-          derivation in <a
+          The rigorous version: the key and name derivations in <a
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/shared_files.rs"
+            target="_blank" rel="noopener noreferrer">shared_files.rs</a>, the upload and download in <a
             href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/r2.rs"
-            target="_blank" rel="noopener noreferrer">r2.rs</a>, and the loopback media server that
-          decrypts on demand in <a
+            target="_blank" rel="noopener noreferrer">r2.rs</a>, the key ring older files use in <a
+            href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/commands/file_keys.rs"
+            target="_blank" rel="noopener noreferrer">file_keys.rs</a>, and the loopback media server
+          that decrypts on demand in <a
             href="https://github.com/pollis-app/pollis/blob/main/pollis-core/src/media_server.rs"
             target="_blank" rel="noopener noreferrer">media_server.rs</a>.
         </p>

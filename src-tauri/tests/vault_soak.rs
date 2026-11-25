@@ -136,12 +136,13 @@ async fn vault_media_soak() {
         let key = up["key"].as_str().unwrap().to_string();
         let file_id = up["content_hash"].as_str().unwrap().to_string();
         let sha = up["sha256"].as_str().unwrap().to_string();
-        let kv = up["key_version"].as_i64().unwrap_or(-1);
+        // #2109: one shared object per distinct file, keyed by its own digest.
+        let version = up["version"].as_u64().unwrap_or(1);
         run.file_id = Some(file_id.clone());
 
         let content = json!({ "_att": [{
             "key": key, "url": up["url"], "name": f.filename, "ct": f.content_type,
-            "size": f.size, "hash": file_id, "kv": kv, "sha": sha,
+            "size": f.size, "hash": file_id, "v": version, "sha": sha,
             "bh": up["blurhash"], "w": up["width"], "h": up["height"],
         }]})
         .to_string();
@@ -158,21 +159,20 @@ async fn vault_media_soak() {
         };
         run.push(Proof::check(
             "upload",
-            sha == f.sha_hex() && kv == 0 && key == format!("media/{file_id}.enc"),
-            format!("object {key}, Vault key version {kv}, returned sha256 matches the source: {}", sha == f.sha_hex()),
+            sha == f.sha_hex() && version == 2 && key == format!("media/{file_id}.enc"),
+            format!("object {key}, reference version {version}, returned sha256 matches the source: {}", sha == f.sha_hex()),
         ));
-        // #1382: the file id is random, not a content digest.
+        // #2109: the object name is the ciphertext's digest, never the plaintext's.
         run.push(Proof::check(
-            "DS: file id is not derived from the content",
-            file_id != f.sha_hex() && file_id != hex::encode(sha256(f.sha_hex().as_bytes())),
+            "DS: object name is not the plaintext digest",
+            file_id.starts_with("v2-") && !file_id.contains(&f.sha_hex()),
             format!("content_hash {file_id} ≠ sha256(plaintext)"),
         ));
 
-        let sec = pollis_core::commands::vault::test_hooks::vault_file_secrets(&alice.state, &alice.user_id, &file_id)
-            .await
-            .expect("file secrets");
-        scanner.add_secret(&sec.file_key, &format!("{} file key", f.label));
-        scanner.add_secret(&sec.file_nonce, &format!("{} file nonce", f.label));
+        let (file_key, file_nonce) =
+            pollis_core::commands::vault::test_hooks::shared_file_key(&sha).expect("file key");
+        scanner.add_secret(&file_key, &format!("{} file key", f.label));
+        scanner.add_secret(&file_nonce, &format!("{} file nonce", f.label));
         built = set_scanner(&scanner);
 
         let (status, object) = operator_get(&world.http, &cfg.s3, &key).await;
@@ -190,17 +190,18 @@ async fn vault_media_soak() {
             ),
         ));
         objects.insert(i, verdict.sha256);
-        let model = proofs::derive_like_file_key(&sec.root_key, &hex::decode(&file_id).unwrap().try_into().unwrap());
-        let opens = open_all(&object, &sec.file_key, &sec.file_nonce).map(|p| sha256(&p) == f.sha256).unwrap_or(false);
-        let attackers: Vec<String> = attacker_keys(&hex::decode(&file_id).unwrap().try_into().unwrap(), &f.sha256)
+        let name_digest: [u8; 32] = pollis_api::messages::shared_object_digest(&file_id).expect("a shared object id");
+        let opens = open_all(&object, &file_key, &file_nonce).map(|p| sha256(&p) == f.sha256).unwrap_or(false);
+        let named = sha256(&object) == name_digest;
+        let attackers: Vec<String> = attacker_keys(&name_digest, &f.sha256)
             .into_iter()
             .map(|(what, k, n)| format!("{what}: {}", if open_chunk0(&object, &k, &n).is_ok() { "OPENED" } else { "refused" }))
             .collect();
         run.push(Proof::check(
-            "at rest: opens with the account's key and nothing else",
-            opens && model.0 == sec.file_key && attackers.iter().all(|a| a.ends_with("refused")),
+            "at rest: opens with the entry's key and nothing the server holds",
+            opens && named && attackers.iter().all(|a| a.ends_with("refused")),
             format!(
-                "real key (HKDF of the Vault root, held only on enrolled devices) opens it and the plaintext sha256 matches: {opens}; {}",
+                "the key from the plaintext digest (carried only inside the encrypted entry) opens it and the plaintext sha256 matches: {opens}; the stored bytes hash to their name: {named}; {}",
                 attackers.join(", ")
             ),
         ));
@@ -209,11 +210,11 @@ async fn vault_media_soak() {
             let same_id = other.map(|s| s.file_id == file_id).unwrap_or(false);
             let same_ct = objects.get(&orig) == objects.get(&i);
             run.push(Proof::check(
-                "at rest: identical plaintext shares nothing",
-                other.is_some() && !same_id && !same_ct,
+                "at rest: identical plaintext is stored once",
+                other.is_some() && same_id && same_ct,
                 format!(
-                    "duplicate of {}: file id differs: {}, ciphertext differs: {}",
-                    files[orig].label, !same_id, !same_ct
+                    "duplicate of {}: same object: {}, same ciphertext: {}",
+                    files[orig].label, same_id, same_ct
                 ),
             ));
         }
@@ -276,7 +277,7 @@ async fn vault_media_soak() {
             None => run.push(Proof::skip("DS rows", "no DS database access on this target (set TURSO_URL/TURSO_TOKEN)")),
         }
 
-        let scope = json!({ "kind": "vault" });
+        let scope = json!({ "kind": "content" });
         let t = Instant::now();
         let url: Result<String, String> = alice
             .invoke("get_media_url", json!({ "r2Key": key, "contentHash": file_id, "contentType": f.content_type, "sha256": sha, "keyScope": scope }))
@@ -326,7 +327,7 @@ async fn vault_media_soak() {
                     key.clone(),
                     file_id.clone(),
                     sha.clone(),
-                    pollis_core::commands::r2::AttachmentKeyScope::Vault,
+                    pollis_core::commands::r2::AttachmentKeyScope::Content,
                     &alice.state,
                 )
                 .await;
@@ -354,7 +355,7 @@ async fn vault_media_soak() {
         let saved: Result<String, String> = alice
             .invoke(
                 "save_media_to_path",
-                json!({ "r2Key": key, "contentHash": file_id, "sha256": sha, "keyScope": { "kind": "vault" }, "targetPath": target.to_string_lossy() }),
+                json!({ "r2Key": key, "contentHash": file_id, "sha256": sha, "keyScope": { "kind": "content" }, "targetPath": target.to_string_lossy() }),
             )
             .await;
         run.save_secs = Some(t.elapsed().as_secs_f64());
@@ -427,8 +428,10 @@ async fn vault_media_soak() {
         format!("{locked_cache} encrypted cache file(s) stay while locked (unreadable without the DB key); the next unlock empties the cache: {unlocked_cache} left"),
     ));
 
-    for s in &stored {
+    for (n, s) in stored.iter().enumerate() {
         let f = &files[s.idx];
+        // #2109: a duplicate's later entry still holds the one stored object.
+        let still_held = stored[n + 1..].iter().any(|later| later.file_id == s.file_id);
         let run = &mut runs[s.idx];
         let t = Instant::now();
         let del: Result<(), String> =
@@ -439,6 +442,14 @@ async fn vault_media_soak() {
             continue;
         }
         let (st, _) = operator_get(&world.http, &cfg.s3, &s.key).await;
+        if still_held {
+            run.push(Proof::check(
+                "delete: an object another entry holds stays",
+                st == 200,
+                format!("operator GET {} → HTTP {st}", s.key),
+            ));
+            continue;
+        }
         run.push(Proof::check("delete: object is gone from storage", st == 404, format!("operator GET {} → HTTP {st}", s.key)));
 
         match &world.db_main {
@@ -469,7 +480,7 @@ async fn vault_media_soak() {
             s.key.clone(),
             s.file_id.clone(),
             f.sha_hex(),
-            pollis_core::commands::r2::AttachmentKeyScope::Vault,
+            pollis_core::commands::r2::AttachmentKeyScope::Content,
             &alice.state,
         )
         .await;
