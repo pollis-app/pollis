@@ -153,6 +153,19 @@ test("keyboard-controller is patched to keep JS in step with the real keyboard, 
   // Bounded re-check after a signal, never a timer or a single fixed delay.
   assert.match(listeners, /for delay in \[0\.0, 0\.1, 0\.25, 0\.5, 1\.0, 2\.0\]/);
   assert.doesNotMatch(listeners, /Timer\.scheduledTimer|repeats: true/);
+  // #2098: an edge-swipe back carries the keyboard off sideways; UIKit reports the hide, but the layout
+  // guide the tracking view follows keeps the keyboard's height. The didHide re-check read that as a
+  // keyboard JS had missed and replayed a show onto the screen gone back to. A show is replayed only in
+  // a foreground / key-window round, and a keyboard frame with nothing focused is no keyboard at all.
+  const check = listeners.slice(listeners.indexOf("func reconcileHiddenKeyboard"));
+  const replayShow = check.indexOf("replay show");
+  const veto = check.indexOf("if visibleHeight >= 1 && UIResponder.current == nil {");
+  assert.ok(veto > 0 && veto < replayShow, "a keyboard frame with nothing focused is no keyboard");
+  assert.match(check.slice(veto), /^if visibleHeight >= 1 && UIResponder\.current == nil \{[\s\S]*?visibleHeight = 0\n/);
+  const forced = check.indexOf("let forced = reconcileForce");
+  const onlyForced = check.indexOf("if !forced {");
+  assert.ok(forced > 0 && forced < onlyForced && onlyForced < replayShow, "only a forced round replays a show");
+  assert.match(check.slice(onlyForced), /^if !forced \{[\s\S]*?return false\n/);
   assert.match(
     read(`${ios}KeyboardMovementObserver+Interactive.swift`),
     /!isKeyboardShown \|\| UIApplication\.shared\.applicationState != \.active/,

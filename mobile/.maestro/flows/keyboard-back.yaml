@@ -1,0 +1,245 @@
+appId: ${MAESTRO_APP_ID}
+---
+# KEYBOARD BACK (#2098) — going back with the keyboard up must leave the
+# screen gone back to at its full height, on every road back: the header
+# back button, the iOS edge swipe (completed and cancelled), Android's Back,
+# and a tab switch.
+#
+# The bug: an iOS edge swipe carries the keyboard off sideways, so once it
+# hides, its view still sits at its full height, just off screen. The
+# keyboard patch's post-hide re-check (#1662) read that frame as a keyboard
+# JS had missed and replayed a show, so the chat came back with its composer
+# a keyboard's height up the screen and nothing below it. The re-check now
+# reads a keyboard only while something is focused (patches/).
+#
+# The proof after every return is where the chat's bottom element sits: a
+# point tap at COMPOSER_POINT, the composer's own position when nothing pads
+# the screen (its bounds in `maestro hierarchy`: iPhone 18 Pro [76,788][294,832]
+# of 874 pt, so 93%; maestro-run.sh passes the iPad's, where the chat is the
+# right pane). The tap must focus the
+# composer (`keyboard-open`). Stranded, that spot is empty background and the
+# keyboard never opens. `keyboard-closed` first: the probe every
+# KeyboardAvoidingView pads from (components/KeyboardProbe.tsx).
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Keyboard Back"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Keyboard Back"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- tapOn:
+    id: "input-composer"
+- inputText: "thread root"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*hread root,.*"
+    timeout: 30000
+
+# Baseline: with the keyboard down, the point tap reaches the composer.
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-closed"
+    timeout: 3000
+- takeScreenshot: keyboard-back-01-baseline
+- runFlow: ../subflows/composer-at-bottom.yaml
+
+# 1. Thread -> chat by the header back button, keyboard up.
+- runFlow: ../subflows/long-press-message.yaml
+- tapOn:
+    id: "btn-reply-thread"
+- assertVisible:
+    id: "screen-thread"
+- tapOn:
+    id: "input-composer"
+- inputText: "one"
+- assertVisible:
+    id: "keyboard-open"
+- tapOn:
+    id: "btn-back"
+- assertNotVisible:
+    id: "screen-thread"
+- assertVisible:
+    id: "screen-chat"
+- takeScreenshot: keyboard-back-02-header-back
+- runFlow: ../subflows/composer-at-bottom.yaml
+
+# 2. Thread -> chat by the platform's own back, keyboard up. iPhone: the
+#    edge swipe, the case that stranded the chat. Android: Back hides the
+#    keyboard, a second Back leaves. The iPad shows the thread in its right
+#    pane, which no edge swipe pops; its header back is step 1.
+- runFlow:
+    when:
+      true: ${typeof IPAD === 'undefined' || IPAD != "1"}
+    commands:
+      - runFlow: ../subflows/long-press-message.yaml
+      - tapOn:
+          id: "btn-reply-thread"
+      - assertVisible:
+          id: "screen-thread"
+      - tapOn:
+          id: "input-composer"
+      - inputText: "two"
+      - assertVisible:
+          id: "keyboard-open"
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - swipe:
+                start: 1%,50%
+                end: 90%,50%
+                duration: 600
+      - runFlow:
+          when:
+            platform: Android
+          commands:
+            - pressKey: back
+            - pressKey: back
+      - assertNotVisible:
+          id: "screen-thread"
+      - assertVisible:
+          id: "screen-chat"
+      - takeScreenshot: keyboard-back-03-system-back
+      - runFlow: ../subflows/composer-at-bottom.yaml
+
+# 2b. iPhone: the same swipe, then straight to the background and back. The
+#     foreground re-check may replay a show JS missed (#1662), so it must not
+#     read the keyboard the swipe carried off as one.
+- runFlow:
+    when:
+      platform: iOS
+      true: ${typeof IPAD === 'undefined' || IPAD != "1"}
+    commands:
+      - runFlow: ../subflows/long-press-message.yaml
+      - tapOn:
+          id: "btn-reply-thread"
+      - assertVisible:
+          id: "screen-thread"
+      - tapOn:
+          id: "input-composer"
+      - inputText: "resume"
+      - assertVisible:
+          id: "keyboard-open"
+      - swipe:
+          start: 1%,50%
+          end: 90%,50%
+          duration: 600
+      - assertNotVisible:
+          id: "screen-thread"
+      - pressKey: Home
+      - launchApp:
+          stopApp: false
+      - assertVisible:
+          id: "screen-chat"
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - takeScreenshot: keyboard-back-03b-swipe-then-background
+      - runFlow: ../subflows/composer-at-bottom.yaml
+
+# 3. iPhone: an edge swipe let go early. The thread stays, keyboard and all;
+#    then the header back.
+- runFlow:
+    when:
+      platform: iOS
+      true: ${typeof IPAD === 'undefined' || IPAD != "1"}
+    commands:
+      - runFlow: ../subflows/long-press-message.yaml
+      - tapOn:
+          id: "btn-reply-thread"
+      - assertVisible:
+          id: "screen-thread"
+      - tapOn:
+          id: "input-composer"
+      - inputText: "three"
+      - assertVisible:
+          id: "keyboard-open"
+      - swipe:
+          start: 1%,50%
+          end: 20%,50%
+          duration: 2000
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: "screen-thread"
+      - takeScreenshot: keyboard-back-04-swipe-cancelled
+      - tapOn:
+          id: "btn-back"
+      - assertNotVisible:
+          id: "screen-thread"
+      - takeScreenshot: keyboard-back-05-after-cancelled
+      - runFlow: ../subflows/composer-at-bottom.yaml
+
+# 4. Phones: chat -> group by the header back button with the composer up,
+#    then back into the chat. On the iPad the chat is the right pane.
+- runFlow:
+    when:
+      true: ${typeof IPAD === 'undefined' || IPAD != "1"}
+    commands:
+      - tapOn:
+          id: "input-composer"
+      - inputText: "four"
+      - assertVisible:
+          id: "keyboard-open"
+      - tapOn:
+          id: "btn-back"
+      - assertNotVisible:
+          id: "screen-chat"
+      - extendedWaitUntil:
+          visible:
+            id: "keyboard-closed"
+          timeout: 3000
+      - takeScreenshot: keyboard-back-06-group
+      - tapOn:
+          text: "General"
+      - assertVisible:
+          id: "screen-chat"
+      - runFlow: ../subflows/composer-at-bottom.yaml
+
+# 5. A tab switch with the keyboard up: the group's search opens the Account
+#    tab's search, focused; Cancel, then back to Groups and the chat.
+- runFlow:
+    when:
+      true: ${typeof IPAD === 'undefined' || IPAD != "1"}
+    commands:
+      - tapOn:
+          id: "btn-back"
+- tapOn:
+    id: "btn-search-group"
+- assertVisible:
+    id: "input-search"
+# The search asks for focus as the tab opens; tap the field too, so the
+# keyboard is up whichever way that race went.
+- tapOn:
+    id: "input-search"
+- extendedWaitUntil:
+    visible:
+      id: "keyboard-open"
+    timeout: 3000
+- takeScreenshot: keyboard-back-07-search
+- tapOn:
+    id: "btn-search-cancel"
+- tapOn:
+    id: "tab-groups"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- takeScreenshot: keyboard-back-08-chat-after-tabs
+- runFlow: ../subflows/composer-at-bottom.yaml
