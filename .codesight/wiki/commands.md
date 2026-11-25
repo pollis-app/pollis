@@ -508,6 +508,20 @@ every fork — mint only at `key_version = 1`, re-wrap at the same version and a
 `(generation, epoch)`, rotate at exactly `+1`) and `POST /v1/read/file-keystate`.
 Both membership-gated. See `.codesight/wiki/database.md` § `file_keystate`.
 
+## share (`share/`, mobile bridge only)
+
+Sharing into Pollis from other apps (#2100); details in [share.md](share.md). Desktop has no
+share-in (exempt), so these are bridge arms with no Tauri shim.
+
+- `share_targets(query?, limit?)` → `ShareTarget[]` — the picker's rows, best first: the Vault,
+  then accepted unblocked DMs and text channels. Never a request or a voice channel.
+- `share_enqueue(request)` → `QueuedShare[]` — `{ shareId, targets[1..5], text, attachments[≤10] }`;
+  every target's row stored (ids derived from `shareId`), or nothing.
+- `share_deliver(queued)` → `ShareOutcome[]` — `sent | queued | rejected` per target.
+
+The iOS share extension calls the same code through the C ABI in
+`pollis-core/include/pollis_share.h`.
+
 ## vault (`commands/vault.rs`)
 
 The Vault (#107): a personal encrypted space that presents as a chat with yourself
@@ -532,7 +546,13 @@ the remote is the source of truth (sync replaces the cache).
   when not. An entry this build cannot decrypt is hidden, never deleted. A row the
   DS has only ever inserted carries `updated_at == created_at`; a rewrite (edit or
   pin) stamps the server clock, which is what both UIs' "(edited)" keys on.
-- `send_vault_message(user_id, content)` → `VaultMessage`
+- `send_vault_message(user_id, content, message_id?, attachments?)` → `VaultMessage` — through
+  the Vault's durable queue (#2100, [share.md](share.md#the-vaults-durable-queue-commandsmessagesvault_queuers)):
+  stored with its files before any network work, under `message_id` (a repeat saves once), files
+  uploaded under the Vault key. A save that cannot finish now stays queued (`send_state`
+  `failed`) for the next outbox drain or a Retry.
+- `retry_vault_message(id, user_id)` → `VaultMessage`; `discard_unsent_vault_message(id)` → `bool`
+  — a queued save that reads "Not saved".
 - `edit_vault_message(id, new_content, user_id)` → `VaultMessage` — keeps `pinned` and
   `created_at`. A file the edit drops is collected like a deleted one (below).
 - `set_vault_message_pinned(id, pinned, user_id)` → `VaultMessage`
@@ -901,7 +921,7 @@ than hand-edit.
 
 **`poster`** (2) — `get_local_video_poster`, `save_local_video_poster`
 
-**`vault`** (5) — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
+**`vault`** (7) — `delete_vault_message`, `discard_unsent_vault_message`, `edit_vault_message`, `get_vault_messages`, `retry_vault_message`, `send_vault_message`, `set_vault_message_pinned`
 
 **`messages`** (28) — `add_reaction`, `delete_message`, `discard_unsent_message`, `edit_message`, `flush_outbox`, `get_conversation_receipts`, `get_message_retention`, `get_reactions`, `get_unread_counts`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_thread_summaries`, `mark_conversation_read`, `mark_messages_read`, `new_message_id`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_messages_after`, `read_messages_around`, `read_thread_messages`, `rebuild_search_index`, `remove_reaction`, `retry_message`, `search_messages`, `send_message`, `set_message_retention`, `refresh_read_cursors`
 

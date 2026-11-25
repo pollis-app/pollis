@@ -1484,8 +1484,10 @@ envelope, so the loss shows in the conversation instead of vanishing. See
 - `sensitive` INTEGER NOT NULL DEFAULT 0 CHECK IN (0, 1) — marked sensitive in the composer (#1568); written into both envelopes as `sens: true`. Added through `ADDITIVE_COLUMNS`, so a row queued by an older build reads as not sensitive
 - `link_preview` INTEGER NOT NULL DEFAULT 0 CHECK IN (0, 1) — 1 for a link-preview thumbnail (#1987), at position `i32::MAX`, one per message. Uploaded in the same `finish_uploads` pass and with the same failure handling as attachments, but its reference goes into the `0xF9` trailer, never `_att`, so it is in no gallery, search result or export. For an edit (#1555 outbox) the row is keyed by the delivered target's id, which holds no other outbox bytes. Added through `ADDITIVE_COLUMNS`
 
-Attachment bytes an unsent message still has to upload, each written in its own
-short insert before the message row and before any network work, so a kill
+Attachment bytes an unsent message (or a queued Vault save, #2100) still has to upload, each
+written before the message row and before any network work (#2100: a zero-filled blob of the
+file's size, filled 1 MiB at a time with incremental blob I/O, and read back 4 MiB at a time by
+the streamed upload, so no file is ever whole in memory), so a kill
 mid-upload loses nothing; bytes whose row never landed are swept when the
 database opens. Plaintext only inside this SQLCipher database (under the
 session's `db_key`) — never a file on disk (#1000). At most
@@ -1641,6 +1643,13 @@ adopted the ring yet open a wrap at any epoch it was a member at, instead of
 only while sitting at exactly that epoch — without it, one commit of its own
 before a key holder re-wrapped locked it out until that holder came online.
 Opens only wraps of keys the device was entitled to at that epoch.
+
+### vault_outbox _(local, #2100)_
+- `id` TEXT PK _(the entry's id from the first attempt)_, `content` TEXT NOT NULL _(caption-only envelope until the files are uploaded, then the final one)_, `created_at` TEXT NOT NULL, `send_state` TEXT NOT NULL CHECK IN (`pending`, `failed`, `rejected`)
+
+The Vault's durable queue: a save waits here, its files in `outbox_attachment` under the same
+id, until the DS holds the entry and `vault_entry_cache` has it; then the row goes. Drained with
+the message outbox. See [share.md](share.md#the-vaults-durable-queue-commandsmessagesvault_queuers).
 
 ### vault_entry_cache _(local cache, #107)_
 - `id` TEXT PK, `content` TEXT NOT NULL _(decrypted entry body — same shape as `message.content`)_, `pinned` INTEGER, `created_at` / `updated_at` TEXT
