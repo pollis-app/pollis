@@ -236,12 +236,13 @@ Happens inside `verify_otp` once the user row is created and `account_id_key` is
 
 ### Verify / unlock
 
-`unlock(user_id, pin)`:
-1. Load `pin_meta_{user_id}`. If missing → return `PinNotSet` error.
-2. Check `failed_attempts` vs threshold. If locked out → return `PinLockedOut`.
-3. Derive KEK, attempt to decrypt the magic-string plaintext.
-4. On success: decrypt `db_key_wrapped_*` and `account_id_key_wrapped_*`, populate `AppState.unlock`, reset counter to 0 in `pin_meta_*`, open local DB via existing `state.load_user_db` path (refactored to take the already-unwrapped key), return `UserProfile`.
-5. On failure: increment counter, store, return `PinIncorrect { attempts_remaining: N }`.
+`unlock(user_id, pin)` (all through `pin::check_pin`):
+1. Under the counter lock (an in-process mutex, plus an `flock` on `<data_dir>/pin.lock` shared with the share extension, #2100): load `pin_meta_{user_id}` (missing → `PinNotSet`); at the threshold → wipe and return `PinLockedOut`; otherwise **count the attempt first**, storing `failed_attempts + 1`. Released before the key derivation, so it is never held for long.
+2. Derive KEK, attempt to decrypt the magic-string plaintext.
+3. On success: reset the counter to 0 (under the lock), decrypt `db_key_wrapped_*` and `account_id_key_wrapped_*`, populate `AppState.unlock`, open local DB via existing `state.load_user_db` path (refactored to take the already-unwrapped key), return `UserProfile`.
+4. On failure: read the counter again (under the lock); at the threshold wipe and return `PinLockedOut`, else `PinIncorrect { attempts_remaining: N }`.
+
+Counting before verifying means guesses made at once (the app's keypad and the extension's side by side on an iPad) each count, and a process killed mid-check has still spent its attempt.
 
 ### Forgotten PIN
 
