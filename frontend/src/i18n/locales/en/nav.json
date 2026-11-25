@@ -95,9 +95,11 @@
   "panel": {
     "thread": "Thread",
     "details": "Details",
+    "chat": "Chat",
     "ariaLabel": "Conversation details",
     "closeThread": "Close thread panel ({{shortcut}})",
     "closeDetails": "Close details panel ({{shortcut}})",
+    "closeChat": "Close chat panel ({{shortcut}})",
     "resize": "Resize details panel (drag; double-click to reset)"
   },
   "members": {

@@ -5,6 +5,7 @@ import { appStore } from "../../../stores/appStore";
 import { rightPanelStore } from "../../../stores/rightPanelStore";
 import { useSkin, usePreferences } from "../../../hooks/queries/usePreferences";
 import type { PanelKind, PanelSearch } from "../../../types/panel";
+import { useCallDm } from "./useCallDm";
 
 /** Which right panel shows and how to change it (#824, #825, #904). Open/closed is device-local per user (`rightPanelStore`), touched only by the user; the shape follows the route. A first launch seeds from the synced preference once it settles, then never consults the skin again. The only writer of panel state. */
 export function useRightPanel() {
@@ -36,6 +37,8 @@ export function useRightPanel() {
   const threadId = search.thread ?? null;
   const pinsOpen = search.pins === "1";
   const safetyPeerId = search.safety ?? null;
+  // On a 1:1 call with a DM, the panel's default is that chat (#2116); a thread, pins or safety opened from it wins.
+  const callDmId = useCallDm(pathname);
   const kind: PanelKind = !isOpen
     ? "none"
     : threadId
@@ -44,7 +47,9 @@ export function useRightPanel() {
         ? "pins"
         : safetyPeerId
           ? "safety"
-          : "members";
+          : callDmId
+            ? "dm"
+            : "members";
 
   const setThread = useCallback(
     (thread: string | undefined) => {
@@ -119,7 +124,7 @@ export function useRightPanel() {
   }, [search.safety, setSafety]);
 
   const setPanel = useCallback(
-    (next: Exclude<PanelKind, "thread" | "pins" | "safety">) => {
+    (next: Exclude<PanelKind, "thread" | "pins" | "safety" | "dm">) => {
       rightPanelStore.setOpen(userId, next !== "none");
       clearThread();
       clearPins();
@@ -155,6 +160,7 @@ export function useRightPanel() {
     isOpen,
     threadId,
     safetyPeerId,
+    callDmId,
     setPanel,
     openThread,
     togglePins,

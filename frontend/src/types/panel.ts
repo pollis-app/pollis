@@ -1,7 +1,8 @@
 // Right-panel URL params (#824, #825, #904); open state is device-local (`stores/rightPanelStore`).
 
 /** The shape the panel is currently rendering. Derived, never parsed. */
-export type PanelKind = "members" | "thread" | "pins" | "safety" | "none";
+/** `"dm"`: on a 1:1 call, the chat with the other party (#2116). */
+export type PanelKind = "members" | "thread" | "pins" | "safety" | "dm" | "none";
 
 export interface PanelSearch {
   /** ULID of the open thread's root; route-scoped. */
