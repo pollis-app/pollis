@@ -168,7 +168,7 @@ export const VaultPage: React.FC = observer(() => {
     }
     const parsed = parseContent(editingEntry.content, "vault");
     const attachments = parsed.attachments ?? [];
-    // Keep files across a text edit; fields mirror `buildMessageContent`.
+    // Keep files across a text edit; the fields are the `_att` envelope the core wrote.
     const newContent =
       attachments.length > 0
         ? JSON.stringify({
