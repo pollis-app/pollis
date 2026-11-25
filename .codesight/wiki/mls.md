@@ -1050,7 +1050,12 @@ post, the sender's copy sits where every recipient's does.
 **Rapid sends: stored at once, delivered in order (#1636).** The composer
 never waits on a send: on desktop and mobile every tap calls `send_message`
 immediately and shows its stub (mobile stubs are `pending-<ms>-<seq>`, so two
-made in one millisecond never share an id). The core makes the order:
+made in one millisecond never share an id). One tap is still one send
+(#2099): the composer takes its text at the tap and refuses a second submit
+until it has rendered cleared (desktop `ChatInput`, mobile
+`lib/composerSubmit.ts`), because submits delivered in one batch would
+otherwise each mint a new id for the same draft, which no id-based guard below
+can merge. The core makes the order:
 
 - **Stored at call time.** `send_message` stamps `sent_at` and registers the
   send in `AppState::outbox_enqueuing` before its first await, then writes the

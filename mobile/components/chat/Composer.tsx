@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { View, Pressable, Platform, ScrollView, type TextInput } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
@@ -38,6 +38,14 @@ import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import type { PickedAttachment } from "../../lib/attachments";
 import { ComposerAttachmentPreview } from "./ComposerAttachmentPreview";
 import { useOpenDraftMediaViewer } from "../../hooks/useOpenMediaViewer";
+import {
+  acceptChange,
+  markCleared,
+  newSubmitGate,
+  rearm,
+  takeSubmit,
+  type SubmitGate,
+} from "../../lib/composerSubmit";
 
 /** Bottom composer bar. `/…`, `@…` and `:…` open suggestions; shortcodes are substituted HERE, before send, so the wire format is unchanged. */
 export function Composer({
@@ -62,7 +70,11 @@ export function Composer({
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
-  onSend: () => void;
+  /**
+   * Sends `text`, the field's text at the tap (#2099). Returns true when it cleared the
+   * composer, so the field's late reports of that text are ignored.
+   */
+  onSend: (text: string) => boolean;
   /** Holds the send button while a send is out. Chat sets it only for a command request (#2018): messages queue (#1636). */
   sendPending?: boolean;
   editable: boolean;
@@ -91,6 +103,24 @@ export function Composer({
   const [emptyHeight, setEmptyHeight] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  // #2099: one submit per draft, and a late native report never refills the cleared field.
+  const gateRef = useRef<SubmitGate | null>(null);
+  if (gateRef.current === null) {
+    gateRef.current = newSubmitGate(draft);
+  }
+  const gate = gateRef.current;
+  useLayoutEffect(() => {
+    rearm(gate, draft);
+  });
+  const submit = () => {
+    const text = takeSubmit(gate, canSendEmptyText);
+    if (text === null) {
+      return;
+    }
+    if (onSend(text)) {
+      markCleared(gate, text, Date.now());
+    }
+  };
   useEffect(() => {
     if (focusRequest > 0) {
       inputRef.current?.focus();
@@ -162,6 +192,9 @@ export function Composer({
 
   // The ':' closing a known shortcode is swallowed for the emoji (single-character insertions at the end only).
   const handleChangeText = (next: string) => {
+    if (!acceptChange(gate, next, Date.now())) {
+      return;
+    }
     if (next.length === draft.length + 1 && next.endsWith(":")) {
       const closed = completedShortcodeAt(next, next.length);
       const entry = closed ? resolveShortcode(shortcodeEntries, closed.name) : undefined;
@@ -483,7 +516,7 @@ export function Composer({
         </View>
         {/* With nothing to send it is announced disabled and leaves the focus order. */}
         <Pressable
-          onPress={onSend}
+          onPress={submit}
           disabled={sendDisabled}
           focusable={!sendDisabled}
           testID="btn-send"

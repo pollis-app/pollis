@@ -102,15 +102,17 @@ function ThreadScreen() {
     return set;
   }, [mentionCandidates, selfName]);
 
-  const onSend = () => {
-    const text = outgoingText(draft);
+  // The composer hands over its text at the tap (#2099); true = the composer was cleared.
+  const onSend = (typed: string): boolean => {
+    const text = outgoingText(typed);
     if (!text || !threadId) {
-      return;
+      return false;
     }
     // Never waits for a fetch still running: the reply goes without it.
     const preview = linkPreview.takeForSend(text);
     setDraft("");
     sendMessage.mutate({ content: text, threadId, linkPreview: preview });
+    return true;
   };
 
   const newestId = replies[replies.length - 1]?.id;

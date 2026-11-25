@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ComposerBarHeader } from "./ComposerBarHeader";
+import { isImeKey } from "../../utils/imeKey";
 
 interface EditMessageBarProps {
   heading: string;
@@ -63,7 +64,8 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            // #2099: an IME's committing Enter is not a save.
+            if (e.key === "Enter" && !e.shiftKey && !isImeKey(e)) {
               e.preventDefault();
               onSave();
             }

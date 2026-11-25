@@ -1714,7 +1714,17 @@ Current state:
   pre-#1636 build and passed all five parts after. `flows/rapid-send.yaml` is
   the iOS path, timed by a fresh group's slow first send, with the same guard.
   `tests/rapid-send.test.ts` pins the hook and the guard. Never gate the chat
-  composer on `isPending` again. **Edits too (#1555):** `edit_message` stores the
+  composer on `isPending` again. **One tap, one send (#2099):** `Composer`
+  owns the Send tap through `lib/composerSubmit.ts`. It hands `onSend(text)`
+  the text the field last reported (never a screen's render-time `draft`),
+  refuses a second submit until it has rendered again (taps queued while the JS
+  thread is busy arrive in one batch, before the clear renders, and each used
+  to send the same draft under a new id), and for 300 ms after a clearing send
+  ignores the field's late reports of the old text (React Native's native field
+  drops a clear while it holds a change JS has not read; that change then
+  refilled the composer, Send enabled, ready to go twice). `onSend` returns
+  true only when it cleared the composer. `tests/composer-submit.test.ts`,
+  `.maestro/flows/composer-double-send.yaml`. **Edits too (#1555):** `edit_message` stores the
   edit in the core's edit outbox before posting and the row reads back with
   `edit_state` until the DS confirms; `MessageRow` labels a failed one
   "(edit not sent)" (`editUnsent`), and the same drain delivers it.
