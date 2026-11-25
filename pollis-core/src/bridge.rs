@@ -1353,6 +1353,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let message_id: String = arg(&args, "messageId")?;
             ok(messages::get_reactions(message_id, &state()?).await?)
         }
+        "get_reactions_for_messages" => {
+            let message_ids: Vec<String> = arg(&args, "messageIds")?;
+            ok(messages::get_reactions_for_messages(message_ids, &state()?).await?)
+        }
         "edit_message" => {
             let conversation_id: String = arg(&args, "conversationId")?;
             let message_id: String = arg(&args, "messageId")?;

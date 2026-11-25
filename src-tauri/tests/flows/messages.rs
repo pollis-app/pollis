@@ -1759,6 +1759,25 @@ async fn reactions_round_trip_between_two_members() {
         "the surviving reaction must be bob's"
     );
 
+    // #2115: one batched read names every requested id, reacted or not.
+    let unreacted_id = alice
+        .send_channel_message_id(&channel_id, "nobody reacts to this")
+        .await;
+    let batch = bob
+        .invoke_json(
+            "get_reactions_for_messages",
+            serde_json::json!({ "messageIds": [message_id, unreacted_id] }),
+        )
+        .await;
+    let batch = batch.as_object().expect("an id -> reactions map");
+    assert_eq!(batch.len(), 2, "an entry per requested id: {batch:#?}");
+    assert_eq!(batch[&message_id], after_remove, "batch and single read agree");
+    assert_eq!(
+        batch[&unreacted_id].as_array().map(|a| a.len()),
+        Some(0),
+        "a message without reactions is an empty list, not absent: {batch:#?}"
+    );
+
     drop(alice);
     drop(bob);
 }
