@@ -161,6 +161,9 @@ fn matches(candidate: &Candidate, query: &str) -> bool {
     words_of(query).all(|term| words.iter().any(|w| w.starts_with(&term)))
 }
 
+/// A target with what it sorts by: its last activity, and (a DM) when it was made.
+type Ranked = (Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, ShareTarget);
+
 /// Order `candidates` (see the module docs), keep those matching `query`, take `limit`.
 pub(crate) fn rank(
     candidates: Vec<Candidate>,
@@ -169,8 +172,7 @@ pub(crate) fn rank(
     limit: usize,
 ) -> Vec<ShareTarget> {
     let query = query.map(str::trim).filter(|q| !q.is_empty());
-    let mut kept: Vec<(Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, ShareTarget)> =
-        candidates
+    let mut kept: Vec<Ranked> = candidates
             .into_iter()
             .filter(|c| query.is_none_or(|q| matches(c, q)))
             .map(|c| {
