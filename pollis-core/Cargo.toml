@@ -177,7 +177,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # can point control-plane HTTP at the loopback overlay shim (proxy-side DNS). OFF
 # by default at runtime — an unset `POLLIS_OVERLAY` builds a proxy-less client, so
 # enabling the feature changes nothing until the overlay is turned on.
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "socks"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "socks", "stream"], default-features = false }
 # Parses and resolves link-preview URLs (#1987); already in the graph through reqwest.
 url = "2"
 anyhow = "1"
@@ -340,7 +340,7 @@ pulseaudio = { version = "0.3", optional = true }
 # See the note above the [dependencies] table — mobile vendors OpenSSL,
 # desktop links the system one.
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
-rusqlite = { version = "0.43", features = ["bundled-sqlcipher-vendored-openssl", "functions"] }
+rusqlite = { version = "0.43", features = ["bundled-sqlcipher-vendored-openssl", "functions", "blob"] }
 # `db::local`'s disposal path needs `O_NOFOLLOW`, whose value is per-platform,
 # so libc has to be present on EVERY unix target rather than only the desktop
 # ones the table further down covers.
@@ -381,7 +381,7 @@ jni = "0.21"
 # declarations that linked mode would otherwise want a header for. Feature
 # union across the workspace must never add a `bundled*` here, so the desktop
 # entry below excludes Windows and src-tauri's dev-dependency is target-gated.
-rusqlite = { version = "0.43", features = ["sqlcipher", "modern_sqlite", "functions"] }
+rusqlite = { version = "0.43", features = ["sqlcipher", "modern_sqlite", "functions", "blob"] }
 # What `-l sqlcipher` above resolves to: the SQLCipher amalgamation built with
 # `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT` and a crypto provider written against the
 # RustCrypto crates this graph already has, so no OpenSSL enters the image
@@ -452,7 +452,7 @@ libc = "0.2"
 # Linux + macOS only. Windows is excluded on purpose and gets plain `bundled`
 # in its own table above — see the long note above the [dependencies] table.
 [target.'cfg(not(any(target_os = "ios", target_os = "android", target_os = "windows")))'.dependencies]
-rusqlite = { version = "0.43", features = ["bundled-sqlcipher", "functions"] }
+rusqlite = { version = "0.43", features = ["bundled-sqlcipher", "functions", "blob"] }
 
 # Shared capture-helper wire protocol. Both the Linux and macOS capture
 # helpers are subprocesses speaking this; this is the parent-side decoder.

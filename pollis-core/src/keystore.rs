@@ -1081,15 +1081,68 @@ mod file_backend {
 
     // Explicit path + codec so tests drive the runtime code, migration included.
 
+    /// Run a read-modify-write of the store under an exclusive `flock` on `<store>.lock`
+    /// (#2100). The app and its iOS extensions share this file through the App Group, and the
+    /// share extension writes the PIN's attempt counter: without the lock, two writers would
+    /// each write back a map missing the other's change. A separate file, never `state.lock`,
+    /// which a process may already hold around the very section that writes here. Waits up to
+    /// [`WRITE_LOCK_WAIT`]; a writer that cannot get it fails loudly rather than racing.
+    #[cfg(not(unix))]
+    fn with_write_lock<T>(_path: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        // Windows runs one Pollis process per data dir; nothing shares the file.
+        f()
+    }
+
+    #[cfg(unix)]
+    fn with_write_lock<T>(path: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("keystore.pks");
+        let lock_path = path.with_file_name(format!("{name}.lock"));
+        if let Some(parent) = lock_path.parent() {
+            crate::private_fs::create_dir_all(parent)
+                .map_err(|e| Error::Keystore(format!("create dir: {e}")))?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|e| Error::Keystore(format!("open {}: {e}", lock_path.display())))?;
+        let deadline = std::time::Instant::now() + WRITE_LOCK_WAIT;
+        loop {
+            let got = crate::notify::lock::try_lock_exclusive(&file)
+                .map_err(|e| Error::Keystore(format!("lock {}: {e}", lock_path.display())))?;
+            if got {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(Error::Keystore("the keystore is busy in another process".into()));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        // The lock is released when `file` closes, after `f`.
+        let out = f();
+        drop(file);
+        out
+    }
+
+    /// Longest a keystore write waits for another process's write to finish.
+    const WRITE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
     fn store_at(
         path: &Path,
         codec: &FileCodec,
         key: String,
         encoded: String,
     ) -> Result<()> {
-        let (mut map, _) = read_map_at(path, codec)?;
-        map.insert(key, encoded);
-        write_map_at(path, codec, &map)
+        with_write_lock(path, || {
+            let (mut map, _) = read_map_at(path, codec)?;
+            map.insert(key, encoded);
+            write_map_at(path, codec, &map)
+        })
     }
 
     fn load_at(path: &Path, codec: &FileCodec, key: &str) -> Result<Option<Vec<u8>>> {
@@ -1120,9 +1173,11 @@ mod file_backend {
     }
 
     fn delete_at(path: &Path, codec: &FileCodec, key: &str) -> Result<()> {
-        let (mut map, _) = read_map_at(path, codec)?;
-        map.remove(key);
-        write_map_at(path, codec, &map)
+        with_write_lock(path, || {
+            let (mut map, _) = read_map_at(path, codec)?;
+            map.remove(key);
+            write_map_at(path, codec, &map)
+        })
     }
 
     pub async fn store(key: &str, value: &[u8]) -> Result<()> {

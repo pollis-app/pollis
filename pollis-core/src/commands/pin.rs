@@ -632,6 +632,35 @@ async fn unlock_inner(
     user_id: &str,
     pin: &str,
 ) -> Result<UnlockState> {
+    match check_pin(keystore, user_id, pin).await? {
+        PinCheck::Unlocked(unlocked) => Ok(unlocked),
+        PinCheck::Incorrect { attempts_remaining } => Err(Error::Other(anyhow::anyhow!(
+            "pin incorrect; {attempts_remaining} attempts remaining"
+        ))),
+        PinCheck::LockedOut => Err(Error::Other(anyhow::anyhow!(
+            "pin locked out; use Secret Key recovery"
+        ))),
+    }
+}
+
+/// What a PIN attempt came to, typed for a host that is not the app (#2100: the iOS share
+/// extension draws its own keypad).
+pub(crate) enum PinCheck {
+    Unlocked(UnlockState),
+    Incorrect { attempts_remaining: u32 },
+    /// At the threshold; the wrapped keys are gone (Secret Key recovery is untouched).
+    LockedOut,
+}
+
+/// Verify `pin` against `user_id`'s slots and unwrap the keys. The ONE attempt counter: every
+/// caller (the app's unlock, a PIN change, the share extension's unlock) counts against
+/// `pin_meta`, so a wrong PIN anywhere brings the same lockout nearer, and the 10th wipes.
+pub(crate) async fn check_pin(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+    pin: &str,
+) -> Result<PinCheck> {
+    validate_pin(pin)?;
     let mut meta = load_pin_meta(keystore, user_id)
         .await?
         .ok_or_else(|| Error::Other(anyhow::anyhow!("PIN not set for user {user_id}")))?;
@@ -639,9 +668,7 @@ async fn unlock_inner(
     if meta.failed_attempts >= MAX_FAILED_ATTEMPTS {
         // Defense-in-depth lockout nuke; Secret Key recovery is untouched.
         nuke_wrapped(keystore, user_id).await?;
-        return Err(Error::Other(anyhow::anyhow!(
-            "pin locked out; use Secret Key recovery"
-        )));
+        return Ok(PinCheck::LockedOut);
     }
 
     let kek = derive_kek(
@@ -669,10 +696,9 @@ async fn unlock_inner(
             MAX_FAILED_ATTEMPTS.saturating_sub(meta.failed_attempts);
         if meta.failed_attempts >= MAX_FAILED_ATTEMPTS {
             nuke_wrapped(keystore, user_id).await?;
+            return Ok(PinCheck::LockedOut);
         }
-        return Err(Error::Other(anyhow::anyhow!(
-            "pin incorrect; {attempts_remaining} attempts remaining"
-        )));
+        return Ok(PinCheck::Incorrect { attempts_remaining });
     }
 
     let db_key_blob = keystore
@@ -692,11 +718,22 @@ async fn unlock_inner(
         store_pin_meta(keystore, user_id, &meta).await?;
     }
 
-    Ok(UnlockState {
+    Ok(PinCheck::Unlocked(UnlockState {
         user_id: user_id.to_string(),
         db_key,
         account_id_key,
-    })
+    }))
+}
+
+/// How many wrong PINs `user_id` has left before the lockout wipe, from `pin_meta` alone.
+/// `None` when no PIN is set (signed out, or wiped by a lockout).
+pub(crate) async fn attempts_remaining(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+) -> Result<Option<u32>> {
+    Ok(load_pin_meta(keystore, user_id)
+        .await?
+        .map(|m| MAX_FAILED_ATTEMPTS.saturating_sub(m.failed_attempts)))
 }
 
 /// Screen lock (not log out): drop unlock state and close the local DB.

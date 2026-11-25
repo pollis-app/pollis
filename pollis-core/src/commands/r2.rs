@@ -7,6 +7,9 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
+mod stream;
+pub(crate) use stream::StreamUpload;
+
 // Media cache: encrypted at rest (HKDF of `db_key`), decrypted by `media_server` on demand.
 
 /// Hard cap on total cache size before LRU eviction kicks in.
@@ -1116,6 +1119,9 @@ pub(crate) async fn delete_r2_object(
 /// so arbitrarily large files can be processed without buffering everything.
 const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 
+/// The plaintext chunk [`StreamUpload::push`] takes: one encryption chunk.
+pub(crate) const UPLOAD_CHUNK: usize = CHUNK_SIZE;
+
 /// AES-256-GCM ciphertext overhead per chunk (authentication tag).
 const TAG_SIZE: usize = 16;
 
@@ -1324,10 +1330,24 @@ pub(crate) async fn r2_put_url(
     data: Vec<u8>,
     content_type: &str,
 ) -> Result<()> {
+    let len = data.len() as u64;
+    r2_put_body(overlay, url, reqwest::Body::from(data), len, content_type).await
+}
+
+/// [`r2_put_url`] with any body of `len` bytes, e.g. a file streamed from disk (#2100). The
+/// length is sent as Content-Length, never chunked: R2 refuses a chunked PUT.
+pub(crate) async fn r2_put_body(
+    overlay: Option<&pollis_relay::OverlayHandle>,
+    url: &PresignedUrl,
+    body: reqwest::Body,
+    len: u64,
+    content_type: &str,
+) -> Result<()> {
     let resp = crate::net::overlay::http_client(overlay)
         .put(url.as_str())
         .header("Content-Type", content_type)
-        .body(data)
+        .header(reqwest::header::CONTENT_LENGTH, len)
+        .body(body)
         .send()
         .await
         // `without_url`: the presigned URL is a write credential; keep it out of logs.

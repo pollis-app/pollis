@@ -239,7 +239,7 @@ static PARKED_DB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None)
 /// only when no command is using it (a `try_lock` loop, not an `.await`). Marks the sends still
 /// out unsent and checkpoints the WAL first. Returns the user it was open for, or `Err(())` if
 /// it could not be taken in time.
-fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Option<String>, ()> {
+pub(crate) fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Option<String>, ()> {
     let deadline = std::time::Instant::now() + budget;
     loop {
         if let Ok(mut slot) = state.local_db.try_lock() {
@@ -1277,6 +1277,21 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(messages::discard_unsent_message(message_id, &state()?).await?)
         }
         "flush_outbox" => ok(messages::flush_outbox(&state()?).await?),
+        // Share into Pollis from another app (#2100): the picker's rows, then the share stored
+        // for every target, then delivered (the picker leaves while it delivers).
+        "share_targets" => {
+            let query: Option<String> = arg_opt(&args, "query")?;
+            let limit: Option<u32> = arg_opt(&args, "limit")?;
+            ok(crate::share::targets::share_targets(&state()?, query, limit).await?)
+        }
+        "share_enqueue" => {
+            let request: crate::share::send::ShareRequest = arg(&args, "request")?;
+            ok(crate::share::send::enqueue_share(&state()?, &request).await?)
+        }
+        "share_deliver" => {
+            let queued: Vec<crate::share::send::QueuedShare> = arg(&args, "queued")?;
+            ok(crate::share::send::deliver_share(&state()?, &queued, |_| {}).await)
+        }
         // Local-first batched reads (#936): pages come straight from the local
         // DB; the caller fires ingest separately, exactly as desktop does.
         "read_channel_messages" => {
@@ -1786,6 +1801,10 @@ mod tests {
         for cmd in [
             "create_group_invite_link",
             "list_group_invite_links",
+            // #2100
+            "share_targets",
+            "share_enqueue",
+            "share_deliver",
             // #1611
             "check_client_policy",
             "get_client_policy_status",

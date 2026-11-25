@@ -130,11 +130,15 @@ pub use types::{
 pub use send::{send_message, send_message_with_id, send_message_with_preview};
 pub use send::test_hooks;
 pub(crate) use send::direct_mentions;
+pub(crate) use send::{enqueue_message, EnqueueOutcome};
 
 pub use outbox::{
     discard_unsent_message, flush_outbox, new_message_id, retry_message, OutboxReport,
 };
-pub(crate) use outbox::{mark_suspended_sends_on, spawn_outbox_flush, sweep_orphan_attachments_on};
+pub(crate) use outbox::{
+    deliver as deliver_queued_message, mark_suspended_sends_on, send_state_of, spawn_outbox_flush,
+    sweep_orphan_attachments_on,
+};
 pub use outbox::OutgoingAttachment;
 pub use outbox::{Enqueuing, Retrying};
 

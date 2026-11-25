@@ -227,19 +227,7 @@ async fn store_attachment(
     meta: &AttMeta,
 ) -> Result<()> {
     match (&att.path, &att.staged_id) {
-        (Some(path), None) => {
-            let data = tokio::fs::read(path).await.map_err(|e| {
-                Error::Other(anyhow::anyhow!("read attachment {}: {e}", att.filename))
-            })?;
-            // The file may have grown since it was sized.
-            if let Some(e) = over_cap(data.len() as u64) {
-                return Err(e);
-            }
-            let meta = AttMeta { size: data.len(), ..meta.clone() };
-            let guard = state.local_db.lock().await;
-            let db = guard.as_ref().ok_or_else(not_signed_in)?;
-            store_attachment_on(db.conn(), id, position, &meta, &data)
-        }
+        (Some(path), None) => store_attachment_streamed(state, id, position, path, att, meta).await,
         (None, Some(staged)) => {
             let bytes = crate::commands::staging::peek_staged(staged).ok_or_else(|| no_staged(staged))?;
             let guard = state.local_db.lock().await;
@@ -251,6 +239,168 @@ async fn store_attachment(
         ))),
     }
 }
+/// How much of a file [`store_attachment_streamed`] holds in memory at once.
+const STORE_CHUNK: usize = 1024 * 1024;
+
+/// Store a file's bytes without reading it into memory (#2100): the row is written with a
+/// zero-filled blob of the file's size, then filled [`STORE_CHUNK`] at a time through SQLite's
+/// incremental blob I/O, taking the database lock per chunk only. A share extension can then
+/// queue a 100 MB video within its memory limit, and the app's other database work never waits
+/// behind the whole copy.
+async fn store_attachment_streamed(
+    state: &Arc<AppState>,
+    id: &str,
+    position: usize,
+    path: &str,
+    att: &OutgoingAttachment,
+    meta: &AttMeta,
+) -> Result<()> {
+    let read_err = |e: std::io::Error| Error::Other(anyhow::anyhow!("read attachment {}: {e}", att.filename));
+    let mut file = tokio::fs::File::open(path).await.map_err(read_err)?;
+    let size = file.metadata().await.map_err(read_err)?.len();
+    // The file may have grown since it was sized.
+    if let Some(e) = over_cap(size) {
+        return Err(e);
+    }
+    let meta = AttMeta { size: size as usize, ..meta.clone() };
+    let rowid = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        reserve_attachment_on(db.conn(), id, position, &meta)?
+    };
+    let mut buf = zeroize::Zeroizing::new(vec![0u8; STORE_CHUNK]);
+    let mut offset: u64 = 0;
+    loop {
+        let n = read_full(&mut file, &mut buf).await.map_err(read_err)?;
+        if n == 0 {
+            break;
+        }
+        if offset + n as u64 > size {
+            return Err(Error::Other(anyhow::anyhow!("attachment {} grew while it was read", att.filename)));
+        }
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        write_attachment_chunk_on(db.conn(), rowid, offset, &buf[..n])?;
+        offset += n as u64;
+    }
+    if offset != size {
+        return Err(Error::Other(anyhow::anyhow!("attachment {} shrank while it was read", att.filename)));
+    }
+    Ok(())
+}
+
+/// Fill `buf` from `file`, short only at the end of the file.
+async fn read_full(file: &mut tokio::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+    use tokio::io::AsyncReadExt;
+    let mut filled = 0;
+    while filled < buf.len() {
+        let n = file.read(&mut buf[filled..]).await?;
+        if n == 0 {
+            break;
+        }
+        filled += n;
+    }
+    Ok(filled)
+}
+
+/// Write the row of an attachment whose bytes follow (a zero-filled blob of `meta.size`);
+/// returns its rowid for [`write_attachment_chunk_on`].
+pub(super) fn reserve_attachment_on(
+    conn: &rusqlite::Connection,
+    id: &str,
+    position: usize,
+    meta: &AttMeta,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT OR REPLACE INTO outbox_attachment
+           (message_id, position, filename, content_type, data, blurhash, width, height, sensitive, poster)
+         VALUES (?1, ?2, ?3, ?4, zeroblob(?5), ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            id,
+            position as i64,
+            meta.filename,
+            meta.content_type,
+            meta.size as i64,
+            meta.blurhash,
+            meta.width,
+            meta.height,
+            meta.sensitive,
+            meta.poster,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Write `data` into the reserved blob of row `rowid` at `offset`.
+pub(super) fn write_attachment_chunk_on(
+    conn: &rusqlite::Connection,
+    rowid: i64,
+    offset: u64,
+    data: &[u8],
+) -> Result<()> {
+    let mut blob = conn.blob_open(rusqlite::MAIN_DB, "outbox_attachment", "data", rowid, false)?;
+    blob.write_at(data, offset as usize)?;
+    Ok(())
+}
+
+/// Read up to `buf.len()` bytes of the `n`th stored attachment of `id` from `offset`; returns
+/// how many were read (0 at the end).
+fn read_attachment_chunk_on(
+    conn: &rusqlite::Connection,
+    id: &str,
+    n: usize,
+    offset: u64,
+    buf: &mut [u8],
+) -> Result<usize> {
+    let (rowid, len): (i64, i64) = conn.query_row(
+        "SELECT rowid, length(data) FROM outbox_attachment WHERE message_id = ?1 AND link_preview = 0
+         ORDER BY position LIMIT 1 OFFSET ?2",
+        rusqlite::params![id, n as i64],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let len = len as u64;
+    if offset >= len {
+        return Ok(0);
+    }
+    let want = buf.len().min((len - offset) as usize);
+    let blob = conn.blob_open(rusqlite::MAIN_DB, "outbox_attachment", "data", rowid, true)?;
+    blob.read_at_exact(&mut buf[..want], offset as usize)?;
+    Ok(want)
+}
+
+/// Upload the `n`th stored attachment of `id`, read out of the database one upload chunk at a
+/// time ([`crate::commands::r2::StreamUpload`], #2100), never whole.
+async fn upload_stored_attachment(
+    state: &Arc<AppState>,
+    id: &str,
+    conversation_id: &str,
+    n: usize,
+    meta: &AttMeta,
+) -> Result<crate::commands::r2::MediaUploadResult> {
+    let mut upload = crate::commands::r2::StreamUpload::begin(
+        state,
+        conversation_id,
+        &meta.content_type,
+        meta.size as u64,
+    )
+    .await?;
+    let mut buf = zeroize::Zeroizing::new(vec![0u8; crate::commands::r2::UPLOAD_CHUNK]);
+    let mut offset: u64 = 0;
+    loop {
+        let got = {
+            let guard = state.local_db.lock().await;
+            let db = guard.as_ref().ok_or_else(not_signed_in)?;
+            read_attachment_chunk_on(db.conn(), id, n, offset, &mut buf)?
+        };
+        if got == 0 {
+            break;
+        }
+        upload.push(&buf[..got]).await?;
+        offset += got as u64;
+    }
+    upload.finish(state, meta.filename.clone()).await
+}
+
 /// One `_att` entry exactly as the renderers encode it (same keys, same order).
 #[derive(Serialize)]
 struct AttWire<'a> {
@@ -407,6 +557,7 @@ pub(super) fn attachment_metas_on(conn: &rusqlite::Connection, id: &str) -> Resu
 
 /// The bytes of the `n`th stored attachment of `id` (by order) — one blob at a
 /// time, so an upload never holds a whole message's files in memory.
+#[cfg(test)]
 fn attachment_data_on(conn: &rusqlite::Connection, id: &str, n: usize) -> Result<Vec<u8>> {
     Ok(conn.query_row(
         "SELECT data FROM outbox_attachment WHERE message_id = ?1 AND link_preview = 0
@@ -737,6 +888,14 @@ pub(super) fn unsent_ids_on(conn: &rusqlite::Connection) -> Result<Vec<String>> 
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(ids)
+}
+
+/// Where the outbox row `id` stands: `None` when there is no such row, `Some(None)` once it is
+/// delivered, else its `send_state` (#2100: a share reports each target's outcome).
+pub(crate) async fn send_state_of(state: &Arc<AppState>, id: &str) -> Result<Option<Option<String>>> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(not_signed_in)?;
+    Ok(load(db.conn(), id)?.map(|(_, send_state)| send_state))
 }
 
 /// True when `id` names one of this device's unsent messages.
@@ -1086,7 +1245,7 @@ impl Drop for RetryingEntry {
 /// row reading "sending"). A refusal no retry fixes is `rejected` at once. Each attempt is a
 /// whole [`deliver_once`]: the same envelope id, its own locks, in its conversation's line.
 /// Nothing is held between attempts, so the conversation's later sends are not held up.
-pub(super) async fn deliver(
+pub(crate) async fn deliver(
     state: &Arc<AppState>,
     id: &str,
     sender_username: Option<String>,
@@ -1397,20 +1556,8 @@ async fn finish_attachment_uploads(
     crate::commands::r2::check_outbox_upload_key(&queued.conversation_id, state).await?;
     let mut uploaded = Vec::with_capacity(metas.len());
     for (n, meta) in metas.iter().enumerate() {
-        let data = {
-            let guard = state.local_db.lock().await;
-            let db = guard.as_ref().ok_or_else(not_signed_in)?;
-            attachment_data_on(db.conn(), &queued.id, n)?
-        };
         uploaded.push(
-            crate::commands::r2::upload_outbox_bytes(
-                data,
-                meta.filename.clone(),
-                meta.content_type.clone(),
-                &queued.conversation_id,
-                state,
-            )
-            .await?,
+            upload_stored_attachment(state, &queued.id, &queued.conversation_id, n, meta).await?,
         );
     }
     let content = final_content(&caption_of(&queued.content), metas, &uploaded);

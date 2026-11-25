@@ -16,6 +16,7 @@ pub mod keystore;
 pub mod media_server;
 pub mod net;
 pub mod notify;
+pub mod share;
 pub mod downloads;
 pub mod private_fs;
 pub mod realtime;
