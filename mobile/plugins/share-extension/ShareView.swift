@@ -242,6 +242,14 @@ struct PickerView: View {
   @ObservedObject var model: ShareModel
   let theme: ShareTheme
   @State private var search = ""
+  /// Which field has the keyboard. Return on the message, a scroll, or a tap on a chat puts it
+  /// down, so the list and Send are never stuck under it.
+  @FocusState private var focus: Field?
+
+  enum Field {
+    case message
+    case search
+  }
 
   var body: some View {
     VStack(spacing: 10) {
@@ -252,6 +260,15 @@ struct PickerView: View {
           }
           TextField(ShareStrings.t("messagePlaceholder"), text: $model.message, axis: .vertical)
             .lineLimit(1...5)
+            .focused($focus, equals: .message)
+            .submitLabel(.done)
+            .onChange(of: model.message) { text in
+              // A vertical field takes return as a newline: here it means done.
+              if text.hasSuffix("\n") {
+                model.message = String(text.dropLast())
+                focus = nil
+              }
+            }
             .padding(12)
             .background(theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -266,6 +283,9 @@ struct PickerView: View {
               .autocorrectionDisabled()
               .textInputAutocapitalization(.never)
               .onChange(of: search) { model.search($0) }
+              .focused($focus, equals: .search)
+              .submitLabel(.search)
+              .onSubmit { focus = nil }
               .accessibilityIdentifier("share-search")
           }
           .padding(12)
@@ -279,6 +299,7 @@ struct PickerView: View {
         }
         .padding(.horizontal, 16)
       }
+      .scrollDismissesKeyboard(.immediately)
       VStack(spacing: 8) {
         if let error = model.sendError {
           Text(error).font(.footnote).foregroundColor(theme.danger).accessibilityIdentifier("share-send-error")
@@ -351,6 +372,7 @@ struct PickerView: View {
       LazyVStack(spacing: 2) {
         ForEach(Array(model.targets.enumerated()), id: \.element.id) { index, target in
           TargetRow(target: target, selected: model.isSelected(target), theme: theme) {
+            focus = nil
             model.toggle(target)
           }
           .disabled(model.sending)
@@ -368,7 +390,10 @@ struct TargetRow: View {
   let action: () -> Void
 
   static func title(of target: ShareTarget) -> String {
-    target.isVault ? ShareStrings.t("vault") : target.title
+    if target.isVault {
+      return ShareStrings.t("vault")
+    }
+    return target.isChannel ? "#\(target.title)" : target.title
   }
 
   private var subtitle: String? {
@@ -383,15 +408,21 @@ struct TargetRow: View {
       HStack(spacing: 12) {
         avatar
         VStack(alignment: .leading, spacing: 2) {
-          Text(Self.title(of: target)).lineLimit(1)
+          Text(Self.title(of: target))
+            .fontWeight(selected ? .bold : .regular)
+            .foregroundColor(selected ? theme.accent : theme.fg)
+            .lineLimit(1)
           if let subtitle {
             Text(subtitle).font(.footnote).foregroundColor(theme.dim).lineLimit(1)
           }
         }
         Spacer()
-        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-          .font(.title3)
-          .foregroundColor(selected ? theme.accent : theme.raised)
+        // The app's pick-one and pick-many rows: a trailing check on the chosen, nothing on the rest.
+        if selected {
+          Image(systemName: "checkmark")
+            .font(.body.weight(.semibold))
+            .foregroundColor(theme.accent)
+        }
       }
       .padding(.vertical, 8)
       .padding(.horizontal, 8)

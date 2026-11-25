@@ -1,0 +1,44 @@
+appId: com.google.android.apps.photos
+---
+# Share the newest COUNT (1 or 2) photos from Google Photos to Pollis through the system share
+# sheet: a real share, with the read grant a gallery gives the receiving app (an `adb am start`
+# cannot grant a MediaStore URI). The script pushes the photos first.
+- launchApp:
+    appId: com.google.android.apps.photos
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 4000
+# The backup offer on a fresh emulator.
+- runFlow:
+    when:
+      visible: "Sign in to back up"
+    commands:
+      - pressKey: back
+- extendedWaitUntil:
+    visible: "Photo taken on.*"
+    timeout: 20000
+- runFlow:
+    when:
+      true: ${COUNT == "1"}
+    commands:
+      - tapOn:
+          text: "Photo taken on.*"
+          index: 0
+      - tapOn:
+          id: "com.google.android.apps.photos:id/share"
+- runFlow:
+    when:
+      true: ${COUNT == "2"}
+    commands:
+      - longPressOn:
+          text: "Photo taken on.*"
+          index: 0
+      - tapOn:
+          text: "Photo taken on.*"
+          index: 1
+      - tapOn: "Share"
+- extendedWaitUntil:
+    visible: "Pollis"
+    timeout: 15000
+- takeScreenshot: share-photos-sheet-${COUNT}
+- tapOn: "Pollis"

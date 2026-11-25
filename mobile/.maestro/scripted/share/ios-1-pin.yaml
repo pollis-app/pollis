@@ -1,0 +1,33 @@
+appId: com.apple.mobileslideshow
+---
+# iOS share extension (#2100): run with the Pollis sheet open from another app's share sheet
+# (scripts/maestro-share-ios.sh opens it from Photos or Safari). A wrong PIN counts against the
+# app's own attempts; then the right one opens the picker.
+- extendedWaitUntil:
+    visible:
+      id: "share-pin-1"
+    timeout: 20000
+- tapOn:
+    id: "share-pin-5"
+- tapOn:
+    id: "share-pin-6"
+- tapOn:
+    id: "share-pin-7"
+- tapOn:
+    id: "share-pin-8"
+- extendedWaitUntil:
+    visible: ".*attempts remaining.*"
+    timeout: 20000
+- takeScreenshot: share-ios-01-wrong-pin
+- tapOn:
+    id: "share-pin-1"
+- tapOn:
+    id: "share-pin-2"
+- tapOn:
+    id: "share-pin-3"
+- tapOn:
+    id: "share-pin-4"
+- extendedWaitUntil:
+    visible: "Vault"
+    timeout: 30000
+- takeScreenshot: share-ios-02-picker

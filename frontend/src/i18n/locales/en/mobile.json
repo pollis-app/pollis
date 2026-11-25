@@ -897,6 +897,7 @@
     "biometricReason": "Unlock Pollis",
     "biometricChanged": "Your Face ID or Touch ID settings changed. Enter your PIN.",
     "vault": "Vault",
-    "vaultSub": "Only you"
+    "vaultSub": "Only you",
+    "unreadable": "Some items couldn't be opened, so they were left out."
   }
 }

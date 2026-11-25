@@ -79,6 +79,7 @@ test("the manifest is read defensively: caps, refusals and junk", () => {
   assert.ok(d.items.every((i) => i.kind === "video"));
   assert.equal(d.truncated, true, "more than ten were shared");
   assert.deepEqual(d.tooLarge, ["huge.mov"]);
+  assert.equal(d.unreadable, 1, "an item the intake could not open is reported, not silently dropped");
 });
 
 test("item kinds follow the MIME type", () => {

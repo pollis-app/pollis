@@ -1,0 +1,17 @@
+appId: ${MAESTRO_APP_ID}
+---
+# After the extension sent: Pollis's Vault holds the share once, saved (not queued).
+- launchApp:
+    stopApp: false
+- runFlow: ../../subflows/unlock-if-locked.yaml
+- openLink: "pollis://vault"
+- runFlow:
+    file: ../../subflows/after-open-link.yaml
+    env:
+      SCREEN: "screen-vault"
+- extendedWaitUntil:
+    visible: ".*${MESSAGE}.*"
+    timeout: 60000
+- assertNotVisible:
+    id: "vault-not-saved-.*"
+- takeScreenshot: share-ios-06-in-vault-${MESSAGE_TAG}

@@ -3,17 +3,18 @@
 #
 #   mobile/scripts/maestro-share.sh android
 #
-# Maestro cannot open another app's share sheet, so this script plays the other app: it sends
-# ACTION_SEND / ACTION_SEND_MULTIPLE with adb (`am start`), exactly what a share sheet hands
-# Pollis's ShareIntakeActivity, and runs .maestro/scripted/share/ between them:
+# Text is shared the way a share sheet hands it to Pollis's ShareIntakeActivity, with adb
+# (`am start` ACTION_SEND). Photos are shared for real from Google Photos through the system share
+# sheet (photos-share.yaml): a gallery grants the receiving app read access to its MediaStore URI,
+# which a shell `am start` cannot. Between them run .maestro/scripted/share/:
 #
 #   1-setup          a fresh account, a group with #General
 #   (adb)            share a link, Pollis open and unlocked
 #   2-text           "Send to" with the link pre-filled -> the Vault and #General -> saved once
-#   (adb)            stop Pollis; share a photo
+#   (Photos)         stop Pollis; share a photo from Google Photos (photos-share.yaml)
 #   3-image-locked   the PIN first (a wrong one shows the app's own countdown), then "Send to"
 #                    with the photo -> #General opens, the photo sent
-#   (adb)            share two photos (SEND_MULTIPLE)
+#   (Photos)         share two photos (SEND_MULTIPLE) from Google Photos
 #   4-multiple       a typed message, the Vault alone -> the Vault opens, both photos saved
 #   5-sign-out       sign out
 #   (adb)            Pollis is no longer a share target: no activity answers SEND, and the
@@ -67,22 +68,18 @@ shot() {
   echo "    screenshot $OUT/$1.png"
 }
 
-# A photo in the shared MediaStore, as a gallery app would share it: its content:// URI.
-media_uri() {
-  local name="$1"
-  A push "$MAE/fixtures/media-viewer.png" "/sdcard/Pictures/$name" >/dev/null
+# A photo in the shared MediaStore, as the camera would leave it, for Google Photos to share.
+push_photo() {
+  A push "$MAE/fixtures/media-viewer.png" "/sdcard/Pictures/$1" >/dev/null
   A shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
-    -d "file:///sdcard/Pictures/$name" >/dev/null
-  local id=""
-  for _ in $(seq 1 20); do
-    id="$(A shell content query --uri content://media/external/images/media \
-      --projection _id --where "_display_name=\'$name\'" 2>/dev/null \
-      | grep -o '_id=[0-9]*' | tail -1 | cut -d= -f2 || true)"
-    [ -n "$id" ] && break
-    sleep 0.5
-  done
-  [ -n "$id" ] || { echo "the photo $name never reached MediaStore" >&2; exit 1; }
-  echo "content://media/external/images/media/$id"
+    -d "file:///sdcard/Pictures/$1" >/dev/null
+  sleep 2
+}
+
+# Share the newest $1 photos from Google Photos to Pollis.
+share_photos() {
+  echo "--> share from Google Photos ($1)"
+  maestro --device "$DEVICE" test --debug-output "$DEBUG" -e COUNT="$1" "$FLOWS/photos-share.yaml"
 }
 
 # Pollis takes shares only while signed in: the activity is enabled by the app.
@@ -110,16 +107,13 @@ part 2-text
 
 echo "    (Pollis stopped; another app shares a photo)"
 A shell am force-stop "$PKG"
-PHOTO1="$(media_uri share-e2e-1.png)"
-A shell am start -W -n "$INTAKE" -a android.intent.action.SEND -t image/png \
-  --eu android.intent.extra.STREAM "$PHOTO1" --grant-read-uri-permission >/dev/null
+push_photo "share-e2e-$(date +%s)-1.png"
+share_photos 1
 part 3-image-locked
 
 echo "    (another app shares two photos)"
-PHOTO2="$(media_uri share-e2e-2.png)"
-PHOTO3="$(media_uri share-e2e-3.png)"
-A shell am start -W -n "$INTAKE" -a android.intent.action.SEND_MULTIPLE -t "image/*" \
-  --eua android.intent.extra.STREAM "$PHOTO2,$PHOTO3" --grant-read-uri-permission >/dev/null
+push_photo "share-e2e-$(date +%s)-2.png"
+share_photos 2
 part 4-multiple
 
 part 5-sign-out

@@ -40,6 +40,8 @@ export interface ShareDraft {
   items: (SharedItem & { kind: ItemKind })[];
   /** Names of files left out for being over the cap. */
   tooLarge: string[];
+  /** How many shared items the intake could not read (no access, or gone). */
+  unreadable: number;
   /** More than [MAX_ITEMS] were shared; the rest were left out. */
   truncated: boolean;
 }
@@ -93,11 +95,15 @@ export function parseManifest(json: string | null | undefined): ShareDraft | nul
   const tooLarge = (Array.isArray(m.refused) ? m.refused : [])
     .filter((r) => r?.reason === "too_large" && typeof r.name === "string")
     .map((r) => r.name);
+  const unreadable = (Array.isArray(m.refused) ? m.refused : []).filter(
+    (r) => r?.reason === "unreadable",
+  ).length;
   return {
     id: m.id,
     message: initialMessage(m.text, m.subject),
     items,
     tooLarge,
+    unreadable,
     truncated: m.truncated === true || (Array.isArray(m.items) && m.items.length > MAX_ITEMS),
   };
 }

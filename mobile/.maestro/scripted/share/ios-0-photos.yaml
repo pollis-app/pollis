@@ -1,0 +1,29 @@
+appId: com.apple.mobileslideshow
+---
+# Open Pollis's share sheet from Photos on a photo (#2100). The script added the photo first
+# (`simctl addmedia`).
+- launchApp:
+    appId: com.apple.mobileslideshow
+    stopApp: true
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "Photo, .*"
+    timeout: 20000
+- tapOn:
+    text: "Photo, .*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "Share"
+    timeout: 10000
+- tapOn:
+    id: "Share"
+- extendedWaitUntil:
+    visible: "Pollis"
+    timeout: 15000
+- takeScreenshot: share-ios-photos-sheet
+- tapOn: "Pollis"

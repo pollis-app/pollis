@@ -234,6 +234,11 @@ export default function ShareScreen() {
                 {draft.tooLarge.map((name) => t("share.tooLarge", { name })).join("\n")}
               </Text>
             ) : null}
+            {draft && draft.unreadable > 0 ? (
+              <Text testID="share-unreadable" style={[ty.meta, { color: semantic.danger }]}>
+                {t("share.unreadable")}
+              </Text>
+            ) : null}
             {draft?.truncated ? (
               <Text testID="share-too-many" style={[ty.meta, { color: semantic.muted }]}>
                 {t("share.tooMany")}

@@ -1,0 +1,32 @@
+appId: com.apple.mobilesafari
+---
+# The extension shares the app's ten-attempt lockout: ten wrong PINs here lock the account on this
+# device, exactly as ten in the app would. Run last: the device's keys are gone afterwards.
+- extendedWaitUntil:
+    visible:
+      id: "share-pin-1"
+    timeout: 20000
+- repeat:
+    times: 10
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "share-pin-5"
+          commands:
+            - tapOn:
+                id: "share-pin-5"
+            - tapOn:
+                id: "share-pin-6"
+            - tapOn:
+                id: "share-pin-7"
+            - tapOn:
+                id: "share-pin-8"
+            - waitForAnimationToEnd:
+                timeout: 8000
+- extendedWaitUntil:
+    visible: "Open Pollis to continue"
+    timeout: 30000
+- takeScreenshot: share-ios-08-locked-out
+- tapOn:
+    id: "share-notice-close"

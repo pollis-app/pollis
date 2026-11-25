@@ -1,0 +1,16 @@
+appId: com.apple.mobilesafari
+---
+# Open Pollis's share sheet from Safari on a page (#2100). The script opened the page first
+# (`simctl openurl`).
+- extendedWaitUntil:
+    visible:
+      id: "MoreMenuButton"
+    timeout: 20000
+- tapOn:
+    id: "MoreMenuButton"
+- tapOn: "Share"
+- extendedWaitUntil:
+    visible: "Pollis"
+    timeout: 15000
+- takeScreenshot: share-ios-safari-sheet
+- tapOn: "Pollis"
