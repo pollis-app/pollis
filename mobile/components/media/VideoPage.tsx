@@ -5,6 +5,7 @@ import { View } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useNamedMediaUri } from "../../hooks/useNamedMediaUri";
 import { MediaStatus } from "./MediaStatus";
+import { mediaProblem } from "../../lib/media/removed";
 import type { MessageAttachment } from "../../types";
 
 export function VideoPage({
@@ -40,9 +41,10 @@ export function VideoPage({
     );
   }
   if (error || !uri) {
+    const problem = mediaProblem(attachment, error);
     return (
       <View testID={testID} style={{ width, height }}>
-        <MediaStatus state="error" />
+        <MediaStatus state={problem === "removed" || problem === "update" ? problem : "error"} />
       </View>
     );
   }

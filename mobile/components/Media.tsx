@@ -9,6 +9,7 @@ import type { ImageStyle, StyleProp } from "react-native";
 import { useMediaUri } from "../hooks/useMediaUri";
 import { semantic, r, type as ty } from "../theme/tokens";
 import type { MessageAttachment } from "../types";
+import { mediaProblem } from "../lib/media/removed";
 
 export function MediaImage({
   attachment,
@@ -44,10 +45,11 @@ export function MediaImage({
     onRenderedChange?.(rendered);
   }, [rendered, onRenderedChange]);
 
-  if (error) {
+  const problem = mediaProblem(attachment, error);
+  if (problem) {
     return (
       <View
-        testID="media-unavailable"
+        testID={problem === "unavailable" ? "media-unavailable" : `media-${problem}`}
         style={[
           {
             borderRadius: r.md,
@@ -59,7 +61,13 @@ export function MediaImage({
           style,
         ]}
       >
-        <Text style={[ty.meta, { textAlign: "center" }]}>{t("ui.imageUnavailable")}</Text>
+        <Text style={[ty.meta, { textAlign: "center" }]}>
+          {problem === "removed"
+            ? t("chat:attachment.removed")
+            : problem === "update"
+              ? t("chat:attachment.updateToOpen")
+              : t("ui.imageUnavailable")}
+        </Text>
       </View>
     );
   }

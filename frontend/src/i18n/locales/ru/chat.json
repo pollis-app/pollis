@@ -129,6 +129,8 @@
     "error": "сбой",
     "failedToLoad": "Не удалось загрузить",
     "failedToDownload": "Не удалось скачать",
+    "removed": "Файл удалён",
+    "updateToOpen": "Обновите Pollis, чтобы открыть этот файл",
     "lightboxFetch": "загрузить",
     "lightboxDone": "Готово",
     "lightboxDoneTerminal": "[ готово ]",

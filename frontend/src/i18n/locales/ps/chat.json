@@ -118,6 +118,8 @@
     "error": "تېروتنه",
     "failedToLoad": "بار نه شو",
     "failedToDownload": "ډاونلوډ نه شو",
+    "removed": "فایل لرې شوه",
+    "updateToOpen": "د دې فایل پرانیستلو لپاره Pollis تازه کړئ",
     "lightboxFetch": "راوړل",
     "lightboxDone": "بشپړ",
     "lightboxDoneTerminal": "[ بشپړ ]",
