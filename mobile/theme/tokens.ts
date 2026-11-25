@@ -193,6 +193,9 @@ export const r = {
   xl: 16,
   sheet: 20,
   pill: 999,
+  // One corner for every box on a list screen (#2101): fields (a search bar), full-width
+  // buttons, cards, grouped lists and list rows, so a search bar and the card under it match.
+  box: 12,
 };
 
 // Corners for one row of a virtualised grouped list: the first row rounds its
@@ -200,10 +203,10 @@ export const r = {
 // sit inside <Group>).
 export function groupedRowCorners(index: number, last: number) {
   return {
-    borderTopLeftRadius: index === 0 ? r.lg : 0,
-    borderTopRightRadius: index === 0 ? r.lg : 0,
-    borderBottomLeftRadius: index === last ? r.lg : 0,
-    borderBottomRightRadius: index === last ? r.lg : 0,
+    borderTopLeftRadius: index === 0 ? r.box : 0,
+    borderTopRightRadius: index === 0 ? r.box : 0,
+    borderBottomLeftRadius: index === last ? r.box : 0,
+    borderBottomRightRadius: index === last ? r.box : 0,
   };
 }
 
