@@ -27,7 +27,6 @@ tags:
 - extendedWaitUntil:
     visible:
       id: "media-image-rendered"
-      index: 1
     timeout: 60000
 - assertNotVisible:
     id: "media-unavailable"

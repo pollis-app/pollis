@@ -33,12 +33,12 @@ const DEFAULT_OTP: &str = "000000";
 /// How long to wait for the phone at each step.
 const WAIT: Duration = Duration::from_secs(600);
 
-/// The newest `_att` entry with an uploaded image in `messages` from someone else.
+/// The newest uploaded `_att` entry in `messages` from someone else.
 fn image_att(page: &[pollis_core::commands::messages::ChannelMessage], me: &str) -> Option<serde_json::Value> {
     page.iter().filter(|m| m.sender_id != me).find_map(|m| {
         let env: serde_json::Value = serde_json::from_str(m.content.as_deref()?).ok()?;
-        let att = env["_att"].as_array()?.first()?.clone();
-        (att["ct"].as_str()?.starts_with("image/") && !att["key"].is_null()).then_some(att)
+        let att = env.get("_att")?.as_array()?.first()?.clone();
+        att.get("key").and_then(|k| k.as_str()).is_some().then_some(att)
     })
 }
 
@@ -88,6 +88,22 @@ async fn main() -> Result<()> {
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     };
+
+    // Say something first, so the phone catches up on this side's join before it sends.
+    messages::send_message_with_id(
+        None,
+        dm_id.clone(),
+        me.id.clone(),
+        "ready for your photo".to_string(),
+        Vec::new(),
+        None,
+        None,
+        Some(me.username.clone()),
+        &state,
+    )
+    .await
+    .context("send the greeting")?;
+    println!("PEER_READY dm={dm_id}");
 
     // The phone's photo: open it here.
     let started = Instant::now();

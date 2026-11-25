@@ -5,34 +5,26 @@ tags:
 # SHARED FILE (#2109), part 2 of 3 — driven by scripts/maestro-shared-file.sh.
 # Part 1 is ../pins/1-open-dm.yaml (sign up, open a DM with the peer). This
 # device sends a photo; the peer opens it and sends the very same bytes back.
-# No relaunch: the session from part 1 is still on screen.
+# No relaunch: the session from part 1 is still on screen. Re-open the DM first,
+# so this device has caught up on the peer's join and its greeting.
+
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "tab-direct"
+- extendedWaitUntil:
+    visible:
+      text: ".*${MAESTRO_PEER_HANDLE}.*"
+    timeout: 30000
+- tapOn:
+    text: ".*${MAESTRO_PEER_HANDLE}.*"
+- extendedWaitUntil:
+    visible: ".*ready for your photo.*"
+    timeout: 90000
 
 - addMedia:
     - "../../fixtures/media-viewer.png"
-- tapOn:
-    id: "btn-attach"
-- waitForAnimationToEnd:
-    timeout: 5000
-- runFlow:
-    when:
-      true: ${IPAD == "1"}
-    file: ../../subflows/ipad-pick-photos.yaml
-    env:
-      CELLS: "1"
-      CONFIRM: "1"
-- runFlow:
-    when:
-      true: ${IPAD != "1"}
-    commands:
-      - tapOn:
-          text: "Photo(,| taken on) .*"
-          index: 0
-      - tapOn:
-          text: "(?i)(add|done).*"
-- extendedWaitUntil:
-    visible:
-      id: "strip-attachments"
-    timeout: 10000
+- runFlow: ../../subflows/pick-newest-photo.yaml
 - tapOn:
     id: "btn-send"
 - extendedWaitUntil:

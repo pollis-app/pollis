@@ -82,6 +82,9 @@ echo "==> 1/3 device opens a DM with the peer"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$PRIMARY_EMAIL" \
   -e MAESTRO_PEER_HANDLE="$HANDLE" "$FLOWS/pins/1-open-dm.yaml"
 
+echo "==> peer says it is ready"
+await_peer PEER_READY 300
+
 echo "==> 2/3 device sends a photo"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e MAESTRO_PEER_HANDLE="$HANDLE" \
   "$FLOWS/shared-file/2-send-photo.yaml"
