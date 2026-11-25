@@ -68,7 +68,9 @@ pub async fn setup(cfg: &SoakConfig, scanner: Arc<Scanner>) -> World {
                 r2_secret_access_key: Some(cfg.s3.secret_key.clone()),
                 ..Default::default()
             };
+            // #2112: the local DS has the shared-upload switch on, as prod will.
             let state = pollis_delivery::AppState::new_with_log_db(main.clone(), log.clone(), true)
+                .with_shared_attachments(true)
                 .with_otp_config(pollis_delivery::otp::OtpConfig {
                     resend_api_key: None,
                     dev_otp: Some(LOCAL_OTP.to_string()),

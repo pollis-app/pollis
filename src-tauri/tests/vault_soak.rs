@@ -515,7 +515,7 @@ async fn vault_media_soak() {
         .expect("sentinel upload");
     let sentinel_content = json!({ "_att": [{
         "key": sent["key"], "url": sent["url"], "name": "sentinel.bin", "ct": "application/octet-stream",
-        "size": sent["size_bytes"], "hash": sent["content_hash"], "kv": sent["key_version"], "sha": sent["sha256"],
+        "size": sent["size_bytes"], "hash": sent["content_hash"], "v": 2, "sha": sent["sha256"],
     }]})
     .to_string();
     let _: serde_json::Value = alice
@@ -525,7 +525,7 @@ async fn vault_media_soak() {
     let sentinel_url: String = alice
         .invoke(
             "get_media_url",
-            json!({ "r2Key": sent["key"], "contentHash": sent["content_hash"], "contentType": "application/octet-stream", "sha256": sent["sha256"], "keyScope": { "kind": "vault" } }),
+            json!({ "r2Key": sent["key"], "contentHash": sent["content_hash"], "contentType": "application/octet-stream", "sha256": sent["sha256"], "keyScope": { "kind": "content" } }),
         )
         .await
         .expect("sentinel view");
