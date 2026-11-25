@@ -21,6 +21,7 @@ import { ThemeProvider, useThemeRerender } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge, invoke } from "../lib/native";
 import { usePushNotifications } from "../hooks/usePushNotifications";
+import { useShareIntake } from "../hooks/useShareIntake";
 import { useInboxRealtime } from "../hooks/useInboxRealtime";
 import { useEnrollmentApprovals } from "../hooks/useEnrollmentApprovals";
 import { useHistoryTransferService } from "../hooks/useHistoryTransferService";
@@ -92,6 +93,7 @@ function BootReset() {
 // App-level signed-in services; each is a no-op until a user is signed in.
 function SignedInServicesGate() {
   usePushNotifications();
+  useShareIntake();
   useInboxRealtime();
   useEnrollmentApprovals();
   useHistoryTransferService();
@@ -300,6 +302,7 @@ export default function RootLayout() {
               <Stack.Screen name="chat/thread" />
               <Stack.Screen name="media" />
               <Stack.Screen name="vault" />
+              <Stack.Screen name="share" />
               <Stack.Screen name="user/[id]" />
               <Stack.Screen name="report" options={drillIn} />
               <Stack.Screen

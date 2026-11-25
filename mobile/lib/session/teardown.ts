@@ -14,6 +14,8 @@ export interface SessionTeardownDeps {
   clearAvatarCache: () => Promise<void>;
   // Unsent composer text, held in memory.
   clearDrafts: () => void;
+  // #2100: files another app shared and nobody sent yet; and Pollis leaves the share sheet.
+  clearShares: () => Promise<void>;
 }
 
 // Every wipe runs even if one fails: a disk hiccup must not strand an ended session.
@@ -37,6 +39,7 @@ export async function tearDownSession(deps: SessionTeardownDeps): Promise<void> 
     deps.clearExportArchives,
     deps.clearEmojiCache,
     deps.clearAvatarCache,
+    deps.clearShares,
   ]);
 }
 
