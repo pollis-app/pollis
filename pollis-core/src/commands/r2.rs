@@ -909,10 +909,7 @@ async fn upload_plaintext(
     let is_image = content_type.starts_with("image/");
     let shared = shared_uploads_enabled(state).await?;
     let (version, key_version, sealed) = if shared {
-        let sealed = seal_off_runtime(data, is_image, |plaintext, h| {
-            crate::commands::shared_files::seal(plaintext, h)
-        })
-        .await?;
+        let sealed = seal_off_runtime(data, is_image, crate::commands::shared_files::seal).await?;
         (SHARED_ATTACHMENT_VERSION, 0, sealed)
     } else {
         // Key first: an unreachable ring must fail before any bytes are encrypted.
@@ -2006,7 +2003,7 @@ mod tests {
 
         let data = Plaintext::Owned(vec![7u8; 48 * 1024 * 1024]);
         let started = std::time::Instant::now();
-        let sealed = seal_off_runtime(data, false, zeroize::Zeroizing::new([1u8; 32]), [2u8; 12])
+        let sealed = seal_off_runtime(data, false, crate::commands::shared_files::seal)
             .await
             .expect("seal");
         let elapsed = started.elapsed();
