@@ -4,7 +4,6 @@
 //! rebuilds it.
 
 use crate::harness::{wipe, writable_remote, TestClient};
-use pollis_core::commands::messages::test_hooks;
 use serde_json::json;
 use serial_test::serial;
 
