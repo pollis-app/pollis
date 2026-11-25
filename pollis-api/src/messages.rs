@@ -305,12 +305,7 @@ pub enum AttachmentClaimStatus {
 /// instead of retrying.
 pub const ATTACHMENT_REMOVED: &str = "attachment_removed";
 
-/// `POST /v1/ops/attachments/remove` — operator removal of a stored file.
-/// Operator bearer token only; no client sends it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpsRemoveAttachmentBody {
-    pub content_hash: String,
-}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentClaimResponse {

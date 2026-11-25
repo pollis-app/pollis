@@ -48,8 +48,6 @@ const SECRET_KEYS = [
   "DEV_OTP",
   // #720: gates GET /v1/retention/metrics; absent, the endpoint 404s.
   "POLLIS_DS_METRICS_TOKEN",
-  // #2109: the destructive operator routes (removing a stored file); absent, they 404.
-  "POLLIS_DS_OPERATOR_TOKEN",
   // #707: authenticates push fan-out to Expo.
   "EXPO_TOKEN",
   // `<email>:<6 digits>` — the one account App Store / Play review signs in

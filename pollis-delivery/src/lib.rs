@@ -125,10 +125,6 @@ pub struct AppState {
     /// until every build in the stores can open a v2 reference. Shared so a
     /// test can flip it on a running DS.
     pub shared_attachments: Arc<std::sync::atomic::AtomicBool>,
-    /// Bearer token for the DESTRUCTIVE operator routes (#2109: removing a
-    /// stored file), `POLLIS_DS_OPERATOR_TOKEN`. Never the read-only metrics
-    /// token; `None` → those routes answer 404.
-    pub operator_token: Option<String>,
 }
 
 impl AppState {
@@ -165,7 +161,6 @@ impl AppState {
             attachment_reclaim: util::SingleFlight::default(),
             avatar_reclaim: util::SingleFlight::default(),
             shared_attachments: Arc::default(),
-            operator_token: None,
         }
     }
 
@@ -196,12 +191,6 @@ impl AppState {
     /// Turn shared attachment uploads (#2109) on or off.
     pub fn with_shared_attachments(self, on: bool) -> Self {
         self.shared_attachments.store(on, std::sync::atomic::Ordering::SeqCst);
-        self
-    }
-
-    /// Set the token for the destructive operator routes; `None` leaves them 404.
-    pub fn with_operator_token(mut self, token: Option<String>) -> Self {
-        self.operator_token = token;
         self
     }
 
@@ -307,7 +296,6 @@ pub fn build_app_state(db: Arc<Db>, log_db: Arc<Db>) -> AppState {
         .with_metrics_token(metrics_token)
         .with_ops_log(ops_log)
         .with_shared_attachments(shared_attachments_from_env())
-        .with_operator_token(operator_token_from_env())
 }
 
 /// Read `POLLIS_DS_SHARED_ATTACHMENTS` (#2109): on only for `on`, `true` or `1`.
@@ -322,12 +310,6 @@ pub fn shared_attachments_from_env() -> bool {
     on
 }
 
-/// Read `POLLIS_DS_OPERATOR_TOKEN`; empty counts as unset.
-pub fn operator_token_from_env() -> Option<String> {
-    std::env::var("POLLIS_DS_OPERATOR_TOKEN")
-        .ok()
-        .filter(|s| !s.is_empty())
-}
 
 /// Read `POLLIS_DS_METRICS_TOKEN`; empty counts as unset.
 pub fn metrics_token_from_env() -> Option<String> {
@@ -347,8 +329,6 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/ops/otp-requests", get(ops_log::otp_requests))
         .route("/v1/ops/errors", get(error_log::list))
         .route("/v1/ops/push", get(push::ops_push))
-        // #2109: operator removal of a stored file (operator bearer token).
-        .route("/v1/ops/attachments/remove", post(messages::ops_remove_attachment))
         // #1751: the DS -> LiveKit path. Passive one-word verdict (open), and counts + live probe (operator).
         .route("/health/livekit", get(livekit::health))
         .route("/v1/ops/livekit", get(livekit::ops))

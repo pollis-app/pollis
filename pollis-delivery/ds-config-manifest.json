@@ -36,7 +36,6 @@
       "R2_SECRET_KEY",
       "R2_BUCKET",
       "POLLIS_DS_METRICS_TOKEN",
-      "POLLIS_DS_OPERATOR_TOKEN",
       "EXPO_TOKEN",
       "APP_REVIEW_LOGIN"
     ],

@@ -874,7 +874,7 @@ A sender's hold on a shared object between the claim (which may say "stored, upl
 - `content_hash` TEXT PK
 - `removed_at` TEXT NOT NULL DEFAULT now
 
-**Operator removal of a stored file.** Because a file is stored once, `POST /v1/ops/attachments/remove` (its own bearer token, `POLLIS_DS_OPERATOR_TOKEN`, never the metrics token; `docs/ds-operator-endpoints.md`) removes it from every message and Vault entry in one action: `remove_stored_object` writes this row first, deletes the object's own R2 key, then its row, references and leases. The row stays, so the id is refused everywhere afterwards: a claim answers `removed`, registration and references are refused, a Vault save drops it, and a presign answers `410 attachment_removed`, which both apps show as "File removed" without retrying. Sending the identical file again therefore cannot restore it. Holds no account, message or conversation.
+**Operator removal of a stored file.** Because a file is stored once, `scripts/remove-stored-file.sh` (an operator command run with the DS's own Doppler config, no route or token; `docs/ds-operator-endpoints.md`) removes it from every message and Vault entry in one action: `remove_stored_object` writes this row first, deletes the object's own R2 key, then its row, references and leases. The row stays, so the id is refused everywhere afterwards: a claim answers `removed`, registration and references are refused, a Vault save drops it, and a presign answers `410 attachment_removed`, which both apps show as "File removed" without retrying. Sending the identical file again therefore cannot restore it. Holds no account, message or conversation.
 
 ### attachment_ref _(migration 000012, #690)_
 - PK: (`content_hash`, `message_id`)

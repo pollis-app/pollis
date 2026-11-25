@@ -108,26 +108,25 @@ that has not advanced — look at the conversation's devices, not at this endpoi
 
 ---
 
-## Token-gated operator routes
+## Operator commands
 
-Not in the `endpoints!` table, and not device-signed. A destructive route takes its own
-bearer token, `POLLIS_DS_OPERATOR_TOKEN` (Doppler → Secrets Store → container, like every
-DS secret), never the read-only `POLLIS_DS_METRICS_TOKEN` that dashboards and the
-`GET /v1/ops/*` routes use. With no operator token configured the route answers `404`;
-without the right bearer, `401`. No client holds the token.
+Not routes at all: run by an operator with the Delivery Service's own configuration
+(its database and R2 credentials, from Doppler). Nothing a client or a token can reach.
 
-### `POST /v1/ops/attachments/remove`
+### Removing a stored file — `scripts/remove-stored-file.sh`
 
 Operator removal of a stored file (#2109). Each distinct file is stored once, so one
-call removes it from every message and Vault entry that holds it.
+run removes it from every message and Vault entry that holds it.
 
-**Body** — `pollis_api::messages::OpsRemoveAttachmentBody`: `{"content_hash": "<object id>"}`,
-either a shared object id (`v2-` + 64 hex) or a pre-#2109 file id (64 hex).
+```bash
+scripts/remove-stored-file.sh --dry-run <object id>   # what it would remove
+scripts/remove-stored-file.sh <object id>             # prod; DOPPLER_CONFIG=dev_personal for dev
+```
 
-**Answers** `{"removed": true, "references": <n>}`, or `500` if the bucket delete did
-not finish (run it again; it is idempotent).
-
-What it does, in `messages::remove_stored_object`:
+The id is a shared object id (`v2-` + 64 hex) or a pre-#2109 file id (64 hex). The
+script runs `pollis-delivery/examples/remove_stored_file.rs` under `doppler run`,
+which calls `messages::remove_stored_object` (covered by
+`pollis-delivery/tests/attachment_dedup.rs`):
 
 1. Records the id in `attachment_removed`. From then on the DS refuses it everywhere:
    a claim answers `removed`, a registration or reference is refused, a Vault save
@@ -138,9 +137,4 @@ What it does, in `messages::remove_stored_object`:
 
 The record stays, so sending the identical file again cannot restore it. A device
 that already downloaded the file keeps its local cached copy until that is evicted.
-
-```bash
-curl -X POST -H "Authorization: Bearer $POLLIS_DS_OPERATOR_TOKEN" \
-  -H 'content-type: application/json' \
-  -d '{"content_hash":"v2-…"}' https://api.pollis.com/v1/ops/attachments/remove
-```
+A bucket failure leaves the record in place; running it again finishes the job.

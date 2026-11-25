@@ -2160,53 +2160,6 @@ pub async fn remove_stored_object(
     Ok(RemovalReport { references })
 }
 
-/// `POST /v1/ops/attachments/remove` — operator removal of a stored file
-/// (#2109). Its own bearer token, `POLLIS_DS_OPERATOR_TOKEN`, never the
-/// read-only metrics token (dashboards may hold that one): 404 when unset,
-/// 401 without it. No client holds it, and the route is not in the
-/// device-signed endpoint table.
-pub async fn ops_remove_attachment(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    use axum::response::IntoResponse as _;
-    let Some(expected) = state.operator_token.as_deref() else {
-        return axum::http::StatusCode::NOT_FOUND.into_response();
-    };
-    if !crate::bearer_token_matches(&headers, expected) {
-        return crate::error::AuthRejection::Unauthorized.into_response();
-    }
-    let Ok(parsed) = serde_json::from_slice::<OpsRemoveAttachmentBody>(&body) else {
-        return crate::writes::bad_request("body must be {\"content_hash\": \"...\"}");
-    };
-    let hash = parsed.content_hash.as_str();
-    let v1 = hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-    if !v1 && !is_shared_object_id(hash) {
-        return crate::writes::bad_request("content_hash is not an attachment id");
-    }
-    let result = async {
-        let conn = state.db.conn().await?;
-        remove_stored_object(&conn, &state.broker, hash).await
-    }
-    .await;
-    match result {
-        Ok(report) => {
-            tracing::info!("operator removed a stored file ({} references)", report.references);
-            (axum::http::StatusCode::OK, axum::Json(serde_json::json!({ "removed": true, "references": report.references })))
-                .into_response()
-        }
-        Err(e) => {
-            tracing::error!("operator removal failed, run it again: {e:#}");
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(serde_json::json!({ "error": "removal did not finish; run it again" })),
-            )
-                .into_response()
-        }
-    }
-}
-
 /// Whether a shared object's row stands for bytes in the bucket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SharedObject {
