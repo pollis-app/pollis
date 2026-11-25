@@ -1,0 +1,43 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Part 3: a photo shared while Pollis was not running. The PIN comes first, three wrong tries
+# show the app's own countdown (one counter, #2100), then the right PIN opens "Send to" with the
+# photo. One chat: Pollis opens it, the photo uploading, then sent.
+- extendedWaitUntil:
+    visible:
+      id: "btn-pin-1"
+    timeout: 30000
+- runFlow:
+    file: ../../subflows/enter-pin-5678.yaml
+- extendedWaitUntil:
+    visible:
+      id: "pin-error"
+    timeout: 20000
+- takeScreenshot: share-05-wrong-pin
+- runFlow: ../../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "screen-share"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "share-item-0"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "share-target-[Gg]eneral"
+    timeout: 30000
+- takeScreenshot: share-06-photo-picker
+- tapOn:
+    id: "share-target-[Gg]eneral"
+- tapOn:
+    id: "btn-share-send"
+- extendedWaitUntil:
+    visible:
+      id: "screen-chat"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "btn-attachment-.*"
+    timeout: 120000
+- takeScreenshot: share-07-photo-sent

@@ -1,0 +1,41 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Part 2: a link shared from another app while Pollis is open and unlocked. The intake brings
+# Pollis forward on "Send to"; the link pre-fills the message. Sent to the Vault AND #General,
+# then each holds it once.
+- extendedWaitUntil:
+    visible:
+      id: "screen-share"
+    timeout: 30000
+- assertVisible:
+    text: ".*https://pollis.com/share-e2e.*"
+- extendedWaitUntil:
+    visible:
+      id: "share-target-vault"
+    timeout: 30000
+- takeScreenshot: share-02-picker
+- tapOn:
+    id: "share-target-vault"
+- tapOn:
+    id: "share-target-[Gg]eneral"
+- assertVisible:
+    id: "share-selected-count"
+- takeScreenshot: share-03-two-selected
+- tapOn:
+    id: "btn-share-send"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-share"
+    timeout: 30000
+# The Vault holds it once.
+- openLink: "pollis://vault"
+- runFlow:
+    file: ../../subflows/after-open-link.yaml
+    env:
+      SCREEN: "screen-vault"
+- extendedWaitUntil:
+    visible: ".*https://pollis.com/share-e2e.*"
+    timeout: 60000
+- assertNotVisible:
+    id: "vault-not-saved-.*"
+- takeScreenshot: share-04-in-vault

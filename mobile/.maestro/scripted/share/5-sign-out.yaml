@@ -1,0 +1,20 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Part 5: signing out takes Pollis out of other apps' share sheets; the script then checks that
+# Android no longer offers it at all.
+- runFlow: ../../subflows/unlock-if-locked.yaml
+- tapOn:
+    id: "tab-self"
+- scrollUntilVisible:
+    element:
+      id: "btn-sign-out"
+    direction: DOWN
+- tapOn:
+    id: "btn-sign-out"
+- tapOn:
+    id: "btn-confirm-sign-out"
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-email"
+    timeout: 30000
+- takeScreenshot: share-10-signed-out

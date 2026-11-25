@@ -117,6 +117,14 @@ mobile/app/vault.tsx                           vault vault-media-instant vault-s
 mobile/components/vault/*                      vault vault-media-instant vault-swipe vault-retry
 mobile/lib/vault*                              vault vault-retry
 mobile/hooks/queries/useVault.ts               vault vault-retry
+# #2100: share into Pollis. The Android share itself runs by hand (scripts/maestro-share.sh, like
+# the biometric script): Maestro cannot open a share sheet. Here, the Vault it also sends to.
+mobile/app/share.tsx                           vault
+mobile/lib/share/*                             vault
+mobile/hooks/useShareIntake.ts                 vault
+mobile/hooks/queries/useShareTargets.ts        vault
+mobile/.maestro/scripted/share/*               vault
+mobile/scripts/maestro-share.sh                vault
 
 # --- Self, settings, search ---
 mobile/app/(tabs)/self.tsx                     search app-update security open-source
