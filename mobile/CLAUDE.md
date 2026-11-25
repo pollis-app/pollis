@@ -1529,8 +1529,8 @@ Current state:
   (`toggle_saved_message` / `list_saved_messages` /
   `resolve_message_permalink`, `pollis://m/<conv>/<msg>` deep link at
   `app/m/[...permalink].tsx`, Saved screen at `app/self/saved.tsx`, verified
-  clipboard copy via expo-clipboard); attachments (picker → `upload_media`
-  path arg → desktop's exact `_att`/`_txt` envelope from `lib/attachments.ts`;
+  clipboard copy via expo-clipboard); attachments (picker → the file path handed to the outbox, or the Vault's queue (#2100),
+  which uploads it and writes desktop's exact `_att`/`_txt` envelope;
   inbound images render via `components/Media.tsx` + `get_media_path`; tapping any
   attachment opens the full-screen viewer `app/media.tsx`, #1248; the picker takes
   photos and videos, and a pending one shows in the composer as desktop's
