@@ -182,11 +182,8 @@ test("a failed save shows its reason and a retry that sends the restored draft",
   assert.match(screen, /testID="btn-vault-retry"/);
 });
 
-test("a retry of the same draft uploads only what failed", () => {
-  const lib = src("lib/attachments.ts");
-  assert.match(lib, /const done = uploaded\.get\(att\)/);
-  assert.match(lib, /uploaded\.set\(att, result\)/);
-  assert.match(lib, /Promise\.allSettled\(/);
+test("a save that failed before the core stored it hands the draft back (#2100: a stored one does not)", () => {
+  assert.ok(!src("lib/attachments.ts").includes("upload_media"), "the core uploads, through the queue");
   assert.match(
     src("app/vault.tsx"),
     /setPendingAttachments\(\(current\) => \(current\.length > 0 \? current : attachments\)\)/,

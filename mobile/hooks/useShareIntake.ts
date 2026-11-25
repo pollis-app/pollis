@@ -17,7 +17,7 @@ import { isInSignedInApp } from "../lib/enrollmentPrompt";
 import { setShareTargetEnabled, takePendingShare } from "../lib/share/native";
 import { holdShare } from "../lib/share/pending";
 
-export const SHARE_PATH = "/share";
+const SHARE_PATH = "/share";
 
 export function useShareIntake() {
   const router = useRouter();

@@ -14,7 +14,7 @@ export const MAX_BYTES = 100 * 1024 * 1024;
 export type ItemKind = "image" | "video" | "file";
 
 /** One file the intake copied. */
-export interface SharedItem {
+interface SharedItem {
   path: string;
   name: string;
   mimeType: string;
@@ -22,7 +22,7 @@ export interface SharedItem {
 }
 
 /** What the Android intake wrote (`ShareInbox.kt`'s `share.json`). */
-export interface ShareManifest {
+interface ShareManifest {
   id: string;
   createdAt: number;
   text?: string;

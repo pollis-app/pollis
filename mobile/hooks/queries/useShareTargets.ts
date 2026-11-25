@@ -16,7 +16,7 @@ export interface ShareTarget {
   group_id: string | null;
 }
 
-export const shareTargetQueryKeys = {
+const shareTargetQueryKeys = {
   all: ["shareTargets"] as const,
   search: (userId: string | null, query: string) => ["shareTargets", userId, query] as const,
 };
