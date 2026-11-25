@@ -18,6 +18,8 @@ import { ComposerBarHeader } from "../ui/ComposerBarHeader";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
 import { optimisticLinkPreview, transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { usePrefetchReactions } from "../../hooks/queries/useReactions";
+import { reactableIds } from "../../hooks/queries/reactionPrefetch";
 import { useLinkPreviewsEnabled } from "../../hooks/queries/useLinkPreviews";
 import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
 import { ComposerLinkPreview } from "../ui/ComposerLinkPreview";
@@ -249,6 +251,10 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     () => allMessages.filter((m) => !m.thread_id || m.thread_id === m.id),
     [allMessages],
   );
+
+  // Older pages, anchored windows and new arrivals: one reactions read per change (#2115).
+  const reactionIds = useMemo(() => reactableIds(channelMessages), [channelMessages]);
+  usePrefetchReactions(reactionIds);
 
   // Ref: a fresh callback re-renders the whole list on every edit keystroke (#874).
   const allMessagesRef = useRef(allMessages);

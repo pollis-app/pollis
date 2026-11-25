@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useRef } from "react";
 import { useEmojiImage } from "./useEmojiImage";
+import "../ui/fadeIn.css";
 
 interface CustomEmojiImageProps {
   contentHash: string;
@@ -16,6 +17,8 @@ export const CustomEmojiImage: React.FC<CustomEmojiImageProps> = ({
   className = "",
 }) => {
   const { url, failed } = useEmojiImage(contentHash);
+  // The image replacing its placeholder fades in over the same box (#2115).
+  const paintedPlaceholder = useRef(url === null);
 
   if (failed) {
     return (
@@ -44,7 +47,7 @@ export const CustomEmojiImage: React.FC<CustomEmojiImageProps> = ({
       draggable={false}
       data-testid="custom-emoji"
       data-shortcode={shortcode}
-      className={`inline-block align-[-0.25em] object-contain ${className}`}
+      className={`inline-block align-[-0.25em] object-contain ${paintedPlaceholder.current ? "pollis-fade-in" : ""} ${className}`}
       style={{ width: `${sizeRem}rem`, height: `${sizeRem}rem` }}
     />
   );
