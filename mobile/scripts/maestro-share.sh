@@ -17,11 +17,11 @@
 #   (Photos)         share two photos (SEND_MULTIPLE) from Google Photos
 #   4-multiple       a typed message, the Vault alone -> the Vault opens, both photos saved
 #   5-sign-out       sign out
-#   (adb)            Pollis is no longer a share target: no activity answers SEND, and the
-#                    system share sheet (screenshot) does not list it
+#   (adb + Photos)   Pollis is no longer a share target: no activity answers SEND, and the
+#                    system share sheet from Google Photos does not list it
 #
-# Before signing out it also screenshots the system share sheet with Pollis in it: one icon,
-# no person, group or channel (there are no Sharing Shortcuts to show).
+# The share sheet screenshots (photos-share*.yaml) show Pollis as one app icon and no person, group
+# or channel (there are no Sharing Shortcuts to show); signed out, no Pollis at all.
 #
 # iOS shares are not routed through the app: the share extension unlocks and sends in place.
 # Its run is mobile/plugins/share-extension/harness/run.sh plus the simulator walkthrough in
@@ -63,11 +63,6 @@ part() {
     -e MAESTRO_APP_ID="$PKG" "$FLOWS/$1.yaml"
 }
 
-shot() {
-  A exec-out screencap -p > "$OUT/$1.png"
-  echo "    screenshot $OUT/$1.png"
-}
-
 # A photo in the shared MediaStore, as the camera would leave it, for Google Photos to share.
 push_photo() {
   A push "$MAE/fixtures/media-viewer.png" "/sdcard/Pictures/$1" >/dev/null
@@ -91,14 +86,6 @@ answers_send() {
 part 1-setup
 answers_send || { echo "signed in, but Pollis is not a share target" >&2; exit 1; }
 
-# The system share sheet while signed in: the Pollis icon, nothing else of Pollis.
-A shell am start -W -a android.intent.action.SEND -t text/plain \
-  --es android.intent.extra.TEXT "chooser check" >/dev/null 2>&1 || true
-sleep 3
-shot share-00-system-sheet-signed-in
-A shell input keyevent KEYCODE_BACK
-sleep 1
-
 echo "    (another app shares a link)"
 A shell am start -W -n "$INTAKE" -a android.intent.action.SEND -t text/plain \
   --es android.intent.extra.SUBJECT "Pollis" \
@@ -121,11 +108,8 @@ if answers_send; then
   echo "signed out, but Pollis still answers SEND" >&2
   exit 1
 fi
-A shell am start -W -a android.intent.action.SEND -t text/plain \
-  --es android.intent.extra.TEXT "chooser check" >/dev/null 2>&1 || true
-sleep 3
-shot share-11-system-sheet-signed-out
-A shell input keyevent KEYCODE_BACK
+echo "--> share sheet while signed out (Google Photos)"
+maestro --device "$DEVICE" test --debug-output "$DEBUG" "$FLOWS/photos-share-signed-out.yaml"
 if A shell am start -W -n "$INTAKE" -a android.intent.action.SEND -t text/plain \
   --es android.intent.extra.TEXT "x" 2>&1 | grep -q "Error"; then
   echo "    signed out: the intake refuses to start"

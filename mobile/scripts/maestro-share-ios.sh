@@ -8,7 +8,7 @@
 #   (simctl)         add a photo
 #   ios-0-photos     Photos -> Share -> Pollis
 #   ios-1-pin        a wrong PIN (the app's own countdown), then the right one -> the picker
-#   ios-2-send       a message, the Vault and #General -> sent in place, the sheet closes
+#   ios-2-send       the Vault and #General -> sent in place, the sheet closes
 #   ios-3-vault      Pollis: the Vault holds it once, saved
 #   (simctl)         open a page in Safari
 #   ios-0-safari     Safari -> Share -> Pollis; the link is the message
@@ -58,18 +58,17 @@ part 1-setup
 PHOTO="$(mktemp -d)/share-ios.png"
 cp "$MAE/fixtures/media-viewer.png" "$PHOTO"
 xcrun simctl addmedia "$DEVICE" "$PHOTO"
-STAMP="$(date +%H%M%S)"
 part ios-0-photos
 part ios-1-pin
-part ios-2-send -e MESSAGE="photo 2100 $STAMP"
-part ios-3-vault -e MESSAGE="photo 2100 $STAMP" -e MESSAGE_TAG=photo
+part ios-2-send -e TAG=photo
+part ios-3-vault -e TAG=photo
 
 xcrun simctl openurl "$DEVICE" "https://pollis.com/learn"
 sleep 4
 part ios-0-safari
 part ios-1-pin
-part ios-2-send -e MESSAGE="https://pollis.com/learn"
-part ios-3-vault -e MESSAGE="pollis.com/learn" -e MESSAGE_TAG=link
+part ios-2-send -e TAG=link
+part ios-3-vault -e TAG=link
 
 xcrun simctl openurl "$DEVICE" "https://pollis.com/learn"
 sleep 3

@@ -10,20 +10,30 @@ appId: com.apple.mobileslideshow
       visible: "Continue"
     commands:
       - tapOn: "Continue"
+# Photos reopens where it was left: in the grid a tap opens a photo; in a photo with its
+# controls hidden a tap brings them back.
+- waitForAnimationToEnd:
+    timeout: 3000
+- repeat:
+    while:
+      notVisible: "Share"
+    times: 4
+    commands:
+      - tapOn:
+          point: "50%,45%"
+      - waitForAnimationToEnd:
+          timeout: 2000
 - extendedWaitUntil:
-    visible: "Photo, .*"
-    timeout: 20000
-- tapOn:
-    text: "Photo, .*"
-    index: 0
+    visible: "Share"
+    timeout: 10000
+- tapOn: "Share"
 - extendedWaitUntil:
     visible:
-      id: "Share"
-    timeout: 10000
-- tapOn:
-    id: "Share"
-- extendedWaitUntil:
-    visible: "Pollis"
+      id: "shareCell"
+      text: "Pollis"
     timeout: 15000
 - takeScreenshot: share-ios-photos-sheet
-- tapOn: "Pollis"
+# The share sheet's app cell, not a "pollis" on the page behind it.
+- tapOn:
+    id: "shareCell"
+    text: "Pollis"

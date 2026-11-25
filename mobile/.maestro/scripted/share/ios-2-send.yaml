@@ -1,23 +1,22 @@
 appId: com.apple.mobileslideshow
 ---
-# iOS share extension (#2100), after ios-1-pin: a message, the Vault and #General, Send. The sheet
-# sends in place (busy at once, never twice) and closes once every target is stored and sent;
-# a target it could not finish says the app will. While the keyboard is up the extension's own
-# elements are hidden from the test driver, so the message is submitted (return puts the keyboard down) before any lookup.
-- pressKey: Enter
-- runFlow:
-    when:
-      notVisible: "${MESSAGE}"
-    commands:
-      - tapOn: "Add a message"
-      - inputText: "${MESSAGE}"
-      - pressKey: Enter
-- tapOn: "Vault"
-- tapOn: ".*General"
-- takeScreenshot: share-ios-03-selected
-- tapOn: "Send"
-- takeScreenshot: share-ios-04-sending
+# iOS share extension (#2100), after ios-1-pin: the Vault and #General, Send. The sheet sends in
+# place (busy at once, never twice) and closes once every target is stored and sent; a target it
+# could not finish says the app will. No typing here: once the keyboard has been up in a share
+# extension, the test driver stops seeing the extension's elements (the message field is covered
+# by the Safari run, where the shared link fills it).
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: "share-target-0"
+- tapOn:
+    id: "share-target-1"
+- takeScreenshot: share-ios-03-selected-${TAG}
+- tapOn:
+    id: "share-send"
+- takeScreenshot: share-ios-04-sending-${TAG}
 - extendedWaitUntil:
-    notVisible: "Send to"
+    notVisible:
+      id: "share-send"
     timeout: 90000
-- takeScreenshot: share-ios-05-after-send
+- takeScreenshot: share-ios-05-after-send-${TAG}

@@ -10,7 +10,12 @@ appId: com.apple.mobilesafari
     id: "MoreMenuButton"
 - tapOn: "Share"
 - extendedWaitUntil:
-    visible: "Pollis"
+    visible:
+      id: "shareCell"
+      text: "Pollis"
     timeout: 15000
 - takeScreenshot: share-ios-safari-sheet
-- tapOn: "Pollis"
+# The share sheet's app cell, not a "pollis" on the page behind it.
+- tapOn:
+    id: "shareCell"
+    text: "Pollis"

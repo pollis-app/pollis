@@ -8,12 +8,29 @@ appId: com.google.android.apps.photos
     stopApp: true
 - waitForAnimationToEnd:
     timeout: 4000
-# The backup offer on a fresh emulator.
+# An update offer, then the backup offer, on a fresh emulator.
+- runFlow:
+    when:
+      visible: "Not now"
+    commands:
+      - tapOn: "Not now"
+      - waitForAnimationToEnd:
+          timeout: 3000
 - runFlow:
     when:
       visible: "Sign in to back up"
     commands:
       - pressKey: back
+# Photos reopens where it was left: back out of a photo to the grid.
+- repeat:
+    while:
+      visible:
+        id: "com.google.android.apps.photos:id/share"
+    times: 3
+    commands:
+      - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 2000
 - extendedWaitUntil:
     visible: "Photo taken on.*"
     timeout: 20000
@@ -33,9 +50,8 @@ appId: com.google.android.apps.photos
       - longPressOn:
           text: "Photo taken on.*"
           index: 0
-      - tapOn:
-          text: "Photo taken on.*"
-          index: 1
+      # The emulator's second item is a video: a photo and a video in one share.
+      - tapOn: "Video taken on.*"
       - tapOn: "Share"
 - extendedWaitUntil:
     visible: "Pollis"
