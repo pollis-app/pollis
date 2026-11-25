@@ -1,9 +1,9 @@
-import { Pressable, View } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Badge } from "../ui";
 import { Icon } from "../icons";
-import { semantic, fonts, r, space, layout, typeSize } from "../../theme/tokens";
+import { semantic, fonts, typeSize } from "../../theme/tokens";
+import { DirectHeadRow } from "./DirectHeadRow";
 
 /** "Message requests" entry at the top of the Direct list, shown only when there are any. */
 export function RequestsRow({
@@ -17,26 +17,12 @@ export function RequestsRow({
 }) {
   const { t } = useTranslation("mobile");
   return (
-    <Pressable
+    <DirectHeadRow
       testID={testID}
       onPress={onPress}
-      accessible
-      accessibilityRole="button"
       accessibilityLabel={t("direct.requestsWaiting", { count })}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        gap: space.lg,
-        minHeight: 52,
-        paddingVertical: space.sm,
-        paddingHorizontal: space.lg,
-        borderRadius: r.md,
-        backgroundColor: pressed ? semantic.raised : semantic.panel,
-      })}
+      glyph={<Icon.mail size={20} color={semantic.dim} />}
     >
-      <View style={{ width: layout.touchMin, alignItems: "center" }}>
-        <Icon.mail size={20} color={semantic.dim} />
-      </View>
       <Text
         numberOfLines={2}
         style={{
@@ -49,7 +35,6 @@ export function RequestsRow({
         {t("direct.requests")}
       </Text>
       <Badge tone="neutral">{count > 99 ? "99+" : count}</Badge>
-      <Icon.chevronRight size={18} color={semantic.muted} />
-    </Pressable>
+    </DirectHeadRow>
   );
 }

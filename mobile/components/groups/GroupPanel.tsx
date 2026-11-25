@@ -207,7 +207,7 @@ function GroupPanelImpl({
           }
           style={{
             minHeight: layout.touchMin,
-            borderRadius: r.md,
+            borderRadius: r.box,
             backgroundColor: semantic.raised,
             flexDirection: "row",
             alignItems: "center",

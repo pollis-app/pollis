@@ -88,7 +88,7 @@ export function ReadOnlyField({
         backgroundColor: semantic.raised,
         paddingHorizontal: space.lg,
         paddingVertical: space.md,
-        borderRadius: r.md,
+        borderRadius: r.box,
       }}
     >
       {icon}

@@ -75,7 +75,7 @@ export function ConversationRow({
         minHeight: 64,
         paddingVertical: space.sm,
         paddingHorizontal: space.lg,
-        borderRadius: r.md,
+        borderRadius: r.box,
         backgroundColor: selected
           ? semantic.accentSoft
           : pressed
