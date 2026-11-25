@@ -2064,7 +2064,8 @@ there, never here; the rules for using them are `docs/design/README.md`.
   (emoji and initials sized to their box, the enrollment code, the 11pt count
   badges). Sentence case, no tracked capitals, nothing below 12 but those
   badges; all text follows system font scaling.
-- `r` radii 4/10/12/14/16/20(sheet); `layout.touchMin` 44.
+- `r` radii 4/10/12/14/16/20(sheet); `r.box` (12) is the one corner for fields,
+  full-width buttons, cards, `Group`s, grouped-list rows and list rows (#2101); `layout.touchMin` 44.
 - Font: Geist via `fonts.regular/medium/semibold/bold` (one family per
   weight, never with `fontWeight`); spread a `type.*` step rather than
   hand-setting size + family.

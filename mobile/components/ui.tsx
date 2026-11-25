@@ -686,7 +686,7 @@ export function Button({
         minHeight: full ? 52 : layout.touchMin,
         paddingHorizontal: space.xxl,
         paddingVertical: space.sm,
-        borderRadius: full ? r.md : layout.touchMin / 2,
+        borderRadius: full ? r.box : layout.touchMin / 2,
         backgroundColor: (pressed && !off ? c.pressedFill : c.fill) ?? "transparent",
         width: full ? "100%" : undefined,
       })}
@@ -892,7 +892,7 @@ export function ListRow({
         paddingVertical: space.sm,
         paddingStart: space.xxl,
         paddingEnd: space.xl,
-        borderRadius: selected ? r.sm : 0,
+        borderRadius: selected ? r.box : 0,
         backgroundColor: selected
           ? semantic.accentSoft
           : pressed && onPress
@@ -1018,7 +1018,7 @@ export function Group({
       testID={testID}
       style={[
         {
-          borderRadius: r.lg,
+          borderRadius: r.box,
           overflow: "hidden",
           backgroundColor: semantic[surface],
         },
@@ -1064,7 +1064,7 @@ export function Card({
         {
           backgroundColor: semantic[surface],
           padding: space.xxl,
-          borderRadius: r.lg,
+          borderRadius: r.box,
         },
         style,
       ]}
@@ -1155,7 +1155,7 @@ export function Field({
               : semantic.raised,
           paddingVertical: rest.multiline ? space.md : 0,
           paddingHorizontal: space.lg,
-          borderRadius: r.md,
+          borderRadius: r.box,
         },
         containerStyle,
       ]}
@@ -1327,7 +1327,7 @@ export function CheckRow({
         minHeight: 56,
         paddingHorizontal: space.xxl,
         paddingVertical: space.lg,
-        borderRadius: r.md,
+        borderRadius: r.box,
         backgroundColor: pressed && !disabled ? semantic.high : semantic.raised,
       })}
     >

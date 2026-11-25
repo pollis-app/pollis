@@ -150,8 +150,9 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
 - Desktop spacing is Tailwind's 0.25rem step; mobile uses `space.*`. Related items `0.5rem` / `8`,
   gutters `1rem` / `16`, sections `1.5–2rem` / `24–32`.
 - Corners: Modern `rounded-chip` 6px, `rounded-control` 8px, panels 10px; Terminal 2 / 4 / 10;
-  Mobile 12 for fields and full-width buttons, pills for inline buttons. An input and a button on
-  the same form share a radius.
+  Mobile `r.box` (12) for fields, full-width buttons, cards, grouped lists and list rows, so a
+  search bar and the card under it match (#2101); pills for inline buttons. An input and a button
+  on the same form share a radius.
 - Every desktop corner is one of those tokens, picked by role (#1967): `rounded-chip` for
   chip-sized things (a key chip, a preset, a badge, a small thumbnail), `rounded-control` for
   controls (buttons, inputs, menus, icon buttons), `rounded-panel` for cards, panels and media

@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Screen, Header, Chip, EmptyState } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty, r, space } from "../../theme/tokens";
+import { semantic, type as ty, space, groupedRowCorners } from "../../theme/tokens";
 import i18n from "../../i18n";
 import {
   useSavedMessages,
@@ -72,16 +72,12 @@ export default function SavedScreen() {
     const savedAgo = t("mobile:self.saved.savedAgo", { time: timeAgo(item.saved_at) });
     const preview = item.available ? item.content || t("row.noText") : t("row.unavailable");
     const first = index === 0;
-    const last = index === saved.length - 1;
     return (
       <View
         style={{
           marginHorizontal: space.xxl,
           backgroundColor: semantic.raised,
-          borderTopLeftRadius: first ? r.lg : 0,
-          borderTopRightRadius: first ? r.lg : 0,
-          borderBottomLeftRadius: last ? r.lg : 0,
-          borderBottomRightRadius: last ? r.lg : 0,
+          ...groupedRowCorners(index, saved.length - 1),
           borderTopWidth: first ? 0 : 1,
           borderTopColor: semantic.hairSoft,
           flexDirection: "row",

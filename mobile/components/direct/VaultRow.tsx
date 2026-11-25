@@ -23,7 +23,7 @@ export function VaultRow({ onPress }: { onPress: () => void }) {
         minHeight: 52,
         paddingVertical: space.sm,
         paddingHorizontal: space.lg,
-        borderRadius: r.md,
+        borderRadius: r.box,
         backgroundColor: pressed ? semantic.raised : semantic.panel,
       })}
     >

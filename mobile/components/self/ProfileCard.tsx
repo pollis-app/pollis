@@ -28,7 +28,7 @@ export function ProfileCard({
       testID="card-self-profile"
       style={{
         padding: space.xxl,
-        borderRadius: r.xl,
+        borderRadius: r.box,
         backgroundColor: semantic.panel,
       }}
     >
