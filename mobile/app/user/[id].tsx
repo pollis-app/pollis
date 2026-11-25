@@ -29,7 +29,10 @@ import {
   useGroupApps,
   useGroupMembers,
   useUserGroupsWithChannels,
+  usePeerAuditAccountKey,
 } from "../../hooks/queries";
+import { AccountKeyAuditLine } from "../../components/AccountKeyAuditLine";
+import { accountKeyDisplayStatus } from "../../lib/accountKeyAuditStatus";
 import { isBotUser } from "../../lib/bots";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -77,6 +80,7 @@ function UserProfile() {
   });
 
   const createDM = useCreateDM();
+  const peerAudit = usePeerAuditAccountKey(isSelf ? null : peerId);
 
   const blockedUsers = useBlockedUsers();
   const isBlocked =
@@ -150,6 +154,13 @@ function UserProfile() {
             ) : null}
           </View>
         </Card>
+        {/* Account-key transparency (#330): one line from the first frame, so nothing below moves (#2114). */}
+        {!isSelf ? (
+          <AccountKeyAuditLine
+            status={accountKeyDisplayStatus(peerAudit)}
+            detail={peerAudit.data?.detail ?? ""}
+          />
+        ) : null}
         {isBot ? (
           <Txt testID="text-bot-profile-managed" variant="secondary">
             {t("mobile:bots.managedBy", { group: groupName })}

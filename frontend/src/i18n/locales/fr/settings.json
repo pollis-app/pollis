@@ -222,6 +222,7 @@
     "accountKeyStatusPending": "Publication de la clé en attente",
     "accountKeyStatusAlarm": "Échec de la vérification de la clé",
     "accountKeyStatusUnavailable": "Vérification indisponible",
+    "accountKeyStatusChecking": "Vérification de la clé…",
     "buildStatusVerified": "Build vérifié publiquement",
     "buildStatusPending": "Publication du build en attente",
     "buildStatusMismatch": "Build absent du journal public",

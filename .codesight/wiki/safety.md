@@ -352,7 +352,10 @@ makes every user's full history auditable by anyone.
 - `audit_peer_account_key` — the same against a TOFU-pinned peer's pinned key:
   pinned key present in the published history → `ok` (notes a newer version as a
   rotation); pinned key absent from a verifying history → `alarm` (the server
-  showed a key it never published).
+  showed a key it never published). Shown as one line on a peer's profile on
+  both apps (desktop `UserProfile`, mobile `app/user/[id].tsx` through the
+  bridge arm, #2114): "Checking key…" while it runs, a failure reads as
+  `unavailable`, and the line holds its slot in every state.
 - `verify_own_build` (#484, binaries tenant) — the in-app "Verify this build"
   check. Computes the running binary's payload hash, pins the served binaries
   key, then runs the SAME `verifiable_log_serve::release::verify_release` the

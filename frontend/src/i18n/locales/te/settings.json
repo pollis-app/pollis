@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "కీ ప్రచురణ పెండింగ్‌లో ఉంది",
     "accountKeyStatusAlarm": "కీ ధృవీకరణ విఫలమైంది",
     "accountKeyStatusUnavailable": "ధృవీకరణ అందుబాటులో లేదు",
+    "accountKeyStatusChecking": "కీని తనిఖీ చేస్తోంది…",
     "buildStatusVerified": "బిల్డ్ పబ్లిక్‌గా ధృవీకరించబడింది",
     "buildStatusPending": "బిల్డ్ ప్రచురణ పెండింగ్‌లో ఉంది",
     "buildStatusMismatch": "బిల్డ్ పబ్లిక్ లాగ్‌లో లేదు",

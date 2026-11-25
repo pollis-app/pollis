@@ -101,6 +101,8 @@ mobile/app/(tabs)/direct.tsx                   dms empty-states ipad-two-pane
 mobile/components/direct/*                     dms dm-safety empty-states
 mobile/app/dm/*                                dms dm-safety
 mobile/app/user/*                              report
+mobile/components/AccountKeyAuditLine.tsx      report
+mobile/lib/accountKeyAuditStatus.ts            report
 mobile/app/report.tsx                          report
 mobile/app/self/blocked.tsx                    security report empty-states
 

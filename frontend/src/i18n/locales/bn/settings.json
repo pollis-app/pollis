@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "কী প্রকাশের অপেক্ষায়",
     "accountKeyStatusAlarm": "কী যাচাই ব্যর্থ হয়েছে",
     "accountKeyStatusUnavailable": "যাচাই উপলব্ধ নয়",
+    "accountKeyStatusChecking": "কী দেখা হচ্ছে…",
     "buildStatusVerified": "বিল্ড পাবলিকভাবে যাচাই করা হয়েছে",
     "buildStatusPending": "বিল্ড প্রকাশের অপেক্ষায়",
     "buildStatusMismatch": "বিল্ডটি পাবলিক লগে নেই",

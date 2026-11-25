@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "Publicação da chave pendente",
     "accountKeyStatusAlarm": "A verificação da chave falhou",
     "accountKeyStatusUnavailable": "Verificação indisponível",
+    "accountKeyStatusChecking": "A verificar a chave…",
     "buildStatusVerified": "Versão verificada publicamente",
     "buildStatusPending": "Publicação da versão pendente",
     "buildStatusMismatch": "Versão não consta do registo público",

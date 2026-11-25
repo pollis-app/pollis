@@ -31,6 +31,16 @@ tags:
     visible:
       id: "screen-user"
     timeout: 20000
+# The account-key line (#2114) holds its slot from the first frame: "Checking key…"
+# (or a verdict already cached), then one of the four verdicts on the same line.
+- assertVisible:
+    id: "key-audit"
+- takeScreenshot: report-00-key-audit-first-frame
+- extendedWaitUntil:
+    visible:
+      id: "key-audit-(ok|pending|alarm|unavailable)"
+    timeout: 30000
+- takeScreenshot: report-00-key-audit-settled
 - assertNotVisible:
     id: "text-safety-number"
 - assertNotVisible:

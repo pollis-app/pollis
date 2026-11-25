@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "Ukushicilelwa kokhiye kulindile",
     "accountKeyStatusAlarm": "Ukuqinisekisa ukhiye kwehlulekile",
     "accountKeyStatusUnavailable": "Ukuqinisekisa akutholakali",
+    "accountKeyStatusChecking": "Ihlola ukhiye…",
     "buildStatusVerified": "Inguqulo iqinisekisiwe esidlangalaleni",
     "buildStatusPending": "Ukushicilelwa kwenguqulo kulindile",
     "buildStatusMismatch": "Inguqulo ayikho kurekhodi lomphakathi",

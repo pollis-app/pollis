@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
+import type { AuditVerdict } from "../../lib/accountKeyAuditStatus";
 
 export interface SafetyNumberInfo {
   safety_number: string;
@@ -94,6 +95,31 @@ export function useKeyChangeNotices(peerUserIds: string[]) {
     },
     enabled: !!currentUser && peerUserIds.length > 0,
     staleTime: 1000 * 30,
+  });
+}
+
+/** Mirrors `PeerAuditReport` in `pollis-core/src/commands/transparency.rs` (#330). */
+export interface PeerAuditReport {
+  status: AuditVerdict;
+  /** One line, shown as the reason on `alarm`. */
+  detail: string;
+  peer_user_id: string;
+  pinned_identity_version: number | null;
+  key_rotated: boolean;
+}
+
+/** Audit a peer's published account key against the public log (#2114; desktop's `usePeerAuditAccountKey`). Advisory. */
+export function usePeerAuditAccountKey(peerUserId: string | null) {
+  return useQuery({
+    queryKey: ["safety", "peer-audit", peerUserId] as const,
+    queryFn: async (): Promise<PeerAuditReport> => {
+      return await invoke<PeerAuditReport>("audit_peer_account_key", {
+        peerUserId,
+      });
+    },
+    enabled: !!peerUserId,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
   });
 }
 

@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "ਕੁੰਜੀ ਦਾ ਪ੍ਰਕਾਸ਼ਨ ਬਕਾਇਆ ਹੈ",
     "accountKeyStatusAlarm": "ਕੁੰਜੀ ਦੀ ਪੁਸ਼ਟੀ ਅਸਫਲ ਰਹੀ",
     "accountKeyStatusUnavailable": "ਪੁਸ਼ਟੀ ਉਪਲਬਧ ਨਹੀਂ",
+    "accountKeyStatusChecking": "ਕੁੰਜੀ ਦੀ ਜਾਂਚ ਹੋ ਰਹੀ ਹੈ…",
     "buildStatusVerified": "ਬਿਲਡ ਦੀ ਜਨਤਕ ਤੌਰ 'ਤੇ ਪੁਸ਼ਟੀ ਹੋਈ",
     "buildStatusPending": "ਬਿਲਡ ਦਾ ਪ੍ਰਕਾਸ਼ਨ ਬਕਾਇਆ ਹੈ",
     "buildStatusMismatch": "ਬਿਲਡ ਜਨਤਕ ਲੌਗ ਵਿੱਚ ਨਹੀਂ ਹੈ",

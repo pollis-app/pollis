@@ -219,6 +219,7 @@
     "accountKeyStatusPending": "密钥发布中",
     "accountKeyStatusAlarm": "密钥验证失败",
     "accountKeyStatusUnavailable": "无法验证",
+    "accountKeyStatusChecking": "正在检查密钥…",
     "buildStatusVerified": "构建已公开验证",
     "buildStatusPending": "构建发布中",
     "buildStatusMismatch": "构建不在公开日志中",

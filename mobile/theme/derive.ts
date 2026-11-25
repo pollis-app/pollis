@@ -29,6 +29,8 @@ export type Theme = {
   // The one destructive red (design/theme.ts), shared with desktop.
   danger: string;
   onDanger: string;
+  // Advisory, never an action (design/theme.ts): a key that failed its audit (#2114).
+  warning: string;
   backdrop: string;
 };
 
@@ -56,6 +58,7 @@ export function deriveTheme(accentRgb: string, bgRgb: string): Theme {
     onAccent: t.onAccent,
     danger: t.danger,
     onDanger: t.onDanger,
+    warning: t.warning,
     backdrop: t.backdrop,
   };
 }

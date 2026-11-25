@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "کنجی دی اشاعت باقی اے",
     "accountKeyStatusAlarm": "کنجی دی تصدیق ناکام",
     "accountKeyStatusUnavailable": "تصدیق نہیں ہو سکدی",
+    "accountKeyStatusChecking": "کنجی چیک ہو رہی اے…",
     "buildStatusVerified": "بلڈ دی پبلک تصدیق ہو گئی",
     "buildStatusPending": "بلڈ دی اشاعت باقی اے",
     "buildStatusMismatch": "بلڈ پبلک لاگ وچ نہیں",

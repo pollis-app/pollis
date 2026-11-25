@@ -17,6 +17,7 @@ import { observer } from "mobx-react-lite";
 import type { RouterContext } from "../types/router";
 import * as api from "../services/api";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
+import { accountKeyDisplayStatus } from "../components/Security/accountKeyAuditStatus";
 import { BuildVerifyLine } from "../components/Security/BuildVerifyLine";
 import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
 import { HistoryTransferSection } from "../components/HistoryTransfer/HistoryTransferSection";
@@ -83,7 +84,7 @@ export const SecurityPage: React.FC = observer(() => {
   const router = useRouter();
   const { onDeleteAccount } = router.options.context as RouterContext;
   const { currentUser } = appStore;
-  const { data: selfAudit } = useSelfAuditAccountKey();
+  const selfAudit = useSelfAuditAccountKey();
   // "This build" verification is on-demand (a mutation), never run on mount.
   const buildVerify = useVerifyOwnBuild();
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -279,13 +280,12 @@ export const SecurityPage: React.FC = observer(() => {
             <p className="text-secondary text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.accountKeyDescription")}
             </p>
-            {selfAudit && (
-              <AccountKeyAuditLine
-                status={selfAudit.status}
-                detail={selfAudit.detail}
-                testId="self-account-key-audit"
-              />
-            )}
+            {/* One line from the first frame: "Checking key…", then the verdict (#2114). */}
+            <AccountKeyAuditLine
+              status={accountKeyDisplayStatus(selfAudit)}
+              detail={selfAudit.data?.detail ?? ""}
+              testId="self-account-key-audit"
+            />
           </section>
 
           {/* This build — optional, on-demand check that this running build's

@@ -1575,6 +1575,12 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(())
         }
         "list_peer_verifications" => ok(safety::list_peer_verifications(&state()?).await?),
+        // The account-key line on a peer's profile (#330, #2114): advisory, never blocking.
+        "audit_peer_account_key" => {
+            let peer_user_id: String = arg(&args, "peerUserId")?;
+            ok(crate::commands::transparency::audit_peer_account_key(&state()?, peer_user_id)
+                .await?)
+        }
         "list_key_change_notices" => {
             let peer_user_ids: Vec<String> = arg(&args, "peerUserIds")?;
             ok(safety::list_key_change_notices(peer_user_ids, &state()?).await?)

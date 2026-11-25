@@ -230,6 +230,7 @@
     "accountKeyStatusPending": "Títẹ̀ kọ́kọ́rọ́ jáde ṣì ń dúró",
     "accountKeyStatusAlarm": "Ìjẹ́rìísí kọ́kọ́rọ́ kùnà",
     "accountKeyStatusUnavailable": "Ìjẹ́rìísí kò sí lọ́wọ́lọ́wọ́",
+    "accountKeyStatusChecking": "Ó ń ṣàyẹ̀wò kọ́kọ́rọ́…",
     "buildStatusVerified": "A ti jẹ́rìísí ẹ̀dà náà ní gbangba",
     "buildStatusPending": "Títẹ̀ ẹ̀dà náà jáde ṣì ń dúró",
     "buildStatusMismatch": "Ẹ̀dà náà kò sí nínú àkọsílẹ̀ gbangba",

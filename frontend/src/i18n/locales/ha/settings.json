@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "Wallafa maɓalli na jira",
     "accountKeyStatusAlarm": "Tantance maɓalli ya kasa",
     "accountKeyStatusUnavailable": "Tantancewa ba ta samuwa",
+    "accountKeyStatusChecking": "Ana duba maɓalli…",
     "buildStatusVerified": "An tantance ginin a bainar jama'a",
     "buildStatusPending": "Wallafa ginin na jira",
     "buildStatusMismatch": "Ginin ba ya cikin rajista ta jama'a",

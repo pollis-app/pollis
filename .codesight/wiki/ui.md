@@ -1228,11 +1228,11 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 ### `components/Security` (5)
 
-- **AccountKeyAuditLine** — props: status, detail, testId — `frontend/src/components/Security/AccountKeyAuditLine.tsx`
+- **AccountKeyAuditLine** — props: status, detail, testId — `frontend/src/components/Security/AccountKeyAuditLine.tsx`. The account-key audit as ONE line in every state (#2114): `accountKeyDisplayStatus` (`accountKeyAuditStatus.ts`, byte-copied to `mobile/lib/`) maps the query to `checking` (display-only, never in the wire `AuditStatus`) while it runs, `unavailable` on failure, else the verdict; an `alarm` reason follows the label on the same line, truncated, in full on hover. Rendered for every peer on the profile and always on Security, so nothing below moves when the audit lands (`e2e/account-key-audit.spec.ts`). Mobile twin: `mobile/components/AccountKeyAuditLine.tsx` on `app/user/[id].tsx`.
 - **BuildVerifyLine** — props: status, detail, testId — `frontend/src/components/Security/BuildVerifyLine.tsx`
 - **ExportArchiveButton** — `frontend/src/components/Security/ExportArchiveButton.tsx`
 - **SecurityEventRow** — `frontend/src/components/Security/SecurityEventRow.tsx`. One read-only audit row (heading, detail, time read as UTC); copy per kind from `describeSecurityEvent` in `securityEvents.ts`, which also holds the quick-filter table. Mobile twin: `mobile/components/self/SecurityEventRow.tsx`, whose relative time never shrinks or wraps (#1548: "just now" lost "now").
-- **SecurityStatusLine** — props: testId, status, icon, label, color, reason, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
+- **SecurityStatusLine** — props: testId, status, icon, label, color, reason, singleLine, children — `frontend/src/components/Security/SecurityStatusLine.tsx`. Icon + label + reason layout shared by `AccountKeyAuditLine` and `BuildVerifyLine` (#1731).
 
 ### `components/ui` (54)
 

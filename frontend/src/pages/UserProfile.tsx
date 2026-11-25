@@ -7,6 +7,7 @@ import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useOtherUserProfile } from "../hooks/queries/useUserProfile";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
+import { accountKeyDisplayStatus } from "../components/Security/accountKeyAuditStatus";
 import { useBlockUser, usePeerAuditAccountKey } from "../hooks/queries";
 import { useCreateOrGetDMConversation } from "../hooks/queries/useMessages";
 import { appStore } from "../stores/appStore";
@@ -27,7 +28,7 @@ export const UserProfilePage: React.FC = observer(() => {
   const currentUser = appStore.currentUser;
 
   const { data: profile, isLoading } = useOtherUserProfile(userId);
-  const { data: peerAudit } = usePeerAuditAccountKey(userId);
+  const peerAudit = usePeerAuditAccountKey(userId);
   const blockMutation = useBlockUser();
   const dmMutation = useCreateOrGetDMConversation();
 
@@ -207,16 +208,18 @@ export const UserProfilePage: React.FC = observer(() => {
               </div>
 
               {/* Account-key transparency: advisory audit of this peer's
-                  published identity key against the public log (#330). */}
-              {!isSelf && peerAudit && (
+                  published identity key against the public log (#330). Always
+                  one line for a peer, "Checking key…" until the audit lands, so
+                  the menu below never moves (#2114). */}
+              {!isSelf && (
                 <AccountKeyAuditLine
-                  status={peerAudit.status}
-                  detail={peerAudit.detail}
+                  status={accountKeyDisplayStatus(peerAudit)}
+                  detail={peerAudit.data?.detail ?? ""}
                   testId="peer-account-key-audit"
                 />
               )}
 
-              <div className="border-t border-line">
+              <div data-testid="user-profile-menu" className="border-t border-line">
                 <TerminalMenu items={items} onEsc={back} />
               </div>
             </>
