@@ -19,7 +19,7 @@ function module(): ShareModule | null {
   return (NativeModules as { PollisShare?: ShareModule }).PollisShare ?? null;
 }
 
-/** The share another app sent and nobody has taken yet, if any. Taking it is once. */
+/** The share another app sent, until it is sent or cancelled (`discardShare`). */
 export async function takePendingShare(): Promise<ShareDraft | null> {
   const native = module();
   if (!native) {

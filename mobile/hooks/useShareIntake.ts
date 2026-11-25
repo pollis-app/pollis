@@ -15,7 +15,7 @@ import { appStore } from "../stores/appStore";
 import { createTapGate, type TapGate } from "../lib/push/tapGate";
 import { isInSignedInApp } from "../lib/enrollmentPrompt";
 import { setShareTargetEnabled, takePendingShare } from "../lib/share/native";
-import { holdShare } from "../lib/share/pending";
+import { heldShare, holdShare } from "../lib/share/pending";
 
 const SHARE_PATH = "/share";
 
@@ -46,7 +46,8 @@ export function useShareIntake() {
     void setShareTargetEnabled(true);
     const check = async () => {
       const draft = await takePendingShare();
-      if (draft) {
+      // Still pending until it is sent or cancelled (a crash or reload offers it again).
+      if (draft && !heldShare(draft.id)) {
         holdShare(draft);
         gate.tap(draft.id);
       }

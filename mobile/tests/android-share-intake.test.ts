@@ -104,6 +104,12 @@ test("the intake reads only other apps' content providers, and safe names", () =
   );
   assert.match(inbox, /uri\.scheme != ContentResolver\.SCHEME_CONTENT/, "no file:// URIs");
   assert.match(inbox, /authority\.startsWith\(context\.packageName\)/, "never Pollis's own providers");
+  // A `0@authority` URI resolves to the same provider: refused, and ownership is by UID.
+  assert.match(inbox, /authority\.contains\('@'\)/, "no user@authority form");
+  assert.match(inbox, /resolveContentProvider\(authority, 0\)/);
+  assert.match(inbox, /applicationInfo\.uid != Process\.myUid\(\)/);
+  // And the opened descriptor must not be one of Pollis's own files.
+  assert.match(inbox, /if \(ownsFile\(context, pfd\)\)/);
   assert.match(inbox, /MAX_BYTES: Long = 100L \* 1024 \* 1024/);
   assert.match(inbox, /MAX_ITEMS = 10/);
 });

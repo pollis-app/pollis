@@ -142,8 +142,9 @@ export default function ShareScreen() {
 
   const leave = () => {
     if (draft) {
-      releaseShare(draft.id);
-      void discardShare(draft.id);
+      const id = draft.id;
+      // Released once native no longer offers it, so a resume in between does not take it again.
+      void discardShare(id).finally(() => releaseShare(id));
     }
     if (router.canGoBack()) {
       router.back();
@@ -186,8 +187,8 @@ export default function ShareScreen() {
       });
       // Stored for every chat: the copies are in the encrypted database now.
       if (draft) {
-        releaseShare(draft.id);
-        void discardShare(draft.id);
+        const id = draft.id;
+        void discardShare(id).finally(() => releaseShare(id));
       }
       // Delivered in the background; anything that cannot go now, the outbox finishes.
       void invoke("share_deliver", { queued })

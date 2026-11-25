@@ -5,11 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.provider.OpenableColumns
+import android.system.Os
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileInputStream
 import java.util.UUID
 
 /**
@@ -116,14 +120,55 @@ object ShareInbox {
   /**
    * Whether a shared URI may be read. Only another app's `content://` provider: a `file://` URI, or
    * one served by this app's own providers, could name Pollis's private files, and a share must
-   * never send those.
+   * never send those. This activity runs as Pollis, so its own providers would answer it even
+   * unexported: ownership is decided by the provider's UID, never by the authority's spelling, and
+   * a `user@authority` form (which the resolver strips) is refused outright.
    */
   fun readable(context: Context, uri: Uri): Boolean {
     if (uri.scheme != ContentResolver.SCHEME_CONTENT) {
       return false
     }
     val authority = uri.authority ?: return false
-    return !authority.startsWith(context.packageName)
+    if (authority.isEmpty() || authority.contains('@')) {
+      return false
+    }
+    if (authority.startsWith(context.packageName)) {
+      return false
+    }
+    val provider = try {
+      context.packageManager.resolveContentProvider(authority, 0)
+    } catch (e: Exception) {
+      null
+    } ?: return false
+    return provider.applicationInfo.uid != Process.myUid() && provider.packageName != context.packageName
+  }
+
+  /**
+   * Whether an opened descriptor is one of Pollis's own files: a second line behind [readable], for
+   * a provider that hands back a path it was tricked into opening. Pipes and sockets pass.
+   */
+  fun ownsFile(context: Context, pfd: ParcelFileDescriptor): Boolean {
+    val target = try {
+      Os.readlink("/proc/self/fd/${pfd.fd}")
+    } catch (e: Exception) {
+      return false
+    }
+    if (!target.startsWith("/")) {
+      return false
+    }
+    val mine = listOfNotNull(
+      context.applicationInfo.dataDir,
+      context.filesDir?.canonicalPath,
+      context.cacheDir?.canonicalPath,
+      context.dataDir?.canonicalPath,
+      context.externalCacheDir?.canonicalPath,
+      context.getExternalFilesDir(null)?.canonicalPath,
+      "/data/data/${context.packageName}",
+      "/data/user/0/${context.packageName}",
+      "/data/user_de/0/${context.packageName}",
+    )
+    val path = try { File(target).canonicalPath } catch (e: Exception) { target }
+    return mine.any { dir -> path == dir || path.startsWith("$dir/") }
   }
 
   /** A display name safe to use as a file name: no path, no control characters, bounded. */
@@ -170,11 +215,16 @@ object ShareInbox {
     val target = File(dir, "${index + 1}-$fileName")
     var copied = 0L
     try {
-      val input = resolver.openInputStream(uri) ?: run {
+      val pfd = resolver.openFileDescriptor(uri, "r") ?: run {
         item.put("reason", "unreadable")
         return item
       }
-      input.use { src ->
+      if (ownsFile(context, pfd)) {
+        pfd.close()
+        item.put("reason", "unreadable")
+        return item
+      }
+      ParcelFileDescriptor.AutoCloseInputStream(pfd).use { src ->
         target.outputStream().use { dst ->
           val buf = ByteArray(256 * 1024)
           while (true) {
@@ -208,18 +258,23 @@ object ShareInbox {
     return if (f.isFile) f.readText().trim().takeIf { it.isNotEmpty() } else null
   }
 
-  /** The pending share's manifest, and forget that it is pending (its files stay until [discard]). */
+  /**
+   * The pending share's manifest. It stays pending until [discard], so a crash or a JS reload
+   * before the share is sent or cancelled offers it again (the app skips one it already holds).
+   */
   fun take(context: Context): String? {
     val id = pendingId(context) ?: return null
-    File(root(context), PENDING).delete()
     val manifest = File(File(root(context), id), MANIFEST)
     return if (manifest.isFile) manifest.readText() else null
   }
 
-  /** Delete one share's files. */
+  /** Delete one share's files, and stop offering it. */
   fun discard(context: Context, id: String) {
     if (id.isEmpty() || id.contains('/') || id.contains("..")) {
       return
+    }
+    if (pendingId(context) == id) {
+      File(root(context), PENDING).delete()
     }
     File(root(context), id).deleteRecursively()
   }
@@ -234,6 +289,9 @@ object ShareInbox {
     val now = System.currentTimeMillis()
     root(context).listFiles()?.forEach { f ->
       if (f.isDirectory && now - f.lastModified() > STALE_MS) {
+        if (pendingId(context) == f.name) {
+          File(root(context), PENDING).delete()
+        }
         f.deleteRecursively()
       }
     }
