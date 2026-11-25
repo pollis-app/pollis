@@ -8,7 +8,6 @@
 use std::time::Duration;
 
 use crate::harness::{wipe, world, writable_remote, TestClient, TEST_PIN};
-use pollis_core::commands::messages::test_hooks;
 use pollis_core::share::send::{deliver_share, enqueue_share, target_message_id, ShareRequest, ShareStatus};
 use pollis_core::share::session::{self, Factor, Params, Status, Unlock};
 use pollis_core::share::targets::{share_targets, TargetKind};
@@ -20,23 +19,6 @@ fn wrong_pin() -> &'static str {
         "2222"
     } else {
         "1111"
-    }
-}
-
-/// R2 is not in the harness: uploads resolve the ring key and seal as in production, then
-/// skip the PUT.
-struct StubUploads;
-
-impl StubUploads {
-    fn on() -> Self {
-        test_hooks::stub_attachment_uploads(true);
-        Self
-    }
-}
-
-impl Drop for StubUploads {
-    fn drop(&mut self) {
-        test_hooks::stub_attachment_uploads(false);
     }
 }
 
@@ -157,7 +139,6 @@ async fn targets_leave_out_requests_blocked_dms_and_voice_channels() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn one_share_reaches_every_target_once_with_its_own_file_keys() {
-    let _stub = StubUploads::on();
     let (alice, bob, dm, channel) = alice_and_bob().await;
 
     // Bigger than two upload chunks, so the streamed store and upload both cross boundaries.
@@ -481,7 +462,6 @@ async fn the_app_leaves_a_row_the_extension_is_delivering_until_its_lease_runs_o
 #[serial]
 async fn a_share_that_fails_part_way_sends_nothing() {
     use pollis_lib::commands::mls::rendezvous::{self, Point};
-    let _stub = StubUploads::on();
     let (alice, bob, dm, channel) = alice_and_bob().await;
     alice.activate();
 

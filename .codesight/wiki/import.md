@@ -233,15 +233,16 @@ images) wants it. What constrains it:
 1. **MLS loss (1)**: a message sealed now reaches only the members in the tree now. A
    history replayed as ordinary messages would be invisible to everyone who joins
    afterwards, and in a migration nearly everyone joins afterwards.
-2. **The file key ring is readable by late joiners, deliberately** (#1382, `commands.md`
-   "file_keys"), and so are **pins** (`Kpin`, #99). Both are the existing, reviewed
+2. **Attachments are readable by late joiners who can read the referencing message,
+   deliberately** (#2109: the key rides in the message; `commands.md` "shared_files"),
+   and so are **pins** (`Kpin`, #99). Both are the existing, reviewed
    exceptions to (1).
 3. **Attribution cannot be cryptographic.** The importer's device signs everything it
    uploads; "written by Ash on 2021-03-05" is the importer's claim.
 
 **Proposed shape (pending decision):** per channel, the importer packs its history into
 compressed JSON chunks, uploads each chunk and every downloaded image as ordinary
-attachments sealed under the channel's file key ring, and posts one message per channel
+attachments (shared objects, #2109), and posts one message per channel
 ("History imported from Discord, 2019-09 to 2024-11") that references the chunks and pins
 it (so late joiners discover it through `Kpin`). Each member's client, on first opening the
 channel, fetches the chunks and materialises them into its local DB as `message` rows

@@ -35,8 +35,12 @@ pub(crate) const FAILED: &str = "failed";
 /// The DS refused it in a way no retry fixes; the drain leaves it to the user.
 pub(crate) const REJECTED: &str = "rejected";
 
-/// Whether `e` is a refusal no retry fixes: DS 400, 403, 404, 410 or 422.
+/// Whether `e` is a refusal no retry fixes: DS 400, 403, 404, 410 or 422, or
+/// an attachment the operator removed (#2109).
 pub(super) fn is_permanent(e: &Error) -> bool {
+    if matches!(e, Error::AttachmentRemoved) {
+        return true;
+    }
     let Error::Other(any) = e else {
         return false;
     };
@@ -406,6 +410,27 @@ fn read_attachment_chunk_on(
     Ok(want)
 }
 
+/// SHA-256 of the `n`th stored attachment of `id`, read one upload chunk at a time.
+async fn stored_attachment_digest(state: &Arc<AppState>, id: &str, n: usize) -> Result<[u8; 32]> {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    let mut buf = zeroize::Zeroizing::new(vec![0u8; crate::commands::r2::UPLOAD_CHUNK]);
+    let mut offset: u64 = 0;
+    loop {
+        let got = {
+            let guard = state.local_db.lock().await;
+            let db = guard.as_ref().ok_or_else(not_signed_in)?;
+            read_attachment_chunk_on(db.conn(), id, n, offset, &mut buf)?
+        };
+        if got == 0 {
+            break;
+        }
+        hasher.update(&buf[..got]);
+        offset += got as u64;
+    }
+    Ok(hasher.finalize().into())
+}
+
 /// Upload the `n`th stored attachment of `id`, read out of the database one upload chunk at a
 /// time ([`crate::commands::r2::StreamUpload`], #2100), never whole.
 pub(super) async fn upload_stored_attachment(
@@ -417,9 +442,16 @@ pub(super) async fn upload_stored_attachment(
 ) -> Result<crate::commands::r2::MediaUploadResult> {
     // An image the sender measured (blurhash and size) is not decoded again.
     let measured = meta.blurhash.is_some() && meta.width.is_some() && meta.height.is_some();
+    // A shared object (#2109) is keyed by its plaintext digest: one read of the stored bytes for
+    // it, then the sealing read below.
+    let sealing = if crate::commands::r2::shared_uploads_enabled(state).await? {
+        crate::commands::r2::Sealing::Shared(stored_attachment_digest(state, id, n).await?)
+    } else {
+        crate::commands::r2::Sealing::Ring(scope)
+    };
     let mut upload = crate::commands::r2::StreamUpload::begin(
         state,
-        scope,
+        sealing,
         &meta.content_type,
         meta.size as u64,
         !measured,
@@ -450,12 +482,19 @@ struct AttWire<'a> {
     name: &'a str,
     ct: &'a str,
     size: usize,
-    /// The object's random file id (not a content hash, #1382).
+    /// The object id: a random file id (v1, #1382), or `v2-` + SHA-256 of
+    /// the stored ciphertext (a shared object, #2109).
     hash: &'a str,
-    /// Which key of the conversation's file key ring sealed it.
-    kv: i64,
-    /// SHA-256 of the plaintext, checked after decrypt. Only ever inside the
-    /// MLS-encrypted message.
+    /// v1: which key of the conversation's file key ring sealed it. Absent
+    /// for a shared object, so an older client draws it as unavailable
+    /// instead of trying a ring key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kv: Option<i64>,
+    /// `2` for a shared object (#2109), keyed by `sha`; absent for v1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    v: Option<u8>,
+    /// SHA-256 of the plaintext, checked after decrypt (and, for a shared
+    /// object, its key's source). Only ever inside the MLS-encrypted message.
     sha: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     bh: Option<&'a str>,
@@ -551,7 +590,8 @@ pub(super) fn final_content(
                 ct: &r.content_type,
                 size: r.size_bytes,
                 hash: &r.content_hash,
-                kv: r.key_version,
+                kv: (r.version != crate::commands::r2::SHARED_ATTACHMENT_VERSION).then_some(r.key_version),
+                v: (r.version == crate::commands::r2::SHARED_ATTACHMENT_VERSION).then_some(r.version),
                 sha: &r.sha256,
                 bh: r.blurhash.as_deref().or(a.blurhash.as_deref()),
                 w: r.width.or(a.width),
@@ -693,6 +733,7 @@ pub(super) async fn upload_preview_thumbnail(
         url: up.url,
         hash: up.content_hash,
         kv: up.key_version,
+        v: (up.version == crate::commands::r2::SHARED_ATTACHMENT_VERSION).then_some(up.version),
         sha: up.sha256,
         ct: crate::commands::link_preview::THUMBNAIL_CONTENT_TYPE.to_string(),
         size: up.size_bytes,
@@ -2436,6 +2477,7 @@ mod tests {
             content_type: "video/mp4".to_string(),
             size_bytes: 1,
             content_hash: "abc".to_string(),
+            version: 1,
             key_version: 2,
             sha256: "d1g".to_string(),
             blurhash: None,
@@ -2479,6 +2521,7 @@ mod tests {
             content_type: "image/png".to_string(),
             size_bytes: 1,
             content_hash: n.to_string(),
+            version: 1,
             key_version: 1,
             sha256: "s".to_string(),
             blurhash: None,
@@ -2527,6 +2570,7 @@ mod tests {
             content_type: ct.to_string(),
             size_bytes: 1,
             content_hash: n.to_string(),
+            version: 1,
             key_version: 1,
             sha256: "s".to_string(),
             blurhash: None,
@@ -2728,6 +2772,7 @@ mod tests {
         assert_eq!(after_failure(&Error::UpgradeRequired, false, false, false), AfterFailure::GiveUp);
         assert_eq!(after_failure(&refused(), false, false, false), AfterFailure::Stop, "rejected");
         assert_eq!(after_failure(&link(), true, false, false), AfterFailure::Stop, "file key");
+        assert_eq!(after_failure(&Error::AttachmentRemoved, false, false, false), AfterFailure::Stop, "removed file");
         assert_eq!(
             after_failure(&super::super::send::test_hooks::simulated_crash(), false, false, false),
             AfterFailure::Stop

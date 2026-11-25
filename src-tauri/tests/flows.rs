@@ -4,11 +4,15 @@
 //! cargo test --features test-harness --test flows
 //! ```
 
+#[path = "flows/fake_r2.rs"]
+mod fake_r2;
 #[path = "flows/harness.rs"]
 mod harness;
 
 #[path = "flows/adversarial.rs"]
 mod adversarial;
+#[path = "flows/attachment_dedup.rs"]
+mod attachment_dedup;
 #[path = "flows/auth.rs"]
 mod auth;
 #[path = "flows/bots.rs"]

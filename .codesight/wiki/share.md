@@ -47,7 +47,10 @@ never a person, group or channel: the chat is chosen inside Pollis, after an unl
   chunked AES-256-GCM (byte-identical objects), the ciphertext written to `<data_dir>/upload-tmp/`
   and PUT from disk with an explicit Content-Length. Peak memory is a couple of chunks whatever
   the size, which is what lets the iOS extension send a 100 MB video. This is every outbox send's
-  path now, not only shares. Images ≤ 24 MiB the sender did not measure are still decoded for
+  path now, not only shares. With shared uploads on (#2109), the stored bytes are read twice: once
+  for the plaintext digest the key comes from, once to seal; the object is named by the
+  ciphertext's SHA-256 and claimed and PUT from the temp file (`r2::PutSource::File`), so a file
+  sent to five chats is stored once. Images ≤ 24 MiB the sender did not measure are still decoded for
   their blurhash and size, one at a time per process, with a 128 MiB allocation limit, and a
   decode is reused for the same bytes (a share's other targets).
 - **One delivery per row across processes.** The app and the extension open the same database,

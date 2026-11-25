@@ -65,7 +65,7 @@ function entryTime(entry: VaultMessage): number {
 }
 
 function VaultScreen() {
-  const { accentHex } = useTheme();
+  const { themeKey } = useTheme();
   const { t } = useTranslation("vault");
   const router = useRouter();
   const [view, setView] = useState<VaultView>("chat");
@@ -309,7 +309,7 @@ function VaultScreen() {
             data={items}
             keyExtractor={(item) => item.key}
             renderItem={renderItem}
-            extraData={accentHex}
+            extraData={themeKey}
             style={{ flex: 1 }}
             keyboardShouldPersistTaps="handled"
             // Anchor a short vault to the top (the chat's rule).

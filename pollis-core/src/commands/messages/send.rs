@@ -782,21 +782,6 @@ pub mod test_hooks {
     }
 
     #[cfg(feature = "test-harness")]
-    static STUB_UPLOADS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-    /// Answer outbox attachment uploads without R2, which the flows world does
-    /// not have (#1335). Stays set until cleared.
-    #[cfg(feature = "test-harness")]
-    pub fn stub_attachment_uploads(on: bool) {
-        STUB_UPLOADS.store(on, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    #[cfg(feature = "test-harness")]
-    pub(crate) fn uploads_stubbed() -> bool {
-        STUB_UPLOADS.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    #[cfg(feature = "test-harness")]
     static ATTEMPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     /// Delivery attempts this process has run (#1335) — how a test tells one

@@ -222,27 +222,11 @@ async fn a_failed_send_is_kept_as_failed_and_retry_or_discard_settles_it() {
     drop((alice, bob));
 }
 
-struct StubbedUploads;
-
-impl StubbedUploads {
-    fn on() -> Self {
-        test_hooks::stub_attachment_uploads(true);
-        StubbedUploads
-    }
-}
-
-impl Drop for StubbedUploads {
-    fn drop(&mut self) {
-        test_hooks::stub_attachment_uploads(false);
-    }
-}
-
 /// A kill during the UPLOAD: the outbox holds the bytes and the drain finishes the send.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn an_attachment_send_killed_before_its_upload_is_delivered_after_unlock() {
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
 
     let bytes = b"\x89PNG not really, but bytes all the same".to_vec();
     let staged = pollis_core::commands::staging::stage_attachment(bytes.clone())
@@ -310,7 +294,6 @@ async fn an_attachment_send_killed_before_its_upload_is_delivered_after_unlock()
 #[serial]
 async fn a_sensitive_attachment_reaches_the_receiver_marked() {
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
 
     let stage = |b: &[u8]| {
         pollis_core::commands::staging::stage_attachment(b.to_vec())
@@ -889,7 +872,6 @@ fn spawn_attachment_send(
 async fn a_text_sent_right_after_an_attachment_never_overtakes_it() {
     use pollis_lib::commands::mls::rendezvous::{self, Point};
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
 
     let mut before_row = rendezvous::arm(Point::OutboxBeforeRow);
     let big: String = alice.invoke_json("new_message_id", json!({})).await
@@ -963,7 +945,6 @@ async fn a_text_sent_right_after_an_attachment_never_overtakes_it() {
 async fn a_send_that_never_writes_its_row_does_not_hold_up_the_next() {
     use pollis_lib::commands::mls::rendezvous::{self, Point};
     let (alice, bob, channel_id) = pair().await;
-    let _stub = StubbedUploads::on();
     let text_send = |content: &'static str| {
         let state = alice.state.clone();
         let channel_id = channel_id.clone();

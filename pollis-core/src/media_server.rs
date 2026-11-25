@@ -145,8 +145,8 @@ async fn serve_media(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // 64 hex chars, or we never touch the FS.
-    if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+    // An attachment id (64 hex, or a shared `v2-` id), or we never touch the FS.
+    if !pollis_api::messages::is_attachment_id(&hash) {
         return StatusCode::BAD_REQUEST.into_response();
     }
 

@@ -118,6 +118,8 @@
     "error": "err",
     "failedToLoad": "Failed to load",
     "failedToDownload": "Failed to download",
+    "removed": "File removed",
+    "updateToOpen": "Update Pollis to open this file",
     "lightboxFetch": "fetch",
     "lightboxDone": "Done",
     "lightboxDoneTerminal": "[ done ]",

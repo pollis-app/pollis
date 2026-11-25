@@ -29,7 +29,7 @@ import {
   useVaultMessages,
   type VaultMessage,
 } from "../hooks/queries/useVault";
-import { outgoingAttachments, releaseStaged } from "../utils/attachmentEnvelope";
+import { outgoingAttachments, referenceKeyFields, releaseStaged } from "../utils/attachmentEnvelope";
 import { invoke } from "../bridge";
 import { appStore } from "../stores/appStore";
 import { vaultSaveFailure, type VaultSaveFailure } from "../utils/vaultSaveFailure";
@@ -179,7 +179,7 @@ export const VaultPage: React.FC = observer(() => {
               ct: a.content_type,
               size: a.file_size,
               hash: a.content_hash,
-              kv: 0,
+              ...referenceKeyFields(a.version, 0),
               sha: a.sha256,
               bh: a.blurhash,
               w: a.width,

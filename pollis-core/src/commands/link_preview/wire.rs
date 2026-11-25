@@ -40,10 +40,16 @@ pub struct LinkPreview {
 pub struct PreviewImage {
     pub key: String,
     pub url: String,
-    /// The object's random file id (not a content hash, #1382).
+    /// The object id: a v1 random file id (#1382), or `v2-` + the SHA-256 of
+    /// the stored ciphertext for a shared object (#2109).
     pub hash: String,
-    /// Which key of the conversation's file key ring sealed it.
+    /// Which key of the conversation's file key ring sealed a v1 thumbnail.
+    /// `0` for a shared object: kept because a shipped client requires the
+    /// field to read the preview at all.
     pub kv: i64,
+    /// `2` for a shared object (#2109), keyed by `sha`; absent for v1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v: Option<u8>,
     /// SHA-256 of the plaintext JPEG, checked after decrypt.
     pub sha: String,
     pub ct: String,
@@ -209,11 +215,15 @@ fn is_hex64(s: &str) -> bool {
 /// The same shape every client checks an `_att` image entry against: a
 /// `media/<file id>.enc` object, a JPEG, with a plausible size.
 fn is_valid_image(image: &PreviewImage) -> bool {
-    is_hex64(&image.hash)
+    let object_ok = match image.v {
+        None => is_hex64(&image.hash) && image.kv >= 0,
+        Some(2) => pollis_api::messages::is_shared_object_id(&image.hash) && image.kv == 0,
+        Some(_) => false,
+    };
+    object_ok
         && image.key == format!("media/{}.enc", image.hash)
         && is_hex64(&image.sha)
         && image.ct == "image/jpeg"
-        && image.kv >= 0
         && image.size > 0
         && image.size <= super::MAX_THUMBNAIL_BYTES
         && image.w > 0
@@ -239,6 +249,7 @@ mod tests {
                 url: String::new(),
                 hash: "a".repeat(64),
                 kv: 1,
+                v: None,
                 sha: "b".repeat(64),
                 ct: "image/jpeg".into(),
                 size: 12_000,

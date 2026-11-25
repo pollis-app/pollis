@@ -1436,12 +1436,15 @@ pub fn parse_r2_key(key: &str) -> Option<R2Key<'_>> {
         }
     }
     match segments.as_slice() {
-        // `media/<hex64>.enc` — today's shape.
+        // `media/<hex64>.enc` (a v1 random file id, #1382) or
+        // `media/v2-<hex64>.enc` (a shared object named by the SHA-256 of its
+        // bytes, #2109).
         ["media", name] => Some(R2Key {
             family: R2Family::Media,
             owner: None,
             content_hash: Some(stem_of(name)),
-            content_addressed: is_hex64(stem_of(name)),
+            content_addressed: is_hex64(stem_of(name))
+                || pollis_api::messages::is_shared_object_id(stem_of(name)),
         }),
         // `media/<hex64>/<name>.enc` — pre-#762, when the filename rode along.
         ["media", hash, ..] => Some(R2Key {
@@ -1538,6 +1541,20 @@ pub async fn r2_presign(
 
     let writing = http_method == "PUT" || http_method == "DELETE";
 
+    // An attachment the operator removed (#2109) is never served or stored
+    // again. The answer names it, so clients show "File removed" rather than
+    // a failure they would retry.
+    if let (R2Family::Media, Some(id)) = (object.family, object.content_hash) {
+        let conn = state.db.conn().await?;
+        if crate::messages::object_is_removed(&conn, id).await? {
+            return Ok((
+                StatusCode::GONE,
+                Json(serde_json::json!({ "error": pollis_api::messages::ATTACHMENT_REMOVED })),
+            )
+                .into_response());
+        }
+    }
+
     // Owned families: avatars belong to a user, icons to a group.
     if writing {
         match (object.family, object.owner) {
@@ -1602,7 +1619,17 @@ pub async fn r2_presign(
         None
     };
 
-    let url = presign_r2_url_bounded(
+    // A shared object (#2109) may hold only the bytes its name is the
+    // SHA-256 of, and only once: the URL signs the checksum R2 verifies the
+    // body against, and `If-None-Match: *`, so a second write of the key fails
+    // instead of replacing it. Its id is known to anyone who has the file, so
+    // without these anyone could store other bytes under it first.
+    let extra_headers = match (http_method, object.family, object.content_hash) {
+        ("PUT", R2Family::Media, Some(id)) => pollis_api::messages::shared_object_put_headers(id),
+        _ => Vec::new(),
+    };
+
+    let url = presign_r2_url_with_headers(
         endpoint,
         bucket,
         &state.broker.r2_region,
@@ -1613,6 +1640,7 @@ pub async fn r2_presign(
         PRESIGN_EXPIRES_SECS,
         &amz_datetime(),
         signed_content_length,
+        &extra_headers,
     );
 
     Ok(ok_response::<R2PresignBody>(R2PresignResponse {
@@ -1631,12 +1659,20 @@ pub trait ObjectStore: Sync {
         &self,
         key: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+
+    /// Whether `key` is stored. Asked before the DS writes a shared object's
+    /// row (#2109), so no row names bytes that are not there.
+    fn object_exists(
+        &self,
+        key: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<bool>> + Send;
 }
 
-impl ObjectStore for BrokerConfig {
-    /// A DELETE through the same SigV4 presign the client's own deletes use,
-    /// sent by the DS. Unconfigured R2 is an error, so the row stays marked.
-    async fn delete_object(&self, key: &str) -> anyhow::Result<()> {
+impl BrokerConfig {
+    /// Send a bodiless `method` (`DELETE` or `HEAD`) to `key` through the same
+    /// SigV4 presign the clients use, as the DS, and answer R2's status.
+    /// Unconfigured R2 is an error.
+    async fn r2_status(&self, method: &str, key: &str) -> anyhow::Result<reqwest::StatusCode> {
         let (endpoint, bucket, access_key, secret_key) = self
             .r2_ready()
             .ok_or_else(|| anyhow::anyhow!("r2 not configured"))?;
@@ -1646,21 +1682,46 @@ impl ObjectStore for BrokerConfig {
             &self.r2_region,
             access_key,
             secret_key,
-            "DELETE",
+            method,
             key,
             PRESIGN_EXPIRES_SECS,
             &amz_datetime(),
         );
-        let status = crate::util::http_delete(crate::util::Upstream::R2, &url)
+        let request = match method {
+            "HEAD" => crate::util::http_head(crate::util::Upstream::R2, &url),
+            _ => crate::util::http_delete(crate::util::Upstream::R2, &url),
+        };
+        Ok(request
             .send()
             .await
             // The URL carries a signature; keep it out of the error and the logs.
             .map_err(|e| anyhow::anyhow!(e.without_url()))?
-            .status();
+            .status())
+    }
+}
+
+impl ObjectStore for BrokerConfig {
+    /// A DELETE through the same SigV4 presign the client's own deletes use,
+    /// sent by the DS. Unconfigured R2 is an error, so the row stays marked.
+    async fn delete_object(&self, key: &str) -> anyhow::Result<()> {
+        let status = self.r2_status("DELETE", key).await?;
         if status.is_success() || status == reqwest::StatusCode::NOT_FOUND {
             Ok(())
         } else {
             anyhow::bail!("r2 delete answered {status}")
+        }
+    }
+
+    /// A HEAD through the same presign. 404 = not stored; anything else that
+    /// is not a success is an error, so the caller writes nothing.
+    async fn object_exists(&self, key: &str) -> anyhow::Result<bool> {
+        let status = self.r2_status("HEAD", key).await?;
+        if status.is_success() {
+            Ok(true)
+        } else if status == reqwest::StatusCode::NOT_FOUND {
+            Ok(false)
+        } else {
+            anyhow::bail!("r2 head answered {status}")
         }
     }
 }
@@ -1687,16 +1748,19 @@ pub fn presign_r2_url(
     expires: u64,
     datetime: &str,
 ) -> String {
-    presign_r2_url_bounded(
-        endpoint, bucket, region, access_key, secret_key, method, key, expires, datetime, None,
+    presign_r2_url_with_headers(
+        endpoint, bucket, region, access_key, secret_key, method, key, expires, datetime, None, &[],
     )
 }
 
-/// [`presign_r2_url`], optionally binding an EXACT `Content-Length`.
+/// [`presign_r2_url`], optionally binding an EXACT `Content-Length` and
+/// signing `extra` headers (lowercase names).
 ///
-/// With `Some(n)` the URL authorizes exactly `n` bytes; R2 rejects any other length (#848).
+/// With `Some(n)` the URL authorizes exactly `n` bytes; R2 rejects any other
+/// length (#848). Every `extra` header must then be sent with exactly the
+/// signed value (#2109: a shared object's checksum and `If-None-Match: *`).
 #[allow(clippy::too_many_arguments)]
-pub fn presign_r2_url_bounded(
+pub fn presign_r2_url_with_headers(
     endpoint: &str,
     bucket: &str,
     region: &str,
@@ -1707,6 +1771,7 @@ pub fn presign_r2_url_bounded(
     expires: u64,
     datetime: &str,
     content_length: Option<u64>,
+    extra: &[(&str, String)],
 ) -> String {
     let date = &datetime[..8];
     let host = host_of(endpoint);
@@ -1722,13 +1787,15 @@ pub fn presign_r2_url_bounded(
     // Canonical headers are lowercase and sorted by name — `content-length`
     // sorts before `host`, and `SignedHeaders` (both the canonical-request line
     // and the `X-Amz-SignedHeaders` query param) must list them in that order.
-    let (canonical_headers, signed_headers) = match content_length {
-        Some(n) => (
-            format!("content-length:{n}\nhost:{host}\n"),
-            "content-length;host",
-        ),
-        None => (format!("host:{host}\n"), "host"),
-    };
+    let mut headers: Vec<(String, String)> = vec![("host".to_string(), host.to_string())];
+    if let Some(n) = content_length {
+        headers.push(("content-length".to_string(), n.to_string()));
+    }
+    headers.extend(extra.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.clone())));
+    headers.sort_by(|a, b| a.0.cmp(&b.0));
+    let canonical_headers: String = headers.iter().map(|(k, v)| format!("{k}:{v}\n")).collect();
+    let signed_headers = headers.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(";");
+    let signed_headers = signed_headers.as_str();
 
     let credential = format!("{access_key}/{date}/{region}/s3/aws4_request");
     // Canonical query: params sorted by name, values URI-encoded (the credential

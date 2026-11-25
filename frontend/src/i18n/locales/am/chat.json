@@ -118,6 +118,8 @@
     "error": "ስህተት",
     "failedToLoad": "መጫን አልተሳካም",
     "failedToDownload": "ማውረድ አልተሳካም",
+    "removed": "ፋይሉ ተወግዷል",
+    "updateToOpen": "ይህን ፋይል ለመክፈት Pollisን ያዘምኑ",
     "lightboxFetch": "አምጣ",
     "lightboxDone": "ተከናውኗል",
     "lightboxDoneTerminal": "[ ተከናውኗል ]",

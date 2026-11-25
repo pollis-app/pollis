@@ -368,7 +368,6 @@ async fn an_interrupted_vault_save_is_finished_by_the_app_once() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_vault_file_goes_through_the_queue_under_the_vault_key() {
-    pollis_core::commands::messages::test_hooks::stub_attachment_uploads(true);
     wipe().await;
     let mut alice = TestClient::new().await;
     let p = alice.sign_up("vault-file@test.local").await;
@@ -388,7 +387,6 @@ async fn a_vault_file_goes_through_the_queue_under_the_vault_key() {
             }),
         )
         .await;
-    pollis_core::commands::messages::test_hooks::stub_attachment_uploads(false);
     let saved = saved.expect("saved");
     let content: serde_json::Value = serde_json::from_str(saved["content"].as_str().unwrap()).unwrap();
     assert_eq!(content["_txt"], "the contract");

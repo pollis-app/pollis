@@ -95,21 +95,6 @@ async fn late_joiners_open_the_ring_and_a_removal_rotates_it_out_of_reach() {
 
 // A DM member without the ring: it is wrapped under ONE epoch's exporter.
 
-struct StubbedUploads;
-
-impl StubbedUploads {
-    fn on() -> Self {
-        pollis_core::commands::messages::test_hooks::stub_attachment_uploads(true);
-        StubbedUploads
-    }
-}
-
-impl Drop for StubbedUploads {
-    fn drop(&mut self) {
-        pollis_core::commands::messages::test_hooks::stub_attachment_uploads(false);
-    }
-}
-
 async fn dm_pair(alice: &mut TestClient, bob: &mut TestClient) -> String {
     let a = alice.sign_up("fk-dm-alice@test.local").await;
     let b = bob.sign_up("fk-dm-bob@test.local").await;
@@ -221,7 +206,6 @@ async fn received_captions(client: &TestClient, dm_id: &str) -> Vec<String> {
 #[serial]
 async fn a_dm_member_behind_the_rings_epoch_still_sends_a_photo() {
     wipe().await;
-    let _stub = StubbedUploads::on();
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
     let dm_id = dm_pair(&mut alice, &mut bob).await;
@@ -245,7 +229,6 @@ async fn a_dm_member_behind_the_rings_epoch_still_sends_a_photo() {
 #[serial]
 async fn a_dm_member_past_the_rings_epoch_still_sends_a_photo() {
     wipe().await;
-    let _stub = StubbedUploads::on();
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
     let dm_id = dm_pair(&mut alice, &mut bob).await;
@@ -270,7 +253,6 @@ async fn a_dm_member_past_the_rings_epoch_still_sends_a_photo() {
 #[serial]
 async fn a_photo_waiting_for_the_file_key_stays_queued_and_goes_out_once_it_arrives() {
     wipe().await;
-    let _stub = StubbedUploads::on();
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
     let dm_id = dm_pair(&mut alice, &mut bob).await;
@@ -305,7 +287,6 @@ async fn a_photo_waiting_for_the_file_key_stays_queued_and_goes_out_once_it_arri
 async fn a_photo_waiting_for_the_file_key_does_not_hold_up_the_next_send() {
     use pollis_core::commands::messages::test_hooks;
     wipe().await;
-    let _stub = StubbedUploads::on();
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
     let dm_id = dm_pair(&mut alice, &mut bob).await;
@@ -346,5 +327,27 @@ async fn a_photo_waiting_for_the_file_key_does_not_hold_up_the_next_send() {
     assert!(received_captions(&alice, &dm_id)
         .await
         .contains(&"waits for the key".to_string()));
+    drop((alice, bob));
+}
+/// #2109, with shared uploads on: a new photo is a shared object keyed by its own reference, so it needs no
+/// conversation file key at all. A DM whose ring this device cannot open (none stored,
+/// none cached) still sends at once, and the peer opens it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_photo_needs_no_conversation_file_key() {
+    wipe().await;
+    crate::harness::set_shared_attachments(true);
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let dm_id = dm_pair(&mut alice, &mut bob).await;
+    forget_the_ring(&dm_id, &[&alice, &bob]).await;
+    wipe_local_ring(&bob, &dm_id).await;
+
+    let (id, sent) = send_photo(&bob, &dm_id, "no ring needed").await;
+    sent.expect("the photo sends without a file key");
+    assert_eq!(own_send_state(&bob, &dm_id, &id).await, None, "delivered at once");
+    assert!(received_captions(&alice, &dm_id)
+        .await
+        .contains(&"no ring needed".to_string()));
     drop((alice, bob));
 }

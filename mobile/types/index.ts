@@ -56,7 +56,9 @@ export interface DMConversation {
 /** Which key an attachment is sealed under (#1382). */
 export type AttachmentKeyScope =
   | { kind: "conversation"; conversation_id: string; key_version: number }
-  | { kind: "vault" };
+  | { kind: "vault" }
+  // A shared object (`v: 2`, #2109): keyed by the reference's own plaintext digest.
+  | { kind: "content" };
 
 /** Decides the attachments' key scope; `null` for preview-only surfaces. */
 export type ContentOrigin = { conversationId: string } | "vault" | null;
@@ -65,12 +67,16 @@ export interface MessageAttachment {
   id: string;
   // Empty while an upload is in progress.
   object_key: string;
-  // The object's random file id (#1382), NOT derived from the content.
+  // The object id: a random file id (#1382) or a shared `v2-` id (#2109). Never key material.
   content_hash: string;
   // Plaintext SHA-256, verified after decrypt.
   sha256: string;
   // null while uploading, for a pre-#1382 reference, or from a preview-only origin.
   key_scope: AttachmentKeyScope | null;
+  // The reference version: 2 for a shared object (#2109), 1 before it.
+  version?: number;
+  // A reference from a newer app version than this one: drawn as "update to open".
+  needs_update?: boolean;
   filename: string;
   content_type: string;
   file_size: number;

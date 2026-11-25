@@ -118,6 +118,8 @@
     "error": "خرابی",
     "failedToLoad": "لوڈ نہیں ہو سکا",
     "failedToDownload": "ڈاؤن لوڈ نہیں ہو سکا",
+    "removed": "فائل ہٹا دی گئی",
+    "updateToOpen": "یہ فائل کھولنے کے لیے Pollis اپڈیٹ کریں",
     "lightboxFetch": "حاصل کریں",
     "lightboxDone": "ہو گیا",
     "lightboxDoneTerminal": "[ ہو گیا ]",

@@ -58,3 +58,13 @@ export async function releaseStaged(attachments: Attachment[]): Promise<void> {
     ),
   );
 }
+
+/**
+ * The `_att` fields that say how a file is keyed: `v: 2` for a shared object
+ * (#2109, keyed by its `sha`), else the v1 ring key version `kv`. A v2
+ * reference carries no `kv`, so an older app shows it as unavailable instead
+ * of trying a ring key. Mirrored in `mobile/lib/attachments.ts`.
+ */
+export function referenceKeyFields(version: number | undefined, keyVersion: number): { v: 2 } | { kv: number } {
+  return version === 2 ? { v: 2 } : { kv: keyVersion };
+}

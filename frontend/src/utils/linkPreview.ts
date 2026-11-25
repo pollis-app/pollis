@@ -31,6 +31,8 @@ interface LinkPreviewImageWire {
   url?: string;
   hash: string;
   kv: number;
+  // 2 for a shared object (#2109); absent for v1.
+  v?: number;
   sha: string;
   ct: string;
   size: number;

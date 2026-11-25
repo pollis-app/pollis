@@ -97,15 +97,27 @@ pub(super) fn chunk_nonce(base: &[u8; 12], index: u32) -> [u8; 12] {
     nonce
 }
 
+/// How a [`StreamUpload`] seals its file.
+pub(crate) enum Sealing {
+    /// v1 (#1382): a random file id under `scope`'s ring key (or the Vault root).
+    Ring(UploadScope),
+    /// A shared object (#2109): keyed by the plaintext's SHA-256 `h`, which the caller reads
+    /// first (one pass over the stored bytes); named by the ciphertext's SHA-256 at the end.
+    Shared([u8; 32]),
+}
+
 /// One upload in progress. [`StreamUpload::push`] takes the plaintext in order, every chunk but
 /// the last exactly [`CHUNK_SIZE`] long; [`StreamUpload::finish`] sends it.
 pub(crate) struct StreamUpload {
     cipher: Aes256Gcm,
     base_nonce: [u8; 12],
+    /// `Some(h)` for a shared object: the digest its key came from, checked again at the end.
+    shared: Option<[u8; 32]>,
+    /// The ciphertext's SHA-256, a shared object's name.
+    cipher_hasher: Sha256,
     key_version: i64,
-    content_hash: String,
-    r2_key: String,
-    r2_url: String,
+    /// v1: the object's random id, R2 key and URL; a shared object's are known at the end.
+    v1_object: Option<(String, String, String)>,
     content_type: String,
     hasher: Sha256,
     /// The plaintext of a small image, for its blurhash; `None` for anything else.
@@ -129,7 +141,7 @@ impl StreamUpload {
     /// sender did not measure is decoded for its blurhash and size.
     pub(crate) async fn begin(
         state: &Arc<AppState>,
-        scope: UploadScope,
+        sealing: Sealing,
         content_type: &str,
         expected_len: u64,
         measure: bool,
@@ -141,17 +153,26 @@ impl StreamUpload {
             )));
         }
         let slot = super::upload_slot().await;
-        let (key_version, ring_key) = super::upload_ring_key(state, &scope).await?;
-        let super::NewObject { content_hash, r2_key, r2_url, enc_key, enc_nonce: base_nonce } =
-            super::new_object(state, ring_key);
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*enc_key));
-        drop(enc_key);
+        let (cipher, base_nonce, shared, key_version, v1_object) = match sealing {
+            Sealing::Ring(scope) => {
+                let (key_version, ring_key) = super::upload_ring_key(state, &scope).await?;
+                let super::NewObject { content_hash, r2_key, r2_url, enc_key, enc_nonce } =
+                    super::new_object(state, ring_key);
+                let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*enc_key));
+                (cipher, enc_nonce, None, key_version, Some((content_hash, r2_key, r2_url)))
+            }
+            Sealing::Shared(h) => {
+                let (enc_key, enc_nonce) = crate::commands::shared_files::content_key(&h);
+                let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&*enc_key));
+                (cipher, enc_nonce, Some(h), 0, None)
+            }
+        };
 
         let dir = state.local_data_dir().join(TMP_DIR);
         crate::private_fs::create_dir_all(&dir)
             .map_err(|e| Error::Other(anyhow::anyhow!("create upload dir: {e}")))?;
         sweep_stale(&dir);
-        let path = dir.join(format!("{content_hash}.enc"));
+        let path = dir.join(format!("{}.enc", ulid::Ulid::new()));
         let file = tokio::fs::File::create(&path)
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("create upload file: {e}")))?;
@@ -165,10 +186,10 @@ impl StreamUpload {
         Ok(Self {
             cipher,
             base_nonce,
+            shared,
+            cipher_hasher: Sha256::new(),
             key_version,
-            content_hash,
-            r2_key,
-            r2_url,
+            v1_object,
             content_type: content_type.to_string(),
             hasher: Sha256::new(),
             image,
@@ -210,6 +231,7 @@ impl StreamUpload {
             .map_err(|_| Error::Other(anyhow::anyhow!("attachment encryption failed")))?;
         self.chunks += 1;
         self.cipher_len += ct.len() as u64;
+        self.cipher_hasher.update(&ct);
         self.file
             .write_all(&ct)
             .await
@@ -238,7 +260,11 @@ impl StreamUpload {
             .sync_all()
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("sync upload file: {e}")))?;
-        let sha256 = hex::encode(self.hasher.finalize_reset());
+        let digest: [u8; 32] = self.hasher.finalize_reset().into();
+        if self.shared.is_some_and(|h| h != digest) {
+            return Err(Error::Other(anyhow::anyhow!("attachment changed while it was read")));
+        }
+        let sha256 = hex::encode(digest);
         let (blurhash, width, height) = match self.image.take() {
             Some(_) if seen_meta(&sha256).is_some() => {
                 let (bh, w, h) = seen_meta(&sha256).unwrap_or_default();
@@ -263,40 +289,53 @@ impl StreamUpload {
         // The image's bytes and decode are done with: the next image may start.
         self._image_permit.take();
 
-        #[cfg(feature = "test-harness")]
-        let stubbed = crate::commands::messages::test_hooks::uploads_stubbed();
-        #[cfg(not(feature = "test-harness"))]
-        let stubbed = false;
-        if !stubbed {
-            let put_url =
-                super::presign_r2_with_length(state, "put", &self.r2_key, Some(self.cipher_len))
-                    .await?;
-            let file = tokio::fs::File::open(&self.tmp.0)
-                .await
-                .map_err(|e| Error::Other(anyhow::anyhow!("open upload file: {e}")))?;
-            let overlay = state.overlay_handle();
-            super::r2_put_body(
-                overlay.as_deref(),
-                &put_url,
-                file_body(file),
-                self.cipher_len,
-                "application/octet-stream",
-            )
-            .await?;
-            let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
-                content_hash: self.content_hash.clone(),
-                r2_key: self.r2_key.clone(),
-            };
-            crate::commands::mls::ds_post_ok(state, &body).await?;
-        }
+        let (content_hash, r2_key, r2_url, version) = match self.v1_object.take() {
+            Some((content_hash, r2_key, r2_url)) => {
+                let put_url =
+                    super::presign_r2_with_length(state, "put", &r2_key, Some(self.cipher_len)).await?;
+                let file = tokio::fs::File::open(&self.tmp.0)
+                    .await
+                    .map_err(|e| Error::Other(anyhow::anyhow!("open upload file: {e}")))?;
+                let overlay = state.overlay_handle();
+                super::r2_put_body(
+                    overlay.as_deref(),
+                    &put_url,
+                    file_body(file),
+                    self.cipher_len,
+                    "application/octet-stream",
+                    &[],
+                )
+                .await?;
+                let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
+                    content_hash: content_hash.clone(),
+                    r2_key: r2_key.clone(),
+                };
+                crate::commands::mls::ds_post_ok(state, &body).await?;
+                (content_hash, r2_key, r2_url, 1)
+            }
+            None => {
+                // Stored once across every account (#2109): uploaded only if nobody has yet.
+                let id = format!(
+                    "{}{}",
+                    pollis_api::messages::SHARED_OBJECT_PREFIX,
+                    hex::encode(self.cipher_hasher.finalize_reset())
+                );
+                let source = super::PutSource::File(self.tmp.0.clone(), self.cipher_len);
+                super::store_shared_object_from(state, &id, &source).await?;
+                let r2_key = pollis_api::messages::shared_object_key(&id);
+                let r2_url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), r2_key);
+                (id, r2_key, r2_url, super::SHARED_ATTACHMENT_VERSION)
+            }
+        };
 
         Ok(MediaUploadResult {
-            key: self.r2_key.clone(),
-            url: self.r2_url.clone(),
+            key: r2_key,
+            url: r2_url,
             filename,
             content_type: self.content_type.clone(),
             size_bytes: self.plain_len as usize,
-            content_hash: self.content_hash.clone(),
+            content_hash,
+            version,
             key_version: self.key_version,
             sha256,
             blurhash,
@@ -308,7 +347,7 @@ impl StreamUpload {
 }
 
 /// A request body that reads `file` 64 KiB at a time.
-fn file_body(file: tokio::fs::File) -> reqwest::Body {
+pub(super) fn file_body(file: tokio::fs::File) -> reqwest::Body {
     use tokio::io::AsyncReadExt;
     const READ: usize = 64 * 1024;
     let stream = futures_util::stream::try_unfold(file, |mut file| async move {

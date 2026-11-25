@@ -66,6 +66,7 @@ Decided by Dan; don't re-propose these or raise them as findings in sweeps.
 - **Blocking is client-side.** The blocked person's app shows a message as sent and never posts it, so a block reveals nothing to them (the Signal/WhatsApp model). The DS takes no part in refusing or discarding messages in a blocked DM.
 - **No separate provenance gate at publish time.** Releases carry build provenance; a second check that refuses to publish without it was judged redundant.
 - **No warrant canary.** It asks readers to take our word for it, which isn't auditable, and signing it ourselves doesn't change that.
+- **Stored files are deduplicated, across all accounts.** A hard platform requirement: each distinct file is stored once, every message or Vault entry using it is a reference, and the object goes with its last reference. Dropped once by #1382 and restored by #2109 (new uploads become shared objects when #2112 turns the DS switch on); any change to attachment encryption must keep it.
 
 ## Style
 

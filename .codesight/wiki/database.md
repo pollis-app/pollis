@@ -751,8 +751,11 @@ lives in this row).
 - `updated_by_device_id` TEXT NOT NULL _(diagnostic; authz is the signed request)_
 
 One mutable row per MLS conversation: the CURRENT wrap of the conversation's
-**attachment file key ring** — the keys every channel/DM attachment is sealed
-under (each file: `HKDF(salt = random file id, ikm = ring key)`). It replaced
+**attachment file key ring** — the keys every channel/DM attachment stored
+before #2109 is sealed under (each file: `HKDF(salt = random file id, ikm =
+ring key)`). New uploads are shared objects keyed by their own digest
+([attachment_object](#attachment_object)); the ring stays so those older files
+keep opening. It replaced
 convergent encryption (key = HKDF(SHA-256(plaintext)), hash stored in
 [attachment_object](#attachment_object)), under which the bucket plus this
 database decrypted every attachment — that scheme was broken and is gone. Same
@@ -808,7 +811,7 @@ so a colliding ULID from another account is a refused write, not an overwrite.
 Hard-deleted on entry delete and purged with the account.
 
 ### vault_attachment_ref _(migration 000020, #107)_
-- `content_hash` TEXT NOT NULL _(the Vault file's random file id since #1382)_
+- `content_hash` TEXT NOT NULL _(the object id: a shared `v2-` id since #2109 — the same object a chat message with the same file references — or a pre-#2109 random file id)_
 - `vault_message_id` TEXT NOT NULL
 - `created_at` TEXT NOT NULL DEFAULT now
 - PK `(content_hash, vault_message_id)`; index on `vault_message_id`
@@ -819,12 +822,14 @@ live envelope" with "a `vault_attachment_ref` joined to a live `vault_message`",
 so a file that exists only in someone's vault survives every collect pass.
 Maintained by `/v1/vault/save` (replace-on-save — an edit that drops a file
 releases it) and `/v1/vault/delete`; reaped by `sweep_envelope_gc` if ever
-orphaned. Releasing the last reference does not by itself remove the object: the
-client's `delete_vault_message` / `edit_vault_message` then collect the
-`attachment_object` row and the stored object (#1491). The user→file-id pairing it records is already conceded by the signed
-upload presign. Vault files are sealed under the account's Vault file root
-(HKDF over the account identity key, info `pollis-vault-files-v1`, #1382), so
-nothing in this row or the object opens them.
+orphaned. A save that adds a file settles the saver's claim on it
+([attachment_lease](#attachment_lease)); a save naming a removed file
+([attachment_removed](#attachment_removed)) drops it. Releasing the last
+reference marks the object released and the DS reclaims it (#1881). The user→file-id pairing it records is already conceded by the signed
+upload presign. Nothing in this row or the object opens a file: a v2 file's key is derived
+from the digest inside the encrypted entry; a pre-#2109 Vault file is sealed
+under the account's Vault file root (HKDF over the account identity key, info
+`pollis-vault-files-v1`, #1382).
 
 ### message_reaction
 - `id` TEXT PK
@@ -838,15 +843,17 @@ nothing in this row or the object opens them.
 Read gate (`directory::visible_reactions`, behind `/v1/messages/lookup`'s `reactions_for`) is **per row**: a row is shown to members of its `conversation_id`, and a NULL row to members of the envelope's conversation while the envelope survives. Before #1433 the read asked only the envelope, so envelope GC (#689) hid every reaction on a message once everyone had read it — a tapped pill appeared optimistically and vanished on the refetch. A row declared against another conversation after GC (the add gate trusts the declaration then, #1161) stays visible only inside that conversation. A repeat add stamps a legacy NULL row (it is the actor's own row).
 
 ### attachment_object
-- `content_hash` TEXT PK _(since #1382 the object's **random 32-byte file id**, hex — a name, not derived from the content and not key material; before #1382 it was SHA-256 of the plaintext, the convergent key)_
-- `r2_key` TEXT NOT NULL _(`media/{file id}.enc`)_
+- `content_hash` TEXT PK _(the object id. Since #2109 `v2-` + the hex SHA-256 of the stored **ciphertext**: one row per distinct file across all accounts. #1382–#2109: a random 32-byte file id, hex. Before #1382: SHA-256 of the plaintext, the convergent key. Never key material now.)_
+- `r2_key` TEXT NOT NULL _(`media/{id}.enc`; for a `v2-` id exactly that, enforced by triggers `attachment_object_shared_key_insert` / `_update`, migration `000057`)_
 - `created_at` TEXT NOT NULL DEFAULT now
 - `uploaded_by` TEXT _(migration `000031`; **dead since migration `000032`** — never written, never read, and existing values cleared. Not dropped because migrations here are additive only)_
 - `reclaim_state` TEXT NULL CHECK IN ('released', 'deleting') _(migration `000050`, #1881. NULL while referenced; `released` once the delete that released its last reference committed; `deleting` while the DS deletes the R2 object. Partial index `idx_attachment_object_reclaim`)_
 
-One row (and one R2 blob) per upload, for reference counting. Until #1382 this was a global convergent-encryption dedup — one row per unique plaintext across all users, keyed by the hash that also derived the decryption key, so this table plus the bucket decrypted every attachment; that was broken and replaced. Now every upload gets a random id, there is no cross-user dedup, and the key lives only in the conversation's [file_keystate](#file_keystate) ring. Several messages share a row only when they reference the same upload (an edit keeps the original's reference; a Vault re-save keeps its files). Written via the DS `/v1/attachments/register` endpoint (`apply_register_attachment`), never a client-side INSERT.
+**Stored files are deduplicated across all accounts (#2109, a settled requirement in `CLAUDE.md`)** — for uploads made while the DS's `POLLIS_DS_SHARED_ATTACHMENTS` switch is on (off as shipped, until every build in the stores reads v2; #2112 turns it on). One row and one R2 blob per distinct file: every message and Vault entry carrying it is a reference, and the object goes with its last reference, whoever sent them. #1382 had dropped this when it replaced the pre-#1382 convergent scheme, in which the row's id was the very hash the key came from, so this table plus the bucket decrypted every attachment. #2109 keeps the key and the name on separate derivations (`pollis-core/src/commands/shared_files.rs`): the key comes from SHA-256 of the plaintext, which rides only inside the E2EE reference; the id is SHA-256 of the ciphertext. Files stored between #1382 and #2109 keep their random ids and ring keys, and duplicates among them stay separate (the server cannot tell they match).
 
-**Deletion is reference-counted server-side (#690, #1881).** An object is kept while any [attachment_ref](#attachment_ref) row or live Vault reference names it (`live_ref_exists` in `messages.rs`: `EXISTS attachment_ref` OR `EXISTS vault_attachment_ref ⋈ vault_message`). A message reference is released only by a delete of that message for everyone (see [attachment_ref](#attachment_ref)); a Vault reference by deleting or editing its entry, or with the account's vault. The release and `mark_released_objects` (`UPDATE … SET reclaim_state = 'released' WHERE … AND NOT live_ref_exists`) run in the delete's own transaction. `reclaim_released_attachments` then, per released row: clears the state if the object is referenced again; else claims it (`deleting`), deletes the R2 key through `BrokerConfig`'s `ObjectStore` impl (a DS-signed SigV4 DELETE; 404 = done), and only then deletes the row and any leftover references. It runs synchronously in `/v1/attachments/delete` (the collect the client sends right after its delete), in the background after the message and vault delete handlers, and on every envelope-GC tick, which is the retry: a failed R2 delete leaves the row in place. Once claimed, a reference that lands cannot save bytes that may already be gone, so the row and its references go with them; no row ever names a missing blob. The DS deletes only `media/<file id>…` for the row's own id, whatever `r2_key` says. The client-requested collect (`COLLECT_UNREFERENCED_OBJECT_SQL`) skips released rows, which the reclaim still needs. Legacy rows with no references stay collectable as before.
+**A shared row exists only with its bytes.** `ensure_shared_object` (`messages.rs`) is the only writer of a `v2-` row: it asks the bucket first, inserts, and asks again (a reclaim could have deleted the bytes in between; then it takes the row back). `apply_register_attachment` writes no `v2-` row and refuses a reference to one that does not exist. The bytes are the right ones because the presigned PUT signs `x-amz-checksum-sha256` (the id's digest) and `If-None-Match: *` (`broker.rs`, `pollis_api::messages::shared_object_put_headers`): R2 stores only bytes hashing to the name, once. So nobody who knows a file can store wrong bytes under its name or a row without bytes, and a second uploader's racing PUT fails 412 and references the first. The client asks first: `/v1/attachments/claim` answers `stored` / `upload` / `busy` / `removed` and takes an [attachment_lease](#attachment_lease). DS tests: `pollis-delivery/tests/attachment_dedup.rs`; flows: `src-tauri/tests/flows/attachment_dedup.rs`. Written via `/v1/attachments/register` (`register_attachment_in`), never a client-side INSERT.
+
+**Deletion is reference-counted server-side (#690, #1881).** An object is kept while any [attachment_ref](#attachment_ref) row, live Vault reference or unexpired claim names it (`live_ref_exists` in `messages.rs`: `EXISTS attachment_ref` OR `EXISTS vault_attachment_ref ⋈ vault_message` OR `EXISTS attachment_lease` younger than 30 days). A message reference is released only by a delete of that message for everyone (see [attachment_ref](#attachment_ref)); a Vault reference by deleting or editing its entry, or with the account's vault. The release and `mark_released_objects` (`UPDATE … SET reclaim_state = 'released' WHERE … AND NOT live_ref_exists`) run in the delete's own transaction. `reclaim_released_attachments` then, per released row: clears the state if the object is referenced again; else claims it (`deleting`), deletes the R2 key through `BrokerConfig`'s `ObjectStore` impl (a DS-signed SigV4 DELETE; 404 = done), and only then deletes the row and any leftover references. It runs synchronously in `/v1/attachments/delete` (the collect the client sends right after its delete), in the background after the message and vault delete handlers, and on every envelope-GC tick, which is the retry: a failed R2 delete leaves the row in place. Once claimed, a reference that lands cannot save bytes that may already be gone, so the row and its references go with them; no row ever names a missing blob. The DS deletes only `media/<file id>…` for the row's own id, whatever `r2_key` says. The client-requested collect (`COLLECT_UNREFERENCED_OBJECT_SQL`) skips released rows, which the reclaim still needs. Legacy rows with no references stay collectable as before.
 
 **The reference count is the whole rule, for everybody.** `object_is_referenced` takes a `content_hash` and nothing else — no actor, no uploader. Only the DS deletes an attachment (#1881): `/v1/r2/presign` mints no `delete` for a `media/` key and no `put` onto a file id that has a row (`object_is_known`), and `apply_delete_attachment` (the collect shipped clients still send) changes nothing — the handler only runs the reclaim for that file. An unreferenced row that no delete released is kept: since the pre-#1881 GC reaped references of delivered messages, a missing reference is not proof that no history holds the file. Messages belong to users, so "my references" are exactly the declarations naming my messages: you release yours by deleting your messages, and the object survives past that only while somebody else's live message still carries the same file.
 
@@ -854,9 +861,24 @@ One row (and one R2 blob) per upload, for reference counting. Until #1382 this w
 
 What the #1161 M5 review actually found and what stays fixed: a reference could be **forged** — you could declare `(victim_hash, message_id)` naming a message you do not own and pin their blob. #1165 fixed that by binding every declaration to `message_envelope.sender_id` (`apply_register_attachment` refuses otherwise), and that binding stays. The review's second half — "the uploader's delete presign 403s while others reference the blob" — was mis-framed as a defect. Under plain reference counting it is correct behaviour: you do not get to destroy bytes another user's live message still depends on. An honest re-send and an abusive "pin" are the same act precisely because neither denies the uploader anything real — their own reference goes when their message goes, their own access goes with it, and the bytes persist only because somebody else legitimately still has that file.
 
+### attachment_lease _(migration 000057, #2109)_
+- `content_hash` TEXT NOT NULL CHECK `v2-` + 64 hex _(a shared object)_
+- `user_id` TEXT NOT NULL _(the account sending it)_
+- `pending` INTEGER NOT NULL DEFAULT 1 CHECK 1..1000 _(that account's sends of it still outstanding)_
+- `updated_at` TEXT NOT NULL DEFAULT now; index on it
+- PK `(content_hash, user_id)`
+
+A sender's hold on a shared object between the claim (which may say "stored, upload nothing") and their reference landing. Without it, another account deleting the last message that held the file in that window would reclaim bytes the sender's message is about to point at. `live_ref_exists` counts a lease younger than 30 days (`ATTACHMENT_LEASE_DAYS`). `/v1/attachments/claim` takes one (or counts it up); each reference that lands for that account (`apply_register_attachment` on a new `(hash, message)`, a Vault save adding the file) counts it down via `settle_lease`, the last one deleting the row. A lease whose reference never comes (a discarded send) lapses: `expire_attachment_leases`, on every envelope-GC pass, drops it and releases what it alone held. Records which account is sending which object for that window only; the signed presign already shows the DS the same.
+
+### attachment_removed _(migration 000057, #2109)_
+- `content_hash` TEXT PK
+- `removed_at` TEXT NOT NULL DEFAULT now
+
+**Operator removal of a stored file.** Because a file is stored once, `scripts/remove-stored-file.sh` (an operator command run with the DS's own Doppler config, no route or token; `docs/ds-operator-endpoints.md`) removes it from every message and Vault entry in one action: `remove_stored_object` writes this row first, deletes the object's own R2 key, then its row, references and leases. The row stays, so the id is refused everywhere afterwards: a claim answers `removed`, registration and references are refused, a Vault save drops it, and a presign answers `410 attachment_removed`, which both apps show as "File removed" without retrying. Sending the identical file again therefore cannot restore it. Holds no account, message or conversation.
+
 ### attachment_ref _(migration 000012, #690)_
 - PK: (`content_hash`, `message_id`)
-- `content_hash` TEXT NOT NULL _(the referenced [attachment_object](#attachment_object) — its random file id since #1382)_
+- `content_hash` TEXT NOT NULL _(the referenced [attachment_object](#attachment_object): a shared `v2-` id since #2109, else a random file id)_
 - `message_id` TEXT NOT NULL _(the message that carries the attachment)_
 - `delete_token_hash` TEXT NULL _(migration `000050`, #1881: the message's deletion-capability hash (#1086), copied from its envelope at registration, so the author's delete can release the reference after envelope GC; NULL for a legacy envelope with none)_
 - `created_at` TEXT NOT NULL DEFAULT now
@@ -870,7 +892,7 @@ One row = "message `message_id` carries the file with `content_hash`". Because t
 
 **Sealed envelopes prove authorship by capability (#1330).** Every envelope a current client writes is sealed, so its `sender_id` is the sentinel `"sealed"` and the name check alone refused every real declaration: from #331 until #1330 no sent attachment was counted, and any delete of the same bytes could collect the blob ("Image unavailable" everywhere else it was sent). The body now carries the envelope's #1086 deletion capability (`delete_token`, optional on the wire); for an envelope whose `sender_id` is not the caller, `envelope_is_authored_by` accepts the declaration only when the token hashes to the stored `delete_token_hash`. A sealed envelope from before #1086 has no hash and is refused, as before. Sends made before the fix are re-declared once per device in the background after a PIN unlock (`spawn_attachment_ref_backfill`, kv key `attachment_ref_backfill`, at most three passes).
 
-**Metadata-exposure trade-off (chosen deliberately; see `docs/metadata-retention-policy.md` §2/§5).** Storing `message_id` in the clear moves the attachment↔message linkage that previously lived only inside the MLS-encrypted payload out to the operator: joining `attachment_ref` to `message_envelope.conversation_id` reveals which messages carry which stored object. Before #1382 that id was the convergent content hash, so it also revealed which conversations shared the same file; since #1382 ids are random per upload, so identical content uploaded twice is unlinkable. It does **not** reveal the file (plaintext is never seen, and nothing here is key material) or the sender (sealed, #607). The opaque-`ref_token` alternative would hide that graph but leaks references forever when a device loses local state and cannot release a token an admin never held — i.e. it fails deletion, the very thing #690 exists to make correct. We chose the counted, robust option; the incremental exposure is the message→object graph over ids the operator already stores.
+**Metadata-exposure trade-off (chosen deliberately; see `docs/metadata-retention-policy.md` §2/§5).** Storing `message_id` in the clear moves the attachment↔message linkage that previously lived only inside the MLS-encrypted payload out to the operator: joining `attachment_ref` to `message_envelope.conversation_id` reveals which messages carry which stored object. Before #1382 that id was the convergent content hash, so it also revealed which conversations shared the same file; between #1382 and #2109 ids were random per upload. Since #2109 one object per distinct file is the requirement, so the operator again sees which messages share a stored file (never what it is: the id is a hash of ciphertext under a key it never holds), and anyone holding a file can test whether it is stored. That is the stated cost of dedup. It does **not** reveal the file (plaintext is never seen, and nothing here is key material) or the sender (sealed, #607). The opaque-`ref_token` alternative would hide that graph but leaks references forever when a device loses local state and cannot release a token an admin never held — i.e. it fails deletion, the very thing #690 exists to make correct. We chose the counted, robust option; the incremental exposure is the message→object graph over ids the operator already stores.
 
 ### custom_emoji_object _(migration 000015, #848)_
 - `content_hash` TEXT PK _(SHA-256 of the **re-encoded** bytes)_

@@ -39,7 +39,7 @@ import { ComposerLinkPreview } from "../../components/chat/ComposerLinkPreview";
 
 /** Slack-style thread screen (#831); state is isolated per thread (#837). */
 function ThreadScreen() {
-  const { accentHex } = useTheme();
+  const { themeKey } = useTheme();
   const router = useNav();
   const { t } = useTranslation("nav");
   const params = useRouteParams<{
@@ -256,7 +256,7 @@ function ThreadScreen() {
         data={replies}
         keyExtractor={(m) => m.id}
         renderItem={renderRow}
-        extraData={accentHex}
+        extraData={themeKey}
         ListHeaderComponent={header}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: 4, paddingBottom: 12 }}

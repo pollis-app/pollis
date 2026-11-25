@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::state::AppState;
 
 mod stream;
-pub(crate) use stream::StreamUpload;
+pub(crate) use stream::{Sealing, StreamUpload};
 
 // Media cache: encrypted at rest (HKDF of `db_key`), decrypted by `media_server` on demand.
 
@@ -202,7 +202,7 @@ fn find_cached_file_in(dir: &Path, content_hash: &str) -> Option<(PathBuf, Strin
 
 /// Remove `user_id`'s cached copy of `content_hash` once its last reference is deleted (#1491).
 pub(crate) fn evict_cached_file_for_user(user_id: &str, content_hash: &str) {
-    if content_hash.len() != 64 || !content_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !pollis_api::messages::is_attachment_id(content_hash) {
         return;
     }
     let Some(root) = MEDIA_CACHE_DIR.get() else {
@@ -496,7 +496,12 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
     Ok(url)
 }
 
-// Media upload: sealed under a ring-derived file key; the DS holds no key material (#1382).
+// Media upload: one shared object per distinct file, sealed under a key only
+// the plaintext yields (#2109, `shared_files`), once the DS turns it on; until
+// then v1 under the conversation's ring (#1382). The DS holds no key material.
+
+/// The `_att` reference version of a shared object (#2109): `v: 2`, no `kv`.
+pub const SHARED_ATTACHMENT_VERSION: u8 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MediaUploadResult {
@@ -505,11 +510,19 @@ pub struct MediaUploadResult {
     pub filename: String,
     pub content_type: String,
     pub size_bytes: usize,
-    /// The random file id, hex; named for the `_att` wire field, not derived from content.
+    /// The object id, named for the `_att` `hash` wire field: `v2-` + the
+    /// SHA-256 of the stored ciphertext for a shared object (#2109), a random
+    /// file id for v1 (#1382).
     pub content_hash: String,
-    /// Which ring key sealed the file (`0` for a Vault file).
+    /// The `_att` reference version: [`SHARED_ATTACHMENT_VERSION`] (written as
+    /// `v`, no `kv`) while the DS's shared-upload switch is on, else `1` (`kv`).
+    pub version: u8,
+    /// v1: which ring key sealed it (`0` for a Vault file). `0` and unused for
+    /// a shared object.
     pub key_version: i64,
-    /// SHA-256 of the plaintext, hex; never sent to the DS.
+    /// SHA-256 of the plaintext, hex; never sent to the DS. For a v2 object
+    /// it is also what the file key is derived from, so it travels only inside
+    /// the end-to-end encrypted reference.
     pub sha256: String,
     pub blurhash: Option<String>,
     pub width: Option<u32>,
@@ -530,9 +543,13 @@ pub enum AttachmentKeyScope {
     },
     /// A Vault attachment, under the account's Vault file root.
     Vault,
+    /// A shared object (#2109, `_att` `v: 2`): the key comes from the
+    /// plaintext digest the reference carries, in a channel, a DM or the Vault.
+    Content,
 }
 
-/// Where a NEW upload is going, which decides the key it is sealed under.
+/// Where a NEW upload is going, which decides the key a v1 upload is sealed
+/// under. A shared object (#2109) needs neither.
 pub(crate) enum UploadScope {
     /// A channel or DM: the newest key of its MLS conversation's ring.
     Conversation(String),
@@ -540,7 +557,7 @@ pub(crate) enum UploadScope {
     Vault,
 }
 
-/// The ring key (and its version) a new upload to `scope` must use.
+/// The ring key (and its version) a new v1 upload to `scope` must use.
 async fn upload_ring_key(
     state: &Arc<AppState>,
     scope: &UploadScope,
@@ -559,13 +576,16 @@ async fn upload_ring_key(
     }
 }
 
-/// The ring key an existing attachment was sealed under.
+/// The ring key a v1 attachment was sealed under (#1382).
 async fn download_ring_key(
     state: &Arc<AppState>,
     scope: &AttachmentKeyScope,
 ) -> Result<zeroize::Zeroizing<[u8; 32]>> {
     let user_id = crate::commands::mls::current_user_id(state).await?;
     match scope {
+        AttachmentKeyScope::Content => Err(Error::Other(anyhow::anyhow!(
+            "a shared object has no ring key"
+        ))),
         AttachmentKeyScope::Conversation {
             conversation_id,
             key_version,
@@ -645,10 +665,15 @@ pub(crate) async fn video_poster(
 }
 
 /// Fail with the file-key wait before an outbox upload reads any bytes (#1636).
+/// Only a v1 upload needs the conversation's file key: with shared uploads on
+/// (#2109) there is nothing to wait for.
 pub(crate) async fn check_outbox_upload_key(
     conversation_id: &str,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    if shared_uploads_enabled(state).await? {
+        return Ok(());
+    }
     upload_ring_key(state, &UploadScope::Conversation(conversation_id.to_string()))
         .await
         .map(|_| ())
@@ -662,30 +687,6 @@ pub(crate) async fn upload_outbox_bytes(
     conversation_id: &str,
     state: &Arc<AppState>,
 ) -> Result<MediaUploadResult> {
-    // Test harness: no R2, so skip the PUT but resolve the ring key as production does.
-    #[cfg(feature = "test-harness")]
-    if crate::commands::messages::test_hooks::uploads_stubbed() {
-        let (key_version, _key) =
-            upload_ring_key(state, &UploadScope::Conversation(conversation_id.to_string())).await?;
-        let mut file_id = [0u8; 32];
-        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
-        let content_hash = hex::encode(file_id);
-        let key = format!("media/{content_hash}.enc");
-        return Ok(MediaUploadResult {
-            url: format!("{}/{key}", state.config.r2_endpoint.trim_end_matches('/')),
-            key,
-            filename,
-            content_type,
-            size_bytes: data.len(),
-            content_hash,
-            key_version,
-            sha256: hex::encode(sha256_bytes(&data)),
-            blurhash: None,
-            width: None,
-            height: None,
-            poster: None,
-        });
-    }
     let _slot = upload_slot().await;
     upload_plaintext(
         Plaintext::Owned(data),
@@ -697,39 +698,55 @@ pub(crate) async fn upload_outbox_bytes(
     .await
 }
 
+/// Whether new uploads are shared objects (#2109), as the DS says now.
+///
+/// A switch on the DS, off by default (`POLLIS_DS_SHARED_ATTACHMENTS`), so new
+/// builds keep uploading v1 until every build in the stores can open a v2
+/// reference. Asked per upload (no cache, no timer). A DS that predates the
+/// switch answers 404: v1.
+pub async fn shared_uploads_enabled(state: &Arc<AppState>) -> Result<bool> {
+    let body = pollis_api::messages::AttachmentFormatBody {};
+    match crate::commands::mls::ds_post_json(state, &body).await {
+        Ok(answer) => Ok(answer.shared),
+        Err(e) if is_ds_status(&e, 404) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// What [`seal_off_runtime`] derives from an upload's plaintext.
 struct Sealed {
-    /// Plaintext SHA-256, hex (#879).
+    /// Plaintext SHA-256, hex (#879); a shared object's key source (#2109).
     sha256: String,
     /// `(blurhash, width, height)` for an image; `None` for anything else.
     image_meta: Option<anyhow::Result<(String, u32, u32)>>,
+    /// The object id `seal` named the ciphertext with.
+    object_id: String,
     ciphertext: Vec<u8>,
 }
 
-/// Hash, measure and encrypt an upload's plaintext, then release it — on the
-/// blocking pool, never on an async worker (#1497).
-async fn seal_off_runtime(
-    data: Plaintext,
-    is_image: bool,
-    enc_key: zeroize::Zeroizing<[u8; 32]>,
-    enc_nonce: [u8; 12],
-) -> Result<Sealed> {
+/// Hash, measure and encrypt an upload's plaintext with `seal` (given the
+/// plaintext and its SHA-256, it returns the object id and ciphertext), then
+/// release it — on the blocking pool, never on an async worker (#1497).
+async fn seal_off_runtime<F>(data: Plaintext, is_image: bool, seal: F) -> Result<Sealed>
+where
+    F: FnOnce(&[u8], &[u8; 32]) -> (String, Vec<u8>) + Send + 'static,
+{
     tokio::task::spawn_blocking(move || {
         // The digest rides inside the encrypted reference (#879).
-        let sha256 = hex::encode(sha256_bytes(data.as_slice()));
+        let h = crate::commands::shared_files::sha256(data.as_slice());
         let image_meta = if is_image {
             Some(compute_image_meta(data.as_slice()))
         } else {
             None
         };
         // Chunked AES-256-GCM.
-        let ciphertext = encrypt_chunked(data.as_slice(), &enc_key, &enc_nonce);
-        drop(enc_key);
+        let (object_id, ciphertext) = seal(data.as_slice(), &h);
         // Release the plaintext before presign and upload (#915).
         data.release();
         Sealed {
-            sha256,
+            sha256: hex::encode(h),
             image_meta,
+            object_id,
             ciphertext,
         }
     })
@@ -758,7 +775,110 @@ pub(crate) fn new_object(state: &Arc<AppState>, ring_key: zeroize::Zeroizing<[u8
     NewObject { content_hash, r2_key, r2_url, enc_key, enc_nonce }
 }
 
-/// Shared upload core: fresh per-file key from `scope`'s ring, random object name.
+
+/// How many times an upload asks again while the DS finishes deleting an
+/// object it is about to store again (#2109).
+const CLAIM_ATTEMPTS: u32 = 6;
+
+/// Store shared object `id` unless it already is (#2109): claim it (which
+/// holds it until this sender's reference lands), and PUT and register the
+/// bytes only when the DS has none. A racing uploader's PUT wins the create-only
+/// write; this one's `412` then means the bytes are there.
+async fn store_shared_object(state: &Arc<AppState>, id: &str, ciphertext: Vec<u8>) -> Result<()> {
+    store_shared_object_from(state, id, &PutSource::Memory(bytes::Bytes::from(ciphertext))).await
+}
+
+/// Where a shared object's ciphertext is PUT from.
+pub(crate) enum PutSource {
+    Memory(bytes::Bytes),
+    /// A sealed file on disk and its length ([`StreamUpload`], #2100), read afresh per attempt.
+    File(std::path::PathBuf, u64),
+}
+
+impl PutSource {
+    fn len(&self) -> u64 {
+        match self {
+            PutSource::Memory(b) => b.len() as u64,
+            PutSource::File(_, len) => *len,
+        }
+    }
+
+    async fn body(&self) -> Result<reqwest::Body> {
+        match self {
+            PutSource::Memory(b) => Ok(reqwest::Body::from(b.clone())),
+            PutSource::File(path, _) => {
+                let file = tokio::fs::File::open(path)
+                    .await
+                    .map_err(|e| Error::Other(anyhow::anyhow!("open upload file: {e}")))?;
+                Ok(stream::file_body(file))
+            }
+        }
+    }
+}
+
+/// [`store_shared_object`] from any [`PutSource`].
+pub(crate) async fn store_shared_object_from(state: &Arc<AppState>, id: &str, source: &PutSource) -> Result<()> {
+    use pollis_api::messages::{AttachmentClaimBody, AttachmentClaimStatus};
+    let key = pollis_api::messages::shared_object_key(id);
+    for attempt in 0..CLAIM_ATTEMPTS {
+        let claim = AttachmentClaimBody { content_hash: id.to_string() };
+        let status = crate::commands::mls::ds_post_json(state, &claim).await?.status;
+        match status {
+            AttachmentClaimStatus::Stored => return Ok(()),
+            AttachmentClaimStatus::Removed => return Err(Error::AttachmentRemoved),
+            AttachmentClaimStatus::Busy => {}
+            AttachmentClaimStatus::Upload => {
+                match presign_r2_with_length(state, "put", &key, Some(source.len())).await {
+                    Ok(put_url) => {
+                        let overlay = state.overlay_handle();
+                        let headers = pollis_api::messages::shared_object_put_headers(id);
+                        r2_put_body(
+                            overlay.as_deref(),
+                            &put_url,
+                            source.body().await?,
+                            source.len(),
+                            "application/octet-stream",
+                            &headers,
+                        )
+                        .await?;
+                    }
+                    // A racer registered it between the claim and the presign.
+                    Err(e) if is_ds_status(&e, 403) => {}
+                    Err(e) => return Err(e),
+                }
+                let register = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
+                    content_hash: id.to_string(),
+                    r2_key: key.clone(),
+                };
+                match crate::commands::mls::ds_post_ok(state, &register).await {
+                    Ok(()) => return Ok(()),
+                    // Being deleted, or not there after all: ask again.
+                    Err(e) if is_ds_status(&e, 400) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500 * u64::from(attempt + 1))).await;
+    }
+    Err(Error::Other(anyhow::anyhow!(
+        "attachment {id}: the server is still finishing an earlier delete of this file; try again"
+    )))
+}
+
+/// True when `e` is a DS answer with HTTP status `code`.
+fn is_ds_status(e: &Error, code: u16) -> bool {
+    match e {
+        Error::Other(inner) => inner
+            .downcast_ref::<crate::commands::mls::ds_client::DsRefused>()
+            .is_some_and(|r| r.status.as_u16() == code),
+        _ => false,
+    }
+}
+
+/// The upload core. A shared object (#2109) when the DS's switch is on:
+/// stored once across every account, keyed by its own digest. Otherwise v1
+/// (#1382): a random file id under `scope`'s ring key (or the Vault root),
+/// which every build in the stores can open.
 async fn upload_plaintext(
     data: Plaintext,
     filename: String,
@@ -776,14 +896,28 @@ async fn upload_plaintext(
         )));
     }
 
-    // Key first: an unreachable ring must fail before any bytes are encrypted.
-    let (key_version, ring_key) = upload_ring_key(state, &scope).await?;
-
-    let NewObject { content_hash, r2_key, r2_url, enc_key, enc_nonce } = new_object(state, ring_key);
-
     let is_image = content_type.starts_with("image/");
-    let Sealed { sha256, image_meta, ciphertext } =
-        seal_off_runtime(data, is_image, enc_key, enc_nonce).await?;
+    let shared = shared_uploads_enabled(state).await?;
+    let (version, key_version, sealed) = if shared {
+        let sealed = seal_off_runtime(data, is_image, crate::commands::shared_files::seal).await?;
+        (SHARED_ATTACHMENT_VERSION, 0, sealed)
+    } else {
+        // Key first: an unreachable ring must fail before any bytes are encrypted.
+        let (key_version, ring_key) = upload_ring_key(state, &scope).await?;
+        // A random file id names the object and salts the key; it is not key material.
+        let mut file_id = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
+        let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
+        drop(ring_key);
+        let sealed = seal_off_runtime(data, is_image, move |plaintext, _h| {
+            (hex::encode(file_id), encrypt_chunked(plaintext, &enc_key, &enc_nonce))
+        })
+        .await?;
+        (1, key_version, sealed)
+    };
+    let Sealed { sha256, image_meta, object_id: content_hash, ciphertext } = sealed;
+    let r2_key = format!("media/{content_hash}.enc");
+    let r2_url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), r2_key);
 
     let (blurhash, width, height) = match image_meta {
         Some(Ok((bh, w, h))) => (Some(bh), Some(w), Some(h)),
@@ -794,17 +928,21 @@ async fn upload_plaintext(
         None => (None, None, None),
     };
 
-    let put_url =
-        presign_r2_with_length(state, "put", &r2_key, Some(ciphertext.len() as u64)).await?;
-    let overlay = state.overlay_handle();
-    r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
-
-    // Register the object so the DS can reference-count and collect it.
-    let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
-        content_hash: content_hash.clone(),
-        r2_key: r2_key.clone(),
-    };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    if shared {
+        // Stored once across every account: upload only if nobody has yet.
+        store_shared_object(state, &content_hash, ciphertext).await?;
+    } else {
+        let put_url =
+            presign_r2_with_length(state, "put", &r2_key, Some(ciphertext.len() as u64)).await?;
+        let overlay = state.overlay_handle();
+        r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
+        // Register the object so the DS can reference-count and collect it.
+        let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
+            content_hash: content_hash.clone(),
+            r2_key: r2_key.clone(),
+        };
+        crate::commands::mls::ds_post_ok(state, &body).await?;
+    }
 
     Ok(MediaUploadResult {
         key: r2_key,
@@ -813,6 +951,7 @@ async fn upload_plaintext(
         content_type,
         size_bytes,
         content_hash,
+        version,
         key_version,
         sha256,
         blurhash,
@@ -831,9 +970,32 @@ pub async fn download_media(
     scope: AttachmentKeyScope,
     state: &Arc<AppState>,
 ) -> Result<Vec<u8>> {
-    let file_id = parse_hex32("file id", &content_hash)?;
     let expected_sha = parse_hex32("attachment sha256", &sha256)?;
 
+    // A shared object (#2109): its own canonical key, opened under the key the
+    // reference's plaintext digest yields.
+    if scope == AttachmentKeyScope::Content {
+        if !pollis_api::messages::is_shared_object_id(&content_hash) {
+            return Err(Error::Other(anyhow::anyhow!("not a shared attachment id: {content_hash}")));
+        }
+        let key = pollis_api::messages::shared_object_key(&content_hash);
+        let get_url = presign_r2(state, "get", &key).await?;
+        let overlay = state.overlay_handle();
+        let Some(ciphertext) = r2_get_url(overlay.as_deref(), &get_url, R2_MAX_DOWNLOAD_BYTES).await? else {
+            return Err(Error::Other(anyhow::anyhow!(
+                "attachment {key} is over the download cap; refusing to buffer it"
+            )));
+        };
+        let h = expected_sha;
+        let id = content_hash.clone();
+        return tokio::task::spawn_blocking(move || {
+            crate::commands::shared_files::open(&id, &ciphertext, &h)
+        })
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("attachment open failed: {e}")))?;
+    }
+
+    let file_id = parse_hex32("file id", &content_hash)?;
     let ring_key = download_ring_key(state, &scope).await?;
     let (enc_key, enc_nonce) = crate::commands::file_keys::derive_file_key(&ring_key, &file_id);
     drop(ring_key);
@@ -1261,7 +1423,12 @@ pub(crate) async fn presign_r2_with_length(
         // No-auth fallback for the acting user (`broker::resolve_user`); not authz.
         user_id: Some(crate::commands::mls::current_user_id(state).await?),
     };
-    let parsed = crate::commands::mls::ds_post_json(state, &body).await?;
+    let parsed = match crate::commands::mls::ds_post_json(state, &body).await {
+        Ok(parsed) => parsed,
+        // The operator removed this file (#2109): say so, not "failed".
+        Err(e) if is_ds_status(&e, 410) => return Err(Error::AttachmentRemoved),
+        Err(e) => return Err(e),
+    };
     PresignedUrl::parse(parsed.url, &state.config)
 }
 
@@ -1288,22 +1455,29 @@ pub(crate) async fn r2_put_url(
     content_type: &str,
 ) -> Result<()> {
     let len = data.len() as u64;
-    r2_put_body(overlay, url, reqwest::Body::from(data), len, content_type).await
+    r2_put_body(overlay, url, reqwest::Body::from(data), len, content_type, &[]).await
 }
 
-/// [`r2_put_url`] with any body of `len` bytes, e.g. a file streamed from disk (#2100). The
-/// length is sent as Content-Length, never chunked: R2 refuses a chunked PUT.
+/// [`r2_put_url`] with any body of `len` bytes, e.g. a file streamed from disk (#2100), and the
+/// extra headers the URL signs (#2109). The length is sent as Content-Length, never chunked: R2
+/// refuses a chunked PUT. A shared object's create-only PUT answering `412` means the bytes are
+/// already stored (identical, as the signed checksum guarantees): success.
 pub(crate) async fn r2_put_body(
     overlay: Option<&pollis_relay::OverlayHandle>,
     url: &PresignedUrl,
     body: reqwest::Body,
     len: u64,
     content_type: &str,
+    signed_headers: &[(&str, String)],
 ) -> Result<()> {
-    let resp = crate::net::overlay::http_client(overlay)
+    let mut req = crate::net::overlay::http_client(overlay)
         .put(url.as_str())
         .header("Content-Type", content_type)
-        .header(reqwest::header::CONTENT_LENGTH, len)
+        .header(reqwest::header::CONTENT_LENGTH, len);
+    for (name, value) in signed_headers {
+        req = req.header(*name, value);
+    }
+    let resp = req
         .body(body)
         .send()
         .await
@@ -1315,6 +1489,9 @@ pub(crate) async fn r2_put_body(
                 crate::commands::mls::ds_client::error_chain(e)
             );
         })?;
+    if !signed_headers.is_empty() && resp.status().as_u16() == 412 {
+        return Ok(());
+    }
     if !resp.status().is_success() {
         let status = resp.status();
         crate::diag!("[r2] PUT → {status}");
@@ -1834,7 +2011,7 @@ mod tests {
 
         let data = Plaintext::Owned(vec![7u8; 48 * 1024 * 1024]);
         let started = std::time::Instant::now();
-        let sealed = seal_off_runtime(data, false, zeroize::Zeroizing::new([1u8; 32]), [2u8; 12])
+        let sealed = seal_off_runtime(data, false, crate::commands::shared_files::seal)
             .await
             .expect("seal");
         let elapsed = started.elapsed();

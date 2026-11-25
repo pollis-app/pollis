@@ -118,6 +118,8 @@
     "error": "ਗੜਬੜ",
     "failedToLoad": "ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ",
     "failedToDownload": "ਡਾਊਨਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ",
+    "removed": "ਫ਼ਾਈਲ ਹਟਾ ਦਿੱਤੀ ਗਈ",
+    "updateToOpen": "ਇਹ ਫ਼ਾਈਲ ਖੋਲ੍ਹਣ ਲਈ Pollis ਅੱਪਡੇਟ ਕਰੋ",
     "lightboxFetch": "ਲਿਆਓ",
     "lightboxDone": "ਹੋ ਗਿਆ",
     "lightboxDoneTerminal": "[ ਹੋ ਗਿਆ ]",

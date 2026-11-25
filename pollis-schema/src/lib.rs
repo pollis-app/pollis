@@ -334,6 +334,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "push_hold",
         include_str!("../migrations/000056_push_hold.sql"),
     ),
+    (
+        57,
+        "attachment_dedup",
+        include_str!("../migrations/000057_attachment_dedup.sql"),
+    ),
 ];
 
 /// Every main-DB script in apply order, one per file: trigger bodies break a `;` split.

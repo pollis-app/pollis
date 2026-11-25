@@ -118,6 +118,8 @@
     "error": "erro",
     "failedToLoad": "Não foi possível carregar",
     "failedToDownload": "Não foi possível transferir",
+    "removed": "Arquivo removido",
+    "updateToOpen": "Atualize o Pollis para abrir este arquivo",
     "lightboxFetch": "obter",
     "lightboxDone": "Concluído",
     "lightboxDoneTerminal": "[ concluído ]",

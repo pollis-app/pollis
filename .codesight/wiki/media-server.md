@@ -8,7 +8,7 @@ dispatch stalls on V8 GC, so bulk media is served over loopback instead. Two
 token-gated routes (same secret, 403 on anything else):
 
 - **`GET /{token}/{hash}`** (`serve_media`) — the decrypted bytes of a cached
-  media file (`{hash}` is the attachment's random file id since #1382; for public
+  media file (`{hash}` is the attachment's object id — `v2-` + the ciphertext's SHA-256 since #2109, a random file id for older files; for public
   objects and emoji it is still a content digest), honouring single-range `Range` requests. The
   decrypted plaintext is handed out as a `Bytes` (`Bytes::from(Vec)`), so a range
   slice is a zero-copy view into it.
