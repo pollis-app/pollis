@@ -30,11 +30,11 @@ tags:
 - assertNotVisible:
     text: ".*: dbl2099 once, .*"
     index: 1
+# The placeholder is an overlay outside the accessibility hierarchy (iOS cannot
+# see it), so check the field itself: it no longer holds the sent text.
 - assertNotVisible:
     id: "input-composer"
     text: ".*dbl2099.*"
-- assertVisible:
-    id: "composer-placeholder"
 - takeScreenshot: composer-double-send-01-once
 
 # A tap on the emptied composer's Send does nothing either.
