@@ -29,9 +29,8 @@
       ]
     },
     "mobile": {
-      "count": 36,
+      "count": 35,
       "fingerprints": {
-        "08cc28f146542205": 1,
         "0935c16f75ae8dc4": 1,
         "111a756f0f17b876": 1,
         "1271fa85728ae15d": 1,
@@ -82,7 +81,6 @@
         "mobile/components/chat/EditBar.tsx:54-65 ≡ mobile/components/vault/VaultDeleteBar.tsx:44-55",
         "mobile/components/chat/MessageActionsSheet.tsx:118-130 ≡ mobile/components/vault/VaultEntrySheet.tsx:37-49",
         "mobile/components/direct/ConversationRow.tsx:86-96 ≡ mobile/components/search/SearchResultRow.tsx:61-71",
-        "mobile/components/direct/RequestsRow.tsx:25-38 ≡ mobile/components/direct/VaultRow.tsx:18-31",
         "mobile/components/groups/FormBits.tsx:14-23 ≡ mobile/components/self/SettingsField.tsx:15-24",
         "mobile/hooks/queries/useBlocks.ts:58-67 ≡ mobile/hooks/queries/useBlocks.ts:121-130",
         "mobile/hooks/queries/useDMChannels.ts:101-109 ≡ mobile/hooks/queries/useDMChannels.ts:237-245",
