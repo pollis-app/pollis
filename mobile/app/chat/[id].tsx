@@ -354,10 +354,11 @@ function TextChat(props: ChatViewProps = {}) {
     setComposerFocus((n) => n + 1);
   }, []);
 
-  const onSend = () => {
-    const text = outgoingText(draft);
+  // The composer hands over its text at the tap (#2099); true = the composer was cleared.
+  const onSend = (typed: string): boolean => {
+    const text = outgoingText(typed);
     if (!text && pendingAttachments.length === 0) {
-      return;
+      return false;
     }
     // A command is an ordinary message, except a shared name without its bot (not sent) and a
     // `request` command (sealed to the bot, never posted).
@@ -365,11 +366,11 @@ function TextChat(props: ChatViewProps = {}) {
     const routed = classifyCommandSend(text, groupCommands ?? [], channelId);
     if (routed.kind === "ambiguous") {
       setCommandNotice(t("common:composer.commandAmbiguous", { command: routed.name }));
-      return;
+      return false;
     }
     if (routed.kind === "request") {
       if (!groupId || !channelId || sendCommandRequest.isPending) {
-        return;
+        return false;
       }
       setCommandNotice(null);
       sendCommandRequest.mutate(
@@ -389,7 +390,7 @@ function TextChat(props: ChatViewProps = {}) {
           },
         },
       );
-      return;
+      return false;
     }
     // Never waits for a fetch still running: the message goes without it.
     const linkPreview = composerPreview.takeForSend(text);
@@ -403,6 +404,7 @@ function TextChat(props: ChatViewProps = {}) {
       replyToId: replyTarget?.id,
       linkPreview,
     });
+    return true;
   };
 
   const onAttach = useCallback(async () => {

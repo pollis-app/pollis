@@ -633,6 +633,15 @@ is still "sending" (the row's spoken label) before Send is tapped for message
 failed at that second send on the pre-#1636 build and passed on the fix.
 `.maestro/flows/rapid-send.yaml` is the iOS path (a fresh group's slow first
 send, same guard); its timing on iOS is not proven.
+One draft, one send (#2099): the core half is
+`one_message_id_handed_over_concurrently_is_delivered_once` in `flows/outbox.rs`
+(one id handed to two sends, a Retry and a drain at once: one envelope, one
+row each side). The composer half: `e2e/composer-double-submit.spec.ts` (Enter,
+Enter and a click in one task send once; a double click sends once; an input
+method's Enter never sends; the pre-fix build sent three times),
+`mobile/tests/composer-submit.test.ts` (the gate in `mobile/lib/composerSubmit.ts`)
+and `mobile/.maestro/flows/composer-double-send.yaml` (a double tap on Send, one
+row, empty composer).
 
 ### Killing an edit part-way (#1555)
 

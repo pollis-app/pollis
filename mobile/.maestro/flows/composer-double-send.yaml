@@ -1,0 +1,66 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# COMPOSER DOUBLE SEND (#2099): a double tap on Send sends the draft once and
+# leaves the composer empty. Desktop's twin is e2e/composer-double-submit.spec.ts.
+#
+# Rows are matched by their spoken label, "<name>: <text>, <status or time>"
+# (MessageRow); the ": " keeps the composer's own text from ever matching one.
+
+- runFlow: ../subflows/home.yaml
+- runFlow:
+    file: ../subflows/rapid-send-open-group.yaml
+    env:
+      GROUP: "E2E Double Send Group"
+
+- tapOn:
+    id: "input-composer"
+- inputText: "dbl2099 once"
+- assertVisible:
+    id: "btn-send"
+- doubleTapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: dbl2099 once, .*"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: ".*: dbl2099 once, sending"
+    timeout: 120000
+- assertNotVisible:
+    text: ".*: dbl2099 once, .*"
+    index: 1
+# The placeholder is an overlay outside the accessibility hierarchy (iOS cannot
+# see it), so check the field itself: it no longer holds the sent text.
+- assertNotVisible:
+    id: "input-composer"
+    text: ".*dbl2099.*"
+- takeScreenshot: composer-double-send-01-once
+
+# A tap on the emptied composer's Send does nothing either.
+- tapOn:
+    id: "btn-send"
+- assertNotVisible:
+    text: ".*: dbl2099 once, .*"
+    index: 1
+
+# The next message types into the empty field and sends once too.
+- inputText: "dbl2099 next"
+- doubleTapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: dbl2099 next, .*"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: ".*: dbl2099 next, sending"
+    timeout: 120000
+- assertNotVisible:
+    text: ".*: dbl2099 next, .*"
+    index: 1
+- assertNotVisible:
+    text: ".*: dbl2099 once, .*"
+    index: 1
+- assertNotVisible:
+    id: "input-composer"
+    text: ".*dbl2099.*"
+- takeScreenshot: composer-double-send-02-next

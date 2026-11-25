@@ -1227,3 +1227,32 @@ async fn a_send_waiting_to_retry_holds_nothing_and_keeps_its_place() {
     assert!(!test_hooks::states_written(&first).iter().any(|s| s == "failed"));
     drop((alice, bob));
 }
+
+/// #2099: every way one queued message can be handed over at once (its send handed twice, a
+/// Retry and a drain, all concurrent) posts one envelope and stores one row on each side.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn one_message_id_handed_over_concurrently_is_delivered_once() {
+    let (alice, bob, channel_id) = pair().await;
+    let id = fresh_id(&alice).await;
+
+    let (first, second, retry, drain) = tokio::join!(
+        send_with_id(&alice, &channel_id, &id, "handed over four times", None),
+        send_with_id(&alice, &channel_id, &id, "handed over four times", None),
+        alice.invoke_try("retry_message", json!({ "messageId": id })),
+        alice.invoke_try("flush_outbox", json!({})),
+    );
+    assert_eq!(first.expect("the send lands")["id"], id.as_str());
+    assert_eq!(second.expect("the repeat answers with the same message")["id"], id.as_str());
+    // A Retry that ran before the row was written finds nothing; either way it adds nothing.
+    let _ = retry;
+    drain.expect("the drain runs");
+    alice.invoke_json("flush_outbox", json!({})).await;
+
+    assert_eq!(envelopes_with_id(&id).await, 1, "one envelope for one message");
+    let row = own_row(&alice, &channel_id, &id).await.expect("stored");
+    assert!(row.get("send_state").is_none(), "delivered: {row}");
+    assert_eq!(copies(&alice, &channel_id, "handed over four times").await, 1);
+    assert_eq!(copies(&bob, &channel_id, "handed over four times").await, 1);
+    drop((alice, bob));
+}

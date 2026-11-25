@@ -111,11 +111,12 @@ function VaultScreen() {
     [router],
   );
 
-  const onSend = () => {
-    const text = outgoingText(draft);
+  // The composer hands over its text at the tap (#2099); true = the composer was cleared.
+  const onSend = (typed: string): boolean => {
+    const text = outgoingText(typed);
     const attachments = pendingAttachments;
     if ((!text && attachments.length === 0) || send.isPending) {
-      return;
+      return false;
     }
     setDraft("");
     setPendingAttachments([]);
@@ -129,6 +130,7 @@ function VaultScreen() {
         },
       },
     );
+    return true;
   };
 
   const onAttach = useCallback(async () => {
@@ -330,7 +332,7 @@ function VaultScreen() {
               >
                 {t(SAVE_FAILED_COPY[vaultSaveFailure(send.error)])}
               </Text>
-              <Button variant="subtle" onPress={onSend} testID="btn-vault-retry">
+              <Button variant="subtle" onPress={() => onSend(draft)} testID="btn-vault-retry">
                 {t("mobile:vault.retry")}
               </Button>
             </View>

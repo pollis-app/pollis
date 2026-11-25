@@ -1,4 +1,5 @@
-import React, { useState, useRef, useCallback, useEffect, useImperativeHandle, useMemo } from "react";
+import React, { useState, useRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo } from "react";
+import { isImeKey } from "../../utils/imeKey";
 import { useTranslation } from "react-i18next";
 import {
   dialogOpen,
@@ -633,7 +634,15 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       });
   };
 
+  // #2099: one submit per rendered draft. Two submits before React renders the cleared input
+  // (an Enter and a click in one task, or `send()` called twice) would both read this `message`.
+  const submittedRef = useRef(false);
+  useLayoutEffect(() => {
+    submittedRef.current = false;
+  });
+
   const handleSend = () => {
+    if (submittedRef.current) { return; }
     if (!message.trim() && attachments.length === 0) { return; }
     if (hasLoadingAttachments || requestSending) { return; }
     const routed = classifyCommandSend(message.trim(), commandCandidates.all, commandCandidates.channelId);
@@ -647,6 +656,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       return;
     }
     // Never waits for a fetch still running: the message goes without it.
+    submittedRef.current = true;
     onSend(message.trim(), attachments, linkPreview.takeForSend(message.trim()));
     clearAfterSend();
     // Don't revoke previews: optimistic stubs may still reference them.
@@ -656,6 +666,10 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   sendRef.current = handleSend;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // #2099: a key of an input method's composition is the IME's, never ours.
+    if (isImeKey(e)) {
+      return;
+    }
     // Before Enter-sends: Enter accepts a suggestion.
     if (showCommandList) {
       if (e.key === "ArrowDown") {
