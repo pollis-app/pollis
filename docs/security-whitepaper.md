@@ -586,9 +586,7 @@ What storing each file once gives up: anyone who already holds a file can comput
 
 An object is deleted once every message and Vault entry that refers to it has been deleted, whoever sent them; one account's delete never removes a file another account's message still holds. Removing an envelope from the DS (after delivery, on account deletion, or with a deleted conversation) does not count, because members keep those messages and fetch their files when they open them. When the last reference goes, the DS deletes the object from R2 and keeps its record of the object until R2 confirms the delete (`pollis-delivery/src/messages.rs`, `reclaim_released_attachments`).
 
-**Operator removal of a stored file.** Because a file is stored once, the operator can remove one stored object, and with it every reference to it, in one action (`POST /v1/ops/attachments/remove`, operator token only; no client can call it). The DS records the removal against the object name, so the identical file cannot be stored or sent again, and apps show "File removed" where it appeared.
-
-**Operator removal of a stored file.** The operator can remove one stored object, and every message and Vault reference to it, in one action (`POST /v1/ops/attachments/remove`, behind its own operator token; no client can call it). The DS records the removal against the object's name and refuses that name from then on, and current apps show the attachment as removed.
+**Operator removal of a stored file.** Because a file is stored once, the operator can remove one stored object, and with it every reference to it, in one action (`POST /v1/ops/attachments/remove`, behind its own operator token; no client can call it). The DS records the removal against the object name, so the identical file cannot be stored or sent again, and apps show "File removed" where it appeared.
 
 ### 9.3 R2 transport
 
