@@ -9,7 +9,7 @@ export interface ToggleIntent {
   mode: "add" | "remove";
 }
 
-/** Mirrors what the query will report (sorted pills, absent when empty); an already-true toggle returns the same map. */
+/** Mirrors what the query will report (sorted pills, `[]` when none); an already-true toggle returns the same map. */
 export function applyReactionToggle(
   previous: ReadonlyMap<string, Reaction[]>,
   { messageId, emoji, userId, mode }: ToggleIntent,
@@ -31,7 +31,8 @@ export function applyReactionToggle(
 
   const next = new Map(previous);
   if (userIds.length === 0 && others.length === 0) {
-    next.delete(messageId);
+    // Still loaded, with no pills: an absent entry would be read again (#2115).
+    next.set(messageId, []);
     return next;
   }
 

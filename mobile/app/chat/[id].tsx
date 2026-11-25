@@ -46,6 +46,7 @@ import {
   useIngestConversation,
   useToggleReaction,
   useConversationReactions,
+  useRevealWithReactions,
   useEditMessage,
   useDeleteMessage,
   useConversationReceipts,
@@ -165,6 +166,12 @@ function TextChat(props: ChatViewProps = {}) {
   const { data: reactionsByMessage } = useConversationReactions(
     conversationId,
     kind,
+    messageIds,
+  );
+  // A fresh open waits (briefly) for its pills, so they paint with their rows (#2115).
+  const listRevealed = useRevealWithReactions(
+    `${kind}:${conversationId}`,
+    reactionsByMessage,
     messageIds,
   );
 
@@ -1090,7 +1097,7 @@ function TextChat(props: ChatViewProps = {}) {
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
         extraData={accentHex}
-        style={{ flex: 1 }}
+        style={{ flex: 1, opacity: listRevealed ? 1 : 0 }}
         // `flex-end` is the visual TOP under `inverted`: anchors a short thread there.
         contentContainerStyle={{
           paddingTop: 4,

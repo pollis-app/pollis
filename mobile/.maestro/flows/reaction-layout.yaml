@@ -1,0 +1,86 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# REACTIONS LAND WITH THEIR MESSAGES (#2115). Reactions live on the DS, not in
+# the local DB, so they used to arrive a beat after their rows and push the
+# chat. Now one `get_reactions_for_messages` reads the page, a fresh open holds
+# the list back until it lands (≤ 150 ms), and a reopen paints from the cache.
+# The flow reacts, cold-restarts (no cache), reopens the channel and takes two
+# screenshots a second apart: the pill is on the first screen and the reacted
+# row has not moved between them (compared by hand or by a pixel diff of
+# reaction-layout-02 / -03). Self-contained: creates a group (→ #General).
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Reaction Layout"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Reaction Layout"
+- tapOn:
+    text: "General"
+- assertVisible:
+    id: "screen-chat"
+
+- tapOn:
+    id: "input-composer"
+- inputText: "first in line"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*first in line.*"
+    timeout: 10000
+- inputText: "react to me"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*react to me.*"
+    timeout: 10000
+- runFlow: ../subflows/message-settled.yaml
+
+# React to the newest message with the sheet's first quick emoji.
+- runFlow: ../subflows/long-press-message.yaml
+- tapOn:
+    id: "btn-react-0"
+- extendedWaitUntil:
+    visible:
+      id: "pill-reaction-.*"
+    timeout: 15000
+- takeScreenshot: reaction-layout-01-reacted
+
+# Cold restart: the reaction map is gone with the process, so this open is the
+# uncached path that used to jump.
+- stopApp
+- launchApp
+- runFlow: ../subflows/enter-pin.yaml
+- runFlow:
+    file: ../subflows/open-group.yaml
+    env:
+      GROUP: "E2E Reaction Layout"
+- tapOn:
+    text: "General"
+- extendedWaitUntil:
+    visible: ".*react to me.*"
+    timeout: 20000
+# The pill is there with its row, not a beat later.
+- assertVisible:
+    id: "pill-reaction-.*"
+- takeScreenshot: reaction-layout-02-first-screen
+# A one-second pause: wait on an id nothing draws.
+- extendedWaitUntil:
+    visible:
+      id: "reaction-layout-pause"
+    timeout: 1000
+    optional: true
+- assertVisible:
+    id: "pill-reaction-.*"
+- takeScreenshot: reaction-layout-03-a-second-later
