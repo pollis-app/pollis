@@ -8,6 +8,7 @@ import {
   filterVaultEntries,
   isVaultEntryEdited,
   vaultAttachments,
+  vaultEntryNotSaved,
   vaultSaveFailure,
   vaultViewerItems,
   type VaultMessage,
@@ -190,4 +191,25 @@ test("a retry of the same draft uploads only what failed", () => {
     src("app/vault.tsx"),
     /setPendingAttachments\(\(current\) => \(current\.length > 0 \? current : attachments\)\)/,
   );
+});
+
+// The Vault's durable queue (#2100).
+test("a save still queued is not in the media view until it is saved", () => {
+  const files = JSON.stringify({
+    _att: [{ key: "", url: "", name: "a.jpg", ct: "image/jpeg", size: 3, hash: "h1", kv: 0, sha: "s" }],
+  });
+  const queued: VaultMessage = { id: "q", content: files, pinned: false, created_at: T0, updated_at: T0, send_state: "failed" };
+  const saved: VaultMessage = { ...queued, id: "s", send_state: undefined };
+  assert.equal(vaultAttachments([queued]).length, 0);
+  assert.equal(vaultAttachments([queued, saved]).length, 1);
+  assert.equal(vaultEntryNotSaved(queued), true);
+  assert.equal(vaultEntryNotSaved({ send_state: "pending" }), false, "a pending save looks saved");
+  assert.equal(vaultEntryNotSaved({ send_state: undefined }), false);
+});
+
+test("the composer saves through the queue with one id per submit", () => {
+  const hook = src("hooks/queries/useVault.ts");
+  assert.match(hook, /invoke<string>\("new_message_id"\)/);
+  assert.match(hook, /messageId,\n\s+attachments: outgoingAttachments\(vars\.attachments\)/);
+  assert.ok(!hook.includes("buildMessageContent"), "files are never uploaded ahead of the queue");
 });

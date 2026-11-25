@@ -1,4 +1,4 @@
-//! A conversation upload fed one chunk at a time (#2100).
+//! An outbox upload (a conversation's or the Vault's) fed one chunk at a time (#2100).
 //!
 //! The outbox keeps an attachment's bytes inside the encrypted local database. Reading the whole
 //! file back, encrypting it in memory and handing the ciphertext to the PUT held two copies of a
@@ -98,11 +98,11 @@ pub(crate) struct StreamUpload {
 }
 
 impl StreamUpload {
-    /// Start an upload of `expected_len` bytes into `conversation_id`. The ring key is resolved
+    /// Start an upload of `expected_len` bytes sealed for `scope`. The ring key is resolved
     /// first, so an unreachable ring fails before any byte is read.
     pub(crate) async fn begin(
         state: &Arc<AppState>,
-        conversation_id: &str,
+        scope: UploadScope,
         content_type: &str,
         expected_len: u64,
     ) -> Result<Self> {
@@ -113,9 +113,7 @@ impl StreamUpload {
             )));
         }
         let slot = super::upload_slot().await;
-        let (key_version, ring_key) =
-            super::upload_ring_key(state, &UploadScope::Conversation(conversation_id.to_string()))
-                .await?;
+        let (key_version, ring_key) = super::upload_ring_key(state, &scope).await?;
         let mut file_id = [0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut file_id);
         let content_hash = hex::encode(file_id);

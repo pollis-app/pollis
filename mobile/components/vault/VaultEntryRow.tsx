@@ -20,6 +20,7 @@ export function VaultEntryRow({
   attachments,
   pinned,
   edited,
+  sendState,
   onOpenActions,
   onTogglePin,
   onEdit,
@@ -32,6 +33,8 @@ export function VaultEntryRow({
   attachments: MessageAttachment[];
   pinned: boolean;
   edited: boolean;
+  /** Still in the Vault's queue (#2100). A pending save looks saved, as a sending message does. */
+  sendState?: "pending" | "failed" | "rejected";
   onOpenActions: () => void;
   onTogglePin: () => void;
   onEdit: () => void;
@@ -47,7 +50,13 @@ export function VaultEntryRow({
     onOpenActions();
   };
 
-  const status = [time, pinned ? t("entry.pinned") : null, edited ? t("entry.edited") : null]
+  const notSaved = sendState === "failed" || sendState === "rejected";
+  const queued = sendState !== undefined;
+  const status = [
+    notSaved ? t("entry.notSaved") : sendState === "pending" ? t("entry.queued") : time,
+    pinned ? t("entry.pinned") : null,
+    edited ? t("entry.edited") : null,
+  ]
     .filter(Boolean)
     .join(", ");
   const label = text
@@ -61,9 +70,13 @@ export function VaultEntryRow({
   const a11yActions = [
     { name: "activate" },
     { name: "longpress" },
-    { name: "togglePin", label: pinned ? t("entry.unpin") : t("entry.pin") },
-    { name: "edit", label: t("entry.edit") },
-    { name: "delete", label: t("entry.delete") },
+    ...(queued
+      ? []
+      : [
+          { name: "togglePin", label: pinned ? t("entry.unpin") : t("entry.pin") },
+          { name: "edit", label: t("entry.edit") },
+          { name: "delete", label: t("entry.delete") },
+        ]),
     ...attachments.map((a, i) => ({
       name: `openAttachment${i}`,
       label: t("chat:attachment.openLabel", { filename: a.filename }),
@@ -108,6 +121,14 @@ export function VaultEntryRow({
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
         <Text style={ty.meta}>{time}</Text>
+        {notSaved ? (
+          <Text
+            testID={`vault-not-saved-${entryId}`}
+            style={[ty.meta, { fontFamily: fonts.semibold, color: semantic.danger }]}
+          >
+            {t("entry.notSaved")}
+          </Text>
+        ) : null}
         {pinned ? (
           <View
             testID={`vault-pinned-${entryId}`}

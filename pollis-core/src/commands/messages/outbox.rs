@@ -131,7 +131,7 @@ fn over_cap(size: u64) -> Option<Error> {
 }
 
 /// Size every attachment and refuse anything over the caps before a byte is read.
-async fn plan_attachments(attachments: &[OutgoingAttachment]) -> Result<Vec<AttMeta>> {
+pub(super) async fn plan_attachments(attachments: &[OutgoingAttachment]) -> Result<Vec<AttMeta>> {
     let mut metas = Vec::with_capacity(attachments.len());
     let mut total: u64 = 0;
     for att in attachments {
@@ -219,7 +219,7 @@ pub(super) fn store_attachment_on(
 }
 
 /// Store one attachment's bytes, locking the DB for that one row only.
-async fn store_attachment(
+pub(super) async fn store_attachment(
     state: &Arc<AppState>,
     id: &str,
     position: usize,
@@ -370,16 +370,16 @@ fn read_attachment_chunk_on(
 
 /// Upload the `n`th stored attachment of `id`, read out of the database one upload chunk at a
 /// time ([`crate::commands::r2::StreamUpload`], #2100), never whole.
-async fn upload_stored_attachment(
+pub(super) async fn upload_stored_attachment(
     state: &Arc<AppState>,
     id: &str,
-    conversation_id: &str,
+    scope: crate::commands::r2::UploadScope,
     n: usize,
     meta: &AttMeta,
 ) -> Result<crate::commands::r2::MediaUploadResult> {
     let mut upload = crate::commands::r2::StreamUpload::begin(
         state,
-        conversation_id,
+        scope,
         &meta.content_type,
         meta.size as u64,
     )
@@ -473,7 +473,7 @@ fn caption(text: &str) -> Option<&str> {
 }
 
 /// The content an unsent attachment message holds until its upload is done.
-fn provisional_content(text: &str, metas: &[AttMeta]) -> String {
+pub(super) fn provisional_content(text: &str, metas: &[AttMeta]) -> String {
     let env = Envelope {
         att: metas
             .iter()
@@ -494,7 +494,7 @@ fn provisional_content(text: &str, metas: &[AttMeta]) -> String {
 }
 
 /// The finished envelope, once every attachment is uploaded.
-fn final_content(
+pub(super) fn final_content(
     text: &str,
     metas: &[AttMeta],
     uploaded: &[crate::commands::r2::MediaUploadResult],
@@ -525,7 +525,7 @@ fn final_content(
 }
 
 /// The caption a provisional envelope carries.
-fn caption_of(content: &str) -> String {
+pub(super) fn caption_of(content: &str) -> String {
     serde_json::from_str::<serde_json::Value>(content)
         .ok()
         .and_then(|v| v.get("_txt").and_then(|t| t.as_str()).map(str::to_string))
@@ -677,7 +677,8 @@ pub(super) fn remove_unsent_on(conn: &rusqlite::Connection, id: &str) -> Result<
 /// Bytes whose message row was never written (killed mid-enqueue); swept at DB open.
 pub(crate) fn sweep_orphan_attachments_on(conn: &rusqlite::Connection) -> Result<usize> {
     Ok(conn.execute(
-        "DELETE FROM outbox_attachment WHERE message_id NOT IN (SELECT id FROM message)",
+        "DELETE FROM outbox_attachment WHERE message_id NOT IN (SELECT id FROM message) \
+         AND message_id NOT IN (SELECT id FROM vault_outbox)",
         [],
     )?)
 }
@@ -705,7 +706,7 @@ pub(super) fn checked_message_id(id: String) -> Result<String> {
     Ok(id)
 }
 
-fn not_signed_in() -> Error {
+pub(super) fn not_signed_in() -> Error {
     Error::Other(anyhow::anyhow!("Not signed in"))
 }
 
@@ -873,6 +874,11 @@ pub(crate) fn mark_suspended_sends_on(conn: &rusqlite::Connection, ids: &[String
     for id in ids {
         marked += conn.execute(
             "UPDATE message SET send_state = ?1 WHERE id = ?2 AND send_state = ?3",
+            rusqlite::params![FAILED, id, PENDING],
+        )?;
+        // A Vault save (#2100) is frozen the same way.
+        marked += conn.execute(
+            "UPDATE vault_outbox SET send_state = ?1 WHERE id = ?2 AND send_state = ?3",
             rusqlite::params![FAILED, id, PENDING],
         )?;
     }
@@ -1156,13 +1162,13 @@ pub(crate) const RETRY_DELAYS: [std::time::Duration; 3] = [
     std::time::Duration::from_secs(15),
 ];
 
-fn retry_delays() -> Vec<std::time::Duration> {
+pub(super) fn retry_delays() -> Vec<std::time::Duration> {
     super::send::test_hooks::retry_delays().unwrap_or_else(|| RETRY_DELAYS.to_vec())
 }
 
 /// Whether the OS says this device has no network at all, so no in-place retry can land (#2055).
 /// Where the OS cannot tell (`None`: mobile, Windows) it is not offline, and the retries run.
-async fn known_offline() -> bool {
+pub(super) async fn known_offline() -> bool {
     if let Some(offline) = super::send::test_hooks::known_offline() {
         return offline;
     }
@@ -1171,7 +1177,7 @@ async fn known_offline() -> bool {
 
 /// What [`deliver`] does after an attempt that failed with a retry still left.
 #[derive(Debug, PartialEq, Eq)]
-enum AfterFailure {
+pub(super) enum AfterFailure {
     /// Stop: the attempt already left the row as it should read (`rejected`, waiting for its
     /// file key, or a simulated kill, which marks nothing).
     Stop,
@@ -1182,7 +1188,7 @@ enum AfterFailure {
 }
 
 /// The one decision behind [`deliver`]'s retries, pure so it is tested on its own.
-fn after_failure(e: &Error, awaiting_key: bool, leaving: bool, offline: bool) -> AfterFailure {
+pub(super) fn after_failure(e: &Error, awaiting_key: bool, leaving: bool, offline: bool) -> AfterFailure {
     if is_permanent(e) || awaiting_key || super::send::test_hooks::is_simulated_crash(e) {
         return AfterFailure::Stop;
     }
@@ -1557,7 +1563,14 @@ async fn finish_attachment_uploads(
     let mut uploaded = Vec::with_capacity(metas.len());
     for (n, meta) in metas.iter().enumerate() {
         uploaded.push(
-            upload_stored_attachment(state, &queued.id, &queued.conversation_id, n, meta).await?,
+            upload_stored_attachment(
+                state,
+                &queued.id,
+                crate::commands::r2::UploadScope::Conversation(queued.conversation_id.clone()),
+                n,
+                meta,
+            )
+            .await?,
         );
     }
     let content = final_content(&caption_of(&queued.content), metas, &uploaded);
@@ -1755,6 +1768,10 @@ async fn drain(state: &Arc<AppState>) -> Result<OutboxReport> {
             }
         }
     }
+    // The Vault's queue (#2100), the same event-driven retry.
+    let (vault_delivered, vault_failed) = super::vault_queue::drain(state).await?;
+    report.delivered.extend(vault_delivered);
+    report.failed.extend(vault_failed);
     // Edits after sends: an edit only ever targets a delivered message, so
     // nothing here waits on the loop above (#1555).
     let (edits_delivered, edits_failed) = super::edit_outbox::drain_edits(state).await?;

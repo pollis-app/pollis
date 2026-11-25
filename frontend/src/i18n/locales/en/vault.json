@@ -19,7 +19,11 @@
     "pin": "Pin entry",
     "unpin": "Unpin entry",
     "edit": "Edit entry",
-    "delete": "Delete entry"
+    "delete": "Delete entry",
+    "queued": "Saving…",
+    "notSaved": "Not saved",
+    "retry": "Retry",
+    "discard": "Discard"
   },
   "edit": {
     "heading": "Edit entry",

@@ -2396,13 +2396,40 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       );
 
     case 'send_vault_message': {
-      const { content } = args as { userId: string; content: string };
+      // The Vault's durable queue (#2100): the files arrive un-uploaded, the id is the client's.
+      const { content: text, messageId } = args as {
+        userId: string;
+        content: string;
+        messageId?: string | null;
+      };
       if (store.failSends) {
         throw 'ds_post /v1/vault/save: error sending request for url (https://api.pollis.test/v1/vault/save): connection closed before message completed';
       }
+      const id = messageId ?? `vault_${store.vaultMessages.length + 1}`;
+      const existing = store.vaultMessages.find((v) => v.id === id);
+      if (existing) {
+        return existing;
+      }
+      const files = (args.attachments ?? []) as Array<{ filename: string; contentType: string }>;
+      const content =
+        files.length === 0
+          ? text
+          : JSON.stringify({
+              _att: files.map((a, i) => ({
+                key: `media/mock-${id}-${i}.enc`,
+                url: `https://r2.mock/media/mock-${id}-${i}.enc`,
+                name: a.filename,
+                ct: a.contentType,
+                size: 0,
+                hash: `mock-${id}-${i}`,
+                kv: 0,
+                sha: `sha-${id}-${i}`,
+              })),
+              ...(text ? { _txt: text } : {}),
+            });
       const now = new Date().toISOString();
       const entry: MockVaultMessage = {
-        id: `vault_${store.vaultMessages.length + 1}`,
+        id,
         user_id: store.session?.id ?? 'u_me',
         content,
         created_at: now,

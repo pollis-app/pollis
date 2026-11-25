@@ -37,6 +37,10 @@ pub struct VaultMessage {
     pub pinned: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// A save still in the Vault's queue (#2100): `pending` while it is tried, `failed` ("Not
+    /// sent", retried by the next drain or Retry), `rejected`. Absent once saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_state: Option<String>,
 }
 
 /// What gets sealed: the entry body plus everything the server must not see.
@@ -46,6 +50,13 @@ pub(crate) struct VaultEntryPlain {
     body: String,
     #[serde(default)]
     pinned: bool,
+}
+
+impl VaultEntryPlain {
+    /// A new, unpinned entry.
+    pub(crate) fn new(body: String) -> Self {
+        Self { v: 1, body, pinned: false }
+    }
 }
 
 /// Derive this account's vault key, salted by the user id.
@@ -121,7 +132,7 @@ pub(crate) fn open_entry(
         .map_err(|e| Error::Other(anyhow::anyhow!("parse vault entry: {e}")))
 }
 
-fn upsert_local(
+pub(crate) fn upsert_local(
     conn: &Connection,
     id: &str,
     content: &str,
@@ -158,6 +169,7 @@ fn list_local(conn: &Connection) -> Result<Vec<VaultMessage>> {
                 pinned: row.get::<_, i64>(2)? != 0,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
+                send_state: None,
             })
         })
         .map_err(|e| Error::Other(anyhow::anyhow!("vault cache query: {e}")))?;
@@ -168,7 +180,7 @@ fn list_local(conn: &Connection) -> Result<Vec<VaultMessage>> {
     Ok(out)
 }
 
-fn get_local(conn: &Connection, id: &str) -> Result<Option<VaultMessage>> {
+pub(crate) fn get_local(conn: &Connection, id: &str) -> Result<Option<VaultMessage>> {
     conn.query_row(
         "SELECT id, content, pinned, created_at, updated_at FROM vault_entry_cache WHERE id = ?1",
         rusqlite::params![id],
@@ -179,6 +191,7 @@ fn get_local(conn: &Connection, id: &str) -> Result<Option<VaultMessage>> {
                 pinned: row.get::<_, i64>(2)? != 0,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
+                send_state: None,
             })
         },
     )
@@ -247,11 +260,15 @@ pub async fn get_vault_messages(user_id: String, state: &Arc<AppState>) -> Resul
     let db = guard
         .as_ref()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    list_local(db.conn())
+    let mut entries = list_local(db.conn())?;
+    // Saves still in the queue (#2100), each with its state, where they will land.
+    entries.extend(crate::commands::messages::vault_queue::queued_on(db.conn())?);
+    entries.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+    Ok(entries)
 }
 
 /// Save remote-first; cache only after the DS accepts.
-async fn save_entry(
+pub(crate) async fn save_entry(
     state: &Arc<AppState>,
     user_id: &str,
     id: &str,
@@ -275,36 +292,37 @@ async fn save_entry(
     super::mls::ds_post_ok(state, &body).await
 }
 
-/// Add a new entry; `content` is a chat composer string.
+/// Add a new entry; `content` is a chat composer string. Durable (#2100): see
+/// [`send_vault_message_with`].
 pub async fn send_vault_message(
     user_id: String,
     content: String,
     state: &Arc<AppState>,
 ) -> Result<VaultMessage> {
-    if content.trim().is_empty() {
+    send_vault_message_with(user_id, None, content, Vec::new(), state).await
+}
+
+/// Save an entry through the Vault's durable queue (#2100), the way a message goes through the
+/// outbox: written locally with its files before any network work, under `message_id` (a
+/// repeat with the same id saves once), then saved. A save that cannot finish now stays queued
+/// and the next drain (unlock, foreground, reconnect) or a Retry finishes it. `text` is the
+/// caption when there are `attachments`, which the queue uploads under the Vault's file key.
+pub async fn send_vault_message_with(
+    user_id: String,
+    message_id: Option<String>,
+    text: String,
+    attachments: Vec<crate::commands::messages::OutgoingAttachment>,
+    state: &Arc<AppState>,
+) -> Result<VaultMessage> {
+    if text.trim().is_empty() && attachments.is_empty() {
         return Err(Error::Other(anyhow::anyhow!("vault entry is empty")));
     }
-    let id = ulid::Ulid::new().to_string();
-    let created_at = super::messages::envelope_sent_at();
-    let entry = VaultEntryPlain {
-        v: 1,
-        body: content.clone(),
-        pinned: false,
-    };
-    save_entry(state, &user_id, &id, &entry, &created_at).await?;
-
-    let guard = state.local_db.lock().await;
-    let db = guard
-        .as_ref()
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    upsert_local(db.conn(), &id, &content, false, &created_at, &created_at)?;
-    Ok(VaultMessage {
-        id,
-        content,
-        pinned: false,
-        created_at: created_at.clone(),
-        updated_at: created_at,
-    })
+    match crate::commands::messages::vault_queue::enqueue(state, message_id, text, attachments).await? {
+        crate::commands::messages::vault_queue::Enqueued::Saved(entry) => Ok(entry),
+        crate::commands::messages::vault_queue::Enqueued::Unsent(id) => {
+            crate::commands::messages::vault_queue::deliver(state, &user_id, &id).await
+        }
+    }
 }
 
 /// Rewrite an entry's body, keeping its pinned flag and creation time.
@@ -357,6 +375,7 @@ pub async fn edit_vault_message(
         pinned: existing.pinned,
         created_at: existing.created_at,
         updated_at,
+        send_state: None,
     })
 }
 
@@ -402,6 +421,7 @@ pub async fn set_vault_message_pinned(
         pinned,
         created_at: existing.created_at,
         updated_at,
+        send_state: None,
     })
 }
 

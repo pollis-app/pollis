@@ -24,6 +24,7 @@ mod send;
 mod types;
 // `pub` so the out-of-workspace `fuzz/` crate can fuzz `next_watermark` (#481).
 pub mod watermark;
+pub mod vault_queue;
 
 // Account deletion (#1866) withdraws the account's undelivered envelopes.
 pub(crate) use delete_capability::withdrawable_envelopes;

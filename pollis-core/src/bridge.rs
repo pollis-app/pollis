@@ -1498,10 +1498,33 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             ok(vault::get_vault_messages(user_id, &state()?).await?)
         }
+        // Durable (#2100): `messageId` makes a repeat save once; files go through the queue.
         "send_vault_message" => {
             let user_id: String = arg(&args, "userId")?;
             let content: String = arg(&args, "content")?;
-            ok(vault::send_vault_message(user_id, content, &state()?).await?)
+            let message_id: Option<String> = arg_opt(&args, "messageId")?;
+            // Expo hands out `file://` URIs; the core reads bare paths.
+            let attachments: Vec<messages::OutgoingAttachment> =
+                arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|mut a| {
+                        a.path = a
+                            .path
+                            .map(|p| p.strip_prefix("file://").unwrap_or(&p).to_string());
+                        a
+                    })
+                    .collect();
+            ok(vault::send_vault_message_with(user_id, message_id, content, attachments, &state()?).await?)
+        }
+        "retry_vault_message" => {
+            let id: String = arg(&args, "id")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(messages::vault_queue::retry_vault_message(id, user_id, &state()?).await?)
+        }
+        "discard_unsent_vault_message" => {
+            let id: String = arg(&args, "id")?;
+            ok(messages::vault_queue::discard_unsent_vault_message(id, &state()?).await?)
         }
         "edit_vault_message" => {
             let id: String = arg(&args, "id")?;
@@ -1849,6 +1872,8 @@ mod tests {
             "list_pinned_messages",
             "get_vault_messages",
             "send_vault_message",
+            "retry_vault_message",
+            "discard_unsent_vault_message",
             "edit_vault_message",
             "set_vault_message_pinned",
             "delete_vault_message",

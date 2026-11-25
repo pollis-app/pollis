@@ -14,11 +14,20 @@ export function VaultEntrySheet({
   quote,
   quoteTime,
   pinned,
+  queued = false,
+  canRetry = false,
+  onRetry,
+  onDiscard,
   onTogglePin,
   onEdit,
   onDelete,
   onClose,
 }: {
+  /** Still in the Vault's queue (#2100): only Retry (when "Not saved") and Discard. */
+  queued?: boolean;
+  canRetry?: boolean;
+  onRetry?: () => void;
+  onDiscard?: () => void;
   quote: string;
   quoteTime: string;
   pinned: boolean;
@@ -55,6 +64,26 @@ export function VaultEntrySheet({
           ) : null}
         </View>
 
+        {queued ? (
+          <Group surface="high">
+            {canRetry ? (
+              <ListRow
+                testID="btn-vault-retry-save"
+                glyph={<Icon.send size={GLYPH} color={semantic.text} />}
+                name={t("entry.retry")}
+                onPress={onRetry}
+              />
+            ) : null}
+            <ListRow
+              testID="btn-vault-discard"
+              glyph={<Icon.trash size={GLYPH} color={semantic.danger} />}
+              name={t("entry.discard")}
+              nameStyle={{ fontFamily: fonts.semibold, color: semantic.danger }}
+              onPress={onDiscard}
+            />
+          </Group>
+        ) : (
+        <>
         <Group surface="high">
           <ListRow
             testID="btn-vault-pin"
@@ -85,6 +114,8 @@ export function VaultEntrySheet({
             onPress={onDelete}
           />
         </Group>
+        </>
+        )}
       </View>
     </SheetOverlay>
   );

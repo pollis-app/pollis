@@ -136,7 +136,8 @@ async fn targets_leave_out_requests_blocked_dms_and_voice_channels() {
     alice.activate();
     let all = share_targets(&alice.state, None, None).await.expect("share_targets");
     let ids: Vec<&str> = all.iter().map(|t| t.conversation_id.as_str()).collect();
-    assert_eq!(ids.first().copied(), Some(general.as_str()), "most recent first: {ids:?}");
+    assert_eq!(ids[0], pollis_core::share::targets::VAULT_TARGET, "the Vault first: {ids:?}");
+    assert_eq!(ids.get(1).copied(), Some(general.as_str()), "then the most recent: {ids:?}");
     assert!(ids.contains(&with_bob.as_str()), "{ids:?}");
     for (id, why) in [(&from_carol, "a request"), (&with_mallory, "a blocked DM"), (&voice, "a voice channel")] {
         assert!(!ids.contains(&id.as_str()), "{why} is no target: {ids:?}");
@@ -371,4 +372,49 @@ async fn signed_out_the_extension_offers_nothing() {
     assert_eq!(open_extension(&nobody).await, Status::SignedOut);
     assert_eq!(session::unlock(Factor::Pin(TEST_PIN.into())).await, Unlock::NoSession);
     assert!(session::targets(None, None).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn the_vault_is_a_target_like_any_chat() {
+    let (alice, bob, dm, _channel) = alice_and_bob().await;
+    alice.activate();
+    let rows = share_targets(&alice.state, None, None).await.expect("targets");
+    assert_eq!(rows[0].kind, TargetKind::Vault, "the Vault comes first");
+    assert_eq!(rows[0].conversation_id, pollis_core::share::targets::VAULT_TARGET);
+
+    let req = request(&[pollis_core::share::targets::VAULT_TARGET, &dm], "keep this");
+    for _ in 0..2 {
+        let queued = enqueue_share(&alice.state, &req).await.expect("enqueue");
+        let results = deliver_share(&alice.state, &queued, |_| {}).await;
+        assert!(results.iter().all(|r| r.status == ShareStatus::Sent), "{results:?}");
+    }
+    let vault = alice
+        .invoke_json("get_vault_messages", json!({ "userId": alice.user_id() }))
+        .await;
+    let saved: Vec<_> = vault.as_array().unwrap().iter().filter(|e| e["content"] == "keep this").collect();
+    assert_eq!(saved.len(), 1, "saved once: {vault}");
+    assert_eq!(
+        saved[0]["id"].as_str().unwrap(),
+        target_message_id(&req.share_id, pollis_core::share::targets::VAULT_TARGET).unwrap()
+    );
+    assert_eq!(copies(&bob, &dm, true, "keep this").await, 1);
+
+    // Six targets with the Vault among them is still over the cap.
+    let six = request(&[pollis_core::share::targets::VAULT_TARGET, "a", "b", "c", "d", "e"], "x");
+    assert!(enqueue_share(&alice.state, &six).await.is_err());
+
+    // From the extension too, interrupted and finished by the app.
+    open_extension(&alice).await;
+    assert_eq!(session::unlock(Factor::Pin(TEST_PIN.into())).await, Unlock::Unlocked);
+    let left = request(&[pollis_core::share::targets::VAULT_TARGET], "saved later");
+    let out = session::send(left.clone(), |_| session::close(), |_| {}).await.expect("stored");
+    assert_eq!(out[0].status, ShareStatus::Queued);
+    alice.flush_outbox().await;
+    let vault = alice
+        .invoke_json("get_vault_messages", json!({ "userId": alice.user_id() }))
+        .await;
+    let later: Vec<_> = vault.as_array().unwrap().iter().filter(|e| e["content"] == "saved later").collect();
+    assert_eq!(later.len(), 1, "{vault}");
+    assert!(later[0].get("send_state").is_none());
 }

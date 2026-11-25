@@ -3,9 +3,10 @@
 //! One query for every picker: the iOS share extension's native list and the Android app's
 //! picker read the same rows in the same order, so the two cannot drift.
 //!
-//! A target is a conversation the user can post in: an accepted DM whose other members the user
-//! has not blocked, or a text channel of a group they belong to. Never a DM request they have
-//! not accepted, and never a voice channel (no message composer). Order: newest local activity
+//! A target is a conversation the user can post in: the Vault (a chat with yourself, always
+//! first), an accepted DM whose other members the user has not blocked, or a text channel of a
+//! group they belong to. Never a DM request they have not accepted, and never a voice channel
+//! (no message composer). After the Vault, order: newest local activity
 //! first (sent or received, as the DM list sorts, #1838), then conversations with none, DMs by
 //! newest made first, then by name; ties break on the id, so the order is total.
 
@@ -33,7 +34,14 @@ const MAX_LIMIT: usize = 500;
 pub enum TargetKind {
     Dm,
     Channel,
+    /// The user's own Vault; its `conversation_id` is [`VAULT_TARGET`].
+    Vault,
 }
+
+pub use crate::commands::messages::vault_queue::VAULT_TARGET;
+
+/// The Vault row's title; hosts show their own localized name for [`TargetKind::Vault`].
+const VAULT_TITLE: &str = "Vault";
 
 /// One row of the picker. Field names are the C ABI's and the bridge's contract.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -56,7 +64,19 @@ pub struct ShareTarget {
 /// Every conversation `user_id` may share to, unranked, from one bootstrap answer.
 pub(crate) fn eligible(user_id: &str, boot: &DirectoryBootstrapResponse) -> Vec<Candidate> {
     let blocked: HashSet<&str> = boot.blocks.iter().map(|b| b.user_id.as_str()).collect();
-    let mut out = Vec::new();
+    let mut out = vec![Candidate {
+        target: ShareTarget {
+            conversation_id: VAULT_TARGET.to_string(),
+            kind: TargetKind::Vault,
+            title: VAULT_TITLE.to_string(),
+            subtitle: None,
+            avatar_user_id: None,
+            last_activity_at: None,
+            group_id: None,
+        },
+        created_at: None,
+        words: vec!["vault".into(), "saved".into(), "notes".into()],
+    }];
     for dm in &boot.dms {
         let others: Vec<_> = dm.members.iter().filter(|m| m.user_id != user_id).collect();
         // A DM with nobody else in it, or with anyone the user has blocked: no target. The DS
@@ -165,7 +185,10 @@ pub(crate) fn rank(
             })
             .collect();
     kept.sort_by(|a, b| {
-        b.0.cmp(&a.0)
+        // The Vault first, always.
+        (b.2.kind == TargetKind::Vault)
+            .cmp(&(a.2.kind == TargetKind::Vault))
+            .then_with(|| b.0.cmp(&a.0))
             .then_with(|| b.1.cmp(&a.1))
             .then_with(|| a.2.title.to_lowercase().cmp(&b.2.title.to_lowercase()))
             .then_with(|| a.2.conversation_id.cmp(&b.2.conversation_id))
@@ -306,11 +329,15 @@ mod tests {
         assert!(!got.contains(&"d-request"), "an unaccepted request: {got:?}");
         assert!(!got.contains(&"d-mallory"), "a blocked DM: {got:?}");
         assert!(!got.contains(&"c-voice"), "a voice channel: {got:?}");
-        for id in ["d-alice", "d-bob", "d-group", "c-general", "c-books"] {
+        for id in [VAULT_TARGET, "d-alice", "d-bob", "d-group", "c-general", "c-books"] {
             assert!(got.contains(&id), "{id} is a target: {got:?}");
         }
         assert_eq!(
-            ineligible("me", &boot(), &["d-alice".into(), "d-request".into(), "c-voice".into(), "nope".into()]),
+            ineligible(
+                "me",
+                &boot(),
+                &[VAULT_TARGET.into(), "d-alice".into(), "d-request".into(), "c-voice".into(), "nope".into()]
+            ),
             vec!["d-request".to_string(), "c-voice".into(), "nope".into()]
         );
     }
@@ -322,10 +349,12 @@ mod tests {
             ("d-alice".to_string(), "2026-06-01T00:00:00+00:00".to_string()),
         ]);
         let all = rank(eligible("me", &boot()), &latest, None, 100);
-        assert_eq!(ids(&all)[..2], ["c-books", "d-alice"]);
-        // No activity: DMs newest-made first, then channels (no creation time), by id.
-        assert_eq!(ids(&all)[2..], ["d-bob", "d-group", "c-general"]);
-        assert_eq!(all[1].last_activity_at.as_deref(), Some("2026-06-01T00:00:00+00:00"));
+        assert_eq!(ids(&all)[0], VAULT_TARGET, "the Vault first, whatever the activity");
+        assert_eq!(ids(&all)[1..3], ["c-books", "d-alice"]);
+        // No activity: DMs newest-made first, then channels (no creation time), by name.
+        assert_eq!(ids(&all)[3..], ["d-bob", "d-group", "c-general"]);
+        assert_eq!(all[2].last_activity_at.as_deref(), Some("2026-06-01T00:00:00+00:00"));
+        assert_eq!(all[0].kind, TargetKind::Vault);
     }
 
     #[test]
@@ -361,7 +390,8 @@ mod tests {
         assert_eq!(find("BOOK club gen"), ["c-general"]);
         assert!(find("mallory").is_empty(), "a blocked DM never matches");
         assert!(find("lounge").is_empty(), "a voice channel never matches");
-        assert_eq!(find("   ").len(), 5, "a blank query is no filter");
+        assert_eq!(find("   ").len(), 6, "a blank query is no filter");
+        assert_eq!(find("vault"), [VAULT_TARGET]);
     }
 
     #[test]

@@ -4,7 +4,9 @@
 //! [`MAX_TARGETS`](super::targets::MAX_TARGETS) conversations. Each target gets its own ordinary
 //! message, sealed under that conversation's MLS group and its files under that conversation's
 //! file key ring (#1382): nothing is reused across conversations, and nothing on the wire tells a
-//! shared message from a typed one.
+//! shared message from a typed one. The Vault is a target like any other: its copy is a Vault
+//! entry, queued through the Vault's own durable queue (`messages::vault_queue`) and sealed
+//! under the account's Vault keys.
 //!
 //! Two halves, so nothing is lost or doubled:
 //! - [`enqueue_share`] writes every target's outbox row (#1335), files included, before any
@@ -202,6 +204,26 @@ pub async fn enqueue_share(state: &Arc<AppState>, req: &ShareRequest) -> Result<
     let mut result = Ok(());
     for conversation_id in &req.targets {
         let message_id = target_message_id(&req.share_id, conversation_id)?;
+        if conversation_id == super::targets::VAULT_TARGET {
+            let stored = crate::commands::messages::vault_queue::enqueue(
+                state,
+                Some(message_id.clone()),
+                req.text.clone(),
+                attachments.clone(),
+            )
+            .await;
+            match stored {
+                Ok(_) => queued.push(QueuedShare {
+                    conversation_id: conversation_id.clone(),
+                    message_id,
+                }),
+                Err(e) => {
+                    result = Err(e);
+                    break;
+                }
+            }
+            continue;
+        }
         let stored = crate::commands::messages::enqueue_message(
             Some(message_id.clone()),
             conversation_id.clone(),
@@ -240,14 +262,30 @@ where
     F: Fn(&ShareOutcome) + Send + Sync,
 {
     let progress = &progress;
+    let user_id = crate::commands::mls::current_user_id(state).await.unwrap_or_default();
+    let user_id = &user_id;
     let one = |q: QueuedShare| async move {
-        if let Err(e) = crate::commands::messages::deliver_queued_message(state, &q.message_id, None).await {
-            crate::diag!("[share] delivery of {} not finished: {e}", q.message_id);
-        }
-        let status = match crate::commands::messages::send_state_of(state, &q.message_id).await {
-            Ok(Some(None)) => ShareStatus::Sent,
-            Ok(Some(Some(s))) if s == "rejected" => ShareStatus::Rejected,
-            _ => ShareStatus::Queued,
+        let status = if q.conversation_id == super::targets::VAULT_TARGET {
+            match crate::commands::messages::vault_queue::deliver(state, user_id, &q.message_id).await {
+                Ok(_) => ShareStatus::Sent,
+                Err(e) => {
+                    crate::diag!("[share] Vault save of {} not finished: {e}", q.message_id);
+                    if crate::commands::messages::vault_queue::is_rejected(state, &q.message_id).await {
+                        ShareStatus::Rejected
+                    } else {
+                        ShareStatus::Queued
+                    }
+                }
+            }
+        } else {
+            if let Err(e) = crate::commands::messages::deliver_queued_message(state, &q.message_id, None).await {
+                crate::diag!("[share] delivery of {} not finished: {e}", q.message_id);
+            }
+            match crate::commands::messages::send_state_of(state, &q.message_id).await {
+                Ok(Some(None)) => ShareStatus::Sent,
+                Ok(Some(Some(s))) if s == "rejected" => ShareStatus::Rejected,
+                _ => ShareStatus::Queued,
+            }
         };
         let outcome = ShareOutcome {
             conversation_id: q.conversation_id,

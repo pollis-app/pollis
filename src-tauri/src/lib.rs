@@ -659,6 +659,8 @@ pub fn run() {
             commands::pinned_messages::list_pinned_messages,
             commands::vault::get_vault_messages,
             commands::vault::send_vault_message,
+            commands::vault::retry_vault_message,
+            commands::vault::discard_unsent_vault_message,
             commands::vault::edit_vault_message,
             commands::vault::set_vault_message_pinned,
             commands::vault::delete_vault_message,

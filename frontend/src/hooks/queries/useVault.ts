@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
+import type { OutgoingAttachment } from "../../utils/attachmentEnvelope";
 
 /** The Vault (#107): sealed under the account key in Rust; a new device decrypts all of it. */
 
@@ -13,6 +14,8 @@ export interface VaultMessage {
   pinned: boolean;
   created_at: string;
   updated_at: string;
+  /** Still in the Vault's queue (#2100): saving, or "Not saved" until a retry. Absent once saved. */
+  send_state?: "pending" | "failed" | "rejected";
 }
 
 const vaultQueryKeys = {
@@ -51,10 +54,43 @@ function useVaultMutation<TVars>(
   });
 }
 
-/** Add one entry built by `buildMessageContent`. */
+/**
+ * Add one entry through the Vault's durable queue (#2100): the files go to the core un-uploaded,
+ * and `messageId` (minted once per submit) makes a repeat save once.
+ */
 export function useSendVaultMessage() {
-  return useVaultMutation<{ content: string }>((vars, userId) =>
-    invoke("send_vault_message", { userId, content: vars.content }),
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useMutation({
+    mutationFn: async (vars: { messageId: string; text: string; attachments: OutgoingAttachment[] }) => {
+      if (!currentUser) {
+        throw new Error("Not signed in");
+      }
+      return await invoke<VaultMessage>("send_vault_message", {
+        userId: currentUser.id,
+        content: vars.text,
+        messageId: vars.messageId,
+        attachments: vars.attachments,
+      });
+    },
+    // Settled either way: a save that failed after it was queued shows as "Not saved".
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: vaultQueryKeys.all });
+    },
+  });
+}
+
+/** Retry a queued save that reads "Not saved". */
+export function useRetryVaultMessage() {
+  return useVaultMutation<{ id: string }>((vars, userId) =>
+    invoke("retry_vault_message", { id: vars.id, userId }),
+  );
+}
+
+/** Drop a queued save that was never saved. */
+export function useDiscardUnsentVaultMessage() {
+  return useVaultMutation<{ id: string }>((vars) =>
+    invoke("discard_unsent_vault_message", { id: vars.id }),
   );
 }
 
