@@ -9,6 +9,7 @@ import { useNamedMediaUri } from "../../hooks/useNamedMediaUri";
 import { IconButton, PressInPressable } from "../ui";
 import { Icon } from "../icons";
 import { MediaStatus } from "./MediaStatus";
+import { mediaProblem } from "../../lib/media/removed";
 import { formatClock } from "../../lib/media/viewer";
 import { formatBytes } from "../../lib/exportArchive";
 import { fonts, layout, semantic, space, type as ty } from "../../theme/tokens";
@@ -57,9 +58,10 @@ export function AudioPage({
   }, [active, player]);
 
   if (error) {
+    const problem = mediaProblem(attachment, error);
     return (
       <View testID={testID} style={{ width, height }}>
-        <MediaStatus state="error" />
+        <MediaStatus state={problem === "removed" || problem === "update" ? problem : "error"} />
       </View>
     );
   }

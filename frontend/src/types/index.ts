@@ -181,10 +181,12 @@ export interface MessageReceipts {
   read_by: string[];
 }
 
-/** Mirrors `pollis_core::commands::r2::AttachmentKeyScope` (#1382). */
+/** Mirrors `pollis_core::commands::r2::AttachmentKeyScope` (#1382, #2109). */
 export type AttachmentKeyScope =
   | { kind: "conversation"; conversation_id: string; key_version: number }
-  | { kind: "vault" };
+  | { kind: "vault" }
+  // A shared object (`v: 2`): keyed by the reference's own plaintext digest.
+  | { kind: "content" };
 
 /** Where a content string came from, which decides its attachments' key scope. */
 export type ContentOrigin = { conversationId: string } | "vault";
@@ -207,11 +209,15 @@ export interface MessageLinkPreview {
 export interface MessageAttachment {
   id: string;
   object_key: string;       // R2 object key — empty string while upload is in progress
-  // Random file id (#1382), not derived from the content.
+  // The object id: a random file id (#1382) or a shared `v2-` id (#2109). Never key material.
   content_hash: string;
   sha256: string;           // plaintext SHA-256, verified after decrypt
   // null while uploading, or for a pre-#1382 reference that can no longer be opened
   key_scope: AttachmentKeyScope | null;
+  // The reference version: 2 for a shared object (#2109), 1 before it.
+  version?: number;
+  // A reference from a newer app version than this one: drawn as "update to open".
+  needs_update?: boolean;
   filename: string;
   content_type: string;
   file_size: number;

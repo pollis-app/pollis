@@ -100,9 +100,11 @@ function newerOf(a: PageCursor, b: PageCursor): PageCursor {
 
 interface MainContentProps {
   pendingDmRequest?: PendingDmRequest | null;
+  /** Focus the composer on mount; off where the chat sits beside something else (the call's panel, #2116). */
+  autoFocus?: boolean;
 }
 
-export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequest = null }) => {
+export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequest = null, autoFocus = true }) => {
   probeRender("MainContent");
   const { t } = useTranslation("nav");
   const {
@@ -911,7 +913,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             onSend={handleSend}
             onValueChange={typing.notify}
             linkPreviews
-            autoFocus
+            autoFocus={autoFocus}
             onHistoryUp={() => {
               messageNavStore.dispatch({ type: "enter" });
               return messageNavStore.active;

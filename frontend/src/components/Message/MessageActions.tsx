@@ -134,7 +134,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   const containerClass =
     variant === "modern"
       ? `absolute end-4 top-0 -translate-y-1/2 flex items-center gap-1 rounded-control border border-line bg-surface-raised px-1 py-0.5 transition-opacity ${visibilityClass}`
-      : `flex-shrink-0 ms-2 flex items-center gap-4 h-6 ${visibilityClass}`;
+      : `msg-term-actions flex-shrink-0 ms-2 flex items-center gap-4 h-6 ${visibilityClass}`;
 
   // `font-mono`: Terminal's UI face; Modern swaps it back to sans (#1964).
   const menuRowClass =

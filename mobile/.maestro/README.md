@@ -514,6 +514,15 @@ the device must draw `video-poster-pv` for the first and `video-poster-local`
 then send a video of its own (`two-client/video-posters/2-posters.yaml`). The
 script passes only when the peer finds a JPEG `pv` in the device's envelope.
 
+**The same file from two accounts (automated, #2109):** `mobile/scripts/maestro-shared-file.sh <device>`
+— the pins shape with `pollis-tui`'s `shared_file_peer` example (needs the dev R2
+origins): the device opens a DM with a fresh peer (`two-client/pins/1-open-dm.yaml`)
+and sends a photo (`two-client/shared-file/2-send-photo.yaml`); the peer opens it
+and sends the exact bytes back, then checks the references (`PEER_ECHO`): with the
+DS's shared-upload switch on, one stored object; off (v1), two, each opening for
+the other. The device must then draw the echo from R2
+(`two-client/shared-file/3-see-echo.yaml`), never `media-unavailable`.
+
 **Group membership without timeline lines (automated, #1506):** `mobile/scripts/maestro-membership.sh <device>`
 — `pollis-tui`'s `membership_peer` example plays the group's creator, and signs
 up a second account that stays a pending invitee. The creator invites the

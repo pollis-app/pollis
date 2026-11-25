@@ -107,6 +107,8 @@
     "error": "오류",
     "failedToLoad": "불러오지 못했습니다",
     "failedToDownload": "다운로드하지 못했습니다",
+    "removed": "파일이 삭제되었습니다",
+    "updateToOpen": "이 파일을 열려면 Pollis를 업데이트하세요",
     "lightboxFetch": "가져오기",
     "lightboxDone": "완료",
     "lightboxDoneTerminal": "[ 완료 ]",

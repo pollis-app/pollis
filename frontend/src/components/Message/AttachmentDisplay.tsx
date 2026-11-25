@@ -12,10 +12,12 @@ import { spotlightRoll } from "../../utils/mediaRoll";
 import {
   announceMediaLoaded,
   getMediaUrl,
+  isAttachmentRemoved,
   peekMediaUrl,
   saveAttachmentAs,
   subscribeMediaResolved,
 } from "../../services/r2-upload";
+import { AttachmentNotice } from "./AttachmentNotice";
 import { MediaSpotlight } from "./MediaSpotlight";
 import { DownloadStatusIcon } from "./DownloadStatusIcon";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -127,7 +129,18 @@ export const AttachmentDisplay = observer(({
       ((isImage || isAudio) && attachment.object_key ? peekMediaUrl(attachment) : null)
   );
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorText] = useState<string | null>(null);
+  // The operator removed this file (#2109): said once, never retried.
+  const [removed, setRemoved] = useState(false);
+  const setError = (text: string | null, err?: unknown) => {
+    if (err !== undefined && isAttachmentRemoved(err)) {
+      setRemoved(true);
+      return;
+    }
+    setErrorText(text);
+  };
+  // Nothing this build can fetch: a reference from a newer app, or a removed file.
+  const unopenable = removed || attachment.needs_update === true;
   const [viewerOpen, setViewerOpen] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState<"idle" | "downloading" | "done">("idle");
   const [duration, setDuration] = useState<number | null>(null);
@@ -159,7 +172,7 @@ export const AttachmentDisplay = observer(({
   // video (#1894), else a frame decoded here and saved, fetching the file for that only
   // while it is small. Once per video, not per render.
   const needsLocalPoster =
-    isVideo && !attachment.poster && !isPending && !sensitivity.hidden;
+    isVideo && !attachment.poster && !isPending && !sensitivity.hidden && !unopenable;
   useEffect(() => {
     if (!needsLocalPoster) { return; }
     let mounted = true;
@@ -196,7 +209,7 @@ export const AttachmentDisplay = observer(({
 
   // Auto-load images and audio once confirmed, via the loopback media server.
   useEffect(() => {
-    if ((!isImage && !isAudio) || isPending || downloadUrl) {
+    if ((!isImage && !isAudio) || isPending || downloadUrl || unopenable) {
       return;
     }
     if (renderFailuresRef.current > MAX_RENDER_RETRIES) {
@@ -214,7 +227,7 @@ export const AttachmentDisplay = observer(({
     fetchUrl.then((url) => {
       if (mounted) { setDownloadUrl(url); }
     }).catch((err) => {
-      if (mounted) { setError(errorMessage(err, t("attachment.failedToLoad"))); }
+      if (mounted) { setError(errorMessage(err, t("attachment.failedToLoad")), err); }
     }).finally(() => {
       if (mounted) { setIsLoading(false); }
     });
@@ -264,7 +277,7 @@ export const AttachmentDisplay = observer(({
         setTimeout(() => setDownloadStatus("idle"), 2000);
       }
     } catch (err) {
-      setError(errorMessage(err, t("attachment.failedToDownload")));
+      setError(errorMessage(err, t("attachment.failedToDownload")), err);
       setDownloadStatus("idle");
     }
   };
@@ -280,7 +293,7 @@ export const AttachmentDisplay = observer(({
       setDownloadUrl(url);
       setViewerOpen(true);
     } catch (err) {
-      setError(errorMessage(err, t("attachment.failedToLoad")));
+      setError(errorMessage(err, t("attachment.failedToLoad")), err);
     } finally {
       setIsLoading(false);
     }
@@ -350,6 +363,17 @@ export const AttachmentDisplay = observer(({
       {!isPending && downloadButton}
     </div>
   );
+
+  if (unopenable) {
+    return (
+      <AttachmentNotice
+        testId={cardTestId}
+        filename={attachment.filename}
+        kind={removed ? "removed" : "update"}
+        notice={removed ? t("attachment.removed") : t("attachment.updateToOpen")}
+      />
+    );
+  }
 
   if (isImage && !undecodable) {
     return (

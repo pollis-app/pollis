@@ -41,6 +41,11 @@ pub enum Error {
     #[error("upgrade_required")]
     UpgradeRequired,
 
+    /// The operator removed this stored file (#2109); it cannot be fetched or
+    /// sent again. Renderers match the exact text and show "File removed".
+    #[error("attachment_removed")]
+    AttachmentRemoved,
+
     /// A voice join failed; `Display` is the `voice_join:<kind>` wire form the renderer matches.
     #[error("{0}")]
     VoiceJoin(crate::commands::voice_join_error::VoiceJoinError),

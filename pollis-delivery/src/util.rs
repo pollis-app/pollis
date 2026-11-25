@@ -126,6 +126,11 @@ pub fn http_delete(upstream: Upstream, url: &str) -> reqwest::RequestBuilder {
     http_client().delete(url).timeout(upstream.timeout())
 }
 
+/// [`http_post`]'s HEAD twin, with the same mandatory deadline.
+pub fn http_head(upstream: Upstream, url: &str) -> reqwest::RequestBuilder {
+    http_client().head(url).timeout(upstream.timeout())
+}
+
 /// The shared outbound HTTP client. **Private** — go through [`http_post`], which
 /// is what makes the timeout unforgettable.
 ///

@@ -59,10 +59,12 @@ export const lastMessageQueryKeys = {
 
 interface AttachmentWire {
   key: string;
-  /** The object's random file id (#1382). */
+  /** The object id: a random file id (#1382) or a shared `v2-` id (#2109). */
   hash: string;
-  /** Which key of the conversation's file key ring sealed it; `0` in the Vault. */
+  /** Which key of the conversation's file key ring sealed a v1 file; `0` in the Vault. */
   kv?: number;
+  /** The reference version: `2` for a shared object (#2109); absent for v1. */
+  v?: number;
   /** Plaintext SHA-256, verified after decrypt. */
   sha?: string;
   name: string;
@@ -171,6 +173,8 @@ function attachmentFromWire(
     content_hash: a.hash ?? '',
     sha256: a.sha ?? '',
     key_scope: keyScopeFor(a, origin),
+    version: a.v === 2 ? 2 : 1,
+    ...(isNewerReference(a) ? { needs_update: true } : {}),
     filename: a.name,
     content_type: a.ct,
     file_size: a.size,
@@ -244,9 +248,21 @@ function posterOf(pv: unknown): string | undefined {
   return /^[A-Za-z0-9+/]+={0,2}$/.test(pv) ? pv : undefined;
 }
 
-/** The attachment's key, or null if it can't be opened (uploading, or pre-#1382). */
+/** A reference version this build does not know (#2109): shown as "update to open", never fetched. */
+function isNewerReference(a: AttachmentWire): boolean {
+  return typeof a.v === 'number' && a.v > 2;
+}
+
+/** The attachment's key, or null if it can't be opened (uploading, pre-#1382, or from a newer app). */
 function keyScopeFor(a: AttachmentWire, origin: ContentOrigin): AttachmentKeyScope | null {
-  if (!a.key || !a.sha || typeof a.kv !== 'number') {
+  if (!a.key || !a.sha || isNewerReference(a)) {
+    return null;
+  }
+  // A shared object (#2109) opens under its own reference, wherever it is.
+  if (a.v === 2) {
+    return { kind: 'content' };
+  }
+  if (typeof a.kv !== 'number') {
     return null;
   }
   if (origin === 'vault') {

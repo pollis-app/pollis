@@ -262,19 +262,30 @@ secret access key is never logged.
 
 ## Why R2 presign needs no per-object READ authz
 
-Pollis media is sealed under a key the DS never holds (#1382; see pollis-core's
-`r2.rs` and `file_keys.rs`): each file's AES-256-GCM key derives from its
-conversation's **file key ring** — which reaches the DS only wrapped under an
-MLS exporter KEK (`file_keystate`) — salted by the file's random id, which is
-also the object's name. Nothing in the bucket or in `attachment_object` /
-`attachment_ref` is key material. A presigned URL therefore only ever exposes
-**ciphertext** — confidentiality comes from MLS key distribution (only a current
-member can unwrap the ring), **not** from the R2 ACL.
+Pollis media is sealed under a key the DS never holds (#2109; see pollis-core's
+`shared_files.rs` and `r2.rs`): each file's AES-256-GCM key derives from the
+SHA-256 of its plaintext, which travels only inside the end-to-end encrypted
+message (or Vault entry), and the object is named after the SHA-256 of its
+**ciphertext**, which yields no key. Files stored before #2109 derive their key
+from the conversation's **file key ring** (#1382), which reaches the DS only
+wrapped under an MLS exporter KEK (`file_keystate`), salted by a random file id.
+Nothing in the bucket or in `attachment_object` / `attachment_ref` /
+`attachment_lease` is key material. A presigned URL therefore only ever exposes
+**ciphertext** — confidentiality comes from MLS key distribution, **not** from
+the R2 ACL.
 
-(Until #1382 media was convergent-encrypted: the key derived from
-`SHA-256(plaintext)`, which also named the object and sat in
+A `put` of a shared object (`media/v2-<hex>.enc`) additionally signs
+`x-amz-checksum-sha256` (the digest the name carries) and `If-None-Match: *`,
+so R2 accepts only the bytes the name is the hash of, and only once: the name
+is computable by anyone holding the file, so without these anyone could store
+other bytes under it first.
+
+(Until #1382 media was convergent-encrypted with ONE derivation: the key derived
+from `SHA-256(plaintext)`, which also named the object and sat in
 `attachment_object`, so the bucket plus that table decrypted every attachment.
-That scheme was broken and replaced; the argument above did not hold then.)
+That scheme was broken and replaced; the argument above did not hold then.
+#2109's convergent scheme keeps the key and the name on separate derivations,
+so the name is never the key.)
 
 So for `get` the presign gate exists solely to stop **anonymous internet
 access** to the bucket; it does not — and cannot meaningfully — enforce read

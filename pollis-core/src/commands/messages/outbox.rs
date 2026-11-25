@@ -35,8 +35,12 @@ pub(crate) const FAILED: &str = "failed";
 /// The DS refused it in a way no retry fixes; the drain leaves it to the user.
 pub(crate) const REJECTED: &str = "rejected";
 
-/// Whether `e` is a refusal no retry fixes: DS 400, 403, 404, 410 or 422.
+/// Whether `e` is a refusal no retry fixes: DS 400, 403, 404, 410 or 422, or
+/// an attachment the operator removed (#2109).
 pub(super) fn is_permanent(e: &Error) -> bool {
+    if matches!(e, Error::AttachmentRemoved) {
+        return true;
+    }
     let Error::Other(any) = e else {
         return false;
     };
@@ -259,12 +263,19 @@ struct AttWire<'a> {
     name: &'a str,
     ct: &'a str,
     size: usize,
-    /// The object's random file id (not a content hash, #1382).
+    /// The object id: a random file id (v1, #1382), or `v2-` + SHA-256 of
+    /// the stored ciphertext (a shared object, #2109).
     hash: &'a str,
-    /// Which key of the conversation's file key ring sealed it.
-    kv: i64,
-    /// SHA-256 of the plaintext, checked after decrypt. Only ever inside the
-    /// MLS-encrypted message.
+    /// v1: which key of the conversation's file key ring sealed it. Absent
+    /// for a shared object, so an older client draws it as unavailable
+    /// instead of trying a ring key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kv: Option<i64>,
+    /// `2` for a shared object (#2109), keyed by `sha`; absent for v1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    v: Option<u8>,
+    /// SHA-256 of the plaintext, checked after decrypt (and, for a shared
+    /// object, its key's source). Only ever inside the MLS-encrypted message.
     sha: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     bh: Option<&'a str>,
@@ -360,7 +371,8 @@ fn final_content(
                 ct: &r.content_type,
                 size: r.size_bytes,
                 hash: &r.content_hash,
-                kv: r.key_version,
+                kv: (r.version != crate::commands::r2::SHARED_ATTACHMENT_VERSION).then_some(r.key_version),
+                v: (r.version == crate::commands::r2::SHARED_ATTACHMENT_VERSION).then_some(r.version),
                 sha: &r.sha256,
                 bh: r.blurhash.as_deref().or(a.blurhash.as_deref()),
                 w: r.width.or(a.width),
@@ -501,6 +513,7 @@ pub(super) async fn upload_preview_thumbnail(
         url: up.url,
         hash: up.content_hash,
         kv: up.key_version,
+        v: (up.version == crate::commands::r2::SHARED_ATTACHMENT_VERSION).then_some(up.version),
         sha: up.sha256,
         ct: crate::commands::link_preview::THUMBNAIL_CONTENT_TYPE.to_string(),
         size: up.size_bytes,
@@ -1979,6 +1992,7 @@ mod tests {
             content_type: "video/mp4".to_string(),
             size_bytes: 1,
             content_hash: "abc".to_string(),
+            version: 1,
             key_version: 2,
             sha256: "d1g".to_string(),
             blurhash: None,
@@ -2022,6 +2036,7 @@ mod tests {
             content_type: "image/png".to_string(),
             size_bytes: 1,
             content_hash: n.to_string(),
+            version: 1,
             key_version: 1,
             sha256: "s".to_string(),
             blurhash: None,
@@ -2070,6 +2085,7 @@ mod tests {
             content_type: ct.to_string(),
             size_bytes: 1,
             content_hash: n.to_string(),
+            version: 1,
             key_version: 1,
             sha256: "s".to_string(),
             blurhash: None,
@@ -2271,6 +2287,7 @@ mod tests {
         assert_eq!(after_failure(&Error::UpgradeRequired, false, false, false), AfterFailure::GiveUp);
         assert_eq!(after_failure(&refused(), false, false, false), AfterFailure::Stop, "rejected");
         assert_eq!(after_failure(&link(), true, false, false), AfterFailure::Stop, "file key");
+        assert_eq!(after_failure(&Error::AttachmentRemoved, false, false, false), AfterFailure::Stop, "removed file");
         assert_eq!(
             after_failure(&super::super::send::test_hooks::simulated_crash(), false, false, false),
             AfterFailure::Stop

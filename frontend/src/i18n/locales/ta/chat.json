@@ -118,6 +118,8 @@
     "error": "பிழை",
     "failedToLoad": "ஏற்ற முடியவில்லை",
     "failedToDownload": "பதிவிறக்க முடியவில்லை",
+    "removed": "கோப்பு நீக்கப்பட்டது",
+    "updateToOpen": "இந்தக் கோப்பைத் திறக்க Pollis-ஐப் புதுப்பிக்கவும்",
     "lightboxFetch": "பெறு",
     "lightboxDone": "முடிந்தது",
     "lightboxDoneTerminal": "[ முடிந்தது ]",
