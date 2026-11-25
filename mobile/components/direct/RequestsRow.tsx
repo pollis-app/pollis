@@ -31,7 +31,7 @@ export function RequestsRow({
         paddingVertical: space.sm,
         paddingHorizontal: space.lg,
         borderRadius: r.box,
-        backgroundColor: pressed ? semantic.raised : semantic.panel,
+        backgroundColor: pressed ? semantic.high : semantic.raised,
       })}
     >
       <View style={{ width: layout.touchMin, alignItems: "center" }}>

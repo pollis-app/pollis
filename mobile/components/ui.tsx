@@ -272,8 +272,11 @@ export function IconButton({
   style,
   pressIn,
   selected,
+  surface = "base",
 }: {
   icon: React.ReactNode;
+  // What it sits on: on a `raised` card a `raised` fill would vanish (as Button and Field).
+  surface?: ControlSurface;
   onPress?: () => void;
   // Act on touch-down (#1529); see usePressIn.
   pressIn?: boolean;
@@ -309,13 +312,19 @@ export function IconButton({
           justifyContent: "center",
           // Disabled is never a fade: Android fades children separately (#3/#4).
           backgroundColor: disabled
-            ? controlDisabled(currentTheme()).fill
+            ? controlDisabled(currentTheme(), surface).fill
             : filled
               ? pressed
-                ? semantic.high
-                : semantic.raised
+                ? surface === "raised"
+                  ? semantic.accentSoft
+                  : semantic.high
+                : surface === "raised"
+                  ? semantic.high
+                  : semantic.raised
               : pressed
-                ? semantic.raised
+                ? surface === "raised"
+                  ? semantic.high
+                  : semantic.raised
                 : "transparent",
         },
         style,

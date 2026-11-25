@@ -29,7 +29,7 @@ export function ProfileCard({
       style={{
         padding: space.xxl,
         borderRadius: r.box,
-        backgroundColor: semantic.panel,
+        backgroundColor: semantic.raised,
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: space.xl }}>
@@ -40,7 +40,7 @@ export function ProfileCard({
           label={displayName}
           size="lg"
           variant="self"
-          on="panel"
+          on="raised"
         />
         <View
           accessible
@@ -64,6 +64,7 @@ export function ProfileCard({
         <IconButton
           testID="btn-edit-profile"
           filled
+          surface="raised"
           accessibilityLabel={t("mobile:self.hub.editProfile")}
           onPress={onEdit}
           icon={<Icon.pencil size={20} color={semantic.text} />}
