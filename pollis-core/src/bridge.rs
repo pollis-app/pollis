@@ -1349,10 +1349,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             messages::remove_reaction(message_id, user_id, emoji, &state()?).await?;
             ok(())
         }
-        "get_reactions" => {
-            let message_id: String = arg(&args, "messageId")?;
-            ok(messages::get_reactions(message_id, &state()?).await?)
-        }
         "get_reactions_for_messages" => {
             let message_ids: Vec<String> = arg(&args, "messageIds")?;
             ok(messages::get_reactions_for_messages(message_ids, &state()?).await?)
