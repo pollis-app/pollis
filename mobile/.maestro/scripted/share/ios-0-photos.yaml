@@ -28,19 +28,22 @@ appId: com.apple.mobileslideshow
       notVisible: "Share"
     times: 4
     commands:
-      # A long library opens at its newest photos, the first one under the header: scroll it
-      # into view first (in an open photo the same swipe goes back to the grid).
-      - swipe:
-          direction: DOWN
-          duration: 300
-      - waitForAnimationToEnd:
-          timeout: 1500
       - tapOn:
           text: "Photo, .*"
           index: 0
           optional: true
       - waitForAnimationToEnd:
           timeout: 2000
+      # A long library opens at its newest photos with the first one under the header: the
+      # middle of the grid is a photo then (in an open photo the tap brings the controls back).
+      - runFlow:
+          when:
+            notVisible: "Share"
+          commands:
+            - tapOn:
+                point: "50%,55%"
+            - waitForAnimationToEnd:
+                timeout: 2000
 - extendedWaitUntil:
     visible: "Share"
     timeout: 10000
