@@ -27,7 +27,7 @@ import {
   useVaultMessages,
   type VaultMessage,
 } from "../hooks/queries/useVault";
-import { buildMessageContent } from "../utils/attachmentEnvelope";
+import { buildMessageContent, referenceKeyFields } from "../utils/attachmentEnvelope";
 import { vaultSaveFailure, type VaultSaveFailure } from "../utils/vaultSaveFailure";
 import { formatClockTime, formatDayDivider } from "../utils/format";
 import type { MessageAttachment } from "../types";
@@ -147,7 +147,7 @@ export const VaultPage: React.FC = observer(() => {
               ct: a.content_type,
               size: a.file_size,
               hash: a.content_hash,
-              kv: 0,
+              ...referenceKeyFields(a.version, 0),
               sha: a.sha256,
               bh: a.blurhash,
               w: a.width,

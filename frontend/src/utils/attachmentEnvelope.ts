@@ -8,9 +8,11 @@ type MediaUploadResult = {
   filename: string;
   content_type: string;
   size_bytes: number;
-  /** The object's random file id (#1382), not a content hash. */
+  /** The object id: `v2-` + SHA-256 of the stored ciphertext (#2109). Never key material. */
   content_hash: string;
-  /** Which ring key sealed it; always `0` for these Vault uploads. */
+  /** The `_att` reference version: `2` for a shared object (#2109). */
+  version: number;
+  /** A v1 ring key version; unused (`0`) for a shared object. */
   key_version: number;
   /** Plaintext SHA-256, only inside the encrypted envelope. */
   sha256: string;
@@ -78,6 +80,16 @@ export async function releaseStaged(attachments: Attachment[]): Promise<void> {
   );
 }
 
+/**
+ * The `_att` fields that say how a file is keyed: `v: 2` for a shared object
+ * (#2109, keyed by its `sha`), else the v1 ring key version `kv`. A v2
+ * reference carries no `kv`, so an older app shows it as unavailable instead
+ * of trying a ring key. Mirrored in `mobile/lib/attachments.ts`.
+ */
+export function referenceKeyFields(version: number | undefined, keyVersion: number): { v: 2 } | { kv: number } {
+  return version === 2 ? { v: 2 } : { kv: keyVersion };
+}
+
 /** Succeeded uploads by attachment (#1497), so a retry uploads only what failed. */
 const uploaded = new WeakMap<Attachment, MediaUploadResult>();
 
@@ -136,7 +148,7 @@ export async function buildMessageContent(
       ct: r.content_type,
       size: r.size_bytes,
       hash: r.content_hash,
-      kv: r.key_version,
+      ...referenceKeyFields(r.version, r.key_version),
       sha: r.sha256,
       bh: r.blurhash ?? attachments[i]?.blurhash,
       w: r.width,

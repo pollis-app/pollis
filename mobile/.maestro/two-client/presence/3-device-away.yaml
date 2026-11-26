@@ -1,0 +1,27 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# PRESENCE AWAY (#2110), the phone's side. The app goes to the background: it writes
+# `active: "0"` to its rooms and the desktop-shaped peer sees it away. Back in the foreground,
+# `active: "1"`, and the peer sees it online again.
+
+- pressKey: home
+- runScript:
+    file: ../../scripts/peer-presence.js
+    env:
+      ACTION: seen
+      EXPECT: away
+- launchApp:
+    stopApp: false
+- runScript:
+    file: ../../scripts/peer-presence.js
+    env:
+      ACTION: seen
+      EXPECT: online
+# The app is unlocked and back on the Direct list (iPad: beside the conversation).
+- extendedWaitUntil:
+    visible:
+      id: "presence-online-row-dm-.*-avatar"
+    timeout: 30000
+- takeScreenshot: presence-two-04-device-back

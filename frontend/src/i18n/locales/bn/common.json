@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "উপস্থিতি: {{status}}",
+    "away": "দূরে",
     "offline": "অফলাইন",
     "online": "অনলাইন"
   },

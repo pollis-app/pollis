@@ -1,6 +1,7 @@
 /**
  * Tell the DS when this desktop is in use (#2056), so it holds the account's phone pushes while
- * the user is here and sends what is still unread once they leave.
+ * the user is here and sends what is still unread once they leave. And tell the core whether
+ * peers should see this user away (#2110).
  *
  * Reported on change (focus, blur, hide, idle, close) and renewed on input at most once every
  * `RENEW_MS` while active: the DS lets a report lapse after two minutes, so a crashed or
@@ -42,5 +43,21 @@ export function useActivityReport(userId: string | null) {
       // Signed out or switched account: this user is no longer here.
       send(false);
     };
+  }, [userId]);
+
+  // Peers' presence (#2110): the core writes it to this device's rooms as the `active` attribute.
+  // Once on sign-in (a reloaded renderer must not leave the core's last answer standing), then on
+  // change only.
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+    return reaction(
+      () => userActivityStore.presenceActive,
+      (active) => {
+        invoke("set_presence_active", { active }).catch(logIgnored);
+      },
+      { fireImmediately: true },
+    );
   }, [userId]);
 }

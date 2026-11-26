@@ -112,6 +112,8 @@
     "error": "err",
     "failedToLoad": "Échec du chargement",
     "failedToDownload": "Échec du téléchargement",
+    "removed": "Fichier supprimé",
+    "updateToOpen": "Mettez à jour Pollis pour ouvrir ce fichier",
     "lightboxFetch": "charger",
     "lightboxDone": "Ok",
     "lightboxDoneTerminal": "[ ok ]",

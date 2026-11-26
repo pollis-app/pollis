@@ -66,6 +66,8 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "group_alias",
     "vault_attachment_ref",
     "vault_message",
+    // #2109: the account's pending claims on shared objects.
+    "attachment_lease",
     "user_report",
     "account_suspension",
 ];
@@ -367,6 +369,16 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     .await?;
     conn.execute("DELETE FROM vault_message WHERE user_id = ?1", uid()).await?;
     crate::messages::mark_released_objects(conn, &released).await?;
+    // #2109: claims this account held on shared objects it was still sending;
+    // what they alone held is released like any other unreferenced file.
+    let claimed = crate::util::query_strings(
+        conn,
+        "SELECT content_hash FROM attachment_lease WHERE user_id = ?1",
+        uid(),
+    )
+    .await?;
+    conn.execute("DELETE FROM attachment_lease WHERE user_id = ?1", uid()).await?;
+    crate::messages::mark_released_objects(conn, &claimed).await?;
     // Pins this user placed (#99); the row names the pinner in the clear.
     conn.execute("DELETE FROM pinned_message WHERE pinned_by = ?1", uid()).await?;
     conn.execute("DELETE FROM security_event WHERE user_id = ?1", uid()).await?;

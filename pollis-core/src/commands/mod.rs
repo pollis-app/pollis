@@ -54,6 +54,7 @@ pub mod pinned_messages;
 pub mod poster;
 pub mod push;
 pub mod r2;
+pub(crate) mod shared_files;
 pub mod vault;
 // Serving relays for others (#813); independent of `overlay`.
 pub mod relay_serving;

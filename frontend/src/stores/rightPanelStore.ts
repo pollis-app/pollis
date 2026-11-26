@@ -42,7 +42,7 @@ class RightPanelStore {
   private byScope: Record<string, boolean> = {};
 
   constructor() {
-    // `remembered` stays tracked (not an action), as with `presenceStore.isOnline`.
+    // `remembered` stays tracked (not an action), as with `presenceStore.status`.
     makeAutoObservable(this, { remembered: false }, { autoBind: true });
   }
 

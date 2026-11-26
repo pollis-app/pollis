@@ -77,13 +77,18 @@ pub struct ArchiveAttachment {
     pub name: Option<String>,
     pub content_type: Option<String>,
     pub size_bytes: Option<u64>,
-    /// The object's random file id (the `_att` `hash` field, #1382).
+    /// The object id (the `_att` `hash` field): a random file id (#1382), or
+    /// `v2-` + the SHA-256 of the stored ciphertext for a shared object (#2109).
+    /// A name, never key material.
     pub content_hash: String,
     pub storage_key: String,
     /// SHA-256 of the plaintext; `None` before #1382 (unfetchable).
     pub sha256: Option<String>,
-    /// Which key of the conversation's file key ring sealed it (`0` = Vault).
+    /// Which key of the conversation's file key ring sealed it (`0` = Vault); v1 only.
     pub key_version: Option<i64>,
+    /// The reference version: `2` for a shared object (#2109), absent for v1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
     /// Path relative to the archive's directory, deterministic from hash and name.
     pub file: String,
 }
@@ -176,6 +181,7 @@ fn split_content(raw: &str) -> (Option<String>, Vec<ArchiveAttachment>) {
                         storage_key,
                         sha256: a.get("sha").and_then(|v| v.as_str()).map(str::to_string),
                         key_version: a.get("kv").and_then(|v| v.as_i64()),
+                        version: a.get("v").and_then(|v| v.as_u64()),
                     })
                 })
                 .collect()
@@ -434,6 +440,8 @@ pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<
             continue;
         };
         let scope = match (conversation, att.key_version) {
+            // A shared object (#2109) opens under its reference alone.
+            _ if att.version == Some(2) => crate::commands::r2::AttachmentKeyScope::Content,
             (Some(conversation_id), Some(key_version)) if key_version >= 1 => {
                 crate::commands::r2::AttachmentKeyScope::Conversation {
                     conversation_id: conversation_id.to_string(),

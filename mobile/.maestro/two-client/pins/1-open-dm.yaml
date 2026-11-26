@@ -22,10 +22,11 @@ tags:
     timeout: 20000
 - tapOn:
     id: "row-user-.*"
+# Creating the DM can take a while on a busy dev DS (the row shows a spinner).
 - extendedWaitUntil:
     visible:
       id: "input-composer"
-    timeout: 30000
+    timeout: 90000
 - tapOn:
     id: "input-composer"
 - inputText: "hello peer"

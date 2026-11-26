@@ -27,6 +27,16 @@ export class UserActivityStore {
     return this.focused && this.visible && !this.idle;
   }
 
+  /**
+   * What peers see (#2110): looser than `isActive`, so switching to another app for a moment
+   * doesn't show you away. Away once the window is hidden, or once no input has reached it for
+   * `IDLE_AFTER_MS` (blurred that long, or left alone); focusing it counts as input, so it is back
+   * at once. The shell reports a hidden window to the core itself (`set_window_hidden`).
+   */
+  get presenceActive(): boolean {
+    return this.visible && !this.idle;
+  }
+
   setFocused(focused: boolean) {
     this.focused = focused;
   }

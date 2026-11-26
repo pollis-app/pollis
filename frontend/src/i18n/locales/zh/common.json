@@ -22,6 +22,7 @@
   },
   "presence": {
     "label": "状态：{{status}}",
+    "away": "离开",
     "offline": "离线",
     "online": "在线"
   },

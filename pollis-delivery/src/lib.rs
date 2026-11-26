@@ -120,6 +120,11 @@ pub struct AppState {
     pub attachment_reclaim: util::SingleFlight,
     /// One avatar reclaim pass at a time (#2003); see [`aliases::spawn_avatar_reclaim`].
     pub avatar_reclaim: util::SingleFlight,
+    /// Whether clients upload new attachments as shared objects (#2109),
+    /// `POLLIS_DS_SHARED_ATTACHMENTS`. Off by default: clients keep uploading v1
+    /// until every build in the stores can open a v2 reference. Shared so a
+    /// test can flip it on a running DS.
+    pub shared_attachments: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AppState {
@@ -155,6 +160,7 @@ impl AppState {
             log_purge_drain: util::SingleFlight::default(),
             attachment_reclaim: util::SingleFlight::default(),
             avatar_reclaim: util::SingleFlight::default(),
+            shared_attachments: Arc::default(),
         }
     }
 
@@ -179,6 +185,12 @@ impl AppState {
     /// Set the operator token for `GET /v1/retention/metrics`; `None` leaves it 404.
     pub fn with_metrics_token(mut self, token: Option<String>) -> Self {
         self.metrics_token = token;
+        self
+    }
+
+    /// Turn shared attachment uploads (#2109) on or off.
+    pub fn with_shared_attachments(self, on: bool) -> Self {
+        self.shared_attachments.store(on, std::sync::atomic::Ordering::SeqCst);
         self
     }
 
@@ -283,7 +295,21 @@ pub fn build_app_state(db: Arc<Db>, log_db: Arc<Db>) -> AppState {
         .with_ratelimit_config(ratelimit::RateLimitConfig::from_env())
         .with_metrics_token(metrics_token)
         .with_ops_log(ops_log)
+        .with_shared_attachments(shared_attachments_from_env())
 }
+
+/// Read `POLLIS_DS_SHARED_ATTACHMENTS` (#2109): on only for `on`, `true` or `1`.
+pub fn shared_attachments_from_env() -> bool {
+    let on = std::env::var("POLLIS_DS_SHARED_ATTACHMENTS")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "on" | "true" | "1"))
+        .unwrap_or(false);
+    tracing::info!(
+        "pollis-delivery attachment uploads: {}",
+        if on { "shared objects (v2)" } else { "v1 (POLLIS_DS_SHARED_ATTACHMENTS off)" }
+    );
+    on
+}
+
 
 /// Read `POLLIS_DS_METRICS_TOKEN`; empty counts as unset.
 pub fn metrics_token_from_env() -> Option<String> {
@@ -329,6 +355,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<messages::AttachmentRegisterBody as DsRequest>::PATH, post(messages::register_attachment))
         .route(<messages::AttachmentDeleteBody as DsRequest>::PATH, post(messages::delete_attachment))
         .route(<messages::AttachmentReleaseBody as DsRequest>::PATH, post(messages::release_attachment))
+        .route(<messages::AttachmentClaimBody as DsRequest>::PATH, post(messages::claim_attachment))
+        .route(<messages::AttachmentFormatBody as DsRequest>::PATH, post(messages::attachment_format))
         // Domain B (#419) — groups / channels / membership / invites / join-requests.
         .route(<groups::CreateGroupBody as DsRequest>::PATH, post(groups::create_group))
         .route(<groups::UpdateGroupBody as DsRequest>::PATH, post(groups::update_group))

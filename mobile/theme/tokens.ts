@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import { deriveTheme, type Theme } from "./derive";
 import { loadBootAccent, loadBootBackground } from "./accentStore";
 import { deviceAccentBackend } from "./deviceAccent";
+import { snapshotSteps } from "./styleSnapshot";
 
 export { DEFAULT_ACCENT_HEX, DEFAULT_BACKGROUND_HEX, ACCENT_PRESETS } from "./accents";
 
@@ -12,15 +13,19 @@ const _bootAccentHex = loadBootAccent(deviceAccentBackend);
 let _accentRgb = hexToRgbTriplet(_bootAccentHex);
 let _bgRgb = hexToRgbTriplet(loadBootBackground(deviceAccentBackend));
 let _theme: Theme = deriveTheme(_accentRgb, _bgRgb);
+// Bumped on every palette or script change; a `type.*` step is a new object after each bump (#2107).
+let _styleGeneration = 0;
 
 export function setAccentRgb(rgb: string) {
   _accentRgb = rgb;
   _theme = deriveTheme(_accentRgb, _bgRgb);
+  _styleGeneration++;
 }
 
 export function setBackgroundRgb(rgb: string) {
   _bgRgb = rgb;
   _theme = deriveTheme(_accentRgb, _bgRgb);
+  _styleGeneration++;
 }
 
 export function currentAccentHex(): string {
@@ -54,6 +59,7 @@ let _untracked = false;
 export function setScriptMetrics(metrics: { nastaliq: boolean; untracked: boolean }) {
   _nastaliq = metrics.nastaliq;
   _untracked = metrics.untracked;
+  _styleGeneration++;
 }
 
 /** A Latin-sized line height, raised to fit Nastaliq while that script is active. */
@@ -253,8 +259,8 @@ export const typeSize = {
   display: 28,
 };
 
-// Colours, line heights and letter-spacing are getters so a flattened style tracks the live theme and script.
-export const type = {
+// Colours, line heights and letter-spacing are getters over the live theme and script.
+const liveType = {
   display: {
     fontFamily: fonts.bold,
     fontSize: typeSize.display,
@@ -382,6 +388,9 @@ export const type = {
     },
   },
 };
+
+// A plain snapshot per step, renewed on every palette or script change (#2107, theme/styleSnapshot.ts).
+export const type = snapshotSteps(liveType, () => _styleGeneration);
 
 export const layout = {
   touchMin: 44,

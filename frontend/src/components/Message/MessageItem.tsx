@@ -388,7 +388,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         )
       )}
 
-      <div className="flex items-start gap-0 min-w-0">
+      <div className="msg-term-line flex items-start gap-0 min-w-0">
         <bdi
           data-testid="message-timestamp"
           dir="ltr"
@@ -418,7 +418,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         </span>
 
         {/* Body column (#1489): media aligns with the text, not the timestamp. */}
-        <div className="flex-1 min-w-0">
+        <div className="msg-term-body flex-1 min-w-0">
           <span
             data-testid="message-content"
             dir="auto"

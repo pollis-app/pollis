@@ -366,7 +366,8 @@ A second source scan bans `std::fs::write` / `File::create` / `create_dir_all` i
 content_hash, storage_key, sha256, key_version }` (`content_hash` is the random file id,
 `sha256` the plaintext digest, `key_version` the file-key-ring version, `0` = Vault; the
 last two are `null` for a reference from before #1382), reply/thread ids, timestamps, `saved` (bookmark) and
-`receipts[]`. Names come from `conversation_cache` / `user_cache` — a conversation the
+`receipts[]`. Since #2109 a new attachment carries `version: 2` instead of `key_version`
+(a shared object, keyed by its `sha256`). Names come from `conversation_cache` / `user_cache` — a conversation the
 cache never learned still exports, with `name: null`. A deleted message exports as a
 tombstone (`text: null`, `deleted_at` set), never its last body. The `{"_att","_txt"}`
 envelope is unpacked; a body that merely starts with `{` is kept as text.
@@ -389,11 +390,13 @@ re-verified against its `sha256` before being vouched for; anything that fails i
 missing rather than aborting. Still zero network. The summary returns `files_dir`,
 `attachments_written` and `attachments_missing[]` (the exact list the opt-in fetch
 takes). The JSON never claims a file exists — the filesystem is the source of truth.
-The archive holds **no** key: the `content_hash` is only the object's random file id
-(#1382 — before that it was the convergent-encryption key, which made the archive alone
-enough to decrypt every file; that scheme was broken and replaced). Fetching a missing
-attachment later needs a device that can still open the conversation's file key ring
-(or, for Vault files, the account key). A pre-#1382 reference (no `sha256`/`key_version`)
+The archive holds no file key in its object names: `content_hash` is the object's name (a
+random file id before #2109, `v2-` + the ciphertext's SHA-256 since). A v2 attachment's
+`sha256` IS the input its key is derived from, so the archive (plaintext by design, written
+where the user chose) can open v2 files it lists, exactly as it already holds their decrypted
+bytes. Fetching a missing v1 attachment later needs a device that can still open the
+conversation's file key ring (or, for Vault files, the account key); a v2 one needs only the
+archive entry. A pre-#1382 reference (no `sha256`/`key_version`)
 is not listed as missing — its object can no longer be opened.
 
 ## export_fetch (`commands/export_fetch.rs`)
@@ -473,10 +476,46 @@ rows jump back to the message (`mobile/stores/messageJumpStore.ts`). Proofs:
 and the two-member `mobile/scripts/maestro-pins.sh` (dev-DS peer
 `pollis-tui/examples/pins_peer.rs`: each side sees the other's pin and unpin).
 
+## shared_files (`commands/shared_files.rs`, #2109)
+
+**Stored files are deduplicated across all accounts** (a settled requirement, `CLAUDE.md`):
+each distinct file is stored once, every message or Vault entry using it is a reference, and
+the object goes with its last reference. #1382 dropped this when it replaced the old
+single-derivation convergent scheme; #2109 restored it with separated derivations.
+
+- `h = SHA-256(plaintext)`, carried only inside the E2EE reference (`_att` `sha`).
+- `content_key(h)`: HKDF-SHA256(salt `pollis-shared-file-v2`, ikm `h`), info
+  `pollis-file-key-v2` (key) / `pollis-file-nonce-v2` (base nonce). Deterministic, so identical
+  files seal to identical bytes; the chunked AES-256-GCM (4 MiB) is `r2::encrypt_chunked`.
+- `object_id(ciphertext)` = `v2-` + hex SHA-256 of the ciphertext: a name the bucket can check
+  bytes against, from which no key follows. `seal` / `open` (open checks the name, decrypts,
+  checks `h`).
+- Unit tests pin determinism, the 4 MiB chunking, substitution refusal, and
+  `nothing_the_server_stores_yields_the_file_key`.
+
+**Behind a DS switch, off until the stores catch up.** `POST /v1/attachments/format` answers
+`{shared}` from `POLLIS_DS_SHARED_ATTACHMENTS` (default off); the client asks before every upload
+(`r2::shared_uploads_enabled`; a DS without the route = off) and, while off, uploads v1 exactly
+as before (ring key, random id, `kv`), which every build in the stores opens. The DS also refuses
+a claim (403) while off. Reading v2 ships now everywhere; the follow-up (#2112) raises the client-policy
+minimum to the first builds that read v2 and turns the switch on.
+
+Upload when on (`r2::upload_plaintext` → `store_shared_object`): `POST /v1/attachments/claim` →
+`stored` (upload nothing), `upload` (presigned create-only checksummed PUT, a 412 counts as
+stored, then `/v1/attachments/register` `ObjectOnly`), `busy` (the DS is deleting it: ask again,
+bounded), `removed` (operator removal: `Error::AttachmentRemoved`, permanent in the outbox).
+No conversation key is needed, so with the switch on an outbox send does not wait on a file
+key ring (`check_outbox_upload_key` passes at once). Download: `AttachmentKeyScope::Content`.
+
 ## file_keys (`commands/file_keys.rs`, #1382)
 
+**Uploads use it while the #2109 switch is off** (the shipped default); once it is on, new
+uploads are shared objects (above). Either way the ring is kept, minted and re-wrapped exactly
+as before, so every member keeps opening files stored under it (`_att` with `kv`, scope
+`conversation` / `vault`).
+
 The per-conversation **attachment file key ring** — the key every channel/DM
-attachment is sealed under. Same construction as the pin key above, with one
+attachment stored before #2109 is sealed under. Same construction as the pin key above, with one
 difference: the ring rotates. Each MLS conversation has a ring of random 32-byte
 keys (each entry also records the `(generation, epoch)` it was added at); the DS
 stores it only WRAPPED under `export_secret("pollis-file-kek")` in `file_keystate`
@@ -498,7 +537,7 @@ Internal hooks (not invokable commands):
   appends a fresh key wrapped at the post-removal epoch. New uploads use it; old files
   are not re-encrypted. The mark clears only once the ring holds a key added at or after
   `(g, e)`, so two racing removals are safe.
-- `upload_key` / `key_at_version` — the newest key for an upload; the key at a given
+- `upload_key` / `key_at_version` — the newest key for a v1 upload; the key at a given
   version for a download (refetching from the DS when the cached ring is shorter).
 - `test_file_key_version` — test harness only (`src-tauri/tests/flows/file_keys.rs`:
   ring mint, late join, rotation on removal).
@@ -520,11 +559,12 @@ the ENTIRE vault: the deliberate, cryptographic inversion of accepted loss (2)
 pin/unpin is indistinguishable from an edit on the wire. Entry bodies are the same
 content string chat uses (plain text or the `_att` attachment envelope), so file
 drops ride the normal staged-upload/R2 pipeline; every save declares its attachment
-file ids so the DS's `vault_attachment_ref` rows keep the objects alive against
-attachment GC. Vault files are sealed under the account's Vault file root
-(`vault_file_root_key`: HKDF over the account identity key seed, `info =
-"pollis-vault-files-v1"`, #1382) instead of a conversation ring, so every enrolled
-device opens them and the DS cannot; their references carry `kv: 0`. Remote-first writes, local `vault_message` cache for offline reads;
+object ids so the DS's `vault_attachment_ref` rows keep the objects alive against
+attachment GC. With the #2109 switch on a Vault file is a shared object like any other
+(`v: 2`): the same file in a chat and the Vault is one stored object, its key rides inside
+the entry, which every enrolled device decrypts and the DS cannot. With it off (and for
+older files) a Vault file is sealed under the account's Vault file root (`vault_file_root_key`: HKDF over the account
+identity key seed, `info = "pollis-vault-files-v1"`, #1382) and carry `kv: 0`. Remote-first writes, local `vault_message` cache for offline reads;
 the remote is the source of truth (sync replaces the cache).
 
 - `get_vault_messages(user_id)` → `VaultMessage[]` — oldest first (chat order). Pulls
@@ -654,8 +694,9 @@ Design: `docs/history-transfer-design.md`. Args camelCase, results snake_case (l
 - `get_livekit_token(room_id, user_id, username)` → token string — mobile bridge only (desktop connects with `connect_rooms`) (identity/name derived server-side; the args are ignored)
 - `subscribe_realtime(on_event: Channel)`
 - `connect_rooms(room_ids, user_id, username)`
+- `set_presence_active(active)` (#2110) — desktop only: the renderer says whether the user is at the app (`userActivityStore.presenceActive`: the window visible and some input within the idle window; sent once at sign-in, then on change). The core combines it with the shell's `set_window_hidden` (closed to the tray/Dock; cleared on show/focus) and, when the combination flips, writes the LiveKit participant attribute `active: "1" | "0"` to every connected room (`livekit_roster::ACTIVE_ATTRIBUTE`); a room joined while not in use gets `"0"` at once. On change only, never a timer. Needs the token grant `canUpdateOwnMetadata` (DS `broker.rs`). Peers' attribute changes re-emit `presence_changed` with `active`.
 - `publish_typing(room_id, channel_id, conversation_id, user_id, username, is_typing)` — unreliable, identity-free body (`livekit_signalling::typing_payload`, #836); the receiver takes the typist from the publishing participant. Senders re-emit every 3 s while typing and send one stop; receivers age entries out after 6 s.
-- Mobile-only bridge arm `livekit_room_presence({ room, identities })` → `[userId]` (#2059): the users a room's remote participants show (every wire identity in the room, resolved through the shared `#836` cache), each once, never self, never the DS or an unresolved pseudonym (`commands/livekit_roster.rs`). Mobile replaces its snapshot of that room with the answer on every roster change; desktop gets the same rule as `presence_changed` events from its own realtime loop.
+- Mobile-only bridge arm `livekit_room_presence({ room, identities, inactive? })` → `{ online: [userId], away: [userId] }` (#2059, #2110; `inactive` = the identities whose `active` attribute is `"0"`, missing = in use; a core before #2110 answered a bare `[userId]`, which mobile still reads as all online): the users a room's remote participants show (every wire identity in the room, resolved through the shared `#836` cache), each once, never self, never the DS or an unresolved pseudonym (`commands/livekit_roster.rs`). Mobile replaces its snapshot of that room with the answer on every roster change; desktop gets the same rule as `presence_changed` events from its own realtime loop.
 - Mobile-only bridge arm `resolve_livekit_identities({ room, identities })` → `[{ identity, userId, username }]` (#1635). Mobile's realtime runs in JS (`livekit-client`, data-only), so the per-room participant pseudonyms (#836) it sees are resolved here via `ds_livekit_identities` (`POST /v1/livekit/identities`, no longer media-gated), the way desktop's realtime loop resolves them. Unresolvable identities are left out. Used for `typing`, whose sender is never read from the body. Mobile publishes `typing` itself from JS (`mobile/lib/realtime/client.ts` `publishRealtime`, same wire body as desktop) and shows it over the composer (`components/chat/TypingIndicator.tsx`, `text-typing-indicator`).
 
 ## voice (`commands/voice/`)
@@ -706,11 +747,12 @@ Capture, publish and the remote drain are described in [capture-split.md](./capt
 - `get_public_file_url(key)` → URL — resolves a public object to a loopback media-server URL, caching the bytes on disk encrypted at rest under the same content-addressed scheme attachments and custom emoji use. The key IS the expected digest, so the integrity check is free and mandatory (these objects are stored unencrypted). Returns `""` — the same sentinel `get_media_url` uses — for a LEGACY key that carries no digest, or when the media server isn't up; the frontend falls back to `download_file` for those.
 - ~~`presign_upload(key, content_type)`~~ — **does not exist** under that name as of 2026-08-03 (#714). Presigning is server-side: the DS secrets broker mints URLs via `POST /v1/r2/presign` (see `delete_r2_object` below and `docs/secrets-broker.md`).
 - `get_media_url(r2_key, content_hash, content_type, sha256, key_scope)` → URL — builds the loopback media-server URL (`http://127.0.0.1:<port>/<token>/<hash>`) for a cached item; errors if the server isn't started or there is no active unlock. See `pollis-core/src/media_server.rs`.
-- `upload_media(path, filename, content_type, poster?)` / `download_media(r2_key, content_hash, sha256, key_scope)` — the sealed media path (#1382; see `file_keys` below). An upload picks a random 32-byte file id, seals the file (AES-256-GCM, 4 MiB chunks) under `HKDF(salt = file id, ikm = newest ring key of the conversation's file key ring)` — or the Vault file root for a Vault upload — PUTs it to `media/{hex file id}.enc` and registers the object with the DS (`attachment_object`, for reference counting only; nothing there is key material). `MediaUploadResult` carries `content_hash` (the file id — named for the `_att` `hash` wire field, NOT derived from content), `key_version` and `sha256`; the `_att` reference carries them as `hash`, `kv`, `sha`. `key_scope` is a tagged enum: `{ kind: "conversation", conversation_id, key_version }` or `{ kind: "vault" }`. A download refuses a reference without a key version (pre-#1382 convergent objects; no fallback) and refuses bytes whose SHA-256 differs from `sha256`. No cross-user dedup: every upload is a new object. A file over `R2_MEDIA_MAX_BYTES` (104 MiB) is refused from its metadata before it is read (#1491) — reading first held a 2 GB pick in memory just to say no. Hashing, image metadata (the blurhash is computed from a ≤64 px thumbnail; width/height stay the original's) and encryption run on the blocking pool, never on the bridge's four async workers, and at most three uploads hold their bytes at once (`MAX_CONCURRENT_UPLOADS`) — a twelve-image Vault entry used to park every worker in image decoding and starve its own HTTP requests (#1497). `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here. **The shim enforces that** — see "Path-taking commands are scoped to what the user picked" below.
+- `upload_media(path, filename, content_type, poster?)` / `download_media(r2_key, content_hash, sha256, key_scope)` — the sealed media path (#2109; see `shared_files` below). With the DS switch on (`shared_uploads_enabled`), an upload seals the file under the key its own SHA-256 yields (AES-256-GCM, 4 MiB chunks, deterministic), names it `media/v2-{hex SHA-256 of the ciphertext}.enc`, claims it at the DS and uploads only if nobody has: **each distinct file is stored once across all accounts**. With it off (the shipped default) it is the v1 upload: a random file id under the conversation's newest ring key (or the Vault root), `kv`. `MediaUploadResult` carries `content_hash` (the object id), `version` (`2` or `1`), `key_version` (v1 only) and `sha256`; a v2 `_att` reference carries `hash`, `v: 2`, `sha` and no `kv` (an older app then draws it as unavailable instead of trying a ring key). `key_scope` is a tagged enum: `{ kind: "content" }` for a v2 file, or for one stored before #2109 `{ kind: "conversation", conversation_id, key_version }` / `{ kind: "vault" }`. A v2 download checks the bytes hash to the name, decrypts under `content_key(sha256)` and checks the plaintext digest; a presign the DS answers `410` (operator removal) is `Error::AttachmentRemoved` (`"attachment_removed"`), which both apps show as "File removed" and never retry. A download refuses a reference with neither `v` nor `kv` (pre-#1382 convergent objects; no fallback). The renderers show a reference with `v > 2` as "Update Pollis to open this file" (`needs_update`), never fetching it. A file over `R2_MEDIA_MAX_BYTES` (104 MiB) is refused from its metadata before it is read (#1491) — reading first held a 2 GB pick in memory just to say no. Hashing, image metadata (the blurhash is computed from a ≤64 px thumbnail; width/height stay the original's) and encryption run on the blocking pool, never on the bridge's four async workers, and at most three uploads hold their bytes at once (`MAX_CONCURRENT_UPLOADS`) — a twelve-image Vault entry used to park every worker in image decoding and starve its own HTTP requests (#1497). `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here. **The shim enforces that** — see "Path-taking commands are scoped to what the user picked" below.
 - `save_media_to_path(r2_key, content_hash, sha256, key_scope, target_path)` → `"marked"` | `"unsupported"` | `"failed: …"` — "save attachment as…". Downloads, decrypts, verifies `sha256` and writes the file in Rust, then applies this platform's download marker (macOS `com.apple.quarantine`, Windows `Zone.Identifier`). The renderer used to `fetch` the loopback URL and `writeFile` the bytes, which left the file with no provenance marker at all — Gatekeeper and SmartScreen both treat an unmarked file as locally authored. A marker that cannot be written (FAT32, a network share) does NOT fail the save; the return value says what happened. `target_path` is gated by `PathScope`. See `.codesight/wiki/media-server.md`.
 - `poster?` on both upload commands (and `OutgoingAttachment.poster` on `send_message`): a video's frame from the client's platform decoder, base64; the result then carries the video's `blurhash`, `width`, `height` and `poster` (the bounded JPEG for `pv`). See [media-server.md → Video posters](media-server.md#video-posters-1837).
 - `get_local_video_poster(content_hash)` → `SavedVideoPoster | null` / `save_local_video_poster(content_hash, frame)` → `SavedVideoPoster` (`commands/poster.rs`, #1894) — device-local: the poster this device decoded for a video with no `pv`, bounded by `poster::from_frame_b64` and kept in the local `video_poster_cache` table, so it is decoded once. `SavedVideoPoster` = `{ jpeg: string | null, blurhash, width, height }`. Never sent anywhere. See [media-server.md → Video posters](media-server.md#video-posters-1837).
 - `upload_media_staged(staged_id, filename, content_type, poster?)` — the same upload for bytes with no path: a paste, or a drop the webview surfaced as a `File`. Reads them from the in-memory staging registry (`commands/staging.rs`) and releases them **only on success**, so a failed upload is a retry rather than a lost paste.
+- Test harness only: `test_upload_v1(conversation_id, data)` stores a v1 object (random id, ring key) so the flows prove v1 still downloads.
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`), used for custom-emoji objects. Attachments are never deleted by a client: since #1881 the DS deletes them itself once every message referring to them is deleted, and refuses a `media/` DELETE presign. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 
 ### Path-taking commands are scoped to what the user picked
@@ -907,7 +949,7 @@ than hand-edit.
 
 **`mls`** (3) — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 
-**`livekit`** (8) — `cancel_call`, `connect_rooms`, `list_voice_participants`, `list_voice_room_counts`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
+**`livekit`** (9) — `cancel_call`, `connect_rooms`, `list_voice_participants`, `list_voice_room_counts`, `publish_typing`, `publish_voice_presence`, `set_presence_active`, `start_call`, `subscribe_realtime`
 
 **`emoji`** (5) — `get_emoji_url`, `list_group_emoji`, `list_usable_emoji`, `remove_group_emoji`, `upload_group_emoji`
 

@@ -107,6 +107,8 @@
     "error": "エラー",
     "failedToLoad": "読み込みに失敗しました",
     "failedToDownload": "ダウンロードに失敗しました",
+    "removed": "ファイルは削除されました",
+    "updateToOpen": "このファイルを開くには Pollis をアップデートしてください",
     "lightboxFetch": "取得",
     "lightboxDone": "完了",
     "lightboxDoneTerminal": "[ 完了 ]",

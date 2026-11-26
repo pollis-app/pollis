@@ -1,19 +1,33 @@
 import { makeAutoObservable } from "mobx";
 
-// Online while any shared LiveKit room shows the user, tracked per room.
+// Presence from LiveKit rooms, tracked per room (#2059, #2110): online while any shared room shows
+// the user in use, away while every room that shows them shows them not in use, offline while
+// none shows them.
 
-export type PresenceStatus = "online" | "offline";
+export type PresenceStatus = "online" | "away" | "offline";
+
+/** room_id → whether the user is in use there. */
+export type UserRooms = Readonly<Record<string, boolean>>;
+
+/** The rule, pure: no rooms is offline, any room in use is online, else away. */
+export function statusFromRooms(rooms: UserRooms | undefined): PresenceStatus {
+  const flags = Object.values(rooms ?? {});
+  if (flags.length === 0) {
+    return "offline";
+  }
+  return flags.some(Boolean) ? "online" : "away";
+}
 
 class PresenceStore {
-  // user_id → Set<room_id>
-  byUser: Record<string, Set<string>> = {};
+  // user_id → room_id → in use
+  byUser: Record<string, UserRooms> = {};
 
   // We never get room events about ourselves, so self is set from `appStore.setCurrentUser`.
   selfUserId: string | null = null;
 
   constructor() {
-    // `isOnline` stays tracked: as an action its reads would be untracked.
-    makeAutoObservable(this, { isOnline: false }, { autoBind: true });
+    // `isPresent` and `status` stay tracked: as actions their reads would be untracked.
+    makeAutoObservable(this, { isPresent: false, status: false }, { autoBind: true });
   }
 
   // A setter keeps this store import-free.
@@ -21,34 +35,34 @@ class PresenceStore {
     this.selfUserId = userId;
   }
 
-  setPresent(userId: string, roomId: string, present: boolean) {
-    const existing = this.byUser[userId];
-    const nextSet = new Set(existing ?? []);
+  /** `active` defaults to in use: an event or caller that predates #2110 means online. */
+  setPresent(userId: string, roomId: string, present: boolean, active = true) {
+    const next: Record<string, boolean> = { ...(this.byUser[userId] ?? {}) };
     if (present) {
-      nextSet.add(roomId);
+      next[roomId] = active;
     } else {
-      nextSet.delete(roomId);
+      delete next[roomId];
     }
     const byUser = { ...this.byUser };
-    if (nextSet.size === 0) {
+    if (Object.keys(next).length === 0) {
       delete byUser[userId];
     } else {
-      byUser[userId] = nextSet;
+      byUser[userId] = next;
     }
     this.byUser = byUser;
   }
 
   resetRoom(roomId: string) {
     let changed = false;
-    const byUser: Record<string, Set<string>> = {};
+    const byUser: Record<string, UserRooms> = {};
     for (const [userId, rooms] of Object.entries(this.byUser)) {
-      if (!rooms.has(roomId)) {
+      if (!(roomId in rooms)) {
         byUser[userId] = rooms;
         continue;
       }
-      const next = new Set(rooms);
-      next.delete(roomId);
-      if (next.size > 0) {
+      const next = { ...rooms };
+      delete next[roomId];
+      if (Object.keys(next).length > 0) {
         byUser[userId] = next;
       }
       changed = true;
@@ -58,20 +72,26 @@ class PresenceStore {
     }
   }
 
-  isOnline(userId: string | null | undefined): boolean {
+  /** Online or away: a shared room shows them (self always). */
+  isPresent(userId: string | null | undefined): boolean {
+    return this.status(userId) !== "offline";
+  }
+
+  status(userId: string | null | undefined): PresenceStatus {
     if (!userId) {
-      return false;
+      return "offline";
     }
+    // You are always online on your own device.
     if (userId === this.selfUserId) {
-      return true;
+      return "online";
     }
-    return (this.byUser[userId]?.size ?? 0) > 0;
+    return statusFromRooms(this.byUser[userId]);
   }
 }
 
 export const presenceStore = new PresenceStore();
 
-/** "online" if seen in any shared room; call inside `observer()`. */
+/** online / away / offline; call inside `observer()`. */
 export function usePresenceStatus(userId: string | null | undefined): PresenceStatus {
-  return presenceStore.isOnline(userId) ? "online" : "offline";
+  return presenceStore.status(userId);
 }

@@ -10,8 +10,10 @@
 # (`.maestro/scripts/peer-typing.js`):
 #   1. the peer types: "<peer> is typing…" shows over the composer; it stops: the line goes;
 #   2. the device types: the peer sees `typing`; clearing the draft or sending: `stopped`;
-#   3. presence: the DM's row on the Direct list shows the peer online; the peer quits, leaving
-#      the room, and the dot turns hollow (offline) with no reload.
+#   3. presence: the DM's row on the Direct list shows the peer online; the peer hides its window
+#      (desktop's close) and the row shows the crescent (away, #2110), then online when it shows;
+#      the device goes to the background and the peer sees it away, then online on its return;
+#      the peer quits, leaving the room, and the dot turns hollow (offline) with no reload.
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled in, and
 # POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler `dev_personal` when unset).
@@ -86,9 +88,11 @@ echo "==> 2/3 typing, both ways"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e PEER_PORT="$PORT" \
   -e MAESTRO_PEER_HANDLE="$HANDLE" "$FLOWS/2-typing.yaml"
 
-echo "==> 3/3 presence: online, then offline once the peer leaves"
+echo "==> 3/3 presence: online, away both ways, then offline once the peer leaves"
 maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "$PRESENCE/1-online.yaml"
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e PEER_PORT="$PORT" "$PRESENCE/2-peer-away.yaml"
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e PEER_PORT="$PORT" "$PRESENCE/3-device-away.yaml"
 curl -fsS "http://127.0.0.1:$PORT/quit" >/dev/null || true
 wait "$PEER_PID" 2>/dev/null || true
-maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "$PRESENCE/2-offline.yaml"
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" "$PRESENCE/4-offline.yaml"
 echo "==> typing and presence passed"

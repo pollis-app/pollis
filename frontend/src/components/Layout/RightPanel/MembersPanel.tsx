@@ -60,9 +60,9 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
 
     // Who the panel lists (#824), by the page's context (`panelContext.ts`):
     // - a DM: everyone in it, you included, with safety numbers and media;
-    // - a group page or channel: that group's OTHER members who are online;
-    // - any other page: the people you have a DM open with who are online.
-    // Reading `isOnline` / `byUser` in the observer keeps it live.
+    // - a group page or channel: that group's OTHER members who are online or away;
+    // - any other page: the people you have a DM open with who are online or away.
+    // Reading `isPresent` / `byUser` in the observer keeps it live.
     const people = useMemo<Person[]>(() => {
       if (conversationId) {
         const dm = dmConversations.find((c) => c.id === conversationId);
@@ -102,7 +102,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
 
       if (groupId) {
         return groupMembers
-          .filter((m) => m.user_id !== currentUser?.id && presenceStore.isOnline(m.user_id))
+          .filter((m) => m.user_id !== currentUser?.id && presenceStore.isPresent(m.user_id))
           .map((m) => ({
             userId: m.user_id,
             label: aliasName(aliases, m.user_id, m.display_name || m.username || m.user_id),
@@ -122,7 +122,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
             ? [{ id: dm.user2_id, label: dm.user2_identifier, avatar: dm.user2_avatar_url ?? null }]
             : [];
         for (const p of peers) {
-          if (p.id === currentUser?.id || contacts.has(p.id) || !presenceStore.isOnline(p.id)) {
+          if (p.id === currentUser?.id || contacts.has(p.id) || !presenceStore.isPresent(p.id)) {
             continue;
           }
           contacts.set(p.id, { userId: p.id, label: p.label, avatarKey: p.avatar, isAdmin: false });

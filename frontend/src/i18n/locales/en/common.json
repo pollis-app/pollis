@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "Presence: {{status}}",
+    "away": "away",
     "offline": "offline",
     "online": "online"
   },

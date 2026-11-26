@@ -114,7 +114,7 @@ type ChatListItem =
   | { type: "keyChange"; key: string; notice: KeyChangeNotice; at: number };
 
 function TextChat(props: ChatViewProps = {}) {
-  const { accentHex } = useTheme();
+  const { themeKey } = useTheme();
   const router = useNav();
   const { t } = useTranslation("mobile");
   const params = useLocalSearchParams<{
@@ -1089,7 +1089,7 @@ function TextChat(props: ChatViewProps = {}) {
         data={items}
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
-        extraData={accentHex}
+        extraData={themeKey}
         style={{ flex: 1 }}
         // `flex-end` is the visual TOP under `inverted`: anchors a short thread there.
         contentContainerStyle={{

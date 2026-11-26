@@ -13,9 +13,12 @@ export interface AttachmentWire {
   // Absent on an entry the outbox has not uploaded yet (#1335).
   key?: string;
   url?: string;
+  // The object id: a random file id (#1382) or a shared `v2-` id (#2109).
   hash?: string;
-  // Key ring version; 0 in the Vault.
+  // Key ring version of a v1 file; 0 in the Vault.
   kv?: number;
+  // The reference version: 2 for a shared object (#2109); absent for v1.
+  v?: number;
   sha?: string;
   name: string;
   ct: string;
@@ -26,6 +29,16 @@ export interface AttachmentWire {
   sens?: boolean;
   // A video's poster JPEG, base64 (#1837); validated by `posterOf`.
   pv?: unknown;
+}
+
+/**
+ * The `_att` fields that say how a file is keyed: `v: 2` for a shared object
+ * (#2109, keyed by its `sha`), else the v1 ring key version `kv`. A v2
+ * reference carries no `kv`, so an older app shows it as unavailable instead
+ * of trying a ring key. Desktop's `referenceKeyFields`, byte for byte.
+ */
+export function referenceKeyFields(version: number | undefined, keyVersion: number): { v: 2 } | { kv: number } {
+  return version === 2 ? { v: 2 } : { kv: keyVersion };
 }
 
 /** Longest `pv` accepted; the core sends at most 16 KiB of it. */
@@ -44,9 +57,21 @@ export function posterUri(poster: string): string {
   return `data:image/jpeg;base64,${poster}`;
 }
 
-/** Null when it cannot be opened from here: uploading, pre-#1382, or preview-only. */
+/** A reference version this build does not know (#2109): shown as "update to open", never fetched. As desktop's. */
+function isNewerReference(a: AttachmentWire): boolean {
+  return typeof a.v === "number" && a.v > 2;
+}
+
+/** Null when it cannot be opened from here: uploading, pre-#1382, preview-only, or from a newer app. */
 function keyScopeFor(a: AttachmentWire, origin: ContentOrigin): AttachmentKeyScope | null {
-  if (origin === null || !a.key || !a.sha || typeof a.kv !== "number") {
+  if (origin === null || !a.key || !a.sha || isNewerReference(a)) {
+    return null;
+  }
+  // A shared object (#2109) opens under its own reference, wherever it is.
+  if (a.v === 2) {
+    return { kind: "content" };
+  }
+  if (typeof a.kv !== "number") {
     return null;
   }
   if (origin === "vault") {
@@ -91,6 +116,8 @@ function attachmentFromWire(a: AttachmentWire, i: number, origin: ContentOrigin)
     content_hash: a.hash ?? "",
     sha256: a.sha ?? "",
     key_scope: keyScopeFor(a, origin),
+    version: a.v === 2 ? 2 : 1,
+    ...(isNewerReference(a) ? { needs_update: true } : {}),
     filename: a.name,
     content_type: a.ct,
     file_size: a.size,

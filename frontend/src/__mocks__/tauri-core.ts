@@ -366,6 +366,8 @@ interface MockStore {
   readElsewhere: Record<string, string>;
   /** #2056: every `report_push_activity` this device sent, in order (true = in use). */
   pushActivity: boolean[];
+  /** #2110: every `set_presence_active` this device sent, in order (true = in use). */
+  presenceActivity: boolean[];
   /** #1628: message ids an ingest already stored, so a replay or receipt wake reports no news. */
   ingested: string[];
   /** Security-event log (#1548), any order. */
@@ -537,6 +539,7 @@ const store: MockStore = {
     ),
   readElsewhere: {},
   pushActivity: [],
+  presenceActivity: [],
   ingested: Object.values((preload.messages ?? {}) as Record<string, MockMessage[]>).flatMap((msgs) =>
     msgs.map((m) => m.id),
   ),
@@ -642,6 +645,12 @@ const failingMediaKeys = new Set<string>((preload.failMediaKeys ?? []) as string
   } else {
     failingMediaKeys.delete(key);
   }
+};
+
+/** #2109: files the operator removed; their media commands fail with the core's `attachment_removed`. */
+const removedMediaKeys = new Set<string>((preload.removedMediaKeys ?? []) as string[]);
+(window as any).__tauriRemoveMedia = (key: string) => {
+  removedMediaKeys.add(key);
 };
 
 /** `video_poster_cache` (#1894), by content hash. */
@@ -1588,6 +1597,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       store.pushActivity.push(Boolean(args.active));
       return null;
 
+    // #2110: what peers see as this device's `active` attribute; the spec reads the log back.
+    case 'set_presence_active':
+      store.presenceActivity.push(Boolean(args.active));
+      return null;
+
     case 'refresh_read_cursors': {
       const moved: string[] = [];
       for (const [id, at] of Object.entries(store.readElsewhere)) {
@@ -2265,9 +2279,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
                 name: a.filename,
                 ct: a.contentType,
                 size: 0,
-                hash: `mock-${id}-${i}`,
-                // #1382: without these the renderer refuses to fetch.
-                kv: 1,
+                hash: `v2-mock-${id}-${i}`,
+                // #2109: a shared object, keyed by its `sha`; without these the renderer refuses to fetch.
+                v: 2,
                 sha: `sha-${id}-${i}`,
                 ...(a.blurhash ? { bh: a.blurhash } : {}),
                 ...(a.width ? { w: a.width, h: a.height } : {}),
@@ -2918,6 +2932,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     // A preload's `mediaUrls` stands in for the media server; else null.
     case 'get_media_url': {
+      if (removedMediaKeys.has(args.r2Key as string)) {
+        throw 'attachment_removed';
+      }
       if (failingMediaKeys.has(args.r2Key as string)) {
         throw 'download_media: error sending request: network unreachable';
       }
