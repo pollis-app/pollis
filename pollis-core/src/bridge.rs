@@ -255,6 +255,10 @@ pub(crate) fn close_db_bounded(state: &AppState, budget: std::time::Duration) ->
                     Err(e) => crate::diag!("[suspend] could not mark unfinished sends: {e}"),
                 }
             }
+            // Its outbox claims go back (#2100): the other process need not wait out the leases.
+            if let Err(e) = crate::commands::messages::release_outbox_claims_on(db.conn()) {
+                crate::diag!("[suspend] could not release outbox claims: {e}");
+            }
             if let Err(e) = db.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
                 crate::diag!("[suspend] wal checkpoint before suspension failed (non-fatal): {e}");
             }

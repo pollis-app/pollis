@@ -1678,8 +1678,11 @@ the message outbox. See [share.md](share.md#the-vaults-durable-queue-commandsmes
 
 Which process is working on an outbox key. The app and the iOS share extension open the same
 database, and `OutboxLock`'s in-process mutex cannot keep them off the same row, so it also takes
-this lease: renewed every 15 s while held, released when done, run out after 60 s if its process
-is killed or suspended. The drain passes by a key another process holds; a store holds its id's
+this lease: renewed every 10 s while held, released when done and whenever the process closes the
+database for a suspension, run out after 30 s otherwise. A holder id is `<role>:<id>` (`app` or
+`share`); one process of each role runs at a time, so opening the database clears the claims a
+killed process of the same role left, and a relaunch never waits out a dead lease. A drain that
+passed by held rows looks once more after the lease could have run out. The drain passes by a key another process holds; a store holds its id's
 claim from the first byte to the row, so the orphan sweep at open leaves its bytes. Not a file
 lock: nothing is held across an iOS suspension. The extension releases its claims as it parks.
 

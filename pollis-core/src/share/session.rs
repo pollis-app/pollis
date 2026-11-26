@@ -114,6 +114,8 @@ async fn unlocked_state() -> Result<Arc<AppState>> {
 /// Read who is signed in and start a locked session for them. Replaces any earlier session.
 pub async fn open(p: Params) -> Status {
     close();
+    // Its outbox claims are the share extension's, not the app's (`outbox::claim`).
+    crate::commands::messages::set_outbox_claim_role("share");
     // iOS reuses an extension process: a gate an earlier share closed must not outlive it.
     crate::notify::lock::suspend::end();
     let Some(user_id) = crate::accounts::read_accounts_index()
@@ -205,6 +207,10 @@ pub async fn unlock(factor: Factor) -> Unlock {
             return Unlock::OpenApp;
         }
     };
+    // A killed earlier share's claims: only one runs at a time.
+    if let Err(e) = crate::commands::messages::purge_stale_outbox_claims_on(db.conn()) {
+        crate::diag!("[share] could not clear stale outbox claims: {e}");
+    }
     *state.local_db.lock().await = Some(db);
     *state.unlock.lock().await = Some(unlocked);
     Unlock::Unlocked
@@ -244,7 +250,6 @@ pub fn suspend(timeout: std::time::Duration) -> bool {
     let Some(session) = guard.as_mut() else {
         return entered.drained;
     };
-    release_claims(&session.state);
     match crate::bridge::close_db_bounded(&session.state, std::time::Duration::from_secs(2)) {
         Ok(Some(_)) => {
             session.parked = true;
@@ -254,19 +259,6 @@ pub fn suspend(timeout: std::time::Duration) -> bool {
         Err(()) => {
             crate::diag!("[share] the database stayed busy; not closed before suspension");
             false
-        }
-    }
-}
-
-/// Hand this process's outbox claims back before it stops (#2100), so the app delivers what is
-/// left at once instead of waiting out the leases.
-fn release_claims(state: &Arc<AppState>) {
-    let Ok(guard) = state.local_db.try_lock() else {
-        return;
-    };
-    if let Some(db) = guard.as_ref() {
-        if let Err(e) = crate::commands::messages::release_outbox_claims_on(db.conn()) {
-            crate::diag!("[share] could not release the outbox claims: {e}");
         }
     }
 }
@@ -323,7 +315,6 @@ pub fn close() {
     if !crate::notify::lock::suspend::begin(ticket, std::time::Duration::from_secs(2)) {
         crate::diag!("[share] closing with work still holding the lock");
     }
-    release_claims(&session.state);
     session.state.state_lock.force_release();
     let _ = crate::bridge::close_db_bounded(&session.state, std::time::Duration::from_secs(2));
     // The session is gone and its database closed: anything left of it finds nothing to work

@@ -505,3 +505,42 @@ async fn a_share_that_fails_part_way_sends_nothing() {
     assert_eq!(copies(&bob, &dm, true, "part of a share").await, 0);
     assert_eq!(copies(&bob, &channel, false, "part of a share").await, 0);
 }
+
+/// #2100: a killed app leaves its claims behind. The relaunched app (here: lock, then unlock,
+/// which reopens the database and drains) clears them, so it never waits out a dead process's
+/// lease, and the message goes out at once.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_relaunched_app_never_waits_on_its_dead_predecessors_claims() {
+    let (alice, bob, dm, _channel) = alice_and_bob().await;
+    alice.activate();
+    let req = request(&[&dm], "left by a killed app");
+    let queued = enqueue_share(&alice.state, &req).await.expect("stored");
+    let id = queued[0].message_id.clone();
+    // What the killed process held: the row and its conversation's line, under a live lease.
+    for key in [id.clone(), format!("line:{dm}")] {
+        let guard = alice.state.local_db.lock().await;
+        guard
+            .as_ref()
+            .expect("db")
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO outbox_claim (key, holder, until_ms) VALUES (?1, 'app:killed', ?2)",
+                rusqlite::params![key, now_ms() + 600_000],
+            )
+            .expect("claim");
+    }
+    alice.invoke_json("lock", json!({})).await;
+    alice
+        .invoke_json("unlock", json!({ "userId": alice.user_id(), "pin": TEST_PIN }))
+        .await;
+    assert_eq!(
+        row_count(&alice, "SELECT COUNT(*) FROM outbox_claim WHERE holder = 'app:killed' AND key = ?1", &id).await,
+        0,
+        "the dead process's claims are gone"
+    );
+    let started = std::time::Instant::now();
+    alice.flush_outbox().await;
+    assert!(started.elapsed() < Duration::from_secs(20), "nothing waited out a lease");
+    assert_eq!(copies(&bob, &dm, true, "left by a killed app").await, 1);
+}

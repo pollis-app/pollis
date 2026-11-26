@@ -140,7 +140,10 @@ pub(crate) use outbox::{
     deliver as deliver_queued_message, mark_suspended_sends_on, send_state_of, spawn_outbox_flush,
     sweep_orphan_attachments_on,
 };
-pub(crate) use outbox::claim::release_all_on as release_outbox_claims_on;
+pub(crate) use outbox::claim::{
+    purge_stale_on as purge_stale_outbox_claims_on, release_all_on as release_outbox_claims_on,
+    set_role as set_outbox_claim_role,
+};
 /// Claim an outbox key for this process (#2100); see `outbox::claim`.
 pub(crate) async fn claim_outbox_key(
     state: &std::sync::Arc<crate::state::AppState>,

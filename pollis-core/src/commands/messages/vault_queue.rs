@@ -260,6 +260,7 @@ pub(crate) async fn drain(state: &Arc<AppState>) -> Result<(Vec<String>, Vec<Str
     for id in ids {
         // Another process (the share extension) is saving it.
         if outbox::claim::held_elsewhere(state, &id).await {
+            outbox::claim::redrain_after_lease(state);
             continue;
         }
         let _sending = crate::notify::lock::suspend::send_started(Some(&id));

@@ -1859,6 +1859,7 @@ async fn drain(state: &Arc<AppState>) -> Result<OutboxReport> {
         // Another process (the share extension) is delivering it: its own pass finishes it, or
         // its lease runs out and a later drain does.
         if claim::held_elsewhere(state, &id).await {
+            claim::redrain_after_lease(state);
             continue;
         }
         // One attempt each: the drain is the event-driven retry. A row a send's in-place retry
@@ -1927,9 +1928,9 @@ pub(crate) mod claim {
     use crate::state::AppState;
 
     /// How long a lease lasts without renewal.
-    pub(crate) const LEASE: Duration = Duration::from_secs(60);
+    pub(crate) const LEASE: Duration = Duration::from_secs(30);
     /// How often a holder renews.
-    const RENEW_EVERY: Duration = Duration::from_secs(15);
+    const RENEW_EVERY: Duration = Duration::from_secs(10);
     /// How often a waiter looks again while another process holds the key.
     const WAIT_STEP: Duration = Duration::from_millis(250);
 
@@ -1940,10 +1941,49 @@ pub(crate) mod claim {
             .unwrap_or(0)
     }
 
-    /// This process's holder id, fresh per process.
+    /// Which kind of process this is: `app` unless set before the first claim (the iOS share
+    /// extension sets `share`). One process of each role runs at a time, so a claim of this
+    /// role under another holder is a dead process's ([`purge_stale_on`]).
+    static ROLE: OnceLock<&'static str> = OnceLock::new();
+
+    pub(crate) fn set_role(role: &'static str) {
+        let _ = ROLE.set(role);
+    }
+
+    fn role() -> &'static str {
+        ROLE.get().copied().unwrap_or("app")
+    }
+
+    /// This process's holder id: its role and a fresh id per process.
     pub(crate) fn holder() -> &'static str {
         static HOLDER: OnceLock<String> = OnceLock::new();
-        HOLDER.get_or_init(|| ulid::Ulid::new().to_string())
+        HOLDER.get_or_init(|| format!("{}:{}", role(), ulid::Ulid::new()))
+    }
+
+    /// Drop the claims an earlier process of this role left (it was killed, or stopped before
+    /// releasing them): only one runs at a time, so none is live. Run when this process opens
+    /// the database, before its drain, so a relaunch never waits out a dead process's lease.
+    pub(crate) fn purge_stale_on(conn: &rusqlite::Connection) -> rusqlite::Result<usize> {
+        conn.execute(
+            "DELETE FROM outbox_claim WHERE holder LIKE ?1 AND holder != ?2",
+            rusqlite::params![format!("{}:%", role()), holder()],
+        )
+    }
+
+    /// A drain passed by rows another process held: look again once their leases could have
+    /// run out (the holder finished them, or stopped). One pending at a time; not a poll.
+    pub(crate) fn redrain_after_lease(state: &Arc<AppState>) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static PENDING: AtomicBool = AtomicBool::new(false);
+        if PENDING.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let state = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(LEASE + Duration::from_secs(2)).await;
+            PENDING.store(false, Ordering::SeqCst);
+            super::spawn_outbox_flush(&state);
+        });
     }
 
     /// Take `key` if it is free, ours, or its lease ran out. `None` when another process holds it.
@@ -2099,6 +2139,27 @@ pub(crate) mod claim {
             assert!(try_take_on(&c, "m1", "extension", expired).unwrap(), "a lease that ran out is taken over");
             assert!(!try_take_on(&c, "m1", "app", expired + 1).unwrap());
             assert!(try_take_on(&c, "m2", "app", expired).unwrap(), "keys are independent");
+        }
+
+        /// A relaunched process clears what a dead process of its own role left, and only that.
+        #[test]
+        fn a_relaunch_clears_its_own_roles_dead_claims_only() {
+            let c = conn();
+            let far = now_ms() + 600_000;
+            let dead = format!("{}:dead", role());
+            assert!(try_take_on(&c, "m1", &dead, now_ms()).unwrap());
+            assert!(try_take_on(&c, "m2", "share-elsewhere:live", now_ms()).unwrap());
+            assert!(try_take_on(&c, "m3", holder(), now_ms()).unwrap());
+            c.execute("UPDATE outbox_claim SET until_ms = ?1", [far]).unwrap();
+            assert_eq!(purge_stale_on(&c).unwrap(), 1);
+            let left: Vec<String> = c
+                .prepare("SELECT key FROM outbox_claim ORDER BY key")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert_eq!(left, vec!["m2", "m3"], "another role's live claim and our own stay");
         }
     }
 }
