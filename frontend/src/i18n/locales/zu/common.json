@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "Ukuba khona: {{status}}",
+    "away": "akekho",
     "offline": "akaxhunyiwe",
     "online": "uxhunyiwe"
   },

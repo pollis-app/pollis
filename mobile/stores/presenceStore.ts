@@ -1,15 +1,17 @@
-// Who is online (#2059), desktop's twin (frontend/src/stores/presenceStore.ts): online while any
-// room this device shares with them shows them. The input is per-room snapshots only
+// Who is online or away (#2059, #2110), desktop's twin (frontend/src/stores/presenceStore.ts): online
+// while any room this device shares with them shows them in use, away while every room that shows
+// them shows them not in use. The input is per-room snapshots only
 // (`setRoom` / `clearRoom`), so a different presence source can feed it without touching readers.
 
 import { comparer, computed, makeAutoObservable } from "mobx";
 import {
-  onlineUsers,
+  presentUsers,
   statusOf,
   withRoom,
   withoutRoom,
   type PresenceStatus,
   type RoomPresence,
+  type RoomSnapshot,
 } from "../lib/presence.ts";
 
 class PresenceStore {
@@ -20,25 +22,25 @@ class PresenceStore {
 
   constructor() {
     // `status` stays tracked: as an action its reads would be untracked.
-    // `online` compares by content, so a snapshot that changes no one re-renders no one.
+    // `present` compares by content, so a snapshot that changes no one re-renders no one.
     makeAutoObservable(
       this,
-      { status: false, online: computed({ equals: comparer.structural }) },
+      { status: false, present: computed({ equals: comparer.structural }) },
       { autoBind: true },
     );
   }
 
-  // Computed, so a status read is a set lookup.
-  get online(): Set<string> {
-    return onlineUsers(this.byRoom);
+  // Computed, so a status read is a map lookup: user → in use somewhere.
+  get present(): Map<string, boolean> {
+    return presentUsers(this.byRoom);
   }
 
   setSelfUserId(userId: string | null) {
     this.selfUserId = userId;
   }
 
-  setRoom(roomId: string, userIds: string[]) {
-    this.byRoom = withRoom(this.byRoom, roomId, userIds);
+  setRoom(roomId: string, snapshot: RoomSnapshot) {
+    this.byRoom = withRoom(this.byRoom, roomId, snapshot);
   }
 
   clearRoom(roomId: string) {
@@ -51,7 +53,7 @@ class PresenceStore {
   }
 
   status(userId: string | null | undefined): PresenceStatus {
-    return statusOf(this.online, userId, this.selfUserId);
+    return statusOf(this.present, userId, this.selfUserId);
   }
 }
 

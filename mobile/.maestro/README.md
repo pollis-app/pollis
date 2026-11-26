@@ -362,11 +362,14 @@ exactly as desktop does). `two-client/typing/`: the peer types and
 `text-typing-indicator` reads "<peer> is typing…", then goes when it stops; the
 device types and the peer sees `typing`, then `stopped` when the draft is
 cleared and again after a send (`scripts/peer-typing.js`).
-**Presence (automated, #2059):** the same `maestro-typing.sh` run goes on to
+**Presence (automated, #2059, #2110):** the same `maestro-typing.sh` run goes on to
 `two-client/presence/`: back on the Direct list the DM's row shows the peer
-online (`presence-online-row-dm-…-avatar`); the script stops the peer, whose
-session leaves the DM's room, and the row's dot turns hollow
-(`presence-offline-…`) with no reload.
+online (`presence-online-row-dm-…-avatar`); the peer hides its window as desktop
+does on close and the row shows the crescent (`presence-away-…`), then online
+when it shows again (`2-peer-away`); the device goes to the background and the
+peer sees it `away`, then `online` once it is back (`3-device-away`,
+`scripts/peer-presence.js`); the script stops the peer, whose session leaves the
+DM's room, and the row's dot turns hollow (`presence-offline-…`) with no reload.
 **DM receipts (automated, #1637):** `mobile/scripts/maestro-receipts.sh <device>`
 — one device plus the same `live_message_peer`, which also fetches the DM and
 marks the device's messages read when a flow asks (`scripts/peer-read.js`). Two

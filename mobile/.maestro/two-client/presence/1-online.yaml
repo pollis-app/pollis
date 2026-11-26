@@ -2,7 +2,7 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - two-client
 ---
-# PRESENCE (#2059), part 1 of 2 — driven by scripts/maestro-typing.sh, after the
+# PRESENCE (#2059), part 1 — driven by scripts/maestro-typing.sh, after the
 # typing flows: the DM is open and the peer, a desktop-shaped client on
 # pollis-core's own LiveKit path, sits in its room. The DM's row on the Direct
 # list shows it online.

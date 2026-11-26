@@ -694,8 +694,9 @@ Design: `docs/history-transfer-design.md`. Args camelCase, results snake_case (l
 - `get_livekit_token(room_id, user_id, username)` → token string — mobile bridge only (desktop connects with `connect_rooms`) (identity/name derived server-side; the args are ignored)
 - `subscribe_realtime(on_event: Channel)`
 - `connect_rooms(room_ids, user_id, username)`
+- `set_presence_active(active)` (#2110) — desktop only: the renderer says whether the user is at the app (`userActivityStore.presenceActive`: the window visible and some input within the idle window; sent once at sign-in, then on change). The core combines it with the shell's `set_window_hidden` (closed to the tray/Dock; cleared on show/focus) and, when the combination flips, writes the LiveKit participant attribute `active: "1" | "0"` to every connected room (`livekit_roster::ACTIVE_ATTRIBUTE`); a room joined while not in use gets `"0"` at once. On change only, never a timer. Needs the token grant `canUpdateOwnMetadata` (DS `broker.rs`). Peers' attribute changes re-emit `presence_changed` with `active`.
 - `publish_typing(room_id, channel_id, conversation_id, user_id, username, is_typing)` — unreliable, identity-free body (`livekit_signalling::typing_payload`, #836); the receiver takes the typist from the publishing participant. Senders re-emit every 3 s while typing and send one stop; receivers age entries out after 6 s.
-- Mobile-only bridge arm `livekit_room_presence({ room, identities })` → `[userId]` (#2059): the users a room's remote participants show (every wire identity in the room, resolved through the shared `#836` cache), each once, never self, never the DS or an unresolved pseudonym (`commands/livekit_roster.rs`). Mobile replaces its snapshot of that room with the answer on every roster change; desktop gets the same rule as `presence_changed` events from its own realtime loop.
+- Mobile-only bridge arm `livekit_room_presence({ room, identities, inactive? })` → `{ online: [userId], away: [userId] }` (#2059, #2110; `inactive` = the identities whose `active` attribute is `"0"`, missing = in use; a core before #2110 answered a bare `[userId]`, which mobile still reads as all online): the users a room's remote participants show (every wire identity in the room, resolved through the shared `#836` cache), each once, never self, never the DS or an unresolved pseudonym (`commands/livekit_roster.rs`). Mobile replaces its snapshot of that room with the answer on every roster change; desktop gets the same rule as `presence_changed` events from its own realtime loop.
 - Mobile-only bridge arm `resolve_livekit_identities({ room, identities })` → `[{ identity, userId, username }]` (#1635). Mobile's realtime runs in JS (`livekit-client`, data-only), so the per-room participant pseudonyms (#836) it sees are resolved here via `ds_livekit_identities` (`POST /v1/livekit/identities`, no longer media-gated), the way desktop's realtime loop resolves them. Unresolvable identities are left out. Used for `typing`, whose sender is never read from the body. Mobile publishes `typing` itself from JS (`mobile/lib/realtime/client.ts` `publishRealtime`, same wire body as desktop) and shows it over the composer (`components/chat/TypingIndicator.tsx`, `text-typing-indicator`).
 
 ## voice (`commands/voice/`)
@@ -948,7 +949,7 @@ than hand-edit.
 
 **`mls`** (3) — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 
-**`livekit`** (8) — `cancel_call`, `connect_rooms`, `list_voice_participants`, `list_voice_room_counts`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
+**`livekit`** (9) — `cancel_call`, `connect_rooms`, `list_voice_participants`, `list_voice_room_counts`, `publish_typing`, `publish_voice_presence`, `set_presence_active`, `start_call`, `subscribe_realtime`
 
 **`emoji`** (5) — `get_emoji_url`, `list_group_emoji`, `list_usable_emoji`, `remove_group_emoji`, `upload_group_emoji`
 

@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "ሁኔታ፦ {{status}}",
+    "away": "አይገኝም",
     "offline": "ከመስመር ውጭ",
     "online": "በመስመር ላይ"
   },

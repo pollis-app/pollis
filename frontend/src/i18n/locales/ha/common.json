@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "Kasancewa: {{status}}",
+    "away": "ba ya nan",
     "offline": "ba a kan layi",
     "online": "a kan layi"
   },

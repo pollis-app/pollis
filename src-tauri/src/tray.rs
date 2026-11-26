@@ -66,6 +66,7 @@ pub(crate) fn show_main_window(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        crate::note_window_hidden(app, false);
     }
 }
 

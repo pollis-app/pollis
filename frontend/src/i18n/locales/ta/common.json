@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "நிலை: {{status}}",
+    "away": "தொலைவில்",
     "offline": "ஆஃப்லைன்",
     "online": "ஆன்லைன்"
   },

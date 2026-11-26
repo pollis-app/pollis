@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "ਮੌਜੂਦਗੀ: {{status}}",
+    "away": "ਦੂਰ",
     "offline": "ਆਫ਼ਲਾਈਨ",
     "online": "ਔਨਲਾਈਨ"
   },

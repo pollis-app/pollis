@@ -118,7 +118,9 @@ Response `200`: `{ "token": "<HS256 JWT>", "url": "wss://<livekit-host>" }`.
 The JWT is HS256 (`typ=JWT`): `iss` = API key, `sub` = identity, `iat`/`nbf` =
 now, `exp` = now + 3600, `name` = **empty**, `video` grants
 `roomJoin`/`canPublish`/`canSubscribe` = true (`canPublishData` = false only for
-`view`).
+`view`), and `canUpdateOwnMetadata` = true except for `view` (#2110: a session sets
+its own `active` attribute, "0" while the app runs unused, which peers show as away;
+the name and metadata it also covers stay empty).
 
 **Identity is an opaque per-room pseudonym (#836).** `sub` used to be the raw
 `{user}:{device}` and `name` the user's username, which handed the SFU the

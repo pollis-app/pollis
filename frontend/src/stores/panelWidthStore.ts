@@ -43,7 +43,7 @@ class PanelWidthStore {
   rightPanel: number | null = load("rightPanel");
 
   constructor() {
-    // `widthOf` stays tracked (not an action), as with `presenceStore.isOnline`.
+    // `widthOf` stays tracked (not an action), as with `presenceStore.status`.
     makeAutoObservable(this, { widthOf: false }, { autoBind: true });
   }
 

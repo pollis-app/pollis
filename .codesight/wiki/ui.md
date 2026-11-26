@@ -684,19 +684,36 @@ interaction may make.
 
 ### Presence
 
-`presenceStore` infers online-ness from LiveKit room participation, keeping a
-`user_id → Set<room_id>` map so leaving one shared room doesn't flip someone
-offline while they're still in another. Two properties are load-bearing:
+`presenceStore` infers presence from LiveKit room participation, keeping a
+`user_id → room_id → in use` map so leaving one shared room doesn't flip someone
+offline while they're still in another. Three states (#2110): **online** while any
+shared room shows the user in use, **away** while every room that shows them shows
+them not in use, **offline** while none shows them (`statusFromRooms`). "In use" is
+the LiveKit participant attribute `active`: `"0"` means running but not in use, and
+only an explicit `"0"` counts, so a build that predates the attribute (which sets
+none) still shows online. A user is in use in a room while any of their sessions
+there is (`livekit_roster::presence_by_user`, the one rule both apps use). Desktop
+writes its own attribute through the core: the renderer's
+`userActivityStore.presenceActive` (visible and not idle; a blur alone is not away,
+focus is back at once) goes to `set_presence_active`, and the shell reports a
+hidden window (`set_window_hidden`, `src-tauri/src/lib.rs` `note_window_hidden`).
+Mobile writes it from `AppState` in `lib/realtime/client.ts` (background → `"0"`,
+foreground → `"1"`). Changing an attribute needs the token grant
+`canUpdateOwnMetadata`, which the DS adds to every non-view token. Away draws a
+crescent in the dot's box: the online dot with a circle four fifths its size, in
+the ring's colour, bitten out of its top corner. `isPresent` (online or away)
+filters the right panel's people lists; a call can be placed to an away peer.
+Two properties are load-bearing:
 
-- **`isOnline` is deliberately NOT a MobX action.** Actions run untracked, so an
+- **`status` / `isPresent` are deliberately NOT MobX actions.** Actions run untracked, so an
   `action` here would leave its `byUser` reads invisible to the calling
-  `observer()` and presence would stop updating live. It stays a plain method,
-  excluded via `makeAutoObservable(this, { isOnline: false })`.
+  `observer()` and presence would stop updating live. They stay plain methods,
+  excluded via `makeAutoObservable(this, { isPresent: false, status: false })`.
 - **The local user is tracked separately.** Room events only ever describe
   *other* participants — nothing tells us we are online — so `byUser` never
   contains us and every surface would report the signed-in user as offline.
   `appStore.setCurrentUser` (and `logout`) pushes the id into
-  `presenceStore.setSelfUserId`, and `isOnline` short-circuits true for it. The
+  `presenceStore.setSelfUserId`, and `status` short-circuits to online for it. The
   dependency is one-way (`appStore → presenceStore`; presence imports nothing of
   ours) so it cannot cycle. Don't paper over this at a call site with a
   hardcoded `presence="online"`.
@@ -712,8 +729,9 @@ offline while they're still in another. Two properties are load-bearing:
 joined by the JS LiveKit SDK (data-only), not by the core, so there is no
 `presence_changed` event: on every roster change of a room (connect, a
 participant joining or leaving, a reconnect) `mobile/lib/realtime/client.ts`
-hands the room's remote wire identities to the core's `livekit_room_presence`
-bridge arm, which resolves them through the same `#836` cache desktop uses
+hands the room's remote wire identities, and the ones whose `active` attribute is
+`"0"`, to the core's `livekit_room_presence` bridge arm (also on
+`ParticipantAttributesChanged`), which resolves them through the same `#836` cache desktop uses
 (`commands/livekit_roster.rs`, always compiled) and answers the people present,
 self excluded, once each whatever their sessions (`present_user_ids`, the same
 "last session" rule as `emit_departure`). Who a participant counts as is one
@@ -731,13 +749,15 @@ under a spinner (`previewUri` / `busy`), sizes `sm`/`md`/`lg`/points, and the
 dot in its corner, desktop's geometry (`presenceDotGeometry`: a quarter of the
 avatar, 5 at least, a 2-point ring 2 points past the corner). Online is the
 accent ringed in the surface behind the avatar (`on`: `bg`, `panel`, `raised`,
-`high`); offline is hollow, `bg` ringed in `accentMuted`. A bot is a user and
+`high`); away is that dot bitten into a crescent (`awayBite`); offline is hollow,
+`bg` ringed in `accentMuted`. A bot is a user and
 follows the same rule (its Bot badge sits by the name, not on the avatar). The
 letter tile `Avatar` in `ui.tsx` is drawn directly only for groups (rounded, no
 dot), and a group DM's stacked pair passes `presence={false}`: it stands for
-the conversation. Maestro reads `presence-online|offline-<testID>` through
-`<Screen>`'s `AvatarProbe` (`flows/presence.yaml`; someone else going online
-and offline in `scripts/maestro-typing.sh` → `two-client/presence/`).
+the conversation. Maestro reads `presence-online|away|offline-<testID>` through
+`<Screen>`'s `AvatarProbe` (`flows/presence.yaml`; someone else going online,
+away and offline, and the peer seeing the phone away in the background, in
+`scripts/maestro-typing.sh` → `two-client/presence/`). Desktop: `e2e/presence-away.spec.ts`.
 
 ### The right panel (#824, #904)
 

@@ -22,6 +22,7 @@
   },
   "presence": {
     "label": "Présence : {{status}}",
+    "away": "absent",
     "offline": "hors ligne",
     "online": "en ligne"
   },

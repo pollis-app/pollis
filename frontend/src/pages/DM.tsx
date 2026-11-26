@@ -81,9 +81,9 @@ export const DMPage: React.FC = observer(() => {
   const canShowProfile = isOneOnOne;
   // Only after the peer accepted, so a request can't escalate to a call.
   const otherPresence = usePresenceStatus(otherUserId);
-  const isOtherOnline = otherPresence === "online";
-  // Offline peers fail at the handshake.
-  const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
+  // Away is still connected (#2110): the app is running and rings. Offline peers fail at the handshake.
+  const isOtherConnected = otherPresence !== "offline";
+  const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherConnected;
   const { togglePins, setSafety } = useRightPanel();
   const verificationByPeer = usePeerVerificationMap();
   const peerVerified = otherUserId ? verificationByPeer.get(otherUserId)?.verified === true : false;

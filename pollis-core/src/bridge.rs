@@ -1666,12 +1666,15 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
                 .collect::<Vec<_>>())
         }
 
-        // #2059: the users a room's participants show, for mobile's presence dots.
+        // #2059: the users a room's participants show, for mobile's presence dots. #2110:
+        // `inactive` lists the identities whose `active` attribute is "0"; missing = none.
         "livekit_room_presence" => {
             let room: String = arg(&args, "room")?;
             let identities: Vec<String> = arg(&args, "identities")?;
+            let inactive: Vec<String> = arg_opt(&args, "inactive")?.unwrap_or_default();
             let st = state()?;
-            ok(crate::commands::livekit_roster::room_presence(&st, &room, &identities).await?)
+            ok(crate::commands::livekit_roster::room_presence(&st, &room, &identities, &inactive)
+                .await?)
         }
 
         "list_usable_emoji" => {

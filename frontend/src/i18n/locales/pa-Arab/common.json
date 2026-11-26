@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "سٹیٹس: {{status}}",
+    "away": "دور",
     "offline": "آف لائن",
     "online": "آن لائن"
   },

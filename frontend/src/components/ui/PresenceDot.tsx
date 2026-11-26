@@ -8,7 +8,7 @@ interface PresenceDotProps {
   testId?: string;
 }
 
-/** Standalone presence dot, for rows with no avatar to anchor it. */
+/** Standalone presence dot, for rows with no avatar to anchor it: online, away (a crescent), offline. */
 export const PresenceDot: React.FC<PresenceDotProps> = observer(
   ({ userId, testId }) => {
     const { t } = useTranslation("common");
@@ -16,13 +16,19 @@ export const PresenceDot: React.FC<PresenceDotProps> = observer(
     return (
       <span
         data-testid={testId}
+        data-presence={status}
         aria-label={t("presence.label", { status: t(`presence.${status}`) })}
-        className={`inline-block size-2 rounded-full box-content shrink-0 border ${
+        className={`relative inline-block size-2 overflow-hidden rounded-full box-content shrink-0 border ${
           status === "offline"
             ? "bg-bg border-accent-muted"
             : "bg-accent border-surface"
         }`}
-      />
+      >
+        {/* #2110: away bites the dot into a crescent, in the ring's colour. */}
+        {status === "away" ? (
+          <span aria-hidden="true" className="absolute -left-[20%] -top-[20%] size-[80%] rounded-full bg-surface" />
+        ) : null}
+      </span>
     );
   },
 );
