@@ -48,5 +48,8 @@ test("CustomEmojiImage never mounts an <Image> without a source", () => {
     "utf8",
   );
   assert.ok(!/source=\{uri \? \{ uri \} : undefined\}/.test(src));
-  assert.match(src, /<Image\s+source=\{\{ uri \}\}/);
+  // Both image paths (plain and #2115's fading one) take props built after the `!uri` placeholder return.
+  assert.match(src, /if \(!uri\) \{[\s\S]*?\}\s*const imageProps = \{\s*source: \{ uri \},/);
+  assert.match(src, /<Animated\.Image \{\.\.\.imageProps\}/);
+  assert.match(src, /<Image \{\.\.\.imageProps\} \/>/);
 });

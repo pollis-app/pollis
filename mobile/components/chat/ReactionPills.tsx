@@ -1,4 +1,5 @@
-import { View, Pressable } from "react-native";
+import { Pressable } from "react-native";
+import Animated from "react-native-reanimated";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { fonts, semantic, type as ty, r, typeSize } from "../../theme/tokens";
@@ -7,6 +8,7 @@ import { splitEmojiSegments } from "../emoji/emojiTokens";
 import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
 import { haptic } from "../../lib/haptics";
 import { LONG_PRESS_MS } from "../../lib/pressFeedback";
+import { LATE_FADE_IN } from "../../lib/lateFade";
 
 /** A reaction's emoji is a Unicode emoji or a `<:name:hash>` custom token. */
 export function ReactionFace({ emoji, size = 18 }: { emoji: string; size?: number }) {
@@ -18,6 +20,7 @@ export function ReactionFace({ emoji, size = 18 }: { emoji: string; size?: numbe
         shortcode={first.shortcode}
         contentHash={first.contentHash}
         size={size}
+        fadeIn
       />
     );
   }
@@ -27,12 +30,15 @@ export function ReactionFace({ emoji, size = 18 }: { emoji: string; size?: numbe
 export function ReactionPills({
   messageId,
   reactions,
+  fadeIn = false,
   currentUserId,
   onToggle,
   onShowWho,
 }: {
   messageId: string;
   reactions: Reaction[];
+  // The row painted without pills: fade them in within the space they take.
+  fadeIn?: boolean;
   currentUserId?: string;
   onToggle: (emoji: string, reacted: boolean) => void;
   // Long press: who reacted (the breakdown sheet). The pill is the responder, so the row's own long press never fires.
@@ -43,7 +49,10 @@ export function ReactionPills({
     return null;
   }
   return (
-    <View
+    <Animated.View
+      // An animated view is never flattened: without an id, iOS hides the pills inside an accessible row (#1895).
+      testID={`reactions-${messageId}`}
+      entering={fadeIn ? LATE_FADE_IN : undefined}
       style={{
         flexDirection: "row",
         flexWrap: "wrap",
@@ -127,6 +136,6 @@ export function ReactionPills({
           </Pressable>
         );
       })}
-    </View>
+    </Animated.View>
   );
 }

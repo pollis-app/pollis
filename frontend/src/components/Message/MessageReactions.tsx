@@ -18,6 +18,7 @@ import { ReactionEmoji, spokenEmoji } from "./ReactionEmoji";
 import { ReactionBreakdownPanel } from "./ReactionBreakdownPanel";
 import { PressButton } from "../ui/PressButton";
 import { FOCUS_RING } from "../ui/focusRing";
+import "../ui/fadeIn.css";
 
 interface MessageReactionsProps {
   messageId: string;
@@ -37,6 +38,8 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
   const { t } = useTranslation("chat");
   const { currentUser } = appStore;
   const { data: reactions = [] } = useReactions(messageId);
+  // Pills that arrive after the row painted fade in rather than blink (#2115).
+  const paintedWithout = useRef(reactions.length === 0);
   const toggleReaction = useToggleReaction(messageId);
   const [hovered, setHovered] = useState(false);
   const [openEmoji, setOpenEmoji] = useState<string | null>(null);
@@ -124,7 +127,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
       ref={wrapperRef}
       data-testid="message-reactions"
       onMouseEnter={() => setHovered(true)}
-      className={`relative flex items-center flex-wrap gap-1 ${className}`}
+      className={`relative flex items-center flex-wrap gap-1 ${paintedWithout.current ? "pollis-fade-in" : ""} ${className}`}
     >
       {reactions.map((reaction) => {
         const reacted = currentUser
@@ -154,7 +157,10 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
             aria-expanded={openEmoji === reaction.emoji}
             aria-pressed={reacted}
           >
-            <ReactionEmoji emoji={reaction.emoji} />
+            {/* A fixed slot: a custom image landing later never changes the pill's size (#2115). */}
+            <span className="inline-flex h-5 min-w-5 items-center justify-center">
+              <ReactionEmoji emoji={reaction.emoji} />
+            </span>
             <span>{reaction.count}</span>
           </PressButton>
         );

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { View, Pressable } from "react-native";
 import { Text } from "../Text";
 import Animated, {
@@ -166,6 +166,9 @@ export function MessageRow({
         (m.name === "all" || (!!selfName && m.name === selfName)),
     );
   }, [text, mentionNames, selfName]);
+
+  // Pills that land after the row painted fade in rather than blink (#2115).
+  const paintedWithoutReactions = useRef(!reactions || reactions.length === 0);
 
   // Touch feedback (#1282): the fade runs on the UI thread; the swipe clears it from its worklet.
   const press = useSharedValue(0);
@@ -463,6 +466,7 @@ export function MessageRow({
               <ReactionPills
                 messageId={messageId ?? ""}
                 reactions={reactions}
+                fadeIn={paintedWithoutReactions.current}
                 currentUserId={currentUserId}
                 onToggle={onToggleReaction}
                 onShowWho={onShowReactions}

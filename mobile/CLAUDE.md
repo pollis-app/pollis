@@ -1506,7 +1506,7 @@ Current state:
 - **Chat parity set (2026-08, stacked PRs; bridge arms land in PR #967):**
   load-older paging (`useMessages` is an infinite query over `next_cursor`;
   inverted FlatList, `onEndReached`); reaction pills + full emoji picker
-  (`get_reactions` batched per conversation in one queryFn; a long press on a
+  (one `get_reactions_for_messages` per page into a per-conversation map, only the ids it lacks, #2115; a long press on a
   pill opens `components/chat/ReactionBreakdownSheet.tsx`, who reacted with
   what, #1684 — tabs and rows from `lib/reactionBreakdown.ts`, names from the
   roster, whose rows carry display names (#2085), and one `get_user_profiles` only for

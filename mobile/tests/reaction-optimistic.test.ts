@@ -73,15 +73,15 @@ test("leaving the last pill drops it", () => {
   assert.deepEqual(next.get(MSG), [pill("🎉", THEM)]);
 });
 
-// An empty array would render an empty pill row until the refetch.
-test("removing the only reaction takes the message out of the map", () => {
+// Kept as "loaded, no pills" (#2115): an absent entry would be read again; an empty list draws no row.
+test("removing the only reaction leaves an empty, still-loaded entry", () => {
   const next = applyReactionToggle(map([[MSG, [pill("👍", ME)]]]), {
     messageId: MSG,
     emoji: "👍",
     userId: ME,
     mode: "remove",
   });
-  assert.equal(next.has(MSG), false);
+  assert.deepEqual(next.get(MSG), []);
 });
 
 test("count is derived from user_ids and cannot drift from it", () => {

@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { AppState, Image, View } from "react-native";
+import {
+  AppState,
+  Image,
+  View,
+  type ImageErrorEventData,
+  type NativeSyntheticEvent,
+} from "react-native";
+import Animated from "react-native-reanimated";
 import { Text } from "../Text";
-import { semantic, fonts } from "../../theme/tokens";
+import { semantic, fonts, r } from "../../theme/tokens";
 import { forgetEmojiUri, resolveEmojiUri } from "../../lib/emojiCache";
 import { emojiRetryDelay, retryOnForeground } from "../../lib/emojiRetry";
 import { reportEmojiShown } from "../../lib/emojiRenderState";
+import { LATE_FADE_IN } from "../../lib/lateFade";
 
 /**
  * One custom emoji, rendered inline. Resolves the content hash to a cached
@@ -32,10 +40,13 @@ export function CustomEmojiImage({
   shortcode,
   contentHash,
   size = 18,
+  fadeIn = false,
 }: {
   shortcode: string;
   contentHash: string;
   size?: number;
+  // Fade the image in over its placeholder; never inside inline <Text>.
+  fadeIn?: boolean;
 }) {
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -130,27 +141,31 @@ export function CustomEmojiImage({
     return (
       <View
         accessibilityLabel={`:${shortcode}:`}
-        style={{ width: size, height: size }}
+        style={{ width: size, height: size, borderRadius: r.xs, backgroundColor: semantic.high }}
       />
     );
   }
 
-  return (
-    <Image
-      source={{ uri }}
-      onLoad={() => {
-        failures.current = 0;
-        clearRetry();
-        setFailed(false);
-        setDrawn(true);
-      }}
-      onError={(e) => {
-        // The file it was given would not draw: re-materialise it next time.
-        forgetEmojiUri(contentHash);
-        fail(`did not draw from ${uri}: ${e.nativeEvent.error}`);
-      }}
-      accessibilityLabel={`:${shortcode}:`}
-      style={{ width: size, height: size, resizeMode: "contain" }}
-    />
-  );
+  const imageProps = {
+    source: { uri },
+    onLoad: () => {
+      failures.current = 0;
+      clearRetry();
+      setFailed(false);
+      setDrawn(true);
+    },
+    onError: (e: NativeSyntheticEvent<ImageErrorEventData>) => {
+      // The file it was given would not draw: re-materialise it next time.
+      forgetEmojiUri(contentHash);
+      fail(`did not draw from ${uri}: ${e.nativeEvent.error}`);
+    },
+    accessibilityLabel: `:${shortcode}:`,
+    style: { width: size, height: size, resizeMode: "contain" as const },
+  };
+
+  // Outside inline text only (a pill): the image always replaces a placeholder, so it fades in (#2115).
+  if (fadeIn) {
+    return <Animated.Image {...imageProps} entering={LATE_FADE_IN} />;
+  }
+  return <Image {...imageProps} />;
 }

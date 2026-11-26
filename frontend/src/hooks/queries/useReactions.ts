@@ -1,21 +1,26 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { invoke } from "../../bridge";
 import type { Reaction } from "../../types";
 import { appStore } from "../../stores/appStore";
+import { prefetchReactions, reactionQueryKeys, reactionQueryOptions } from "./reactionPrefetch";
 
-const reactionQueryKeys = {
-  message: (messageId: string) => ["reactions", messageId] as const,
-};
-
+/** One message's pills; normally seeded by the page's batch read (#2115). */
 export function useReactions(messageId: string) {
-  return useQuery({
-    queryKey: reactionQueryKeys.message(messageId),
-    queryFn: async (): Promise<Reaction[]> => {
-      return await invoke<Reaction[]>("get_reactions", { messageId });
-    },
-    staleTime: 1000 * 15,
-  });
+  return useQuery(reactionQueryOptions(messageId, invoke));
+}
+
+/** Seeds reactions for every listed message with one batched read per change (#2115). */
+export function usePrefetchReactions(messageIds: readonly string[]) {
+  const queryClient = useQueryClient();
+  const idsKey = messageIds.join("|");
+  useEffect(() => {
+    if (messageIds.length === 0) {
+      return;
+    }
+    void prefetchReactions(queryClient, messageIds, invoke);
+    // idsKey stands for messageIds: a new array with the same ids is no change.
+  }, [queryClient, idsKey]);
 }
 
 interface ReactionVars {

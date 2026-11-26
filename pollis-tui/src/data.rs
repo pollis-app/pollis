@@ -124,6 +124,7 @@ pub async fn reactions(
     Ok(get_reactions_for_messages(message_ids, state)
         .await?
         .into_iter()
+        .filter(|(_, reactions)| !reactions.is_empty())
         .collect())
 }
 

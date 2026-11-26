@@ -1515,6 +1515,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       const { messageId } = args as { messageId: string };
       return store.reactions[messageId] ?? [];
     }
+    // An entry per requested id, empty when none, like the core (#2115).
+    case 'get_reactions_for_messages': {
+      const { messageIds } = args as { messageIds: string[] };
+      return Object.fromEntries(messageIds.map((id) => [id, store.reactions[id] ?? []]));
+    }
     case 'add_reaction': {
       const { messageId, userId, emoji } = args as { messageId: string; userId: string; emoji: string };
       const list = (store.reactions[messageId] ??= []);

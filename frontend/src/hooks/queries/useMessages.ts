@@ -24,6 +24,12 @@ import {
   type SendState,
 } from "../../utils/pendingMessages";
 import { activityMs, bumpActivity } from "../../utils/dmActivity";
+import {
+  prefetchReactions,
+  reactableIds,
+  REACTIONS_REVEAL_WAIT_MS,
+  settleWithin,
+} from "./reactionPrefetch";
 
 // Last background ingest per conversation, to debounce channel switching (realtime writes it too).
 const lastIngestAt = new Map<string, number>();
@@ -334,30 +340,32 @@ export function useMessages(channelId: string | null, conversationId: string | n
     queryKey,
     queryFn: async (): Promise<MessagesQueryResult> => {
       // Stubs for sends the store doesn't hold survive the refetch (#1335).
-      const cachedStubs = queryClient.getQueryData<MessagesQueryResult>(queryKey)?.messages;
+      const cached = queryClient.getQueryData<MessagesQueryResult>(queryKey);
+      const cachedStubs = cached?.messages;
+      let page: MessagePage;
       if (isChannel && channelId) {
-        const page = await invoke<MessagePage>('read_channel_messages', {
+        page = await invoke<MessagePage>('read_channel_messages', {
           channelId,
           limit: 50,
         });
-        return {
-          messages: carryStubs((page.messages || []).map(transformChannelMessage), cachedStubs),
-          nextCursor: page.next_cursor ?? null,
-        };
-      }
-
-      if (conversationId) {
-        const page = await invoke<MessagePage>('read_dm_messages', {
+      } else if (conversationId) {
+        page = await invoke<MessagePage>('read_dm_messages', {
           dmChannelId: conversationId,
           limit: 50,
         });
-        return {
-          messages: carryStubs((page.messages || []).map(transformChannelMessage), cachedStubs),
-          nextCursor: page.next_cursor ?? null,
-        };
+      } else {
+        return { messages: [], nextCursor: null };
+      }
+      const messages = carryStubs((page.messages || []).map(transformChannelMessage), cachedStubs);
+
+      // One reactions read for the page (#2115). A first open waits briefly for it so pills
+      // paint with their rows instead of pushing the log down a beat later.
+      const seeded = prefetchReactions(queryClient, reactableIds(messages), invoke);
+      if (cached === undefined) {
+        await settleWithin(seeded, REACTIONS_REVEAL_WAIT_MS);
       }
 
-      return { messages: [], nextCursor: null };
+      return { messages, nextCursor: page.next_cursor ?? null };
     },
     enabled: !!(channelId || conversationId) && !!currentUser,
     staleTime: 1000 * 30,

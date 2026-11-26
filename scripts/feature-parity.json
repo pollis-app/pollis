@@ -20,7 +20,8 @@
     "clear_update_required": "Desktop shell: the self-updater's 'continue without updating' lifts the send block mark_update_required set (#1916). Mobile is updated by the stores and OTA, not by this flow.",
     "get_device_id": "Real-time media: desktop's voice session uses the device id as its per-device voice identity. Voice is desktop-only by product decision (mobile is LiveKit data-only).",
     "save_diagnostics": "Desktop writes the diagnostics report to a path picked in the native save dialog (#1305); mobile writes get_diagnostics output to a file itself and hands it to the OS share sheet.",
-    "set_video_wants": "Real-time media: which video tracks the desktop's tiles want decoded. Video is desktop-only by product decision (mobile is LiveKit data-only)."
+    "set_video_wants": "Real-time media: which video tracks the desktop's tiles want decoded. Video is desktop-only by product decision (mobile is LiveKit data-only).",
+    "get_reactions": "Desktop rows keep a per-message cache key, so a row whose cache is cold and that no page batch covered reads its one message (#2115). Mobile holds one map per conversation and reads only through get_reactions_for_messages."
   },
   "mobile_only": {
     "version": "uniffi build/version probe used by the mobile diagnostics screen; desktop reads its version from Tauri.",
@@ -160,7 +161,6 @@
       "get_my_join_request",
       "get_pending_invites",
       "get_preferences",
-      "get_reactions",
       "get_safety_number",
       "get_unlock_state",
       "get_unread_counts",
