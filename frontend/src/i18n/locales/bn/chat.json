@@ -118,6 +118,8 @@
     "error": "ত্রুটি",
     "failedToLoad": "লোড করা যায়নি",
     "failedToDownload": "ডাউনলোড করা যায়নি",
+    "removed": "ফাইল সরানো হয়েছে",
+    "updateToOpen": "এই ফাইলটি খুলতে Pollis আপডেট করুন",
     "lightboxFetch": "আনুন",
     "lightboxDone": "হয়ে গেছে",
     "lightboxDoneTerminal": "[ হয়ে গেছে ]",

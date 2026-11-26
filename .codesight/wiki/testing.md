@@ -589,8 +589,11 @@ before any network work, or after the DS took the envelope but before this
 device recorded it. `flows/outbox.rs` uses it with `lock` + `unlock` as the
 restart to prove a message the user saw accepted is delivered after the next
 unlock (a thread reply included; an attachment send killed BEFORE its upload,
-with `test_hooks::stub_attachment_uploads` standing in for R2, which the flows
-world does not have), that a re-post after a landed envelope is answered as a
+through the flows world's in-process R2). The flows world has an in-process R2
+(`flows/fake_r2.rs`, #2109; it replaced the `stub_attachment_uploads` hook): the DS's broker and
+the clients point at it, it honours the shared-object PUT's `If-None-Match: *`
+and `x-amz-checksum-sha256`, and `wipe()` empties it, so attachments run their
+real presign / PUT / register / GET path (`flows/attachment_dedup.rs`), that a re-post after a landed envelope is answered as a
 replay and arrives exactly once with the sender's `sent_at` matching the
 recipient's, that a failed send is kept as `failed` until Retry delivers it or
 Discard removes it, that Discarding a send that reached the DS withdraws it from
@@ -982,7 +985,7 @@ them.
 | Proof | How |
 |---|---|
 | **in transit** | the S3 PUT body: needle-free, high entropy, no file magic, sealed length, byte-identical to the stored object; every S3 GET response likewise; every DS request/response body re-scanned at the end with every needle, including keys learned after the request went out |
-| **at rest (storage)** | the raw object fetched with the bucket's own credentials (an operator's view): needle-free, entropy above the random-data floor, no magic, ≠ plaintext digest; it opens with the real file key and the plaintext digest matches, while HKDF of the file id, a convergent HKDF(sha256(plaintext)) key and a random key are all refused; an exact duplicate shares neither file id nor ciphertext (#1382) |
+| **at rest (storage)** | the raw object fetched with the bucket's own credentials (an operator's view): needle-free, entropy above the random-data floor, no magic, ≠ plaintext digest; it opens with the real file key and the plaintext digest matches, while HKDF of the file id, a convergent HKDF(sha256(plaintext)) key and a random key are all refused; an exact duplicate shares neither file id nor ciphertext (#1382); Shared objects (#2109) are proved by the flows until #2112 switches the DS to v2 uploads and moves this soak to them |
 | **DS rows** | `attachment_object` holds the random file id (≠ any digest of the content) and the object key only; `vault_attachment_ref` and `vault_message` exist; every cell needle-free; after deletion a full scan of every table in both DS databases (local) |
 | **local cache / DB** | the media-cache entry is ciphertext that opens with the device DB key and not a wrong one; the whole app data dir (SQLCipher DB, WAL, cache, `accounts.json`, logs) is needle-free; the DB has no plaintext header, a wrong key cannot open it, and the right key finds every entry — so "no needle on disk" is not vacuous |
 | **transient plaintext** | the loopback view returns the plaintext with `Cache-Control: no-store`; the system temp dir holds no new decrypted copy; locking turns every loopback URL into 403; the next unlock empties the cache; ending the session (logout, or account deletion on dev) leaves the user's cache dir empty — a stored, viewed sentinel proves it had something to wipe |

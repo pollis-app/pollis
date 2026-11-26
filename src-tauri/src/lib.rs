@@ -53,6 +53,18 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
         }
         api.prevent_close();
         let _ = window.hide();
+        note_window_hidden(window.app_handle(), true);
+    }
+}
+
+/// #2110: a hidden window is not in use, so peers see this user away until it shows again.
+#[cfg(feature = "native-shell")]
+pub(crate) fn note_window_hidden(app: &tauri::AppHandle, hidden: bool) {
+    if let Some(state) = app.try_state::<Arc<AppState>>() {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = pollis_core::commands::livekit::set_window_hidden(hidden, &state).await;
+        });
     }
 }
 
@@ -324,7 +336,10 @@ async fn write_clipboard_text(app: tauri::AppHandle, text: String) -> bool {
 #[tauri::command]
 fn hide_window(window: tauri::Window) {
     #[cfg(target_os = "macos")]
-    let _ = window.hide();
+    {
+        let _ = window.hide();
+        note_window_hidden(window.app_handle(), true);
+    }
 
     #[cfg(not(target_os = "macos"))]
     let _ = window.close();
@@ -700,6 +715,7 @@ pub fn run() {
             commands::mls::catch_up_all_mls_groups,
             commands::livekit::subscribe_realtime,
             commands::livekit::connect_rooms,
+            commands::livekit::set_presence_active,
             commands::livekit::publish_typing,
             commands::livekit::publish_voice_presence,
             commands::livekit::list_voice_participants,
@@ -811,6 +827,8 @@ pub fn run() {
                 }
             }
             if let tauri::WindowEvent::Focused(true) = _event {
+                // Shown again (tray, Dock, taskbar): the renderer's own state applies (#2110).
+                note_window_hidden(_window.app_handle(), false);
                 // Evict messages past the local retention window.
                 if let Some(state) = _window.app_handle().try_state::<Arc<AppState>>() {
                     let state = state.inner().clone();
@@ -825,6 +843,7 @@ pub fn run() {
                 if crate::tray::should_hide_on_close(_window.app_handle()) {
                     api.prevent_close();
                     let _ = _window.hide();
+                    note_window_hidden(_window.app_handle(), true);
                 } else if let Some(state) =
                     _window.app_handle().try_state::<Arc<AppState>>()
                 {

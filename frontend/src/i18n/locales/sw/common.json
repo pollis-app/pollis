@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "Hali: {{status}}",
+    "away": "hayupo",
     "offline": "nje ya mtandao",
     "online": "mtandaoni"
   },

@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "उपस्थिती: {{status}}",
+    "away": "दूर",
     "offline": "ऑफलाइन",
     "online": "ऑनलाइन"
   },

@@ -7,7 +7,7 @@ import { semantic, r } from "../theme/tokens";
 import { avatarStore } from "../lib/avatarCache";
 import { renditionFor } from "../lib/avatarKey";
 import { reportAvatarTag } from "../lib/avatarRenderState";
-import { presenceDotGeometry, type PresenceStatus } from "../lib/presence";
+import { awayBite, presenceDotGeometry, type PresenceStatus } from "../lib/presence";
 import { presenceStore } from "../stores/presenceStore";
 
 type Size = "sm" | "md" | "lg" | number;
@@ -64,13 +64,15 @@ export function usePrefetchAvatars(
 
 /**
  * Desktop's corner dot (`ui/Avatar.tsx`): online is an accent fill ringed in the surface behind
- * the avatar; offline is a hollow dot, the background ringed in the muted accent. Solid colours,
- * no glow.
+ * the avatar; away (#2110) is the same dot with a bite out of its top corner in the ring's colour,
+ * a crescent moon in the same box; offline is a hollow dot, the background ringed in the muted
+ * accent. Solid colours, no glow.
  */
 function PresenceDot({ size, status, ring }: { size: number; status: PresenceStatus; ring: string }) {
   const g = presenceDotGeometry(size);
   const outer = g.dot + g.ring * 2;
-  const online = status === "online";
+  const online = status !== "offline";
+  const bite = awayBite(g.dot);
   return (
     <View
       pointerEvents="none"
@@ -84,8 +86,23 @@ function PresenceDot({ size, status, ring }: { size: number; status: PresenceSta
         borderWidth: g.ring,
         borderColor: online ? ring : semantic.accentMuted,
         backgroundColor: online ? semantic.accent : semantic.bg,
+        overflow: "hidden",
       }}
-    />
+    >
+      {status === "away" ? (
+        <View
+          style={{
+            position: "absolute",
+            top: bite.inset,
+            start: bite.inset,
+            width: bite.size,
+            height: bite.size,
+            borderRadius: bite.size / 2,
+            backgroundColor: ring,
+          }}
+        />
+      ) : null}
+    </View>
   );
 }
 

@@ -73,6 +73,8 @@ const TUNABLE_VAR_KEYS = [
   "RL_INVITE_REDEEM_WINDOW_SECS",
   // Dev-only ops log (ops_log.rs).
   "POLLIS_DS_OPS_LOG",
+  // #2109: shared attachment uploads; unset is off.
+  "POLLIS_DS_SHARED_ATTACHMENTS",
 ] as const;
 
 // Every header that can carry a client IP, all deleted before forwarding.

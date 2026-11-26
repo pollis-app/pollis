@@ -13,11 +13,12 @@ import { ResizeHandle } from "../ResizeHandle";
 import { usePanelWidth } from "../usePanelWidth";
 import { panelContextFromPath } from "./panelContext";
 import { PanelCloseRow } from "../../ui/PanelCloseRow";
+import { DMChat } from "../DMChat";
 
 /** Right panel slot (#824): a flex sibling of `<Outlet />`, never an overlay. Open state is device-local (#904); see `useRightPanel`. */
 export const RightPanel: React.FC = observer(() => {
   const { t } = useTranslation("nav");
-  const { kind, isOpen, threadId, safetyPeerId, setPanel, setSafety } =
+  const { kind, isOpen, threadId, safetyPeerId, callDmId, setPanel, setSafety } =
     useRightPanel();
   const { data: dmConversations = [] } = useDMConversations();
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
@@ -30,7 +31,11 @@ export const RightPanel: React.FC = observer(() => {
 
   // The page decides, never "last selected" store fields (`panelContext.ts`).
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { groupId, channelId, conversationId } = panelContextFromPath(pathname);
+  const routeContext = panelContextFromPath(pathname);
+  const { groupId, channelId } = routeContext;
+  // On a 1:1 call the DM is the conversation, so its threads, pins and safety open here too (#2116).
+  const conversationId = routeContext.conversationId ?? callDmId;
+  const dmChatId = kind === "dm" ? callDmId : null;
   // No conversation: `MembersPanel` shows the online DM contacts.
   // Threads and pins need a message log (a channel or a DM); else the people list.
   const hasLog = Boolean(channelId || conversationId);
@@ -52,11 +57,15 @@ export const RightPanel: React.FC = observer(() => {
     ? t("panel.thread")
     : showPins
       ? t("pins.heading")
-      : t("panel.details");
+      : dmChatId
+        ? t("panel.chat")
+        : t("panel.details");
   // Two keys, not lowercased `label`: casing isn't universal.
   const closeLabel = shownThreadId
     ? t("panel.closeThread", { shortcut: toggleRightPanelLabel })
-    : t("panel.closeDetails", { shortcut: toggleRightPanelLabel });
+    : dmChatId
+      ? t("panel.closeChat", { shortcut: toggleRightPanelLabel })
+      : t("panel.closeDetails", { shortcut: toggleRightPanelLabel });
 
   return (
     <aside
@@ -82,6 +91,11 @@ export const RightPanel: React.FC = observer(() => {
             peerLabel={`@${safetyPeer.username ?? safetyPeer.user_id}`}
             onBack={() => setSafety(undefined)}
           />
+        ) : dmChatId ? (
+          // The real DM view, not a copy; no autofocus, so keys stay with the call.
+          <div className="flex h-full flex-col" data-testid="right-panel-dm">
+            <DMChat key={dmChatId} conversationId={dmChatId} autoFocus={false} />
+          </div>
         ) : (
           <MembersPanel
             groupId={groupId}

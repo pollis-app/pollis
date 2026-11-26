@@ -1677,7 +1677,9 @@ Current state:
   desktop's corner dot. The feed is the realtime client: on each room's roster
   change it asks the core's `livekit_room_presence` for the users present and
   stores the snapshot in `stores/presenceStore.ts` (per room; a closed room is
-  dropped). The arm is a core change, so the fingerprint runtime version keeps
+  dropped). Away (#2110): the client sets the `active` participant attribute
+  from `AppState` (background `"0"`, foreground `"1"`) and passes the peers
+  whose attribute is `"0"` as `inactive`; a missing attribute is in use. The arm is a core change, so the fingerprint runtime version keeps
   this JS off any binary without it (OTA cannot reach one). See
   `.codesight/wiki/ui.md` → "Presence"; Maestro `flows/presence.yaml` and the
   presence half of `scripts/maestro-typing.sh`.
@@ -2038,8 +2040,14 @@ there, never here; the rules for using them are `docs/design/README.md`.
   No other hex may appear in UI code. Defaults: accent `#fabf5a` (brand amber),
   background `#0a0907`. Both are runtime-configurable (`setAccentRgb`,
   `setBackgroundRgb`; `<ThemeProvider>` holds them and `useTheme()` re-renders
-  subscribers). `semantic.*` and the `type.*` colours are getters over the live
-  derived theme.
+  subscribers). `semantic.*` colours are getters over the live derived theme.
+  A `type.*` step is a plain object snapshot (`theme/styleSnapshot.ts`): the
+  same object while nothing changes, a new one after every accent, background
+  or script change (#2107). React Native diffs a style prop by identity first,
+  so the old single object with colour getters kept the first colour it painted
+  (the Account profile card's name stayed the old theme's text colour after a
+  background change, until a cold start). Never hand a component an object
+  whose values are getters as a style.
 - **Synced keys, shared with desktop.** The accent is `accent_color` and the
   background `background_color` in the preferences blob; desktop picks the
   background, mobile follows it. Builds before the unification read only
@@ -2065,7 +2073,8 @@ there, never here; the rules for using them are `docs/design/README.md`.
   its route created, and `observer()` is a memo that skips parent re-renders.
   So every route component, and every `observer`/`memo` component that reads
   tokens, calls `useThemeRerender()` (or `useTheme()`), and a `FlatList` whose
-  `renderItem` is a `useCallback` passes `extraData={accentHex}`.
+  `renderItem` is a `useCallback` passes `extraData={themeKey}` (from
+  `useTheme()`; it moves with the accent AND the background, #2107).
   `tests/theme-startup.test.ts` fails on a miss. `<Screen>` draws the
   invisible e2e hooks `theme-accent-<rrggbb>` / `theme-boot-accent-<rrggbb>`
   (`components/ThemeProbe.tsx`; Maestro `theme-startup.yaml`).

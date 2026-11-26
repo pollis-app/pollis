@@ -2,20 +2,17 @@ import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { Phone, PhoneCall, Pin, Shield, ShieldCheck } from "lucide-react";
-import { MainContent } from "../components/Layout/MainContent";
+import { DMChat } from "../components/Layout/DMChat";
 import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 import type { PendingDmRequest } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { useMarkConversationRead } from "../hooks/queries/useUnread";
 import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "../bridge";
 import { voiceSession } from "../voice";
 import { usePeerVerificationMap } from "../hooks/queries/useUserProfile";
-import { useReadReceipts } from "../hooks/useReadReceipts";
-import { useSendReadReceipts } from "../hooks/queries/usePreferences";
 import { PressButton } from "../components/ui/PressButton";
 import { IconButton } from "../components/ui/IconButton";
 import { PillButton } from "../components/ui/PillButton";
@@ -30,29 +27,15 @@ export const DMPage: React.FC = observer(() => {
   const { t } = useTranslation("dms");
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
-  const setSelectedConversationId = appStore.setSelectedConversationId;
-  const { mutate: markConversationRead } = useMarkConversationRead(appStore.currentUser?.id ?? null);
   const currentUser = appStore.currentUser;
   const setOutgoingCall = appStore.setOutgoingCall;
   // Joining or in a 1:1 call, ringing or answered, either side (#1640).
   const activeCallId = activeCallIdOf(appStore.voiceState);
   const callPeerId = voiceCounterpartyUserId(appStore.voiceState);
 
-  const sendReadReceipts = useSendReadReceipts();
-
   const [otherUserId, setOtherUserId] = React.useState<string | null>(null);
   const [memberCount, setMemberCount] = React.useState<number>(0);
   const [otherAcceptedAt, setOtherAcceptedAt] = React.useState<string | null>(null);
-
-  useEffect(() => {
-    setSelectedConversationId(conversationId);
-    // Clear on any nav path, with a durable cursor (#844).
-    markConversationRead(conversationId);
-    return () => { setSelectedConversationId(null); };
-  }, [conversationId, setSelectedConversationId, markConversationRead]);
-
-  // Receipts (#857) are DM-only and track their own viewport + focus; Rust enforces the preference.
-  useReadReceipts(conversationId, currentUser?.id ?? null, sendReadReceipts);
 
   // Members, for block/call targets and whether the peer accepted.
   useEffect(() => {
@@ -98,9 +81,9 @@ export const DMPage: React.FC = observer(() => {
   const canShowProfile = isOneOnOne;
   // Only after the peer accepted, so a request can't escalate to a call.
   const otherPresence = usePresenceStatus(otherUserId);
-  const isOtherOnline = otherPresence === "online";
-  // Offline peers fail at the handshake.
-  const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
+  // Away is still connected (#2110): the app is running and rings. Offline peers fail at the handshake.
+  const isOtherConnected = otherPresence !== "offline";
+  const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherConnected;
   const { togglePins, setSafety } = useRightPanel();
   const verificationByPeer = usePeerVerificationMap();
   const peerVerified = otherUserId ? verificationByPeer.get(otherUserId)?.verified === true : false;
@@ -226,7 +209,7 @@ export const DMPage: React.FC = observer(() => {
         ) : null}
       </ConversationHeader>
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-        <MainContent pendingDmRequest={pendingDmRequest} />
+        <DMChat conversationId={conversationId} pendingDmRequest={pendingDmRequest} />
       </div>
     </div>
   );

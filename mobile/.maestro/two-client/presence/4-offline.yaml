@@ -2,7 +2,7 @@ appId: ${MAESTRO_APP_ID}
 tags:
   - two-client
 ---
-# PRESENCE (#2059), part 2 of 2. The script has stopped the peer: its session
+# PRESENCE (#2059), last part. The script has stopped the peer: its session
 # leaves the DM's room, and the row's dot turns hollow with no reload.
 
 - extendedWaitUntil:
@@ -11,4 +11,4 @@ tags:
     timeout: 60000
 - assertNotVisible:
     id: "presence-online-row-dm-.*-avatar"
-- takeScreenshot: presence-two-02-peer-offline
+- takeScreenshot: presence-two-05-peer-offline

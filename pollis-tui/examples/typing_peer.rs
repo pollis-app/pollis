@@ -12,6 +12,9 @@
 //!   GET /typing?on=0   stop: one `is_typing: false`
 //!   GET /seen          the phone's last typing state in this DM: `typing`, `stopped` or `none`
 //!   GET /say           send "hello from the peer" in the DM (a row with the peer's avatar, #2059)
+//!   GET /hide          hide the window, as desktop's shell does on close: the phone sees away (#2110)
+//!   GET /show          show it again: online
+//!   GET /presence      the phone's presence in this DM as the peer sees it: `online`, `away`, `offline`
 //!   GET /quit
 //!
 //! Not a shipping binary:
@@ -42,21 +45,37 @@ const IDLE: Duration = Duration::from_secs(1800);
 /// Desktop's `TYPING_REFRESH_MS`.
 const REFRESH: Duration = Duration::from_secs(3);
 
-/// What the phone last said about typing in the DM.
+/// What the phone last said about typing in the DM, and how its presence there reads (#2110).
 struct Seen {
     me: String,
     dm_id: Mutex<Option<String>>,
     state: Mutex<&'static str>,
+    presence: Mutex<&'static str>,
 }
 
 impl EventSink<RealtimeEvent> for Seen {
     fn send(&self, event: RealtimeEvent) -> Result<(), String> {
-        if let RealtimeEvent::Typing { conversation_id, user_id, username, is_typing, .. } = event {
-            let dm = self.dm_id.lock().unwrap().clone();
-            if user_id != self.me && conversation_id.is_some() && conversation_id == dm {
-                println!("SEEN typing={is_typing} from={}", username.unwrap_or(user_id));
-                *self.state.lock().unwrap() = if is_typing { "typing" } else { "stopped" };
+        let dm = self.dm_id.lock().unwrap().clone();
+        match event {
+            RealtimeEvent::Typing { conversation_id, user_id, username, is_typing, .. } => {
+                if user_id != self.me && conversation_id.is_some() && conversation_id == dm {
+                    println!("SEEN typing={is_typing} from={}", username.unwrap_or(user_id));
+                    *self.state.lock().unwrap() = if is_typing { "typing" } else { "stopped" };
+                }
             }
+            // The DM's only other member is the phone.
+            RealtimeEvent::PresenceChanged { room_id, present, active, .. }
+                if Some(&room_id) == dm.as_ref() =>
+            {
+                let now = match (present, active) {
+                    (false, _) => "offline",
+                    (true, true) => "online",
+                    (true, false) => "away",
+                };
+                println!("SEEN presence={now}");
+                *self.presence.lock().unwrap() = now;
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -97,6 +116,7 @@ async fn main() -> Result<()> {
         me: me.id.clone(),
         dm_id: Mutex::new(None),
         state: Mutex::new("none"),
+        presence: Mutex::new("offline"),
     });
     livekit::subscribe_realtime(seen.clone(), &state).await?;
 
@@ -137,6 +157,14 @@ async fn main() -> Result<()> {
         let (status, body, quit) = match target.as_str() {
             "/quit" => ("200 OK", "bye".to_string(), true),
             "/seen" => ("200 OK", seen.state.lock().unwrap().to_string(), false),
+            "/presence" => ("200 OK", seen.presence.lock().unwrap().to_string(), false),
+            // #2110: desktop's shell reports a hidden window to the core, which writes `active: "0"`.
+            "/hide" | "/show" => {
+                let hidden = target == "/hide";
+                let _ = livekit::set_window_hidden(hidden, &state).await;
+                println!("WINDOW hidden={hidden}");
+                ("200 OK", if hidden { "hidden" } else { "shown" }.to_string(), false)
+            }
             "/typing?on=1" => {
                 if let Some(t) = typing.take() {
                     t.abort();

@@ -16,3 +16,6 @@ serde = { version = "1", features = ["derive"] }
 # content-free control blob the DS fans out without inspecting). Everything else
 # on the wire is a concrete field.
 serde_json = "1"
+# The checksum header of a shared attachment PUT (#2109), computed identically by
+# the DS that signs it and the client that sends it.
+base64 = "0.22"

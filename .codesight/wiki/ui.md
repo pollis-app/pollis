@@ -684,19 +684,36 @@ interaction may make.
 
 ### Presence
 
-`presenceStore` infers online-ness from LiveKit room participation, keeping a
-`user_id → Set<room_id>` map so leaving one shared room doesn't flip someone
-offline while they're still in another. Two properties are load-bearing:
+`presenceStore` infers presence from LiveKit room participation, keeping a
+`user_id → room_id → in use` map so leaving one shared room doesn't flip someone
+offline while they're still in another. Three states (#2110): **online** while any
+shared room shows the user in use, **away** while every room that shows them shows
+them not in use, **offline** while none shows them (`statusFromRooms`). "In use" is
+the LiveKit participant attribute `active`: `"0"` means running but not in use, and
+only an explicit `"0"` counts, so a build that predates the attribute (which sets
+none) still shows online. A user is in use in a room while any of their sessions
+there is (`livekit_roster::presence_by_user`, the one rule both apps use). Desktop
+writes its own attribute through the core: the renderer's
+`userActivityStore.presenceActive` (visible and not idle; a blur alone is not away,
+focus is back at once) goes to `set_presence_active`, and the shell reports a
+hidden window (`set_window_hidden`, `src-tauri/src/lib.rs` `note_window_hidden`).
+Mobile writes it from `AppState` in `lib/realtime/client.ts` (background → `"0"`,
+foreground → `"1"`). Changing an attribute needs the token grant
+`canUpdateOwnMetadata`, which the DS adds to every non-view token. Away draws a
+crescent in the dot's box: the online dot with a circle four fifths its size, in
+the ring's colour, bitten out of its top corner. `isPresent` (online or away)
+filters the right panel's people lists; a call can be placed to an away peer.
+Two properties are load-bearing:
 
-- **`isOnline` is deliberately NOT a MobX action.** Actions run untracked, so an
+- **`status` / `isPresent` are deliberately NOT MobX actions.** Actions run untracked, so an
   `action` here would leave its `byUser` reads invisible to the calling
-  `observer()` and presence would stop updating live. It stays a plain method,
-  excluded via `makeAutoObservable(this, { isOnline: false })`.
+  `observer()` and presence would stop updating live. They stay plain methods,
+  excluded via `makeAutoObservable(this, { isPresent: false, status: false })`.
 - **The local user is tracked separately.** Room events only ever describe
   *other* participants — nothing tells us we are online — so `byUser` never
   contains us and every surface would report the signed-in user as offline.
   `appStore.setCurrentUser` (and `logout`) pushes the id into
-  `presenceStore.setSelfUserId`, and `isOnline` short-circuits true for it. The
+  `presenceStore.setSelfUserId`, and `status` short-circuits to online for it. The
   dependency is one-way (`appStore → presenceStore`; presence imports nothing of
   ours) so it cannot cycle. Don't paper over this at a call site with a
   hardcoded `presence="online"`.
@@ -712,8 +729,9 @@ offline while they're still in another. Two properties are load-bearing:
 joined by the JS LiveKit SDK (data-only), not by the core, so there is no
 `presence_changed` event: on every roster change of a room (connect, a
 participant joining or leaving, a reconnect) `mobile/lib/realtime/client.ts`
-hands the room's remote wire identities to the core's `livekit_room_presence`
-bridge arm, which resolves them through the same `#836` cache desktop uses
+hands the room's remote wire identities, and the ones whose `active` attribute is
+`"0"`, to the core's `livekit_room_presence` bridge arm (also on
+`ParticipantAttributesChanged`), which resolves them through the same `#836` cache desktop uses
 (`commands/livekit_roster.rs`, always compiled) and answers the people present,
 self excluded, once each whatever their sessions (`present_user_ids`, the same
 "last session" rule as `emit_departure`). Who a participant counts as is one
@@ -731,13 +749,15 @@ under a spinner (`previewUri` / `busy`), sizes `sm`/`md`/`lg`/points, and the
 dot in its corner, desktop's geometry (`presenceDotGeometry`: a quarter of the
 avatar, 5 at least, a 2-point ring 2 points past the corner). Online is the
 accent ringed in the surface behind the avatar (`on`: `bg`, `panel`, `raised`,
-`high`); offline is hollow, `bg` ringed in `accentMuted`. A bot is a user and
+`high`); away is that dot bitten into a crescent (`awayBite`); offline is hollow,
+`bg` ringed in `accentMuted`. A bot is a user and
 follows the same rule (its Bot badge sits by the name, not on the avatar). The
 letter tile `Avatar` in `ui.tsx` is drawn directly only for groups (rounded, no
 dot), and a group DM's stacked pair passes `presence={false}`: it stands for
-the conversation. Maestro reads `presence-online|offline-<testID>` through
-`<Screen>`'s `AvatarProbe` (`flows/presence.yaml`; someone else going online
-and offline in `scripts/maestro-typing.sh` → `two-client/presence/`).
+the conversation. Maestro reads `presence-online|away|offline-<testID>` through
+`<Screen>`'s `AvatarProbe` (`flows/presence.yaml`; someone else going online,
+away and offline, and the peer seeing the phone away in the background, in
+`scripts/maestro-typing.sh` → `two-client/presence/`). Desktop: `e2e/presence-away.spec.ts`.
 
 ### The right panel (#824, #904)
 
@@ -763,6 +783,8 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 **Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-composer border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, Modern re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; Modern keeps the airier avatar rows.
 
 **Content is contextual, the column is not.** The panel's context comes from the route alone (`RightPanel/panelContext.ts`, pinned by `frontend/tests/panel-context.test.ts`), never from `appStore.selected*`: those outlive the page that set them, which once left a channel's group roster on every settings page. Any `/groups/<id>/…` page lists that group's **other members who are online**; a channel adds threads, pins and its media. `/dms/<id>` (and its settings) lists everyone in the conversation, you included, with safety numbers and media. Every other page (Preferences, Search, root, …) lists the **online people you have a DM open with**, named from the DM list, never a raw id. No media grid off a conversation, and a stale `?thread=` there falls back to the people list rather than rendering an empty thread. Presence is `presenceStore`; test builds expose it as `window.__pollisPresence` so specs can mark people online.
+
+**A 1:1 call shows its DM (#2116).** On `/call/<id>` the panel's default shape is `"dm"`: the 1:1 DM with the other party (the voice counterparty, else the ringing caller or callee), resolved by `utils/callDm.ts` from the DM list — members exactly self + peer, so a group DM containing the peer never counts, and with no such DM the panel is the people list as before (a call never creates a DM). It mounts `Layout/DMChat`, the one DM chat view the DM page also renders: selection (so the realtime wake's `isSelected` and `useReadWhileViewing` treat it as on screen, #2056), the durable read cursor, receipts, then `MainContent` without autofocus. Threads, pins and safety opened from it win over it, as `?thread=` does on a DM page, because the panel context's conversation on a call is that DM. Open/closed is still `rightPanelStore`. Group voice channels never use `/call/`, so they never get one. Coverage: `e2e/call-dm-panel.spec.ts`, `frontend/tests/call-dm.test.ts`.
 
 **The media grid is the message log's thumbnails.** `MediaGrid` renders `AttachmentDisplay` in its `tile` mode (a square that fills the cell instead of the fixed 96×96 thumb) — the same blurhash placeholder while bytes resolve, the same `0.5rem` corners, no border, click-to-lightbox — so a picture looks identical in the panel and in the chat. It used to be a separate `MediaTile` with none of that; the search page's `ResultThumbnails` used the same tile and now renders the same component. The grid is pictures and videos only (`isVisualMedia` in `MembersPanel`, the split `MessageItem` makes); audio and files stay in the log. Coverage: `e2e/right-panel-media.spec.ts`.
 
@@ -1058,7 +1080,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**259 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**261 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -1139,13 +1161,14 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **InviteLinkManager** — props: groupId — `frontend/src/components/Invites/InviteLinkManager.tsx`
 - **InviteLinkRow** — props: link, onRevoke, isRevoking — `frontend/src/components/Invites/InviteLinkRow.tsx`
 
-### `components/Layout` (16)
+### `components/Layout` (17)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`. The bar under the TitleBar: a back/forward chevron pair, then the clickable trail, then search + settings. The chevrons walk **router history**, one entry per click, the way a browser (and Slack, and Discord) does — there is no hierarchical "up one level" navigation any more; the trail's own segments are what jump up the tree. **Both are always rendered**, root included: a control that vanishes at the root shifts everything beside it sideways on the way home. When a direction has nowhere to go it is greyed out and truly `disabled` (a `ui/Button` `variant="ghost"`), so assistive tech is told what the grey says. Enablement comes from `stores/historyNavStore`, which subscribes to `router.history` (event-driven, never polled) and keeps a cursor plus a ceiling — `canGoBack` is `index > 0`, `canGoForward` is `index < maxIndex`, and a PUSH resets the ceiling to the new entry because it discards whatever was ahead. That arithmetic is pure in `utils/historyNav.ts` and pinned by `frontend/tests/history-nav.test.ts`; it exists because no browser API answers "can I go forward?" — `history.length` counts a session, not a direction, and never shrinks on a truncating push. The `nav.back` shortcut (Escape, handled in `AppShell`) routes through the same `historyNavStore.goBack()`, so the key and the chevron cannot land in different places.
 - **ConfirmPage** — props: title, paneTestId — `frontend/src/components/Layout/ConfirmPage.tsx`. A confirmation that is its own page (#1968): `PageShell` + `PageColumn` + `ConfirmBlock`. Leave group and Remove member; `e2e/confirm-form-patterns.spec.ts`.
 - **ConversationHeader** — props: title, children — `frontend/src/components/Layout/ConversationHeader.tsx`. The `h-bar` top bar of the channel and DM pages (#1640): title on the start side, every action in one `flex items-center gap-2` row on the end side. Spacing and vertical centring live here only — actions carry no `me-*` margins and nothing is absolutely positioned (the DM call button used to be, and sat on top of the pin). In the DM header the call slot becomes a "Return to call" `PillButton` (same target as the voice bar's channel pill, via `activeCallIdOf` in `types/voice-state.ts`) while any 1:1 call is joining or joined. Pinned by `frontend/tests/conversation-header.test.ts` and `e2e/dm-header-actions.spec.ts`.
-- **MainContent** — props: pendingDmRequest — `frontend/src/components/Layout/MainContent.tsx`
+- **DMChat** — props: conversationId, pendingDmRequest, autoFocus — `frontend/src/components/Layout/DMChat.tsx`
+- **MainContent** — props: pendingDmRequest, autoFocus — `frontend/src/components/Layout/MainContent.tsx`
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
 - **ResizeHandle** — props: panelRef, edge, label, maxPx, onCommit, onCollapse, onReset — `frontend/src/components/Layout/ResizeHandle.tsx`. Shared by both side panels; drags write `style.width` straight to the panel and never through React. See [Resizable side panels](#resizable-side-panels-985).
 - **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`. Its settings rows carry `sidebar-row-*` testids like `SectionHeader`'s, so navigation tests never match on a translated label (#932).
@@ -1176,9 +1199,10 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SensitiveCover** — `frontend/src/components/Media/SensitiveCover.tsx`
 - **SensitiveHideButton** — `frontend/src/components/Media/SensitiveHideButton.tsx`
 
-### `components/Message` (26)
+### `components/Message` (27)
 
 - **AttachmentDisplay** — props: attachment, tile, testId, roll — `frontend/src/components/Message/AttachmentDisplay.tsx`
+- **AttachmentNotice** — `frontend/src/components/Message/AttachmentNotice.tsx`. What `AttachmentDisplay` draws, in place of the file, for an attachment it cannot open (#2109): one the operator removed ("File removed", `kind="removed"`) or one from a newer app version ("Update Pollis to open this file", `kind="update"`). No retry. Mobile: `MediaStatus` / `MediaImage` / `AttachmentTile` with `lib/media/removed.ts`.
 - **DownloadStatusIcon** — props: status — `frontend/src/components/Message/DownloadStatusIcon.tsx`. Download / spinner / check glyph of `AttachmentDisplay`'s download buttons (#1731).
 - **KeyChangeNoticeRow** — props: noticeId, peerUserId, peerLabel, at, skin, onVerify — `frontend/src/components/Message/KeyChangeNoticeRow.tsx`
 - **LastMessagePreview** — props: message, isLoading, aliases — `frontend/src/components/Message/LastMessagePreview.tsx`

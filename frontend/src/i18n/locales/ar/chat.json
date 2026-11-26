@@ -149,6 +149,8 @@
     "error": "خطأ",
     "failedToLoad": "تعذّر التحميل",
     "failedToDownload": "تعذّر التنزيل",
+    "removed": "تمت إزالة الملف",
+    "updateToOpen": "حدّث Pollis لفتح هذا الملف",
     "lightboxFetch": "جلب",
     "lightboxDone": "تم",
     "lightboxDoneTerminal": "[ تم ]",

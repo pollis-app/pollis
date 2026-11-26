@@ -183,6 +183,8 @@ type RealtimeEvent =
     user_id: string;
     room_id: string;
     present: boolean;
+    /** #2110: some session of theirs in this room is in use; false = away. */
+    active?: boolean;
   }
   | {
     type: 'key_changed';
@@ -638,7 +640,7 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'presence_changed') {
-        presenceStore.setPresent(event.user_id, event.room_id, event.present);
+        presenceStore.setPresent(event.user_id, event.room_id, event.present, event.active !== false);
         return;
       }
 

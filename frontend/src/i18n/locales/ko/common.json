@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "상태: {{status}}",
+    "away": "자리 비움",
     "offline": "오프라인",
     "online": "온라인"
   },

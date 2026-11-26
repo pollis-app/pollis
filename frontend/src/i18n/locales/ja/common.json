@@ -37,6 +37,7 @@
   },
   "presence": {
     "label": "ステータス：{{status}}",
+    "away": "離席中",
     "offline": "オフライン",
     "online": "オンライン"
   },

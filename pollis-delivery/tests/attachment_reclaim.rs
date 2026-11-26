@@ -68,6 +68,10 @@ impl ObjectStore for FakeR2 {
         self.objects.lock().unwrap().remove(key);
         Ok(())
     }
+
+    async fn object_exists(&self, key: &str) -> anyhow::Result<bool> {
+        Ok(self.holds(key))
+    }
 }
 
 async fn conn() -> Connection {

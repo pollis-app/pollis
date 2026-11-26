@@ -1,0 +1,29 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# PRESENCE AWAY (#2110), the peer's side. The peer (desktop-shaped, pollis-core's own LiveKit
+# path) hides its window, as desktop does on close: the core writes `active: "0"` to its room, and
+# the DM's row turns to the crescent with no reload. Shown again, the dot is back.
+
+- runScript:
+    file: ../../scripts/peer-presence.js
+    env:
+      ACTION: hide
+- extendedWaitUntil:
+    visible:
+      id: "presence-away-row-dm-.*-avatar"
+    timeout: 30000
+- assertNotVisible:
+    id: "presence-online-row-dm-.*-avatar"
+- takeScreenshot: presence-two-02-peer-away
+
+- runScript:
+    file: ../../scripts/peer-presence.js
+    env:
+      ACTION: show
+- extendedWaitUntil:
+    visible:
+      id: "presence-online-row-dm-.*-avatar"
+    timeout: 30000
+- takeScreenshot: presence-two-03-peer-back

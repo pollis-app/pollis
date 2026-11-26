@@ -99,6 +99,8 @@
     "error": "错误",
     "failedToLoad": "加载失败",
     "failedToDownload": "下载失败",
+    "removed": "文件已移除",
+    "updateToOpen": "请更新 Pollis 以打开此文件",
     "lightboxFetch": "获取",
     "lightboxDone": "完成",
     "lightboxDoneTerminal": "[ 完成 ]",
