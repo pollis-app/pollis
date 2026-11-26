@@ -298,7 +298,8 @@ export function EmojiPickerSheet({
 
   return (
     <SheetOverlay title={title ?? t("chat:reactions.add")} onClose={onClose}>
-      <View style={{ height: 460, gap: 12 }}>
+      {/* #2123: gives up height to the keyboard on a short phone; the list scrolls. */}
+      <View style={{ height: 460, flexShrink: 1, minHeight: 0, gap: 12 }}>
         <Field
           testID="input-emoji-search"
           surface="raised"
