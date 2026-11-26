@@ -6,7 +6,7 @@ import type { Reaction } from "../../types";
 /** `invoke` from the bridge, injected so the cache rules are testable without Tauri. */
 export type ReactionInvoke = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 
-export const REACTIONS_STALE_MS = 15_000;
+const REACTIONS_STALE_MS = 15_000;
 
 /** How long a freshly opened conversation waits for its reactions before painting without them. */
 export const REACTIONS_REVEAL_WAIT_MS = 150;

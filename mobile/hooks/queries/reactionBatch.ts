@@ -9,7 +9,7 @@ export type ReactionInvoke = <T>(command: string, args: Record<string, unknown>)
 export type ReactionMap = Map<string, Reaction[]>;
 
 /** Rust groups via a HashMap: sort for a stable pill order. */
-export function sortPills(reactions: readonly Reaction[]): Reaction[] {
+function sortPills(reactions: readonly Reaction[]): Reaction[] {
   return [...reactions].sort((a, b) => a.emoji.localeCompare(b.emoji));
 }
 
