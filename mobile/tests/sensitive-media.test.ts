@@ -134,7 +134,6 @@ test("the eye sits before remove, and a marked attachment is sent sensitive", ()
   assert.match(card, /if \(sensitive\) \{\s*body = <SensitiveCover/);
   const lib = readFileSync(new URL("../lib/attachments.ts", import.meta.url), "utf8");
   assert.match(lib, /\.\.\.\(att\.sensitive \? \{ sensitive: true \} : \{\}\)/);
-  assert.match(lib, /\.\.\.\(attachments\[i\]\?\.sensitive \? \{ sens: true \} : \{\}\)/);
   for (const screen of ["app/chat/[id].tsx", "app/vault.tsx"]) {
     const src = readFileSync(new URL(`../${screen}`, import.meta.url), "utf8");
     assert.match(src, /onChangeAttachment=\{/, screen);

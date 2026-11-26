@@ -119,7 +119,7 @@ mod tests {
     fn nothing_is_allowed_before_the_user_chooses_anything() {
         let scope = PathScope::default();
         assert!(!scope.is_allowed(Path::new("/home/someone/.ssh/id_rsa")));
-        assert!(scope.require(Path::new("/etc/shadow"), "upload_media").is_err());
+        assert!(scope.require(Path::new("/etc/shadow"), "send_message").is_err());
     }
 
     #[test]
@@ -132,8 +132,8 @@ mod tests {
 
         assert!(scope.is_allowed(&picked));
         assert!(!scope.is_allowed(&sibling));
-        assert!(scope.require(&picked, "upload_media").is_ok());
-        assert!(scope.require(&sibling, "upload_media").is_err());
+        assert!(scope.require(&picked, "send_message").is_ok());
+        assert!(scope.require(&sibling, "send_message").is_err());
     }
 
     #[test]

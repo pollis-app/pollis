@@ -3,7 +3,7 @@
 import { invoke } from "./invoke";
 
 export interface StagedAttachment {
-  /** Opaque handle; pass to `upload_media_staged` or `discardStagedAttachment`. */
+  /** Opaque handle; pass to `send_message` / `send_vault_message` (`stagedId`) or `discardStagedAttachment`. */
   id: string;
   size_bytes: number;
 }

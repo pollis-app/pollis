@@ -1,0 +1,19 @@
+appId: com.apple.mobileslideshow
+---
+# iPad (#2100): the extension's form sheet is not in the test driver's tree, so taps go by place.
+# The Vault (the first row), then #General (the chosen pill row has pushed the list down), Send.
+- tapOn:
+    point: "31%,48%"
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    point: "33%,55%"
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: ipad-share-03-selected
+- tapOn:
+    point: "50%,70%"
+- takeScreenshot: ipad-share-04-sending
+- waitForAnimationToEnd:
+    timeout: 15000
+- takeScreenshot: ipad-share-05-after-send

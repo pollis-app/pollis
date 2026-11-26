@@ -1,0 +1,38 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Part 4: a photo and a video (SEND_MULTIPLE) to the Vault alone, with a typed message. Pollis opens the
+# Vault, where the entry carries both and the message.
+- runFlow: ../../subflows/unlock-if-locked.yaml
+- extendedWaitUntil:
+    visible:
+      id: "screen-share"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "share-item-1"
+    timeout: 10000
+- tapOn:
+    id: "input-share-message"
+- inputText: "two photos 2100"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "share-target-vault"
+    timeout: 30000
+- tapOn:
+    id: "share-target-vault"
+- takeScreenshot: share-08-two-photos
+- tapOn:
+    id: "btn-share-send"
+- extendedWaitUntil:
+    visible:
+      id: "screen-vault"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: ".*two photos 2100.*"
+    timeout: 120000
+- extendedWaitUntil:
+    notVisible:
+      id: "vault-not-saved-.*"
+    timeout: 120000
+- takeScreenshot: share-09-vault-photos

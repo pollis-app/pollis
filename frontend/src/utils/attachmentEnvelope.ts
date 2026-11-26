@@ -1,27 +1,6 @@
-import { invoke, discardStagedAttachment } from "../bridge";
+import { discardStagedAttachment } from "../bridge";
 import { blobToBase64 } from "./imageProcessing";
 import type { Attachment } from "../components/ui/ChatInput";
-
-type MediaUploadResult = {
-  key: string;
-  url: string;
-  filename: string;
-  content_type: string;
-  size_bytes: number;
-  /** The object id: `v2-` + SHA-256 of the stored ciphertext (#2109). Never key material. */
-  content_hash: string;
-  /** The `_att` reference version: `2` for a shared object (#2109). */
-  version: number;
-  /** A v1 ring key version; unused (`0`) for a shared object. */
-  key_version: number;
-  /** Plaintext SHA-256, only inside the encrypted envelope. */
-  sha256: string;
-  blurhash?: string;
-  width?: number;
-  height?: number;
-  /** A video's bounded poster JPEG, base64 (#1837): `pv`. */
-  poster?: string;
-};
 
 /** Mirrors `pollis_core::commands::messages::OutgoingAttachment` (#1335): exactly one of `path` / `stagedId`. */
 export type OutgoingAttachment = {
@@ -88,77 +67,4 @@ export async function releaseStaged(attachments: Attachment[]): Promise<void> {
  */
 export function referenceKeyFields(version: number | undefined, keyVersion: number): { v: 2 } | { kv: number } {
   return version === 2 ? { v: 2 } : { kv: keyVersion };
-}
-
-/** Succeeded uploads by attachment (#1497), so a retry uploads only what failed. */
-const uploaded = new WeakMap<Attachment, MediaUploadResult>();
-
-/** Upload attachments and encode the `_att` envelope (decoded in `hooks/queries/useMessages.ts`). */
-export async function buildMessageContent(
-  attachments: Attachment[],
-  contentText: string,
-): Promise<string> {
-  if (attachments.length === 0) {
-    return contentText;
-  }
-
-  // A file path or staged bytes. The caller owns retries (#1497); all uploads settle before failing.
-  const settled = await Promise.allSettled(
-    attachments.map(async (att) => {
-      const done = uploaded.get(att);
-      if (done) {
-        return done;
-      }
-      if (!att.source) {
-        throw new Error(`attachment ${att.name} has no bytes to upload yet`);
-      }
-      // Images get their blurhash during upload; a video's comes from its frame (#1837).
-      const poster = (await posterOf(att)) ?? null;
-      const upload =
-        att.source.kind === "staged"
-          ? invoke<MediaUploadResult>("upload_media_staged", {
-              stagedId: att.source.id,
-              filename: att.name,
-              contentType: att.mimeType,
-              poster,
-            })
-          : invoke<MediaUploadResult>("upload_media", {
-              path: att.source.path,
-              filename: att.name,
-              contentType: att.mimeType,
-              poster,
-            });
-      return upload.then((result) => {
-        uploaded.set(att, result);
-        return result;
-      });
-    }),
-  );
-  const failed = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
-  if (failed) {
-    throw failed.reason;
-  }
-  const results = settled.map((s) => (s as PromiseFulfilledResult<MediaUploadResult>).value);
-
-  const envelope: Record<string, unknown> = {
-    _att: results.map((r, i) => ({
-      key: r.key,
-      url: r.url,
-      name: r.filename,
-      ct: r.content_type,
-      size: r.size_bytes,
-      hash: r.content_hash,
-      ...referenceKeyFields(r.version, r.key_version),
-      sha: r.sha256,
-      bh: r.blurhash ?? attachments[i]?.blurhash,
-      w: r.width,
-      h: r.height,
-      ...(attachments[i]?.sensitive ? { sens: true } : {}),
-      ...(r.poster ? { pv: r.poster } : {}),
-    })),
-  };
-  if (contentText) {
-    envelope._txt = contentText;
-  }
-  return JSON.stringify(envelope);
 }

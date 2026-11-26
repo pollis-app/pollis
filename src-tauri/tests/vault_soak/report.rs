@@ -95,7 +95,7 @@ pub fn render(header: &[(String, String)], files: &[FileRun], global: &[Proof]) 
     ));
 
     o.push_str("## Per file\n\n");
-    o.push_str("Timings: upload = `upload_media` (seal + presign + PUT + register) + `send_vault_message`; view = `get_media_url` + loopback fetch (or the in-memory byte path); save = `save_media_to_path` (download + decrypt + verify + write). MiB/s over the plaintext size.\n\n");
+    o.push_str("Timings: upload = `send_vault_message` with the file (#2100: stored in the Vault's queue, then seal + presign + PUT + register + save); view = `get_media_url` + loopback fetch (or the in-memory byte path); save = `save_media_to_path` (download + decrypt + verify + write). MiB/s over the plaintext size.\n\n");
     o.push_str("| file | kind | size | upload | upload s | up MiB/s | view s | save s | down MiB/s | delete s | transit | at rest | DS rows | local | transient | round trip | deleted |\n");
     o.push_str("|---|---|---:|---|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|---|\n");
     for f in files {

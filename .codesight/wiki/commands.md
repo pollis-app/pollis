@@ -547,6 +547,20 @@ every fork — mint only at `key_version = 1`, re-wrap at the same version and a
 `(generation, epoch)`, rotate at exactly `+1`) and `POST /v1/read/file-keystate`.
 Both membership-gated. See `.codesight/wiki/database.md` § `file_keystate`.
 
+## share (`share/`, mobile bridge only)
+
+Sharing into Pollis from other apps (#2100); details in [share.md](share.md). Desktop has no
+share-in (exempt), so these are bridge arms with no Tauri shim.
+
+- `share_targets(query?, limit?)` → `ShareTarget[]` — the picker's rows, best first: the Vault,
+  then accepted unblocked DMs and text channels. Never a request or a voice channel.
+- `share_enqueue(request)` → `QueuedShare[]` — `{ shareId, targets[1..5], text, attachments[≤10] }`;
+  every target's row stored (ids derived from `shareId`), or nothing.
+- `share_deliver(queued)` → `ShareOutcome[]` — `sent | queued | rejected` per target.
+
+The iOS share extension calls the same code through the C ABI in
+`pollis-core/include/pollis_share.h`.
+
 ## vault (`commands/vault.rs`)
 
 The Vault (#107): a personal encrypted space that presents as a chat with yourself
@@ -572,7 +586,13 @@ the remote is the source of truth (sync replaces the cache).
   when not. An entry this build cannot decrypt is hidden, never deleted. A row the
   DS has only ever inserted carries `updated_at == created_at`; a rewrite (edit or
   pin) stamps the server clock, which is what both UIs' "(edited)" keys on.
-- `send_vault_message(user_id, content)` → `VaultMessage`
+- `send_vault_message(user_id, content, message_id?, attachments?)` → `VaultMessage` — through
+  the Vault's durable queue (#2100, [share.md](share.md#the-vaults-durable-queue-commandsmessagesvault_queuers)):
+  stored with its files before any network work, under `message_id` (a repeat saves once), files
+  uploaded under the Vault key. A save that cannot finish now stays queued (`send_state`
+  `failed`) for the next outbox drain or a Retry.
+- `retry_vault_message(id, user_id)` → `VaultMessage`; `discard_unsent_vault_message(id)` → `bool`
+  — a queued save that reads "Not saved".
 - `edit_vault_message(id, new_content, user_id)` → `VaultMessage` — keeps `pinned` and
   `created_at`. A file the edit drops is collected like a deleted one (below).
 - `set_vault_message_pinned(id, pinned, user_id)` → `VaultMessage`
@@ -747,19 +767,19 @@ Capture, publish and the remote drain are described in [capture-split.md](./capt
 - `get_public_file_url(key)` → URL — resolves a public object to a loopback media-server URL, caching the bytes on disk encrypted at rest under the same content-addressed scheme attachments and custom emoji use. The key IS the expected digest, so the integrity check is free and mandatory (these objects are stored unencrypted). Returns `""` — the same sentinel `get_media_url` uses — for a LEGACY key that carries no digest, or when the media server isn't up; the frontend falls back to `download_file` for those.
 - ~~`presign_upload(key, content_type)`~~ — **does not exist** under that name as of 2026-08-03 (#714). Presigning is server-side: the DS secrets broker mints URLs via `POST /v1/r2/presign` (see `delete_r2_object` below and `docs/secrets-broker.md`).
 - `get_media_url(r2_key, content_hash, content_type, sha256, key_scope)` → URL — builds the loopback media-server URL (`http://127.0.0.1:<port>/<token>/<hash>`) for a cached item; errors if the server isn't started or there is no active unlock. See `pollis-core/src/media_server.rs`.
-- `upload_media(path, filename, content_type, poster?)` / `download_media(r2_key, content_hash, sha256, key_scope)` — the sealed media path (#2109; see `shared_files` below). With the DS switch on (`shared_uploads_enabled`), an upload seals the file under the key its own SHA-256 yields (AES-256-GCM, 4 MiB chunks, deterministic), names it `media/v2-{hex SHA-256 of the ciphertext}.enc`, claims it at the DS and uploads only if nobody has: **each distinct file is stored once across all accounts**. With it off (the shipped default) it is the v1 upload: a random file id under the conversation's newest ring key (or the Vault root), `kv`. `MediaUploadResult` carries `content_hash` (the object id), `version` (`2` or `1`), `key_version` (v1 only) and `sha256`; a v2 `_att` reference carries `hash`, `v: 2`, `sha` and no `kv` (an older app then draws it as unavailable instead of trying a ring key). `key_scope` is a tagged enum: `{ kind: "content" }` for a v2 file, or for one stored before #2109 `{ kind: "conversation", conversation_id, key_version }` / `{ kind: "vault" }`. A v2 download checks the bytes hash to the name, decrypts under `content_key(sha256)` and checks the plaintext digest; a presign the DS answers `410` (operator removal) is `Error::AttachmentRemoved` (`"attachment_removed"`), which both apps show as "File removed" and never retry. A download refuses a reference with neither `v` nor `kv` (pre-#1382 convergent objects; no fallback). The renderers show a reference with `v > 2` as "Update Pollis to open this file" (`needs_update`), never fetching it. A file over `R2_MEDIA_MAX_BYTES` (104 MiB) is refused from its metadata before it is read (#1491) — reading first held a 2 GB pick in memory just to say no. Hashing, image metadata (the blurhash is computed from a ≤64 px thumbnail; width/height stay the original's) and encryption run on the blocking pool, never on the bridge's four async workers, and at most three uploads hold their bytes at once (`MAX_CONCURRENT_UPLOADS`) — a twelve-image Vault entry used to park every worker in image decoding and starve its own HTTP requests (#1497). `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here. **The shim enforces that** — see "Path-taking commands are scoped to what the user picked" below.
+- `download_media(r2_key, content_hash, sha256, key_scope)` — the sealed media path (#2109; see `shared_files` below). Uploads happen inside the outbox and the Vault's queue (#1335, #2100; `upload_media` / `upload_media_staged` were removed in #2100), streamed from the stored bytes (`r2::StreamUpload`); a shared upload reads them twice, once for the plaintext digest its key comes from and once to seal. With the DS switch on (`shared_uploads_enabled`), an upload seals the file under the key its own SHA-256 yields (AES-256-GCM, 4 MiB chunks, deterministic), names it `media/v2-{hex SHA-256 of the ciphertext}.enc`, claims it at the DS and uploads only if nobody has: **each distinct file is stored once across all accounts**. With it off (the shipped default) it is the v1 upload: a random file id under the conversation's newest ring key (or the Vault root), `kv`. `MediaUploadResult` carries `content_hash` (the object id), `version` (`2` or `1`), `key_version` (v1 only) and `sha256`; a v2 `_att` reference carries `hash`, `v: 2`, `sha` and no `kv` (an older app then draws it as unavailable instead of trying a ring key). `key_scope` is a tagged enum: `{ kind: "content" }` for a v2 file, or for one stored before #2109 `{ kind: "conversation", conversation_id, key_version }` / `{ kind: "vault" }`. A v2 download checks the bytes hash to the name, decrypts under `content_key(sha256)` and checks the plaintext digest; a presign the DS answers `410` (operator removal) is `Error::AttachmentRemoved` (`"attachment_removed"`), which both apps show as "File removed" and never retry. A download refuses a reference with neither `v` nor `kv` (pre-#1382 convergent objects; no fallback). The renderers show a reference with `v > 2` as "Update Pollis to open this file" (`needs_update`), never fetching it. A file over `R2_MEDIA_MAX_BYTES` (104 MiB) is refused from its metadata before it is read (#1491) — reading first held a 2 GB pick in memory just to say no. Image metadata (the blurhash is computed from a ≤64 px thumbnail; width/height stay the original's) runs on the blocking pool, one image at a time, and at most three uploads run at once (`MAX_CONCURRENT_UPLOADS`) (#1497). An attachment `path` is a file the **user** already has (picker selection, OS drag-and-drop); **the shims enforce that** — see "Path-taking commands are scoped to what the user picked" below.
 - `save_media_to_path(r2_key, content_hash, sha256, key_scope, target_path)` → `"marked"` | `"unsupported"` | `"failed: …"` — "save attachment as…". Downloads, decrypts, verifies `sha256` and writes the file in Rust, then applies this platform's download marker (macOS `com.apple.quarantine`, Windows `Zone.Identifier`). The renderer used to `fetch` the loopback URL and `writeFile` the bytes, which left the file with no provenance marker at all — Gatekeeper and SmartScreen both treat an unmarked file as locally authored. A marker that cannot be written (FAT32, a network share) does NOT fail the save; the return value says what happened. `target_path` is gated by `PathScope`. See `.codesight/wiki/media-server.md`.
-- `poster?` on both upload commands (and `OutgoingAttachment.poster` on `send_message`): a video's frame from the client's platform decoder, base64; the result then carries the video's `blurhash`, `width`, `height` and `poster` (the bounded JPEG for `pv`). See [media-server.md → Video posters](media-server.md#video-posters-1837).
+- `OutgoingAttachment.poster` on `send_message` / `send_vault_message`: a video's frame from the client's platform decoder, base64; the result then carries the video's `blurhash`, `width`, `height` and `poster` (the bounded JPEG for `pv`). See [media-server.md → Video posters](media-server.md#video-posters-1837).
 - `get_local_video_poster(content_hash)` → `SavedVideoPoster | null` / `save_local_video_poster(content_hash, frame)` → `SavedVideoPoster` (`commands/poster.rs`, #1894) — device-local: the poster this device decoded for a video with no `pv`, bounded by `poster::from_frame_b64` and kept in the local `video_poster_cache` table, so it is decoded once. `SavedVideoPoster` = `{ jpeg: string | null, blurhash, width, height }`. Never sent anywhere. See [media-server.md → Video posters](media-server.md#video-posters-1837).
-- `upload_media_staged(staged_id, filename, content_type, poster?)` — the same upload for bytes with no path: a paste, or a drop the webview surfaced as a `File`. Reads them from the in-memory staging registry (`commands/staging.rs`) and releases them **only on success**, so a failed upload is a retry rather than a lost paste.
 - Test harness only: `test_upload_v1(conversation_id, data)` stores a v1 object (random id, ring key) so the flows prove v1 still downloads.
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`), used for custom-emoji objects. Attachments are never deleted by a client: since #1881 the DS deletes them itself once every message referring to them is deleted, and refuses a `media/` DELETE presign. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 
 ### Path-taking commands are scoped to what the user picked
 
-Four commands take a filesystem path as an IPC argument — `upload_media`,
-`upload_group_emoji`, `export_archive`, `fetch_export_attachments` — and act on
-it with the app process's full authority. They are the only four, and each one's
+The commands that take a filesystem path as an IPC argument — `send_message` and
+`send_vault_message` (their attachments, #1335 / #2100), `upload_group_emoji`,
+`export_archive`, `fetch_export_attachments` — act on it with the app process's
+full authority. They are the only ones, and each one's
 `#[tauri::command]` shim in `src-tauri/src/commands/` calls
 `PathScope::require` before forwarding to `pollis-core`. A path that is not in
 the scope is refused with *"that location was not chosen in a file dialog on
@@ -943,7 +963,7 @@ than hand-edit.
 
 **`poster`** (2) — `get_local_video_poster`, `save_local_video_poster`
 
-**`vault`** (5) — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
+**`vault`** (7) — `delete_vault_message`, `discard_unsent_vault_message`, `edit_vault_message`, `get_vault_messages`, `retry_vault_message`, `send_vault_message`, `set_vault_message_pinned`
 
 **`messages`** (28) — `add_reaction`, `delete_message`, `discard_unsent_message`, `edit_message`, `flush_outbox`, `get_conversation_receipts`, `get_message_retention`, `get_reactions`, `get_unread_counts`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_thread_summaries`, `mark_conversation_read`, `mark_messages_read`, `new_message_id`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_messages_after`, `read_messages_around`, `read_thread_messages`, `rebuild_search_index`, `remove_reaction`, `retry_message`, `search_messages`, `send_message`, `set_message_retention`, `refresh_read_cursors`
 

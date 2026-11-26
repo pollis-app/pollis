@@ -3,6 +3,7 @@
 package com.pollisnative
 
 import com.pollisnative.push.PollisPushStateModule
+import com.pollisnative.share.PollisShareModule
 import com.facebook.react.BaseReactPackage
 import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
@@ -18,6 +19,8 @@ class PollisNativePackage : BaseReactPackage() {
       PollisPushStateModule.NAME -> PollisPushStateModule(reactContext)
       // #1837: a video's still frame for its poster.
       PollisVideoFrameModule.NAME -> PollisVideoFrameModule(reactContext)
+      // #2100: the share another app sent, and whether Pollis is a share target.
+      PollisShareModule.NAME -> PollisShareModule(reactContext)
       else -> null
     }
   }
@@ -45,6 +48,14 @@ class PollisNativePackage : BaseReactPackage() {
       moduleInfos[PollisVideoFrameModule.NAME] = ReactModuleInfo(
         PollisVideoFrameModule.NAME,
         PollisVideoFrameModule::class.java.name,
+        false,  // canOverrideExistingModule
+        false,  // needsEagerInit
+        false,  // isCxxModule
+        false // isTurboModule
+      )
+      moduleInfos[PollisShareModule.NAME] = ReactModuleInfo(
+        PollisShareModule.NAME,
+        PollisShareModule::class.java.name,
         false,  // canOverrideExistingModule
         false,  // needsEagerInit
         false,  // isCxxModule

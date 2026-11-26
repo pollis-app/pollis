@@ -142,7 +142,6 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::export::export_archive,
             crate::commands::export::fetch_export_attachments,
             // Path-taking shims; `tests/flows/security.rs` proves they refuse unchosen paths.
-            crate::commands::r2::upload_media,
             crate::commands::emoji::upload_group_emoji,
             // For the vault soak suite (#1491).
             crate::commands::r2::get_media_url,
@@ -153,6 +152,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::file_keys::test_file_key_version,
             crate::commands::vault::get_vault_messages,
             crate::commands::vault::send_vault_message,
+            crate::commands::vault::retry_vault_message,
+            crate::commands::vault::discard_unsent_vault_message,
             crate::commands::vault::edit_vault_message,
             crate::commands::vault::set_vault_message_pinned,
             crate::commands::vault::delete_vault_message,

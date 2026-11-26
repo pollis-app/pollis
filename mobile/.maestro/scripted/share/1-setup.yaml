@@ -1,0 +1,24 @@
+appId: ${MAESTRO_APP_ID}
+---
+# SHARE INTO POLLIS (#2100), part 1. Driven by scripts/maestro-share.sh, which sends the shares
+# from "another app" with adb between the parts (Maestro cannot open the share sheet).
+#
+# A fresh account with one group and its #General channel: with the Vault, two targets and no
+# peer needed.
+- runFlow:
+    file: ../../subflows/sign-in.yaml
+    env:
+      FRESH: "share"
+- runFlow: ../../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "Share Test"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../../subflows/group-created.yaml
+    env:
+      GROUP: "Share Test"
+- takeScreenshot: share-01-ready

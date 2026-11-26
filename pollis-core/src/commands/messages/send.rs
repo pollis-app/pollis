@@ -87,9 +87,58 @@ pub async fn send_message_with_preview(
     sender_username: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<Message> {
-    let outgoing = link_preview
-        .as_ref()
-        .and_then(|draft| crate::commands::link_preview::outgoing(draft, &content));
+    let queued = enqueue_message(
+        message_id,
+        conversation_id,
+        sender_id,
+        content,
+        attachments,
+        link_preview.as_ref(),
+        reply_to_id,
+        thread_id,
+        state,
+    )
+    .await;
+    // The outbox holds its own copy of the thumbnail now.
+    if let Some(draft) = &link_preview {
+        crate::commands::link_preview::release_draft(draft);
+    }
+    let id = match queued? {
+        EnqueueOutcome::Unsent(id) => id,
+        EnqueueOutcome::AlreadySent(message) => return Ok(message),
+    };
+    // Test-harness only: die right after the outbox row is written (#1335).
+    if test_hooks::take(test_hooks::Crash::AfterEnqueue) {
+        return Err(test_hooks::simulated_crash());
+    }
+    super::outbox::deliver(state, &id, sender_username).await
+}
+
+/// What [`enqueue_message`] left in the outbox.
+pub(crate) enum EnqueueOutcome {
+    /// Stored and unsent (now, or by an earlier call with the same id): deliver it.
+    Unsent(String),
+    /// A message with this id was already delivered.
+    AlreadySent(Message),
+}
+
+/// The first half of a send: write the outbox row (and its attachments' bytes) and stop, so a
+/// caller sending one draft to several conversations (#2100) stores every row before it
+/// delivers any. The link preview's staged thumbnail is copied, never released: the caller
+/// releases the draft once every row holds its copy.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn enqueue_message(
+    message_id: Option<String>,
+    conversation_id: String,
+    sender_id: String,
+    content: String,
+    attachments: Vec<OutgoingAttachment>,
+    link_preview: Option<&crate::commands::link_preview::LinkPreviewDraft>,
+    reply_to_id: Option<String>,
+    thread_id: Option<String>,
+    state: &Arc<AppState>,
+) -> Result<EnqueueOutcome> {
+    let outgoing = link_preview.and_then(|draft| crate::commands::link_preview::outgoing(draft, &content));
     let id = match message_id {
         Some(id) => super::outbox::checked_message_id(id)?,
         None => Ulid::new().to_string(),
@@ -121,18 +170,10 @@ pub async fn send_message_with_preview(
     )
     .await;
     drop(ticket);
-    // The outbox holds its own copy of the thumbnail now.
-    if let Some(draft) = &link_preview {
-        crate::commands::link_preview::release_draft(draft);
-    }
-    if let super::outbox::Enqueued::AlreadySent(message) = enqueued? {
-        return Ok(message);
-    }
-    // Test-harness only: die right after the outbox row is written (#1335).
-    if test_hooks::take(test_hooks::Crash::AfterEnqueue) {
-        return Err(test_hooks::simulated_crash());
-    }
-    super::outbox::deliver(state, &queued.id, sender_username).await
+    Ok(match enqueued? {
+        super::outbox::Enqueued::AlreadySent(message) => EnqueueOutcome::AlreadySent(message),
+        super::outbox::Enqueued::Unsent => EnqueueOutcome::Unsent(queued.id),
+    })
 }
 
 /// The plaintext a message is sealed as: text padded to a size bucket (#331)

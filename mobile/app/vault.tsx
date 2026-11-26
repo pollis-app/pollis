@@ -22,6 +22,8 @@ import {
   useDeleteVaultMessage,
   useEditVaultMessage,
   useSendVaultMessage,
+  useRetryVaultMessage,
+  useDiscardUnsentVaultMessage,
   useSetVaultMessagePinned,
   useVaultMessages,
   type VaultMessage,
@@ -78,6 +80,8 @@ function VaultScreen() {
 
   const { data: entries = [], isLoading, isError } = useVaultMessages();
   const send = useSendVaultMessage();
+  const retrySave = useRetryVaultMessage();
+  const discardSave = useDiscardUnsentVaultMessage();
   const edit = useEditVaultMessage();
   const remove = useDeleteVaultMessage();
   const pin = useSetVaultMessagePinned();
@@ -208,7 +212,8 @@ function VaultScreen() {
           text={parsed.text}
           attachments={parsed.attachments}
           pinned={entry.pinned}
-          edited={isVaultEntryEdited(entry)}
+          edited={entry.send_state === undefined && isVaultEntryEdited(entry)}
+          sendState={entry.send_state}
           onOpenActions={() => setActionTarget(entry)}
           onTogglePin={() => togglePin(entry)}
           onEdit={() => startEdit(entry)}
@@ -382,6 +387,16 @@ function VaultScreen() {
           quote={actionParsed.text || actionParsed.attachments.map((a) => a.filename).join(", ")}
           quoteTime={`${dayLabel(entryTime(actionTarget))} · ${timeLabel(entryTime(actionTarget))}`}
           pinned={actionTarget.pinned}
+          queued={actionTarget.send_state !== undefined}
+          canRetry={actionTarget.send_state === "failed"}
+          onRetry={() => {
+            retrySave.mutate(actionTarget.id);
+            setActionTarget(null);
+          }}
+          onDiscard={() => {
+            discardSave.mutate(actionTarget.id);
+            setActionTarget(null);
+          }}
           onTogglePin={() => {
             togglePin(actionTarget);
             setActionTarget(null);

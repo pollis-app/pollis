@@ -569,7 +569,7 @@ async fn request_item_once(
     }))
 }
 
-fn classify(e: crate::error::Error) -> Reason {
+pub(crate) fn classify(e: crate::error::Error) -> Reason {
     match e {
         crate::error::Error::Network(_) => Reason::Network,
         crate::error::Error::Database(_) => Reason::Internal,

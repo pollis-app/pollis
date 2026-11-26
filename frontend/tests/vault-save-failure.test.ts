@@ -39,10 +39,12 @@ test("the Vault page shows the reason, restores the draft and offers a retry", (
   assert.match(page, /chatInputRef\.current\?\.send\(\)/);
 });
 
-test("a retry of the same draft uploads only what failed", () => {
-  const envelope = src("src/utils/attachmentEnvelope.ts");
-  assert.match(envelope, /const done = uploaded\.get\(att\)/);
-  assert.match(envelope, /uploaded\.set\(att, result\)/);
-  // Every upload settles before the failure is reported, so the memo is whole.
-  assert.match(envelope, /Promise\.allSettled\(/);
+test("a save goes through the Vault's durable queue: one id per submit, the files un-uploaded (#2100)", () => {
+  const page = src("src/pages/Vault.tsx");
+  // The core uploads (once: a retry finds the finished envelope) and saves under this id.
+  assert.match(page, /messageId = await invoke<string>\("new_message_id"\)/);
+  assert.match(page, /await outgoingAttachments\(attachments\)/);
+  // A save the core stored is not handed back as a draft: that would save it twice.
+  assert.match(page, /await vaultHolds\(messageId\)/);
+  assert.ok(!page.includes("buildMessageContent"));
 });

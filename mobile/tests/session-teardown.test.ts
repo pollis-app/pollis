@@ -48,6 +48,7 @@ function recordingDeps(calls: string[], failing: string[] = []): SessionTeardown
     clearExportArchives: step("clearExportArchives"),
     clearEmojiCache: step("clearEmojiCache"),
     clearAvatarCache: step("clearAvatarCache"),
+    clearShares: step("clearShares"),
     clearDrafts: () => {
       calls.push("clearDrafts");
     },
@@ -75,6 +76,7 @@ test("the teardown resets the store, leaves the signed-in screens, then clears e
     "clearExportArchives",
     "clearEmojiCache",
     "clearAvatarCache",
+    "clearShares",
   ]));
 });
 
@@ -96,6 +98,8 @@ test("endSession wires the real wipes", () => {
     "clearEmojiCache,",
     "clearAvatarCache,",
     "clearDrafts: clearAllDrafts",
+    "setShareTargetEnabled(false)",
+    "discardAllShares()",
     "router.dismissAll()",
     'router.replace("/(auth)/email")',
   ]) {

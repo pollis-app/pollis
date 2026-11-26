@@ -1,0 +1,39 @@
+appId: com.google.android.apps.photos
+---
+# Signed out (#2100): the system share sheet from Google Photos no longer offers Pollis, and offers
+# no person or chat from it either (Pollis never published any).
+- launchApp:
+    appId: com.google.android.apps.photos
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 4000
+- runFlow:
+    when:
+      visible: "Not now"
+    commands:
+      - tapOn: "Not now"
+- runFlow:
+    when:
+      visible: "Sign in to back up"
+    commands:
+      - pressKey: back
+- repeat:
+    while:
+      notVisible:
+        id: "com.google.android.apps.photos:id/share"
+    times: 3
+    commands:
+      - tapOn:
+          text: "Photo taken on.*"
+          index: 0
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 2000
+- tapOn:
+    id: "com.google.android.apps.photos:id/share"
+- extendedWaitUntil:
+    visible: "Drive"
+    timeout: 15000
+- assertNotVisible: "Pollis"
+- takeScreenshot: share-11-system-sheet-signed-out
+- pressKey: back

@@ -11,6 +11,13 @@ export interface VaultMessage {
   pinned: boolean;
   created_at: string;
   updated_at: string;
+  /** Still in the Vault's queue (#2100): saving, or "Not saved" until a retry. Absent once saved. */
+  send_state?: "pending" | "failed" | "rejected";
+}
+
+/** A save the queue holds that reads "Not saved". */
+export function vaultEntryNotSaved(entry: Pick<VaultMessage, "send_state">): boolean {
+  return entry.send_state === "failed" || entry.send_state === "rejected";
 }
 
 /** Pin/unpin counts as a rewrite too (the flag lives inside the ciphertext). */
@@ -39,6 +46,10 @@ export function vaultAttachments(entries: readonly VaultMessage[]): MessageAttac
   const out: MessageAttachment[] = [];
   const seen = new Set<string>();
   for (let i = entries.length - 1; i >= 0; i--) {
+    // A save still queued (#2100) has no uploaded files yet: the media view shows it once saved.
+    if (entries[i].send_state !== undefined) {
+      continue;
+    }
     for (const attachment of parseContent(entries[i].content, "vault").attachments) {
       if (!seen.has(attachment.id)) {
         seen.add(attachment.id);

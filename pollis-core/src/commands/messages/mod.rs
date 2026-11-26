@@ -24,6 +24,7 @@ mod send;
 mod types;
 // `pub` so the out-of-workspace `fuzz/` crate can fuzz `next_watermark` (#481).
 pub mod watermark;
+pub mod vault_queue;
 
 // Account deletion (#1866) withdraws the account's undelivered envelopes.
 pub(crate) use delete_capability::withdrawable_envelopes;
@@ -130,11 +131,26 @@ pub use types::{
 pub use send::{send_message, send_message_with_id, send_message_with_preview};
 pub use send::test_hooks;
 pub(crate) use send::direct_mentions;
+pub(crate) use send::{enqueue_message, EnqueueOutcome};
 
 pub use outbox::{
     discard_unsent_message, flush_outbox, new_message_id, retry_message, OutboxReport,
 };
-pub(crate) use outbox::{mark_suspended_sends_on, spawn_outbox_flush, sweep_orphan_attachments_on};
+pub(crate) use outbox::{
+    deliver as deliver_queued_message, mark_suspended_sends_on, send_state_of, spawn_outbox_flush,
+    sweep_orphan_attachments_on,
+};
+pub(crate) use outbox::claim::{
+    purge_stale_on as purge_stale_outbox_claims_on, release_all_on as release_outbox_claims_on,
+    set_role as set_outbox_claim_role,
+};
+/// Claim an outbox key for this process (#2100); see `outbox::claim`.
+pub(crate) async fn claim_outbox_key(
+    state: &std::sync::Arc<crate::state::AppState>,
+    key: &str,
+) -> Option<outbox::claim::Claim> {
+    outbox::claim::Claim::take(state, key).await
+}
 pub use outbox::OutgoingAttachment;
 pub use outbox::{Enqueuing, Retrying};
 

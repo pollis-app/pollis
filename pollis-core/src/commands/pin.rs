@@ -314,7 +314,7 @@ pub async fn set_pin(
     let (db_key, account_id_key): (Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>) = match old_pin {
         Some(ref old) => {
             validate_pin(old)?;
-            let unlocked = unlock_inner(keystore, &user_id, old).await?;
+            let unlocked = unlock_inner(keystore, &user_id, old, Some(&state.local_data_dir())).await?;
             (unlocked.db_key, unlocked.account_id_key)
         }
         None => source_initial_keys(state, &user_id).await?,
@@ -537,7 +537,7 @@ pub async fn unlock(
     pin: String,
 ) -> Result<UnlockOutcome> {
     validate_pin(&pin)?;
-    let unlocked = unlock_inner(state.keystore.as_ref(), &user_id, &pin).await?;
+    let unlocked = unlock_inner(state.keystore.as_ref(), &user_id, &pin, Some(&state.local_data_dir())).await?;
     let outcome = finish_unlock(state, unlocked).await?;
     record_pin_proof(state, &outcome.user_id).await;
     Ok(outcome)
@@ -622,7 +622,7 @@ pub(crate) async fn finish_unlock(
 /// Re-verify the PIN of an unlocked device for a keyboard-present action (#1207).
 pub(crate) async fn verify_pin(state: &Arc<AppState>, user_id: &str, pin: &str) -> Result<()> {
     validate_pin(pin)?;
-    unlock_inner(state.keystore.as_ref(), user_id, pin).await.map(|_| ())
+    unlock_inner(state.keystore.as_ref(), user_id, pin, Some(&state.local_data_dir())).await.map(|_| ())
 }
 
 /// Shared core for verify-and-unwrap, used by both `unlock` and the
@@ -631,18 +631,167 @@ async fn unlock_inner(
     keystore: &dyn crate::keystore::Keystore,
     user_id: &str,
     pin: &str,
+    lock_dir: Option<&std::path::Path>,
 ) -> Result<UnlockState> {
-    let mut meta = load_pin_meta(keystore, user_id)
+    match check_pin(keystore, user_id, pin, lock_dir).await? {
+        PinCheck::Unlocked(unlocked) => Ok(unlocked),
+        PinCheck::Incorrect { attempts_remaining } => Err(Error::Other(anyhow::anyhow!(
+            "pin incorrect; {attempts_remaining} attempts remaining"
+        ))),
+        PinCheck::LockedOut => Err(Error::Other(anyhow::anyhow!(
+            "pin locked out; use Secret Key recovery"
+        ))),
+    }
+}
+
+/// What a PIN attempt came to, typed for a host that is not the app (#2100: the iOS share
+/// extension draws its own keypad).
+pub(crate) enum PinCheck {
+    Unlocked(UnlockState),
+    Incorrect { attempts_remaining: u32 },
+    /// At the threshold; the wrapped keys are gone (Secret Key recovery is untouched).
+    LockedOut,
+}
+
+/// Serializes the attempt counter's read-modify-write inside this process; [`pin_file_lock`]
+/// does it across the app and its extensions.
+static PIN_COUNTER: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Longest a PIN attempt waits for another process's counter update.
+const PIN_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The cross-process lock on `pin_meta`'s counter: `pin.lock` in the data directory the app and
+/// its extensions share. Held only around a counter update (never across the key derivation),
+/// so nothing holds it long enough to be suspended with it.
+#[cfg(unix)]
+async fn pin_file_lock(dir: &std::path::Path) -> Result<std::fs::File> {
+    crate::private_fs::create_dir_all(dir).map_err(|e| Error::Other(anyhow::anyhow!("create {}: {e}", dir.display())))?;
+    let path = dir.join("pin.lock");
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|e| Error::Other(anyhow::anyhow!("open {}: {e}", path.display())))?;
+    let deadline = std::time::Instant::now() + PIN_LOCK_WAIT;
+    loop {
+        let got = crate::notify::lock::try_lock_exclusive(&file)
+            .map_err(|e| Error::Other(anyhow::anyhow!("lock {}: {e}", path.display())))?;
+        if got {
+            return Ok(file);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Other(anyhow::anyhow!("the PIN is being checked in another process")));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Windows runs one Pollis process per data dir; nothing else counts attempts there.
+#[cfg(not(unix))]
+async fn pin_file_lock(_dir: &std::path::Path) -> Result<()> {
+    Ok(())
+}
+
+/// What one locked counter update found.
+enum Counted {
+    /// The attempt is counted; the meta as it was before, to verify against.
+    Counted(PinMeta),
+    /// Already at the threshold: the wrapped keys are wiped.
+    LockedOut,
+}
+
+/// Count an attempt BEFORE verifying it, under the counter lock, so attempts made at once (the
+/// app's keypad and the share extension's, side by side) each count.
+async fn count_attempt(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+    lock_dir: Option<&std::path::Path>,
+) -> Result<Counted> {
+    let _in_process = PIN_COUNTER.lock().await;
+    let _file = match lock_dir {
+        Some(dir) => Some(pin_file_lock(dir).await?),
+        None => None,
+    };
+    let meta = load_pin_meta(keystore, user_id)
         .await?
         .ok_or_else(|| Error::Other(anyhow::anyhow!("PIN not set for user {user_id}")))?;
-
     if meta.failed_attempts >= MAX_FAILED_ATTEMPTS {
         // Defense-in-depth lockout nuke; Secret Key recovery is untouched.
         nuke_wrapped(keystore, user_id).await?;
-        return Err(Error::Other(anyhow::anyhow!(
-            "pin locked out; use Secret Key recovery"
-        )));
+        return Ok(Counted::LockedOut);
     }
+    let mut counted = meta.clone();
+    counted.failed_attempts += 1;
+    counted.last_attempt_unix = crate::util::now_unix();
+    store_pin_meta(keystore, user_id, &counted).await?;
+    Ok(Counted::Counted(meta))
+}
+
+/// After a wrong PIN (already counted): what is left, wiping at the threshold.
+async fn after_wrong_pin(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+    lock_dir: Option<&std::path::Path>,
+) -> Result<PinCheck> {
+    let _in_process = PIN_COUNTER.lock().await;
+    let _file = match lock_dir {
+        Some(dir) => Some(pin_file_lock(dir).await?),
+        None => None,
+    };
+    let Some(meta) = load_pin_meta(keystore, user_id).await? else {
+        // A lockout elsewhere already wiped it.
+        return Ok(PinCheck::LockedOut);
+    };
+    if meta.failed_attempts >= MAX_FAILED_ATTEMPTS {
+        nuke_wrapped(keystore, user_id).await?;
+        return Ok(PinCheck::LockedOut);
+    }
+    Ok(PinCheck::Incorrect {
+        attempts_remaining: MAX_FAILED_ATTEMPTS.saturating_sub(meta.failed_attempts),
+    })
+}
+
+/// The right PIN: the counter starts again from zero.
+async fn reset_attempts(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+    lock_dir: Option<&std::path::Path>,
+) -> Result<()> {
+    let _in_process = PIN_COUNTER.lock().await;
+    let _file = match lock_dir {
+        Some(dir) => Some(pin_file_lock(dir).await?),
+        None => None,
+    };
+    if let Some(mut meta) = load_pin_meta(keystore, user_id).await? {
+        if meta.failed_attempts != 0 {
+            meta.failed_attempts = 0;
+            meta.last_attempt_unix = crate::util::now_unix();
+            store_pin_meta(keystore, user_id, &meta).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Verify `pin` against `user_id`'s slots and unwrap the keys. The ONE attempt counter: every
+/// caller (the app's unlock, a PIN change, the share extension's unlock) counts against
+/// `pin_meta`, so a wrong PIN anywhere brings the same lockout nearer, and the 10th wipes.
+///
+/// The attempt is counted before the PIN is checked, under a lock (`lock_dir`: the data
+/// directory the app and its extensions share), so parallel guesses cannot share one count and
+/// a process killed mid-check has still spent the attempt.
+pub(crate) async fn check_pin(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+    pin: &str,
+    lock_dir: Option<&std::path::Path>,
+) -> Result<PinCheck> {
+    validate_pin(pin)?;
+    let meta = match count_attempt(keystore, user_id, lock_dir).await? {
+        Counted::Counted(meta) => meta,
+        Counted::LockedOut => return Ok(PinCheck::LockedOut),
+    };
 
     let kek = derive_kek(
         pin,
@@ -662,18 +811,9 @@ async fn unlock_inner(
         .unwrap_or(false);
 
     if !verifier_ok {
-        meta.failed_attempts += 1;
-        meta.last_attempt_unix = crate::util::now_unix();
-        store_pin_meta(keystore, user_id, &meta).await?;
-        let attempts_remaining =
-            MAX_FAILED_ATTEMPTS.saturating_sub(meta.failed_attempts);
-        if meta.failed_attempts >= MAX_FAILED_ATTEMPTS {
-            nuke_wrapped(keystore, user_id).await?;
-        }
-        return Err(Error::Other(anyhow::anyhow!(
-            "pin incorrect; {attempts_remaining} attempts remaining"
-        )));
+        return after_wrong_pin(keystore, user_id, lock_dir).await;
     }
+    reset_attempts(keystore, user_id, lock_dir).await?;
 
     let db_key_blob = keystore
         .load_for_user(DB_KEY_WRAPPED_SLOT, user_id)
@@ -686,17 +826,22 @@ async fn unlock_inner(
     let db_key = unwrap_bytes(&kek, &db_key_blob)?;
     let account_id_key = unwrap_bytes(&kek, &account_id_key_blob)?;
 
-    if meta.failed_attempts != 0 {
-        meta.failed_attempts = 0;
-        meta.last_attempt_unix = crate::util::now_unix();
-        store_pin_meta(keystore, user_id, &meta).await?;
-    }
-
-    Ok(UnlockState {
+    Ok(PinCheck::Unlocked(UnlockState {
         user_id: user_id.to_string(),
         db_key,
         account_id_key,
-    })
+    }))
+}
+
+/// How many wrong PINs `user_id` has left before the lockout wipe, from `pin_meta` alone.
+/// `None` when no PIN is set (signed out, or wiped by a lockout).
+pub(crate) async fn attempts_remaining(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+) -> Result<Option<u32>> {
+    Ok(load_pin_meta(keystore, user_id)
+        .await?
+        .map(|m| MAX_FAILED_ATTEMPTS.saturating_sub(m.failed_attempts)))
 }
 
 /// Screen lock (not log out): drop unlock state and close the local DB.
@@ -869,7 +1014,7 @@ mod tests {
         };
         store_pin_meta(&*ks, uid, &meta).await.unwrap();
 
-        let unlocked = unlock_inner(&*ks, uid, "4321").await.unwrap();
+        let unlocked = unlock_inner(&*ks, uid, "4321", None).await.unwrap();
         assert_eq!(&*unlocked.db_key, &db_key);
         assert_eq!(&*unlocked.account_id_key, &acct_key);
     }
@@ -923,13 +1068,13 @@ mod tests {
         };
         store_pin_meta(&*ks, uid, &meta).await.unwrap();
 
-        assert!(unlock_inner(&*ks, uid, "2222").await.is_err());
+        assert!(unlock_inner(&*ks, uid, "2222", None).await.is_err());
         let after = load_pin_meta(&*ks, uid).await.unwrap().unwrap();
         assert_eq!(after.failed_attempts, 1);
 
         // 9 more wrong attempts should trip the lockout nuke.
         for _ in 0..9 {
-            let _ = unlock_inner(&*ks, uid, "2222").await;
+            let _ = unlock_inner(&*ks, uid, "2222", None).await;
         }
         assert!(ks
             .load_for_user(DB_KEY_WRAPPED_SLOT, uid)
@@ -941,6 +1086,40 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    /// #2100: guesses made at once (the app's keypad and the share extension's) each count, so
+    /// parallel attempts cannot share one count and get past the ten.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn parallel_wrong_pins_each_count() {
+        let ks: StdArc<dyn crate::keystore::Keystore> = StdArc::new(InMemoryKeystore::new());
+        let uid = "user_parallel";
+        let (kek, meta) = cheap_kek_and_meta("1357");
+        install_wrapped_slots(&*ks, uid, &kek, &meta, &[1u8; 32], &[2u8; 32], true)
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut tasks = Vec::new();
+        for _ in 0..4 {
+            let ks = ks.clone();
+            let dir = dir.path().to_path_buf();
+            tasks.push(tokio::spawn(async move {
+                check_pin(&*ks, uid, "2468", Some(&dir))
+                    .await
+                    .map(|c| matches!(c, PinCheck::Incorrect { .. }))
+            }));
+        }
+        for t in tasks {
+            assert!(t.await.unwrap().unwrap(), "each is answered as a wrong PIN");
+        }
+        let after = load_pin_meta(&*ks, uid).await.unwrap().unwrap();
+        assert_eq!(after.failed_attempts, 4, "four guesses, four counts");
+        // The right PIN starts the count again.
+        assert!(matches!(
+            check_pin(&*ks, uid, "1357", Some(dir.path())).await.unwrap(),
+            PinCheck::Unlocked(_)
+        ));
+        assert_eq!(load_pin_meta(&*ks, uid).await.unwrap().unwrap().failed_attempts, 0);
     }
 
     /// #1685: the 10th wrong PIN takes the biometric slots with the PIN's, so a lockout cannot be
@@ -958,7 +1137,7 @@ mod tests {
         }
         require_pin_not_locked_out(&*ks, uid).await.expect("not locked out yet");
         for _ in 0..MAX_FAILED_ATTEMPTS {
-            let _ = unlock_inner(&*ks, uid, "2468").await;
+            let _ = unlock_inner(&*ks, uid, "2468", None).await;
         }
         for slot in crate::commands::device_unlock::SLOTS {
             assert!(
@@ -1039,7 +1218,7 @@ mod tests {
         };
         store_pin_meta(&*ks, uid, &meta).await.unwrap();
 
-        unlock_inner(&*ks, uid, "9999").await.unwrap();
+        unlock_inner(&*ks, uid, "9999", None).await.unwrap();
         let after = load_pin_meta(&*ks, uid).await.unwrap().unwrap();
         assert_eq!(after.failed_attempts, 0);
     }
@@ -1134,11 +1313,11 @@ mod tests {
         );
 
         // And the key material survived, reachable only through the PIN.
-        let unlocked = unlock_inner(&*ks, uid, "1357").await.unwrap();
+        let unlocked = unlock_inner(&*ks, uid, "1357", None).await.unwrap();
         assert_eq!(&*unlocked.db_key, &LEGACY_DB_KEY);
         assert_eq!(&*unlocked.account_id_key, &LEGACY_ACCOUNT_KEY);
         assert!(
-            unlock_inner(&*ks, uid, "2468").await.is_err(),
+            unlock_inner(&*ks, uid, "2468", None).await.is_err(),
             "the migrated key must now be behind the PIN, not beside it"
         );
     }
@@ -1204,7 +1383,7 @@ mod tests {
                 .await
                 .expect("the retry completes");
                 assert_eq!(
-                    &*unlock_inner(&*healthy, uid, "1357").await.unwrap().account_id_key,
+                    &*unlock_inner(&*healthy, uid, "1357", None).await.unwrap().account_id_key,
                     &LEGACY_ACCOUNT_KEY,
                 );
             }
@@ -1229,7 +1408,7 @@ mod tests {
             .await
             .expect("no legacy slot is not an error");
 
-        let unlocked = unlock_inner(&*ks, modern, "8642").await.unwrap();
+        let unlocked = unlock_inner(&*ks, modern, "8642", None).await.unwrap();
         assert_eq!(&*unlocked.db_key, &db_key);
         assert_eq!(&*unlocked.account_id_key, &account_id_key);
 

@@ -1,0 +1,30 @@
+appId: ${MAESTRO_APP_ID}
+---
+# After the extension sent: Pollis's Vault holds the share, saved (not queued). TAG=photo looks
+# for the photo, TAG=link for the shared link (pre-filled as the message).
+- launchApp:
+    stopApp: false
+- runFlow: ../../subflows/unlock-if-locked.yaml
+- openLink: "pollis://vault"
+- runFlow:
+    file: ../../subflows/after-open-link.yaml
+    env:
+      SCREEN: "screen-vault"
+- runFlow:
+    when:
+      true: ${TAG == "photo"}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "btn-attachment-.*"
+          timeout: 60000
+- runFlow:
+    when:
+      true: ${TAG == "link"}
+    commands:
+      - extendedWaitUntil:
+          visible: ".*pollis.com/learn.*"
+          timeout: 60000
+- assertNotVisible:
+    id: "vault-not-saved-.*"
+- takeScreenshot: share-ios-06-in-vault-${TAG}

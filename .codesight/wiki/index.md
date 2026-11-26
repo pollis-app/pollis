@@ -17,6 +17,7 @@ Start here. Navigate to the article you need.
 - [Safety & Verification](./safety.md) — Signal-style safety numbers, TOFU pinning, group MITM defence (refs #277)
 - [Windows Signing](./windows-signing.md) — Azure Artifact Signing setup for Windows installer signing
 - [Windows Dev VM](./windows-vm.md) — `scripts/windows-vm.sh`: local Windows 11 ARM64 VM in Docker (colima nested virt + dockur/windows-arm) for fast Windows testing
+- [Sharing into Pollis](./share.md) — Other apps' share sheets → up to 5 chats (DMs, channels, the Vault): the iOS share extension (unlocks and sends in place), the Android intake, the one `share_targets` query, streamed outbox files, the Vault's durable queue (#2100)
 - [PIN Design](./pin-design.md) — Local PIN unlock: KDF/AEAD choices, blob format, lifecycle, threat model
 - [Notifications](./notifications.md) — Sound, OS notification, badge, and alert dispatcher (`notify()` + category table)
 - [Audio Processing](./audio-processing.md) — Mic-side AGC + NS + AEC pipeline (WebRTC APM), playback mixer, AEC render reference, build deps

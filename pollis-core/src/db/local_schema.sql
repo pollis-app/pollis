@@ -591,6 +591,30 @@ CREATE TABLE IF NOT EXISTS vault_entry_cache (
 
 CREATE INDEX IF NOT EXISTS idx_vault_entry_cache_created ON vault_entry_cache(created_at DESC);
 
+-- The Vault's durable queue (#2100), its twin of the message outbox (#1335): a save is written
+-- here, files included (as `outbox_attachment` rows keyed by this id), before any network work,
+-- and leaves only once the DS holds the entry and `vault_entry_cache` has it. The id is the
+-- entry's id from the first attempt, so a repeat or a retry saves the same entry, once. `content`
+-- is the caption-only envelope until the files are uploaded, then the final one.
+CREATE TABLE IF NOT EXISTS vault_outbox (
+    id         TEXT PRIMARY KEY,
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    send_state TEXT NOT NULL DEFAULT 'pending' CHECK (send_state IN ('pending', 'failed', 'rejected'))
+);
+
+-- Which process is working on an outbox key (#2100): a message or Vault save id, a
+-- conversation's send line, an edit. The app and the iOS share extension share this database,
+-- and an in-process lock cannot keep them off the same row. A claim is a lease: its holder
+-- renews it while it works and deletes it when done; one a stopped or suspended process left
+-- runs out at `until_ms` (wall-clock milliseconds) and is taken over. A row being stored holds
+-- its claim too, so the orphan sweep leaves its bytes alone.
+CREATE TABLE IF NOT EXISTS outbox_claim (
+    key      TEXT PRIMARY KEY,
+    holder   TEXT NOT NULL,
+    until_ms INTEGER NOT NULL
+);
+
 -- An edit, self-redaction or admin tombstone that reached this device before
 -- the message it targets (#1735) — the target is absent (sent before this
 -- device joined, so only a history transfer can bring it) or a loss

@@ -216,6 +216,16 @@ An opt-in convenience, off by default: Face ID, Touch ID or a Class 3 fingerprin
 
 **What it does not change.** A biometric read that fails or is cancelled costs no PIN attempt and is not counted; a successful one forgives none. The 10th wrong PIN deletes these slots with the PIN's (§3.3). A biometric unlock ends in the same unlock path as the PIN, so it refreshes the notification escrow (§3.8) exactly as a PIN unlock would, no more. The slots are deleted with the PIN slots by "delete data" sign-out, account deletion, "wipe this device" and recovery. Desktop does not offer it: the OS keychain backend it uses cannot attach biometric access control to an item, and Linux and Windows have no equivalent.
 
+### 3.10 Sharing into Pollis (mobile only, #2100)
+
+Other apps' share sheets list Pollis as an app only. Pollis gives the operating system no contacts, groups or conversations to suggest there: the iOS share extension declares no messaging intent, and the Android app publishes no share targets or shortcuts.
+
+**iOS.** The share extension is its own process, so it unlocks its own session. With the PIN it uses the same attempt counter as the app (§3.3): a wrong PIN there counts toward the same ten, and the tenth deletes the same slots. With biometrics it reads the device unlock key (§3.9), which needs a biometric match for every read. To read that key, the share extension's entitlements include the app-only keychain group, because a user is present when it runs. The Notification Service Extension still does not get that group. The share extension never reads the notification escrow (§3.8). It opens the database exactly as that extension does (§3.8), and it holds the cross-process lock for each MLS step (§6.6). It closes the database and releases the lock when the sharing app leaves the screen, and again when it finishes. A shared file is copied into the extension's own temporary directory, not the App Group container. It is stored in the encrypted local database before anything is sent, and the copy is deleted then, or when the share is cancelled.
+
+**Android.** The app copies what was shared into its private cache while Android grants read access. It accepts only content URIs from other apps' providers, never a file path or one of its own providers. The copies are deleted once the share is stored, cancelled or a day old, and at sign-out. The share target is turned off while nobody is signed in.
+
+**Sending.** Each chosen chat gets an ordinary message, sealed under that chat's keys, with its files sealed under that chat's file keys. A Vault copy is sealed under the Vault's keys. Nothing is shared between the copies, and nothing on the wire tells a shared message from a typed one.
+
 ---
 
 ## 4. Authentication Flow (OTP)

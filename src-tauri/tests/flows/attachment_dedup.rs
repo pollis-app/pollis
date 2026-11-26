@@ -171,27 +171,23 @@ async fn one_file_to_several_chats_and_the_vault_is_one_object() {
     for conversation in [&channel_id, &dm_id, &channel2] {
         ids.push(send_photo(&alice, conversation, PHOTO).await.1["hash"].clone());
     }
+    // The Vault's queue uploads it (#2100), as the outbox does a chat's.
     let staged = pollis_core::commands::staging::stage_attachment(PHOTO.to_vec()).expect("stage").id;
-    let up = pollis_core::commands::r2::upload_media_staged(
-        staged,
-        "photo.png".into(),
-        "image/png".into(),
-        None,
-        &alice.state,
-    )
-    .await
-    .expect("vault upload");
-    ids.push(json!(up.content_hash));
-    assert!(ids.iter().all(|h| *h == ids[0]), "{ids:?}");
-    let id = up.content_hash.clone();
-    let body = json!({ "_att": [{
-        "key": up.key, "url": "", "name": "photo.png", "ct": "image/png", "size": up.size_bytes,
-        "hash": up.content_hash, "v": 2, "sha": up.sha256,
-    }]})
-    .to_string();
-    alice
-        .invoke_json("send_vault_message", json!({ "userId": alice.user_id(), "content": body }))
+    let saved = alice
+        .invoke_json(
+            "send_vault_message",
+            json!({
+                "userId": alice.user_id(),
+                "content": "",
+                "attachments": [{ "stagedId": staged, "filename": "photo.png", "contentType": "image/png" }],
+            }),
+        )
         .await;
+    let saved: serde_json::Value = serde_json::from_str(saved["content"].as_str().expect("content")).expect("envelope");
+    assert_eq!(saved["_att"][0]["v"], 2, "a shared object in the Vault too");
+    ids.push(saved["_att"][0]["hash"].clone());
+    assert!(ids.iter().all(|h| *h == ids[0]), "{ids:?}");
+    let id = ids[0].as_str().expect("id").to_string();
 
     assert_eq!(media_keys().len(), 1, "stored once: {:?}", media_keys());
     assert_eq!(count(&format!("SELECT COUNT(*) FROM attachment_ref WHERE content_hash = '{id}'")).await, 3);

@@ -154,6 +154,8 @@ interface MockVaultMessage {
   created_at: string;
   updated_at: string;
   pinned: boolean;
+  /** The Vault's queue (#2100): stored, not yet saved. */
+  send_state?: 'pending' | 'failed' | 'rejected';
 }
 
 interface MockBookmark {
@@ -354,6 +356,8 @@ interface MockStore {
   savedDiagnosticsPath: string | null;
   /** Outbox (#1335): while true every send fails as offline; see `window.__tauriFailSends`. */
   failSends: boolean;
+  /** #2100: a Vault save is stored in the queue, then fails to reach the DS ("Not saved"). */
+  failVaultSaves: boolean;
   /** #2055: the OS says there is no network, so a failed send is not retried in place; `window.__tauriSetOffline`. */
   knownOffline: boolean;
   /** #2055: the core's in-place retry delays (2 s / 5 s / 15 s); specs shorten them. */
@@ -525,6 +529,7 @@ const store: MockStore = {
       : preload.exportSavePath,
   savedDiagnosticsPath: null,
   failSends: preload.failSends === true,
+  failVaultSaves: preload.failVaultSaves === true,
   knownOffline: preload.knownOffline === true,
   outboxRetryDelaysMs: (preload.outboxRetryDelaysMs as number[] | undefined) ?? [2_000, 5_000, 15_000],
   mutedChannels: (preload.mutedChannels as string[] | undefined) ?? [],
@@ -565,6 +570,9 @@ const store: MockStore = {
 (window as any).__tauriMock = store;
 (window as any).__tauriFailSends = (fail: boolean) => {
   store.failSends = fail;
+};
+(window as any).__tauriFailVaultSaves = (fail: boolean) => {
+  store.failVaultSaves = fail;
 };
 (window as any).__tauriSetOffline = (offline: boolean) => {
   store.knownOffline = offline;
@@ -2410,13 +2418,40 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       );
 
     case 'send_vault_message': {
-      const { content } = args as { userId: string; content: string };
+      // The Vault's durable queue (#2100): the files arrive un-uploaded, the id is the client's.
+      const { content: text, messageId } = args as {
+        userId: string;
+        content: string;
+        messageId?: string | null;
+      };
       if (store.failSends) {
         throw 'ds_post /v1/vault/save: error sending request for url (https://api.pollis.test/v1/vault/save): connection closed before message completed';
       }
+      const id = messageId ?? `vault_${store.vaultMessages.length + 1}`;
+      const existing = store.vaultMessages.find((v) => v.id === id);
+      if (existing) {
+        return existing;
+      }
+      const files = (args.attachments ?? []) as Array<{ filename: string; contentType: string }>;
+      const content =
+        files.length === 0
+          ? text
+          : JSON.stringify({
+              _att: files.map((a, i) => ({
+                key: `media/mock-${id}-${i}.enc`,
+                url: `https://r2.mock/media/mock-${id}-${i}.enc`,
+                name: a.filename,
+                ct: a.contentType,
+                size: 0,
+                hash: `mock-${id}-${i}`,
+                kv: 0,
+                sha: `sha-${id}-${i}`,
+              })),
+              ...(text ? { _txt: text } : {}),
+            });
       const now = new Date().toISOString();
       const entry: MockVaultMessage = {
-        id: `vault_${store.vaultMessages.length + 1}`,
+        id,
         user_id: store.session?.id ?? 'u_me',
         content,
         created_at: now,
@@ -2424,7 +2459,32 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         pinned: false,
       };
       store.vaultMessages.push(entry);
+      if (store.failVaultSaves) {
+        entry.send_state = 'failed';
+        throw 'ds_post /v1/vault/save: error sending request for url (https://api.pollis.test/v1/vault/save): connection closed before message completed';
+      }
       return entry;
+    }
+
+    case 'retry_vault_message': {
+      const { id } = args as { id: string };
+      const entry = store.vaultMessages.find((v) => v.id === id);
+      if (!entry) {
+        throw 'vault entry is not queued';
+      }
+      if (store.failVaultSaves) {
+        entry.send_state = 'failed';
+        throw 'ds_post /v1/vault/save: error sending request';
+      }
+      delete entry.send_state;
+      return entry;
+    }
+
+    case 'discard_unsent_vault_message': {
+      const { id } = args as { id: string };
+      const before = store.vaultMessages.length;
+      store.vaultMessages = store.vaultMessages.filter((v) => !(v.id === id && v.send_state));
+      return store.vaultMessages.length !== before;
     }
 
     case 'edit_vault_message': {

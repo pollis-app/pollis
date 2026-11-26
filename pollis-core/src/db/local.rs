@@ -131,7 +131,9 @@ impl LocalDb {
         // Before the schema batch, which indexes one of these columns.
         add_missing_columns(&conn)?;
         apply_local_schema(&conn)?;
-        // Orphan attachment bytes (#1335); nothing can be mid-send at open.
+        // A killed earlier process's outbox claims (#2100): nothing of it is live.
+        crate::commands::messages::purge_stale_outbox_claims_on(&conn)?;
+        // Orphan attachment bytes (#1335); bytes another process is storing are under its claim.
         crate::commands::messages::sweep_orphan_attachments_on(&conn)?;
         conn.execute(
             "INSERT OR REPLACE INTO kv (key, value) VALUES ('schema_version', ?1)",

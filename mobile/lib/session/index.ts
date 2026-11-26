@@ -8,6 +8,8 @@ import { clearExportArchives } from "../exportDir";
 import { clearEmojiCache } from "../emojiCache";
 import { clearAvatarCache } from "../avatarCache";
 import { clearAllDrafts } from "../drafts";
+import { discardAllShares, setShareTargetEnabled } from "../share/native";
+import { releaseAllShares } from "../share/pending";
 import { oncePerProcess, sweepPlaintext, tearDownSession } from "./teardown";
 
 export function endSession(): Promise<void> {
@@ -29,6 +31,11 @@ export function endSession(): Promise<void> {
     clearEmojiCache,
     clearAvatarCache,
     clearDrafts: clearAllDrafts,
+    clearShares: async () => {
+      releaseAllShares();
+      await setShareTargetEnabled(false);
+      await discardAllShares();
+    },
   });
 }
 

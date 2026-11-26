@@ -277,23 +277,30 @@ pub async fn unlock_with_device_key(
     user_id: String,
     device_key: String,
 ) -> Result<UnlockOutcome> {
-    let keystore = state.keystore.as_ref();
-    pin::require_pin_not_locked_out(keystore, &user_id).await?;
-    let meta = load_meta(keystore, &user_id)
+    let unlocked = unwrap_with_device_key(state.keystore.as_ref(), &user_id, &device_key).await?;
+    pin::finish_unlock(state, unlocked).await
+}
+
+/// The key half of [`unlock_with_device_key`]: the PIN gate, then the biometric slots. Also the
+/// iOS share extension's biometric unlock (#2100), which opens its own session rather than the
+/// app's. Never touches the PIN's attempt counter.
+pub(crate) async fn unwrap_with_device_key(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+    device_key: &str,
+) -> Result<UnlockState> {
+    pin::require_pin_not_locked_out(keystore, user_id).await?;
+    let meta = load_meta(keystore, user_id)
         .await?
         .filter(|m| m.confirmed)
         .ok_or_else(|| Error::Other(anyhow::anyhow!("biometric unlock is off")))?;
-    let duk = decode_duk(&device_key)?;
-    let (db_key, account_id_key) = unwrap_keys(keystore, &user_id, &duk, &meta).await?;
-    pin::finish_unlock(
-        state,
-        UnlockState {
-            user_id,
-            db_key,
-            account_id_key,
-        },
-    )
-    .await
+    let duk = decode_duk(device_key)?;
+    let (db_key, account_id_key) = unwrap_keys(keystore, user_id, &duk, &meta).await?;
+    Ok(UnlockState {
+        user_id: user_id.to_string(),
+        db_key,
+        account_id_key,
+    })
 }
 
 /// Turn biometric unlock off for the active user. Needs no PIN: it only takes a way in away.

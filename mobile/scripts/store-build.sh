@@ -61,11 +61,14 @@ if [ "$PLATFORM" = ios ]; then
     --config ubrn.config.yaml --and-generate --release --no-sim) > "$L/ubrn.log" 2>&1 || fail "ubrn build ios"
   echo "== prebuild + pods"
   ./node_modules/.bin/expo prebuild -p ios --no-install > "$L/prebuild.log" 2>&1 || fail "expo prebuild"
-  for f in ios/Pollis/Pollis.entitlements ios/PollisNotificationService/PollisNotificationService.entitlements; do
+  for f in ios/Pollis/Pollis.entitlements ios/PollisNotificationService/PollisNotificationService.entitlements ios/PollisShare/PollisShare.entitlements; do
     [ -f "$f" ] || fail "missing $f"
     grep -q group.com.pollis.ios "$f" && grep -q 8JT3WH45NZ.com.pollis.shared "$f" || fail "$f lacks the app group / keychain group"
   done
   grep -q usernotifications.communication ios/Pollis/Pollis.entitlements || fail "app lacks the communication entitlement"
+  grep -q 8JT3WH45NZ.com.pollis.app ios/PollisShare/PollisShare.entitlements || fail "share extension lacks the app-only keychain group"
+  grep -q 8JT3WH45NZ.com.pollis.app ios/PollisNotificationService/PollisNotificationService.entitlements && fail "the NSE must not hold the app-only keychain group"
+  grep -q IntentsSupported ios/PollisShare/PollisShare-Info.plist && fail "the share extension must not declare IntentsSupported"
   (cd ios && pod install) > "$L/pod.log" 2>&1 || fail "pod install"
   echo "== archive (unsigned), entitle, export"
   rm -rf build/Pollis.xcarchive build/export
@@ -74,9 +77,12 @@ if [ "$PLATFORM" = ios ]; then
     DEVELOPMENT_TEAM=8JT3WH45NZ CODE_SIGNING_ALLOWED=NO > "$L/archive.log" 2>&1 || fail "xcodebuild archive"
   APP=build/Pollis.xcarchive/Products/Applications/Pollis.app
   [ -d "$APP/PlugIns/PollisNotificationService.appex" ] || fail "notification service extension not embedded"
-  # Inner bundle first: signing the app seals PlugIns/. Without these, push is silently lost.
+  [ -d "$APP/PlugIns/PollisShare.appex" ] || fail "share extension not embedded"
+  # Inner bundles first: signing the app seals PlugIns/. Without these, push is silently lost.
   codesign -f -s - --entitlements ios/PollisNotificationService/PollisNotificationService.entitlements \
     "$APP/PlugIns/PollisNotificationService.appex" || fail "codesign appex"
+  codesign -f -s - --entitlements ios/PollisShare/PollisShare.entitlements \
+    "$APP/PlugIns/PollisShare.appex" || fail "codesign share appex"
   codesign -f -s - --entitlements ios/Pollis/Pollis.entitlements "$APP" || fail "codesign app"
   xcodebuild -exportArchive -archivePath build/Pollis.xcarchive -exportOptionsPlist store/ExportOptions.plist \
     -exportPath build/export -allowProvisioningUpdates -authenticationKeyPath "$KEY" \
@@ -85,9 +91,9 @@ if [ "$PLATFORM" = ios ]; then
 
   echo "== checks"
   D="$L/ipa"; rm -rf "$D"; mkdir -p "$D"; unzip -q "$ART" -d "$D"
-  A="$D/Payload/Pollis.app"; X="$A/PlugIns/PollisNotificationService.appex"
+  A="$D/Payload/Pollis.app"; X="$A/PlugIns/PollisNotificationService.appex"; SX="$A/PlugIns/PollisShare.appex"
   codesign --verify --deep --strict "$A" || fail "codesign --verify --deep"
-  for b in "$A" "$X"; do
+  for b in "$A" "$X" "$SX"; do
     n="$(basename "$b")"
     check "$n signed by Pollis Inc." "$(codesign -dvvv "$b" 2>&1 | grep -c '^Authority=Apple Distribution: Pollis Inc. (8JT3WH45NZ)')" 1
     ENT="$(codesign -d --entitlements :- "$b" 2>/dev/null)"

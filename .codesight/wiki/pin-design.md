@@ -16,6 +16,7 @@ Every user keeps the Pollis PIN. Face ID / Touch ID / a Class 3 fingerprint may 
 - **Slots** (`commands/device_unlock.rs`): a random 32-byte device unlock key (DUK) wraps the *same* `db_key` and `account_id_key` as the PIN slots — `db_key_duk`, `account_id_key_duk` — plus `duk_meta` (version, `confirmed`, a verifier sealed under the DUK). A PIN change re-wraps nothing; a first-time `set_pin(None, …)` (which may install new keys after recovery) drops them.
 - **Turning it on** needs the PIN: typed for it (Security → switch → PIN page), or typed to unlock within 5 minutes (the one-time offer after a PIN unlock spends that proof once). A biometric unlock never leaves a proof, so biometrics cannot re-key biometrics. `begin` writes `duk_meta` unconfirmed first (an older key fails its verifier from that write on), then the blobs, and reads all three back; `confirm` checks the key the app stored against the slots and the unlocked keys, then flips `confirmed` and reads it back (#951's rule: a keystore `Ok(())` is not evidence). Unconfirmed slots never unlock.
 - **The counter is the PIN's alone.** `unlock_with_device_key` passes `require_pin_not_locked_out` (which only reads `pin_meta`, and nukes at the threshold like a wrong PIN), then unwraps. A failure or a success never writes `pin_meta`. The 10th wrong PIN's `nuke_wrapped` deletes the DUK slots with the PIN slots and the escrow.
+- **The share extension (#2100) uses the same counter.** iOS's PollisShare unlocks its own session with `pin::check_pin` (a wrong PIN there counts against the app's ten, the tenth wipes) or with the device unlock key through `device_unlock::unwrap_with_device_key` (the PIN gate first, the counter never written). Its entitlements carry the app-only keychain group so it can read the DUK item; a user is present there, unlike the Notification Service Extension, which never gets that group. See [share.md](share.md).
 - **One unlock path.** Both factors end in `pin::finish_unlock`, so a biometric unlock refreshes the notification escrow exactly as a PIN unlock does.
 - **Lifecycle.** The slots follow the PIN slots: kept on a plain logout; deleted by `logout(delete_data)`, `delete_account`, `wipe_local_data` (all three loop `auth::WIPED_USER_SLOTS`, which a test holds to `device_unlock::SLOTS`), `wipe_local_account_identity` (recovery), `disable_device_unlock` and the lockout nuke.
 - **Where the DUK lives** (`mobile/lib/deviceUnlock.ts`, expo-secure-store `requireAuthentication`): iOS keychain, `.biometryCurrentSet` + `WHEN_PASSCODE_SET_THIS_DEVICE_ONLY`, in the explicit app-only access group `8JT3WH45NZ.com.pollis.app` (`plugins/withDeviceUnlock.js` adds it to the app's entitlements only). Never the default group: the first `keychain-access-groups` entry is the shared `8JT3WH45NZ.com.pollis.shared` the Notification Service Extension reads. Android: an AndroidKeyStore AES key with per-use authentication, opened through a BiometricPrompt `CryptoObject` (BIOMETRIC_STRONG), invalidated by a new enrolment. A re-enrolment makes the read come back empty: the keypad shows, and the next PIN unlock re-arms it (silently on iOS, one prompt on Android). A cancel or failure is just the keypad.
@@ -235,12 +236,13 @@ Happens inside `verify_otp` once the user row is created and `account_id_key` is
 
 ### Verify / unlock
 
-`unlock(user_id, pin)`:
-1. Load `pin_meta_{user_id}`. If missing → return `PinNotSet` error.
-2. Check `failed_attempts` vs threshold. If locked out → return `PinLockedOut`.
-3. Derive KEK, attempt to decrypt the magic-string plaintext.
-4. On success: decrypt `db_key_wrapped_*` and `account_id_key_wrapped_*`, populate `AppState.unlock`, reset counter to 0 in `pin_meta_*`, open local DB via existing `state.load_user_db` path (refactored to take the already-unwrapped key), return `UserProfile`.
-5. On failure: increment counter, store, return `PinIncorrect { attempts_remaining: N }`.
+`unlock(user_id, pin)` (all through `pin::check_pin`):
+1. Under the counter lock (an in-process mutex, plus an `flock` on `<data_dir>/pin.lock` shared with the share extension, #2100): load `pin_meta_{user_id}` (missing → `PinNotSet`); at the threshold → wipe and return `PinLockedOut`; otherwise **count the attempt first**, storing `failed_attempts + 1`. Released before the key derivation, so it is never held for long.
+2. Derive KEK, attempt to decrypt the magic-string plaintext.
+3. On success: reset the counter to 0 (under the lock), decrypt `db_key_wrapped_*` and `account_id_key_wrapped_*`, populate `AppState.unlock`, open local DB via existing `state.load_user_db` path (refactored to take the already-unwrapped key), return `UserProfile`.
+4. On failure: read the counter again (under the lock); at the threshold wipe and return `PinLockedOut`, else `PinIncorrect { attempts_remaining: N }`.
+
+Counting before verifying means guesses made at once (the app's keypad and the extension's side by side on an iPad) each count, and a process killed mid-check has still spent its attempt.
 
 ### Forgotten PIN
 

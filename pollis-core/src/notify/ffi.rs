@@ -197,14 +197,19 @@ fn fetch_json(data_dir: Option<String>, handle: Option<String>, budget_ms: u32) 
     }
 }
 
-unsafe fn opt_str(p: *const c_char) -> Option<String> {
+/// A host's C string, or `None` for NULL or invalid UTF-8.
+///
+/// # Safety
+/// `p` must be NULL or a valid NUL-terminated string.
+pub(crate) unsafe fn opt_str(p: *const c_char) -> Option<String> {
     if p.is_null() {
         return None;
     }
     CStr::from_ptr(p).to_str().ok().map(str::to_string)
 }
 
-fn to_c(s: String) -> *mut c_char {
+/// An owned C string for the host to free with [`pollis_string_free`]; never NULL.
+pub(crate) fn to_c(s: String) -> *mut c_char {
     CString::new(s)
         .unwrap_or_else(|_| c"{\"ok\":false,\"reason\":\"internal\"}".to_owned())
         .into_raw()

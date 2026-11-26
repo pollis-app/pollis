@@ -21,13 +21,17 @@ import { MediaGalleryView } from "../components/Media/MediaGalleryView";
 import { parseContent } from "../hooks/queries/useMessages";
 import {
   useDeleteVaultMessage,
+  useDiscardUnsentVaultMessage,
   useEditVaultMessage,
+  useRetryVaultMessage,
   useSendVaultMessage,
   useSetVaultMessagePinned,
   useVaultMessages,
   type VaultMessage,
 } from "../hooks/queries/useVault";
-import { buildMessageContent, referenceKeyFields } from "../utils/attachmentEnvelope";
+import { outgoingAttachments, referenceKeyFields, releaseStaged } from "../utils/attachmentEnvelope";
+import { invoke } from "../bridge";
+import { appStore } from "../stores/appStore";
 import { vaultSaveFailure, type VaultSaveFailure } from "../utils/vaultSaveFailure";
 import { formatClockTime, formatDayDivider } from "../utils/format";
 import type { MessageAttachment } from "../types";
@@ -36,6 +40,20 @@ import { IconButton } from "../components/ui/IconButton";
 import { EmptyState } from "../components/ui/EmptyState";
 
 type VaultView = "chat" | "media";
+
+/** Whether the core stored the save `id` (queued or saved), so a failed answer is not a lost draft. */
+async function vaultHolds(id: string): Promise<boolean> {
+  const userId = appStore.currentUser?.id;
+  if (!userId) {
+    return false;
+  }
+  try {
+    const all = await invoke<VaultMessage[]>("get_vault_messages", { userId });
+    return all.some((e) => e.id === id);
+  } catch {
+    return false;
+  }
+}
 
 // What a failed save says, by what the user can do about it (#1497).
 const SAVE_FAILED_COPY: Record<VaultSaveFailure, string> = {
@@ -58,6 +76,8 @@ export const VaultPage: React.FC = observer(() => {
   const editMutation = useEditVaultMessage();
   const deleteMutation = useDeleteVaultMessage();
   const pinMutation = useSetVaultMessagePinned();
+  const retryMutation = useRetryVaultMessage();
+  const discardMutation = useDiscardUnsentVaultMessage();
 
   const chatInputRef = useRef<ChatInputHandle>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -88,6 +108,10 @@ export const VaultPage: React.FC = observer(() => {
     const out: MessageAttachment[] = [];
     const seen = new Set<string>();
     for (let i = entries.length - 1; i >= 0; i--) {
+      // A save still queued (#2100) has no uploaded files yet: the media view shows it once saved.
+      if (entries[i].send_state !== undefined) {
+        continue;
+      }
       for (const attachment of parseContent(entries[i].content, "vault").attachments ?? []) {
         if (!seen.has(attachment.id)) {
           seen.add(attachment.id);
@@ -110,13 +134,21 @@ export const VaultPage: React.FC = observer(() => {
       }
       setSaveFailure(null);
       setSaving(true);
+      // One id per submit (#2100): the queue saves it once, however often it is retried.
+      let messageId: string | null = null;
       try {
-        const content = await buildMessageContent(attachments, contentText);
-        await sendMutation.mutateAsync({ content });
+        messageId = await invoke<string>("new_message_id");
+        const outgoing = await outgoingAttachments(attachments);
+        await sendMutation.mutateAsync({ messageId, text: contentText, attachments: outgoing });
       } catch (err) {
         console.warn("[vault] save failed:", err);
-        setSaveFailure(vaultSaveFailure(err));
-        chatInputRef.current?.restore(contentText, attachments);
+        // Queued but not saved yet: the entry shows "Not saved" with Retry; the draft stays sent.
+        const queued = messageId !== null && (await vaultHolds(messageId));
+        if (!queued) {
+          setSaveFailure(vaultSaveFailure(err));
+          void releaseStaged(attachments);
+          chatInputRef.current?.restore(contentText, attachments);
+        }
       } finally {
         setSaving(false);
       }
@@ -136,7 +168,7 @@ export const VaultPage: React.FC = observer(() => {
     }
     const parsed = parseContent(editingEntry.content, "vault");
     const attachments = parsed.attachments ?? [];
-    // Keep files across a text edit; fields mirror `buildMessageContent`.
+    // Keep files across a text edit; the fields are the `_att` envelope the core wrote.
     const newContent =
       attachments.length > 0
         ? JSON.stringify({
@@ -284,6 +316,8 @@ export const VaultPage: React.FC = observer(() => {
                       new Date(entry.created_at).toDateString() !==
                         new Date(visibleEntries[index - 1].created_at).toDateString()
                     }
+                    onRetry={(id) => retryMutation.mutate({ id })}
+                    onDiscard={(id) => discardMutation.mutate({ id })}
                     onEdit={startEdit}
                     onDelete={(id) => {
                       setEditingEntry(null);
@@ -373,6 +407,9 @@ export const VaultPage: React.FC = observer(() => {
 interface VaultEntryRowProps {
   entry: VaultMessage;
   showDayDivider: boolean;
+  /** A queued save (#2100) that reads "Not saved": try again, or drop it. */
+  onRetry: (id: string) => void;
+  onDiscard: (id: string) => void;
   onEdit: (entry: VaultMessage) => void;
   onDelete: (id: string) => void;
   onTogglePin: (entry: VaultMessage) => void;
@@ -382,11 +419,16 @@ interface VaultEntryRowProps {
 const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
   entry,
   showDayDivider,
+  onRetry,
+  onDiscard,
   onEdit,
   onDelete,
   onTogglePin,
 }) => {
   const { t } = useTranslation("vault");
+  // Still in the Vault's queue (#2100): no pin, edit or delete until it is saved.
+  const queued = entry.send_state !== undefined;
+  const notSaved = entry.send_state === "failed" || entry.send_state === "rejected";
   const parsed = parseContent(entry.content, "vault");
   const createdMs = new Date(entry.created_at).getTime();
 
@@ -416,8 +458,36 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
                 {t("entry.pinned")}
               </span>
             )}
-            {entry.updated_at !== entry.created_at && (
+            {!queued && entry.updated_at !== entry.created_at && (
               <span className="font-mono text-meta text-muted">{t("entry.edited")}</span>
+            )}
+            {entry.send_state === "pending" && (
+              <span className="font-mono text-meta text-muted" data-testid="vault-entry-queued">
+                {t("entry.queued")}
+              </span>
+            )}
+            {notSaved && (
+              <span className="flex items-center gap-2" data-testid="vault-entry-not-saved">
+                <span className="font-mono text-meta text-danger">{t("entry.notSaved")}</span>
+                {entry.send_state === "failed" && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    data-testid="vault-entry-retry"
+                    onClick={() => onRetry(entry.id)}
+                  >
+                    {t("entry.retry")}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  data-testid="vault-entry-discard"
+                  onClick={() => onDiscard(entry.id)}
+                >
+                  {t("entry.discard")}
+                </Button>
+              </span>
             )}
           </div>
           {parsed.text && (
@@ -433,6 +503,7 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
             </div>
           )}
         </div>
+        {!queued && (
         <div className="flex h-6 flex-shrink-0 items-center gap-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           <IconButton
             data-testid="vault-entry-pin"
@@ -462,6 +533,7 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
             <Trash2 size={16} aria-hidden />
           </IconButton>
         </div>
+        )}
       </div>
     </li>
   );

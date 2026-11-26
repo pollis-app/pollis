@@ -1,0 +1,55 @@
+appId: com.apple.mobileslideshow
+---
+# Open Pollis's share sheet from Photos on a photo (#2100). The script added the photo first
+# (`simctl addmedia`).
+- launchApp:
+    appId: com.apple.mobileslideshow
+    stopApp: true
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+# Photos reopens where it was left: in the grid a tap opens a photo; in a photo with its
+# controls hidden a tap brings them back.
+- waitForAnimationToEnd:
+    timeout: 3000
+# Photos sometimes does not come forward right after `simctl addmedia`: launch it once more.
+- runFlow:
+    when:
+      notVisible: "Photo, .*"
+    commands:
+      - launchApp:
+          appId: com.apple.mobileslideshow
+      - waitForAnimationToEnd:
+          timeout: 3000
+- repeat:
+    while:
+      notVisible: "Share"
+    times: 4
+    commands:
+      - tapOn:
+          text: "Photo, .*"
+          index: 0
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 2000
+      # A long library opens at its newest photos with the first one under the header: the
+      # middle of the grid is a photo then (in an open photo the tap brings the controls back).
+      - runFlow:
+          when:
+            notVisible: "Share"
+          commands:
+            - tapOn:
+                point: "50%,55%"
+            - waitForAnimationToEnd:
+                timeout: 2000
+- extendedWaitUntil:
+    visible: "Share"
+    timeout: 10000
+- tapOn: "Share"
+- extendedWaitUntil:
+    visible: "Pollis"
+    timeout: 15000
+- takeScreenshot: share-ios-photos-sheet
+- tapOn: "Pollis"

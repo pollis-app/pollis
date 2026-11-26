@@ -1,7 +1,4 @@
-// Attachment upload + message-content envelope; must match desktop's attachmentEnvelope.ts byte-for-byte.
-
-import { invoke } from "./native";
-import { referenceKeyFields } from "./messageContent.ts";
+// Picked attachments and what the outbox takes for them (#1335): the core uploads them, chat and Vault alike (#2100).
 
 export interface PickedAttachment {
   id: string;
@@ -16,26 +13,6 @@ export interface PickedAttachment {
   blurhash?: string;
   /** A video's frame from the platform decoder, base64 JPEG (#1837); the core makes the poster from it. */
   posterFrame?: string;
-}
-
-export interface MediaUploadResult {
-  key: string;
-  url: string;
-  filename: string;
-  content_type: string;
-  size_bytes: number;
-  // The object id: `v2-` + SHA-256 of the stored ciphertext (#2109). Never key material.
-  content_hash: string;
-  // The `_att` reference version: 2 for a shared object (#2109).
-  version: number;
-  // A v1 ring key version; unused (0) for a shared object.
-  key_version: number;
-  sha256: string;
-  blurhash?: string | null;
-  width?: number | null;
-  height?: number | null;
-  // A video's bounded poster JPEG, base64 (#1837): `pv`.
-  poster?: string | null;
 }
 
 /** Mirrors `pollis_core::commands::messages::OutgoingAttachment` (#1335). */
@@ -67,63 +44,4 @@ export function outgoingAttachments(attachments: PickedAttachment[]): OutgoingAt
     ...(att.sensitive ? { sensitive: true } : {}),
     ...(posterFrameOf(att) ? { poster: posterFrameOf(att) } : {}),
   }));
-}
-
-/** Uploads that already succeeded (#1497); weak, so a dropped draft takes its entries along. */
-const uploaded = new WeakMap<PickedAttachment, MediaUploadResult>();
-
-/** Upload every attachment, then build desktop's exact envelope; `_txt` is OMITTED when empty. */
-export async function buildMessageContent(
-  attachments: PickedAttachment[],
-  contentText: string,
-): Promise<string> {
-  if (attachments.length === 0) {
-    return contentText;
-  }
-  // Each success is remembered (#1497), so a retry uploads only what failed.
-  const settled = await Promise.allSettled(
-    attachments.map((att) => {
-      const done = uploaded.get(att);
-      if (done) {
-        return Promise.resolve(done);
-      }
-      return invoke<MediaUploadResult>("upload_media", {
-        path: att.uri,
-        filename: att.name,
-        contentType: att.mimeType,
-        poster: posterFrameOf(att) ?? null,
-      }).then((result) => {
-        uploaded.set(att, result);
-        return result;
-      });
-    }),
-  );
-  const failed = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
-  if (failed) {
-    throw failed.reason;
-  }
-  const results = settled.map((s) => (s as PromiseFulfilledResult<MediaUploadResult>).value);
-
-  const envelope: Record<string, unknown> = {
-    _att: results.map((r, i) => ({
-      key: r.key,
-      url: r.url,
-      name: r.filename,
-      ct: r.content_type,
-      size: r.size_bytes,
-      hash: r.content_hash,
-      ...referenceKeyFields(r.version, r.key_version),
-      sha: r.sha256,
-      bh: r.blurhash ?? attachments[i]?.blurhash ?? undefined,
-      w: r.width ?? undefined,
-      h: r.height ?? undefined,
-      // Only when set, as the core and desktop write it (#1568).
-      ...(attachments[i]?.sensitive ? { sens: true } : {}),
-      ...(r.poster ? { pv: r.poster } : {}),
-    })),
-  };
-  if (contentText) {
-    envelope._txt = contentText;
-  }
-  return JSON.stringify(envelope);
 }

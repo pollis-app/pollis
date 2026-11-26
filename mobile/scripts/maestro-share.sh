@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Share into Pollis from another app (#2100), on the Android emulator.
+#
+#   mobile/scripts/maestro-share.sh android
+#
+# Text is shared the way a share sheet hands it to Pollis's ShareIntakeActivity, with adb
+# (`am start` ACTION_SEND). Photos are shared for real from Google Photos through the system share
+# sheet (photos-share.yaml): a gallery grants the receiving app read access to its MediaStore URI,
+# which a shell `am start` cannot. Between them run .maestro/scripted/share/:
+#
+#   1-setup          a fresh account, a group with #General
+#   (adb)            share a link, Pollis open and unlocked
+#   2-text           "Send to" with the link pre-filled -> the Vault and #General -> saved once
+#   (Photos)         stop Pollis; share a photo from Google Photos (photos-share.yaml)
+#   3-image-locked   the PIN first (a wrong one shows the app's own countdown), then "Send to"
+#                    with the photo -> #General opens, the photo sent
+#   (Photos)         share two photos (SEND_MULTIPLE) from Google Photos
+#   4-multiple       a typed message, the Vault alone -> the Vault opens, both photos saved
+#   5-sign-out       sign out
+#   (adb + Photos)   Pollis is no longer a share target: no activity answers SEND, and the
+#                    system share sheet from Google Photos does not list it
+#
+# The share sheet screenshots (photos-share*.yaml) show Pollis as one app icon and no person, group
+# or channel (there are no Sharing Shortcuts to show); signed out, no Pollis at all.
+#
+# iOS shares are not routed through the app: the share extension unlocks and sends in place.
+# Its run is mobile/plugins/share-extension/harness/run.sh plus the simulator walkthrough in
+# mobile/CLAUDE.md -> "Share extension (#2100)".
+set -euo pipefail
+# shellcheck source=maestro-app-id.sh
+source "$(dirname "$0")/maestro-app-id.sh"
+
+PLATFORM="${1:-android}"
+[ "$PLATFORM" = android ] || { echo "maestro-share.sh drives Android only (see the header)" >&2; exit 2; }
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+if ! command -v adb >/dev/null; then
+  # shellcheck disable=SC1091
+  source "$HERE/android-env.sh" >/dev/null
+fi
+MAE="$HERE/.maestro"
+FLOWS="$MAE/scripted/share"
+ENV_FILE="$MAE/.env"
+PKG="com.pollis.mobile"
+INTAKE="$PKG/com.pollisnative.share.ShareIntakeActivity"
+
+ENV_ARGS=()
+while IFS= read -r line; do
+  case "$line" in ''|\#*) continue;; esac
+  ENV_ARGS+=(-e "$line")
+done < "$ENV_FILE"
+
+OUT="$MAE/artifacts/$(date +%Y-%m-%d)/$PLATFORM"
+DEBUG="$OUT/.debug-share"
+mkdir -p "$DEBUG"
+
+DEVICE="${ANDROID_SERIAL:-$(adb devices | awk '/^emulator-[0-9]+\tdevice$/{print $1; exit}')}"
+[ -n "$DEVICE" ] || { echo "no running emulator (boot pollis_e2e first)" >&2; exit 1; }
+A() { adb -s "$DEVICE" "$@"; }
+
+part() {
+  echo "--> share $1"
+  maestro --device "$DEVICE" test --debug-output "$DEBUG" ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} \
+    -e MAESTRO_APP_ID="$PKG" "$FLOWS/$1.yaml"
+}
+
+# A photo in the shared MediaStore, as the camera would leave it, for Google Photos to share.
+push_photo() {
+  A push "$MAE/fixtures/media-viewer.png" "/sdcard/Pictures/$1" >/dev/null
+  A shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
+    -d "file:///sdcard/Pictures/$1" >/dev/null
+  sleep 2
+}
+
+# Share the newest $1 photos from Google Photos to Pollis.
+share_photos() {
+  echo "--> share from Google Photos ($1)"
+  maestro --device "$DEVICE" test --debug-output "$DEBUG" -e COUNT="$1" "$FLOWS/photos-share.yaml"
+}
+
+# Pollis takes shares only while signed in: the activity is enabled by the app.
+answers_send() {
+  A shell cmd package query-activities --brief -a android.intent.action.SEND -t text/plain \
+    | grep -q "com.pollisnative.share.ShareIntakeActivity"
+}
+
+part 1-setup
+answers_send || { echo "signed in, but Pollis is not a share target" >&2; exit 1; }
+
+echo "    (another app shares a link)"
+A shell am start -W -n "$INTAKE" -a android.intent.action.SEND -t text/plain \
+  --es android.intent.extra.SUBJECT "Pollis" \
+  --es android.intent.extra.TEXT "https://pollis.com/share-e2e" >/dev/null
+part 2-text
+
+echo "    (Pollis stopped; another app shares a photo)"
+A shell am force-stop "$PKG"
+push_photo "share-e2e-$(date +%s)-1.png"
+share_photos 1
+part 3-image-locked
+
+echo "    (another app shares two photos)"
+push_photo "share-e2e-$(date +%s)-2.png"
+share_photos 2
+part 4-multiple
+
+part 5-sign-out
+if answers_send; then
+  echo "signed out, but Pollis still answers SEND" >&2
+  exit 1
+fi
+echo "--> share sheet while signed out (Google Photos)"
+maestro --device "$DEVICE" test --debug-output "$DEBUG" "$FLOWS/photos-share-signed-out.yaml"
+if A shell am start -W -n "$INTAKE" -a android.intent.action.SEND -t text/plain \
+  --es android.intent.extra.TEXT "x" 2>&1 | grep -q "Error"; then
+  echo "    signed out: the intake refuses to start"
+fi
+
+find "$DEBUG" -name 'share-*.png' -exec cp {} "$OUT/" \; 2>/dev/null || true
+echo "==> share into Pollis: all parts passed ($PLATFORM). Screenshots: $OUT"

@@ -1,0 +1,9 @@
+appId: com.apple.mobilesafari
+---
+# Nobody signed in: the extension offers nothing and says so.
+- extendedWaitUntil:
+    visible: "Sign in to Pollis first"
+    timeout: 20000
+- takeScreenshot: share-ios-09-signed-out
+- tapOn:
+    id: "share-notice-close"

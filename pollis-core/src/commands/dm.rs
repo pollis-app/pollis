@@ -203,7 +203,7 @@ pub async fn list_dm_channels(
 
 /// Newest local `sent_at` per conversation in `ids` (#1838), sent or received, any row kind.
 /// Conversations with no local messages are absent.
-fn latest_sent_at_on(
+pub(crate) fn latest_sent_at_on(
     conn: &rusqlite::Connection,
     ids: &[String],
 ) -> Result<std::collections::HashMap<String, String>> {
@@ -227,7 +227,7 @@ fn latest_sent_at_on(
 }
 
 /// A stored timestamp as an instant: RFC 3339, or SQLite's `datetime()` form read as UTC.
-fn parse_instant(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+pub(crate) fn parse_instant(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     if let Ok(d) = chrono::DateTime::parse_from_rfc3339(s) {
         return Some(d.to_utc());
     }

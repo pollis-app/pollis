@@ -21,8 +21,8 @@ onFlowComplete:
 # pooled connections.
 #
 # Part 2 (Android only — Maestro can switch airplane mode only there): a save
-# made offline names the reason, puts the draft back and offers "Try again";
-# back online, the retry saves it.
+# made offline is queued and reads "Not saved"; back online it is saved once
+# (#2100, the Vault's durable queue).
 #
 # Self-contained: a fresh disposable account, no peer.
 
@@ -96,7 +96,11 @@ onFlowComplete:
     id: "text-vault-save-failed"
 - takeScreenshot: vault-retry-02-twelve-saved
 
-# ── Part 2: offline save → reason + draft back → Try again (Android) ────────
+# ── Part 2: offline save → queued, "Not saved" → retried, saved once (Android) ──
+# #2100: a Vault save goes through the durable queue like a message. Offline, it
+# is stored, tried in place, then reads "Not saved" on its row; the composer is
+# NOT handed the draft back (it was sent, and a resend would save twice). Back
+# online, the drain or Retry (long press → Retry) saves it, once.
 - runFlow:
     when:
       platform: Android
@@ -109,33 +113,31 @@ onFlowComplete:
           id: "btn-send"
       - extendedWaitUntil:
           visible:
-            id: "text-vault-save-failed"
-          timeout: 60000
-      - assertVisible: ".*Couldn't reach Pollis.*"
-      - assertVisible:
-          id: "btn-vault-retry"
-      # The draft is back in the composer.
-      - assertVisible: "vault offline 1497"
-      - takeScreenshot: vault-retry-03-failed-offline
-      - setAirplaneMode: disabled
-      # Give the radio a moment to come back before retrying.
-      - extendedWaitUntil:
-          visible:
-            id: "btn-vault-retry"
-          timeout: 5000
-      - repeat:
-          while:
-            visible:
-              id: "text-vault-save-failed"
-          times: 5
-          commands:
-            - tapOn:
-                id: "btn-vault-retry"
-            - waitForAnimationToEnd:
-                timeout: 8000
-      - extendedWaitUntil:
-          visible: ".*vault offline 1497, .*"
-          timeout: 30000
+            id: "vault-not-saved-.*"
+          timeout: 90000
       - assertNotVisible:
           id: "text-vault-save-failed"
-      - takeScreenshot: vault-retry-04-retried
+      - takeScreenshot: vault-retry-03-not-saved-offline
+      - setAirplaneMode: disabled
+      - waitForAnimationToEnd:
+          timeout: 5000
+      # Retry by hand unless the reconnect drain got there first.
+      - runFlow:
+          when:
+            visible:
+              id: "vault-not-saved-.*"
+          commands:
+            - longPressOn: ".*vault offline 1497.*"
+            - extendedWaitUntil:
+                visible:
+                  id: "btn-vault-retry-save"
+                timeout: 8000
+            - takeScreenshot: vault-retry-04-retry-sheet
+            - tapOn:
+                id: "btn-vault-retry-save"
+      - extendedWaitUntil:
+          notVisible:
+            id: "vault-not-saved-.*"
+          timeout: 60000
+      - assertVisible: ".*vault offline 1497.*"
+      - takeScreenshot: vault-retry-05-saved

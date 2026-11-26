@@ -10,8 +10,7 @@
     "get_emoji_url": "Desktop loopback URL; mobile's equivalent is get_emoji_path.",
     "download_media": "Desktop fetches into the loopback cache; mobile resolves through get_media_path.",
     "download_file": "Desktop saves to a picked path; mobile hands the file to the OS share sheet.",
-    "stage_attachment": "Desktop stages drag-and-drop/pasted files before send; mobile uploads straight from the picker with upload_media.",
-    "upload_media_staged": "Second half of desktop staging; mobile uses upload_media.",
+    "stage_attachment": "Desktop stages drag-and-drop/pasted files before send; mobile hands the picker's file path to the outbox.",
     "connect_rooms": "Desktop's LiveKit room connection; mobile's data-only equivalent is get_livekit_token.",
     "set_presence_active": "Desktop's rooms are joined by pollis-core, so the renderer hands the core whether the user is at the app and the core writes the 'active' participant attribute (#2110). Mobile joins its rooms in JS and sets the same attribute from AppState there, so it has no bridge call.",
     "create_device_link": "The v1 QR (#1207) is shown only by a signed-in desktop, for a new phone to scan; a signed-in phone scans the new device's v2 code instead (#1361), so it no longer shows one.",
@@ -50,7 +49,10 @@
     "get_notification_content": "Rich push (#1599): what a push notification may show, read by the phone's notification extension. Push is mobile-only; desktop raises OS notifications from its live connection.",
     "set_notification_content": "Rich push (#1599): what a push notification may show, read by the phone's notification extension. Push is mobile-only; desktop raises OS notifications from its live connection.",
     "reconcile_backstop_all": "Mobile runs its own ingest pass, then only the reconcile and self-update backstops (#1571, #1880); desktop's catch_up_all_mls_groups runs the same backstops inside its full sweep.",
-    "wait_persisted": "uniffi has no event channel, so mobile parks this call to learn which conversations' local rows changed (#1610), whichever path stored them; desktop's renderer drives its ingest calls itself and refreshes from their results."
+    "wait_persisted": "uniffi has no event channel, so mobile parks this call to learn which conversations' local rows changed (#1610), whichever path stored them; desktop's renderer drives its ingest calls itself and refreshes from their results.",
+    "share_targets": "Share into Pollis from another app's share sheet (#2100) is mobile-only: a Tauri bundle cannot carry a macOS share extension, Windows offers share targets only to packaged (MSIX) apps, and Linux has none; desktop takes the same files by drag-and-drop and paste.",
+    "share_enqueue": "Share into Pollis from another app's share sheet (#2100) is mobile-only: a Tauri bundle cannot carry a macOS share extension, Windows offers share targets only to packaged (MSIX) apps, and Linux has none; desktop takes the same files by drag-and-drop and paste.",
+    "share_deliver": "Share into Pollis from another app's share sheet (#2100) is mobile-only: a Tauri bundle cannot carry a macOS share extension, Windows offers share targets only to packaged (MSIX) apps, and Linux has none; desktop takes the same files by drag-and-drop and paste."
   },
   "missing_from_cli": {
     "preview_group_invite_link": "The terminal client cannot join by invite link yet (redeem_group_invite_link is known debt below); naming the group before joining (#1972) belongs with that flow when it lands.",
@@ -87,7 +89,9 @@
     "set_link_previews_enabled": "The terminal client draws no link previews and sends none, so it has no setting for them.",
     "list_group_invites": "The terminal client can send a group invite but has no group admin pages; pending invites are listed and revoked in the desktop or mobile app.",
     "revoke_group_invite": "The terminal client can send a group invite but has no group admin pages; pending invites are listed and revoked in the desktop or mobile app.",
-    "refresh_read_cursors": "The terminal client shows no unread counts and reports no reads (get_unread_counts / mark_conversation_read are known debt below); syncing read cursors belongs with that surface."
+    "refresh_read_cursors": "The terminal client shows no unread counts and reports no reads (get_unread_counts / mark_conversation_read are known debt below); syncing read cursors belongs with that surface.",
+    "retry_vault_message": "The terminal client has no Vault view (#2100: the Vault's queue, Retry and Discard live in the apps' Vault screens).",
+    "discard_unsent_vault_message": "The terminal client has no Vault view (#2100: the Vault's queue, Retry and Discard live in the apps' Vault screens)."
   },
   "patterns": [
     {
@@ -213,7 +217,6 @@
       "update_group",
       "update_user_profile",
       "upload_group_emoji",
-      "upload_media",
       "verify_email_change",
       "wipe_local_data"
     ]

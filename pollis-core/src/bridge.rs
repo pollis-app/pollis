@@ -239,7 +239,7 @@ static PARKED_DB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None)
 /// only when no command is using it (a `try_lock` loop, not an `.await`). Marks the sends still
 /// out unsent and checkpoints the WAL first. Returns the user it was open for, or `Err(())` if
 /// it could not be taken in time.
-fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Option<String>, ()> {
+pub(crate) fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Option<String>, ()> {
     let deadline = std::time::Instant::now() + budget;
     loop {
         if let Ok(mut slot) = state.local_db.try_lock() {
@@ -254,6 +254,10 @@ fn close_db_bounded(state: &AppState, budget: std::time::Duration) -> Result<Opt
                     Ok(n) => crate::diag!("[suspend] {n} send(s) left unsent for the foreground"),
                     Err(e) => crate::diag!("[suspend] could not mark unfinished sends: {e}"),
                 }
+            }
+            // Its outbox claims go back (#2100): the other process need not wait out the leases.
+            if let Err(e) = crate::commands::messages::release_outbox_claims_on(db.conn()) {
+                crate::diag!("[suspend] could not release outbox claims: {e}");
             }
             if let Err(e) = db.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
                 crate::diag!("[suspend] wal checkpoint before suspension failed (non-fatal): {e}");
@@ -446,6 +450,20 @@ fn arg_opt<T: serde::de::DeserializeOwned>(
 
 fn ok<T: serde::Serialize>(v: T) -> Result<String, BridgeError> {
     serde_json::to_string(&v).map_err(BridgeError::from)
+}
+
+/// #1335: Expo hands out `file://` URIs; the core reads bare paths.
+fn bare_paths(
+    attachments: Option<Vec<crate::commands::messages::OutgoingAttachment>>,
+) -> Vec<crate::commands::messages::OutgoingAttachment> {
+    attachments
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut a| {
+            a.path = a.path.map(|p| p.strip_prefix("file://").unwrap_or(&p).to_string());
+            a
+        })
+        .collect()
 }
 
 /// Dispatch a command by name. `args_json` must be a JSON object; pass
@@ -1239,16 +1257,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let message_id: Option<String> = arg_opt(&args, "messageId")?;
             // #1335: Expo hands out `file://` URIs; the core reads bare paths.
             let attachments: Vec<messages::OutgoingAttachment> =
-                arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|mut a| {
-                        a.path = a
-                            .path
-                            .map(|p| p.strip_prefix("file://").unwrap_or(&p).to_string());
-                        a
-                    })
-                    .collect();
+                bare_paths(arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?);
             // #1987: the composer's link preview, checked against `content` in core.
             let link_preview: Option<crate::commands::link_preview::LinkPreviewDraft> =
                 arg_opt(&args, "linkPreview")?;
@@ -1277,6 +1286,21 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(messages::discard_unsent_message(message_id, &state()?).await?)
         }
         "flush_outbox" => ok(messages::flush_outbox(&state()?).await?),
+        // Share into Pollis from another app (#2100): the picker's rows, then the share stored
+        // for every target, then delivered (the picker leaves while it delivers).
+        "share_targets" => {
+            let query: Option<String> = arg_opt(&args, "query")?;
+            let limit: Option<u32> = arg_opt(&args, "limit")?;
+            ok(crate::share::targets::share_targets(&state()?, query, limit).await?)
+        }
+        "share_enqueue" => {
+            let request: crate::share::send::ShareRequest = arg(&args, "request")?;
+            ok(crate::share::send::enqueue_share(&state()?, &request).await?)
+        }
+        "share_deliver" => {
+            let queued: Vec<crate::share::send::QueuedShare> = arg(&args, "queued")?;
+            ok(crate::share::send::deliver_share(&state()?, &queued, |_| {}).await)
+        }
         // Local-first batched reads (#936): pages come straight from the local
         // DB; the caller fires ingest separately, exactly as desktop does.
         "read_channel_messages" => {
@@ -1483,10 +1507,24 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let user_id: String = arg(&args, "userId")?;
             ok(vault::get_vault_messages(user_id, &state()?).await?)
         }
+        // Durable (#2100): `messageId` makes a repeat save once; files go through the queue.
         "send_vault_message" => {
             let user_id: String = arg(&args, "userId")?;
             let content: String = arg(&args, "content")?;
-            ok(vault::send_vault_message(user_id, content, &state()?).await?)
+            let message_id: Option<String> = arg_opt(&args, "messageId")?;
+            // Expo hands out `file://` URIs; the core reads bare paths.
+            let attachments: Vec<messages::OutgoingAttachment> =
+                bare_paths(arg_opt::<Vec<messages::OutgoingAttachment>>(&args, "attachments")?);
+            ok(vault::send_vault_message_with(user_id, message_id, content, attachments, &state()?).await?)
+        }
+        "retry_vault_message" => {
+            let id: String = arg(&args, "id")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(messages::vault_queue::retry_vault_message(id, user_id, &state()?).await?)
+        }
+        "discard_unsent_vault_message" => {
+            let id: String = arg(&args, "id")?;
+            ok(messages::vault_queue::discard_unsent_vault_message(id, &state()?).await?)
         }
         "edit_vault_message" => {
             let id: String = arg(&args, "id")?;
@@ -1716,17 +1754,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(format!("file://{}", path.display()))
         }
 
-        // The Vault upload path (chat attachments use the outbox); sealed under the Vault file key (#1382).
-        "upload_media" => {
-            let path: String = arg(&args, "path")?;
-            let filename: String = arg(&args, "filename")?;
-            let content_type: String = arg(&args, "contentType")?;
-            // A video's poster frame, base64 (#1837).
-            let poster: Option<String> = arg_opt(&args, "poster")?;
-            let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
-            ok(crate::commands::r2::upload_media(path, filename, content_type, poster, &state()?)
-                .await?)
-        }
         // No loopback server on mobile: decrypt to a sandbox file; the JS side unlinks it on last release.
         "get_media_path" => {
             let r2_key: String = arg(&args, "r2Key")?;
@@ -1789,6 +1816,10 @@ mod tests {
         for cmd in [
             "create_group_invite_link",
             "list_group_invite_links",
+            // #2100
+            "share_targets",
+            "share_enqueue",
+            "share_deliver",
             // #1611
             "check_client_policy",
             "get_client_policy_status",
@@ -1823,7 +1854,6 @@ mod tests {
             "list_security_events",
             "delete_account",
             "wipe_local_data",
-            "upload_media",
             "new_message_id",
             "retry_message",
             "discard_unsent_message",
@@ -1833,6 +1863,8 @@ mod tests {
             "list_pinned_messages",
             "get_vault_messages",
             "send_vault_message",
+            "retry_vault_message",
+            "discard_unsent_vault_message",
             "edit_vault_message",
             "set_vault_message_pinned",
             "delete_vault_message",
