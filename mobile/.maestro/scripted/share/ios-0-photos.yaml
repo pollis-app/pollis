@@ -28,6 +28,13 @@ appId: com.apple.mobileslideshow
       notVisible: "Share"
     times: 4
     commands:
+      # A long library opens at its newest photos, the first one under the header: scroll it
+      # into view first (in an open photo the same swipe goes back to the grid).
+      - swipe:
+          direction: DOWN
+          duration: 300
+      - waitForAnimationToEnd:
+          timeout: 1500
       - tapOn:
           text: "Photo, .*"
           index: 0
