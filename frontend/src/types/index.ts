@@ -343,7 +343,7 @@ interface AccountReport {
   violations: string[];
 }
 
-export type AuditStatus = "ok" | "pending" | "alarm" | "unavailable";
+type AuditStatus = "ok" | "pending" | "alarm" | "unavailable";
 
 export interface SelfAuditReport {
   status: AuditStatus;
