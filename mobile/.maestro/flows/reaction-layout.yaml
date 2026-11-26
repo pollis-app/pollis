@@ -47,7 +47,8 @@ tags:
     timeout: 10000
 - runFlow: ../subflows/message-settled.yaml
 
-# React to the newest message with the sheet's first quick emoji.
+# React with the sheet's first quick emoji (the subflow presses the first row),
+# so a row sits below the pills: it would move if they arrived late.
 - runFlow: ../subflows/long-press-message.yaml
 - tapOn:
     id: "btn-react-0"

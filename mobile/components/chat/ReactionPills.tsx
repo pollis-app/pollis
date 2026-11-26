@@ -50,6 +50,8 @@ export function ReactionPills({
   }
   return (
     <Animated.View
+      // An animated view is never flattened: without an id, iOS hides the pills inside an accessible row (#1895).
+      testID={`reactions-${messageId}`}
       entering={fadeIn ? LATE_FADE_IN : undefined}
       style={{
         flexDirection: "row",
