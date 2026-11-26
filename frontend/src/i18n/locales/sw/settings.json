@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "Uchapishaji wa ufunguo unasubiri",
     "accountKeyStatusAlarm": "Uthibitishaji wa ufunguo umeshindwa",
     "accountKeyStatusUnavailable": "Uthibitishaji haupatikani",
+    "accountKeyStatusChecking": "Inaangalia ufunguo…",
     "buildStatusVerified": "Toleo limethibitishwa hadharani",
     "buildStatusPending": "Uchapishaji wa toleo unasubiri",
     "buildStatusMismatch": "Toleo halipo kwenye kumbukumbu ya umma",

@@ -3068,6 +3068,34 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'download_file':
       return null;
 
+    // Account-key audits (#330, #2114): `ok` unless `accountKeyAudit` preloads another verdict, or `fail` to reject.
+    case 'audit_peer_account_key': {
+      const { peerUserId } = args as { peerUserId: string };
+      const audit = (preload.accountKeyAudit ?? {}) as { status?: string; detail?: string; fail?: boolean };
+      if (audit.fail) {
+        throw new Error('audit failed');
+      }
+      return {
+        status: audit.status ?? 'ok',
+        detail: audit.detail ?? '',
+        peer_user_id: peerUserId,
+        pinned_identity_version: 1,
+        key_rotated: false,
+        report: null,
+      };
+    }
+
+    case 'self_audit_account_key': {
+      const audit = (preload.accountKeyAudit ?? {}) as { status?: string; detail?: string };
+      return {
+        status: audit.status ?? 'ok',
+        detail: audit.detail ?? '',
+        my_identity_version: 1,
+        my_account_id_pub: '',
+        report: null,
+      };
+    }
+
     default:
       console.warn(`[tauri-mock] Unhandled command: ${command}`, args);
       return null;

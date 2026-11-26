@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "የቁልፉ መታተም በመጠባበቅ ላይ",
     "accountKeyStatusAlarm": "የቁልፍ ማረጋገጫ አልተሳካም",
     "accountKeyStatusUnavailable": "ማረጋገጫ አይገኝም",
+    "accountKeyStatusChecking": "ቁልፉን በመፈተሽ ላይ…",
     "buildStatusVerified": "ግንባታው በይፋ ተረጋግጧል",
     "buildStatusPending": "የግንባታው መታተም በመጠባበቅ ላይ",
     "buildStatusMismatch": "ግንባታው በይፋዊ መዝገቡ ውስጥ የለም",

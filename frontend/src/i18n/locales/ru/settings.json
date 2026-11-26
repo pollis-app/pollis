@@ -228,6 +228,7 @@
     "accountKeyStatusPending": "Публикация ключа ожидается",
     "accountKeyStatusAlarm": "Проверка ключа не прошла",
     "accountKeyStatusUnavailable": "Проверка недоступна",
+    "accountKeyStatusChecking": "Проверка ключа…",
     "buildStatusVerified": "Сборка публично проверена",
     "buildStatusPending": "Публикация сборки ожидается",
     "buildStatusMismatch": "Сборки нет в публичном журнале",

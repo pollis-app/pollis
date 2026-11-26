@@ -230,6 +230,7 @@
     "accountKeyStatusPending": "鍵の公開を保留中",
     "accountKeyStatusAlarm": "鍵の検証に失敗",
     "accountKeyStatusUnavailable": "検証を利用できません",
+    "accountKeyStatusChecking": "鍵を確認中…",
     "buildStatusVerified": "ビルドは公開検証済み",
     "buildStatusPending": "ビルドの公開を保留中",
     "buildStatusMismatch": "ビルドが公開ログにありません",

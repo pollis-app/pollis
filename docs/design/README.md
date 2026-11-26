@@ -79,7 +79,7 @@ Cool, Green, Purple. Both colours sync across devices as `accent_color` and `bac
 | `accentFaint` / `Soft` / `Mid` | `bg-accent-faint` … | `accentFaint` … | accent over bg at 10 / 16 / 22% | same | Tinted fills (selected chips, pressed rows). |
 | `danger` | `bg-danger`, `text-danger` | `danger` | `#ff6b6b` | `#ff6b6b` | Destructive actions and errors. The one red. |
 | `onDanger` | `text-on-danger` | `onDanger` | `#0a0907` | `#0a0907` | Ink on a danger fill. |
-| `warning` | `text-warning` | — | `#f0c674` | `#f0c674` | Degraded connection, a changed key. |
+| `warning` | `text-warning` | `warning` | `#f0c674` | `#f0c674` | Degraded connection, a changed key, a key that failed its audit. |
 | `success` | `text-connected` | — | `#69d39e` | `#69d39e` | "In a voice room" only. |
 | `hover` / `active` | `bg-hover` / `bg-active` | — | white 5% / accent 13% | accent 8% / 14% | Hovered row / the selected row. |
 

@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "د کیلي خپرول په تمه دي",
     "accountKeyStatusAlarm": "د کیلي تایید ناکام شو",
     "accountKeyStatusUnavailable": "تایید شتون نه لري",
+    "accountKeyStatusChecking": "کیلي کتل کېږي…",
     "buildStatusVerified": "نسخه په عامه توګه تایید شوې",
     "buildStatusPending": "د نسخې خپرول په تمه دي",
     "buildStatusMismatch": "نسخه په عامه لاګ کې نشته",

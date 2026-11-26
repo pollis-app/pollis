@@ -222,6 +222,7 @@
     "accountKeyStatusPending": "Publicación de la clave pendiente",
     "accountKeyStatusAlarm": "Fallo al verificar la clave",
     "accountKeyStatusUnavailable": "Verificación no disponible",
+    "accountKeyStatusChecking": "Comprobando la clave…",
     "buildStatusVerified": "Compilación verificada públicamente",
     "buildStatusPending": "Publicación de la compilación pendiente",
     "buildStatusMismatch": "La compilación no está en el registro público",

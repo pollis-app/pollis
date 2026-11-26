@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "کلید کی اشاعت زیر التواء",
     "accountKeyStatusAlarm": "کلید کی تصدیق ناکام",
     "accountKeyStatusUnavailable": "تصدیق دستیاب نہیں",
+    "accountKeyStatusChecking": "کلید چیک ہو رہی ہے…",
     "buildStatusVerified": "بلڈ کی عوامی تصدیق ہو گئی",
     "buildStatusPending": "بلڈ کی اشاعت زیر التواء",
     "buildStatusMismatch": "بلڈ عوامی لاگ میں نہیں",

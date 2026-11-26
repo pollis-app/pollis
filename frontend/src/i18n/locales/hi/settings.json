@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "कुंजी का प्रकाशन बाकी है",
     "accountKeyStatusAlarm": "कुंजी का सत्यापन विफल",
     "accountKeyStatusUnavailable": "सत्यापन उपलब्ध नहीं",
+    "accountKeyStatusChecking": "कुंजी की जांच हो रही है…",
     "buildStatusVerified": "बिल्ड सार्वजनिक रूप से सत्यापित",
     "buildStatusPending": "बिल्ड का प्रकाशन बाकी है",
     "buildStatusMismatch": "बिल्ड सार्वजनिक लॉग में नहीं है",

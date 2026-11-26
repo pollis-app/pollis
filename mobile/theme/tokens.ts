@@ -159,6 +159,10 @@ export const semantic = {
   get onDanger() {
     return _theme.onDanger;
   },
+  // Advisory warnings (a key that failed its audit), never an action.
+  get warning() {
+    return _theme.warning;
+  },
   get backdrop() {
     return _theme.backdrop;
   },

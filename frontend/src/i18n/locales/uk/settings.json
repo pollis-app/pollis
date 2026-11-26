@@ -228,6 +228,7 @@
     "accountKeyStatusPending": "Публікація ключа очікується",
     "accountKeyStatusAlarm": "Перевірка ключа не вдалася",
     "accountKeyStatusUnavailable": "Перевірка недоступна",
+    "accountKeyStatusChecking": "Перевірка ключа…",
     "buildStatusVerified": "Збірку публічно перевірено",
     "buildStatusPending": "Публікація збірки очікується",
     "buildStatusMismatch": "Збірки немає у відкритому журналі",

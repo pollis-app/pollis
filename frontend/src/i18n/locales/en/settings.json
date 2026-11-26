@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "Key publication pending",
     "accountKeyStatusAlarm": "Key verification failed",
     "accountKeyStatusUnavailable": "Verification unavailable",
+    "accountKeyStatusChecking": "Checking key…",
     "buildStatusVerified": "Build publicly verified",
     "buildStatusPending": "Build publication pending",
     "buildStatusMismatch": "Build not in public log",

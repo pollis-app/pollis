@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "விசை வெளியீடு நிலுவையில்",
     "accountKeyStatusAlarm": "விசைச் சரிபார்ப்பு தோல்வியடைந்தது",
     "accountKeyStatusUnavailable": "சரிபார்ப்பு கிடைக்கவில்லை",
+    "accountKeyStatusChecking": "விசையைச் சரிபார்க்கிறது…",
     "buildStatusVerified": "பில்டு பொதுவில் சரிபார்க்கப்பட்டது",
     "buildStatusPending": "பில்டு வெளியீடு நிலுவையில்",
     "buildStatusMismatch": "பில்டு பொதுப் பதிவில் இல்லை",

@@ -234,6 +234,7 @@
     "accountKeyStatusPending": "نشر المفتاح قيد الانتظار",
     "accountKeyStatusAlarm": "فشل التحقق من المفتاح",
     "accountKeyStatusUnavailable": "التحقق غير متاح",
+    "accountKeyStatusChecking": "جارٍ التحقق من المفتاح…",
     "buildStatusVerified": "تم التحقق من النسخة علنًا",
     "buildStatusPending": "نشر النسخة قيد الانتظار",
     "buildStatusMismatch": "النسخة غير موجودة في السجل العام",

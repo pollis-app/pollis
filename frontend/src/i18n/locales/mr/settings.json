@@ -233,6 +233,7 @@
     "accountKeyStatusPending": "की प्रकाशित होणे प्रलंबित",
     "accountKeyStatusAlarm": "की पडताळणी अयशस्वी",
     "accountKeyStatusUnavailable": "पडताळणी उपलब्ध नाही",
+    "accountKeyStatusChecking": "की तपासत आहे…",
     "buildStatusVerified": "बिल्ड सार्वजनिकरित्या पडताळलेला",
     "buildStatusPending": "बिल्ड प्रकाशित होणे प्रलंबित",
     "buildStatusMismatch": "बिल्ड सार्वजनिक लॉगमध्ये नाही",
