@@ -865,6 +865,15 @@ pub(crate) async fn store_shared_object_from(state: &Arc<AppState>, id: &str, so
     )))
 }
 
+/// Register an uploaded v1 object so the DS can reference-count and collect it.
+pub(crate) async fn register_object(state: &Arc<AppState>, content_hash: &str, r2_key: &str) -> Result<()> {
+    let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
+        content_hash: content_hash.to_string(),
+        r2_key: r2_key.to_string(),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await
+}
+
 /// True when `e` is a DS answer with HTTP status `code`.
 fn is_ds_status(e: &Error, code: u16) -> bool {
     match e {
@@ -936,12 +945,7 @@ async fn upload_plaintext(
             presign_r2_with_length(state, "put", &r2_key, Some(ciphertext.len() as u64)).await?;
         let overlay = state.overlay_handle();
         r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
-        // Register the object so the DS can reference-count and collect it.
-        let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
-            content_hash: content_hash.clone(),
-            r2_key: r2_key.clone(),
-        };
-        crate::commands::mls::ds_post_ok(state, &body).await?;
+        register_object(state, &content_hash, &r2_key).await?;
     }
 
     Ok(MediaUploadResult {

@@ -306,11 +306,7 @@ impl StreamUpload {
                     &[],
                 )
                 .await?;
-                let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
-                    content_hash: content_hash.clone(),
-                    r2_key: r2_key.clone(),
-                };
-                crate::commands::mls::ds_post_ok(state, &body).await?;
+                super::register_object(state, &content_hash, &r2_key).await?;
                 (content_hash, r2_key, r2_url, 1)
             }
             None => {

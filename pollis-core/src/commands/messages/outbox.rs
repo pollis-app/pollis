@@ -410,23 +410,44 @@ fn read_attachment_chunk_on(
     Ok(want)
 }
 
-/// SHA-256 of the `n`th stored attachment of `id`, read one upload chunk at a time.
+/// The `n`th stored attachment of `id`, read one upload chunk at a time, the database lock
+/// taken per chunk.
+struct StoredChunks<'a> {
+    state: &'a Arc<AppState>,
+    id: &'a str,
+    n: usize,
+    offset: u64,
+    buf: zeroize::Zeroizing<Vec<u8>>,
+}
+
+impl<'a> StoredChunks<'a> {
+    fn new(state: &'a Arc<AppState>, id: &'a str, n: usize) -> Self {
+        let buf = zeroize::Zeroizing::new(vec![0u8; crate::commands::r2::UPLOAD_CHUNK]);
+        Self { state, id, n, offset: 0, buf }
+    }
+
+    /// The next chunk; `None` at the end.
+    async fn next(&mut self) -> Result<Option<&[u8]>> {
+        let got = {
+            let guard = self.state.local_db.lock().await;
+            let db = guard.as_ref().ok_or_else(not_signed_in)?;
+            read_attachment_chunk_on(db.conn(), self.id, self.n, self.offset, &mut self.buf)?
+        };
+        if got == 0 {
+            return Ok(None);
+        }
+        self.offset += got as u64;
+        Ok(Some(&self.buf[..got]))
+    }
+}
+
+/// SHA-256 of the `n`th stored attachment of `id`.
 async fn stored_attachment_digest(state: &Arc<AppState>, id: &str, n: usize) -> Result<[u8; 32]> {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
-    let mut buf = zeroize::Zeroizing::new(vec![0u8; crate::commands::r2::UPLOAD_CHUNK]);
-    let mut offset: u64 = 0;
-    loop {
-        let got = {
-            let guard = state.local_db.lock().await;
-            let db = guard.as_ref().ok_or_else(not_signed_in)?;
-            read_attachment_chunk_on(db.conn(), id, n, offset, &mut buf)?
-        };
-        if got == 0 {
-            break;
-        }
-        hasher.update(&buf[..got]);
-        offset += got as u64;
+    let mut chunks = StoredChunks::new(state, id, n);
+    while let Some(chunk) = chunks.next().await? {
+        hasher.update(chunk);
     }
     Ok(hasher.finalize().into())
 }
@@ -457,19 +478,9 @@ pub(super) async fn upload_stored_attachment(
         !measured,
     )
     .await?;
-    let mut buf = zeroize::Zeroizing::new(vec![0u8; crate::commands::r2::UPLOAD_CHUNK]);
-    let mut offset: u64 = 0;
-    loop {
-        let got = {
-            let guard = state.local_db.lock().await;
-            let db = guard.as_ref().ok_or_else(not_signed_in)?;
-            read_attachment_chunk_on(db.conn(), id, n, offset, &mut buf)?
-        };
-        if got == 0 {
-            break;
-        }
-        upload.push(&buf[..got]).await?;
-        offset += got as u64;
+    let mut chunks = StoredChunks::new(state, id, n);
+    while let Some(chunk) = chunks.next().await? {
+        upload.push(chunk).await?;
     }
     upload.finish(state, meta.filename.clone()).await
 }
