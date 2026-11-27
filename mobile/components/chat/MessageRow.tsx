@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ComponentProps } from "react";
+import { useLayoutEffect, useMemo, useRef, type ComponentProps } from "react";
 import { View, Pressable } from "react-native";
 import { Text } from "../Text";
 import Animated, {
@@ -31,6 +31,7 @@ import {
   restingSurface,
 } from "../../lib/pressFeedback";
 import { haptic } from "../../lib/haptics";
+import { PERF_MARKS, perfRowRender, perfRowShown } from "../../lib/perfMarks";
 import { linkA11yActions, runLinkA11yAction } from "../../lib/openLink";
 import type { UnsentReason } from "../../hooks/queries/pendingMessages";
 import type { Reaction } from "../../hooks/queries/useReactions";
@@ -159,6 +160,21 @@ export function MessageRow({
   entering?: ComponentProps<typeof Animated.View>["entering"];
 }) {
   const { t } = useTranslation("chat");
+  // #2141: render counts and the commit that shows an action (perf builds only).
+  perfRowRender();
+  useLayoutEffect(() => {
+    if (!PERF_MARKS || !messageId) {
+      return;
+    }
+    perfRowShown({
+      id: messageId,
+      text,
+      deleted,
+      reacted: (emoji) =>
+        !!currentUserId &&
+        (reactions ?? []).some((r) => r.emoji === emoji && r.user_ids.includes(currentUserId)),
+    });
+  }, [messageId, text, deleted, reactions, currentUserId]);
 
   const mentionsSelf = useMemo(() => {
     if (!text || !mentionNames) {

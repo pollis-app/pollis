@@ -7,6 +7,7 @@ import { plainBridgeError } from "./bridgeError";
 import { localizeCoreFailure } from "../../i18n/coreErrors";
 import { noticeDeviceRevoked } from "../deviceRevoked";
 import { noticeUpgradeRequired } from "../clientPolicy";
+import { PERF_MARKS, perfBridgeCall } from "../perfMarks";
 
 interface NativeBridge {
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
@@ -30,6 +31,7 @@ const defaultBridge: NativeBridge = {
 /** Routes invoke() into pollis-core's dispatcher. */
 const pollisNativeBridge: NativeBridge = {
   async invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    perfBridgeCall();
     const argsJson = args ? JSON.stringify(args) : "{}";
     let resultJson: string;
     try {
@@ -87,6 +89,8 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
     dev_access_key: config.devAccessKey ?? "",
     client_platform: config.clientPlatform ?? null,
     client_version: config.clientVersion ?? null,
+    // #2141: the core's `[perf]` lines, in a build made to measure only.
+    perf_marks: PERF_MARKS,
   });
   try {
     await pollisNative.initPollis(configJson);

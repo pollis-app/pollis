@@ -17,6 +17,7 @@ pub mod media_server;
 pub mod message_format;
 pub mod net;
 pub mod notify;
+pub mod perf;
 pub mod share;
 pub mod downloads;
 pub mod private_fs;

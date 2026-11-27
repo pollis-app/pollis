@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
   View,
@@ -105,6 +105,14 @@ import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 import { selectConversation } from "../../hooks/useOpenConversation";
 import { haptic } from "../../lib/haptics";
+import {
+  PERF_MARKS,
+  perfConfirmed,
+  perfEditClosed,
+  perfPinnedShown,
+  perfTap,
+} from "../../lib/perfMarks";
+import { PerfSummary } from "../../components/chat/PerfSummary";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { nextJumpStep } from "../../lib/messageJump";
 import { useTheme, useThemeRerender } from "../../components/theme";
@@ -508,12 +516,17 @@ function TextChat(props: ChatViewProps = {}) {
     typing.stop();
     setPendingAttachments([]);
     setReplyTarget(null);
-    sendMessage.mutate({
-      content: text,
-      attachments: pendingAttachments,
-      replyToId: replyTarget?.id,
-      linkPreview,
-    });
+    const perfAction = replyTarget ? "reply" : "send";
+    perfTap(perfAction, [{ kind: "rowText", text }]);
+    sendMessage.mutate(
+      {
+        content: text,
+        attachments: pendingAttachments,
+        replyToId: replyTarget?.id,
+        linkPreview,
+      },
+      { onSettled: () => perfConfirmed(perfAction) },
+    );
     return true;
   };
 
@@ -536,9 +549,11 @@ function TextChat(props: ChatViewProps = {}) {
     if (!text || !editTarget) {
       return;
     }
+    perfTap("edit", [{ kind: "rowText", text }, { kind: "editClosed" }]);
     editMessage.mutate(
       { messageId: editTarget.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
       {
+        onSettled: () => perfConfirmed("edit"),
         onSuccess: () => {
           setEditTarget(null);
           setEditDraft("");
@@ -560,6 +575,18 @@ function TextChat(props: ChatViewProps = {}) {
   const toggleSaved = useToggleSavedMessage();
   const pinnedIds = usePinnedMessageIds(conversationId);
   const togglePin = useTogglePinnedMessage();
+  // #2141: the commits that show a pin and a closed edit bar (perf builds only).
+  useLayoutEffect(() => {
+    if (PERF_MARKS) {
+      perfPinnedShown(pinnedIds);
+    }
+  }, [pinnedIds]);
+  const editOpen = !!editTarget;
+  useLayoutEffect(() => {
+    if (PERF_MARKS && !editOpen) {
+      perfEditClosed();
+    }
+  }, [editOpen]);
 
   // #897: copy is VERIFIED — a thrown write reads as failure.
   const copyToClipboard = useCallback(async (text: string) => {
@@ -738,11 +765,17 @@ function TextChat(props: ChatViewProps = {}) {
       const reacted = currentUser
         ? existing?.user_ids.includes(currentUser.id) ?? false
         : false;
-      toggleReaction.mutate({
-        messageId,
-        emoji,
-        mode: reacted ? "remove" : "add",
-      });
+      if (!reacted) {
+        perfTap("react", [{ kind: "reacted", id: messageId, emoji }]);
+      }
+      toggleReaction.mutate(
+        {
+          messageId,
+          emoji,
+          mode: reacted ? "remove" : "add",
+        },
+        { onSettled: () => perfConfirmed("react") },
+      );
     },
     [reactionsByMessage, currentUser, toggleReaction],
   );
@@ -1225,6 +1258,7 @@ function TextChat(props: ChatViewProps = {}) {
         }
       />
       {unseen > 0 && !atBottom ? <NewMessagesButton count={unseen} onPress={goToNewest} /> : null}
+      {PERF_MARKS ? <PerfSummary /> : null}
       </Animated.View>
       {/* A failed send is told on its own row (UnsentActions), never as a raw error here. */}
 
@@ -1309,11 +1343,17 @@ function TextChat(props: ChatViewProps = {}) {
           onTogglePin={
             conversationId
               ? () => {
-                  togglePin.mutate({
-                    conversationId,
-                    messageId: actionTarget.id,
-                    isPinned: pinnedIds.has(actionTarget.id),
-                  });
+                  if (!pinnedIds.has(actionTarget.id)) {
+                    perfTap("pin", [{ kind: "pinned", id: actionTarget.id }]);
+                  }
+                  togglePin.mutate(
+                    {
+                      conversationId,
+                      messageId: actionTarget.id,
+                      isPinned: pinnedIds.has(actionTarget.id),
+                    },
+                    { onSettled: () => perfConfirmed("pin") },
+                  );
                   setActionTarget(null);
                 }
               : undefined
@@ -1354,7 +1394,8 @@ function TextChat(props: ChatViewProps = {}) {
             setActionTarget(null);
           }}
           onDelete={() => {
-            deleteMessage.mutate(actionTarget.id);
+            perfTap("delete", [{ kind: "rowDeleted", id: actionTarget.id }]);
+            deleteMessage.mutate(actionTarget.id, { onSettled: () => perfConfirmed("delete") });
             setActionTarget(null);
           }}
           onReport={() => {

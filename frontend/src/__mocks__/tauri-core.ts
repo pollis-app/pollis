@@ -464,6 +464,8 @@ const PRIMARY_HOOKS = [
   '__tauriLastArgs',
   '__tauriHold',
   '__tauriRelease',
+  '__tauriSetLatency',
+  '__tauriInvokeLog',
   '__emitRealtimeEvent',
   '__historyTransferStep',
 ] as const;
@@ -721,6 +723,21 @@ const lastInvokeArgs: Record<string, unknown> = {};
 for (const command of (preload.holdCommands ?? []) as string[]) {
   heldReplies.set(command, []);
 }
+/**
+ * Chat latency (#2141): each reply settles this many ms after the call, as a round trip to
+ * the DS would; `*` covers every command not named. Set after boot with `__tauriSetLatency`
+ * (a spec keeps the boot fast), or from the `invokeLatencyMs` preload.
+ */
+const invokeLatencyMs: Record<string, number> = { ...((preload.invokeLatencyMs ?? {}) as Record<string, number>) };
+(window as any).__tauriSetLatency = (next: Record<string, number>) => {
+  for (const key of Object.keys(invokeLatencyMs)) {
+    delete invokeLatencyMs[key];
+  }
+  Object.assign(invokeLatencyMs, next);
+};
+/** When each command was called and settled (`performance.now()`), for tap→confirmed (#2141). */
+const invokeLog: Array<{ command: string; args: Record<string, unknown>; at: number; settledAt: number | null }> = [];
+(window as any).__tauriInvokeLog = invokeLog;
 (window as any).__tauriRelease = (command: string) => {
   const waiting = heldReplies.get(command) ?? [];
   heldReplies.delete(command);
@@ -3202,17 +3219,26 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   if (forcedRejection !== undefined) {
     return Promise.reject(forcedRejection);
   }
+  const logged = { command, args: args ?? {}, at: performance.now(), settledAt: null as number | null };
+  invokeLog.push(logged);
   return new Promise((resolve, reject) => {
-    let settle: () => void;
+    let reply: () => void;
     try {
       const result = handleCommand(command, args ?? {}) as T;
-      settle = () => resolve(result);
+      reply = () => resolve(result);
     } catch (err) {
-      settle = () => reject(err);
+      reply = () => reject(err);
     }
+    const settle = () => {
+      logged.settledAt = performance.now();
+      reply();
+    };
     const held = heldReplies.get(command);
+    const latency = invokeLatencyMs[command] ?? invokeLatencyMs['*'] ?? 0;
     if (held) {
       held.push(settle);
+    } else if (latency > 0) {
+      setTimeout(settle, latency);
     } else {
       settle();
     }

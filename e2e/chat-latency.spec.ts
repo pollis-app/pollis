@@ -1,0 +1,340 @@
+// Chat action latency (#2141): send, reply, edit, delete, pin and react, each measured from the
+// tap to the first commit that shows it, to the reply that confirms it, with the rows it
+// re-rendered and the commands it called. Every reply is held back by an injected IPC latency
+// (`__tauriSetLatency`), as a round trip to the DS would, so an action that waits on the network
+// before it draws shows that wait here.
+
+import { test, expect, type Page } from "./lib/zero-loss";
+
+const USER = { id: "u-alice", email: "alice@example.com", username: "alice" };
+const BOB = { id: "u-bob", username: "bob" };
+
+const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2GRP";
+const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2XCB";
+
+/** What every reply waits, in ms: well past a frame, so a wait on it cannot hide. */
+const LATENCY_MS = 150;
+/** Runs per action. */
+const RUNS = 8;
+/** A change is "in the same frame" when it commits this soon after the tap. */
+const FRAME_MS = 16.7;
+
+// Few enough rows, on a tall enough page, that the windowed log renders every one of them.
+const ROWS = 8;
+const ownId = (i: number) => `01HQ7Z3K9M2P5R8T1V4W6Y2O${String(i).padStart(2, "0")}`;
+const bobId = (i: number) => `01HQ7Z3K9M2P5R8T1V4W6Y2B${String(i).padStart(2, "0")}`;
+
+function messages() {
+  const out = [];
+  for (let i = 0; i < ROWS; i++) {
+    out.push({
+      id: bobId(i),
+      conversation_id: CHANNEL_ID,
+      sender_id: BOB.id,
+      sender_username: BOB.username,
+      content: `bob says ${i}`,
+      sent_at: `2026-08-01T10:${String(i * 2).padStart(2, "0")}:00.000Z`,
+    });
+    out.push({
+      id: ownId(i),
+      conversation_id: CHANNEL_ID,
+      sender_id: USER.id,
+      sender_username: USER.username,
+      content: `alice says ${i}`,
+      sent_at: `2026-08-01T10:${String(i * 2 + 1).padStart(2, "0")}:00.000Z`,
+    });
+  }
+  return out;
+}
+
+function preloadState() {
+  const reactions: Record<string, { emoji: string; user_ids: string[]; count: number }[]> = {};
+  for (let i = 0; i < ROWS; i++) {
+    reactions[bobId(i)] = [{ emoji: "👍", user_ids: [BOB.id], count: 1 }];
+  }
+  return {
+    session: USER,
+    profile: { id: USER.id, username: USER.username },
+    preferences: JSON.stringify({ skin: "modern" }),
+    groups: [{ id: GROUP_ID, name: "Acme", owner_id: USER.id, created_at: new Date().toISOString() }],
+    channels: { [GROUP_ID]: [{ id: CHANNEL_ID, group_id: GROUP_ID, name: "general" }] },
+    groupMembers: {
+      [GROUP_ID]: [
+        { user_id: USER.id, username: USER.username, role: "admin" },
+        { user_id: BOB.id, username: BOB.username, role: "member" },
+      ],
+    },
+    dmChannels: [],
+    messages: { [CHANNEL_ID]: messages() },
+    reactions,
+    bookmarks: [],
+  };
+}
+
+async function boot(page: Page) {
+  await page.addInitScript((preload) => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__POLLIS_PRELOAD__ = preload;
+    w.__TAURI_INTERNALS__ = {
+      metadata: {
+        currentWindow: { label: "main" },
+        currentWebview: { windowLabel: "main", label: "main" },
+      },
+      plugins: {},
+      transformCallback: () => 0,
+      convertFileSrc: (path: string) => path,
+      registerListener: () => {},
+      unregisterListener: () => {},
+      runCallback: () => {},
+      invoke: () => Promise.resolve(null),
+    };
+    // The tap: capture phase, so it is stamped before the app's own handler runs.
+    const perf = { tap: 0 };
+    w.__perfTap = perf;
+    document.addEventListener("pointerdown", () => (perf.tap = performance.now()), true);
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Enter") {
+          perf.tap = performance.now();
+        }
+      },
+      true,
+    );
+  }, preloadState());
+  await page.goto("/");
+  await expect(page.getByTestId("app-ready")).toBeAttached();
+  await page.getByTestId("menu-item-groups").click();
+  await page.getByTestId(`group-option-${GROUP_ID}`).click();
+  await page.getByTestId(`channel-option-${CHANNEL_ID}`).click();
+  await expect(page.getByTestId(`message-${ownId(ROWS - 1)}`)).toBeVisible();
+  await page.evaluate((ms) => {
+    (window as unknown as { __tauriSetLatency: (m: Record<string, number>) => void }).__tauriSetLatency({ "*": ms });
+  }, LATENCY_MS);
+}
+
+interface Sample {
+  visibleMs: number;
+  confirmedMs: number;
+  rows: number;
+  invokes: number;
+}
+
+/**
+ * Arm a watch for `predicate` (a function body over `document`), run `act`, and time it.
+ * `confirm` names the command whose reply confirms the action.
+ */
+async function measure(page: Page, predicate: string, confirm: string, act: () => Promise<void>): Promise<Sample> {
+  await page.evaluate((body) => {
+    const w = window as unknown as Record<string, any>;
+    const check = new Function("document", body) as (d: Document) => boolean;
+    const watch = { seenAt: 0, renders: { ...(w.__pollisRenders ?? {}) }, invokes: { ...(w.__tauriInvokeCounts ?? {}) }, log: w.__tauriInvokeLog.length };
+    w.__perfWatch = watch;
+    const observer = new MutationObserver(() => {
+      if (!watch.seenAt && check(document)) {
+        watch.seenAt = performance.now();
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+  }, predicate);
+  await act();
+  await expect.poll(() => page.evaluate(() => (window as any).__perfWatch.seenAt > 0), { timeout: 10_000 }).toBe(true);
+  // Confirmed: the action's command replied.
+  await expect
+    .poll(
+      () =>
+        page.evaluate((cmd) => {
+          const w = window as any;
+          return w.__tauriInvokeLog.slice(w.__perfWatch.log).some((e: any) => e.command === cmd && e.settledAt !== null);
+        }, confirm),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+  // Settled: whatever the reply set off has run too.
+  await page.waitForTimeout(LATENCY_MS * 3);
+  return await page.evaluate((cmd) => {
+    const w = window as any;
+    const watch = w.__perfWatch;
+    const tap = w.__perfTap.tap;
+    const settled = w.__tauriInvokeLog
+      .slice(watch.log)
+      .find((e: any) => e.command === cmd && e.settledAt !== null);
+    const sum = (now: Record<string, number>, before: Record<string, number>, only?: string) =>
+      Object.keys(now)
+        .filter((k) => !only || k === only)
+        .reduce((n, k) => n + (now[k] - (before[k] ?? 0)), 0);
+    return {
+      visibleMs: watch.seenAt - tap,
+      confirmedMs: settled.settledAt - tap,
+      rows: sum(w.__pollisRenders ?? {}, watch.renders, "MessageItem"),
+      invokes: sum(w.__tauriInvokeCounts ?? {}, watch.invokes),
+    };
+  }, confirm);
+}
+
+function pct(values: number[], p: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
+}
+
+function report(action: string, samples: Sample[]) {
+  const v = samples.map((s) => s.visibleMs);
+  const c = samples.map((s) => s.confirmedMs);
+  const line = {
+    action,
+    runs: samples.length,
+    visibleP50: Math.round(pct(v, 50) * 10) / 10,
+    visibleP95: Math.round(pct(v, 95) * 10) / 10,
+    confirmedP50: Math.round(pct(c, 50)),
+    confirmedP95: Math.round(pct(c, 95)),
+    rowsP50: pct(samples.map((s) => s.rows), 50),
+    invokesP50: pct(samples.map((s) => s.invokes), 50),
+  };
+  console.log(`[perf] desktop ${JSON.stringify(line)}`);
+  return line;
+}
+
+const contentIs = (rowId: string, text: string) =>
+  `const row = document.querySelector('[data-testid="message-${rowId}"]');
+   return !!row && (row.querySelector('[data-testid="message-content"]')?.textContent ?? '').includes(${JSON.stringify(text)});`;
+
+async function openMenu(page: Page, rowId: string) {
+  const row = page.getByTestId(`message-${rowId}`);
+  await row.scrollIntoViewIfNeeded();
+  await row.hover();
+  await row.getByTestId("message-actions-more").click();
+}
+
+test.use({ viewport: { width: 1280, height: 3200 } });
+
+test.describe("chat action latency", () => {
+  test("send, reply, edit, delete, pin and react", async ({ page }) => {
+    test.setTimeout(240_000);
+    await boot(page);
+    const input = page.getByTestId("message-input");
+    const results: Record<string, ReturnType<typeof report>> = {};
+
+    // ── Send ────────────────────────────────────────────────────────────
+    const send: Sample[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const text = `latency send ${i}`;
+      await input.click();
+      await page.keyboard.type(text);
+      send.push(
+        await measure(
+          page,
+          `return [...document.querySelectorAll('[data-testid="message-content"]')].some((n) => (n.textContent ?? '').includes(${JSON.stringify(text)}));`,
+          "send_message",
+          () => page.keyboard.press("Enter"),
+        ),
+      );
+    }
+    results.send = report("send", send);
+
+    // ── Reply: the quote is drawn with the new row ─────────────────────────
+    const reply: Sample[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const target = bobId(ROWS - 1 - i);
+      const text = `latency reply ${i}`;
+      const row = page.getByTestId(`message-${target}`);
+      await row.scrollIntoViewIfNeeded();
+      await row.hover();
+      await row.getByTestId("reply-button").click();
+      await page.keyboard.type(text);
+      reply.push(
+        await measure(
+          page,
+          `return !!document.querySelector('[data-testid="reply-preview-${target}"]') &&
+             [...document.querySelectorAll('[data-testid="message-content"]')].some((n) => (n.textContent ?? '').includes(${JSON.stringify(text)}));`,
+          "send_message",
+          () => page.keyboard.press("Enter"),
+        ),
+      );
+    }
+    results.reply = report("reply", reply);
+
+    // ── Edit: the new text shows and the bar is gone ──────────────────────
+    const edit: Sample[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const target = ownId(ROWS - 1 - i);
+      const text = `edited ${i}`;
+      const row = page.getByTestId(`message-${target}`);
+      await row.scrollIntoViewIfNeeded();
+      await row.hover();
+      await row.getByTestId("edit-button").click();
+      const bar = page.getByTestId("edit-message-bar-input");
+      await expect(bar).toBeVisible();
+      await bar.fill(text);
+      edit.push(
+        await measure(
+          page,
+          `${contentIs(target, text).replace("return ", "const shown = ")}
+           return shown && !document.querySelector('[data-testid="edit-message-bar"]');`,
+          "edit_message",
+          () => bar.press("Enter"),
+        ),
+      );
+    }
+    results.edit = report("edit", edit);
+
+    // ── Delete: the row says deleted and the bar is gone ───────────────────
+    const del: Sample[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const target = ownId(i);
+      await openMenu(page, target);
+      await page.getByTestId("delete-button").click();
+      const confirm = page.getByTestId("delete-message-confirm");
+      await expect(confirm).toBeVisible();
+      del.push(
+        await measure(
+          page,
+          `${contentIs(target, `alice says ${i}`).replace("return ", "const still = ")}
+           return !still && !document.querySelector('[data-testid="delete-message-bar"]');`,
+          "delete_message",
+          () => confirm.click(),
+        ),
+      );
+    }
+    results.delete = report("delete", del);
+
+    // ── Pin: the pinned list shows it ───────────────────────────────────
+    await page.getByTestId("channel-pins-trigger").click();
+    await expect(page.getByTestId("pinned-panel")).toBeVisible();
+    const pin: Sample[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const target = bobId(i);
+      await openMenu(page, target);
+      pin.push(
+        await measure(
+          page,
+          `return [...document.querySelectorAll('[data-testid="pinned-panel-text"]')].some((n) => (n.textContent ?? '').includes(${JSON.stringify(`bob says ${i}`)}));`,
+          "pin_message",
+          () => page.getByTestId("pin-button").click(),
+        ),
+      );
+    }
+    results.pin = report("pin", pin);
+
+    // ── React: tap bob's 👍 and the count reads 2 ─────────────────────────
+    const react: Sample[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const target = bobId(ROWS - 1 - i);
+      const row = page.getByTestId(`message-${target}`);
+      await row.scrollIntoViewIfNeeded();
+      react.push(
+        await measure(
+          page,
+          `const row = document.querySelector('[data-testid="message-${target}"]');
+           return !!row && (row.querySelector('[data-testid="reaction-count"]')?.textContent ?? '').includes('2');`,
+          "add_reaction",
+          () => row.getByTestId("reaction-pill").first().click(),
+        ),
+      );
+    }
+    results.react = report("react", react);
+
+    expect(Object.keys(results)).toHaveLength(6);
+    void FRAME_MS;
+  });
+});

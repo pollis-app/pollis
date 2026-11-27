@@ -1,0 +1,73 @@
+appId: ${MAESTRO_APP_ID}
+---
+# One round of the chat-perf flow (#2141): send, react, pin, edit, reply and delete, on the
+# newest message, each waited on until it shows. Round ${ROUND}.
+- tapOn:
+    id: "input-composer"
+- inputText: "perf ${ROUND}"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*perf ${ROUND}, .*"
+    timeout: 15000
+- hideKeyboard
+- runFlow: message-settled.yaml
+
+# React.
+- runFlow: long-press-message.yaml
+- tapOn:
+    id: "btn-react-0"
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-edit"
+    timeout: 5000
+
+# Pin.
+- runFlow: long-press-message.yaml
+- tapOn:
+    id: "btn-pin"
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-edit"
+    timeout: 5000
+
+# Edit.
+- runFlow: long-press-message.yaml
+- tapOn:
+    id: "btn-edit"
+- assertVisible:
+    id: "input-edit-composer"
+- inputText: " e"
+- tapOn:
+    id: "btn-edit-save"
+- extendedWaitUntil:
+    visible: ".*perf ${ROUND} e, .*"
+    timeout: 30000
+- extendedWaitUntil:
+    notVisible:
+      id: "input-edit-composer"
+    timeout: 30000
+
+# Reply to it.
+- runFlow: long-press-message.yaml
+- tapOn:
+    id: "btn-reply"
+- tapOn:
+    id: "input-composer"
+- inputText: "reply ${ROUND}"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*reply ${ROUND}, .*"
+    timeout: 15000
+- hideKeyboard
+- runFlow: message-settled.yaml
+
+# Delete the reply.
+- runFlow: long-press-message.yaml
+- tapOn:
+    id: "btn-delete"
+- extendedWaitUntil:
+    visible:
+      text: "Message deleted"
+    timeout: 30000

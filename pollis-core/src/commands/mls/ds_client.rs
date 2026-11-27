@@ -721,6 +721,7 @@ fn new_request_id() -> String {
 /// Send a DS request stamped with a fresh request id (#1305); non-2xx and transport failures are logged with it.
 async fn send_ds(path: &str, request: reqwest::RequestBuilder) -> reqwest::Result<reqwest::Response> {
     let request_id = new_request_id();
+    crate::perf::note_ds_request();
     let result = request.header(pollis_api::redact::REQUEST_ID_HEADER, &request_id).send().await;
     match &result {
         Ok(resp) if !resp.status().is_success() => {
