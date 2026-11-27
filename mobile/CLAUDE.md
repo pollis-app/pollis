@@ -2250,6 +2250,28 @@ The entrance (#1249) runs on Reanimated on the UI thread: one shared value
 drives backdrop opacity and the card's translateY, starting from the window
 height on the Modal's `onShow` (no layout measurement), with a 600 ms
 fallback that settles to static styles — `tests/sheet-entrance.test.ts` pins
-that net. `@gorhom/bottom-sheet` was evaluated and rejected: on Reanimated
+that net. The close (#2125) plays the entrance backwards in `MOTION.exitMs`
+(140 ms, `easeIn`) for the sheet's own dismissals (Close, the backdrop,
+Android Back, all through `requestClose`): the settled styles step aside so
+the exit shows, and `onClose` fires once, from a JS timer at 140 ms, never
+from the animation's callback, so a stalled timing can never hold a sheet
+open. Under Reduce Motion it closes at once; a parent that unmounts the sheet
+itself (a row's action) still closes it at once, and the unmount clears the
+timer. The same test pins all of it.
+
+**Motion (#2125).** Timings and the curve come from `MOTION` in the root
+`design/theme.ts`, through `theme/motion.ts` (Reanimated builders only, no
+numbers of its own). The one Reduce Motion source is `hooks/useReduceMotion.ts`
+(live as the setting changes); `theme/motion.ts`'s presets use
+`ReduceMotion.Never`, so every caller picks its reduced form from the hook. The
+chat and thread logs follow a new message only from the bottom or after the
+reader's own send (`lib/chatFollow.ts`, `tests/chat-follow.test.ts`). Scrolled
+up, `maintainVisibleContentPosition` holds the rows and `NewMessagesButton`
+counts what landed. A live arrival rises 10 pt and fades in; the first load,
+older pages and a stub's swap for its stored row do not. Pills pop, roll and
+bump (`lib/reactionMotion.ts`). A badge pops only when it turns up after the
+first unread counts landed (`hooks/useLateArrival.ts`, armed by
+`appStore.unreadHydrated`). Device proof: `scripts/maestro-new-messages.sh`.
+`@gorhom/bottom-sheet` was evaluated and rejected: on Reanimated
 4.4+ its sheets can mount invisible (gorhom #2721, #2696) and its modal can
 wedge after an interrupted dismiss (#2762); upstream had no fix as of 2026-10.

@@ -288,12 +288,15 @@ Motion is small and quiet, and it shows what changed; it never decorates (#2125)
   entrance backwards). Distances and scales are tokens too: a new message rises 10px, a popover
   4px; a new pill or badge grows from 0.7 to a 1.08 peak. Desktop paints them as `--motion-*`
   variables (`frontend/src/utils/motion.ts`) and every keyframe lives in
-  `frontend/src/components/ui/motion.css`; mobile reads them from `mobile/theme/motion.ts`
-  (Reanimated, on the UI thread). Never type a duration or a curve in a component.
+  `frontend/src/components/ui/motion.css`. Mobile imports the same `MOTION` through
+  `mobile/theme/motion.ts`, which only turns it into Reanimated builders (`EASE_OUT`,
+  `messageRiseIn`, `POP_IN`, `ROLL_IN`, the fold and fade presets), all running on the UI
+  thread. Never type a duration or a curve in a component.
 - **Limits.** Nothing runs longer than 240 ms; nothing overshoots its resting value by more than
   8 %; no springs that wobble, no glow, no motion that loops (the status bar's unread blink is
-  the one loop, and it stops under reduced motion). `frontend/tests/motion-tokens.test.ts` and
-  mobile's twin hold these.
+  the one loop, and it stops under reduced motion). `frontend/tests/motion-tokens.test.ts` holds
+  these for desktop; on mobile `tests/sheet-entrance.test.ts` and `tests/reaction-motion.test.ts`
+  check the sheet and pill timings against the same ceiling.
 - **What moves.**
   - A message that arrives while the reader is at the bottom rises and fades in, and the log
     follows it. Scrolled up, nothing moves: a "N new messages" button appears at the bottom of
@@ -306,17 +309,27 @@ Motion is small and quiet, and it shows what changed; it never decorates (#2125)
   - Desktop popovers (the emoji picker, the message menu, the reaction breakdown, the suggest
     list) fade in and rise 4px from the control that opened them; an emoji under the pointer
     in the picker grows slightly.
-  - Mobile sheets close with their entrance played backwards, in 140 ms.
-  - The sidebar's group chevron turns as its channels fold open and shut; an unread badge that
-    turns up (not one there at first paint) pops in.
-  - Content that replaces a loading state fades in where the loader was.
+  - Mobile sheets close with their entrance played backwards, in 140 ms, when the sheet closes
+    itself (Close, the backdrop, Android Back). `onClose` runs from a timer at 140 ms, never from
+    the animation, so a stalled animation can never hold a sheet open, and it fires once. A row
+    whose action closes the sheet and goes somewhere else still closes it at once, so the next
+    step is not delayed.
+  - Desktop: the sidebar's group chevron turns as its channels fold open and shut. Mobile: a
+    category in a group's channel list does the same (its rows fade, the rows under it slide).
+    An unread badge that turns up pops in: desktop's sidebar, mobile's tab bar, DM, channel and
+    category rows. A badge that was there when the counts first loaded does not.
+  - Content that replaces a loading state fades in where the loader was: the chat log on both,
+    desktop's lists and empty states, mobile's Groups and DMs tabs.
 - **Reduced motion.** One source per platform. Desktop: `useReducedMotion()`
   (`frontend/src/hooks/useReducedMotion.ts`) and `scrollBehavior()` for code, and the one
   `@media (prefers-reduced-motion: reduce)` block at the end of `motion.css` for CSS. Mobile:
-  the one hook in `mobile/theme/motion.ts`. Under it every movement becomes an opacity fade at
-  `fastMs` or nothing at all: arrivals, pills and popovers fade, bumps, folds, turns, the blink
-  and the scrambled preview text stop, smooth scrolls jump, and on mobile swipe-to-reply, the
-  media viewer and stack transitions stop sliding.
+  `useReduceMotion()` (`mobile/hooks/useReduceMotion.ts`), live as the setting changes; the
+  presets in `theme/motion.ts` opt out of Reanimated's own handling, so each caller picks its
+  reduced form from the hook. Under it every movement becomes an opacity fade at `fastMs` or
+  nothing at all: arrivals, pills and popovers fade, bumps, folds, turns, the blink and the
+  scrambled preview text stop, and smooth scrolls jump. On mobile, sheets open and close at
+  once, swipe-to-reply follows the finger then snaps home with no nudge, the media viewer pages
+  and dismisses without sliding, and a stack push cross-fades instead of sliding.
 
 ## Components: reuse first
 
