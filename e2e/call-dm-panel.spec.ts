@@ -4,6 +4,7 @@
 // never gets one. `CALL_DM_SHOTS=<dir>` writes review screenshots.
 
 import { test, expect, type Page } from "./lib/zero-loss";
+import { intersects, rectOf } from "./lib/rects";
 
 const ME = { id: "u-alice", email: "alice@example.com", username: "alice" };
 const BOB = { id: "u-bob", username: "bob" };
@@ -256,6 +257,36 @@ for (const skin of SKINS) {
       await expect(panel(page)).toBeVisible();
       await expect(panelDm(page)).toHaveCount(0);
       await expect(page.getByTestId(`message-${GROUP_DM_MSG}`)).toHaveCount(0);
+    });
+
+    test("in the narrow panel, a message's hover actions stay clear of its text (#2144)", async ({ page }) => {
+      await boot(page, skin);
+      await callBob(page);
+      await expect(panelDm(page)).toBeVisible();
+      const id = "01HQ7Z3K9M2P5R8T1V4W6Y0DM3";
+      await bobSays(page, id, "the panel is narrow, so this line wraps a few times beside the call while we talk it over");
+      const row = panelDm(page).getByTestId(`message-${id}`);
+      await row.getByTestId("message-content").hover();
+      const actions = row.getByTestId("message-actions");
+      await expect(actions).toHaveCSS("opacity", "1");
+      const box = await rectOf(actions);
+      // The first painted line of the text (with Terminal's name and ":" sharing it).
+      const line = await row.getByTestId("message-content").evaluate((el) => {
+        const flow = el.parentElement!.querySelector(':scope > [data-testid="message-author"]') ? el.parentElement! : el;
+        const range = document.createRange();
+        range.selectNodeContents(flow);
+        const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height < 40);
+        const top = Math.min(...rects.map((r) => r.top));
+        const first = rects.filter((r) => r.top < top + 4);
+        return {
+          left: Math.min(...first.map((r) => r.left)),
+          right: Math.max(...first.map((r) => r.right)),
+          top,
+          bottom: Math.max(...first.map((r) => r.bottom)),
+        };
+      });
+      expect(intersects(box, line), `actions ${JSON.stringify(box)} vs line ${JSON.stringify(line)}`).toBe(false);
+      await shot(page, `call-dm-panel-actions-${skin}`);
     });
 
     test("a group voice channel shows no DM panel", async ({ page }) => {
