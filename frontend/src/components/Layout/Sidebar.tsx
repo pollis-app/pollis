@@ -389,8 +389,9 @@ interface SectionHeaderProps {
 }
 
 const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isActive, onClick, badge, bordered, borderedBottom, activateOn }) => {
+  // z-[2]: above the pinned group headers (z-[1]), so one pushed out slides under this bar (#2193).
   const cls = [
-    "sticky top-0 z-[1] flex w-full h-bar items-center gap-1.5 px-2.5",
+    "sticky top-0 z-[2] flex w-full h-bar items-center gap-1.5 px-2.5",
     "uppercase tracking-[0.08em] text-start cursor-pointer",
     " bg-surface hover:bg-hover",
     isActive ? "text-accent" : "text-muted",
