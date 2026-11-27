@@ -71,9 +71,7 @@ export async function channelAliasName(
 
 /** The open channel's group aliases; empty in a DM or with no channel open. */
 export function useSelectedGroupAliases(): AliasMap {
-  const groupId = useObserver(() =>
-    appStore.selectedChannelId ? appStore.selectedGroupId : null,
-  );
+  const groupId = useObserver(() => appStore.chatGroupId);
   return useGroupAliases(groupId);
 }
 

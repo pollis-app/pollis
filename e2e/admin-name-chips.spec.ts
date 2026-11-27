@@ -1,14 +1,16 @@
 // Admin name chips (#1488): own chip uses the accent, other admins their per-user colour.
+// A DM has no admins (#2126): no chip there, even with an admin's group still selected behind it.
 
 import { test, expect, type Page } from "./lib/zero-loss";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_admins";
 const CHANNEL_ID = "c_general";
+const DM_ID = "dm_dana";
 
-const msg = (id: string, senderId: string, username: string, text: string, at: string) => ({
+const msg = (id: string, senderId: string, username: string, text: string, at: string, conversation = CHANNEL_ID) => ({
   id,
-  conversation_id: CHANNEL_ID,
+  conversation_id: conversation,
   sender_id: senderId,
   sender_username: username,
   ciphertext: "",
@@ -54,8 +56,24 @@ async function openChannel(page: Page, skin: Skin, background?: string) {
         { user_id: "u_zed", username: "zed", role: "member", joined_at: "2026-01-01T00:00:00Z" },
       ],
     },
-    messages: { [CHANNEL_ID]: MESSAGES },
-    dmChannels: [],
+    messages: {
+      [CHANNEL_ID]: MESSAGES,
+      [DM_ID]: [
+        msg("dm_mia", ME.id, "mia", "my name in a DM", "2026-08-01T10:00:00Z", DM_ID),
+        msg("dm_dana", "u_dana", "dana", "her name in a DM", "2026-08-01T10:01:00Z", DM_ID),
+      ],
+    },
+    dmChannels: [
+      {
+        id: DM_ID,
+        created_by: "u_dana",
+        created_at: "2026-01-01T00:00:00Z",
+        members: [
+          { user_id: ME.id, username: "mia" },
+          { user_id: "u_dana", username: "dana" },
+        ],
+      },
+    ],
     preferences: { skin, ...(background ? { background_color: background } : {}) },
   });
   await page.goto("/");
@@ -116,6 +134,21 @@ for (const skin of SKINS) {
       const zed = await paintOf(page, "m_zed");
       expect(zed.background).toBe(TRANSPARENT);
       expect(zed.color).toBe(await resolve(page, expectedColor("zed", false)));
+    });
+
+    test("a DM has no admins: plain names after leaving an admin's group for the DM (#2126)", async ({ page }) => {
+      await openChannel(page, skin);
+      // The group's chips are up, so the group really is selected behind the DM.
+      expect((await paintOf(page, "m_mia")).background).not.toBe(TRANSPARENT);
+
+      // The sidebar row: the way Dan got there, with the group still selected.
+      await page.getByTestId(`sidebar-row-dm-${DM_ID}`).click();
+      await expect(page.getByTestId("message-dm_dana").getByTestId("message-content")).toBeVisible();
+
+      for (const id of ["dm_mia", "dm_dana"]) {
+        expect((await paintOf(page, id)).background).toBe(TRANSPARENT);
+      }
+      await page.screenshot({ path: `artifacts/admin-name-chips/${skin}-dm.png` });
     });
 
     test("on a light background the chip keeps the bright fill and dark ink", async ({ page }) => {
