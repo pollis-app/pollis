@@ -18,7 +18,8 @@ import { authorName } from "../../lib/authorName";
 import { aliasAvatar, aliasName } from "../../lib/groupAlias";
 import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { outgoingText } from "../../lib/messageText";
-import { botHandles, botIds } from "../../lib/bots";
+import { botIds } from "../../lib/bots";
+import { useMessageBodyContext } from "../../hooks/useMessageBodyContext";
 import {
   useMessages,
   useSendMessage,
@@ -28,6 +29,7 @@ import {
   useGroupMembers,
   useUserGroupsWithChannels,
   useLinkPreviewsEnabled,
+  useIsDmRequest,
   flattenPages,
   type ConversationKind,
   type Message,
@@ -99,18 +101,15 @@ function ThreadScreen() {
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const botGroup = groupsWithChannels?.find((g) => g.id === mentionGroupId)?.name;
   const botSenders = useMemo(() => botIds(threadMembers ?? []), [threadMembers]);
-  const botMentions = useMemo(() => botHandles(threadMembers ?? []), [threadMembers]);
-  const selfName = currentUser?.username?.toLowerCase() ?? null;
-  const mentionNames = useMemo(() => {
-    const set = new Set<string>(["all"]);
-    for (const c of mentionCandidates) {
-      set.add(c.username.toLowerCase());
-    }
-    if (selfName) {
-      set.add(selfName);
-    }
-    return set;
-  }, [mentionCandidates, selfName]);
+  // Bodies draw as the conversation draws them (#2143): mentions with alias labels, bots, links.
+  const {
+    mentionNames,
+    selfName,
+    mentionLabels: aliasMentionLabels,
+    botMentions,
+  } = useMessageBodyContext(kind, conversationId, mentionGroupId);
+  // No sender previews in an unaccepted DM request, as in its conversation (#1987).
+  const isPendingRequest = useIsDmRequest(kind, conversationId);
 
   // The composer hands over its text at the tap (#2099); true = the composer was cleared.
   const onSend = (typed: string): boolean => {
@@ -192,7 +191,7 @@ function ThreadScreen() {
           text={m.content}
           deleted={!!m.deleted_at}
           attachments={m.attachments}
-          linkPreview={m.link_preview}
+          linkPreview={isPendingRequest ? null : m.link_preview}
           onOpenAttachment={openMedia}
           pending={m.pending}
           failed={m.failed}
@@ -206,6 +205,7 @@ function ThreadScreen() {
           botGroup={botGroup}
           mentionNames={mentionNames}
           botMentions={botMentions}
+          mentionLabels={aliasMentionLabels}
           selfName={selfName}
           onPressAvatar={
             mine
@@ -220,7 +220,7 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases, botSenders, botGroup, botMentions, rising, riseIn],
+    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases, botSenders, botGroup, botMentions, aliasMentionLabels, isPendingRequest, rising, riseIn],
   );
 
   const rootName = root
@@ -240,7 +240,7 @@ function ThreadScreen() {
           text={root.content}
           deleted={!!root.deleted_at}
           attachments={root.attachments}
-          linkPreview={root.link_preview}
+          linkPreview={isPendingRequest ? null : root.link_preview}
           onOpenAttachment={openMedia}
           edited={!!root.edited_at}
           editUnsent={root.edit_unsent}
@@ -248,6 +248,7 @@ function ThreadScreen() {
           botGroup={botGroup}
           mentionNames={mentionNames}
           botMentions={botMentions}
+          mentionLabels={aliasMentionLabels}
           selfName={selfName}
         />
       ) : null}
