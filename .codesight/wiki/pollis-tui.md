@@ -385,7 +385,7 @@ The main pane lays out through `timeline::layout_open` (see the source table):
 14:06 bob  LONGSTART word word word …
       word word … LONGEND              ← wrapped, never cut off
 14:06 bob  CAPTION_HERE
-      [image: photo.png, 2 KB]         ← `_att` envelope → caption + attachment line
+      [image: photo.png, 2 KB]         ← `_att` envelope → caption, then the attachment on its own line (always, with or without a caption: #2130)
       ↳ bob: ROOT first line …          ← quote-reply context (`reply_to_id`)
 14:07 bob  hey @alice look             ← a mention of you (or @all) is highlighted
 ```
