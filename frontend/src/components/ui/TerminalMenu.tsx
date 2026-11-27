@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronRight, ArrowUp, ArrowDown, Settings } from "lucide-react";
 import { Button } from "./Button";
 import { usePressActivator, type ActivateOn } from "../../hooks/usePressActivation";
+import { scrollBehavior } from "../../utils/motion";
 
 export interface TerminalMenuItem {
   id: string;
@@ -112,7 +113,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
   );
 
   useEffect(() => {
-    itemRefs.current[selectedIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    itemRefs.current[selectedIndex]?.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
   }, [selectedIndex]);
 
   // Warm up the highlighted row; re-runs on item change so a new list warms its first row.

@@ -16,6 +16,7 @@ import { usePressActivator } from "../hooks/usePressActivation";
 import { EmptyState } from "./ui/EmptyState";
 import { Kbd } from "./ui/Kbd";
 import { useSkin } from "../hooks/queries/usePreferences";
+import { scrollBehavior } from "../utils/motion";
 
 type SearchResultItem =
   | {
@@ -325,7 +326,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
 
   useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({
-      behavior: "smooth",
+      behavior: scrollBehavior(),
       block: "nearest",
     });
   }, [selectedIndex]);

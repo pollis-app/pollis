@@ -18,7 +18,6 @@ import { ReactionEmoji, spokenEmoji } from "./ReactionEmoji";
 import { ReactionBreakdownPanel } from "./ReactionBreakdownPanel";
 import { PressButton } from "../ui/PressButton";
 import { FOCUS_RING } from "../ui/focusRing";
-import "../ui/fadeIn.css";
 
 interface MessageReactionsProps {
   messageId: string;
@@ -127,7 +126,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
       ref={wrapperRef}
       data-testid="message-reactions"
       onMouseEnter={() => setHovered(true)}
-      className={`relative flex items-center flex-wrap gap-1 ${paintedWithout.current ? "pollis-fade-in" : ""} ${className}`}
+      className={`relative flex items-center flex-wrap gap-1 ${paintedWithout.current ? "motion-late-fade" : ""} ${className}`}
     >
       {reactions.map((reaction) => {
         const reacted = currentUser

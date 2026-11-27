@@ -326,6 +326,44 @@ export function backgroundFromPrefs(prefs: { background_color?: unknown } | null
   return normalizeHex(prefs.background_color);
 }
 
+/**
+ * Motion (#2125): the timings and the one curve every Pollis animation uses, desktop and mobile.
+ * Rules (docs/design/README.md → Motion): nothing runs longer than `slowMs`, nothing overshoots
+ * its resting value by more than `maxOvershoot`, no glow, and under the OS reduced-motion setting
+ * every movement becomes an opacity fade or nothing. Desktop paints these as `--motion-*`
+ * variables (`frontend/src/utils/motion.ts`); mobile reads them through `mobile/theme/motion.ts`.
+ */
+export const MOTION = {
+  fastMs: 120,
+  baseMs: 180,
+  slowMs: 240,
+  /** A closing sheet: its entrance played backwards, a little quicker. */
+  exitMs: 140,
+  /** The one ease-out curve, as cubic-bezier control points. */
+  easeOut: [0.22, 1, 0.36, 1] as const,
+  /** Its mirror, for an exit that plays an entrance backwards. */
+  easeIn: [0.64, 0, 0.78, 0] as const,
+  /** A new message rises this far (px) as it fades in. */
+  messageRisePx: 10,
+  /** A popover rises this far (px) from the control that opened it. */
+  popoverRisePx: 4,
+  /** A new reaction pill or unread badge grows from this scale… */
+  popFromScale: 0.7,
+  /** …peaks here, then settles at 1. */
+  popPeakScale: 1.08,
+  /** A tapped reaction pill swells to this and back. */
+  bumpScale: 1.08,
+  /** An emoji under the pointer in the desktop picker (a resting state, not an overshoot). */
+  hoverScale: 1.15,
+  /** The ceiling for any overshoot past a resting value of 1. */
+  maxOvershoot: 0.08,
+} as const;
+
+/** `cubic-bezier(…)` for CSS. */
+export function cssCurve(points: readonly [number, number, number, number]): string {
+  return `cubic-bezier(${points.join(", ")})`;
+}
+
 /** What a colour save writes: the shared key plus the legacy mobile mirror. */
 export function colorPreferencesPatch(colors: { accent?: string; background?: string }): {
   accent_color?: string;

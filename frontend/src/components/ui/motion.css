@@ -1,0 +1,225 @@
+/*
+ * Every motion in the renderer (#2125). Timings and the curve are `--motion-*` variables painted
+ * from design/theme.ts (utils/motion.ts), shared with mobile. Limits: nothing over
+ * `--motion-slow` (240 ms), no overshoot past 8 %, no glow. The reduced-motion block at the end is
+ * the one global rule: every movement there becomes an opacity fade or nothing, and smooth
+ * scrolling jumps. Code that moves things from JS reads `useReducedMotion` / `scrollBehavior()`.
+ */
+
+@keyframes motion-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* A new message, appended live while the reader is at the bottom: rises and fades in. */
+@keyframes motion-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-message-rise));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A new reaction pill or a first unread badge: grows from 70 %, peaks at 108 %, settles. */
+@keyframes motion-pop {
+  0% {
+    opacity: 0;
+    transform: scale(var(--motion-pop-from));
+  }
+  70% {
+    opacity: 1;
+    transform: scale(var(--motion-pop-peak));
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* A changed count: the new digit rolls up into its slot. */
+@keyframes motion-roll {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A tapped pill: a small swell and back. */
+@keyframes motion-bump {
+  40% {
+    transform: scale(var(--motion-bump));
+  }
+}
+
+/* A popover opening upward rises from below its control; one opening downward drops from above. */
+@keyframes motion-popover-up {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-popover-rise));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes motion-popover-down {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--motion-popover-rise) * -1));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.motion-rise {
+  animation: motion-rise var(--motion-base) var(--motion-ease-out) both;
+}
+
+.motion-pop {
+  animation: motion-pop var(--motion-base) var(--motion-ease-out) both;
+}
+
+/* The slot a rolling count sits in: one line tall, clips the digit on its way up. */
+.motion-roll-slot {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  font-variant-numeric: tabular-nums;
+}
+
+.motion-roll {
+  display: inline-block;
+  animation: motion-roll var(--motion-base) var(--motion-ease-out) both;
+}
+
+.motion-bump {
+  animation: motion-bump var(--motion-slow) var(--motion-ease-out);
+}
+
+.motion-popover-up {
+  animation: motion-popover-up var(--motion-fast) var(--motion-ease-out) both;
+}
+
+.motion-popover-down {
+  animation: motion-popover-down var(--motion-fast) var(--motion-ease-out) both;
+}
+
+/* Content replacing a loading state. */
+.motion-fade {
+  animation: motion-fade var(--motion-base) var(--motion-ease-out) both;
+}
+
+/* Late arrivals fade in within the space they already hold (#2115): a pill row that landed after
+   its message painted, a custom emoji image replacing its placeholder. */
+.motion-late-fade {
+  animation: motion-fade var(--motion-fast) ease-out both;
+}
+
+/* An emoji under the pointer in the picker. */
+.motion-hover-grow > * {
+  transition: transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.motion-hover-grow:hover > * {
+  transform: scale(var(--motion-hover-scale));
+}
+
+/* A collapse chevron: one glyph, turned a quarter (mirrored in RTL). */
+.motion-chevron {
+  transition: transform var(--motion-base) var(--motion-ease-out);
+}
+
+.motion-chevron[data-collapsed="true"] {
+  transform: rotate(-90deg);
+}
+
+[dir="rtl"] .motion-chevron[data-collapsed="true"] {
+  transform: rotate(90deg);
+}
+
+/* A folding list (`ui/Fold.tsx`): the rows track grows from nothing. Clipped only while moving,
+   so a settled list never clips a focus ring. */
+.motion-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-base) var(--motion-ease-out),
+    opacity var(--motion-base) var(--motion-ease-out);
+}
+
+.motion-fold[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.motion-fold > * {
+  min-height: 0;
+}
+
+.motion-fold[data-moving="true"] > * {
+  overflow: hidden;
+}
+
+/* The status bar's unread blink. */
+@keyframes status-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.5;
+  }
+}
+
+.status-bar-blink {
+  animation: status-blink 2s ease-in-out infinite;
+}
+
+/* The one reduced-motion rule (#2125). Movement becomes a short fade; a swell, a blink, a turn and
+   a fold become nothing; smooth scrolling jumps. */
+@media (prefers-reduced-motion: reduce) {
+  html,
+  html * {
+    scroll-behavior: auto !important;
+  }
+
+  .motion-rise,
+  .motion-pop,
+  .motion-roll,
+  .motion-popover-up,
+  .motion-popover-down {
+    animation: motion-fade var(--motion-fast) linear both;
+  }
+
+  .motion-bump,
+  .motion-late-fade,
+  .status-bar-blink {
+    animation: none;
+  }
+
+  .motion-hover-grow > *,
+  .motion-chevron,
+  .motion-fold {
+    transition: none;
+  }
+
+  .motion-hover-grow:hover > * {
+    transform: none;
+  }
+}
