@@ -275,7 +275,15 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
 - **Terminal message line** (desktop Terminal, `pollis-tui`): a shell line, not two columns (#2130).
   The time sits in its own gutter; the name, `:` and the text flow as one line, and wrapped text
   continues under the name, never in a hanging block after it. Pictures, files and reactions start
-  at the name on the lines below.
+  at the name on the lines below. A quoted reply's arrow starts where the names start (#2146).
+- **Name colour** (#2146): a person's name has one colour wherever the chat shows it, your own
+  included. On desktop it is the per-user colour (`getUsernameColor`, keyed on the handle), in
+  the message line, the admin chip's fill, reply quotes (on the row and above the composer), and
+  the thread and pinned views, in both looks. There is no accent for self (#1488's rule is
+  gone). Quotes are muted by colour, never by opacity, so the name in them keeps its colour. A
+  mention of you keeps its accent highlight, which marks the mention rather than the name. Mobile
+  draws no per-user colours: every name is `text` (`textDim` in a quote) for everyone, you
+  included.
 - **Message hover actions** (desktop, both looks): Slack/Discord style (#2144). Reply, react, edit
   and more float on a `surface-raised` panel at the row's top-end corner, over its top edge, with
   their bottom on the row's first line. They never cover the text at any column width or in either

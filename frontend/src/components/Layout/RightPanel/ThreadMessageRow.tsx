@@ -1,4 +1,5 @@
-import { senderName } from "../../../utils/senderName";
+import { senderColorKey, senderName } from "../../../utils/senderName";
+import { getUsernameColor, useBackgroundIsLight } from "../../../utils/usernameColor";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
@@ -27,6 +28,9 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     const isTerminal = skin !== "modern";
     const aliases = useSelectedGroupAliases();
     const author = aliasName(aliases, message.sender_id, senderName(message));
+    // The name's one colour, as in the channel (#2146).
+    const isLightBg = useBackgroundIsLight();
+    const authorStyle = { color: getUsernameColor(senderColorKey(message), isLightBg) };
     // A bot's replies carry the Bot badge (#1182), as in the channel.
     const { botIds, groupName } = useSelectedGroupBots();
     const botBadge = botIds.has(message.sender_id) ? (
@@ -77,7 +81,9 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
         <div className="px-1 py-0.5" data-testid={testid}>
           <div className="flex items-baseline gap-1.5">
             <span className="shrink-0 text-meta text-muted">{time}</span>
-            <span className="truncate text-row text-dim">{author}</span>
+            <span data-testid="thread-author" className="truncate text-row" style={authorStyle}>
+              {author}
+            </span>
             {botBadge}
           </div>
           {body}
@@ -96,7 +102,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="truncate text-secondary font-medium text-fg">
+            <span data-testid="thread-author" className="truncate text-secondary font-medium" style={authorStyle}>
               {author}
             </span>
             {botBadge}

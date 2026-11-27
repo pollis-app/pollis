@@ -41,7 +41,7 @@
        `min-h-composer` only where the border is on a separate ancestor. */
 
     /* ── Ink: dark text on a bright per-user fill (fixed, theme-independent).
-       Another admin's name chip (#1488) — stays dark on light themes too,
+       An admin's name chip (#1488; yours too, #2146) — stays dark on light themes too,
        where --c-bg would not. */
     --c-ink: hsl(0 0% 4%);
 

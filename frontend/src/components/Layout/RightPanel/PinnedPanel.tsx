@@ -1,4 +1,5 @@
-import { senderName } from "../../../utils/senderName";
+import { senderColorKey, senderName } from "../../../utils/senderName";
+import { getUsernameColor } from "../../../utils/usernameColor";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
@@ -74,9 +75,12 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
               >
                 <div className="flex items-baseline gap-2">
                   <span
-                    className={`min-w-0 flex-1 truncate font-medium text-fg ${
+                    data-testid="pinned-panel-author"
+                    className={`min-w-0 flex-1 truncate font-medium ${
                       isTerminal ? "text-body" : "text-secondary"
                     }`}
+                    // The name's one colour, as in the conversation (#2146).
+                    style={{ color: getUsernameColor(senderColorKey(pin), ctx.isLightBg) }}
                   >
                     {author}
                   </span>
