@@ -6,8 +6,9 @@ tags:
 # timeline: a link (a long press opens the link sheet with its real host, not
 # the row's jump), and the sender's preview card, whose tap leaves for the
 # browser. Self-contained: posts into a fresh self-owned group's #General.
-# Needs network from the device to github.com (the preview is a real fetch,
-# as in link-previews.yaml).
+# Needs network from the device to github.com (the preview is a real fetch, as
+# in link-previews.yaml). The URL must not redirect: a preview whose final URL
+# differs from the body link is dropped at send (#1987), so no card would come.
 #
 # The message is ONE link, so the centre of the pin's body text (`text-pin-*`),
 # where a long press lands, lies inside it (message-links.yaml does the same).
@@ -38,7 +39,7 @@ tags:
 # The linked message, sent with its preview card.
 - tapOn:
     id: "input-composer"
-- inputText: "https://github.com/actuallydan/pollis"
+- inputText: "https://github.com/"
 - extendedWaitUntil:
     visible:
       id: "composer-link-preview"
