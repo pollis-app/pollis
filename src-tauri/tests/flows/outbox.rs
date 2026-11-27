@@ -1363,3 +1363,71 @@ async fn deleting_an_unsent_message_discards_it() {
     assert_eq!(copies(&bob, &channel_id, "never mind").await, 0);
     drop((alice, bob));
 }
+
+/// Deleting a message before its send has stored it (#2141, the renderer drew it from a pooled
+/// id while the send was still on its way): the send that follows never delivers it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_message_discarded_before_its_send_stored_it_is_never_sent() {
+    let (alice, bob, channel_id) = pair().await;
+    let id = fresh_id(&alice).await;
+    let gone = alice
+        .invoke_json("discard_unsent_message", json!({ "messageId": id }))
+        .await;
+    assert_eq!(gone, json!(true), "the renderer may drop its stub");
+
+    send_with_id(&alice, &channel_id, &id, "thrown away first", None)
+        .await
+        .expect_err("a discarded message is refused, not sent");
+    assert!(own_row(&alice, &channel_id, &id).await.is_none(), "no row left behind");
+    alice.invoke_json("flush_outbox", json!({})).await;
+    assert_eq!(envelopes_with_id(&id).await, 0);
+    assert_eq!(copies(&bob, &channel_id, "thrown away first").await, 0);
+
+    // An id discarded once is spent; the next message sends as usual.
+    alice.send_channel_message(&channel_id, "the next one").await;
+    assert_eq!(copies(&bob, &channel_id, "the next one").await, 1);
+    drop((alice, bob));
+}
+
+/// An edit queued behind a send goes only when the outbox would send that message: a
+/// `rejected` target stays unsent, and its edit is rejected with it, never re-sent by the
+/// edit drain.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_edit_never_sends_a_rejected_target() {
+    let (alice, bob, channel_id) = pair().await;
+    let id = fresh_id(&alice).await;
+    test_hooks::crash_next_send(Crash::AfterSeal);
+    send_with_id(&alice, &channel_id, &id, "refused for good", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+    {
+        let guard = alice.state.local_db.lock().await;
+        let conn = guard.as_ref().expect("db").conn();
+        conn.execute("UPDATE message SET send_state = 'rejected' WHERE id = ?1", rusqlite::params![id])
+            .expect("reject");
+        conn.execute(
+            "INSERT INTO outbox_edit (target_message_id, envelope_id, conversation_id, sender_id, content, send_state)
+             VALUES (?1, ?2, ?3, ?4, 'edited anyway', 'pending')",
+            rusqlite::params![id, ulid::Ulid::new().to_string(), channel_id, alice.user_id()],
+        )
+        .expect("queue an edit");
+    }
+    let before = test_hooks::delivery_attempts();
+    alice.invoke_json("flush_outbox", json!({})).await;
+    assert_eq!(test_hooks::delivery_attempts(), before, "the rejected message was not tried again");
+    assert_eq!(envelopes_with_id(&id).await, 0);
+    let edit_state: String = {
+        let guard = alice.state.local_db.lock().await;
+        guard
+            .as_ref()
+            .expect("db")
+            .conn()
+            .query_row("SELECT send_state FROM outbox_edit WHERE target_message_id = ?1", [&id], |r| r.get(0))
+            .expect("edit row")
+    };
+    assert_eq!(edit_state, "rejected");
+    assert_eq!(copies(&bob, &channel_id, "refused for good").await, 0);
+    drop((alice, bob));
+}

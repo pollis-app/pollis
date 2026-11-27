@@ -3217,6 +3217,11 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   }
   const forcedRejection = rejectWith.get(command);
   if (forcedRejection !== undefined) {
+    // A refusal takes the injected round trip too (#2141), so a spec can act while it is out.
+    const refusalLatency = invokeLatencyMs[command] ?? 0;
+    if (refusalLatency > 0) {
+      return new Promise((_, reject) => setTimeout(() => reject(forcedRejection), refusalLatency));
+    }
     return Promise.reject(forcedRejection);
   }
   const logged = { command, args: args ?? {}, at: performance.now(), settledAt: null as number | null };

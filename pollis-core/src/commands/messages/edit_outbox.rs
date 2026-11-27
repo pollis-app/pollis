@@ -439,14 +439,26 @@ async fn deliver_edit_locked(state: &Arc<AppState>, target: &str) -> Result<()> 
         edit
     };
     // Queued behind a send still out (#2141): the envelope it edits goes first, through the
-    // conversation's line order. Until it has, the edit stays queued, never marked failed.
-    if super::outbox::is_unsent(state, target).await? {
-        // Type-erased: a whole send nested in an edit's future is too deep for the compiler's
-        // Send check in the hosts that await edits (pollis-bot).
-        let send: std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<super::types::Message>> + Send + '_>,
-        > = Box::pin(super::outbox::deliver(state, target, None));
-        send.await?;
+    // conversation's line order, but only one the outbox drain itself would send (`pending`
+    // or `failed`). Until it has, the edit stays queued, never marked failed. A `rejected`
+    // target never goes, so neither does its edit.
+    match super::outbox::send_state_of(state, target).await?.flatten().as_deref() {
+        None => {}
+        Some(s) if s == PENDING || s == FAILED => {
+            // Type-erased: a whole send nested in an edit's future is too deep for the
+            // compiler's Send check in the hosts that await edits (pollis-bot).
+            let send: std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<super::types::Message>> + Send + '_>,
+            > = Box::pin(super::outbox::deliver(state, target, None));
+            send.await?;
+        }
+        Some(_) => {
+            let guard = state.local_db.lock().await;
+            if let Some(db) = guard.as_ref() {
+                mark_edit_state_on(db.conn(), target, &edit.envelope_id, REJECTED)?;
+            }
+            return Err(not_sent_yet());
+        }
     }
 
     match super::edit_delete::post_edit(state, &edit).await {

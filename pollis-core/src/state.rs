@@ -123,6 +123,9 @@ pub struct AppState {
     /// current (#2141), so the per-pass GroupInfo backstop reads the DS only after the group
     /// moved (or once per process).
     pub group_info_confirmed: Arc<std::sync::Mutex<HashMap<String, (i64, u64)>>>,
+    /// Message ids the user discarded before their send had stored them (#2141): the
+    /// delivery that follows removes the row instead of sending it.
+    pub discarded_before_stored: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Inbound messages each catch-up pass newly stored, for realtime wakes to announce once (#1628).
     pub inbound_news: crate::commands::messages::news::SharedLedger,
     /// Per-message outbox locks (#1335): never post the same message twice at once.
@@ -210,6 +213,7 @@ impl AppState {
             catch_up_clock: Arc::default(),
             mls_group_memo: Arc::default(),
             group_info_confirmed: Arc::default(),
+            discarded_before_stored: Arc::default(),
             inbound_news: Arc::default(),
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_enqueuing: Arc::default(),

@@ -124,7 +124,7 @@ test("rows reply once settled or while still sending, and every reply path is wi
   // delivered, or still sending (not failed, not deleted).
   const item = read("components/chat/MessageRowItem.tsx");
   assert.match(item, /onReply=\{actionable \? \(\) => handlers\.onReply\(m\) : undefined\}/);
-  assert.match(item, /const actionable = settled \|\| \(m\.pending === true && !m\.failed && !m\.deleted_at\);/);
+  assert.match(item, /const actionable = settled \|\| \(m\.pending === true && !!m\.outboxId && !m\.failed && !m\.deleted_at\);/);
   assert.match(chat, /onReply: \(m\) => latest\.current\.startReply\(m\)/);
   // A pending original is named by the core's id, which its stub carries.
   assert.match(chat, /replyToId: replyTarget \? replyTarget\.outboxId \?\? replyTarget\.id : undefined/);

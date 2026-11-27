@@ -99,7 +99,9 @@ export const MessageRowItem = memo(function MessageRowItem({
   // core's id; its conversation delivers in order, so whatever targets it goes out after it.
   // Reactions and pins wait until it is delivered (the sheet leaves them out).
   const settled = !m.pending && !m.failed && !m.deleted_at;
-  const actionable = settled || (m.pending === true && !m.failed && !m.deleted_at);
+  // Only once the stub carries the core's id (an empty id pool leaves it without one until the
+  // send names it): nothing else can name its reply, edit or delete.
+  const actionable = settled || (m.pending === true && !!m.outboxId && !m.failed && !m.deleted_at);
   // The id the core stored it under: a stub's `outboxId`, else its own.
   const coreId = m.outboxId ?? m.id;
   const retryId = retryTarget(m);

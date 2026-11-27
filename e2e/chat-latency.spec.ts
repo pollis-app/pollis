@@ -11,6 +11,8 @@ const BOB = { id: "u-bob", username: "bob" };
 
 const GROUP_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2GRP";
 const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2XCB";
+/** A second channel, for what must not leak between conversations. */
+const CHANNEL_B = "01HQ7Z3K9M2P5R8T1V4W6Y2XCC";
 
 /** What every reply waits, in ms: well past a frame, so a wait on it cannot hide. */
 const LATENCY_MS = 150;
@@ -57,7 +59,12 @@ function preloadState() {
     profile: { id: USER.id, username: USER.username },
     preferences: JSON.stringify({ skin: "modern" }),
     groups: [{ id: GROUP_ID, name: "Acme", owner_id: USER.id, created_at: new Date().toISOString() }],
-    channels: { [GROUP_ID]: [{ id: CHANNEL_ID, group_id: GROUP_ID, name: "general" }] },
+    channels: {
+      [GROUP_ID]: [
+        { id: CHANNEL_ID, group_id: GROUP_ID, name: "general" },
+        { id: CHANNEL_B, group_id: GROUP_ID, name: "random" },
+      ],
+    },
     groupMembers: {
       [GROUP_ID]: [
         { user_id: USER.id, username: USER.username, role: "admin" },
@@ -65,13 +72,13 @@ function preloadState() {
       ],
     },
     dmChannels: [],
-    messages: { [CHANNEL_ID]: messages() },
+    messages: { [CHANNEL_ID]: messages(), [CHANNEL_B]: [] },
     reactions,
     bookmarks: [],
   };
 }
 
-async function boot(page: Page) {
+async function boot(page: Page, extra: Record<string, unknown> = {}) {
   await page.addInitScript((preload) => {
     const w = window as unknown as Record<string, unknown>;
     w.__POLLIS_PRELOAD__ = preload;
@@ -101,7 +108,7 @@ async function boot(page: Page) {
       },
       true,
     );
-  }, preloadState());
+  }, { ...preloadState(), ...extra });
   await page.goto("/");
   await expect(page.getByTestId("app-ready")).toBeAttached();
   await page.getByTestId("menu-item-groups").click();
@@ -198,6 +205,14 @@ function report(action: string, samples: Sample[]) {
 const contentIs = (rowId: string, text: string) =>
   `const row = document.querySelector('[data-testid="message-${rowId}"]');
    return !!row && (row.querySelector('[data-testid="message-content"]')?.textContent ?? '').includes(${JSON.stringify(text)});`;
+
+/** Open a channel of the group by name, through the Cmd+K panel. */
+async function switchChannel(page: Page, name: string) {
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK");
+  await expect(page.getByTestId("search-panel")).toBeVisible();
+  await page.getByTestId("search-panel-input").fill(name);
+  await page.keyboard.press("Enter");
+}
 
 async function openMenu(page: Page, rowId: string) {
   const row = page.getByTestId(`message-${rowId}`);
@@ -409,5 +424,109 @@ test.describe("chat action latency", () => {
 
     await page.evaluate(() => (window as any).__tauriRelease("send_message"));
     await expect(page.getByTestId("message-content").filter({ hasText: "still going out, fixed" })).toBeVisible();
+  });
+
+  // Review fixes (#2141).
+
+  test("a refused delete puts back its own row only, never another conversation's", async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__tauriSetLatency({ delete_message: 4000 });
+      w.__tauriRejectWith("delete_message", "network unreachable");
+    });
+    const target = ownId(ROWS - 1);
+    await openMenu(page, target);
+    await page.getByTestId("delete-button").click();
+    await page.getByTestId("delete-message-confirm").click();
+    await expect(page.getByTestId(`message-${target}`).getByTestId("message-content")).not.toContainText(`alice says ${ROWS - 1}`);
+
+    // While the delete is still out, a send in another channel fails and shows Retry.
+    await switchChannel(page, "random");
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__tauriFailSends(true);
+      // Known offline: the send reads failed at once instead of retrying in place.
+      w.__tauriSetOffline(true);
+    });
+    await page.getByTestId("message-input").click();
+    await page.keyboard.type("sent while the delete was out");
+    await page.keyboard.press("Enter");
+    await expect(page.locator('[data-testid^="message-discard-"]')).toBeVisible();
+
+    // The delete is refused: its row comes back in its own channel ...
+    await expect(page.getByTestId("delete-message-error")).toBeVisible({ timeout: 10_000 });
+    // ... and the failed send here keeps its row and its way out.
+    await expect(page.locator('[data-testid^="message-discard-"]')).toBeVisible();
+    await switchChannel(page, "general");
+    await expect(page.getByTestId(`message-${target}`).getByTestId("message-content")).toContainText(`alice says ${ROWS - 1}`);
+  });
+
+  test("an edit and a delete in flight survive a refetch that reads the old row", async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__tauriHold("edit_message");
+      w.__tauriHold("delete_message");
+    });
+    const edited = ownId(ROWS - 1);
+    const deleted = ownId(ROWS - 2);
+    const row = page.getByTestId(`message-${edited}`);
+    await row.hover();
+    await row.getByTestId("edit-button").click();
+    await page.getByTestId("edit-message-bar-input").fill("edited while a wake came in");
+    await page.getByTestId("edit-message-bar-input").press("Enter");
+    await openMenu(page, deleted);
+    await page.getByTestId("delete-button").click();
+    await page.getByTestId("delete-message-confirm").click();
+
+    // The core has not stored either yet (#1555): put the store back, then a wake re-reads it.
+    await page.evaluate(
+      ({ channel, edited, deleted, editedText, deletedText }) => {
+        const w = window as any;
+        const rows = w.__tauriMock.messages[channel] as Array<Record<string, unknown>>;
+        const e = rows.find((m) => m.id === edited)!;
+        e.content = editedText;
+        delete e.edited_at;
+        const d = rows.find((m) => m.id === deleted)!;
+        d.content = deletedText;
+        delete d.deleted_at;
+        w.__emitRealtimeEvent({ type: "new_message", channel_id: channel, conversation_id: null, sender_id: "u-bob" });
+      },
+      {
+        channel: CHANNEL_ID,
+        edited,
+        deleted,
+        editedText: `alice says ${ROWS - 1}`,
+        deletedText: `alice says ${ROWS - 2}`,
+      },
+    );
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__tauriInvokeCounts.read_channel_messages ?? 0))
+      .toBeGreaterThan(1);
+    await page.waitForTimeout(300);
+    await expect(row.getByTestId("message-content")).toContainText("edited while a wake came in");
+    await expect(page.getByTestId(`message-${deleted}`).getByTestId("message-content")).not.toContainText(`alice says ${ROWS - 2}`);
+  });
+
+  test("a stub without the core's id yet offers no actions", async ({ page }) => {
+    // No id is ever ready: every stub waits on its own `new_message_id`.
+    await boot(page, { holdCommands: ["new_message_id"] });
+    // And the send stays out, so the row is still the stub when its id arrives.
+    await page.evaluate(() => (window as any).__tauriHold("send_message"));
+    await page.getByTestId("message-input").click();
+    await page.keyboard.type("no id yet");
+    await page.keyboard.press("Enter");
+    const stub = page.locator('[data-testid^="message-pending-"]', { hasText: "no id yet" }).last();
+    await expect(stub).toBeVisible();
+    await stub.hover();
+    await expect(stub.getByTestId("message-actions")).toHaveCount(0);
+
+    // Once the core names it, reply, edit and delete are offered.
+    await page.evaluate(() => (window as any).__tauriRelease("new_message_id"));
+    const pendingTestId = await stub.getAttribute("data-testid");
+    const named = page.getByTestId(pendingTestId!);
+    await named.hover();
+    await expect(named.getByTestId("reply-button")).toBeVisible();
   });
 });

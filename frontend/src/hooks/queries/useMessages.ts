@@ -26,6 +26,7 @@ import {
 } from "../../utils/pendingMessages";
 import { activityMs, bumpActivity } from "../../utils/dmActivity";
 import { createMessageIdPool } from "../../utils/messageIds";
+import { applyLocalChanges, restoreRow, type LocalChange } from "../../utils/pendingMessages";
 import {
   prefetchReactions,
   reactableIds,
@@ -359,7 +360,11 @@ export function useMessages(channelId: string | null, conversationId: string | n
       } else {
         return { messages: [], nextCursor: null };
       }
-      const messages = carryStubs((page.messages || []).map(transformChannelMessage), cachedStubs);
+      // Edits and deletes still in flight stay drawn over what the store holds (#2141).
+      const messages = applyLocalChanges(
+        carryStubs((page.messages || []).map(transformChannelMessage), cachedStubs),
+        localChanges,
+      );
 
       // One reactions read for the page (#2115). A first open waits briefly for it so pills
       // paint with their rows instead of pushing the log down a beat later.
@@ -576,6 +581,64 @@ function invalidateConversation(
   queryClient.invalidateQueries({ queryKey: messageQueryKeys.channel(conversationId) });
   queryClient.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
   queryClient.invalidateQueries({ queryKey: messageQueryKeys.threads });
+}
+
+/**
+ * Edits and deletes drawn but not yet stored by the core (#2141), by the core's message id.
+ * Every page read lays them over its rows (`applyLocalChanges`) until the change settles.
+ */
+const localChanges = new Map<string, LocalChange<Message>>();
+
+/** The cache keys one conversation's page may sit under: a channel's or a DM's. */
+function conversationKeys(conversationId: string) {
+  return [messageQueryKeys.channel(conversationId), messageQueryKeys.conversation(conversationId)];
+}
+
+/**
+ * Draw `change` on message `id` in its conversation's page and keep it drawn over refetches
+ * until `settle` (#2141). Returns the row as it was, for a refusal to put back. Only this
+ * conversation's page is touched, never another's (a send failing there meanwhile stays).
+ */
+function drawLocalChange(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  id: string,
+  change: LocalChange<Message>,
+): Message | undefined {
+  localChanges.set(id, change);
+  let before: Message | undefined;
+  for (const key of conversationKeys(conversationId)) {
+    queryClient.setQueryData<MessagesQueryResult>(key, (old) => {
+      if (!old) {
+        return old;
+      }
+      before ??= old.messages.find((m) => m.id === id || m.outbox_id === id);
+      return { ...old, messages: applyLocalChanges(old.messages, new Map([[id, change]])) };
+    });
+  }
+  return before;
+}
+
+/** The change settled: stop drawing it. Put the row back if it was refused. */
+function settleLocalChange(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  id: string,
+  change: LocalChange<Message>,
+  refusedBefore: Message | undefined,
+) {
+  // A later change of the same message (a second edit) keeps its own.
+  if (localChanges.get(id) === change) {
+    localChanges.delete(id);
+  }
+  if (!refusedBefore) {
+    return;
+  }
+  for (const key of conversationKeys(conversationId)) {
+    queryClient.setQueryData<MessagesQueryResult>(key, (old) =>
+      old ? { ...old, messages: restoreRow(old.messages, id, refusedBefore) } : old,
+    );
+  }
 }
 
 /** An unsent row to retry or discard, and the conversation whose page to re-read. */
@@ -818,26 +881,26 @@ export function useDeleteMessage() {
         userId: currentUser.id,
       });
     },
-    onMutate: async ({ messageId }) => {
-      const previous = queryClient.getQueriesData<unknown>({ queryKey: messageQueryKeys.all });
-      updateMessageLists(queryClient, (msgs) =>
-        msgs.map((m) =>
-          m.id === messageId
-            ? {
-                ...m,
-                content_decrypted: undefined,
-                attachments: [],
-                link_preview: null,
-                deleted_at: new Date().toISOString(),
-              }
-            : m,
-        ),
-      );
-      return { previous };
+    onMutate: ({ messageId, conversationId }) => {
+      const deletedAt = new Date().toISOString();
+      const change: LocalChange<Message> = (m) => ({
+        ...m,
+        content_decrypted: undefined,
+        attachments: [],
+        link_preview: null,
+        deleted_at: deletedAt,
+      });
+      const before = drawLocalChange(queryClient, conversationId, messageId, change);
+      return { change, before };
     },
-    onError: (_err, _vars, context) => {
-      for (const [key, data] of context?.previous ?? []) {
-        queryClient.setQueryData(key, data);
+    onError: (_err, { messageId, conversationId }, context) => {
+      if (context) {
+        settleLocalChange(queryClient, conversationId, messageId, context.change, context.before);
+      }
+    },
+    onSuccess: (_data, { messageId, conversationId }, context) => {
+      if (context) {
+        settleLocalChange(queryClient, conversationId, messageId, context.change, undefined);
       }
     },
     // The tombstone drawn on the tap is what the store now holds (#2141): re-reading the page
@@ -862,7 +925,8 @@ type EditMessageVars = {
 
 type EditMessageContext = {
   queryKey: readonly unknown[];
-  previousData: MessagesQueryResult | undefined;
+  change: LocalChange<Message>;
+  before: Message | undefined;
 };
 
 export function useEditMessage() {
@@ -882,38 +946,29 @@ export function useEditMessage() {
         linkPreview: linkPreview ?? null,
       });
     },
-    onMutate: async ({ channelId, conversationId, messageId, newContent, linkPreview }) => {
+    onMutate: ({ channelId, conversationId, messageId, newContent, linkPreview }) => {
       const queryKey = channelId
         ? messageQueryKeys.channel(channelId)
         : messageQueryKeys.conversation(conversationId);
-
-      await queryClient.cancelQueries({ queryKey });
-      const previousData = queryClient.getQueryData<MessagesQueryResult>(queryKey);
-
-      queryClient.setQueryData<MessagesQueryResult>(queryKey, (old) => {
-        if (!old) {
-          return old;
-        }
-        return {
-          ...old,
-          messages: old.messages.map((m) =>
-            m.id === messageId || m.outbox_id === messageId
-              ? {
-                  ...m,
-                  content_decrypted: newContent,
-                  edited_at: new Date().toISOString(),
-                  link_preview: optimisticLinkPreview(linkPreview),
-                }
-              : m
-          ),
-        };
+      const editedAt = new Date().toISOString();
+      const preview = optimisticLinkPreview(linkPreview);
+      const change: LocalChange<Message> = (m) => ({
+        ...m,
+        content_decrypted: newContent,
+        edited_at: editedAt,
+        link_preview: preview,
       });
-
-      return { queryKey, previousData };
+      const before = drawLocalChange(queryClient, channelId || conversationId, messageId, change);
+      return { queryKey, change, before };
     },
-    onError: (_err, _vars, context) => {
-      if (context?.previousData !== undefined) {
-        queryClient.setQueryData(context.queryKey, context.previousData);
+    onError: (_err, { channelId, conversationId, messageId }, context) => {
+      if (context) {
+        settleLocalChange(queryClient, channelId || conversationId, messageId, context.change, context.before);
+      }
+    },
+    onSuccess: (_data, { channelId, conversationId, messageId }, context) => {
+      if (context) {
+        settleLocalChange(queryClient, channelId || conversationId, messageId, context.change, undefined);
       }
     },
     // The text drawn on submit is what the store now holds (#2141), so a delivered edit does

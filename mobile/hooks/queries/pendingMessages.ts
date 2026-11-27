@@ -104,3 +104,30 @@ export function withoutOutboxRows<M extends StubLike>(
 ): M[] {
   return rows.filter((m) => m.outboxId !== outboxId && m.id !== outboxId);
 }
+
+/** A change drawn before the core has stored it: rewrites one row. */
+export type LocalChange<M> = (m: M) => M;
+
+/**
+ * Rows with the edits and deletes still in flight laid over them (#2141). The core writes the
+ * row only once the DS took the change (#1555), seconds later, so a refetch in between reads the
+ * old row; this keeps what the user did on screen until the change settles. Keyed by the core's
+ * id, which a pending row's stub carries as `outboxId`.
+ */
+export function applyLocalChanges<M extends StubLike>(
+  rows: M[],
+  changes: ReadonlyMap<string, LocalChange<M>>,
+): M[] {
+  if (changes.size === 0) {
+    return rows;
+  }
+  return rows.map((m) => {
+    const change = changes.get(m.id) ?? (m.outboxId ? changes.get(m.outboxId) : undefined);
+    return change ? change(m) : m;
+  });
+}
+
+/** One row put back as it was (a refused change), wherever it sits now; the rest untouched. */
+export function restoreRow<M extends StubLike>(rows: M[], id: string, before: M): M[] {
+  return rows.map((m) => (m.id === id || m.outboxId === id ? before : m));
+}

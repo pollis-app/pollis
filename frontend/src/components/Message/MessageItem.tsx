@@ -197,8 +197,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     </>
   );
 
+  // A stub without the core's id yet (an empty id pool) has nothing to name a reply, an edit or
+  // a delete by (#2141): no actions until its id arrives.
   const actionsFor = (variant: "modern" | "terminal") =>
-    !isDeleted && !(isUnsent && isFailed) && (
+    !isDeleted && !(isUnsent && (isFailed || !message.outbox_id)) && (
       <MessageActions
         messageId={message.outbox_id ?? message.id}
         variant={variant}
