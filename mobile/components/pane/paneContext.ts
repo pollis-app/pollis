@@ -124,7 +124,9 @@ export function useNav(): Nav {
         }
         return;
       }
-      router.replace(`/(tabs)/${tab}` as Href);
+      // Pop back to the tabs (#2129): a replace kept the pages under it (the group a delete or
+      // leave just removed) behind Back and the edge swipe.
+      router.dismissTo(`/(tabs)/${tab}` as Href);
     },
     [api, router],
   );

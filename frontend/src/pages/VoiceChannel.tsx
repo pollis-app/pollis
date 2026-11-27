@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { Pencil, Trash2, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -19,6 +20,7 @@ import { voiceSession } from "../voice";
 export const VoiceChannelPage: React.FC = observer(() => {
   const { t } = useTranslation("voice");
   const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/voice/$channelId" });
   const {
     voiceState,
@@ -62,7 +64,7 @@ export const VoiceChannelPage: React.FC = observer(() => {
     try {
       await deleteChannelMutation.mutateAsync({ groupId, channelId });
       setPendingDeleteChannelId(null);
-      navigate({ to: "/groups/$groupId", params: { groupId } });
+      finish({ to: "/groups/$groupId", params: { groupId } });
     } catch (err) {
       console.error("Failed to delete voice channel:", err);
     }

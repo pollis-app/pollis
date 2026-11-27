@@ -2,7 +2,7 @@ import { errorMessage } from "../utils/errorMessage";
 import { PinField } from "../components/Auth/PinField";
 import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { PageShell } from "../components/Layout/PageShell";
 import { PageColumn } from "../components/ui/PageColumn";
 import { FormLead } from "../components/ui/FormLead";
@@ -14,7 +14,7 @@ type Step = "old" | "new" | "confirm";
 
 export const ChangePinPage: React.FC = () => {
   const { t } = useTranslation("settings");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const [step, setStep] = useState<Step>("old");
   const [oldPin, setOldPin] = useState("");
   const [newPin, setNewPin] = useState("");
@@ -92,7 +92,7 @@ export const ChangePinPage: React.FC = () => {
             <FormActions>
               <Button
                 data-testid="change-pin-done-button"
-                onClick={() => navigate({ to: "/security" })}
+                onClick={() => finish({ to: "/security" })}
               >
                 {t("changePin.doneButton")}
               </Button>
@@ -130,7 +130,7 @@ export const ChangePinPage: React.FC = () => {
             <FormActions
               cancel={{
                 testId: "change-pin-cancel-button",
-                onClick: () => navigate({ to: "/security" }),
+                onClick: () => finish({ to: "/security" }),
               }}
             />
           </>

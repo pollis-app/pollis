@@ -1318,6 +1318,13 @@ renders the route's own component. Those screens read params with
 to `<Header>`. Opening a conversation/group from elsewhere goes through
 `hooks/useOpenConversation` (phones: push; iPad: select it + return to its tab);
 `chat/[id]` and `group/[id]` redirect to the tab on regular width as a net.
+Finishing a form never pushes its result (#2129): it pops itself (`router.back()`:
+invite, change PIN, link device, add host), replaces itself with the result
+(`router.replace` / `openConversation(…, { replace: true })`: new DM, invite link,
+add bot, the OTP step once its code is used), or pops to a tab (`dismissTo`: create
+group; `useNav().exitToTab` after a delete or leave, which a plain replace would
+leave sitting on top of the deleted group's pages). Pinned by
+`tests/finished-forms.test.ts` and Maestro `flows/finished-forms-back.yaml`.
 A selected group with no conversation open auto-opens its first channel in
 the right pane (Groups tab, while focused). Content width on iPad: every
 full-screen page and every pane page uses `<Screen>`'s one

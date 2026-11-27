@@ -1,6 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { PageShell } from "../components/Layout/PageShell";
 import { EmptyState } from "../components/ui/EmptyState";
 import { BotPairingForm } from "../components/Bots/BotPairingForm";
@@ -10,7 +11,7 @@ import { botAddHostCommand } from "../utils/bots";
 /** Add a host to a bot (#1182): the new machine prints a code; one of the bot's hosts hands it the keys. */
 export const AddBotHostPage: React.FC = () => {
   const { t } = useTranslation("channels");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { groupId, botId } = useParams({ from: "/groups/$groupId/bots/$botId/add-host" });
   const { group, isAdmin, isLoading } = useBotGroup(groupId);
   const { data: bot } = useBot(botId, isAdmin);
@@ -21,7 +22,7 @@ export const AddBotHostPage: React.FC = () => {
   }
 
   const name = bot?.displayName ?? botId;
-  const toBot = () => navigate({ to: "/groups/$groupId/bots/$botId", params: { groupId, botId } });
+  const toBot = () => finish({ to: "/groups/$groupId/bots/$botId", params: { groupId, botId } });
 
   return (
     <PageShell title={t("bots.addHost.pageTitle", { bot: name })} scrollable>

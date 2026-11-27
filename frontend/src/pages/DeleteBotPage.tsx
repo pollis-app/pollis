@@ -1,6 +1,7 @@
 import React from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { ConfirmPage } from "../components/Layout/ConfirmPage";
 import { botErrorText } from "../components/Bots/botErrorText";
 import { useBot, useBotGroup, useDeleteBot } from "../hooks/queries/useBots";
@@ -8,12 +9,12 @@ import { useBot, useBotGroup, useDeleteBot } from "../hooks/queries/useBots";
 /** Delete a bot (#1182): it leaves the group and every host stops running it. */
 export const DeleteBotPage: React.FC = () => {
   const { t } = useTranslation("channels");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { groupId, botId } = useParams({ from: "/groups/$groupId/bots/$botId/delete" });
   const { isAdmin } = useBotGroup(groupId);
   const { data: bot } = useBot(botId, isAdmin);
   const deleteBot = useDeleteBot();
-  const toBot = () => navigate({ to: "/groups/$groupId/bots/$botId", params: { groupId, botId } });
+  const toBot = () => finish({ to: "/groups/$groupId/bots/$botId", params: { groupId, botId } });
 
   return (
     <ConfirmPage
@@ -37,7 +38,7 @@ export const DeleteBotPage: React.FC = () => {
       onConfirm={async () => {
         try {
           await deleteBot.mutateAsync({ botUserId: botId, groupId });
-          navigate({ to: "/groups/$groupId/bots", params: { groupId } });
+          finish({ to: "/groups/$groupId/bots", params: { groupId } });
         } catch {
           // Shown through `deleteBot.isError` above.
         }

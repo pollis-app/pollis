@@ -29,7 +29,9 @@ exact same `pollis_core::commands::*` surface the desktop app reaches over Tauri
   On an existing signed-in device, `E` opens **PendingEnrollments** (↑/↓ move,
   `a` approve, `r` reject). The list shows the requesting **device id and
   nothing else**: `a` opens **ApproveEnrollment**, where the approver TYPES the
-  verification code shown on the NEW device (`Enter` approves, `Esc` back).
+  verification code shown on the NEW device (`Enter` approves, `Esc` back). A
+  successful approval returns to PendingEnrollments with the code cleared
+  (#2129), so the finished code screen is never left open under the next request.
 
   That is #1096, and it is why code entry is its own screen rather than an inline
   field — `a`, `r`, `j`, `k` and `q` are all characters a verification code can

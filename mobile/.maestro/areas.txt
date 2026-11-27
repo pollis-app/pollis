@@ -65,9 +65,9 @@ mobile/app/(tabs)/groups.tsx                   groups ipad-two-pane empty-states
 mobile/components/groups/*                     groups ipad-two-pane channel-menu channel-mute copy-state group-aliases channel-categories group-header-pinned
 mobile/lib/channelLayout.ts                    groups channel-categories
 mobile/lib/categoryCollapse.ts                 channel-categories
-mobile/app/group/*                             groups channel-menu channel-mute custom-emoji copy-state empty-states
+mobile/app/group/*                             groups channel-menu channel-mute custom-emoji copy-state empty-states finished-forms-back
 mobile/components/MasterDetail.tsx             ipad-two-pane
-mobile/components/pane/*                       ipad-two-pane
+mobile/components/pane/*                       ipad-two-pane finished-forms-back
 mobile/app/self/alias*                         group-aliases
 mobile/app/self/aliases.tsx                    group-aliases
 
