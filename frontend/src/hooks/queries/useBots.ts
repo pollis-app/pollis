@@ -105,7 +105,7 @@ export function useBotGroup(groupId: string) {
 
 /** The open channel's group's bots and its name, for Bot badges outside the message list. */
 export function useSelectedGroupBots(): { botIds: ReadonlySet<string>; groupName?: string } {
-  const groupId = useObserver(() => (appStore.selectedChannelId ? appStore.selectedGroupId : null));
+  const groupId = useObserver(() => appStore.chatGroupId);
   const { data: members } = useGroupMembers(groupId);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const botIds = useMemo(() => botIdSet(members ?? []), [members]);

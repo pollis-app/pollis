@@ -30,7 +30,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
     const { data: pins = [], isLoading, isError } = usePinnedMessages(activeConversationId);
     const togglePin = useTogglePinnedMessage();
     // A channel's pins name authors as its group shows them (#2003); a DM's, by main profile.
-    const aliases = useGroupAliases(channelId ? appStore.selectedGroupId : null);
+    const aliases = useGroupAliases(channelId ? appStore.chatGroupId : null);
 
     const gutter = isTerminal ? "px-2.5" : "px-2";
 
