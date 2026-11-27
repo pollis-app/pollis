@@ -276,6 +276,11 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   The time sits in its own gutter; the name, `:` and the text flow as one line, and wrapped text
   continues under the name, never in a hanging block after it. Pictures, files and reactions start
   at the name on the lines below.
+- **Message hover actions** (desktop, both looks): Slack/Discord style (#2144). Reply, react, edit
+  and more float on a `surface-raised` panel at the row's top-end corner, over its top edge, with
+  their bottom on the row's first line. They never cover the text at any column width or in either
+  direction, so the whole line stays selectable while they show. Keyboard focus in the row shows
+  them too.
 
 ## Motion
 

@@ -639,7 +639,7 @@ every id in between was rendered on the way — through both doors, in both skin
 
 **`content-visibility: auto` on the row does not work** — tried and reverted in
 #874, and not worth retrying. It implies *paint containment*, which clips the
-row's `absolute` hover action bar (`end-4 top-0 -translate-y-1/2`) and its
+row's `absolute` hover action bar (`.msg-actions`, over the row's top edge) and its
 dropdown menu, both of which deliberately overflow the row box. It failed 8
 `bookmarks.spec.ts` cases. It could only work if the action bar were hoisted out
 of the row into a single shared overlay tracking the hovered row (the way Slack

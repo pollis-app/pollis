@@ -226,7 +226,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         aria-label={t("message.fromLabel", { name: displayName })}
         // Focused programmatically by arrow-key navigation; focus-within mirrors hover.
         tabIndex={-1}
-        className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header" : "pt-msg-group"} pb-msg-row hover:bg-hover focus-within:bg-hover outline-none`}
+        className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header [--msg-actions-anchor:var(--msg-header-gap)]" : "pt-msg-group [--msg-actions-anchor:var(--msg-group-gap)]"} pb-msg-row focus-within:scroll-mt-8 hover:bg-hover focus-within:bg-hover outline-none`}
       >
         <div className="flex justify-center pt-0.5 select-none">
           {isGroupStart ? (
@@ -343,7 +343,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       data-testid={`message-${message.id}`}
       aria-label={t("message.fromLabel", { name: displayName })}
       tabIndex={-1}
-      className="group relative px-4 py-1 hover:bg-hover focus-within:bg-hover outline-none"
+      className="group relative px-4 py-1 [--msg-actions-anchor:0.25rem] focus-within:scroll-mt-8 hover:bg-hover focus-within:bg-hover outline-none"
     >
       {message.reply_to_message_id && (
         replyTo ? (
@@ -434,9 +434,9 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-0.5" />}
         </div>
-
-        {actionsFor("terminal")}
       </div>
+
+      {actionsFor("terminal")}
     </div>
   );
 });

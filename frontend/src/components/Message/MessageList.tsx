@@ -5,7 +5,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { MessageItem } from "./MessageItem";
 import { useMessageRenderContext } from "./useMessageRenderContext";
 import "./messageHighlight.css";
-import "./terminalRowNarrow.css";
 import {
   estimateRowPx,
   findRow,
@@ -885,8 +884,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     <div
       data-testid="message-list"
       ref={containerRef}
-      // `message-list-column`: the width the terminal row's narrow layout reads (#2116).
-      className="message-list-column flex-1 overflow-y-auto min-h-0 bg-bg"
+      className="flex-1 overflow-y-auto min-h-0 bg-bg"
       onKeyDown={handleNavKeyDown}
       onBlur={handleNavBlur}
     >
