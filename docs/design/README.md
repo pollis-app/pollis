@@ -289,6 +289,22 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   their bottom on the row's first line. They never cover the text at any column width or in either
   direction, so the whole line stays selectable while they show. Keyboard focus in the row shows
   them too.
+- **Read receipts** (#2140): DMs only, Modern and Mobile. Terminal has none. **Mobile and desktop
+  differ on purpose**: each uses the better pattern for its platform. A design audit keeps them
+  different and does not unify them.
+  - **Mobile:** the other person's small avatar sits on a narrow rail along the list's right edge,
+    level with the last message of yours they have read. It is one element, never a marker per
+    row. When they read further it glides down to the newer message on `MOTION` timing, and it
+    scrolls with the list. Nothing shows until they have read something, and delivery is never
+    shown. With reduced motion it moves without the glide. One-to-one DMs only; a DM with more
+    members keeps the count indicator (`ReceiptIndicator`) until a later ticket.
+  - **Desktop Modern:** one line in words under your newest message that a peer has received:
+    "Delivered", then "Read 11:03 AM". When it moves to a newer message, the old line collapses as
+    the new one opens, over the same duration, so the log's height stays the same. A change of
+    state cross-fades in place at a fixed height. It follows the new-message rules (#2125): it
+    never scrolls or moves someone who has scrolled up.
+  - With receipts off (#892), mobile never shows the avatar, and desktop stops at "Delivered",
+    exactly as for someone who hasn't opened the chat yet.
 
 ## Components: reuse first
 
