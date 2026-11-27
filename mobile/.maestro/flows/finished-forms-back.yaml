@@ -1,6 +1,7 @@
 appId: ${MAESTRO_APP_ID}
 tags:
   - parity
+  - peer
 ---
 # FINISHED FORMS LEAVE HISTORY (#2129) — create a group, invite someone, then
 # delete the group: each finished form is gone from behind Back. Desktop twin:
@@ -48,7 +49,6 @@ tags:
 - tapOn:
     id: "input-user-search"
 - inputText: "${MAESTRO_PEER_HANDLE}"
-- hideKeyboard
 - tapOn:
     id: "btn-send-invite"
 - extendedWaitUntil:

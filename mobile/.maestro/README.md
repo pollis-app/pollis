@@ -109,7 +109,7 @@ The order:
    an address of its own: `subflows/fresh-email.yaml` adds `-<name>-<time>` to
    the run's address (`sign-in.yaml` does it when called with `FRESH`);
 2. `setup/peer.yaml`, when a `peer` flow is selected (`dms`, `dm-safety`,
-   `report`): a fresh account on the same device, whose `@handle` the runner
+   `report`, `finished-forms-back`): a fresh account on the same device, whose `@handle` the runner
    reads off Self and passes as `MAESTRO_PEER_HANDLE`. Reading it ends the
    first invocation;
 3. `setup/setup.yaml`: the run's **shared account**. The runner makes a new
