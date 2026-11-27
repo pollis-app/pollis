@@ -23,6 +23,40 @@ tag date, UTC.
 
 ---
 
+## v1.19.22 — 2026-11-27
+
+- **Faster chat actions.** Sending, editing, deleting and pinning show on
+  screen straight away. A send needs fewer server round trips, so it confirms
+  sooner. You can reply to, edit or delete a message that is still sending.
+- **Basic formatting.** `**bold**`, `*italic*`, `__underline__`,
+  `~~strikethrough~~` and code blocks (three backticks) work in messages, as on
+  GitHub and Discord.
+- **Read receipts in words.** In a direct message, your newest message shows
+  "Delivered", then "Read" and the time. The Terminal look shows no receipts.
+- **Links and previews in pinned messages and threads**, the same as in the
+  conversation.
+- **Persian (فارسی)** is a new interface language.
+- **Smoother motion.** New messages slide in when you are at the bottom of a
+  chat and never move you when you have scrolled up. Reactions, menus and the
+  sidebar animate gently, and nothing moves when your system asks for reduced
+  motion.
+- **One colour per name.** A person's name, yours included, has the same colour
+  everywhere in the chat. Message actions float above the row and no longer
+  cover its text.
+- **Terminal look.** Message text flows straight after the name and wraps under
+  it, attachments start on their own line, and a reply's arrow lines up with
+  the names.
+- **Sidebar.** Group headers stay pinned while their channels scroll, and
+  dragging to resize a panel no longer selects text.
+- **Away status.** Your status shows as away while the app is open but not in
+  use.
+- **Calls in a direct message** show the chat in the right-hand panel.
+- **Fixes.** Finishing a create or edit form no longer leaves it behind Back.
+  The composer clears when you send and cannot send twice. Your own name no
+  longer shows as an admin in direct messages. Reactions load with their
+  messages, with no jump. The Vault shows "Saving…" while a file uploads, and
+  offers Retry if it fails.
+
 ## v1.19.21 — 2026-11-24
 
 - **Display names everywhere.** Messages, member lists, DM lists and message
