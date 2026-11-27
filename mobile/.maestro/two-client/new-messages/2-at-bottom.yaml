@@ -32,9 +32,11 @@ tags:
     env:
       PEER_PORT: ${PEER_PORT}
       TEXT: "at the bottom"
+# The wait covers the dev DS delivering it (a few seconds after a burst), not the follow:
+# at the bottom the newest row is on screen the moment it lands.
 - extendedWaitUntil:
     visible: ".*: at the bottom, .*"
-    timeout: 5000
+    timeout: 20000
 - assertNotVisible:
     id: "new-messages-button"
 - takeScreenshot: new-messages-01-at-bottom-follows
