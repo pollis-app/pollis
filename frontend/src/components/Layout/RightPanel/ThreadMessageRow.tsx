@@ -1,49 +1,42 @@
 import { senderColorKey, senderName } from "../../../utils/senderName";
-import { getUsernameColor, useBackgroundIsLight } from "../../../utils/usernameColor";
+import { getUsernameColor } from "../../../utils/usernameColor";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { UnsentMessageActions } from "../../Message/UnsentMessageActions";
-import { MessageLinkPreview } from "../../Message/MessageLinkPreview";
 import { MessageBody } from "../../Message/MessageBody";
-import { useMessageRenderContext } from "../../Message/useMessageRenderContext";
-import { appStore } from "../../../stores/appStore";
-import { useSkin } from "../../../hooks/queries/usePreferences";
+import { MessageUnfurls } from "../../Message/MessageUnfurls";
+import type { MessageRenderContext } from "../../Message/messageRenderContext";
 import { formatClockTime, toMs } from "../../../utils/format";
 import type { Message } from "../../../types";
-import { useSelectedGroupAliases } from "../../../hooks/queries/useGroupAliases";
 import { aliasAvatar, aliasName } from "../../../utils/groupAlias";
-import { useSelectedGroupBots } from "../../../hooks/queries/useBots";
 import { BotBadge } from "../../ui/BotBadge";
 
 interface ThreadMessageRowProps {
   message: Message;
+  /** The panel's one render context (`useMessageRenderContext`), shared by its rows. */
+  ctx: MessageRenderContext;
   isRoot?: boolean;
 }
 
 /** A message in the thread panel: author, text, attachments. No own-message tint in either skin; terminal drops the avatar. */
 export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
-  ({ message, isRoot = false }) => {
+  ({ message, ctx, isRoot = false }) => {
     const { t } = useTranslation("nav");
-    const skin = useSkin();
-    const isTerminal = skin !== "modern";
-    const aliases = useSelectedGroupAliases();
+    const isTerminal = ctx.skin !== "modern";
+    const aliases = ctx.aliases;
     const author = aliasName(aliases, message.sender_id, senderName(message));
     // The name's one colour, as in the channel (#2146).
-    const isLightBg = useBackgroundIsLight();
-    const authorStyle = { color: getUsernameColor(senderColorKey(message), isLightBg) };
+    const authorStyle = { color: getUsernameColor(senderColorKey(message), ctx.isLightBg) };
     // A bot's replies carry the Bot badge (#1182), as in the channel.
-    const { botIds, groupName } = useSelectedGroupBots();
-    const botBadge = botIds.has(message.sender_id) ? (
-      <BotBadge groupName={groupName} data-testid="thread-bot-badge" />
+    const botBadge = ctx.botIds?.has(message.sender_id) ? (
+      <BotBadge groupName={ctx.groupName} data-testid="thread-bot-badge" />
     ) : null;
     // App language; `toMs` or seconds-precision timestamps render as 1970 (#874).
     const time = formatClockTime(toMs(message.created_at));
     const testid = isRoot ? "thread-root" : "thread-reply";
-    // The body draws as the timeline draws it: formatting (#2142), mentions, links, emoji.
-    const ctx = useMessageRenderContext(appStore.chatGroupId, !isTerminal);
 
     const body = message.deleted_at ? (
       <p className={`italic text-muted ${isTerminal ? "text-row" : "text-body"}`}>
@@ -54,10 +47,12 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
         {message.content_decrypted ? (
           <div
             dir="auto"
+            data-testid="thread-message-text"
             className={`whitespace-pre-wrap break-words text-fg ${
               isTerminal ? "text-row" : "text-body"
             }`}
           >
+            {/* As the timeline draws it (#2143): formatting (#2142), mentions, links, emoji. */}
             <MessageBody text={message.content_decrypted} ctx={ctx} />
             {/* An unsent reply (#1335). */}
             {message.status === "failed" && <UnsentMessageActions message={message} />}
@@ -70,9 +65,9 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
             {t("chat:message.undecryptable.body_one")}
           </p>
         ) : null}
-        {/* A sender's link preview (#1987): Modern look only. */}
-        {!isTerminal && message.content_decrypted ? (
-          <MessageLinkPreview text={message.content_decrypted} preview={message.link_preview} />
+        {/* As the timeline (#2143): the sender's preview (#1987, Modern look), then media link tiles. */}
+        {message.content_decrypted ? (
+          <MessageUnfurls text={message.content_decrypted} preview={message.link_preview} ctx={ctx} />
         ) : null}
         {(message.attachments ?? []).map((attachment) => (
           <div key={attachment.id} className="mt-1">

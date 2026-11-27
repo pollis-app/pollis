@@ -28,6 +28,12 @@ export function useDMRequests() {
   });
 }
 
+/** True while a DM is a request not yet accepted: no sender previews there (#1987). A channel never is. */
+export function useIsDmRequest(channelId: string | null, conversationId: string | null): boolean {
+  const { data: dmRequests = [] } = useDMRequests();
+  return !channelId && !!conversationId && dmRequests.some((r) => r.id === conversationId);
+}
+
 export function useAcceptDMRequest() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
