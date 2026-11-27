@@ -144,6 +144,11 @@ pub(crate) use outbox::claim::{
     purge_stale_on as purge_stale_outbox_claims_on, release_all_on as release_outbox_claims_on,
     set_role as set_outbox_claim_role,
 };
+/// This process's outbox claim role. The flows harness runs the app and the share extension in
+/// one process, and the extension's role is set once per process, so a test that plays a dead
+/// predecessor's claim has to use the role this process actually has.
+#[cfg(feature = "test-harness")]
+pub use outbox::claim::role as outbox_claim_role;
 /// Claim an outbox key for this process (#2100); see `outbox::claim`.
 pub(crate) async fn claim_outbox_key(
     state: &std::sync::Arc<crate::state::AppState>,
