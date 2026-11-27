@@ -6,9 +6,7 @@ import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { MessageBody } from "./MessageBody";
-import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
-import { MessageLinkPreview } from "./MessageLinkPreview";
-import { matchPreviewLink } from "../../utils/linkPreview";
+import { MessageUnfurls } from "./MessageUnfurls";
 import { getUsernameColor, getUsernameChipColor } from "../../utils/usernameColor";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
@@ -151,12 +149,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const content = isDeleted
     ? t("message.deleted")
     : (message.content_decrypted ?? t("message.undecryptable.body_one"));
-
-  // A sender's preview (#1987): Modern look only, never in an unaccepted request, only for a body link.
-  const previewLink =
-    !isDeleted && skin === "modern" && ctx.linkPreviews
-      ? matchPreviewLink(content, message.link_preview)
-      : null;
 
   const isVisualMedia = (ct: string) =>
     ct.startsWith("image/") || ct.startsWith("video/");
@@ -326,12 +318,8 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             />
           </div>
 
-          {previewLink && (
-            <MessageLinkPreview text={content} preview={message.link_preview} />
-          )}
-
           {!isDeleted && (
-            <MediaLinkUnfurl text={content} exceptHref={previewLink?.href ?? null} />
+            <MessageUnfurls text={content} preview={message.link_preview} ctx={ctx} />
           )}
 
           {attachmentBlocks}
@@ -388,7 +376,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         )
       )}
 
-      <div className="msg-term-line flex items-start gap-0 min-w-0">
+      <div className="flex items-start gap-0 min-w-0">
         <bdi
           data-testid="message-timestamp"
           dir="ltr"
@@ -399,40 +387,48 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           {formatTimeOfDay(toMs(message.created_at))}
         </bdi>
 
-        <bdi
-          data-testid="message-author"
-          className={`flex-shrink-0 font-mono text-body font-semibold me-1 ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : ""}`}
-          style={isAuthorAdmin ? adminChipStyle : {
-            color: isOwn ? "var(--c-accent)" : authorColor,
-          }}
-        >
-          {displayName}
-        </bdi>
-        {botBadge && <span className="me-1 flex-shrink-0 self-center">{botBadge}</span>}
-
-        <span
-          className="font-mono text-body select-none me-1 flex-shrink-0 text-muted"
-          aria-hidden="true"
-        >
-          {":"}
-        </span>
-
-        {/* Body column (#1489): media aligns with the text, not the timestamp. */}
-        <div className="msg-term-body flex-1 min-w-0">
-          <span
-            data-testid="message-content"
-            dir="auto"
-            className={`block font-mono text-body break-words ${isDeleted ? "italic text-muted" : "text-fg"}`}
-            style={{
-              whiteSpace: "pre-wrap",
-            }}
+        {/* One line from the name on (#2130): name, ":" and text flow inline, and wrapped text
+            continues under the name like a shell line. Media and reactions start on their own
+            line below, at the name. */}
+        <div className="flex-1 min-w-0">
+          <div
+            className="font-mono text-body break-words"
+            style={{ whiteSpace: "pre-wrap" }}
           >
-            <MessageBody text={content} ctx={ctx} />
-            {bodyTail}
-            {/* No receipts in the terminal skin (product call). */}
-          </span>
+            <bdi
+              data-testid="message-author"
+              className={`font-semibold ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : ""}`}
+              style={isAuthorAdmin ? adminChipStyle : {
+                color: isOwn ? "var(--c-accent)" : authorColor,
+              }}
+            >
+              {displayName}
+            </bdi>
+            {/* Spacing sits on these spans, not on the name: a `<bdi>` resolves `me-*` in the
+                name's own direction, which pushes a Latin name off a right-to-left line's edge. */}
+            {botBadge && <span className="ms-1 align-middle">{botBadge}</span>}
+            {/* Selectable, so a copied line reads "name: text". A picture with no caption gets
+                none: there is no text for it to introduce. */}
+            {content !== "" && (
+              <span className="ms-1 text-muted" aria-hidden="true">
+                {": "}
+              </span>
+            )}
+            {/* `dir="auto"` isolates the text, so each body still reads in its own script. */}
+            <span
+              data-testid="message-content"
+              dir="auto"
+              className={isDeleted ? "italic text-muted" : "text-fg"}
+            >
+              <MessageBody text={content} ctx={ctx} />
+              {bodyTail}
+              {/* No receipts in the terminal skin (product call). */}
+            </span>
+          </div>
 
-          {!isDeleted && <MediaLinkUnfurl text={content} />}
+          {!isDeleted && (
+            <MessageUnfurls text={content} preview={message.link_preview} ctx={ctx} />
+          )}
 
           {attachmentBlocks}
 

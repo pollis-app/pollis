@@ -22,10 +22,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MessageRow } from "../../components/chat/MessageRow";
 import { usePrefetchAvatars } from "../../components/UserAvatar";
 import { isNewMemberMessage, newMemberJoins } from "../../lib/newMember";
-import { botHandles, botIds } from "../../lib/bots";
+import { botIds } from "../../lib/bots";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
-import { aliasAvatar, aliasName, mentionLabels } from "../../lib/groupAlias";
+import { aliasAvatar, aliasName } from "../../lib/groupAlias";
 import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
 import { outgoingText } from "../../lib/messageText";
 import { EditBar } from "../../components/chat/EditBar";
@@ -76,6 +76,7 @@ import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { receiptTargetId } from "../../lib/receiptTarget";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
+import { useMessageBodyContext } from "../../hooks/useMessageBodyContext";
 import { useGroupCommands, useSendCommandRequest } from "../../hooks/queries/useBots";
 import { BOT_REQUESTS_UNAVAILABLE, classifyCommandSend } from "../../lib/slashCommands";
 import { useUsableEmoji } from "../../hooks/queries/useEmoji";
@@ -470,17 +471,13 @@ function TextChat(props: ChatViewProps = {}) {
     return copied;
   }, []);
 
-  const selfName = currentUser?.username?.toLowerCase() ?? null;
-  const mentionNames = useMemo(() => {
-    const set = new Set<string>(["all"]);
-    for (const c of mentionCandidates) {
-      set.add(c.username.toLowerCase());
-    }
-    if (selfName) {
-      set.add(selfName);
-    }
-    return set;
-  }, [mentionCandidates, selfName]);
+  // How a body draws (mentions, aliases, bots); the pinned list draws pins the same way (#2127).
+  const {
+    mentionNames,
+    selfName,
+    mentionLabels: aliasMentionLabels,
+    botMentions,
+  } = useMessageBodyContext(kind, conversationId, groupId ?? null);
 
   // Inverted-list items, newest first. Thread replies stay out of the main timeline (#837).
   const items = useMemo(() => {
@@ -678,7 +675,6 @@ function TextChat(props: ChatViewProps = {}) {
 
   // Bots (#1182): the roster says who is one; their rows and mentions carry the Bot badge.
   const botSenders = useMemo(() => botIds(groupMembers ?? []), [groupMembers]);
-  const botMentions = useMemo(() => botHandles(groupMembers ?? []), [groupMembers]);
 
   // Per-group aliases (#2003): inside a group, people show as it shows them; a DM, by main profile.
   const aliases = useGroupAliases(kind === "channel" ? groupId ?? null : null);
@@ -686,10 +682,6 @@ function TextChat(props: ChatViewProps = {}) {
     (senderId: string, senderUsername: string | undefined, senderDisplayName?: string | null) =>
       aliasName(aliases, senderId, authorName(senderId, senderUsername, currentUser, senderDisplayName)),
     [aliases, currentUser],
-  );
-  const aliasMentionLabels = useMemo(
-    () => mentionLabels(aliases, groupMembers ?? []),
-    [aliases, groupMembers],
   );
 
   // Senders' pictures: the roster already carries every member's key. A member

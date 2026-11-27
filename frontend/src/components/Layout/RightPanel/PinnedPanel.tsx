@@ -4,15 +4,17 @@ import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Pin, PinOff } from "lucide-react";
 import { usePinnedMessages, useTogglePinnedMessage } from "../../../hooks/queries/usePins";
-import { parseContent } from "../../../hooks/queries/useMessages";
-import { useSkin } from "../../../hooks/queries/usePreferences";
+import { linkPreviewFromWire, parseContent } from "../../../hooks/queries/useMessages";
+import { useDMRequests } from "../../../hooks/queries/useBlocks";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
+import { MessageBody } from "../../Message/MessageBody";
+import { MessageUnfurls } from "../../Message/MessageUnfurls";
+import { useMessageRenderContext } from "../../Message/useMessageRenderContext";
 import { LoadingSpinner } from "../../ui/LoaderSpinner";
 import { formatClockTime } from "../../../utils/format";
 import { EmptyState } from "../../ui/EmptyState";
 import { SectionHeader } from "../../ui/SectionHeader";
 import { IconButton } from "../../ui/IconButton";
-import { useGroupAliases } from "../../../hooks/queries/useGroupAliases";
 import { appStore } from "../../../stores/appStore";
 import { aliasName } from "../../../utils/groupAlias";
 
@@ -25,12 +27,17 @@ interface PinnedPanelProps {
 export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
   ({ channelId, conversationId }) => {
     const { t } = useTranslation("nav");
-    const isTerminal = useSkin() !== "modern";
     const activeConversationId = channelId ?? conversationId;
     const { data: pins = [], isLoading, isError } = usePinnedMessages(activeConversationId);
     const togglePin = useTogglePinnedMessage();
-    // A channel's pins name authors as its group shows them (#2003); a DM's, by main profile.
-    const aliases = useGroupAliases(channelId ? appStore.selectedGroupId : null);
+    // No sender previews in an unaccepted DM request, as in its timeline (#1987).
+    const { data: dmRequests = [] } = useDMRequests();
+    const isRequest = !channelId && dmRequests.some((r) => r.id === conversationId);
+    // A pin's body draws as it does in the timeline (#2127): mentions, links, previews. A channel's
+    // pins name authors as its group shows them (#2003); a DM's, by main profile.
+    const ctx = useMessageRenderContext(channelId ? appStore.chatGroupId : null, !isRequest);
+    const aliases = ctx.aliases;
+    const isTerminal = ctx.skin !== "modern";
 
     const gutter = isTerminal ? "px-2.5" : "px-2";
 
@@ -94,12 +101,21 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
                 </div>
                 {parsed.text ? (
                   <p
+                    data-testid="pinned-panel-text"
+                    dir="auto"
                     className={`mt-0.5 whitespace-pre-wrap break-words text-fg ${
                       isTerminal ? "text-row" : "text-body"
                     }`}
                   >
-                    {parsed.text}
+                    <MessageBody text={parsed.text} ctx={ctx} />
                   </p>
+                ) : null}
+                {parsed.text ? (
+                  <MessageUnfurls
+                    text={parsed.text}
+                    preview={linkPreviewFromWire(pin.link_preview, { conversationId: pin.conversation_id })}
+                    ctx={ctx}
+                  />
                 ) : null}
                 {parsed.attachments && parsed.attachments.length > 0 ? (
                   <div className="mt-1 flex flex-wrap gap-1">

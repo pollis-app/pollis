@@ -613,10 +613,9 @@ for (const skin of SKINS) {
       );
       expect(new Set(boxes.map((b) => b.top)).size).toBe(1);
 
-      // The first pill starts where the message text starts, in both skins:
-      // Modern's name and body share a column, and terminal's pills sit in
-      // the body column after `name :` (#1489).
-      const anchor = row.getByTestId("message-content");
+      // The first pill starts where the message line starts: Modern's body
+      // column, terminal's name, which the text wraps back under (#2130).
+      const anchor = row.getByTestId(skin === "terminal" ? "message-author" : "message-content");
       const anchorLeft = Math.round((await anchor.boundingBox())!.x);
       expect(Math.abs(boxes[0].left - anchorLeft)).toBeLessThanOrEqual(1);
     });

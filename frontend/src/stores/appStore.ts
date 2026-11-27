@@ -8,6 +8,7 @@ import type { CameraSource } from '../camera/types';
 import { isSpeaking } from '../voice/participantAudio';
 // One-way edge: presenceStore imports nothing of ours, so this cannot cycle.
 import { presenceStore } from './presenceStore';
+import { chatGroupId } from '../utils/chatGroup';
 
 type CameraRemote = { trackKey: string; width: number; height: number };
 type EnrollmentApproval = { requestId: string; newDeviceId: string };
@@ -205,6 +206,11 @@ class AppStore implements AppState {
 
   unreadFor(items: { id: string }[]): number {
     return items.reduce((sum, x) => sum + (this.unreadCounts[x.id] ?? 0), 0);
+  }
+
+  /** The open chat's group: a channel's, never a DM's (#2126). Roles and aliases read this, not `selectedGroupId`. */
+  get chatGroupId(): string | null {
+    return chatGroupId(this);
   }
 
   get totalUnread(): number {

@@ -269,7 +269,13 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   name truncates); a quoted reply sits above it and changes nothing in it. Pictures and videos come
   before files: one keeps its own shape, several sit in equal squares (desktop's wrapping thumbs,
   mobile's 2-up grid, `MessageAttachments`); files and audio follow as a list. A failed send's
-  reason and Retry / Discard go under the whole message, after its attachments.
+  reason and Retry / Discard go under the whole message, after its attachments. In every look and
+  client, attachments start on their own line below the text, with or without text (Slack,
+  Discord).
+- **Terminal message line** (desktop Terminal, `pollis-tui`): a shell line, not two columns (#2130).
+  The time sits in its own gutter; the name, `:` and the text flow as one line, and wrapped text
+  continues under the name, never in a hanging block after it. Pictures, files and reactions start
+  at the name on the lines below.
 
 ## Components: reuse first
 

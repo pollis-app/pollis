@@ -9,19 +9,23 @@ import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { Screen, Header, Chip, EmptyState } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
-import { EmojiText } from "../../components/emoji/EmojiText";
+import { MessageBodyInline } from "../../components/chat/MessageBody";
+import { MessageLinkPreview } from "../../components/chat/MessageLinkPreview";
 import { dayLabel, timeLabel } from "../../components/chat/dates";
 import { fonts, semantic, type as ty, space, groupedRowCorners } from "../../theme/tokens";
 import {
   usePinnedMessages,
   useTogglePinnedMessage,
   useResolvePermalink,
+  useDMRequests,
   type PinnedMessage,
 } from "../../hooks/queries";
+import { useMessageBodyContext } from "../../hooks/useMessageBodyContext";
 import { authorName } from "../../lib/authorName";
 import { aliasName } from "../../lib/groupAlias";
 import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
-import { pinPreview } from "../../lib/pins";
+import { pinLinkPreview, pinPreview } from "../../lib/pins";
+import { linkA11yActions, runLinkA11yAction } from "../../lib/openLink";
 import { permalinkMissCopy } from "../../lib/permalinks";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { appStore } from "../../stores/appStore";
@@ -36,7 +40,15 @@ function PinnedMessagesScreen() {
   const name = typeof params.name === "string" ? params.name : undefined;
   const currentUser = appStore.currentUser;
   // A channel's pins name authors as its group shows them (#2003); a DM's, by main profile.
-  const aliases = useGroupAliases(params.kind === "channel" ? appStore.selectedGroupId ?? null : null);
+  const kind = params.kind === "channel" || params.kind === "dm" ? params.kind : null;
+  const groupId = kind === "channel" ? appStore.selectedGroupId ?? null : null;
+  const aliases = useGroupAliases(groupId);
+  // A pin's body draws as the timeline draws it (#2127): mentions, links, the sender's preview.
+  const body = useMessageBodyContext(kind, conversationId, groupId);
+  // No sender previews in an unaccepted DM request, as in its timeline (#1987).
+  const { data: dmRequests } = useDMRequests();
+  const isRequest =
+    kind === "dm" && !!conversationId && (dmRequests ?? []).some((d) => d.id === conversationId);
   const { data: pins = [], isLoading, isError } = usePinnedMessages(conversationId, {
     fresh: true,
   });
@@ -63,7 +75,10 @@ function PinnedMessagesScreen() {
     const sent = new Date(item.sent_at).getTime();
     const when = Number.isFinite(sent) ? `${dayLabel(sent)} · ${timeLabel(sent)}` : "";
     const preview = pinPreview(item.content);
+    const linkPreview = isRequest ? null : pinLinkPreview(item);
     const spoken = preview.text.trim() || preview.filenames.join(", ");
+    // The row is one accessible element, so its links are offered as actions, as a timeline row's are.
+    const linkActions = linkA11yActions(preview.text, (host) => t("mobile:link.openLabel", { host }));
     const first = index === 0;
     return (
       <View
@@ -83,6 +98,10 @@ function PinnedMessagesScreen() {
           accessibilityRole="button"
           accessibilityLabel={t("mobile:pins.rowLabel", { author, when, text: spoken })}
           accessibilityHint={t("mobile:pins.openA11y")}
+          accessibilityActions={linkActions.map(({ name, label }) => ({ name, label }))}
+          onAccessibilityAction={(e) => {
+            runLinkA11yAction(e.nativeEvent.actionName, linkActions);
+          }}
           onPress={() => void openPin(item)}
           style={({ pressed }) => ({
             flex: 1,
@@ -105,7 +124,18 @@ function PinnedMessagesScreen() {
             <Text style={ty.meta}>{when}</Text>
           </View>
           {preview.text ? (
-            <EmojiText text={preview.text} numberOfLines={3} style={ty.body} />
+            <Text testID={`text-pin-${item.message_id}`} numberOfLines={3} style={[ty.body, { color: semantic.text }]}>
+              <MessageBodyInline
+                text={preview.text}
+                mentionNames={body.mentionNames}
+                selfName={body.selfName}
+                mentionLabels={body.mentionLabels}
+                botMentions={body.botMentions}
+              />
+            </Text>
+          ) : null}
+          {preview.text && linkPreview ? (
+            <MessageLinkPreview text={preview.text} preview={linkPreview} />
           ) : null}
           {preview.filenames.map((filename, fi) => (
             <View
