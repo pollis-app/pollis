@@ -679,6 +679,7 @@ export function useMyJoinRequest(groupId: string | undefined) {
 }
 
 export function useSendGroupInvite() {
+  const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
@@ -687,6 +688,10 @@ export function useSendGroupInvite() {
         throw new Error('No current user');
       }
       await invoke('send_group_invite', { groupId, inviterId: currentUser.id, inviteeIdentifier });
+    },
+    // Members lists pending invites; a list read before the send would hide this one until stale.
+    onSuccess: (_data, { groupId }) => {
+      queryClient.invalidateQueries({ queryKey: groupQueryKeys.groupInvites(groupId) });
     },
   });
 }

@@ -176,6 +176,7 @@ export function useDeclineGroupInvite() {
 }
 
 export function useSendGroupInvite(groupId: string | null) {
+  const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     // Tactile feedback (#1286): lib/queryClient.ts plays it.
@@ -190,6 +191,8 @@ export function useSendGroupInvite(groupId: string | null) {
         inviteeIdentifier,
       });
     },
+    // Members lists pending invites; a list read before the send would hide this one for 30 s.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: groupInviteQueryKeys.groupInvites(groupId) }),
   });
 }
 
