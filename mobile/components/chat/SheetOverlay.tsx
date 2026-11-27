@@ -18,6 +18,7 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { semantic, type as ty, r, space, layout } from "../../theme/tokens";
 import { useTheme } from "../theme";
 import { Icon } from "../icons";
@@ -59,6 +60,7 @@ export function SheetOverlay({
   const { t } = useTranslation("common");
   // Root insets are right here: the Modal is translucent under both system bars.
   const bottomInset = useBottomInset();
+  const topInset = useSafeAreaInsets().top;
   const regular = useIsRegular();
   // Start below the screen edge: no measurement needed (#1249).
   const { height: windowHeight } = useWindowDimensions();
@@ -162,7 +164,8 @@ export function SheetOverlay({
             pointerEvents="box-none"
             behavior="padding"
             automaticOffset
-            style={{ flex: 1, justifyContent: "flex-end" }}
+            // #2123: a sheet taller than the room above the keyboard stops below the status bar.
+            style={{ flex: 1, justifyContent: "flex-end", paddingTop: topInset + space.lg }}
           >
             <Animated.View
               testID={testID}
@@ -182,6 +185,9 @@ export function SheetOverlay({
                   paddingTop: space.xl,
                   paddingBottom: bottomInset + space.lg,
                   gap: space.lg,
+                  // Shrinks into that room; a child that can give (a list) does.
+                  flexShrink: 1,
+                  minHeight: 0,
                 },
                 cardStyle,
                 settled ? SETTLED_CARD : null,
