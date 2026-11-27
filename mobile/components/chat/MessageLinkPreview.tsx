@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { MediaImage } from "../Media";
 import { LinkPreviewCard } from "./LinkPreviewCard";
 import { matchPreviewLink } from "../../lib/linkPreview";
+import { scanText } from "../../../design/messageFormat.ts";
 import { tapLink } from "../../lib/openLink";
 import type { MessageLinkPreview as Preview } from "../../types";
 
@@ -17,7 +18,8 @@ export function MessageLinkPreview({
   preview: Preview | null | undefined;
   onLongPress?: () => void;
 }) {
-  const link = useMemo(() => matchPreviewLink(text, preview), [text, preview]);
+  // A link inside a code block is not a link (#2142).
+  const link = useMemo(() => matchPreviewLink(scanText(text), preview), [text, preview]);
   if (!preview || !link) {
     return null;
   }

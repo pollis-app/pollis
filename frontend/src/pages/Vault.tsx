@@ -15,7 +15,9 @@ import { ChatInput, type ChatInputHandle, type Attachment } from "../components/
 import { Button } from "../components/ui/Button";
 import { EditMessageBar } from "../components/ui/EditMessageBar";
 import { ConfirmBar } from "../components/ui/ConfirmBar";
-import { LinkifiedText } from "../components/ui/LinkifiedText";
+import { MessageBody } from "../components/Message/MessageBody";
+import { useMessageRenderContext } from "../components/Message/useMessageRenderContext";
+import type { MessageRenderContext } from "../components/Message/messageRenderContext";
 import { AttachmentDisplay } from "../components/Message/AttachmentDisplay";
 import { MediaGalleryView } from "../components/Media/MediaGalleryView";
 import { parseContent } from "../hooks/queries/useMessages";
@@ -66,6 +68,8 @@ const SAVE_FAILED_COPY: Record<VaultSaveFailure, string> = {
 export const VaultPage: React.FC = observer(() => {
   const { t } = useTranslation("vault");
   const [view, setView] = useState<VaultView>("chat");
+  // Entries draw as messages do (#2142): formatting, links, emoji. No group, no previews.
+  const bodyCtx = useMessageRenderContext(null, false);
   const [searchQuery, setSearchQuery] = useState("");
   const [editingEntry, setEditingEntry] = useState<VaultMessage | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -311,6 +315,7 @@ export const VaultPage: React.FC = observer(() => {
                   <VaultEntryRow
                     key={entry.id}
                     entry={entry}
+                    bodyCtx={bodyCtx}
                     showDayDivider={
                       index === 0 ||
                       new Date(entry.created_at).toDateString() !==
@@ -406,6 +411,7 @@ export const VaultPage: React.FC = observer(() => {
 
 interface VaultEntryRowProps {
   entry: VaultMessage;
+  bodyCtx: MessageRenderContext;
   showDayDivider: boolean;
   /** A queued save (#2100) that reads "Not saved": try again, or drop it. */
   onRetry: (id: string) => void;
@@ -418,6 +424,7 @@ interface VaultEntryRowProps {
 /** One vault entry: content + attachments, hover actions at the row end. */
 const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
   entry,
+  bodyCtx,
   showDayDivider,
   onRetry,
   onDiscard,
@@ -491,9 +498,9 @@ const VaultEntryRow: React.FC<VaultEntryRowProps> = ({
             )}
           </div>
           {parsed.text && (
-            <p className="whitespace-pre-wrap break-words font-mono text-body text-fg">
-              <LinkifiedText text={parsed.text} />
-            </p>
+            <div dir="auto" className="whitespace-pre-wrap break-words font-mono text-body text-fg">
+              <MessageBody text={parsed.text} ctx={bodyCtx} />
+            </div>
           )}
           {parsed.attachments && parsed.attachments.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">

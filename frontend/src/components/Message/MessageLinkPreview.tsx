@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { peekMediaUrl } from "../../services/r2-upload";
 import { useResolveMediaUrl } from "../../hooks/useResolveMediaUrl";
 import { matchPreviewLink } from "../../utils/linkPreview";
+import { scanText } from "../../../../design/messageFormat";
 import { openMessageLink } from "../ui/LinkifiedText";
 import { BlurhashCanvas } from "../Media/BlurhashCanvas";
 import { LinkPreviewCard } from "./LinkPreviewCard";
@@ -43,7 +44,8 @@ const PreviewThumb: React.FC<{ image: MessageAttachment }> = ({ image }) => {
  * body; the domain line and the click both use that body link, never the preview's own data.
  */
 export const MessageLinkPreview: React.FC<MessageLinkPreviewProps> = React.memo(({ text, preview }) => {
-  const link = useMemo(() => matchPreviewLink(text, preview), [text, preview]);
+  // A link inside a code block is not a link (#2142).
+  const link = useMemo(() => matchPreviewLink(scanText(text), preview), [text, preview]);
   if (!preview || !link) {
     return null;
   }

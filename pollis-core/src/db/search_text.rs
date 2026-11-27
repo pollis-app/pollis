@@ -100,6 +100,24 @@ pub fn plain_text(content: &str) -> String {
     }
 }
 
+/// What a search snippet is cut from: [`plain_text`] with the caption's formatting markers
+/// removed (#2142), so a snippet reads as the message does. Never the index's input, which stays
+/// [`plain_text`] (determinism, above); file names keep every character.
+pub fn snippet_text(content: &str) -> String {
+    match parse_envelope(content) {
+        Some(parsed) => {
+            let mut parts: Vec<String> = Vec::new();
+            let caption = crate::message_format::strip(&parsed.text);
+            if !caption.trim().is_empty() {
+                parts.push(caption);
+            }
+            parts.extend(parsed.attachment_names);
+            parts.join(" ")
+        }
+        None => crate::message_format::strip(content),
+    }
+}
+
 /// Whether a body carries at least one attachment.
 pub fn has_attachment(content: &str) -> bool {
     parse_envelope(content)

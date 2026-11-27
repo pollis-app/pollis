@@ -5,6 +5,8 @@
 @import "@fontsource/atkinson-hyperlegible-next/600.css";
 @import "@fontsource/atkinson-hyperlegible-next/700.css";
 @import "@fontsource/dm-mono/500.css";
+/* Terminal's *italic* message text (#2142). */
+@import "@fontsource/dm-mono/500-italic.css";
 /* Geist Sans — the Modern (base) UI sans; Terminal uses Atkinson (see :root). */
 @import "@fontsource/geist-sans/400.css";
 @import "@fontsource/geist-sans/500.css";

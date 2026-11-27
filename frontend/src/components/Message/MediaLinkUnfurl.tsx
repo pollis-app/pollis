@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { shellOpen } from "../../bridge";
 import { findUrls, parseLink } from "../../utils/links";
+import { scanText } from "../../../../design/messageFormat";
 import { PressButton } from "../ui/PressButton";
 import { FOCUS_RING } from "../ui/focusRing";
 
@@ -41,7 +42,8 @@ function classify(href: string): MediaKind | null {
 function extractMediaLinks(text: string, exceptHref: string | null): MediaLink[] {
   const out: MediaLink[] = [];
   const seen = new Set<string>();
-  for (const { url } of findUrls(text) ?? []) {
+  // A link inside a code block is not a link (#2142).
+  for (const { url } of findUrls(scanText(text)) ?? []) {
     if (seen.has(url)) {
       continue;
     }

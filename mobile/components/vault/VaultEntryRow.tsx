@@ -4,7 +4,8 @@ import { Text } from "../Text";
 import { KeyboardController } from "react-native-keyboard-controller";
 import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
-import { MessageBodyInline } from "../chat/MessageBody";
+import { MessageBodyText } from "../chat/MessageBody";
+import { scanText, stripFormatting } from "../../../design/messageFormat.ts";
 import { MessageAttachments } from "../chat/MessageAttachments";
 import { haptic } from "../../lib/haptics";
 import { linkA11yActions, runLinkA11yAction } from "../../lib/openLink";
@@ -60,11 +61,11 @@ export function VaultEntryRow({
     .filter(Boolean)
     .join(", ");
   const label = text
-    ? `${text}, ${status}`
+    ? `${stripFormatting(text)}, ${status}`
     : `${attachments.map((a) => a.filename).join(", ")}, ${status}`;
 
   const linkActions = useMemo(
-    () => linkA11yActions(text, (host) => t("mobile:link.openLabel", { host })),
+    () => linkA11yActions(scanText(text), (host) => t("mobile:link.openLabel", { host })),
     [text, t],
   );
   const a11yActions = [
@@ -143,9 +144,7 @@ export function VaultEntryRow({
         {edited ? <Text style={ty.meta}>{t("entry.edited")}</Text> : null}
       </View>
       {text ? (
-        <Text testID={`text-vault-${entryId}`} style={[ty.body, { color: semantic.text }]}>
-          <MessageBodyInline text={text} />
-        </Text>
+        <MessageBodyText testID={`text-vault-${entryId}`} style={[ty.body, { color: semantic.text }]} text={text} />
       ) : null}
       {attachments.length > 0 ? (
         <MessageAttachments

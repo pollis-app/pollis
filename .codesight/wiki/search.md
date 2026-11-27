@@ -174,7 +174,9 @@ results rather than falling through to a filter-only scan of everything.
 
 `SearchResult` carries `conversation_kind`, `conversation_name`, `group_id`,
 `group_name`, `sender_username`, `thread_id`, `has_attachment`, `has_link`, and a
-structured `snippet { text, highlights: [[start, end], …] }`.
+structured `snippet { text, highlights: [[start, end], …] }`. The snippet is cut from
+`search_text::snippet_text`: the caption with its formatting markers stripped (#2142), so
+`**bold**` reads and highlights as `bold`; the index input (`plain_text`) is unchanged.
 
 **Highlight offsets are UTF-16 code units**, not Unicode scalars: the only
 consumer is JavaScript, whose string indices are code units, so an emoji earlier

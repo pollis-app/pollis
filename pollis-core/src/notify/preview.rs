@@ -1,6 +1,6 @@
 //! What a notification shows of a stored message body (#1599). Pure.
 //!
-//! The body is at most [`MAX_BODY_CHARS`] characters with markdown markers removed. An
+//! The body is at most [`MAX_BODY_CHARS`] characters with formatting markers removed (#2142). An
 //! attachment never shows its media or file name: it becomes a fixed English placeholder plus a
 //! `body_key` the host may localise instead.
 
@@ -92,66 +92,12 @@ fn attachment_envelope(content: &str) -> Option<(String, BodyKey)> {
     Some((caption, key))
 }
 
-/// Markdown markers out, whitespace collapsed, cut to [`MAX_BODY_CHARS`].
+/// Formatting markers out (#2142, the renderers' own parser), whitespace collapsed, cut to
+/// [`MAX_BODY_CHARS`].
 fn clean(text: &str) -> String {
-    let mut out = String::with_capacity(text.len().min(MAX_BODY_CHARS * 4));
-    for line in text.lines() {
-        let line = line.trim_start();
-        // Block markers at the start of a line: quotes, headings, list bullets.
-        let line = line.trim_start_matches('>').trim_start();
-        let line = line.trim_start_matches('#').trim_start();
-        let line = line
-            .strip_prefix("- ")
-            .or_else(|| line.strip_prefix("* "))
-            .unwrap_or(line);
-        if line.starts_with("```") {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        out.push_str(&strip_inline(line));
-    }
-    let collapsed: String = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    let stripped = crate::message_format::strip(text);
+    let collapsed: String = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     truncate(&collapsed, MAX_BODY_CHARS)
-}
-
-/// `**b**`, `__b__`, `*i*`, `~~s~~`, `` `c` `` lose their markers; `[text](url)` keeps the text.
-fn strip_inline(line: &str) -> String {
-    let chars: Vec<char> = line.chars().collect();
-    let mut out = String::with_capacity(line.len());
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        match c {
-            '*' | '`' | '~' => {
-                i += 1;
-            }
-            '_' if chars.get(i + 1) == Some(&'_') => {
-                i += 2;
-            }
-            '[' => {
-                // A link: `[text](url)` → `text`. Anything else stays as typed.
-                if let Some(close) = chars[i + 1..].iter().position(|&ch| ch == ']') {
-                    let close = i + 1 + close;
-                    if chars.get(close + 1) == Some(&'(') {
-                        if let Some(end) = chars[close + 2..].iter().position(|&ch| ch == ')') {
-                            out.extend(&chars[i + 1..close]);
-                            i = close + 2 + end + 1;
-                            continue;
-                        }
-                    }
-                }
-                out.push(c);
-                i += 1;
-            }
-            _ => {
-                out.push(c);
-                i += 1;
-            }
-        }
-    }
-    out
 }
 
 fn truncate(text: &str, max: usize) -> String {
@@ -174,11 +120,19 @@ mod tests {
     }
 
     #[test]
-    fn markdown_markers_are_stripped() {
-        let (body, _) = preview("**bold** and *it* and ~~gone~~ `code` [site](https://x.example)");
-        assert_eq!(body, "bold and it and gone code site");
-        let (body, _) = preview("> quoted\n# Heading\n- item\n```\nfn x() {}\n```");
-        assert_eq!(body, "quoted Heading item fn x() {}");
+    fn formatting_markers_are_stripped() {
+        let (body, _) = preview("**bold** and *it* and __under__ and ~~gone~~");
+        assert_eq!(body, "bold and it and under and gone");
+        let (body, _) = preview("look:\n```rust\nfn x() {}\n```\ndone");
+        assert_eq!(body, "look: fn x() {} done");
+    }
+
+    // Only the five supported styles are markers (#2142); everything else reads as typed.
+    #[test]
+    fn unsupported_markdown_and_arithmetic_stay_as_typed() {
+        assert_eq!(preview("> not a quote\n# not a heading").0, "> not a quote # not a heading");
+        assert_eq!(preview("2*3*4 and file_name_here").0, "2*3*4 and file_name_here");
+        assert_eq!(preview("\\*literal\\*").0, "*literal*");
     }
 
     #[test]

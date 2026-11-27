@@ -259,16 +259,7 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
     };
 
     let content = parse_content(raw);
-    let mut text_lines: Vec<&str> = if content.text.is_empty() {
-        Vec::new()
-    } else {
-        // `\r\n` from a Windows client reads as one break.
-        content
-            .text
-            .split('\n')
-            .map(|l| l.trim_end_matches('\r'))
-            .collect()
-    };
+    let body = body_lines(&content.text, ctx.me_name);
     let edited = m.edited_at.is_some();
     // An unconfirmed edit (#1555) reads as an edit; a failed one says so.
     let edited_label = if matches!(m.edit_state.as_deref(), Some("failed") | Some("rejected")) {
@@ -278,28 +269,29 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
     };
 
     // Attachments always start on their own line under the text (#2130), with or without text.
-    if text_lines.is_empty() {
-        if edited && content.attachments.is_empty() {
+    // A code block (#2142) starts on its own line too, set apart by a gutter and a background.
+    let starts_with_code = body.first().is_some_and(|l| l.code);
+    if body.is_empty() || starts_with_code {
+        if body.is_empty() && edited && content.attachments.is_empty() {
             head.push((edited_label.to_string(), dim));
         }
-        lines.extend(wrap(head, width, INDENT));
-    } else {
-        let last = text_lines.len() - 1;
-        let first_text = text_lines.remove(0);
-        let mut segments = head;
-        segments.extend(highlight_mentions(first_text, ctx.me_name));
-        if edited && last == 0 && content.attachments.is_empty() {
+        lines.extend(wrap(std::mem::take(&mut head), width, INDENT));
+    }
+    let last = body.len().saturating_sub(1);
+    for (n, line) in body.into_iter().enumerate() {
+        let mut segments = if n == 0 && !starts_with_code {
+            std::mem::take(&mut head)
+        } else {
+            vec![(" ".repeat(INDENT), Style::default())]
+        };
+        if line.code {
+            segments.push((CODE_GUTTER.to_string(), dim));
+        }
+        segments.extend(line.segments);
+        if edited && n == last && content.attachments.is_empty() {
             segments.push((edited_label.to_string(), dim));
         }
         lines.extend(wrap(segments, width, INDENT));
-        for (n, text) in text_lines.iter().enumerate() {
-            let mut segments = vec![(" ".repeat(INDENT), Style::default())];
-            segments.extend(highlight_mentions(text, ctx.me_name));
-            if edited && n + 1 == last && content.attachments.is_empty() {
-                segments.push((edited_label.to_string(), dim));
-            }
-            lines.extend(wrap(segments, width, INDENT));
-        }
     }
     let rest_len = content.attachments.len();
     for (n, a) in content.attachments.iter().enumerate() {
@@ -389,6 +381,60 @@ fn finish(
 
 fn attachment_style() -> Style {
     Style::default().fg(Color::Magenta)
+}
+
+/// What sets a code block's lines apart (#2142): a dim gutter, then text on [`CODE_BG`].
+pub const CODE_GUTTER: &str = "│ ";
+
+/// A code block's background: the solid surface the reaction pills sit on.
+pub const CODE_BG: Color = Color::Rgb(40, 40, 46);
+
+/// One display line of a message body before wrapping.
+struct BodyLine {
+    segments: Vec<(String, Style)>,
+    code: bool,
+}
+
+/// A message body as lines of styled runs (#2142): bold, italic, underline and strikethrough
+/// become ANSI modifiers; mentions keep their highlight inside them; code blocks are their own
+/// lines, unparsed.
+fn body_lines(text: &str, me: &str) -> Vec<BodyLine> {
+    use pollis_core::message_format::{parse, Node};
+
+    fn walk(nodes: &[Node], style: Style, me: &str, out: &mut Vec<BodyLine>) {
+        for node in nodes {
+            match node {
+                Node::Text(t) => {
+                    for (n, part) in t.split('\n').enumerate() {
+                        if n > 0 || out.last().is_none_or(|l| l.code) {
+                            out.push(BodyLine { segments: Vec::new(), code: false });
+                        }
+                        let line = out.last_mut().expect("a line was just ensured");
+                        for (run, run_style) in highlight_mentions(part, me) {
+                            line.segments.push((run, style.patch(run_style)));
+                        }
+                    }
+                }
+                Node::Bold(c) => walk(c, style.add_modifier(Modifier::BOLD), me, out),
+                Node::Italic(c) => walk(c, style.add_modifier(Modifier::ITALIC), me, out),
+                Node::Underline(c) => walk(c, style.add_modifier(Modifier::UNDERLINED), me, out),
+                Node::Strike(c) => walk(c, style.add_modifier(Modifier::CROSSED_OUT), me, out),
+                Node::Code { text, .. } => {
+                    let code_style = Style::default().fg(Color::Rgb(225, 225, 225)).bg(CODE_BG);
+                    for part in text.split('\n') {
+                        out.push(BodyLine {
+                            segments: vec![(part.to_string(), code_style)],
+                            code: true,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(&parse(text), Style::default(), me, &mut out);
+    out
 }
 
 /// `text` split into plain and highlighted runs, highlighting the mentions
@@ -621,6 +667,79 @@ mod tests {
         assert!(lines[1].ends_with("alice  multi"), "{lines:?}");
         assert_eq!(lines[2], "      line");
         assert_eq!(lines[3], "      message");
+    }
+
+    /// The styled span holding `needle` on the block's lines.
+    fn span_with<'a>(blocks: &'a [Block], needle: &str) -> &'a Span<'static> {
+        blocks
+            .iter()
+            .flat_map(|b| b.lines.iter())
+            .flat_map(|l| l.spans.iter())
+            .find(|s| s.content.contains(needle))
+            .unwrap_or_else(|| panic!("no span with {needle:?}"))
+    }
+
+    #[test]
+    fn formatting_renders_as_ansi_styles_without_its_markers() {
+        let f = Fixture::new();
+        let m = msg("1", "alice", "**bold** *it* __under__ ~~gone~~ ***both*** 2*3*4");
+        let blocks = f.layout(&[&m], None, 80);
+        let lines = all_text(&blocks);
+        assert!(lines[1].ends_with("alice  bold it under gone both 2*3*4"), "{lines:?}");
+        let has = |needle: &str, modifier: Modifier| {
+            span_with(&blocks, needle).style.add_modifier.contains(modifier)
+        };
+        assert!(has("bold", Modifier::BOLD));
+        assert!(has("it", Modifier::ITALIC));
+        assert!(has("under", Modifier::UNDERLINED));
+        assert!(has("gone", Modifier::CROSSED_OUT));
+        assert!(has("both", Modifier::BOLD) && has("both", Modifier::ITALIC));
+        assert!(!has("2*3*4", Modifier::ITALIC));
+    }
+
+    #[test]
+    fn a_mention_inside_bold_keeps_its_highlight() {
+        let f = Fixture::new();
+        let m = msg("1", "alice", "hey **@me** look");
+        let blocks = f.layout(&[&m], None, 60);
+        let mention = span_with(&blocks, "@me");
+        assert_eq!(mention.style.bg, Some(Color::Yellow));
+        assert!(mention.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn a_code_block_is_set_apart_and_unparsed() {
+        let f = Fixture::new();
+        let m = msg("1", "alice", "look:\n```rust\nlet x = **y**; // @me\n\n```\ndone");
+        let blocks = f.layout(&[&m], None, 60);
+        let lines = all_text(&blocks);
+        assert!(lines[1].ends_with("alice  look:"), "{lines:?}");
+        assert_eq!(lines[2], format!("      {CODE_GUTTER}let x = **y**; // @me"));
+        assert_eq!(lines[3], format!("      {CODE_GUTTER}"));
+        assert_eq!(lines[4], "      done");
+        let code = span_with(&blocks, "let x");
+        assert_eq!(code.style.bg, Some(CODE_BG));
+        assert!(code.style.add_modifier.is_empty(), "nothing in code is styled");
+    }
+
+    #[test]
+    fn a_message_that_opens_with_code_starts_it_on_its_own_line() {
+        let f = Fixture::new();
+        let mut m = msg("1", "alice", "```\nfn main() {}\n```");
+        m.edited_at = Some("t".into());
+        let lines = all_text(&f.layout(&[&m], None, 60));
+        assert!(lines[1].ends_with("alice  "), "{lines:?}");
+        assert_eq!(lines[2], format!("      {CODE_GUTTER}fn main() {{}} (edited)"));
+    }
+
+    #[test]
+    fn a_quoted_reply_drops_the_markers() {
+        let mut f = Fixture::new();
+        f.pool.push(msg("q", "bob", "**ship** it"));
+        let mut reply = msg("2", "alice", "ok");
+        reply.reply_to_id = Some("q".into());
+        let lines = all_text(&f.layout(&[&reply], None, 60));
+        assert!(lines.iter().any(|l| l.contains("↳ bob: ship it")), "{lines:?}");
     }
 
     #[test]

@@ -42,6 +42,7 @@ import {
   parseContent,
 } from "../../lib/messageContent";
 import { createSingleFlight } from "../../lib/singleFlight";
+import { stripFormatting } from "../../../design/messageFormat.ts";
 
 export type ConversationKind = "channel" | "dm";
 
@@ -902,7 +903,8 @@ export function previewText(message: Message | undefined): string | null {
     return i18n.t("chat:preview.undecryptable");
   }
   if (message.content) {
-    return message.content;
+    // The words without the formatting markers (#2142).
+    return stripFormatting(message.content);
   }
   if (message.attachments && message.attachments.length > 0) {
     return i18n.t("mobile:direct.previewAttachment");

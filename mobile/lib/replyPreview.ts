@@ -1,4 +1,5 @@
 // Quote replies (#1270): what a reply shows of its original. Pure.
+import { stripFormatting } from "../../design/messageFormat.ts";
 
 export const REPLY_SNIPPET_MAX = 80;
 
@@ -10,7 +11,8 @@ type Quotable = {
 
 // Text cut at 80 characters, or the first file's name; empty when neither.
 export function replySnippet(message: Quotable): string {
-  const text = message.content.replace(/\s+/g, " ").trim();
+  // The words without the formatting markers (#2142).
+  const text = stripFormatting(message.content).replace(/\s+/g, " ").trim();
   if (text) {
     return text.length > REPLY_SNIPPET_MAX
       ? `${text.slice(0, REPLY_SNIPPET_MAX)}…`

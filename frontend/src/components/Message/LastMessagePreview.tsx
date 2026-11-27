@@ -4,6 +4,7 @@ import { ScrambleText } from "../ui/ScrambleText";
 import type { Message } from "../../types";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { aliasName, type AliasMap } from "../../utils/groupAlias";
+import { stripFormatting } from "../../../../design/messageFormat";
 
 interface LastMessagePreviewProps {
   // Handed down: the list batches every row's preview in one call (#874).
@@ -19,13 +20,15 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message,
   const isTerminal = useSkin() === "terminal";
   const sender = message ? aliasName(aliases, message.sender_id, message.sender_display_name || message.sender_username) : undefined;
 
-  const text = message?.content_decrypted
+  // The words without the formatting markers (#2142).
+  const plain = message?.content_decrypted ? stripFormatting(message.content_decrypted) : "";
+  const text = plain
     ? (sender
         ? t("preview.withSender", {
             name: sender,
-            text: message.content_decrypted,
+            text: plain,
           })
-        : message.content_decrypted)
+        : plain)
     : null;
 
   const fallbackText = (() => {

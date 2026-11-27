@@ -534,9 +534,10 @@ async fn apply_emoji_rule(state: &Arc<AppState>, id: &str, content: String) -> R
 
 /// True when `content` contains an `@all` mention as a standalone token —
 /// i.e. whitespace-delimited and ignoring trailing punctuation, so "@all" and
-/// "@all," match but "@allison" and "email@allcorp" do not. Case-insensitive.
+/// "@all," match but "@allison" and "email@allcorp" do not. Case-insensitive. Read through the
+/// formatting parser (#2142), as clients draw it: `**@all**` counts, `@all` in a code block not.
 fn mentions_all(content: &str) -> bool {
-    content.split_whitespace().any(|w| {
+    crate::message_format::scan_text(content).split_whitespace().any(|w| {
         w.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '@')
             .eq_ignore_ascii_case("@all")
     })
@@ -586,7 +587,8 @@ pub(crate) fn mention_audience(
 /// The members `content` names directly by `@username`, whether or not it also
 /// says `@all` — the ones a channel mute does not silence (#1431).
 pub(crate) fn direct_mentions(content: &str, members: &[(String, String)]) -> Vec<String> {
-    let tokens = mention_tokens(content);
+    // As clients draw mentions (#2142): inside formatting yes, inside a code block no.
+    let tokens = mention_tokens(&crate::message_format::scan_text(content));
     let mut ids: Vec<String> = Vec::new();
     if tokens.is_empty() {
         return ids;
@@ -646,6 +648,20 @@ mod tests {
             mention_audience(true, "@bob and @dana", &members()),
             MentionAudience::Only(vec!["u_dana".to_string(), "u_bob".to_string()])
         );
+    }
+
+    // #2142: a mention wakes exactly where clients draw one — inside formatting, never in code.
+    #[test]
+    fn mentions_follow_the_formatting_parser() {
+        assert_eq!(
+            mention_audience(true, "hi**@dana**!", &members()),
+            MentionAudience::Only(vec!["u_dana".to_string()])
+        );
+        assert_eq!(
+            mention_audience(true, "```\n@dana @all\n```", &members()),
+            MentionAudience::Nobody
+        );
+        assert_eq!(mention_audience(true, "~~@all~~ ok", &members()), MentionAudience::Everyone);
     }
 
     // Trailing sentence punctuation must not swallow the mention.

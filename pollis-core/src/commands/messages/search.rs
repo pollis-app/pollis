@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::db::search_text::{
-    has_attachment, has_cjk, plain_text, segment_cjk, strip_sentinels, ATTACHMENT_SENTINEL,
+    has_attachment, has_cjk, segment_cjk, snippet_text, strip_sentinels, ATTACHMENT_SENTINEL,
     LINK_SENTINEL,
 };
 use crate::error::Result;
@@ -856,7 +856,7 @@ pub async fn rebuild_search_index(state: &Arc<AppState>) -> Result<()> {
 /// Cut a window of context around the first match.
 /// Built from `message.content`: a contentless FTS5 table has no text for `snippet()`.
 pub fn build_snippet(content: &str, parsed: &ParsedQuery) -> SearchSnippet {
-    let text = plain_text(content);
+    let text = snippet_text(content);
     let lower = text.to_lowercase();
 
     let first_match = needles(parsed)
@@ -1060,6 +1060,18 @@ mod tests {
         assert!(snippet.text.contains("slides attached"));
         assert!(snippet.text.contains("deck.pdf"));
         assert!(!snippet.text.contains("media/abc"));
+    }
+
+    // #2142: the snippet reads as the message renders, and the highlight lands on the word.
+    #[test]
+    fn snippet_reads_without_formatting_markers() {
+        let q = parse_query("bold");
+        let mut snippet = build_snippet("a **bold** word and file_name_here", &q);
+        snippet.highlights = highlight_ranges(&snippet.text, &q);
+        assert_eq!(snippet.text, "a bold word and file_name_here");
+        assert_eq!(snippet.highlights, vec![(2, 6)]);
+        let caption = r#"{"_att":[{"name":"_draft_.pdf","ct":"application/pdf","size":1}],"_txt":"see __this__"}"#;
+        assert_eq!(build_snippet(caption, &parse_query("this")).text, "see this _draft_.pdf");
     }
 
     #[test]

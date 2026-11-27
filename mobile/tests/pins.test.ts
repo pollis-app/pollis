@@ -120,7 +120,9 @@ test("a pin carries its link preview, its thumbnail scoped to the pin's conversa
 
 test("the pinned list reuses the timeline's body and preview components", () => {
   const screen = src("app/conversation/pins.tsx");
-  assert.match(screen, /<MessageBodyInline\b/);
+  // The timeline row and the pin draw a body with the same component, code blocks included (#2142).
+  assert.match(screen, /<MessageBodyText\b/);
+  assert.match(src("components/chat/MessageRow.tsx"), /<MessageBodyText\b/);
   assert.match(screen, /<MessageLinkPreview\b/);
   assert.match(screen, /useMessageBodyContext\(/);
   assert.doesNotMatch(screen, /<EmojiText\b/);

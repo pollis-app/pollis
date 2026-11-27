@@ -13,7 +13,7 @@ import { KeyboardController } from "react-native-keyboard-controller";
 import { UserAvatar } from "../UserAvatar";
 import { Icon } from "../icons";
 import { fonts, semantic, type as ty, typeSize } from "../../theme/tokens";
-import { MessageBodyInline } from "./MessageBody";
+import { MessageBodyText } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator, receiptLabel } from "./ReceiptIndicator";
 import { MessageAttachments } from "./MessageAttachments";
@@ -23,6 +23,7 @@ import { UnsentActions } from "./UnsentActions";
 import { Tag } from "../Tag";
 import { BotBadge } from "../BotBadge";
 import { findMentions } from "../../lib/mentions";
+import { scanText, stripFormatting } from "../../../design/messageFormat.ts";
 import {
   LONG_PRESS_MS,
   PRESS_FEEDBACK,
@@ -160,7 +161,8 @@ export function MessageRow({
     if (!text || !mentionNames) {
       return false;
     }
-    return findMentions(text).some(
+    // Where the body draws a mention (#2142): inside formatting, never in a code block.
+    return findMentions(scanText(text)).some(
       (m) =>
         mentionNames.has(m.name) &&
         (m.name === "all" || (!!selfName && m.name === selfName)),
@@ -213,7 +215,7 @@ export function MessageRow({
     : [];
   const isReply = replyTo !== undefined;
   const linkActions = useMemo(
-    () => linkA11yActions(text, (host) => t("mobile:link.openLabel", { host })),
+    () => linkA11yActions(scanText(text ?? ""), (host) => t("mobile:link.openLabel", { host })),
     [text, t],
   );
   const a11yActions = [
@@ -240,7 +242,8 @@ export function MessageRow({
       ? t("message.beforeJoin")
       : t("message.undecryptable.title");
   const deletedText = deleted ? t("message.deleted") : null;
-  const spokenText = deletedText ?? text;
+  // Spoken without the formatting markers (#2142).
+  const spokenText = deletedText ?? (text ? stripFormatting(text) : text);
   const quoteLabel = isReply
     ? `${t("mobile:chat.replyQuoteLabel", { name: replyTo?.name ?? "", text: quoteText })}. `
     : "";
@@ -408,20 +411,21 @@ export function MessageRow({
                 {deletedText}
               </Text>
             ) : text ? (
-              <Text style={[ty.body, { color: semantic.text }]}>
-                <MessageBodyInline
-                  text={text}
-                  mentionNames={mentionNames}
-                  selfName={selfName}
-                  mentionLabels={mentionLabels}
-                  botMentions={botMentions}
-                />
-                {edited ? (
-                  <Text style={ty.meta} testID={editUnsent ? "text-edit-unsent" : undefined}>
-                    {`  ${editUnsent ? t("message.editUnsent") : t("message.edited")}`}
-                  </Text>
-                ) : null}
-              </Text>
+              <MessageBodyText
+                style={[ty.body, { color: semantic.text }]}
+                text={text}
+                mentionNames={mentionNames}
+                selfName={selfName}
+                mentionLabels={mentionLabels}
+                botMentions={botMentions}
+                trailing={
+                  edited ? (
+                    <Text style={ty.meta} testID={editUnsent ? "text-edit-unsent" : undefined}>
+                      {`  ${editUnsent ? t("message.editUnsent") : t("message.edited")}`}
+                    </Text>
+                  ) : null
+                }
+              />
             ) : null}
             {!deletedText && text && linkPreview ? (
               <MessageLinkPreview text={text} preview={linkPreview} onLongPress={onLongPressTouch} />

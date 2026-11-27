@@ -42,7 +42,8 @@ mobile/stores/*                                gate
 mobile/hooks/queries/*                         gate
 mobile/lib/native/*                            gate
 mobile/lib/session/*                           gate auth
-design/*                                       theme-startup theme-live-switch profile-prefs tour
+design/theme.ts                                theme-startup theme-live-switch profile-prefs tour
+design/messageFormat*                          message-formatting messaging pins
 mobile/theme/*                                 theme-startup theme-live-switch profile-prefs tour
 mobile/components/theme.tsx                    theme-startup theme-live-switch profile-prefs
 mobile/components/ThemeProbe.tsx               theme-startup theme-live-switch
@@ -73,7 +74,7 @@ mobile/app/self/aliases.tsx                    group-aliases
 
 # --- conversations ---
 mobile/app/chat/*                              messaging reply outbox composer-draft composer-double-send long-history message-links message-actions-keyboard rapid-send channel-menu reaction-layout
-mobile/components/chat/*                       messaging reply outbox composer-attachments composer-draft composer-double-send message-links message-actions-keyboard message-media-grid sensitive-media pins pinned-links channel-menu
+mobile/components/chat/*                       messaging reply outbox composer-attachments composer-draft composer-double-send message-links message-actions-keyboard message-media-grid sensitive-media pins pinned-links channel-menu message-formatting
 mobile/components/chat/*Link*                  link-previews message-links
 mobile/components/chat/ReplyBar.tsx            reply
 mobile/components/chat/SwipeToReply.tsx        reply
@@ -95,7 +96,7 @@ mobile/lib/linkPreview*                        link-previews pinned-links
 mobile/lib/replyPreview*                       reply
 mobile/lib/swipeReply*                         reply
 mobile/lib/mentions*                           messaging
-mobile/app/conversation/*                      pins pinned-links channel-menu
+mobile/app/conversation/*                      pins pinned-links channel-menu message-formatting
 mobile/lib/pins.ts                             pins pinned-links
 mobile/hooks/useMessageBodyContext.ts          messaging message-links pinned-links
 mobile/lib/messageJump*                        pins search
@@ -122,7 +123,7 @@ mobile/hooks/useVideoPoster.ts                 composer-attachments
 
 # --- Vault ---
 mobile/app/vault.tsx                           vault vault-media-instant vault-swipe vault-retry theme-live-switch
-mobile/components/vault/*                      vault vault-media-instant vault-swipe vault-retry
+mobile/components/vault/*                      vault vault-media-instant vault-swipe vault-retry message-formatting
 mobile/lib/vault*                              vault vault-retry
 mobile/hooks/queries/useVault.ts               vault vault-retry
 # #2100: share into Pollis. The Android share itself runs by hand (scripts/maestro-share.sh, like
