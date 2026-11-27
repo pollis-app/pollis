@@ -1,0 +1,82 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# GROUP HEADER STAYS PUT (#2132) — desktop pins each group's header in the
+# sidebar while its channels scroll. Mobile shows one group at a time (the
+# pills pick it), and the panel's header — name, member count, Edit, "+",
+# invite — sits above the channel list's scroll view, so it never scrolls
+# away. This proves it: a group with more channels than fit, scrolled to the
+# bottom, still shows its header with working controls. Self-contained: makes
+# its own group. Runs on phones and the iPad (where the panel is the persistent
+# left column of the two-pane).
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Pinned Header"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Pinned Header"
+
+# More channels than the tallest screen (iPad Pro 13-inch) holds.
+- evalScript: ${output.n = 0}
+- repeat:
+    times: 28
+    commands:
+      - evalScript: ${output.n = output.n + 1}
+      - tapOn:
+          id: "btn-create-channel"
+      - tapOn:
+          id: "input-channel-name"
+      - inputText: "pinned-${output.n}"
+      - tapOn:
+          id: "btn-create-channel-submit"
+      - extendedWaitUntil:
+          visible:
+            id: "screen-chat"
+          timeout: 30000
+      - runFlow: ../subflows/back-on-phone.yaml
+      - extendedWaitUntil:
+          visible:
+            id: "btn-group-menu"
+          timeout: 15000
+- takeScreenshot: pinned-header-01-top
+
+# Scroll the channel list to its end (swipes start mid-panel, which is the
+# list: on the iPad the right pane is the open chat): the header is still there.
+- repeat:
+    times: 4
+    commands:
+      - swipe:
+          from:
+            id: "panel-group"
+          direction: UP
+- assertVisible:
+    id: "row-group-settings"
+- assertNotVisible: "General"
+- assertVisible:
+    id: "btn-group-menu"
+    text: "E2E Pinned Header, .*"
+- assertVisible:
+    id: "btn-create-channel"
+- assertVisible:
+    id: "row-group-invite"
+- takeScreenshot: pinned-header-02-scrolled
+
+# Its controls work from there: the group menu opens.
+- tapOn:
+    id: "btn-group-menu"
+- assertVisible:
+    id: "sheet-group-menu"
+- takeScreenshot: pinned-header-03-menu
