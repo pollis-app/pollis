@@ -6,9 +6,7 @@ import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { MessageBody } from "./MessageBody";
-import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
-import { MessageLinkPreview } from "./MessageLinkPreview";
-import { matchPreviewLink } from "../../utils/linkPreview";
+import { MessageUnfurls } from "./MessageUnfurls";
 import { getUsernameColor, getUsernameChipColor } from "../../utils/usernameColor";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
@@ -151,12 +149,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const content = isDeleted
     ? t("message.deleted")
     : (message.content_decrypted ?? t("message.undecryptable.body_one"));
-
-  // A sender's preview (#1987): Modern look only, never in an unaccepted request, only for a body link.
-  const previewLink =
-    !isDeleted && skin === "modern" && ctx.linkPreviews
-      ? matchPreviewLink(content, message.link_preview)
-      : null;
 
   const isVisualMedia = (ct: string) =>
     ct.startsWith("image/") || ct.startsWith("video/");
@@ -326,12 +318,8 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             />
           </div>
 
-          {previewLink && (
-            <MessageLinkPreview text={content} preview={message.link_preview} />
-          )}
-
           {!isDeleted && (
-            <MediaLinkUnfurl text={content} exceptHref={previewLink?.href ?? null} />
+            <MessageUnfurls text={content} preview={message.link_preview} ctx={ctx} />
           )}
 
           {attachmentBlocks}
@@ -438,7 +426,9 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             </span>
           </div>
 
-          {!isDeleted && <MediaLinkUnfurl text={content} />}
+          {!isDeleted && (
+            <MessageUnfurls text={content} preview={message.link_preview} ctx={ctx} />
+          )}
 
           {attachmentBlocks}
 

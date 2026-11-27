@@ -407,6 +407,7 @@ test.describe("shipped locales", () => {
       "am",
       "yo",
       "zu",
+      "fa",
     ]);
   });
 
@@ -433,7 +434,7 @@ test.describe("shipped locales", () => {
 
       await expect(page.getByTestId("language-page-heading")).toHaveText(heading);
       await expect(page.locator("html")).toHaveAttribute("lang", code);
-      // Direction travels with the language (rtl: Arabic, Urdu, Shahmukhi Punjabi, Pashto).
+      // Direction travels with the language (rtl: Arabic, Urdu, Shahmukhi Punjabi, Pashto, Persian).
       await expect(page.locator("html")).toHaveAttribute("dir", dir);
       // A locale that silently half-loaded would leak raw keys somewhere.
       expect(await rawKeyLeaks(page)).toEqual([]);

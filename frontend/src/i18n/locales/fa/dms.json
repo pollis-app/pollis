@@ -1,0 +1,81 @@
+{
+  "list": {
+    "newMessage": "پیام جدید",
+    "requests": "درخواست‌ها",
+    "blocked": "کاربران مسدود",
+    "avatarAlt": "تصویر نمایه {{name}}",
+    "settingsFor": "تنظیمات {{name}}",
+    "verified": "مخاطب تأییدشده",
+    "keyChanged": "کلید هویت تغییر کرد — دوباره تأیید کنید"
+  },
+  "conversation": {
+    "fallbackTitle": "پیام مستقیم",
+    "viewProfile": "مشاهده نمایه @{{name}}",
+    "call": "تماس با @{{name}}",
+    "returnToCall": "بازگشت به تماس با @{{name}}",
+    "pinsLabel": "پیام‌های سنجاق‌شده"
+  },
+  "settings": {
+    "pageTitle": "تنظیمات گفتگو",
+    "leave": "ترک گفتگو",
+    "leaveQuestion": "گفتگوی خود با <strong>{{name}}</strong> را ترک می‌کنید؟",
+    "leaveQuestionUnnamed": "این گفتگو را ترک می‌کنید؟",
+    "leaveConsequence": "دیگر پیام‌های جدید آن را دریافت نخواهید کرد.",
+    "submitting": "در حال ترک…",
+    "leaveFailed": "ترک گفتگو ناموفق بود",
+    "cancel": "لغو (Esc)"
+  },
+  "start": {
+    "pageTitle": "پیام جدید",
+    "identifierLabel": "نام کاربری یا ایمیل",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "شروع گفتگو",
+    "submitting": "در حال شروع…",
+    "identifierRequired": "شناسه کاربر الزامی است",
+    "userNotFound": "کاربر پیدا نشد",
+    "startFailed": "شروع گفتگو ناموفق بود"
+  },
+  "requests": {
+    "pageTitle": "درخواست‌های پیام",
+    "empty": "هیچ درخواست در انتظاری وجود ندارد.",
+    "noMessageYet": "(هنوز پیامی نیست)",
+    "unknownSender": "ناشناس",
+    "others_one": "(+{{count}} نفر دیگر)",
+    "others_other": "(+{{count}} نفر دیگر)",
+    "accept": "پذیرفتن",
+    "block": "مسدود کردن"
+  },
+  "blocked": {
+    "pageTitle": "کاربران مسدود",
+    "empty": "هیچ کاربر مسدودی وجود ندارد.",
+    "unblock": "رفع مسدودیت"
+  },
+  "profile": {
+    "fallbackName": "کاربر",
+    "fallbackTitle": "نمایه",
+    "notFound": "کاربر پیدا نشد",
+    "avatarAlt": "تصویر نمایه {{name}}",
+    "sendMessage": "ارسال پیام",
+    "block": "مسدود کردن",
+    "safetyNumber": "شماره امنیتی",
+    "statusVerified": "تأییدشده",
+    "statusChanged": "تغییر کرده — دوباره تأیید کنید",
+    "statusUnverified": "تأییدنشده",
+    "keyChangedWarning": "کلید هویت این مخاطب از آخرین باری که آن را تأیید کردید تغییر کرده است. پیش از اعتماد به آن، شماره را دوباره از راهی جدا از این برنامه (مثلاً حضوری یا در تماس) مقایسه کنید.",
+    "removeVerification": "حذف تأیید",
+    "markVerified": "علامت‌گذاری به‌عنوان تأییدشده",
+    "report": "گزارش"
+  },
+  "safety": {
+    "title": "شما و {{name}}",
+    "verify": "تأیید شماره امنیتی",
+    "headingMany": "شماره‌های امنیتی",
+    "shared": "شما و {{name}} شماره یکسانی می‌بینید. آن را حضوری یا در یک تماس مقایسه کنید تا مطمئن شوید کسی میان شما نیست.",
+    "qrLabel": "کد QR شماره امنیتی مشترک شما با {{name}}",
+    "failed": "بارگذاری شماره امنیتی ممکن نشد."
+  },
+  "notify": {
+    "requestTitle": "گفتگوی جدید",
+    "requestBody": "{{name}} گفتگویی را با شما شروع کرد"
+  }
+}

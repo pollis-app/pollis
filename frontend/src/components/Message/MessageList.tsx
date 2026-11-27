@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useNavigate } from "@tanstack/react-router";
 import { MessageItem } from "./MessageItem";
+import { useMessageRenderContext } from "./useMessageRenderContext";
 import "./messageHighlight.css";
 import "./terminalRowNarrow.css";
 import {
@@ -15,9 +16,6 @@ import {
 } from "./messageWindow";
 import { useBlockedUsers } from "../../hooks/queries";
 import { useGroupMembers, useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { useGroupAliases } from "../../hooks/queries/useGroupAliases";
-import { mentionLabels } from "../../utils/groupAlias";
-import { botHandleSet, botIdSet } from "../../utils/bots";
 import { observer } from "mobx-react-lite";
 import { formatDayDivider, toMs } from "../../utils/format";
 import { useSkin } from "../../hooks/queries/usePreferences";
@@ -33,10 +31,7 @@ import { useMessagePermalink } from "../../hooks/useMessagePermalink";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { useConversationReceipts } from "../../hooks/queries/useReceipts";
 import { useDMConversations } from "../../hooks/queries/useMessages";
-import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
-import { useBackgroundIsLight } from "../../utils/usernameColor";
 import { probeRender } from "../../utils/renderProbe";
-import type { MessageRenderContext } from "./messageRenderContext";
 import { appStore } from "../../stores/appStore";
 import { messageNavStore } from "../../stores/messageNavStore";
 import type { MessageNavAction } from "../../utils/messageNav";
@@ -186,21 +181,10 @@ export const MessageList: React.FC<MessageListProps> = observer(({
 
   // The "new" member tag (#1506): tagged for a week after `joined_at`.
   const { data: groupMembers = [] } = useGroupMembers(groupIdForNames ?? null);
-  // Per-group aliases (#2003): only inside a group; a DM shows main profiles.
-  const aliases = useGroupAliases(groupIdForNames ?? null);
-  const aliasMentionLabels = useMemo(
-    () => mentionLabels(aliases, groupMembers),
-    [aliases, groupMembers],
-  );
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
-  const namesGroup = groupIdForNames
-    ? groupsWithChannels?.find((g) => g.id === groupIdForNames)
+  const groupCreatorId = groupIdForNames
+    ? groupsWithChannels?.find((g) => g.id === groupIdForNames)?.created_by
     : undefined;
-  const groupCreatorId = namesGroup?.created_by;
-  const groupName = namesGroup?.name;
-  // Bot badges (#1182) on a bot's messages and on mentions of it.
-  const botIds = useMemo(() => botIdSet(groupMembers), [groupMembers]);
-  const botHandles = useMemo(() => botHandleSet(groupMembers), [groupMembers]);
   const newMemberJoinMs = useMemo(
     () => newMemberJoins(groupMembers, groupCreatorId),
     [groupMembers, groupCreatorId],
@@ -221,57 +205,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   }, [isDm, dmConversations, selectedConversationId]);
 
   // List-wide render inputs, subscribed once so the row memo holds (#874).
-  const isLightBg = useBackgroundIsLight();
   const currentUser = appStore.currentUser;
-  const mentionCandidates = useMentionCandidates();
-  const selfName = currentUser?.username?.toLowerCase();
-  const mentionNames = useMemo(() => {
-    const set = new Set<string>(["all"]);
-    for (const c of mentionCandidates) {
-      set.add(c.username.toLowerCase());
-    }
-    if (selfName) {
-      set.add(selfName);
-    }
-    return set;
-  }, [mentionCandidates, selfName]);
-  // A quoted original from before this user joined never reaches them (`utils/replyQuote.ts`).
-  const viewerJoinedAtMs = useMemo(() => {
-    const me = groupMembers.find((m) => m.user_id === currentUser?.id);
-    const ms = me ? Date.parse(me.joined_at) : NaN;
-    return Number.isFinite(ms) ? ms : null;
-  }, [groupMembers, currentUser?.id]);
-
-  const renderCtx = useMemo<MessageRenderContext>(
-    () => ({
-      skin,
-      isLightBg,
-      currentUserId: currentUser?.id,
-      mentionNames,
-      selfName,
-      viewerJoinedAtMs,
-      linkPreviews,
-      aliases,
-      mentionLabels: aliasMentionLabels,
-      botIds,
-      botHandles,
-      groupName,
-    }),
-    [
-      skin,
-      isLightBg,
-      currentUser?.id,
-      mentionNames,
-      selfName,
-      viewerJoinedAtMs,
-      linkPreviews,
-      aliases,
-      aliasMentionLabels,
-      botIds,
-      botHandles,
-      groupName,
-    ],
-  );
+  const renderCtx = useMessageRenderContext(groupIdForNames ?? null, linkPreviews);
 
   // One tick per DM (#1637), on the newest own message with a receipt. A window
   // anchored on older history (`hasNewer`) does not hold that message, so none.

@@ -1,0 +1,215 @@
+{
+  "sidebar": {
+    "groups": "گروه‌ها",
+    "dms": "پیام‌های مستقیم",
+    "account": "حساب",
+    "saved": "پیام‌های ذخیره‌شده",
+    "preferences": "ترجیحات",
+    "language": "زبان",
+    "profile": "نمایه",
+    "voiceAndVideo": "صدا و تصویر",
+    "security": "امنیت",
+    "keyBindings": "میانبرهای صفحه‌کلید",
+    "softwareUpdate": "به‌روزرسانی نرم‌افزار",
+    "expandGroup": "باز کردن {{name}}",
+    "collapseGroup": "جمع کردن {{name}}",
+    "keyChanged": "کلید هویت تغییر کرد — دوباره تأیید کنید",
+    "verified": "مخاطب تأییدشده",
+    "dmAvatarAlt": "تصویر نمایه {{name}}",
+    "close": "بستن نوار کناری ({{shortcut}})",
+    "resize": "تغییر اندازه نوار کناری (بکشید؛ برای بازنشانی دوبار کلیک کنید)",
+    "searchMessages": "جستجوی پیام‌ها",
+    "vault": "گاوصندوق",
+    "securityEvents": "رویدادهای امنیتی",
+    "copyHistory": "کپی تاریخچه"
+  },
+  "profile": {
+    "you": "شما",
+    "call": "تماس",
+    "voice": "صدا",
+    "voiceConnected": "صدا متصل است",
+    "stopScreenShare": "توقف اشتراک‌گذاری صفحه",
+    "shareScreen": "اشتراک‌گذاری صفحه",
+    "disconnect": "قطع اتصال"
+  },
+  "breadcrumb": {
+    "home": "خانه",
+    "groups": "گروه‌ها",
+    "createGroup": "ایجاد گروه",
+    "findGroup": "یافتن گروه",
+    "newChannel": "کانال جدید",
+    "voice": "صوتی",
+    "joinRequests": "درخواست‌های عضویت",
+    "inviteMember": "دعوت عضو",
+    "leaveGroup": "ترک گروه",
+    "members": "اعضا",
+    "removeMember": "حذف عضو",
+    "bots": "ربات‌ها",
+    "addBot": "افزودن ربات",
+    "bot": "ربات",
+    "addBotHost": "افزودن میزبان",
+    "deleteBot": "حذف ربات",
+    "newMessage": "پیام جدید",
+    "requests": "درخواست‌ها",
+    "blockedUsers": "کاربران مسدودشده",
+    "conversationSettings": "تنظیمات گفتگو",
+    "account": "حساب",
+    "preferences": "ترجیحات",
+    "language": "زبان",
+    "profile": "نمایه",
+    "security": "امنیت",
+    "voiceSettings": "صدا",
+    "invites": "دعوت‌ها",
+    "joinAGroup": "پیوستن به گروه",
+    "search": "جستجو",
+    "searchButton": "جستجو ({{shortcut}})",
+    "settings": "تنظیمات",
+    "securityEvents": "رویدادهای امنیتی",
+    "copyHistory": "کپی تاریخچه پیام‌ها",
+    "historyRequest": "درخواست تاریخچه"
+  },
+  "statusBar": {
+    "groupsUnread_one": "پیام‌های خوانده‌نشده گروه: {{count}}",
+    "groupsUnread_other": "پیام‌های خوانده‌نشده گروه: {{count}}",
+    "dmsUnread_one": "پیام‌های مستقیم خوانده‌نشده: {{count}}",
+    "dmsUnread_other": "پیام‌های مستقیم خوانده‌نشده: {{count}}",
+    "joinRequests_one": "درخواست‌های عضویت در انتظار: {{count}}",
+    "joinRequests_other": "درخواست‌های عضویت در انتظار: {{count}}",
+    "invites_one": "دعوت‌های در انتظار: {{count}}",
+    "invites_other": "دعوت‌های در انتظار: {{count}}",
+    "someone": "کسی",
+    "updateAvailable": "به‌روزرسانی در دسترس است",
+    "updateAvailableTitle": "به‌روزرسانی در دسترس است: {{version}}",
+    "answerCall": "پاسخ به تماس از طرف @{{username}}",
+    "declineCall": "رد تماس",
+    "dismissVoiceError": "بستن خطای صدا",
+    "dismissScreenShareError": "بستن خطای اشتراک‌گذاری صفحه",
+    "dismissCameraError": "بستن خطای دوربین",
+    "syncing": "در حال همگام‌سازی…"
+  },
+  "shell": {
+    "dropFiles": "برای ارسال، فایل‌ها را رها کنید",
+    "voiceChannelFallback": "صوتی",
+    "callChannel": "تماس"
+  },
+  "panel": {
+    "thread": "رشته",
+    "details": "جزئیات",
+    "chat": "گفتگو",
+    "ariaLabel": "جزئیات گفتگو",
+    "closeThread": "بستن پنل رشته ({{shortcut}})",
+    "closeDetails": "بستن پنل جزئیات ({{shortcut}})",
+    "closeChat": "بستن پنل گفتگو ({{shortcut}})",
+    "resize": "تغییر اندازه پنل جزئیات (بکشید؛ برای بازنشانی دوبار کلیک کنید)"
+  },
+  "members": {
+    "count_one": "اعضا — {{count}}",
+    "count_other": "اعضا — {{count}}",
+    "onlineCount_one": "آنلاین — {{count}}",
+    "onlineCount_other": "آنلاین — {{count}}",
+    "empty": "عضوی برای نمایش وجود ندارد.",
+    "noneOnline": "کسی آنلاین نیست.",
+    "you": "شما",
+    "admin": "مدیر"
+  },
+  "media": {
+    "heading": "رسانه",
+    "empty": "هنوز رسانه‌ای به اشتراک گذاشته نشده است."
+  },
+  "thread": {
+    "loading": "در حال بارگذاری پاسخ‌ها…",
+    "empty": "هنوز پاسخی نیست. رشته را از پایین شروع کنید.",
+    "placeholder": "پاسخ در رشته…"
+  },
+  "chat": {
+    "noSelection": "برای شروع پیام‌رسانی یک کانال انتخاب کنید"
+  },
+  "dmRequest": {
+    "heading": "درخواست پیام",
+    "body": "<name>{{name}}</name> می‌خواهد به شما پیام بفرستد.",
+    "accept": "پذیرفتن",
+    "accepting": "در حال پذیرفتن…",
+    "block": "مسدود کردن",
+    "blocking": "در حال مسدود کردن…"
+  },
+  "editBar": {
+    "heading": "ویرایش پیام",
+    "cancel": "لغو ویرایش",
+    "hint": "Enter برای ذخیره · Shift+Enter برای خط جدید · Esc برای لغو"
+  },
+  "deleteChannel": {
+    "heading": "حذف کانال",
+    "cancel": "لغو حذف",
+    "body": "این کانال و همه پیام‌های آن برای همیشه حذف می‌شوند. این کار برگشت‌پذیر نیست.",
+    "deleting": "در حال حذف…"
+  },
+  "deleteMessage": {
+    "heading": "حذف پیام",
+    "moderateHeading": "حذف پیام (مدیر)",
+    "body": "این پیام برای همه حذف می‌شود، از جمله کسانی که قبلاً آن را دریافت کرده‌اند.",
+    "moderateBody": "این پیام و پیوست‌های آن برای همه افراد کانال حذف می‌شوند.",
+    "cancel": "لغو حذف",
+    "deleting": "در حال حذف…",
+    "remove": "حذف"
+  },
+  "update": {
+    "preparing": "در حال آماده‌سازی به‌روزرسانی…",
+    "checking": "در حال بررسی به‌روزرسانی‌ها…",
+    "downloading": "در حال دانلود به‌روزرسانی…",
+    "downloadingProgress": "در حال دانلود به‌روزرسانی… {{progress}}%",
+    "installing": "در حال نصب به‌روزرسانی…",
+    "relaunching": "در حال اجرای دوباره…",
+    "failed": "به‌روزرسانی ناموفق بود: {{error}}",
+    "tryAgain": "دوباره تلاش کنید",
+    "continueWithout": "ادامه بدون به‌روزرسانی",
+    "readOnlyDiskImage": "Pollis از روی disk image اجرا می‌شود که فقط‌خواندنی است. از Pollis خارج شوید، آن را به Applications بکشید، disk image را بیرون بیاورید و Pollis را از Applications باز کنید.",
+    "readOnlyTranslocated": "macOS در حال اجرای Pollis از یک مکان موقت فقط‌خواندنی است. از Pollis خارج شوید، با Finder آن را از Applications بیرون ببرید و دوباره برگردانید، سپس دوباره بازش کنید.",
+    "readOnlyTranslocatedHealed": "macOS در حال اجرای Pollis از یک مکان موقت فقط‌خواندنی بود که از یک به‌روزرسانی قبلی باقی مانده بود. این مشکل برطرف شد. از Pollis خارج شوید و دوباره آن را از Applications باز کنید.",
+    "readOnlyGeneric": "Pollis نمی‌تواند خودش را به‌روزرسانی کند، چون مکان آن فقط‌خواندنی است. از Pollis خارج شوید، مطمئن شوید در پوشه Applications قرار دارد (با Finder به آنجا منتقل شده باشد)، و دوباره بازش کنید."
+  },
+  "clientBlocked": {
+    "title": "به‌روزرسانی لازم است",
+    "body": "این نسخه از Pollis دیگر پشتیبانی نمی‌شود. برای ادامه استفاده، آن را به‌روزرسانی کنید. پیام‌ها و تنظیمات شما روی این دستگاه باقی می‌مانند.",
+    "versions": "نصب‌شده {{version}} · لازم {{minimum}} یا جدیدتر",
+    "installed": "نصب‌شده {{version}}",
+    "updateNow": "به‌روزرسانی اکنون",
+    "updating": "در حال به‌روزرسانی…",
+    "download": "دانلود آخرین نسخه",
+    "updateFailed": "به‌روزرسانی کامل نشد. به‌جای آن آخرین نسخه را دانلود کنید.",
+    "packageManager": "Pollis با {{source}} نصب شده است. آن را از همان‌جا به‌روزرسانی کنید:",
+    "openAppStore": "باز کردن App Store",
+    "openPlay": "باز کردن Google Play",
+    "openTestflight": "باز کردن TestFlight",
+    "openWebsite": "باز کردن pollis.com",
+    "openFailed": "پیوند باز نشد. به {{url}} بروید",
+    "retry": "بررسی دوباره",
+    "checking": "در حال بررسی…"
+  },
+  "home": {
+    "groups": "گروه‌ها",
+    "groupsDescription": "انجمن‌ها، سازمان‌ها، تیم‌ها و گفتگوهای گروهی بیش از حد جاه‌طلبانه",
+    "dmsDescription": "گفتگوهای خصوصی با رمزگذاری سرتاسری با افراد",
+    "invites": "دعوت‌ها",
+    "noPendingInvites": "دعوت در انتظاری وجود ندارد",
+    "pending_one": "{{count}} در انتظار",
+    "pending_other": "{{count}} در انتظار",
+    "join": "پیوستن به گروه",
+    "joinDescription": "استفاده از پیوند دعوت یا کد عضویت",
+    "joinRequests": "درخواست‌های عضویت",
+    "logout": "خروج از حساب",
+    "exit": "خروج"
+  },
+  "titleBar": {
+    "minimize": "کوچک کردن",
+    "maximize": "بزرگ کردن"
+  },
+  "terminal": {
+    "shellFailed": "راه‌اندازی shell ناموفق بود: {{error}}"
+  },
+  "pins": {
+    "heading": "سنجاق‌شده",
+    "empty": "هنوز پیام سنجاق‌شده‌ای نیست.",
+    "unavailable": "سنجاق‌ها هنوز روی این دستگاه در دسترس نیستند — پس از همگام‌سازی گفتگو نمایش داده می‌شوند.",
+    "unpin": "برداشتن سنجاق"
+  }
+}

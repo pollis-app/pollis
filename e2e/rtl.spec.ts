@@ -1,4 +1,4 @@
-// RTL layout (#855), both skins, real `ar` locale: every assertion measures pixels, never `dir`, and pins LTR too.
+// RTL layout (#855), both skins, real `ar` locale (or RTL_LOCALE): every assertion measures pixels, never `dir`, and pins LTR too.
 
 import { test, expect, type Locator, type Page } from "./lib/zero-loss";
 
@@ -16,8 +16,8 @@ const LATIN_TEXT = "shipping notes for the london office";
 // unambiguous first strong character to resolve on.
 const ARABIC_TEXT = "ملاحظات الشحن لمكتب لندن";
 
-/** The shipped RTL locale; `languages.ts` carries `dir: "rtl"` for it. */
-const RTL_LANG = "ar";
+/** A shipped RTL locale (`dir: "rtl"` in `languages.ts`); RTL_LOCALE=fa runs the same pixels under another one. */
+const RTL_LANG = process.env.RTL_LOCALE ?? "ar";
 const LTR_LANG = "en";
 
 const SKINS = ["terminal", "modern"] as const;

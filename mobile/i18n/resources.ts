@@ -82,6 +82,21 @@ import es_search from "../../frontend/src/i18n/locales/es/search.json";
 import es_settings from "../../frontend/src/i18n/locales/es/settings.json";
 import es_vault from "../../frontend/src/i18n/locales/es/vault.json";
 import es_voice from "../../frontend/src/i18n/locales/es/voice.json";
+import fa_arcade from "../../frontend/src/i18n/locales/fa/arcade.json";
+import fa_auth from "../../frontend/src/i18n/locales/fa/auth.json";
+import fa_channels from "../../frontend/src/i18n/locales/fa/channels.json";
+import fa_chat from "../../frontend/src/i18n/locales/fa/chat.json";
+import fa_common from "../../frontend/src/i18n/locales/fa/common.json";
+import fa_dms from "../../frontend/src/i18n/locales/fa/dms.json";
+import fa_emoji from "../../frontend/src/i18n/locales/fa/emoji.json";
+import fa_errors from "../../frontend/src/i18n/locales/fa/errors.json";
+import fa_mobile from "../../frontend/src/i18n/locales/fa/mobile.json";
+import fa_nav from "../../frontend/src/i18n/locales/fa/nav.json";
+import fa_saved from "../../frontend/src/i18n/locales/fa/saved.json";
+import fa_search from "../../frontend/src/i18n/locales/fa/search.json";
+import fa_settings from "../../frontend/src/i18n/locales/fa/settings.json";
+import fa_vault from "../../frontend/src/i18n/locales/fa/vault.json";
+import fa_voice from "../../frontend/src/i18n/locales/fa/voice.json";
 import fr_arcade from "../../frontend/src/i18n/locales/fr/arcade.json";
 import fr_auth from "../../frontend/src/i18n/locales/fr/auth.json";
 import fr_channels from "../../frontend/src/i18n/locales/fr/channels.json";
@@ -455,6 +470,23 @@ export const RESOURCES: Record<string, Record<string, Catalogue>> = {
     "settings": es_settings,
     "vault": es_vault,
     "voice": es_voice,
+  },
+  "fa": {
+    "arcade": fa_arcade,
+    "auth": fa_auth,
+    "channels": fa_channels,
+    "chat": fa_chat,
+    "common": fa_common,
+    "dms": fa_dms,
+    "emoji": fa_emoji,
+    "errors": fa_errors,
+    "mobile": fa_mobile,
+    "nav": fa_nav,
+    "saved": fa_saved,
+    "search": fa_search,
+    "settings": fa_settings,
+    "vault": fa_vault,
+    "voice": fa_voice,
   },
   "fr": {
     "arcade": fr_arcade,

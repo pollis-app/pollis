@@ -37,6 +37,7 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { code: "am", label: "አማርኛ", dir: "ltr" },
   { code: "yo", label: "Èdè Yorùbá", dir: "ltr" },
   { code: "zu", label: "isiZulu", dir: "ltr" },
+  { code: "fa", label: "فارسی", dir: "rtl" },
 ];
 
 export function supportedLanguageCodes(): string[] {
@@ -60,7 +61,7 @@ export function usesNastaliq(language: string | null | undefined): boolean {
 }
 
 // Arabic-script and Indic languages, where Latin tracking breaks joins or pulls clusters apart (#1726).
-const UNTRACKED_LANGUAGES: readonly string[] = ["ar", "ur", "pa-Arab", "ps", "hi", "mr", "bn", "te", "ta", "pa-Guru"];
+const UNTRACKED_LANGUAGES: readonly string[] = ["ar", "ur", "pa-Arab", "ps", "fa", "hi", "mr", "bn", "te", "ta", "pa-Guru"];
 
 /** True when type should drop its letter-spacing; the desktop twin is the `:lang()` rule in frontend/src/index.css. */
 export function dropsLetterSpacing(language: string | null | undefined): boolean {
