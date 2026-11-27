@@ -1,7 +1,8 @@
 import { errorMessage } from "../utils/errorMessage";
 import React from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useDMConversations, useLeaveDM } from "../hooks/queries/useMessages";
@@ -13,7 +14,7 @@ import { ExportArchiveButton } from "../components/Security/ExportArchiveButton"
 /** Conversation settings: export it, or leave it (the page's one confirmation, #1968). */
 export const DMSettingsPage: React.FC = observer(() => {
   const { t } = useTranslation("dms");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { conversationId } = useParams({ from: "/dms/$conversationId/settings" });
   const { setSelectedConversationId } = appStore;
   const leaveDMMutation = useLeaveDM();
@@ -56,7 +57,7 @@ export const DMSettingsPage: React.FC = observer(() => {
             try {
               await leaveDMMutation.mutateAsync(conversationId);
               setSelectedConversationId(null);
-              navigate({ to: "/" });
+              finish({ to: "/" });
             } catch {
               // error shown via isError above
             }
@@ -67,7 +68,7 @@ export const DMSettingsPage: React.FC = observer(() => {
             activateOn: "press",
             // Export keeps the page's first focus, as before; the action never takes it.
             autoFocus: false,
-            onClick: () => navigate({ to: "/dms/$conversationId", params: { conversationId } }),
+            onClick: () => finish({ to: "/dms/$conversationId", params: { conversationId } }),
           }}
         />
       </PageColumn>

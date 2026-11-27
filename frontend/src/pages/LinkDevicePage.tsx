@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { observer } from "mobx-react-lite";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
@@ -28,7 +28,7 @@ type Step =
 
 export const LinkDevicePage: React.FC = observer(() => {
   const { t } = useTranslation("settings");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const userId = appStore.currentUser?.id ?? null;
   const [step, setStep] = useState<Step>({ kind: "pin" });
   const [pin, setPin] = useState("");
@@ -89,7 +89,7 @@ export const LinkDevicePage: React.FC = observer(() => {
     if (step.kind === "code") {
       await api.cancelDeviceLink(step.handle.link_id).catch(() => undefined);
     }
-    navigate({ to: "/security" });
+    finish({ to: "/security" });
   };
 
   const restart = () => {
@@ -136,7 +136,7 @@ export const LinkDevicePage: React.FC = observer(() => {
           />
           {pinError && <p className="text-body text-danger" data-testid="link-device-pin-error">{pinError}</p>}
         </div>
-        <FormActions cancel={{ onClick: () => navigate({ to: "/security" }) }} />
+        <FormActions cancel={{ onClick: () => finish({ to: "/security" }) }} />
       </>
     );
   } else if (step.kind === "linked") {
@@ -146,7 +146,7 @@ export const LinkDevicePage: React.FC = observer(() => {
         {/* #1735: the new device may ask for this one's message history right away. */}
         <LinkedHistoryRequest deviceId={step.deviceId} deviceName={step.name} />
         <FormActions>
-          <Button onClick={() => navigate({ to: "/security" })}>{t("linkDevice.done")}</Button>
+          <Button onClick={() => finish({ to: "/security" })}>{t("linkDevice.done")}</Button>
         </FormActions>
       </>
     );

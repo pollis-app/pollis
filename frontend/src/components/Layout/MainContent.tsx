@@ -29,6 +29,7 @@ import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups
 import type { Message, MessageAttachment } from "../../types";
 import { outgoingAttachments, releaseStaged, type OutgoingAttachment } from "../../utils/attachmentEnvelope";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
+import { useFinishFlow } from "../../hooks/useFinishFlow";
 import { messageNavStore } from "../../stores/messageNavStore";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { TypingIndicator } from "../TypingIndicator";
@@ -122,6 +123,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   const acceptDmRequestMutation = useAcceptDMRequest();
   const blockUserMutation = useBlockUser();
   const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const routeSearch = useSearch({ strict: false }) as { message?: string };
   const deleteChannelMutation = useDeleteChannel();
   const isDeletingThisChannel =
@@ -542,7 +544,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         channelId: selectedChannelId,
       });
       setPendingDeleteChannelId(null);
-      navigate({ to: "/groups/$groupId", params: { groupId: selectedGroupId } });
+      finish({ to: "/groups/$groupId", params: { groupId: selectedGroupId } });
     } catch (error) {
       console.error("Failed to delete channel:", error);
     }

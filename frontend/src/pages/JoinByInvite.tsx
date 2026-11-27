@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { PageColumn } from "../components/ui/PageColumn";
@@ -22,7 +22,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
 }) => {
   const { t } = useTranslation("channels");
   const skin = useSkin();
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const [token, setToken] = useState(initialToken);
   const [error, setError] = useState<string | null>(null);
   const redeemMutation = useRedeemGroupInviteLink();
@@ -41,12 +41,12 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
       setError(null);
       try {
         const result = await redeemMutation.mutateAsync({ token: trimmed });
-        navigate({ to: "/groups/$groupId", params: { groupId: result.group_id } });
+        finish({ to: "/groups/$groupId", params: { groupId: result.group_id } });
       } catch (err) {
         setError(errorMessage(err));
       }
     },
-    [navigate, redeemMutation]
+    [finish, redeemMutation]
   );
 
   // #1094: a deep link never redeems on arrival; joining discloses your identity, so it takes a press.

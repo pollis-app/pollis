@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
 import { PageColumn } from "../components/ui/PageColumn";
@@ -16,7 +17,7 @@ import {
 /** #1735: the source device's page for one history request: approve (with the PIN when asked), then its progress. */
 export const HistoryTransferApprovalPage: React.FC = () => {
   const { t } = useTranslation("settings");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { transferId } = useParams({ from: "/security/history-transfer/$transferId" });
   const pending = usePendingHistoryTransferRequests();
   const transfers = useHistoryTransfers();
@@ -24,7 +25,7 @@ export const HistoryTransferApprovalPage: React.FC = () => {
 
   const request = pending.data?.find((r) => r.transfer_id === transferId) ?? null;
   const transfer = transfers.data?.find((tr) => tr.transfer_id === transferId) ?? null;
-  const leave = () => navigate({ to: "/security" });
+  const leave = () => finish({ to: "/security" });
 
   let body: React.ReactNode;
   if (declined) {

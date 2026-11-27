@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { observer } from "mobx-react-lite";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
@@ -16,8 +17,6 @@ const REASONS: ReportReason[] = ["spam", "harassment", "illegal", "other"];
 /** Report a user (#1213): account, reason and message ids; never the text. */
 export const ReportPage: React.FC = observer(() => {
   const { t } = useTranslation("chat");
-  const navigate = useNavigate();
-  const router = useRouter();
   const params = useParams({ strict: false }) as {
     userId: string;
     conversationId?: string;
@@ -31,13 +30,7 @@ export const ReportPage: React.FC = observer(() => {
   const name = profile?.preferred_name || (profile?.username ? `@${profile.username}` : t("report.someone"));
   const aboutMessage = !!params.messageId;
 
-  const goBack = () => {
-    if (router.history.length > 1) {
-      router.history.back();
-    } else {
-      navigate({ to: "/" });
-    }
-  };
+  const { leave: goBack } = useFinishFlow();
 
   const submit = async (alsoBlock: boolean) => {
     if (!reason) {

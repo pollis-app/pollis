@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { PageShell } from "../components/Layout/PageShell";
 import { EmptyState } from "../components/ui/EmptyState";
 import { TextInput } from "../components/ui/TextInput";
@@ -11,7 +12,7 @@ import { BOT_PAIR_COMMAND } from "../utils/bots";
 /** Add a bot (#1182): name it, run the pairing command on its machine, type the code it prints. */
 export const AddBotPage: React.FC = () => {
   const { t } = useTranslation("channels");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { groupId } = useParams({ from: "/groups/$groupId/bots/new" });
   const { group, isAdmin, isLoading } = useBotGroup(groupId);
   const createBot = useCreateBot();
@@ -21,7 +22,7 @@ export const AddBotPage: React.FC = () => {
     return null;
   }
 
-  const toBots = () => navigate({ to: "/groups/$groupId/bots", params: { groupId } });
+  const toBots = () => finish({ to: "/groups/$groupId/bots", params: { groupId } });
 
   return (
     <PageShell title={t("bots.create.pageTitle", { group: group.name })} scrollable>
@@ -39,7 +40,7 @@ export const AddBotPage: React.FC = () => {
           failedLabel={t("bots.create.failed")}
           onSubmit={async (code) => {
             const bot = await createBot.mutateAsync({ groupId, code, displayName: name.trim() });
-            navigate({ to: "/groups/$groupId/bots/$botId", params: { groupId, botId: bot.userId } });
+            finish({ to: "/groups/$groupId/bots/$botId", params: { groupId, botId: bot.userId } });
           }}
           cancel={{ testId: "add-bot-cancel", onClick: toBots }}
         >
