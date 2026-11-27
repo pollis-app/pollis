@@ -13,6 +13,7 @@ import type {
   DMConversation,
   LinkPreviewDraft,
   LinkPreviewWire,
+  Reaction,
 } from "../../types";
 import type { OutgoingAttachment } from "../../utils/attachmentEnvelope";
 import {
@@ -28,6 +29,7 @@ import {
   prefetchReactions,
   reactableIds,
   REACTIONS_REVEAL_WAIT_MS,
+  reactionQueryKeys,
   settleWithin,
 } from "./reactionPrefetch";
 
@@ -499,7 +501,17 @@ export function useSendMessage() {
         (old) => ({ ...(old ?? {}), [previewId]: confirmedMessage }),
       );
 
-      queryClient.invalidateQueries({ queryKey });
+      // A just-sent row has no reactions (#2141): seed that, so nothing reads them from the DS.
+      queryClient.setQueryData<Reaction[]>(
+        reactionQueryKeys.message(confirmedMessage.id),
+        (old) => old ?? [],
+      );
+      // The patch above is the row (#2141); re-reading the page would only repeat it. Only a
+      // refetch still in flight may have read the store before this row was written, and
+      // would put the stub back, so then read once more.
+      if (queryClient.isFetching({ queryKey }) > 0) {
+        queryClient.invalidateQueries({ queryKey });
+      }
 
       // Threaded sends (#825) also change the thread and its reply counts.
       if (variables.threadId) {

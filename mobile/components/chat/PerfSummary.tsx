@@ -15,7 +15,7 @@ export function PerfSummary() {
   return (
     <View pointerEvents="none" style={{ position: "absolute", top: 0, start: 0 }}>
       {/* Not translated: a measurement readout, not UI copy. */}
-      <Text testID="perf-summary" style={[ty.meta, { color: semantic.muted, fontSize: 8 }]}>
+      <Text testID="perf-summary" style={[ty.meta, { color: semantic.muted }]}>
         {summary}
       </Text>
     </View>

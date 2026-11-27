@@ -1,6 +1,7 @@
 // Pages are LOCAL reads; ingest runs off the render path. Cursors derive from page data, never an effect (desktop #958).
 
 import { useCallback, useMemo } from "react";
+import { reactionQueryKeys, type Reaction } from "./useReactions";
 import {
   useInfiniteQuery,
   useMutation,
@@ -491,8 +492,19 @@ export function useSendMessage(
             }
           : cache,
       );
-      // Re-read: a refetch that read the store before this row was written would drop it.
-      queryClient.invalidateQueries({ queryKey: ctx.key });
+      // A just-sent row has no reactions (#2141): seed that, so nothing reads them from the DS.
+      if (kind) {
+        queryClient.setQueriesData<Map<string, Reaction[]>>(
+          { queryKey: reactionQueryKeys.conversation(kind, conversationId) },
+          (old) => (old === undefined || old.has(settled.id) ? old : new Map(old).set(settled.id, [])),
+        );
+      }
+      // The patch above is the row (#2141); re-reading every loaded page would only repeat it.
+      // Only a refetch still in flight may have read the store before this row was written,
+      // and would put the stub back, so then read once more.
+      if (queryClient.isFetching({ queryKey: ctx.key }) > 0) {
+        queryClient.invalidateQueries({ queryKey: ctx.key });
+      }
       if (ctx.threadId) {
         queryClient.setQueryData<Message[]>(
           messageQueryKeys.thread(ctx.threadId),

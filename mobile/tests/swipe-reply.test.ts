@@ -120,7 +120,10 @@ test("the row moves on the UI thread; JS runs only when a reply fires or the arm
 test("rows reply only once settled, and every reply path is wired", () => {
   assert.match(row, /<SwipeToReply onReply=\{onReply\}[ >]/);
   assert.match(row, /name: "reply", label: t\("actions\.reply"\)/);
-  assert.match(chat, /onReply=\{settled \? \(\) => startReply\(m\) : undefined\}/);
+  // The memoised row (#2141) offers Reply only when it may act, through the screen's startReply.
+  const item = read("components/chat/MessageRowItem.tsx");
+  assert.match(item, /onReply=\{actionable \? \(\) => handlers\.onReply\(m\) : undefined\}/);
+  assert.match(chat, /onReply: \(m\) => latest\.current\.startReply\(m\)/);
   assert.match(chat, /replyToId: replyTarget\?\.id/);
   assert.match(read("components/chat/MessageActionsSheet.tsx"), /testID="btn-reply"/);
 });

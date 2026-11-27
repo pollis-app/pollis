@@ -329,7 +329,8 @@ test("every surface that names a person draws their picture", () => {
     }
   }
   assert.match(src("app/chat/thread.tsx"), /senderId=\{m\.sender_id\}/);
-  assert.match(src("app/chat/[id].tsx"), /senderAvatarKey=\{avatarKeyById\.get\(m\.sender_id\)\}/);
+  // The conversation's rows are drawn by the memoised MessageRowItem (#2141).
+  assert.match(src("components/chat/MessageRowItem.tsx"), /senderAvatarKey=\{ctx\.avatarKeyById\.get\(m\.sender_id\)\}/);
 });
 
 test("a new group's seeded roster never stands in for the creator's picture", () => {

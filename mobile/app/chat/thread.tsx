@@ -82,8 +82,9 @@ function ThreadScreen() {
   const { data: replies = [], isLoading } = useThreadMessages(threadId);
   const openMedia = useOpenMediaViewer(conversationId, kind, threadId);
   const sendMessage = useSendMessage(conversationId, kind);
-  const retryMessage = useRetryMessage(conversationId, kind, threadId);
-  const discardUnsent = useDiscardUnsent(conversationId, kind, threadId);
+  // `mutate` keeps its identity (#2141): the rows need not re-render on every keystroke.
+  const { mutate: retrySend } = useRetryMessage(conversationId, kind, threadId);
+  const { mutate: discardSend } = useDiscardUnsent(conversationId, kind, threadId);
 
   const mentionGroupId =
     kind === "channel" ? appStore.selectedGroupId ?? null : null;
@@ -197,8 +198,8 @@ function ThreadScreen() {
           pending={m.pending}
           failed={m.failed}
           unsentReason={unsentReason(m)}
-          onRetry={retryId ? () => retryMessage.mutate(retryId) : undefined}
-          onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
+          onRetry={retryId ? () => retrySend(retryId) : undefined}
+          onDiscard={m.failed ? () => discardSend(m.outboxId ?? m.id) : undefined}
           edited={!!m.edited_at}
           editUnsent={m.edit_unsent}
           continued={continued}
@@ -220,7 +221,7 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases, botSenders, botGroup, botMentions, rising, riseIn],
+    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retrySend, discardSend, aliases, botSenders, botGroup, botMentions, rising, riseIn],
   );
 
   const rootName = root

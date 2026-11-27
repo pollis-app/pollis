@@ -266,7 +266,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   const timeline: TimelineItem[] = useMemo(() => {
     const items: TimelineItem[] = sortedMessages.map((message) => ({
       kind: "message",
-      key: `msg:${message.id}`,
+      // Keyed by the core's id (#2141): a stub and the stored row it becomes are one element.
+      key: `msg:${message.outbox_id ?? message.id}`,
       ts: toMs(message.created_at),
       message,
     }));
