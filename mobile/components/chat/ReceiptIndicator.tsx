@@ -30,7 +30,11 @@ export function receiptLabel(
   return t("receipts.deliveredCount", { count: deliveredCount, total: peerCount });
 }
 
-/** Delivery/read state on an own DM message (#892): nothing until a delivery lands, so "receipts off" never leaks. */
+/**
+ * Delivery/read state on an own message in a DM with more than one other member (#892): nothing
+ * until a delivery lands, so "receipts off" never leaks. A one-to-one DM shows the read-up-to
+ * rail instead (#2140, `ReadRail.tsx`).
+ */
 export function ReceiptIndicator({
   receipts,
   peerCount,
@@ -62,13 +66,9 @@ export function ReceiptIndicator({
       ) : (
         <Icon.check size={16} color={color} />
       )}
-      {peerCount > 1 ? (
-        <Text
-          style={[ty.meta, { color }]}
-        >
-          {`${anyRead ? readCount : deliveredCount}/${peerCount}`}
-        </Text>
-      ) : null}
+      <Text style={[ty.meta, { color }]}>
+        {`${anyRead ? readCount : deliveredCount}/${peerCount}`}
+      </Text>
     </View>
   );
 }

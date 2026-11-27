@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Delivery + read receipts (#857), Modern skin: A's row shows delivered before B opens the DM, then read-all.
+// Delivery + read receipts (#857), Modern skin: A's row shows delivered before B opens the DM, then read (#2140: the status line).
 
 const fs = require("fs");
 const path = require("path");
@@ -247,7 +247,7 @@ async function main() {
       A.browser,
       token,
       ["delivered"],
-      ["read-all"],
+      ["read"],
       RECEIPT_TIMEOUT_MS,
     );
     console.log("[receipts] delivered receipt converged (B decrypted, B did not read)");
@@ -262,7 +262,7 @@ async function main() {
 
     // Step 5 — READ.
     console.log("[receipts] A: waiting for the READ tick");
-    await waitForReceiptState(A.browser, token, ["read-all"], [], RECEIPT_TIMEOUT_MS);
+    await waitForReceiptState(A.browser, token, ["read"], [], RECEIPT_TIMEOUT_MS);
     console.log(`[receipts] SUCCESS: delivered -> read converged for "${token}"`);
     await shot(A.browser, "receipts-A-read.png");
     code = 0;

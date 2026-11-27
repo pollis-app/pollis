@@ -385,12 +385,13 @@ when it shows again (`2-peer-away`); the device goes to the background and the
 peer sees it `away`, then `online` once it is back (`3-device-away`,
 `scripts/peer-presence.js`); the script stops the peer, whose session leaves the
 DM's room, and the row's dot turns hollow (`presence-offline-…`) with no reload.
-**DM receipts (automated, #1637):** `mobile/scripts/maestro-receipts.sh <device>`
+**DM receipts (automated, #1637, #2140):** `mobile/scripts/maestro-receipts.sh <device>`
 — one device plus the same `live_message_peer`, which also fetches the DM and
-marks the device's messages read when a flow asks (`scripts/peer-read.js`). Two
-messages read by the peer show ONE tick, on the newest (the row's label ends
-", Read by everyone"); the peer's reply carries none and does not move it; a
-third message read by the peer takes the tick from the second.
+marks the device's messages read when a flow asks (`scripts/peer-read.js`). Nothing
+shows until the peer reads; two messages read by the peer put the read-up-to
+avatar on the newest (the row's label ends ", <peer> has read up to here"); the
+peer's reply and an unread third message do not move it; once the peer reads the
+third, the avatar glides down to it and leaves the second.
 
 **DM order (automated, #1838):** `mobile/scripts/maestro-dm-order.sh <device>`
 — one device plus two `live_message_peer`s. The device opens a DM with peer A,

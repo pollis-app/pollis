@@ -9,6 +9,8 @@ export interface MessageReceipts {
   delivered_by: string[];
   /** Readers who saw it on screen; a subset of `delivered_by`. */
   read_by: string[];
+  /** Reader id → when they read it, the reader's own timestamp (#2140); one per `read_by` entry. */
+  read_at: Record<string, string>;
 }
 
 export const receiptQueryKeys = {

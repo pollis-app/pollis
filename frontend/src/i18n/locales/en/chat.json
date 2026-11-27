@@ -54,6 +54,10 @@
     "replyCount_other": "{{count}} replies"
   },
   "receipts": {
+    "delivered": "Delivered",
+    "read": "Read",
+    "readAt": "Read {{time}}",
+    "readUpTo": "{{name}} has read up to here",
     "readByEveryone": "Read by everyone",
     "readByCount_one": "Read by {{count}} of {{total}}",
     "readByCount_other": "Read by {{count}} of {{total}}",

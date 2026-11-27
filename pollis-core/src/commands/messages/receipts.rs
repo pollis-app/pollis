@@ -5,6 +5,7 @@
 //! "Read implies delivered" is enforced by a trigger in `local_schema.sql`.
 //! The `send_read_receipts` opt-out is reciprocal: off means no emitting and no recording.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rusqlite::OptionalExtension;
@@ -27,6 +28,9 @@ pub struct MessageReceipts {
     /// Readers who actually saw it on screen. Always a subset of
     /// `delivered_by` — the schema trigger guarantees it.
     pub read_by: Vec<String>,
+    /// When each reader in `read_by` read it (#2140): the reader's own timestamp, carried inside
+    /// the encrypted receipt. Keyed by reader id; exactly the readers in `read_by`.
+    pub read_at: BTreeMap<String, String>,
 }
 
 /// Is this device allowed to emit and record receipts?
@@ -269,13 +273,21 @@ pub async fn get_conversation_receipts(
     let db = guard
         .as_ref()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    let conn = db.conn();
+    conversation_receipts(db.conn(), &conversation_id)
+}
+
+/// The query behind [`get_conversation_receipts`]: nothing while receipts are off, else every
+/// receipt grouped by message, with each reader's read time.
+fn conversation_receipts(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+) -> Result<Vec<MessageReceipts>> {
     if !receipts_enabled(conn) {
         return Ok(Vec::new());
     }
 
     let mut stmt = conn.prepare(
-        "SELECT r.message_id, r.reader_id, r.kind
+        "SELECT r.message_id, r.reader_id, r.kind, r.at
          FROM message_receipt r
          JOIN message m ON m.id = r.message_id
          WHERE m.conversation_id = ?1
@@ -286,18 +298,20 @@ pub async fn get_conversation_receipts(
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
         ))
     })?;
 
     // Preserve message order while grouping.
     let mut out: Vec<MessageReceipts> = Vec::new();
     for row in rows {
-        let (message_id, reader_id, kind) = row?;
+        let (message_id, reader_id, kind, at) = row?;
         if out.last().map(|r| r.message_id.as_str()) != Some(message_id.as_str()) {
             out.push(MessageReceipts {
                 message_id: message_id.clone(),
                 delivered_by: Vec::new(),
                 read_by: Vec::new(),
+                read_at: BTreeMap::new(),
             });
         }
         let entry = out
@@ -305,7 +319,10 @@ pub async fn get_conversation_receipts(
             .expect("just pushed when the group changed");
         match kind.as_str() {
             "delivered" => entry.delivered_by.push(reader_id),
-            "read" => entry.read_by.push(reader_id),
+            "read" => {
+                entry.read_at.insert(reader_id.clone(), at);
+                entry.read_by.push(reader_id);
+            }
             _ => {}
         }
     }
@@ -495,5 +512,49 @@ mod tests {
             )
             .unwrap();
         assert_eq!(at, "t-first");
+    }
+
+    /// The read time is the read receipt's own timestamp, one per reader, and only for readers
+    /// who read it (#2140).
+    #[test]
+    fn listed_receipts_carry_each_readers_read_time() {
+        let db = db();
+        for id in ["m1", "m2"] {
+            db.conn()
+                .execute(
+                    "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+                     VALUES (?1, 'dm1', 'alice', x'00', 'hi', '2026-11-01T10:00:00Z')",
+                    rusqlite::params![id],
+                )
+                .unwrap();
+        }
+        let dm = |message_id, reader_id, kind, at| {
+            record_receipt(db.conn(), message_id, reader_id, kind, at, true);
+        };
+        dm("m1", "bob", ReceiptKind::Delivered, "2026-11-01T10:00:05Z");
+        dm("m1", "bob", ReceiptKind::Read, "2026-11-01T10:03:00Z");
+        dm("m1", "carol", ReceiptKind::Delivered, "2026-11-01T10:00:06Z");
+        dm("m2", "bob", ReceiptKind::Delivered, "2026-11-01T10:04:00Z");
+
+        let listed = conversation_receipts(db.conn(), "dm1").unwrap();
+        assert_eq!(listed.len(), 2);
+        let m1 = listed.iter().find(|r| r.message_id == "m1").unwrap();
+        assert_eq!(m1.read_by, vec!["bob".to_string()]);
+        assert_eq!(
+            m1.read_at,
+            BTreeMap::from([("bob".to_string(), "2026-11-01T10:03:00Z".to_string())]),
+            "the read time is the read receipt's own timestamp, not the delivery's",
+        );
+        let m2 = listed.iter().find(|r| r.message_id == "m2").unwrap();
+        assert!(m2.read_by.is_empty());
+        assert!(m2.read_at.is_empty(), "a delivered-only message has no time");
+
+        // On the wire to the renderer, a reader id maps to its time.
+        let json = serde_json::to_value(m1).unwrap();
+        assert_eq!(json["read_at"]["bob"], "2026-11-01T10:03:00Z");
+
+        // The opt-out lists nothing at all.
+        set_pref(db.conn(), r#"{"send_read_receipts":false}"#);
+        assert!(conversation_receipts(db.conn(), "dm1").unwrap().is_empty());
     }
 }
