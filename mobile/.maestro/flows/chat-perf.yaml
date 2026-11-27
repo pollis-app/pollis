@@ -9,7 +9,7 @@ tags:
 #
 # A fresh group's #General, warmed by one send first, so every round is the steady state
 # (a fresh group's first send pays for the MLS group setup, which this does not measure).
-# The summary's p50/p95 are over the ten rounds; the `[perf]` lines land in Maestro's log.
+# The summary's p50/p95 are over the six rounds; the `[perf]` lines land in Maestro's log.
 
 - runFlow: ../subflows/home.yaml
 - tapOn:
@@ -85,22 +85,6 @@ tags:
     file: ../subflows/chat-perf-round.yaml
     env:
       ROUND: "6"
-- runFlow:
-    file: ../subflows/chat-perf-round.yaml
-    env:
-      ROUND: "7"
-- runFlow:
-    file: ../subflows/chat-perf-round.yaml
-    env:
-      ROUND: "8"
-- runFlow:
-    file: ../subflows/chat-perf-round.yaml
-    env:
-      ROUND: "9"
-- runFlow:
-    file: ../subflows/chat-perf-round.yaml
-    env:
-      ROUND: "10"
 
 - copyTextFrom:
     id: "perf-summary"

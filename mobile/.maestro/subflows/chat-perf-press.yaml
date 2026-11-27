@@ -1,0 +1,19 @@
+appId: ${MAESTRO_APP_ID}
+---
+# Long-press the row whose text is ${TEXT} and wait for its sheet (#2141, chat-perf). A row is
+# one accessible element labelled "<name>: <text>, <status or time>". A press right after a
+# layout change can go unregistered (long-press-message.yaml), so a second try if no sheet.
+- longPressOn: ".*: ${TEXT}, .*"
+- runFlow:
+    file: probe-shown.yaml
+    env:
+      ID: "btn-reply"
+- runFlow:
+    when:
+      true: ${!output.shown}
+    commands:
+      - longPressOn: ".*: ${TEXT}, .*"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-reply"
+          timeout: 4000
