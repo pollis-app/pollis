@@ -23,6 +23,11 @@ tag date, UTC.
 
 ---
 
+## v1.19.23 — 2026-11-27
+
+- **Fix.** In the sidebar, a group name pushed off the top while you scroll now
+  slides under the Groups heading instead of covering it.
+
 ## v1.19.22 — 2026-11-27
 
 - **Faster chat actions.** Sending, editing, deleting and pinning show on
