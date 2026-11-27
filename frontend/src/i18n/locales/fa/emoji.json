@@ -1,0 +1,61 @@
+{
+  "picker": {
+    "label": "انتخابگر ایموجی",
+    "triggerLabel": "ایموجی",
+    "searchLabel": "جستجو",
+    "searchPlaceholder": "جستجوی ایموجی",
+    "resultsFor": "نتایج برای «{{query}}»",
+    "recent": "پرکاربرد",
+    "custom": "سفارشی",
+    "empty": "هیچ ایموجی‌ای مطابقت ندارد.",
+    "previewHint": "یک ایموجی انتخاب کنید",
+    "railLabel": "دسته‌های ایموجی"
+  },
+  "categories": {
+    "people": "افراد",
+    "nature": "طبیعت",
+    "food": "غذا",
+    "activity": "فعالیت‌ها",
+    "travel": "سفر",
+    "objects": "اشیا",
+    "symbols": "نمادها",
+    "flags": "پرچم‌ها"
+  },
+  "skinTone": {
+    "groupLabel": "رنگ پوست",
+    "default": "رنگ پوست پیش‌فرض",
+    "numbered": "رنگ پوست {{index}}"
+  },
+  "manage": {
+    "title": "ایموجی سفارشی",
+    "signInRequired": "لطفا وارد شوید",
+    "dropPrompt": "تصویری را اینجا بکشید یا برای انتخاب کلیک کنید",
+    "dropNow": "رها کنید تا این تصویر استفاده شود",
+    "dropHint": "{{formats}} · GIFهای متحرک، متحرک باقی می‌مانند",
+    "replaceHint": "برای جایگزینی، تصویر دیگری رها کنید یا کلیک کنید",
+    "sourceSize": "منبع {{size}} · هنگام بارگذاری با کدگذاری دوباره به زیر 48 KB می‌رسد",
+    "reencodeNote": "هنگام بارگذاری با کدگذاری دوباره به زیر 48 KB می‌رسد",
+    "fileTooLarge": "حجم این تصویر بیش از {{size}} است — فایل منبع کوچک‌تری انتخاب کنید",
+    "unsupportedFile": "{{name}} از نوع PNG، JPEG، GIF یا WebP نیست",
+    "shortcodeLabel": "کد کوتاه",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "به‌صورت :shortcode: تایپ می‌شود — a–z، 0–9 و _",
+    "shortcodeRequired": "برای افزودن این ایموجی، نامی برای آن بگذارید",
+    "shortcodeInvalid": "از 2 تا 32 نویسه استفاده کنید: a–z، 0–9 و _",
+    "shortcodeTaken": ":{{shortcode}}: قبلا در این گروه استفاده شده است",
+    "samplePlaceholder": "ظاهر آن در یک پیام",
+    "add": "افزودن ایموجی",
+    "shrinking": "در حال کوچک‌سازی…",
+    "filePickerTitle": "انتخاب تصویر ایموجی",
+    "imageFilterName": "تصاویر",
+    "addFailed": "افزودن این ایموجی ممکن نشد",
+    "removeFailed": "حذف این ایموجی ممکن نشد",
+    "storageNote": "تصاویر پیش از بارگذاری با کدگذاری دوباره به زیر 48 KB می‌رسند، پس فایل منبع بزرگ مشکلی ندارد. تصاویر یکسان در همه گروه‌هایی که از آن‌ها استفاده می‌کنند فقط یک نسخه ذخیره‌شده مشترک دارند. محدودیتی برای تعداد ایموجی‌های این گروه وجود ندارد.",
+    "stored_one": "{{count}} ایموجی · {{size}} ذخیره‌شده",
+    "stored_other": "{{count}} ایموجی · {{size}} ذخیره‌شده",
+    "empty": "هنوز ایموجی سفارشی‌ای وجود ندارد. هر کسی در گروه می‌تواند یکی اضافه کند.",
+    "sizeAnimated": "متحرک · {{size}}",
+    "remove": "حذف :{{shortcode}}:",
+    "removeAdminsOnly": "فقط مدیران گروه می‌توانند ایموجی حذف کنند."
+  }
+}

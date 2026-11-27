@@ -1,0 +1,187 @@
+{
+  "message": {
+    "fromLabel": "پیام از {{name}}",
+    "unknownAuthor": "ناشناس",
+    "deleted": "پیام حذف شد",
+    "beforeJoin": "پیش از پیوستن شما ارسال شده",
+    "edited": "(ویرایش‌شده)",
+    "editUnsent": "(ویرایش ارسال نشد)",
+    "newMember": "جدید",
+    "newMemberTitle": "در 7 روز گذشته پیوسته است",
+    "undecryptable": {
+      "tag": "رمزگشایی نشد",
+      "title": "رمزگشایی ممکن نشد",
+      "body_one": "{{count}} پیام در این دستگاه رمزگشایی نشد.",
+      "body_other": "{{count}} پیام در این دستگاه رمزگشایی نشد.",
+      "detail": "چیزی اینجا ارسال شده، اما این دستگاه نتوانست آن را بخواند. ممکن است دستگاه‌های دیگر شما هنوز آن را داشته باشند.",
+      "diagnostics": "مشاهده عیب‌یابی"
+    }
+  },
+  "status": {
+    "pending": "در انتظار",
+    "sending": "در حال ارسال",
+    "sent": "ارسال شد",
+    "failed": "ناموفق",
+    "cancelled": "لغو شد"
+  },
+  "outbox": {
+    "retry": "تلاش دوباره",
+    "discard": "دور انداختن",
+    "retryLabel": "تلاش دوباره برای ارسال این پیام",
+    "discardLabel": "دور انداختن این پیام ارسال‌نشده",
+    "notSent": "ارسال نشد",
+    "willResend": "وقتی Pollis دوباره وصل شود، خودکار ارسال می‌شود.",
+    "notDelivered": "این پیام تحویل داده نشد."
+  },
+  "actions": {
+    "reply": "پاسخ",
+    "replyInThread": "پاسخ در رشته",
+    "save": "ذخیره پیام",
+    "removeBookmark": "حذف نشانک",
+    "copyLink": "کپی پیوند پیام",
+    "copyLinkCopied": "پیوند کپی شد",
+    "copyLinkFailed": "کپی پیوند ممکن نشد",
+    "edit": "ویرایش پیام",
+    "delete": "حذف پیام",
+    "deleteAsAdmin": "حذف پیام (مدیر)",
+    "more": "کارهای بیشتر",
+    "pin": "سنجاق کردن پیام",
+    "unpin": "برداشتن سنجاق پیام",
+    "report": "گزارش"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} پاسخ",
+    "replyCount_other": "{{count}} پاسخ"
+  },
+  "receipts": {
+    "readByEveryone": "خوانده‌شده توسط همه",
+    "readByCount_one": "خوانده‌شده توسط {{count}} از {{total}}",
+    "readByCount_other": "خوانده‌شده توسط {{count}} از {{total}}",
+    "deliveredCount_one": "تحویل‌شده به {{count}} از {{total}}",
+    "deliveredCount_other": "تحویل‌شده به {{count}} از {{total}}"
+  },
+  "list": {
+    "empty": "هنوز پیامی نیست. گفتگو را شروع کنید.",
+    "unknownAuthor": "ناشناس",
+    "blockedAuthor": "کاربر مسدود",
+    "blockedBody": "مسدود",
+    "blockedBodyTerminal": "[مسدود]"
+  },
+  "replyBar": {
+    "replyingTo": "در پاسخ به <name>{{name}}</name>",
+    "scrollToMessage": "رفتن به پیامی که به آن پاسخ داده شده",
+    "dismiss": "لغو پاسخ"
+  },
+  "queue": {
+    "heading": "صف",
+    "pendingPlaceholder": "پیام در انتظار",
+    "pendingPlaceholderTerminal": "[پیام در انتظار]",
+    "cancel": "لغو پیام",
+    "retry": "تلاش دوباره",
+    "failedCount_one": "ناموفق ×{{count}}",
+    "failedCount_other": "ناموفق ×{{count}}"
+  },
+  "reactions": {
+    "add": "افزودن واکنش",
+    "all": "همه",
+    "allTabLabel_one": "همه، {{count}} واکنش",
+    "allTabLabel_other": "همه، {{count}} واکنش",
+    "contextHint": "برای دیدن واکنش‌دهندگان، راست‌کلیک کنید",
+    "hoverMore_one": "{{names}} و {{count}} نفر دیگر با {{emoji}} واکنش نشان دادند",
+    "hoverMore_other": "{{names}} و {{count}} نفر دیگر با {{emoji}} واکنش نشان دادند",
+    "hoverNames": "واکنش {{names}} با {{emoji}}",
+    "pillLabel_one": "{{emoji}} {{count}} واکنش",
+    "pillLabel_other": "{{emoji}} {{count}} واکنش",
+    "rowLabel": "{{name}}، واکنش با {{emojis}}",
+    "selfName": "{{name}} (شما)",
+    "sheetTitle": "واکنش‌ها",
+    "tabLabel_one": "{{emoji}}، {{count}} واکنش",
+    "tabLabel_other": "{{emoji}}، {{count}} واکنش",
+    "unknownUser": "کاربر ناشناس",
+    "viewWho": "مشاهده واکنش‌ها",
+    "you": "شما"
+  },
+  "preview": {
+    "noMessages": "هنوز پیامی نیست",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "{{count}} پیوست",
+    "attachments_other": "{{count}} پیوست",
+    "attachmentsTerminal_one": "[{{count}} پیوست]",
+    "attachmentsTerminal_other": "[{{count}} پیوست]",
+    "undecryptable": "یک پیام در این دستگاه رمزگشایی نشد"
+  },
+  "attachment": {
+    "viewLabel": "مشاهده {{filename}}",
+    "openLabel": "باز کردن {{filename}}",
+    "downloadLabel": "دانلود {{filename}}",
+    "loading": "در حال بارگذاری…",
+    "error": "خطا",
+    "failedToLoad": "بارگذاری ناموفق بود",
+    "failedToDownload": "دانلود ناموفق بود",
+    "removed": "فایل حذف شد",
+    "updateToOpen": "برای باز کردن این فایل، Pollis را به‌روزرسانی کنید",
+    "lightboxFetch": "دریافت",
+    "lightboxDone": "تمام",
+    "lightboxDoneTerminal": "[ تمام ]",
+    "lightboxDownload": "دانلود",
+    "lightboxDownloadTerminal": "[دانلود]",
+    "lightboxCloseTerminal": "[esc]",
+    "sensitiveReveal": "نمایش رسانه حساس: {{filename}}",
+    "sensitiveHide": "پنهان کردن {{filename}}"
+  },
+  "unfurl": {
+    "loadImage": "بارگذاری تصویر",
+    "loadVideo": "بارگذاری ویدیو",
+    "loadTitle": "بارگذاری رسانه از {{url}} — این کار مستقیماً به آن سایت وصل می‌شود",
+    "loadDescription": "بارگذاری رسانه از {{url}}. این کار مستقیماً به آن سایت وصل می‌شود و نشانی IP شما را برای آن آشکار می‌کند.",
+    "openLabel": "باز کردن {{url}}"
+  },
+  "linkPreview": {
+    "loading": "در حال بارگذاری پیش‌نمایش…",
+    "remove": "حذف پیش‌نمایش پیوند"
+  },
+  "notify": {
+    "newMessageTitle": "پیام جدید",
+    "newMessageBody": "{{name}}: پیام جدید",
+    "mentionTitle": "اشاره جدید",
+    "allMentionBody": "{{name}} به @all اشاره کرد",
+    "userMentionBody": "{{name}} به شما اشاره کرد"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  },
+  "report": {
+    "someone": "این شخص",
+    "titleMessage": "گزارش پیام",
+    "titleUser": "گزارش {{name}}",
+    "intro": "Pollis حساب و دلیل گزارش را دریافت می‌کند. پیام‌ها رمزگذاری‌شده باقی می‌مانند، پس ما هرگز نمی‌بینیم چه گفته شده است.",
+    "reasonLabel": "دلیل",
+    "reason": {
+      "spam": "هرزنامه",
+      "harassment": "آزار یا تهدید",
+      "illegal": "محتوای غیرقانونی",
+      "other": "مورد دیگر"
+    },
+    "submit": "گزارش",
+    "submitAndBlock": "گزارش و مسدود کردن",
+    "failed": "ارسال گزارش ممکن نشد. دوباره تلاش کنید.",
+    "doneTitle": "گزارش ارسال شد",
+    "done": "متشکریم. ما همه گزارش‌ها را بررسی می‌کنیم.",
+    "doneBlocked": "متشکریم. ما همه گزارش‌ها را بررسی می‌کنیم. {{name}} را هم مسدود کردید.",
+    "close": "تمام"
+  },
+  "keyChange": {
+    "notice": "شماره امنیتی شما با {{name}} تغییر کرد.",
+    "verify": "تأیید آن",
+    "defaultName": "این مخاطب"
+  },
+  "typing": {
+    "one": "{{name}} در حال نوشتن است…",
+    "two": "{{first}} و {{second}} در حال نوشتن هستند…",
+    "several_one": "{{count}} نفر در حال نوشتن است…",
+    "several_other": "{{count}} نفر در حال نوشتن هستند…"
+  }
+}

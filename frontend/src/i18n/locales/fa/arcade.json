@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "آرکید"
+  },
+  "hud": {
+    "score": "امتیاز  {{score}}",
+    "time": "زمان   {{time}}",
+    "gameOver": "بازی تمام شد",
+    "final_one": "نهایی {{count}} امتیاز · {{time}}",
+    "final_other": "نهایی {{count}} امتیاز · {{time}}",
+    "restartHint": "برای شروع دوباره R را بزنید · Esc برای خروج",
+    "controls": "WASD حرکت · ماوس نشانه‌گیری · کلیک/Space شلیک · Esc خروج"
+  }
+}

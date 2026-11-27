@@ -1,0 +1,125 @@
+{
+  "actions": {
+    "back": "بازگشت",
+    "cancel": "لغو",
+    "close": "بستن",
+    "copy": "کپی",
+    "copied": "کپی شد",
+    "copyFailed": "کپی نشد",
+    "delete": "حذف",
+    "forward": "بازارسال",
+    "goBack": "برگشتن",
+    "moreOptions": "گزینه‌های بیشتر",
+    "save": "ذخیره"
+  },
+  "states": {
+    "buttonLoading": "در حال بارگذاری...",
+    "loading": "در حال بارگذاری…"
+  },
+  "time": {
+    "today": "امروز",
+    "yesterday": "دیروز"
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "escape": "Esc",
+    "space": "فاصله",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down"
+  },
+  "presence": {
+    "label": "وضعیت: {{status}}",
+    "away": "غایب",
+    "offline": "آفلاین",
+    "online": "آنلاین"
+  },
+  "list": {
+    "empty": "موردی وجود ندارد."
+  },
+  "grid": {
+    "empty": "هنوز کسی اینجا نیست."
+  },
+  "menu": {
+    "escHint": "Esc برای بازگشت",
+    "navigationLabel": "منوی ناوبری",
+    "navigateHint": "پیمایش",
+    "selectHint": "Enter برای انتخاب"
+  },
+  "media": {
+    "mute": "بی‌صدا",
+    "pause": "توقف",
+    "play": "پخش",
+    "seek": "جابه‌جایی در صدا",
+    "skipBackward": "10 ثانیه به عقب",
+    "skipForward": "10 ثانیه به جلو",
+    "unmute": "لغو بی‌صدا",
+    "volume": "میزان صدا"
+  },
+  "composer": {
+    "addAttachment": "افزودن پیوست",
+    "allMentionHint": "به همه افراد این کانال اعلان می‌دهد",
+    "filePickerTitle": "افزودن فایل",
+    "inputLabel": "ورودی پیام",
+    "placeholder": "پیامی بنویسید…",
+    "previewAlt": "پیش‌نمایش",
+    "removeAttachment": "حذف {{name}}",
+    "send": "ارسال پیام",
+    "markSensitive": "علامت‌گذاری {{name}} به‌عنوان حساس",
+    "unmarkSensitive": "برداشتن علامت حساس از {{name}}",
+    "commandAmbiguous": "بیش از یک اپ دستور /{{command}} را دارد. یکی را از فهرست انتخاب کنید.",
+    "commandRequestHint": "به‌صورت خصوصی برای {{app}} ارسال می‌شود و در این کانال منتشر نمی‌شود",
+    "commandRequestUnavailable": "درخواست خصوصی به اپ‌ها در این نسخه در دسترس نیست. چیزی منتشر نشد.",
+    "commandRequestFailed": "ارسال این دستور ممکن نشد. چیزی منتشر نشد."
+  },
+  "mentions": {
+    "listLabel": "پیشنهادهای اشاره",
+    "matching": "اعضای مطابق با <hl>@{{query}}</hl>"
+  },
+  "emojiSuggest": {
+    "listLabel": "پیشنهادهای ایموجی",
+    "matching": "ایموجی‌های مطابق با <hl>:{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "تصویر نمایه",
+    "loading": "در حال بارگذاری",
+    "otpDigit": "رقم {{index}} کد یک‌بارمصرف"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} ثانیه",
+    "seconds_other": "{{count}} ثانیه",
+    "minutes_one": "{{count}} دقیقه",
+    "minutes_other": "{{count}} دقیقه",
+    "hours_one": "{{count}} ساعت",
+    "hours_other": "{{count}} ساعت",
+    "days_one": "{{count}} روز",
+    "days_other": "{{count}} روز",
+    "weeks_one": "{{count}} هفته",
+    "weeks_other": "{{count}} هفته",
+    "months_one": "{{count}} ماه",
+    "months_other": "{{count}} ماه",
+    "years_one": "{{count}} سال",
+    "years_other": "{{count}} سال"
+  },
+  "tray": {
+    "open": "باز کردن Pollis",
+    "muteMic": "بی‌صدا کردن میکروفون",
+    "unmuteMic": "لغو بی‌صدای میکروفون",
+    "muteMicIdle": "بی‌صدا کردن میکروفون (در تماس نیستید)",
+    "version": "نسخه {{version}}",
+    "quit": "خروج از Pollis",
+    "unread_one": "Pollis — {{count}} خوانده‌نشده",
+    "unread_other": "Pollis — {{count}} خوانده‌نشده"
+  },
+  "commands": {
+    "listLabel": "پیشنهادهای دستور",
+    "matching": "دستورهای مطابق با <hl>/{{query}}</hl>"
+  }
+}
