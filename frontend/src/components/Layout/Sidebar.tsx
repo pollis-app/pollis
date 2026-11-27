@@ -166,66 +166,74 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
             const addMenuOpen = addMenuGroupId === group.id;
             return (
               <li key={group.id}>
-                <Row
-                  activateOn="press"
-                  indent={1}
-                  isActive={isGroupActive && !activeChannelId && !activeVoiceId}
-                  onClick={() => router.navigate({ to: "/groups/$groupId", params: { groupId: group.id } })}
-                  chevron={{
-                    isCollapsed,
-                    onToggle: () => toggleGroup(group.id),
-                    ariaLabel: isCollapsed
-                      ? t("sidebar.expandGroup", { name: group.name })
-                      : t("sidebar.collapseGroup", { name: group.name }),
-                  }}
-                  label={group.name}
-                  badge={isCollapsed && groupUnread > 0 ? groupUnread : null}
-                  testId={`group-${group.id}`}
-                  actionsPinned={addMenuOpen}
-                  actions={
-                    isAdmin ? (
-                      <IconButton
-                        aria-label={t("channels:categories.addToGroup", { name: group.name })}
-                        aria-expanded={addMenuOpen}
-                        data-testid={`sidebar-group-add-${group.id}`}
-                        onClick={() => setAddMenuGroupId(addMenuOpen ? null : group.id)}
-                      >
-                        <Plus {...iconProps} />
-                      </IconButton>
-                    ) : undefined
-                  }
-                />
-                {addMenuOpen && (
-                  <div data-testid={`sidebar-group-add-menu-${group.id}`}>
-                    <Row
-                      indent={2}
-                      isActive={false}
-                      leading={<Plus {...iconProps} />}
-                      label={t("channels:categories.newChannel")}
-                      testId={`group-${group.id}-new-channel`}
-                      onClick={() => {
-                        setAddMenuGroupId(null);
-                        appStore.setSelectedGroupId(group.id);
-                        appStore.setNewChannelCategoryId(null);
-                        router.navigate({ to: "/groups/$groupId/channels/new", params: { groupId: group.id } });
-                      }}
-                    />
-                    <Row
-                      indent={2}
-                      isActive={false}
-                      leading={<FolderPlus {...iconProps} />}
-                      label={t("channels:categories.newCategory")}
-                      testId={`group-${group.id}-new-category`}
-                      onClick={() => {
-                        setAddMenuGroupId(null);
-                        if (isCollapsed) {
-                          toggleGroup(group.id);
-                        }
-                        setNewCategoryGroupId(group.id);
-                      }}
-                    />
-                  </div>
-                )}
+                {/* Sticky under the Groups header while its channels scroll, pushed out by the next
+                    group's (#2132). Opaque, since the row's own hover/active fill is translucent. The
+                    "+" menu rides inside it, so opening it from a pinned header shows it on screen. */}
+                <div
+                  className="sticky top-bar z-[1] bg-surface"
+                  data-testid={`sidebar-group-header-${group.id}`}
+                >
+                  <Row
+                    activateOn="press"
+                    indent={1}
+                    isActive={isGroupActive && !activeChannelId && !activeVoiceId}
+                    onClick={() => router.navigate({ to: "/groups/$groupId", params: { groupId: group.id } })}
+                    chevron={{
+                      isCollapsed,
+                      onToggle: () => toggleGroup(group.id),
+                      ariaLabel: isCollapsed
+                        ? t("sidebar.expandGroup", { name: group.name })
+                        : t("sidebar.collapseGroup", { name: group.name }),
+                    }}
+                    label={group.name}
+                    badge={isCollapsed && groupUnread > 0 ? groupUnread : null}
+                    testId={`group-${group.id}`}
+                    actionsPinned={addMenuOpen}
+                    actions={
+                      isAdmin ? (
+                        <IconButton
+                          aria-label={t("channels:categories.addToGroup", { name: group.name })}
+                          aria-expanded={addMenuOpen}
+                          data-testid={`sidebar-group-add-${group.id}`}
+                          onClick={() => setAddMenuGroupId(addMenuOpen ? null : group.id)}
+                        >
+                          <Plus {...iconProps} />
+                        </IconButton>
+                      ) : undefined
+                    }
+                  />
+                  {addMenuOpen && (
+                    <div data-testid={`sidebar-group-add-menu-${group.id}`}>
+                      <Row
+                        indent={2}
+                        isActive={false}
+                        leading={<Plus {...iconProps} />}
+                        label={t("channels:categories.newChannel")}
+                        testId={`group-${group.id}-new-channel`}
+                        onClick={() => {
+                          setAddMenuGroupId(null);
+                          appStore.setSelectedGroupId(group.id);
+                          appStore.setNewChannelCategoryId(null);
+                          router.navigate({ to: "/groups/$groupId/channels/new", params: { groupId: group.id } });
+                        }}
+                      />
+                      <Row
+                        indent={2}
+                        isActive={false}
+                        leading={<FolderPlus {...iconProps} />}
+                        label={t("channels:categories.newCategory")}
+                        testId={`group-${group.id}-new-category`}
+                        onClick={() => {
+                          setAddMenuGroupId(null);
+                          if (isCollapsed) {
+                            toggleGroup(group.id);
+                          }
+                          setNewCategoryGroupId(group.id);
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
                 {!isCollapsed && (
                   <SidebarGroupChannels
                     group={group}
