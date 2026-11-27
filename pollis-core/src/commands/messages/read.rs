@@ -240,24 +240,32 @@ pub async fn read_dm_messages(
     read_local_page(state, &dm_channel_id, &cursor, limit).await
 }
 
-/// Bound-parameter chunk size, well under older SQLite's 999-variable limit.
-const LAST_MESSAGE_ID_CHUNK: usize = 400;
-
-/// The batched newest-per-conversation SELECT, for `n` bound conversation ids.
+/// The newest message in one conversation (`?1`), by the key `read_local_channel_page` orders on.
 ///
-/// Orders by `sent_at DESC, id DESC`, the same key `read_local_channel_page` uses.
-pub(crate) fn last_messages_sql(n: usize) -> String {
-    let placeholders = (1..=n).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
-    format!(
-        "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable, send_state, link_preview
-         FROM (
-           SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable, send_state, link_preview,
-                  ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY sent_at DESC, id DESC) AS rn
-           FROM message
-           WHERE conversation_id IN ({placeholders})
-         )
-         WHERE rn = 1"
-    )
+/// One indexed `LIMIT 1` on `idx_message_conversation_order` (#2171): it reads the last index
+/// entry and one table row, where a window over the conversation sorted every row of it.
+pub(crate) const LAST_MESSAGE_SQL: &str =
+    "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id, undecryptable, send_state, link_preview
+     FROM message
+     WHERE conversation_id = ?1
+     ORDER BY sent_at DESC, id DESC
+     LIMIT 1";
+
+/// The newest message in each of `ids`, in input order; a conversation with none is absent.
+pub(crate) fn last_messages_on(conn: &rusqlite::Connection, ids: &[String]) -> Result<Vec<ChannelMessage>> {
+    let mut stmt = conn.prepare_cached(LAST_MESSAGE_SQL)?;
+    let mut out: Vec<ChannelMessage> = Vec::with_capacity(ids.len());
+    for id in ids {
+        // A row that fails to map is skipped, as a page read skips it.
+        if let Some(m) = stmt
+            .query_map(rusqlite::params![id], row_to_channel_message)?
+            .flatten()
+            .next()
+        {
+            out.push(m);
+        }
+    }
+    Ok(out)
 }
 
 /// The rows [`super::read_state::newest_unread_of`] picks from what an ingest stored,
@@ -297,7 +305,7 @@ pub(crate) async fn fresh_unread_messages(
     Ok(messages)
 }
 
-/// The newest message in each of `conversation_ids`, in ONE round trip (#874).
+/// The newest message in each of `conversation_ids`, in ONE call (#874), under one lock.
 /// Conversations with no local messages are absent from the result.
 pub async fn read_last_messages(
     conversation_ids: Vec<String>,
@@ -321,17 +329,7 @@ pub async fn read_last_messages(
             .as_ref()
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        let mut out: Vec<ChannelMessage> = Vec::with_capacity(ids.len());
-        for chunk in ids.chunks(LAST_MESSAGE_ID_CHUNK) {
-            let sql = last_messages_sql(chunk.len());
-            let mut stmt = db.conn().prepare(&sql)?;
-            let mapped =
-                stmt.query_map(rusqlite::params_from_iter(chunk.iter()), row_to_channel_message)?;
-            for m in mapped.flatten() {
-                out.push(m);
-            }
-        }
-        out
+        last_messages_on(db.conn(), &ids)?
     };
 
     hydrate_rows(state, &mut messages).await?;
@@ -521,6 +519,33 @@ pub async fn read_thread_messages(
     Ok(messages)
 }
 
+/// Reply counts per thread in one conversation (`?1`). Its plan reads only the partial
+/// `idx_message_conversation_thread` (#2172), which holds thread replies alone and every column
+/// used here, so a channel open no longer reads every row of the channel.
+pub(crate) const THREAD_SUMMARIES_SQL: &str =
+    "SELECT thread_id, COUNT(*) AS reply_count, MAX(sent_at) AS last_reply_at
+     FROM message
+     WHERE conversation_id = ?1
+       AND thread_id IS NOT NULL
+       AND deleted_at IS NULL
+     GROUP BY thread_id";
+
+/// [`list_thread_summaries`] on an open connection.
+pub(crate) fn thread_summaries_on(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+) -> Result<Vec<ThreadSummary>> {
+    let mut stmt = conn.prepare_cached(THREAD_SUMMARIES_SQL)?;
+    let rows = stmt.query_map(rusqlite::params![conversation_id], |row| {
+        Ok(ThreadSummary {
+            thread_id: row.get(0)?,
+            reply_count: row.get(1)?,
+            last_reply_at: row.get(2)?,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 /// Reply count and last-reply time for every thread in a conversation (#825).
 /// Soft-deleted replies are excluded from the count.
 pub async fn list_thread_summaries(
@@ -531,21 +556,5 @@ pub async fn list_thread_summaries(
     let db = guard
         .as_ref()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-
-    let mut stmt = db.conn().prepare(
-        "SELECT thread_id, COUNT(*) AS reply_count, MAX(sent_at) AS last_reply_at
-         FROM message
-         WHERE conversation_id = ?1
-           AND thread_id IS NOT NULL
-           AND deleted_at IS NULL
-         GROUP BY thread_id",
-    )?;
-    let rows = stmt.query_map(rusqlite::params![conversation_id], |row| {
-        Ok(ThreadSummary {
-            thread_id: row.get(0)?,
-            reply_count: row.get(1)?,
-            last_reply_at: row.get(2)?,
-        })
-    })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    thread_summaries_on(db.conn(), &conversation_id)
 }

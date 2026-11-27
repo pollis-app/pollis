@@ -96,12 +96,30 @@ CREATE TABLE IF NOT EXISTS known_envelope (
     recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);
+-- The conversation index (#2171). Its order is the message list's
+-- (`sent_at, id`), and it carries `sender_id` and `deleted_at`, so unread counts,
+-- the newest message per conversation and page reads are answered from the index
+-- alone: no sort step and no table lookup per row. Each table lookup is a page
+-- decrypt in SQLCipher, which is what made a full count cost ~0.6 s at 100k rows.
+-- It replaces `idx_message_conversation (conversation_id, sent_at)`, dropped below.
+-- An older build that opens this file recreates that one and keeps maintaining
+-- this one; nothing names either index (`INDEXED BY`), so both builds read the
+-- same results. Built on the first open after the upgrade, inside the unlock.
+CREATE INDEX IF NOT EXISTS idx_message_conversation_order
+    ON message(conversation_id, sent_at, id, sender_id, deleted_at);
+DROP INDEX IF EXISTS idx_message_conversation;
 
 -- Thread lookup: fetching one thread's replies, and counting replies per root.
 -- Created on every open like the eviction index above, so existing DBs gain it
 -- without a schema-version bump (which would wipe history).
 CREATE INDEX IF NOT EXISTS idx_message_thread ON message(thread_id, sent_at);
+
+-- Thread summaries for one conversation (#2172): only thread replies, about one
+-- row in twenty, and every column `list_thread_summaries` reads, so a channel
+-- open reads its replies from the index instead of every row of the channel.
+CREATE INDEX IF NOT EXISTS idx_message_conversation_thread
+    ON message(conversation_id, thread_id, sent_at, deleted_at)
+    WHERE thread_id IS NOT NULL;
 
 -- Eviction scan index: lookback/retention sweeps delete by received_at. Run on
 -- every open (this schema is re-applied each open) so existing DBs gain it
