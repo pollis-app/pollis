@@ -352,13 +352,16 @@ test.describe("chat action latency", () => {
     await boot(page);
     await page.evaluate(() => (window as any).__tauriHold("send_message"));
     const input = page.getByTestId("message-input");
-    const rowWith = (text: string) => page.locator('[data-testid^="message-"]', { hasText: text }).last();
+    // A stub's row: `message-pending-…` until its send settles.
+    const rowWith = (text: string) => page.locator('[data-testid^="message-pending-"]', { hasText: text }).last();
 
     await input.click();
     await page.keyboard.type("still going out");
     await page.keyboard.press("Enter");
-    const pending = rowWith("still going out");
-    await expect(pending).toBeVisible();
+    await expect(rowWith("still going out")).toBeVisible();
+    // Pinned by its own id: the reply below quotes the same words.
+    const pendingTestId = await rowWith("still going out").getAttribute("data-testid");
+    const pending = page.getByTestId(pendingTestId!);
     // The stub carries the core's id from its first frame: no wait on new_message_id.
     const coreId = await page.evaluate(() => {
       const log = (window as any).__tauriInvokeLog as Array<{ command: string; args: { messageId?: string } }>;
@@ -401,10 +404,10 @@ test.describe("chat action latency", () => {
     await page.getByTestId("delete-button").click();
     await page.getByTestId("delete-message-confirm").click();
     await expect(page.getByTestId("delete-message-bar")).toHaveCount(0);
-    await expect(page.locator('[data-testid^="message-"]', { hasText: "a reply to it" })).toHaveCount(0);
+    await expect(page.getByTestId("message-content").filter({ hasText: "a reply to it" })).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).__tauriInvokeCounts.discard_unsent_message)).toBe(1);
 
     await page.evaluate(() => (window as any).__tauriRelease("send_message"));
-    await expect(rowWith("still going out, fixed")).toBeVisible();
+    await expect(page.getByTestId("message-content").filter({ hasText: "still going out, fixed" })).toBeVisible();
   });
 });
