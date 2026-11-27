@@ -208,7 +208,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
               data-testid="message-actions-menu"
               role="menu"
               className={`absolute end-0 z-40 min-w-[11rem] rounded-control border border-line bg-surface-raised py-1 ${
-                opensUp ? "bottom-full mb-1" : "top-full mt-1"
+                opensUp ? "bottom-full mb-1 motion-popover-up" : "top-full mt-1 motion-popover-down"
               }`}
             >
               {onOpenThread && (

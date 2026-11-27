@@ -55,8 +55,14 @@
   }
 }
 
-/* A tapped pill: a small swell and back. */
+/* A tapped pill: a small swell and back. Twice, under two names, so a second tap restarts it. */
 @keyframes motion-bump {
+  40% {
+    transform: scale(var(--motion-bump));
+  }
+}
+
+@keyframes motion-bump-again {
   40% {
     transform: scale(var(--motion-bump));
   }
@@ -108,6 +114,10 @@
 
 .motion-bump {
   animation: motion-bump var(--motion-slow) var(--motion-ease-out);
+}
+
+.motion-bump-again {
+  animation: motion-bump-again var(--motion-slow) var(--motion-ease-out);
 }
 
 .motion-popover-up {
@@ -208,6 +218,7 @@
   }
 
   .motion-bump,
+  .motion-bump-again,
   .motion-late-fade,
   .status-bar-blink {
     animation: none;

@@ -277,6 +277,47 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   continues under the name, never in a hanging block after it. Pictures, files and reactions start
   at the name on the lines below.
 
+## Motion
+
+Motion is small and quiet, and it shows what changed; it never decorates (#2125).
+
+- **Tokens.** `MOTION` in [`design/theme.ts`](../../design/theme.ts), shared like the colours:
+  `fastMs` 120 (popovers, a fade under reduced motion), `baseMs` 180 (arrivals, folds, the sheet
+  entrance), `slowMs` 240 (the longest anything runs: the tap bump), `exitMs` 140 (a closing
+  sheet), and one ease-out curve, `cubic-bezier(0.22, 1, 0.36, 1)` (its mirror `easeIn` plays an
+  entrance backwards). Distances and scales are tokens too: a new message rises 10px, a popover
+  4px; a new pill or badge grows from 0.7 to a 1.08 peak. Desktop paints them as `--motion-*`
+  variables (`frontend/src/utils/motion.ts`) and every keyframe lives in
+  `frontend/src/components/ui/motion.css`; mobile reads them from `mobile/theme/motion.ts`
+  (Reanimated, on the UI thread). Never type a duration or a curve in a component.
+- **Limits.** Nothing runs longer than 240 ms; nothing overshoots its resting value by more than
+  8 %; no springs that wobble, no glow, no motion that loops (the status bar's unread blink is
+  the one loop, and it stops under reduced motion). `frontend/tests/motion-tokens.test.ts` and
+  mobile's twin hold these.
+- **What moves.**
+  - A message that arrives while the reader is at the bottom rises and fades in, and the log
+    follows it. Scrolled up, nothing moves: a "N new messages" button appears at the bottom of
+    the log, and a click, or reaching the bottom by hand, clears it. The first load, older
+    pages, a switch of conversation and a sending message turning into a sent one never move.
+    Sending while scrolled up takes you to your message, as in Slack. Typing never moves the
+    log (#2082).
+  - A new reaction pill pops in, a changed count rolls its digit up, a tapped pill bumps.
+    Pills that were there when the row painted hold still.
+  - Desktop popovers (the emoji picker, the message menu, the reaction breakdown, the suggest
+    list) fade in and rise 4px from the control that opened them; an emoji under the pointer
+    in the picker grows slightly.
+  - Mobile sheets close with their entrance played backwards, in 140 ms.
+  - The sidebar's group chevron turns as its channels fold open and shut; an unread badge that
+    turns up (not one there at first paint) pops in.
+  - Content that replaces a loading state fades in where the loader was.
+- **Reduced motion.** One source per platform. Desktop: `useReducedMotion()`
+  (`frontend/src/hooks/useReducedMotion.ts`) and `scrollBehavior()` for code, and the one
+  `@media (prefers-reduced-motion: reduce)` block at the end of `motion.css` for CSS. Mobile:
+  the one hook in `mobile/theme/motion.ts`. Under it every movement becomes an opacity fade at
+  `fastMs` or nothing at all: arrivals, pills and popovers fade, bumps, folds, turns, the blink
+  and the scrambled preview text stop, smooth scrolls jump, and on mobile swipe-to-reply, the
+  media viewer and stack transitions stop sliding.
+
 ## Components: reuse first
 
 Use the existing primitives. Do not hand-roll a styled `<button>`, input, toggle or list row; if a
@@ -290,7 +331,7 @@ primitive cannot do what a screen needs, extend it in its own file and use it ev
   `Card`, `EmptyState`, `Avatar`, `PresenceAvatar`, `PresenceDot`, `PillButton`, `PressButton`,
   `BotBadge`, `SasCodeInput` (a code typed off another screen; never pre-filled),
   `NavigableList`, `NavigableGrid`, `TerminalMenu` (Terminal hub pages), `LoaderSpinner`,
-  `IconSpinner`, `ChatInput`, `EditMessageBar`, `SuggestList`.
+  `IconSpinner`, `ChatInput`, `EditMessageBar`, `SuggestList`, `Fold` (a list that folds open and shut).
 - **Mobile** (`mobile/components/ui.tsx`): `Screen`, `Header`, `Body`, `BottomAction`, `Txt`,
   `SectionTitle`, `Group`, `ListRow`, `ActionRow`, `CheckRow`, `Field`, `Toggle`, `EmptyState`, `Button`
   (`primary`, `secondary`, `subtle`, `danger`, `default`), `Chip` (`default`, `solid`, `subtle`,

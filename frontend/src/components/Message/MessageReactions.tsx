@@ -18,6 +18,7 @@ import { ReactionEmoji, spokenEmoji } from "./ReactionEmoji";
 import { ReactionBreakdownPanel } from "./ReactionBreakdownPanel";
 import { PressButton } from "../ui/PressButton";
 import { FOCUS_RING } from "../ui/focusRing";
+import { useReactionBump, useReactionMotion } from "./useReactionMotion";
 
 interface MessageReactionsProps {
   messageId: string;
@@ -39,6 +40,9 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
   const { data: reactions = [] } = useReactions(messageId);
   // Pills that arrive after the row painted fade in rather than blink (#2115).
   const paintedWithout = useRef(reactions.length === 0);
+  // A pill joining the row pops in, a changed count rolls, a tapped pill bumps (#2125).
+  const { pops, rolls } = useReactionMotion(reactions);
+  const { bump, bumpClass } = useReactionBump();
   const toggleReaction = useToggleReaction(messageId);
   const [hovered, setHovered] = useState(false);
   const [openEmoji, setOpenEmoji] = useState<string | null>(null);
@@ -138,7 +142,10 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
             key={reaction.emoji}
             activateOn="click"
             data-testid="reaction-pill"
-            onClick={() => toggleReaction(reaction.emoji)}
+            onClick={() => {
+              bump(reaction.emoji);
+              toggleReaction(reaction.emoji);
+            }}
             onFocus={() => setHovered(true)}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -147,7 +154,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
             title={tooltip(reaction.emoji, reaction.count)}
             className={`panel-raised flex items-center gap-1 px-1.5 py-0.5 text-secondary font-mono transition-colors duration-75 hover:opacity-90 ${FOCUS_RING} ${
               reacted ? "text-accent border-line-strong" : "text-muted"
-            }`}
+            } ${pops(reaction.emoji) ? "motion-pop" : ""} ${bumpClass(reaction.emoji)}`}
             aria-label={t("reactions.pillLabel", {
               emoji: spokenEmoji(reaction.emoji),
               count: reaction.count,
@@ -160,14 +167,23 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
             <span className="inline-flex h-5 min-w-5 items-center justify-center">
               <ReactionEmoji emoji={reaction.emoji} />
             </span>
-            <span>{reaction.count}</span>
+            {/* A changed count rolls up into its slot (#2125); keyed so each change replays. */}
+            <span className="motion-roll-slot">
+              <span
+                key={reaction.count}
+                data-testid="reaction-count"
+                className={rolls(reaction.emoji) ? "motion-roll" : "inline-block"}
+              >
+                {reaction.count}
+              </span>
+            </span>
           </PressButton>
         );
       })}
       {openEmoji !== null && tabs.length > 0 ? (
         <div
           data-placement={placement.placement}
-          className={`absolute z-40 start-0 ${placement.placement === "up" ? "bottom-full mb-1" : "top-full mt-1"}`}
+          className={`absolute z-40 start-0 ${placement.placement === "up" ? "bottom-full mb-1 motion-popover-up" : "top-full mt-1 motion-popover-down"}`}
         >
           <ReactionBreakdownPanel
             key={openEmoji}

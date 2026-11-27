@@ -2,7 +2,7 @@
 // design/theme.ts, shared with mobile; this paints them as CSS variables and answers "should
 // this move?" for code that animates outside CSS (smooth scrolls).
 
-import { MOTION, cssCurve } from "../../../design/theme";
+import { MOTION, cssCurve } from "../../../design/theme.ts";
 
 const REDUCE_QUERY = "(prefers-reduced-motion: reduce)";
 

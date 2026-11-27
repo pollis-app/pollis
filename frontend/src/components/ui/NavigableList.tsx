@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { horizontalArrowStep, isHorizontalArrow } from "../../utils/direction";
 import { EmptyState } from "./EmptyState";
 import { usePressActivator, type ActivateOn } from "../../hooks/usePressActivation";
+import { useLateArrival } from "../../hooks/useLateArrival";
 
 // Keyboard-navigable list: col 0 is the row, 1..N its inline-end controls (ArrowLeft reaches them under RTL; see `utils/direction.ts`).
 export interface NavigableListProps<T> {
@@ -62,6 +63,8 @@ export function NavigableList<T>({
   const resolvedLoadingLabel = loadingLabel ?? t("states.loading");
   const resolvedEmptyLabel = emptyLabel ?? t("list.empty");
   const [nav, setNav] = useState<NavState>({ rowIndex: 0, colIndex: 0 });
+  // The rows or the empty sentence replaced the loading line: they fade in (#2125).
+  const arrived = useLateArrival(!isLoading);
   const press = usePressActivator();
   const containerRef = useRef<HTMLDivElement>(null);
   const [hasFocusWithin, setHasFocusWithin] = useState(false);
@@ -186,7 +189,7 @@ export function NavigableList<T>({
 
   if (items.length === 0) {
     return (
-      <EmptyState background={false} testId={testId ? `${testId}-empty` : undefined}>
+      <EmptyState background={false} fadeIn={arrived} testId={testId ? `${testId}-empty` : undefined}>
         {resolvedEmptyLabel}
       </EmptyState>
     );
@@ -208,7 +211,7 @@ export function NavigableList<T>({
           : undefined
       }
       data-testid={testId}
-      className="flex-1 flex flex-col overflow-auto outline-none"
+      className={`flex-1 flex flex-col overflow-auto outline-none ${arrived ? "motion-fade" : ""}`}
     >
       {items.map((item, rowIndex) => {
         const key = getKey(item);
