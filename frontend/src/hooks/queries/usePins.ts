@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
+import type { LinkPreviewWire } from "../../types";
 
 /** Pinned messages (#99): shared per conversation, sealed under its pin key; the DS holds ciphertext only. */
 
@@ -18,6 +19,8 @@ export interface PinnedMessage {
   sender_username?: string | null;
   sender_display_name?: string | null;
   sent_at: string;
+  /** #2127: the sender's link preview, re-checked against `content` in Rust. */
+  link_preview?: LinkPreviewWire | null;
 }
 
 const pinQueryKeys = {

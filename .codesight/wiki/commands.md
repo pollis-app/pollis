@@ -456,7 +456,7 @@ self-update moves the epoch). Minting is INSERT-ONLY on the DS so two racing min
 can never fork the key. See `.codesight/wiki/mls.md` § "Pinned-message key state".
 
 - `pin_message(conversation_id, message_id, user_id)` — snapshot the message from the
-  local `message` row (a message this device cannot read cannot be pinned), seal under
+  local `message` row, its stored link preview included (#2127; a message this device cannot read cannot be pinned), seal under
   `Kpin`, `POST /v1/pins/pin`. Mints the conversation's key on first use. Idempotent
   per `(conversation_id, message_id)`.
 - `unpin_message(conversation_id, message_id, user_id)` — `POST /v1/pins/unpin`. Any
