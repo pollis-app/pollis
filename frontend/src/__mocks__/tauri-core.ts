@@ -244,6 +244,8 @@ interface MockReceipt {
   message_id: string;
   delivered_by: string[];
   read_by: string[];
+  /** Reader id → when they read it (#2140); a preload may leave it out. */
+  read_at?: Record<string, string>;
 }
 
 /** Mirrors `PendingEnrollmentRequest` (#1096): no code. `correctCode` is mock-only and never listed. */
@@ -2982,7 +2984,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (!conversationId) {
         return [];
       }
-      return store.receipts[conversationId] ?? [];
+      return (store.receipts[conversationId] ?? []).map((r) => ({ ...r, read_at: r.read_at ?? {} }));
     }
 
     case 'mark_messages_read': {
@@ -3004,7 +3006,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         }
         let entry = list.find((r) => r.message_id === messageId);
         if (!entry) {
-          entry = { message_id: messageId, delivered_by: [], read_by: [] };
+          entry = { message_id: messageId, delivered_by: [], read_by: [], read_at: {} };
           list.push(entry);
         }
         if (!entry.delivered_by.includes(userId)) {
@@ -3012,6 +3014,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         }
         if (!entry.read_by.includes(userId)) {
           entry.read_by.push(userId);
+          entry.read_at = { ...entry.read_at, [userId]: new Date().toISOString() };
         }
       }
       return null;

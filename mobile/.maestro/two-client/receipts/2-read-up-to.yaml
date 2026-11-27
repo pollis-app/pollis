@@ -1,0 +1,73 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# DM RECEIPTS (#1637, #2140), part 2 of 2. The peer has accepted the DM.
+#
+# A one-to-one DM shows the peer's small avatar on a rail at the list's right edge, level
+# with the newest message of mine they have READ. It is one element that glides down as they
+# read further; delivery alone shows nothing. The read-up-to row's spoken label ends
+# ", <peer> has read up to here" (#1637), which is what these assertions read; the
+# screenshots show the avatar itself.
+
+- tapOn:
+    id: "input-composer"
+- inputText: "receipt two"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: receipt two, .*"
+    timeout: 15000
+# Nothing is read yet, so nothing is placed: delivery is never shown.
+- assertNotVisible: ".*has read up to here"
+- takeScreenshot: receipts-00-nothing-read
+
+# The peer fetches and reads both, once both are on the DS. The avatar goes to the newer.
+- runScript:
+    file: ../../scripts/peer-read.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      EXPECT: "2"
+- extendedWaitUntil:
+    visible: ".*: receipt two, .*, .* has read up to here"
+    timeout: 20000
+# The older one was read too, and carries nothing: one avatar, never one per row.
+- assertNotVisible: ".*: receipt one, .*has read up to here"
+- takeScreenshot: receipts-01-read-up-to
+
+# The peer answers: the avatar stays on my newest read message.
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      TEXT: "got both"
+- extendedWaitUntil:
+    visible: ".*: got both, .*"
+    timeout: 20000
+- assertVisible: ".*: receipt two, .*, .* has read up to here"
+- assertNotVisible: ".*: got both, .*has read up to here"
+
+# A newer message, sent but unread, does not move it.
+- tapOn:
+    id: "input-composer"
+- inputText: "receipt three"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: receipt three, .*"
+    timeout: 15000
+- assertVisible: ".*: receipt two, .*, .* has read up to here"
+- assertNotVisible: ".*: receipt three, .*has read up to here"
+
+# Once the peer reads it, the avatar glides down to it and leaves the second.
+- runScript:
+    file: ../../scripts/peer-read.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      EXPECT: "3"
+- extendedWaitUntil:
+    visible: ".*: receipt three, .*, .* has read up to here"
+    timeout: 20000
+- assertNotVisible: ".*: receipt two, .*has read up to here"
+- assertNotVisible: ".*: receipt one, .*has read up to here"
+- takeScreenshot: receipts-02-avatar-moved

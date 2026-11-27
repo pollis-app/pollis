@@ -2,6 +2,7 @@ import { memo } from "react";
 import type { ComponentProps } from "react";
 import type Animated from "react-native-reanimated";
 import { MessageRow } from "./MessageRow";
+import { ReadRailSlot, type RailPeer } from "./ReadRail";
 import { timeLabel } from "./dates";
 import { replySnippet } from "../../lib/replyPreview";
 import { sentBeforeJoin } from "../../lib/replyQuote";
@@ -19,7 +20,8 @@ import type { Message } from "../../hooks/queries";
  */
 export interface RowContext {
   currentUserId: string | undefined;
-  isDm: boolean;
+  /** Own rows draw the receipt count: a group DM's (#857). */
+  showReceipts: boolean;
   peerCount: number;
   /** A DM request not yet accepted: no link previews (#1987). */
   hidePreviews: boolean;
@@ -68,8 +70,15 @@ export const MessageRowItem = memo(function MessageRowItem({
   original,
   highlighted,
   entering,
+  railPeer,
+  readUpTo,
+  readUpToLabel,
 }: {
   message: Message;
+  /** A one-to-one DM's read-up-to rail (#2140): every row keeps its column; one row holds the peer. */
+  railPeer: RailPeer | null;
+  readUpTo: boolean;
+  readUpToLabel: string | null;
   continued: boolean;
   ctx: RowContext;
   handlers: RowHandlers;
@@ -132,7 +141,9 @@ export const MessageRowItem = memo(function MessageRowItem({
       currentUserId={ctx.currentUserId}
       receipt={receipt}
       peerCount={ctx.peerCount}
-      showReceipt={mine && ctx.isDm}
+      showReceipt={mine && ctx.showReceipts}
+      readRail={railPeer ? <ReadRailSlot messageId={m.id} peer={readUpTo ? railPeer : null} /> : undefined}
+      readUpToLabel={readUpToLabel}
       continued={continued}
       isNew={isNewMemberMessage(ctx.newMemberJoinMs, m.sender_id, m.created_at)}
       isBot={ctx.botSenders.has(m.sender_id)}

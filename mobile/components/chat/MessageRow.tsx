@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, type ComponentProps } from "react";
+import { useLayoutEffect, useMemo, useRef, type ComponentProps, type ReactNode } from "react";
 import { View, Pressable } from "react-native";
 import { Text } from "../Text";
 import Animated, {
@@ -16,6 +16,7 @@ import { fonts, semantic, type as ty, typeSize } from "../../theme/tokens";
 import { MessageBodyText } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator, receiptLabel } from "./ReceiptIndicator";
+import { READ_RAIL_WIDTH } from "./ReadRail";
 import { MessageAttachments } from "./MessageAttachments";
 import { MessageLinkPreview } from "./MessageLinkPreview";
 import { SwipeToReply } from "./SwipeToReply";
@@ -73,6 +74,8 @@ export function MessageRow({
   receipt,
   peerCount = 0,
   showReceipt = false,
+  readRail,
+  readUpToLabel,
   threadCount = 0,
   threadLastReply,
   onOpenThread,
@@ -124,9 +127,14 @@ export function MessageRow({
   onToggleReaction?: (emoji: string, reacted: boolean) => void;
   // Who reacted with `emoji` (long press on a pill, or the row's a11y action).
   onShowReactions?: (emoji: string) => void;
+  // A group DM's count indicator (#857); a one-to-one DM uses the read-up-to rail instead.
   receipt?: MessageReceipts;
   peerCount?: number;
   showReceipt?: boolean;
+  // The one-to-one DM's read-up-to rail slot (#2140), laid over this row's end edge.
+  readRail?: ReactNode;
+  // Spoken on the row the other person has read up to (#1637): "<name> has read up to here".
+  readUpToLabel?: string | null;
   threadCount?: number;
   threadLastReply?: string;
   onOpenThread?: () => void;
@@ -276,7 +284,8 @@ export function MessageRow({
     .join(" ");
   // The row is one element on iOS, so the tick's state is spoken with it (#1637).
   const spokenReceipt =
-    showReceipt && !pending && !failed ? receiptLabel(t, receipt, peerCount) : null;
+    readUpToLabel ??
+    (showReceipt && !pending && !failed ? receiptLabel(t, receipt, peerCount) : null);
 
   return (
     <SwipeToReply onReply={onReply} pressFeedback={press}>
@@ -325,6 +334,8 @@ export function MessageRow({
         style={[
           {
             paddingHorizontal: 16,
+            // The rail keeps its column clear on every row, so text never reflows as the avatar moves.
+            paddingEnd: readRail ? READ_RAIL_WIDTH + 4 : 16,
             paddingTop: mentionsSelf ? 8 : showHeader ? 10 : 2,
             paddingBottom: mentionsSelf ? 8 : 2,
             marginTop: mentionsSelf && showHeader ? 4 : 0,
@@ -333,6 +344,7 @@ export function MessageRow({
           pressStyle,
         ]}
       >
+        {readRail}
         {isReply ? (
           <Pressable
             testID={`reply-quote-${messageId ?? ""}`}

@@ -309,8 +309,9 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
     the new one opens, over the same duration, so the log's height stays the same. A change of
     state cross-fades in place at a fixed height. It follows the new-message rules (#2125): it
     never scrolls or moves someone who has scrolled up.
-  - With receipts off (#892), mobile never shows the avatar, and desktop stops at "Delivered",
-    exactly as for someone who hasn't opened the chat yet.
+  - With receipts off (#892), on either side, nothing shows on either platform: the opt-out
+    stops delivery receipts too, so there is no "Delivered" to show, and nothing hints that
+    receipts are off.
 
 ## Motion
 

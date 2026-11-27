@@ -92,6 +92,8 @@ import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { receiptTargetId } from "../../lib/receiptTarget";
+import { readUpToId } from "../../lib/readUpTo";
+import { ReadRailCell, ReadRailProvider, ReadRailSlot, type RailPeer } from "../../components/chat/ReadRail";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { useMessageBodyContext } from "../../hooks/useMessageBodyContext";
 import { useGroupCommands, useSendCommandRequest } from "../../hooks/queries/useBots";
@@ -227,18 +229,15 @@ function TextChat(props: ChatViewProps = {}) {
     currentUser?.id ?? null,
     isDm && sendReadReceipts,
   );
-  const peerCount = 1;
-  // One tick per DM (#1637): the newest own top-level message with a receipt.
+  // Top-level rows, newest first: what the receipts are placed against.
+  const topLevel = useMemo(
+    () => messages.filter((m) => !m.thread_id || m.thread_id === m.id),
+    [messages],
+  );
+  // A DM with more members: one count tick (#1637), on the newest own message with a receipt.
   const receiptMessageId = useMemo(
-    () =>
-      isDm
-        ? receiptTargetId(
-            messages.filter((m) => !m.thread_id || m.thread_id === m.id),
-            currentUser?.id,
-            receiptsByMessage,
-          )
-        : null,
-    [isDm, messages, currentUser?.id, receiptsByMessage],
+    () => (isDm ? receiptTargetId(topLevel, currentUser?.id, receiptsByMessage) : null),
+    [isDm, topLevel, currentUser?.id, receiptsByMessage],
   );
 
   // Safety numbers (#1605): durable change notices + this DM's verified state.
@@ -267,6 +266,17 @@ function TextChat(props: ChatViewProps = {}) {
     (peerVerifications ?? []).some(
       (v) => v.peer_user_id === onePeer.user_id && v.verified,
     );
+  const peerCount = Math.max(dmPeers.length, 1);
+  // A one-to-one DM: the read-up-to rail instead (#2140). Never placed while receipts are off
+  // (#892); then the receipts query is empty too.
+  const railPeerMember = isDm && onePeer && sendReadReceipts ? onePeer : null;
+  const readUpToMessageId = useMemo(
+    () =>
+      railPeerMember
+        ? readUpToId(topLevel, currentUser?.id, railPeerMember.user_id, receiptsByMessage)
+        : null,
+    [railPeerMember, topLevel, currentUser?.id, receiptsByMessage],
+  );
   const peerLabel = useCallback(
     (userId: string) => {
       const p = dmPeers.find((m) => m.user_id === userId);
@@ -861,6 +871,22 @@ function TextChat(props: ChatViewProps = {}) {
     }
     return map;
   }, [dmChannel, groupMembers]);
+
+  // Who the read-up-to rail shows (#2140): the other person, drawn like their message rows.
+  const railPeer = useMemo<(RailPeer & { name: string }) | null>(() => {
+    if (!railPeerMember) {
+      return null;
+    }
+    const name =
+      groupAuthor(railPeerMember.user_id, railPeerMember.username, railPeerMember.preferred_name) ??
+      t("chat:list.unknownAuthor");
+    return {
+      userId: railPeerMember.user_id,
+      avatarKey: avatarKeyById.get(railPeerMember.user_id),
+      label: name.slice(0, 2),
+      name,
+    };
+  }, [railPeerMember, groupAuthor, avatarKeyById, t]);
   usePrefetchAvatars(
     useMemo(
       () =>
@@ -978,7 +1004,8 @@ function TextChat(props: ChatViewProps = {}) {
   const rowCtx = useMemo<RowContext>(
     () => ({
       currentUserId: currentUser?.id,
-      isDm,
+      // The count indicator is a group DM's (#857); a one-to-one DM has the read-up-to rail (#2140).
+      showReceipts: isDm && dmPeers.length > 1,
       peerCount,
       hidePreviews: isPendingRequest,
       author: groupAuthor,
@@ -998,6 +1025,7 @@ function TextChat(props: ChatViewProps = {}) {
     [
       currentUser?.id,
       isDm,
+      dmPeers.length,
       peerCount,
       isPendingRequest,
       groupAuthor,
@@ -1104,9 +1132,13 @@ function TextChat(props: ChatViewProps = {}) {
           />
         );
       }
+      const readUpTo = !!railPeer && m.id === readUpToMessageId;
       return (
         <MessageRowItem
           message={m}
+          railPeer={railPeer}
+          readUpTo={readUpTo}
+          readUpToLabel={readUpTo && railPeer ? t("chat:receipts.readUpTo", { name: railPeer.name }) : null}
           continued={item.continued}
           ctx={rowCtx}
           handlers={rowHandlers}
@@ -1127,6 +1159,9 @@ function TextChat(props: ChatViewProps = {}) {
       reactionsByMessage,
       receiptsByMessage,
       receiptMessageId,
+      railPeer,
+      readUpToMessageId,
+      t,
       threadSummaries,
       repliedTo,
       highlightId,
@@ -1254,6 +1289,10 @@ function TextChat(props: ChatViewProps = {}) {
         </Animated.View>
       ) : null}
       <Animated.View style={[{ flex: 1 }, revealStyle, revealSettled ? REVEALED : null]}>
+      <ReadRailProvider
+        conversationKey={logKey}
+        raisedKey={readUpToMessageId ? items.find((i) => i.type === "msg" && i.message.id === readUpToMessageId)?.key ?? null : null}
+      >
       <FlatList
         ref={listRef}
         testID="list-messages"
@@ -1264,6 +1303,7 @@ function TextChat(props: ChatViewProps = {}) {
         data={items}
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
+        CellRendererComponent={railPeer ? ReadRailCell : undefined}
         extraData={themeKey}
         style={{ flex: 1, opacity: listRevealed ? 1 : 0 }}
         // `flex-end` is the visual TOP under `inverted`: anchors a short thread there.
@@ -1291,6 +1331,7 @@ function TextChat(props: ChatViewProps = {}) {
           ) : null
         }
       />
+      </ReadRailProvider>
       {unseen > 0 && !atBottom ? <NewMessagesButton count={unseen} onPress={goToNewest} /> : null}
       {PERF_MARKS ? <PerfSummary /> : null}
       </Animated.View>

@@ -185,6 +185,26 @@
   overflow: hidden;
 }
 
+/* The DM status line (#2140, `Message/ReceiptLine.tsx`) folds on `.motion-fold`, opening and
+   shutting on the same timing, so when it moves the old line's fold and the new line's opening
+   cancel out and the log's height holds. A change of state cross-fades its two stacked faces at
+   a fixed height. */
+.receipt-line-faces {
+  display: grid;
+  padding-top: 0.125rem;
+  white-space: nowrap;
+}
+
+.receipt-line-faces > * {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--motion-ease-out);
+}
+
+.receipt-line-faces > [data-front="true"] {
+  opacity: 1;
+}
+
 /* The status bar's unread blink. */
 @keyframes status-blink {
   0%,
@@ -226,7 +246,8 @@
 
   .motion-hover-grow > *,
   .motion-chevron,
-  .motion-fold {
+  .motion-fold,
+  .receipt-line-faces > * {
     transition: none;
   }
 

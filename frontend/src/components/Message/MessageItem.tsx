@@ -13,7 +13,7 @@ import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
 import { MessageActions } from "./MessageActions";
 import { MessageReactions } from "./MessageReactions";
-import { ReceiptIndicator } from "./ReceiptIndicator";
+import { ReceiptLine } from "./ReceiptLine";
 import { UndecryptableMessage } from "./UndecryptableMessage";
 import { UnsentMessageActions } from "./UnsentMessageActions";
 import { probeRender } from "../../utils/renderProbe";
@@ -53,7 +53,7 @@ interface MessageItemProps {
   isSaved?: boolean;
   isPinned?: boolean;
   onScrollToReply?: (messageId: string) => void;
-  /** Receipts for this message only (#857); Modern skin, DMs only. */
+  /** Receipts for this message only (#857), drawn as the status line (#2140); Modern skin, DMs only. */
   receipt?: MessageReceipts;
   peerCount?: number;
   isDm?: boolean;
@@ -317,11 +317,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           >
             <MessageBody text={content} ctx={ctx} />
             {bodyTail}
-            <ReceiptIndicator
-              receipts={receipt}
-              peerCount={peerCount}
-              visible={isOwn && isDm}
-            />
           </div>
 
           {!isDeleted && (
@@ -337,6 +332,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
           {/* Inside the body column so pills align with the text. */}
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-1" />}
+
+          {/* The DM status line (#2140): under the whole message, shut unless this row carries it. */}
+          {isOwn && isDm && (
+            <ReceiptLine messageId={message.id} receipt={receipt} peerCount={peerCount} />
+          )}
         </div>
 
         {actionsFor("modern")}

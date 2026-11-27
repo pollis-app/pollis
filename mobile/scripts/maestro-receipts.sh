@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One receipt tick per DM (#1637), on ONE device plus a dev-DS peer.
+# The read-up-to avatar of a one-to-one DM (#1637, #2140), on ONE device plus a dev-DS peer.
 #
 #   mobile/scripts/maestro-receipts.sh <device-id>
 #
@@ -8,9 +8,9 @@
 # (`.maestro/scripts/peer-send.js`) or fetches and reads the device's messages
 # (`.maestro/scripts/peer-read.js`) when a flow asks over loopback HTTP:
 #   1. the device opens the DM and sends one message;
-#   2. it sends a second, the peer reads both -> only the newest shows "Read by everyone";
-#      the peer replies -> its message has no tick and mine keeps it; a third send read by the
-#      peer takes the tick and the second gives it up.
+#   2. it sends a second -> nothing shows until the peer reads; the peer reads both -> the
+#      avatar sits on the newest; the peer replies, and a third send waits unread -> it stays;
+#      the peer reads the third -> the avatar glides down to it and the second gives it up.
 #
 # Needs: a Release build against the dev DS on the device, .maestro/.env filled in, and
 # POLLIS_DEV_ACCESS_KEY for the dev gate (read from Doppler `dev_personal` when unset).
@@ -79,7 +79,7 @@ maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$PRIMARY_EMAI
   -e MAESTRO_PEER_HANDLE="$HANDLE" "$FLOWS/1-open-dm.yaml"
 await_peer PEER_READY 300
 
-echo "==> 2/2 one tick, on the newest message the peer has"
-maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e PEER_PORT="$PORT" "$FLOWS/2-latest-only.yaml"
+echo "==> 2/2 the avatar moves to the newest message the peer has read"
+maestro --device "$DEVICE" test "${ENV_ARGS[@]}" -e PEER_PORT="$PORT" "$FLOWS/2-read-up-to.yaml"
 curl -fsS "http://127.0.0.1:$PORT/quit" >/dev/null || true
 echo "==> receipts passed"
