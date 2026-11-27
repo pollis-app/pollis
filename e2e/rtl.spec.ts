@@ -314,6 +314,32 @@ for (const skin of SKINS) {
       const bodyOf = (page: Page, id: string) =>
         page.getByTestId(`message-${id}`).getByTestId("message-content");
 
+      if (skin === "terminal") {
+        // Terminal's text runs inline after the name (#2130), so it has no column to hug: the line
+        // follows the interface (name at its reading start, text after it), and each body is
+        // painted in its own script's order inside that line.
+        for (const lang of [RTL_LANG, LTR_LANG]) {
+          await boot(page, skin, lang);
+          await gotoChannel(page);
+          for (const id of [LATIN_MESSAGE_ID, ARABIC_MESSAGE_ID]) {
+            const name = await box(page.getByTestId(`message-${id}`).getByTestId("message-author"));
+            const body = await box(bodyOf(page, id));
+            if (lang === RTL_LANG) {
+              expect(body.right).toBeLessThan(name.left);
+            } else {
+              expect(body.left).toBeGreaterThan(name.right);
+            }
+            const chars = await firstLastCharLefts(bodyOf(page, id));
+            if (id === ARABIC_MESSAGE_ID) {
+              expect(chars.first).toBeGreaterThan(chars.last);
+            } else {
+              expect(chars.first).toBeLessThan(chars.last);
+            }
+          }
+        }
+        return;
+      }
+
       await boot(page, skin, RTL_LANG);
       await gotoChannel(page);
       const rtlLatin = await textBox(bodyOf(page, LATIN_MESSAGE_ID));

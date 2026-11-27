@@ -277,11 +277,9 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
         " (edited)"
     };
 
-    let mut attachments = content.attachments.iter();
+    // Attachments always start on their own line under the text (#2130), with or without text.
     if text_lines.is_empty() {
-        let first = attachments.next().map(attachment_label).unwrap_or_default();
-        head.push((first, attachment_style()));
-        if edited && content.attachments.len() <= 1 {
+        if edited && content.attachments.is_empty() {
             head.push((edited_label.to_string(), dim));
         }
         lines.extend(wrap(head, width, INDENT));
@@ -303,9 +301,8 @@ fn message_block(m: &ChannelMessage, ctx: &Context<'_>, width: usize) -> Block {
             lines.extend(wrap(segments, width, INDENT));
         }
     }
-    let rest: Vec<_> = attachments.collect();
-    let rest_len = rest.len();
-    for (n, a) in rest.into_iter().enumerate() {
+    let rest_len = content.attachments.len();
+    for (n, a) in content.attachments.iter().enumerate() {
         let mut segments = vec![
             (" ".repeat(INDENT), Style::default()),
             (attachment_label(a), attachment_style()),
@@ -670,7 +667,7 @@ mod tests {
     }
 
     #[test]
-    fn an_attachment_without_caption_rides_the_header() {
+    fn an_attachment_without_caption_still_takes_its_own_line() {
         let f = Fixture::new();
         let m = msg(
             "1",
@@ -678,10 +675,21 @@ mod tests {
             r#"{"_att":[{"name":"a.pdf","ct":"application/pdf","size":1024}]}"#,
         );
         let lines = all_text(&f.layout(&[&m], None, 60));
-        assert!(
-            lines[1].ends_with("alice  [file: a.pdf, 1 KB]"),
-            "{lines:?}"
-        );
+        assert!(lines[1].trim_end().ends_with("alice"), "{lines:?}");
+        assert_eq!(lines[2], "      [file: a.pdf, 1 KB]");
+    }
+
+    #[test]
+    fn long_text_wraps_under_the_sender_not_after_the_name() {
+        let f = Fixture::new();
+        let m = msg("1", "bartholomew", &"word ".repeat(30));
+        let lines = all_text(&f.layout(&[&m], None, 40));
+        let body: Vec<_> = lines.iter().skip(1).filter(|l| !l.trim().is_empty()).collect();
+        assert!(body.len() > 2, "{lines:?}");
+        assert!(body[0].contains("bartholomew  word"), "{lines:?}");
+        for line in &body[1..] {
+            assert!(line.starts_with("      word"), "{lines:?}");
+        }
     }
 
     #[test]
