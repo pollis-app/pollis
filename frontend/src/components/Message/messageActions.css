@@ -1,0 +1,14 @@
+/*
+ * The per-message hover actions (#2144), Slack/Discord style: they float at the row's top-end
+ * corner and straddle its top edge, their bottom edge on the row's first line. So they never cover
+ * the text, at any column width or in either direction, and selection works across the whole line
+ * while they show. Each row sets `--msg-actions-anchor` to its top padding, where its content starts,
+ * and, while focused, `scroll-mt-8` (the bar's height), so arrow-key navigation scrolls a row in
+ * with its bar (only then: a jump's centring must not shift by it).
+ */
+.msg-actions {
+  position: absolute;
+  inset-inline-end: 1rem;
+  bottom: calc(100% - var(--msg-actions-anchor, 0rem));
+  z-index: 10;
+}

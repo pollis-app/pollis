@@ -4,6 +4,7 @@
 // writes review screenshots.
 
 import { test, expect, type Locator, type Page } from "./lib/zero-loss";
+import { rectOf, type Rect } from "./lib/rects";
 
 const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
 const GROUP_ID = "g_media";
@@ -99,14 +100,6 @@ async function openChannel(page: Page, lang = "en") {
   await page.getByTestId(`channel-option-${CHANNEL_ID}`).click();
   await expect(page.getByTestId("message-m_arabic").getByTestId("message-content")).toBeVisible();
 }
-
-type Rect = { left: number; right: number; top: number; bottom: number };
-
-const rectOf = async (locator: Locator): Promise<Rect> => {
-  const b = await locator.boundingBox();
-  expect(b).not.toBeNull();
-  return { left: b!.x, right: b!.x + b!.width, top: b!.y, bottom: b!.y + b!.height };
-};
 
 /** One rect per painted line of an inline element (`getClientRects`), top to bottom. */
 const lineRects = (locator: Locator): Promise<Rect[]> =>
@@ -207,15 +200,16 @@ test.describe("terminal skin — a message reads like a shell line", () => {
     expect(preview.bottom).toBeLessThanOrEqual(author.top + 1);
   });
 
-  test("the hover actions stay at the end of the line, clear of the text", async ({ page }) => {
+  test("the hover actions float over the row's top edge, clear of the text", async ({ page }) => {
     await openChannel(page);
     const row = page.getByTestId("message-m_long");
     await row.hover();
     const actions = await rectOf(row.getByTestId("message-actions"));
+    const author = await rectOf(row.getByTestId("message-author"));
     const lines = await lineRects(row.getByTestId("message-content"));
-    for (const line of lines) {
-      expect(line.right).toBeLessThan(actions.left);
-    }
+    // Above the line, at the row's end (#2144): the text keeps the full width under them.
+    expect(actions.bottom).toBeLessThanOrEqual(Math.min(author.top, lines[0].top) + 0.5);
+    expect(lines[0].right).toBeGreaterThan(actions.left);
   });
 
   test("selecting the line copies it as name: text", async ({ page }) => {
