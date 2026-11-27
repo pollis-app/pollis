@@ -88,7 +88,7 @@ import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { receiptTargetId } from "../../lib/receiptTarget";
 import { readUpToId } from "../../lib/readUpTo";
-import { ReadRailProvider, ReadRailSlot, type RailPeer } from "../../components/chat/ReadRail";
+import { ReadRailCell, ReadRailProvider, ReadRailSlot, type RailPeer } from "../../components/chat/ReadRail";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { useMessageBodyContext } from "../../hooks/useMessageBodyContext";
 import { useGroupCommands, useSendCommandRequest } from "../../hooks/queries/useBots";
@@ -1217,7 +1217,10 @@ function TextChat(props: ChatViewProps = {}) {
         </Animated.View>
       ) : null}
       <Animated.View style={[{ flex: 1 }, revealStyle, revealSettled ? REVEALED : null]}>
-      <ReadRailProvider conversationKey={logKey}>
+      <ReadRailProvider
+        conversationKey={logKey}
+        raisedKey={readUpToMessageId ? items.find((i) => i.type === "msg" && i.message.id === readUpToMessageId)?.key ?? null : null}
+      >
       <FlatList
         ref={listRef}
         testID="list-messages"
@@ -1228,6 +1231,7 @@ function TextChat(props: ChatViewProps = {}) {
         data={items}
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
+        CellRendererComponent={railPeer ? ReadRailCell : undefined}
         extraData={themeKey}
         style={{ flex: 1, opacity: listRevealed ? 1 : 0 }}
         // `flex-end` is the visual TOP under `inverted`: anchors a short thread there.

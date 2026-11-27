@@ -11,7 +11,7 @@
  * off the screen never places it (#892).
  */
 import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
-import { View } from "react-native";
+import { View, type ViewProps } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -32,13 +32,49 @@ interface RailRegistry {
 }
 
 const RailContext = createContext<RailRegistry | null>(null);
+// The list key of the row holding the avatar: its cell is raised over the rows it glides past.
+const RaisedKeyContext = createContext<string | null>(null);
 
-export function ReadRailProvider({ conversationKey, children }: { conversationKey: string; children: ReactNode }) {
+export function ReadRailProvider({
+  conversationKey,
+  raisedKey,
+  children,
+}: {
+  conversationKey: string;
+  raisedKey: string | null;
+  children: ReactNode;
+}) {
   const registry = useRef<{ key: string; value: RailRegistry } | null>(null);
   if (registry.current?.key !== conversationKey) {
     registry.current = { key: conversationKey, value: { slots: new Map(), shownAt: null } };
   }
-  return <RailContext.Provider value={registry.current.value}>{children}</RailContext.Provider>;
+  return (
+    <RailContext.Provider value={registry.current.value}>
+      <RaisedKeyContext.Provider value={raisedKey}>{children}</RaisedKeyContext.Provider>
+    </RailContext.Provider>
+  );
+}
+
+/**
+ * The list's `CellRendererComponent`. Every row paints its own background, and in an inverted
+ * list the older rows the avatar glides past are drawn after it, so they would cover it; the
+ * read-up-to row's cell is raised above its siblings instead.
+ */
+export function ReadRailCell({
+  cellKey,
+  style,
+  children,
+  item: _item,
+  index: _index,
+  ...rest
+}: ViewProps & { cellKey?: string; item?: unknown; index?: number; children?: ReactNode }) {
+  const raisedKey = useContext(RaisedKeyContext);
+  const raised = raisedKey !== null && cellKey === raisedKey;
+  return (
+    <View {...rest} style={[style, raised ? { zIndex: 1, elevation: 1 } : null]}>
+      {children}
+    </View>
+  );
 }
 
 function bottomInWindow(view: View): Promise<number | null> {
