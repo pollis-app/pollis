@@ -130,6 +130,13 @@ for (const skin of SKINS) {
       expect(c.top).toBeCloseTo(pinAt + natural.height / 2, 0);
       expect(b.bottom).toBeCloseTo(c.top, 0);
       expect(b.top).toBeLessThan(pinAt);
+      // B's outgoing top half slides under the Groups bar, never over it (#2193).
+      const overBar = await page.evaluate((y) => {
+        const s = document.querySelector('[data-testid="sidebar"]') as HTMLElement;
+        const r = s.getBoundingClientRect();
+        return document.elementFromPoint(r.left + r.width / 2, y)?.closest("[data-testid]")?.getAttribute("data-testid") ?? null;
+      }, pinAt - natural.height / 4);
+      expect(overBar).toBe("sidebar-row-groups");
       await shot(page, `${skin}-handoff`);
 
       // Past it: C is the pinned one.
