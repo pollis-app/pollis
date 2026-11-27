@@ -12,7 +12,7 @@ import { semantic, fonts, r } from "../../theme/tokens";
 import { forgetEmojiUri, resolveEmojiUri } from "../../lib/emojiCache";
 import { emojiRetryDelay, retryOnForeground } from "../../lib/emojiRetry";
 import { reportEmojiShown } from "../../lib/emojiRenderState";
-import { LATE_FADE_IN } from "../../lib/lateFade";
+import { LATE_FADE_IN } from "../../theme/motion";
 
 /**
  * One custom emoji, rendered inline. Resolves the content hash to a cached

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
+import { FadeInAfterLoad } from "../../components/FadeInAfterLoad";
 import {
   Screen,
   Header,
@@ -177,7 +178,9 @@ function Direct() {
             {t("direct.loadFailed")}
           </Txt>
         ) : null}
-        {!isLoading && !isError && dms.length === 0 ? (
+        {/* Fades in where the loading line was (#2125). */}
+        <FadeInAfterLoad loading={isLoading} style={{ gap: 2 }}>
+        {!isError && dms.length === 0 ? (
           <EmptyState
             testID="direct-empty"
             icon="messageCircle"
@@ -239,6 +242,7 @@ function Direct() {
             />
           );
         })}
+        </FadeInAfterLoad>
       </Body>
     </>
   );

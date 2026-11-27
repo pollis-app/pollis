@@ -343,6 +343,16 @@ then waits with a tight timeout: a message into the open DM is on screen within
 the DM opens, with no loading line; and after 35 s in the background one is in
 the DM within 3 s of opening it on resume.
 
+**New messages (automated, #2125):** `mobile/scripts/maestro-new-messages.sh <device>`
+— one device plus the same `live_message_peer` (`scripts/peer-send.js`, and
+`scripts/peer-send-many.js` for a run of numbered messages). The device opens a DM
+with the peer (`two-client/live-message/1-open-dm.yaml`); the peer fills more than a
+screen and sends again: at the bottom the log follows and no `new-messages-button`
+shows (`two-client/new-messages/2-at-bottom.yaml`). The device then scrolls up to the
+DM's first message and the peer sends four: the first message stays in view (a log
+that shifted by four rows would push it off the top), "4 new messages" shows, and a
+tap goes to the newest and the button goes (`3-scrolled-up.yaml`).
+
 **Profile change (automated, #2084):** `mobile/scripts/maestro-profile-change.sh <device>`
 — one device plus `pollis-tui`'s `profile_peer` example. `two-client/profile-change/`:
 the device reads the peer's message under its handle, the peer changes its handle and

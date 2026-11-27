@@ -3,6 +3,7 @@ import { View } from "react-native";
 import { Text } from "../../components/Text";
 import { useFocusEffect, useIsFocused, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
+import { FadeInAfterLoad } from "../../components/FadeInAfterLoad";
 import { observer } from "mobx-react-lite";
 import { Screen, Header, Body, Button, EmptyState } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -198,10 +199,13 @@ function Groups() {
             </Text>
           ) : null}
           {pending}
-          {!isLoading && !isError ? (
-            <EmptyState testID="groups-empty" icon="users" action={groupActions}>
-              {t("groups.emptyTitle")}
-            </EmptyState>
+          {!isError ? (
+            // Fades in where the loading line was (#2125).
+            <FadeInAfterLoad loading={isLoading}>
+              <EmptyState testID="groups-empty" icon="users" action={groupActions}>
+                {t("groups.emptyTitle")}
+              </EmptyState>
+            </FadeInAfterLoad>
           ) : null}
           {isError ? <View style={{ gap: space.md }}>{groupActions}</View> : null}
         </Body>

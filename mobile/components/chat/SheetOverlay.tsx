@@ -2,16 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal,
   View,
-  AccessibilityInfo,
   Platform,
   useWindowDimensions,
 } from "react-native";
 import { Text } from "../Text";
 import Animated, {
-  Easing,
+  ReduceMotion,
   cancelAnimation,
   useAnimatedStyle,
-  useReducedMotion,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
@@ -24,10 +22,15 @@ import { useTheme } from "../theme";
 import { Icon } from "../icons";
 import { useBottomInset, PressInPressable, InSheetContext } from "../ui";
 import { useIsRegular } from "../../hooks/useLayoutClass";
+import { useReduceMotion } from "../../hooks/useReduceMotion";
+import { EASE_IN, EASE_OUT, MOTION } from "../../theme/motion";
 
-// Entry timing (#1193), in line with the ~200 ms stack transitions.
-const ENTER_MS = 180;
+// Entry timing (#1193), in line with the ~200 ms stack transitions; the shared tokens (#2125).
+const ENTER_MS = MOTION.baseMs;
 const SETTLE_FALLBACK_MS = 600;
+// The close plays the entrance backwards (#2125). `onClose` runs from a JS timer at EXIT_MS, never
+// from the animation's callback, so a stalled animation can never hold a sheet open.
+const EXIT_MS = MOTION.exitMs;
 
 // Applied AFTER the animated styles once settled, in case Reanimated never wrote the view.
 const SETTLED_BACKDROP = { opacity: 1 };
@@ -42,7 +45,7 @@ export function afterSheetClose(fn: () => void): void {
   requestAnimationFrame(() => requestAnimationFrame(fn));
 }
 
-/** Bottom sheet in a transparent `Modal` (full-screen backdrop, focus confined). Dismissal is immediate. */
+/** Bottom sheet in a transparent `Modal` (full-screen backdrop, focus confined). Its own dismissals (Close, backdrop, Back) play the entrance backwards. */
 export function SheetOverlay({
   onClose,
   title,
@@ -67,20 +70,55 @@ export function SheetOverlay({
   const offscreen = useRef(windowHeight).current;
   // 0 → 1 over the entrance, on the UI thread.
   const progress = useSharedValue(0);
-  // A ref: read only when the entrance would start.
-  const reduceMotionAtLaunch = useReducedMotion();
-  const reduceMotion = useRef(reduceMotionAtLaunch);
+  // A ref: read only when the entrance or the exit would start.
+  const reduceMotionNow = useReduceMotion();
+  const reduceMotion = useRef(reduceMotionNow);
+  reduceMotion.current = reduceMotionNow;
   // Once settled, plain static styles: visibility no longer depends on Reanimated.
-  const [settled, setSettled] = useState(reduceMotionAtLaunch);
+  const [settled, setSettled] = useState(reduceMotionNow);
   const markSettled = useCallback(() => setSettled(true), []);
-
-  useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((enabled) => {
-        reduceMotion.current = enabled;
-      })
-      .catch(() => {});
+  // Closing: the settled styles step aside so the exit shows; `onClose` fires once, from a timer.
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const closedRef = useRef(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const finishClose = useCallback(() => {
+    if (closedRef.current) {
+      return;
+    }
+    closedRef.current = true;
+    onCloseRef.current();
   }, []);
+  const requestClose = useCallback(() => {
+    if (closingRef.current || closedRef.current) {
+      return;
+    }
+    closingRef.current = true;
+    if (reduceMotion.current) {
+      finishClose();
+      return;
+    }
+    setClosing(true);
+    cancelAnimation(progress);
+    progress.value = withTiming(0, {
+      duration: EXIT_MS,
+      easing: EASE_IN,
+      reduceMotion: ReduceMotion.Never,
+    });
+    closeTimer.current = setTimeout(finishClose, EXIT_MS);
+  }, [finishClose, progress]);
+  // Unmounted by its parent (a row's action closed it): nothing left to close.
+  useEffect(
+    () => () => {
+      closedRef.current = true;
+      if (closeTimer.current) {
+        clearTimeout(closeTimer.current);
+      }
+    },
+    [],
+  );
 
   // iOS can lose an animation started before the modal is presented (review #1): start on onShow.
   const onShow = () => {
@@ -93,7 +131,7 @@ export function SheetOverlay({
     }
     progress.value = withTiming(
       1,
-      { duration: ENTER_MS, easing: Easing.out(Easing.cubic) },
+      { duration: ENTER_MS, easing: EASE_OUT, reduceMotion: ReduceMotion.Never },
       (finished) => {
         "worklet";
         if (finished) {
@@ -111,7 +149,8 @@ export function SheetOverlay({
 
   // A stalled timing (gorhom #2721) would hold props that override the SETTLED_* styles.
   useEffect(() => {
-    if (!settled) {
+    // Never snap a closing sheet back open.
+    if (!settled || closingRef.current) {
       return;
     }
     cancelAnimation(progress);
@@ -130,7 +169,7 @@ export function SheetOverlay({
       animationType="none"
       statusBarTranslucent
       navigationBarTranslucent
-      onRequestClose={onClose}
+      onRequestClose={requestClose}
       onShow={onShow}
     >
       {/* Android keeps every control in here on release (lib/pressIn.ts). */}
@@ -147,13 +186,13 @@ export function SheetOverlay({
                 backgroundColor: semantic.backdrop,
               },
               backdropStyle,
-              settled ? SETTLED_BACKDROP : null,
+              settled && !closing ? SETTLED_BACKDROP : null,
             ]}
           >
             {/* Hidden from screen readers: Close is the accessible way out. */}
             <PressInPressable
               pressIn
-              onPress={onClose}
+              onPress={requestClose}
               accessible={false}
               importantForAccessibility="no"
               style={{ flex: 1 }}
@@ -190,7 +229,7 @@ export function SheetOverlay({
                   minHeight: 0,
                 },
                 cardStyle,
-                settled ? SETTLED_CARD : null,
+                settled && !closing ? SETTLED_CARD : null,
               ]}
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
@@ -203,7 +242,7 @@ export function SheetOverlay({
                 </Text>
                 <PressInPressable
                   pressIn
-                  onPress={onClose}
+                  onPress={requestClose}
                   testID={closeTestID}
                   accessibilityRole="button"
                   accessibilityLabel={t("actions.close")}

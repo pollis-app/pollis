@@ -2,6 +2,8 @@ import { Pressable, View } from "react-native";
 import { Text } from "../Text";
 import { useTranslation } from "react-i18next";
 import { Badge } from "../ui";
+import { useLateArrival } from "../../hooks/useLateArrival";
+import { appStore } from "../../stores/appStore";
 import { UserAvatar } from "../UserAvatar";
 import {
   semantic,
@@ -46,6 +48,7 @@ export function ConversationRow({
 }) {
   const { t } = useTranslation("mobile");
   const isUnread = unread > 0;
+  const badgePops = useLateArrival(isUnread, appStore.unreadHydrated);
   const shownPreview = preview
     ? own
       ? t("direct.ownPreview", { text: preview })
@@ -138,7 +141,7 @@ export function ConversationRow({
               {shownPreview ?? ""}
             </Text>
             {isUnread ? (
-              <Badge testID={unreadTestID}>
+              <Badge testID={unreadTestID} pop={badgePops}>
                 {unread > 99 ? "99+" : unread}
               </Badge>
             ) : null}

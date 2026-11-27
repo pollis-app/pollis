@@ -1,0 +1,50 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# NEW MESSAGES (#2125), part 3 of 3. The reader scrolls up to the start of the DM; the peer sends
+# four more. Nothing on screen moves (the first message stays in view, where a list that shifted
+# by four rows would have pushed it off the top), "4 new messages" shows, and tapping it goes to
+# the newest message, after which the button is gone.
+
+- repeat:
+    times: 5
+    commands:
+      # The list is inverted: dragging down reads back in time.
+      - swipe:
+          start: 50%,30%
+          end: 50%,85%
+          duration: 300
+- waitForAnimationToEnd:
+    timeout: 3000
+- extendedWaitUntil:
+    visible: ".*: hello peer, .*"
+    timeout: 10000
+- takeScreenshot: new-messages-02-scrolled-up
+- runScript:
+    file: ../../scripts/peer-send-many.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      COUNT: "4"
+      PREFIX: "unseen"
+- extendedWaitUntil:
+    visible:
+      id: "new-messages-button"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: ".*4 new messages.*"
+    timeout: 15000
+# Position kept: the first message is still on screen and the new ones are not.
+- assertVisible: ".*: hello peer, .*"
+- assertNotVisible: ".*: unseen 04, .*"
+- takeScreenshot: new-messages-03-button
+- tapOn:
+    id: "new-messages-button"
+- extendedWaitUntil:
+    visible: ".*: unseen 04, .*"
+    timeout: 5000
+- extendedWaitUntil:
+    notVisible:
+      id: "new-messages-button"
+    timeout: 5000
+- takeScreenshot: new-messages-04-newest

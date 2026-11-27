@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, View, FlatList } from "react-native";
+import {
+  AppState,
+  View,
+  FlatList,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
+import Animated, {
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { readsOnArrival, resumedToForeground } from "../../lib/unread";
 import { Text } from "../../components/Text";
 import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
@@ -99,6 +111,21 @@ import { COMPATIBLE_PICK } from "../../lib/pickerOptions";
 import { conversationDraftKey, useDraft } from "../../hooks/useDraft";
 import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
 import { ComposerLinkPreview } from "../../components/chat/ComposerLinkPreview";
+import { NewMessagesButton } from "../../components/chat/NewMessagesButton";
+import { classifyArrivals, distanceFromBottom, isNearBottom } from "../../lib/chatFollow";
+import { useReduceMotion } from "../../hooks/useReduceMotion";
+import {
+  BASE_TIMING,
+  CONTENT_FADE_IN,
+  MOTION,
+  REDUCED_FADE_IN,
+  messageRiseIn,
+} from "../../theme/motion";
+
+// Scrolled up, the rows on screen hold still while new ones land under them (#2125).
+const HOLD_POSITION = { minIndexForVisible: 0 } as const;
+const RISE_INVERTED = messageRiseIn(true);
+const REVEALED = { opacity: 1 };
 
 // Props embed this screen in the iPad right pane; route usage passes none.
 type ChatViewProps = {
@@ -309,17 +336,92 @@ function TextChat(props: ChatViewProps = {}) {
     }, [conversationId]),
   );
 
-  // Keyed on the newest id, so loading an older page never scrolls the reader.
+  // #2125: new messages are followed only from the bottom (or after the reader's own send).
+  // Scrolled up, nothing moves and "N new messages" counts what landed; the first load, an
+  // older page and a stub swapping for its stored row never count (lib/chatFollow.ts).
   const listRef = useRef<FlatList<ChatListItem>>(null);
   const newestId = messages[0]?.id;
+  const reduceMotion = useReduceMotion();
+  const reduceMotionRef = useRef(reduceMotion);
+  reduceMotionRef.current = reduceMotion;
+  const logKey = `${kind}:${conversationId}`;
+  const atBottomRef = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const [unseen, setUnseen] = useState(0);
+  const shownIds = useMemo(() => messages.map((m) => m.id), [messages]);
+  const prevLog = useRef<{ key: string; ids: readonly string[] } | null>(null);
+  const selfId = currentUser?.id;
+  const arrivals = useMemo(() => {
+    const prev = prevLog.current?.key === logKey ? prevLog.current.ids : null;
+    const own = new Set(messages.filter((m) => m.sender_id === selfId).map((m) => m.id));
+    return classifyArrivals({
+      prev,
+      next: shownIds,
+      atBottom: atBottomRef.current,
+      isOwn: (id) => own.has(id),
+    });
+    // `messages` moves with `shownIds`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownIds, logKey, selfId]);
+  // A row rises once: scrolled away and back, it remounts still.
+  const risen = useRef(new Set<string>());
+  const rising = useMemo(() => new Set(arrivals.rise), [arrivals]);
   useEffect(() => {
-    if (!newestId) {
+    prevLog.current = { key: logKey, ids: shownIds };
+    for (const id of arrivals.rise) {
+      risen.current.add(id);
+    }
+    if (arrivals.unseen > 0) {
+      setUnseen((n) => n + arrivals.unseen);
+    }
+    if (arrivals.follow) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToOffset({ offset: 0, animated: !reduceMotionRef.current });
+      });
+    }
+  }, [arrivals, logKey, shownIds]);
+  // Another conversation starts at its newest message with nothing counted.
+  useEffect(() => {
+    atBottomRef.current = true;
+    setAtBottom(true);
+    setUnseen(0);
+    risen.current = new Set();
+  }, [logKey]);
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // Inverted: the offset is the distance from the newest message.
+    const near = isNearBottom(distanceFromBottom(e.nativeEvent.contentOffset.y, true));
+    atBottomRef.current = near;
+    setAtBottom(near);
+    if (near) {
+      setUnseen(0);
+    }
+  }, []);
+  const goToNewest = useCallback(() => {
+    setUnseen(0);
+    listRef.current?.scrollToOffset({ offset: 0, animated: !reduceMotionRef.current });
+  }, []);
+  const riseIn = reduceMotion ? REDUCED_FADE_IN : RISE_INVERTED;
+
+  // Loading → the log: it fades in where the loading line was (#2125). The list's own static
+  // opacity still hides it until its pills are known (#2115); this only softens the reveal.
+  const reveal = useSharedValue(listRevealed ? 1 : 0);
+  const [revealSettled, setRevealSettled] = useState(listRevealed);
+  useEffect(() => {
+    if (!listRevealed) {
+      cancelAnimation(reveal);
+      reveal.value = 0;
+      setRevealSettled(false);
       return;
     }
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    });
-  }, [newestId]);
+    reveal.value = withTiming(
+      1,
+      reduceMotionRef.current ? { ...BASE_TIMING, duration: MOTION.fastMs } : BASE_TIMING,
+    );
+    // Then a plain static style: visibility never rests on Reanimated.
+    const timer = setTimeout(() => setRevealSettled(true), MOTION.slowMs + 60);
+    return () => clearTimeout(timer);
+  }, [listRevealed, reveal]);
+  const revealStyle = useAnimatedStyle(() => ({ opacity: reveal.value }));
 
   useEffect(() => {
     if (!conversationId || !newestId) {
@@ -937,10 +1039,13 @@ function TextChat(props: ChatViewProps = {}) {
           replyBeforeJoin={replyTo === null && !!m.reply_to_id && sentBeforeJoin(m.reply_to_id, viewerJoinedAtMs)}
           onPressReplyQuote={original ? () => scrollToMessage(original.id) : undefined}
           highlighted={highlightId === m.id}
+          entering={rising.has(m.id) && !risen.current.has(m.id) ? riseIn : undefined}
         />
       );
     },
     [
+      rising,
+      riseIn,
       currentUser,
       router,
       reactionsByMessage,
@@ -1082,10 +1187,14 @@ function TextChat(props: ChatViewProps = {}) {
         </Text>
       ) : null}
       {!isLoading && !isError && items.length === 0 ? (
-        <EmptyState testID="chat-empty" icon="messageCircle">
-          {t("chat:list.empty")}
-        </EmptyState>
+        // Fades in where the loading line was (#2125).
+        <Animated.View entering={reduceMotion ? REDUCED_FADE_IN : CONTENT_FADE_IN}>
+          <EmptyState testID="chat-empty" icon="messageCircle">
+            {t("chat:list.empty")}
+          </EmptyState>
+        </Animated.View>
       ) : null}
+      <Animated.View style={[{ flex: 1 }, revealStyle, revealSettled ? REVEALED : null]}>
       <FlatList
         ref={listRef}
         testID="list-messages"
@@ -1108,6 +1217,9 @@ function TextChat(props: ChatViewProps = {}) {
         // With `inverted`, the "end" is the visual top (the oldest loaded message).
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
+        onScroll={onScroll}
+        scrollEventThrottle={32}
+        maintainVisibleContentPosition={atBottom ? undefined : HOLD_POSITION}
         onScrollToIndexFailed={onScrollToIndexFailed}
         viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs}
         ListFooterComponent={
@@ -1120,6 +1232,8 @@ function TextChat(props: ChatViewProps = {}) {
           ) : null
         }
       />
+      {unseen > 0 && !atBottom ? <NewMessagesButton count={unseen} onPress={goToNewest} /> : null}
+      </Animated.View>
       {/* A failed send is told on its own row (UnsentActions), never as a raw error here. */}
 
       {editTarget ? (

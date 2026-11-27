@@ -33,6 +33,8 @@ class AppStore implements AppState {
 
   // Hydrated from the persisted read cursors (#1422); live wake-ups bump it in between.
   unreadCounts: Record<string, number> = {};
+  /** The first counts have landed: a badge from here on is news, so it may pop in (#2125). */
+  unreadHydrated = false;
 
   // Set by the focused chat screen itself, however it was reached. Never badges.
   openConversationId: string | null = null;
@@ -160,6 +162,7 @@ class AppStore implements AppState {
   // A replacement, not a merge (#1422; see `unreadBadges`).
   hydrateUnread(counts: UnreadCount[]) {
     this.unreadCounts = unreadBadges(counts, this.openConversationId);
+    this.unreadHydrated = true;
   }
 
   markRead(id: string) {
@@ -186,6 +189,7 @@ class AppStore implements AppState {
     this.isLoading = false;
     this.error = null;
     this.unreadCounts = {};
+    this.unreadHydrated = false;
     this.openConversationId = null;
     this.isLocked = false;
     // A jump queued in this session points into this session's history.

@@ -2,6 +2,8 @@ import { Pressable, View } from "react-native";
 import { Text } from "../Text";
 import { semantic, fonts, r, space, layout, typeSize } from "../../theme/tokens";
 import { Badge, Dot } from "../ui";
+import { useLateArrival } from "../../hooks/useLateArrival";
+import { appStore } from "../../stores/appStore";
 import { Icon } from "../icons";
 
 // One row of the group panel's channel list; ONE accessible element, so callers pass the full spoken label.
@@ -34,6 +36,7 @@ export function ChannelRow({
   // A muted channel (#1431): quieter, never bold, with a bell-off glyph; the caller says "muted".
   muted?: boolean;
 }) {
+  const badgePops = useLateArrival(count !== undefined && count > 0, appStore.unreadHydrated);
   const color = selected
     ? semantic.accent
     : muted
@@ -88,7 +91,7 @@ export function ChannelRow({
         </Text>
       ) : null}
       {count !== undefined && count > 0 ? (
-        <Badge>{count > 99 ? "99+" : count}</Badge>
+        <Badge pop={badgePops}>{count > 99 ? "99+" : count}</Badge>
       ) : unread ? (
         <View style={{ marginEnd: 7 }}>
           <Dot />

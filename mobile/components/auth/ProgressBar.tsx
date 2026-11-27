@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, View } from "react-native";
 import { semantic } from "../../theme/tokens";
-import { useReduceMotion } from "./useReduceMotion";
+import { useReduceMotion } from "../../hooks/useReduceMotion";
 
 const HEIGHT = 6;
 const SWEEP_MS = 1400;
