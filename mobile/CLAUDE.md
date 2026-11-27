@@ -1528,7 +1528,10 @@ Current state:
   → cached `file://`, see `lib/emojiCache.ts`; `CustomEmojiImage` never mounts a source-less `<Image>` (iOS fires `onError` for one, which showed every custom emoji as `:shortcode:` text on iOS, #1562) and retries a failure (`lib/emojiRetry.ts`); Maestro reads what it drew from `EmojiProbe` (`flows/custom-emoji.yaml`, `scripts/maestro-custom-emoji.sh`); management at
   `app/group/emoji.tsx` — every member sees Add, only admins see Remove; the DS enforces it, #1280); DM receipts (`get_conversation_receipts` +
   `mark_messages_read` via FlatList viewability 60%/600ms + AppState gate;
-  synced top-level `send_read_receipts` key, default true); threads
+  synced top-level `send_read_receipts` key, default true; shown in a one-to-one DM as the
+  read-up-to avatar on a right-hand rail, `components/chat/ReadRail.tsx` + `lib/readUpTo.ts`,
+  one element that glides on `BASE_TIMING` (#2140), and in a larger DM as the count tick,
+  `ReceiptIndicator`; Maestro `scripts/maestro-receipts.sh`); threads
   (`read_thread_messages` / `list_thread_summaries`, `send_message` with
   `threadId`, screen at `app/chat/thread.tsx`, replies filtered out of the
   main timeline); mentions (`lib/mentions.ts` port, roster-only candidates,
