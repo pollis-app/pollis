@@ -156,13 +156,6 @@ export function perfConfirmed(action: PerfAction): void {
   }, SETTLE_MS);
 }
 
-/** Forget every result (the flow's start). */
-export function perfReset(): void {
-  open.clear();
-  done.clear();
-  changed();
-}
-
 function pct(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))];

@@ -1053,6 +1053,41 @@ every later attempt posts that one unchanged — a re-seal does not move it — 
 after a crash-after-post, whose retry the DS answers as a replay of the first
 post, the sender's copy sits where every recipient's does.
 
+**The critical path of a send, an edit and a delete (#2141).** In the steady state (a warm
+group) each makes ONE catch-up read before it seals: `ds_reads::catch_up_before_seal` asks for
+the group, the membership version (#1874), the DM's members and the envelopes with their log head
+in a single `/v1/conversations/catch-up`, and hands that response to
+`catch_up_mls_group_interleaved_from`, which applies it exactly where the interleaved catch-up's
+own read used to be applied: after the Welcome poll, before the seal, under the per-group
+single-flight. It is used only if nothing changed this device's MLS state since it was read:
+`AppState::catch_up_clock` (`ingest_guard::PassClock`) moves at the start and end of every catch-up
+pass and when a drain applies Welcomes, and a read taken while a pass ran or followed by one is
+dropped for a fresh read, as before. A pass that used it posts its watermarks and delivery
+receipts in the background (`spawn_background`), off the seal's path. On top of that a send makes
+its DM block check and its Welcome poll concurrently (applied in the old order: a blocked DM sends
+nothing, Welcomes before the catch-up), reads the channel roster only when the text has an `@`
+where clients draw mentions, and returns once `settle` has run: the room wake-up and the inbox
+pings go on in a background task holding a `suspend::send_started` guard (attachment and preview
+reference registration stays inline). A self-delete resolves its conversation once (the
+redaction's read), and `pin_message` / `list_pinned_messages` take the MLS group id from
+`AppState::mls_group_memo`, which every catch-up read fills (and empties on "not a member"); the DS
+gates both pin endpoints on membership itself. What still serialises is unchanged: enqueue before
+any network, settle only after the DS confirms (#1335), Welcomes and catch-up applied before the
+seal (#440, #371), the sealing lock (#1079), the conversation's line order (#1636), an edit
+written to the row only after its post (#1555), the redaction before the envelope removal, and the
+pre-seal backstop (#1874). The DS requests each command makes are counted and asserted in
+`src-tauri/tests/flows/chat_latency.rs`.
+
+**Acting on a message still being sent (#2141).** A send's stub carries the core's id from its
+first frame (the renderers keep a few `new_message_id`s ready, `utils/messageIds.ts` /
+`lib/messageIds.ts`), so a pending row can be replied to, edited and deleted. A reply names it and
+the line order delivers the original first. Delete is discard. An edit (`edit_message`) takes the
+send's outbox lock: never sealed, the row's text is rewritten and the send carries it (no edit
+envelope, nothing reads as edited); sealed (the DS may hold it), the edit is queued in
+`outbox_edit` and `deliver_edit` delivers its target first. Only a `pending` row qualifies: a
+failed one offers Retry and Discard, and one with attachments refuses the edit. Reactions and pins
+stay off until it is delivered.
+
 **Rapid sends: stored at once, delivered in order (#1636).** The composer
 never waits on a send: on desktop and mobile every tap calls `send_message`
 immediately and shows its stub (mobile stubs are `pending-<ms>-<seq>`, so two

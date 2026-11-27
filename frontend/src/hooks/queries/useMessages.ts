@@ -840,8 +840,12 @@ export function useDeleteMessage() {
         queryClient.setQueryData(key, data);
       }
     },
-    onSettled: (_data, _err, { conversationId }) => {
-      invalidateConversation(queryClient, conversationId);
+    // The tombstone drawn on the tap is what the store now holds (#2141): re-reading the page
+    // would only re-render every row. A refusal re-reads it, to show what is really there.
+    onSettled: (_data, err, { conversationId }) => {
+      if (err) {
+        invalidateConversation(queryClient, conversationId);
+      }
       queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
     },
   });
@@ -912,8 +916,11 @@ export function useEditMessage() {
         queryClient.setQueryData(context.queryKey, context.previousData);
       }
     },
-    onSettled: (_data, _err, _vars, context) => {
-      if (context) {
+    // The text drawn on submit is what the store now holds (#2141), so a delivered edit does
+    // not re-read the page (that re-rendered every row). A failed one is read back (the core
+    // kept it, labelled, #1555), and so is one with a preview, whose thumbnail lands later.
+    onSettled: (_data, err, vars, context) => {
+      if (context && (err || vars.linkPreview)) {
         queryClient.invalidateQueries({ queryKey: context.queryKey });
       }
     },

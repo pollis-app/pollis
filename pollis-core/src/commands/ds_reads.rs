@@ -64,14 +64,60 @@ pub(crate) async fn catch_up_full(
     post_catch_up(state, conversation_id, want_envelopes, want_dm, want_roster, false).await
 }
 
-/// [`catch_up`] before a seal: with the membership version the pre-seal check
-/// compares (#1874).
+/// [`catch_up`] with the membership version the pre-seal check compares (#1874), and no
+/// envelopes: the test harness's non-author edit (`edit_message_as`).
+#[cfg(feature = "test-harness")]
 pub(crate) async fn catch_up_with_membership(
     state: &Arc<AppState>,
     conversation_id: &str,
     want_dm: bool,
 ) -> Result<dir::CatchUpResponse> {
     post_catch_up(state, conversation_id, false, want_dm, false, true).await
+}
+
+/// The one catch-up read before a seal (#2141): the conversation's group, its membership
+/// version (#1874), its DM when asked, and the envelopes and log head the interleaved
+/// catch-up applies, all in one request. Hand it to
+/// [`catch_up_mls_group_interleaved_from`](crate::commands::messages::catch_up_mls_group_interleaved_from)
+/// with the [`PassClock`](crate::commands::messages::ingest_guard::PassClock) reading taken
+/// before it, so that catch-up makes no read of its own.
+pub(crate) async fn catch_up_before_seal(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    want_dm: bool,
+) -> Result<crate::commands::messages::PrefetchedCatchUp> {
+    let clock = state.catch_up_clock.now();
+    let response = post_catch_up(state, conversation_id, true, want_dm, false, true).await?;
+    Ok(crate::commands::messages::PrefetchedCatchUp { response, clock })
+}
+
+/// The MLS group behind `conversation_id` (#2141), from the memo every catch-up read fills, or
+/// one read when it has none. Membership is not checked here: callers post to endpoints the DS
+/// gates on it.
+pub(crate) async fn mls_group_of(state: &Arc<AppState>, conversation_id: &str) -> Result<String> {
+    let known = state
+        .mls_group_memo
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(conversation_id)
+        .cloned();
+    if let Some(group) = known {
+        return Ok(group);
+    }
+    let resolved = catch_up(state, conversation_id, false, false).await?;
+    if !resolved.authorized {
+        return Err(Error::Other(anyhow::anyhow!("not a member of this conversation")));
+    }
+    Ok(resolved.mls_group_id)
+}
+
+fn remember_group(state: &Arc<AppState>, conversation_id: &str, resp: &dir::CatchUpResponse) {
+    let mut memo = state.mls_group_memo.lock().unwrap_or_else(|e| e.into_inner());
+    if resp.authorized {
+        memo.insert(conversation_id.to_string(), resp.mls_group_id.clone());
+    } else {
+        memo.remove(conversation_id);
+    }
 }
 
 async fn post_catch_up(
@@ -97,7 +143,9 @@ async fn post_catch_up(
         user_id: Some(current_user_id(state).await?),
         device_id: state.device_id.lock().await.clone(),
     };
-    ds_post_json(state, &body).await
+    let resp: dir::CatchUpResponse = ds_post_json(state, &body).await?;
+    remember_group(state, conversation_id, &resp);
+    Ok(resp)
 }
 
 /// Which conversation an envelope belongs to, or `None`.

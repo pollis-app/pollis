@@ -214,8 +214,17 @@ pub(super) async fn deliver_queued(
     state.check_not_outdated()?;
 
     // Group channels share the group's MLS group; a DM's is keyed by conversation_id.
-    // With the membership version the pre-seal check compares (#1874).
-    let resolved = crate::commands::ds_reads::catch_up_with_membership(state, &conversation_id, true).await?;
+    // ONE read (#2141): the group, the membership version the pre-seal check compares (#1874),
+    // the DM's members, and the envelopes the catch-up below applies.
+    // The Welcome poll goes out with it (#2141): independent reads, applied in the old order
+    // (Welcomes before the catch-up is applied, both before the seal; #440, #371). A Welcome
+    // applied meanwhile makes the catch-up below read afresh (`PassClock`).
+    let (fetched, ()) = tokio::join!(
+        crate::commands::ds_reads::catch_up_before_seal(state, &conversation_id, true),
+        poll_welcomes_before_seal(state, &sender_id, "send_message"),
+    );
+    let fetched = fetched?;
+    let resolved = &fetched.response;
     // Not (or no longer) a member: no attempt will ever get further, so say so
     // in a way the outbox records as `rejected` rather than retrying (#1335).
     if !resolved.authorized {
@@ -223,23 +232,24 @@ pub(super) async fn deliver_queued(
     }
     let is_channel = resolved.kind == pollis_api::directory::ConversationKind::Channel;
     let mls_group_id = resolved.mls_group_id.clone();
+    let membership_version = resolved.membership_version;
+    let peers: Vec<String> = resolved
+        .dm
+        .as_ref()
+        .map(|dm| {
+            dm.members
+                .iter()
+                .map(|m| m.user_id.clone())
+                .filter(|id| id != &sender_id)
+                .collect()
+        })
+        .unwrap_or_default();
 
     // DM blocks silently drop the message: stored locally, never sent, so no signal reveals the block.
-    let suppress_delivery = if !is_channel {
-        let peers: Vec<String> = resolved
-            .dm
-            .as_ref()
-            .map(|dm| {
-                dm.members
-                    .iter()
-                    .map(|m| m.user_id.clone())
-                    .filter(|id| id != &sender_id)
-                    .collect()
-            })
-            .unwrap_or_default();
-        crate::commands::blocks::any_blocked_either_way(state, &sender_id, &peers).await?
-    } else {
+    let suppress_delivery = if is_channel {
         false
+    } else {
+        crate::commands::blocks::any_blocked_either_way(state, &sender_id, &peers).await?
     };
 
     if suppress_delivery {
@@ -256,19 +266,11 @@ pub(super) async fn deliver_queued(
         });
     }
 
-    // Poll MLS Welcomes — this device may have been added to the group but
-    // hasn't applied the Welcome yet.
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(ref did) = device_id {
-            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, &sender_id, did).await {
-                crate::diag!("[messages] send_message: poll_mls_welcomes for {mls_group_id}: {e}");
-            }
-        }
-    }
-
     // Ingest-before-advance (#440): interleaved catch-up so no inbound keys are discarded; no lock held here.
-    if let Err(e) = super::catch_up_mls_group_interleaved(state, &mls_group_id, &sender_id).await {
+    // It applies the read above (#2141) unless a pass or a Welcome moved the state since.
+    if let Err(e) =
+        super::catch_up_mls_group_interleaved_from(state, &mls_group_id, &sender_id, fetched).await
+    {
         crate::diag!("[messages] send_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
@@ -281,7 +283,7 @@ pub(super) async fn deliver_queued(
         state,
         &mls_group_id,
         &sender_id,
-        resolved.membership_version,
+        membership_version,
     ))
     .await;
 
@@ -317,7 +319,9 @@ pub(super) async fn deliver_queued(
     .await?;
 
     // Mentions (#843) resolve against this channel's roster only, before the post carries the push audience.
-    let members: Vec<(String, String)> = if is_channel {
+    // Text that names nobody (no `@` where clients draw mentions) needs no roster (#2141).
+    let may_mention = crate::message_format::scan_text(&content).contains('@');
+    let members: Vec<(String, String)> = if is_channel && may_mention {
         crate::commands::ds_reads::group(state, &mls_group_id, &sender_id, false)
             .await?
             .members
@@ -407,74 +411,88 @@ pub(super) async fn deliver_queued(
         let _ = super::edit_delete::register_refs(state, &id, vec![super::edit_delete::preview_ref(image)]).await;
     }
 
-    // Notify via LiveKit (non-fatal); the wake-up carries routing only, no sender.
-    if is_channel {
-        // One room per group; receivers filter by channel_id.
-        if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
-            state,
-            &mls_group_id,
-            Some(&conversation_id),
-            None,
-        ).await {
-            crate::diag!("[realtime] send_message: publish to group {mls_group_id}: {e}");
-        }
-    } else {
-        // DM: publish to the shared DM room.
-        if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
-            state,
-            &conversation_id,
-            None,
-            Some(&conversation_id),
-        ).await {
-            crate::diag!("[realtime] send_message: publish to DM room {conversation_id}: {e}");
-        }
-    }
+    // The room wake-up and the inbox pings (#2141) never fail a send and nobody waits for them:
+    // the UI gets its answer now, and they go on in the background, still finished before iOS
+    // suspends the app (the guard is the one a send holds).
+    let sending = crate::notify::lock::suspend::send_started(None);
+    let signal_state = Arc::clone(state);
+    let signal = {
+        let (mls_group_id, conversation_id, sender_id, content) =
+            (mls_group_id.clone(), conversation_id.clone(), sender_id.clone(), content.clone());
+        async move {
+            let _sending = sending;
+            let state = &signal_state;
+            // Notify via LiveKit (non-fatal); the wake-up carries routing only, no sender.
+            if is_channel {
+                // One room per group; receivers filter by channel_id.
+                if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
+                    state,
+                    &mls_group_id,
+                    Some(&conversation_id),
+                    None,
+                ).await {
+                    crate::diag!("[realtime] send_message: publish to group {mls_group_id}: {e}");
+                }
+            } else {
+                // DM: publish to the shared DM room.
+                if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
+                    state,
+                    &conversation_id,
+                    None,
+                    Some(&conversation_id),
+                ).await {
+                    crate::diag!("[realtime] send_message: publish to DM room {conversation_id}: {e}");
+                }
+            }
 
-    // Inbox pings; fire-and-forget.
-    if is_channel {
-        // A member also named directly gets `user_mention`, which gets through a mute (#1431).
-        if mentions_all(&content) {
-            let payload = serde_json::json!({
-                "type": "all_mention",
-                "group_id": mls_group_id,
-                "channel_id": conversation_id,
-                "sender_id": sender_id,
-                "sender_username": sender_username,
-            });
-            let named = serde_json::json!({
-                "type": "user_mention",
-                "group_id": mls_group_id,
-                "channel_id": conversation_id,
-                "sender_id": sender_id,
-                "sender_username": sender_username,
-            });
-            for (uid, _) in &members {
-                let ping = if direct.contains(uid) { &named } else { &payload };
-                if let Err(e) =
-                    crate::commands::livekit::publish_to_user_inbox(state, uid, ping.clone())
-                        .await
-                {
-                    crate::diag!("[realtime] send_message: @all inbox publish to {uid}: {e}");
-                }
-            }
-        } else if let MentionAudience::Only(ref ids) = audience {
-            let payload = serde_json::json!({
-                "type": "user_mention",
-                "group_id": mls_group_id,
-                "channel_id": conversation_id,
-                "sender_id": sender_id,
-                "sender_username": sender_username,
-            });
-            for uid in ids {
-                if let Err(e) =
-                    crate::commands::livekit::publish_to_user_inbox(state, uid, payload.clone())
-                        .await
-                {
-                    crate::diag!("[realtime] send_message: @mention inbox publish to {uid}: {e}");
+            // Inbox pings; fire-and-forget.
+            if is_channel {
+                // A member also named directly gets `user_mention`, which gets through a mute (#1431).
+                if mentions_all(&content) {
+                    let payload = serde_json::json!({
+                        "type": "all_mention",
+                        "group_id": mls_group_id,
+                        "channel_id": conversation_id,
+                        "sender_id": sender_id,
+                        "sender_username": sender_username,
+                    });
+                    let named = serde_json::json!({
+                        "type": "user_mention",
+                        "group_id": mls_group_id,
+                        "channel_id": conversation_id,
+                        "sender_id": sender_id,
+                        "sender_username": sender_username,
+                    });
+                    for (uid, _) in &members {
+                        let ping = if direct.contains(uid) { &named } else { &payload };
+                        if let Err(e) =
+                            crate::commands::livekit::publish_to_user_inbox(state, uid, ping.clone())
+                                .await
+                        {
+                            crate::diag!("[realtime] send_message: @all inbox publish to {uid}: {e}");
+                        }
+                    }
+                } else if let MentionAudience::Only(ref ids) = audience {
+                    let payload = serde_json::json!({
+                        "type": "user_mention",
+                        "group_id": mls_group_id,
+                        "channel_id": conversation_id,
+                        "sender_id": sender_id,
+                        "sender_username": sender_username,
+                    });
+                    for uid in ids {
+                        if let Err(e) =
+                            crate::commands::livekit::publish_to_user_inbox(state, uid, payload.clone())
+                                .await
+                        {
+                            crate::diag!("[realtime] send_message: @mention inbox publish to {uid}: {e}");
+                        }
+                    }
                 }
             }
         }
-    }
+    };
+    state.spawn_background(signal);
 
     Ok(Message {
         id,
@@ -485,6 +503,17 @@ pub(super) async fn deliver_queued(
         thread_id,
         sent_at: now,
     })
+}
+
+/// Poll MLS Welcomes before a seal: this device may have been added to the group but not have
+/// applied the Welcome yet. Failures are logged; the seal goes ahead, as it always has.
+pub(super) async fn poll_welcomes_before_seal(state: &Arc<AppState>, user_id: &str, what: &str) {
+    let device_id = state.device_id.lock().await.clone();
+    if let Some(ref did) = device_id {
+        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
+            crate::diag!("[messages] {what}: poll_mls_welcomes: {e}");
+        }
+    }
 }
 
 /// Whether the stored row has never been sealed — until then nothing of it can have

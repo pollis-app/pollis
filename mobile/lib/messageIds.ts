@@ -7,7 +7,7 @@
 // core still mints every id (a cryptographic random ULID) and still checks the one it gets.
 
 /** Ids held ready. One tap uses one; a burst of sends past this asks the core directly. */
-export const MESSAGE_ID_POOL = 3;
+const MESSAGE_ID_POOL = 3;
 
 export interface MessageIdPool {
   /** A ready id, never handed out twice, or null when none is ready (ask the core then). */

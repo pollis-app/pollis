@@ -410,13 +410,8 @@ pub async fn pin_message(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let cu = super::ds_reads::catch_up(state, &conversation_id, false, false).await?;
-    if !cu.authorized {
-        return Err(Error::Other(anyhow::anyhow!(
-            "not a member of this conversation"
-        )));
-    }
-    let mls_id = cu.mls_group_id;
+    // The group from the memo (#2141), not a catch-up read: `/v1/pins/pin` checks membership.
+    let mls_id = super::ds_reads::mls_group_of(state, &conversation_id).await?;
 
     // The snapshot comes from this device's own decrypted copy — a message
     // this device cannot read is a message it cannot pin.
@@ -503,13 +498,9 @@ pub async fn list_pinned_messages(
         return Ok(Vec::new());
     }
 
-    let cu = super::ds_reads::catch_up(state, &conversation_id, false, false).await?;
-    if !cu.authorized {
-        return Err(Error::Other(anyhow::anyhow!(
-            "not a member of this conversation"
-        )));
-    }
-    let kpin = ensure_kpin(state, &cu.mls_group_id, &user_id, false)
+    // The group from the memo (#2141): `read_pins` above already checked membership.
+    let mls_id = super::ds_reads::mls_group_of(state, &conversation_id).await?;
+    let kpin = ensure_kpin(state, &mls_id, &user_id, false)
         .await?
         .ok_or_else(|| {
             Error::Other(anyhow::anyhow!(

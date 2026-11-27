@@ -1784,7 +1784,8 @@ async fn withdraw(
     if !resolved.authorized {
         return Err(not_a_member());
     }
-    super::edit_delete::retract_for_everyone(state, conversation_id, id, sender_id).await
+    super::edit_delete::retract_for_everyone(state, conversation_id, id, sender_id).await?;
+    Ok(())
 }
 
 /// What one drain did.

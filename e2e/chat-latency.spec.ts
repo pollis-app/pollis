@@ -334,7 +334,77 @@ test.describe("chat action latency", () => {
     }
     results.react = report("react", react);
 
-    expect(Object.keys(results)).toHaveLength(6);
+    // Every action shows before its reply could have arrived (#2141): nothing waits on the
+    // round trip to draw: a change that waited on it shows no sooner than the whole injected
+    // latency. A dev build renders slowly and noisily, so the bound is on the p50; p95s are printed.
+    for (const [action, r] of Object.entries(results)) {
+      expect(r.visibleP50, `${action} draws before its reply`).toBeLessThan(LATENCY_MS);
+    }
+    // A send re-renders its own row and its neighbours' grouping (counts doubled by StrictMode),
+    // never the whole log (50 before #2141).
+    expect(results.send.rowsP50).toBeLessThanOrEqual(6);
+    // No reaction re-renders a message row.
+    expect(results.react.rowsP50).toBe(0);
     void FRAME_MS;
+  });
+
+  test("a message still being sent can be replied to, edited and deleted", async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => (window as any).__tauriHold("send_message"));
+    const input = page.getByTestId("message-input");
+    const rowWith = (text: string) => page.locator('[data-testid^="message-"]', { hasText: text }).last();
+
+    await input.click();
+    await page.keyboard.type("still going out");
+    await page.keyboard.press("Enter");
+    const pending = rowWith("still going out");
+    await expect(pending).toBeVisible();
+    // The stub carries the core's id from its first frame: no wait on new_message_id.
+    const coreId = await page.evaluate(() => {
+      const log = (window as any).__tauriInvokeLog as Array<{ command: string; args: { messageId?: string } }>;
+      return log.filter((e) => e.command === "send_message").at(-1)?.args.messageId ?? null;
+    });
+    expect(coreId).toBeTruthy();
+    expect(coreId).not.toMatch(/^pending-/);
+
+    // Reply: the quote finds the pending original.
+    await pending.hover();
+    await expect(pending.getByTestId("reply-button")).toBeVisible();
+    // Reactions wait until it is delivered.
+    await expect(pending.getByTestId("reaction-add-btn")).toHaveCount(0);
+    await pending.getByTestId("reply-button").click();
+    await expect(page.getByTestId("reply-preview")).toBeVisible();
+    await page.keyboard.type("a reply to it");
+    await page.keyboard.press("Enter");
+    const reply = rowWith("a reply to it");
+    await expect(reply.getByTestId(`reply-preview-${coreId}`)).toBeVisible();
+    const replyArgs = await page.evaluate(() => {
+      const log = (window as any).__tauriInvokeLog as Array<{ command: string; args: { replyToId?: string } }>;
+      return log.filter((e) => e.command === "send_message").at(-1)?.args ?? null;
+    });
+    expect(replyArgs?.replyToId).toBe(coreId);
+
+    // Edit: the bar closes on submit and the row shows the new text.
+    await pending.hover();
+    await pending.getByTestId("edit-button").click();
+    const bar = page.getByTestId("edit-message-bar-input");
+    await bar.fill("still going out, fixed");
+    await bar.press("Enter");
+    await expect(page.getByTestId("edit-message-bar")).toHaveCount(0);
+    await expect(rowWith("still going out, fixed")).toBeVisible();
+    const editArgs = await page.evaluate(() => (window as any).__tauriLastArgs.edit_message);
+    expect(editArgs.messageId).toBe(coreId);
+
+    // Delete = discard: the pending reply goes away at once.
+    await reply.hover();
+    await reply.getByTestId("message-actions-more").click();
+    await page.getByTestId("delete-button").click();
+    await page.getByTestId("delete-message-confirm").click();
+    await expect(page.getByTestId("delete-message-bar")).toHaveCount(0);
+    await expect(page.locator('[data-testid^="message-"]', { hasText: "a reply to it" })).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).__tauriInvokeCounts.discard_unsent_message)).toBe(1);
+
+    await page.evaluate(() => (window as any).__tauriRelease("send_message"));
+    await expect(rowWith("still going out, fixed")).toBeVisible();
   });
 });

@@ -1,12 +1,17 @@
-//! DS requests per chat action (#2141): send, edit, delete, pin, list pins and react, each
-//! in a warm DM and a warm channel, counted at the in-process DS.
+//! DS requests per chat action (#2141): send, edit, delete, pin, list pins and react, each in a
+//! warm DM and a warm channel.
 //!
-//! The count is what a command waits on: the requests this device made between the call
-//! and its return. Work the command hands to a background task is not counted, and is
-//! checked separately to still happen. Each run prints `[perf]` lines, so a change that
-//! saves or adds a round trip shows in the test output too.
+//! Two counts per action. `waited` is what the command waits on: the DS requests made in its
+//! own task (`pollis_core::perf::counted`), so its critical path. `all` is every request this
+//! device made at the in-process DS while the command ran, background work included (the
+//! watermark, the applied-epoch report, room wake-ups), printed for the record. Each run prints
+//! `[perf]` lines; the asserts keep the critical path from growing back.
+
+use std::sync::Arc;
 
 use crate::harness::{ds_request_mark, ds_requests_since, wipe, TestClient};
+use pollis_core::perf::counted;
+use pollis_core::state::AppState;
 use serde_json::json;
 use serial_test::serial;
 
@@ -14,22 +19,24 @@ async fn device_of(client: &TestClient) -> String {
     client.state.device_id.lock().await.clone().expect("device id")
 }
 
-/// The DS paths `client` requested while `action` ran.
-async fn requests_of<F, Fut, T>(client: &TestClient, label: &str, action: F) -> (T, Vec<String>)
+/// Run `action` as `client`, returning its result, the requests it waited on and every path
+/// the device asked for meanwhile.
+async fn measured<F, Fut, T>(client: &TestClient, label: &str, action: F) -> (T, u32, Vec<String>)
 where
-    F: FnOnce() -> Fut,
+    F: FnOnce(Arc<AppState>) -> Fut,
     Fut: std::future::Future<Output = T>,
 {
+    client.activate();
     let device = device_of(client).await;
     let mark = ds_request_mark();
-    let out = action().await;
+    let (out, waited) = counted(action(Arc::clone(&client.state))).await;
     let paths = ds_requests_since(mark, &device);
-    println!("[perf] {label}: {} DS requests {paths:?}", paths.len());
-    (out, paths)
+    println!("[perf] {label}: waited on {waited} DS requests; {} in all {paths:?}", paths.len());
+    (out, waited, paths)
 }
 
-/// A DM between alice and bob and a channel they share, each with one message already
-/// sent both ways, so every group is warm: what follows is the steady state.
+/// A DM between alice and bob and a channel they share, each with one message already sent
+/// both ways, so every group is warm: what follows is the steady state.
 async fn warm_world() -> (TestClient, TestClient, String, String) {
     wipe().await;
     let mut alice = TestClient::new().await;
@@ -60,6 +67,10 @@ async fn warm_world() -> (TestClient, TestClient, String, String) {
     pin(&alice, &channel, &first).await;
     let first_dm = alice.send_channel_message_id(&dm, "first dm pin").await;
     pin(&alice, &dm, &first_dm).await;
+    // One send more each, so the conversations are where a steady state leaves them.
+    alice.send_channel_message(&channel, "steady").await;
+    alice.send_channel_message(&dm, "steady").await;
+    alice.state.settle_background().await;
     (alice, bob, dm, channel)
 }
 
@@ -72,70 +83,85 @@ async fn pin(client: &TestClient, conversation: &str, message_id: &str) {
         .await;
 }
 
-/// Every action's DS request count in one conversation.
+/// Every action's critical-path DS request count in one conversation.
 #[derive(Debug, Default)]
 struct Counts {
-    send: usize,
-    send_mention: usize,
-    edit: usize,
-    delete: usize,
-    pin: usize,
-    list_pins: usize,
-    react: usize,
+    send: u32,
+    send_mention: u32,
+    edit: u32,
+    delete: u32,
+    pin: u32,
+    list_pins: u32,
+    react: u32,
 }
 
 async fn measure(alice: &TestClient, bob: &TestClient, conversation: &str, kind: &str) -> Counts {
+    use pollis_core::commands::{messages, pinned_messages};
+    let me = alice.user_id().to_string();
+    let conv = conversation.to_string();
     let mut counts = Counts::default();
 
-    let (id, paths) = requests_of(alice, &format!("{kind} send"), || {
-        alice.send_channel_message_id(conversation, "plain chatter")
+    let (sent, n, _) = measured(alice, &format!("{kind} send"), |s| {
+        let (conv, me) = (conv.clone(), me.clone());
+        async move { messages::send_message(conv, me, "plain chatter".into(), None, None, None, &s).await }
     })
     .await;
-    counts.send = paths.len();
+    let id = sent.expect("send").id;
+    counts.send = n;
+    alice.state.settle_background().await;
 
     let mention = format!("hello @{}", bob.profile.as_ref().expect("bob").username);
-    let (_, paths) = requests_of(alice, &format!("{kind} send @mention"), || {
-        alice.send_channel_message_id(conversation, &mention)
+    let (_, n, _) = measured(alice, &format!("{kind} send @mention"), |s| {
+        let (conv, me, text) = (conv.clone(), me.clone(), mention.clone());
+        async move { messages::send_message(conv, me, text, None, None, None, &s).await.expect("send") }
     })
     .await;
-    counts.send_mention = paths.len();
+    counts.send_mention = n;
+    alice.state.settle_background().await;
 
-    let (_, paths) = requests_of(alice, &format!("{kind} edit"), || {
-        alice.edit_message(conversation, &id, "plain chatter, edited")
+    let (_, n, _) = measured(alice, &format!("{kind} edit"), |s| {
+        let (conv, me, id) = (conv.clone(), me.clone(), id.clone());
+        async move {
+            messages::edit_message(conv, id, me, "plain chatter, edited".into(), &s).await.expect("edit")
+        }
     })
     .await;
-    counts.edit = paths.len();
+    counts.edit = n;
+    alice.state.settle_background().await;
 
-    let (_, paths) = requests_of(alice, &format!("{kind} pin"), || pin(alice, conversation, &id)).await;
-    counts.pin = paths.len();
-
-    let (pins, paths) = requests_of(alice, &format!("{kind} list pins"), || {
-        alice.invoke_json(
-            "list_pinned_messages",
-            json!({ "conversationId": conversation, "userId": alice.user_id() }),
-        )
+    let (_, n, _) = measured(alice, &format!("{kind} pin"), |s| {
+        let (conv, me, id) = (conv.clone(), me.clone(), id.clone());
+        async move { pinned_messages::pin_message(conv, id, me, &s).await.expect("pin") }
     })
     .await;
-    counts.list_pins = paths.len();
-    assert!(
-        pins.as_array().expect("pins").iter().any(|p| p["message_id"] == id.as_str()),
-        "the pin is listed: {pins:?}"
-    );
+    counts.pin = n;
 
-    let (_, paths) = requests_of(alice, &format!("{kind} react"), || {
-        alice.invoke_json(
-            "add_reaction",
-            json!({ "messageId": id, "userId": alice.user_id(), "emoji": "👍" }),
-        )
+    let (pins, n, _) = measured(alice, &format!("{kind} list pins"), |s| {
+        let (conv, me) = (conv.clone(), me.clone());
+        async move { pinned_messages::list_pinned_messages(conv, me, &s).await.expect("list pins") }
     })
     .await;
-    counts.react = paths.len();
+    counts.list_pins = n;
+    assert!(pins.iter().any(|p| p.message_id == id), "the pin is listed");
+
+    let (_, n, _) = measured(alice, &format!("{kind} react"), |s| {
+        let (me, id) = (me.clone(), id.clone());
+        async move { messages::add_reaction(id, me, "👍".into(), &s).await.expect("react") }
+    })
+    .await;
+    counts.react = n;
 
     let doomed = alice.send_channel_message_id(conversation, "to be deleted").await;
-    let (_, paths) = requests_of(alice, &format!("{kind} delete"), || alice.delete_message(&doomed)).await;
-    counts.delete = paths.len();
+    alice.state.settle_background().await;
+    let (_, n, _) = measured(alice, &format!("{kind} delete"), |s| {
+        let me = me.clone();
+        async move { messages::delete_message(doomed, me, &s).await.expect("delete") }
+    })
+    .await;
+    counts.delete = n;
+    alice.state.settle_background().await;
 
-    // Bob still gets all of it.
+    // Bob still gets all of it, in its final form.
     let seen = if kind == "dm" {
         bob.fetch_dm_messages(conversation).await
     } else {
@@ -146,7 +172,7 @@ async fn measure(alice: &TestClient, bob: &TestClient, conversation: &str, kind:
     assert!(texts.contains(&mention.as_str()), "{texts:?}");
     assert!(!texts.contains(&"to be deleted"), "{texts:?}");
 
-    println!("[perf] {kind} totals: {counts:?}");
+    println!("[perf] {kind} waited on: {counts:?}");
     counts
 }
 
@@ -154,6 +180,21 @@ async fn measure(alice: &TestClient, bob: &TestClient, conversation: &str, kind:
 #[serial]
 async fn ds_requests_per_chat_action() {
     let (alice, bob, dm, channel) = warm_world().await;
-    let _dm = measure(&alice, &bob, &dm, "dm").await;
-    let _channel = measure(&alice, &bob, &channel, "channel").await;
+    let dm = measure(&alice, &bob, &dm, "dm").await;
+    let channel = measure(&alice, &bob, &channel, "channel").await;
+
+    // A steady-state send waits on (catch-up ∥ Welcome poll), the post, and in a DM the block
+    // check between them: 2 round trips in a channel, 3 in a DM (it was 9 requests each).
+    assert!(channel.send <= 3, "channel send: {channel:?}");
+    assert!(dm.send <= 4, "dm send: {dm:?}");
+    // The roster is read only for a text that names someone.
+    assert_eq!(channel.send_mention, channel.send + 1, "{channel:?}");
+    // An edit: (catch-up ∥ Welcome poll), the post.
+    assert!(channel.edit <= 3 && dm.edit <= 3, "edit: {dm:?} {channel:?}");
+    // A delete: (catch-up ∥ Welcome poll), the redaction, the envelope removal; no second resolve.
+    assert!(channel.delete <= 4 && dm.delete <= 4, "delete: {dm:?} {channel:?}");
+    // Pins name their group from the memo: the DS call alone.
+    assert_eq!((dm.pin, channel.pin), (1, 1));
+    assert_eq!((dm.list_pins, channel.list_pins), (1, 1));
+    assert_eq!((dm.react, channel.react), (1, 1));
 }

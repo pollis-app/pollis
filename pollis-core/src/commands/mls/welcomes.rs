@@ -348,6 +348,10 @@ async fn drain_welcomes(
     } = super::ds_reads::fetch_welcomes(state, user_id, device_id).await?;
 
     let had_welcomes = !items.is_empty();
+    if had_welcomes {
+        // A catch-up read made before these is stale for the groups they join (#2141).
+        state.catch_up_clock.touch();
+    }
 
     // A re-add Welcome replaces the group this device still holds for that
     // lineage. Replay that group first, as far as the log goes (#1772): what

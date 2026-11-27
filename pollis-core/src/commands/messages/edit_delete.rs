@@ -35,11 +35,19 @@ pub(super) async fn retract_for_everyone(
     conversation_id: &str,
     message_id: &str,
     user_id: &str,
-) -> Result<()> {
-    send_redaction_message(state, conversation_id, message_id, user_id).await?;
+) -> Result<Resolved> {
+    let resolved = send_redaction_message(state, conversation_id, message_id, user_id).await?;
     let delete_token = super::delete_capability::envelope_delete_token(state, message_id).await;
     let body = delete_message_body(message_id, conversation_id, user_id, user_id, delete_token);
-    crate::commands::mls::ds_post_ok(state, &body).await
+    crate::commands::mls::ds_post_ok(state, &body).await?;
+    Ok(resolved)
+}
+
+/// The MLS group behind a conversation, and whether it is a channel (#2141): resolved once per
+/// delete, by the redaction's read, and reused for the realtime hint.
+pub(super) struct Resolved {
+    pub mls_group_id: String,
+    pub is_channel: bool,
 }
 
 /// Delete a message.
@@ -160,7 +168,7 @@ pub async fn delete_message(
     }
 
     // Self-delete: redaction first, then envelope removal (see `retract_for_everyone`).
-    retract_for_everyone(state, &conversation_id, &message_id, &user_id).await?;
+    let resolved = retract_for_everyone(state, &conversation_id, &message_id, &user_id).await?;
 
     // Soft-delete the local row (the `[deleted]` placeholder recipients see) under one lock.
     let attachments: Vec<AttachmentRef> = {
@@ -208,7 +216,8 @@ pub async fn delete_message(
     }
 
     // Broadcast so connected members apply the redaction now; the envelope is the durable path.
-    let (mls_group_id, is_channel, _) = resolve_mls_group(state, &conversation_id).await?;
+    // The redaction already resolved the group (#2141): no second read.
+    let Resolved { mls_group_id, is_channel } = resolved;
     let (channel_arg, dm_arg) = if is_channel {
         (Some(conversation_id.as_str()), None)
     } else {
@@ -231,6 +240,7 @@ pub async fn delete_message(
 /// `group_id` (all channels in a group share one MLS group); a DM's MLS group is
 /// keyed by the conversation id itself. Returns `(mls_group_id, is_channel,
 /// membership_version)`; the version is for [`backstop_on_membership_change`](crate::commands::mls::backstop_on_membership_change).
+#[cfg(feature = "test-harness")]
 async fn resolve_mls_group(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -252,7 +262,8 @@ pub async fn send_redaction_as(
     target_message_id: &str,
     user_id: &str,
 ) -> Result<()> {
-    send_redaction_message(state, conversation_id, target_message_id, user_id).await
+    send_redaction_message(state, conversation_id, target_message_id, user_id).await?;
+    Ok(())
 }
 
 /// Test-only: post an edit as an arbitrary caller, so flows can prove recipients reject a non-author's edit (#607).
@@ -268,16 +279,7 @@ pub async fn edit_message_as(
     let (mls_group_id, _is_channel, _) = resolve_mls_group(state, conversation_id).await?;
 
     // Catch up so the edit is sealed at the current epoch.
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(ref did) = device_id {
-            if let Err(e) =
-                crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
-            {
-                crate::diag!("[messages] edit_message_as: poll_mls_welcomes for {mls_group_id}: {e}");
-            }
-        }
-    }
+    super::send::poll_welcomes_before_seal(state, user_id, "edit_message_as").await;
     if let Err(e) =
         super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
     {
@@ -339,24 +341,23 @@ async fn send_redaction_message(
     conversation_id: &str,
     target_message_id: &str,
     user_id: &str,
-) -> Result<()> {
+) -> Result<Resolved> {
     let envelope_id = Ulid::new().to_string();
-    let (mls_group_id, _is_channel, membership_version) =
-        resolve_mls_group(state, conversation_id).await?;
+    // One read (#2141): the group, the membership version (#1874) and the envelopes the
+    // catch-up below applies.
+    // The Welcome poll goes out with it (#2141), applied first as before (#440).
+    let (fetched, ()) = tokio::join!(
+        crate::commands::ds_reads::catch_up_before_seal(state, conversation_id, false),
+        super::send::poll_welcomes_before_seal(state, user_id, "send_redaction"),
+    );
+    let fetched = fetched?;
+    let mls_group_id = fetched.response.mls_group_id.clone();
+    let is_channel = fetched.response.kind == pollis_api::directory::ConversationKind::Channel;
+    let membership_version = fetched.response.membership_version;
 
-    // Catch up before encrypting (#440), as send and edit do.
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(ref did) = device_id {
-            if let Err(e) =
-                crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
-            {
-                crate::diag!("[messages] send_redaction: poll_mls_welcomes for {mls_group_id}: {e}");
-            }
-        }
-    }
+    // Catch up before encrypting (#440), as send and edit do: Welcomes were polled above.
     if let Err(e) =
-        super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
+        super::catch_up_mls_group_interleaved_from(state, &mls_group_id, user_id, fetched).await
     {
         crate::diag!("[messages] send_redaction: catch_up_mls_group for {mls_group_id}: {e}");
     }
@@ -420,7 +421,7 @@ async fn send_redaction_message(
     )
     .await?;
 
-    Ok(())
+    Ok(Resolved { mls_group_id, is_channel })
 }
 
 /// Attachment identifier extracted from a message's plaintext JSON payload.
@@ -821,14 +822,19 @@ pub(super) async fn post_edit(
         ..
     } = edit;
 
-    // Not (or no longer) a member: the outbox records `rejected`.
-    let resolved =
-        crate::commands::ds_reads::catch_up_with_membership(state, conversation_id, false).await?;
-    if !resolved.authorized {
+    // Not (or no longer) a member: the outbox records `rejected`. One read (#2141): the group,
+    // the membership version (#1874) and the envelopes the catch-up below applies.
+    // The Welcome poll goes out with it (#2141), applied first as before (#371).
+    let (fetched, ()) = tokio::join!(
+        crate::commands::ds_reads::catch_up_before_seal(state, conversation_id, false),
+        super::send::poll_welcomes_before_seal(state, user_id, "edit_message"),
+    );
+    let fetched = fetched?;
+    if !fetched.response.authorized {
         return Err(super::outbox::not_a_member());
     }
-    let mls_group_id = resolved.mls_group_id;
-    let membership_version = resolved.membership_version;
+    let mls_group_id = fetched.response.mls_group_id.clone();
+    let membership_version = fetched.response.membership_version;
 
     // The custom-emoji use rule (#848, #1808); text it changes is posted as a new edit.
     let ruled = super::edit_outbox::apply_emoji_rule(state, edit).await?;
@@ -839,20 +845,12 @@ pub(super) async fn post_edit(
     let new_content = &edit.content;
     let envelope_id = &edit.envelope_id;
 
-    // Catch up before encrypting, or the edit seals at a stale epoch (#371).
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(ref did) = device_id {
-            if let Err(e) =
-                crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
-            {
-                crate::diag!("[messages] edit_message: poll_mls_welcomes for {mls_group_id}: {e}");
-            }
-        }
-    }
+    // Catch up before encrypting, or the edit seals at a stale epoch (#371): Welcomes were
+    // polled with the read above.
     // Interleaved catch-up (#440), so no inbound message is stranded; no lock held here.
+    // It applies the read above (#2141) unless a pass or a Welcome moved the state since.
     if let Err(e) =
-        super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
+        super::catch_up_mls_group_interleaved_from(state, &mls_group_id, user_id, fetched).await
     {
         crate::diag!("[messages] edit_message: catch_up_mls_group for {mls_group_id}: {e}");
     }

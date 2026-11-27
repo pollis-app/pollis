@@ -57,6 +57,15 @@ pub async fn measured<F: Future>(name: &str, command: F) -> F::Output {
     out
 }
 
+/// Run `command`, returning what it returned and the DS requests it waited on (#2141): those
+/// made in its own task, not by work it handed to the background. The flows suite asserts
+/// these per chat command.
+pub async fn counted<F: Future>(command: F) -> (F::Output, u32) {
+    let requests = Arc::new(AtomicU32::new(0));
+    let out = DS_REQUESTS.scope(Arc::clone(&requests), command).await;
+    (out, requests.load(Ordering::Relaxed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
