@@ -348,7 +348,8 @@ export function EmojiPickerSheet({
             showsHorizontalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ gap: 2 }}
-            style={{ flexGrow: 0 }}
+            // #2123: a ScrollView shrinks by default; only the list below gives up height.
+            style={{ flexGrow: 0, flexShrink: 0 }}
           >
             {tabs.map((tab) => {
               const selected = (active ?? tabs[0]?.id) === tab.id;

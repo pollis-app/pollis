@@ -20,3 +20,7 @@ test("the sheet card can shrink into that room", () => {
 test("the emoji picker gives up height rather than overflowing", () => {
   assert.match(picker, /height: 460, flexShrink: 1, minHeight: 0/);
 });
+
+test("the category tabs keep their height; only the list shrinks", () => {
+  assert.match(picker, /style=\{\{ flexGrow: 0, flexShrink: 0 \}\}/);
+});
