@@ -9,7 +9,7 @@ import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { Screen, Header, Chip, EmptyState } from "../../components/ui";
 import { ErrorText } from "../../components/self/SettingsField";
 import { Icon } from "../../components/icons";
-import { MessageBodyInline } from "../../components/chat/MessageBody";
+import { MessageBodyText } from "../../components/chat/MessageBody";
 import { MessageLinkPreview } from "../../components/chat/MessageLinkPreview";
 import { dayLabel, timeLabel } from "../../components/chat/dates";
 import { fonts, semantic, type as ty, space, groupedRowCorners } from "../../theme/tokens";
@@ -29,6 +29,7 @@ import { linkA11yActions, runLinkA11yAction } from "../../lib/openLink";
 import { permalinkMissCopy } from "../../lib/permalinks";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { appStore } from "../../stores/appStore";
+import { scanText, stripFormatting } from "../../../design/messageFormat.ts";
 import { useThemeRerender } from "../../components/theme";
 
 function PinnedMessagesScreen() {
@@ -76,9 +77,10 @@ function PinnedMessagesScreen() {
     const when = Number.isFinite(sent) ? `${dayLabel(sent)} · ${timeLabel(sent)}` : "";
     const preview = pinPreview(item.content);
     const linkPreview = isRequest ? null : pinLinkPreview(item);
-    const spoken = preview.text.trim() || preview.filenames.join(", ");
+    // Spoken without the formatting markers; links in a code block are not links (#2142).
+    const spoken = stripFormatting(preview.text).trim() || preview.filenames.join(", ");
     // The row is one accessible element, so its links are offered as actions, as a timeline row's are.
-    const linkActions = linkA11yActions(preview.text, (host) => t("mobile:link.openLabel", { host }));
+    const linkActions = linkA11yActions(scanText(preview.text), (host) => t("mobile:link.openLabel", { host }));
     const first = index === 0;
     return (
       <View
@@ -124,15 +126,16 @@ function PinnedMessagesScreen() {
             <Text style={ty.meta}>{when}</Text>
           </View>
           {preview.text ? (
-            <Text testID={`text-pin-${item.message_id}`} numberOfLines={3} style={[ty.body, { color: semantic.text }]}>
-              <MessageBodyInline
-                text={preview.text}
-                mentionNames={body.mentionNames}
-                selfName={body.selfName}
-                mentionLabels={body.mentionLabels}
-                botMentions={body.botMentions}
-              />
-            </Text>
+            <MessageBodyText
+              testID={`text-pin-${item.message_id}`}
+              numberOfLines={3}
+              style={[ty.body, { color: semantic.text }]}
+              text={preview.text}
+              mentionNames={body.mentionNames}
+              selfName={body.selfName}
+              mentionLabels={body.mentionLabels}
+              botMentions={body.botMentions}
+            />
           ) : null}
           {preview.text && linkPreview ? (
             <MessageLinkPreview text={preview.text} preview={linkPreview} />

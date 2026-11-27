@@ -12,6 +12,8 @@ import {
   Geist_500Medium,
   Geist_600SemiBold,
   Geist_700Bold,
+  Geist_400Regular_Italic,
+  Geist_600SemiBold_Italic,
 } from "@expo-google-fonts/geist";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
@@ -132,6 +134,9 @@ export default function RootLayout() {
     Geist_500Medium,
     Geist_600SemiBold,
     Geist_700Bold,
+    // Message formatting (#2142): italic, and bold italic.
+    Geist_400Regular_Italic,
+    Geist_600SemiBold_Italic,
   });
   const [bridgeReady, setBridgeReady] = useState(false);
   const [bridgeError, setBridgeError] = useState<Error | null>(null);

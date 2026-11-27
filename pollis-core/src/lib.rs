@@ -14,6 +14,7 @@ pub mod diag;
 pub mod error;
 pub mod keystore;
 pub mod media_server;
+pub mod message_format;
 pub mod net;
 pub mod notify;
 pub mod share;

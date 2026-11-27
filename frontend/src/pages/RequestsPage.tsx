@@ -15,6 +15,7 @@ import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
 import { ScrambleText } from "../components/ui/ScrambleText";
 import { timeAgo } from "../utils/timeAgo";
+import { stripFormatting } from "../../../design/messageFormat";
 import type { DmChannel, Message } from "../types";
 
 // A DM request's latest body, batch-fetched by the page (#874); acceptance doesn't gate decryption.
@@ -28,7 +29,8 @@ const RequestPreview: React.FC<{ message?: Message; isLoading: boolean }> = ({
     return <ScrambleText text={null} placeholderLength={28} typeSpeed={25} />;
   }
 
-  const text = message?.content_decrypted ?? t("requests.noMessageYet");
+  // A preview: the words without the formatting markers (#2142).
+  const text = message?.content_decrypted != null ? stripFormatting(message.content_decrypted) : t("requests.noMessageYet");
   return <ScrambleText text={text} placeholderLength={28} typeSpeed={25} />;
 };
 

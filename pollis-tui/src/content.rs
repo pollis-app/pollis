@@ -132,14 +132,16 @@ pub fn format_file_size(bytes: u64) -> String {
 /// whitespace collapsed to single spaces, cut to `max_chars` with an ellipsis.
 pub fn preview(raw: &str, max_chars: usize) -> String {
     let content = parse_content(raw);
-    let source = if content.text.trim().is_empty() {
+    // Previews keep the words, not the formatting markers (#2142).
+    let text = pollis_core::message_format::strip(&content.text);
+    let source = if text.trim().is_empty() {
         content
             .attachments
             .first()
             .map(attachment_label)
             .unwrap_or_default()
     } else {
-        content.text
+        text
     };
     let collapsed = source.split_whitespace().collect::<Vec<_>>().join(" ");
     truncate_chars(&collapsed, max_chars)
@@ -460,6 +462,12 @@ mod tests {
             ),
             "[image: p.png, 2 KB]"
         );
+    }
+
+    #[test]
+    fn preview_drops_formatting_markers() {
+        assert_eq!(preview("**bold** and ~~gone~~ x_y_z", 40), "bold and gone x_y_z");
+        assert_eq!(preview("```\nlet a = 1;\n```", 40), "let a = 1;");
     }
 
     #[test]

@@ -710,7 +710,7 @@ Android FCM handler both call one plain C function in `pollis-core`
   nothing for the handle's conversation (the app already had it), the newest
   message there from the last 10 minutes, once (its id is kept in `ui_state`
   `notify_fallback_shown`). Setting "Nothing" returns before any fetch. At most 5, oldest first, body ≤ 200 chars
-  with markdown markers removed (`notify/preview.rs`). Attachments become a
+  with formatting markers removed by the renderers' parser (`notify/preview.rs`, #2142). Attachments become a
   placeholder plus `body_key` (`image|video|voice|attachment|sensitive`).
   `muted` is a muted channel with no direct `@username` of this user
   (`mention`), the same rule `push_recipients` uses. Failures are reasons

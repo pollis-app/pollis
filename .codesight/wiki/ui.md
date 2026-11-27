@@ -159,7 +159,7 @@ What becomes a link, and why:
   `content:`, `tel:`, `sms:`, custom schemes or the app's own `pollis://` —
   those never match the pattern, and the opener re-checks the scheme of the
   `href` it is about to hand over.
-- **The label is the destination.** There is no markdown on either client, so
+- **The label is the destination.** There is no link syntax on either client (#2142 adds only five styles), so
   no `[label](url)`. A token with credentials in the authority
   (`https://good.example@evil.example`) or a backslash in it (browsers read `\`
   as `/`) is refused outright, because its text names one host and opens
@@ -230,6 +230,33 @@ are `frontend/src/utils/linkPreview.ts`, a byte copy at
   text is unchanged. Either way `wire::from_stored` re-checks it against the
   pinned text, so a card never names a link the pin does not show. Same gates:
   Modern look only on desktop, none in an unaccepted DM request.
+- **Message formatting (#2142).** Five styles and nothing else: `**bold**`,
+  `*italic*` / `_italic_`, `__underline__` (Discord's meaning), `~~strike~~` and
+  fenced code blocks (a line of three backticks, an optional language word, no
+  highlighting; an unclosed fence is text). One parser per language over one case
+  table: `design/messageFormat.ts` (desktop and mobile; `parseFormatting` returns a
+  token tree, `stripFormatting` serves previews, `scanText` mention and link
+  detection) and `pollis-core/src/message_format.rs` (the core's notification and
+  search previews, the wake audience, `pollis-tui`), both tested against
+  `design/messageFormat.cases.json`. Rules: a backslash escapes a marker or a
+  backtick; markers need content that neither starts nor ends with a space;
+  `_`/`__` never open or close inside a word, `*`/`**` do except next to a digit
+  (`2*3*4` stays); URLs, mentions and emoji tokens are atoms. The renderers build
+  elements from the tree, never HTML: desktop `MessageBody` (`strong` semibold,
+  Terminal's bold the bright ink since DM Mono has no bold face; `em`, `u`, `s`; a
+  code block is a `pre` on `bg-surface`, `font-machine`, wrapping), mobile
+  `MessageBodyInline` (nested `Text`, Geist italic faces) and `MessageBodyText` (a
+  code block as its own raised box, `message-code-block`). Text runs keep mentions,
+  links, emoji and custom emoji inside any style; inside code nothing applies, and a
+  link only in code gets no card, tile or composer preview, a mention there wakes
+  no one. The stored text keeps its markers (no wire change); copying a whole
+  formatted body on desktop copies it as typed, mobile's Copy copies the stored
+  text. Previews strip the markers: conversation previews, reply quotes, a row's
+  spoken label, notifications (`notify/preview.rs`) and search snippets
+  (`search_text::snippet_text`; the index itself is unchanged). Tests:
+  `frontend/tests/message-format.test.ts`, `mobile/tests/message-format.test.ts`,
+  `message_format::tests`, `e2e/message-formatting.spec.ts`,
+  `mobile/.maestro/flows/message-formatting.yaml`, the `pollis-tui` timeline tests.
 - **Setting.** "Generate link previews" (per device, on by default): desktop
   Preferences after Network privacy (off and locked under `strict`), mobile
   Preferences. It governs only this device's sends.
@@ -1257,7 +1284,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MentionToken** — props: name, label, isSelf, isBot, groupName, skin — `frontend/src/components/Message/MentionToken.tsx`
 - **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, isPinned, copyLinkState, onReply, onOpenThread, onToggleSave, onTogglePin, onCopyLink, onEdit, onDelete, onReport — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut. Keyboard selection **inverts** the focused control (`focus:bg-accent focus:text-bg`; menu rows too, with Delete inverting to `bg-danger` instead of borrowing the affirmative accent) — a recolor alone was invisible in the terminal skin, and it replaces the browser's default focus ring on the menu rows. The inversion is on plain `focus:`, not `focus-visible:`, because `MessageList` projects nav state with a programmatic `.focus()` that WebKitGTK does not reliably treat as focus-visible — the row's own `focus-within:bg-hover` is plain-focus for the same reason. The one row that does **not** take the plain inversion is Copy link: it keeps focus after the click (the menu stays open so the copied/failed feedback lands where the pointer is, #897), so a solid accent fill would paint over its tone (#1059). Copied, the row steps its focus fill down to the selected-row tint (`focus:bg-active focus:text-accent`) so the accent text shows — a pressed button releasing; failed, it inverts to `bg-danger` like Delete. Focus never moves off the row: a keyboard user would lose their place in the menu. The "more" trigger rests one step brighter (`text-dim`) than Reply/Edit: three dots carry less ink than the arrow or pencil, so at a shared `text-muted` it read as disabled.
 - **MessageAvatar** — props: userId, username, aliasKey, size — `frontend/src/components/Message/MessageAvatar.tsx`
-- **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
+- **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders the formatting tree (#2142, "Message formatting" above), resolving `@mentions` as tokens in each run and delegating the rest to `LinkifiedText`. Used by `MessageItem`, `PinnedPanel`, `ThreadMessageRow` and the Vault. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, isAuthorNew, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, onReport, onTogglePin, copyLinkState, isSaved, isPinned, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed. The row's `hover:bg-hover focus-within:bg-hover` is its pointer/keyboard feedback; mobile's counterpart (`mobile/components/chat/MessageRow.tsx`, #1282) fades a touched row from `bg` to `raised` (`accentFaint` to `accentSoft` on a mention or jump-to tint) after a 100 ms delay, held through the long press and cleared on release, scroll or swipe, on the UI thread (timings in `mobile/lib/pressFeedback.ts`). The long press that opens the sheet also plays a haptic (#1286). Mobile gives tactile feedback for every significant non-navigation action — mutations through one `MutationCache` keyed on `meta.haptic` (`mobile/lib/queryClient.ts`), plus gestures, switches, two-tap confirms and copies; the rules are in `mobile/CLAUDE.md` → Haptics (desktop has no haptic surface). Layout parity (#1970, rule in `docs/design/README.md` → "Message rows"): mobile's header is one non-wrapping line, name in `semantic.text` then the time, as here; its attachments go through `mobile/components/chat/MessageAttachments.tsx` (also the Vault's entry rows), which puts several pictures and videos in a 2-up grid of equal squares (this component's wrapping 96px thumbs) ahead of the files list (`mobile/lib/media/messageAttachments.ts`), and a failed send's `UnsentActions` sit under the attachments.
 - **MessageLinkPreview** — props: text, preview — `frontend/src/components/Message/MessageLinkPreview.tsx`. A received sender preview (#1987), drawn only through `matchPreviewLink`; thumbnail via `getMediaUrl` like an image attachment, blurhash until then. Modern look only (`MessageItem` and `PinnedPanel` through `MessageUnfurls`, `ThreadMessageRow`). Mobile: `mobile/components/chat/MessageLinkPreview.tsx` (thumbnail through `MediaImage`).
 - **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, hasNewer, isFetchingNewer, onLoadNewer, windowEpoch, focusComposer, linkPreviews, pinsConversationId, onVerifyKeyChange — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).

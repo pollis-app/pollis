@@ -27,6 +27,7 @@ import {
   rankMentionCandidates,
   type MentionCandidate,
 } from "../../utils/mentions";
+import { scanText } from "../../../../design/messageFormat";
 import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
 import { useCommandCandidates } from "../../hooks/queries/useCommandCandidates";
 import {
@@ -464,7 +465,8 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   const hasLoadingAttachments = attachments.some((a) => a.loading);
 
-  const willNotifyEveryone = canNotifyAll && mentionsAll(message);
+  // As the core decides (#2142): `@all` in a code block notifies no one.
+  const willNotifyEveryone = canNotifyAll && mentionsAll(scanText(message));
 
   // @mention autocomplete (#843): candidates from this conversation's roster only.
   const skin = useSkin();

@@ -8,6 +8,7 @@ import { PressButton } from "../ui/PressButton";
 import { IconButton } from "../ui/IconButton";
 import { useSelectedGroupAliases } from '../../hooks/queries/useGroupAliases';
 import { aliasName } from '../../utils/groupAlias';
+import { stripFormatting } from '../../../../design/messageFormat';
 
 interface ReplyPreviewProps {
   messageId: string;
@@ -33,7 +34,8 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
   const authorColor = getUsernameColor(senderColorKey(message), isLightBg);
   // The text, else the first file's name, else (no text on this device) that it could not be decrypted.
   const content =
-    message.content_decrypted ||
+    // The words without the formatting markers (#2142).
+    (message.content_decrypted ? stripFormatting(message.content_decrypted) : '') ||
     (message.content_decrypted != null ? message.attachments?.[0]?.filename : undefined) ||
     t('message.undecryptable.title');
   const snippet = content.length > 80 ? content.substring(0, 80) + '...' : content;

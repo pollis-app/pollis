@@ -6,6 +6,7 @@ import {
   type LinkPreviewDraft,
   type LinkPreviewState,
 } from "../utils/linkPreview";
+import { scanText } from "../../../design/messageFormat";
 
 export interface LinkPreviewDraftHandle {
   state: LinkPreviewState;
@@ -47,7 +48,8 @@ export function useLinkPreviewDraft(
       draftKeyRef.current = draftKey;
       composer.reset();
     }
-    composer.update(text, enabled);
+    // Only a link outside code blocks gets a preview (#2142).
+    composer.update(scanText(text), enabled);
   }, [composer, text, enabled, draftKey]);
 
   // Unmount (the bar closes, the panel goes): nothing staged outlives the draft.
@@ -56,7 +58,7 @@ export function useLinkPreviewDraft(
   return {
     state,
     remove: () => composer.remove(),
-    takeForSend: (sent) => composer.takeForSend(sent),
+    takeForSend: (sent) => composer.takeForSend(scanText(sent)),
     reset: () => composer.reset(),
   };
 }

@@ -1,5 +1,6 @@
 import React from "react";
 import { matchPreviewLink } from "../../utils/linkPreview";
+import { scanText } from "../../../../design/messageFormat";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
 import { MessageLinkPreview } from "./MessageLinkPreview";
 import type { MessageRenderContext } from "./messageRenderContext";
@@ -19,7 +20,7 @@ interface MessageUnfurlsProps {
  */
 export const MessageUnfurls: React.FC<MessageUnfurlsProps> = ({ text, preview, ctx }) => {
   const previewLink =
-    ctx.skin === "modern" && ctx.linkPreviews ? matchPreviewLink(text, preview) : null;
+    ctx.skin === "modern" && ctx.linkPreviews ? matchPreviewLink(scanText(text), preview) : null;
   return (
     <>
       {previewLink && <MessageLinkPreview text={text} preview={preview} />}

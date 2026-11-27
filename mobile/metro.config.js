@@ -1,4 +1,4 @@
-// Expo's defaults plus TWO watch folders: the shared translation catalogues (frontend/src/i18n/locales/) and the shared colour source (design/). Nothing else outside mobile/ is watched.
+// Expo's defaults plus TWO watch folders: the shared translation catalogues (frontend/src/i18n/locales/) and design/ (the colour source and the message-formatting parser). Nothing else outside mobile/ is watched.
 
 const { getDefaultConfig } = require("expo/metro-config");
 const { execFileSync } = require("node:child_process");

@@ -235,6 +235,9 @@ export const fonts = {
   medium: "Geist_500Medium",
   semibold: "Geist_600SemiBold",
   bold: "Geist_700Bold",
+  // Message formatting (#2142): *italic* and ***bold italic*** (bold is `semibold`).
+  italic: "Geist_400Regular_Italic",
+  semiboldItalic: "Geist_600SemiBold_Italic",
   mono400: SYSTEM_MONO,
   mono500: SYSTEM_MONO,
   // Deprecated aliases from the Sora era — they resolve to Geist.

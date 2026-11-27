@@ -7,6 +7,9 @@ import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { UnsentMessageActions } from "../../Message/UnsentMessageActions";
 import { MessageLinkPreview } from "../../Message/MessageLinkPreview";
+import { MessageBody } from "../../Message/MessageBody";
+import { useMessageRenderContext } from "../../Message/useMessageRenderContext";
+import { appStore } from "../../../stores/appStore";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { formatClockTime, toMs } from "../../../utils/format";
 import type { Message } from "../../../types";
@@ -39,6 +42,8 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     // App language; `toMs` or seconds-precision timestamps render as 1970 (#874).
     const time = formatClockTime(toMs(message.created_at));
     const testid = isRoot ? "thread-root" : "thread-reply";
+    // The body draws as the timeline draws it: formatting (#2142), mentions, links, emoji.
+    const ctx = useMessageRenderContext(appStore.chatGroupId, !isTerminal);
 
     const body = message.deleted_at ? (
       <p className={`italic text-muted ${isTerminal ? "text-row" : "text-body"}`}>
@@ -47,15 +52,16 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     ) : (
       <>
         {message.content_decrypted ? (
-          <p
+          <div
+            dir="auto"
             className={`whitespace-pre-wrap break-words text-fg ${
               isTerminal ? "text-row" : "text-body"
             }`}
           >
-            {message.content_decrypted}
+            <MessageBody text={message.content_decrypted} ctx={ctx} />
             {/* An unsent reply (#1335). */}
             {message.status === "failed" && <UnsentMessageActions message={message} />}
-          </p>
+          </div>
         ) : message.content_decrypted == null ? (
           // No text on this device: it could not be decrypted (every message is encrypted).
           <p

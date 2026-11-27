@@ -1,0 +1,95 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# MESSAGE FORMATTING (#2142) — bold, italic, underline, strikethrough and code
+# blocks render from the shared parser (design/messageFormat.ts), markers gone,
+# in the timeline and in the pinned list; arithmetic and escapes stay literal;
+# a code block is its own box (`message-code-block`) with its text exactly as
+# typed. Self-contained: posts into a fresh self-owned group's #General.
+#
+# What is asserted is the text Maestro reads: on iOS a row is one accessible
+# element whose label is the stripped text; on Android the body's nested Text
+# reads the same. Either way, no `**` survives into it. The styles themselves
+# (faces, decorations) are in the review screenshots.
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Formatting"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Formatting"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# Every inline style, plus arithmetic and an escape that must stay literal.
+- tapOn:
+    id: "input-composer"
+- inputText: "**bold** *italic* __under__ ~~gone~~ 2*3*4 \\*kept\\*"
+- tapOn:
+    id: "btn-send"
+- runFlow: ../subflows/message-settled.yaml
+- hideKeyboard
+- extendedWaitUntil:
+    visible: "(?s).*bold italic under gone 2\\*3\\*4 \\*kept\\*.*"
+    timeout: 10000
+- assertNotVisible: "(?s).*\\*\\*bold\\*\\*.*"
+- takeScreenshot: message-formatting-01-styles
+
+# The pinned list draws the same body.
+- runFlow: ../subflows/long-press-message.yaml
+- tapOn:
+    id: "btn-pin"
+- assertNotVisible:
+    id: "btn-edit"
+
+# A code block: typed line by line (the composer is multiline, Return is a
+# line break), shown as its own box, nothing inside it parsed.
+- tapOn:
+    id: "input-composer"
+- inputText: "look:"
+- pressKey: Enter
+- inputText: "```"
+- pressKey: Enter
+- inputText: "x = **y**"
+- pressKey: Enter
+- inputText: "```"
+- pressKey: Enter
+- inputText: "done"
+- tapOn:
+    id: "btn-send"
+- runFlow: ../subflows/message-settled.yaml
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "message-code-block"
+    timeout: 10000
+- assertVisible: "(?s).*x = \\*\\*y\\*\\*.*"
+- assertNotVisible: "(?s).*```.*"
+- takeScreenshot: message-formatting-02-code
+
+- tapOn:
+    id: "btn-pins"
+- assertVisible:
+    id: "screen-pins"
+- extendedWaitUntil:
+    visible:
+      id: "row-pin-.*"
+    timeout: 30000
+- assertVisible: "(?s).*bold italic under gone 2\\*3\\*4 \\*kept\\*.*"
+- assertNotVisible: "(?s).*\\*\\*bold\\*\\*.*"
+- takeScreenshot: message-formatting-03-pins

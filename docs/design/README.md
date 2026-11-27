@@ -272,6 +272,12 @@ body 16 against desktop 15 is platform-normal). Desktop sizes are rem at a 15px 
   reason and Retry / Discard go under the whole message, after its attachments. In every look and
   client, attachments start on their own line below the text, with or without text (Slack,
   Discord).
+- **Message formatting** (#2142): bold, italic, underline, strikethrough and code blocks, nothing
+  else, in every look and client. Bold is the semibold face (Terminal: the bright ink, since DM
+  Mono has no bold; `pollis-tui`: ANSI bold); italic the real italic face (Geist italic on mobile,
+  DM Mono italic in Terminal). A code block is machine text on the next surface step (`surface`
+  on desktop, `raised` on mobile; `pollis-tui` a dim gutter on a solid background), the control
+  radius, never a border, and it wraps. Previews and notifications show the words without markers.
 - **Terminal message line** (desktop Terminal, `pollis-tui`): a shell line, not two columns (#2130).
   The time sits in its own gutter; the name, `:` and the text flow as one line, and wrapped text
   continues under the name, never in a hanging block after it. Pictures, files and reactions start
