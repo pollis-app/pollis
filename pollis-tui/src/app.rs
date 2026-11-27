@@ -1280,11 +1280,17 @@ impl App {
     async fn do_approve_enrollment(&mut self, request_id: &str, code: &str) {
         match enroll::approve(&self.state, request_id.to_string(), code.to_string()).await {
             Ok(()) => {
-                self.status = Some("Device approved.".to_string());
+                self.finish_approval();
                 self.do_load_pending_enrollments().await;
             }
             Err(e) => self.status = Some(format!("Couldn't approve: {e}")),
         }
+    }
+
+    /// A finished approval leaves the code screen for the list (#2129). Staying put left the
+    /// used code typed in, now under whichever request the reloaded list highlighted.
+    fn finish_approval(&mut self) {
+        self.goto(Screen::PendingEnrollments, "Device approved.");
     }
 
     /// Existing device: reject a request, then reload the list.
@@ -2037,6 +2043,32 @@ mod tests {
         assert!(!k.is_submittable("12345"));
         assert!(k.is_submittable("123456"));
         assert!(!k.is_submittable("1234567"));
+    }
+
+    fn test_app() -> App {
+        use pollis_core::config::Config;
+        use pollis_core::keystore::{InMemoryKeystore, Keystore};
+        let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
+        let config = Config::for_test().expect("test config");
+        App::new(Arc::new(AppState::new_with_parts(config, keystore)))
+    }
+
+    /// #2129: a finished approval lands on the list with the code cleared, and Esc from
+    /// there leaves for Home; it never steps back into the code screen.
+    #[test]
+    fn a_finished_approval_returns_to_the_list_not_the_code_screen() {
+        let mut app = test_app();
+        app.screen = Screen::ApproveEnrollment;
+        app.input = "ABCDEF".to_string();
+
+        app.finish_approval();
+        assert_eq!(app.screen, Screen::PendingEnrollments);
+        assert!(app.input.is_empty(), "the used code must not stay typed in");
+        assert_eq!(app.status.as_deref(), Some("Device approved."));
+
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(app.on_pending_enrollments_key(esc).is_none());
+        assert_eq!(app.screen, Screen::Home);
     }
 
     #[test]
