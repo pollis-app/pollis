@@ -545,24 +545,44 @@ function updateMessageLists(
   });
 }
 
+/**
+ * Re-read one conversation's rows (#2141): its page, whichever key it is cached under (a
+ * channel's or a DM's), and any open thread. Never every conversation's.
+ */
+function invalidateConversation(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string | undefined,
+) {
+  if (!conversationId) {
+    queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+    return;
+  }
+  queryClient.invalidateQueries({ queryKey: messageQueryKeys.channel(conversationId) });
+  queryClient.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
+  queryClient.invalidateQueries({ queryKey: messageQueryKeys.threads });
+}
+
+/** An unsent row to retry or discard, and the conversation whose page to re-read. */
+type OutboxTarget = { outboxId: string; conversationId?: string };
+
 /** Retry one unsent message (#1335) under the same id, so it never arrives twice. */
 export function useRetryMessage() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (outboxId: string) =>
+    mutationFn: async ({ outboxId }: OutboxTarget) =>
       invoke<RawMessage>("retry_message", { messageId: outboxId }),
-    onMutate: (outboxId) => {
+    onMutate: ({ outboxId }) => {
       updateMessageLists(queryClient, (msgs) =>
         mapOutboxRows(msgs, outboxId, (m) => ({ ...m, status: "sending" as const })),
       );
     },
-    onError: (_err, outboxId) => {
+    onError: (_err, { outboxId }) => {
       updateMessageLists(queryClient, (msgs) =>
         mapOutboxRows(msgs, outboxId, (m) => ({ ...m, status: "failed" as const })),
       );
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+    onSettled: (_data, _err, { conversationId }) => {
+      invalidateConversation(queryClient, conversationId);
       queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
     },
   });
@@ -572,13 +592,13 @@ export function useRetryMessage() {
 export function useDiscardUnsent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (outboxId: string) =>
+    mutationFn: async ({ outboxId }: OutboxTarget) =>
       invoke<boolean>("discard_unsent_message", { messageId: outboxId }),
-    onMutate: (outboxId) => {
+    onMutate: ({ outboxId }) => {
       updateMessageLists(queryClient, (msgs) => withoutOutboxRows(msgs, outboxId));
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+    onSettled: (_data, _err, { conversationId }) => {
+      invalidateConversation(queryClient, conversationId);
       queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
     },
   });
@@ -761,12 +781,19 @@ export function useCreateOrGetDMConversation() {
   });
 }
 
+type DeleteMessageVars = { messageId: string; conversationId: string };
+
+/**
+ * Delete for everyone, drawn at once (#2141): the row reads "Message deleted" on the tap, as
+ * on mobile, and comes back if the core refuses. The core still redacts before it removes the
+ * envelope, so nothing here changes what is sent or in which order.
+ */
 export function useDeleteMessage() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
-    mutationFn: async ({ messageId }: { messageId: string }) => {
+    mutationFn: async ({ messageId }: DeleteMessageVars) => {
       if (!currentUser) {
         throw new Error('No current user');
       }
@@ -775,8 +802,30 @@ export function useDeleteMessage() {
         userId: currentUser.id,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+    onMutate: async ({ messageId }) => {
+      const previous = queryClient.getQueriesData<unknown>({ queryKey: messageQueryKeys.all });
+      updateMessageLists(queryClient, (msgs) =>
+        msgs.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                content_decrypted: undefined,
+                attachments: [],
+                link_preview: null,
+                deleted_at: new Date().toISOString(),
+              }
+            : m,
+        ),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      for (const [key, data] of context?.previous ?? []) {
+        queryClient.setQueryData(key, data);
+      }
+    },
+    onSettled: (_data, _err, { conversationId }) => {
+      invalidateConversation(queryClient, conversationId);
       queryClient.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
     },
   });

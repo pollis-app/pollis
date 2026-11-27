@@ -175,6 +175,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  // A delete the core refused (#2141): the row came back, and this says so above the composer.
+  const [deleteFailed, setDeleteFailed] = useState(false);
   const [editDraftValue, setEditDraftValue] = useState('');
   // An edit rebuilds the message (#1987): the edit bar previews its text like the composer does.
   const skin = useSkin();
@@ -265,6 +267,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
   // Ref: a fresh callback re-renders the whole list on every edit keystroke (#874).
   const allMessagesRef = useRef(allMessages);
+  const editingRef = useRef(editingMessage);
+  editingRef.current = editingMessage;
   allMessagesRef.current = allMessages;
 
   const loadMore = useCallback(async () => {
@@ -524,17 +528,23 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     });
   }, [jumpMessageId, selectedChannelId, selectedConversationId, handleScrollToMessage, navigate]);
 
-  const handleConfirmDelete = async () => {
-    if (!pendingDeleteId) {
+  // The bar closes on the tap and the row reads deleted at once (#2141); a refusal brings it back.
+  const handleConfirmDelete = () => {
+    const conversationId = selectedChannelId ?? selectedConversationId;
+    if (!pendingDeleteId || !conversationId) {
       return;
     }
-    try {
-      await deleteMessageMutation.mutateAsync({ messageId: pendingDeleteId });
-    } catch (error) {
-      console.error("Failed to delete message:", error);
-    } finally {
-      setPendingDeleteId(null);
-    }
+    setPendingDeleteId(null);
+    setDeleteFailed(false);
+    deleteMessageMutation.mutate(
+      { messageId: pendingDeleteId, conversationId },
+      {
+        onError: (error) => {
+          console.error("Failed to delete message:", error);
+          setDeleteFailed(true);
+        },
+      },
+    );
   };
 
   const handleConfirmDeleteChannel = async () => {
@@ -594,7 +604,10 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     [currentUser?.id, currentUser?.username],
   );
 
-  const handleSaveEdit = async () => {
+  // The bar closes on submit (#2141): the core stores the edit before it posts (#1555), so a
+  // stored edit that then fails is labelled on its row. Only one the core never stored brings
+  // the bar back, with the text as typed.
+  const handleSaveEdit = () => {
     const trimmed = editDraftValue.trim();
     if (!trimmed || !editingMessage) {
       return;
@@ -603,19 +616,35 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     if (!conversationId) {
       return;
     }
+    const target = editingMessage;
     const linkPreview = editLinkPreview.takeForSend(trimmed);
-    try {
-      await editMessageMutation.mutateAsync({
+    setEditingMessage(null);
+    editMessageMutation.mutate(
+      {
         conversationId,
         channelId: selectedChannelId ?? undefined,
-        messageId: editingMessage.id,
+        messageId: target.id,
         newContent: trimmed,
         linkPreview,
-      });
-      setEditingMessage(null);
-    } catch (error) {
-      console.error("Failed to edit message:", error);
-    }
+      },
+      {
+        onError: async (error) => {
+          console.error("Failed to edit message:", error);
+          const queryKey = selectedChannelId
+            ? messageQueryKeys.channel(selectedChannelId)
+            : messageQueryKeys.conversation(conversationId);
+          await queryClient.refetchQueries({ queryKey });
+          const row = queryClient
+            .getQueryData<MessagesQueryData>(queryKey)
+            ?.messages.find((m) => m.id === target.id);
+          if (row?.edit_unsent || editingRef.current) {
+            return;
+          }
+          setEditDraftValue(trimmed);
+          setEditingMessage(target);
+        },
+      },
+    );
   };
 
   const handleAcceptDmRequest = async () => {
@@ -656,6 +685,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     if (!currentUser) {
       return;
     }
+    setDeleteFailed(false);
     // The optimistic insert lands on the live page (#1039).
     if (isAnchored) {
       leaveAnchoredWindow();
@@ -879,7 +909,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           onChange={setEditDraftValue}
           onSave={handleSaveEdit}
           onCancel={handleCancelEdit}
-          isSaving={editMessageMutation.isPending}
           preview={
             <ComposerLinkPreview
               state={editLinkPreview.state}
@@ -921,6 +950,11 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         );
       })() : (
         <div data-testid="message-form">
+          {deleteFailed && (
+            <p role="alert" data-testid="delete-message-error" className="px-4 pt-2 text-secondary text-danger">
+              {t("deleteMessage.failed")}
+            </p>
+          )}
           <TypingIndicator
             channelId={selectedChannelId ?? null}
             conversationId={selectedChannelId ? null : selectedConversationId ?? null}

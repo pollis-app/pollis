@@ -560,10 +560,20 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     if (!conversationId) {
       return;
     }
+    const message = sortedMessagesRef.current.find((m) => m.id === messageId);
     togglePinRef.current.mutate({
       conversationId,
       messageId,
       isPinned: pinnedIdsRef.current.has(messageId),
+      source: message
+        ? {
+            content: message.content_decrypted ?? "",
+            sender_id: message.sender_id,
+            sender_username: message.sender_username ?? null,
+            sender_display_name: message.sender_display_name ?? null,
+            sent_at: new Date(message.created_at).toISOString(),
+          }
+        : null,
     });
   }, []);
 

@@ -11,7 +11,7 @@ interface EditMessageBarProps {
   /** Enter (without Shift) saves; Escape is the caller's. */
   onSave: () => void;
   onCancel: () => void;
-  isSaving: boolean;
+  isSaving?: boolean;
   testId: string;
   inputTestId: string;
   cancelTestId: string;
@@ -28,7 +28,7 @@ export const EditMessageBar: React.FC<EditMessageBarProps> = ({
   onChange,
   onSave,
   onCancel,
-  isSaving,
+  isSaving = false,
   testId,
   inputTestId,
   cancelTestId,

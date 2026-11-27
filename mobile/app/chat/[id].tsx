@@ -79,6 +79,8 @@ import {
   flattenPages,
   markConversationRead,
   type ConversationKind,
+  type MessagesData,
+  messageQueryKeys,
   type Message,
 } from "../../hooks/queries";
 import { retryTarget, unsentReason } from "../../hooks/queries/pendingMessages";
@@ -544,19 +546,38 @@ function TextChat(props: ChatViewProps = {}) {
     setPendingAttachments((prev) => [...prev, ...picked]);
   }, []);
 
+  // The bar closes on submit (#2141): the core stores the edit before it posts (#1555), so a
+  // stored edit that then fails is labelled on its row. Only one the core never stored brings
+  // the bar back, with the text as typed.
+  const editTargetRef = useRef(editTarget);
+  editTargetRef.current = editTarget;
   const onSaveEdit = () => {
     const text = outgoingText(editDraft);
     if (!text || !editTarget) {
       return;
     }
+    const target = editTarget;
     perfTap("edit", [{ kind: "rowText", text }, { kind: "editClosed" }]);
+    setEditTarget(null);
+    setEditDraft("");
     editMessage.mutate(
-      { messageId: editTarget.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
+      { messageId: target.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
       {
         onSettled: () => perfConfirmed("edit"),
-        onSuccess: () => {
-          setEditTarget(null);
-          setEditDraft("");
+        onError: async () => {
+          if (!conversationId || !kind) {
+            return;
+          }
+          const key = messageQueryKeys.conversation(conversationId, kind);
+          await queryClient.refetchQueries({ queryKey: key });
+          const stored = queryClient
+            .getQueryData<MessagesData>(key)
+            ?.pages.some((p) => p.messages.some((m) => m.id === target.id && m.edit_unsent));
+          if (stored || editTargetRef.current) {
+            return;
+          }
+          setEditDraft(text);
+          setEditTarget(target);
         },
       },
     );
@@ -1351,6 +1372,13 @@ function TextChat(props: ChatViewProps = {}) {
                       conversationId,
                       messageId: actionTarget.id,
                       isPinned: pinnedIds.has(actionTarget.id),
+                      source: {
+                        content: actionTarget.content,
+                        sender_id: actionTarget.sender_id,
+                        sender_username: actionTarget.sender_username,
+                        sender_display_name: actionTarget.sender_display_name,
+                        sent_at: new Date(actionTarget.created_at).toISOString(),
+                      },
                     },
                     { onSettled: () => perfConfirmed("pin") },
                   );
@@ -1395,7 +1423,11 @@ function TextChat(props: ChatViewProps = {}) {
           }}
           onDelete={() => {
             perfTap("delete", [{ kind: "rowDeleted", id: actionTarget.id }]);
-            deleteMessage.mutate(actionTarget.id, { onSettled: () => perfConfirmed("delete") });
+            deleteMessage.mutate(actionTarget.id, {
+              onSettled: () => perfConfirmed("delete"),
+              // The row came back (the hook's rollback); say why above the composer (#2141).
+              onError: () => setCommandNotice(t("nav:deleteMessage.failed")),
+            });
             setActionTarget(null);
           }}
           onReport={() => {

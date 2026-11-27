@@ -73,3 +73,22 @@ export function mergeReactions(
   }
   return next;
 }
+
+/**
+ * The entries of a re-read that are still the truth (#2141): an id tapped again after the read
+ * started keeps its newer optimistic entry, and that tap's own re-read brings the server's.
+ * `asked` is each id's toggle count when the read went out, `now` the current counts.
+ */
+export function stillCurrent(
+  fresh: ReadonlyMap<string, Reaction[]>,
+  asked: ReadonlyMap<string, number>,
+  now: ReadonlyMap<string, number>,
+): ReactionMap {
+  const out: ReactionMap = new Map();
+  for (const [id, reactions] of fresh) {
+    if ((asked.get(id) ?? 0) === (now.get(id) ?? 0)) {
+      out.set(id, reactions);
+    }
+  }
+  return out;
+}

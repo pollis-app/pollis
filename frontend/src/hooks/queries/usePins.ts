@@ -55,6 +55,34 @@ interface TogglePinVars {
   messageId: string;
   /** Current state — `true` means this toggle UNPINS. */
   isPinned: boolean;
+  /** The local row, drawn as the pin until the list is re-read (#2141). */
+  source?: Pick<PinnedMessage, "content" | "sender_id" | "sender_username" | "sender_display_name" | "sent_at"> | null;
+}
+
+/** The pinned list as it reads once the toggle lands, drawn on the tap (#2141). */
+function togglePinLocally(
+  pins: PinnedMessage[],
+  { conversationId, messageId, isPinned, source }: TogglePinVars,
+  pinnedBy: string,
+): PinnedMessage[] {
+  if (isPinned) {
+    return pins.filter((p) => p.message_id !== messageId);
+  }
+  if (!source || pins.some((p) => p.message_id === messageId)) {
+    return pins;
+  }
+  return [
+    {
+      id: `pending-pin-${messageId}`,
+      conversation_id: conversationId,
+      message_id: messageId,
+      pinned_by: pinnedBy,
+      pinned_at: new Date().toISOString(),
+      ...source,
+      link_preview: null,
+    },
+    ...pins,
+  ];
 }
 
 /** Pin or unpin one message; any member may do either. */
@@ -72,7 +100,22 @@ export function useTogglePinnedMessage() {
         userId: currentUser.id,
       });
     },
-    onSuccess: (_data, { conversationId }) => {
+    // Drawn on the tap (#2141), rolled back if the core refuses, re-read either way.
+    onMutate: async (vars) => {
+      const key = pinQueryKeys.conversation(vars.conversationId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<PinnedMessage[]>(key);
+      queryClient.setQueryData<PinnedMessage[]>(key, (pins) =>
+        togglePinLocally(pins ?? [], vars, currentUser?.id ?? ""),
+      );
+      return { previous, key };
+    },
+    onError: (_err, _vars, context) => {
+      if (context) {
+        queryClient.setQueryData(context.key, context.previous);
+      }
+    },
+    onSettled: (_data, _err, { conversationId }) => {
       void queryClient.invalidateQueries({
         queryKey: pinQueryKeys.conversation(conversationId),
       });

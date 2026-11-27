@@ -32,7 +32,7 @@ export const UnsentMessageActions: React.FC<UnsentMessageActionsProps> = ({ mess
           aria-label={t("outbox.retryLabel")}
           isLoading={retry.isPending}
           disabled={retry.isPending || discard.isPending}
-          onClick={() => retry.mutate(retryId)}
+          onClick={() => retry.mutate({ outboxId: retryId, conversationId: message.conversation_id ?? message.channel_id })}
         >
           {t("outbox.retry")}
         </Button>
@@ -43,7 +43,7 @@ export const UnsentMessageActions: React.FC<UnsentMessageActionsProps> = ({ mess
         size="xs"
         aria-label={t("outbox.discardLabel")}
         disabled={retry.isPending || discard.isPending}
-        onClick={() => discard.mutate(discardId)}
+        onClick={() => discard.mutate({ outboxId: discardId, conversationId: message.conversation_id ?? message.channel_id })}
       >
         {t("outbox.discard")}
       </Button>
