@@ -179,6 +179,8 @@ export interface MessageReceipts {
   delivered_by: string[];
   /** Readers who actually saw it on screen in a focused window. */
   read_by: string[];
+  /** Reader id → when they read it, the reader's own timestamp (#2140); one per `read_by` entry. */
+  read_at: Record<string, string>;
 }
 
 /** Mirrors `pollis_core::commands::r2::AttachmentKeyScope` (#1382, #2109). */
