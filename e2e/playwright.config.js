@@ -28,7 +28,17 @@ module.exports = defineConfig({
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // The shipping WebView is WebKit on macOS and Linux. Specs whose bug lives
+    // in WebKit alone also run here (#2128: unprefixed `user-select` is
+    // ignored there, so a resize drag selected text Chromium never did).
+    {
+      name: "webkit",
+      testMatch: /resize-no-select\.spec\.ts$/,
+      use: { ...devices["Desktop Safari"] },
+    },
+  ],
   webServer: {
     // `exec vite` rather than `dev --`: pnpm swallows the `--` separator and
     // vite ends up back on its default port. `--host 127.0.0.1` is load-
