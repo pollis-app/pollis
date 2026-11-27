@@ -1,0 +1,142 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# PINNED LINKS (#2127) — a link in a pinned message is drawn as in the
+# timeline: a link (a long press opens the link sheet with its real host, not
+# the row's jump), and the sender's preview card, whose tap leaves for the
+# browser. Self-contained: posts into a fresh self-owned group's #General.
+# Needs network from the device to github.com (the preview is a real fetch,
+# as in link-previews.yaml).
+#
+# The message is ONE link, so the centre of the pin's body text (`text-pin-*`),
+# where a long press lands, lies inside it (message-links.yaml does the same).
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Pinned Links"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Pinned Links"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# The linked message, sent with its preview card.
+- tapOn:
+    id: "input-composer"
+- inputText: "https://github.com/actuallydan/pollis"
+- extendedWaitUntil:
+    visible:
+      id: "composer-link-preview"
+    timeout: 5000
+- extendedWaitUntil:
+    visible: ".*GitHub.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-send"
+- runFlow: ../subflows/message-settled.yaml
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "message-link-preview"
+    timeout: 30000
+- takeScreenshot: pinned-links-01-timeline
+
+# Pin it from the message sheet.
+- runFlow: ../subflows/long-press-message.yaml
+- assertVisible:
+    id: "btn-pin"
+    text: "Pin message"
+- tapOn:
+    id: "btn-pin"
+- assertNotVisible:
+    id: "btn-edit"
+
+# The pinned list: the body is a link and the card is the timeline's card.
+- tapOn:
+    id: "btn-pins"
+- assertVisible:
+    id: "screen-pins"
+- extendedWaitUntil:
+    visible:
+      id: "row-pin-.*"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "text-pin-.*"
+    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      id: "message-link-preview"
+    timeout: 15000
+- assertVisible: ".*github.com.*"
+- takeScreenshot: pinned-links-02-list
+
+# A long press on the link opens the link sheet (real host, Copy / Open) and
+# does not jump back to the conversation.
+- runFlow:
+    when:
+      notVisible:
+        id: "sheet-link"
+    commands:
+      - longPressOn:
+          id: "text-pin-.*"
+      - extendedWaitUntil:
+          visible:
+            id: "sheet-link"
+          timeout: 4000
+          optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "sheet-link"
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - longPressOn:
+          id: "text-pin-.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-link"
+    timeout: 5000
+- assertVisible:
+    id: "text-link-host"
+    text: "github.com"
+- assertVisible:
+    id: "btn-link-copy"
+- takeScreenshot: pinned-links-03-link-sheet
+- tapOn:
+    id: "btn-link-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "sheet-link"
+    timeout: 5000
+- assertVisible:
+    id: "screen-pins"
+
+# Last, so nothing has to come back from the browser: a tap on the pin's card
+# opens its link and Pollis leaves the foreground.
+- tapOn:
+    id: "message-link-preview"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-pins"
+    timeout: 10000
+# The browser, not the row's jump back to the conversation.
+- assertNotVisible:
+    id: "screen-chat"
+- takeScreenshot: pinned-links-04-browser

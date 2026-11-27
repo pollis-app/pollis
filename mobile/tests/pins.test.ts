@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { pinPreview, pinnedIds } from "../lib/pins.ts";
+import { pinLinkPreview, pinPreview, pinnedIds } from "../lib/pins.ts";
 import { parseContent } from "../lib/messageContent.ts";
 import { JUMP_MAX_PAGES, nextJumpStep } from "../lib/messageJump.ts";
 import { messageJumpStore } from "../stores/messageJumpStore.ts";
@@ -96,4 +96,33 @@ test("the message sheet pins, the header opens the list, and every jump door que
   assert.match(src("hooks/queries/usePins.ts"), /refetchOnMount: fresh \? "always" : true/);
   assert.match(src("components/pane/paneContext.ts"), /"\/conversation\/pins"/);
   assert.match(src("components/MasterDetail.tsx"), /"\/conversation\/pins": PinnedMessages/);
+});
+
+// #2127: a pin's links and preview draw exactly as in the timeline, through the same components.
+test("a pin carries its link preview, its thumbnail scoped to the pin's conversation", () => {
+  const preview = pinLinkPreview({
+    conversation_id: "c1",
+    link_preview: {
+      url: "https://example.com/page",
+      title: "Example page",
+      image: { key: "media/t", url: "", hash: "h", kv: 0, sha: "s", ct: "image/jpeg", size: 1, w: 1, h: 1 },
+    },
+  });
+  assert.equal(preview?.title, "Example page");
+  assert.equal(preview?.image?.object_key, "media/t");
+  assert.deepEqual(preview?.image?.key_scope, parseContent(
+    JSON.stringify({ _att: [{ key: "media/t", hash: "h", name: "", ct: "image/jpeg", size: 1, kv: 0 }] }),
+    { conversationId: "c1" },
+  ).attachments[0].key_scope);
+  assert.equal(pinLinkPreview({ conversation_id: "c1", link_preview: null }), null);
+  assert.equal(pinLinkPreview({ conversation_id: "c1" }), null);
+});
+
+test("the pinned list reuses the timeline's body and preview components", () => {
+  const screen = src("app/conversation/pins.tsx");
+  assert.match(screen, /<MessageBodyInline\b/);
+  assert.match(screen, /<MessageLinkPreview\b/);
+  assert.match(screen, /useMessageBodyContext\(/);
+  assert.doesNotMatch(screen, /<EmojiText\b/);
+  assert.match(src("app/chat/[id].tsx"), /useMessageBodyContext\(/);
 });

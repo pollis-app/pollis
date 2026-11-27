@@ -164,6 +164,21 @@ interface MockBookmark {
   saved_at: string;
 }
 
+/** One pin (#99): a snapshot of the message at pin time, as `PinnedMessage` in pollis-core. */
+interface MockPin {
+  id: string;
+  conversation_id: string;
+  message_id: string;
+  pinned_by: string;
+  pinned_at: string;
+  content: string;
+  sender_id: string;
+  sender_username?: string | null;
+  sent_at: string;
+  /** #2127: the message's preview, sealed with the snapshot. */
+  link_preview?: Record<string, unknown> | null;
+}
+
 /** One custom emoji (#848). Mirrors `CustomEmoji` in `frontend/src/types`. */
 interface MockCustomEmoji {
   group_id: string;
@@ -318,6 +333,7 @@ interface MockStore {
   dmRequests: MockDmChannel[];
   groupMembers: Record<string, MockGroupMember[]>;
   bookmarks: MockBookmark[];
+  pins: MockPin[];
   vaultMessages: MockVaultMessage[];
   customEmoji: MockCustomEmoji[];
   inviteLinks: MockInviteLink[];
@@ -494,6 +510,7 @@ const store: MockStore = {
   dmRequests: preload.dmRequests ?? [],
   groupMembers: preload.groupMembers ?? {},
   bookmarks: preload.bookmarks ?? [],
+  pins: preload.pins ?? [],
   vaultMessages: preload.vaultMessages ?? [],
   customEmoji: preload.customEmoji ?? [],
   inviteLinks: preload.inviteLinks ?? [],
@@ -2538,6 +2555,53 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
             sent_at: available ? message?.sent_at ?? null : null,
           };
         });
+    }
+
+    // Pins (#99), newest first; a pin snapshots the message's content and preview (#2127).
+    case 'list_pinned_messages': {
+      const { conversationId } = args as { conversationId: string };
+      return store.pins
+        .filter((p) => p.conversation_id === conversationId)
+        .sort((a, b) => b.pinned_at.localeCompare(a.pinned_at));
+    }
+
+    case 'pin_message': {
+      const { conversationId, messageId, userId } = args as {
+        conversationId: string;
+        messageId: string;
+        userId: string;
+      };
+      if (store.pins.some((p) => p.message_id === messageId && p.conversation_id === conversationId)) {
+        return null;
+      }
+      const message = findMessage(messageId);
+      if (!message || message.content == null || message.deleted_at) {
+        throw new Error('message not available to pin');
+      }
+      const sender = Object.values(store.groupMembers)
+        .flat()
+        .find((m) => m.user_id === message.sender_id);
+      store.pins.push({
+        id: `pin_${messageId}`,
+        conversation_id: conversationId,
+        message_id: messageId,
+        pinned_by: userId,
+        pinned_at: nowIso(),
+        content: message.content,
+        sender_id: message.sender_id,
+        sender_username: sender?.username ?? null,
+        sent_at: String(message.sent_at),
+        link_preview: message.link_preview ?? null,
+      });
+      return null;
+    }
+
+    case 'unpin_message': {
+      const { conversationId, messageId } = args as { conversationId: string; messageId: string };
+      store.pins = store.pins.filter(
+        (p) => !(p.message_id === messageId && p.conversation_id === conversationId),
+      );
+      return null;
     }
 
     case 'toggle_saved_message': {

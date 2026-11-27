@@ -1,6 +1,7 @@
 // What a pinned-list row shows (#1315): a pin is a SNAPSHOT, parsed like a timeline row. Pure.
 
-import { parseContent } from "./messageContent.ts";
+import { linkPreviewFromWire, parseContent } from "./messageContent.ts";
+import type { LinkPreviewWire, MessageLinkPreview } from "../types";
 
 export interface PinnedMessage {
   id: string;
@@ -14,6 +15,8 @@ export interface PinnedMessage {
   /** #2085: the sender's display name when this device knows one. */
   sender_display_name?: string | null;
   sent_at: string;
+  /** #2127: the sender's link preview, re-checked against `content` in the core. */
+  link_preview?: LinkPreviewWire | null;
 }
 
 export type PinPreview = {
@@ -28,6 +31,13 @@ export function pinPreview(content: string): PinPreview {
     text: parsed.text,
     filenames: parsed.attachments.map((a) => a.filename),
   };
+}
+
+/** The pin's link preview, its thumbnail loading as an image of the pin's conversation (#2127). */
+export function pinLinkPreview(
+  pin: Pick<PinnedMessage, "conversation_id" | "link_preview">,
+): MessageLinkPreview | null {
+  return linkPreviewFromWire(pin.link_preview, { conversationId: pin.conversation_id });
 }
 
 export function pinnedIds(pins: readonly Pick<PinnedMessage, "message_id">[]): Set<string> {

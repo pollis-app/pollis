@@ -20,6 +20,8 @@ use zeroize::Zeroizing;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
+use super::link_preview::wire::{self, LinkPreview};
+
 use super::mls::generation::local_generation;
 use super::mls::provider::load_stored_group;
 use super::mls::PollisProvider;
@@ -48,6 +50,10 @@ pub struct PinnedMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender_display_name: Option<String>,
     pub sent_at: String,
+    /// #2127: the sender's link preview, re-checked against `content`; the renderers draw it as
+    /// they do in the timeline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_preview: Option<LinkPreview>,
 }
 
 /// The sealed snapshot; ids sit inside the ciphertext so a server reshuffle shows as a mismatch.
@@ -59,6 +65,32 @@ struct PinSnapshot {
     sender_id: String,
     sent_at: String,
     content: String,
+    /// #2127: the message's stored preview JSON at pin time (`message.link_preview`'s shape).
+    /// Absent in pins sealed before it existed; older readers ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    link_preview: Option<String>,
+}
+
+/// The preview a pin shows: the sealed one, else (a pin sealed before #2127) this device's copy
+/// of the message, while its text is still what was pinned. Either way re-checked against the
+/// pinned text, so a preview never names a link the body does not hold.
+fn pin_link_preview(conn: &Connection, snapshot: &PinSnapshot) -> Option<LinkPreview> {
+    let json = match &snapshot.link_preview {
+        Some(json) => Some(json.clone()),
+        None => conn
+            .query_row(
+                "SELECT link_preview FROM message \
+                 WHERE id = ?1 AND conversation_id = ?2 AND content = ?3 \
+                   AND deleted_at IS NULL",
+                rusqlite::params![snapshot.message_id, snapshot.conversation_id, snapshot.content],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .flatten(),
+    }?;
+    wire::from_stored(&json, &snapshot.content)
 }
 
 fn seal(key: &[u8], plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -388,18 +420,18 @@ pub async fn pin_message(
 
     // The snapshot comes from this device's own decrypted copy — a message
     // this device cannot read is a message it cannot pin.
-    let (content, sender_id, sent_at): (String, String, String) = {
+    let (content, sender_id, sent_at, link_preview): (String, String, String, Option<String>) = {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
         db.conn()
             .query_row(
-                "SELECT content, sender_id, sent_at FROM message \
+                "SELECT content, sender_id, sent_at, link_preview FROM message \
                  WHERE id = ?1 AND conversation_id = ?2 AND deleted_at IS NULL \
                    AND content IS NOT NULL",
                 rusqlite::params![message_id, conversation_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()
             .map_err(|e| Error::Other(anyhow::anyhow!("pin snapshot lookup: {e}")))?
@@ -422,6 +454,7 @@ pub async fn pin_message(
         sender_id,
         sent_at,
         content,
+        link_preview,
     };
     let json = serde_json::to_vec(&snapshot)
         .map_err(|e| Error::Other(anyhow::anyhow!("serialize pin snapshot: {e}")))?;
@@ -520,6 +553,7 @@ pub async fn list_pinned_messages(
         let sender = crate::commands::user_cache::cached_one(db.conn(), &snapshot.sender_id);
         let sender_username = sender.as_ref().map(|n| n.username.clone());
         let sender_display_name = sender.and_then(|n| n.display_name);
+        let link_preview = pin_link_preview(db.conn(), &snapshot);
         out.push(PinnedMessage {
             id: pin.id,
             conversation_id: pin.conversation_id,
@@ -531,6 +565,7 @@ pub async fn list_pinned_messages(
             sender_username,
             sender_display_name,
             sent_at: snapshot.sent_at,
+            link_preview,
         });
     }
     Ok(out)
@@ -551,7 +586,91 @@ mod tests {
             sender_id: "user-01M2PINNEDSNAPSHOT".into(),
             sent_at: "2026-01-01T00:00:00Z".into(),
             content: "the pinned words".into(),
+            link_preview: None,
         }
+    }
+
+    const PREVIEW_JSON: &str = r#"{"url":"https://example.com/page","title":"Example page"}"#;
+
+    fn conn_with_message(content: &str, preview: Option<&str>) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE message (id TEXT, conversation_id TEXT, content TEXT, \
+             deleted_at TEXT, link_preview TEXT)",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message VALUES (?1, ?2, ?3, NULL, ?4)",
+            rusqlite::params!["msg-01M2PINNEDSNAPSHOT", "conv-01M2PINNEDSNAPSHOT", content, preview],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn linked() -> PinSnapshot {
+        PinSnapshot {
+            content: "see https://example.com/page".into(),
+            ..snapshot()
+        }
+    }
+
+    /// #2127: a pin carries the message's preview, re-checked against the pinned text.
+    #[test]
+    fn a_sealed_preview_comes_back_with_the_pin() {
+        let snap = PinSnapshot {
+            link_preview: Some(PREVIEW_JSON.into()),
+            ..linked()
+        };
+        let conn = conn_with_message("unrelated", None);
+        let preview = pin_link_preview(&conn, &snap).expect("preview");
+        assert_eq!(preview.url, "https://example.com/page");
+        assert_eq!(preview.title, "Example page");
+    }
+
+    /// A sealed preview naming a link the pinned text does not hold is never shown.
+    #[test]
+    fn a_preview_for_a_link_not_in_the_pin_is_dropped() {
+        let snap = PinSnapshot {
+            link_preview: Some(PREVIEW_JSON.into()),
+            ..snapshot()
+        };
+        let conn = conn_with_message("unrelated", None);
+        assert!(pin_link_preview(&conn, &snap).is_none());
+    }
+
+    /// A pin sealed before #2127 shows this device's preview while the text still matches.
+    #[test]
+    fn an_older_pin_uses_the_local_preview_of_the_same_text() {
+        let snap = linked();
+        let conn = conn_with_message(&snap.content, Some(PREVIEW_JSON));
+        assert!(pin_link_preview(&conn, &snap).is_some());
+        let edited = conn_with_message("edited, see https://example.com/page", Some(PREVIEW_JSON));
+        assert!(pin_link_preview(&edited, &snap).is_none());
+    }
+
+    /// Older readers parse a snapshot with a preview; newer ones parse one without.
+    #[test]
+    fn the_preview_field_is_additive() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct OldSnapshot {
+            v: u8,
+            message_id: String,
+            conversation_id: String,
+            sender_id: String,
+            sent_at: String,
+            content: String,
+        }
+        let with = PinSnapshot {
+            link_preview: Some(PREVIEW_JSON.into()),
+            ..linked()
+        };
+        let json = serde_json::to_vec(&with).unwrap();
+        assert!(serde_json::from_slice::<OldSnapshot>(&json).is_ok());
+        let without = serde_json::to_vec(&snapshot()).unwrap();
+        assert!(!String::from_utf8_lossy(&without).contains("link_preview"));
+        let back: PinSnapshot = serde_json::from_slice(&without).unwrap();
+        assert!(back.link_preview.is_none());
     }
 
     #[test]
