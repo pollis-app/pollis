@@ -65,11 +65,12 @@ tags:
 - runFlow: ../subflows/message-settled.yaml
 - hideKeyboard
 # The reply's body (`text-message-*`; the root's says "thread links root"):
-# the markers are gone, it reads "here https://github.com/".
+# the markers are gone, it reads "here https://github.com/" (the link wrapped
+# in bidi isolates, hence the pattern).
 - extendedWaitUntil:
     visible:
       id: "text-message-.*"
-      text: "here https://github.com/"
+      text: "here .*https://github.com/.*"
     timeout: 30000
 - assertNotVisible: ".*\\*\\*here.*"
 # The card is the timeline's card, inside the thread screen.
@@ -93,7 +94,7 @@ tags:
     commands:
       - longPressOn:
           id: "text-message-.*"
-          text: "here https://github.com/"
+          text: "here .*https://github.com/.*"
       - extendedWaitUntil:
           visible:
             id: "sheet-link"
@@ -108,7 +109,7 @@ tags:
           timeout: 3000
       - longPressOn:
           id: "text-message-.*"
-          text: "here https://github.com/"
+          text: "here .*https://github.com/.*"
 - extendedWaitUntil:
     visible:
       id: "sheet-link"
