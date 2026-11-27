@@ -142,7 +142,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
         <div
           data-testid={panelTestId}
           data-placement={resolved.placement}
-          className={`absolute z-40 ${positionClass}`}
+          className={`absolute z-40 ${positionClass} ${resolved.placement === "up" ? "motion-popover-up" : "motion-popover-down"}`}
         >
           {/* No spinner: the local chunk resolves within a frame or two. */}
           <Suspense fallback={null}>

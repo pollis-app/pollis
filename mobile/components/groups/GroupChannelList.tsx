@@ -1,5 +1,11 @@
-import { Fragment, useMemo, useRef, useState } from "react";
-import { PanResponder, Pressable, View, type LayoutChangeEvent } from "react-native";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { I18nManager, PanResponder, Pressable, View, type LayoutChangeEvent } from "react-native";
+import Animated, {
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { Text } from "../Text";
@@ -20,6 +26,8 @@ import {
 import { toggleCategoryCollapsed, useCollapsedCategories } from "../../lib/categoryCollapse";
 import { isPendingCategory } from "../../hooks/queries/useChannelCategories";
 import { ChannelRow } from "./ChannelRow";
+import { useReduceMotion } from "../../hooks/useReduceMotion";
+import { EASE_OUT, FOLD_IN, FOLD_LAYOUT, FOLD_OUT, MOTION } from "../../theme/motion";
 
 type Block = ChannelBlock<Channel, ChannelCategory>;
 type Kind = "channel" | "category";
@@ -68,6 +76,32 @@ function GroupChannelListImpl(props: Props) {
   const { t } = useTranslation("mobile");
   const { editing, categories } = props;
   const collapsed = useCollapsedCategories();
+  // #2125: a category folds (its rows fade, the rows under it slide) and its chevron turns.
+  // Under Reduce Motion it opens and closes at once.
+  const reduceMotion = useReduceMotion();
+  const folds = !editing && !reduceMotion;
+  const [foldingId, setFoldingId] = useState<string | null>(null);
+  const foldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (foldTimer.current) {
+        clearTimeout(foldTimer.current);
+      }
+    },
+    [],
+  );
+  const badgeSeenWithout = useRef(new Set<string>());
+  const badgeArrived = useRef(new Set<string>());
+  const toggleFold = (id: string) => {
+    if (folds) {
+      setFoldingId(id);
+      if (foldTimer.current) {
+        clearTimeout(foldTimer.current);
+      }
+      foldTimer.current = setTimeout(() => setFoldingId(null), MOTION.slowMs + 60);
+    }
+    toggleCategoryCollapsed(id);
+  };
   const blocks = useMemo(
     () => channelBlocks(editing ? props.allChannels : props.channels, categories),
     [editing, props.allChannels, props.channels, categories],
@@ -303,6 +337,17 @@ function GroupChannelListImpl(props: Props) {
         </View>
       );
     }
+    // The roll-up badge pops only when it turns up after the label painted without it, once the
+    // first unread counts have landed (#2125); a collapsed category at first paint holds still.
+    const badgeShown = isCollapsed && unread > 0;
+    if (!badgeShown) {
+      badgeArrived.current.delete(k.id);
+      if (appStore.unreadHydrated) {
+        badgeSeenWithout.current.add(k.id);
+      }
+    } else if (badgeSeenWithout.current.has(k.id)) {
+      badgeArrived.current.add(k.id);
+    }
     const spoken = isCollapsed
       ? unread > 0
         ? t("channels:categories.unread", { name: k.name, count: unread })
@@ -318,7 +363,7 @@ function GroupChannelListImpl(props: Props) {
           isCollapsed ? t("channels:categories.expand", { name: k.name }) : t("channels:categories.collapse", { name: k.name })
         }
         accessibilityState={{ expanded: !isCollapsed }}
-        onPress={() => toggleCategoryCollapsed(k.id)}
+        onPress={() => toggleFold(k.id)}
         style={({ pressed }) => ({
           flexDirection: "row",
           alignItems: "center",
@@ -331,15 +376,11 @@ function GroupChannelListImpl(props: Props) {
           backgroundColor: pressed ? semantic.raised : "transparent",
         })}
       >
-        {isCollapsed ? (
-          <Icon.chevronRight size={16} color={semantic.muted} />
-        ) : (
-          <Icon.chevronDown size={16} color={semantic.muted} />
-        )}
+        <FoldChevron collapsed={isCollapsed} animate={folds} />
         <Text numberOfLines={1} style={[ty.section, { flex: 1 }]}>
           {k.name}
         </Text>
-        {isCollapsed && unread > 0 ? <Badge>{unread > 99 ? "99+" : unread}</Badge> : null}
+        {isCollapsed && unread > 0 ? <Badge pop={badgeArrived.current.has(k.id)}>{unread > 99 ? "99+" : unread}</Badge> : null}
       </Pressable>
     );
   };
@@ -358,10 +399,29 @@ function GroupChannelListImpl(props: Props) {
         const k = b.category;
         const shown = !editing && collapsed.has(k.id) ? collapsedVisible(b.channels, [props.selectedChannelId]) : b.channels;
         // Flat siblings, so every row's layout y is in the list's own coordinates.
+        if (!folds) {
+          return (
+            <Fragment key={k.id}>
+              {renderLabel(b)}
+              {shown.map(renderChannel)}
+            </Fragment>
+          );
+        }
+        // Outside Edit mode nothing measures rows, so each can ride in its own animated view.
+        const sliding = foldingId !== null ? FOLD_LAYOUT : undefined;
         return (
           <Fragment key={k.id}>
-            {renderLabel(b)}
-            {shown.map(renderChannel)}
+            <Animated.View layout={sliding}>{renderLabel(b)}</Animated.View>
+            {shown.map((c) => (
+              <Animated.View
+                key={c.id}
+                layout={sliding}
+                entering={foldingId === k.id ? FOLD_IN : undefined}
+                exiting={FOLD_OUT}
+              >
+                {renderChannel(c)}
+              </Animated.View>
+            ))}
           </Fragment>
         );
       })}
@@ -407,6 +467,26 @@ function GroupChannelListImpl(props: Props) {
 
 // An observer: each row reads its own unread count from the store.
 export const GroupChannelList = observer(GroupChannelListImpl);
+
+/** One chevron, turned to the end edge when folded (#2125): it rotates rather than swapping glyphs. */
+function FoldChevron({ collapsed, animate }: { collapsed: boolean; animate: boolean }) {
+  const turn = collapsed ? (I18nManager.isRTL ? 90 : -90) : 0;
+  const angle = useSharedValue(turn);
+  useEffect(() => {
+    angle.value = animate
+      ? withTiming(turn, { duration: MOTION.baseMs, easing: EASE_OUT, reduceMotion: ReduceMotion.Never })
+      : turn;
+  }, [turn, animate, angle]);
+  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${angle.value}deg` }] }));
+  return (
+    // The static turn first: if Reanimated never writes the view, the chevron still points right.
+    <Animated.View style={[{ transform: [{ rotate: `${turn}deg` }] }, style]}>
+      <Icon.chevronDown size={16} color={semantic.muted} />
+    </Animated.View>
+  );
+}
+
+
 
 /**
  * Edit mode's ≡: dragging it moves its row; nothing else on the row drags, so a scroll that starts

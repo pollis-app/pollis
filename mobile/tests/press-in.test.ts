@@ -141,8 +141,8 @@ test("the shared primitives take pressIn and keep onPress for screen readers", (
 const CONVERTED: Record<string, string[]> = {
   "components/TabBar.tsx": ["<PressInPressable\n            key={tab.name}\n            pressIn"],
   "components/chat/SheetOverlay.tsx": [
-    "<PressInPressable\n              pressIn\n              onPress={onClose}\n              accessible={false}",
-    "<PressInPressable\n                  pressIn\n                  onPress={onClose}\n                  testID={closeTestID}",
+    "<PressInPressable\n              pressIn\n              onPress={requestClose}\n              accessible={false}",
+    "<PressInPressable\n                  pressIn\n                  onPress={requestClose}\n                  testID={closeTestID}",
   ],
   "app/chat/[id].tsx": ['testID="btn-pins"\n              pressIn', 'testID="btn-members"\n              pressIn', 'testID="btn-chat-menu"\n              pressIn'],
   "components/chat/Composer.tsx": ['pressIn\n          testID="btn-attach"', 'pressIn\n                testID="btn-composer-emoji"'],

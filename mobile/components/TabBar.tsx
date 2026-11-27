@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import { View, Platform } from "react-native";
+import Animated from "react-native-reanimated";
 import { Text } from "./Text";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -17,6 +19,8 @@ import {
   useUserGroupsWithChannels,
 } from "../hooks/queries";
 import { badgeText, badgeTotal, tabA11yLabel, tabBadges } from "../lib/tabBadges";
+import { POP_IN, REDUCED_FADE_IN } from "../theme/motion";
+import { useReduceMotion } from "../hooks/useReduceMotion";
 
 // Groups / Direct / Link / Self. `tab-<name>` and `badge-<name>` are load-bearing in e2e. The shield (#1550) is a shortcut, never a tab.
 const ICON = 22;
@@ -61,6 +65,20 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
     requestCount: requests.length,
     inviteCount: invites.length,
   });
+  // A badge that appears while the bar is on screen pops in; one there on the first paint does not (#2125).
+  const reduceMotion = useReduceMotion();
+  const seenWithout = useRef(new Set<string>());
+  const popTabs = new Set<string>();
+  for (const tab of TABS) {
+    if (badgeTotal(badgeByTab[tab.name]) > 0) {
+      if (seenWithout.current.has(tab.name)) {
+        popTabs.add(tab.name);
+      }
+    } else if (appStore.unreadHydrated) {
+      // Only once the first counts have landed: before that, "no badge" just means "not known yet".
+      seenWithout.current.add(tab.name);
+    }
+  }
   return (
     <View
       // "tabbar" exists only on iOS; Android crashes on it.
@@ -132,7 +150,10 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
             <View>
               {tab.glyph(color)}
               {count > 0 ? (
-                <View
+                <Animated.View
+                  entering={
+                    popTabs.has(tab.name) ? (reduceMotion ? REDUCED_FADE_IN : POP_IN) : undefined
+                  }
                   testID={`badge-${tab.name}`}
                   style={{
                     position: "absolute",
@@ -160,7 +181,7 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
                   >
                     {badgeText(count)}
                   </Text>
-                </View>
+                </Animated.View>
               ) : null}
             </View>
             <Text

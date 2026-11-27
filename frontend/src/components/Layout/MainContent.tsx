@@ -35,6 +35,7 @@ import { messageJumpStore } from "../../stores/messageJumpStore";
 import { TypingIndicator } from "../TypingIndicator";
 import { EmptyState } from "../ui/EmptyState";
 import { probeRender } from "../../utils/renderProbe";
+import { useLateArrival } from "../../hooks/useLateArrival";
 
 // DM not yet accepted: the chat input becomes an accept/block bar.
 export interface PendingDmRequest {
@@ -155,6 +156,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     selectedChannelId,
     selectedConversationId
   );
+  const logArrived = useLateArrival(!messagesLoading);
   const sendMessageMutation = useSendMessage();
   const { openThread, setSafety } = useRightPanel();
   const { data: threadSummaries } = useThreadSummaries(
@@ -779,32 +781,38 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             <LoadingSpinner size="base" />
           </div>
         ) : (
-          <MessageList
-            messages={channelMessages}
-            // MLS group id (for DMs, the dm_channel_id).
-            conversationId={chatGroupId ?? selectedConversationId ?? null}
-            groupIdForNames={chatGroupId ?? null}
-            adminUserIds={adminUserIds}
-            viewerIsAdmin={viewerIsAdmin}
-            onOpenThread={openThread}
-            onVerifyKeyChange={setSafety}
-            threadReplyCounts={threadReplyCounts}
-            onReply={handleReply}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            pinsConversationId={selectedChannelId ?? selectedConversationId ?? null}
-            onScrollToMessage={handleScrollToMessage}
-            getAuthorUsername={getAuthorUsername}
-            hasMore={!!pageCursor}
-            isFetchingMore={loadingMore}
-            onLoadMore={loadMore}
-            hasNewer={!!newerCursor}
-            isFetchingNewer={loadingNewer}
-            onLoadNewer={loadNewer}
-            windowEpoch={windowEpoch}
-            focusComposer={focusComposer}
-            linkPreviews={!pendingDmRequest}
-          />
+          // The log (or its empty sentence) fades in where the spinner was (#2125).
+          <div
+            data-testid="message-log-arrival"
+            className={`flex-1 flex flex-col overflow-hidden min-h-0 ${logArrived ? "motion-fade" : ""}`}
+          >
+            <MessageList
+              messages={channelMessages}
+              // MLS group id (for DMs, the dm_channel_id).
+              conversationId={chatGroupId ?? selectedConversationId ?? null}
+              groupIdForNames={chatGroupId ?? null}
+              adminUserIds={adminUserIds}
+              viewerIsAdmin={viewerIsAdmin}
+              onOpenThread={openThread}
+              onVerifyKeyChange={setSafety}
+              threadReplyCounts={threadReplyCounts}
+              onReply={handleReply}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              pinsConversationId={selectedChannelId ?? selectedConversationId ?? null}
+              onScrollToMessage={handleScrollToMessage}
+              getAuthorUsername={getAuthorUsername}
+              hasMore={!!pageCursor}
+              isFetchingMore={loadingMore}
+              onLoadMore={loadMore}
+              hasNewer={!!newerCursor}
+              isFetchingNewer={loadingNewer}
+              onLoadNewer={loadNewer}
+              windowEpoch={windowEpoch}
+              focusComposer={focusComposer}
+              linkPreviews={!pendingDmRequest}
+            />
+          </div>
         )}
       </div>
 

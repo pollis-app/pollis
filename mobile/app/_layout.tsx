@@ -17,6 +17,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { semantic } from "../theme/tokens";
 import { drillIn } from "../lib/transitions";
+import { useReduceMotion } from "../hooks/useReduceMotion";
 import { ThemeProvider, useThemeRerender } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge, invoke } from "../lib/native";
@@ -111,12 +112,13 @@ function SignedInServicesGate() {
 // Under ThemeProvider so the scene background follows a palette change (#1447).
 function RootStack({ children }: { children: React.ReactNode }) {
   useThemeRerender();
+  const push = drillIn(useReduceMotion());
   return (
     <Stack
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: semantic.bg },
-        ...drillIn,
+        ...push,
       }}
     >
       {children}
@@ -138,6 +140,8 @@ export default function RootLayout() {
   const [policyReady, setPolicyReady] = useState(false);
   const policy = useSyncExternalStore(subscribeClientPolicy, getClientPolicy);
   const blocked = policy?.blocked === true;
+  // Every push, honouring Reduce Motion (#2125).
+  const push = drillIn(useReduceMotion());
   // Set once a block lifts, so the navigator that mounts again re-runs boot routing.
   const wasBlocked = useRef(false);
   const [resetBoot, setResetBoot] = useState(false);
@@ -304,85 +308,85 @@ export default function RootLayout() {
               <Stack.Screen name="vault" />
               <Stack.Screen name="share" />
               <Stack.Screen name="user/[id]" />
-              <Stack.Screen name="report" options={drillIn} />
+              <Stack.Screen name="report" options={push} />
               <Stack.Screen
                 name="self/preferences"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/language"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/user-settings"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/aliases"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/alias"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/security"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/security-events"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/link-device"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/blocked"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/change-email"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/saved"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/diagnostics"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/open-source/index"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/open-source/[id]"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/change-pin"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/biometric-unlock"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen name="m/[...permalink]" />
               <Stack.Screen name="dev/client-policy" options={{ animation: "none" }} />
               <Stack.Screen name="dev/background" options={{ animation: "none" }} />
-              <Stack.Screen name="approve-device" options={drillIn} />
-              <Stack.Screen name="approve-history-transfer" options={drillIn} />
+              <Stack.Screen name="approve-device" options={push} />
+              <Stack.Screen name="approve-history-transfer" options={push} />
               {/* After setup, like an auth step: no swipe back into initializing. */}
               <Stack.Screen name="history-offer" options={{ animation: "fade", gestureEnabled: false }} />
               <Stack.Screen
                 name="self/history-transfer"
-                options={drillIn}
+                options={push}
               />
               <Stack.Screen
                 name="self/delete-account"
-                options={drillIn}
+                options={push}
               />
             </RootStack>
             {/* A message link's Copy / Open sheet and the IDN confirm. */}

@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, type ComponentProps } from "react";
 import { View, Pressable } from "react-native";
 import { Text } from "../Text";
 import Animated, {
@@ -94,6 +94,7 @@ export function MessageRow({
   botGroup,
   testID,
   messageId,
+  entering,
 }: {
   av: string;
   // The sender's picture; `senderAvatarKey` undefined = the roster does not say.
@@ -153,6 +154,8 @@ export function MessageRow({
   botGroup?: string;
   testID?: string;
   messageId?: string;
+  /** A live arrival at the bottom of the log rises in (#2125); read only when the row mounts. */
+  entering?: ComponentProps<typeof Animated.View>["entering"];
 }) {
   const { t } = useTranslation("chat");
 
@@ -259,6 +262,7 @@ export function MessageRow({
   return (
     <SwipeToReply onReply={onReply} pressFeedback={press}>
       <AnimatedPressable
+        entering={entering}
         // The list persists "handled" taps (#1859), so a tap on a row dismisses the keyboard here.
         onPress={dismissKeyboard}
         onLongPress={onLongPressTouch}

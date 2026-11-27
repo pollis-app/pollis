@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { applyReactionToggle } from "./reactionOptimistic";
+import { noteLocalReaction } from "../../lib/reactionMotion";
 import {
   mayReveal,
   mergeReactions,
@@ -159,6 +160,10 @@ export function useToggleReaction(
     },
 
     onMutate: async (vars) => {
+      // The pill this adds pops in, even on a row that had none (#2125).
+      if (vars.mode === "add") {
+        noteLocalReaction(vars.messageId, vars.emoji);
+      }
       if (!currentUser || !conversationId || !kind) {
         return { previous: [] };
       }

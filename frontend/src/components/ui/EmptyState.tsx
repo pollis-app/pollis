@@ -11,6 +11,8 @@ interface EmptyStateProps {
   background?: boolean;
   /** What goes under the sentence: the action that fills the space, when there is one. */
   actions?: React.ReactNode;
+  /** It replaced a loading state: fade in (#2125). */
+  fadeIn?: boolean;
 }
 
 /**
@@ -25,11 +27,13 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   tone = "muted",
   background = true,
   actions,
+  fadeIn = false,
 }) => {
   const wrapper = [
     "flex flex-1 items-center justify-center px-4 py-8 text-center",
     actions ? "flex-col gap-3" : "",
     background ? "bg-bg" : "",
+    fadeIn ? "motion-fade" : "",
   ]
     .filter(Boolean)
     .join(" ");

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useNavigate } from "@tanstack/react-router";
@@ -45,6 +45,10 @@ import { placeKeyChangeNotices } from "../../utils/keyChangeTimeline";
 import { receiptTargetId } from "../../utils/receiptTarget";
 import { useMarkConversationRead } from "../../hooks/queries/useUnread";
 import { useReadWhileViewing } from "../../hooks/useReadWhileViewing";
+import { useReducedMotion } from "../../hooks/useReducedMotion";
+import { scrollBehavior } from "../../utils/motion";
+import { classifyAppend, isAtBottom, type AppendResult } from "./liveAppend";
+import { NewMessagesButton } from "./NewMessagesButton";
 
 // How long the permalink jump highlight stays on the target row.
 const HIGHLIGHT_MS = 1800;
@@ -306,6 +310,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   const rowEstimateRef = useRef(rowEstimatePx);
   rowEstimateRef.current = rowEstimatePx;
   const estimateSize = useCallback(() => rowEstimateRef.current, []);
+  const reduceMotion = useReducedMotion();
+  const logKey = `${selectedChannelId ?? ""}|${selectedConversationId ?? ""}`;
+  const liveTail = !hasNewer && !isFetchingNewer;
 
   const virtualizer = useVirtualizer({
     count: timeline.length,
@@ -316,9 +323,66 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     // Re-pins the visible row across any count change (older page prepended, etc.).
     anchorTo: "end",
     // Follow new messages only from the bottom; never while an anchored window (#1039).
-    followOnAppend: hasNewer || isFetchingNewer ? false : "smooth",
+    followOnAppend: liveTail ? (reduceMotion ? "auto" : "smooth") : false,
     scrollEndThreshold: rowEstimatePx,
   });
+
+  // Live arrivals (#2125), classified during render so a rising row's first paint already
+  // carries its class. The DOM still shows the previous commit here, so "at the bottom" is where
+  // the reader was before these rows landed. Once per timeline (StrictMode renders twice); the
+  // initial load, older pages and a stub's swap for its confirmed row are never arrivals.
+  const risingKeysRef = useRef(new Set<string>());
+  const appendRef = useRef<{
+    logKey: string;
+    timeline: TimelineItem[];
+    result: AppendResult;
+    consumed: boolean;
+  } | null>(null);
+  if (appendRef.current?.timeline !== timeline) {
+    const prev = appendRef.current;
+    const ownKeys = new Set<string>();
+    for (const item of timeline) {
+      if (item.kind === "message" && item.message.sender_id === currentUser?.id) {
+        ownKeys.add(item.key);
+      }
+    }
+    const container = containerRef.current;
+    const result = classifyAppend(
+      prev ? { logKey: prev.logKey, keys: prev.timeline.map((x) => x.key) } : null,
+      { logKey, keys: timeline.map((x) => x.key) },
+      {
+        atBottom: container ? isAtBottom(container, rowEstimatePx) : true,
+        liveTail,
+        isOwn: (key) => ownKeys.has(key),
+      },
+    );
+    if (prev?.logKey !== logKey) {
+      risingKeysRef.current.clear();
+    }
+    for (const key of result.animate) {
+      risingKeysRef.current.add(key);
+    }
+    appendRef.current = { logKey, timeline, result, consumed: false };
+  }
+
+  // "N new messages" while scrolled up; reaching the bottom by any route clears it.
+  const [unseen, setUnseen] = useState(0);
+  useEffect(() => {
+    setUnseen(0);
+  }, [logKey, windowEpoch]);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || unseen === 0) {
+      return;
+    }
+    const onScroll = () => {
+      if (isAtBottom(container, rowEstimateRef.current)) {
+        setUnseen(0);
+      }
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, [unseen]);
 
   const indexByMessageId = useMemo(() => {
     const map = new Map<string, number>();
@@ -345,7 +409,6 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   rowWindowRef.current = rowWindow;
 
   // Open at the newest message; re-runs because the dev double mount rewinds the scroll.
-  const logKey = `${selectedChannelId ?? ""}|${selectedConversationId ?? ""}`;
   const hasRows = timeline.length > 0;
   useEffect(() => {
     if (!hasRows) {
@@ -353,6 +416,28 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     }
     virtualizer.scrollToIndex(timelineRef.current.length - 1, { align: "end" });
   }, [logKey, windowEpoch, hasRows, virtualizer]);
+
+  const goToNewest = useCallback(() => {
+    setUnseen(0);
+    virtualizer.scrollToEnd({ behavior: scrollBehavior() });
+  }, [virtualizer]);
+
+  // Act on a timeline's arrivals once: count the unseen, or take a sender who is scrolled up to
+  // the message they just sent.
+  useLayoutEffect(() => {
+    const append = appendRef.current;
+    if (!append || append.consumed) {
+      return;
+    }
+    append.consumed = true;
+    const { unseen: arrived, jumpToEnd } = append.result;
+    if (arrived > 0) {
+      setUnseen((n) => n + arrived);
+    }
+    if (jumpToEnd) {
+      goToNewest();
+    }
+  }, [timeline, goToNewest]);
 
   const maybeLoadMore = useCallback(() => {
     const container = containerRef.current;
@@ -433,7 +518,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       () => replyRevealRef.current !== token,
     ).then((el) => {
       if (el && replyRevealRef.current === token) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
       }
     });
     onScrollToMessageRef.current?.(messageId);
@@ -548,7 +633,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       if (!messageJumpStore.claimMessage(jumpTargetMessageId)) {
         return;
       }
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
       el.classList.add("pollis-message-flash");
       timer = setTimeout(() => {
         el.classList.remove("pollis-message-flash");
@@ -816,12 +901,22 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         className="relative"
         style={{ height: `${virtualizer.getTotalSize()}px` }}
       >
-        {virtualItems.map((virtualRow) => (
+        {virtualItems.map((virtualRow) => {
+          // A live arrival rises in: a transform on the row, so its measured height holds.
+          const rising = risingKeysRef.current.has(String(virtualRow.key));
+          return (
           // Absolute placement gives each row a BFC, so divider margins measure inside it.
           <div
             key={virtualRow.key}
             data-index={virtualRow.index}
             ref={virtualizer.measureElement}
+            className={rising ? "motion-rise" : undefined}
+            data-arrival={rising ? "live" : undefined}
+            onAnimationEnd={(e) => {
+              if (e.target === e.currentTarget) {
+                risingKeysRef.current.delete(String(virtualRow.key));
+              }
+            }}
             style={{
               position: "absolute",
               insetInlineStart: 0,
@@ -831,8 +926,12 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           >
             {renderTimelineItem(virtualRow.index)}
           </div>
-        ))}
+          );
+        })}
       </div>
+      {unseen > 0 && liveTail && (
+        <NewMessagesButton count={unseen} skin={skin} onClick={goToNewest} />
+      )}
       {isFetchingNewer && (
         <p
           data-testid="message-loading-newer"

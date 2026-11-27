@@ -1,0 +1,42 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - two-client
+---
+# NEW MESSAGES (#2125), part 2 of 3 — driven by scripts/maestro-new-messages.sh. The DM with
+# the peer is open (two-client/live-message/1-open-dm.yaml) and the reader is at the bottom.
+# The peer fills more than a screen, then sends once more: the log follows it, and no
+# "N new messages" button shows.
+
+# The first message after the peer accepts lands at the epoch its join opened (as live-message).
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      TEXT: "warm up"
+- extendedWaitUntil:
+    visible: ".*: warm up, .*"
+    timeout: 20000
+- runScript:
+    file: ../../scripts/peer-send-many.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      COUNT: "30"
+      PREFIX: "fill"
+- extendedWaitUntil:
+    visible: ".*: fill 30, .*"
+    timeout: 30000
+# More than a screen: the oldest of this run is out of view.
+- assertNotVisible: ".*: hello peer, .*"
+- runScript:
+    file: ../../scripts/peer-send.js
+    env:
+      PEER_PORT: ${PEER_PORT}
+      TEXT: "at the bottom"
+# The wait covers the dev DS delivering it (a few seconds after a burst), not the follow:
+# at the bottom the newest row is on screen the moment it lands.
+- extendedWaitUntil:
+    visible: ".*: at the bottom, .*"
+    timeout: 20000
+- assertNotVisible:
+    id: "new-messages-button"
+- takeScreenshot: new-messages-01-at-bottom-follows

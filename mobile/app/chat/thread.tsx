@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, FlatList } from "react-native";
+import {
+  View,
+  FlatList,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
 import { Text } from "../../components/Text";
 import { useNav, useRouteParams } from "../../components/pane/paneContext";
 import { useTranslation } from "react-i18next";
@@ -36,6 +41,11 @@ import { useTheme } from "../../components/theme";
 import { useDraft } from "../../hooks/useDraft";
 import { useLinkPreviewDraft } from "../../hooks/useLinkPreviewDraft";
 import { ComposerLinkPreview } from "../../components/chat/ComposerLinkPreview";
+import { classifyArrivals, distanceFromBottom, isNearBottom } from "../../lib/chatFollow";
+import { useReduceMotion } from "../../hooks/useReduceMotion";
+import { REDUCED_FADE_IN, messageRiseIn } from "../../theme/motion";
+
+const RISE = messageRiseIn(false);
 
 /** Slack-style thread screen (#831); state is isolated per thread (#837). */
 function ThreadScreen() {
@@ -115,15 +125,47 @@ function ThreadScreen() {
     return true;
   };
 
-  const newestId = replies[replies.length - 1]?.id;
-  useEffect(() => {
-    if (!newestId) {
-      return;
-    }
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated: true });
+  // #2125: the same rule as the conversation: follow only from the bottom or after an own reply.
+  const reduceMotion = useReduceMotion();
+  const reduceMotionRef = useRef(reduceMotion);
+  reduceMotionRef.current = reduceMotion;
+  const atBottomRef = useRef(true);
+  const newestFirst = useMemo(() => replies.map((m) => m.id).reverse(), [replies]);
+  const prevIds = useRef<readonly string[] | null>(null);
+  const selfId = currentUser?.id;
+  const arrivals = useMemo(() => {
+    const own = new Set(replies.filter((m) => m.sender_id === selfId).map((m) => m.id));
+    return classifyArrivals({
+      prev: prevIds.current,
+      next: newestFirst,
+      atBottom: atBottomRef.current,
+      isOwn: (id) => own.has(id),
     });
-  }, [newestId]);
+    // `replies` moves with `newestFirst`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newestFirst, selfId]);
+  const risen = useRef(new Set<string>());
+  const rising = useMemo(() => new Set(arrivals.rise), [arrivals]);
+  useEffect(() => {
+    // The first replies to land open the thread at its newest one.
+    const first = prevIds.current === null || prevIds.current.length === 0;
+    prevIds.current = newestFirst;
+    for (const id of arrivals.rise) {
+      risen.current.add(id);
+    }
+    if ((first && newestFirst.length > 0) || arrivals.follow) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: !first && !reduceMotionRef.current });
+      });
+    }
+  }, [arrivals, newestFirst]);
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    atBottomRef.current = isNearBottom(
+      distanceFromBottom(contentOffset.y, false, contentSize.height, layoutMeasurement.height),
+    );
+  }, []);
+  const riseIn = reduceMotion ? REDUCED_FADE_IN : RISE;
 
   const renderRow = useCallback(
     ({ item: m, index }: { item: Message; index: number }) => {
@@ -174,10 +216,11 @@ function ThreadScreen() {
                     params: { id: m.sender_id },
                   })
           }
+          entering={rising.has(m.id) && !risen.current.has(m.id) ? riseIn : undefined}
         />
       );
     },
-    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases, botSenders, botGroup, botMentions],
+    [currentUser, router, t, replies, mentionNames, selfName, openMedia, retryMessage, discardUnsent, aliases, botSenders, botGroup, botMentions, rising, riseIn],
   );
 
   const rootName = root
@@ -260,6 +303,8 @@ function ThreadScreen() {
         ListHeaderComponent={header}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingTop: 4, paddingBottom: 12 }}
+        onScroll={onScroll}
+        scrollEventThrottle={32}
       />
       {/* A failed send is told on its own row (UnsentActions), never as a raw error here. */}
       <Composer
