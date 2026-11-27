@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { observer } from "mobx-react-lite";
 import { Upload, User } from "lucide-react";
 import { PageShell } from "../components/Layout/PageShell";
@@ -24,7 +25,7 @@ import { appStore } from "../stores/appStore";
  */
 export const GroupAliasPage: React.FC = observer(() => {
   const { t } = useTranslation("settings");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { groupId } = useParams({ from: "/user/aliases/$groupId" });
   const currentUser = appStore.currentUser;
   const { data: groups = [] } = useUserGroupsWithChannels();
@@ -69,7 +70,7 @@ export const GroupAliasPage: React.FC = observer(() => {
   const { data: shownUrl } = useAvatarBlobUrl(shownKey);
   const busy = setAlias.isPending || uploading;
 
-  const back = () => navigate({ to: "/user" });
+  const back = () => finish({ to: "/user" });
 
   const handleSave = async () => {
     if (!currentUser) {

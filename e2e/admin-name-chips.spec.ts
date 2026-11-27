@@ -1,4 +1,4 @@
-// Admin name chips (#1488): own chip uses the accent, other admins their per-user colour.
+// Admin name chips (#1488): every admin's chip, your own included (#2146), is their per-user colour.
 // A DM has no admins (#2126): no chip there, even with an admin's group still selected behind it.
 
 import { test, expect, type Page } from "./lib/zero-loss";
@@ -112,12 +112,15 @@ const TRANSPARENT = "rgba(0, 0, 0, 0)";
 
 for (const skin of SKINS) {
   test.describe(`admin name chips — ${skin} skin`, () => {
-    test("my own chip keeps the accent; other admins get their own colour under dark ink", async ({ page }) => {
+    test("every admin's chip, my own included, is their own colour under dark ink", async ({ page }) => {
       await openChannel(page, skin);
       const accent = await resolve(page, "var(--c-accent)");
 
+      // No accent for self (#2146): my chip follows the rule everyone else's does.
       const mine = await paintOf(page, "m_mia");
-      expect(mine.background).toBe(accent);
+      expect(mine.background).toBe(await resolve(page, expectedColor("mia", false)));
+      expect(mine.background).not.toBe(accent);
+      expect(isDark(mine.color)).toBe(true);
 
       const dana = await paintOf(page, "m_dana");
       const eve = await paintOf(page, "m_eve");

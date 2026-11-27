@@ -45,7 +45,7 @@ export function SuggestList<T>({
       data-testid={testId}
       role="listbox"
       aria-label={label}
-      className="absolute bottom-full left-0 right-0 z-20 mb-1 mx-2 overflow-hidden rounded-panel border border-line bg-surface-raised"
+      className="motion-popover-up absolute bottom-full left-0 right-0 z-20 mb-1 mx-2 overflow-hidden rounded-panel border border-line bg-surface-raised"
     >
       <div className="px-3 py-1.5 border-b border-line text-meta text-muted select-none">
         {/* `Trans`, so a translator can move the highlighted query. */}

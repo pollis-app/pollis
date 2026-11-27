@@ -38,6 +38,8 @@ import { formatBytes } from "../lib/exportArchive";
 import { semantic, space, type as ty } from "../theme/tokens";
 import type { MessageAttachment } from "../types";
 import { useThemeRerender } from "../components/theme";
+import { useReduceMotion } from "../hooks/useReduceMotion";
+import { MOTION } from "../theme/motion";
 
 type Feedback = "saved" | "denied" | "saveFailed" | "shareFailed" | "shareUnavailable";
 
@@ -191,6 +193,8 @@ export default function MediaViewerScreen() {
     }
   }, [current, busy, announce]);
 
+  // #2125: under Reduce Motion the page follows the finger, then closes or snaps back at once.
+  const reduceMotion = useReduceMotion();
   const step = useCallback(
     (delta: number) => {
       if (items.length < 2) {
@@ -200,10 +204,10 @@ export default function MediaViewerScreen() {
       setCurrentId(items[next].id);
       listRef.current?.scrollToIndex({
         index: next,
-        animated: Math.abs(next - currentIndex) === 1,
+        animated: Math.abs(next - currentIndex) === 1 && !reduceMotion,
       });
     },
-    [items, currentIndex],
+    [items, currentIndex, reduceMotion],
   );
 
   // Swipe down to dismiss (#1492): downwards only, one finger, never while zoomed.
@@ -225,13 +229,17 @@ export default function MediaViewerScreen() {
     })
     .onEnd((e) => {
       if (shouldDismiss(dragY.value, e.velocityY, pageHeight)) {
+        if (reduceMotion) {
+          scheduleOnRN(close);
+          return;
+        }
         dragY.value = withTiming(pageHeight, { duration: 160 }, (finished) => {
           if (finished) {
             scheduleOnRN(close);
           }
         });
       } else {
-        dragY.value = withTiming(0, { duration: 180 });
+        dragY.value = reduceMotion ? 0 : withTiming(0, { duration: MOTION.baseMs });
       }
     });
   const dragStyle = useAnimatedStyle(() => {

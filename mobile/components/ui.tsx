@@ -31,6 +31,11 @@ import { activeLocale } from "../i18n";
 import { Icon, isIconElement } from "./icons";
 import { haptic } from "../lib/haptics";
 import { createPressInGuard, pressInAllowed, pressInSupported } from "../lib/pressIn";
+import Animated from "react-native-reanimated";
+import { POP_IN, REDUCED_FADE_IN } from "../theme/motion";
+import { useReduceMotion } from "../hooks/useReduceMotion";
+import { useLateArrival } from "../hooks/useLateArrival";
+import { appStore } from "../stores/appStore";
 
 type TypeKey =
   | "display"
@@ -787,16 +792,21 @@ export function Badge({
   tone = "accent",
   size = "md",
   testID,
+  pop = false,
 }: {
   children: React.ReactNode;
   tone?: "accent" | "neutral";
   // md 22pt (rows) · sm 18pt (tab bar, pills).
   size?: "sm" | "md";
   testID?: string;
+  /** It appeared while on screen (`useLateArrival`): pops in (#2125). Read when it mounts. */
+  pop?: boolean;
 }) {
   const h = size === "sm" ? 18 : 22;
+  const reduceMotion = useReduceMotion();
   return (
-    <View
+    <Animated.View
+      entering={pop ? (reduceMotion ? REDUCED_FADE_IN : POP_IN) : undefined}
       testID={testID}
       accessible={false}
       importantForAccessibility="no-hide-descendants"
@@ -820,7 +830,7 @@ export function Badge({
       >
         {children}
       </Text>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -869,6 +879,7 @@ export function ListRow({
   accessibilityHint?: string;
   disabled?: boolean;
 }) {
+  const badgePops = useLateArrival(badge !== undefined && badge > 0, appStore.unreadHydrated);
   const parts = [name, sub, value].filter(
     (p): p is string => typeof p === "string" && p.length > 0,
   );
@@ -948,7 +959,7 @@ export function ListRow({
           {value}
         </Text>
       ) : null}
-      {badge !== undefined && badge > 0 ? <Badge>{badge > 99 ? "99+" : badge}</Badge> : null}
+      {badge !== undefined && badge > 0 ? <Badge pop={badgePops}>{badge > 99 ? "99+" : badge}</Badge> : null}
       {end !== undefined && (
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
           {end}

@@ -38,6 +38,8 @@ class AppStore implements AppState {
   error: string | null = null;
 
   unreadCounts: Record<string, number> = {};
+  /** The first counts have landed: a badge from here on is news, so it may pop in (#2125). */
+  unreadHydrated = false;
 
   // Voice + local share state; the union is in `types/voice-state.ts`.
   voiceState: VoiceState = { kind: 'idle' };
@@ -181,6 +183,7 @@ class AppStore implements AppState {
       next[c.conversation_id] = c.count;
     }
     this.unreadCounts = next;
+    this.unreadHydrated = true;
   }
 
   markRead(id: string) {
@@ -618,6 +621,7 @@ class AppStore implements AppState {
     this.isLoading = false;
     this.error = null;
     this.unreadCounts = {};
+    this.unreadHydrated = false;
     this.voiceState = { kind: 'idle' };
     this.statusBarAlert = null;
     this.voiceError = null;

@@ -1,7 +1,8 @@
 import { errorMessage } from "../utils/errorMessage";
 import React from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useLeaveGroup, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
@@ -9,7 +10,7 @@ import { ConfirmPage } from "../components/Layout/ConfirmPage";
 
 export const LeaveGroupPage: React.FC = observer(() => {
   const { t } = useTranslation("channels");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { groupId } = useParams({ from: "/groups/$groupId/leave" });
   const { setSelectedGroupId, setSelectedChannelId } = appStore;
   const leaveGroupMutation = useLeaveGroup();
@@ -47,14 +48,14 @@ export const LeaveGroupPage: React.FC = observer(() => {
           await leaveGroupMutation.mutateAsync(group.id);
           setSelectedGroupId(null);
           setSelectedChannelId(null);
-          navigate({ to: "/" });
+          finish({ to: "/" });
         } catch {
           // error shown via isError above
         }
       }}
       cancel={{
         testId: "leave-group-cancel",
-        onClick: () => navigate({ to: "/groups/$groupId", params: { groupId } }),
+        onClick: () => finish({ to: "/groups/$groupId", params: { groupId } }),
       }}
     />
   );

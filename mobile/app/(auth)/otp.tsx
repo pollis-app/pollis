@@ -42,10 +42,10 @@ export default function AuthOTP() {
         onSuccess: (profile) => {
           // A new device must enroll before any key material exists.
           if (profile.enrollment_required) {
-            router.push("/(auth)/enrollment");
+            router.replace("/(auth)/enrollment");
             return;
           }
-          router.push("/(auth)/pin");
+          router.replace("/(auth)/pin");
         },
         onError: submit.end,
       },

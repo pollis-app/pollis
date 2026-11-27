@@ -1,17 +1,18 @@
 import React from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { useKickMember, useGroupMembers } from "../hooks/queries/useGroups";
 import { ConfirmPage } from "../components/Layout/ConfirmPage";
 
 export const KickMemberPage: React.FC = () => {
   const { t } = useTranslation("channels");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { groupId, userId } = useParams({ from: "/groups/$groupId/members/$userId/kick" });
   const kickMutation = useKickMember();
   const { data: members = [] } = useGroupMembers(groupId);
   const member = members.find((m) => m.user_id === userId);
-  const toMembers = () => navigate({ to: "/groups/$groupId/members", params: { groupId } });
+  const toMembers = () => finish({ to: "/groups/$groupId/members", params: { groupId } });
 
   return (
     <ConfirmPage

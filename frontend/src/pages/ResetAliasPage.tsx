@@ -1,6 +1,7 @@
 import React from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { useGroupMembers } from "../hooks/queries/useGroups";
 import { useGroupAliases, useResetGroupAlias } from "../hooks/queries/useGroupAliases";
 import { aliasName } from "../utils/groupAlias";
@@ -9,14 +10,14 @@ import { ConfirmPage } from "../components/Layout/ConfirmPage";
 /** An admin resets a member's alias in this group (#2003); they may set it again. */
 export const ResetAliasPage: React.FC = () => {
   const { t } = useTranslation("channels");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { groupId, userId } = useParams({ from: "/groups/$groupId/members/$userId/reset-alias" });
   const reset = useResetGroupAlias();
   const { data: members = [] } = useGroupMembers(groupId);
   const aliases = useGroupAliases(groupId);
   const member = members.find((m) => m.user_id === userId);
   const name = aliasName(aliases, userId, member?.username ?? userId);
-  const toMembers = () => navigate({ to: "/groups/$groupId/members", params: { groupId } });
+  const toMembers = () => finish({ to: "/groups/$groupId/members", params: { groupId } });
 
   return (
     <ConfirmPage

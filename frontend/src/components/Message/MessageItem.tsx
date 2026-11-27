@@ -1,4 +1,4 @@
-import { senderName } from "../../utils/senderName";
+import { senderColorKey, senderName } from "../../utils/senderName";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Reply, CornerUpLeft } from "lucide-react";
@@ -95,13 +95,13 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   // Not delivered yet (#1335): no reply/react/pin/edit until it is.
   const isUnsent = !!message.outbox_id || message.id.startsWith("pending-");
   const displayName = aliasName(ctx.aliases, message.sender_id, authorUsername ?? t("message.unknownAuthor"));
-  const authorColorKey = message.sender_username ?? message.sender_id;
+  const authorColorKey = senderColorKey(message);
+  // One colour per name, the viewer's own included (#2146): the same per-user colour in the line,
+  // the admin chip, reply previews, threads and pins.
   const authorColor = getUsernameColor(authorColorKey, isLightBg);
-  // Admin chip (#1488): own keeps the accent, others their stable colour.
-  const adminChipClass = isOwn ? "bg-accent text-bg" : "text-ink";
-  const adminChipStyle: React.CSSProperties | undefined = isOwn
-    ? undefined
-    : { background: getUsernameChipColor(authorColorKey) };
+  // Admin chip (#1488): an admin's name on their stable colour.
+  const adminChipClass = "text-ink";
+  const adminChipStyle: React.CSSProperties = { background: getUsernameChipColor(authorColorKey) };
 
   const replyTo = replyToMessage ?? null;
 
@@ -125,7 +125,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     ? aliasName(ctx.aliases, replyTo.sender_id, senderName(replyTo))
     : null;
   const replyToAuthorColor = replyTo
-    ? getUsernameColor(replyTo.sender_username ?? replyTo.sender_id, isLightBg)
+    ? getUsernameColor(senderColorKey(replyTo), isLightBg)
     : null;
 
   // Every message is encrypted, so a quote says what happened: the original was deleted, could
@@ -217,9 +217,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
   if (skin === "modern") {
     const nameClass = isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : "";
-    const nameStyle: React.CSSProperties | undefined = isAuthorAdmin
-      ? adminChipStyle
-      : { color: isOwn ? "var(--c-accent)" : authorColor };
+    const nameStyle: React.CSSProperties = isAuthorAdmin ? adminChipStyle : { color: authorColor };
 
     return (
       <div
@@ -227,7 +225,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         aria-label={t("message.fromLabel", { name: displayName })}
         // Focused programmatically by arrow-key navigation; focus-within mirrors hover.
         tabIndex={-1}
-        className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header" : "pt-msg-group"} pb-msg-row hover:bg-hover focus-within:bg-hover hover:z-10 focus-within:z-10 outline-none`}
+        className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header [--msg-actions-anchor:var(--msg-header-gap)]" : "pt-msg-group [--msg-actions-anchor:var(--msg-group-gap)]"} pb-msg-row focus-within:scroll-mt-8 hover:bg-hover focus-within:bg-hover hover:z-10 focus-within:z-10 outline-none`}
       >
         <div className="flex justify-center pt-0.5 select-none">
           {isGroupStart ? (
@@ -254,7 +252,8 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               <PressButton
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
                 onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-                className="flex items-center gap-1 text-secondary mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0 text-muted"
+                // Muted by colour, never by opacity: the name keeps its one colour (#2146).
+                className="flex items-center gap-1 text-secondary mb-0.5 min-w-0 text-muted hover:text-dim transition-colors"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
                 {replyToAuthor && (
@@ -272,7 +271,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             ) : (
               <div
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
-                className="flex items-center gap-1 text-secondary mb-0.5 opacity-70 min-w-0 text-muted"
+                className="flex items-center gap-1 text-secondary mb-0.5 min-w-0 text-muted"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
                 <span className="truncate max-w-xs">{missingQuoteText}</span>
@@ -345,14 +344,16 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       aria-label={t("message.fromLabel", { name: displayName })}
       tabIndex={-1}
       // Raised while in use (both rows), so its menus paint over the rows after it (a code block's fill).
-      className="group relative px-4 py-1 hover:bg-hover focus-within:bg-hover hover:z-10 focus-within:z-10 outline-none"
+      className="group relative px-4 py-1 [--msg-actions-anchor:0.25rem] focus-within:scroll-mt-8 hover:bg-hover focus-within:bg-hover hover:z-10 focus-within:z-10 outline-none"
     >
       {message.reply_to_message_id && (
         replyTo ? (
           <PressButton
             data-testid={`reply-preview-${message.reply_to_message_id}`}
             onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-            className="flex items-center gap-1 text-secondary font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity text-muted"
+            // `ps-20` = the time gutter's `w-20`: the arrow starts where the names start (#2146).
+            // Muted by colour, never by opacity, so the name keeps its one colour.
+            className="flex items-center gap-1 text-secondary font-mono mb-1.5 ps-20 text-muted hover:text-dim transition-colors"
           >
             <Reply size={10} className="rtl-unmirror" />
             {replyToAuthor && (
@@ -370,7 +371,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
-            className="flex items-center gap-1 text-secondary font-mono mb-1.5 ps-14 opacity-60 text-muted"
+            className="flex items-center gap-1 text-secondary font-mono mb-1.5 ps-20 text-muted"
           >
             <Reply size={10} className="rtl-unmirror" />
             <span className="truncate max-w-xs">{missingQuoteText}</span>
@@ -400,9 +401,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             <bdi
               data-testid="message-author"
               className={`font-semibold ${isAuthorAdmin ? `${adminChipClass} px-1 rounded-chip` : ""}`}
-              style={isAuthorAdmin ? adminChipStyle : {
-                color: isOwn ? "var(--c-accent)" : authorColor,
-              }}
+              style={isAuthorAdmin ? adminChipStyle : { color: authorColor }}
             >
               {displayName}
             </bdi>
@@ -436,9 +435,9 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
           {!isDeleted && <MessageReactions messageId={message.id} className="mt-0.5" />}
         </div>
-
-        {actionsFor("terminal")}
       </div>
+
+      {actionsFor("terminal")}
     </div>
   );
 });

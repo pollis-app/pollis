@@ -65,7 +65,12 @@
     "unknownAuthor": "Unknown",
     "blockedAuthor": "blocked user",
     "blockedBody": "Blocked",
-    "blockedBodyTerminal": "[blocked]"
+    "blockedBodyTerminal": "[blocked]",
+    "newMessages_one": "{{count}} new message",
+    "newMessages_other": "{{count}} new messages",
+    "newMessagesTerminal_one": "[{{count}} new message]",
+    "newMessagesTerminal_other": "[{{count}} new messages]",
+    "newMessagesHint": "Go to the newest message"
   },
   "replyBar": {
     "replyingTo": "replying to <name>{{name}}</name>",

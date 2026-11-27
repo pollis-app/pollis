@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { PageShell } from "../components/Layout/PageShell";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -8,7 +8,7 @@ import { StartDM } from "./StartDM";
 
 export const StartDMPage: React.FC = observer(() => {
   const { t } = useTranslation("dms");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const { setSelectedConversationId } = appStore;
 
   return (
@@ -16,7 +16,7 @@ export const StartDMPage: React.FC = observer(() => {
       <StartDM
         onSuccess={(conversationId) => {
           setSelectedConversationId(conversationId);
-          navigate({ to: "/dms/$conversationId", params: { conversationId } });
+          finish({ to: "/dms/$conversationId", params: { conversationId } });
         }}
       />
     </PageShell>

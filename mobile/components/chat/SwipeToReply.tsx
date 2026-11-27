@@ -23,6 +23,7 @@ import {
   towardStart,
 } from "../../lib/swipeReply";
 import { armHaptic, type HapticEvent } from "../../lib/hapticEvents";
+import { useReduceMotion } from "../../hooks/useReduceMotion";
 import { haptic } from "../../lib/haptics";
 
 const ARROW = 32;
@@ -51,6 +52,8 @@ export function SwipeToReply({
   const armed = useSharedValue(false);
   const enabled = !!onReply;
   const dir = replyDirection(I18nManager.isRTL);
+  // #2125: under Reduce Motion the row still follows the finger, then snaps home; no nudge.
+  const reduceMotion = useReduceMotion();
 
   const gesture = useMemo(() => {
     const ranges = panRanges(dir);
@@ -80,7 +83,7 @@ export function SwipeToReply({
           scheduleOnRN(fire);
         }
         armed.value = false;
-        offset.value = withSpring(0, SWIPE_SPRING);
+        offset.value = reduceMotion ? 0 : withSpring(0, SWIPE_SPRING);
       });
     const doubleTap = Gesture.Tap()
       .enabled(enabled)
@@ -90,15 +93,17 @@ export function SwipeToReply({
         if (!success) {
           return;
         }
-        offset.value = withSequence(
-          withTiming(SWIPE_REPLY.nudge * dir, { duration: SWIPE_REPLY.nudgeMs }),
-          withSpring(0, SWIPE_SPRING),
-        );
+        if (!reduceMotion) {
+          offset.value = withSequence(
+            withTiming(SWIPE_REPLY.nudge * dir, { duration: SWIPE_REPLY.nudgeMs }),
+            withSpring(0, SWIPE_SPRING),
+          );
+        }
         scheduleOnRN(buzz, "doubleTapReply");
         scheduleOnRN(fire);
       });
     return Gesture.Race(pan, doubleTap);
-  }, [dir, enabled, fire, buzz, offset, armed, pressFeedback]);
+  }, [dir, enabled, fire, buzz, offset, armed, pressFeedback, reduceMotion]);
 
   const rowStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offset.value }],

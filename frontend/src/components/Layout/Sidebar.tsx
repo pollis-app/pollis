@@ -40,6 +40,8 @@ import { PanelCloseRow } from "../ui/PanelCloseRow";
 import { IconButton } from "../ui/IconButton";
 import { usePersistentIdSet } from "../../hooks/usePersistentIdSet";
 import { SidebarRow as Row, SidebarUnreadBadge as UnreadBadge, sidebarIconProps as iconProps } from "./SidebarRow";
+import { useLateArrival } from "../../hooks/useLateArrival";
+import { Fold } from "../ui/Fold";
 import { SidebarGroupChannels } from "./SidebarGroupChannels";
 
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
@@ -234,7 +236,8 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                     </div>
                   )}
                 </div>
-                {!isCollapsed && (
+                {/* Folds open and shut under the sticky header (#2125); unmounted once shut. */}
+                <Fold open={!isCollapsed} testId={`sidebar-group-fold-${group.id}`}>
                   <SidebarGroupChannels
                     group={group}
                     isAdmin={isAdmin}
@@ -249,7 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                     creatingCategory={newCategoryGroupId === group.id}
                     onCreatingCategoryDone={() => setNewCategoryGroupId(null)}
                   />
-                )}
+                </Fold>
               </li>
             );
           })}
@@ -396,6 +399,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isAc
   ]
     .filter(Boolean)
     .join(" ");
+  const badgeArrived = useLateArrival(badge != null, appStore.unreadHydrated);
   return (
     <PressButton
       activateOn={activateOn ?? "click"}
@@ -405,7 +409,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isAc
     >
       {icon}
       <span className="flex-1 leading-[100%] text-[0.8rem]">{label}</span>
-      {badge != null && <UnreadBadge count={badge} muted testId={`sidebar-unread-${testId}`} />}
+      {badge != null && <UnreadBadge count={badge} muted arrived={badgeArrived} testId={`sidebar-unread-${testId}`} />}
     </PressButton>
   );
 };

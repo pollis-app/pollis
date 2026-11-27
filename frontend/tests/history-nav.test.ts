@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import {
   canGoBack,
   canGoForward,
+  finishMove,
   reduceHistoryNav,
+  reduceHistoryPaths,
   syncHistoryNav,
   INITIAL_HISTORY_NAV,
   type HistoryNavEvent,
@@ -119,4 +121,46 @@ test("syncing an unwatched stack starts with forward dark", () => {
   assert.equal(canGoBack(syncHistoryNav(4)), true);
 
   assert.deepEqual(syncHistoryNav(undefined), INITIAL_HISTORY_NAV);
+});
+
+// #2129: leaving a finished form.
+
+test("a POP steps back and leaves nothing ahead", () => {
+  const state = walk(INITIAL_HISTORY_NAV, [
+    { action: "PUSH", index: 1 },
+    { action: "POP", index: 0 },
+  ]);
+  assert.deepEqual(state, { index: 0, maxIndex: 0 });
+  assert.equal(canGoForward(state), false);
+
+  const unstamped = walk(INITIAL_HISTORY_NAV, [{ action: "PUSH" }, { action: "POP" }]);
+  assert.deepEqual(unstamped, { index: 0, maxIndex: 0 });
+});
+
+test("paths follow pushes, replaces and moves, and a POP drops the entry it left", () => {
+  let paths = reduceHistoryPaths([], "REPLACE", 0, "/groups");
+  paths = reduceHistoryPaths(paths, "PUSH", 1, "/groups/new");
+  assert.deepEqual(paths, ["/groups", "/groups/new"]);
+
+  // The form becomes the result in place.
+  assert.deepEqual(reduceHistoryPaths(paths, "REPLACE", 1, "/groups/g1"), ["/groups", "/groups/g1"]);
+
+  // An ordinary Back keeps the entry ahead; a POP drops it.
+  assert.deepEqual(reduceHistoryPaths(paths, "BACK", 0, "/groups"), ["/groups", "/groups/new"]);
+  assert.deepEqual(reduceHistoryPaths(paths, "POP", 0, "/groups"), ["/groups"]);
+
+  // A push from the middle drops what was ahead.
+  const pushed = reduceHistoryPaths(["/", "/a", "/b"], "PUSH", 1, "/c");
+  assert.deepEqual(pushed, ["/", "/c"]);
+});
+
+test("a finished form replaces itself unless the page behind it is the result", () => {
+  // Create: /groups → /groups/new → the new group. Back must reach /groups.
+  assert.equal(finishMove(["/groups", "/groups/new"], 1, "/groups/g1"), "replace");
+  // Rename from the group page: step back to it rather than stack a twin.
+  assert.equal(finishMove(["/groups/g1", "/groups/g1/rename"], 1, "/groups/g1"), "pop");
+  // Opened first (nothing behind): replace, never pop.
+  assert.equal(finishMove(["/groups/g1/rename"], 0, "/groups/g1"), "replace");
+  // Unknown entry behind (attached mid-stack): replace.
+  assert.equal(finishMove([undefined, "/security/change-pin"], 1, "/security"), "replace");
 });

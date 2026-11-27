@@ -1,7 +1,9 @@
 import React from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { ActivateOn } from "../../hooks/usePressActivation";
 import { PressButton } from "../ui/PressButton";
+import { useLateArrival } from "../../hooks/useLateArrival";
+import { appStore } from "../../stores/appStore";
 
 // Sized in rem to track the font preference; the rem `size-[…]` class beats the SVG attribute.
 export const sidebarIconProps = {
@@ -81,6 +83,7 @@ export const SidebarRow: React.FC<SidebarRowProps> = ({
   danger = false,
 }) => {
   const isLabel = variant === "label";
+  const badgeArrived = useLateArrival(badge != null, appStore.unreadHydrated);
   return (
     <div
       data-active={isActive ? "true" : "false"}
@@ -117,11 +120,13 @@ export const SidebarRow: React.FC<SidebarRowProps> = ({
           aria-label={chevron.ariaLabel}
           className={`inline-flex items-center pe-0 cursor-pointer text-inherit ${indentPadClass(indent)}`}
         >
-          {chevron.isCollapsed ? (
-            <ChevronRight {...sidebarIconProps} className={`${sidebarIconProps.className} rtl-mirror`} />
-          ) : (
-            <ChevronDown {...sidebarIconProps} />
-          )}
+          {/* One glyph that turns a quarter as the list folds (#2125); toward the reading start in RTL. */}
+          <ChevronDown
+            {...sidebarIconProps}
+            data-testid="sidebar-chevron"
+            data-collapsed={chevron.isCollapsed ? "true" : "false"}
+            className={`${sidebarIconProps.className} motion-chevron`}
+          />
         </PressButton>
       )}
       <PressButton
@@ -138,7 +143,7 @@ export const SidebarRow: React.FC<SidebarRowProps> = ({
         <bdi className="flex-1 truncate">{label}</bdi>
         {trailing}
         {badge != null && (
-          <SidebarUnreadBadge count={badge} muted={dimmed} testId={testId ? `sidebar-unread-${testId}` : undefined} />
+          <SidebarUnreadBadge count={badge} muted={dimmed} arrived={badgeArrived} testId={testId ? `sidebar-unread-${testId}` : undefined} />
         )}
       </PressButton>
       {actions && (
@@ -156,12 +161,14 @@ export const SidebarRow: React.FC<SidebarRowProps> = ({
   );
 };
 
-export const SidebarUnreadBadge: React.FC<{ count: number; muted?: boolean; testId?: string }> = ({ count, muted, testId }) => (
+/** `arrived`: it turned up after its row painted without it, so it pops in (#2125). */
+export const SidebarUnreadBadge: React.FC<{ count: number; muted?: boolean; arrived?: boolean; testId?: string }> = ({ count, muted, arrived, testId }) => (
   <span
     data-testid={testId}
+    data-arrival={arrived ? "late" : undefined}
     className={`shrink-0 rounded-chip px-1.5 py-0.5 text-meta leading-none text-bg ${
       muted ? "bg-muted" : "bg-accent"
-    }`}
+    } ${arrived ? "motion-pop" : ""}`}
   >
     {count > 99 ? "99+" : count}
   </span>

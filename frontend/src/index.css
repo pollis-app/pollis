@@ -43,7 +43,7 @@
        `min-h-composer` only where the border is on a separate ancestor. */
 
     /* ── Ink: dark text on a bright per-user fill (fixed, theme-independent).
-       Another admin's name chip (#1488) — stays dark on light themes too,
+       An admin's name chip (#1488; yours too, #2146) — stays dark on light themes too,
        where --c-bg would not. */
     --c-ink: hsl(0 0% 4%);
 
@@ -617,24 +617,6 @@ html:has([data-window-viewer]) ::-webkit-scrollbar-thumb {
 :root[data-skin="modern"] :is(.section-label, .uppercase:is(.tracking-wide, .tracking-wider, .tracking-widest, [class*="tracking-["])) {
   text-transform: none;
   letter-spacing: normal;
-}
-
-/* ── Status bar unread blink ─────────────────────────────────────── */
-@keyframes status-blink {
-
-  0%,
-  49% {
-    opacity: 1;
-  }
-
-  50%,
-  100% {
-    opacity: 0.5;
-  }
-}
-
-.status-bar-blink {
-  animation: status-blink 2s ease-in-out infinite;
 }
 
 /* ── Titlebar drag ───────────────────────────────────────────────── */

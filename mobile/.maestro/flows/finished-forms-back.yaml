@@ -1,0 +1,107 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+  - peer
+---
+# FINISHED FORMS LEAVE HISTORY (#2129) — create a group, invite someone, then
+# delete the group: each finished form is gone from behind Back. Desktop twin:
+# e2e/finished-forms-history.spec.ts.
+#
+# Back from a page pushed after a finished form must land on the Groups tab,
+# never on the form. Delete leaves through `useNav().exitToTab`, which now pops
+# to the tabs (`dismissTo`) instead of replacing the top page, so nothing that
+# was under it stays behind Back.
+
+- runFlow: ../subflows/home.yaml
+
+# --- 1. create a group: lands on the Groups tab, the form dismissed ---
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Back Group"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Back Group"
+- assertNotVisible:
+    id: "screen-group-new"
+- takeScreenshot: finished-forms-01-created
+
+# A page pushed now backs out to the tab, not to the finished form.
+- tapOn:
+    id: "row-group-members"
+- assertVisible:
+    id: "screen-group-members"
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "panel-group"
+- assertNotVisible:
+    id: "screen-group-new"
+
+# --- 2. invite a user: sending returns to the group ---
+- tapOn:
+    id: "row-group-invite"
+- assertVisible:
+    id: "screen-group-invite"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+- tapOn:
+    id: "btn-send-invite"
+- extendedWaitUntil:
+    visible:
+      id: "panel-group"
+    timeout: 30000
+- assertNotVisible:
+    id: "screen-group-invite"
+- takeScreenshot: finished-forms-02-invited
+
+# The invite landed (Members lists it), and Back from Members finds the group,
+# not the invite form.
+- tapOn:
+    id: "row-group-members"
+- extendedWaitUntil:
+    visible:
+      id: "section-invited"
+    timeout: 20000
+- tapOn:
+    id: "btn-back"
+- assertVisible:
+    id: "panel-group"
+- assertNotVisible:
+    id: "screen-group-invite"
+
+# --- 3. delete the group: back on the tab, settings gone from the stack ---
+- tapOn:
+    id: "row-group-settings"
+- assertVisible:
+    id: "screen-group-settings"
+- scrollUntilVisible:
+    element:
+      id: "btn-delete-group"
+    direction: DOWN
+    centerElement: true
+- tapOn:
+    id: "btn-delete-group"
+- tapOn:
+    id: "btn-delete-group"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-group-settings"
+    timeout: 30000
+- assertVisible:
+    id: "tab-groups"
+- takeScreenshot: finished-forms-03-deleted
+
+# Android's system Back from the tab must not bring the settings of the
+# deleted group back (it leaves the app instead, the tab being the root).
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
+      - assertNotVisible:
+          id: "screen-group-settings"

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "../../hooks/useReducedMotion";
 
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
 
@@ -18,7 +19,7 @@ interface ScrambleTextProps {
   className?: string;
 }
 
-/** Scrambles while loading, then types the text in. */
+/** Scrambles while loading, then types the text in. Under reduced motion: a still placeholder, then the text at once. */
 export const ScrambleText: React.FC<ScrambleTextProps> = ({
   text,
   placeholderLength = 20,
@@ -33,6 +34,7 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
   const prevText = useRef<string | null | undefined>(text);
   const typeIndex = useRef(0);
   const frameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     return () => {
@@ -68,6 +70,10 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
     if (phase !== "scramble") {
       return;
     }
+    if (reduceMotion) {
+      setDisplayed("·".repeat(placeholderLength));
+      return;
+    }
     const tick = () => {
       setDisplayed(
         Array.from({ length: placeholderLength }, randomChar).join("")
@@ -80,10 +86,14 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
         clearTimeout(frameRef.current);
       }
     };
-  }, [phase, placeholderLength, scrambleInterval]);
+  }, [phase, placeholderLength, scrambleInterval, reduceMotion]);
 
   useEffect(() => {
     if (phase !== "typing" || text == null) {
+      return;
+    }
+    if (reduceMotion) {
+      setPhase("done");
       return;
     }
     const tick = () => {
@@ -103,7 +113,7 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
         clearTimeout(frameRef.current);
       }
     };
-  }, [phase, text, typeSpeed]);
+  }, [phase, text, typeSpeed, reduceMotion]);
 
   useEffect(() => {
     if (phase === "done" && text != null) {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "@tanstack/react-router";
+import { useFinishFlow } from "../hooks/useFinishFlow";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
@@ -22,7 +22,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 /** #1735: copy message history to this device from another of the account's devices, which must approve it. */
 export const CopyHistoryPage: React.FC = () => {
   const { t } = useTranslation("settings");
-  const navigate = useNavigate();
+  const { finish } = useFinishFlow();
   const queryClient = useQueryClient();
   const sources = useHistoryTransferSources();
   const transfers = useHistoryTransfers();
@@ -102,7 +102,7 @@ export const CopyHistoryPage: React.FC = () => {
             {requestError}
           </p>
         )}
-        <FormActions cancel={{ onClick: () => navigate({ to: "/security" }) }}>
+        <FormActions cancel={{ onClick: () => finish({ to: "/security" }) }}>
           <Button
             data-testid="history-request-start"
             isLoading={requesting}

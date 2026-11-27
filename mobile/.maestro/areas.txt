@@ -66,9 +66,9 @@ mobile/app/(tabs)/groups.tsx                   groups ipad-two-pane empty-states
 mobile/components/groups/*                     groups ipad-two-pane channel-menu channel-mute copy-state group-aliases channel-categories group-header-pinned
 mobile/lib/channelLayout.ts                    groups channel-categories
 mobile/lib/categoryCollapse.ts                 channel-categories
-mobile/app/group/*                             groups channel-menu channel-mute custom-emoji copy-state empty-states
+mobile/app/group/*                             groups channel-menu channel-mute custom-emoji copy-state empty-states finished-forms-back
 mobile/components/MasterDetail.tsx             ipad-two-pane
-mobile/components/pane/*                       ipad-two-pane
+mobile/components/pane/*                       ipad-two-pane finished-forms-back
 mobile/app/self/alias*                         group-aliases
 mobile/app/self/aliases.tsx                    group-aliases
 
@@ -82,7 +82,14 @@ mobile/components/chat/ChannelMenuSheet.tsx    channel-menu channel-mute
 mobile/components/chat/Reaction*               reaction-layout emoji-coverage
 mobile/hooks/queries/reaction*                 reaction-layout emoji-coverage
 mobile/hooks/queries/useReactions.ts           reaction-layout emoji-coverage
-mobile/lib/lateFade.ts                         reaction-layout custom-emoji
+mobile/theme/motion.ts                         reaction-layout custom-emoji messaging channel-categories
+mobile/lib/reactionMotion.ts                   reaction-layout emoji-coverage
+mobile/lib/chatFollow.ts                       messaging rapid-send long-history reply
+mobile/components/chat/NewMessagesButton.tsx   messaging long-history
+mobile/hooks/useReduceMotion.ts                gate
+mobile/hooks/useLateArrival.ts                 groups dms channel-categories
+mobile/components/FadeInAfterLoad.tsx          empty-states dms groups
+mobile/lib/transitions.ts                      gate keyboard-back
 mobile/components/chat/SensitiveCover.tsx      sensitive-media
 mobile/components/chat/UnsentActions.tsx       outbox
 mobile/lib/drafts.ts                           composer-draft

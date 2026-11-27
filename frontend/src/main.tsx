@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import "./index.css";
+import "./components/ui/motion.css";
 // Initializes i18next before anything renders.
 import i18n from "./i18n";
 import App from "./App";
@@ -14,9 +15,11 @@ import { audioLevels } from "./voice/audioLevels";
 import { appHandlesPaste, readClipboardText } from "./bridge";
 import { installAppPaste } from "./utils/appPaste";
 import { initTheme } from "./utils/colorUtils";
+import { initMotion } from "./utils/motion";
 
-// Colour tokens and the default skin, painted before anything renders (design/theme.ts).
+// Colour and motion tokens and the default skin, painted before anything renders (design/theme.ts).
 initTheme();
+initMotion();
 
 // Platform tag for CSS (e.g. macOS already rounds corners).
 const ua = navigator.userAgent;
