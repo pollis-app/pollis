@@ -35,7 +35,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
     const isRequest = !channelId && dmRequests.some((r) => r.id === conversationId);
     // A pin's body draws as it does in the timeline (#2127): mentions, links, previews. A channel's
     // pins name authors as its group shows them (#2003); a DM's, by main profile.
-    const ctx = useMessageRenderContext(channelId ? appStore.selectedGroupId : null, !isRequest);
+    const ctx = useMessageRenderContext(channelId ? appStore.chatGroupId : null, !isRequest);
     const aliases = ctx.aliases;
     const isTerminal = ctx.skin !== "modern";
 

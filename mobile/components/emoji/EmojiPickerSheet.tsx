@@ -298,7 +298,8 @@ export function EmojiPickerSheet({
 
   return (
     <SheetOverlay title={title ?? t("chat:reactions.add")} onClose={onClose}>
-      <View style={{ height: 460, gap: 12 }}>
+      {/* #2123: gives up height to the keyboard on a short phone; the list scrolls. */}
+      <View style={{ height: 460, flexShrink: 1, minHeight: 0, gap: 12 }}>
         <Field
           testID="input-emoji-search"
           surface="raised"
@@ -347,7 +348,8 @@ export function EmojiPickerSheet({
             showsHorizontalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ gap: 2 }}
-            style={{ flexGrow: 0 }}
+            // #2123: a ScrollView shrinks by default; only the list below gives up height.
+            style={{ flexGrow: 0, flexShrink: 0 }}
           >
             {tabs.map((tab) => {
               const selected = (active ?? tabs[0]?.id) === tab.id;
