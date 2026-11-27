@@ -131,14 +131,14 @@ test("direction is rtl only for the Arabic-script locale", () => {
 test("only the Nastaliq languages get the taller type line heights (#1726)", () => {
   assert.equal(usesNastaliq("ur"), true);
   assert.equal(usesNastaliq("pa-Arab"), true);
-  // Pashto and Arabic are Naskh, which fits the Latin-sized steps.
-  for (const code of ["ps", "ar", "pa-Guru", "hi", "en", null]) {
+  // Pashto, Persian and Arabic are Naskh, which fits the Latin-sized steps.
+  for (const code of ["ps", "fa", "ar", "pa-Guru", "hi", "en", null]) {
     assert.equal(usesNastaliq(code), false, String(code));
   }
 });
 
 test("Arabic-script and Indic languages drop Latin letter-spacing (#1726)", () => {
-  for (const code of ["ar", "ur", "pa-Arab", "ps", "hi", "mr", "bn", "te", "ta", "pa-Guru"]) {
+  for (const code of ["ar", "ur", "pa-Arab", "ps", "fa", "hi", "mr", "bn", "te", "ta", "pa-Guru"]) {
     assert.equal(dropsLetterSpacing(code), true, code);
   }
   for (const code of ["en", "es", "ru", "zh", "ja", "ko", null]) {
@@ -167,4 +167,10 @@ test("South Asian locales are auto-detected from OS tags (#1726)", () => {
   assert.equal(resolveDeviceLanguage(["te-IN"]), "te");
   assert.equal(resolveDeviceLanguage(["ta-LK"]), "ta");
   assert.equal(resolveDeviceLanguage(["pa-IN"]), "pa-Guru");
+});
+
+test("Persian is auto-detected from OS tags (#2131)", () => {
+  assert.equal(resolveDeviceLanguage(["fa-IR"]), "fa");
+  assert.equal(resolveDeviceLanguage(["fa-AF"]), "fa");
+  assert.equal(languageDirection("fa"), "rtl");
 });

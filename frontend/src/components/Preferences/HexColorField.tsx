@@ -45,6 +45,7 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
     </label>
     <input
       type="text"
+      dir="ltr"
       value={hexInput}
       onChange={(e) => {
         const val = e.target.value;
