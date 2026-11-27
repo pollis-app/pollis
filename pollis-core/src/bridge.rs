@@ -136,6 +136,9 @@ struct InitConfig {
     /// The store build's native version (`nativeApplicationVersion`), never the OTA bundle's.
     #[serde(default)]
     client_version: Option<String>,
+    /// `[perf]` lines for the chat commands (#2141); only a build made to measure sets it.
+    #[serde(default)]
+    perf_marks: bool,
 }
 
 /// Initialize the process-global `AppState`. Safe to call multiple times —
@@ -154,6 +157,9 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
     APP_STATE
         .get_or_try_init(|| async {
             let parsed: InitConfig = serde_json::from_str(&config_json)?;
+            if parsed.perf_marks {
+                crate::perf::enable();
+            }
             #[cfg(target_os = "android")]
             android_bootstrap(parsed.data_dir.as_deref())?;
             #[cfg(target_os = "ios")]
@@ -479,7 +485,7 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
     run_on_worker(async move {
         let queued = asked.elapsed();
         let name = cmd.clone();
-        let result = invoke_inner(cmd, args_json).await;
+        let result = crate::perf::measured(&name, invoke_inner(cmd, args_json)).await;
         note_slow_command(&name, queued, asked.elapsed() - queued);
         result
     })

@@ -112,6 +112,20 @@ pub struct AppState {
     pub mls_group_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// Per-group single-flight for the ingesting catch-up (#1629), so overlapping triggers never fetch and open the same envelopes twice.
     pub catch_up_flights: crate::commands::messages::ingest_guard::CatchUpFlights,
+    /// Moves whenever a catch-up pass or a Welcome changes this device's MLS state (#2141), so
+    /// a catch-up read made before a seal is used only if nothing changed since it was read.
+    pub catch_up_clock: Arc<crate::commands::messages::ingest_guard::PassClock>,
+    /// Which MLS group backs each conversation (#2141): a channel's group, a DM's own id. It
+    /// never changes for a conversation; refreshed by every catch-up read, and dropped when
+    /// one says this account is not a member (a `membership_changed` wake runs one).
+    pub mls_group_memo: Arc<std::sync::Mutex<HashMap<String, String>>>,
+    /// The local `(generation, epoch)` at which each group's published GroupInfo was last seen
+    /// current (#2141), so the per-pass GroupInfo backstop reads the DS only after the group
+    /// moved (or once per process).
+    pub group_info_confirmed: Arc<std::sync::Mutex<HashMap<String, (i64, u64)>>>,
+    /// Message ids the user discarded before their send had stored them (#2141): the
+    /// delivery that follows removes the row instead of sending it.
+    pub discarded_before_stored: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Inbound messages each catch-up pass newly stored, for realtime wakes to announce once (#1628).
     pub inbound_news: crate::commands::messages::news::SharedLedger,
     /// Per-message outbox locks (#1335): never post the same message twice at once.
@@ -196,6 +210,10 @@ impl AppState {
             shutdown_signal: Arc::new(Notify::new()),
             mls_group_locks: Arc::new(Mutex::new(HashMap::new())),
             catch_up_flights: Arc::default(),
+            catch_up_clock: Arc::default(),
+            mls_group_memo: Arc::default(),
+            group_info_confirmed: Arc::default(),
+            discarded_before_stored: Arc::default(),
             inbound_news: Arc::default(),
             outbox_locks: Arc::new(Mutex::new(HashMap::new())),
             outbox_enqueuing: Arc::default(),

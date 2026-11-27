@@ -150,7 +150,8 @@
     "moderateBody": "This message and its attachments will be removed for everyone in the channel.",
     "cancel": "Cancel delete",
     "deleting": "Deleting…",
-    "remove": "Remove"
+    "remove": "Remove",
+    "failed": "Couldn't delete that message. Try again."
   },
   "update": {
     "preparing": "Preparing to update…",

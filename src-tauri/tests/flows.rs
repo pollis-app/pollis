@@ -25,6 +25,8 @@ mod bot_runtime;
 mod bot_commands;
 #[path = "flows/channel_mute.rs"]
 mod channel_mute;
+#[path = "flows/chat_latency.rs"]
+mod chat_latency;
 #[path = "flows/cross_channel_ingest.rs"]
 mod cross_channel_ingest;
 #[path = "flows/cross_signing.rs"]

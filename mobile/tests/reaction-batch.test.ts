@@ -10,6 +10,7 @@ import {
   mergeReactions,
   missingIds,
   readReactions,
+  stillCurrent,
   type ReactionInvoke,
   type ReactionMap,
 } from "../hooks/queries/reactionBatch.ts";
@@ -115,4 +116,30 @@ test("the hook makes no per-message reads", () => {
   assert.doesNotMatch(src, /"get_reactions"/);
   assert.doesNotMatch(src, /Promise\.all/);
   assert.match(src, /readReactions\(missing, invoke\)/);
+});
+
+// #2141: a toggle re-reads only its own message, and never undoes a later tap.
+test("a re-read keeps only the ids nobody tapped again since it went out", () => {
+  const pill = (count: number) => [{ emoji: "👍", user_ids: ["u"].slice(0, count), count }];
+  const fresh = new Map([
+    ["a", pill(1)],
+    ["b", pill(0)],
+  ]);
+  const asked = new Map([
+    ["a", 1],
+    ["b", 1],
+  ]);
+  const now = new Map([
+    ["a", 1],
+    ["b", 2],
+  ]);
+  const kept = stillCurrent(fresh, asked, now);
+  assert.deepEqual([...kept.keys()], ["a"]);
+});
+
+test("a toggle no longer refetches every loaded message's reactions", () => {
+  const hook = readFileSync(new URL("../hooks/queries/useReactions.ts", import.meta.url), "utf8");
+  const toggle = hook.slice(hook.indexOf("export function useToggleReaction"));
+  assert.ok(!toggle.includes("invalidateQueries"), "useToggleReaction must not invalidate the whole map");
+  assert.ok(toggle.includes("rereadToggled("), "it re-reads the toggled message");
 });

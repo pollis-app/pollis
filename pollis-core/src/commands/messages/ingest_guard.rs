@@ -268,3 +268,76 @@ mod tests {
         a.await.unwrap().unwrap();
     }
 }
+
+/// Counts the passes that change this device's MLS state (#2141): every catch-up pass, and a
+/// drain that applied Welcomes. A read made before a seal records [`PassClock::now`]; it is
+/// used in place of a fresh read only if no such pass started, ran or finished since.
+#[derive(Default)]
+pub struct PassClock {
+    /// Starts and ends of passes, and applied Welcome drains.
+    events: AtomicU64,
+    /// Passes running now.
+    running: AtomicU64,
+}
+
+impl PassClock {
+    /// The clock's reading, or `None` while a pass runs (its result would race a read).
+    pub(crate) fn now(&self) -> Option<u64> {
+        if self.running.load(Ordering::SeqCst) > 0 {
+            return None;
+        }
+        Some(self.events.load(Ordering::SeqCst))
+    }
+
+    /// Whether nothing changed since `reading`.
+    pub(crate) fn unchanged_since(&self, reading: Option<u64>) -> bool {
+        reading.is_some() && self.now() == reading
+    }
+
+    /// Something outside a pass changed the MLS state (Welcomes applied).
+    pub(crate) fn touch(&self) {
+        self.events.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Start a pass; it ends when the returned guard drops.
+    pub(crate) fn pass(self: &Arc<Self>) -> PassGuard {
+        self.running.fetch_add(1, Ordering::SeqCst);
+        self.events.fetch_add(1, Ordering::SeqCst);
+        PassGuard(Arc::clone(self))
+    }
+}
+
+/// A running pass on a [`PassClock`].
+pub(crate) struct PassGuard(Arc<PassClock>);
+
+impl Drop for PassGuard {
+    fn drop(&mut self) {
+        self.0.events.fetch_add(1, Ordering::SeqCst);
+        self.0.running.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod pass_clock_tests {
+    use super::*;
+
+    #[test]
+    fn a_read_is_current_only_while_no_pass_touched_the_state() {
+        let clock = Arc::new(PassClock::default());
+        let read = clock.now();
+        assert!(clock.unchanged_since(read));
+        drop(clock.pass());
+        assert!(!clock.unchanged_since(read), "a pass ran since");
+
+        let read = clock.now();
+        let running = clock.pass();
+        assert_eq!(clock.now(), None, "no reading while a pass runs");
+        assert!(!clock.unchanged_since(read));
+        drop(running);
+
+        let read = clock.now();
+        clock.touch();
+        assert!(!clock.unchanged_since(read), "Welcomes applied since");
+        assert!(!clock.unchanged_since(None));
+    }
+}

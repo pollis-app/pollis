@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { pinLinkPreview, pinPreview, pinnedIds } from "../lib/pins.ts";
+import { pinLinkPreview, pinPreview, pinnedIds, togglePinLocally } from "../lib/pins.ts";
 import { parseContent } from "../lib/messageContent.ts";
 import { JUMP_MAX_PAGES, nextJumpStep } from "../lib/messageJump.ts";
 import { messageJumpStore } from "../stores/messageJumpStore.ts";
@@ -127,4 +127,55 @@ test("the pinned list reuses the timeline's body and preview components", () => 
   assert.match(screen, /useMessageBodyContext\(/);
   assert.doesNotMatch(screen, /<EmojiText\b/);
   assert.match(src("app/chat/[id].tsx"), /useMessageBodyContext\(/);
+});
+
+// #2141: a pin or unpin shows on the tap, drawn from the local row.
+test("pinning draws the pin at the top of the list from the local row", () => {
+  const before = [
+    {
+      id: "p1",
+      conversation_id: "c",
+      message_id: "m1",
+      pinned_by: "u",
+      pinned_at: "2026-11-01T00:00:00Z",
+      content: "older",
+      sender_id: "u",
+      sent_at: "2026-11-01T00:00:00Z",
+    },
+  ];
+  const after = togglePinLocally(before, {
+    conversationId: "c",
+    messageId: "m2",
+    isPinned: false,
+    pinnedBy: "me",
+    source: { content: "pin me", sender_id: "bob", sent_at: "2026-11-02T00:00:00Z" },
+    now: "2026-11-03T00:00:00Z",
+  });
+  assert.equal(after.length, 2);
+  assert.equal(after[0].message_id, "m2");
+  assert.equal(after[0].content, "pin me");
+  assert.deepEqual(pinnedIds(after), new Set(["m1", "m2"]));
+  // Already pinned: nothing doubles.
+  const again = togglePinLocally(after, {
+    conversationId: "c",
+    messageId: "m2",
+    isPinned: false,
+    pinnedBy: "me",
+    source: { content: "pin me", sender_id: "bob", sent_at: "x" },
+  });
+  assert.equal(again.length, 2);
+});
+
+test("unpinning drops the pin at once", () => {
+  const pins = togglePinLocally([], {
+    conversationId: "c",
+    messageId: "m",
+    isPinned: false,
+    pinnedBy: "me",
+    source: { content: "x", sender_id: "u", sent_at: "t" },
+  });
+  assert.deepEqual(
+    togglePinLocally(pins, { conversationId: "c", messageId: "m", isPinned: true, pinnedBy: "me" }),
+    [],
+  );
 });

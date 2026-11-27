@@ -265,6 +265,11 @@ async fn ensure_group_info_published(state: &Arc<AppState>, conversation_id: &st
         }
     };
 
+    // Already confirmed published at this very position (#2141): nothing has moved since.
+    if group_info_confirmed_at(state, conversation_id) == Some(local_head) {
+        return;
+    }
+
     // One snapshot answers both staleness and membership; a removed member's republish would 403.
     let Ok(snap) = super::ds_reads::conversation_snapshot(
         state,
@@ -285,15 +290,35 @@ async fn ensure_group_info_published(state: &Arc<AppState>, conversation_id: &st
     }
     let published = group_info_head_of(&snap);
     if !group_info_is_stale(published, local_head) {
+        confirm_group_info(state, conversation_id, local_head);
         return;
     }
 
-    if let Err(e) = publish_group_info(state, conversation_id).await {
-        crate::diag!(
+    match publish_group_info(state, conversation_id).await {
+        Ok(_) => confirm_group_info(state, conversation_id, local_head),
+        Err(e) => crate::diag!(
             "[mls] ensure_group_info_published: republish for {conversation_id} \
              (local head {local_head:?}, published {published:?}) failed: {e}"
-        );
+        ),
     }
+}
+
+/// Where this device last saw its GroupInfo for `conversation_id` published and current.
+fn group_info_confirmed_at(state: &Arc<AppState>, conversation_id: &str) -> Option<(i64, u64)> {
+    state
+        .group_info_confirmed
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(conversation_id)
+        .copied()
+}
+
+fn confirm_group_info(state: &Arc<AppState>, conversation_id: &str, head: (i64, u64)) {
+    state
+        .group_info_confirmed
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(conversation_id.to_string(), head);
 }
 
 /// Join an existing MLS group via external commit, using the latest
@@ -1251,6 +1276,33 @@ impl ReplayBound {
     }
 }
 
+/// The commit batch a replay would read at the head of its lineage (#2141): authorized, empty,
+/// with no gap and no prune. Only the fields the replay reads are meaningful.
+fn nothing_pending(
+    mls_group_id: &str,
+    generation: i64,
+    epoch: u64,
+) -> pollis_api::reads::ConversationState {
+    pollis_api::reads::ConversationState {
+        conversation_id: mls_group_id.to_string(),
+        authorized: true,
+        group_info: None,
+        welcome_pending: false,
+        head: epoch as i64,
+        head_generation: generation,
+        generation,
+        commits: Vec::new(),
+        hole: None,
+        pruned_below: None,
+        commit_at_epoch: None,
+        is_member: None,
+        device_registered: None,
+        device_registered_at: None,
+        member_since: None,
+        added_identities: Vec::new(),
+    }
+}
+
 /// Most suite generations a single pass will hop across (#454 P4).
 ///
 /// Hops re-enter the replay with the hook live; bounded because a DS drives it.
@@ -1375,17 +1427,28 @@ async fn process_one_generation<'h>(
 
     // 2. Fetch this lineage's pending commits plus cross-signing rows for the users they hint at (#987).
     // The DS reads head and batch in ONE transaction and refuses a non-contiguous batch, which makes the gap handling below safe.
-    let snapshot = super::ds_reads::conversation_snapshot(
-        state,
-        pollis_api::reads::ConversationStateQuery {
-            conversation_id: mls_group_id.to_string(),
-            generation: Some(generation),
-            since: Some(initial_epoch as i64),
-            want_group_info_blob: false,
-            commit_at_epoch: None,
-        },
-    )
-    .await?;
+    //
+    // #2141: the catch-up's own log head, read before its envelopes (#1041), already says when
+    // there is nothing to fetch: this device stands at the head of the newest lineage, so no
+    // commit is below the bound and no successor exists to adopt. The pass then goes on as if
+    // the batch came back empty (nothing applied, every check after it still runs) without the
+    // round trip. Any other position, or no head (an older DS), reads the batch as before.
+    let at_head = bound.is_some_and(|b| b.generation == generation && b.epoch == initial_epoch);
+    let snapshot = if at_head {
+        nothing_pending(mls_group_id, generation, initial_epoch)
+    } else {
+        super::ds_reads::conversation_snapshot(
+            state,
+            pollis_api::reads::ConversationStateQuery {
+                conversation_id: mls_group_id.to_string(),
+                generation: Some(generation),
+                since: Some(initial_epoch as i64),
+                want_group_info_blob: false,
+                commit_at_epoch: None,
+            },
+        )
+        .await?
+    };
     if !snapshot.authorized {
         // Removed from the conversation: not an error; this pass simply ends.
         crate::diag!(

@@ -117,11 +117,17 @@ test("the row moves on the UI thread; JS runs only when a reply fires or the arm
   assert.match(swipe, /Gesture\.Race\(pan, doubleTap\)/);
 });
 
-test("rows reply only once settled, and every reply path is wired", () => {
+test("rows reply once settled or while still sending, and every reply path is wired", () => {
   assert.match(row, /<SwipeToReply onReply=\{onReply\}[ >]/);
   assert.match(row, /name: "reply", label: t\("actions\.reply"\)/);
-  assert.match(chat, /onReply=\{settled \? \(\) => startReply\(m\) : undefined\}/);
-  assert.match(chat, /replyToId: replyTarget\?\.id/);
+  // The memoised row (#2141) offers Reply only when it may act, through the screen's startReply:
+  // delivered, or still sending (not failed, not deleted).
+  const item = read("components/chat/MessageRowItem.tsx");
+  assert.match(item, /onReply=\{actionable \? \(\) => handlers\.onReply\(m\) : undefined\}/);
+  assert.match(item, /const actionable = settled \|\| \(m\.pending === true && !!m\.outboxId && !m\.failed && !m\.deleted_at\);/);
+  assert.match(chat, /onReply: \(m\) => latest\.current\.startReply\(m\)/);
+  // A pending original is named by the core's id, which its stub carries.
+  assert.match(chat, /replyToId: replyTarget \? replyTarget\.outboxId \?\? replyTarget\.id : undefined/);
   assert.match(read("components/chat/MessageActionsSheet.tsx"), /testID="btn-reply"/);
 });
 

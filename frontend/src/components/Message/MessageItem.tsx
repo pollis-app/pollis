@@ -92,8 +92,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     return <UndecryptableMessage message={message} skin={skin} />;
   }
   const isOwn = message.sender_id === currentUserId;
-  // Not delivered yet (#1335): no reply/react/pin/edit until it is.
+  // Not delivered yet (#1335). Still sending (#2141), it can be replied to, edited and deleted
+  // (= discarded) under the core's id; reactions, pins and the rest wait until it is delivered.
+  // A failed one offers only Retry / Discard.
   const isUnsent = !!message.outbox_id || message.id.startsWith("pending-");
+  const isFailed = message.status === "failed";
   const displayName = aliasName(ctx.aliases, message.sender_id, authorUsername ?? t("message.unknownAuthor"));
   const authorColorKey = senderColorKey(message);
   // One colour per name, the viewer's own included (#2146): the same per-user colour in the line,
@@ -194,22 +197,25 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     </>
   );
 
+  // A stub without the core's id yet (an empty id pool) has nothing to name a reply, an edit or
+  // a delete by (#2141): no actions until its id arrives.
   const actionsFor = (variant: "modern" | "terminal") =>
-    !isDeleted && !isUnsent && (
+    !isDeleted && !(isUnsent && (isFailed || !message.outbox_id)) && (
       <MessageActions
-        messageId={message.id}
+        messageId={message.outbox_id ?? message.id}
         variant={variant}
+        pending={isUnsent}
         isOwn={isOwn}
         canModerate={canModerate}
         isSaved={isSaved}
         isPinned={isPinned}
         copyLinkState={copyLinkState}
         onReply={onReply}
-        onOpenThread={onOpenThread}
-        onToggleSave={onToggleSave}
-        onTogglePin={onTogglePin}
-        onCopyLink={onCopyLink}
-        onReport={onReport}
+        onOpenThread={isUnsent ? undefined : onOpenThread}
+        onToggleSave={isUnsent ? undefined : onToggleSave}
+        onTogglePin={isUnsent ? undefined : onTogglePin}
+        onCopyLink={isUnsent ? undefined : onCopyLink}
+        onReport={isUnsent ? undefined : onReport}
         onEdit={onEdit}
         onDelete={onDelete}
       />

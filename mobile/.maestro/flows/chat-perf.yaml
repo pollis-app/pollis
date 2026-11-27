@@ -1,0 +1,92 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - perf
+---
+# CHAT PERF (#2141): how fast send, react, pin, edit, reply and delete show and confirm,
+# measured inside the app (lib/perfMarks.ts) and read off the `perf-summary` text at the
+# end. Needs a Release build made with EXPO_PUBLIC_PERF_MARKS=1; in any other build the
+# summary is absent and the flow stops at its first check.
+#
+# A fresh group's #General, warmed by one send first, so every round is the steady state
+# (a fresh group's first send pays for the MLS group setup, which this does not measure).
+# The summary's p50/p95 are over the six rounds; the `[perf]` lines land in Maestro's log.
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Perf Group"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Perf Group"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- assertVisible:
+    id: "perf-summary"
+
+# Warm the group: its first send sets it up.
+- tapOn:
+    id: "input-composer"
+- inputText: "warm up"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*warm up, .*"
+    timeout: 15000
+- hideKeyboard
+- runFlow: ../subflows/message-settled.yaml
+
+# Typing re-renders no rows: the summary's `rows=` line before and after a burst of keys.
+- copyTextFrom:
+    id: "perf-summary"
+- evalScript: ${output.rowsBefore = maestro.copiedText.split('\n')[0]}
+- tapOn:
+    id: "input-composer"
+- inputText: "typing costs nothing"
+- copyTextFrom:
+    id: "perf-summary"
+- evalScript: ${console.log('[perf] typing ' + output.rowsBefore + ' -> ' + maestro.copiedText.split('\n')[0])}
+- eraseText: 30
+- hideKeyboard
+
+- runFlow:
+    file: ../subflows/chat-perf-round.yaml
+    env:
+      ROUND: "1"
+- runFlow:
+    file: ../subflows/chat-perf-round.yaml
+    env:
+      ROUND: "2"
+- runFlow:
+    file: ../subflows/chat-perf-round.yaml
+    env:
+      ROUND: "3"
+- runFlow:
+    file: ../subflows/chat-perf-round.yaml
+    env:
+      ROUND: "4"
+- runFlow:
+    file: ../subflows/chat-perf-round.yaml
+    env:
+      ROUND: "5"
+- runFlow:
+    file: ../subflows/chat-perf-round.yaml
+    env:
+      ROUND: "6"
+
+- copyTextFrom:
+    id: "perf-summary"
+- evalScript: ${console.log('[perf] summary ' + maestro.copiedText.split('\n').join(' | '))}
+- takeScreenshot: chat-perf-summary

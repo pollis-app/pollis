@@ -88,9 +88,9 @@ test("the Bot badge sits on member rows, message rows and mentions, driven by th
   assert.match(read("components/chat/MentionToken.tsx"), /<BotBadge inline/);
   assert.match(read("components/chat/Composer.tsx"), /candidate\.isBot \? \(\s*<BotBadge/);
   assert.match(read("hooks/useMentionCandidates.ts"), /isBot: isBotUser\(m\)/);
-  for (const f of ["app/chat/[id].tsx", "app/chat/thread.tsx"]) {
-    assert.match(read(f), /isBot=\{botSenders\.has\(/, f);
-  }
+  // The conversation's rows are drawn by the memoised MessageRowItem (#2141).
+  assert.match(read("components/chat/MessageRowItem.tsx"), /isBot=\{ctx\.botSenders\.has\(/);
+  assert.match(read("app/chat/thread.tsx"), /isBot=\{botSenders\.has\(/);
   // A bot is managed on its own page: no role, alias or remove chips on its member row.
   assert.match(read("app/group/members.tsx"), /iAmAdmin && !isMe && !isOwner && !isBot/);
 });

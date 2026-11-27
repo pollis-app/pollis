@@ -51,7 +51,9 @@ test("both message queries carry stubs and both settle paths use settleSend", ()
   const s = readFileSync(new URL("../hooks/queries/useMessages.ts", import.meta.url), "utf8");
   assert.equal(s.match(/carryStubs\(/g)?.length, 2);
   assert.equal(s.match(/settleSend\(/g)?.length, 2);
-  assert.match(s, /settleSend\(p\.messages, ctx\.optimisticId, settled\)[\s\S]{0,400}invalidateQueries\(\{ queryKey: ctx\.key \}\)/);
+  // A refetch that read the store before the row was written is still covered (#2141):
+  // one in flight when the send settles is followed by another read.
+  assert.match(s, /settleSend\(p\.messages, ctx\.optimisticId, settled\)[\s\S]{0,1200}isFetching\(\{ queryKey: ctx\.key \}\) > 0\) \{\s*queryClient\.invalidateQueries\(\{ queryKey: ctx\.key \}\)/);
 });
 
 test("a stub steps aside once the store holds its message", () => {

@@ -11,6 +11,7 @@ import {
   missingIds,
   readReactions,
   REACTIONS_REVEAL_WAIT_MS,
+  stillCurrent,
   type ReactionMap,
 } from "./reactionBatch";
 import { appStore } from "../../stores/appStore";
@@ -130,7 +131,56 @@ export function useRevealWithReactions(
   return true;
 }
 
-/** Toggle a reaction, optimistically: `applyReactionToggle` computes what the refetch will report; failure restores the snapshot. */
+/** How long a burst of taps waits before its one re-read (#2141). */
+const REREAD_COALESCE_MS = 250;
+
+/** Each message's toggle count, so a re-read never overwrites a later tap (`stillCurrent`). */
+const toggleCounts = new Map<string, number>();
+
+/** Toggled ids waiting for their re-read, per conversation's reaction key. */
+const rereads = new Map<string, { key: readonly unknown[]; ids: Set<string> }>();
+
+/**
+ * After a toggle, re-read only the toggled messages (#2141), several taps in one call. The
+ * conversation's other rows keep their entries, so no other pill re-renders.
+ */
+function rereadToggled(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key: readonly unknown[],
+  messageId: string,
+) {
+  const slot = JSON.stringify(key);
+  const pending = rereads.get(slot);
+  if (pending) {
+    pending.ids.add(messageId);
+    return;
+  }
+  rereads.set(slot, { key, ids: new Set([messageId]) });
+  setTimeout(() => {
+    const taken = rereads.get(slot);
+    rereads.delete(slot);
+    if (!taken) {
+      return;
+    }
+    const ids = [...taken.ids];
+    const asked = new Map(ids.map((id) => [id, toggleCounts.get(id) ?? 0]));
+    readReactions(ids, invoke)
+      .then((fresh) => {
+        const current = stillCurrent(fresh, asked, toggleCounts);
+        if (current.size === 0) {
+          return;
+        }
+        queryClient.setQueriesData<ReactionMap>({ queryKey: taken.key }, (old) =>
+          old === undefined ? old : mergeReactions(old, current),
+        );
+      })
+      .catch(() => {
+        // Left as drawn: the conversation's next refresh reads it again.
+      });
+  }, REREAD_COALESCE_MS);
+}
+
+/** Toggle a reaction, optimistically: `applyReactionToggle` computes what the re-read will report; failure restores the snapshot. */
 export function useToggleReaction(
   conversationId: string | null,
   kind: ConversationKind | null,
@@ -160,6 +210,7 @@ export function useToggleReaction(
     },
 
     onMutate: async (vars) => {
+      toggleCounts.set(vars.messageId, (toggleCounts.get(vars.messageId) ?? 0) + 1);
       // The pill this adds pops in, even on a row that had none (#2125).
       if (vars.mode === "add") {
         noteLocalReaction(vars.messageId, vars.emoji);
@@ -193,11 +244,10 @@ export function useToggleReaction(
     },
 
     // Both paths: a failure needs the server's truth, a success another device's reactions.
-    onSettled: () => {
+    // Only the toggled message is re-read, never every loaded one (#2141).
+    onSettled: (_data, _error, vars) => {
       if (conversationId && kind) {
-        queryClient.invalidateQueries({
-          queryKey: reactionQueryKeys.conversation(kind, conversationId),
-        });
+        rereadToggled(queryClient, reactionQueryKeys.conversation(kind, conversationId), vars.messageId);
       }
     },
   });

@@ -1,6 +1,8 @@
 // Pages are LOCAL reads; ingest runs off the render path. Cursors derive from page data, never an effect (desktop #958).
 
 import { useCallback, useMemo } from "react";
+import { reactionQueryKeys, type Reaction } from "./useReactions";
+import { createMessageIdPool } from "../../lib/messageIds";
 import {
   useInfiniteQuery,
   useMutation,
@@ -30,6 +32,9 @@ import {
 import { pickedToMessageAttachment } from "../../lib/composerAttachments";
 import {
   carryStubs,
+  applyLocalChanges,
+  restoreRow,
+  type LocalChange,
   mapOutboxRows,
   settleSend,
   unsentFlags,
@@ -217,7 +222,8 @@ async function readMessagePage(
     args.cursor = pageParam;
   }
   const page = await invoke<MessagePage>(cmd, args);
-  const messages = (page.messages ?? []).map(transform);
+  // Edits and deletes still in flight stay drawn over what the store holds (#2141).
+  const messages = applyLocalChanges((page.messages ?? []).map(transform), localChanges);
   // A refetch of the newest page while a send is in flight must not drop
   // its optimistic stub, which is never in the store (pendingMessages.ts).
   const newest = pageParam
@@ -342,8 +348,60 @@ function patchOutboxRows(
   }
 }
 
+/**
+ * Edits and deletes drawn but not yet stored by the core (#2141), by the core's message id.
+ * Every page read lays them over its rows (`applyLocalChanges`) until the change settles.
+ */
+const localChanges = new Map<string, LocalChange<Message>>();
+
+/**
+ * Draw `change` on message `id` and keep it drawn over refetches until it settles (#2141).
+ * Returns the row as it was, for a refusal to put back.
+ */
+function drawLocalChange(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key: readonly unknown[],
+  id: string,
+  change: LocalChange<Message>,
+): Message | undefined {
+  localChanges.set(id, change);
+  let before: Message | undefined;
+  queryClient.setQueryData<MessagesData>(key, (cache) =>
+    mapPages(cache, (msgs) => {
+      before ??= msgs.find((m) => m.id === id || m.outboxId === id);
+      return applyLocalChanges(msgs, new Map([[id, change]]));
+    }),
+  );
+  return before;
+}
+
+/** The change settled: stop drawing it, and put the one row back if it was refused. */
+function settleLocalChange(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key: readonly unknown[],
+  id: string,
+  change: LocalChange<Message>,
+  refusedBefore: Message | undefined,
+) {
+  // A later change of the same message (a second edit) keeps its own.
+  if (localChanges.get(id) === change) {
+    localChanges.delete(id);
+  }
+  if (refusedBefore) {
+    queryClient.setQueryData<MessagesData>(key, (cache) =>
+      mapPages(cache, (msgs) => restoreRow(msgs, id, refusedBefore)),
+    );
+  }
+}
+
 /** Tells apart stubs made in the same millisecond. */
 let stubSeq = 0;
+
+/** Ids named before the tap (#2141): a stub carries the core's id from its first frame. */
+export const messageIdPool = createMessageIdPool(() => invoke<string>("new_message_id"));
+
+/** The id a send took from the pool, by its variables. */
+const preNamed = new WeakMap<object, string>();
 
 /**
  * Send a text message optimistically; durable via the core's outbox (#1335).
@@ -373,12 +431,16 @@ export function useSendMessage(
       if (!conversationId || !currentUser) {
         throw new NotQueuedError("No active conversation");
       }
-      // The core names the message first (#1335), so a refetch drops the stub instead of doubling it.
-      const messageId = await invoke<string>("new_message_id").catch((e) => {
-        throw new NotQueuedError(String(e));
-      });
+      // The core names the message first (#1335), so a refetch drops the stub instead of doubling
+      // it. Usually named before the tap (#2141), and the stub already carries it.
+      const named = preNamed.get(vars);
+      const messageId =
+        named ??
+        (await invoke<string>("new_message_id").catch((e) => {
+          throw new NotQueuedError(String(e));
+        }));
       const stubId = stubIds.get(vars);
-      if (stubId && kind) {
+      if (!named && stubId && kind) {
         const key = messageQueryKeys.conversation(conversationId, kind);
         const tag = (m: Message): Message => (m.id === stubId ? { ...m, outboxId: messageId } : m);
         queryClient.setQueryData<MessagesData>(key, (cache) =>
@@ -418,6 +480,10 @@ export function useSendMessage(
       stubSeq += 1;
       const optimisticId = `pending-${Date.now()}-${stubSeq}`;
       stubIds.set(vars, optimisticId);
+      const named = messageIdPool.take();
+      if (named) {
+        preNamed.set(vars, named);
+      }
       const optimistic: Message = {
         id: optimisticId,
         conversation_id: conversationId,
@@ -431,6 +497,7 @@ export function useSendMessage(
         thread_id: vars.threadId ?? null,
         created_at: Date.now(),
         pending: true,
+        outboxId: named ?? undefined,
         link_preview: optimisticLinkPreview(vars.linkPreview),
       };
       const previous = queryClient.getQueryData<MessagesData>(key);
@@ -491,8 +558,19 @@ export function useSendMessage(
             }
           : cache,
       );
-      // Re-read: a refetch that read the store before this row was written would drop it.
-      queryClient.invalidateQueries({ queryKey: ctx.key });
+      // A just-sent row has no reactions (#2141): seed that, so nothing reads them from the DS.
+      if (kind) {
+        queryClient.setQueriesData<Map<string, Reaction[]>>(
+          { queryKey: reactionQueryKeys.conversation(kind, conversationId) },
+          (old) => (old === undefined || old.has(settled.id) ? old : new Map(old).set(settled.id, [])),
+        );
+      }
+      // The patch above is the row (#2141); re-reading every loaded page would only repeat it.
+      // Only a refetch still in flight may have read the store before this row was written,
+      // and would put the stub back, so then read once more.
+      if (queryClient.isFetching({ queryKey: ctx.key }) > 0) {
+        queryClient.invalidateQueries({ queryKey: ctx.key });
+      }
       if (ctx.threadId) {
         queryClient.setQueryData<Message[]>(
           messageQueryKeys.thread(ctx.threadId),
@@ -709,40 +787,37 @@ export function useEditMessage(
       });
       return vars;
     },
-    onMutate: async (vars) => {
+    // Drawn on submit and kept over refetches until it settles (#2141): the core writes the row
+    // only once the DS has the edit (#1555), so a refetch in between would read the old text.
+    onMutate: (vars) => {
       if (!conversationId || !kind) {
         return;
       }
       const key = messageQueryKeys.conversation(conversationId, kind);
-      await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<MessagesData>(key);
-      queryClient.setQueryData<MessagesData>(key, (cache) =>
-        mapPages(cache, (msgs) =>
-          msgs.map((m) =>
-            m.id === vars.messageId
-              ? {
-                  ...m,
-                  content: vars.newContent,
-                  edited_at: Date.now(),
-                  link_preview: optimisticLinkPreview(vars.linkPreview),
-                }
-              : m,
-          ),
-        ),
-      );
-      return { previous, key };
+      const editedAt = Date.now();
+      const preview = optimisticLinkPreview(vars.linkPreview);
+      const change: LocalChange<Message> = (m) => ({
+        ...m,
+        content: vars.newContent,
+        edited_at: editedAt,
+        link_preview: preview,
+      });
+      const before = drawLocalChange(queryClient, key, vars.messageId, change);
+      return { key, change, before };
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars, ctx) => {
+      if (ctx) {
+        settleLocalChange(queryClient, ctx.key, vars.messageId, ctx.change, undefined);
+      }
       queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
     },
-    onError: (_e, _vars, ctx) => {
-      if (ctx?.previous) {
-        queryClient.setQueryData(ctx.key, ctx.previous);
+    onError: (_e, vars, ctx) => {
+      if (!ctx) {
+        return;
       }
+      settleLocalChange(queryClient, ctx.key, vars.messageId, ctx.change, ctx.before);
       // The core kept the edit in its outbox (#1555); read it back.
-      if (ctx?.key) {
-        queryClient.invalidateQueries({ queryKey: ctx.key });
-      }
+      queryClient.invalidateQueries({ queryKey: ctx.key });
     },
   });
 }
@@ -766,30 +841,33 @@ export function useDeleteMessage(
       });
       return messageId;
     },
-    onMutate: async (messageId) => {
+    // The row stays and reads "Message deleted", as the stored row will (desktop too), kept over
+    // refetches until the delete settles (#2141). A refusal puts back that one row only, never
+    // the whole page as it was (a send failing meanwhile keeps its Retry).
+    onMutate: (messageId) => {
       if (!conversationId || !kind) {
         return;
       }
       const key = messageQueryKeys.conversation(conversationId, kind);
-      await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<MessagesData>(key);
-      // The row stays and reads "Message deleted", as the stored row will once refetched (desktop too).
       const deletedAt = Date.now();
-      queryClient.setQueryData<MessagesData>(key, (cache) =>
-        mapPages(cache, (msgs) =>
-          msgs.map((m) =>
-            m.id === messageId ? { ...m, content: "", attachments: [], deleted_at: deletedAt } : m,
-          ),
-        ),
-      );
-      return { previous, key };
+      const change: LocalChange<Message> = (m) => ({
+        ...m,
+        content: "",
+        attachments: [],
+        deleted_at: deletedAt,
+      });
+      const before = drawLocalChange(queryClient, key, messageId, change);
+      return { key, change, before };
     },
-    onSuccess: () => {
+    onSuccess: (_data, messageId, ctx) => {
+      if (ctx) {
+        settleLocalChange(queryClient, ctx.key, messageId, ctx.change, undefined);
+      }
       queryClient.invalidateQueries({ queryKey: searchQueryKeys.all });
     },
-    onError: (_e, _vars, ctx) => {
-      if (ctx?.previous) {
-        queryClient.setQueryData(ctx.key, ctx.previous);
+    onError: (_e, messageId, ctx) => {
+      if (ctx) {
+        settleLocalChange(queryClient, ctx.key, messageId, ctx.change, ctx.before);
       }
     },
   });

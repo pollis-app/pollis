@@ -231,6 +231,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     for (const m of sortedMessages) {
       if (wanted.has(m.id)) {
         map.set(m.id, m);
+      } else if (m.outbox_id && wanted.has(m.outbox_id)) {
+        // A reply to a message still being sent names the core's id (#2141).
+        map.set(m.outbox_id, m);
       }
     }
     return map;
@@ -266,7 +269,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   const timeline: TimelineItem[] = useMemo(() => {
     const items: TimelineItem[] = sortedMessages.map((message) => ({
       kind: "message",
-      key: `msg:${message.id}`,
+      // Keyed by the core's id (#2141): a stub and the stored row it becomes are one element.
+      key: `msg:${message.outbox_id ?? message.id}`,
       ts: toMs(message.created_at),
       message,
     }));
@@ -560,10 +564,20 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     if (!conversationId) {
       return;
     }
+    const message = sortedMessagesRef.current.find((m) => m.id === messageId);
     togglePinRef.current.mutate({
       conversationId,
       messageId,
       isPinned: pinnedIdsRef.current.has(messageId),
+      source: message
+        ? {
+            content: message.content_decrypted ?? "",
+            sender_id: message.sender_id,
+            sender_username: message.sender_username ?? null,
+            sender_display_name: message.sender_display_name ?? null,
+            sent_at: new Date(message.created_at).toISOString(),
+          }
+        : null,
     });
   }, []);
 

@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
-import { pinnedIds, type PinnedMessage } from "../../lib/pins";
+import { pinnedIds, togglePinLocally, type PinnedMessage, type PinSource } from "../../lib/pins";
 
 export type { PinnedMessage } from "../../lib/pins";
 
@@ -44,6 +44,8 @@ export type TogglePinVars = {
   messageId: string;
   /** `true` means this toggle UNPINS. */
   isPinned: boolean;
+  /** The local row, drawn as the pin until the list is re-read (#2141). */
+  source?: PinSource | null;
 };
 
 export function useTogglePinnedMessage() {
@@ -62,7 +64,28 @@ export function useTogglePinnedMessage() {
         userId: currentUser.id,
       });
     },
-    onSuccess: (_data, { conversationId }) => {
+    // Drawn on the tap (#2141), rolled back if the core refuses, re-read either way.
+    onMutate: async ({ conversationId, messageId, isPinned, source }) => {
+      const key = pinQueryKeys.conversation(conversationId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<PinnedMessage[]>(key);
+      queryClient.setQueryData<PinnedMessage[]>(key, (pins) =>
+        togglePinLocally(pins ?? [], {
+          conversationId,
+          messageId,
+          isPinned,
+          pinnedBy: currentUser?.id ?? "",
+          source,
+        }),
+      );
+      return { previous, key };
+    },
+    onError: (_e, _vars, ctx) => {
+      if (ctx) {
+        queryClient.setQueryData(ctx.key, ctx.previous);
+      }
+    },
+    onSettled: (_data, _err, { conversationId }) => {
       void queryClient.invalidateQueries({
         queryKey: pinQueryKeys.conversation(conversationId),
       });

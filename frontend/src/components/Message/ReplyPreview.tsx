@@ -26,7 +26,8 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
   const { t } = useTranslation('chat');
   const isLightBg = useBackgroundIsLight();
   const aliases = useSelectedGroupAliases();
-  const message = allMessages.find((m) => m.id === messageId);
+  // A pending original is named by the core's id, its stub's outbox_id (#2141).
+  const message = allMessages.find((m) => m.id === messageId || m.outbox_id === messageId);
   if (!message) {
     return null;
   }

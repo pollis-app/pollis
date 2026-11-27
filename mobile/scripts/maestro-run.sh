@@ -204,13 +204,14 @@ case "$TIER" in
     done ;;
   all)
     for n in $(all_flow_names); do
-      if ! has_tag "$n" two-client; then
+      # A `perf` flow (#2141) needs a build made with EXPO_PUBLIC_PERF_MARKS=1; it runs by name.
+      if ! has_tag "$n" two-client && ! has_tag "$n" perf; then
         SELECTED+=("$n")
       fi
     done ;;
   area)
     for n in $(area_flows | sort -u); do
-      if [ -f "$MAE/flows/$n.yaml" ] && ! has_tag "$n" two-client; then
+      if [ -f "$MAE/flows/$n.yaml" ] && ! has_tag "$n" two-client && ! has_tag "$n" perf; then
         SELECTED+=("$n")
       fi
     done ;;

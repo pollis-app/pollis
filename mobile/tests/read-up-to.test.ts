@@ -46,5 +46,9 @@ test("the rail glides on the shared timing and honours Reduce Motion", () => {
 test("the chat screen draws the rail only for a one-to-one DM with receipts on", () => {
   const src = readFileSync(new URL("../app/chat/[id].tsx", import.meta.url), "utf8");
   assert.match(src, /isDm && onePeer && sendReadReceipts \? onePeer : null/);
-  assert.match(src, /showReceipt=\{mine && isDm && dmPeers\.length > 1\}/, "a larger DM keeps the count tick");
+  // The rows are memoised MessageRowItems (#2141): the rule sits in the row context.
+  assert.match(src, /showReceipts: isDm && dmPeers\.length > 1/, "a larger DM keeps the count tick");
+  const item = readFileSync(new URL("../components/chat/MessageRowItem.tsx", import.meta.url), "utf8");
+  assert.match(item, /showReceipt=\{mine && ctx\.showReceipts\}/);
+  assert.match(item, /<ReadRailSlot messageId=\{m\.id\} peer=\{readUpTo \? railPeer : null\} \/>/);
 });

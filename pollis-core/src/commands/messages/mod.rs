@@ -166,7 +166,8 @@ pub use search::{
 };
 
 pub use ingest::{
-    catch_up_mls_group_interleaved, ingest_channel_envelopes, ingest_channel_envelopes_inner,
+    catch_up_mls_group_interleaved, catch_up_mls_group_interleaved_from, PrefetchedCatchUp,
+    ingest_channel_envelopes, ingest_channel_envelopes_inner,
     ingest_dm_envelopes, ingest_dm_envelopes_inner,
 };
 // The channel → MLS group memo (#1610), shared with the voice join so it skips the resolve POST.

@@ -1,0 +1,92 @@
+appId: ${MAESTRO_APP_ID}
+---
+# One round of the chat-perf flow (#2141): send, react, pin, edit, reply and delete, each
+# waited on until it shows. Round ${ROUND}. Texts start with the round number, which no
+# keyboard capitalises. Rows are pressed by their text, never "the first
+# row", since earlier rounds leave rows (deleted ones among them) on screen. The keyboard is
+# never hidden by hand: a long press dismisses it (#1859), and a Back with none up would leave.
+- tapOn:
+    id: "input-composer"
+- inputText: "${ROUND} perf"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: ${ROUND} perf, .*"
+    timeout: 15000
+- runFlow: message-settled.yaml
+
+# React.
+- runFlow:
+    file: chat-perf-press.yaml
+    env:
+      TEXT: "${ROUND} perf"
+- tapOn:
+    id: "btn-react-0"
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-reply"
+    timeout: 5000
+
+# Pin.
+- runFlow:
+    file: chat-perf-press.yaml
+    env:
+      TEXT: "${ROUND} perf"
+- tapOn:
+    id: "btn-pin"
+- extendedWaitUntil:
+    notVisible:
+      id: "btn-reply"
+    timeout: 5000
+
+# Edit.
+- runFlow:
+    file: chat-perf-press.yaml
+    env:
+      TEXT: "${ROUND} perf"
+- tapOn:
+    id: "btn-edit"
+- assertVisible:
+    id: "input-edit-composer"
+# The whole text again: the field may not hold the caret at its end once the keyboard was down.
+- tapOn:
+    id: "input-edit-composer"
+- eraseText: 30
+- inputText: "${ROUND} perf e"
+- tapOn:
+    id: "btn-edit-save"
+- extendedWaitUntil:
+    visible: ".*: ${ROUND} perf e, .*"
+    timeout: 120000
+- extendedWaitUntil:
+    notVisible:
+      id: "input-edit-composer"
+    timeout: 120000
+
+# Reply to it.
+- runFlow:
+    file: chat-perf-press.yaml
+    env:
+      TEXT: "${ROUND} perf e"
+- tapOn:
+    id: "btn-reply"
+- tapOn:
+    id: "input-composer"
+- inputText: "${ROUND} reply"
+- tapOn:
+    id: "btn-send"
+- extendedWaitUntil:
+    visible: ".*: ${ROUND} reply, .*"
+    timeout: 15000
+- runFlow: message-settled.yaml
+
+# Delete the reply.
+- runFlow:
+    file: chat-perf-press.yaml
+    env:
+      TEXT: "${ROUND} reply"
+- tapOn:
+    id: "btn-delete"
+- extendedWaitUntil:
+    notVisible: ".*: ${ROUND} reply, .*"
+    timeout: 120000

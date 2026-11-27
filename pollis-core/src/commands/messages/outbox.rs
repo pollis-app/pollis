@@ -45,6 +45,7 @@ pub(super) fn is_permanent(e: &Error) -> bool {
         return false;
     };
     any.downcast_ref::<NotAMember>().is_some()
+        || any.downcast_ref::<DiscardedBeforeStored>().is_some()
         || any
             .downcast_ref::<crate::commands::mls::ds_client::DsRefused>()
             .is_some_and(|r| matches!(r.status.as_u16(), 400 | 403 | 404 | 410 | 422))
@@ -64,6 +65,23 @@ impl std::error::Error for NotAMember {}
 
 pub(super) fn not_a_member() -> Error {
     Error::Other(anyhow::Error::new(NotAMember))
+}
+
+/// The user discarded this message before its send had stored it (#2141); typed so
+/// [`is_permanent`] stops every retry.
+#[derive(Debug)]
+pub(super) struct DiscardedBeforeStored;
+
+impl std::fmt::Display for DiscardedBeforeStored {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("this message was discarded")
+    }
+}
+
+impl std::error::Error for DiscardedBeforeStored {}
+
+fn discarded_before_stored() -> Error {
+    Error::Other(anyhow::Error::new(DiscardedBeforeStored))
 }
 
 /// The one soft-delete; also clears `send_state`, or the CHECK would wedge ingest (#1335). `?1` = deleted_at, `?2` = id.
@@ -1529,6 +1547,18 @@ async fn deliver_locked(
     sender_username: Option<String>,
     attempt: Attempt,
 ) -> Result<Message> {
+    // Discarded before it was stored (#2141): it is removed here, never sent.
+    let discarded = state
+        .discarded_before_stored
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(id);
+    if discarded {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(not_signed_in)?;
+        remove_unsent_on(db.conn(), id)?;
+        return Err(discarded_before_stored());
+    }
     // The row and its stored files in one read: another process's finished upload rewrites the
     // content and deletes the files in one transaction, so both come from the same side of it.
     let (queued, sender_username, metas) = {
@@ -1734,6 +1764,15 @@ pub async fn discard_unsent_message(message_id: String, state: &Arc<AppState>) -
     result
 }
 
+/// Whether any row, sent or not, holds `id`.
+fn message_exists_on(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM message WHERE id = ?1)",
+        rusqlite::params![id],
+        |row| row.get(0),
+    )?)
+}
+
 /// Whose message, where, and whether it was ever sealed.
 fn unsent_row_on(
     conn: &rusqlite::Connection,
@@ -1758,6 +1797,25 @@ async fn discard_locked(state: &Arc<AppState>, id: &str) -> Result<bool> {
         }
     };
     let Some((conversation_id, sender_id, sealed)) = row else {
+        // Discarded before its send stored it (#2141): the renderer drew the message, the
+        // send is still on its way (a slow bridge hop, an attachment poster). Remember the id,
+        // so the delivery that follows removes the row instead of sending what the user threw
+        // away. Held under this id's outbox lock, which every delivery attempt takes too.
+        let stored = {
+            let guard = state.local_db.lock().await;
+            match guard.as_ref() {
+                Some(db) => message_exists_on(db.conn(), id)?,
+                None => true,
+            }
+        };
+        if !stored {
+            state
+                .discarded_before_stored
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id.to_string());
+            return Ok(true);
+        }
         return Ok(false);
     };
     if sealed {
@@ -1784,7 +1842,8 @@ async fn withdraw(
     if !resolved.authorized {
         return Err(not_a_member());
     }
-    super::edit_delete::retract_for_everyone(state, conversation_id, id, sender_id).await
+    super::edit_delete::retract_for_everyone(state, conversation_id, id, sender_id).await?;
+    Ok(())
 }
 
 /// What one drain did.

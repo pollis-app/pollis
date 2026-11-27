@@ -241,11 +241,51 @@ pub(crate) fn remember_channel_group(channel_id: &str, mls_group_id: &str) {
 ///       decrypt (any conversation) envelopes whose MLS epoch == the new epoch
 /// ```
 /// Each envelope's epoch is parsed, not inferred; the replay runs even with zero envelopes (#371).
-pub async fn catch_up_mls_group_interleaved(
+// Not `async`: it returns the shared body's future itself, so this entry point adds no layer to
+// the futures of its many callers (a whole send's future is near the compiler's depth limit
+// for proving it `Send` in hosts such as pollis-bot).
+pub fn catch_up_mls_group_interleaved<'a>(
+    state: &'a Arc<AppState>,
+    mls_group_id: &'a str,
+    user_id: &'a str,
+) -> impl std::future::Future<Output = Result<()>> + 'a {
+    catch_up_interleaved(state, mls_group_id, user_id, None)
+}
+
+/// A catch-up read made before a seal (#2141), with the [`PassClock`] reading taken before it.
+///
+/// [`PassClock`]: super::ingest_guard::PassClock
+pub struct PrefetchedCatchUp {
+    pub response: pollis_api::directory::CatchUpResponse,
+    pub clock: Option<u64>,
+}
+
+/// [`catch_up_mls_group_interleaved`] applying `fetched` instead of reading again (#2141): one
+/// read per send, edit or delete instead of two. Applied exactly as a fresh read would be, in
+/// the same place in the sequence (after the Welcome poll, before the seal), under the same
+/// single-flight. Used only if no catch-up pass and no Welcome changed this device's MLS state
+/// since it was read; otherwise the pass reads afresh, as it always did. Its best-effort tail
+/// (watermarks, delivery receipts) goes on in the background, off the seal's path.
+///
+/// Returned type-erased: it sits inside every send, edit and delete, and hosts that await a
+/// whole send (pollis-bot) otherwise hit the compiler's depth limit proving that future `Send`.
+pub fn catch_up_mls_group_interleaved_from<'a>(
+    state: &'a Arc<AppState>,
+    mls_group_id: &'a str,
+    user_id: &'a str,
+    fetched: PrefetchedCatchUp,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+    Box::pin(catch_up_interleaved(state, mls_group_id, user_id, Some(fetched)))
+}
+
+async fn catch_up_interleaved(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
+    fetched: Option<PrefetchedCatchUp>,
 ) -> Result<()> {
+    // Taken by the first pass this call runs, if it is still current then.
+    let fetched = std::sync::Mutex::new(fetched);
     let held = |state: &Arc<AppState>| {
         let state = state.clone();
         let id = mls_group_id.to_string();
@@ -260,7 +300,10 @@ pub async fn catch_up_mls_group_interleaved(
     // Boxed: the largest future on the receive path (#1571 overflowed a test stack).
     // Single-flight per group (#1629): an overlapping pass would open the same envelopes again.
     let flights = &state.catch_up_flights;
-    let once = || Box::pin(catch_up_once(state, mls_group_id, user_id));
+    let once = || {
+        let prefetched = fetched.lock().unwrap_or_else(|e| e.into_inner()).take();
+        Box::pin(catch_up_once(state, mls_group_id, user_id, prefetched))
+    };
     super::ingest_guard::coalesced(flights, mls_group_id, once).await?;
     // A pass that started with no group could only join; run one more pass now (#1571) to show what it holds.
     if !held_before && held(state).await {
@@ -283,10 +326,22 @@ async fn catch_up_once(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
+    prefetched: Option<PrefetchedCatchUp>,
 ) -> Result<()> {
+    // A read made before the seal is this pass's read when nothing moved since (#2141).
+    let current = prefetched.filter(|p| {
+        state.catch_up_clock.unchanged_since(p.clock)
+            && p.response.authorized
+            && p.response.head.is_some()
+            && p.response.mls_group_id == mls_group_id
+    });
+    let _pass = state.catch_up_clock.pass();
+    let detach_tail = current.is_some();
     // One request lists the bound conversations and their envelopes past each watermark (#875, #987).
-    let resolved =
-        crate::commands::ds_reads::catch_up(state, mls_group_id, true, false).await?;
+    let resolved = match current {
+        Some(p) => p.response,
+        None => crate::commands::ds_reads::catch_up(state, mls_group_id, true, false).await?,
+    };
     if !resolved.authorized {
         // Not a member (any more): nothing to do.
         return Ok(());
@@ -371,8 +426,12 @@ async fn catch_up_once(
         tokio::join!(watermarks, receipts);
     };
     // Everything above is stored; a push fetch posts its notification without waiting for
-    // this (#1804). Anywhere else it runs inline, as before.
-    crate::notify::scope::defer_or_run(tail).await;
+    // this (#1804), and neither does a seal (#2141). Anywhere else it runs inline, as before.
+    if detach_tail {
+        state.spawn_background(tail);
+    } else {
+        crate::notify::scope::defer_or_run(tail).await;
+    }
 
     Ok(())
 }

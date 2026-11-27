@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AppState,
   View,
@@ -31,9 +31,13 @@ import { KeyChangeNoticeRow } from "../../components/chat/KeyChangeNoticeRow";
 import { collapseUndecryptable } from "../../lib/collapseUndecryptable";
 import { placeKeyChangeNotices } from "../../lib/keyChangeTimeline";
 import { useQueryClient } from "@tanstack/react-query";
-import { MessageRow } from "../../components/chat/MessageRow";
+import {
+  MessageRowItem,
+  type RowContext,
+  type RowHandlers,
+} from "../../components/chat/MessageRowItem";
 import { usePrefetchAvatars } from "../../components/UserAvatar";
-import { isNewMemberMessage, newMemberJoins } from "../../lib/newMember";
+import { newMemberJoins } from "../../lib/newMember";
 import { botIds } from "../../lib/bots";
 import { Composer } from "../../components/chat/Composer";
 import { authorName } from "../../lib/authorName";
@@ -43,7 +47,6 @@ import { outgoingText } from "../../lib/messageText";
 import { EditBar } from "../../components/chat/EditBar";
 import { ReplyBar } from "../../components/chat/ReplyBar";
 import { replySnippet, replyTargets } from "../../lib/replyPreview";
-import { sentBeforeJoin } from "../../lib/replyQuote";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
 import { EmojiPickerSheet } from "../../components/emoji/EmojiPickerSheet";
@@ -79,9 +82,11 @@ import {
   flattenPages,
   markConversationRead,
   type ConversationKind,
+  type MessagesData,
+  messageQueryKeys,
+  messageIdPool,
   type Message,
 } from "../../hooks/queries";
-import { retryTarget, unsentReason } from "../../hooks/queries/pendingMessages";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { TypingIndicator } from "../../components/chat/TypingIndicator";
@@ -107,6 +112,14 @@ import { useOpenMediaViewer } from "../../hooks/useOpenMediaViewer";
 import { useIsRegular } from "../../hooks/useLayoutClass";
 import { selectConversation } from "../../hooks/useOpenConversation";
 import { haptic } from "../../lib/haptics";
+import {
+  PERF_MARKS,
+  perfConfirmed,
+  perfEditClosed,
+  perfPinnedShown,
+  perfTap,
+} from "../../lib/perfMarks";
+import { PerfSummary } from "../../components/chat/PerfSummary";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { nextJumpStep } from "../../lib/messageJump";
 import { useTheme, useThemeRerender } from "../../components/theme";
@@ -516,12 +529,18 @@ function TextChat(props: ChatViewProps = {}) {
     typing.stop();
     setPendingAttachments([]);
     setReplyTarget(null);
-    sendMessage.mutate({
-      content: text,
-      attachments: pendingAttachments,
-      replyToId: replyTarget?.id,
-      linkPreview,
-    });
+    const perfAction = replyTarget ? "reply" : "send";
+    perfTap(perfAction, [{ kind: "rowText", text }]);
+    sendMessage.mutate(
+      {
+        content: text,
+        attachments: pendingAttachments,
+        // The core's id: a reply to a message still being sent names its stub's outboxId (#2141).
+        replyToId: replyTarget ? replyTarget.outboxId ?? replyTarget.id : undefined,
+        linkPreview,
+      },
+      { onSettled: () => perfConfirmed(perfAction) },
+    );
     return true;
   };
 
@@ -539,17 +558,43 @@ function TextChat(props: ChatViewProps = {}) {
     setPendingAttachments((prev) => [...prev, ...picked]);
   }, []);
 
+  // The bar closes on submit (#2141): the core stores the edit before it posts (#1555), so a
+  // stored edit that then fails is labelled on its row. Only one the core never stored brings
+  // the bar back, with the text as typed.
+  const editTargetRef = useRef(editTarget);
+  // Ids ready before the first tap (#2141).
+  useEffect(() => {
+    messageIdPool.fill();
+  }, []);
+  editTargetRef.current = editTarget;
   const onSaveEdit = () => {
     const text = outgoingText(editDraft);
     if (!text || !editTarget) {
       return;
     }
+    const target = editTarget;
+    perfTap("edit", [{ kind: "rowText", text }, { kind: "editClosed" }]);
+    setEditTarget(null);
+    setEditDraft("");
     editMessage.mutate(
-      { messageId: editTarget.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
+      // The core's id (#2141): a pending row's stub is named `pending-…`.
+      { messageId: target.outboxId ?? target.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
       {
-        onSuccess: () => {
-          setEditTarget(null);
-          setEditDraft("");
+        onSettled: () => perfConfirmed("edit"),
+        onError: async () => {
+          if (!conversationId || !kind) {
+            return;
+          }
+          const key = messageQueryKeys.conversation(conversationId, kind);
+          await queryClient.refetchQueries({ queryKey: key });
+          const stored = queryClient
+            .getQueryData<MessagesData>(key)
+            ?.pages.some((p) => p.messages.some((m) => m.id === (target.outboxId ?? target.id) && m.edit_unsent));
+          if (stored || editTargetRef.current) {
+            return;
+          }
+          setEditDraft(text);
+          setEditTarget(target);
         },
       },
     );
@@ -568,6 +613,18 @@ function TextChat(props: ChatViewProps = {}) {
   const toggleSaved = useToggleSavedMessage();
   const pinnedIds = usePinnedMessageIds(conversationId);
   const togglePin = useTogglePinnedMessage();
+  // #2141: the commits that show a pin and a closed edit bar (perf builds only).
+  useLayoutEffect(() => {
+    if (PERF_MARKS) {
+      perfPinnedShown(pinnedIds);
+    }
+  }, [pinnedIds]);
+  const editOpen = !!editTarget;
+  useLayoutEffect(() => {
+    if (PERF_MARKS && !editOpen) {
+      perfEditClosed();
+    }
+  }, [editOpen]);
 
   // #897: copy is VERIFIED — a thrown write reads as failure.
   const copyToClipboard = useCallback(async (text: string) => {
@@ -637,7 +694,9 @@ function TextChat(props: ChatViewProps = {}) {
         !m.reply_to_id &&
         prev.sender_id === m.sender_id &&
         m.created_at - prev.created_at < GROUP_WINDOW_MS;
-      out.push({ type: "msg", key: m.id, message: m, continued });
+      // Keyed by the core's id (#2141): a stub and the stored row it becomes are one element,
+      // so the row neither remounts nor re-measures when its send settles.
+      out.push({ type: "msg", key: m.outboxId ?? m.id, message: m, continued });
       prev = m;
     }
     while (next < placed.length) {
@@ -662,7 +721,7 @@ function TextChat(props: ChatViewProps = {}) {
   );
   const scrollToMessage = useCallback(
     (messageId: string) => {
-      const index = items.findIndex((i) => i.type === "msg" && i.key === messageId);
+      const index = items.findIndex((i) => i.type === "msg" && (i.message.id === messageId || i.key === messageId));
       if (index < 0) {
         return;
       }
@@ -702,7 +761,7 @@ function TextChat(props: ChatViewProps = {}) {
       return;
     }
     const step = nextJumpStep({
-      index: items.findIndex((i) => i.type === "msg" && i.key === jumpMessageId),
+      index: items.findIndex((i) => i.type === "msg" && (i.message.id === jumpMessageId || i.key === jumpMessageId)),
       loaded: messages.some((m) => m.id === jumpMessageId),
       isLoading,
       isFetchingNextPage,
@@ -746,11 +805,17 @@ function TextChat(props: ChatViewProps = {}) {
       const reacted = currentUser
         ? existing?.user_ids.includes(currentUser.id) ?? false
         : false;
-      toggleReaction.mutate({
-        messageId,
-        emoji,
-        mode: reacted ? "remove" : "add",
-      });
+      if (!reacted) {
+        perfTap("react", [{ kind: "reacted", id: messageId, emoji }]);
+      }
+      toggleReaction.mutate(
+        {
+          messageId,
+          emoji,
+          mode: reacted ? "remove" : "add",
+        },
+        { onSettled: () => perfConfirmed("react") },
+      );
     },
     [reactionsByMessage, currentUser, toggleReaction],
   );
@@ -934,6 +999,104 @@ function TextChat(props: ChatViewProps = {}) {
     [conversationId, kind, router, title],
   );
 
+  // #2141: what every row shares, and actions that never change identity, so a keystroke or a
+  // toggle re-renders no row but its own (MessageRowItem is memoised).
+  const rowCtx = useMemo<RowContext>(
+    () => ({
+      currentUserId: currentUser?.id,
+      // The count indicator is a group DM's (#857); a one-to-one DM has the read-up-to rail (#2140).
+      showReceipts: isDm && dmPeers.length > 1,
+      peerCount,
+      hidePreviews: isPendingRequest,
+      author: groupAuthor,
+      unknownAuthor: t("chat:list.unknownAuthor"),
+      deletedLabel: t("chat:message.deleted"),
+      aliases,
+      avatarKeyById,
+      newMemberJoinMs,
+      botSenders,
+      botGroup: group?.name,
+      botMentions,
+      mentionNames,
+      selfName,
+      mentionLabels: aliasMentionLabels,
+      viewerJoinedAtMs,
+    }),
+    [
+      currentUser?.id,
+      isDm,
+      dmPeers.length,
+      peerCount,
+      isPendingRequest,
+      groupAuthor,
+      t,
+      aliases,
+      avatarKeyById,
+      newMemberJoinMs,
+      botSenders,
+      group?.name,
+      botMentions,
+      mentionNames,
+      selfName,
+      aliasMentionLabels,
+      viewerJoinedAtMs,
+    ],
+  );
+  const latest = useRef({
+    retry: retryMessage.mutate,
+    discard: discardUnsent.mutate,
+    toggleReaction: toggleReaction.mutate,
+    startReply,
+    openThread,
+    scrollToMessage,
+    openMedia,
+    router,
+    kind,
+    groupId,
+  });
+  latest.current = {
+    retry: retryMessage.mutate,
+    discard: discardUnsent.mutate,
+    toggleReaction: toggleReaction.mutate,
+    startReply,
+    openThread,
+    scrollToMessage,
+    openMedia,
+    router,
+    kind,
+    groupId,
+  };
+  const rowHandlers = useMemo<RowHandlers>(
+    () => ({
+      onLongPress: (m) => setActionTarget(m),
+      onReply: (m) => latest.current.startReply(m),
+      onRetry: (outboxId) => latest.current.retry(outboxId),
+      onDiscard: (outboxId) => latest.current.discard(outboxId),
+      onOpenThread: (rootId) => latest.current.openThread(rootId),
+      onToggleReaction: (messageId, emoji, reacted) => {
+        if (!reacted) {
+          perfTap("react", [{ kind: "reacted", id: messageId, emoji }]);
+        }
+        latest.current.toggleReaction(
+          { messageId, emoji, mode: reacted ? "remove" : "add" },
+          { onSettled: () => perfConfirmed("react") },
+        );
+      },
+      onShowReactions: (messageId, emoji) => setWhoTarget({ messageId, emoji }),
+      onPressAvatar: (senderId) => {
+        const { router: nav, kind: k, groupId: g } = latest.current;
+        nav.push({
+          pathname: "/user/[id]",
+          // In a group, the profile shows the group's view of them (#2003).
+          params: k === "channel" && g ? { id: senderId, groupId: g } : { id: senderId },
+        });
+      },
+      onPressReplyQuote: (messageId) => latest.current.scrollToMessage(messageId),
+      onOpenAttachment: (attachment) => latest.current.openMedia(attachment),
+    }),
+    [],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: ChatListItem }) => {
       if (item.type === "sep") {
@@ -969,94 +1132,21 @@ function TextChat(props: ChatViewProps = {}) {
           />
         );
       }
-      const mine = currentUser?.id === m.sender_id;
       const readUpTo = !!railPeer && m.id === readUpToMessageId;
-      const summary = threadSummaries?.get(m.id);
-      const name = groupAuthor(m.sender_id, m.sender_username, m.sender_display_name) ?? t("chat:list.unknownAuthor");
-      const original = m.reply_to_id ? repliedTo.get(m.reply_to_id) : undefined;
-      const replyTo = m.reply_to_id
-        ? original
-          ? {
-              name:
-                groupAuthor(original.sender_id, original.sender_username, original.sender_display_name) ??
-                t("chat:list.unknownAuthor"),
-              snippet: original.deleted_at
-                ? t("chat:message.deleted")
-                : replySnippet(original),
-            }
-          : null
-        : undefined;
-      // A deleted row has nothing to reply to or act on (desktop hides its actions too).
-      const settled = !m.pending && !m.failed && !m.deleted_at;
-      const retryId = retryTarget(m);
       return (
-        <MessageRow
-          testID={`row-message-${m.id}`}
-          messageId={m.id}
-          av={name.slice(0, 2)}
-          senderId={m.sender_id}
-          senderAvatarKey={avatarKeyById.get(m.sender_id)}
-          senderAliasKey={aliasAvatar(aliases, m.sender_id, null)}
-          amber={mine}
-          name={name}
-          time={timeLabel(m.created_at)}
-          text={m.content}
-          deleted={!!m.deleted_at}
-          attachments={m.attachments}
-          linkPreview={isPendingRequest ? null : m.link_preview}
-          onOpenAttachment={openMedia}
-          pending={m.pending}
-          failed={m.failed}
-          unsentReason={unsentReason(m)}
-          onRetry={retryId ? () => retryMessage.mutate(retryId) : undefined}
-          onDiscard={m.failed ? () => discardUnsent.mutate(m.outboxId ?? m.id) : undefined}
-          edited={!!m.edited_at}
-          editUnsent={m.edit_unsent}
-          reactions={m.deleted_at ? undefined : reactionsByMessage?.get(m.id)}
-          currentUserId={currentUser?.id}
-          receipt={m.id === receiptMessageId ? receiptsByMessage?.get(m.id) : undefined}
-          peerCount={peerCount}
-          showReceipt={mine && isDm && dmPeers.length > 1}
-          readRail={railPeer ? <ReadRailSlot messageId={m.id} peer={readUpTo ? railPeer : null} /> : undefined}
+        <MessageRowItem
+          message={m}
+          railPeer={railPeer}
+          readUpTo={readUpTo}
           readUpToLabel={readUpTo && railPeer ? t("chat:receipts.readUpTo", { name: railPeer.name }) : null}
           continued={item.continued}
-          isNew={isNewMemberMessage(newMemberJoinMs, m.sender_id, m.created_at)}
-          isBot={botSenders.has(m.sender_id)}
-          botGroup={group?.name}
-          botMentions={botMentions}
-          threadCount={summary?.reply_count ?? 0}
-          threadLastReply={
-            summary?.last_reply_at
-              ? timeLabel(new Date(summary.last_reply_at).getTime())
-              : undefined
-          }
-          onOpenThread={() => openThread(m.id)}
-          mentionNames={mentionNames}
-          selfName={selfName}
-          mentionLabels={aliasMentionLabels}
-          onToggleReaction={(emoji, reacted) =>
-            toggleReaction.mutate({
-              messageId: m.id,
-              emoji,
-              mode: reacted ? "remove" : "add",
-            })
-          }
-          onShowReactions={(emoji) => setWhoTarget({ messageId: m.id, emoji })}
-          onPressAvatar={
-            mine
-              ? undefined
-              : () =>
-                  router.push({
-                    pathname: "/user/[id]",
-                    // In a group, the profile shows the group's view of them (#2003).
-                    params: kind === "channel" && groupId ? { id: m.sender_id, groupId } : { id: m.sender_id },
-                  })
-          }
-          onLongPress={settled ? () => setActionTarget(m) : undefined}
-          onReply={settled ? () => startReply(m) : undefined}
-          replyTo={replyTo}
-          replyBeforeJoin={replyTo === null && !!m.reply_to_id && sentBeforeJoin(m.reply_to_id, viewerJoinedAtMs)}
-          onPressReplyQuote={original ? () => scrollToMessage(original.id) : undefined}
+          ctx={rowCtx}
+          handlers={rowHandlers}
+          reactions={reactionsByMessage?.get(m.id)}
+          receipt={m.id === receiptMessageId ? receiptsByMessage?.get(m.id) : undefined}
+          threadCount={threadSummaries?.get(m.id)?.reply_count ?? 0}
+          threadLastReplyAt={threadSummaries?.get(m.id)?.last_reply_at}
+          original={m.reply_to_id ? repliedTo.get(m.reply_to_id) : undefined}
           highlighted={highlightId === m.id}
           entering={rising.has(m.id) && !risen.current.has(m.id) ? riseIn : undefined}
         />
@@ -1065,37 +1155,19 @@ function TextChat(props: ChatViewProps = {}) {
     [
       rising,
       riseIn,
-      currentUser,
       router,
       reactionsByMessage,
-      toggleReaction,
       receiptsByMessage,
       receiptMessageId,
-      peerCount,
-      isDm,
-      dmPeers.length,
       railPeer,
       readUpToMessageId,
-      threadSummaries,
-      openThread,
-      openMedia,
-      mentionNames,
-      selfName,
-      repliedTo,
-      startReply,
-      scrollToMessage,
-      highlightId,
-      retryMessage,
-      discardUnsent,
-      newMemberJoinMs,
-      botSenders,
-      botMentions,
-      group?.name,
-      viewerJoinedAtMs,
-      peerLabel,
-      avatarKeyById,
-      isPendingRequest,
       t,
+      threadSummaries,
+      repliedTo,
+      highlightId,
+      peerLabel,
+      rowCtx,
+      rowHandlers,
     ],
   );
 
@@ -1261,6 +1333,7 @@ function TextChat(props: ChatViewProps = {}) {
       />
       </ReadRailProvider>
       {unseen > 0 && !atBottom ? <NewMessagesButton count={unseen} onPress={goToNewest} /> : null}
+      {PERF_MARKS ? <PerfSummary /> : null}
       </Animated.View>
       {/* A failed send is told on its own row (UnsentActions), never as a raw error here. */}
 
@@ -1336,6 +1409,7 @@ function TextChat(props: ChatViewProps = {}) {
           }
           quoteTime={timeLabel(actionTarget.created_at)}
           isOwn={actionTarget.sender_id === currentUser?.id}
+          pending={!!actionTarget.pending}
           isSaved={savedIds.has(actionTarget.id)}
           onToggleSave={() => {
             toggleSaved.mutate(actionTarget.id);
@@ -1345,11 +1419,24 @@ function TextChat(props: ChatViewProps = {}) {
           onTogglePin={
             conversationId
               ? () => {
-                  togglePin.mutate({
-                    conversationId,
-                    messageId: actionTarget.id,
-                    isPinned: pinnedIds.has(actionTarget.id),
-                  });
+                  if (!pinnedIds.has(actionTarget.id)) {
+                    perfTap("pin", [{ kind: "pinned", id: actionTarget.id }]);
+                  }
+                  togglePin.mutate(
+                    {
+                      conversationId,
+                      messageId: actionTarget.id,
+                      isPinned: pinnedIds.has(actionTarget.id),
+                      source: {
+                        content: actionTarget.content,
+                        sender_id: actionTarget.sender_id,
+                        sender_username: actionTarget.sender_username,
+                        sender_display_name: actionTarget.sender_display_name,
+                        sent_at: new Date(actionTarget.created_at).toISOString(),
+                      },
+                    },
+                    { onSettled: () => perfConfirmed("pin") },
+                  );
                   setActionTarget(null);
                 }
               : undefined
@@ -1390,7 +1477,18 @@ function TextChat(props: ChatViewProps = {}) {
             setActionTarget(null);
           }}
           onDelete={() => {
-            deleteMessage.mutate(actionTarget.id);
+            // Deleting a message still being sent is discarding it (#2141): it reaches nobody.
+            if (actionTarget.pending) {
+              discardUnsent.mutate(actionTarget.outboxId ?? actionTarget.id);
+              setActionTarget(null);
+              return;
+            }
+            perfTap("delete", [{ kind: "rowDeleted", id: actionTarget.id }]);
+            deleteMessage.mutate(actionTarget.id, {
+              onSettled: () => perfConfirmed("delete"),
+              // The row came back (the hook's rollback); say why above the composer (#2141).
+              onError: () => setCommandNotice(t("nav:deleteMessage.failed")),
+            });
             setActionTarget(null);
           }}
           onReport={() => {
