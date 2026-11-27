@@ -19,6 +19,7 @@ import { ReactionBreakdownPanel } from "./ReactionBreakdownPanel";
 import { PressButton } from "../ui/PressButton";
 import { FOCUS_RING } from "../ui/focusRing";
 import { useReactionBump, useReactionMotion } from "./useReactionMotion";
+import { useLateArrival } from "../../hooks/useLateArrival";
 
 interface MessageReactionsProps {
   messageId: string;
@@ -39,7 +40,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
   const { currentUser } = appStore;
   const { data: reactions = [] } = useReactions(messageId);
   // Pills that arrive after the row painted fade in rather than blink (#2115).
-  const paintedWithout = useRef(reactions.length === 0);
+  const arrived = useLateArrival(reactions.length > 0);
   // A pill joining the row pops in, a changed count rolls, a tapped pill bumps (#2125).
   const { pops, rolls } = useReactionMotion(reactions);
   const { bump, bumpClass } = useReactionBump();
@@ -130,7 +131,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
       ref={wrapperRef}
       data-testid="message-reactions"
       onMouseEnter={() => setHovered(true)}
-      className={`relative flex items-center flex-wrap gap-1 ${paintedWithout.current ? "motion-late-fade" : ""} ${className}`}
+      className={`relative flex items-center flex-wrap gap-1 ${arrived ? "motion-late-fade" : ""} ${className}`}
     >
       {reactions.map((reaction) => {
         const reacted = currentUser

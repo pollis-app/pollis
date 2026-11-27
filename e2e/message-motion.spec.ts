@@ -119,9 +119,28 @@ test.describe("message motion (#2125)", () => {
       await page.waitForTimeout(60);
     }
     await expect(page.getByTestId(`message-${NEWEST}`)).not.toBeInViewport();
-    const before = await list.evaluate((el) => el.scrollTop);
-    const anchor = page.getByTestId(`message-${idAt(40)}`);
-    const anchorTop = (await anchor.boundingBox())?.y;
+    // The row the reader is looking at: whatever sits mid-log once the wheel and the window's
+    // re-measuring settle (scrollTop alone re-anchors as rows measure, so it is not the test).
+    const anchorId = await list.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return hit?.closest('[data-testid^="message-01"]')?.getAttribute("data-testid") ?? null;
+    });
+    expect(anchorId).not.toBeNull();
+    const anchor = page.getByTestId(anchorId as string);
+    const settledTop = async () => {
+      let last = Number.NaN;
+      for (let i = 0; i < 20; i++) {
+        const y = (await anchor.boundingBox())?.y ?? Number.NaN;
+        if (Math.abs(y - last) < 0.5) {
+          return y;
+        }
+        last = y;
+        await page.waitForTimeout(150);
+      }
+      return last;
+    };
+    const anchorTop = await settledTop();
 
     const a = "01HQ7Z3K9M2P5R8T1V4W6YN002";
     const b = "01HQ7Z3K9M2P5R8T1V4W6YN003";
@@ -130,10 +149,8 @@ test.describe("message motion (#2125)", () => {
 
     const button = page.getByTestId("new-messages-button");
     await expect(button).toHaveText("2 new messages");
-    expect(await list.evaluate((el) => el.scrollTop)).toBe(before);
-    if (anchorTop !== undefined) {
-      expect(Math.abs(((await anchor.boundingBox())?.y ?? 0) - anchorTop)).toBeLessThan(1);
-    }
+    expect(Math.abs((await settledTop()) - anchorTop)).toBeLessThan(1);
+    await expect(page.getByTestId(`message-${NEWEST}`)).not.toBeInViewport();
     await expect(page.locator('[data-arrival="live"]')).toHaveCount(0);
 
     await button.click();
