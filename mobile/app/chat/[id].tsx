@@ -84,6 +84,7 @@ import {
   type ConversationKind,
   type MessagesData,
   messageQueryKeys,
+  messageIdPool,
   type Message,
 } from "../../hooks/queries";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
@@ -526,7 +527,8 @@ function TextChat(props: ChatViewProps = {}) {
       {
         content: text,
         attachments: pendingAttachments,
-        replyToId: replyTarget?.id,
+        // The core's id: a reply to a message still being sent names its stub's outboxId (#2141).
+        replyToId: replyTarget ? replyTarget.outboxId ?? replyTarget.id : undefined,
         linkPreview,
       },
       { onSettled: () => perfConfirmed(perfAction) },
@@ -552,6 +554,10 @@ function TextChat(props: ChatViewProps = {}) {
   // stored edit that then fails is labelled on its row. Only one the core never stored brings
   // the bar back, with the text as typed.
   const editTargetRef = useRef(editTarget);
+  // Ids ready before the first tap (#2141).
+  useEffect(() => {
+    messageIdPool.fill();
+  }, []);
   editTargetRef.current = editTarget;
   const onSaveEdit = () => {
     const text = outgoingText(editDraft);
@@ -563,7 +569,8 @@ function TextChat(props: ChatViewProps = {}) {
     setEditTarget(null);
     setEditDraft("");
     editMessage.mutate(
-      { messageId: target.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
+      // The core's id (#2141): a pending row's stub is named `pending-…`.
+      { messageId: target.outboxId ?? target.id, newContent: text, linkPreview: editPreview.takeForSend(text) },
       {
         onSettled: () => perfConfirmed("edit"),
         onError: async () => {
@@ -574,7 +581,7 @@ function TextChat(props: ChatViewProps = {}) {
           await queryClient.refetchQueries({ queryKey: key });
           const stored = queryClient
             .getQueryData<MessagesData>(key)
-            ?.pages.some((p) => p.messages.some((m) => m.id === target.id && m.edit_unsent));
+            ?.pages.some((p) => p.messages.some((m) => m.id === (target.outboxId ?? target.id) && m.edit_unsent));
           if (stored || editTargetRef.current) {
             return;
           }
@@ -1363,6 +1370,7 @@ function TextChat(props: ChatViewProps = {}) {
           }
           quoteTime={timeLabel(actionTarget.created_at)}
           isOwn={actionTarget.sender_id === currentUser?.id}
+          pending={!!actionTarget.pending}
           isSaved={savedIds.has(actionTarget.id)}
           onToggleSave={() => {
             toggleSaved.mutate(actionTarget.id);
@@ -1430,6 +1438,12 @@ function TextChat(props: ChatViewProps = {}) {
             setActionTarget(null);
           }}
           onDelete={() => {
+            // Deleting a message still being sent is discarding it (#2141): it reaches nobody.
+            if (actionTarget.pending) {
+              discardUnsent.mutate(actionTarget.outboxId ?? actionTarget.id);
+              setActionTarget(null);
+              return;
+            }
             perfTap("delete", [{ kind: "rowDeleted", id: actionTarget.id }]);
             deleteMessage.mutate(actionTarget.id, {
               onSettled: () => perfConfirmed("delete"),

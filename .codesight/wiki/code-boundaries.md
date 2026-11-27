@@ -37,6 +37,7 @@ Not scanned, each for a reason: `e2e/` (test code), `pollis-delivery/worker/` (o
   | `mobile/lib/identityFields.ts` | `frontend/src/utils/identityFields.ts` | `mobile/tests/identity-fields.test.ts` |
   | `mobile/lib/securityEvents.ts` | `frontend/src/components/Security/securityEvents.ts` | `mobile/tests/security-events.test.ts` |
   | `mobile/lib/dmActivity.ts` | `frontend/src/utils/dmActivity.ts` | `mobile/tests/dm-activity.test.ts` (byte-identical) |
+  | `mobile/lib/messageIds.ts` | `frontend/src/utils/messageIds.ts` | `mobile/tests/message-ids.test.ts` (byte-identical) |
   | `mobile/lib/accountKeyAuditStatus.ts` | `frontend/src/components/Security/accountKeyAuditStatus.ts` | `mobile/tests/account-key-audit.test.ts` (byte-identical) |
   | `mobile/lib/media/localVideoPoster.ts` | `frontend/src/utils/localVideoPoster.ts` | `mobile/tests/video-posters.test.ts` (identical but for comments) |
   | `mobile/i18n/languages.ts`, `namespaces.ts` | `frontend/src/i18n/languages.ts`, `namespaces.ts` | `mobile/tests/i18n.test.ts` |

@@ -1237,3 +1237,129 @@ async fn one_message_id_handed_over_concurrently_is_delivered_once() {
     assert_eq!(copies(&bob, &channel_id, "handed over four times").await, 1);
     drop((alice, bob));
 }
+
+// ── Acting on a message still being sent (#2141) ─────────────────────────────
+
+/// Bob's copy of the message with `id`, read after an ingest.
+async fn bobs_row(bob: &TestClient, channel_id: &str, id: &str) -> serde_json::Value {
+    bob.fetch_channel_messages(channel_id)
+        .await
+        .into_iter()
+        .find(|m| m["id"] == id)
+        .unwrap_or_else(|| panic!("bob holds {id}"))
+}
+
+/// An edit of a message never sealed rewrites what is sent: recipients get the new text as
+/// the message itself, and nothing reads as edited. Also across a kill: the row is stored
+/// before the network, the edit rewrites it, and the drain after the restart sends it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_edit_of_a_never_sealed_message_is_what_gets_sent() {
+    let (alice, bob, channel_id) = pair().await;
+    let id = fresh_id(&alice).await;
+    test_hooks::crash_next_send(Crash::AfterEnqueue);
+    send_with_id(&alice, &channel_id, &id, "teh typo", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+
+    alice.edit_message(&channel_id, &id, "the fix").await;
+    let row = own_row(&alice, &channel_id, &id).await.expect("stored");
+    assert_eq!(row["content"], "the fix");
+    assert_eq!(row["send_state"], "pending", "still unsent: {row}");
+    assert_eq!(envelopes_with_id(&id).await, 0);
+
+    restart(&alice).await;
+    alice.invoke_json("flush_outbox", json!({})).await;
+
+    assert_eq!(copies(&bob, &channel_id, "the fix").await, 1);
+    assert_eq!(copies(&bob, &channel_id, "teh typo").await, 0);
+    let seen = bobs_row(&bob, &channel_id, &id).await;
+    assert!(seen["edited_at"].is_null(), "a rewrite is not an edit: {seen}");
+    let mine = own_row(&alice, &channel_id, &id).await.expect("still there");
+    assert!(mine.get("send_state").is_none(), "delivered: {mine}");
+    drop((alice, bob));
+}
+
+/// A message already sealed may be held by the DS, so its text is fixed: the edit is queued
+/// and goes out behind the send, which it delivers first.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn an_edit_of_a_sealed_unsent_message_goes_out_behind_it() {
+    let (alice, bob, channel_id) = pair().await;
+    let id = fresh_id(&alice).await;
+    test_hooks::crash_next_send(Crash::AfterSeal);
+    send_with_id(&alice, &channel_id, &id, "sealed first", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+    assert_eq!(envelopes_with_id(&id).await, 0);
+
+    // The edit delivers its target, then itself.
+    alice.edit_message(&channel_id, &id, "sealed, then edited").await;
+    assert_eq!(envelopes_with_id(&id).await, 1);
+
+    assert_eq!(copies(&bob, &channel_id, "sealed, then edited").await, 1);
+    assert_eq!(copies(&bob, &channel_id, "sealed first").await, 0);
+    let seen = bobs_row(&bob, &channel_id, &id).await;
+    assert!(!seen["edited_at"].is_null(), "an edit of a sent message: {seen}");
+    let mine = own_row(&alice, &channel_id, &id).await.expect("still there");
+    assert!(mine.get("send_state").is_none(), "delivered: {mine}");
+    assert_eq!(mine["content"], "sealed, then edited");
+    drop((alice, bob));
+}
+
+/// A reply to a message still being sent names it by the id it was stored under; the line
+/// order delivers the original first, so every recipient can quote it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_reply_to_an_unsent_message_arrives_after_it() {
+    let (alice, bob, channel_id) = pair().await;
+    let original = fresh_id(&alice).await;
+    test_hooks::crash_next_send(Crash::AfterEnqueue);
+    send_with_id(&alice, &channel_id, &original, "the original", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+
+    let reply = fresh_id(&alice).await;
+    alice
+        .invoke_try(
+            "send_message",
+            json!({
+                "conversationId": channel_id,
+                "senderId": alice.user_id(),
+                "content": "the reply",
+                "replyToId": original,
+                "threadId": null,
+                "senderUsername": null,
+                "messageId": reply,
+            }),
+        )
+        .await
+        .expect("the reply is delivered, and the original before it");
+
+    assert_eq!(envelopes_with_id(&original).await, 1);
+    let first = bobs_row(&bob, &channel_id, &original).await;
+    let second = bobs_row(&bob, &channel_id, &reply).await;
+    let stamp = |m: &serde_json::Value| m["sent_at"].as_str().expect("sent_at").to_string();
+    assert!(stamp(&first) < stamp(&second), "the original goes first: {first} {second}");
+    assert_eq!(second["reply_to_id"], original.as_str());
+    drop((alice, bob));
+}
+
+/// Deleting a message still being sent discards it: it never reaches anyone.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn deleting_an_unsent_message_discards_it() {
+    let (alice, bob, channel_id) = pair().await;
+    let id = fresh_id(&alice).await;
+    test_hooks::crash_next_send(Crash::AfterEnqueue);
+    send_with_id(&alice, &channel_id, &id, "never mind", None)
+        .await
+        .expect_err("the simulated kill ends the send");
+
+    alice.delete_message(&id).await;
+    assert!(own_row(&alice, &channel_id, &id).await.is_none(), "discarded");
+    alice.invoke_json("flush_outbox", json!({})).await;
+    assert_eq!(envelopes_with_id(&id).await, 0);
+    assert_eq!(copies(&bob, &channel_id, "never mind").await, 0);
+    drop((alice, bob));
+}

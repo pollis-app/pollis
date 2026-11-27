@@ -94,9 +94,12 @@ export const MessageRowItem = memo(function MessageRowItem({
         }
       : null
     : undefined;
-  // A deleted row has nothing to reply to or act on (desktop hides its actions too).
+  // A deleted row has nothing to reply to or act on (desktop hides its actions too). A row
+  // still being sent (#2141) may be replied to, edited and deleted (= discarded) under the
+  // core's id; its conversation delivers in order, so whatever targets it goes out after it.
+  // Reactions and pins wait until it is delivered (the sheet leaves them out).
   const settled = !m.pending && !m.failed && !m.deleted_at;
-  const actionable = settled;
+  const actionable = settled || (m.pending === true && !m.failed && !m.deleted_at);
   // The id the core stored it under: a stub's `outboxId`, else its own.
   const coreId = m.outboxId ?? m.id;
   const retryId = retryTarget(m);

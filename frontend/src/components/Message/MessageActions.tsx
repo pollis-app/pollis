@@ -24,6 +24,8 @@ interface MessageActionsProps {
   messageId: string;
   /** Button sizing per look; both float on the same raised panel (#2144). */
   variant: "modern" | "terminal";
+  /** Still being sent (#2141): no reaction until it is delivered. */
+  pending?: boolean;
   isOwn: boolean;
   canModerate: boolean;
   isSaved: boolean;
@@ -45,6 +47,7 @@ const MENU_CLEARANCE_PX = 220;
 export const MessageActions: React.FC<MessageActionsProps> = ({
   messageId,
   variant,
+  pending = false,
   isOwn,
   canModerate,
   isSaved,
@@ -168,12 +171,14 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
         <Reply size={iconSize} className="rtl-mirror" />
       </PressButton>
 
-      <ReactionAddButton
-        messageId={messageId}
-        iconSize={iconSize}
-        className={barBtnClass}
-        onOpenChange={setPickerOpen}
-      />
+      {!pending && (
+        <ReactionAddButton
+          messageId={messageId}
+          iconSize={iconSize}
+          className={barBtnClass}
+          onOpenChange={setPickerOpen}
+        />
+      )}
 
       {isOwn && onEdit && (
         <PressButton

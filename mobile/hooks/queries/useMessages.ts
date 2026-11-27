@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { reactionQueryKeys, type Reaction } from "./useReactions";
+import { createMessageIdPool } from "../../lib/messageIds";
 import {
   useInfiniteQuery,
   useMutation,
@@ -346,6 +347,12 @@ function patchOutboxRows(
 /** Tells apart stubs made in the same millisecond. */
 let stubSeq = 0;
 
+/** Ids named before the tap (#2141): a stub carries the core's id from its first frame. */
+export const messageIdPool = createMessageIdPool(() => invoke<string>("new_message_id"));
+
+/** The id a send took from the pool, by its variables. */
+const preNamed = new WeakMap<object, string>();
+
 /**
  * Send a text message optimistically; durable via the core's outbox (#1335).
  *
@@ -374,12 +381,16 @@ export function useSendMessage(
       if (!conversationId || !currentUser) {
         throw new NotQueuedError("No active conversation");
       }
-      // The core names the message first (#1335), so a refetch drops the stub instead of doubling it.
-      const messageId = await invoke<string>("new_message_id").catch((e) => {
-        throw new NotQueuedError(String(e));
-      });
+      // The core names the message first (#1335), so a refetch drops the stub instead of doubling
+      // it. Usually named before the tap (#2141), and the stub already carries it.
+      const named = preNamed.get(vars);
+      const messageId =
+        named ??
+        (await invoke<string>("new_message_id").catch((e) => {
+          throw new NotQueuedError(String(e));
+        }));
       const stubId = stubIds.get(vars);
-      if (stubId && kind) {
+      if (!named && stubId && kind) {
         const key = messageQueryKeys.conversation(conversationId, kind);
         const tag = (m: Message): Message => (m.id === stubId ? { ...m, outboxId: messageId } : m);
         queryClient.setQueryData<MessagesData>(key, (cache) =>
@@ -419,6 +430,10 @@ export function useSendMessage(
       stubSeq += 1;
       const optimisticId = `pending-${Date.now()}-${stubSeq}`;
       stubIds.set(vars, optimisticId);
+      const named = messageIdPool.take();
+      if (named) {
+        preNamed.set(vars, named);
+      }
       const optimistic: Message = {
         id: optimisticId,
         conversation_id: conversationId,
@@ -432,6 +447,7 @@ export function useSendMessage(
         thread_id: vars.threadId ?? null,
         created_at: Date.now(),
         pending: true,
+        outboxId: named ?? undefined,
         link_preview: optimisticLinkPreview(vars.linkPreview),
       };
       const previous = queryClient.getQueryData<MessagesData>(key);
@@ -731,7 +747,7 @@ export function useEditMessage(
       queryClient.setQueryData<MessagesData>(key, (cache) =>
         mapPages(cache, (msgs) =>
           msgs.map((m) =>
-            m.id === vars.messageId
+            m.id === vars.messageId || m.outboxId === vars.messageId
               ? {
                   ...m,
                   content: vars.newContent,

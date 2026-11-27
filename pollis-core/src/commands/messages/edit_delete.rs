@@ -726,6 +726,27 @@ pub async fn edit_message_with_preview(
     let outgoing = link_preview
         .as_ref()
         .and_then(|draft| crate::commands::link_preview::outgoing(draft, &new_content));
+    // A message still being sent (#2141) has no envelope for an edit to target yet.
+    if super::outbox::is_unsent(state, &message_id).await? {
+        let edited = edit_unsent(
+            state,
+            &conversation_id,
+            &message_id,
+            &user_id,
+            &new_content,
+            outgoing.as_ref(),
+        )
+        .await;
+        if let Some(draft) = &link_preview {
+            crate::commands::link_preview::release_draft(draft);
+        }
+        match edited? {
+            super::edit_outbox::UnsentEdit::Rewritten => return Ok(()),
+            super::edit_outbox::UnsentEdit::Queued => {
+                return super::edit_outbox::deliver_edit(state, &message_id).await;
+            }
+        }
+    }
     {
         let guard = state.local_db.lock().await;
         let db = guard
@@ -749,6 +770,40 @@ pub async fn edit_message_with_preview(
         return Err(super::send::test_hooks::simulated_crash());
     }
     super::edit_outbox::deliver_edit(state, &message_id).await
+}
+
+/// Edit a message that is still being sent (#2141), under the send's own outbox lock, so no
+/// delivery attempt is between reading the row and sealing it. Never sealed, nothing of it has
+/// left the device: its text is rewritten and the send carries the new text. Sealed (the DS
+/// may hold that envelope), the edit is queued and goes out behind the send
+/// (`edit_outbox::deliver_edit` delivers the target first).
+async fn edit_unsent(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    message_id: &str,
+    user_id: &str,
+    new_content: &str,
+    outgoing: Option<&crate::commands::link_preview::Outgoing>,
+) -> Result<super::edit_outbox::UnsentEdit> {
+    let lock = super::outbox::OutboxLock::acquire(state, message_id).await;
+    let edited = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")));
+        db.and_then(|db| {
+            super::edit_outbox::edit_unsent_on(
+                db.conn(),
+                conversation_id,
+                message_id,
+                user_id,
+                new_content,
+                outgoing,
+            )
+        })
+    };
+    lock.release().await;
+    edited
 }
 
 /// Seal and post one stored edit, then confirm it locally — the network half

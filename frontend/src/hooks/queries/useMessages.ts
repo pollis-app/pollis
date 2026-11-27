@@ -25,6 +25,7 @@ import {
   type SendState,
 } from "../../utils/pendingMessages";
 import { activityMs, bumpActivity } from "../../utils/dmActivity";
+import { createMessageIdPool } from "../../utils/messageIds";
 import {
   prefetchReactions,
   reactableIds,
@@ -411,6 +412,9 @@ export function useMessages(channelId: string | null, conversationId: string | n
     isLoading: query.isLoading,
   };
 }
+
+/** Ids named before the tap (#2141): a stub carries the core's id from its first frame. */
+export const messageIdPool = createMessageIdPool(() => invoke<string>("new_message_id"));
 
 export function useSendMessage() {
   const queryClient = useQueryClient();
@@ -889,7 +893,7 @@ export function useEditMessage() {
         return {
           ...old,
           messages: old.messages.map((m) =>
-            m.id === messageId
+            m.id === messageId || m.outbox_id === messageId
               ? {
                   ...m,
                   content_decrypted: newContent,

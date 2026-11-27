@@ -16,6 +16,7 @@ import { EditMessageBar } from "../ui/EditMessageBar";
 import { ConfirmBar } from "../ui/ConfirmBar";
 import { ComposerBarHeader } from "../ui/ComposerBarHeader";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
+import { messageIdPool, useDiscardUnsent } from "../../hooks/queries/useMessages";
 import { optimisticLinkPreview, transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { usePrefetchReactions } from "../../hooks/queries/useReactions";
@@ -170,6 +171,11 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     return counts;
   }, [threadSummaries]);
   const deleteMessageMutation = useDeleteMessage();
+  const discardUnsentMutation = useDiscardUnsent();
+  // Ids ready before the first tap (#2141).
+  useEffect(() => {
+    messageIdPool.fill();
+  }, []);
   const editMessageMutation = useEditMessage();
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -536,6 +542,14 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     }
     setPendingDeleteId(null);
     setDeleteFailed(false);
+    // Deleting a message still being sent is discarding it (#2141): it never reaches anyone.
+    const target = allMessagesRef.current.find(
+      (m) => m.id === pendingDeleteId || m.outbox_id === pendingDeleteId,
+    );
+    if (target && (target.outbox_id || target.id.startsWith("pending-"))) {
+      discardUnsentMutation.mutate({ outboxId: target.outbox_id ?? target.id, conversationId });
+      return;
+    }
     deleteMessageMutation.mutate(
       { messageId: pendingDeleteId, conversationId },
       {
@@ -565,7 +579,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
   // Pinned: this re-renders on every edit keystroke (#874).
   const handleEdit = useCallback((messageId: string) => {
-    const message = allMessagesRef.current.find((m) => m.id === messageId);
+    const message = allMessagesRef.current.find((m) => m.id === messageId || m.outbox_id === messageId);
     if (!message) {
       return;
     }
@@ -623,7 +637,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       {
         conversationId,
         channelId: selectedChannelId ?? undefined,
-        messageId: target.id,
+        // The core's id: a pending row's stub is named `pending-…` (#2141).
+        messageId: target.outbox_id ?? target.id,
         newContent: trimmed,
         linkPreview,
       },
@@ -636,7 +651,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           await queryClient.refetchQueries({ queryKey });
           const row = queryClient
             .getQueryData<MessagesQueryData>(queryKey)
-            ?.messages.find((m) => m.id === target.id);
+            ?.messages.find((m) => m.id === (target.outbox_id ?? target.id));
           if (row?.edit_unsent || editingRef.current) {
             return;
           }
@@ -712,6 +727,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     }));
 
     const optimisticId = `pending-${Date.now()}-${Math.random()}`;
+    // Named before the tap (#2141): the stub is the core's message from its first frame.
+    const preNamed = messageIdPool.take();
     const optimisticMessage: Message = {
       id: optimisticId,
       channel_id: selectedChannelId ?? undefined,
@@ -726,6 +743,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       created_at: Date.now(),
       delivered: false,
       status: 'sending',
+      outbox_id: preNamed ?? undefined,
       reply_to_message_id: replyToMessageId ?? undefined,
       link_preview: optimisticLinkPreview(linkPreview),
     };
@@ -761,8 +779,12 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     let messageId: string;
     let outgoing: OutgoingAttachment[];
     try {
-      messageId = await invoke<string>("new_message_id");
-      patchStub({ outbox_id: messageId });
+      if (preNamed) {
+        messageId = preNamed;
+      } else {
+        messageId = await invoke<string>("new_message_id");
+        patchStub({ outbox_id: messageId });
+      }
       outgoing = await outgoingAttachments(attachments);
     } catch (error) {
       await releaseStaged(attachments);
@@ -931,7 +953,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           pendingLabel={t("deleteChannel.deleting")}
         />
       ) : pendingDeleteId ? (() => {
-        const target = allMessages.find((m) => m.id === pendingDeleteId);
+        const target = allMessages.find((m) => m.id === pendingDeleteId || m.outbox_id === pendingDeleteId);
         const isModerating = !!target && !!currentUser && target.sender_id !== currentUser.id;
         return (
           <ConfirmBar

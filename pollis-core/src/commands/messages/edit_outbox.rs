@@ -71,10 +71,24 @@ pub(super) fn enqueue_edit_with_preview_on(
     if author != sender_id || deleted_at.is_some() || conv != conversation_id {
         return Err(not_editable());
     }
-    // An unsent message (#1335) has no envelope for an edit to target.
+    // An unsent message (#1335) has no envelope for an edit to target: `edit_unsent_on`
+    // decides what an edit of one is (#2141).
     if send_state.is_some() {
-        return Err(Error::Other(anyhow::anyhow!("message has not been sent yet")));
+        return Err(not_sent_yet());
     }
+    queue_edit_on(conn, conversation_id, target_message_id, sender_id, content, preview, link_preview)
+}
+
+/// Write the edit row (and its thumbnail) for a target already checked.
+fn queue_edit_on(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    target_message_id: &str,
+    sender_id: &str,
+    content: &str,
+    preview: Option<&crate::commands::link_preview::Outgoing>,
+    link_preview: Option<String>,
+) -> Result<QueuedEdit> {
     let existing = load_edit_on(conn, target_message_id)?;
     let envelope_id = match existing {
         Some((e, _)) if e.content == content && e.link_preview == link_preview => e.envelope_id,
@@ -143,6 +157,95 @@ pub(super) async fn apply_emoji_rule(
         ],
     )?;
     Ok(next)
+}
+
+/// What an edit of a still-unsent message became (#2141).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum UnsentEdit {
+    /// Never sealed: the stored row now holds the new text, and the send sends it.
+    Rewritten,
+    /// Sealed, so the DS may hold the original: an edit is queued behind the send.
+    Queued,
+}
+
+/// Edit `target` while it is unsent (#2141). The caller holds the target's outbox lock, so no
+/// delivery attempt is between reading the row and sealing it.
+///
+/// A message with attachments is refused: its stored content becomes the uploaded envelope
+/// partway through delivery. So is a sealed one whose edit carries a link-preview thumbnail,
+/// which would take the send's own thumbnail slot.
+pub(super) fn edit_unsent_on(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    target_message_id: &str,
+    sender_id: &str,
+    content: &str,
+    preview: Option<&crate::commands::link_preview::Outgoing>,
+) -> Result<UnsentEdit> {
+    type Row = (String, String, Option<String>, Option<String>, bool, Option<String>);
+    let target: Option<Row> = conn
+        .query_row(
+            "SELECT conversation_id, sender_id, deleted_at, send_state, length(ciphertext) = 0, content
+             FROM message WHERE id = ?1",
+            rusqlite::params![target_message_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        )
+        .optional()?;
+    let Some((conv, author, deleted_at, send_state, never_sealed, stored)) = target else {
+        return Err(not_editable());
+    };
+    if author != sender_id || deleted_at.is_some() || conv != conversation_id {
+        return Err(not_editable());
+    }
+    let has_files: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM outbox_attachment WHERE message_id = ?1 AND link_preview = 0)",
+        rusqlite::params![target_message_id],
+        |row| row.get(0),
+    )?;
+    let is_attachment = stored
+        .as_deref()
+        .is_some_and(super::edit_delete::is_attachment_content);
+    if has_files || is_attachment {
+        return Err(not_sent_yet());
+    }
+    let link_preview = preview.map(|o| crate::commands::link_preview::wire::to_stored(&o.preview));
+    // Delivered meanwhile: an ordinary edit.
+    if send_state.is_none() {
+        queue_edit_on(conn, conversation_id, target_message_id, sender_id, content, preview, link_preview)?;
+        return Ok(UnsentEdit::Queued);
+    }
+    // Only one still going out: a failed or refused send offers Retry and Discard, not Edit.
+    if send_state.as_deref() != Some(super::outbox::PENDING) {
+        return Err(not_sent_yet());
+    }
+    if never_sealed {
+        let tx = conn.unchecked_transaction()?;
+        let written = tx.execute(
+            "UPDATE message SET content = ?1, link_preview = ?2
+             WHERE id = ?3 AND sender_id = ?4 AND length(ciphertext) = 0 AND send_state IS NOT NULL",
+            rusqlite::params![content, link_preview, target_message_id, sender_id],
+        )?;
+        if written == 0 {
+            return Err(not_sent_yet());
+        }
+        // The send's own thumbnail slot: the new preview's, or none.
+        super::outbox::store_preview_thumbnail_on(
+            &tx,
+            target_message_id,
+            preview.and_then(|o| o.thumbnail.as_ref()),
+        )?;
+        tx.commit()?;
+        return Ok(UnsentEdit::Rewritten);
+    }
+    if preview.is_some_and(|o| o.thumbnail.is_some()) {
+        return Err(not_sent_yet());
+    }
+    queue_edit_on(conn, conversation_id, target_message_id, sender_id, content, None, link_preview)?;
+    Ok(UnsentEdit::Queued)
+}
+
+fn not_sent_yet() -> Error {
+    Error::Other(anyhow::anyhow!("message has not been sent yet"))
 }
 
 fn not_editable() -> Error {
@@ -335,6 +438,16 @@ async fn deliver_edit_locked(state: &Arc<AppState>, target: &str) -> Result<()> 
         }
         edit
     };
+    // Queued behind a send still out (#2141): the envelope it edits goes first, through the
+    // conversation's line order. Until it has, the edit stays queued, never marked failed.
+    if super::outbox::is_unsent(state, target).await? {
+        // Type-erased: a whole send nested in an edit's future is too deep for the compiler's
+        // Send check in the hosts that await edits (pollis-bot).
+        let send: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<super::types::Message>> + Send + '_>,
+        > = Box::pin(super::outbox::deliver(state, target, None));
+        send.await?;
+    }
 
     match super::edit_delete::post_edit(state, &edit).await {
         Ok(()) => Ok(()),

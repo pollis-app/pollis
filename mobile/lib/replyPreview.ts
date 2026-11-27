@@ -21,8 +21,11 @@ export function replySnippet(message: Quotable): string {
   return message.attachments[0]?.filename ?? "";
 }
 
-// ONE pass, keyed by id (#874); an unloaded target is absent.
-export function replyTargets<M extends Quotable & { reply_to_id?: string | null }>(
+// ONE pass, keyed by id (#874); an unloaded target is absent. A reply to a message still
+// being sent names the core's id (#2141), which its stub carries as `outboxId`.
+export function replyTargets<
+  M extends Quotable & { reply_to_id?: string | null; outboxId?: string },
+>(
   messages: readonly M[],
 ): Map<string, M> {
   const wanted = new Set<string>();
@@ -38,6 +41,8 @@ export function replyTargets<M extends Quotable & { reply_to_id?: string | null 
   for (const m of messages) {
     if (wanted.has(m.id)) {
       out.set(m.id, m);
+    } else if (m.outboxId && wanted.has(m.outboxId)) {
+      out.set(m.outboxId, m);
     }
   }
   return out;

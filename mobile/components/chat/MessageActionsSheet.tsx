@@ -27,6 +27,7 @@ export function MessageActionsSheet({
   quoteName,
   quoteTime,
   isOwn,
+  pending = false,
   isSaved,
   isPinned,
   onReact,
@@ -46,6 +47,8 @@ export function MessageActionsSheet({
   quoteName: string;
   quoteTime: string;
   isOwn: boolean;
+  /** Still being sent (#2141): reply, copy, edit and delete only, until it is delivered. */
+  pending?: boolean;
   isSaved: boolean;
   isPinned: boolean;
   onReact: (emoji: string) => void;
@@ -144,33 +147,35 @@ export function MessageActionsSheet({
           ) : null}
         </View>
 
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            gap: 6,
-          }}
-        >
-          {QUICK_EMOJI.map((emoji, ei) => (
-            <Pressable
-              key={emoji}
-              testID={`btn-react-${ei}`}
-              accessibilityRole="button"
-              accessibilityLabel={t("mobile:chat.reactWith", { emoji })}
-              onPress={() => onReact(emoji)}
-              style={({ pressed }) => ({
-                width: layout.touchMin + 4,
-                height: layout.touchMin + 4,
-                borderRadius: (layout.touchMin + 4) / 2,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: pressed ? semantic.accentSoft : semantic.high,
-              })}
-            >
-              <Text style={{ fontSize: 24 }}>{emoji}</Text>
-            </Pressable>
-          ))}
-        </View>
+        {pending ? null : (
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              gap: 6,
+            }}
+          >
+            {QUICK_EMOJI.map((emoji, ei) => (
+              <Pressable
+                key={emoji}
+                testID={`btn-react-${ei}`}
+                accessibilityRole="button"
+                accessibilityLabel={t("mobile:chat.reactWith", { emoji })}
+                onPress={() => onReact(emoji)}
+                style={({ pressed }) => ({
+                  width: layout.touchMin + 4,
+                  height: layout.touchMin + 4,
+                  borderRadius: (layout.touchMin + 4) / 2,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: pressed ? semantic.accentSoft : semantic.high,
+                })}
+              >
+                <Text style={{ fontSize: 24 }}>{emoji}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         <Group surface="high">
           <ListRow
@@ -179,18 +184,22 @@ export function MessageActionsSheet({
             name={t("actions.reply")}
             onPress={onReply}
           />
-          <ListRow
-            testID="btn-reply-thread"
-            glyph={<Icon.thread size={GLYPH} color={semantic.text} />}
-            name={t("actions.replyInThread")}
-            onPress={onReplyInThread}
-          />
-          <ListRow
-            testID="btn-react-more"
-            glyph={<Icon.smilePlus size={GLYPH} color={semantic.text} />}
-            name={t("reactions.add")}
-            onPress={onOpenPicker}
-          />
+          {pending ? null : (
+            <>
+              <ListRow
+                testID="btn-reply-thread"
+                glyph={<Icon.thread size={GLYPH} color={semantic.text} />}
+                name={t("actions.replyInThread")}
+                onPress={onReplyInThread}
+              />
+              <ListRow
+                testID="btn-react-more"
+                glyph={<Icon.smilePlus size={GLYPH} color={semantic.text} />}
+                name={t("reactions.add")}
+                onPress={onOpenPicker}
+              />
+            </>
+          )}
           <ListRow
             testID="btn-copy-text"
             glyph={<Icon.copy size={GLYPH} color={copyColor(textCopy)} />}
@@ -198,38 +207,42 @@ export function MessageActionsSheet({
             nameStyle={{ color: copyColor(textCopy) }}
             onPress={() => runCopy(onCopyText, setTextCopy)}
           />
-          <ListRow
-            testID="btn-copy-link"
-            glyph={<Icon.link size={GLYPH} color={copyColor(linkCopy)} />}
-            name={linkCopyLabel}
-            nameStyle={{ color: copyColor(linkCopy) }}
-            onPress={() => runCopy(onCopyLink, setLinkCopy)}
-          />
-          <ListRow
-            testID="btn-save"
-            glyph={
-              <Icon.bookmark
-                size={GLYPH}
-                color={isSaved ? semantic.accent : semantic.text}
+          {pending ? null : (
+            <>
+              <ListRow
+                testID="btn-copy-link"
+                glyph={<Icon.link size={GLYPH} color={copyColor(linkCopy)} />}
+                name={linkCopyLabel}
+                nameStyle={{ color: copyColor(linkCopy) }}
+                onPress={() => runCopy(onCopyLink, setLinkCopy)}
               />
-            }
-            name={isSaved ? t("actions.removeBookmark") : t("actions.save")}
-            onPress={onToggleSave}
-          />
-          {onTogglePin ? (
-            <ListRow
-              testID="btn-pin"
-              glyph={
-                isPinned ? (
-                  <Icon.pinOff size={GLYPH} color={semantic.text} />
-                ) : (
-                  <Icon.pin size={GLYPH} color={semantic.text} />
-                )
-              }
-              name={isPinned ? t("actions.unpin") : t("actions.pin")}
-              onPress={onTogglePin}
-            />
-          ) : null}
+              <ListRow
+                testID="btn-save"
+                glyph={
+                  <Icon.bookmark
+                    size={GLYPH}
+                    color={isSaved ? semantic.accent : semantic.text}
+                  />
+                }
+                name={isSaved ? t("actions.removeBookmark") : t("actions.save")}
+                onPress={onToggleSave}
+              />
+              {onTogglePin ? (
+                <ListRow
+                  testID="btn-pin"
+                  glyph={
+                    isPinned ? (
+                      <Icon.pinOff size={GLYPH} color={semantic.text} />
+                    ) : (
+                      <Icon.pin size={GLYPH} color={semantic.text} />
+                    )
+                  }
+                  name={isPinned ? t("actions.unpin") : t("actions.pin")}
+                  onPress={onTogglePin}
+                />
+              ) : null}
+            </>
+          )}
         </Group>
 
         {isOwn ? (

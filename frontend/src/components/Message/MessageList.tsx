@@ -231,6 +231,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     for (const m of sortedMessages) {
       if (wanted.has(m.id)) {
         map.set(m.id, m);
+      } else if (m.outbox_id && wanted.has(m.outbox_id)) {
+        // A reply to a message still being sent names the core's id (#2141).
+        map.set(m.outbox_id, m);
       }
     }
     return map;
