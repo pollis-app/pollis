@@ -1,5 +1,6 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { clampPanelPx, resolveDrag } from "./panelWidth";
+import "./ResizeHandle.css";
 
 interface ResizeHandleProps {
   panelRef: React.RefObject<HTMLElement | null>;
@@ -11,7 +12,7 @@ interface ResizeHandleProps {
   onReset: () => void;
 }
 
-/** Drag handle on a side panel's inner edge (#985). Moves write `style.width` directly (no React per move); the store is written once on release. Collapse lands on release: this is a child of the panel, so unmounting mid-drag strands the capture. */
+/** Drag handle on a side panel's inner edge (#985). Moves write `style.width` directly (no React per move); the store is written once on release. Collapse lands on release: this is a child of the panel, so unmounting mid-drag strands the capture. A drag selects nothing (#2128): the press's default action is cancelled and `<html data-resizing>` turns selection off page-wide until the drag ends, however it ends. */
 export const ResizeHandle: React.FC<ResizeHandleProps> = ({
   panelRef,
   edge,
@@ -29,6 +30,10 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
     max: number;
     requested: number;
     moved: boolean;
+    handle: HTMLDivElement;
+    pointerId: number;
+    /** The blur listener as added, so the same function is removed whichever render ends the drag. */
+    onBlur: () => void;
   } | null>(null);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -48,12 +53,17 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
       max: maxPx(),
       requested: rect.width,
       moved: false,
+      handle: e.currentTarget,
+      pointerId: e.pointerId,
+      onBlur: endDrag,
     };
+    // Cancels the press's default action, so no text selection starts from it.
+    e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     e.currentTarget.dataset.dragging = "true";
-    // Keep the cursor and avoid text selection while the pointer leaves the handle.
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    // Selection off and the cursor held page-wide while the pointer leaves the handle.
+    document.documentElement.dataset.resizing = "true";
+    window.addEventListener("blur", endDrag);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -69,18 +79,24 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
     panel.style.width = `${clampPanelPx(state.requested, state.max)}px`;
   };
 
-  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+  /** Clears what a drag sets outside React: the handle's flag, the page-wide flag, the blur listener. */
+  function clearDragChrome({ handle, onBlur }: { handle: HTMLDivElement; onBlur: () => void }) {
+    window.removeEventListener("blur", onBlur);
+    delete handle.dataset.dragging;
+    delete document.documentElement.dataset.resizing;
+  }
+
+  /** Ends the drag on release, cancel, a lost capture or the window losing focus; a second call is a no-op. */
+  function endDrag() {
     const state = drag.current;
     if (!state) {
       return;
     }
     drag.current = null;
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
+    clearDragChrome(state);
+    if (state.handle.hasPointerCapture(state.pointerId)) {
+      state.handle.releasePointerCapture(state.pointerId);
     }
-    delete e.currentTarget.dataset.dragging;
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
     const panel = panelRef.current;
     if (panel) {
       panel.style.width = "";
@@ -96,7 +112,19 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
       return;
     }
     onCommit(outcome.px);
-  };
+  }
+
+  // Unmounted mid-drag (the panel closed by a shortcut): selection must not stay off.
+  useEffect(() => {
+    return () => {
+      const state = drag.current;
+      if (state) {
+        drag.current = null;
+        clearDragChrome(state);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Straddles the border (VS Code sash); a solid 1px line on hover and drag.
   const placement = edge === "end" ? "-end-1" : "-start-1";
@@ -113,6 +141,7 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
       onPointerMove={handlePointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      onLostPointerCapture={endDrag}
       onDoubleClick={onReset}
       className={`group absolute inset-y-0 ${placement} z-10 w-2 cursor-col-resize touch-none`}
     >

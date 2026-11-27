@@ -1,0 +1,11 @@
+/* A side-panel resize drag in progress (#2128), set by ResizeHandle on <html>.
+ * Nothing on the page may be selected while it lasts, including text that opts
+ * back in with `user-select: text`. WebKit (the shipping WebView on macOS and
+ * Linux) honours only the prefixed property, so both are set. The cursor holds
+ * col-resize wherever the pointer wanders. */
+:root[data-resizing="true"],
+:root[data-resizing="true"] * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  cursor: col-resize !important;
+}

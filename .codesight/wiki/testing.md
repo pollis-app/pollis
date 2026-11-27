@@ -1249,7 +1249,7 @@ and proves nothing extra. These specs drive the **browser** build with
 branching; no MLS, no delivery service, no Turso.
 
 ```bash
-pnpm --filter @pollis/e2e exec playwright install chromium   # once
+pnpm --filter @pollis/e2e exec playwright install chromium webkit   # once (WebKit runs only the specs its project names)
 pnpm --filter @pollis/e2e e2e:ui                             # all specs
 pnpm --filter @pollis/e2e e2e:ui bookmarks                   # one file (substring match)
 ```
@@ -1274,6 +1274,7 @@ ran on every renderer PR from #1059 until #2022.
 | `login-prompt.spec.ts` | The sign-in heading follows the step: "Enter your email to continue", then "Enter the code we emailed you" on the code step |
 | `first-run-appearance.spec.ts` | First-run Terminal / Modern step (#1924): a new account or first enrollment with no saved skin is asked before the app opens, Modern preselected and saved as `refined`, Terminal applies live, busy and failed saves; an account that already chose, a known install and a returning sign-in are not asked |
 | `voice-resolution.spec.ts` | In-call resolution (#1902): the Resolution panel appears only while the user sends a share or camera, a pick calls `set_screen_share_max_height` / `set_camera_max_height` with the new ceiling and never restarts the stream, it is the same preference as Voice & Video settings (both ways), and a camera started from the picker carries the stored ceiling |
+| `resize-no-select.spec.ts` | Dragging the left sidebar's or right panel's resize edge selects nothing (#2128) in BOTH skins: the selection is empty mid-drag and after release, after a release outside the window, and after the window loses focus mid-drag, and a double-click selects text again afterwards. Runs on Chromium **and WebKit** (the config's `webkit` project): WebKit ignores unprefixed `user-select`, so Chromium alone passed on the broken code |
 | `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849). The persistent strips' copy of these controls is `voice-sidebar-parity.spec.ts` |
 | `autolock.spec.ts` | Idle auto-lock: the window is chosen, reaches the backend and survives a restart; the shell reports activity; a backend lock drops to the PIN gate **and empties the query cache**, in BOTH skins (#851) |
 | `i18n.spec.ts` | The language selector, switching, per-device persistence, OS-locale default and the English fallback — driven through a synthetic locale so it survives the real language list changing, in BOTH skins (#855). Also pins that the sidebar's settings rows are reached by `sidebar-row-*` testid and not by their translated label, under a locale that renames every one of them (#932) |

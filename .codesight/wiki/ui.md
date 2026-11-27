@@ -868,6 +868,19 @@ the drag at all — the store and `localStorage` are written **once**, on releas
 is the only moment a width is worth remembering. The imperative style is cleared before
 that write so the committed render owns the width afterwards.
 
+**A drag selects nothing (#2128).** `pointerdown` calls `preventDefault()`, so no
+selection starts from the press, and sets `<html data-resizing="true">`, which
+`ResizeHandle.css` turns into `-webkit-user-select: none` + `user-select: none` (and the
+col-resize cursor) on every element, `!important` so text that opts back in with
+`user-select: text` is covered too. The prefixed property is the load-bearing one:
+WebKit, the shipping WebView on macOS and Linux, ignores the unprefixed one, so the old
+`body.style.userSelect = "none"` worked in Chromium and did nothing in the app. The flag
+comes off on every way a drag ends: `pointerup`, `pointercancel`, `lostpointercapture`
+(a release outside the window included), `window` `blur` (focus taken mid-drag with no
+release) and unmount. `e2e/resize-no-select.spec.ts` drags both edges in both looks, on
+Chromium **and WebKit** (the config's `webkit` project; Chromium alone passed on the
+broken code).
+
 **RTL.** Which physical edge moves is measured at pointer-down (whichever edge the
 handle is nearer to is the one that moves), so the same component works under
 `dir="rtl"`, where the sidebar is drawn on the right and grows leftwards, without
