@@ -184,6 +184,40 @@ impl SharedStateLock {
         self.policy
     }
 
+    /// One attempt to join the hold, taking the file lock if nobody in this `AppState` has it
+    /// yet. `Ok(None)` when another process holds it, or while suspending with no hold to join.
+    /// Never blocks.
+    pub fn try_acquire_now(
+        self: &Arc<Self>,
+        data_dir: &Path,
+    ) -> Result<Option<SharedStateGuard>, LockError> {
+        if self.policy == LockPolicy::HeldByCaller {
+            return Ok(Some(SharedStateGuard { owner: None }));
+        }
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        // Joining an existing hold is always allowed, even while suspending: the joiner
+        // may be nested inside the very section the suspend is waiting to drain. A hold
+        // whose file lock was force-released (#1599, `force_release`) is not joined: it
+        // no longer excludes anyone, so the file lock is taken again first.
+        if inner.holders > 0 && inner.lock.is_some() {
+            inner.holders += 1;
+            return Ok(Some(SharedStateGuard {
+                owner: Some(self.clone()),
+            }));
+        }
+        if !suspend::is_suspending() {
+            if let Some(lock) = StateLock::try_acquire_in(data_dir)? {
+                inner.lock = Some(lock);
+                inner.holders += 1;
+                suspend::hold_started();
+                return Ok(Some(SharedStateGuard {
+                    owner: Some(self.clone()),
+                }));
+            }
+        }
+        Ok(None)
+    }
+
     /// Join the hold, taking the file lock if nobody in this `AppState` has it yet. Waits up to
     /// `wait` for another process.
     ///
@@ -194,34 +228,11 @@ impl SharedStateLock {
         data_dir: &Path,
         wait: Duration,
     ) -> Result<SharedStateGuard, LockError> {
-        if self.policy == LockPolicy::HeldByCaller {
-            return Ok(SharedStateGuard { owner: None });
-        }
         let mut deadline = Instant::now() + wait;
         let mut logged = false;
         loop {
-            {
-                let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-                // Joining an existing hold is always allowed, even while suspending: the joiner
-                // may be nested inside the very section the suspend is waiting to drain. A hold
-                // whose file lock was force-released (#1599, `force_release`) is not joined: it
-                // no longer excludes anyone, so the file lock is taken again first.
-                if inner.holders > 0 && inner.lock.is_some() {
-                    inner.holders += 1;
-                    return Ok(SharedStateGuard {
-                        owner: Some(self.clone()),
-                    });
-                }
-                if !suspend::is_suspending() {
-                    if let Some(lock) = StateLock::try_acquire_in(data_dir)? {
-                        inner.lock = Some(lock);
-                        inner.holders += 1;
-                        suspend::hold_started();
-                        return Ok(SharedStateGuard {
-                            owner: Some(self.clone()),
-                        });
-                    }
-                }
+            if let Some(guard) = self.try_acquire_now(data_dir)? {
+                return Ok(guard);
             }
             if suspend::is_suspending() {
                 // Going to the background: start no new hold until the host says we are back.
@@ -580,7 +591,7 @@ pub fn lock_path(data_dir: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn dir() -> tempfile::TempDir {
@@ -666,7 +677,7 @@ mod tests {
     }
 
     /// The suspend gate is process-global: the tests that close it run one at a time.
-    static GATE_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    pub(crate) static GATE_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[tokio::test(flavor = "multi_thread")]
     async fn going_to_the_background_drains_holds_and_survives_a_quick_return() {

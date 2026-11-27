@@ -32,6 +32,109 @@ pub fn apply_local_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// The message indexes the read paths are built around (#2171, #2172), in build order.
+///
+/// - `idx_message_conversation_order`: the message list's order (`sent_at, id`) plus `sender_id`
+///   and `deleted_at`, so unread counts, the newest message per conversation and page reads are
+///   answered from the index alone. Every SQLCipher table lookup is a page decrypt; the narrower
+///   index it replaces made the unread count read every stored message.
+/// - `idx_message_conversation_thread`: thread replies only, with every column
+///   `list_thread_summaries` reads.
+///
+/// Deliberately NOT in `local_schema.sql`, which every open replays: only the app's own open
+/// builds these ([`upgrade_message_indexes`]), under the cross-process state lock, best-effort.
+/// Correctness never depends on them, only speed.
+pub(crate) const MESSAGE_INDEXES: [(&str, &str); 2] = [
+    (
+        "idx_message_conversation_order",
+        "CREATE INDEX IF NOT EXISTS idx_message_conversation_order
+             ON message(conversation_id, sent_at, id, sender_id, deleted_at)",
+    ),
+    (
+        "idx_message_conversation_thread",
+        "CREATE INDEX IF NOT EXISTS idx_message_conversation_thread
+             ON message(conversation_id, thread_id, sent_at, deleted_at)
+             WHERE thread_id IS NOT NULL",
+    ),
+];
+
+/// The conversation index [`MESSAGE_INDEXES`] replaces. Dropped only once every one of them
+/// exists; an older build that opens the file recreates it and reads the same results.
+pub(crate) const RETIRED_MESSAGE_INDEX: &str = "idx_message_conversation";
+
+/// Create [`MESSAGE_INDEXES`], then drop [`RETIRED_MESSAGE_INDEX`]: separate statements, the
+/// drop last, so a failure or a kill at any point leaves a usable index set (the old one is
+/// kept until its replacement exists). No lock: callers decide that.
+pub(crate) fn apply_message_indexes(conn: &Connection) -> Result<()> {
+    for (_, create) in MESSAGE_INDEXES {
+        conn.execute_batch(create)?;
+    }
+    conn.execute_batch(&format!("DROP INDEX IF EXISTS {RETIRED_MESSAGE_INDEX}"))?;
+    Ok(())
+}
+
+/// Whether [`apply_message_indexes`] has nothing left to do.
+fn message_indexes_current(conn: &Connection) -> Result<bool> {
+    let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'message'")?;
+    let names: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(MESSAGE_INDEXES.iter().all(|(name, _)| names.iter().any(|n| n == name))
+        && !names.iter().any(|n| n == RETIRED_MESSAGE_INDEX))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Runs while [`upgrade_message_indexes`] holds the state lock, before the build. Tests only.
+    pub(crate) static DURING_INDEX_BUILD: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        std::cell::RefCell::new(None);
+}
+
+/// Build [`MESSAGE_INDEXES`] on the app's own open, best-effort (#2171, #2172).
+///
+/// The first open after the upgrade builds them (~0.5 s desktop, seconds on a phone, at 100k
+/// messages). That holds SQLite's write lock throughout, so it runs only under the cross-process
+/// state lock: a notification or share extension mid-decrypt (or mid-`merge_staged_commit`) can
+/// never hit `SQLITE_BUSY` because of it. Never waits: when another process holds the lock, or
+/// the build fails (disk full, busy), it is logged and skipped, the old index stays, and the
+/// next open tries again. An unlock is never refused or delayed for it.
+fn upgrade_message_indexes(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    lock: &std::sync::Arc<crate::notify::lock::SharedStateLock>,
+) {
+    match message_indexes_current(conn) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(e) => {
+            crate::diag!("[db] message index check failed; not building them this open: {e}");
+            return;
+        }
+    }
+    let _hold = match lock.try_acquire_now(data_dir) {
+        Ok(Some(hold)) => hold,
+        Ok(None) => {
+            crate::diag!("[db] another process holds the state lock; message indexes on a later open");
+            return;
+        }
+        Err(e) => {
+            crate::diag!("[db] state lock unavailable ({e}); message indexes on a later open");
+            return;
+        }
+    };
+    #[cfg(test)]
+    DURING_INDEX_BUILD.with(|hook| {
+        if let Some(hook) = hook.borrow().as_ref() {
+            hook();
+        }
+    });
+    let started = std::time::Instant::now();
+    match apply_message_indexes(conn) {
+        Ok(()) => crate::diag!("[db] message indexes built in {} ms", started.elapsed().as_millis()),
+        Err(e) => crate::diag!("[db] message index build failed, old index kept; retried next open: {e}"),
+    }
+}
+
 /// `<data_dir>/pollis_<user_id>.db`, the ONLY way a user id becomes a DB path.
 ///
 /// The id is also validated at `commands::auth::accept_server_user_id`; this is the same check at the join.
@@ -54,17 +157,34 @@ impl LocalDb {
         Self::open_for_user_in(&dirs_path(), user_id, key)
     }
 
-    /// [`LocalDb::open_for_user`] under an explicit data directory
-    /// ([`crate::state::AppState::local_data_dir`]).
+    /// [`LocalDb::open_for_user`] under an explicit data directory, for a caller with no
+    /// `AppState`: it takes the cross-process state lock with a hold of its own.
     pub fn open_for_user_in(data_dir: &std::path::Path, user_id: &str, key: &[u8]) -> Result<Self> {
+        let lock = crate::notify::lock::SharedStateLock::new(crate::notify::lock::LockPolicy::PerSection);
+        Self::open_for_user_with_lock(data_dir, user_id, key, &lock)
+    }
+
+    /// The app's open ([`crate::state::AppState::load_user_db_with_key`]): `lock` is the
+    /// `AppState`'s own state lock, which [`upgrade_message_indexes`] joins.
+    pub fn open_for_user_with_lock(
+        data_dir: &std::path::Path,
+        user_id: &str,
+        key: &[u8],
+        lock: &std::sync::Arc<crate::notify::lock::SharedStateLock>,
+    ) -> Result<Self> {
         crate::private_fs::create_dir_all(data_dir)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create data dir: {e}")))?;
 
         let db_path = user_db_path(data_dir, user_id)?;
-        Self::open_at(&db_path, key)
+        Self::open_at(data_dir, &db_path, key, lock)
     }
 
-    fn open_at(db_path: &std::path::Path, key: &[u8]) -> Result<Self> {
+    fn open_at(
+        data_dir: &std::path::Path,
+        db_path: &std::path::Path,
+        key: &[u8],
+        lock: &std::sync::Arc<crate::notify::lock::SharedStateLock>,
+    ) -> Result<Self> {
         let key_pragma = format!("PRAGMA key = \"x'{}'\"", hex::encode(key));
 
         // #992: a plaintext DB from a build whose `PRAGMA key` did nothing. Destroy it explicitly so its pages don't linger.
@@ -131,6 +251,8 @@ impl LocalDb {
         // Before the schema batch, which indexes one of these columns.
         add_missing_columns(&conn)?;
         apply_local_schema(&conn)?;
+        // The app's open only, never `open_existing_for_user_in` (#2171, #2172).
+        upgrade_message_indexes(&conn, data_dir, lock);
         // A killed earlier process's outbox claims (#2100): nothing of it is live.
         crate::commands::messages::purge_stale_outbox_claims_on(&conn)?;
         // Orphan attachment bytes (#1335); bytes another process is storing are under its claim.
@@ -151,7 +273,8 @@ impl LocalDb {
     /// Unlike [`LocalDb::open_for_user_in`], a missing file, a wrong key or a schema mismatch is an
     /// error, not a reason to destroy the file: the app owns the database, and a stale notification
     /// key must never cost the user their history. Nothing that assumes "no other process is using
-    /// this file" (the orphan-attachment sweep, eviction) runs here.
+    /// this file" (the orphan-attachment sweep, eviction) runs here, and no index is ever built
+    /// here ([`MESSAGE_INDEXES`] belong to the app's own open).
     pub fn open_existing_for_user_in(
         data_dir: &std::path::Path,
         user_id: &str,
@@ -179,6 +302,8 @@ impl LocalDb {
         }
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         // Registers `pollis_search_text`, which the `message` triggers call; the batch is idempotent.
+        // It builds no message index (#2171, #2172): a multi-second build here would hold the
+        // write lock under an app mid-decrypt. Only the app's own open builds them.
         apply_local_schema(&conn)?;
         Ok(Self { conn })
     }
@@ -190,6 +315,7 @@ impl LocalDb {
         conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         apply_local_schema(&conn)?;
+        apply_message_indexes(&conn)?;
         Ok(Self { conn })
     }
 
@@ -2132,6 +2258,178 @@ mod tests {
                 "{name} was written in plaintext — this build's SQLCipher is not encrypting"
             );
             println!("wrote {} ({} bytes)", path.display(), bytes.len());
+        }
+    }
+}
+
+/// #2171 / #2172: the message indexes are built by the app's own open only, under the state
+/// lock, best-effort, create first and drop last.
+#[cfg(test)]
+mod message_index_tests {
+    use super::*;
+    use crate::notify::lock::{tests::GATE_TESTS, StateLock};
+
+    const USER: &str = "index-user";
+    const KEY: &[u8; 32] = b"pollis-index-upgrade-test-key-32";
+    const OLD_INDEX_DDL: &str =
+        "CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at)";
+
+    fn names(db: &LocalDb) -> Vec<String> {
+        let mut stmt = db
+            .conn()
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'message' ORDER BY 1",
+            )
+            .unwrap();
+        stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+    }
+
+    fn has(db: &LocalDb, name: &str) -> bool {
+        names(db).iter().any(|n| n == name)
+    }
+
+    /// A database as the build before this change left it: the old conversation index, none of
+    /// the new ones, and some messages.
+    fn pre_upgrade_db(dir: &std::path::Path) {
+        let db = LocalDb::open_for_user_in(dir, USER, KEY).expect("create");
+        let conn = db.conn();
+        for (name, _) in MESSAGE_INDEXES {
+            conn.execute_batch(&format!("DROP INDEX IF EXISTS {name}")).unwrap();
+        }
+        conn.execute_batch(OLD_INDEX_DDL).unwrap();
+        for i in 0..50 {
+            conn.execute(
+                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, thread_id, sent_at)
+                 VALUES (?1, ?2, 'u', X'00', 'x', ?3, '2026-01-01T00:00:00Z')",
+                rusqlite::params![
+                    format!("m{i:02}"),
+                    format!("c{}", i % 3),
+                    (i % 7 == 0).then_some("m00")
+                ],
+            )
+            .unwrap();
+        }
+    }
+
+    fn assert_pre_upgrade(db: &LocalDb) {
+        assert!(has(db, RETIRED_MESSAGE_INDEX), "{:?}", names(db));
+        for (name, _) in MESSAGE_INDEXES {
+            assert!(!has(db, name), "{name} built: {:?}", names(db));
+        }
+    }
+
+    fn assert_upgraded(db: &LocalDb) {
+        assert!(!has(db, RETIRED_MESSAGE_INDEX), "{:?}", names(db));
+        for (name, _) in MESSAGE_INDEXES {
+            assert!(has(db, name), "{name} missing: {:?}", names(db));
+        }
+    }
+
+    #[test]
+    fn a_fresh_app_open_builds_the_indexes_and_retires_the_old_one() {
+        let _serial = GATE_TESTS.blocking_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let db = LocalDb::open_for_user_in(dir.path(), USER, KEY).unwrap();
+        assert_upgraded(&db);
+    }
+
+    /// The headless readers (notification and share extensions, the resume reopen) never build.
+    #[test]
+    fn a_headless_open_never_builds_an_index() {
+        let _serial = GATE_TESTS.blocking_lock();
+        let dir = tempfile::tempdir().unwrap();
+        pre_upgrade_db(dir.path());
+        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY).unwrap();
+        assert_pre_upgrade(&db);
+        drop(db);
+        let db = LocalDb::open_for_user_in(dir.path(), USER, KEY).unwrap();
+        assert_upgraded(&db);
+    }
+
+    /// A headless holder of the state lock and an upgrading open exclude each other: with the
+    /// extension holding it the build is skipped (and the open still succeeds); during the build
+    /// the app holds it, so the extension cannot start.
+    #[test]
+    fn the_build_and_a_headless_lock_holder_are_mutually_exclusive() {
+        let _serial = GATE_TESTS.blocking_lock();
+        let dir = tempfile::tempdir().unwrap();
+        pre_upgrade_db(dir.path());
+
+        let headless = StateLock::try_acquire_in(dir.path()).unwrap().expect("headless holds it");
+        let db = LocalDb::open_for_user_in(dir.path(), USER, KEY).expect("the unlock is never refused");
+        assert_pre_upgrade(&db);
+        drop(db);
+        drop(headless);
+
+        let path = dir.path().to_path_buf();
+        let saw = std::rc::Rc::new(std::cell::Cell::new(false));
+        let seen = saw.clone();
+        DURING_INDEX_BUILD.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move || {
+                assert!(
+                    StateLock::try_acquire_in(&path).unwrap().is_none(),
+                    "an extension could take the state lock during the build"
+                );
+                seen.set(true);
+            }))
+        });
+        let db = LocalDb::open_for_user_in(dir.path(), USER, KEY).unwrap();
+        DURING_INDEX_BUILD.with(|h| *h.borrow_mut() = None);
+        assert!(saw.get(), "the build ran without the hook");
+        assert_upgraded(&db);
+        drop(db);
+        assert!(
+            StateLock::try_acquire_in(dir.path()).unwrap().is_some(),
+            "the lock is released after the build"
+        );
+    }
+
+    /// A failed build (here: the name is taken, as a full disk or a busy file would fail it) is
+    /// logged and skipped: the unlock opens, the old index stays, and the next open finishes.
+    #[test]
+    fn a_failed_build_never_blocks_the_open_and_keeps_the_old_index() {
+        let _serial = GATE_TESTS.blocking_lock();
+        for (blocked, _) in MESSAGE_INDEXES {
+            let dir = tempfile::tempdir().unwrap();
+            pre_upgrade_db(dir.path());
+            {
+                let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY).unwrap();
+                db.conn()
+                    .execute_batch(&format!("CREATE VIEW {blocked} AS SELECT 1"))
+                    .unwrap();
+            }
+            let db =
+                LocalDb::open_for_user_in(dir.path(), USER, KEY).expect("the unlock is never refused");
+            assert!(
+                has(&db, RETIRED_MESSAGE_INDEX),
+                "old index dropped after a failed build: {:?}",
+                names(&db)
+            );
+            assert!(!has(&db, blocked));
+            db.conn().execute_batch(&format!("DROP VIEW {blocked}")).unwrap();
+            drop(db);
+            let db = LocalDb::open_for_user_in(dir.path(), USER, KEY).unwrap();
+            assert_upgraded(&db);
+        }
+    }
+
+    /// Killed after a CREATE and before the DROP (or between the two CREATEs): the old index is
+    /// still there, and the next open finishes the job.
+    #[test]
+    fn a_crash_between_create_and_drop_is_harmless() {
+        let _serial = GATE_TESTS.blocking_lock();
+        for done in 1..=MESSAGE_INDEXES.len() {
+            let dir = tempfile::tempdir().unwrap();
+            pre_upgrade_db(dir.path());
+            {
+                let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY).unwrap();
+                for (_, create) in &MESSAGE_INDEXES[..done] {
+                    db.conn().execute_batch(create).unwrap();
+                }
+                assert!(has(&db, RETIRED_MESSAGE_INDEX));
+            }
+            let db = LocalDb::open_for_user_in(dir.path(), USER, KEY).unwrap();
+            assert_upgraded(&db);
         }
     }
 }

@@ -203,7 +203,12 @@ fn read_after_breaks_sent_at_ties_on_id_like_the_backward_read() {
 // #2171 / #2172: the indexed unread, newest-message and thread-summary reads return exactly
 // what the shipped queries returned, on a DB with every edge case those reads must get right.
 mod index_equivalence {
-    use super::local_db;
+    /// The local schema plus the message indexes, as the app's own open leaves it.
+    fn local_db() -> Connection {
+        let conn = super::local_db();
+        crate::db::local::apply_message_indexes(&conn).unwrap();
+        conn
+    }
     use crate::commands::messages::read::{
         last_messages_on, thread_summaries_on, LAST_MESSAGE_SQL, THREAD_SUMMARIES_SQL,
     };
@@ -517,29 +522,34 @@ mod index_equivalence {
         .collect()
     }
 
-    /// An upgrade swaps the old conversation index for the wide one; a downgrade (an older build
-    /// opening the file) brings the old one back beside it, and the next upgrade drops it again.
-    /// Results are the same at every step.
+    /// Results are the same with every index set a device can hold: before the upgrade (or after
+    /// a skipped or failed build: the old index only), mid-upgrade (old and new), after it, and
+    /// after a downgrade (an older build recreates the old index beside the new ones).
     #[test]
-    fn the_index_swap_survives_upgrade_and_downgrade() {
-        let conn = local_db();
+    fn every_index_set_a_device_can_hold_reads_the_same() {
+        let conn = super::local_db();
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);",
+        )
+        .unwrap();
+        seed(&conn);
+        assert_same_results(&conn);
+
+        conn.execute_batch(crate::db::local::MESSAGE_INDEXES[0].1).unwrap();
+        assert_same_results(&conn);
+
+        crate::db::local::apply_message_indexes(&conn).unwrap();
         let names = index_names(&conn);
+        assert!(!names.iter().any(|n| n == "idx_message_conversation"), "{names:?}");
         assert!(names.iter().any(|n| n == "idx_message_conversation_order"), "{names:?}");
         assert!(names.iter().any(|n| n == "idx_message_conversation_thread"), "{names:?}");
-        assert!(!names.iter().any(|n| n == "idx_message_conversation"), "{names:?}");
-        seed(&conn);
+        assert_same_results(&conn);
 
         // What an older build's schema does on open.
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);",
         )
         .unwrap();
-        assert_same_results(&conn);
-
-        crate::db::local::apply_local_schema(&conn).unwrap();
-        let names = index_names(&conn);
-        assert!(!names.iter().any(|n| n == "idx_message_conversation"), "{names:?}");
-        assert!(names.iter().any(|n| n == "idx_message_conversation_order"), "{names:?}");
         assert_same_results(&conn);
     }
 

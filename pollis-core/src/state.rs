@@ -362,7 +362,12 @@ impl AppState {
         user_id: &str,
         db_key: &[u8],
     ) -> crate::error::Result<bool> {
-        let db = LocalDb::open_for_user_in(&self.local_data_dir(), user_id, db_key)?;
+        let db = LocalDb::open_for_user_with_lock(
+            &self.local_data_dir(),
+            user_id,
+            db_key,
+            &self.state_lock,
+        )?;
 
         let mls_empty: bool = db
             .conn()
