@@ -74,7 +74,7 @@ import {
   useUserGroupsWithChannels,
   useGroupMembers,
   useDMChannel,
-  useDMRequests,
+  useIsDmRequest,
   useLinkPreviewsEnabled,
   useKeyChangeNotices,
   usePeerVerifications,
@@ -275,9 +275,7 @@ function TextChat(props: ChatViewProps = {}) {
     [dmPeers],
   );
   // Link previews (#1987): never drawn in a request not yet accepted; generated per the device setting.
-  const { data: dmRequests } = useDMRequests();
-  const isPendingRequest =
-    isDm && !!conversationId && (dmRequests ?? []).some((d) => d.id === conversationId);
+  const isPendingRequest = useIsDmRequest(kind, conversationId);
   const { enabled: linkPreviewsEnabled } = useLinkPreviewsEnabled();
   const draftKey = conversationDraftKey(kind, conversationId);
   const composerPreview = useLinkPreviewDraft(

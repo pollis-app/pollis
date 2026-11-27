@@ -10,6 +10,8 @@ import {
 import { ChatInput, type Attachment } from "../../ui/ChatInput";
 import { outgoingAttachments, releaseStaged, type OutgoingAttachment } from "../../../utils/attachmentEnvelope";
 import { ThreadMessageRow } from "./ThreadMessageRow";
+import { useMessageRenderContext } from "../../Message/useMessageRenderContext";
+import { useIsDmRequest } from "../../../hooks/queries/useBlocks";
 import { EmptyState } from "../../ui/EmptyState";
 import { discardStagedAttachment } from "../../../bridge";
 import type { LinkPreviewDraft } from "../../../utils/linkPreview";
@@ -28,6 +30,10 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
     const { data: replies = [], isLoading } = useThreadMessages(threadId);
     const sendMessage = useSendMessage();
     const currentUser = appStore.currentUser;
+    // Bodies draw as the timeline draws them (#2143): formatting, mentions, links, previews. No
+    // sender previews in an unaccepted DM request (#1987); a channel's names follow its group (#2003).
+    const isRequest = useIsDmRequest(channelId, conversationId);
+    const ctx = useMessageRenderContext(channelId ? appStore.chatGroupId : null, !isRequest);
 
     const root = useMemo(
       () => messages.find((m) => m.id === threadId) ?? null,
@@ -83,7 +89,7 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
           {root && (
             <div className="mb-3 border-b border-line pb-3">
-              <ThreadMessageRow message={root} isRoot />
+              <ThreadMessageRow message={root} ctx={ctx} isRoot />
             </div>
           )}
 
@@ -96,7 +102,7 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
           ) : (
             <div className="flex flex-col gap-2">
               {replies.map((reply) => (
-                <ThreadMessageRow key={reply.id} message={reply} />
+                <ThreadMessageRow key={reply.id} message={reply} ctx={ctx} />
               ))}
             </div>
           )}

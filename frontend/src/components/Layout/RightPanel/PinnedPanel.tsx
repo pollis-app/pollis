@@ -6,7 +6,7 @@ import { observer } from "mobx-react-lite";
 import { Pin, PinOff } from "lucide-react";
 import { usePinnedMessages, useTogglePinnedMessage } from "../../../hooks/queries/usePins";
 import { linkPreviewFromWire, parseContent } from "../../../hooks/queries/useMessages";
-import { useDMRequests } from "../../../hooks/queries/useBlocks";
+import { useIsDmRequest } from "../../../hooks/queries/useBlocks";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { MessageBody } from "../../Message/MessageBody";
 import { MessageUnfurls } from "../../Message/MessageUnfurls";
@@ -32,8 +32,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = observer(
     const { data: pins = [], isLoading, isError } = usePinnedMessages(activeConversationId);
     const togglePin = useTogglePinnedMessage();
     // No sender previews in an unaccepted DM request, as in its timeline (#1987).
-    const { data: dmRequests = [] } = useDMRequests();
-    const isRequest = !channelId && dmRequests.some((r) => r.id === conversationId);
+    const isRequest = useIsDmRequest(channelId, conversationId);
     // A pin's body draws as it does in the timeline (#2127): mentions, links, previews. A channel's
     // pins name authors as its group shows them (#2003); a DM's, by main profile.
     const ctx = useMessageRenderContext(channelId ? appStore.chatGroupId : null, !isRequest);

@@ -243,3 +243,9 @@ export function useDMRequests() {
     staleTime: 1000 * 60,
   });
 }
+
+/** True while a DM is a request not yet accepted: no sender previews there (#1987). A channel never is. */
+export function useIsDmRequest(kind: string | null, conversationId: string | null): boolean {
+  const { data: dmRequests } = useDMRequests();
+  return kind === "dm" && !!conversationId && (dmRequests ?? []).some((d) => d.id === conversationId);
+}
