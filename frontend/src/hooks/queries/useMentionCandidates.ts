@@ -11,13 +11,13 @@ import { isBotUser } from "../../utils/bots";
 /** Mentionable people (#843), only from membership the user can already see; never a directory lookup. Excludes self. */
 export function useMentionCandidates(): MentionCandidate[] {
   const currentUser = useObserver(() => appStore.currentUser);
-  const selectedGroupId = useObserver(() => appStore.selectedGroupId);
+  const chatGroupId = useObserver(() => appStore.chatGroupId);
   const selectedChannelId = useObserver(() => appStore.selectedChannelId);
   const selectedConversationId = useObserver(() => appStore.selectedConversationId);
 
-  const groupMembers = useGroupMembers(selectedChannelId ? selectedGroupId : null);
+  const groupMembers = useGroupMembers(chatGroupId);
   // The picker shows each member as this group does (#2003); it still inserts `@handle`.
-  const aliases = useGroupAliases(selectedChannelId ? selectedGroupId : null);
+  const aliases = useGroupAliases(chatGroupId);
   const dmConversations = useDMConversations();
 
   const members = groupMembers.data;

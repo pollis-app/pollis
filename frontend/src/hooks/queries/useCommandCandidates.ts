@@ -12,7 +12,7 @@ export interface CommandCandidates {
 
 /** The composer's slash commands (#2018): only in a group channel, never in a DM. */
 export function useCommandCandidates(): CommandCandidates {
-  const groupId = useObserver(() => appStore.selectedGroupId);
+  const groupId = useObserver(() => appStore.chatGroupId);
   const channelId = useObserver(() => appStore.selectedChannelId);
   const inChannel = !!channelId && !!groupId;
   const commands = useGroupCommands(inChannel ? groupId : null);

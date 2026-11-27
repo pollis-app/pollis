@@ -112,7 +112,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   const {
     selectedChannelId,
     selectedConversationId,
-    selectedGroupId,
+    // The open chat's group: a channel's, null in a DM, so a DM never resolves roles or aliases (#2126).
+    chatGroupId,
     replyToMessageId,
     setReplyToMessageId,
     currentUser,
@@ -127,19 +128,19 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   const isDeletingThisChannel =
     !!selectedChannelId && pendingDeleteChannelId === selectedChannelId;
 
-  const { data: groupMembers = [] } = useGroupMembers(selectedGroupId ?? null);
+  const { data: groupMembers = [] } = useGroupMembers(chatGroupId ?? null);
   const adminUserIds = useMemo(
     () => new Set(groupMembers.filter((m) => m.role === "admin").map((m) => m.user_id)),
     [groupMembers],
   );
   const viewerIsAdmin =
-    !!selectedGroupId && !!currentUser && adminUserIds.has(currentUser.id);
+    !!chatGroupId && !!currentUser && adminUserIds.has(currentUser.id);
 
   const chatInputRef = useRef<ChatInputHandle>(null);
 
   // LiveKit room: the group's MLS id for channels, the conversation id for DMs.
   const typingRoomId = selectedChannelId
-    ? selectedGroupId ?? null
+    ? chatGroupId ?? null
     : selectedConversationId ?? null;
   const typing = useTypingPublisher({
     roomId: typingRoomId,
@@ -533,16 +534,16 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   };
 
   const handleConfirmDeleteChannel = async () => {
-    if (!selectedChannelId || !selectedGroupId) {
+    if (!selectedChannelId || !chatGroupId) {
       return;
     }
     try {
       await deleteChannelMutation.mutateAsync({
-        groupId: selectedGroupId,
+        groupId: chatGroupId,
         channelId: selectedChannelId,
       });
       setPendingDeleteChannelId(null);
-      navigate({ to: "/groups/$groupId", params: { groupId: selectedGroupId } });
+      navigate({ to: "/groups/$groupId", params: { groupId: chatGroupId } });
     } catch (error) {
       console.error("Failed to delete channel:", error);
     }
@@ -779,9 +780,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           <MessageList
             messages={channelMessages}
             // MLS group id (for DMs, the dm_channel_id).
-            conversationId={selectedGroupId ?? selectedConversationId ?? null}
-            groupIdForNames={selectedGroupId ?? null}
-            adminUserIds={selectedGroupId ? adminUserIds : undefined}
+            conversationId={chatGroupId ?? selectedConversationId ?? null}
+            groupIdForNames={chatGroupId ?? null}
+            adminUserIds={adminUserIds}
             viewerIsAdmin={viewerIsAdmin}
             onOpenThread={openThread}
             onVerifyKeyChange={setSafety}
