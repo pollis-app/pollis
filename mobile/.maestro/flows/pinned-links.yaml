@@ -87,6 +87,8 @@ tags:
 - assertVisible: ".*github.com.*"
 - takeScreenshot: pinned-links-02-list
 
+# The press lands on the link itself, near the start of the text: the text
+# element is as wide as the row, and on the iPad its centre is empty space.
 # A long press on the link opens the link sheet (real host, Copy / Open) and
 # does not jump back to the conversation.
 - runFlow:
@@ -96,6 +98,7 @@ tags:
     commands:
       - longPressOn:
           id: "text-pin-.*"
+          point: "5%,50%"
       - extendedWaitUntil:
           visible:
             id: "sheet-link"
@@ -110,6 +113,7 @@ tags:
           timeout: 3000
       - longPressOn:
           id: "text-pin-.*"
+          point: "5%,50%"
 - extendedWaitUntil:
     visible:
       id: "sheet-link"

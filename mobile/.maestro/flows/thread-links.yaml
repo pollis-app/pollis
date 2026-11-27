@@ -83,8 +83,9 @@ tags:
 - takeScreenshot: thread-links-01-reply
 
 # A long press on the link opens the link sheet (real host, Copy / Open), not
-# the message sheet. The centre of the body, where a long press lands, lies in
-# the link ("here " is the short end). Retried once, as pinned-links does.
+# the message sheet. The press lands 15% into the body, on the link: "here " is
+# the short start, and the body is as wide as the row, so on the iPad its
+# centre is empty space. Retried once, as pinned-links does.
 - waitForAnimationToEnd:
     timeout: 3000
 - runFlow:
@@ -95,6 +96,7 @@ tags:
       - longPressOn:
           id: "text-message-.*"
           text: "here .*https://github.com/.*"
+          point: "15%,50%"
       - extendedWaitUntil:
           visible:
             id: "sheet-link"
@@ -110,6 +112,7 @@ tags:
       - longPressOn:
           id: "text-message-.*"
           text: "here .*https://github.com/.*"
+          point: "15%,50%"
 - extendedWaitUntil:
     visible:
       id: "sheet-link"
