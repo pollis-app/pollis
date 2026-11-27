@@ -1,0 +1,10 @@
+New
+• Share photos, files and links into Pollis from any app.
+• Bold, italic, underline, strikethrough and code blocks in messages.
+• See how far the other person has read in DMs.
+• Pollis is now available in Persian.
+
+Fixes
+• Faster send, edit, delete, reply, pin and react.
+• Pinned messages and threads show links and previews.
+• Other fixes and improvements.

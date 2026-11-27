@@ -1,0 +1,20 @@
+New
+• Share photos, videos, files, links and text into Pollis from any app, to up to five chats at once.
+• Messages can use bold, italic, underline, strikethrough and code blocks.
+• In DMs, a small picture shows how far the other person has read.
+• Your status shows as away while Pollis is open but not in use.
+• Pollis is now available in Persian.
+• New messages slide in, with small transitions elsewhere.
+• Group headers stay in place while their channels scroll.
+
+Fixes
+• Sending, editing, deleting, replying, pinning and reacting are faster.
+• Pinned messages and threads show links, previews and photos as in the conversation.
+• The message box clears as soon as you tap send, and a message can't be sent twice.
+• Reactions load with their messages instead of popping in.
+• Changing the background repaints every screen right away.
+• After you create or edit something, Back no longer returns to the finished form.
+• The emoji picker stays below the status bar while the keyboard is up.
+• The screen keeps its full height after swiping back with the keyboard up.
+• Search fields and the cards below them line up.
+• Profiles no longer shift while they finish loading.
