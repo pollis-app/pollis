@@ -10,3 +10,11 @@ export function senderName(m: {
 }): string {
   return m.sender_display_name || m.sender_username || m.sender_id;
 }
+
+/**
+ * What a sender's name colour is keyed on: the handle, else the id. The rule is the same for every
+ * sender, the viewer included (#2146), so a name has one colour wherever the chat shows it.
+ */
+export function senderColorKey(m: { sender_id: string; sender_username?: string | null }): string {
+  return m.sender_username ?? m.sender_id;
+}
