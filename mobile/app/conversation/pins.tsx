@@ -17,7 +17,7 @@ import {
   usePinnedMessages,
   useTogglePinnedMessage,
   useResolvePermalink,
-  useDMRequests,
+  useIsDmRequest,
   type PinnedMessage,
 } from "../../hooks/queries";
 import { useMessageBodyContext } from "../../hooks/useMessageBodyContext";
@@ -47,9 +47,7 @@ function PinnedMessagesScreen() {
   // A pin's body draws as the timeline draws it (#2127): mentions, links, the sender's preview.
   const body = useMessageBodyContext(kind, conversationId, groupId);
   // No sender previews in an unaccepted DM request, as in its timeline (#1987).
-  const { data: dmRequests } = useDMRequests();
-  const isRequest =
-    kind === "dm" && !!conversationId && (dmRequests ?? []).some((d) => d.id === conversationId);
+  const isRequest = useIsDmRequest(kind, conversationId);
   const { data: pins = [], isLoading, isError } = usePinnedMessages(conversationId, {
     fresh: true,
   });

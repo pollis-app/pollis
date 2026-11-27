@@ -1,0 +1,142 @@
+appId: ${MAESTRO_APP_ID}
+tags:
+  - parity
+---
+# THREAD LINKS (#2143) — a thread reply is drawn as the conversation draws a
+# message: formatting (#2142), a link (a long press opens the link sheet with
+# its real host, not the message sheet), and the sender's preview card, whose
+# tap leaves for the browser. Self-contained: posts into a fresh self-owned
+# group's #General. Needs network from the device to github.com (the preview is
+# a real fetch, as in link-previews.yaml). The URL must not redirect: a preview
+# whose final URL differs from the body link is dropped at send (#1987).
+
+- runFlow: ../subflows/home.yaml
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
+- runFlow: ../subflows/open-create-group.yaml
+- tapOn:
+    id: "toggle-general-channel"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Thread Links"
+- tapOn:
+    id: "btn-submit-group"
+- runFlow:
+    file: ../subflows/group-created.yaml
+    env:
+      GROUP: "E2E Thread Links"
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+
+# The thread's root.
+- tapOn:
+    id: "input-composer"
+- inputText: "thread links root"
+- tapOn:
+    id: "btn-send"
+- runFlow: ../subflows/message-settled.yaml
+- hideKeyboard
+
+# Open its thread from the message sheet.
+- runFlow: ../subflows/long-press-message.yaml
+- tapOn:
+    id: "btn-reply-thread"
+- assertVisible:
+    id: "screen-thread"
+
+# The reply: bold, then the link, sent with its card.
+- tapOn:
+    id: "input-composer"
+- inputText: "**here** https://github.com/"
+- extendedWaitUntil:
+    visible:
+      id: "composer-link-preview"
+    timeout: 5000
+- extendedWaitUntil:
+    visible: ".*GitHub.*"
+    timeout: 15000
+- tapOn:
+    id: "btn-send"
+- runFlow: ../subflows/message-settled.yaml
+- hideKeyboard
+# The reply's body (`text-message-*`; the root's says "thread links root"):
+# the markers are gone, it reads "here https://github.com/" (the link wrapped
+# in bidi isolates, hence the pattern).
+- extendedWaitUntil:
+    visible:
+      id: "text-message-.*"
+      text: "here .*https://github.com/.*"
+    timeout: 30000
+- assertNotVisible: ".*\\*\\*here.*"
+# The card is the timeline's card, inside the thread screen.
+- extendedWaitUntil:
+    visible:
+      id: "message-link-preview"
+    timeout: 30000
+- assertVisible:
+    id: "screen-thread"
+- takeScreenshot: thread-links-01-reply
+
+# A long press on the link opens the link sheet (real host, Copy / Open), not
+# the message sheet. The centre of the body, where a long press lands, lies in
+# the link ("here " is the short end). Retried once, as pinned-links does.
+- waitForAnimationToEnd:
+    timeout: 3000
+- runFlow:
+    when:
+      notVisible:
+        id: "sheet-link"
+    commands:
+      - longPressOn:
+          id: "text-message-.*"
+          text: "here .*https://github.com/.*"
+      - extendedWaitUntil:
+          visible:
+            id: "sheet-link"
+          timeout: 4000
+          optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "sheet-link"
+    commands:
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - longPressOn:
+          id: "text-message-.*"
+          text: "here .*https://github.com/.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-link"
+    timeout: 5000
+- assertNotVisible:
+    id: "btn-edit"
+- assertVisible:
+    id: "text-link-host"
+    text: "github.com"
+- assertVisible:
+    id: "btn-link-copy"
+- takeScreenshot: thread-links-02-link-sheet
+- tapOn:
+    id: "btn-link-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "sheet-link"
+    timeout: 5000
+- assertVisible:
+    id: "screen-thread"
+
+# Last, so nothing has to come back from the browser: a tap on the reply's card
+# opens its link and Pollis leaves the foreground.
+- tapOn:
+    id: "message-link-preview"
+- extendedWaitUntil:
+    notVisible:
+      id: "screen-thread"
+    timeout: 10000
+- takeScreenshot: thread-links-03-browser

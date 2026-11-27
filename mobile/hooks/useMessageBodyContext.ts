@@ -1,6 +1,6 @@
 // What `MessageBodyInline` needs to draw a body as the timeline does (#2127): which `@mentions`
 // resolve, which is the viewer, alias labels (#2003) and bot handles (#1182). Shared by the
-// conversation screen and the pinned list.
+// conversation screen, the pinned list and the thread screen (#2143).
 
 import { useMemo } from "react";
 import { useObserver } from "mobx-react-lite";

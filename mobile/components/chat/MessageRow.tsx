@@ -428,6 +428,7 @@ export function MessageRow({
               </Text>
             ) : text ? (
               <MessageBodyText
+                testID={messageId ? `text-message-${messageId}` : undefined}
                 style={[ty.body, { color: semantic.text }]}
                 text={text}
                 mentionNames={mentionNames}
