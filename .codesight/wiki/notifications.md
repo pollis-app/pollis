@@ -775,7 +775,11 @@ Android FCM handler both call one plain C function in `pollis-core`
   `notify_db_key`. Whitepaper §3.8 has the trade-off. Desktop never escrows.
 - **Cross-process lock.** Every MLS-mutating step (all `mls_group_lock`
   sections, welcome drains, KeyPackage top-ups, receipt seals) also holds
-  `flock(<data_dir>/state.lock)` (`notify/lock.rs`). The app shares one hold
+  `flock(<data_dir>/state.lock)` (`notify/lock.rs`), and so does the app's
+  one-time local message-index build after an upgrade (#2171, #2172: it holds
+  SQLite's write lock for seconds, so it only runs when `try_acquire_now`
+  gets the lock, and is skipped otherwise; headless opens never build one,
+  see `database.md` → "How the #2171/#2172 indexes are built"). The app shares one hold
   across its sections; the extension holds it for its whole run with a
   deadline of 40% of its budget, and only for the ingest (it lets go before
   the name and mute lookups). On iOS the host takes

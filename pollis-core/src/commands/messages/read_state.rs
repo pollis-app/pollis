@@ -142,6 +142,32 @@ pub(crate) fn is_ahead_of(local: &[ReadCursor], remote: &[ReadCursor]) -> bool {
     })
 }
 
+/// The unread-count SELECT (#2171): `?1` is the user.
+///
+/// A loose index scan walks the distinct conversations in `message`, then each one gets a
+/// ranged count on `idx_message_conversation_order`, from its cursor on (or from the start
+/// when it has none). Conversations with and without a cursor are separate `CASE` arms, so no
+/// `OR` stops the row-value compare from bounding the range. The index carries `sender_id` and
+/// `deleted_at`, so no row is read from the table.
+pub(crate) const UNREAD_COUNTS_SQL: &str = "WITH RECURSIVE convs(id) AS (
+       SELECT (SELECT MIN(conversation_id) FROM message)
+       UNION ALL
+       SELECT (SELECT MIN(conversation_id) FROM message WHERE conversation_id > convs.id)
+       FROM convs WHERE convs.id IS NOT NULL
+     )
+     SELECT convs.id, CASE WHEN c.conversation_id IS NULL THEN (
+         SELECT COUNT(*) FROM message m
+         WHERE m.conversation_id = convs.id AND m.sender_id != ?1 AND m.deleted_at IS NULL
+       ) ELSE (
+         SELECT COUNT(*) FROM message m
+         WHERE m.conversation_id = convs.id
+           AND (m.sent_at, m.id) > (c.last_read_at, c.last_read_message_id)
+           AND m.sender_id != ?1 AND m.deleted_at IS NULL
+       ) END AS n
+     FROM convs LEFT JOIN read_cursor c ON c.conversation_id = convs.id
+     WHERE convs.id IS NOT NULL AND n > 0
+     ORDER BY convs.id";
+
 /// Unread counts for every conversation this device holds messages for.
 ///
 /// Conversations with nothing unread are omitted.
@@ -149,20 +175,7 @@ pub(crate) fn is_ahead_of(local: &[ReadCursor], remote: &[ReadCursor]) -> bool {
 /// Excludes own and deleted messages; with no cursor yet, everything from others counts.
 pub(crate) fn unread_counts(conn: &Connection, user_id: &str) -> Result<Vec<UnreadCount>> {
     let mut stmt = conn
-        .prepare(
-            "SELECT m.conversation_id, COUNT(*)
-             FROM message m
-             LEFT JOIN read_cursor c ON c.conversation_id = m.conversation_id
-             WHERE m.sender_id != ?1
-               AND m.deleted_at IS NULL
-               AND (
-                     c.conversation_id IS NULL
-                     OR (m.sent_at, m.id) > (c.last_read_at, c.last_read_message_id)
-                   )
-             GROUP BY m.conversation_id
-             HAVING COUNT(*) > 0
-             ORDER BY m.conversation_id",
-        )
+        .prepare_cached(UNREAD_COUNTS_SQL)
         .map_err(|e| Error::Other(anyhow::anyhow!("prepare unread: {e}")))?;
     let rows = stmt
         .query_map(rusqlite::params![user_id], |row| {

@@ -518,6 +518,9 @@ async fn a_relaunched_app_never_waits_on_its_dead_predecessors_claims() {
     let queued = enqueue_share(&alice.state, &req).await.expect("stored");
     let id = queued[0].message_id.clone();
     // What the killed process held: the row and its conversation's line, under a live lease.
+    // Its holder is this process's role: another test in this process may have opened the share
+    // extension, which sets the role once for the whole process.
+    let dead = format!("{}:killed", pollis_core::commands::messages::outbox_claim_role());
     for key in [id.clone(), format!("line:{dm}")] {
         let guard = alice.state.local_db.lock().await;
         guard
@@ -525,8 +528,8 @@ async fn a_relaunched_app_never_waits_on_its_dead_predecessors_claims() {
             .expect("db")
             .conn()
             .execute(
-                "INSERT OR REPLACE INTO outbox_claim (key, holder, until_ms) VALUES (?1, 'app:killed', ?2)",
-                rusqlite::params![key, now_ms() + 600_000],
+                "INSERT OR REPLACE INTO outbox_claim (key, holder, until_ms) VALUES (?1, ?2, ?3)",
+                rusqlite::params![key, dead, now_ms() + 600_000],
             )
             .expect("claim");
     }
@@ -535,7 +538,7 @@ async fn a_relaunched_app_never_waits_on_its_dead_predecessors_claims() {
         .invoke_json("unlock", json!({ "userId": alice.user_id(), "pin": TEST_PIN }))
         .await;
     assert_eq!(
-        row_count(&alice, "SELECT COUNT(*) FROM outbox_claim WHERE holder = 'app:killed' AND key = ?1", &id).await,
+        row_count(&alice, &format!("SELECT COUNT(*) FROM outbox_claim WHERE holder = '{dead}' AND key = ?1"), &id).await,
         0,
         "the dead process's claims are gone"
     );

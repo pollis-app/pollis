@@ -2020,7 +2020,7 @@ pub(crate) mod claim {
         let _ = ROLE.set(role);
     }
 
-    fn role() -> &'static str {
+    pub fn role() -> &'static str {
         ROLE.get().copied().unwrap_or("app")
     }
 

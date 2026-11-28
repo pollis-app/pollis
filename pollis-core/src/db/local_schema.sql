@@ -96,7 +96,12 @@ CREATE TABLE IF NOT EXISTS known_envelope (
     recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);
+-- The conversation and thread-summary indexes (#2171, #2172) are NOT here: this
+-- batch is replayed by every open, the headless readers' included, and a
+-- multi-second index build must never run there. `db::local::MESSAGE_INDEXES`
+-- holds them; only the app's own open builds them, under the cross-process state
+-- lock. The retired `idx_message_conversation (conversation_id, sent_at)` is
+-- dropped there once its replacement exists, and is not recreated here either.
 
 -- Thread lookup: fetching one thread's replies, and counting replies per root.
 -- Created on every open like the eviction index above, so existing DBs gain it
