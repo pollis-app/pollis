@@ -4,7 +4,8 @@ import { I18nManager } from "react-native";
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
-import { RESOURCES } from "./resources";
+import { LANGUAGE_LOADERS } from "./resources";
+import { initialResources, switchLanguage } from "./load";
 import { NAMESPACES, DEFAULT_NAMESPACE } from "./namespaces";
 import {
   DEFAULT_LANGUAGE,
@@ -20,9 +21,12 @@ import {
 import { loadDeviceLanguage, saveDeviceLanguage } from "./storage";
 import { setScriptMetrics } from "../theme/tokens";
 
+const initialLanguage = resolveDeviceLanguage(deviceLanguageCandidates());
+
 void i18n.use(initReactI18next).init({
-  resources: RESOURCES,
-  lng: resolveDeviceLanguage(deviceLanguageCandidates()),
+  // English and the device language only (#2187); `switchLanguage` adds any other before use.
+  resources: initialResources(LANGUAGE_LOADERS, DEFAULT_LANGUAGE, [initialLanguage]),
+  lng: initialLanguage,
   fallbackLng: DEFAULT_LANGUAGE,
   supportedLngs: supportedLanguageCodes(),
   ns: NAMESPACES,
@@ -77,7 +81,7 @@ function applyLayoutDirection(language: string): void {
 export async function hydrateLanguage(): Promise<void> {
   const stored = await loadDeviceLanguage(null);
   if (stored && stored !== i18n.language) {
-    await i18n.changeLanguage(stored);
+    await switchLanguage(i18n, LANGUAGE_LOADERS, DEFAULT_NAMESPACE, stored);
   }
   applyLayoutDirection(i18n.language);
 }
@@ -85,14 +89,14 @@ export async function hydrateLanguage(): Promise<void> {
 export async function setLanguage(language: string, userId?: string | null): Promise<void> {
   const normalized = normalizeLanguage(language) ?? DEFAULT_LANGUAGE;
   await saveDeviceLanguage(userId ?? null, normalized);
-  await i18n.changeLanguage(normalized);
+  await switchLanguage(i18n, LANGUAGE_LOADERS, DEFAULT_NAMESPACE, normalized);
   applyLayoutDirection(normalized);
 }
 
 export async function adoptUserLanguage(userId: string | null | undefined): Promise<void> {
   const stored = await loadDeviceLanguage(userId);
   if (stored && stored !== i18n.language) {
-    await i18n.changeLanguage(stored);
+    await switchLanguage(i18n, LANGUAGE_LOADERS, DEFAULT_NAMESPACE, stored);
     applyLayoutDirection(stored);
   }
 }

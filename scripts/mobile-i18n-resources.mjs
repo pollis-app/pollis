@@ -24,10 +24,6 @@ export function listCatalogues(localesDir = LOCALES_DIR) {
   return out;
 }
 
-function identifier(code, ns) {
-  return `${code}_${ns}`.replace(/[^A-Za-z0-9_]/g, "_");
-}
-
 export function render(catalogues) {
   const lines = [
     "// GENERATED FILE — DO NOT EDIT BY HAND.",
@@ -38,25 +34,24 @@ export function render(catalogues) {
     "//",
     "//     node scripts/mobile-i18n-resources.mjs",
     "//",
+    "// One loader per language (#2187). Each `require` is synchronous, but Metro runs a",
+    "// catalogue's module only when its loader is first called, so a launch builds the",
+    "// active language and English, not every language. `i18n/load.ts` is the only caller.",
     "",
+    "type Catalogue = Record<string, unknown>;",
+    "",
+    "export type LanguageBundle = Record<string, Catalogue>;",
+    "",
+    "export const LANGUAGE_LOADERS: Readonly<Record<string, () => LanguageBundle>> = {",
   ];
   for (const [code, namespaces] of Object.entries(catalogues)) {
+    lines.push(`  ${JSON.stringify(code)}: () => ({`);
     for (const ns of namespaces) {
       lines.push(
-        `import ${identifier(code, ns)} from "../../frontend/src/i18n/locales/${code}/${ns}.json";`,
+        `    ${JSON.stringify(ns)}: require("../../frontend/src/i18n/locales/${code}/${ns}.json"),`,
       );
     }
-  }
-  lines.push("");
-  lines.push("type Catalogue = Record<string, unknown>;");
-  lines.push("");
-  lines.push("export const RESOURCES: Record<string, Record<string, Catalogue>> = {");
-  for (const [code, namespaces] of Object.entries(catalogues)) {
-    lines.push(`  ${JSON.stringify(code)}: {`);
-    for (const ns of namespaces) {
-      lines.push(`    ${JSON.stringify(ns)}: ${identifier(code, ns)},`);
-    }
-    lines.push("  },");
+    lines.push("  }),");
   }
   lines.push("};");
   lines.push("");

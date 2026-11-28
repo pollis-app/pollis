@@ -50,6 +50,22 @@ function changed() {
   }
 }
 
+/**
+ * The splash came down (#2187): logs the JS heap Hermes holds at that point, so a cold-start
+ * bench can read what boot allocated off logcat / the device log. A no-op outside a perf build.
+ */
+export function perfSplashHidden(): void {
+  if (!PERF_MARKS) {
+    return;
+  }
+  const hermes = (globalThis as { HermesInternal?: { getInstrumentedStats?: () => Record<string, number> } })
+    .HermesInternal;
+  const stats = hermes?.getInstrumentedStats?.();
+  console.log(
+    `[perf] splash-hide js_allocatedBytes=${stats?.js_allocatedBytes ?? -1} js_heapSize=${stats?.js_heapSize ?? -1}`,
+  );
+}
+
 /** A row render, from the top of MessageRow. */
 export function perfRowRender(): void {
   if (PERF_MARKS) {

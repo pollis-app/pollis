@@ -51,6 +51,7 @@ import {
 } from "../lib/clientPolicy";
 import { ClientBlockedScreen } from "../components/ClientBlockedScreen";
 import { usePersistedFeed } from "../hooks/usePersistedFeed";
+import { perfSplashHidden } from "../lib/perfMarks";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -259,6 +260,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded && bridgeReady && languageReady && sweepReady && policyReady) {
       SplashScreen.hideAsync();
+      perfSplashHidden();
     }
   }, [loaded, bridgeReady, languageReady, sweepReady, policyReady]);
 

@@ -28,7 +28,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `expo-camera`, `expo-secure-store`, `expo-notifications`
 - `expo-image` (caching, and the blurhash placeholders — there is no separate blurhash package)
 - `@livekit/react-native-webrtc` pinned to `144.1.2` + `@livekit/react-native-expo-plugin` `^1.0.3` (installed for #343, not wired — see "Voice")
-- `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.75 — `ICON_STROKE`). `react-native-svg` is still used directly for the Initializing dot-field.
+- `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.75 — `ICON_STROKE`), one deep import per icon (`lucide-react-native/icons/<file>`), never the barrel, which bundles and builds all ~1,800 (#2187; `tests/lucide-deep-imports.test.ts`, `scripts/lucide-deep-imports.mjs` rewrites one). `react-native-svg` is still used directly for the Initializing dot-field.
 - Geist (UI, the desktop Modern skin's face) via `@expo-google-fonts/geist`, one family name per weight (`fonts.regular/medium/semibold/bold`; never pair with `fontWeight`). Monospace (crypto material, e.g. the enrollment approval code) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
 - Rust core via `pollis-native` Turbo Module (uniffi-bindgen-react-native)
 
@@ -61,9 +61,13 @@ tier for that.
 ## Localization (i18n, #1074)
 
 `i18next` + `react-i18next`, the same stack and the **same catalogues** as
-desktop — `mobile/i18n/resources.ts` is a generated static table of every
-`frontend/src/i18n/locales/<lng>/<ns>.json`, which Metro can resolve because
-`metro.config.js` adds that one directory to `watchFolders`. A key is
+desktop — `mobile/i18n/resources.ts` is a generated table of one loader per
+language over `frontend/src/i18n/locales/<lng>/<ns>.json`, which Metro can resolve
+because `metro.config.js` adds that one directory to `watchFolders`. Only English
+and the active language are built at launch (#2187); every language change goes
+through `switchLanguage` in `i18n/load.ts`, which adds the bundle before
+`changeLanguage` — never call `i18n.changeLanguage` directly
+(`tests/i18n-lazy.test.ts`). A key is
 addressed exactly as on desktop (`t("settings:language.heading")`, or
 `t("language.heading")` under `useTranslation("settings")`); copy that exists
 only on mobile lives in the `mobile` namespace, in the same directory, so
