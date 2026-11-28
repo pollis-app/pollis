@@ -137,6 +137,11 @@ fn token_of(msg: &str) -> String {
 /// A sealed message `id` in `conv` carrying `file`, declared through the real
 /// registration path, proven by its deletion capability (#1086, #1330).
 async fn send_file(c: &Connection, id: &str, conv: &str, seq: i64, file: &str) -> WriteOutcome {
+    // `seq` from the counter first: migration 000058 refuses any other value.
+    exec(c, &format!(
+        "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES ('{conv}', {seq}) \
+         ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)"
+    )).await;
     exec(c, &format!(
         "INSERT INTO message_envelope \
              (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
@@ -568,8 +573,8 @@ async fn a_late_declaration_revives_a_released_file() {
     // Bob's message carrying the same file is posted; its declaration lags.
     exec(&c, &format!(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
-         VALUES ('b_msg', 'ca', 'sealed', 'ct', '2026-01-01', 2, 1, '{}')",
+             (id, conversation_id, sender_id, ciphertext, sent_at, sealed, delete_token_hash) \
+         VALUES ('b_msg', 'ca', 'sealed', 'ct', '2026-01-01', 1, '{}')",
         capability_hash(&token_of("b_msg"))
     )).await;
     let r2 = FakeR2::with(&key());
@@ -600,8 +605,8 @@ async fn a_reference_landing_mid_delete_never_leaves_a_row_without_its_blob() {
     // A pass claimed it and crashed after the blob delete.
     exec(&c, &format!("UPDATE attachment_object SET reclaim_state = 'deleting' WHERE content_hash = '{FILE}'")).await;
     let r2 = FakeR2::default();
-    exec(&c, "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at, seq) \
-              VALUES ('late', 'ca', 'alice', 'ct', '2026-01-01', 9)").await;
+    exec(&c, "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
+              VALUES ('late', 'ca', 'alice', 'ct', '2026-01-01')").await;
     exec(&c, &format!("INSERT INTO attachment_ref (content_hash, message_id) VALUES ('{FILE}', 'late')")).await;
     assert_eq!(reclaim(&c, &r2).await, ReclaimReport { reclaimed: 1, failed: 0 });
     assert!(!object_row(&c).await, "a row survived naming a deleted blob");
@@ -670,8 +675,8 @@ async fn reclaim_never_deletes_a_key_outside_the_objects_own_name() {
     let foreign = "avatars/bob/0000000000000000000000000000000000000000000000000000000000000000.webp";
     exec(&c, &format!(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
-         VALUES ('a_msg', 'ca', 'sealed', 'ct', '2026-01-01', 1, 1, '{}')",
+             (id, conversation_id, sender_id, ciphertext, sent_at, sealed, delete_token_hash) \
+         VALUES ('a_msg', 'ca', 'sealed', 'ct', '2026-01-01', 1, '{}')",
         capability_hash(&token_of("a_msg"))
     )).await;
     apply_register_attachment(
@@ -739,8 +744,8 @@ async fn an_id_reused_after_gc_cannot_release_the_originals_file() {
     // Self path: mallory's own envelope `a_msg`, her own capability.
     exec(&c, &format!(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
-         VALUES ('a_msg', 'cm', 'sealed', 'ct', '2026-01-02', 1, 1, '{}')",
+             (id, conversation_id, sender_id, ciphertext, sent_at, sealed, delete_token_hash) \
+         VALUES ('a_msg', 'cm', 'sealed', 'ct', '2026-01-02', 1, '{}')",
         capability_hash("mallory-token")
     )).await;
     let _ = apply_register_attachment(
@@ -762,8 +767,8 @@ async fn an_id_reused_after_gc_cannot_release_the_originals_file() {
     // Admin path: the same id again, tombstoned by mallory as admin of her group.
     exec(&c, &format!(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
-         VALUES ('a_msg', 'cm', 'sealed', 'ct', '2026-01-03', 2, 1, '{}')",
+             (id, conversation_id, sender_id, ciphertext, sent_at, sealed, delete_token_hash) \
+         VALUES ('a_msg', 'cm', 'sealed', 'ct', '2026-01-03', 1, '{}')",
         capability_hash("mallory-token-2")
     )).await;
     let out = apply_delete_message(
@@ -794,8 +799,8 @@ async fn a_legacy_reference_without_a_capability_is_never_released() {
     let c = conn().await;
     user(&c, "alice").await;
     group(&c, "ga", "ca", &["alice"]).await;
-    exec(&c, "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at, seq) \
-              VALUES ('old', 'ca', 'alice', 'ct', '2026-01-01', 1)").await;
+    exec(&c, "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
+              VALUES ('old', 'ca', 'alice', 'ct', '2026-01-01')").await;
     let out = apply_register_attachment(
         &c,
         Some("alice"),
@@ -831,8 +836,8 @@ async fn a_reference_to_a_file_being_deleted_is_refused_explicitly() {
 
     exec(&c, &format!(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, sent_at, seq, sealed, delete_token_hash) \
-         VALUES ('b_msg', 'ca', 'sealed', 'ct', '2026-01-01', 2, 1, '{}')",
+             (id, conversation_id, sender_id, ciphertext, sent_at, sealed, delete_token_hash) \
+         VALUES ('b_msg', 'ca', 'sealed', 'ct', '2026-01-01', 1, '{}')",
         capability_hash(&token_of("b_msg"))
     )).await;
     assert!(matches!(declare(&c, "b_msg", FILE).await, WriteOutcome::Invalid(_)));

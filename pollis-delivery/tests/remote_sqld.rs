@@ -21,6 +21,8 @@ use pollis_delivery::commit::{
 use pollis_delivery::leaf_cert::LeafCheck;
 
 mod common;
+#[path = "support/seq_invariants.rs"]
+mod seq_invariants;
 #[path = "support/sqld.rs"]
 mod sqld;
 use sqld::RemoteDb;
@@ -371,4 +373,22 @@ async fn sends_after_a_lull_reuse_the_warm_socket() {
     }
     assert_eq!(fx.main.proxy.sockets(), main_before, "no new main socket after a lull");
     assert_eq!(fx.log.proxy.sockets(), log_before, "no new log socket after a lull");
+}
+
+/// #2180's delivery-sequence invariants, over hrana on a real sqld: the
+/// concurrency is the server's, not a local file's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "needs a local sqld; see support/sqld.rs"]
+async fn delivery_sequence_invariants_hold_over_hrana() {
+    let r = RemoteDb::single_db().await;
+    let db = r.db.as_ref();
+    seq_invariants::an_insert_takes_the_next_counter_value(db).await;
+    seq_invariants::concurrent_sends_to_one_conversation_are_dense_and_unique(Arc::clone(&r.db), 24).await;
+    seq_invariants::the_counter_outlives_gc_emptying_a_conversation(db).await;
+    seq_invariants::a_teardown_restarts_the_sequence_with_its_cursors(db).await;
+    seq_invariants::a_failed_insert_consumes_no_seq(db).await;
+    seq_invariants::an_explicit_seq_must_be_the_counter(db).await;
+    seq_invariants::a_multi_row_insert_gets_consecutive_seqs(db).await;
+    seq_invariants::old_and_new_ds_writers_interleave_safely(Arc::clone(&r.db), 12).await;
+    seq_invariants::without_the_triggers_a_send_fails_closed(db).await;
 }

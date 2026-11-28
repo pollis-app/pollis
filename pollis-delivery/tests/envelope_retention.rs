@@ -76,19 +76,20 @@ async fn seed_watermark_reported(
 
 async fn add_envelope(db: &Db, id: &str, conv: &str, seq: i64) {
     let conn = db.conn().await.unwrap();
+    // Take `seq` from the counter first, as a DS writing an explicit seq must
+    // (migration 000058 refuses any other value).
+    conn.execute(
+        "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
+         ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
+        libsql::params![conv.to_string(), seq],
+    )
+    .await
+    .unwrap();
     conn.execute(
         "INSERT INTO message_envelope \
              (id, conversation_id, sent_at, sender_id, ciphertext, seq) \
          VALUES (?1, ?2, datetime('now'), 'sender', 'ct', ?3)",
         libsql::params![id.to_string(), conv.to_string(), seq],
-    )
-    .await
-    .unwrap();
-    // Advance `conversation_seq` as `insert_envelope_with_seq` does, or the next write reuses `seq`.
-    conn.execute(
-        "INSERT INTO conversation_seq (conversation_id, next_seq) VALUES (?1, ?2) \
-         ON CONFLICT(conversation_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)",
-        libsql::params![conv.to_string(), seq],
     )
     .await
     .unwrap();

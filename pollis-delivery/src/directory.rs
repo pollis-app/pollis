@@ -263,22 +263,37 @@ pub async fn resolve_conversation(
     // One round trip (#1960); the precedence is unchanged: channel, then DM, then group.
     let mut rows = conn
         .query(
-            "SELECT (SELECT group_id FROM channels WHERE id = ?1), \
-                    EXISTS (SELECT 1 FROM dm_channel WHERE id = ?1), \
-                    EXISTS (SELECT 1 FROM groups WHERE id = ?1)",
-            libsql::params![id.to_string()],
+            &format!("SELECT {RESOLVE_COLUMNS}"),
+            libsql::named_params! { ":resolve_id": id.to_string() },
         )
         .await?;
     let Some(row) = rows.next().await? else {
         return Ok(None);
     };
-    if let Some(group_id) = row.get::<Option<String>>(0)? {
+    decode_resolved(&row, 0, id)
+}
+
+/// The three columns [`resolve_conversation`] reads for the id bound as
+/// `:resolve_id`, for statements that fold it into a larger read (the send
+/// path, #2180; catch-up, #2181). Decode them with [`decode_resolved`].
+pub(crate) const RESOLVE_COLUMNS: &str = "(SELECT group_id FROM channels WHERE id = :resolve_id), \
+     EXISTS (SELECT 1 FROM dm_channel WHERE id = :resolve_id), \
+     EXISTS (SELECT 1 FROM groups WHERE id = :resolve_id)";
+
+/// [`RESOLVE_COLUMNS`] at `offset` in `row`, in their one precedence: channel,
+/// then DM, then group.
+pub(crate) fn decode_resolved(
+    row: &libsql::Row,
+    offset: i32,
+    id: &str,
+) -> anyhow::Result<Option<(String, ConversationKind)>> {
+    if let Some(group_id) = row.get::<Option<String>>(offset)? {
         return Ok(Some((group_id, ConversationKind::Channel)));
     }
-    if row.get::<i64>(1)? != 0 {
+    if row.get::<i64>(offset + 1)? != 0 {
         return Ok(Some((id.to_string(), ConversationKind::Dm)));
     }
-    if row.get::<i64>(2)? != 0 {
+    if row.get::<i64>(offset + 2)? != 0 {
         return Ok(Some((id.to_string(), ConversationKind::Group)));
     }
     Ok(None)

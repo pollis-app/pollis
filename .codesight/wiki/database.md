@@ -497,34 +497,64 @@ client with a wrong clock now produces a wrong timestamp in a bubble rather than
 an undeliverable message.
 
 **Why the sequence is not `MAX(seq)+1`.** The counter lives in its own table,
-`conversation_seq(conversation_id, next_seq)`, taken with a single `INSERT … ON
-CONFLICT DO UPDATE … RETURNING`. Deriving it from `message_envelope` is wrong in
-a way that is easy to miss and produces silent message loss: envelope GC
-**deletes rows**, so once every member device has read past everything the
-conversation is emptied, `MAX(seq)` goes NULL, and the next envelope is assigned
-`1` again — at or below every device's cursor, so `seq > last_seq` never selects
-it and it reaches nobody. That is the #692 shape reappearing inside the design
-meant to retire it. GC never touches `conversation_seq`; only teardown removes a
-row, at which point the cursors pointing into it go too. Pinned by
-`delivery_sequence_tests::a_sequence_is_never_reused_after_gc_empties_the_conversation`,
-which fails against the naive implementation. Every envelope — send, edit,
-tombstone — is written through one chokepoint, `messages::insert_envelope_with_seq`.
+`conversation_seq(conversation_id, next_seq)` (`next_seq` holds the last value
+handed out). Deriving it from `message_envelope` is wrong in a way that is easy
+to miss and produces silent message loss: envelope GC **deletes rows**, so once
+every member device has read past everything the conversation is emptied,
+`MAX(seq)` goes NULL, and the next envelope is assigned `1` again — at or below
+every device's cursor, so `seq > last_seq` never selects it and it reaches
+nobody. That is the #692 shape reappearing inside the design meant to retire
+it. GC never touches `conversation_seq`; only teardown removes a row, at which
+point the cursors pointing into it go too.
 
-**Why that chokepoint takes a `Transaction`, not a `Connection`.** Allocating the
-sequence and inserting the row are two statements. If another writer can slip
-between them it takes `N+1` and publishes *that* row while `N` is still missing;
-a recipient fetching `seq > last_seq` in that window sees `N+1`, advances its
-cursor onto it, and envelope `N` lands below every cursor — delivered to nobody,
-then collected. That would be a fourth acceptable loss, which the delivery
-contract does not have room for. Under SQLite/libsql a transaction whose first
-statement is a write holds the write lock until commit, so writers serialise and
-the gap is never observable; taking the transaction *in the signature* is what
-stops a later caller from re-opening the window with a bare autocommit
-connection. A rolled-back insert un-does the counter bump with it, so there is
-not even a burned sequence. Pinned by
-`delivery_sequence_tests::an_in_flight_send_never_exposes_a_sequence_without_its_envelope`,
-which reads from a second connection mid-send and fails if either half is
-visible alone.
+**The database assigns it (#2180, migration `000058`).** Two triggers on
+`message_envelope` hold the invariant at the lowest layer:
+
+- `message_envelope_assign_seq` (AFTER INSERT, row inserted without a seq)
+  bumps the conversation's counter and stamps the row, inside the inserting
+  statement. A SQLite statement is atomic, so allocation and insert commit or
+  roll back together: no envelope exists without its seq, no reader ever sees
+  the counter ahead of its row, and a failed insert burns nothing.
+- `message_envelope_seq_from_counter` (BEFORE INSERT, row naming a seq)
+  refuses any seq but the counter's current value, so a writer that bypassed
+  the counter (`MAX(seq)+1`, a copied seq) fails loudly. The DS deployed before
+  000058 bumps the counter and inserts exactly that value in one transaction,
+  so it still passes: old and new DS can write one database during a rolling
+  deploy or a rollback. A test fixture that needs a specific seq bumps the
+  counter to it first, the same way.
+
+Every envelope — send, edit, tombstone — goes through one chokepoint,
+`messages::insert_envelope`, which names no seq (source-shape guard:
+`envelope_insert_site_tests`). A **send is one autocommit statement**, so
+Turso's database-wide write lock is held for one statement instead of across
+the four or five round trips of the old BEGIN / bump / INSERT / COMMIT (which
+capped total send capacity at ~18 sends/s at 10 ms RTT); an edit or tombstone
+runs it inside its own transaction. The chokepoint **fails closed**: the INSERT
+is conditioned on both triggers existing (`sqlite_schema`) and must store
+exactly one row, so on a database the migration never reached a send stores
+nothing and errors (the client keeps it and retries) instead of acknowledging
+an envelope with no seq; the DS also refuses to start without them
+(`messages::require_seq_triggers`). The migration must be applied before the
+DS that relies on it is deployed (the deploy workflows migrate first).
+
+Pinned by `tests/envelope_seq.rs` (local) and `remote_sqld.rs::delivery_sequence_invariants_hold_over_hrana`
+(a real sqld): next value, N concurrent same-conversation sends dense and
+unique, the counter outliving GC, teardown restarting at 1, a failed insert
+burning nothing, explicit seqs refused unless equal to the counter, multi-row
+inserts consecutive, no trigger means no envelope and no startup, and old-DS
+and new-DS writers interleaving on one database.
+
+**One read before a send (#2180).** `send_envelope_once` reads the replay row
+(the envelope already under `body.id`), what `body.conversation_id` resolves to
+(the epoch gate's MLS group) and the member check in ONE statement
+(`send_probe`), built from the shared definitions `writes::member_predicate`
+(which `is_member` itself runs) and `directory::RESOLVE_COLUMNS` (which
+`resolve_conversation` runs), bound by name. It then evaluates them in the order
+they always ran: replay, the head, the actor and membership, the body. So a
+non-member at a stale epoch still gets `EpochBehind`, and an existing id still
+reveals nothing (`epoch_gate_tests::the_folded_send_checks_keep_their_order`).
+The `EnvelopeIdLock`, both head reads and the delete-on-`EpochBehind` are
+unchanged. A send is now 2 main + 2 log round trips (was 11 + 4).
 
 **What the sequence retired**, all of it the cost of ordering by a lexically
 compared string that two different clocks wrote:
