@@ -860,11 +860,11 @@ async fn retry_after_a_lost_epoch_zero_race_keeps_the_welcome_that_landed_meanwh
     drop(bob);
 }
 
-/// #1220 ordering B: a Welcome at the epoch an unconfirmed branch claims wins. It waits for the
-/// join holding the branch; the branch loses its CAS and the retry stands down to the Welcome.
+/// #1220 ordering B, live: a Welcome polled while a join holds its stored, doomed branch waits
+/// for the join's lock; the branch loses its CAS and the retry stands down to the Welcome.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn welcome_polled_while_a_doomed_join_branch_is_stored_replaces_the_branch() {
+async fn welcome_polled_while_a_doomed_join_holds_its_branch_waits_and_the_join_stands_down() {
     use pollis_lib::commands::mls::reconcile_group_mls_impl;
     use pollis_lib::commands::mls::rendezvous::{self, Point};
     use std::time::Duration;
@@ -925,6 +925,98 @@ async fn welcome_polled_while_a_doomed_join_branch_is_stored_replaces_the_branch
         panic!(
             "bob lost the message sealed while his doomed branch was stored: {bob_view:?}\n{diag}"
         );
+    }
+    assert_cursor_never_passes_an_unprocessed_envelope(&bob, &bob_profile.id, &alice, &dm_id).await;
+
+    bob.send_channel_message(&dm_id, "PONG").await;
+    assert!(alice
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .any(|m| m["content"] == "PONG"));
+
+    drop(alice);
+    drop(bob);
+}
+
+/// How many unconfirmed external-join branches `client` holds (#1220's `mls_kv` marker).
+async fn unconfirmed_branches(client: &TestClient) -> i64 {
+    let guard = client.state.local_db.lock().await;
+    guard
+        .as_ref()
+        .expect("signed in")
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM mls_kv WHERE scope = 'pollis_unconfirmed_join'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("marker count")
+}
+
+/// #1220 ordering B after a crash: the app was killed with its external-join branch stored and
+/// the CAS never sent, so nothing will resolve the branch. The Welcome at the epoch the branch
+/// claims, applied under the group's lock, replaces it: nothing sealed at that epoch is lost,
+/// and the cursor never passes what was not ingested.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn welcome_replaces_the_branch_a_join_killed_before_its_cas_left_stored() {
+    use pollis_lib::commands::mls::reconcile_group_mls_impl;
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let dm_id = dm_with_only_the_creators_group(&alice, &alice_profile.id, &bob_profile.id).await;
+
+    let mut before_submit = rendezvous::arm(Point::ExternalJoinBeforeSubmit);
+    let join = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        let dm = dm_id.clone();
+        tokio::spawn(async move {
+            pollis_core::commands::mls::process_pending_commits(&state, dm, user).await
+        })
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), before_submit.recv())
+        .await
+        .expect("bob never built his external-join branch")
+        .expect("rendezvous closed");
+    rendezvous::disarm(Point::ExternalJoinBeforeSubmit);
+
+    // The kill: the join dies with its branch stored and its CAS never sent.
+    join.abort();
+    let _ = join.await;
+    drop(release);
+    bob.relaunch().await;
+    assert!(holds_local_group(&bob, &dm_id).await, "precondition: the branch survived the crash");
+    assert_eq!(unconfirmed_branches(&bob).await, 1, "precondition: and is still unconfirmed");
+
+    // Alice's Add takes the epoch the dead branch claims; her message is sealed there.
+    reconcile_group_mls_impl(&alice.state, &dm_id, &alice_profile.id)
+        .await
+        .expect("reconcile");
+    alice.send_channel_message(&dm_id, "SEALED_AT_THE_DEAD_BRANCHS_EPOCH").await;
+
+    // The Welcome is applied under the group's lock and replaces the branch.
+    pollis_core::commands::mls::poll_mls_welcomes(&bob.state, bob_profile.id.clone())
+        .await
+        .expect("poll_mls_welcomes");
+    assert_eq!(unconfirmed_branches(&bob).await, 0, "the Welcome's group replaced the branch");
+
+    bob.accept_dm_request(&dm_id).await;
+    let bob_view: Vec<String> = bob
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    if !bob_view.contains(&"SEALED_AT_THE_DEAD_BRANCHS_EPOCH".to_string()) {
+        let diag = diagnose_missing_delivery(&bob_profile.id, &dm_id).await;
+        panic!("bob lost the message sealed at the dead branch's epoch: {bob_view:?}\n{diag}");
     }
     assert_cursor_never_passes_an_unprocessed_envelope(&bob, &bob_profile.id, &alice, &dm_id).await;
 

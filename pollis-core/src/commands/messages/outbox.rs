@@ -67,6 +67,11 @@ pub(super) fn not_a_member() -> Error {
     Error::Other(anyhow::Error::new(NotAMember))
 }
 
+/// Whether `e` is [`not_a_member`]'s refusal: about the conversation, not one envelope.
+pub(super) fn is_not_a_member(e: &Error) -> bool {
+    matches!(e, Error::Other(any) if any.downcast_ref::<NotAMember>().is_some())
+}
+
 /// The user discarded this message before its send had stored it (#2141); typed so
 /// [`is_permanent`] stops every retry.
 #[derive(Debug)]

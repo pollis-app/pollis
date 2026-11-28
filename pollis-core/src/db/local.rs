@@ -135,6 +135,70 @@ fn upgrade_message_indexes(
     }
 }
 
+/// How long a headless open waits on another connection's write lock for the owed-receipt
+/// table's one-time `CREATE`: a small slice of [`BUSY_TIMEOUT_MS`], so it never eats the budget.
+const RECEIPT_OWED_BUSY_MS: u64 = 250;
+
+#[cfg(test)]
+thread_local! {
+    /// Runs while [`ensure_receipt_owed_headless`] holds the state lock, before the `CREATE`.
+    /// Tests only.
+    pub(crate) static DURING_RECEIPT_OWED_CREATE: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        std::cell::RefCell::new(None);
+}
+
+/// A fresh `AppState`-style state lock, as the share extension and the app hold. Tests only.
+#[cfg(test)]
+pub(crate) fn per_section_lock() -> std::sync::Arc<crate::notify::lock::SharedStateLock> {
+    crate::notify::lock::SharedStateLock::new(crate::notify::lock::LockPolicy::PerSection)
+}
+
+/// The owed-receipt table on a headless open (the notification and share extensions, the
+/// resume reopen), unlike every other piece of DDL, which belongs to the app's own open.
+///
+/// The exception, because a message such an open's caller stores must owe its receipt
+/// (`messages::RECEIPT_OWED_DDL`): without the table, a push stored while the app has not run
+/// since the upgrade would never be acknowledged. It is safe here where an index build is not:
+/// once per file, a single `CREATE TABLE IF NOT EXISTS` (one page), and nothing at all once the
+/// table exists. Under the caller's state lock (`try_acquire_now`; a headless fetch already
+/// holds it), with a short busy timeout, and never fatal: busy or refused, it is logged and the
+/// open goes on; the store creates the table itself in its own savepoint
+/// (`receipts::owe_delivered_on`), and the next open tries again. Errs only if the
+/// connection's own busy timeout cannot be restored.
+fn ensure_receipt_owed_headless(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    lock: &std::sync::Arc<crate::notify::lock::SharedStateLock>,
+) -> Result<()> {
+    if crate::commands::messages::owed_table_exists(conn) {
+        return Ok(());
+    }
+    let _hold = match lock.try_acquire_now(data_dir) {
+        Ok(Some(hold)) => hold,
+        Ok(None) => {
+            crate::diag!("[db] another process holds the state lock; owed-receipt table on a later open");
+            return Ok(());
+        }
+        Err(e) => {
+            crate::diag!("[db] state lock unavailable ({e}); owed-receipt table on a later open");
+            return Ok(());
+        }
+    };
+    #[cfg(test)]
+    DURING_RECEIPT_OWED_CREATE.with(|hook| {
+        if let Some(hook) = hook.borrow().as_ref() {
+            hook();
+        }
+    });
+    conn.busy_timeout(std::time::Duration::from_millis(RECEIPT_OWED_BUSY_MS))?;
+    let created = crate::commands::messages::ensure_receipt_owed(conn);
+    conn.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))?;
+    if let Err(e) = created {
+        crate::diag!("[db] owed-receipt table not created on this open ({e}); the store or a later open will");
+    }
+    Ok(())
+}
+
 /// `<data_dir>/pollis_<user_id>.db`, the ONLY way a user id becomes a DB path.
 ///
 /// The id is also validated at `commands::auth::accept_server_user_id`; this is the same check at the join.
@@ -251,9 +315,9 @@ impl LocalDb {
         // Before the schema batch, which indexes one of these columns.
         add_missing_columns(&conn)?;
         apply_local_schema(&conn)?;
-        // The receipts this device owes; the app's open only, like the indexes below. Additive
-        // and idempotent: an older build ignores the table.
-        conn.execute_batch(crate::commands::messages::RECEIPT_OWED_DDL)?;
+        // The receipts this device owes. Every open makes sure of it; the app's strictly.
+        // Additive and idempotent: an older build ignores the table.
+        crate::commands::messages::ensure_receipt_owed(&conn)?;
         // The app's open only, never `open_existing_for_user_in` (#2171, #2172).
         upgrade_message_indexes(&conn, data_dir, lock);
         // A killed earlier process's outbox claims (#2100): nothing of it is live.
@@ -277,12 +341,14 @@ impl LocalDb {
     /// error, not a reason to destroy the file: the app owns the database, and a stale notification
     /// key must never cost the user their history. Nothing that assumes "no other process is using
     /// this file" (the orphan-attachment sweep, eviction) runs here, and no index is ever built
-    /// here ([`MESSAGE_INDEXES`] belong to the app's own open), nor the owed-receipt table
-    /// (`messages::RECEIPT_OWED_DDL`, the app's open too).
+    /// here ([`MESSAGE_INDEXES`] belong to the app's own open). The owed-receipt table is the one
+    /// exception, best-effort ([`ensure_receipt_owed_headless`]): a message this open's caller
+    /// stores must owe its receipt. `lock` is the caller's `AppState` state lock.
     pub fn open_existing_for_user_in(
         data_dir: &std::path::Path,
         user_id: &str,
         key: &[u8],
+        lock: &std::sync::Arc<crate::notify::lock::SharedStateLock>,
     ) -> Result<Self> {
         let db_path = user_db_path(data_dir, user_id)?;
         if !db_path.is_file() {
@@ -309,6 +375,7 @@ impl LocalDb {
         // It builds no message index (#2171, #2172): a multi-second build here would hold the
         // write lock under an app mid-decrypt. Only the app's own open builds them.
         apply_local_schema(&conn)?;
+        ensure_receipt_owed_headless(&conn, data_dir, lock)?;
         Ok(Self { conn })
     }
 
@@ -319,7 +386,7 @@ impl LocalDb {
         conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         apply_local_schema(&conn)?;
-        conn.execute_batch(crate::commands::messages::RECEIPT_OWED_DDL)?;
+        crate::commands::messages::ensure_receipt_owed(&conn)?;
         apply_message_indexes(&conn)?;
         Ok(Self { conn })
     }
@@ -1164,7 +1231,7 @@ mod tests {
                 .expect("insert");
         }
         let wrong = [0x5Au8; 32];
-        match LocalDb::open_existing_for_user_in(dir.path(), USER, &wrong) {
+        match LocalDb::open_existing_for_user_in(dir.path(), USER, &wrong, &per_section_lock()) {
             Err(Error::Database(rusqlite::Error::SqliteFailure(f, _))) => {
                 assert_eq!(f.code, rusqlite::ErrorCode::NotADatabase);
             }
@@ -1172,11 +1239,11 @@ mod tests {
             Ok(_) => panic!("a wrong key opened the database"),
         }
         assert!(
-            LocalDb::open_existing_for_user_in(dir.path(), "nobody-here", TEST_KEY).is_err(),
+            LocalDb::open_existing_for_user_in(dir.path(), "nobody-here", TEST_KEY, &per_section_lock()).is_err(),
             "a missing database is an error, never created"
         );
         assert!(!dir.path().join("pollis_nobody-here.db").exists());
-        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, TEST_KEY).expect("right key");
+        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, TEST_KEY, &per_section_lock()).expect("right key");
         let kept: String = db
             .conn()
             .query_row("SELECT content FROM message WHERE id = 'm1'", [], |r| r.get(0))
@@ -2344,7 +2411,7 @@ mod message_index_tests {
         let _serial = GATE_TESTS.blocking_lock();
         let dir = tempfile::tempdir().unwrap();
         pre_upgrade_db(dir.path());
-        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY).unwrap();
+        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY, &per_section_lock()).unwrap();
         assert_pre_upgrade(&db);
         drop(db);
         let db = LocalDb::open_for_user_in(dir.path(), USER, KEY).unwrap();
@@ -2398,7 +2465,7 @@ mod message_index_tests {
             let dir = tempfile::tempdir().unwrap();
             pre_upgrade_db(dir.path());
             {
-                let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY).unwrap();
+                let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY, &per_section_lock()).unwrap();
                 db.conn()
                     .execute_batch(&format!("CREATE VIEW {blocked} AS SELECT 1"))
                     .unwrap();
@@ -2427,7 +2494,7 @@ mod message_index_tests {
             let dir = tempfile::tempdir().unwrap();
             pre_upgrade_db(dir.path());
             {
-                let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY).unwrap();
+                let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY, &per_section_lock()).unwrap();
                 for (_, create) in &MESSAGE_INDEXES[..done] {
                     db.conn().execute_batch(create).unwrap();
                 }
@@ -2436,5 +2503,107 @@ mod message_index_tests {
             let db = LocalDb::open_for_user_in(dir.path(), USER, KEY).unwrap();
             assert_upgraded(&db);
         }
+    }
+}
+
+/// The owed-receipt table on a headless open (`ensure_receipt_owed_headless`).
+#[cfg(test)]
+mod receipt_owed_open_tests {
+    use super::*;
+    use crate::commands::messages::owed_table_exists;
+    use crate::notify::lock::{tests::GATE_TESTS, LockPolicy, SharedStateLock, StateLock};
+
+    const USER: &str = "owed-user";
+    const KEY: &[u8; 32] = b"pollis-owed-receipt-test-key-32b";
+
+    /// A file the app last opened before the upgrade: no owed-receipt table.
+    fn pre_upgrade_db(dir: &std::path::Path) {
+        let db = LocalDb::open_for_user_in(dir, USER, KEY).expect("create");
+        db.conn().execute_batch("DROP TABLE receipt_owed").unwrap();
+    }
+
+    fn owed(db: &LocalDb) -> i64 {
+        db.conn()
+            .query_row("SELECT COUNT(*) FROM receipt_owed", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// The notification extension's open (it already holds the state lock) and the share
+    /// extension's (it takes it) both create the table, so what they store owes its receipt.
+    #[test]
+    fn a_headless_open_creates_the_table() {
+        let _serial = GATE_TESTS.blocking_lock();
+        for policy in [LockPolicy::HeldByCaller, LockPolicy::PerSection] {
+            let dir = tempfile::tempdir().unwrap();
+            pre_upgrade_db(dir.path());
+            let held = (policy == LockPolicy::HeldByCaller)
+                .then(|| StateLock::try_acquire_in(dir.path()).unwrap().expect("the fetch holds it"));
+            let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY, &SharedStateLock::new(policy))
+                .unwrap();
+            assert!(owed_table_exists(db.conn()), "{policy:?}");
+            db.conn()
+                .execute(
+                    "INSERT INTO receipt_owed (conversation_id, message_id, kind, at)
+                     VALUES ('dm1', 'm1', 'delivered', 't0')",
+                    [],
+                )
+                .unwrap();
+            assert_eq!(owed(&db), 1, "{policy:?}");
+            drop(held);
+        }
+    }
+
+    /// Another process holds the state lock: the open goes on without the table (the store
+    /// creates it), and the next open creates it.
+    #[test]
+    fn a_headless_open_never_waits_for_the_state_lock() {
+        let _serial = GATE_TESTS.blocking_lock();
+        let dir = tempfile::tempdir().unwrap();
+        pre_upgrade_db(dir.path());
+        let app = StateLock::try_acquire_in(dir.path()).unwrap().expect("the app holds it");
+        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY, &per_section_lock())
+            .expect("the open is never refused");
+        assert!(!owed_table_exists(db.conn()));
+        drop(db);
+        drop(app);
+        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY, &per_section_lock()).unwrap();
+        assert!(owed_table_exists(db.conn()));
+    }
+
+    /// The database is busy at the `CREATE` (the app mid-write): the open neither fails nor
+    /// waits out its 5 s busy timeout, and keeps that timeout for everything after.
+    #[test]
+    fn a_busy_database_never_fails_or_stalls_a_headless_open() {
+        let _serial = GATE_TESTS.blocking_lock();
+        let dir = tempfile::tempdir().unwrap();
+        pre_upgrade_db(dir.path());
+        let path = user_db_path(dir.path(), USER).unwrap();
+        let writer: std::rc::Rc<std::cell::RefCell<Option<Connection>>> = Default::default();
+        let holds = writer.clone();
+        DURING_RECEIPT_OWED_CREATE.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move || {
+                let conn = Connection::open(&path).unwrap();
+                conn.execute_batch(&format!("PRAGMA key = \"x'{}'\"; BEGIN IMMEDIATE", hex::encode(KEY)))
+                    .unwrap();
+                *holds.borrow_mut() = Some(conn);
+            }))
+        });
+        let started = std::time::Instant::now();
+        let opened = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY, &per_section_lock());
+        DURING_RECEIPT_OWED_CREATE.with(|h| *h.borrow_mut() = None);
+        let db = opened.expect("a busy CREATE never fails the open");
+        assert!(writer.borrow().is_some(), "the hook ran");
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(BUSY_TIMEOUT_MS / 2),
+            "the open waited {:?}",
+            started.elapsed()
+        );
+        assert!(!owed_table_exists(db.conn()));
+        let timeout_ms: i64 = db.conn().query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap();
+        assert_eq!(timeout_ms, BUSY_TIMEOUT_MS as i64, "the open's own busy timeout is restored");
+        writer.borrow_mut().take();
+        drop(db);
+        let db = LocalDb::open_existing_for_user_in(dir.path(), USER, KEY, &per_section_lock()).unwrap();
+        assert!(owed_table_exists(db.conn()), "the next open creates it");
     }
 }

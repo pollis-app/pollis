@@ -1000,6 +1000,42 @@ async fn a_message_a_headless_fetch_stored_is_acknowledged_by_the_apps_next_pass
     );
 }
 
+/// The same, on a file the app has not opened since the upgrade (no owed-receipt table): only
+/// the headless open has run on it, and what it stored is still owed and sent by the app's next
+/// unlock.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_message_stored_before_the_apps_first_unlock_after_the_upgrade_is_acknowledged() {
+    let _mobile = MobileBuild::on();
+    let (alice, bob, dm) = push_dm().await;
+    {
+        let guard = bob.state.local_db.lock().await;
+        guard
+            .as_ref()
+            .expect("signed in")
+            .conn()
+            .execute_batch("DROP TABLE receipt_owed")
+            .expect("drop the table, as before the upgrade");
+    }
+
+    let m = alice.send_channel_message_id(&dm, "stored before the app ran").await;
+    let handle = handle_for(bob.user_id(), &dm, "dm").await;
+    let out = headless(&bob, Some(handle), Duration::from_secs(20)).await;
+    let bodies: Vec<String> = items(&out).into_iter().map(|i| i.body).collect();
+    assert_eq!(bodies, vec!["stored before the app ran".to_string()]);
+
+    // The app's next unlock (its outbox drain) sends what is owed.
+    bob.relaunch().await;
+    bob.invoke_json("flush_outbox", serde_json::json!({})).await;
+    alice.fetch_dm_messages(&dm).await;
+    let delivered = (m, bob.user_id().to_string(), "delivered".to_string());
+    assert!(
+        alice.receipts(&dm).await.contains(&delivered),
+        "the headless fetch stored it on a pre-upgrade file and it was never acknowledged: {:?}",
+        alice.receipts(&dm).await
+    );
+}
+
 /// `catch_up_mls_group_interleaved` for `client` in its own task.
 fn spawn_catch_up(client: &TestClient, dm: &str) -> tokio::task::JoinHandle<pollis_core::error::Result<()>> {
     let state = client.state.clone();

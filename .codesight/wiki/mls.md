@@ -270,7 +270,7 @@ branch is claiming). A lost CAS deletes only a still-unconfirmed branch
 (epoch desync, gap recovery) delete it by name first. Invariant I10 in
 `docs/backend-core-invariants.md`; flows tests
 `dms::retry_after_a_lost_epoch_zero_race_*` and
-`dms::welcome_polled_while_a_doomed_join_branch_*` force each ordering through
+`dms::welcome_polled_while_a_doomed_join_holds_its_branch_*` force each ordering through
 rendezvous points (`ExternalJoinBeforeSubmit`, `ExternalJoinAfterLostRace`).
 
 **A Welcome is applied under its group's MLS lock.** `apply_welcome` takes a
@@ -293,6 +293,10 @@ next drain. The #1220 orderings above now meet this lock too: a Welcome that arr
 while an external join holds the group (its branch stored, or between a lost CAS and
 the retry) waits for it, and the retry, seeing the Welcome pending, stands down to it
 (`DeferredToWelcome`); the two `dms::` tests park the join and assert the poll waits.
+A branch can still be met by a Welcome with no join holding it: a process killed between
+storing the branch and its CAS leaves it stored and unconfirmed, and the Welcome at its
+epoch, applied under the lock, replaces it
+(`dms::welcome_replaces_the_branch_a_join_killed_before_its_cas_left_stored`).
 
 **A Welcome drain never runs inside a catch-up pass.** A drain waits on other
 groups' catch-ups (its #1772 replays) and takes group locks, so inside a pass,
@@ -460,9 +464,9 @@ next pass found the message already stored, so most messages a phone stored
 from a push were never acknowledged. Now:
 
 - A receipt this device owes is a row in the local `receipt_owed` table
-  (`receipts::RECEIPT_OWED_DDL`; `(conversation, kind, message)`, a read row
-  carrying the reader's time, a CHECK making either shape without it
-  unstorable). A delivered one is written in the per-envelope savepoint that
+  (`receipts::RECEIPT_OWED_DDL`; `(conversation, kind, message)`, each row
+  carrying the time its receipt states, NOT NULL: the store time for a
+  delivered one, the reader's for a read one). A delivered one is written in the per-envelope savepoint that
   stores the message (`ingest::open_and_persist` → `owe_delivered_on`), so a
   stored inbound DM message always has its receipt sent or owed; a read one by
   `mark_messages_read`. Nothing is owed while the opt-out is on.
@@ -475,23 +479,32 @@ from a push were never acknowledged. Now:
   `MAX_IDS_PER_RECEIPT` ids) under the DM's MLS lock (`seal_under_lock`) and
   posts it through `seal::post_resealing`, which catches up and re-seals on
   `epoch_behind` like a message. A frame's rows are cleared only once it
-  landed; a locked device seals nothing and keeps them; a conversation that is
-  no longer a DM or no longer has us, the opt-out, or a refusal no retry fixes
-  clears them. One drain per conversation runs at a time per process
-  (`AppState::receipt_drains`); one asked for meanwhile, including from inside
-  the running drain's own re-seal catch-up, makes it go round again instead of
-  waiting. Two processes draining the same rows can each send a frame: the
-  receiver's `INSERT OR IGNORE` makes that a no-op.
-- The table is created by the app's own open (`LocalDb::open_at`), never by an
-  extension's (the #2192 rule): a file no build with it has opened yet has no
-  table, and then the pass sends what it just stored once, from memory, as
-  before.
+  landed, or when the DS refused that one envelope in a way no retry fixes
+  (it costs that frame and no other: the next is still sent); a locked device
+  seals nothing and keeps them; a conversation that is no longer a DM or no
+  longer has us, or the opt-out, clears all of it. One drain per conversation
+  runs at a time per process (`AppState::receipt_drains`); one asked for
+  meanwhile, including from inside the running drain's own re-seal catch-up,
+  makes it go round again instead of waiting, whether the running round landed
+  or failed, with the asker's ids; the end of a drain and a new request are
+  decided under one lock, so no request falls between them. Two processes
+  draining the same rows can each send a frame: the receiver's `INSERT OR
+  IGNORE` makes that a no-op.
+- The table exists on every open (`receipts::ensure_receipt_owed`): the app's
+  strictly, the headless opens (notification and share extensions, the resume
+  reopen) best-effort under the state lock with a short busy timeout, and the
+  store's own savepoint if neither could (`database.md` → `receipt_owed` says
+  why this is the one DDL a headless open runs). So a message a push fetch
+  stores before the app's first unlock after the upgrade is still owed. Only a
+  database that refuses the `CREATE` outright has no table; then the pass
+  sends what it just stored once, from memory.
 
 Tests (`dms.rs`, `rich_push.rs`), each failing before:
 `a_read_receipt_asked_for_behind_a_staged_commit_still_reaches_the_sender`,
 `a_delivered_receipt_sealed_behind_a_landed_commit_is_resealed_and_delivered`,
-`a_message_a_headless_fetch_stored_is_acknowledged_by_the_apps_next_pass`;
-unit tests in `receipts::tests`.
+`a_message_a_headless_fetch_stored_is_acknowledged_by_the_apps_next_pass`,
+`a_message_stored_before_the_apps_first_unlock_after_the_upgrade_is_acknowledged`;
+unit tests in `receipts::tests` and `db::local::receipt_owed_open_tests`.
 
 ### Lost messages are visible (#1312)
 

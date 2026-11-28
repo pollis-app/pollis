@@ -528,9 +528,6 @@ async fn drain_welcomes(
         // Test-harness only: park a drain with its replays done and this Welcome not applied.
         #[cfg(feature = "test-harness")]
         super::rendezvous::park(super::rendezvous::Point::WelcomeBeforeApply).await;
-        // Test-harness only: park a drain with its replays done and this Welcome not applied.
-        #[cfg(feature = "test-harness")]
-        super::rendezvous::park(super::rendezvous::Point::WelcomeBeforeApply).await;
         // Applied under the lock of the group it joins, taken now that the replays above are
         // done (the lock is not re-entrant): a pass that started on the held group finishes
         // first, and `join_from_welcome` re-checks `welcome_may_replace` against whatever it

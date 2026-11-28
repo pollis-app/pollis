@@ -209,7 +209,7 @@ pub use read_state::{
     UnreadCount,
 };
 pub use receipts::{get_conversation_receipts, mark_messages_read, MessageReceipts, ReceiptDrains};
-pub(crate) use receipts::RECEIPT_OWED_DDL;
+pub(crate) use receipts::{ensure_receipt_owed, owed_table_exists};
 
 pub use reactions::{
     add_reaction, get_reactions, get_reactions_for_messages, remove_reaction, Reaction,

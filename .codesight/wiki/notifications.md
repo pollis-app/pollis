@@ -705,8 +705,8 @@ Android FCM handler both call one plain C function in `pollis-core`
   (`POST /v1/push/fetch`, below; `resolve_push_handle` against an older DS), then runs the app's own
   `ingest_dm_envelopes_inner` / `ingest_channel_envelopes_inner` on a headless
   `AppState`: no realtime, no LiveKit, no media server, the database opened
-  with `LocalDb::open_existing_for_user_in`, which never creates, migrates or
-  wipes. It returns only the inbound messages that call stored; if it stored
+  with `LocalDb::open_existing_for_user_in`, which never migrates or
+  wipes (its one write of schema is the owed-receipt table, best-effort, `database.md` → `receipt_owed`). It returns only the inbound messages that call stored; if it stored
   nothing for the handle's conversation (the app already had it), the newest
   message there from the last 10 minutes, once (its id is kept in `ui_state`
   `notify_fallback_shown`). Setting "Nothing" returns before any fetch. At most 5, oldest first, body ≤ 200 chars

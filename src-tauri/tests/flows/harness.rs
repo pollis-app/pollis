@@ -1334,6 +1334,15 @@ impl TestClient {
         &self.profile.as_ref().expect("not signed in").id
     }
 
+    /// The app relaunched: lock, then unlock with the PIN, so the local database is closed and
+    /// reopened through the app's own open.
+    pub(crate) async fn relaunch(&self) {
+        let uid = self.user_id().to_string();
+        self.invoke_json("lock", serde_json::json!({})).await;
+        self.invoke_json("unlock", serde_json::json!({ "userId": uid, "pin": TEST_PIN }))
+            .await;
+    }
+
     /// Point `accounts.json`'s active user at this client: `ds_post` signs as that global user.
     pub(crate) fn activate(&self) {
         if let Some(p) = &self.profile {
