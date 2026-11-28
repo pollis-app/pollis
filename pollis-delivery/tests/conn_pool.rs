@@ -129,7 +129,7 @@ async fn an_untouched_checkout_does_not_make_a_connection_look_fresh() {
         .with_max_idle(Duration::from_millis(200));
 
     let conn = db.conn().await.expect("checkout");
-    conn.prepare("SELECT 1").await.expect("prepare");
+    conn.query("SELECT 1", ()).await.expect("query");
     drop(conn);
 
     for _ in 0..4 {

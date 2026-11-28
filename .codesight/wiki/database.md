@@ -89,7 +89,7 @@ Three rules keep reuse safe, all enforced in `db.rs` rather than by convention:
   connection would corrupt the former and funnel every DS query through the
   latter.
 - **Parked connections expire.** A `query()` leaves its hrana stream open
-  (describe + cursor never close it) and the server reaps idle streams, so
+  (a `/v3/cursor` never closes it) and the server reaps idle streams, so
   anything parked past `DEFAULT_MAX_IDLE` (3s) is discarded instead of reused.
   That is precisely the sporadic-traffic case where the handshake cost is
   irrelevant anyway. The age runs from the connection's last *use* (#1500): a
@@ -145,10 +145,25 @@ and no connector, libsql panics on the first remote query ("you must provide
 your own http connector"). `pollis-libsql-connector/tests/connector.rs` pins the
 contract: verified chain + name, untrusted CA and wrong name refused, `http`
 plain, other schemes refused, and a real libsql remote handle completing the
-handshake through it. libsql itself comes from `patches/libsql` (#1847): the
-crates.io 0.10.0 source with `http2` dropped from its hyper 0.14 features, so no
-h2 crate is linked at all. Delete the patch when a libsql release moves to
-hyper 1.x.
+handshake through it. libsql itself comes from `patches/libsql`: the crates.io
+0.10.0 source with these edits, each listed with its reason and its "when
+deleting" check in the provenance header of `patches/libsql/Cargo.toml`:
+
+- **#1847** — `http2` dropped from its hyper 0.14 features, so no h2 crate is
+  linked at all.
+- **#2178** — a remote statement no longer sends a `describe` before it runs.
+  Upstream's `hrana::Statement::new` awaited a `/v3/pipeline` describe ahead of
+  every query's `/v3/cursor`, so each DS read cost two round trips to Turso;
+  the answer only fed `Statement::columns()`, which nothing calls remotely.
+  Now one SELECT is one `/v3/cursor` (a send dropped from 11+4 to 7+2 Turso
+  round trips, a group catch-up from 12+2 to 6+1). `execute()` never
+  described. Pinned by `pollis-delivery/tests/remote_round_trips.rs`, which
+  counts the requests a remote read makes against the hrana double, so a
+  libsql upgrade that brings the describe back fails a test instead of
+  silently doubling every read.
+
+Blast radius of a change here: the DS, `verifiable-log-builder` (`db-source`),
+`verifiable-log-serve`, and `src-tauri`'s dev-only `test-harness`.
 
 ### users
 - `id` TEXT PK
