@@ -3,7 +3,8 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
-import { buildResources } from "./resources";
+import { buildResources, loadLanguageResources } from "./resources";
+import { createLanguageLoader } from "./languageLoader";
 import { DEFAULT_NAMESPACE, NAMESPACES } from "./namespaces";
 import {
   DEFAULT_LANGUAGE,
@@ -59,7 +60,7 @@ function applyDocumentLanguage(language: string): void {
   }
 }
 
-/** Shipped catalogues, plus the injected test locale's partial ones. */
+/** Bundled catalogues (English), plus the injected test locale's partial ones. */
 function initialResources(): Record<string, Record<string, Record<string, unknown>>> {
   const resources = buildResources();
   if (testLocale) {
@@ -68,8 +69,10 @@ function initialResources(): Record<string, Record<string, Record<string, unknow
   return resources;
 }
 
-void i18n.use(initReactI18next).init({
+const initialized = i18n.use(initReactI18next).init({
   resources: initialResources(),
+  // Other languages arrive from their chunk through `switchLanguage` before they are shown.
+  partialBundledLanguages: true,
   lng: resolveInitialLanguage(),
   fallbackLng: DEFAULT_LANGUAGE,
   supportedLngs: supportedLanguageCodes(),
@@ -90,21 +93,34 @@ void i18n.use(initReactI18next).init({
 applyDocumentLanguage(i18n.language);
 i18n.on("languageChanged", applyDocumentLanguage);
 
-/** Switch language and store it per user on this device. */
+// The only caller of `changeLanguage` (#2186): load the chunk, then switch; English if it can't load.
+const { switchLanguage } = createLanguageLoader(i18n, loadLanguageResources, {
+  fallbackLanguage: DEFAULT_LANGUAGE,
+});
+
+/**
+ * Settles once the start-up language is in (main.tsx renders after it, so there is no English flash).
+ * Never rejects and is time-bounded: a broken chunk renders English rather than nothing.
+ */
+export const i18nReady: Promise<void> = initialized
+  .catch((error: unknown) => console.warn("[i18n] init failed", error))
+  .then(() => switchLanguage(i18n.language));
+
+/** Switch language and store it per user on this device. Never rejects. */
 export async function setLanguage(
   language: string,
   userId?: string | null,
 ): Promise<void> {
   const normalized = normalizeLanguage(language) ?? DEFAULT_LANGUAGE;
   saveDeviceLanguage(userId ?? null, normalized);
-  await i18n.changeLanguage(normalized);
+  await switchLanguage(normalized);
 }
 
-/** A signed-in user's stored choice wins over the pre-auth language. */
+/** A signed-in user's stored choice wins over the pre-auth language. Never rejects: sign-in waits on it. */
 export async function adoptUserLanguage(userId: string | null | undefined): Promise<void> {
   const stored = loadDeviceLanguage(userId);
   if (stored && stored !== i18n.language) {
-    await i18n.changeLanguage(stored);
+    await switchLanguage(stored);
   }
 }
 

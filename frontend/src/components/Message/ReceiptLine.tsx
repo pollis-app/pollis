@@ -9,7 +9,7 @@
  * message, so "receipts off" never leaks (#892).
  */
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import type { MessageReceipts } from "../../types";
 import { receiptLineText, type ReceiptLineState } from "../../utils/receiptLine";
 import { formatTimeOfDay } from "../../utils/format";
@@ -32,7 +32,7 @@ interface Faces {
 }
 
 export function ReceiptLine({ messageId, receipt, peerCount }: ReceiptLineProps) {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   const line = receiptLineText(receipt, peerCount, t, (at) => formatTimeOfDay(Date.parse(at)));
   const label = line?.text ?? null;
 

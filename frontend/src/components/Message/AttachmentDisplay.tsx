@@ -1,6 +1,6 @@
 import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { observer } from "mobx-react-lite";
 import { Play } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
@@ -68,7 +68,7 @@ export const AttachmentDisplay = observer(({
   testId,
   roll,
 }: AttachmentDisplayProps) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   // Sensitive media (#1568): the reveal is shared across surfaces.
   const sensitivity = useSensitiveReveal(attachment);
   const isImage = attachment.content_type.startsWith("image/");

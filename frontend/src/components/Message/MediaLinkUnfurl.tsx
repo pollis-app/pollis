@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { shellOpen } from "../../bridge";
 import { findUrls, parseLink } from "../../utils/links";
 import { scanText } from "../../../../design/messageFormat";
@@ -67,7 +67,7 @@ interface MediaLinkUnfurlProps {
 }
 
 export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text, exceptHref = null }) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   const links = useMemo(() => extractMediaLinks(text, exceptHref), [text, exceptHref]);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   // Remote media loads only on a per-URL click, every host: an automatic fetch leaks the reader's IP to a sender-chosen host.

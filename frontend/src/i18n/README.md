@@ -1,7 +1,11 @@
 # Localization (i18n)
 
 `i18next` + `react-i18next`. Catalogues are plain JSON under
-`locales/<language>/<namespace>.json`, bundled eagerly at build time.
+`locales/<language>/<namespace>.json`. English is bundled into the entry chunk;
+every other language is its own local `locale-<lng>` chunk, loaded before it is
+shown (`languageLoader.ts`, #2186). The `mobile` namespace is not bundled on
+desktop. Change language only through `setLanguage` / `adoptUserLanguage`, never
+`i18n.changeLanguage` directly.
 
 Canonical article: [`.codesight/wiki/i18n.md`](../../../.codesight/wiki/i18n.md).
 That one covers the design decisions; this one is the working checklist.

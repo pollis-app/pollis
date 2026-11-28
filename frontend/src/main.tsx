@@ -4,8 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import "./index.css";
 import "./components/ui/motion.css";
-// Initializes i18next before anything renders.
-import i18n from "./i18n";
+// Initializes i18next; the first render waits for the start-up language (#2186).
+import i18n, { i18nReady } from "./i18n";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { appStore } from "./stores/appStore";
@@ -70,7 +70,9 @@ if (import.meta.env.VITE_PLAYWRIGHT === 'true') {
 
 const root = createRoot(container!);
 
-root.render(
+// After the start-up language's local chunk is in (no English flash). `finally`, not `then`: a broken
+// chunk still renders (in English), since i18nReady is bounded and never rejects.
+void i18nReady.finally(() => root.render(
   <React.StrictMode>
     <I18nextProvider i18n={i18n}>
       <ErrorBoundary>
@@ -80,4 +82,4 @@ root.render(
       </ErrorBoundary>
     </I18nextProvider>
   </React.StrictMode>
-);
+));

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { currentAccentHex } from "../../utils/colorUtils";
+import { probeRender } from "../../utils/renderProbe";
+import { prefersReducedMotion } from "../../utils/motion";
 
 // Algorithms are tagged objects run over typed arrays, so the hot loop never allocates.
 
@@ -30,6 +32,11 @@ interface DotMatrixProps {
 // One canvas pixel per cell, scaled up by the compositor and masked into dots: O(cells) writes per frame.
 
 const MIN_VISIBLE_OPACITY = 0.02;
+
+// The pattern moves this long after mount, then holds its last frame (#2169). Every animated frame is a
+// full-window repaint (software-painted on Linux, where compositing is off), so a lock screen left open
+// would otherwise keep a core busy. Under reduced motion it paints one still frame and never animates.
+const ANIMATE_FOR_MS = 2500;
 
 // Periodic revival so the board never settles into still lifes.
 const GOL_RESEED_EVERY = 30;
@@ -105,11 +112,18 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
     let dirty = true;
     let rafId = 0;
     let rgb = parseAccentRgb();
+    const reducedMotion = prefersReducedMotion();
+    // Set once the loop has ended (or never started): from then on only a resize or accent change repaints.
+    let stopped = reducedMotion;
+    let lastT = 0;
 
     // Accent lives in inline custom properties on <html>; watch that.
     const colorObserver = new MutationObserver(() => {
       rgb = parseAccentRgb();
       dirty = true;
+      if (stopped) {
+        paintStill();
+      }
     });
     colorObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
 
@@ -248,11 +262,30 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
       ctx.putImageData(image, 0, 0);
     };
 
-    const animate = (ts: number) => {
-      rafId = requestAnimationFrame(animate);
+    // The held frame: recompute the current pattern (new cells after a resize included) and draw it.
+    const paintStill = () => {
+      if (cols === 0 || rows === 0) {
+        return;
+      }
+      switch (kind) {
+        case "pulsingWave":
+          stepPulsingWave(0);
+          break;
+        case "flowingWave":
+          stepFlowingWave(lastT);
+          break;
+        case "gameOfLife":
+          break;
+      }
+      draw();
+      dirty = false;
+    };
 
+    const animate = (ts: number) => {
+      probeRender("DotMatrixFrame");
       if (cols === 0 || rows === 0) {
         resize();
+        rafId = requestAnimationFrame(animate);
         return;
       }
 
@@ -266,6 +299,7 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
       const dt = Math.min(rawDt, 0.1) * speed;
       const t = ((ts - startTime) / 1000) * speed;
       lastTime = ts;
+      lastT = t;
 
       switch (kind) {
         case "pulsingWave":
@@ -291,15 +325,28 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
         draw();
         dirty = false;
       }
+
+      if (ts - startTime < ANIMATE_FOR_MS) {
+        rafId = requestAnimationFrame(animate);
+      } else {
+        stopped = true;
+      }
     };
 
     const ro = new ResizeObserver(() => {
       resize();
+      if (stopped) {
+        paintStill();
+      }
     });
     ro.observe(container);
 
     resize();
-    rafId = requestAnimationFrame(animate);
+    if (reducedMotion) {
+      paintStill();
+    } else {
+      rafId = requestAnimationFrame(animate);
+    }
 
     return () => {
       cancelAnimationFrame(rafId);

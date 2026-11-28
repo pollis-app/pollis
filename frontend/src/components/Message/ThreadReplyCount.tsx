@@ -1,5 +1,5 @@
 import React from "react";
-import { useTranslation } from "react-i18next";
+import { useRowT } from "../../i18n/useRowT";
 import { MessagesSquare } from "lucide-react";
 import { PressButton } from "../ui/PressButton";
 
@@ -13,7 +13,7 @@ export const ThreadReplyCount: React.FC<ThreadReplyCountProps> = ({
   count,
   onOpen,
 }) => {
-  const { t } = useTranslation("chat");
+  const t = useRowT("chat");
   if (count <= 0 || !onOpen) {
     return null;
   }

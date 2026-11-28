@@ -279,9 +279,9 @@ for (const file of SRC_DIRS.flatMap((dir) => sourceFiles(dir))) {
   const text = readFileSync(file, "utf8");
   const where = file.replace(ROOT + "/", "");
 
-  // Resolve unprefixed t() calls against the component's useTranslation namespace.
+  // Resolve unprefixed t() calls against the component's useTranslation (or per-row useRowT, #2167) namespace.
   const declared = [];
-  for (const match of text.matchAll(/useTranslation\(\s*(\[[^\]]*\]|[^)]*)\)/g)) {
+  for (const match of text.matchAll(/(?:useTranslation|useRowT)\(\s*(\[[^\]]*\]|[^)]*)\)/g)) {
     for (const ns of match[1].matchAll(/["'`]([\w.-]+)["'`]/g)) {
       declared.push(ns[1]);
     }
