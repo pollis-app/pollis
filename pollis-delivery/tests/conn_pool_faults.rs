@@ -123,3 +123,28 @@ async fn a_connection_released_before_a_fault_is_still_reused() {
         "its stream is kept, but it sends on a new socket: the fault may have been the old one's (#2179)"
     );
 }
+
+/// #2182: a push-handle batch that fails transiently is written row by row on
+/// a NEW stream and socket, not on the one that failed, so every recipient
+/// still gets a handle.
+#[tokio::test]
+async fn a_transient_handle_batch_failure_retries_on_a_fresh_stream() {
+    let _serial = SERIAL.lock().await;
+    let (double, url) = start_double().await;
+    let db = remote_db(&url).await;
+
+    let conn = db.conn().await.expect("checkout");
+    // A read leaves a stream open, as before a fan-out.
+    conn.query("SELECT 1", ()).await.expect("query");
+    double.clear_served();
+    double.fail_next(StatusCode::BAD_GATEWAY);
+    let users: Vec<String> = ["u1", "u2", "u3"].iter().map(|u| u.to_string()).collect();
+    let handles = pollis_delivery::push::mint_push_handles(&conn, &users, "conv", "dm").await;
+    assert_eq!(handles.len(), 3, "every recipient still has a handle");
+
+    let served = double.work();
+    assert_eq!(served.len(), 4, "the failed batch, then one row each: {served:?}");
+    assert!(served[0].had_baton, "the batch went out on the open stream: {served:?}");
+    assert!(!served[1].had_baton, "the retry is on a new stream: {served:?}");
+    assert_ne!(served[1].peer, served[0].peer, "and a new socket: {served:?}");
+}

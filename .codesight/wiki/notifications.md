@@ -467,6 +467,18 @@ old time cutoff (`read_secs_ago`) still applies alongside, so an older client, o
 before 000056, behaves as before. Before this, a read within ~2 s of arrival — exactly the case
 of reading an open conversation — never cleared that message's push.
 
+**Handles and tickets are written in batches (#2182).** `push::mint_push_handles_for` (every
+caller: the channel/DM fan-out, the held-push release, the DM-request pushes) mints one random
+handle per recipient in memory, then writes them with ONE autocommit multi-row INSERT per 83
+recipients (6 binds a row, under the 500-bind cap), each committed before the first push is
+posted, so a tap always resolves; nothing holds a transaction across the Expo call. A chunk that
+fails is written again one row at a time, after a transient error on a new stream and socket, so
+everyone who can get a handle still does (no handle, no `h`, as before); `ON CONFLICT(handle) DO
+NOTHING` makes that retry safe if the batch had landed after all. Each Expo batch's ok tickets are
+one `INSERT OR IGNORE` too, best-effort. A 200-member channel's fan-out was ~607 sequential
+round trips (first push ~3.8 s after the send at 15 ms RTT); it is now ~17. Each row still
+records its own `message_id` / `message_sent_at`, and the payload still names nothing but `h`.
+
 **Edge cases.** Scrolled up or in an older window: unread, alerts. Threads: replies share the
 conversation's cursor. Mentions follow the same rules; only the existing mute bypass differs.
 Several devices: any active desktop holds the account's pushes; each device reports for itself.
